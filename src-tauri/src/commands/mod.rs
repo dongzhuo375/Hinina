@@ -8,8 +8,6 @@ pub mod workspace_cmd;
 pub mod config_cmd;
 pub mod theme_cmd;
 
-use tauri::Manager;
-
 /// 注册所有 Command 到 Tauri App。
 /// 在 main.rs 的 `.invoke_handler()` 中调用此函数。
 pub fn register_commands(app: &mut tauri::App) {

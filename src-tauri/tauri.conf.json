@@ -9,7 +9,6 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "title": "Hinina",
     "windows": [
       {
         "title": "Hinina",
