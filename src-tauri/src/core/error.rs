@@ -31,8 +31,31 @@ pub enum AppError {
     #[error("Provider 未找到: {0}")]
     ProviderNotFound(String),
 
+    #[error("序列化错误: {0}")]
+    Serialization(String),
+
     #[error("未知错误: {0}")]
     Unknown(String),
+}
+
+// ── From 转换：让 ? 操作符自动将底层错误转为 AppError ──
+
+impl From<std::io::Error> for AppError {
+    fn from(e: std::io::Error) -> Self {
+        AppError::Io(e.to_string())
+    }
+}
+
+impl From<reqwest::Error> for AppError {
+    fn from(e: reqwest::Error) -> Self {
+        AppError::Network(e.to_string())
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(e: serde_json::Error) -> Self {
+        AppError::Serialization(e.to_string())
+    }
 }
 
 impl AppError {
@@ -49,6 +72,7 @@ impl AppError {
             AppError::Network(msg) => msg,
             AppError::Config(msg) => msg,
             AppError::ProviderNotFound(msg) => msg,
+            AppError::Serialization(msg) => msg,
             AppError::Unknown(msg) => msg,
         }
     }

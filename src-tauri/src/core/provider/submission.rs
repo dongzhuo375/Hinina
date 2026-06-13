@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::core::entity::submission::{JudgementResult, Submission};
+use crate::core::entity::submission::JudgementResult;
 use crate::core::error::AppResult;
 
 /// 提交 Provider：提交代码与查询评测结果

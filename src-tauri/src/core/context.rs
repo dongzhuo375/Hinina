@@ -15,7 +15,7 @@ use crate::service::workspace::manager::WorkspaceManager;
 pub struct AppContext {
     pub event_bus: Arc<EventBus>,
     pub config: Arc<ConfigService>,
-    pub provider_registry: Arc<ProviderRegistry>,
+    pub provider_registry: Arc<dyn ProviderRegistry>,
     pub workspace_manager: Arc<WorkspaceManager>,
     pub http_client: Arc<HttpClient>,
     pub storage: Arc<Storage>,
