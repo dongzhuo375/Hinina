@@ -12,16 +12,16 @@ use crate::core::provider::submission::SubmissionProvider;
 /// 管理所有 OJ 的 Provider 实例，支持注册、查找与 OJ 切换。
 pub trait ProviderRegistry: Send + Sync {
     /// 注册 AuthProvider
-    fn register_auth(&mut self, oj_type: OJType, provider: Arc<dyn AuthProvider>);
+    fn register_auth(&self, oj_type: OJType, provider: Arc<dyn AuthProvider>);
 
     /// 注册 ContestProvider
-    fn register_contest(&mut self, oj_type: OJType, provider: Arc<dyn ContestProvider>);
+    fn register_contest(&self, oj_type: OJType, provider: Arc<dyn ContestProvider>);
 
     /// 注册 ProblemProvider
-    fn register_problem(&mut self, oj_type: OJType, provider: Arc<dyn ProblemProvider>);
+    fn register_problem(&self, oj_type: OJType, provider: Arc<dyn ProblemProvider>);
 
     /// 注册 SubmissionProvider
-    fn register_submission(&mut self, oj_type: OJType, provider: Arc<dyn SubmissionProvider>);
+    fn register_submission(&self, oj_type: OJType, provider: Arc<dyn SubmissionProvider>);
 
     /// 获取 AuthProvider
     fn get_auth(&self, oj_type: &OJType) -> AppResult<Arc<dyn AuthProvider>>;

@@ -31,67 +31,83 @@ impl ProviderRegistryImpl {
 }
 
 impl ProviderRegistry for ProviderRegistryImpl {
-    fn register_auth(&mut self, oj_type: OJType, provider: Arc<dyn AuthProvider>) {
-        self.auth_providers.get_mut().unwrap().insert(oj_type, provider);
+    fn register_auth(&self, oj_type: OJType, provider: Arc<dyn AuthProvider>) {
+        if let Ok(mut map) = self.auth_providers.write() {
+            map.insert(oj_type, provider);
+        }
     }
 
-    fn register_contest(&mut self, oj_type: OJType, provider: Arc<dyn ContestProvider>) {
-        self.contest_providers.get_mut().unwrap().insert(oj_type, provider);
+    fn register_contest(&self, oj_type: OJType, provider: Arc<dyn ContestProvider>) {
+        if let Ok(mut map) = self.contest_providers.write() {
+            map.insert(oj_type, provider);
+        }
     }
 
-    fn register_problem(&mut self, oj_type: OJType, provider: Arc<dyn ProblemProvider>) {
-        self.problem_providers.get_mut().unwrap().insert(oj_type, provider);
+    fn register_problem(&self, oj_type: OJType, provider: Arc<dyn ProblemProvider>) {
+        if let Ok(mut map) = self.problem_providers.write() {
+            map.insert(oj_type, provider);
+        }
     }
 
-    fn register_submission(&mut self, oj_type: OJType, provider: Arc<dyn SubmissionProvider>) {
-        self.submission_providers.get_mut().unwrap().insert(oj_type, provider);
+    fn register_submission(&self, oj_type: OJType, provider: Arc<dyn SubmissionProvider>) {
+        if let Ok(mut map) = self.submission_providers.write() {
+            map.insert(oj_type, provider);
+        }
     }
 
     fn get_auth(&self, oj_type: &OJType) -> AppResult<Arc<dyn AuthProvider>> {
-        self.auth_providers
-            .read()
-            .unwrap()
-            .get(oj_type)
+        let map = self.auth_providers.read().map_err(|e| {
+            AppError::Unknown(format!("AuthProvider lock poisoned: {}", e))
+        })?;
+        map.get(oj_type)
             .cloned()
             .ok_or_else(|| AppError::ProviderNotFound(format!("AuthProvider for {:?}", oj_type)))
     }
 
     fn get_contest(&self, oj_type: &OJType) -> AppResult<Arc<dyn ContestProvider>> {
-        self.contest_providers
-            .read()
-            .unwrap()
-            .get(oj_type)
+        let map = self.contest_providers.read().map_err(|e| {
+            AppError::Unknown(format!("ContestProvider lock poisoned: {}", e))
+        })?;
+        map.get(oj_type)
             .cloned()
             .ok_or_else(|| AppError::ProviderNotFound(format!("ContestProvider for {:?}", oj_type)))
     }
 
     fn get_problem(&self, oj_type: &OJType) -> AppResult<Arc<dyn ProblemProvider>> {
-        self.problem_providers
-            .read()
-            .unwrap()
-            .get(oj_type)
+        let map = self.problem_providers.read().map_err(|e| {
+            AppError::Unknown(format!("ProblemProvider lock poisoned: {}", e))
+        })?;
+        map.get(oj_type)
             .cloned()
             .ok_or_else(|| AppError::ProviderNotFound(format!("ProblemProvider for {:?}", oj_type)))
     }
 
     fn get_submission(&self, oj_type: &OJType) -> AppResult<Arc<dyn SubmissionProvider>> {
-        self.submission_providers
-            .read()
-            .unwrap()
-            .get(oj_type)
+        let map = self.submission_providers.read().map_err(|e| {
+            AppError::Unknown(format!("SubmissionProvider lock poisoned: {}", e))
+        })?;
+        map.get(oj_type)
             .cloned()
             .ok_or_else(|| AppError::ProviderNotFound(format!("SubmissionProvider for {:?}", oj_type)))
     }
 
     fn current_oj(&self) -> OJType {
-        self.current.read().unwrap().clone()
+        self.current
+            .read()
+            .map(|oj| oj.clone())
+            .unwrap_or(OJType::HOJ)
     }
 
     fn set_current_oj(&self, oj_type: OJType) {
-        *self.current.write().unwrap() = oj_type;
+        if let Ok(mut current) = self.current.write() {
+            *current = oj_type;
+        }
     }
 
     fn list_available(&self) -> Vec<OJType> {
-        self.auth_providers.read().unwrap().keys().cloned().collect()
+        self.auth_providers
+            .read()
+            .map(|map| map.keys().cloned().collect())
+            .unwrap_or_default()
     }
 }

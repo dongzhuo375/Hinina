@@ -35,7 +35,7 @@ use crate::core::repository::workspace_repo::WorkspaceRepository;
 pub struct WorkspaceManager {
     repo: Arc<dyn WorkspaceRepository>,
     event_bus: Arc<EventBus>,
-    current: RwLock<Option<Workspace>>,
+    current: RwLock<Option<Arc<Workspace>>>,
     auto_save_handle: Mutex<Option<AutoSaveHandle>>,
     workspaces_dir: PathBuf,
 }
@@ -62,19 +62,19 @@ impl WorkspaceManager {
     }
 
     /// 创建新工作区（初始化目录结构、模板文件）
-    pub fn create(&self, contest_id: &str) -> AppResult<Workspace> {
+    pub fn create(&self, contest_id: &str) -> AppResult<Arc<Workspace>> {
         let _ = contest_id;
         todo!("WorkspaceManager::create()")
     }
 
     /// 加载已有工作区（从磁盘恢复）
-    pub fn load(&self, workspace_id: &str) -> AppResult<Workspace> {
+    pub fn load(&self, workspace_id: &str) -> AppResult<Arc<Workspace>> {
         let _ = workspace_id;
         todo!("WorkspaceManager::load()")
     }
 
     /// 切换工作区（保存当前 → 加载目标）
-    pub fn switch(&self, workspace_id: &str) -> AppResult<Workspace> {
+    pub fn switch(&self, workspace_id: &str) -> AppResult<Arc<Workspace>> {
         let _ = workspace_id;
         todo!("WorkspaceManager::switch()")
     }
@@ -102,12 +102,12 @@ impl WorkspaceManager {
     }
 
     /// 崩溃恢复：启动时扫描所有未正常关闭的工作区
-    pub fn recover_all(&self) -> AppResult<Vec<Workspace>> {
+    pub fn recover_all(&self) -> AppResult<Vec<Arc<Workspace>>> {
         todo!("WorkspaceManager::recover_all()")
     }
 
     /// 获取当前活动工作区
-    pub fn current(&self) -> Option<Workspace> {
+    pub fn current(&self) -> Option<Arc<Workspace>> {
         self.current.read().ok()?.clone()
     }
 

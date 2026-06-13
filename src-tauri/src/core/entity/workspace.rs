@@ -13,4 +13,8 @@ pub struct Workspace {
     pub files: std::collections::HashMap<String, String>,
     pub language: String,
     pub is_dirty: bool,
+    /// 创建时间（UTC 秒级时间戳）
+    pub created_at: i64,
+    /// 最后修改时间（UTC 秒级时间戳），崩溃恢复时用于判断最近活跃工作区
+    pub updated_at: i64,
 }
