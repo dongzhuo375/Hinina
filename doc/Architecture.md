@@ -18,6 +18,7 @@ Hinina/
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
+│   ├── todo.md                            # NEW: 开发路线图（8 阶段执行顺序）
 │   └── modules/
 │       └── README.md                     # 模块文档索引（格式约定与维护规则）
 └── src-tauri/
