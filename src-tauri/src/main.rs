@@ -18,7 +18,11 @@ fn main() {
     // 运行时初始化，阻塞式
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let ctx = rt.block_on(async {
-        AppContext::init().await.expect("Failed to initialize AppContext")
+        // TODO: 从 Tauri app_data_dir 获取正式路径（阶段 2 实现后完善）
+        let base_dir = std::env::temp_dir().join("hinina");
+        AppContext::init(base_dir)
+            .await
+            .expect("Failed to initialize AppContext")
     });
 
     tauri::Builder::default()
