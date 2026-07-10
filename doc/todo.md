@@ -1,6 +1,6 @@
 # Hinina 开发路线图
 
-> 当前状态：架构骨架已完成（trait/struct/enum 声明 + `todo!()` 占位），所有模块等待填充业务逻辑。
+> 当前状态：阶段 1（基础设施）已完成，进入阶段 2（存储抽象层）。
 > 开发顺序遵循自底向上依赖链：Infrastructure → Domain → Service → Adapter → Command → Frontend。
 
 ---
@@ -9,10 +9,10 @@
 
 > 所有上层模块的依赖根基，必须先完成。
 
-- [ ] **Logger 初始化** — `infra/logger.rs`：配置 tracing-subscriber，设定日志级别和输出目标，敏感信息过滤
-- [ ] **Storage 实现** — `infra/storage.rs`：补充文件读写方法（`read` / `write` / `exists` / `create_dir`）
-- [ ] **HttpClient 封装** — `infra/http.rs`：封装 reqwest::Client，统一超时/重试/UA/Cookie Store
-- [ ] **AppContext::init() 实现** — `core/context.rs`：按注释中 9 步顺序装配所有基础设施
+- [x] **Logger 初始化** — `infra/logger.rs`：配置 tracing-subscriber，设定日志级别和输出目标，敏感信息过滤
+- [x] **Storage 实现** — `infra/storage.rs`：补充文件读写方法（`read` / `write` / `exists` / `create_dir`）
+- [x] **HttpClient 封装** — `infra/http.rs`：封装 reqwest::Client，统一超时/重试/UA/Cookie Store
+- [x] **AppContext::init() 实现** — `core/context.rs`：按注释中 9 步顺序装配所有基础设施
 
 ---
 
@@ -53,6 +53,7 @@
 
 ### 4.5 WorkspaceManager
 - [ ] **WorkspaceManager 完整实现** — `service/workspace/manager.rs`：create / load / save / auto-save / switch / destroy / recover 全部方法
+  > ⚠️ 上下文：`AppContext.workspace_manager` 当前为 `Option<Arc<WorkspaceManager>> = None`（阶段 1 PR5 Review P5-1），应用可正常启动但无工作区管理能力。实现后需改回 `Some(...)`。
 
 ### 4.6 SubmissionService
 - [ ] **SubmissionService** — `service/submission/mod.rs`：提交代码、评测结果轮询、超时处理
