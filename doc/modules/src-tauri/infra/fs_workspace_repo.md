@@ -34,6 +34,7 @@
 - **exists**：委托 `Storage::exists()` 检查目录存在性。
 
 ## 测试覆盖（7 项）
+测试代码位于 `tests/fs_workspace_repo_tests.rs`。
 - `save_and_read_file` — 保存与读取往返
 - `read_nonexistent_file_returns_error` — 读取不存在的文件
 - `list_files_after_save` — 递归列出含子目录的文件

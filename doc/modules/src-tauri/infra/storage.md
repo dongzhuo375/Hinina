@@ -32,4 +32,5 @@
 构造时接收 `base_dir` 路径并调用 `create_dir_all` 确保目录存在。所有文件操作通过 `resolve()` 方法将相对路径拼接到 `base_dir` 下，遍历 `Path::components()` 拒绝任何 `Component::ParentDir`（纯逻辑检查，不依赖文件系统）。write 系列方法自动创建不存在的父目录。`list()` 返回 `strip_prefix` 后的相对路径。
 
 ## 测试
-`#[cfg(test)]` 模块包含 3 个目录穿越防护测试：正常路径通过、`..` 拒绝、深层嵌套合法路径通过。
+测试代码位于 `tests/storage_tests.rs`，通过 `#[cfg(test)] #[path = "tests/storage_tests.rs"]` 引用。
+包含 3 个目录穿越防护测试：正常路径通过、`..` 拒绝、深层嵌套合法路径通过。

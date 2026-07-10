@@ -28,6 +28,7 @@
 - **config_exists**：委托 `Storage::exists()` 检查文件存在性。
 
 ## 测试覆盖（5 项）
+测试代码位于 `tests/fs_config_repo_tests.rs`。
 - `save_and_load_roundtrip` — JSON 序列化往返一致性
 - `config_exists_returns_false_initially` — 初始配置文件不存在
 - `load_missing_config_returns_error` — 读取不存在的配置文件返回错误

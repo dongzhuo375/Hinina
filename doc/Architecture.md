@@ -105,10 +105,14 @@ Hinina/
         │   ├── storage.rs                # Storage 底层文件工具
         │   ├── cache.rs                  # Cache 预留
         │   ├── logger.rs                 # Logger（基于 Tracing）
-        │   ├── fs_workspace_repo.rs      # NEW: FsWorkspaceRepository
-        │   ├── fs_config_repo.rs         # NEW: FsConfigRepository
-        │   ├── fs_plugin_repo.rs         # NEW: FsPluginRepository
-        │   └── provider_registry_impl.rs # NEW: ProviderRegistryImpl
+        │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
+        │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
+        │   ├── fs_plugin_repo.rs         # FsPluginRepository（骨架）
+        │   ├── provider_registry_impl.rs # ProviderRegistryImpl
+        │   └── tests/
+        │       ├── storage_tests.rs      # Storage 单元测试
+        │       ├── fs_workspace_repo_tests.rs  # FsWorkspaceRepository 单元测试
+        │       └── fs_config_repo_tests.rs     # FsConfigRepository 单元测试
         ├── plugin/
         │   ├── mod.rs
         │   ├── host/
