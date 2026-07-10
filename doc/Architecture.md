@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-07-09 | 分支：`feat/infrastructure`
+> 最后更新：2026-07-10 | 分支：`feat/infrastructure`（PR5 Review 修正后）
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 

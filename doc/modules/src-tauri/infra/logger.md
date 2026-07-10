@@ -1,7 +1,7 @@
 # logger
 
 ## 职责
-日志追踪模块（基于 Tracing），提供分级日志输出与敏感信息过滤。
+日志追踪模块（基于 Tracing），提供分级日志输出，支持 debug/release 自适应级别与 RUST_LOG 覆盖。
 
 ## 核心类型/函数
 - **`Logger`** — 日志 struct（单元结构体）
@@ -16,4 +16,4 @@
 - `core::context`（`AppContext` 持有 `Arc<Logger>` 并在 `init()` 序列中首先初始化）
 
 ## 逻辑流程
-`Logger::init()` 在应用启动时首先调用，根据编译模式设定默认日志级别，支持 `RUST_LOG` 环境变量动态覆盖。敏感字段（password、token、cookie）应在调用处通过 tracing span 字段过滤，不在 Logger 层处理。
+`Logger::init()` 在应用启动时首先调用，根据编译模式设定默认日志级别，支持 `RUST_LOG` 环境变量动态覆盖。

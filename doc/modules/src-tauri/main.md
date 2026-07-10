@@ -17,7 +17,7 @@
 
 ## 逻辑流程
 1. 创建 Tokio runtime
-2. 阻塞式调用 `AppContext::init(temp_dir)` — 当前使用临时目录，待阶段 2 后切换为 `app_data_dir`
+2. 阻塞式调用 `AppContext::init(temp_dir)` — 当前使用临时目录，base_dir 在 `init()` 中自动创建
 3. 装配 Tauri Builder，注入 `AppContext` 到 State
 4. `setup` 中调用 `commands::register_commands()` 注册 IPC
 5. 启动 Tauri 桌面应用

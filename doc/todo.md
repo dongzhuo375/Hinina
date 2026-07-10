@@ -53,6 +53,7 @@
 
 ### 4.5 WorkspaceManager
 - [ ] **WorkspaceManager 完整实现** — `service/workspace/manager.rs`：create / load / save / auto-save / switch / destroy / recover 全部方法
+  > ⚠️ 上下文：`AppContext.workspace_manager` 当前为 `Option<Arc<WorkspaceManager>> = None`（阶段 1 PR5 Review P5-1），应用可正常启动但无工作区管理能力。实现后需改回 `Some(...)`。
 
 ### 4.6 SubmissionService
 - [ ] **SubmissionService** — `service/submission/mod.rs`：提交代码、评测结果轮询、超时处理

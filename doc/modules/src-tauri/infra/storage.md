@@ -15,12 +15,12 @@
 - **`Storage::create_dir(relative_path) -> AppResult<()>`** — 递归创建目录
 - **`Storage::remove(relative_path) -> AppResult<()>`** — 删除文件或空目录
 - **`Storage::remove_all(relative_path) -> AppResult<()>`** — 递归删除文件或目录
-- **`Storage::list(relative_path) -> AppResult<Vec<PathBuf>>`** — 列出目录直接子项
+- **`Storage::list(relative_path) -> AppResult<Vec<PathBuf>>`** — 列出目录直接子项，返回相对路径
 
 ## 直接依赖
-- `std::path::PathBuf`
+- `std::path::{Path, PathBuf, Component}`
 - `std::fs`
-- `core::error::AppResult`
+- `core::error::{AppError, AppResult}`
 
 ## 被依赖
 - `core::context`（`AppContext` 持有 `Arc<Storage>` 注入各模块）
@@ -29,4 +29,7 @@
 - `infra::fs_plugin_repo`（`FsPluginRepository` 依赖 `Storage` 存取插件文件）
 
 ## 逻辑流程
-构造时接收 `base_dir` 路径，所有文件操作通过 `resolve()` 方法将相对路径拼接到 `base_dir` 下，并经 `is_safe()` 双重检查防止目录穿越攻击（拒绝 `..` 越权路径）。write 系列方法自动创建不存在的父目录。
+构造时接收 `base_dir` 路径并调用 `create_dir_all` 确保目录存在。所有文件操作通过 `resolve()` 方法将相对路径拼接到 `base_dir` 下，遍历 `Path::components()` 拒绝任何 `Component::ParentDir`（纯逻辑检查，不依赖文件系统）。write 系列方法自动创建不存在的父目录。`list()` 返回 `strip_prefix` 后的相对路径。
+
+## 测试
+`#[cfg(test)]` 模块包含 3 个目录穿越防护测试：正常路径通过、`..` 拒绝、深层嵌套合法路径通过。
