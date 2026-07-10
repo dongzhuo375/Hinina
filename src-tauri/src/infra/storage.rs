@@ -129,7 +129,7 @@ impl Storage {
         }
     }
 
-    /// 列出目录下的所有条目（仅直接子项）。
+    /// 列出目录下的所有条目（仅直接子项），返回相对 base_dir 的路径。
     ///
     /// # Errors
     /// 路径不安全或读取失败时返回 `AppError::Io`。
@@ -137,7 +137,14 @@ impl Storage {
         let path = self.resolve(relative_path)?;
         let entries: Vec<PathBuf> = fs::read_dir(&path)
             .map_err(|e| AppError::Io(format!("列出目录失败 {}: {}", relative_path, e)))?
-            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter_map(|entry| {
+                entry.ok().and_then(|e| {
+                    e.path()
+                        .strip_prefix(&self.base_dir)
+                        .ok()
+                        .map(|p| p.to_path_buf())
+                })
+            })
             .collect();
         Ok(entries)
     }
