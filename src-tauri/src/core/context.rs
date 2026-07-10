@@ -49,6 +49,11 @@ impl AppContext {
         Logger::init();
         tracing::info!("Hinina 启动中... base_dir={}", base_dir.display());
 
+        // 确保 base_dir 存在
+        std::fs::create_dir_all(&base_dir).map_err(|e| {
+            crate::core::error::AppError::Io(format!("创建 base_dir 失败: {}", e))
+        })?;
+
         // 2. 加载配置（阶段 4 实现，当前为空壳）
         let config = Arc::new(ConfigService::new());
 

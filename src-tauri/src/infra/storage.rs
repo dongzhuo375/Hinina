@@ -14,6 +14,8 @@ pub struct Storage {
 
 impl Storage {
     pub fn new(base_dir: PathBuf) -> Self {
+        // 确保存储根目录存在
+        let _ = fs::create_dir_all(&base_dir);
         Self { base_dir }
     }
 
