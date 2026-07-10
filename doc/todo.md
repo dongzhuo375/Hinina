@@ -1,6 +1,6 @@
 # Hinina 开发路线图
 
-> 当前状态：阶段 1（基础设施）已完成，进入阶段 2（存储抽象层）。
+> 当前状态：阶段 2（存储抽象层）已完成，进入阶段 3（领域核心）。
 > 开发顺序遵循自底向上依赖链：Infrastructure → Domain → Service → Adapter → Command → Frontend。
 
 ---
@@ -20,8 +20,8 @@
 
 > Infrastructure 就绪后，实现文件系统 Repository。
 
-- [ ] **FsWorkspaceRepository** — `infra/fs_workspace_repo.rs`：基于 Storage 实现 WorkspaceRepository trait
-- [ ] **FsConfigRepository** — `infra/fs_config_repo.rs`：基于 Storage 实现 ConfigRepository trait（JSON 序列化）
+- [x] **FsWorkspaceRepository** — `infra/fs_workspace_repo.rs`：基于 Storage 实现 WorkspaceRepository trait（保存/读取/递归列表/删除/存在性检查 + 路径穿越校验，7 项单元测试）
+- [x] **FsConfigRepository** — `infra/fs_config_repo.rs`：基于 Storage 实现 ConfigRepository trait（JSON 序列化/反序列化/存在性检查，5 项单元测试）
 
 ---
 
