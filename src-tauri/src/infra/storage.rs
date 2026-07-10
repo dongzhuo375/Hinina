@@ -1,7 +1,7 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 
 /// 本地文件存储工具。
 ///
@@ -23,61 +23,18 @@ impl Storage {
 
     // ── 路径解析 ──
 
-    /// 将相对路径解析为 `base_dir` 下的绝对路径，并确保不超出 `base_dir`。
+    /// 将相对路径解析为 `base_dir` 下的绝对路径，并拒绝任何 `..` 越权路径。
+    ///
+    /// 纯逻辑检查（遍历 `Path::components()`），不依赖文件系统状态，
+    /// 因此对尚不存在的路径也能正确判断。
     fn resolve(&self, relative_path: &str) -> AppResult<PathBuf> {
-        let full_path = self.base_dir.join(relative_path);
-
-        // 规范化路径后检查是否仍在 base_dir 内
-        let canonical = full_path.canonicalize().unwrap_or_else(|_| full_path.clone());
-        let base_canonical = self
-            .base_dir
-            .canonicalize()
-            .unwrap_or_else(|_| self.base_dir.clone());
-
-        if !canonical.starts_with(&base_canonical) {
-            // 如果路径尚不存在（如 create_dir 场景），检查父目录是否在 base_dir 内
-            if let Some(parent) = full_path.parent() {
-                let parent_canonical =
-                    parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
-                if !parent_canonical.starts_with(&base_canonical) {
-                    return Err(crate::core::error::AppError::Io(format!(
-                        "目录穿越攻击: {}",
-                        relative_path
-                    )));
-                }
-            } else {
-                return Err(crate::core::error::AppError::Io(format!(
-                    "非法路径: {}",
-                    relative_path
-                )));
+        let path = Path::new(relative_path);
+        for component in path.components() {
+            if matches!(component, Component::ParentDir) {
+                return Err(AppError::Io(format!("目录穿越攻击: {}", relative_path)));
             }
         }
-        Ok(full_path)
-    }
-
-    /// 检查 `relative_path` 是否指向 `base_dir` 内的路径（用于安全检查）。
-    fn is_safe(&self, relative_path: &str) -> bool {
-        let full_path = self.base_dir.join(relative_path);
-        // 清理 .. 和 .
-        match full_path.canonicalize() {
-            Ok(canonical) => {
-                match self.base_dir.canonicalize() {
-                    Ok(base_canonical) => canonical.starts_with(&base_canonical),
-                    Err(_) => false,
-                }
-            }
-            Err(_) => {
-                // 路径不存在时，检查父目录
-                if let Some(parent) = full_path.parent() {
-                    match (parent.canonicalize(), self.base_dir.canonicalize()) {
-                        (Ok(p), Ok(b)) => p.starts_with(&b),
-                        _ => false,
-                    }
-                } else {
-                    false
-                }
-            }
-        }
+        Ok(self.base_dir.join(relative_path))
     }
 
     // ── 文件操作 ──
@@ -88,9 +45,8 @@ impl Storage {
     /// 路径不安全或文件不存在时返回 `AppError::Io`。
     pub fn read(&self, relative_path: &str) -> AppResult<Vec<u8>> {
         let path = self.resolve(relative_path)?;
-        fs::read(&path).map_err(|e| {
-            crate::core::error::AppError::Io(format!("读取文件失败 {}: {}", relative_path, e))
-        })
+        fs::read(&path)
+            .map_err(|e| AppError::Io(format!("读取文件失败 {}: {}", relative_path, e)))
     }
 
     /// 读取文件内容（UTF-8 字符串）。
@@ -99,12 +55,8 @@ impl Storage {
     /// 路径不安全、文件不存在或非 UTF-8 时返回 `AppError::Io`。
     pub fn read_to_string(&self, relative_path: &str) -> AppResult<String> {
         let path = self.resolve(relative_path)?;
-        fs::read_to_string(&path).map_err(|e| {
-            crate::core::error::AppError::Io(format!(
-                "读取文件失败 {}: {}",
-                relative_path, e
-            ))
-        })
+        fs::read_to_string(&path)
+            .map_err(|e| AppError::Io(format!("读取文件失败 {}: {}", relative_path, e)))
     }
 
     /// 写入二进制数据到文件。自动创建父目录。
@@ -115,15 +67,11 @@ impl Storage {
         let path = self.resolve(relative_path)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                crate::core::error::AppError::Io(format!(
-                    "创建父目录失败 {}: {}",
-                    relative_path, e
-                ))
+                AppError::Io(format!("创建父目录失败 {}: {}", relative_path, e))
             })?;
         }
-        fs::write(&path, data).map_err(|e| {
-            crate::core::error::AppError::Io(format!("写入文件失败 {}: {}", relative_path, e))
-        })
+        fs::write(&path, data)
+            .map_err(|e| AppError::Io(format!("写入文件失败 {}: {}", relative_path, e)))
     }
 
     /// 写入字符串到文件。自动创建父目录。
@@ -133,7 +81,9 @@ impl Storage {
 
     /// 检查文件或目录是否存在。
     pub fn exists(&self, relative_path: &str) -> bool {
-        self.is_safe(relative_path) && self.base_dir.join(relative_path).exists()
+        self.resolve(relative_path)
+            .map(|p| p.exists())
+            .unwrap_or(false)
     }
 
     /// 递归创建目录。
@@ -142,12 +92,8 @@ impl Storage {
     /// 路径不安全或创建失败时返回 `AppError::Io`。
     pub fn create_dir(&self, relative_path: &str) -> AppResult<()> {
         let path = self.resolve(relative_path)?;
-        fs::create_dir_all(&path).map_err(|e| {
-            crate::core::error::AppError::Io(format!(
-                "创建目录失败 {}: {}",
-                relative_path, e
-            ))
-        })
+        fs::create_dir_all(&path)
+            .map_err(|e| AppError::Io(format!("创建目录失败 {}: {}", relative_path, e)))
     }
 
     /// 删除文件或空目录。
@@ -157,13 +103,11 @@ impl Storage {
     pub fn remove(&self, relative_path: &str) -> AppResult<()> {
         let path = self.resolve(relative_path)?;
         if path.is_dir() {
-            fs::remove_dir(&path).map_err(|e| {
-                crate::core::error::AppError::Io(format!("删除目录失败 {}: {}", relative_path, e))
-            })
+            fs::remove_dir(&path)
+                .map_err(|e| AppError::Io(format!("删除目录失败 {}: {}", relative_path, e)))
         } else {
-            fs::remove_file(&path).map_err(|e| {
-                crate::core::error::AppError::Io(format!("删除文件失败 {}: {}", relative_path, e))
-            })
+            fs::remove_file(&path)
+                .map_err(|e| AppError::Io(format!("删除文件失败 {}: {}", relative_path, e)))
         }
     }
 
@@ -175,15 +119,11 @@ impl Storage {
         let path = self.resolve(relative_path)?;
         if path.is_dir() {
             fs::remove_dir_all(&path).map_err(|e| {
-                crate::core::error::AppError::Io(format!(
-                    "递归删除目录失败 {}: {}",
-                    relative_path, e
-                ))
+                AppError::Io(format!("递归删除目录失败 {}: {}", relative_path, e))
             })
         } else {
-            fs::remove_file(&path).map_err(|e| {
-                crate::core::error::AppError::Io(format!("删除文件失败 {}: {}", relative_path, e))
-            })
+            fs::remove_file(&path)
+                .map_err(|e| AppError::Io(format!("删除文件失败 {}: {}", relative_path, e)))
         }
     }
 
@@ -194,14 +134,41 @@ impl Storage {
     pub fn list(&self, relative_path: &str) -> AppResult<Vec<PathBuf>> {
         let path = self.resolve(relative_path)?;
         let entries: Vec<PathBuf> = fs::read_dir(&path)
-            .map_err(|e| {
-                crate::core::error::AppError::Io(format!(
-                    "列出目录失败 {}: {}",
-                    relative_path, e
-                ))
-            })?
+            .map_err(|e| AppError::Io(format!("列出目录失败 {}: {}", relative_path, e)))?
             .filter_map(|entry| entry.ok().map(|e| e.path()))
             .collect();
         Ok(entries)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn storage() -> Storage {
+        Storage::new(PathBuf::from("/tmp/hinina-test"))
+    }
+
+    #[test]
+    fn resolve_normal_path() {
+        let s = storage();
+        assert!(s.resolve("foo/bar/baz").is_ok());
+        assert!(s.resolve("a").is_ok());
+        assert!(s.resolve("a/b/./c").is_ok());
+    }
+
+    #[test]
+    fn resolve_rejects_parent_dir() {
+        let s = storage();
+        assert!(s.resolve("..").is_err());
+        assert!(s.resolve("../etc").is_err());
+        assert!(s.resolve("foo/../../../etc/passwd").is_err());
+        assert!(s.resolve("a/../b/../c").is_err());
+    }
+
+    #[test]
+    fn resolve_deep_nested() {
+        let s = storage();
+        assert!(s.resolve("a/b/c/d/e/f").is_ok());
     }
 }

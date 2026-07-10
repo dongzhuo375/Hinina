@@ -5,7 +5,7 @@ use tracing_subscriber::{
 
 /// 日志追踪（基于 Tracing）。
 ///
-/// 提供分级日志输出与敏感信息过滤。
+/// 提供分级日志输出，支持 debug/release 自适应级别与 RUST_LOG 覆盖。
 pub struct Logger;
 
 impl Logger {
@@ -15,7 +15,6 @@ impl Logger {
     /// - release 构建：默认 `info` 级别
     /// - 可通过 `RUST_LOG` 环境变量覆盖
     /// - 日志中包含 span 事件的 enter/exit 信息
-    /// - 敏感字段（password、token、cookie）自动过滤为 `***`
     pub fn init() {
         let default_level = if cfg!(debug_assertions) {
             "debug"
