@@ -1,6 +1,6 @@
 # Hinina 开发路线图
 
-> 当前状态：阶段 2（存储抽象层）已完成，进入阶段 3（领域核心）。
+> 当前状态：阶段 3（领域核心）已完成，进入阶段 4（服务层）。
 > 开发顺序遵循自底向上依赖链：Infrastructure → Domain → Service → Adapter → Command → Frontend。
 
 ---
@@ -29,9 +29,9 @@
 
 > Repository 就绪后，填充核心实体和事件总线逻辑。
 
-- [ ] **EventBus 实现** — `core/event/event_bus.rs`：`publish()` / `subscribe()` / `unsubscribe()` 完整逻辑
-- [ ] **AppError From 转换** — `core/error.rs`：为 `io::Error`、`reqwest::Error`、`serde_json::Error` 等实现 `From`
-- [ ] **Workspace 实体完善** — `core/entity/workspace.rs`：补充 `created_at` / `updated_at` 时间戳
+- [x] **EventBus 实现** — `core/event/event_bus.rs`：`publish()` / `subscribe()` / `unsubscribe()` 完整逻辑，含 AppEvent::category() 映射、All 通配订阅、锁外回调防死锁。8 项单元测试
+- [x] **AppError From 转换** — `core/error.rs`：`io::Error` / `reqwest::Error` / `serde_json::Error` — 阶段 1 已提前完成
+- [x] **Workspace 实体完善** — `core/entity/workspace.rs`：`new()` / `touch()` / `mark_dirty()` / `mark_clean()` 方法。5 项单元测试
 
 ---
 

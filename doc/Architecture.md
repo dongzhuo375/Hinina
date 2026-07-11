@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-07-10 | 分支：`feat/stage2-repository`
+> 最后更新：2026-07-11 | 分支：`feat/stage3-domain`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -34,33 +34,37 @@ Hinina/
         ├── lib.rs                        # 库根，公开模块树
         ├── core/
         │   ├── mod.rs                    # core 模块声明
-        │   ├── context.rs                # NEW: AppContext 统一应用上下文
-        │   ├── error.rs                  # AppError 枚举 + user_message() + AppResult<T>
+        │   ├── context.rs                # AppContext 统一应用上下文
+        │   ├── error.rs                  # AppError 枚举 + user_message() + AppResult<T> + From 转换
         │   ├── entity/
         │   │   ├── mod.rs
         │   │   ├── user.rs               # User 实体
         │   │   ├── contest.rs            # Contest 实体
         │   │   ├── problem.rs            # Problem + Sample 实体
         │   │   ├── submission.rs         # Submission + JudgementStatus + JudgementResult
-        │   │   └── workspace.rs          # Workspace 核心实体
+        │   │   ├── workspace.rs          # Workspace 核心实体（阶段 3 完善）
+        │   │   └── tests/
+        │   │       └── workspace_tests.rs     # Workspace 单元测试
         │   ├── provider/
         │   │   ├── mod.rs
         │   │   ├── auth.rs               # AuthProvider trait
         │   │   ├── contest.rs            # ContestProvider trait
         │   │   ├── problem.rs            # ProblemProvider trait
         │   │   ├── submission.rs         # SubmissionProvider trait
-        │   │   ├── oj_type.rs            # NEW: OJType 枚举
-        │   │   └── registry.rs           # NEW: ProviderRegistry trait
+        │   │   ├── oj_type.rs            # OJType 枚举
+        │   │   └── registry.rs           # ProviderRegistry trait
         │   ├── event/
         │   │   ├── mod.rs
-        │   │   ├── app_event.rs          # AppEvent + 6 个领域子事件枚举
-        │   │   ├── event_bus.rs          # EventBus struct（按 EventCategory 订阅）
-        │   │   └── event_category.rs     # NEW: EventCategory 枚举
+        │   │   ├── app_event.rs          # AppEvent + 6 个子事件枚举 + category() 映射
+        │   │   ├── event_bus.rs          # EventBus（阶段 3 实现：publish/subscribe/unsubscribe）
+        │   │   ├── event_category.rs     # EventCategory 枚举
+        │   │   └── tests/
+        │   │       └── event_bus_tests.rs     # EventBus 单元测试
         │   └── repository/
         │       ├── mod.rs
-        │       ├── workspace_repo.rs     # NEW: WorkspaceRepository trait
-        │       ├── config_repo.rs        # NEW: ConfigRepository trait
-        │       └── plugin_repo.rs        # NEW: PluginRepository trait
+        │       ├── workspace_repo.rs     # WorkspaceRepository trait
+        │       ├── config_repo.rs        # ConfigRepository trait
+        │       └── plugin_repo.rs        # PluginRepository trait
         ├── service/
         │   ├── mod.rs
         │   ├── auth/

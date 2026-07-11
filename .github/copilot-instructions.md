@@ -59,3 +59,4 @@ Hinina 是基于 Tauri 2 + Rust + Vue 3 的 OJ 桌面竞赛客户端，面向 AC
 - **依赖安装路径**：新增依赖（npm/cargo 等）不得下载到 C 盘。安装前若无已有配置指定路径（如 `.npmrc`、`.cargo/config.toml`），须主动询问用户确认安装位置
 - **Git 提交规则**：所有 git commit 禁止携带 Coding Agent 的 Co-authored-by 尾注或其他 AI 代理署名。本项目所有代码产权归属于 dongzhuo375
 - **工具路径**：GitHub CLI 位于 `D:\DevTool\GitHubCLI\bin\gh.exe`，创建 PR 时使用该完整路径调用
+- **测试文件组织**：Rust 单元测试代码与源文件分离。测试文件放置于同模块目录下的 `tests/` 子目录，源文件通过 `#[cfg(test)] #[path = "tests/{module}_tests.rs"] mod tests;` 引用。测试文件以 `use super::*;` 开头可访问 private 项。禁止使用 `src-tauri/tests/` 顶层集成测试目录覆盖单元测试职责
