@@ -32,7 +32,10 @@ impl ConfigRepository for FsConfigRepository {
                 error = %e,
                 "配置文件读取失败"
             );
-            AppError::Config(format!("配置文件不存在或无法读取: {}", self.config_path))
+            AppError::Config(format!(
+                "配置文件读取失败: {}, 错误: {}",
+                self.config_path, e
+            ))
         })?;
         debug!(config_path = %self.config_path, "配置文件已加载");
         serde_json::from_str::<T>(&raw).map_err(|e| {

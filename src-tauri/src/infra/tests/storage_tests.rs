@@ -1,8 +1,7 @@
 use super::*;
-use std::path::PathBuf;
 
 fn storage() -> Storage {
-    Storage::new(PathBuf::from("/tmp/hinina-test"))
+    Storage::new(std::env::temp_dir().join("hinina-test"))
 }
 
 #[test]

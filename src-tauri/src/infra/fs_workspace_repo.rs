@@ -40,8 +40,8 @@ impl FsWorkspaceRepository {
         format!("{}/{}", WORKSPACES_DIR, workspace_id)
     }
 
-    /// 递归遍历目录，收集所有文件相对于 workspace 根目录的路径。
-    fn walk_dir(dir: &Path, prefix: &str, files: &mut Vec<PathBuf>) -> AppResult<()> {
+    /// 递归遍历目录，收集所有文件相对于 `dir_root` 的路径。
+    fn walk_dir(dir: &Path, dir_root: &Path, files: &mut Vec<PathBuf>) -> AppResult<()> {
         for entry in std::fs::read_dir(dir).map_err(|e| {
             AppError::Workspace(format!("读取目录失败 {}: {}", dir.display(), e))
         })? {
@@ -49,17 +49,13 @@ impl FsWorkspaceRepository {
                 AppError::Workspace(format!("读取目录条目失败: {}", e))
             })?;
             let path = entry.path();
-            let relative = path
-                .to_string_lossy()
-                .strip_prefix(prefix)
-                .map(PathBuf::from)
-                .ok_or_else(|| {
-                    AppError::Workspace(format!("路径前缀剥离失败: {}", path.display()))
-                })?;
+            let relative = path.strip_prefix(dir_root).map_err(|e| {
+                AppError::Workspace(format!("路径前缀剥离失败 {}: {}", path.display(), e))
+            })?;
             if path.is_dir() {
-                Self::walk_dir(&path, prefix, files)?;
+                Self::walk_dir(&path, dir_root, files)?;
             } else {
-                files.push(relative);
+                files.push(relative.to_path_buf());
             }
         }
         Ok(())
@@ -98,9 +94,10 @@ impl WorkspaceRepository for FsWorkspaceRepository {
                 "工作区文件读取失败"
             );
             AppError::Workspace(format!(
-                "文件不存在: workspace={}, path={}",
+                "读取文件失败: workspace={}, path={}, 错误: {}",
                 workspace_id,
-                path.display()
+                path.display(),
+                e
             ))
         })
     }
@@ -114,13 +111,8 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         }
         // 递归遍历工作区目录，返回所有文件的相对路径（去掉 workspace 根前缀）。
         let root_abs = self.storage.base_dir().join(&root);
-        let mut prefix = root_abs.to_string_lossy().to_string();
-        // 确保前缀以路径分隔符结尾，使 strip_prefix 后得到干净的相对路径
-        if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
-            prefix.push(std::path::MAIN_SEPARATOR);
-        }
         let mut files = Vec::new();
-        Self::walk_dir(&root_abs, &prefix, &mut files)?;
+        Self::walk_dir(&root_abs, &root_abs, &mut files)?;
         debug!(
             workspace_id = workspace_id,
             count = files.len(),
