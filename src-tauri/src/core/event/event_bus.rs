@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::core::event::app_event::AppEvent;
 use crate::core::event::event_category::EventCategory;
@@ -39,9 +40,9 @@ impl EventBus {
     /// 发布事件。分发到事件所属 category 和 EventCategory::All 的订阅者。
     ///
     /// 回调在锁外执行，避免回调中操作 EventBus 导致死锁。
-    pub fn publish(&self, event: AppEvent) {
+    /// 单个 handler panic 不影响其他 handler 执行。
+    pub fn publish(&self, event: &AppEvent) {
         let category = event.category();
-        let event_arc = Arc::new(event);
 
         // 在读锁内收集需要调用的 handler，然后在锁外执行
         let handlers_to_call = {
@@ -74,7 +75,18 @@ impl EventBus {
         );
 
         for handler in handlers_to_call {
-            handler(&event_arc);
+            // catch_unwind 隔离单个 handler panic，避免中断事件链
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                handler(event);
+            }));
+            if let Err(e) = result {
+                let msg = e
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                    .unwrap_or("(unknown)");
+                warn!(category = ?category, panic_message = msg, "事件 handler panic");
+            }
         }
     }
 

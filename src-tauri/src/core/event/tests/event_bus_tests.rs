@@ -15,8 +15,8 @@ fn subscribe_and_publish_to_category() {
         c.fetch_add(1, Ordering::SeqCst);
     }));
 
-    bus.publish(AppEvent::System(SystemEvent::ConfigReloaded));
-    bus.publish(AppEvent::System(SystemEvent::ThemeChanged));
+    bus.publish(&AppEvent::System(SystemEvent::ConfigReloaded));
+    bus.publish(&AppEvent::System(SystemEvent::ThemeChanged));
 
     assert_eq!(counter.load(Ordering::SeqCst), 2);
 }
@@ -31,8 +31,8 @@ fn all_subscriber_receives_every_event() {
         c.fetch_add(1, Ordering::SeqCst);
     }));
 
-    bus.publish(AppEvent::System(SystemEvent::ConfigReloaded));
-    bus.publish(AppEvent::Auth(crate::core::event::app_event::AuthEvent::Logout));
+    bus.publish(&AppEvent::System(SystemEvent::ConfigReloaded));
+    bus.publish(&AppEvent::Auth(crate::core::event::app_event::AuthEvent::Logout));
 
     assert_eq!(counter.load(Ordering::SeqCst), 2);
 }
@@ -47,11 +47,11 @@ fn unsubscribe_stops_receiving() {
         c.fetch_add(1, Ordering::SeqCst);
     }));
 
-    bus.publish(AppEvent::System(SystemEvent::ConfigReloaded));
+    bus.publish(&AppEvent::System(SystemEvent::ConfigReloaded));
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 
     bus.unsubscribe(id);
-    bus.publish(AppEvent::System(SystemEvent::ThemeChanged));
+    bus.publish(&AppEvent::System(SystemEvent::ThemeChanged));
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
 
@@ -59,7 +59,7 @@ fn unsubscribe_stops_receiving() {
 fn publish_with_no_subscribers_does_not_panic() {
     let bus = EventBus::new();
     // 无订阅者时发布不应 panic
-    bus.publish(AppEvent::System(SystemEvent::ConfigReloaded));
+    bus.publish(&AppEvent::System(SystemEvent::ConfigReloaded));
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn multiple_subscribers_same_category() {
     bus.subscribe(EventCategory::System, Arc::new(move |_| { cc1.fetch_add(1, Ordering::SeqCst); }));
     bus.subscribe(EventCategory::System, Arc::new(move |_| { cc2.fetch_add(1, Ordering::SeqCst); }));
 
-    bus.publish(AppEvent::System(SystemEvent::ConfigReloaded));
+    bus.publish(&AppEvent::System(SystemEvent::ConfigReloaded));
 
     assert_eq!(c1.load(Ordering::SeqCst), 1);
     assert_eq!(c2.load(Ordering::SeqCst), 1);
@@ -99,7 +99,7 @@ fn empty_category_cleaned_after_unsubscribe() {
     bus.unsubscribe(id);
 
     // 发布事件应正常（无 panic），类别已清理
-    bus.publish(AppEvent::System(SystemEvent::ConfigReloaded));
+    bus.publish(&AppEvent::System(SystemEvent::ConfigReloaded));
 }
 
 #[test]
@@ -114,7 +114,28 @@ fn handler_receives_correct_event_data() {
         }
     }));
 
-    bus.publish(AppEvent::System(SystemEvent::ThemeChanged));
+    bus.publish(&AppEvent::System(SystemEvent::ThemeChanged));
 
     assert_eq!(*received.lock().unwrap(), "theme-changed");
+}
+
+#[test]
+fn handler_panic_does_not_interrupt_other_handlers() {
+    let bus = EventBus::new();
+    let counter = Arc::new(AtomicUsize::new(0));
+    let c = Arc::clone(&counter);
+
+    // 第一个 handler 会 panic
+    bus.subscribe(EventCategory::System, Arc::new(|_| {
+        panic!("intentional panic in handler");
+    }));
+    // 第二个 handler 应正常执行
+    bus.subscribe(EventCategory::System, Arc::new(move |_| {
+        c.fetch_add(1, Ordering::SeqCst);
+    }));
+
+    bus.publish(&AppEvent::System(SystemEvent::ConfigReloaded));
+
+    // panic handler 不应阻止第二个 handler 执行
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
