@@ -1,6 +1,8 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use tracing::{debug, warn};
+
 use crate::core::error::{AppError, AppResult};
 use crate::core::repository::workspace_repo::WorkspaceRepository;
 use crate::infra::storage::Storage;
@@ -67,12 +69,34 @@ impl FsWorkspaceRepository {
 impl WorkspaceRepository for FsWorkspaceRepository {
     fn save_file(&self, workspace_id: &str, path: &Path, content: &str) -> AppResult<()> {
         let rel = self.workspace_relative(workspace_id, path)?;
-        self.storage.write_string(&rel, content)
+        let result = self.storage.write_string(&rel, content);
+        if let Err(ref e) = result {
+            warn!(
+                workspace_id = workspace_id,
+                file = %path.display(),
+                error = %e,
+                "工作区文件保存失败"
+            );
+        } else {
+            debug!(
+                workspace_id = workspace_id,
+                file = %path.display(),
+                size = content.len(),
+                "保存工作区文件"
+            );
+        }
+        result
     }
 
     fn read_file(&self, workspace_id: &str, path: &Path) -> AppResult<String> {
         let rel = self.workspace_relative(workspace_id, path)?;
-        self.storage.read_to_string(&rel).map_err(|_| {
+        self.storage.read_to_string(&rel).map_err(|e| {
+            warn!(
+                workspace_id = workspace_id,
+                file = %path.display(),
+                error = %e,
+                "工作区文件读取失败"
+            );
             AppError::Workspace(format!(
                 "文件不存在: workspace={}, path={}",
                 workspace_id,
@@ -85,6 +109,7 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         let root = self.workspace_root(workspace_id);
         // 工作区不存在时返回空列表，而非错误
         if !self.storage.exists(&root) {
+            debug!(workspace_id = workspace_id, "工作区不存在，返回空文件列表");
             return Ok(Vec::new());
         }
         // 递归遍历工作区目录，返回所有文件的相对路径（去掉 workspace 根前缀）。
@@ -96,12 +121,27 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         }
         let mut files = Vec::new();
         Self::walk_dir(&root_abs, &prefix, &mut files)?;
+        debug!(
+            workspace_id = workspace_id,
+            count = files.len(),
+            "列出工作区文件"
+        );
         Ok(files)
     }
 
     fn delete_workspace(&self, workspace_id: &str) -> AppResult<()> {
         let root = self.workspace_root(workspace_id);
-        self.storage.remove_all(&root)
+        let result = self.storage.remove_all(&root);
+        if let Err(ref e) = result {
+            warn!(
+                workspace_id = workspace_id,
+                error = %e,
+                "工作区删除失败"
+            );
+        } else {
+            debug!(workspace_id = workspace_id, "删除工作区");
+        }
+        result
     }
 
     fn exists(&self, workspace_id: &str) -> bool {
