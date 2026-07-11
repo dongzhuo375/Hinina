@@ -5,12 +5,12 @@
 
 ## 核心类型/函数
 - **`SubscriptionId`** — 订阅 ID 类型别名（`usize`）
-- **`EventHandler`** — 事件处理回调类型（`Arc<dyn Fn(AppEvent) + Send + Sync>`）
+- **`EventHandler`** — 事件处理回调类型（`Arc<dyn Fn(&AppEvent) + Send + Sync>`），接收事件引用
 - **`EventBus`** — 事件总线 struct，内部持有 `RwLock<HashMap<EventCategory, Vec<(SubscriptionId, EventHandler)>>>` 和 `Mutex<SubscriptionId>`
 - **`EventBus::new()`** — 创建新 EventBus
-- **`EventBus::publish(&self, event: AppEvent)`** — 发布事件，通知匹配类别及 All 订阅者（TODO）
-- **`EventBus::subscribe(&self, category, handler) -> SubscriptionId`** — 订阅事件（TODO）
-- **`EventBus::unsubscribe(&self, id)`** — 取消订阅（TODO）
+- **`EventBus::publish(&self, event: AppEvent)`** — 发布事件，通过 `AppEvent::category()` 映射类别，分发到对应类别 + All 订阅者。回调在锁外执行防死锁
+- **`EventBus::subscribe(&self, category, handler) -> SubscriptionId`** — 分配递增 ID，写入对应类别列表
+- **`EventBus::unsubscribe(&self, id)`** — 全局遍历 retain 移除匹配 ID，清理空类别
 - **`Default for EventBus`** — 默认实现
 
 ## 直接依赖
@@ -18,10 +18,16 @@
 - `core::event::event_category::EventCategory`
 - `std::collections::HashMap`
 - `std::sync::{Arc, Mutex, RwLock}`
+- `tracing::debug`
 
 ## 被依赖
 - `core::context`（AppContext 持有 Arc<EventBus>）
 - `service::workspace::manager`
 
 ## 逻辑流程
-`publish` 遍历 `subscribers` 中匹配类别及 `All` 类别的 handler 并逐一调用；`subscribe` 分配递增 ID 并插入对应类别列表；`unsubscribe` 按 ID 移除。三个方法当前均为 TODO 占位。
+- **publish**：事件通过 `AppEvent::category()` 映射到 EventCategory，读锁收集对应类别 + All 的 handler，锁外逐一调用（避免回调中操作 EventBus 死锁）
+- **subscribe**：Mutex 分配递增 ID（wrapping_add 防溢出），写锁插入 subscribers map
+- **unsubscribe**：写锁遍历所有类别 retain 移除匹配 ID，保留非空类别
+
+## 测试
+测试代码位于 `tests/event_bus_tests.rs`，8 项：分类发布、All 通配、取消订阅、无订阅者不 panic、多订阅者、唯一 ID、空类别清理、事件数据正确性。

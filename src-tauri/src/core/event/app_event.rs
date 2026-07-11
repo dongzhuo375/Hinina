@@ -1,6 +1,7 @@
 use crate::core::entity::contest::Contest;
 use crate::core::entity::submission::JudgementResult;
 use crate::core::entity::user::User;
+use crate::core::event::event_category::EventCategory;
 use crate::core::provider::oj_type::OJType;
 
 /// 应用全局事件枚举。
@@ -13,6 +14,21 @@ pub enum AppEvent {
     Submission(SubmissionEvent),
     Workspace(WorkspaceEvent),
     System(SystemEvent),
+}
+
+impl AppEvent {
+    /// 返回事件对应的 EventCategory，用于 EventBus 按类别分发。
+    #[must_use]
+    pub fn category(&self) -> EventCategory {
+        match self {
+            AppEvent::Auth(_) => EventCategory::Auth,
+            AppEvent::Contest(_) => EventCategory::Contest,
+            AppEvent::Problem(_) => EventCategory::Problem,
+            AppEvent::Submission(_) => EventCategory::Submission,
+            AppEvent::Workspace(_) => EventCategory::Workspace,
+            AppEvent::System(_) => EventCategory::System,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
