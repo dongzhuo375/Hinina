@@ -277,21 +277,28 @@ pub struct SubmissionDetail {
 //
 // HOJ status → JudgementStatus
 
-/// 将 HOJ 评测状态码（0-11）映射为 JudgementStatus。
+/// 将 HOJ 评测状态码（0-15）映射为 JudgementStatus。
+///
+/// 非终态（0=Pending, 1=Judging）映射为 Running 供上层轮询。
+/// JudgementStatus 无 PE/OLE/SE/RJE/FREQ 枚举，统一归入 WrongAnswer/Unknown。
 pub fn map_status(status: i32) -> crate::core::entity::submission::JudgementStatus {
     use crate::core::entity::submission::JudgementStatus;
     match status {
-        0 | 1 => JudgementStatus::Running,     // Pending/Judging → Running
-        2 => JudgementStatus::CompilationError,
-        3 => JudgementStatus::WrongAnswer,      // Presentation Error
-        4 => JudgementStatus::WrongAnswer,
-        5 => JudgementStatus::Accepted,
-        6 => JudgementStatus::TimeLimitExceeded,
-        7 => JudgementStatus::MemoryLimitExceeded,
-        8 => JudgementStatus::RuntimeError,
-        9 => JudgementStatus::WrongAnswer,      // System Error
-        10 => JudgementStatus::WrongAnswer,     // Submitted Failed
-        11 => JudgementStatus::WrongAnswer,     // Partial AC (IO)
+        0 | 1 => JudgementStatus::Running,          // Pending / Judging
+        2 => JudgementStatus::CompilationError,      // CE
+        3 => JudgementStatus::WrongAnswer,           // PE（无对应枚举）
+        4 => JudgementStatus::WrongAnswer,           // WA
+        5 => JudgementStatus::Accepted,              // AC
+        6 => JudgementStatus::TimeLimitExceeded,     // TLE
+        7 => JudgementStatus::MemoryLimitExceeded,   // MLE
+        8 => JudgementStatus::Unknown,               // OLE（无对应枚举）
+        9 => JudgementStatus::RuntimeError,           // RE
+        10 => JudgementStatus::Unknown,               // SE
+        11 => JudgementStatus::Unknown,               // RJE
+        12 => JudgementStatus::WrongAnswer,           // SF
+        13 => JudgementStatus::Accepted,              // PA（Partial AC，保守映射为 AC）
+        14 => JudgementStatus::Unknown,               // FREQ
+        15 => JudgementStatus::Unknown,               // UE
         _ => JudgementStatus::Unknown,
     }
 }
