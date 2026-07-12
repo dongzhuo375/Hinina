@@ -263,6 +263,7 @@ impl WorkspaceManager {
                         let ws_id = ws.id.clone();
                         drop(guard);
 
+                        let mut write_error = false;
                         for (file_name, content) in &files {
                             let path = std::path::PathBuf::from(file_name);
                             if let Err(e) = repo.save_file(&ws_id, &path, content) {
@@ -272,15 +273,29 @@ impl WorkspaceManager {
                                     error = %e,
                                     "自动保存失败"
                                 );
+                                write_error = true;
                             }
                         }
-                        let ws_id_for_debug = ws_id.clone();
+
+                        // 写入成功后标记 clean，避免下一 tick 重复写入
+                        if !write_error {
+                            let mut guard = current
+                                .write()
+                                .unwrap_or_else(|e| e.into_inner());
+                            // 仅在仍是同一个工作区时重置 dirty 标记
+                            if let Some(ref mut ws) = *guard {
+                                if ws.id == ws_id {
+                                    ws.mark_clean();
+                                }
+                            }
+                        }
+
                         event_bus.publish(&AppEvent::Workspace(
                             WorkspaceEvent::AutoSaveTriggered {
-                                workspace_id: ws_id,
+                                workspace_id: ws_id.clone(),
                             },
                         ));
-                        debug!(workspace_id = ws_id_for_debug, "自动保存完成");
+                        debug!(workspace_id = ws_id, "自动保存完成");
                     } else {
                         drop(guard);
                     }
