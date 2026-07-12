@@ -22,8 +22,20 @@ impl FsWorkspaceRepository {
         Self { storage }
     }
 
+    /// 校验 workspace_id 合法性：仅允许字母、数字、短横线和下划线。
+    fn validate_workspace_id(id: &str) -> AppResult<()> {
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(AppError::Workspace(format!(
+                "无效的 workspace_id: {}（仅允许字母、数字、-、_）",
+                id
+            )));
+        }
+        Ok(())
+    }
+
     /// 构建 workspace 内文件的相对路径，并对 `file_path` 做路径穿越校验。
     fn workspace_relative(&self, workspace_id: &str, file_path: &Path) -> AppResult<String> {
+        Self::validate_workspace_id(workspace_id)?;
         for component in file_path.components() {
             if matches!(component, Component::ParentDir) {
                 return Err(AppError::Workspace(format!(
@@ -32,12 +44,18 @@ impl FsWorkspaceRepository {
                 )));
             }
         }
-        Ok(format!("{}/{}/{}", WORKSPACES_DIR, workspace_id, file_path.display()))
+        let relative = Path::new(WORKSPACES_DIR)
+            .join(workspace_id)
+            .join(file_path);
+        Ok(relative.to_string_lossy().into_owned())
     }
 
     /// 构建 workspace 根目录的相对路径。
     fn workspace_root(&self, workspace_id: &str) -> String {
-        format!("{}/{}", WORKSPACES_DIR, workspace_id)
+        Path::new(WORKSPACES_DIR)
+            .join(workspace_id)
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// 递归遍历目录，收集所有文件相对于 `dir_root` 的路径。
@@ -113,6 +131,8 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         let root_abs = self.storage.base_dir().join(&root);
         let mut files = Vec::new();
         Self::walk_dir(&root_abs, &root_abs, &mut files)?;
+        // 过滤内部元数据文件，避免暴露给调用方
+        files.retain(|p| p != &PathBuf::from("workspace.json"));
         debug!(
             workspace_id = workspace_id,
             count = files.len(),

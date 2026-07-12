@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-07-11 | 分支：`feat/stage3-domain`
+> 最后更新：2026-07-12 | 分支：`feat/stage4-service`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -38,7 +38,8 @@ Hinina/
         │   ├── error.rs                  # AppError 枚举 + user_message() + AppResult<T> + From 转换
         │   ├── entity/
         │   │   ├── mod.rs
-        │   │   ├── user.rs               # User 实体
+        │         │   ├── config.rs            # AppConfig 实体（用户/OJ/编辑器/主题/布局配置）
+        │         │   ├── user.rs               # User 实体
         │   │   ├── contest.rs            # Contest 实体
         │   │   ├── problem.rs            # Problem + Sample 实体
         │   │   ├── submission.rs         # Submission + JudgementStatus + JudgementResult
@@ -67,28 +68,28 @@ Hinina/
         │       └── plugin_repo.rs        # PluginRepository trait
         ├── service/
         │   ├── mod.rs
+        │   ├── config/
+        │   │   ├── mod.rs                # ConfigService：加载/保存/变更检测/热重载
+        │   │   └── error.rs              # ConfigError
+        │   ├── theme/
+        │   │   ├── mod.rs                # ThemeService：主题切换/配色方案管理
+        │   │   └── error.rs              # ThemeError
         │   ├── auth/
-        │   │   ├── mod.rs
+        │   │   ├── mod.rs                # AuthService：登录编排/会话持久化/登出
         │   │   └── error.rs              # AuthError
         │   ├── contest/
-        │   │   ├── mod.rs
+        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存/比赛切换
         │   │   └── error.rs              # ContestError
         │   ├── problem/
-        │   │   ├── mod.rs
+        │   │   ├── mod.rs                # ProblemService：题目获取/打开题目
         │   │   └── error.rs              # ProblemError
         │   ├── submission/
-        │   │   ├── mod.rs
+        │   │   ├── mod.rs                # SubmissionService：代码提交/评测轮询/超时
         │   │   └── error.rs              # SubmissionError
-        │   ├── workspace/
-        │   │   ├── mod.rs
-        │   │   ├── error.rs              # WorkspaceError
-        │   │   └── manager.rs            # NEW: WorkspaceManager（完整生命周期）
-        │   ├── config/
-        │   │   ├── mod.rs
-        │   │   └── error.rs              # ConfigError
-        │   └── theme/
+        │   └── workspace/
         │       ├── mod.rs
-        │       └── error.rs              # ThemeError
+        │       ├── error.rs              # WorkspaceError
+        │       └── manager.rs            # WorkspaceManager：完整生命周期实现
         ├── adapter/
         │   ├── mod.rs
         │   ├── hoj/

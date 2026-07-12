@@ -1,20 +1,22 @@
 # context
 
 ## 职责
-定义统一应用上下文 `AppContext`，在启动时装配所有基础设施（EventBus、ConfigService、ProviderRegistry、WorkspaceManager、HttpClient、Storage、Logger），注入到 Tauri State 中供所有 Service 通过依赖注入使用。
+定义统一应用上下文 `AppContext`，在启动时按依赖顺序装配所有基础设施和 7 个 Service 层实例，注入到 Tauri State 中供所有 Command 通过依赖注入使用。
 
 ## 核心类型/函数
-- **`AppContext`** — 统一应用上下文 struct，持有所有基础设施的 `Arc` 引用。
-  `workspace_manager` 为 `Option<Arc<WorkspaceManager>>`，当前为 `None`（阶段 2/4 补全）。
-- **`AppContext::init(base_dir: PathBuf) -> AppResult<Self>`** — 按 8 步初始化序列装配 AppContext：
+- **`AppContext`** — 统一应用上下文 struct，持有所有基础设施和 Service 的 `Arc` 引用。
+  字段：`event_bus`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
+- **`AppContext::init(base_dir: PathBuf) -> AppResult<Self>`** — 异步初始化序列：
   1. Logger — 日志系统初始化
   2. `create_dir_all` — 确保 base_dir 存在
-  3. ConfigService — 空壳实例（阶段 4 实现）
-  4. Storage — 文件系统（base_dir 由调用方传入）
-  5. HttpClient — 网络客户端
-  6. EventBus — 事件总线
+  3. Storage — 文件系统（base_dir 传入）
+  4. EventBus — 事件总线
+  5. ConfigService — 通过 `FsConfigRepository` 加载配置（首次启动使用默认值并持久化）
+  6. HttpClient — 网络客户端
   7. ProviderRegistry — 默认 HOJ（Provider 在阶段 5 注册）
-  8. WorkspaceManager — `None`（阶段 2/4 补全）
+  8. WorkspaceManager — 通过 `FsWorkspaceRepository` 创建，包装为 `Some(Arc<...>)`
+  9. 装配 5 个 Service：ThemeService → AuthService → ContestService → ProblemService → SubmissionService
+  10. 装配 AppContext 并返回
 
 ## 直接依赖
 - `core::event::event_bus::EventBus`
@@ -24,8 +26,15 @@
 - `infra::http::HttpClient`
 - `infra::logger::Logger`
 - `infra::storage::Storage`
+- `infra::fs_config_repo::FsConfigRepository`
+- `infra::fs_workspace_repo::FsWorkspaceRepository`
 - `infra::provider_registry_impl::ProviderRegistryImpl`
 - `service::config::ConfigService`
+- `service::theme::ThemeService`
+- `service::auth::AuthService`
+- `service::contest::ContestService`
+- `service::problem::ProblemService`
+- `service::submission::SubmissionService`
 - `service::workspace::manager::WorkspaceManager`
 - `tracing`（启动日志）
 
@@ -39,4 +48,4 @@
 - `commands::workspace_cmd`
 
 ## 逻辑流程
-`AppContext::init(base_dir)` 按序初始化：Logger → ConfigService → Storage → HttpClient → EventBus → ProviderRegistry(HOJ) → WorkspaceManager(todo!) → 装配。当前 WorkspaceManager 为运行时占位，待阶段 2（Repository）和阶段 4（Service）补全。
+`AppContext::init(base_dir)` 按依赖顺序初始化：Logger → Storage → EventBus → ConfigService → HttpClient → ProviderRegistry → WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ 装配 AppContext。所有 Service 通过 Arc 共享 EventBus、ConfigService、ProviderRegistry 和 Storage。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
