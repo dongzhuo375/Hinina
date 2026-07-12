@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use crate::core::entity::submission::JudgementResult;
+use crate::core::entity::submission::{JudgementResult, JudgementStatus};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, SubmissionEvent};
 use crate::core::event::event_bus::EventBus;
@@ -104,19 +104,28 @@ impl SubmissionService {
 
             match provider.get_judgement(submission_id).await {
                 Ok(result) => {
-                    debug!(
-                        submission_id = submission_id,
-                        status = ?result.status,
-                        attempts = attempt,
-                        "评测完成"
-                    );
-                    self.event_bus.publish(&AppEvent::Submission(
-                        SubmissionEvent::Judged {
-                            submission_id: submission_id.to_string(),
-                            result: result.clone(),
-                        },
-                    ));
-                    return Ok(result);
+                    // 非终态（Running）：继续轮询
+                    if matches!(result.status, JudgementStatus::Running) {
+                        debug!(
+                            submission_id = submission_id,
+                            attempt = attempt,
+                            "评测进行中，继续轮询"
+                        );
+                    } else {
+                        debug!(
+                            submission_id = submission_id,
+                            status = ?result.status,
+                            attempts = attempt,
+                            "评测完成"
+                        );
+                        self.event_bus.publish(&AppEvent::Submission(
+                            SubmissionEvent::Judged {
+                                submission_id: submission_id.to_string(),
+                                result: result.clone(),
+                            },
+                        ));
+                        return Ok(result);
+                    }
                 }
                 Err(e) => {
                     warn!(

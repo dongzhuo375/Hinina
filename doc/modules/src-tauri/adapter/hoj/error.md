@@ -1,17 +1,18 @@
 # error
 
 ## 职责
-定义 HOJ 适配器的错误类型。目前仅包含一个通用的 API 错误变体，用于封装 HOJ API 调用过程中产生的错误。
+定义 HOJ 适配器专用错误类型。
 
 ## 核心类型/函数
-- `enum HOJError` — HOJ 适配器错误枚举
-  - `ApiError(String)` — 表示 HOJ API 调用错误，携带错误描述字符串
+- `enum HOJError`：
+  - `ApiError(i32, String)` — API 返回非 200 状态码
+  - `HttpError(String)` — HTTP 请求失败
+  - `JsonError(String)` — JSON 解析失败
+  - `Unauthorized(String)` — Token 缺失
+  - `UnknownStatus(i32)` — 未知评测状态码
 
 ## 直接依赖
-- `thiserror::Error`（derive 宏，用于自动生成 `Display` 和 `std::error::Error` 实现）
+- `thiserror::Error`（derive 宏）
 
 ## 被依赖
-- `adapter/hoj/mod.rs`（`pub mod error`）
-
-## 逻辑流程
-无（仅错误类型定义）
+- `adapter/hoj/mod.rs`

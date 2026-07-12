@@ -1,16 +1,14 @@
 # types
 
 ## 职责
-HOJ API 请求/响应 DTO 类型定义文件。当前为占位，待实现。
+HOJ API DTO 类型定义 + 状态码映射。
 
-## 核心类型/函数
-无（TODO：定义 HOJ 特定的 DTO 类型）
-
-## 直接依赖
-无
-
-## 被依赖
-- `adapter/hoj/mod.rs`（`pub mod types`）
-
-## 逻辑流程
-无（仅类型定义占位）
+## 核心类型
+- `ApiResponse<T>` — 统一响应包装 `{status, msg, data}`
+- `PageResult<T>` — 分页 `{records, total, size, current}`
+- `LoginRequest` / `UserInfoVO` — 认证
+- `ContestVO` / `ContestProblemVO` — 比赛
+- `ProblemVO` / `ProblemInfoVO` / `TagVO` — 题目
+- `JudgeVO` / `SubmissionInfoVO` / `SubmissionDetail` — 提交评测
+- `map_status(i32)` → JudgementStatus
+- `is_terminal_status(i32)` → bool

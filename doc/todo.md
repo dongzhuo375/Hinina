@@ -1,6 +1,6 @@
 # Hinina 开发路线图
 
-> 当前状态：阶段 4（服务层）已完成，进入阶段 5（OJ 适配器）。
+> 当前状态：阶段 5（HOJ Adapter）已完成，进入阶段 6（Tauri Command）。
 > 开发顺序遵循自底向上依赖链：Infrastructure → Domain → Service → Adapter → Command → Frontend。
 
 ---
@@ -66,9 +66,9 @@
 
 > Service 层就绪后，首先实现 HOJ Adapter 验证 Provider trait 设计的通用性。
 
-- [ ] **HOJ Adapter** — `adapter/hoj/`：实现 AuthProvider + ContestProvider + ProblemProvider + SubmissionProvider 四个 trait
-  - [ ] HOJ DTO 类型定义 — `adapter/hoj/types.rs`
-  - [ ] HOJ API 对接 — 登录、比赛列表、题目详情、提交代码、评测结果
+- [x] **HOJ Adapter** — `adapter/hoj/`：实现 AuthProvider + ContestProvider + ProblemProvider + SubmissionProvider 四个 trait
+  - [x] HOJ DTO 类型定义 — `adapter/hoj/types.rs`：ApiResponse<T>、LoginRequest、UserInfoVO、ContestVO、ContestProblemVO、ProblemInfoVO、JudgeVO、状态码映射
+  - [x] HOJ API 对接 — 登录、比赛列表、题目详情、提交代码、评测结果
 
 ---
 
