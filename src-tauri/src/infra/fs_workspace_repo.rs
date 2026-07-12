@@ -131,6 +131,8 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         let root_abs = self.storage.base_dir().join(&root);
         let mut files = Vec::new();
         Self::walk_dir(&root_abs, &root_abs, &mut files)?;
+        // 过滤内部元数据文件，避免暴露给调用方
+        files.retain(|p| p != &PathBuf::from("workspace.json"));
         debug!(
             workspace_id = workspace_id,
             count = files.len(),
