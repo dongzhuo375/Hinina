@@ -191,30 +191,33 @@ impl HOJAdapter {
     }
 
     /// 从 HTML 样例中提取纯文本 input/output 对。
-    /// HOJ 将样例存储为 HTML（`<pre>` 包裹），这里做简单提取。
+    /// HOJ 将样例存储为 HTML，`<pre>` 可能带属性（如 `<pre class="input">`）。
     fn parse_samples(html: &str) -> Vec<Sample> {
         if html.is_empty() {
             return Vec::new();
         }
-        // 提取所有 <pre>...</pre> 块内容
+        // 提取所有 <pre ...>...</pre> 块内容（支持标签属性）
         let mut pre_blocks: Vec<String> = Vec::new();
         let mut remaining = html;
-        while let Some(start) = remaining.find("<pre>") {
-            let after_open = &remaining[start + 5..];
-            if let Some(end) = after_open.find("</pre>") {
-                let content = &after_open[..end];
-                pre_blocks.push(
-                    content
-                        .trim()
-                        .replace("&lt;", "<")
-                        .replace("&gt;", ">")
-                        .replace("&amp;", "&")
-                        .replace("&quot;", "\""),
-                );
-                remaining = &after_open[end + 6..];
-            } else {
-                break;
-            }
+        while let Some(start) = remaining.find("<pre") {
+            let after_tag = &remaining[start + 4..];
+            // 跳过属性直到 >
+            let Some(close_bracket) = after_tag.find('>') else { break };
+            let after_open = &after_tag[close_bracket + 1..];
+            let Some(end) = after_open.find("</pre>") else { break };
+            let content = &after_open[..end];
+            pre_blocks.push(
+                content
+                    .trim()
+                    .replace("<br>", "\n")
+                    .replace("<br/>", "\n")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&amp;", "&")
+                    .replace("&quot;", "\"")
+                    .replace("&nbsp;", " "),
+            );
+            remaining = &after_open[end + 6..];
         }
 
         let mut samples = Vec::new();
