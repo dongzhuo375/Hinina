@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-07-12 | 分支：`feat/stage4-service`
+> 最后更新：2026-07-12 | 分支：`feat/stage5-hoj`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -93,8 +93,8 @@ Hinina/
         ├── adapter/
         │   ├── mod.rs
         │   ├── hoj/
-        │   │   ├── mod.rs
-        │   │   ├── types.rs              # HOJ DTO 类型（骨架）
+        │   │   ├── mod.rs                # HOJAdapter：实现 4 个 Provider trait（阶段 5 完成）
+        │   │   ├── types.rs              # HOJ DTO：ApiResponse/Login/Contest/Problem/Submission + 状态码映射
         │   │   └── error.rs              # HOJError
         │   ├── qduoj/
         │   │   ├── mod.rs

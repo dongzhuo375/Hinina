@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::adapter::hoj::HOJAdapter;
 use crate::core::error::AppResult;
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::oj_type::OJType;
@@ -81,9 +82,22 @@ impl AppContext {
         })?);
 
         // 6. 创建 Provider 注册中心，默认使用 HOJ
-        //    注意：HOJ Adapter 在阶段 5 注册，当前 provider map 均为空
         let provider_registry: Arc<dyn ProviderRegistry> =
             Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
+
+        // 6.5 注册 HOJ Adapter（阶段 5）
+        {
+            let hoj_base = config.get().oj.hoj_url;
+            tracing::info!(base_url = hoj_base, "HOJ Adapter 注册中");
+            let hoj = Arc::new(HOJAdapter::new(
+                Arc::clone(&http_client),
+                hoj_base,
+            ));
+            provider_registry.register_auth(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::auth::AuthProvider>);
+            provider_registry.register_contest(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::contest::ContestProvider>);
+            provider_registry.register_problem(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::problem::ProblemProvider>);
+            provider_registry.register_submission(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::submission::SubmissionProvider>);
+        }
 
         // 7. 创建 WorkspaceManager
         let workspace_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
