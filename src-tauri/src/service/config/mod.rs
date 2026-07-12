@@ -57,8 +57,9 @@ impl<R: ConfigRepository> ConfigService<R> {
 
     /// 通过闭包修改配置，修改后自动保存。
     ///
-    /// 如果保存失败，内存中的修改会被保留（保持 UI 响应一致），
-    /// 但会返回错误供调用方决定如何提示用户。
+    /// 先调用 updater 闭包修改内存中的配置，然后持久化到磁盘。
+    /// 如果持久化失败，内存中的修改会被保留（保持 UI 响应一致），
+    /// 返回错误供调用方决定是否回滚。
     pub fn update<F>(&self, updater: F) -> AppResult<AppConfig>
     where
         F: FnOnce(&mut AppConfig),
@@ -72,10 +73,10 @@ impl<R: ConfigRepository> ConfigService<R> {
             cfg.clone()
         };
 
-        // 先持久化，再更新内存（持久化失败时回滚）
+        // 持久化到磁盘，失败时保留内存修改但上报错误
         if let Err(e) = self.repo.save_config(&new_config) {
-            warn!(error = %e, "配置保存失败");
-            return Err(AppError::Config(format!("配置保存失败: {}", e)));
+            warn!(error = %e, "配置持久化失败");
+            return Err(AppError::Config(format!("配置持久化失败: {}", e)));
         }
 
         debug!("配置已更新并保存");
@@ -112,3 +113,7 @@ impl<R: ConfigRepository> ConfigService<R> {
         &self.repo
     }
 }
+
+#[cfg(test)]
+#[path = "tests/config_tests.rs"]
+mod tests;

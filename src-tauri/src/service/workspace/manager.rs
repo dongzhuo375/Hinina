@@ -11,6 +11,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, WorkspaceEvent};
 use crate::core::event::event_bus::EventBus;
 use crate::core::repository::workspace_repo::WorkspaceRepository;
+use serde::{Deserialize, Serialize};
 
 /// Workspace 管理器。
 ///
@@ -40,12 +41,23 @@ use crate::core::repository::workspace_repo::WorkspaceRepository;
 pub struct WorkspaceManager {
     repo: Arc<dyn WorkspaceRepository>,
     event_bus: Arc<EventBus>,
-    /// 当前活动工作区（Arc 包装以支持 auto-save 任务安全共享）
-    current: Arc<RwLock<Option<Arc<Workspace>>>>,
+    /// 当前活动工作区（RwLock 内直接持有 Workspace，支持 auto-save 共享和可变访问）
+    current: Arc<RwLock<Option<Workspace>>>,
     /// 自动保存取消标记
     auto_save_running: AtomicBool,
     /// 自动保存的 JoinHandle
     auto_save_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+/// 工作区元数据，持久化在 workspace.json 中，避免从 workspace_id 字符串解析字段。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceMeta {
+    contest_id: String,
+    problem_id: String,
+    root_path: String,
+    language: String,
+    created_at: i64,
+    updated_at: i64,
 }
 
 impl WorkspaceManager {
@@ -70,20 +82,33 @@ impl WorkspaceManager {
         contest_id: &str,
         problem_id: &str,
         root_path: &str,
-    ) -> AppResult<Arc<Workspace>> {
-        let workspace = Arc::new(Workspace::new(
+    ) -> AppResult<Workspace> {
+        let ws = Workspace::new(
             contest_id.to_string(),
             problem_id.to_string(),
             root_path.to_string(),
-        ));
+        );
+
+        // 持久化元数据到 workspace.json，避免从 workspace_id 字符串解析元数据
+        let meta = WorkspaceMeta {
+            contest_id: contest_id.to_string(),
+            problem_id: problem_id.to_string(),
+            root_path: root_path.to_string(),
+            language: String::new(),
+            created_at: ws.created_at,
+            updated_at: ws.updated_at,
+        };
+        let meta_json = serde_json::to_string_pretty(&meta)
+            .map_err(|e| AppError::Serialization(format!("序列化工作区元数据失败: {}", e)))?;
+        self.repo.save_file(&ws.id, &PathBuf::from("workspace.json"), &meta_json)?;
 
         {
             let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
-            *current = Some(Arc::clone(&workspace));
+            *current = Some(ws.clone());
         }
 
         info!(
-            workspace_id = workspace.id,
+            workspace_id = ws.id,
             contest_id = contest_id,
             problem_id = problem_id,
             "工作区已创建"
@@ -91,16 +116,16 @@ impl WorkspaceManager {
 
         self.event_bus
             .publish(&AppEvent::Workspace(WorkspaceEvent::Loaded {
-                workspace_id: workspace.id.clone(),
+                workspace_id: ws.id.clone(),
             }));
 
-        Ok(workspace)
+        Ok(ws)
     }
 
     /// 加载已有工作区：从磁盘恢复所有文件到内存。
     ///
     /// 发布 `WorkspaceEvent::Loaded`。
-    pub fn load(&self, workspace_id: &str, root_path: &str) -> AppResult<Arc<Workspace>> {
+    pub fn load(&self, workspace_id: &str, _root_path: &str) -> AppResult<Workspace> {
         if !self.repo.exists(workspace_id) {
             return Err(AppError::Workspace(format!(
                 "工作区不存在: {}",
@@ -109,9 +134,20 @@ impl WorkspaceManager {
         }
 
         let file_paths = self.repo.list_files(workspace_id)?;
+
+        // 读取元数据
+        let meta_json = self.repo.read_file(workspace_id, &PathBuf::from("workspace.json"))?;
+        let meta: WorkspaceMeta = serde_json::from_str(&meta_json)
+            .map_err(|e| AppError::Serialization(format!("解析工作区元数据失败: {}", e)))?;
+
         let mut files = HashMap::new();
 
+        // 恢复所有文件，跳过元数据文件本身
         for path in &file_paths {
+            // 跳过 workspace.json，避免将其作为用户文件加载
+            if path == &PathBuf::from("workspace.json") {
+                continue;
+            }
             match self.repo.read_file(workspace_id, path) {
                 Ok(content) => {
                     files.insert(path.to_string_lossy().into_owned(), content);
@@ -127,27 +163,21 @@ impl WorkspaceManager {
             }
         }
 
-        // 从 workspace_id 解析 contest_id 和 problem_id
-        // ID 格式: ws-{contest_id}-{problem_id}-{timestamp}-{hex}
-        let parts: Vec<&str> = workspace_id.split('-').collect();
-        let contest_id = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
-        let problem_id = parts.get(2).map(|s| s.to_string()).unwrap_or_default();
-
-        let workspace = Arc::new(Workspace {
+        let ws = Workspace {
             id: workspace_id.to_string(),
-            contest_id,
-            problem_id,
-            root_path: root_path.to_string(),
+            contest_id: meta.contest_id,
+            problem_id: meta.problem_id,
+            root_path: meta.root_path,
             files,
-            language: String::new(),
+            language: meta.language,
             is_dirty: false,
-            created_at: 0, // 恢复时不保留精确创建时间
-            updated_at: 0,
-        });
+            created_at: meta.created_at,
+            updated_at: meta.updated_at,
+        };
 
         {
             let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
-            *current = Some(Arc::clone(&workspace));
+            *current = Some(ws.clone());
         }
 
         info!(workspace_id = workspace_id, "工作区已加载");
@@ -157,21 +187,16 @@ impl WorkspaceManager {
                 workspace_id: workspace_id.to_string(),
             }));
 
-        Ok(workspace)
+        Ok(ws)
     }
 
     /// 保存当前工作区的所有脏文件到磁盘。
     ///
     /// 发布 `WorkspaceEvent::Saved`。
     pub fn save(&self) -> AppResult<()> {
-        let current = self
-            .current
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-
-        let ws = match current {
-            Some(ref ws) => ws,
+        let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
+        let ws = match current.as_mut() {
+            Some(ws) => ws,
             None => {
                 debug!("无当前工作区，跳过保存");
                 return Ok(());
@@ -189,10 +214,7 @@ impl WorkspaceManager {
             saved += 1;
         }
 
-        // 通过 Arc 内部可变性标记为 clean
-        // 注意：Workspace 需要内部可变性支持
-        // 当前设计：Workspace 不可变，save 后通过创建新对象替换
-        // 暂时跳过 mark_clean 调用（Workspace 是 Arc 包装的不可变对象）
+        ws.mark_clean();
 
         debug!(
             workspace_id = ws.id,
@@ -200,9 +222,12 @@ impl WorkspaceManager {
             "工作区已保存"
         );
 
+        let ws_id = ws.id.clone();
+        drop(current);
+
         self.event_bus
             .publish(&AppEvent::Workspace(WorkspaceEvent::Saved {
-                workspace_id: ws.id.clone(),
+                workspace_id: ws_id,
             }));
 
         Ok(())
@@ -229,29 +254,38 @@ impl WorkspaceManager {
             loop {
                 interval_timer.tick().await;
 
-                let ws_opt = current
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
+                let guard = current.read().unwrap_or_else(|e| e.into_inner());
 
-                if let Some(ref ws) = ws_opt {
-                    for (file_name, content) in &ws.files {
-                        let path = std::path::PathBuf::from(file_name);
-                        if let Err(e) = repo.save_file(&ws.id, &path, content) {
-                            warn!(
-                                workspace_id = ws.id,
-                                file = file_name,
-                                error = %e,
-                                "自动保存失败"
-                            );
+                if let Some(ref ws) = *guard {
+                    if ws.is_dirty {
+                        // 克隆文件集，在释放锁后异步写入
+                        let files: HashMap<String, String> = ws.files.clone();
+                        let ws_id = ws.id.clone();
+                        drop(guard);
+
+                        for (file_name, content) in &files {
+                            let path = std::path::PathBuf::from(file_name);
+                            if let Err(e) = repo.save_file(&ws_id, &path, content) {
+                                warn!(
+                                    workspace_id = ws_id,
+                                    file = file_name,
+                                    error = %e,
+                                    "自动保存失败"
+                                );
+                            }
                         }
+                        let ws_id_for_debug = ws_id.clone();
+                        event_bus.publish(&AppEvent::Workspace(
+                            WorkspaceEvent::AutoSaveTriggered {
+                                workspace_id: ws_id,
+                            },
+                        ));
+                        debug!(workspace_id = ws_id_for_debug, "自动保存完成");
+                    } else {
+                        drop(guard);
                     }
-                    event_bus.publish(&AppEvent::Workspace(
-                        WorkspaceEvent::AutoSaveTriggered {
-                            workspace_id: ws.id.clone(),
-                        },
-                    ));
-                    debug!(workspace_id = ws.id, "自动保存完成");
+                } else {
+                    drop(guard);
                 }
             }
         });
@@ -275,7 +309,7 @@ impl WorkspaceManager {
     /// 切换工作区：保存当前 → 加载目标。
     ///
     /// 发布 `WorkspaceEvent::Switched`。
-    pub fn switch(&self, workspace_id: &str, root_path: &str) -> AppResult<Arc<Workspace>> {
+    pub fn switch(&self, workspace_id: &str, root_path: &str) -> AppResult<Workspace> {
         let from = {
             let current = self.current.read().unwrap_or_else(|e| e.into_inner());
             current.as_ref().map(|ws| ws.id.clone())
@@ -305,10 +339,9 @@ impl WorkspaceManager {
         // 如果销毁的是当前工作区，则清空当前引用
         {
             let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
-            if let Some(ref ws) = *current {
-                if ws.id == workspace_id {
-                    *current = None;
-                }
+            let is_current = current.as_ref().is_some_and(|ws| ws.id == workspace_id);
+            if is_current {
+                *current = None;
             }
         }
 
@@ -320,7 +353,7 @@ impl WorkspaceManager {
     ///
     /// 当前实现为 stub —— WorkspaceRepository 没有 list_all_workspaces 方法。
     /// 恢复功能将在 Storage 层补充目录扫描能力后完善。
-    pub fn recover_all(&self) -> AppResult<Vec<Arc<Workspace>>> {
+    pub fn recover_all(&self) -> AppResult<Vec<Workspace>> {
         debug!("崩溃恢复：当前阶段为 stub");
         // TODO: 需要 Storage::list_dirs() 或 WorkspaceRepository::list_workspaces()
         Ok(Vec::new())
@@ -328,27 +361,18 @@ impl WorkspaceManager {
 
     // ── 文件操作 ──
 
-    /// 更新当前工作区中的文件内容，标记为 dirty。
+    /// 更新当前工作区中的文件内容，标记为 dirty 并持久化到磁盘。
     pub fn update_file(&self, file_name: &str, content: &str) -> AppResult<()> {
-        let current = self
-            .current
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
+        let ws = current
+            .as_mut()
+            .ok_or_else(|| AppError::Workspace("无当前工作区".into()))?;
 
-        let ws = match current {
-            Some(ref ws) => ws,
-            None => {
-                return Err(AppError::Workspace("无当前工作区".into()));
-            }
-        };
+        // 更新内存中的文件 + 标记 dirty
+        ws.files.insert(file_name.to_string(), content.to_string());
+        ws.mark_dirty();
 
-        // Workspace 是不可变的 Arc，需要通过创建新对象来更新
-        // 简化方案：直接操作 files HashMap 并标记 dirty
-        // 这需要 Workspace 内部使用 Mutex 或 RefCell
-        // 当前为简化的 unsafe 访问模式，下一版本改为 RwLock<Workspace>
-
-        // 直接保存文件到 repo
+        // 持久化到磁盘
         self.repo
             .save_file(&ws.id, &PathBuf::from(file_name), content)?;
 
@@ -359,29 +383,23 @@ impl WorkspaceManager {
             "文件已更新"
         );
 
-        self.event_bus
-            .publish(&AppEvent::Workspace(WorkspaceEvent::AutoSaveTriggered {
-                workspace_id: ws.id.clone(),
-            }));
-
+        // auto-save 负责发布事件，这里不重复发布
         Ok(())
     }
 
-    /// 获取当前工作区中的文件内容。
+    /// 获取当前工作区中的文件内容。优先从内存读取，内存未命中时回退到磁盘。
     pub fn get_file(&self, file_name: &str) -> AppResult<String> {
-        let current = self
-            .current
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let current = self.current.read().unwrap_or_else(|e| e.into_inner());
+        let ws = current
+            .as_ref()
+            .ok_or_else(|| AppError::Workspace("无当前工作区".into()))?;
 
-        let ws = match current {
-            Some(ref ws) => ws,
-            None => {
-                return Err(AppError::Workspace("无当前工作区".into()));
-            }
-        };
+        // 优先从内存返回
+        if let Some(content) = ws.files.get(file_name) {
+            return Ok(content.clone());
+        }
 
+        // 回退到磁盘
         self.repo
             .read_file(&ws.id, &PathBuf::from(file_name))
             .map_err(|e| {
@@ -393,7 +411,7 @@ impl WorkspaceManager {
     }
 
     /// 获取当前活动工作区。
-    pub fn current(&self) -> Option<Arc<Workspace>> {
+    pub fn current(&self) -> Option<Workspace> {
         self.current.read().ok()?.clone()
     }
 }
@@ -403,3 +421,7 @@ impl Drop for WorkspaceManager {
         self.stop_auto_save();
     }
 }
+
+#[cfg(test)]
+#[path = "tests/manager_tests.rs"]
+mod tests;

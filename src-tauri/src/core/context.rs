@@ -11,7 +11,12 @@ use crate::infra::http::HttpClient;
 use crate::infra::logger::Logger;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 use crate::infra::storage::Storage;
+use crate::service::auth::AuthService;
 use crate::service::config::ConfigService;
+use crate::service::contest::ContestService;
+use crate::service::problem::ProblemService;
+use crate::service::submission::SubmissionService;
+use crate::service::theme::ThemeService;
 use crate::service::workspace::manager::WorkspaceManager;
 
 /// 统一应用上下文。
@@ -26,6 +31,12 @@ pub struct AppContext {
     pub http_client: Arc<HttpClient>,
     pub storage: Arc<Storage>,
     pub logger: Arc<Logger>,
+    // ── Service 层 ──
+    pub theme: Arc<ThemeService<FsConfigRepository>>,
+    pub auth: Arc<AuthService>,
+    pub contest: Arc<ContestService>,
+    pub problem: Arc<ProblemService>,
+    pub submission: Arc<SubmissionService>,
 }
 
 impl AppContext {
@@ -81,6 +92,29 @@ impl AppContext {
             Arc::clone(&event_bus),
         )));
 
+        // 7.5 装配 Service 层
+        let theme = Arc::new(ThemeService::new(
+            Arc::clone(&config),
+            Arc::clone(&event_bus),
+        ));
+        let auth = Arc::new(AuthService::new(
+            Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
+            Arc::clone(&storage),
+            Arc::clone(&event_bus),
+        ));
+        let contest = Arc::new(ContestService::new(
+            Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
+            Arc::clone(&event_bus),
+        ));
+        let problem = Arc::new(ProblemService::new(
+            Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
+            Arc::clone(&event_bus),
+        ));
+        let submission = Arc::new(SubmissionService::new(
+            Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
+            Arc::clone(&event_bus),
+        ));
+
         // 8. 装配
         Ok(Self {
             event_bus,
@@ -90,6 +124,11 @@ impl AppContext {
             http_client,
             storage,
             logger: Arc::new(Logger),
+            theme,
+            auth,
+            contest,
+            problem,
+            submission,
         })
     }
 }

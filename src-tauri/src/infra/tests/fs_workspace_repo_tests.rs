@@ -80,3 +80,39 @@ fn rejects_path_traversal() {
     assert!(r.read_file(ws, Path::new("../../etc/passwd")).is_err());
     assert!(r.save_file(ws, Path::new("a/../b"), "bad").is_err());
 }
+
+// ── validate_workspace_id 边界测试 ──
+
+#[test]
+fn validate_workspace_id_rejects_slash() {
+    // workspace_id 含 / 应被拒绝（路径穿越风险）
+    assert!(FsWorkspaceRepository::validate_workspace_id("ws/../etc").is_err());
+    assert!(FsWorkspaceRepository::validate_workspace_id("a/b").is_err());
+}
+
+#[test]
+fn validate_workspace_id_rejects_dotdot() {
+    // workspace_id 含 .. 应被拒绝
+    assert!(FsWorkspaceRepository::validate_workspace_id("ws-..-foo").is_err());
+    assert!(FsWorkspaceRepository::validate_workspace_id("..").is_err());
+}
+
+#[test]
+fn validate_workspace_id_rejects_empty() {
+    assert!(FsWorkspaceRepository::validate_workspace_id("").is_err());
+}
+
+#[test]
+fn validate_workspace_id_rejects_non_ascii() {
+    // 中文或空格应被拒绝
+    assert!(FsWorkspaceRepository::validate_workspace_id("你好").is_err());
+    assert!(FsWorkspaceRepository::validate_workspace_id("ws bad").is_err());
+}
+
+#[test]
+fn validate_workspace_id_accepts_valid() {
+    // 合法 ID 应通过
+    assert!(FsWorkspaceRepository::validate_workspace_id("ws-contest1-problemA-1234567890-abcd").is_ok());
+    assert!(FsWorkspaceRepository::validate_workspace_id("my_workspace").is_ok());
+    assert!(FsWorkspaceRepository::validate_workspace_id("abc123").is_ok());
+}
