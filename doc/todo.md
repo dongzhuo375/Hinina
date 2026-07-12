@@ -1,6 +1,6 @@
 # Hinina 开发路线图
 
-> 当前状态：阶段 3（领域核心）已完成，进入阶段 4（服务层）。
+> 当前状态：阶段 4（服务层）已完成，进入阶段 5（OJ 适配器）。
 > 开发顺序遵循自底向上依赖链：Infrastructure → Domain → Service → Adapter → Command → Frontend。
 
 ---
@@ -40,26 +40,25 @@
 > 按依赖顺序实现，每个 Service 完成后对应 Command 也可同步填充。
 
 ### 4.1 ConfigService
-- [ ] **ConfigService** — `service/config/mod.rs`：加载/保存/监听配置变更，发布 SystemEvent::ConfigReloaded
+- [x] **ConfigService** — `service/config/mod.rs`：加载/保存/监听配置变更，发布 SystemEvent::ConfigReloaded
 
 ### 4.2 AuthService
-- [ ] **AuthService** — `service/auth/mod.rs`：登录流程编排、会话持久化、登出清理
+- [x] **AuthService** — `service/auth/mod.rs`：登录流程编排、会话持久化、登出清理
 
 ### 4.3 ContestService
-- [ ] **ContestService** — `service/contest/mod.rs`：比赛获取、列表缓存、当前比赛切换
+- [x] **ContestService** — `service/contest/mod.rs`：比赛获取、列表缓存、当前比赛切换
 
 ### 4.4 ProblemService
-- [ ] **ProblemService** — `service/problem/mod.rs`：题目获取、本地缓存、题目切换时保留代码
+- [x] **ProblemService** — `service/problem/mod.rs`：题目获取、本地缓存、题目切换时保留代码
 
 ### 4.5 WorkspaceManager
-- [ ] **WorkspaceManager 完整实现** — `service/workspace/manager.rs`：create / load / save / auto-save / switch / destroy / recover 全部方法
-  > ⚠️ 上下文：`AppContext.workspace_manager` 当前为 `Option<Arc<WorkspaceManager>> = None`（阶段 1 PR5 Review P5-1），应用可正常启动但无工作区管理能力。实现后需改回 `Some(...)`。
+- [x] **WorkspaceManager 完整实现** — `service/workspace/manager.rs`：create / load / save / auto-save / switch / destroy / recover 全部方法
 
 ### 4.6 SubmissionService
-- [ ] **SubmissionService** — `service/submission/mod.rs`：提交代码、评测结果轮询、超时处理
+- [x] **SubmissionService** — `service/submission/mod.rs`：提交代码、评测结果轮询、超时处理
 
 ### 4.7 ThemeService
-- [ ] **ThemeService** — `service/theme/mod.rs`：主题切换、配色方案管理，发布 SystemEvent::ThemeChanged
+- [x] **ThemeService** — `service/theme/mod.rs`：主题切换、配色方案管理，发布 SystemEvent::ThemeChanged
 
 ---
 
