@@ -22,6 +22,9 @@ const SESSIONS_DIR: &str = "sessions";
 /// 本地会话记录。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
+    /// 用户 ID（UUID），`#[serde(default)]` 兼容升级前不含此字段的旧版 session 文件。
+    #[serde(default)]
+    pub user_id: String,
     pub username: String,
     pub token: String,
     pub oj_type: String,
@@ -67,6 +70,7 @@ impl AuthService {
 
         // 持久化会话
         let session = Session {
+            user_id: user.id.clone(),
             username: user.username.clone(),
             token: user.token.clone(),
             oj_type: format!("{:?}", oj_type),

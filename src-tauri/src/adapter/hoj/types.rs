@@ -307,3 +307,7 @@ pub fn map_status(status: i32) -> crate::core::entity::submission::JudgementStat
 pub fn is_terminal_status(status: i32) -> bool {
     !matches!(status, 0 | 1)
 }
+
+#[cfg(test)]
+#[path = "tests/types_tests.rs"]
+mod tests;

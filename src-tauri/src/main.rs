@@ -18,7 +18,7 @@ fn main() {
     // 运行时初始化，阻塞式
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let ctx = rt.block_on(async {
-        // TODO: 从 Tauri app_data_dir 获取正式路径（阶段 2 实现后完善）
+        // TODO: 从 Tauri app_data_dir 获取正式路径（阶段 7 实现后完善）
         let base_dir = std::env::temp_dir().join("hinina");
         AppContext::init(base_dir)
             .await
@@ -27,10 +27,26 @@ fn main() {
 
     tauri::Builder::default()
         .manage(ctx)
-        .setup(|app| {
-            commands::register_commands(app);
-            Ok(())
-        })
+        .invoke_handler(tauri::generate_handler![
+            commands::auth_cmd::login,
+            commands::auth_cmd::logout,
+            commands::auth_cmd::get_session,
+            commands::contest_cmd::list_contests,
+            commands::contest_cmd::select_contest,
+            commands::problem_cmd::get_problem,
+            commands::problem_cmd::list_problems,
+            commands::submission_cmd::submit_code,
+            commands::submission_cmd::get_judgement,
+            commands::workspace_cmd::load_workspace,
+            commands::workspace_cmd::save_workspace,
+            commands::workspace_cmd::switch_workspace,
+            commands::workspace_cmd::current_workspace,
+            commands::config_cmd::get_config,
+            commands::config_cmd::reload_config,
+            commands::config_cmd::update_config,
+            commands::theme_cmd::get_theme,
+            commands::theme_cmd::set_theme,
+        ])
         .run(tauri::generate_context!())
         .expect("Failed to launch Hinina");
 }
