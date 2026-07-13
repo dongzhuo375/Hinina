@@ -1,6 +1,6 @@
 # Hinina 开发路线图
 
-> 当前状态：阶段 5（HOJ Adapter）已完成，进入阶段 6（Tauri Command）。
+> 当前状态：阶段 6（Tauri Command）已完成，进入阶段 7（Vue 前端）。
 > 开发顺序遵循自底向上依赖链：Infrastructure → Domain → Service → Adapter → Command → Frontend。
 
 ---
@@ -81,9 +81,9 @@
 - [ ] **problem_cmd** — `commands/problem_cmd.rs`：get_problem / list_problems
 - [ ] **submission_cmd** — `commands/submission_cmd.rs`：submit_code / get_judgement
 - [ ] **workspace_cmd** — `commands/workspace_cmd.rs`：load / save / switch / current
-- [ ] **config_cmd** — `commands/config_cmd.rs`：get_config / update_config
+- [ ] **config_cmd** — `commands/config_cmd.rs`：get_config / reload_config / update_config
 - [ ] **theme_cmd** — `commands/theme_cmd.rs`：get_theme / set_theme
-- [ ] **register_commands** — `commands/mod.rs`：将所有 Command 注册到 Tauri App
+- [ ] **register_commands** — `commands/mod.rs` + `main.rs`：通过 `tauri::generate_handler!` + `invoke_handler()` 注册所有 18 个 Command
 
 ---
 

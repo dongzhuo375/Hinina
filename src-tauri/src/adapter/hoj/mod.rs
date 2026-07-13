@@ -241,6 +241,10 @@ impl HOJAdapter {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/mod_tests.rs"]
+mod tests;
+
 // ── AuthProvider ──
 
 #[async_trait]
