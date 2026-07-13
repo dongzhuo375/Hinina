@@ -2,8 +2,8 @@ use tauri::State;
 use tracing::info;
 
 use crate::core::context::AppContext;
-use crate::core::entity::contest::Contest;
-use crate::core::error::AppResult;
+use crate::core::entity::contest::{Contest, ContestProblem};
+use crate::core::error::{AppError, AppResult};
 
 /// 获取比赛列表（带缓存）。
 ///
@@ -29,4 +29,29 @@ pub async fn select_contest(
 ) -> AppResult<()> {
     info!(contest_id = %contest_id, "Command: 选中比赛");
     ctx.contest.select_contest(&contest_id)
+}
+
+/// 从配置文件加载默认比赛（阶段 7 单比赛模式入口）。
+///
+/// 前端 invoke 签名: `contest:load_configured`
+///
+/// 从 `OjConfig.contest_id` 读取比赛 ID，自动加载比赛详情与题目列表。
+/// 若 `contest_id == 0` 返回错误提示用户配置。
+/// 返回 `(Contest, Vec<ContestProblem>)`，前端据此渲染题目侧边栏。
+#[tauri::command]
+pub async fn load_configured_contest(
+    ctx: State<'_, AppContext>,
+) -> AppResult<(Contest, Vec<ContestProblem>)> {
+    let contest_id = ctx.config.get().oj.contest_id;
+    if contest_id == 0 {
+        return Err(AppError::Contest(
+            "未配置默认比赛 ID，请在 config.json 中设置 oj.contest_id".into(),
+        ));
+    }
+
+    info!(contest_id = contest_id, "Command: 加载配置的比赛");
+    let password = ctx.config.get().oj.contest_password.clone();
+    ctx.contest
+        .load_contest_with_problems(&contest_id.to_string(), password.as_deref())
+        .await
 }

@@ -429,6 +429,46 @@ impl WorkspaceManager {
     pub fn current(&self) -> Option<Workspace> {
         self.current.read().ok()?.clone()
     }
+
+    /// 按 `contest_id` + `problem_id` 查找或创建工作区（修复 P36）。
+    ///
+    /// 扫描所有已有工作区的元数据，匹配 `contest_id` 和 `problem_id`：
+    /// - 命中 → 加载已有工作区（恢复之前的代码）
+    /// - 未命中 → 创建新工作区
+    ///
+    /// 发布 `WorkspaceEvent::Loaded`。
+    pub fn find_or_create(
+        &self,
+        contest_id: &str,
+        problem_id: &str,
+        root_path: &str,
+    ) -> AppResult<Workspace> {
+        // 扫描已有工作区，查找匹配的 workspace.json 元数据
+        let ids = self.repo.list_workspace_ids().unwrap_or_default();
+        for ws_id in &ids {
+            if let Ok(meta_json) = self.repo.read_file(ws_id, &PathBuf::from("workspace.json")) {
+                if let Ok(meta) = serde_json::from_str::<WorkspaceMeta>(&meta_json) {
+                    if meta.contest_id == contest_id && meta.problem_id == problem_id {
+                        info!(
+                            workspace_id = ws_id,
+                            contest_id = contest_id,
+                            problem_id = problem_id,
+                            "找到已有工作区，恢复代码"
+                        );
+                        return self.load(ws_id, root_path);
+                    }
+                }
+            }
+        }
+
+        // 未命中，创建新工作区
+        debug!(
+            contest_id = contest_id,
+            problem_id = problem_id,
+            "未找到已有工作区，创建新工作区"
+        );
+        self.create(contest_id, problem_id, root_path)
+    }
 }
 
 impl Drop for WorkspaceManager {

@@ -79,6 +79,13 @@ pub struct OjConfig {
     /// 比赛列表缓存 TTL（秒）
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_secs: u64,
+    /// 默认加载的比赛 ID（阶段 7：单比赛模式，从配置读取）。
+    /// 设为 0 表示不自动加载。
+    #[serde(default)]
+    pub contest_id: i64,
+    /// 比赛密码（私有赛需要），公开赛留空。
+    #[serde(default)]
+    pub contest_password: Option<String>,
 }
 
 impl Default for OjConfig {
@@ -89,6 +96,8 @@ impl Default for OjConfig {
             poll_interval_secs: default_poll_interval(),
             poll_timeout_secs: default_poll_timeout(),
             cache_ttl_secs: default_cache_ttl(),
+            contest_id: 0,
+            contest_password: None,
         }
     }
 }

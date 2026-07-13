@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use tracing::{debug, info, warn};
 
-use crate::core::entity::contest::Contest;
+use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, ContestEvent};
 use crate::core::event::event_bus::EventBus;
@@ -115,5 +115,43 @@ impl ContestService {
 
         // 使用 TTL=0 强制刷新
         self.list_contests(0).await
+    }
+
+    /// 加载指定比赛及其题目列表，并自动选中。
+    ///
+    /// 阶段 7 单比赛模式入口：从配置文件读取 contest_id 后调用此方法，
+    /// 一次性获取比赛详情 + 题目列表 + 自动选中。
+    pub async fn load_contest_with_problems(
+        &self,
+        contest_id: &str,
+        password: Option<&str>,
+    ) -> AppResult<(Contest, Vec<ContestProblem>)> {
+        let oj_type = self.registry.current_oj();
+        let provider = self.registry.get_contest(&oj_type)?;
+
+        info!(contest_id = contest_id, "加载比赛");
+        let contest = provider.get_contest(contest_id).await.map_err(|e| {
+            warn!(error = %e, "获取比赛详情失败");
+            AppError::Contest(format!("获取比赛详情失败: {}", e))
+        })?;
+
+        // 私有赛需要密码
+        if contest.auth == 1 {
+            if let Some(_pw) = password {
+                // TODO: 阶段 7 后续实现比赛注册 API 调用
+                debug!("私有赛密码已提供");
+            }
+        }
+
+        let problems = provider.list_contest_problems(contest_id).await.map_err(|e| {
+            warn!(error = %e, "获取比赛题目列表失败");
+            AppError::Contest(format!("获取比赛题目列表失败: {}", e))
+        })?;
+
+        // 自动选中
+        self.select_contest(contest_id)?;
+
+        debug!(problem_count = problems.len(), "比赛加载完成");
+        Ok((contest, problems))
     }
 }

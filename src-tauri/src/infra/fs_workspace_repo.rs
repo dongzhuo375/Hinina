@@ -160,6 +160,28 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         let root = self.workspace_root(workspace_id);
         self.storage.exists(&root)
     }
+
+    fn list_workspace_ids(&self) -> AppResult<Vec<String>> {
+        let workspaces_dir = self.storage.base_dir().join(WORKSPACES_DIR);
+        if !workspaces_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut ids = Vec::new();
+        for entry in std::fs::read_dir(&workspaces_dir).map_err(|e| {
+            AppError::Workspace(format!("读取 workspaces 目录失败: {}", e))
+        })? {
+            let entry = entry.map_err(|e| {
+                AppError::Workspace(format!("读取目录条目失败: {}", e))
+            })?;
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if let Some(name) = entry.file_name().to_str() {
+                    ids.push(name.to_string());
+                }
+            }
+        }
+        Ok(ids)
+    }
 }
 
 #[cfg(test)]

@@ -5,11 +5,12 @@ use crate::core::context::AppContext;
 use crate::core::entity::workspace::Workspace;
 use crate::core::error::{AppError, AppResult};
 
-/// 加载或创建工作区。
+/// 加载或创建工作区（修复 P36：find_or_create）。
 ///
 /// 前端 invoke 签名: `workspace:load`({ contest_id, problem_id })
 ///
-/// 始终为新打开的题目创建独立 Workspace，实现比赛隔离。
+/// 优先查找已有工作区（按 contest_id + problem_id 匹配），
+/// 找到则恢复之前保存的代码，否则创建新工作区。
 /// `root_path` 为语义性字段，实际文件定位由 `FsWorkspaceRepository` 通过
 /// `workspace_id` 完成，此处传入空字符串。
 #[tauri::command]
@@ -24,7 +25,7 @@ pub async fn load_workspace(
         AppError::Workspace("WorkspaceManager 未初始化".into())
     })?;
 
-    wm.create(&contest_id, &problem_id, "")
+    wm.find_or_create(&contest_id, &problem_id, "")
 }
 
 /// 持久化当前工作区的脏文件到磁盘。
