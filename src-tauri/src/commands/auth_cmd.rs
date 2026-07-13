@@ -22,16 +22,17 @@ pub async fn login(
 ) -> AppResult<User> {
     // 如果前端指定了 OJ 类型，先切换
     if let Some(ref ot) = oj_type {
-        let parsed: OJType = match ot.to_uppercase().as_str() {
+        let oj = match ot.to_uppercase().as_str() {
             "HOJ" => OJType::HOJ,
             "QDUOJ" => OJType::QDUOJ,
             "HUSTOJ" => OJType::HUSTOJ,
             other => {
                 warn!(oj_type = other, "未知的 OJ 类型，使用当前默认值");
-                ctx.provider_registry.current_oj()
+                // 未知类型不回退设置，直接进入登录流程
+                return ctx.auth.login(&username, &password).await;
             }
         };
-        ctx.provider_registry.set_current_oj(parsed);
+        ctx.provider_registry.set_current_oj(oj);
         info!(oj_type = ot, "已切换 OJ 类型");
     }
 
@@ -56,7 +57,7 @@ pub async fn logout(ctx: State<'_, AppContext>) -> AppResult<()> {
 pub async fn get_session(ctx: State<'_, AppContext>) -> AppResult<Option<User>> {
     let session = ctx.auth.get_session();
     Ok(session.map(|s| User {
-        id: String::new(),
+        id: s.user_id,
         username: s.username,
         token: s.token,
     }))

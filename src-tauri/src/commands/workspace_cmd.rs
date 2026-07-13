@@ -10,7 +10,8 @@ use crate::core::error::{AppError, AppResult};
 /// 前端 invoke 签名: `workspace:load`({ contest_id, problem_id })
 ///
 /// 始终为新打开的题目创建独立 Workspace，实现比赛隔离。
-/// `root_path` 从 Storage base_dir 推导（`workspaces/{workspace_id}`）。
+/// `root_path` 为语义性字段，实际文件定位由 `FsWorkspaceRepository` 通过
+/// `workspace_id` 完成，此处传入空字符串。
 #[tauri::command]
 pub async fn load_workspace(
     ctx: State<'_, AppContext>,
@@ -23,8 +24,7 @@ pub async fn load_workspace(
         AppError::Workspace("WorkspaceManager 未初始化".into())
     })?;
 
-    let root_path = format!("workspaces/{{id}}"); // 占位，实际路径由 create 内部填充
-    wm.create(&contest_id, &problem_id, &root_path)
+    wm.create(&contest_id, &problem_id, "")
 }
 
 /// 持久化当前工作区的脏文件到磁盘。
@@ -58,8 +58,7 @@ pub async fn switch_workspace(
         AppError::Workspace("WorkspaceManager 未初始化".into())
     })?;
 
-    let root_path = format!("workspaces/{{id}}");
-    wm.switch(&workspace_id, &root_path)
+    wm.switch(&workspace_id, "")
 }
 
 /// 获取当前活动工作区。
