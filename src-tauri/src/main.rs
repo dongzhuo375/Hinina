@@ -13,7 +13,6 @@
 
 use hinina_lib::commands;
 use hinina_lib::core::context::AppContext;
-use tauri::Manager;
 
 fn main() {
     // 运行时初始化，阻塞式
@@ -28,23 +27,6 @@ fn main() {
 
     tauri::Builder::default()
         .manage(ctx)
-        .setup(|app| {
-            // P39 修复：在 Tauri 的 async runtime 上启动 auto-save，
-            // 确保 tokio::spawn 不会因临时 runtime 被 drop 而取消。
-            let ctx = app.state::<AppContext>();
-            if let Some(ref wm) = ctx.workspace_manager {
-                let interval = ctx.config.get().editor.auto_save_interval_secs;
-                if ctx.config.get().editor.auto_save && interval > 0 {
-                    let wm = std::sync::Arc::clone(wm);
-                    // 通过 tokio::spawn 在 Tauri 的 tokio runtime 上启动
-                    tokio::spawn(async move {
-                        wm.start_auto_save(interval);
-                    });
-                    tracing::info!(interval_secs = interval, "auto-save 已启动（Tauri runtime）");
-                }
-            }
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             commands::auth_cmd::login,
             commands::auth_cmd::logout,
