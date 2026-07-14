@@ -22,8 +22,6 @@ pub struct Contest {
     /// 权限：0=公开，1=私有（需密码），2=保护
     #[serde(default)]
     pub auth: i32,
-    /// 题目标题列表（按 displayId 顺序排列）
-    pub problems: Vec<String>,
 }
 
 /// 比赛题目摘要（问题列表用）

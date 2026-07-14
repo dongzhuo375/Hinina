@@ -8,7 +8,6 @@ export interface Contest {
   contestType: number
   status: number
   auth: number
-  problems: string[]
 }
 
 /// 比赛题目摘要，对应 Rust `core::entity::contest::ContestProblem`。

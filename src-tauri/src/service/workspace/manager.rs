@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -43,8 +42,6 @@ pub struct WorkspaceManager {
     event_bus: Arc<EventBus>,
     /// 当前活动工作区（RwLock 内直接持有 Workspace，支持 auto-save 共享和可变访问）
     current: Arc<RwLock<Option<Workspace>>>,
-    /// 自动保存取消标记
-    auto_save_running: AtomicBool,
     /// 自动保存的 JoinHandle
     auto_save_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -67,7 +64,6 @@ impl WorkspaceManager {
             repo,
             event_bus,
             current: Arc::new(RwLock::new(None)),
-            auto_save_running: AtomicBool::new(false),
             auto_save_handle: Mutex::new(None),
         }
     }
@@ -239,8 +235,6 @@ impl WorkspaceManager {
     pub fn start_auto_save(&self, interval_secs: u64) {
         self.stop_auto_save();
 
-        self.auto_save_running.store(true, Ordering::SeqCst);
-
         // auto-save 通过 Arc 共享 current 状态，安全且 Send。
         let repo = Arc::clone(&self.repo);
         let event_bus = Arc::clone(&self.event_bus);
@@ -313,7 +307,6 @@ impl WorkspaceManager {
 
     /// 停止自动保存。
     pub fn stop_auto_save(&self) {
-        self.auto_save_running.store(false, Ordering::SeqCst);
         let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(task) = handle.take() {
             task.abort();

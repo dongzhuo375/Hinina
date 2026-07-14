@@ -375,7 +375,6 @@ impl ContestProvider for HOJAdapter {
                 contest_type: c.r#type,
                 status: c.status,
                 auth: c.auth,
-                problems: Vec::new(),
             })
             .collect();
 
@@ -406,7 +405,6 @@ impl ContestProvider for HOJAdapter {
             contest_type: c.r#type,
             status: c.status,
             auth: c.auth,
-            problems: Vec::new(),
         })
     }
 

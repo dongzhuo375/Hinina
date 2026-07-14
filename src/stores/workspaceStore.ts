@@ -2,6 +2,14 @@ import { defineStore } from 'pinia'
 import type { Workspace } from '@/types/workspace'
 import { workspaceService } from '@/services/workspace.service'
 
+/// 语言 → 默认文件名映射
+const langFileMap: Record<string, string> = {
+  c: 'main.c',
+  cpp: 'main.cpp',
+  java: 'Main.java',
+  python: 'main.py',
+}
+
 export const useWorkspaceStore = defineStore('workspace', {
   state: () => ({
     workspace: null as Workspace | null,
@@ -47,12 +55,15 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.debouncedSync()
     },
 
-    /** 防抖同步：2 秒无操作后将代码推送到 Rust 后端 */
+    /** 防抖同步：2 秒无操作后将代码推送到 Rust 后端。*/
     debouncedSync() {
       if (this._syncTimer) clearTimeout(this._syncTimer)
       this._syncTimer = setTimeout(() => {
         if (this.isDirty) {
-          workspaceService.updateWorkspaceFile('main.cpp', this.code).catch(() => {})
+          const fileName = langFileMap[this.language] || 'main.cpp'
+          workspaceService.updateWorkspaceFile(fileName, this.code).catch((e) => {
+            console.error('[workspaceStore] 代码同步失败:', e)
+          })
         }
       }, 2000)
     },
