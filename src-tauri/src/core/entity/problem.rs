@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// 题目详情
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Problem {
     pub id: String,
     pub title: String,
@@ -15,6 +16,7 @@ pub struct Problem {
 
 /// 样例数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Sample {
     pub input: String,
     pub output: String,

@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
 
-use crate::core::entity::contest::Contest;
+use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::problem::{Problem, Sample};
 use crate::core::entity::submission::{JudgementResult, JudgementStatus};
 use crate::core::entity::user::User;
@@ -371,8 +371,10 @@ impl ContestProvider for HOJAdapter {
                 title: c.title,
                 start_time: Self::parse_time(&c.start_time),
                 end_time: Self::parse_time(&c.end_time),
-                // problems 需通过 get-contest-problem 单独获取
-                problems: Vec::new(),
+                description: c.description,
+                contest_type: c.r#type,
+                status: c.status,
+                auth: c.auth,
             })
             .collect();
 
@@ -399,8 +401,41 @@ impl ContestProvider for HOJAdapter {
             title: c.title,
             start_time: Self::parse_time(&c.start_time),
             end_time: Self::parse_time(&c.end_time),
-            problems: Vec::new(),
+            description: c.description,
+            contest_type: c.r#type,
+            status: c.status,
+            auth: c.auth,
         })
+    }
+
+    async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
+        let url = self.api_url(&format!("/get-contest-problem?cid={}", contest_id));
+        let token = self.get_token();
+
+        let api_resp = self
+            .http
+            .get_json::<ApiResponse<Vec<ContestProblemVO>>>(&url, token.as_deref())
+            .await
+            .map_err(|e| AppError::Network(format!("HOJ contest problem list 请求失败: {}", e)))?;
+
+        let problem_list = api_resp.into_data().map_err(|msg| {
+            AppError::Contest(format!("HOJ contest problem list 失败: {}", msg))
+        })?;
+
+        let problems: Vec<ContestProblem> = problem_list
+            .into_iter()
+            .map(|p| ContestProblem {
+                id: p.id,
+                display_id: p.display_id,
+                cid: p.cid,
+                problem_id: p.pid.to_string(),
+                display_title: p.display_title,
+                ac: p.ac,
+                total: p.total,
+            })
+            .collect();
+
+        Ok(problems)
     }
 }
 

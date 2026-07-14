@@ -21,4 +21,7 @@ pub trait WorkspaceRepository: Send + Sync {
 
     /// 检查工作区是否存在
     fn exists(&self, workspace_id: &str) -> bool;
+
+    /// 列出所有工作区 ID（用于 find_or_create 扫描匹配）
+    fn list_workspace_ids(&self) -> AppResult<Vec<String>>;
 }

@@ -1,6 +1,6 @@
 # Hinina 开发路线图
 
-> 当前状态：阶段 6（Tauri Command）已完成，进入阶段 7（Vue 前端）。
+> 当前状态：阶段 7（Vue 前端）已完成，进入阶段 8（后续增强）。
 > 开发顺序遵循自底向上依赖链：Infrastructure → Domain → Service → Adapter → Command → Frontend。
 
 ---
@@ -91,14 +91,16 @@
 
 > 后端 5 个核心功能闭环打通后，开始前端开发。
 
-- [ ] **项目初始化** — Vite + Vue3 + TypeScript + TailwindCSS + Naive UI + Monaco Editor
-- [ ] **Bridge 层** — `src/bridge/`：封装 Tauri IPC invoke 调用
-- [ ] **Service 层** — `src/services/`：auth / contest / problem / submission / workspace 业务逻辑
-- [ ] **Store 层** — `src/stores/`：Pinia 状态管理
-- [ ] **登录页** — `views/LoginView.vue`
-- [ ] **比赛列表页** — `views/ContestListView.vue`
-- [ ] **题目阅读器** — `views/ProblemView.vue`（分栏布局：题面 + 代码编辑器）
-- [ ] **提交结果面板** — `views/SubmissionView.vue`
+- [x] **项目初始化** — Vite + Vue3 + TypeScript + TailwindCSS + Naive UI + Monaco Editor
+- [x] **Bridge 层** — `src/bridge/`：封装 Tauri IPC invoke 调用（auth, contest, problem, submission, workspace, config）
+- [x] **Service 层** — `src/services/`：auth / contest / problem / submission / workspace 业务逻辑
+- [x] **Store 层** — `src/stores/`：Pinia 状态管理（auth, contest, problem, submission, workspace）
+- [x] **登录页** — `views/LoginView.vue`
+- [x] **比赛页** — `views/ContestView.vue`（单比赛模式，三栏布局：题目列表 + 题面 + 编辑器/提交面板）
+- [x] **题目阅读器** — `components/problem/ProblemStatement.vue`（分栏布局：题面 + 样例）
+- [x] **代码编辑器** — `components/editor/CodeEditor.vue`（Monaco Editor + 语言切换 + 提交按钮）
+- [x] **提交结果面板** — `components/submission/SubmissionPanel.vue`
+- [x] **Rust 后端补齐** — OjConfig 增加 contest_id、Contest 实体扩展、load_configured_contest 命令、WorkspaceManager find_or_create（P36）、auto-save Tauri runtime（P39）
 
 ---
 

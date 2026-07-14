@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// 以 JSON 格式持久化，ConfigService 负责加载/保存。
 /// 所有可变行为参数均从 Config 读取，支持运行时热更新。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     /// 用户偏好
     #[serde(default)]
@@ -38,6 +39,7 @@ impl Default for AppConfig {
 // ── 用户偏好 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserConfig {
     /// 上次登录的 OJ 类型
     #[serde(default = "default_oj_type")]
@@ -63,6 +65,7 @@ fn default_oj_type() -> String {
 // ── OJ 连接配置 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OjConfig {
     /// HOJ 服务端地址
     #[serde(default = "default_hoj_url")]
@@ -79,6 +82,13 @@ pub struct OjConfig {
     /// 比赛列表缓存 TTL（秒）
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_secs: u64,
+    /// 默认加载的比赛 ID（阶段 7：单比赛模式，从配置读取）。
+    /// 设为 0 表示不自动加载。
+    #[serde(default)]
+    pub contest_id: i64,
+    /// 比赛密码（私有赛需要），公开赛留空。
+    #[serde(default)]
+    pub contest_password: Option<String>,
 }
 
 impl Default for OjConfig {
@@ -89,6 +99,8 @@ impl Default for OjConfig {
             poll_interval_secs: default_poll_interval(),
             poll_timeout_secs: default_poll_timeout(),
             cache_ttl_secs: default_cache_ttl(),
+            contest_id: 0,
+            contest_password: None,
         }
     }
 }
@@ -112,6 +124,7 @@ const fn default_cache_ttl() -> u64 {
 // ── 编辑器配置 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorConfig {
     /// 字体大小
     #[serde(default = "default_font_size")]
@@ -161,6 +174,7 @@ fn default_language() -> String {
 // ── 主题配置 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThemeConfig {
     /// 当前主题名称（light / dark）
     #[serde(default = "default_theme_name")]
@@ -189,6 +203,7 @@ fn default_editor_theme() -> String {
 // ── 布局配置 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LayoutConfig {
     /// 侧边栏宽度（像素）
     #[serde(default = "default_sidebar_width")]

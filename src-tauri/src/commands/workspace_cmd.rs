@@ -5,13 +5,14 @@ use crate::core::context::AppContext;
 use crate::core::entity::workspace::Workspace;
 use crate::core::error::{AppError, AppResult};
 
-/// 加载或创建工作区。
+/// 加载或创建工作区（修复 P36：find_or_create）。
 ///
-/// 前端 invoke 签名: `workspace:load`({ contest_id, problem_id })
+/// 前端 invoke 签名: `load_workspace`({ contestId, problemId })
 ///
-/// 始终为新打开的题目创建独立 Workspace，实现比赛隔离。
-/// `root_path` 为语义性字段，实际文件定位由 `FsWorkspaceRepository` 通过
-/// `workspace_id` 完成，此处传入空字符串。
+/// 优先查找已有工作区（按 contest_id + problem_id 匹配），
+/// 找到则恢复之前保存的代码，否则创建新工作区。
+///
+/// 首次调用时自动启动 auto-save（修复 P39：确保在 Tauri 的 tokio runtime 上运行）。
 #[tauri::command]
 pub async fn load_workspace(
     ctx: State<'_, AppContext>,
@@ -24,12 +25,39 @@ pub async fn load_workspace(
         AppError::Workspace("WorkspaceManager 未初始化".into())
     })?;
 
-    wm.create(&contest_id, &problem_id, "")
+    // P39: 首次加载工作区时，在 Tauri Command 的 tokio 上下文中懒启动 auto-save
+    start_auto_save_if_needed(&ctx, wm);
+
+    wm.find_or_create(&contest_id, &problem_id, "")
+}
+
+/// 首次调用时启动 auto-save，确保在 Tauri 的 tokio runtime 上运行。
+fn start_auto_save_if_needed(
+    ctx: &AppContext,
+    wm: &std::sync::Arc<crate::service::workspace::manager::WorkspaceManager>,
+) {
+    use std::sync::atomic::Ordering;
+    use std::sync::atomic::AtomicBool;
+    static STARTED: AtomicBool = AtomicBool::new(false);
+
+    if STARTED.swap(true, Ordering::SeqCst) {
+        return; // 已启动
+    }
+
+    let cfg = ctx.config.get().editor;
+    if cfg.auto_save && cfg.auto_save_interval_secs > 0 {
+        let wm = std::sync::Arc::clone(wm);
+        // 此时在 Tauri Command 的 async 上下文中，tokio::spawn 可用
+        tokio::spawn(async move {
+            wm.start_auto_save(cfg.auto_save_interval_secs);
+        });
+        info!(interval_secs = cfg.auto_save_interval_secs, "auto-save 已启动");
+    }
 }
 
 /// 持久化当前工作区的脏文件到磁盘。
 ///
-/// 前端 invoke 签名: `workspace:save`
+/// 前端 invoke 签名: `save_workspace`
 ///
 /// 仅保存已修改（dirty）的文件，发布 `WorkspaceEvent::Saved`。
 #[tauri::command]
@@ -43,7 +71,7 @@ pub async fn save_workspace(ctx: State<'_, AppContext>) -> AppResult<()> {
 
 /// 切换活动工作区。
 ///
-/// 前端 invoke 签名: `workspace:switch`({ workspace_id })
+/// 前端 invoke 签名: `switch_workspace`({ workspaceId })
 ///
 /// 保存当前工作区 → 加载目标工作区 → 返回新 Workspace。
 /// 发布 `WorkspaceEvent::Switched`。
@@ -63,7 +91,7 @@ pub async fn switch_workspace(
 
 /// 获取当前活动工作区。
 ///
-/// 前端 invoke 签名: `workspace:current`
+/// 前端 invoke 签名: `current_workspace`
 ///
 /// 返回 `None` 表示当前无活动工作区。
 #[tauri::command]
@@ -74,4 +102,22 @@ pub async fn current_workspace(ctx: State<'_, AppContext>) -> AppResult<Option<W
     };
 
     Ok(wm.current())
+}
+
+/// 更新工作区中的文件内容（前端的 Monaco 编辑器同步到后端）。
+///
+/// 前端 invoke 签名: `update_workspace_file`({ fileName, content })
+///
+/// 仅更新内存中的文件内容，不立即持久化到磁盘。
+/// 持久化由 auto-save 或显式 save_workspace 负责。
+#[tauri::command]
+pub async fn update_workspace_file(
+    ctx: State<'_, AppContext>,
+    file_name: String,
+    content: String,
+) -> AppResult<()> {
+    let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
+        AppError::Workspace("WorkspaceManager 未初始化".into())
+    })?;
+    wm.update_file(&file_name, &content)
 }

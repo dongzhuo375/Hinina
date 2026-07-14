@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-07-13 | 分支：`feat/stage6-commands`
+> 最后更新：2026-07-13 | 分支：`feat/stage7-frontend`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -38,9 +38,9 @@ Hinina/
         │   ├── error.rs                  # AppError 枚举 + user_message() + AppResult<T> + From 转换
         │   ├── entity/
         │   │   ├── mod.rs
-        │         │   ├── config.rs            # AppConfig 实体（用户/OJ/编辑器/主题/布局配置）
-        │         │   ├── user.rs               # User 实体
-        │   │   ├── contest.rs            # Contest 实体
+        │   │   ├── config.rs            # AppConfig 实体（用户/OJ/编辑器/主题/布局配置 + contest_id）
+        │   │   ├── user.rs               # User 实体
+        │   │   ├── contest.rs            # Contest + ContestProblem 实体（阶段 7 扩展字段）
         │   │   ├── problem.rs            # Problem + Sample 实体
         │   │   ├── submission.rs         # Submission + JudgementStatus + JudgementResult
         │   │   ├── workspace.rs          # Workspace 核心实体（阶段 3 完善）
@@ -49,7 +49,7 @@ Hinina/
         │   ├── provider/
         │   │   ├── mod.rs
         │   │   ├── auth.rs               # AuthProvider trait
-        │   │   ├── contest.rs            # ContestProvider trait
+        │   │   ├── contest.rs            # ContestProvider trait（+ list_contest_problems）
         │   │   ├── problem.rs            # ProblemProvider trait
         │   │   ├── submission.rs         # SubmissionProvider trait
         │   │   ├── oj_type.rs            # OJType 枚举
@@ -138,19 +138,21 @@ Hinina/
         │   └── runtime/
         │       └── mod.rs
         └── commands/                     # NEW: Tauri Command 薄封装
-            ├── mod.rs                    # register_commands() 入口
+            ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login / logout / get_session
-            ├── contest_cmd.rs            # list_contests / select_contest
+            ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest
             ├── problem_cmd.rs            # get_problem / list_problems
             ├── submission_cmd.rs         # submit_code / get_judgement
-            ├── workspace_cmd.rs          # load / save / switch / current
-            ├── config_cmd.rs             # get_config / update_config
-            └── theme_cmd.rs              # get_theme / set_theme
+            ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file
+            ├── config_cmd.rs             # get_config / reload_config / update_config
+            ├── theme_cmd.rs              # get_theme / set_theme
+            └── tests/
+                └── mod_tests.rs          # Command 层关键路径测试（P40）
 ```
 
 ---
 
-## 项目根目录（需新建的配置文件）
+## 项目根目录（已存在）
 
 ```
 Hinina/
@@ -159,75 +161,63 @@ Hinina/
 ├── vite.config.ts                        # Vite 构建配置
 ├── tsconfig.json                         # TypeScript 配置
 ├── tsconfig.node.json                    # Vite/Node 端 TS 配置
-├── tailwind.config.js                    # TailwindCSS 配置
-├── postcss.config.js                     # PostCSS 配置
 ├── .gitignore                            # Git 忽略规则
-├── .prettierrc                           # Prettier 配置
-└── .eslintrc.cjs                         # ESLint 配置
 ```
 
-### Vue3 前端 — `src/`（待创建）
+### Vue3 前端 — `src/`（阶段 7 已完成）
 
 ```
 src/
-├── main.ts                               # Vue 应用入口
-├── App.vue                               # 根组件
+├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI）
+├── App.vue                               # 根组件（n-config-provider + n-dialog-provider）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
-│   └── index.ts                          # Vue Router
+│   └── index.ts                          # Vue Router（/login, /contest）
 ├── views/
-│   ├── LoginView.vue
-│   ├── ContestListView.vue
-│   ├── ContestDetailView.vue
-│   ├── ProblemView.vue                   # 核心页面（分栏布局）
-│   └── SubmissionView.vue
+│   ├── LoginView.vue                     # 登录页（居中卡片表单 + session 检查）
+│   └── ContestView.vue                   # 核心页面（三栏分割：题目列表｜题面｜编辑器+提交）
 ├── components/
 │   ├── layout/
-│   │   ├── AppHeader.vue
-│   │   ├── AppSidebar.vue
-│   │   └── AppStatusBar.vue
+│   │   └── AppHeader.vue                 # 顶部栏（Logo + 比赛标题 + 倒计时 + 用户）
 │   ├── editor/
-│   │   ├── CodeEditor.vue                # Monaco Editor 封装
-│   │   └── EditorToolbar.vue
+│   │   └── CodeEditor.vue                # Monaco Editor 封装（手动 worker 配置）
 │   ├── problem/
-│   │   ├── ProblemStatement.vue
-│   │   └── ProblemSamples.vue
+│   │   ├── ProblemSidebar.vue            # 题目列表侧边栏
+│   │   └── ProblemStatement.vue          # 题面展示（描述/输入/输出/样例 Tab）
 │   ├── submission/
-│   │   ├── SubmissionList.vue
-│   │   └── JudgementResult.vue
-│   ├── contest/
-│   │   └── ContestCard.vue
+│   │   └── SubmissionPanel.vue           # 提交记录列表 + 评测状态 Badge
 │   └── common/
-│       ├── LoadingSpinner.vue
-│       └── ErrorMessage.vue
+│       ├── LoadingSpinner.vue            # 通用加载动画
+│       └── ErrorMessage.vue              # 通用错误提示 + 重试按钮
 ├── stores/
-│   ├── authStore.ts
-│   ├── contestStore.ts
-│   ├── problemStore.ts
-│   ├── submissionStore.ts
-│   └── workspaceStore.ts
+│   ├── authStore.ts                      # 用户认证状态
+│   ├── contestStore.ts                   # 比赛 + 题目摘要状态
+│   ├── problemStore.ts                   # 当前题目详情状态
+│   ├── submissionStore.ts                # 提交记录 + 轮询状态
+│   └── workspaceStore.ts                 # 工作区 + 代码编辑器状态
 ├── services/
-│   ├── auth.service.ts
-│   ├── contest.service.ts
-│   ├── problem.service.ts
-│   ├── submission.service.ts
-│   └── workspace.service.ts
+│   ├── auth.service.ts                   # 登录/登出/会话检查（localStorage 缓存）
+│   ├── contest.service.ts                # 加载配置的比赛
+│   ├── problem.service.ts                # 获取题目详情/列表
+│   ├── submission.service.ts             # 提交代码/轮询评测
+│   └── workspace.service.ts              # 工作区创建/保存/恢复
 ├── bridge/
-│   ├── index.ts
-│   ├── auth.bridge.ts
-│   ├── contest.bridge.ts
-│   ├── problem.bridge.ts
-│   ├── submission.bridge.ts
-│   └── workspace.bridge.ts
+│   ├── index.ts                          # ipcInvoke 统一封装
+│   ├── auth.bridge.ts                    # login / logout / get_session
+│   ├── contest.bridge.ts                 # load_configured_contest
+│   ├── problem.bridge.ts                 # get_problem / list_problems
+│   ├── submission.bridge.ts              # submit_code / get_judgement
+│   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile
+│   └── config.bridge.ts                  # get_config
 ├── types/
-│   ├── user.ts
-│   ├── contest.ts
-│   ├── problem.ts
-│   ├── submission.ts
-│   └── workspace.ts
+│   ├── user.ts                           # User 实体
+│   ├── contest.ts                        # Contest + ContestProblem 实体
+│   ├── problem.ts                        # Problem + Sample 实体
+│   ├── submission.ts                     # JudgementStatus + JudgementResult
+│   ├── workspace.ts                      # Workspace 实体
+│   └── config.ts                         # AppConfig 及其子配置
 └── styles/
-    ├── variables.css
-    └── global.css
+    └── global.css                        # TailwindCSS + CSS 变量 + 暗色主题
 ```
 
 ---

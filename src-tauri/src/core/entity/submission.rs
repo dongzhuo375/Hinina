@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// 提交记录与评测状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Submission {
     pub id: String,
     pub problem_id: String,
@@ -27,6 +28,7 @@ pub enum JudgementStatus {
 
 /// 评测结果详情
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JudgementResult {
     pub status: JudgementStatus,
     pub score: f64,

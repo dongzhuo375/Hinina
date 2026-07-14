@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -43,8 +42,6 @@ pub struct WorkspaceManager {
     event_bus: Arc<EventBus>,
     /// 当前活动工作区（RwLock 内直接持有 Workspace，支持 auto-save 共享和可变访问）
     current: Arc<RwLock<Option<Workspace>>>,
-    /// 自动保存取消标记
-    auto_save_running: AtomicBool,
     /// 自动保存的 JoinHandle
     auto_save_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -67,7 +64,6 @@ impl WorkspaceManager {
             repo,
             event_bus,
             current: Arc::new(RwLock::new(None)),
-            auto_save_running: AtomicBool::new(false),
             auto_save_handle: Mutex::new(None),
         }
     }
@@ -239,8 +235,6 @@ impl WorkspaceManager {
     pub fn start_auto_save(&self, interval_secs: u64) {
         self.stop_auto_save();
 
-        self.auto_save_running.store(true, Ordering::SeqCst);
-
         // auto-save 通过 Arc 共享 current 状态，安全且 Send。
         let repo = Arc::clone(&self.repo);
         let event_bus = Arc::clone(&self.event_bus);
@@ -313,7 +307,6 @@ impl WorkspaceManager {
 
     /// 停止自动保存。
     pub fn stop_auto_save(&self) {
-        self.auto_save_running.store(false, Ordering::SeqCst);
         let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(task) = handle.take() {
             task.abort();
@@ -428,6 +421,46 @@ impl WorkspaceManager {
     /// 获取当前活动工作区。
     pub fn current(&self) -> Option<Workspace> {
         self.current.read().ok()?.clone()
+    }
+
+    /// 按 `contest_id` + `problem_id` 查找或创建工作区（修复 P36）。
+    ///
+    /// 扫描所有已有工作区的元数据，匹配 `contest_id` 和 `problem_id`：
+    /// - 命中 → 加载已有工作区（恢复之前的代码）
+    /// - 未命中 → 创建新工作区
+    ///
+    /// 发布 `WorkspaceEvent::Loaded`。
+    pub fn find_or_create(
+        &self,
+        contest_id: &str,
+        problem_id: &str,
+        root_path: &str,
+    ) -> AppResult<Workspace> {
+        // 扫描已有工作区，查找匹配的 workspace.json 元数据
+        let ids = self.repo.list_workspace_ids().unwrap_or_default();
+        for ws_id in &ids {
+            if let Ok(meta_json) = self.repo.read_file(ws_id, &PathBuf::from("workspace.json")) {
+                if let Ok(meta) = serde_json::from_str::<WorkspaceMeta>(&meta_json) {
+                    if meta.contest_id == contest_id && meta.problem_id == problem_id {
+                        info!(
+                            workspace_id = ws_id,
+                            contest_id = contest_id,
+                            problem_id = problem_id,
+                            "找到已有工作区，恢复代码"
+                        );
+                        return self.load(ws_id, root_path);
+                    }
+                }
+            }
+        }
+
+        // 未命中，创建新工作区
+        debug!(
+            contest_id = contest_id,
+            problem_id = problem_id,
+            "未找到已有工作区，创建新工作区"
+        );
+        self.create(contest_id, problem_id, root_path)
     }
 }
 
