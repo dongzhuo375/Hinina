@@ -9,6 +9,3 @@ dist/
 
 # Vite cache
 .vite/
-
-# Local npm cache
-.npm-cache/
