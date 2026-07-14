@@ -10,7 +10,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [problemId: string]
+  select: [displayId: string, problemId: string]
 }>()
 
 /// 题目状态图标（当前无真实 AC 数据，MVP 用占位）
@@ -37,7 +37,7 @@ function isActive(p: ContestProblem): boolean {
           :key="p.id"
           class="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--bg-card)]"
           :class="isActive(p) ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium' : 'text-[var(--text-primary)]'"
-          @click="emit('select', p.problemId)"
+          @click="emit('select', p.displayId, p.problemId)"
         >
           <span class="flex h-6 w-6 items-center justify-center rounded text-xs font-mono font-bold"
             :class="isActive(p) ? 'bg-[var(--color-primary)] text-white' : 'bg-[var(--border-color)] text-[var(--text-secondary)]'"

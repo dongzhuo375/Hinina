@@ -91,7 +91,7 @@ pub async fn switch_workspace(
 
 /// 获取当前活动工作区。
 ///
-/// 前端 invoke 签名: `workspace:current`
+/// 前端 invoke 签名: `current_workspace`
 ///
 /// 返回 `None` 表示当前无活动工作区。
 #[tauri::command]
@@ -102,4 +102,22 @@ pub async fn current_workspace(ctx: State<'_, AppContext>) -> AppResult<Option<W
     };
 
     Ok(wm.current())
+}
+
+/// 更新工作区中的文件内容（前端的 Monaco 编辑器同步到后端）。
+///
+/// 前端 invoke 签名: `update_workspace_file`({ fileName, content })
+///
+/// 仅更新内存中的文件内容，不立即持久化到磁盘。
+/// 持久化由 auto-save 或显式 save_workspace 负责。
+#[tauri::command]
+pub async fn update_workspace_file(
+    ctx: State<'_, AppContext>,
+    file_name: String,
+    content: String,
+) -> AppResult<()> {
+    let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
+        AppError::Workspace("WorkspaceManager 未初始化".into())
+    })?;
+    wm.update_file(&file_name, &content)
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { NMessageProvider } from 'naive-ui'
 import AppHeader from '@/components/layout/AppHeader.vue'
@@ -14,6 +14,7 @@ import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { getConfig } from '@/bridge/config.bridge'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -25,6 +26,7 @@ const workspace = useWorkspaceStore()
 const leftWidth = ref(220)
 const rightRatio = ref(0.5)
 let isDragging = false
+const pollingTimers = ref<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
 /// 分栏拖拽
 function startDrag(e: MouseEvent) {
@@ -53,32 +55,47 @@ async function loadContest() {
     await contest.loadContest()
     // 自动打开第一道题
     const first = contest.problems[0]
-    if (first) await openProblem(first.problemId)
+    if (first) await openProblem(first.displayId, first.problemId)
   } catch {
     // error set by store
   }
 }
 
-/// 打开题目
-async function openProblem(problemId: string) {
+/// 打开题目（displayId for API, problemId for workspace）
+async function openProblem(displayId: string, problemId: string) {
   if (!contest.contest) return
   // 保存当前工作区
   if (workspace.isDirty) await workspace.saveWorkspace()
-  // 加载新题目的工作区
+  // load_workspace uses pid; get_problem uses displayId
   await workspace.loadWorkspace(contest.contest.id, problemId)
-  // 获取题目详情
-  await problem.openProblem(contest.contest.id, problemId)
+  await problem.openProblem(contest.contest.id, displayId)
 }
 
 /// 提交代码
 async function handleSubmit() {
   if (!contest.contest || !problem.currentProblem) return
-  await submission.submitCode(
+  const subId = await submission.submitCode(
     contest.contest.id,
     problem.currentProblem.id,
     workspace.language,
     workspace.code,
   )
+  // Start polling for result
+  const config = await getConfig()
+  const interval = (config.oj.pollIntervalSecs || 2) * 1000
+  const timer = setInterval(async () => {
+    try {
+      const result = await submission.pollResult(subId)
+      const terminalStatuses = ['Accepted', 'WrongAnswer', 'TimeLimitExceeded', 'MemoryLimitExceeded', 'RuntimeError', 'CompilationError']
+      if (terminalStatuses.includes(result.status)) {
+        clearInterval(timer)
+        pollingTimers.value.delete(subId)
+      }
+    } catch {
+      // Will retry on next interval
+    }
+  }, interval)
+  pollingTimers.value.set(subId, timer)
 }
 
 /// 页面加载
@@ -90,6 +107,10 @@ onMounted(async () => {
     return
   }
   await loadContest()
+})
+
+onUnmounted(() => {
+  pollingTimers.value.forEach((t) => clearInterval(t))
 })
 </script>
 

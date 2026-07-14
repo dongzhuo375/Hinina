@@ -21,6 +21,7 @@ fn random_hex_suffix() -> String {
 ///
 /// 负责代码存储、自动保存、崩溃恢复、比赛隔离、模板管理、缓存。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Workspace {
     pub id: String,
     pub contest_id: String,

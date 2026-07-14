@@ -9,6 +9,8 @@ export const useWorkspaceStore = defineStore('workspace', {
     code: '',
     language: 'cpp',
     isDirty: false,
+    /// 2 秒防抖定时器句柄（非持久化状态）
+    _syncTimer: null as ReturnType<typeof setTimeout> | null,
   }),
 
   getters: {
@@ -38,10 +40,21 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.isDirty = false
     },
 
-    /** 更新编辑器内代码（标记脏状态） */
+    /** 更新编辑器内代码（标记脏状态 + 防抖同步到后端） */
     updateCode(code: string) {
       this.code = code
       this.isDirty = true
+      this.debouncedSync()
+    },
+
+    /** 防抖同步：2 秒无操作后将代码推送到 Rust 后端 */
+    debouncedSync() {
+      if (this._syncTimer) clearTimeout(this._syncTimer)
+      this._syncTimer = setTimeout(() => {
+        if (this.isDirty) {
+          workspaceService.updateWorkspaceFile('main.cpp', this.code).catch(() => {})
+        }
+      }, 2000)
     },
 
     /** 切换编辑器语言 */

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// 比赛信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Contest {
     pub id: String,
     pub title: String,
@@ -27,6 +28,7 @@ pub struct Contest {
 
 /// 比赛题目摘要（问题列表用）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ContestProblem {
     /// 内部 ID
     pub id: i64,

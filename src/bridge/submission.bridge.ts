@@ -8,10 +8,10 @@ export async function submitCode(
   language: string,
   sourceCode: string,
 ): Promise<string> {
-  return ipcInvoke<string>('submission:submit', { contestId, problemId, language, sourceCode })
+  return ipcInvoke<string>('submit_code', { contestId, problemId, language, sourceCode })
 }
 
 /** 获取评测结果 */
 export async function getJudgement(submissionId: string): Promise<JudgementResult> {
-  return ipcInvoke<JudgementResult>('submission:get_judgement', { submissionId })
+  return ipcInvoke<JudgementResult>('get_judgement', { submissionId })
 }

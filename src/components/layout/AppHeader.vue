@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { NButton, NTag, NPopconfirm } from 'naive-ui'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
@@ -7,18 +7,27 @@ import { useContestStore } from '@/stores/contestStore'
 const auth = useAuthStore()
 const contest = useContestStore()
 
+const now = ref(Math.floor(Date.now() / 1000))
+
+onMounted(() => {
+  const timer = setInterval(() => {
+    now.value = Math.floor(Date.now() / 1000)
+  }, 1000)
+  onUnmounted(() => clearInterval(timer))
+})
+
 /// 比赛剩余时间文本
 const timeStatus = computed(() => {
   const c = contest.contest
   if (!c) return ''
-  const now = Math.floor(Date.now() / 1000)
+  const nowSecs = now.value
   if (c.status === 1) return '已结束'
-  if (now < c.startTime) {
-    const diff = c.startTime - now
+  if (nowSecs < c.startTime) {
+    const diff = c.startTime - nowSecs
     return `距开始 ${formatDuration(diff)}`
   }
-  if (now < c.endTime) {
-    const diff = c.endTime - now
+  if (nowSecs < c.endTime) {
+    const diff = c.endTime - nowSecs
     return `剩余 ${formatDuration(diff)}`
   }
   return '已结束'
@@ -28,9 +37,9 @@ const timeStatusType = computed<'info' | 'success' | 'warning'>(() => {
   const c = contest.contest
   if (!c) return 'info'
   if (c.status === 1) return 'info'
-  const now = Math.floor(Date.now() / 1000)
-  if (now < c.startTime) return 'warning'
-  if (now < c.endTime) return 'success'
+  const nowSecs = now.value
+  if (nowSecs < c.startTime) return 'warning'
+  if (nowSecs < c.endTime) return 'success'
   return 'info'
 })
 

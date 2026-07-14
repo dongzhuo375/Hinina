@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// 以 JSON 格式持久化，ConfigService 负责加载/保存。
 /// 所有可变行为参数均从 Config 读取，支持运行时热更新。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     /// 用户偏好
     #[serde(default)]
@@ -38,6 +39,7 @@ impl Default for AppConfig {
 // ── 用户偏好 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserConfig {
     /// 上次登录的 OJ 类型
     #[serde(default = "default_oj_type")]
@@ -63,6 +65,7 @@ fn default_oj_type() -> String {
 // ── OJ 连接配置 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OjConfig {
     /// HOJ 服务端地址
     #[serde(default = "default_hoj_url")]
@@ -121,6 +124,7 @@ const fn default_cache_ttl() -> u64 {
 // ── 编辑器配置 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorConfig {
     /// 字体大小
     #[serde(default = "default_font_size")]
@@ -170,6 +174,7 @@ fn default_language() -> String {
 // ── 主题配置 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThemeConfig {
     /// 当前主题名称（light / dark）
     #[serde(default = "default_theme_name")]
@@ -198,6 +203,7 @@ fn default_editor_theme() -> String {
 // ── 布局配置 ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LayoutConfig {
     /// 侧边栏宽度（像素）
     #[serde(default = "default_sidebar_width")]

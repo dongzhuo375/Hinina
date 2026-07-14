@@ -25,6 +25,13 @@ export class WorkspaceService {
   async currentWorkspace(): Promise<Workspace | null> {
     return workspaceBridge.currentWorkspace()
   }
+
+  /**
+   * 更新工作区文件内容（前端编辑器同步到后端）。
+   */
+  async updateWorkspaceFile(fileName: string, content: string): Promise<void> {
+    return workspaceBridge.updateWorkspaceFile(fileName, content)
+  }
 }
 
 export const workspaceService = new WorkspaceService()
