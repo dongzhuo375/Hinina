@@ -138,14 +138,16 @@ Hinina/
         │   └── runtime/
         │       └── mod.rs
         └── commands/                     # NEW: Tauri Command 薄封装
-            ├── mod.rs                    # register_commands() 入口
+            ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login / logout / get_session
-            ├── contest_cmd.rs            # list_contests / select_contest
+            ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest
             ├── problem_cmd.rs            # get_problem / list_problems
             ├── submission_cmd.rs         # submit_code / get_judgement
-            ├── workspace_cmd.rs          # load / save / switch / current
-            ├── config_cmd.rs             # get_config / update_config
-            └── theme_cmd.rs              # get_theme / set_theme
+            ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file
+            ├── config_cmd.rs             # get_config / reload_config / update_config
+            ├── theme_cmd.rs              # get_theme / set_theme
+            └── tests/
+                └── mod_tests.rs          # Command 层关键路径测试（P40）
 ```
 
 ---
@@ -159,11 +161,7 @@ Hinina/
 ├── vite.config.ts                        # Vite 构建配置
 ├── tsconfig.json                         # TypeScript 配置
 ├── tsconfig.node.json                    # Vite/Node 端 TS 配置
-├── tailwind.config.js                    # TailwindCSS 配置
-├── postcss.config.js                     # PostCSS 配置
 ├── .gitignore                            # Git 忽略规则
-├── .prettierrc                           # Prettier 配置
-└── .eslintrc.cjs                         # ESLint 配置
 ```
 
 ### Vue3 前端 — `src/`（阶段 7 已完成）
@@ -205,12 +203,12 @@ src/
 │   └── workspace.service.ts              # 工作区创建/保存/恢复
 ├── bridge/
 │   ├── index.ts                          # ipcInvoke 统一封装
-│   ├── auth.bridge.ts                    # auth:login / logout / get_session
-│   ├── contest.bridge.ts                 # contest:load_configured
-│   ├── problem.bridge.ts                 # problem:get / list
-│   ├── submission.bridge.ts              # submission:submit / get_judgement
-│   ├── workspace.bridge.ts               # workspace:load / save / current
-│   └── config.bridge.ts                  # config:get
+│   ├── auth.bridge.ts                    # login / logout / get_session
+│   ├── contest.bridge.ts                 # load_configured_contest
+│   ├── problem.bridge.ts                 # get_problem / list_problems
+│   ├── submission.bridge.ts              # submit_code / get_judgement
+│   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile
+│   └── config.bridge.ts                  # get_config
 ├── types/
 │   ├── user.ts                           # User 实体
 │   ├── contest.ts                        # Contest + ContestProblem 实体

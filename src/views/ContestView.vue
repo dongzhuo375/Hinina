@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { NMessageProvider } from 'naive-ui'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import ProblemSidebar from '@/components/problem/ProblemSidebar.vue'
 import ProblemStatement from '@/components/problem/ProblemStatement.vue'
@@ -23,14 +22,11 @@ const problem = useProblemStore()
 const submission = useSubmissionStore()
 const workspace = useWorkspaceStore()
 
-const leftWidth = ref(220)
 const rightRatio = ref(0.5)
-let isDragging = false
 const pollingTimers = ref<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
 /// 分栏拖拽
 function startDrag(e: MouseEvent) {
-  isDragging = true
   const startX = e.clientX
   const startRatio = rightRatio.value
   const containerWidth = (e.currentTarget as HTMLElement).parentElement!.clientWidth
@@ -40,7 +36,6 @@ function startDrag(e: MouseEvent) {
     rightRatio.value = Math.min(0.7, Math.max(0.3, startRatio + dx / containerWidth))
   }
   function onUp() {
-    isDragging = false
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
   }
@@ -115,13 +110,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <n-message-provider>
-    <div class="flex h-screen flex-col bg-[var(--bg-body)]">
-      <!-- 顶部栏 -->
-      <AppHeader />
+  <div class="flex h-screen flex-col bg-[var(--bg-body)]">
+    <!-- 顶部栏 -->
+    <AppHeader />
 
-      <!-- 主内容区：三栏布局 -->
-      <div v-if="contest.isLoading" class="flex-1 flex items-center justify-center">
+    <!-- 主内容区：三栏布局 -->
+    <div v-if="contest.isLoading" class="flex-1 flex items-center justify-center">
         <LoadingSpinner message="正在加载比赛..." />
       </div>
 
@@ -187,5 +181,5 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-  </n-message-provider>
+  </div>
 </template>

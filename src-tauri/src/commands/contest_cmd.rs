@@ -7,7 +7,7 @@ use crate::core::error::{AppError, AppResult};
 
 /// 获取比赛列表（带缓存）。
 ///
-/// 前端 invoke 签名: `contest:list`
+/// 前端 invoke 签名: `list_contests`
 ///
 /// 缓存 TTL 从 Config 读取（`oj.cache_ttl_secs`），未配置时默认 60 秒。
 /// 首次调用或缓存过期时从远程 OJ 拉取最新数据。
@@ -19,7 +19,7 @@ pub async fn list_contests(ctx: State<'_, AppContext>) -> AppResult<Vec<Contest>
 
 /// 选中比赛。
 ///
-/// 前端 invoke 签名: `contest:select`({ contest_id })
+/// 前端 invoke 签名: `select_contest`({ contestId })
 ///
 /// 选中后发布 `ContestEvent::Selected`，前端其他组件可监听此事件切换题目列表等。
 #[tauri::command]
@@ -33,7 +33,7 @@ pub async fn select_contest(
 
 /// 从配置文件加载默认比赛（阶段 7 单比赛模式入口）。
 ///
-/// 前端 invoke 签名: `contest:load_configured`
+/// 前端 invoke 签名: `load_configured_contest`
 ///
 /// 从 `OjConfig.contest_id` 读取比赛 ID，自动加载比赛详情与题目列表。
 /// 若 `contest_id == 0` 返回错误提示用户配置。

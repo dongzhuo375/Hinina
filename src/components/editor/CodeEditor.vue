@@ -33,7 +33,6 @@ const emit = defineEmits<{
 
 const editorContainer = ref<HTMLDivElement>()
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
-const isReadonly = ref(false)
 
 /// 支持的语言
 const languages = [
@@ -49,6 +48,14 @@ const langMap: Record<string, string> = {
   cpp: 'cpp',
   java: 'java',
   python: 'python',
+}
+
+/// Ctrl+Enter 提交
+function handleKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault()
+    emit('submit')
+  }
 }
 
 onMounted(async () => {
@@ -75,10 +82,14 @@ onMounted(async () => {
   })
 
   editor.value = ed
+
+  // Ctrl+Enter 提交快捷键
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   editor.value?.dispose()
+  window.removeEventListener('keydown', handleKeydown)
 })
 
 watch(() => props.language, (lang) => {
@@ -87,17 +98,6 @@ watch(() => props.language, (lang) => {
     monaco.editor.setModelLanguage(model, langMap[lang] || 'cpp')
   }
 })
-
-/// Ctrl+Enter 提交
-function handleKeydown(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    e.preventDefault()
-    emit('submit')
-  }
-}
-
-onMounted(() => window.addEventListener('keydown', handleKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 </script>
 
 <template>

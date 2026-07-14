@@ -8,7 +8,7 @@ use crate::core::provider::oj_type::OJType;
 
 /// 登录 Command。
 ///
-/// 前端 invoke 签名: `auth:login`({ username, password, oj_type? })
+/// 前端 invoke 签名: `login`({ username, password, ojType? })
 ///
 /// 若传入 `oj_type`，先切换 ProviderRegistry 的当前 OJ 再执行登录。
 /// `oj_type` 支持 "HOJ" / "QDUOJ" / "HUSTOJ"（大小写不敏感）。
@@ -41,7 +41,7 @@ pub async fn login(
 
 /// 登出 Command。
 ///
-/// 前端 invoke 签名: `auth:logout`
+/// 前端 invoke 签名: `logout`
 #[tauri::command]
 pub async fn logout(ctx: State<'_, AppContext>) -> AppResult<()> {
     ctx.auth.logout().await
@@ -49,7 +49,7 @@ pub async fn logout(ctx: State<'_, AppContext>) -> AppResult<()> {
 
 /// 获取本地保存的会话信息。
 ///
-/// 前端 invoke 签名: `auth:get_session`
+/// 前端 invoke 签名: `get_session`
 ///
 /// 返回 `None` 表示无已保存的会话（从未登录或已登出）。
 /// 返回的 `User.token` 可用于恢复 API 认证。

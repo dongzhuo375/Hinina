@@ -7,7 +7,7 @@ use crate::core::error::{AppError, AppResult};
 
 /// 加载或创建工作区（修复 P36：find_or_create）。
 ///
-/// 前端 invoke 签名: `workspace:load`({ contest_id, problem_id })
+/// 前端 invoke 签名: `load_workspace`({ contestId, problemId })
 ///
 /// 优先查找已有工作区（按 contest_id + problem_id 匹配），
 /// 找到则恢复之前保存的代码，否则创建新工作区。
@@ -57,7 +57,7 @@ fn start_auto_save_if_needed(
 
 /// 持久化当前工作区的脏文件到磁盘。
 ///
-/// 前端 invoke 签名: `workspace:save`
+/// 前端 invoke 签名: `save_workspace`
 ///
 /// 仅保存已修改（dirty）的文件，发布 `WorkspaceEvent::Saved`。
 #[tauri::command]
@@ -71,7 +71,7 @@ pub async fn save_workspace(ctx: State<'_, AppContext>) -> AppResult<()> {
 
 /// 切换活动工作区。
 ///
-/// 前端 invoke 签名: `workspace:switch`({ workspace_id })
+/// 前端 invoke 签名: `switch_workspace`({ workspaceId })
 ///
 /// 保存当前工作区 → 加载目标工作区 → 返回新 Workspace。
 /// 发布 `WorkspaceEvent::Switched`。

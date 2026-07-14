@@ -7,7 +7,7 @@ use crate::core::error::AppResult;
 
 /// 获取完整应用配置。
 ///
-/// 前端 invoke 签名: `config:get`
+/// 前端 invoke 签名: `get_config`
 ///
 /// 返回 `AppConfig`（包含 user/oj/editor/theme/layout 五个子分组）。
 /// 配置源自磁盘持久化文件，首次启动时自动生成默认值。
@@ -18,7 +18,7 @@ pub async fn get_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 
 /// 从磁盘重新加载配置。
 ///
-/// 前端 invoke 签名: `config:reload`
+/// 前端 invoke 签名: `reload_config`
 ///
 /// 发布 `SystemEvent::ConfigReloaded`，各 Service 可通过监听此事件热更新参数。
 #[tauri::command]
@@ -29,7 +29,7 @@ pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 
 /// 更新配置并持久化。
 ///
-/// 前端 invoke 签名: `config:update`({ config })
+/// 前端 invoke 签名: `update_config`({ config })
 ///
 /// 将前端传来的完整 `AppConfig` 写入磁盘。
 /// 配置字段按需热生效（如主题切换需额外调用 `theme:set` 发布事件）。

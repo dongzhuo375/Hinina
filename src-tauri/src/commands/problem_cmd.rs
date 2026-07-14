@@ -7,7 +7,7 @@ use crate::core::error::AppResult;
 
 /// 获取题目详情。
 ///
-/// 前端 invoke 签名: `problem:get`({ contest_id, problem_id })
+/// 前端 invoke 签名: `get_problem`({ contestId, problemId })
 ///
 /// 调用 `ProblemService::open_problem`，获取题目描述/样例/限制等完整信息，
 /// 并发布 `ProblemEvent::Opened` 供前端 Workspace 切换。
@@ -23,9 +23,9 @@ pub async fn get_problem(
 
 /// 获取比赛下所有题目列表。
 ///
-/// 前端 invoke 签名: `problem:list`({ contest_id })
+/// 前端 invoke 签名: `list_problems`({ contestId })
 ///
-/// 返回题目摘要列表（不含完整题面描述）。获取详情请用 `problem:get`。
+/// 返回题目摘要列表（不含完整题面描述）。获取详情请用 `get_problem`。
 #[tauri::command]
 pub async fn list_problems(
     ctx: State<'_, AppContext>,

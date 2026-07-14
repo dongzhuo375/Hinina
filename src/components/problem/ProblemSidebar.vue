@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { NScrollbar } from 'naive-ui'
-import { CheckmarkCircle, CloseCircle, HelpCircle } from '@vicons/ionicons5'
 import type { ContestProblem } from '@/types/contest'
 
 const props = defineProps<{
@@ -12,12 +10,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [displayId: string, problemId: string]
 }>()
-
-/// 题目状态图标（当前无真实 AC 数据，MVP 用占位）
-function getStatusIcon(_p: ContestProblem) {
-  // TODO: 对接 HOJ 用户题目状态后显示真实 AC/WA
-  return null
-}
 
 function isActive(p: ContestProblem): boolean {
   return p.problemId === props.currentId || p.displayId === props.currentId

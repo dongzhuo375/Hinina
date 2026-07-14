@@ -7,9 +7,9 @@ use crate::core::error::AppResult;
 
 /// 提交代码到 OJ。
 ///
-/// 前端 invoke 签名: `submission:submit`({ contest_id, problem_id, language, source_code })
+/// 前端 invoke 签名: `submit_code`({ contestId, problemId, language, sourceCode })
 ///
-/// 返回 `submission_id` 字符串，前端可用 `submission:get_judgement` 轮询结果。
+/// 返回 `submissionId` 字符串，前端可用 `get_judgement` 轮询结果。
 /// 发布 `SubmissionEvent::Created`。
 #[tauri::command]
 pub async fn submit_code(
@@ -27,7 +27,7 @@ pub async fn submit_code(
 
 /// 轮询评测结果。
 ///
-/// 前端 invoke 签名: `submission:get_judgement`({ submission_id })
+/// 前端 invoke 签名: `get_judgement`({ submissionId })
 ///
 /// 轮询间隔和超时从 Config 读取（`oj.poll_interval_secs` / `oj.poll_timeout_secs`）。
 /// 评测完成时返回 `JudgementResult`，超时或查询失败时返回错误。
