@@ -1,7 +1,7 @@
 <template>
   <n-config-provider :theme="null" :theme-overrides="themeOverrides">
     <n-dialog-provider>
-      <div class="flex h-screen w-screen flex-col overflow-hidden">
+      <div class="flex h-screen w-screen flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)] shadow-2xl">
         <TitleBar />
         <div class="flex-1 overflow-hidden">
           <router-view />

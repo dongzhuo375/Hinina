@@ -26,7 +26,6 @@
 
   font-family: var(--font);
   color: var(--text-primary);
-  background-color: var(--bg-body);
 }
 
 html.dark {
@@ -39,9 +38,15 @@ html.dark {
   --border-color: #30363d;
 }
 
+html,
+body {
+  background: transparent;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 /* 数字/倒计时使用等宽数字，避免跳动 */

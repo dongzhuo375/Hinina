@@ -28,7 +28,7 @@ Hinina/
     ├── build.rs                          # Tauri 构建脚本
     ├── icons/                            # 应用图标目录（待填充）
     ├── capabilities/
-    │   └── default.json                  # Tauri 2 默认权限集
+    │   └── default.json                  # Tauri 2 默认权限集（文件/网络/窗口控制/拖拽）
     └── src/
         ├── main.rs                       # Rust 入口点，9 步初始化序列
         ├── lib.rs                        # 库根，公开模块树
