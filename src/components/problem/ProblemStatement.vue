@@ -1,10 +1,30 @@
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
 import type { Problem } from '@/types/problem'
 import { NCard, NTag, NScrollbar, NTabs, NTabPane } from 'naive-ui'
+import { renderMarkdown } from '@/utils/markdown'
+import { getConfig } from '@/bridge/config.bridge'
 
-defineProps<{
+const props = defineProps<{
   problem: Problem
 }>()
+
+/// HOJ 服务端地址（用于把题目描述中的相对图片 URL 改写为绝对地址）
+const baseUrl = ref('')
+
+onMounted(async () => {
+  try {
+    const config = await getConfig()
+    baseUrl.value = config.oj.hojUrl
+  } catch {
+    // 配置获取失败时保持空，相对路径将按原样输出
+  }
+})
+
+/// 将 Markdown 题面渲染为 HTML
+const renderedDescription = computed(() => renderMarkdown(props.problem.description, baseUrl.value))
+const renderedInput = computed(() => renderMarkdown(props.problem.inputDescription, baseUrl.value))
+const renderedOutput = computed(() => renderMarkdown(props.problem.outputDescription, baseUrl.value))
 </script>
 
 <template>
@@ -26,15 +46,15 @@ defineProps<{
       <!-- 题面 -->
       <n-tabs type="line" size="small" animated>
         <n-tab-pane name="desc" tab="题目描述">
-          <div class="prose prose-sm max-w-none pt-3 text-[var(--text-primary)]" v-html="problem.description" />
+          <div class="prose prose-sm max-w-none pt-3 text-[var(--text-primary)]" v-html="renderedDescription" />
         </n-tab-pane>
 
         <n-tab-pane name="input" tab="输入说明">
-          <div class="prose prose-sm max-w-none pt-3 text-[var(--text-primary)]" v-html="problem.inputDescription" />
+          <div class="prose prose-sm max-w-none pt-3 text-[var(--text-primary)]" v-html="renderedInput" />
         </n-tab-pane>
 
         <n-tab-pane name="output" tab="输出说明">
-          <div class="prose prose-sm max-w-none pt-3 text-[var(--text-primary)]" v-html="problem.outputDescription" />
+          <div class="prose prose-sm max-w-none pt-3 text-[var(--text-primary)]" v-html="renderedOutput" />
         </n-tab-pane>
 
         <n-tab-pane name="samples" tab="样例">
@@ -76,5 +96,9 @@ defineProps<{
 .prose :deep(code) {
   font-family: var(--font-mono);
   font-size: 0.875em;
+}
+.prose :deep(img) {
+  max-width: 100%;
+  height: auto;
 }
 </style>

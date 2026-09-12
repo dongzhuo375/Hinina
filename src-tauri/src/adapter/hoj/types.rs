@@ -45,7 +45,7 @@ pub struct PageResult<T> {
 
 // ── 认证 ──
 
-/// 登录请求（密码提交前需 MD5 散列）。
+/// 登录请求（密码为明文，服务端自行 MD5 比对）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
@@ -54,13 +54,17 @@ pub struct LoginRequest {
 
 /// HOJ 返回的用户信息（UserInfoVO）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserInfoVO {
     pub uid: String,
     pub username: String,
+    /// 昵称（可为 null）
     #[serde(default)]
-    pub nickname: String,
+    pub nickname: Option<String>,
+    /// 头像 URL（可为 null）
     #[serde(default)]
-    pub avatar: String,
+    pub avatar: Option<String>,
+    /// 角色列表（如 ["root", "admin"]）
     #[serde(default)]
     pub role_list: Vec<String>,
 }
@@ -69,12 +73,13 @@ pub struct UserInfoVO {
 
 /// 比赛列表条目（ContestVO）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ContestVO {
     pub id: i64,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
-    pub description: String,
+    pub description: Option<String>,
     /// 赛制：0=ACM, 1=OI
     #[serde(default)]
     pub r#type: i32,
@@ -97,6 +102,7 @@ pub struct ContestVO {
 
 /// 比赛题目列表条目（ContestProblemVO）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ContestProblemVO {
     #[serde(default)]
     pub id: i64,
@@ -123,6 +129,7 @@ pub struct ContestProblemVO {
 
 /// 题目详情原始字段（ProblemVO）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProblemVO {
     pub id: i64,
     /// 题目展示ID（如 "HOJ-1001"）
@@ -143,20 +150,20 @@ pub struct ProblemVO {
     #[serde(default)]
     pub stack_limit: i64,
     #[serde(default)]
-    pub description: String,
+    pub description: Option<String>,
     /// 输入描述
     #[serde(default)]
-    pub input: String,
+    pub input: Option<String>,
     /// 输出描述
     #[serde(default)]
-    pub output: String,
+    pub output: Option<String>,
     /// 样例（HTML 格式）
     #[serde(default)]
-    pub examples: String,
+    pub examples: Option<String>,
     #[serde(default)]
-    pub hint: String,
+    pub hint: Option<String>,
     #[serde(default)]
-    pub source: String,
+    pub source: Option<String>,
     #[serde(default)]
     pub auth: i32,
     #[serde(default)]
@@ -167,6 +174,7 @@ pub struct ProblemVO {
 
 /// get-problem-detail 和 get-contest-problem-details 的完整响应。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProblemInfoVO {
     pub problem: ProblemVO,
     #[serde(default)]
@@ -190,6 +198,7 @@ pub struct TagVO {
 
 /// 提交请求体。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubmitRequest {
     /// 题目展示ID
     pub pid: String,
@@ -210,6 +219,7 @@ pub struct SubmitRequest {
 
 /// 提交后返回的 Judge 对象。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JudgeVO {
     #[serde(default)]
     pub submit_id: i64,
@@ -219,7 +229,7 @@ pub struct JudgeVO {
     pub display_pid: String,
     #[serde(default)]
     pub username: String,
-    /// 评测状态码（0-11，见 status_code_map）
+    /// 评测状态码（0-15，见 map_status）
     #[serde(default)]
     pub status: i32,
     #[serde(default)]
@@ -239,6 +249,7 @@ pub struct SubmissionInfoVO {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubmissionDetail {
     #[serde(default)]
     pub submit_id: i64,
@@ -254,6 +265,7 @@ pub struct SubmissionDetail {
     #[serde(default)]
     pub status: i32,
     /// 编译错误信息（CE 时非空）
+    #[serde(default)]
     pub error_message: Option<String>,
     /// 运行时间（ms）
     #[serde(default)]

@@ -46,3 +46,14 @@ pub struct ContestProblem {
     #[serde(default)]
     pub total: i64,
 }
+
+/// 配置比赛加载结果：比赛详情 + 题目列表。
+///
+/// 作为 `load_configured_contest` Command 的返回值，
+/// 序列化为 `{ "contest": ..., "problems": [...] }`（对象而非元组数组），
+/// 供前端 `loadConfiguredContest` 直接解构使用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContestBundle {
+    pub contest: Contest,
+    pub problems: Vec<ContestProblem>,
+}

@@ -2,7 +2,7 @@ use tauri::State;
 use tracing::info;
 
 use crate::core::context::AppContext;
-use crate::core::entity::contest::{Contest, ContestProblem};
+use crate::core::entity::contest::{Contest, ContestBundle};
 use crate::core::error::{AppError, AppResult};
 
 /// 获取比赛列表（带缓存）。
@@ -37,11 +37,11 @@ pub async fn select_contest(
 ///
 /// 从 `OjConfig.contest_id` 读取比赛 ID，自动加载比赛详情与题目列表。
 /// 若 `contest_id == 0` 返回错误提示用户配置。
-/// 返回 `(Contest, Vec<ContestProblem>)`，前端据此渲染题目侧边栏。
+/// 返回 `ContestBundle`（`{ contest, problems }`），前端据此渲染题目侧边栏。
 #[tauri::command]
 pub async fn load_configured_contest(
     ctx: State<'_, AppContext>,
-) -> AppResult<(Contest, Vec<ContestProblem>)> {
+) -> AppResult<ContestBundle> {
     let contest_id = ctx.config.get().oj.contest_id;
     if contest_id == 0 {
         return Err(AppError::Contest(

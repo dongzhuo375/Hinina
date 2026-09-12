@@ -23,6 +23,8 @@
 - `poll_interval_secs: u64`（默认 `2`）— 评测轮询间隔
 - `poll_timeout_secs: u64`（默认 `300`）— 评测最大等待时间
 - `cache_ttl_secs: u64`（默认 `60`）— 比赛列表缓存 TTL
+- `contest_id: i64`（默认 `0`）— 默认加载的比赛 ID（阶段 7 单比赛模式），`0` 表示不自动加载
+- `contest_password: Option<String>`（默认 `None`）— 比赛密码（私有赛需要），公开赛留空
 
 ### EditorConfig
 - `font_size: u32`（默认 `14`）— 编辑器字体大小

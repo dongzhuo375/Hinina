@@ -113,6 +113,8 @@ impl AuthService {
     /// 从本地文件恢复会话。
     ///
     /// 返回 `None` 表示无已保存的会话（从未登录或已登出）。
+    ///
+    /// 恢复成功时将 token 回注到 Provider，确保重启后认证请求仍携带 Authorization 头。
     pub fn get_session(&self) -> Option<Session> {
         let oj_type = self.registry.current_oj();
         let path = self.session_path(&oj_type);
@@ -124,6 +126,10 @@ impl AuthService {
         match self.storage.read_to_string(&path) {
             Ok(raw) => match serde_json::from_str::<Session>(&raw) {
                 Ok(session) => {
+                    // 将 token 回注到 Provider，保证后续认证接口可用
+                    if let Ok(provider) = self.registry.get_auth(&oj_type) {
+                        provider.restore_token(&session.token);
+                    }
                     debug!(username = session.username, "会话已恢复");
                     Some(session)
                 }

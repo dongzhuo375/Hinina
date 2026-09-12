@@ -7,7 +7,14 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
 - `HOJAdapter` — 封装 `Arc<HttpClient>` + `base_url` + `RwLock<Option<String>>`（JWT token）
 - `api_url(path)` — 拼接完整 API URL
 - `parse_time(s)` — ISO 时间 → Unix 秒级时间戳（纯 std）
-- `parse_samples(html)` — HTML `<pre>` 样例 → `Vec<Sample>`
+- `parse_samples(html)` — HTML `<input>/<output>` 样例 → `Vec<Sample>`（成对匹配）
+- `extract_tag_contents(html, tag)` / `unescape_html(s)` — HTML 标签提取与实体反转义
+- `get_json_authed(url)` — 带认证 GET，自动处理服务端 token 轮换（`Refresh-Token` 头）
+
+## 关键实现约定
+- **登录密码**：HOJ 服务端对收到的密码自行 `SecureUtil.md5()` 后比对，客户端发送**明文密码**（不自行 MD5）。
+- **token 轮换**：HOJ 服务端在 token 到期前返回 `Refresh-Token: true` + 新 `Authorization` 头，`get_json_authed` 会自动更新本地 token，避免后续请求 401。
+- **token 回注**：`restore_token(token)` 供 `AuthService::get_session()` 在应用重启后回注会话 token。
 
 ## 直接依赖
 - `infra::http::HttpClient` — 网络请求
