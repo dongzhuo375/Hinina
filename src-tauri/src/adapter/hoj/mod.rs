@@ -496,33 +496,16 @@ impl SubmissionProvider for HOJAdapter {
 
         info!(contest_id = contest_id, problem_id = problem_id, language = language, "HOJ 提交代码");
 
-        let response = self
+        // 使用带 token 轮换检测的 POST，避免内联重复逻辑
+        let (api_resp, refreshed) = self
             .http
-            .client()
-            .post(&url)
-            .header("Authorization", &token)
-            .json(&body)
-            .send()
+            .post_json_with_refresh::<ApiResponse<JudgeVO>, _>(&url, &body, Some(&token))
             .await
-            .map_err(|e| AppError::Network(format!("HOJ submit 请求失败: {}", e)))?;
-
-        // 处理服务端 token 轮换（submit 也是需认证接口，可能触发轮换）
-        if response.headers().get("refresh-token").is_some() {
-            if let Some(new_token) = response
-                .headers()
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string())
-            {
-                debug!("HOJ token 已轮换（submit），更新本地缓存");
-                self.set_token(new_token);
-            }
+            .map_err(|e| AppError::Submission(format!("HOJ submit 请求失败: {}", e)))?;
+        if let Some(new_token) = refreshed {
+            debug!("HOJ token 已轮换（submit），更新本地缓存");
+            self.set_token(new_token);
         }
-
-        let api_resp: ApiResponse<JudgeVO> = response
-            .json()
-            .await
-            .map_err(|e| AppError::Serialization(format!("HOJ submit 响应解析失败: {}", e)))?;
 
         let judge = api_resp.into_data().map_err(|msg| {
             warn!(error = msg, "HOJ 提交失败");

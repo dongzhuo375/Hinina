@@ -18,7 +18,7 @@
 - `last_username: String`（默认 `""`）— 用于自动填充登录用户名
 
 ### OjConfig
-- `hoj_url: String`（默认 `"http://10.10.205.111"`，⚠️ 内网联调临时值，测试完成后改回 `"https://hoj.dongzhuo.top"`）— HOJ 服务端地址
+- `hoj_url: String`（默认 `"https://hoj.dongzhuo.top"`）— HOJ 服务端地址
 - `timeout_secs: u64`（默认 `30`）— HTTP 请求超时
 - `poll_interval_secs: u64`（默认 `2`）— 评测轮询间隔
 - `poll_timeout_secs: u64`（默认 `300`）— 评测最大等待时间

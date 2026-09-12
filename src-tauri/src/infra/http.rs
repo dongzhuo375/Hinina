@@ -133,6 +133,39 @@ impl HttpClient {
         })
     }
 
+    /// 发送 POST 请求（JSON body）并反序列化 JSON 响应体，同时检测 token 轮换。
+    ///
+    /// POST 为非幂等方法，不执行自动重试。
+    /// 返回 `(解析后的数据, 轮换后的新 token)`，未轮换时新 token 为 `None`。
+    pub async fn post_json_with_refresh<T: DeserializeOwned, B: Serialize>(
+        &self,
+        url: &str,
+        body: &B,
+        auth_token: Option<&str>,
+    ) -> AppResult<(T, Option<String>)> {
+        let mut req = self.client.post(url).json(body);
+        if let Some(token) = auth_token {
+            req = req.header("Authorization", token);
+        }
+        let response = req.send().await.map_err(|e| {
+            crate::core::error::AppError::Network(format!("POST 请求失败 {}: {}", url, e))
+        })?;
+        if !response.status().is_success() {
+            return Err(status_error(url, response.status()));
+        }
+        let new_token = extract_refreshed_token(&response);
+        let body = response.text().await.map_err(|e| {
+            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
+        })?;
+        let parsed = serde_json::from_str::<T>(&body).map_err(|e| {
+            crate::core::error::AppError::Serialization(format!(
+                "JSON 反序列化失败 {}: {}",
+                url, e
+            ))
+        })?;
+        Ok((parsed, new_token))
+    }
+
     // ── 内部重试逻辑 ──
 
     /// 发送 GET 请求，对 5xx 响应自动重试（最多 2 次，指数退避）。

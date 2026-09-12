@@ -106,8 +106,7 @@ impl Default for OjConfig {
 }
 
 fn default_hoj_url() -> String {
-    // TODO(临时测试): 内网联调地址，测试完成后改回生产环境
-    "http://10.10.205.111".into()
+    "https://hoj.dongzhuo.top".into()
 }
 const fn default_timeout() -> u64 {
     30
