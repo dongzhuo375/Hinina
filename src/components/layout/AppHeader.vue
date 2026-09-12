@@ -58,11 +58,9 @@ function handleLogout() {
 
 <template>
   <header class="flex h-14 items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-card)] px-4 shrink-0">
-    <!-- 左侧：Logo + 比赛标题 -->
+    <!-- 左侧：比赛标题 + 状态 -->
     <div class="flex items-center gap-3">
-      <span class="text-lg font-bold tracking-tight text-[var(--color-primary)]">Hinina</span>
       <template v-if="contest.contest">
-        <span class="text-sm text-[var(--text-secondary)]">/</span>
         <span class="text-sm font-medium truncate max-w-[300px]">{{ contest.contest.title }}</span>
         <n-tag :type="timeStatusType" size="small" :bordered="false">
           {{ timeStatus }}

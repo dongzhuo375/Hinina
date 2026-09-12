@@ -178,7 +178,8 @@ src/
 │   └── ContestView.vue                   # 核心页面（三栏分割：题目列表｜题面｜编辑器+提交）
 ├── components/
 │   ├── layout/
-│   │   └── AppHeader.vue                 # 顶部栏（Logo + 比赛标题 + 倒计时 + 用户）
+│   │   ├── TitleBar.vue                  # 窗口标题栏（拖拽区 + 最小化/最大化/关闭，decorations:false）
+│   │   └── AppHeader.vue                 # 顶部栏（比赛标题 + 倒计时 + 用户）
 │   ├── editor/
 │   │   └── CodeEditor.vue                # Monaco Editor 封装（手动 worker 配置）
 │   ├── problem/

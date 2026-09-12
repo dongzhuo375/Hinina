@@ -110,7 +110,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-screen flex-col bg-[var(--bg-body)]">
+  <div class="flex h-full flex-col bg-[var(--bg-body)]">
     <!-- 顶部栏 -->
     <AppHeader />
 

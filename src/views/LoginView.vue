@@ -37,10 +37,54 @@ const countdown = computed(() => {
   }
 })
 
-/// 比赛是否已开始
-const contestStarted = computed(() => {
+/// 比赛阶段：none（未加载）/ upcoming（未开始）/ running（进行中）/ ended（已结束）
+const contestPhase = computed<'none' | 'upcoming' | 'running' | 'ended'>(() => {
   const c = contest.value
-  return !!c && now.value >= c.startTime
+  if (!c) return 'none'
+  if (c.status === 1 || now.value >= c.endTime) return 'ended'
+  if (now.value >= c.startTime) return 'running'
+  return 'upcoming'
+})
+
+/// 倒计时数字段配色：非零紫色，归零黑色
+function segColor(v: number): string {
+  return v > 0 ? 'text-[#6845f5]' : 'text-[var(--text-primary)]'
+}
+
+/// 倒计时四段（天/时/分/秒），供模板 v-for 渲染
+const countdownSegs = computed(() => [
+  { value: countdown.value.days, label: 'DAYS 天' },
+  { value: countdown.value.hours, label: 'HOURS 时' },
+  { value: countdown.value.mins, label: 'MINS 分' },
+  { value: countdown.value.secs, label: 'SECS 秒' },
+])
+
+/// 比赛阶段徽章文案
+const phaseLabel = computed(() => {
+  switch (contestPhase.value) {
+    case 'upcoming':
+      return 'ACM / ICPC 赛制 · 即将开始'
+    case 'running':
+      return '比赛进行中'
+    case 'ended':
+      return '比赛已结束'
+    default:
+      return 'ACM / ICPC 赛制'
+  }
+})
+
+/// 比赛阶段副标题文案
+const phaseDesc = computed(() => {
+  switch (contestPhase.value) {
+    case 'upcoming':
+      return '竞赛倒计时结束后自动解锁题目并开启实时评测系统'
+    case 'running':
+      return '比赛已开始，登录后即可进入赛场'
+    case 'ended':
+      return '比赛已结束'
+    default:
+      return 'Hinina 竞赛客户端'
+  }
 })
 
 /// 比赛简介 Markdown 渲染
@@ -93,9 +137,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen select-none items-center justify-center bg-[var(--bg-body)] p-4 sm:p-6">
+  <div class="flex h-full w-full select-none items-center justify-center bg-[var(--bg-body)] p-4 sm:p-6">
     <!-- 主窗口卡片 -->
-    <div class="relative flex h-[720px] w-full max-w-[1100px] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-xl">
+    <div class="relative flex h-full w-full overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-xl">
       <!-- ═══════ 左侧：登录表单栏（400px） ═══════ -->
       <section class="flex w-[400px] shrink-0 flex-col border-r border-[var(--border-color)] px-10 py-8">
         <!-- Logo -->
@@ -266,13 +310,13 @@ onUnmounted(() => {
         <div class="relative z-10 mt-6 max-w-lg">
           <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--bg-card)]/80 px-3 py-1 text-xs font-semibold text-[#6845f5] shadow-sm backdrop-blur">
             <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-[#7c5cff]"></span>
-            <span>{{ contestStarted ? '比赛进行中' : 'ACM / ICPC 赛制 · 即将开始' }}</span>
+            <span>{{ phaseLabel }}</span>
           </div>
           <h2 class="text-3xl font-extrabold leading-tight tracking-tight text-[var(--text-primary)] lg:text-4xl">
             {{ contest?.title ?? 'Hinina 竞赛' }}
           </h2>
           <p class="mt-2 max-w-sm text-xs tracking-wide text-[var(--text-secondary)]">
-            {{ contestStarted ? '比赛已开始，登录后即可进入赛场' : '竞赛倒计时结束后自动解锁题目并开启实时评测系统' }}
+            {{ phaseDesc }}
           </p>
         </div>
 
@@ -288,25 +332,13 @@ onUnmounted(() => {
           </div>
 
           <div class="flex max-w-md items-baseline gap-6 font-mono tabular-nums lg:gap-8">
-            <div class="flex flex-col">
-              <span class="text-4xl font-extrabold tracking-tight text-[var(--text-primary)] lg:text-5xl">{{ String(countdown.days).padStart(2, '0') }}</span>
-              <span class="mt-1.5 text-[11px] tracking-wider text-[var(--text-muted)]">DAYS 天</span>
-            </div>
-            <span class="-mt-4 text-2xl font-light text-[var(--text-muted)]">:</span>
-            <div class="flex flex-col">
-              <span class="text-4xl font-extrabold tracking-tight text-[var(--text-primary)] lg:text-5xl">{{ String(countdown.hours).padStart(2, '0') }}</span>
-              <span class="mt-1.5 text-[11px] tracking-wider text-[var(--text-muted)]">HOURS 时</span>
-            </div>
-            <span class="-mt-4 text-2xl font-light text-[var(--text-muted)]">:</span>
-            <div class="flex flex-col">
-              <span class="text-4xl font-extrabold tracking-tight text-[#6845f5] lg:text-5xl">{{ String(countdown.mins).padStart(2, '0') }}</span>
-              <span class="mt-1.5 text-[11px] font-semibold tracking-wider text-[#6845f5]">MINS 分</span>
-            </div>
-            <span class="-mt-4 text-2xl font-light text-[var(--text-muted)]">:</span>
-            <div class="flex flex-col">
-              <span class="text-4xl font-extrabold tracking-tight text-[#6845f5] lg:text-5xl">{{ String(countdown.secs).padStart(2, '0') }}</span>
-              <span class="mt-1.5 text-[11px] font-semibold tracking-wider text-[#6845f5]">SECS 秒</span>
-            </div>
+            <template v-for="(seg, i) in countdownSegs" :key="i">
+              <div class="flex flex-col">
+                <span :class="['text-4xl font-extrabold tracking-tight lg:text-5xl', segColor(seg.value)]">{{ String(seg.value).padStart(2, '0') }}</span>
+                <span :class="['mt-1.5 text-[11px] tracking-wider', segColor(seg.value)]">{{ seg.label }}</span>
+              </div>
+              <span v-if="i < 3" class="-mt-4 text-2xl font-light text-[var(--text-muted)]">:</span>
+            </template>
           </div>
         </div>
       </section>
