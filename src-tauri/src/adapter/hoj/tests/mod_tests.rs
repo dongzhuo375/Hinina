@@ -65,17 +65,8 @@ fn parse_samples_empty() {
 }
 
 #[test]
-fn parse_samples_single_pre() {
-    let html = "<pre>1 2</pre>";
-    let samples = HOJAdapter::parse_samples(html);
-    assert_eq!(samples.len(), 1);
-    assert_eq!(samples[0].input, "1 2");
-    assert_eq!(samples[0].output, "");
-}
-
-#[test]
-fn parse_samples_one_pair() {
-    let html = "<pre>3 4</pre><pre>7</pre>";
+fn parse_samples_single_pair() {
+    let html = "<input>3 4</input><output>7</output>";
     let samples = HOJAdapter::parse_samples(html);
     assert_eq!(samples.len(), 1);
     assert_eq!(samples[0].input, "3 4");
@@ -84,7 +75,7 @@ fn parse_samples_one_pair() {
 
 #[test]
 fn parse_samples_two_pairs() {
-    let html = "<pre>A</pre><pre>B</pre><pre>C</pre><pre>D</pre>";
+    let html = "<input>A</input><output>B</output><input>C</input><output>D</output>";
     let samples = HOJAdapter::parse_samples(html);
     assert_eq!(samples.len(), 2);
     assert_eq!(samples[0].input, "A");
@@ -94,17 +85,27 @@ fn parse_samples_two_pairs() {
 }
 
 #[test]
-fn parse_samples_with_attributes() {
-    let html = r#"<pre class="input">5</pre><pre class="output">6</pre>"#;
+fn parse_samples_input_only() {
+    let html = "<input>1 2</input>";
     let samples = HOJAdapter::parse_samples(html);
     assert_eq!(samples.len(), 1);
-    assert_eq!(samples[0].input, "5");
-    assert_eq!(samples[0].output, "6");
+    assert_eq!(samples[0].input, "1 2");
+    assert_eq!(samples[0].output, "");
+}
+
+#[test]
+fn parse_samples_multiline_input() {
+    // 实际 HOJ 数据：输入包含多行测试用例
+    let html = "<input>6\n4\n1 0 0 1\n6\n0 1 1 1</input><output>Brick\nAgain</output>";
+    let samples = HOJAdapter::parse_samples(html);
+    assert_eq!(samples.len(), 1);
+    assert_eq!(samples[0].input, "6\n4\n1 0 0 1\n6\n0 1 1 1");
+    assert_eq!(samples[0].output, "Brick\nAgain");
 }
 
 #[test]
 fn parse_samples_html_entities() {
-    let html = "<pre>&lt;int&gt; &amp; &quot;str&quot;</pre><pre>&nbsp;ok</pre>";
+    let html = "<input>&lt;int&gt; &amp; &quot;str&quot;</input><output>&nbsp;ok</output>";
     let samples = HOJAdapter::parse_samples(html);
     assert_eq!(samples.len(), 1);
     assert_eq!(samples[0].input, r#"<int> & "str""#);
@@ -113,7 +114,7 @@ fn parse_samples_html_entities() {
 
 #[test]
 fn parse_samples_br_tags() {
-    let html = "<pre>line1<br>line2<br/>line3</pre><pre>out</pre>";
+    let html = "<input>line1<br>line2<br/>line3</input><output>out</output>";
     let samples = HOJAdapter::parse_samples(html);
     assert_eq!(samples.len(), 1);
     assert_eq!(samples[0].input, "line1\nline2\nline3");
@@ -122,7 +123,7 @@ fn parse_samples_br_tags() {
 
 #[test]
 fn parse_samples_trim_whitespace() {
-    let html = "<pre>\n  hello  \n</pre><pre>  world  </pre>";
+    let html = "<input>\n  hello  \n</input><output>  world  </output>";
     let samples = HOJAdapter::parse_samples(html);
     assert_eq!(samples.len(), 1);
     assert_eq!(samples[0].input, "hello");

@@ -14,4 +14,7 @@ pub trait AuthProvider: Send + Sync {
 
     /// 校验当前会话是否有效
     async fn validate_session(&self) -> AppResult<bool>;
+
+    /// 恢复本地保存的会话 token（应用重启后由 AuthService 回注）。
+    fn restore_token(&self, token: &str);
 }

@@ -21,6 +21,19 @@ const fn retry_delay(attempt: u32) -> Duration {
     Duration::from_millis(RETRY_BASE_DELAY_MS * 2u64.pow(attempt))
 }
 
+/// 从响应头检测 token 轮换，返回轮换后的新 token（未轮换返回 `None`）。
+fn extract_refreshed_token(response: &reqwest::Response) -> Option<String> {
+    if response.headers().get("refresh-token").is_some() {
+        response
+            .headers()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    } else {
+        None
+    }
+}
+
 /// 将 HTTP 状态码转为 AppError
 fn status_error(url: &str, status: reqwest::StatusCode) -> crate::core::error::AppError {
     let msg = format!("HTTP {} {}: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), url);
@@ -64,6 +77,29 @@ impl HttpClient {
                 url, e
             ))
         })
+    }
+
+    /// 发送 GET 请求并反序列化 JSON，同时检测服务端 token 轮换。
+    ///
+    /// HOJ 服务端在 token 到期前会返回 `Refresh-Token: true` 头和新 `Authorization` 头。
+    /// 返回 `(解析后的数据, 轮换后的新 token)`，未轮换时新 token 为 `None`。
+    pub async fn get_json_with_refresh<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        auth_token: Option<&str>,
+    ) -> AppResult<(T, Option<String>)> {
+        let response = self.retry_get(url, auth_token).await?;
+        let new_token = extract_refreshed_token(&response);
+        let body = response.text().await.map_err(|e| {
+            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
+        })?;
+        let parsed = serde_json::from_str::<T>(&body).map_err(|e| {
+            crate::core::error::AppError::Serialization(format!(
+                "JSON 反序列化失败 {}: {}",
+                url, e
+            ))
+        })?;
+        Ok((parsed, new_token))
     }
 
     /// 发送 POST 请求（JSON body）并反序列化 JSON 响应体。

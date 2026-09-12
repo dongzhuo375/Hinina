@@ -37,84 +37,6 @@ pub struct HOJAdapter {
     token: RwLock<Option<String>>,
 }
 
-// ── MD5 散列（内联实现，不引入额外依赖） ──
-
-/// 对输入字符串做 MD5 散列，返回 32 位小写十六进制字符串。
-fn md5_hex(input: &str) -> String {
-    // MD5 常量
-    const S: [u32; 64] = [
-        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
-        5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20,
-        4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
-        6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
-    ];
-    const K: [u32; 64] = [
-        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
-        0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
-        0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
-        0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
-        0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa,
-        0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
-        0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
-        0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
-        0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
-        0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
-        0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05,
-        0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
-        0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039,
-        0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
-        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
-        0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
-    ];
-
-    let msg = input.as_bytes();
-    let original_len_bits = (msg.len() as u64).wrapping_mul(8);
-    let pad_len = if msg.len() % 64 < 56 { 56 - msg.len() % 64 } else { 120 - msg.len() % 64 };
-    let total_len = msg.len() + pad_len + 8;
-    let mut padded = vec![0u8; total_len];
-    padded[..msg.len()].copy_from_slice(msg);
-    padded[msg.len()] = 0x80;
-    padded[total_len - 8..].copy_from_slice(&original_len_bits.to_le_bytes());
-
-    let mut state: [u32; 4] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
-
-    for chunk in padded.chunks(64) {
-        let mut m = [0u32; 16];
-        for (i, word) in chunk.chunks(4).enumerate() {
-            m[i] = u32::from_le_bytes([word[0], word[1], word[2], word[3]]);
-        }
-        let (mut a, mut b, mut c, mut d) = (state[0], state[1], state[2], state[3]);
-        for i in 0..64 {
-            let (f, g) = if i < 16 {
-                ((b & c) | (!b & d), i)
-            } else if i < 32 {
-                ((d & b) | (!d & c), (5 * i + 1) % 16)
-            } else if i < 48 {
-                (b ^ c ^ d, (3 * i + 5) % 16)
-            } else {
-                (c ^ (b | !d), (7 * i) % 16)
-            };
-            let f = f.wrapping_add(a).wrapping_add(K[i]).wrapping_add(m[g]);
-            a = d;
-            d = c;
-            c = b;
-            b = b.wrapping_add(f.rotate_left(S[i]));
-        }
-        state[0] = state[0].wrapping_add(a);
-        state[1] = state[1].wrapping_add(b);
-        state[2] = state[2].wrapping_add(c);
-        state[3] = state[3].wrapping_add(d);
-    }
-
-    let mut hex = String::with_capacity(32);
-    for &word in &state {
-        for &byte in &word.to_le_bytes() {
-            hex.push_str(&format!("{:02x}", byte));
-        }
-    }
-    hex
-}
-
 impl HOJAdapter {
     /// 创建 HOJAdapter。
     ///
@@ -151,6 +73,23 @@ impl HOJAdapter {
         if let Ok(mut t) = self.token.write() {
             *t = None;
         }
+    }
+
+    /// 发送带认证的 GET 请求，自动处理服务端 token 轮换。
+    ///
+    /// HOJ 服务端会在 token 到期前返回 `Refresh-Token: true` 和新 `Authorization` 头。
+    /// 此方法在收到轮换的新 token 时自动更新内部存储，避免后续请求 401。
+    async fn get_json_authed<T: serde::de::DeserializeOwned>(&self, url: &str) -> AppResult<T> {
+        let token = self.get_token();
+        let (data, refreshed) = self
+            .http
+            .get_json_with_refresh::<T>(url, token.as_deref())
+            .await?;
+        if let Some(new_token) = refreshed {
+            debug!("HOJ token 已轮换，更新本地缓存");
+            self.set_token(new_token);
+        }
+        Ok(data)
     }
 
     // ── 工具方法 ──
@@ -191,54 +130,62 @@ impl HOJAdapter {
     }
 
     /// 从 HTML 样例中提取纯文本 input/output 对。
-    /// HOJ 将样例存储为 HTML，`<pre>` 可能带属性（如 `<pre class="input">`）。
+    ///
+    /// HOJ 的 `examples` 字段格式为成对的 `<input>...</input><output>...</output>`，
+    /// 例如 `<input>1\n8\n00100100</input><output>Yes</output>`。
+    /// 每个 `<input>` 与紧随其后的 `<output>` 构成一组样例。
     fn parse_samples(html: &str) -> Vec<Sample> {
         if html.is_empty() {
             return Vec::new();
         }
-        // 提取所有 <pre ...>...</pre> 块内容（支持标签属性）
-        let mut pre_blocks: Vec<String> = Vec::new();
-        let mut remaining = html;
-        while let Some(start) = remaining.find("<pre") {
-            let after_tag = &remaining[start + 4..];
-            // 跳过属性直到 >
-            let Some(close_bracket) = after_tag.find('>') else { break };
-            let after_open = &after_tag[close_bracket + 1..];
-            let Some(end) = after_open.find("</pre>") else { break };
-            let content = &after_open[..end];
-            pre_blocks.push(
-                content
-                    .trim()
-                    .replace("<br>", "\n")
-                    .replace("<br/>", "\n")
-                    .replace("&lt;", "<")
-                    .replace("&gt;", ">")
-                    .replace("&amp;", "&")
-                    .replace("&quot;", "\"")
-                    .replace("&nbsp;", " "),
-            );
-            remaining = &after_open[end + 6..];
-        }
+
+        let inputs = extract_tag_contents(html, "input");
+        let outputs = extract_tag_contents(html, "output");
 
         let mut samples = Vec::new();
-        let mut i = 0;
-        // 偶数为输入，奇数为输出
-        while i + 1 < pre_blocks.len() {
+        for (i, input) in inputs.iter().enumerate() {
+            let output = outputs.get(i).cloned().unwrap_or_default();
             samples.push(Sample {
-                input: pre_blocks[i].clone(),
-                output: pre_blocks[i + 1].clone(),
-            });
-            i += 2;
-        }
-        // 如果只有一个块，作为只有一个样例的输入
-        if pre_blocks.len() == 1 {
-            samples.push(Sample {
-                input: pre_blocks[0].clone(),
-                output: String::new(),
+                input: input.clone(),
+                output,
             });
         }
         samples
     }
+}
+
+/// 提取指定 HTML 标签的内容（支持 `<tag>` 与 `<tag attr="...">` 形式）。
+fn extract_tag_contents(html: &str, tag: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let open_marker = format!("<{}", tag);
+    let close_marker = format!("</{}>", tag);
+    let mut remaining = html;
+
+    while let Some(start) = remaining.find(&open_marker) {
+        let after_tag = &remaining[start + open_marker.len()..];
+        // 跳过标签属性直到 '>'
+        let Some(close_bracket) = after_tag.find('>') else { break };
+        let after_open = &after_tag[close_bracket + 1..];
+        let Some(end) = after_open.find(&close_marker) else { break };
+        let content = &after_open[..end];
+        result.push(unescape_html(content.trim()));
+        remaining = &after_open[end + close_marker.len()..];
+    }
+
+    result
+}
+
+/// 反转义常见的 HTML 实体与 `<br>` 换行标签。
+fn unescape_html(s: &str) -> String {
+    s.replace("<br>", "\n")
+        .replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
 }
 
 #[cfg(test)]
@@ -251,9 +198,11 @@ mod tests;
 impl AuthProvider for HOJAdapter {
     async fn login(&self, username: &str, password: &str) -> AppResult<User> {
         let url = self.api_url("/login");
+        // 注意：HOJ 服务端会对收到的密码自行 MD5 后比对，
+        // 客户端必须发送明文密码（详见 PassportManager.login 的 SecureUtil.md5 逻辑）。
         let body = LoginRequest {
             username: username.to_string(),
-            password: md5_hex(password),
+            password: password.to_string(),
         };
 
         info!(username = username, "HOJ 登录请求");
@@ -276,11 +225,15 @@ impl AuthProvider for HOJAdapter {
             .map(|s| s.to_string())
             .ok_or_else(|| AppError::Auth("HOJ 登录响应未包含 token".into()))?;
 
-        // 解析响应体
-        let api_resp: ApiResponse<UserInfoVO> = response
-            .json()
+        // 解析响应体：先取原始文本便于诊断，再反序列化
+        let raw_body = response
+            .text()
             .await
-            .map_err(|e| AppError::Serialization(format!("HOJ login 响应解析失败: {}", e)))?;
+            .map_err(|e| AppError::Serialization(format!("HOJ login 读取响应体失败: {}", e)))?;
+        let api_resp: ApiResponse<UserInfoVO> = serde_json::from_str(&raw_body).map_err(|e| {
+            warn!(body = raw_body, error = %e, "HOJ login 响应解析失败");
+            AppError::Serialization(format!("HOJ login 响应解析失败: {}", e))
+        })?;
 
         let user_info = api_resp.into_data().map_err(|msg| {
             warn!(error = msg, "HOJ 登录失败");
@@ -343,6 +296,12 @@ impl AuthProvider for HOJAdapter {
             Err(_) => Ok(false),
         }
     }
+
+    fn restore_token(&self, token: &str) {
+        if !token.is_empty() {
+            self.set_token(token.to_string());
+        }
+    }
 }
 
 // ── ContestProvider ──
@@ -351,11 +310,8 @@ impl AuthProvider for HOJAdapter {
 impl ContestProvider for HOJAdapter {
     async fn list_contests(&self) -> AppResult<Vec<Contest>> {
         let url = self.api_url("/get-contest-list?limit=1000");
-        let token = self.get_token();
-
         let api_resp = self
-            .http
-            .get_json::<ApiResponse<types::PageResult<ContestVO>>>(&url, token.as_deref())
+            .get_json_authed::<ApiResponse<types::PageResult<ContestVO>>>(&url)
             .await
             .map_err(|e| AppError::Network(format!("HOJ contest list 请求失败: {}", e)))?;
 
@@ -371,7 +327,7 @@ impl ContestProvider for HOJAdapter {
                 title: c.title,
                 start_time: Self::parse_time(&c.start_time),
                 end_time: Self::parse_time(&c.end_time),
-                description: c.description,
+                description: c.description.unwrap_or_default(),
                 contest_type: c.r#type,
                 status: c.status,
                 auth: c.auth,
@@ -384,11 +340,9 @@ impl ContestProvider for HOJAdapter {
 
     async fn get_contest(&self, contest_id: &str) -> AppResult<Contest> {
         let url = self.api_url(&format!("/get-contest-info?cid={}", contest_id));
-        let token = self.get_token();
 
         let api_resp = self
-            .http
-            .get_json::<ApiResponse<ContestVO>>(&url, token.as_deref())
+            .get_json_authed::<ApiResponse<ContestVO>>(&url)
             .await
             .map_err(|e| AppError::Network(format!("HOJ contest info 请求失败: {}", e)))?;
 
@@ -401,7 +355,7 @@ impl ContestProvider for HOJAdapter {
             title: c.title,
             start_time: Self::parse_time(&c.start_time),
             end_time: Self::parse_time(&c.end_time),
-            description: c.description,
+            description: c.description.unwrap_or_default(),
             contest_type: c.r#type,
             status: c.status,
             auth: c.auth,
@@ -410,11 +364,9 @@ impl ContestProvider for HOJAdapter {
 
     async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
         let url = self.api_url(&format!("/get-contest-problem?cid={}", contest_id));
-        let token = self.get_token();
 
         let api_resp = self
-            .http
-            .get_json::<ApiResponse<Vec<ContestProblemVO>>>(&url, token.as_deref())
+            .get_json_authed::<ApiResponse<Vec<ContestProblemVO>>>(&url)
             .await
             .map_err(|e| AppError::Network(format!("HOJ contest problem list 请求失败: {}", e)))?;
 
@@ -445,11 +397,9 @@ impl ContestProvider for HOJAdapter {
 impl ProblemProvider for HOJAdapter {
     async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<Problem>> {
         let url = self.api_url(&format!("/get-contest-problem?cid={}", contest_id));
-        let token = self.get_token();
 
         let api_resp = self
-            .http
-            .get_json::<ApiResponse<Vec<ContestProblemVO>>>(&url, token.as_deref())
+            .get_json_authed::<ApiResponse<Vec<ContestProblemVO>>>(&url)
             .await
             .map_err(|e| AppError::Network(format!("HOJ contest problem list 请求失败: {}", e)))?;
 
@@ -489,11 +439,9 @@ impl ProblemProvider for HOJAdapter {
             "/get-contest-problem-details?cid={}&displayId={}",
             contest_id, problem_id
         ));
-        let token = self.get_token();
 
         let api_resp = self
-            .http
-            .get_json::<ApiResponse<ProblemInfoVO>>(&url, token.as_deref())
+            .get_json_authed::<ApiResponse<ProblemInfoVO>>(&url)
             .await
             .map_err(|e| AppError::Network(format!("HOJ problem detail 请求失败: {}", e)))?;
 
@@ -501,14 +449,14 @@ impl ProblemProvider for HOJAdapter {
             AppError::Problem(format!("HOJ problem detail 失败: {}", msg))
         })?;
 
-        let samples = Self::parse_samples(&info.problem.examples);
+        let samples = Self::parse_samples(info.problem.examples.as_deref().unwrap_or(""));
 
         let problem = Problem {
             id: info.problem.id.to_string(),
             title: info.problem.title,
-            description: info.problem.description,
-            input_description: info.problem.input,
-            output_description: info.problem.output,
+            description: info.problem.description.unwrap_or_default(),
+            input_description: info.problem.input.unwrap_or_default(),
+            output_description: info.problem.output.unwrap_or_default(),
             samples,
             time_limit: info.problem.time_limit as u32,
             memory_limit: info.problem.memory_limit as u32,
@@ -557,6 +505,19 @@ impl SubmissionProvider for HOJAdapter {
             .send()
             .await
             .map_err(|e| AppError::Network(format!("HOJ submit 请求失败: {}", e)))?;
+
+        // 处理服务端 token 轮换（submit 也是需认证接口，可能触发轮换）
+        if response.headers().get("refresh-token").is_some() {
+            if let Some(new_token) = response
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+            {
+                debug!("HOJ token 已轮换（submit），更新本地缓存");
+                self.set_token(new_token);
+            }
+        }
 
         let api_resp: ApiResponse<JudgeVO> = response
             .json()

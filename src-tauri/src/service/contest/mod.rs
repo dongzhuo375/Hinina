@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use tracing::{debug, info, warn};
 
-use crate::core::entity::contest::{Contest, ContestProblem};
+use crate::core::entity::contest::{Contest, ContestBundle};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, ContestEvent};
 use crate::core::event::event_bus::EventBus;
@@ -125,7 +125,7 @@ impl ContestService {
         &self,
         contest_id: &str,
         password: Option<&str>,
-    ) -> AppResult<(Contest, Vec<ContestProblem>)> {
+    ) -> AppResult<ContestBundle> {
         let oj_type = self.registry.current_oj();
         let provider = self.registry.get_contest(&oj_type)?;
 
@@ -152,6 +152,6 @@ impl ContestService {
         self.select_contest(contest_id)?;
 
         debug!(problem_count = problems.len(), "比赛加载完成");
-        Ok((contest, problems))
+        Ok(ContestBundle { contest, problems })
     }
 }
