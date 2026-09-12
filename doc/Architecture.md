@@ -174,7 +174,7 @@ src/
 ├── router/
 │   └── index.ts                          # Vue Router（/login, /contest）
 ├── views/
-│   ├── LoginView.vue                     # 登录页（居中卡片表单 + session 检查）
+│   ├── LoginView.vue                     # 登录页（左右分栏：登录表单 + 几何 SVG 氛围区/比赛简介/倒计时）
 │   └── ContestView.vue                   # 核心页面（三栏分割：题目列表｜题面｜编辑器+提交）
 ├── components/
 │   ├── layout/
@@ -204,7 +204,7 @@ src/
 ├── bridge/
 │   ├── index.ts                          # ipcInvoke 统一封装
 │   ├── auth.bridge.ts                    # login / logout / get_session
-│   ├── contest.bridge.ts                 # load_configured_contest
+│   ├── contest.bridge.ts                 # load_configured_contest / list_contests（匿名，登录页比赛信息）
 │   ├── problem.bridge.ts                 # get_problem / list_problems
 │   ├── submission.bridge.ts              # submit_code / get_judgement
 │   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile
@@ -219,7 +219,7 @@ src/
 ├── utils/
 │   └── markdown.ts                       # Markdown 渲染（marked）+ 相对图片 URL 改写为 HOJ 绝对地址
 └── styles/
-    └── global.css                        # TailwindCSS + CSS 变量 + 暗色主题
+    └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题
 ```
 
 ---
