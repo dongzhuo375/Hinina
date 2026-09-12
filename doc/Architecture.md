@@ -183,7 +183,7 @@ src/
 │   │   └── CodeEditor.vue                # Monaco Editor 封装（手动 worker 配置）
 │   ├── problem/
 │   │   ├── ProblemSidebar.vue            # 题目列表侧边栏
-│   │   └── ProblemStatement.vue          # 题面展示（描述/输入/输出/样例 Tab）
+│   │   └── ProblemStatement.vue          # 题面展示（Markdown 渲染 + 相对图片 URL 改写）
 │   ├── submission/
 │   │   └── SubmissionPanel.vue           # 提交记录列表 + 评测状态 Badge
 │   └── common/
@@ -216,6 +216,8 @@ src/
 │   ├── submission.ts                     # JudgementStatus + JudgementResult
 │   ├── workspace.ts                      # Workspace 实体
 │   └── config.ts                         # AppConfig 及其子配置
+├── utils/
+│   └── markdown.ts                       # Markdown 渲染（marked）+ 相对图片 URL 改写为 HOJ 绝对地址
 └── styles/
     └── global.css                        # TailwindCSS + CSS 变量 + 暗色主题
 ```

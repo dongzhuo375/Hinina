@@ -5,12 +5,12 @@
 
 ## 核心类型/函数
 - `pub mod error` — 认证错误类型模块声明
-- **`Session`** — 本地会话记录结构体（`username`, `token`, `oj_type`），实现 `Serialize + Deserialize`
+- **`Session`** — 本地会话记录结构体（`user_id`, `username`, `token`, `oj_type`），实现 `Serialize + Deserialize`
 - **`AuthService`** — 认证服务
   - `fn new(registry, storage, event_bus) -> Self` — 创建实例
   - `async fn login(&self, username, password) -> AppResult<User>` — 调用 AuthProvider 登录 → 持久化 session → 发布 `AuthEvent::LoginSuccess`
   - `async fn logout(&self) -> AppResult<()>` — 远端登出（非致命）→ 删除本地会话文件 → 发布 `AuthEvent::Logout`
-  - `fn get_session(&self) -> Option<Session>` — 从本地文件恢复会话；文件不存在或 JSON 解析失败返回 `None`
+  - `fn get_session(&self) -> Option<Session>` — 从本地文件恢复会话；恢复成功时将 token 回注到 Provider（`AuthProvider::restore_token`），保证重启后认证请求仍携带 Authorization 头；文件不存在或 JSON 解析失败返回 `None`
   - `async fn validate_session(&self) -> bool` — 本地恢复 session → 远端校验；会话过期时发布 `AuthEvent::SessionExpired`
 - **字段**：`registry: Arc<dyn ProviderRegistry>`, `storage: Arc<Storage>`, `event_bus: Arc<EventBus>`
 - 常量：`SESSIONS_DIR: &str = "sessions"`
@@ -30,5 +30,5 @@
 ## 逻辑流程
 - **login**：调用 `ProviderRegistry::get_auth()` → `AuthProvider::login()` → 本地持久化 session JSON → 发布 `LoginSuccess` 事件
 - **logout**：尝试远端 `logout()`（失败仅警告）→ 删除 `sessions/{oj_type}.json` → 发布 `Logout` 事件
-- **get_session**：读取 `sessions/{oj_type}.json` 反序列化为 `Session`；文件不存在或损坏返回 `None`
+- **get_session**：读取 `sessions/{oj_type}.json` 反序列化为 `Session`；恢复成功后调用 `ProviderRegistry::get_auth()` 获取 Provider 并回注 token；文件不存在或损坏返回 `None`
 - **validate_session**：先 `get_session()` → 无本地会话返回 `false`；调用远端 `validate_session()` → 过期时发布 `SessionExpired`
