@@ -20,6 +20,9 @@ const contest = ref<Contest | null>(null)
 const baseUrl = ref('')
 const briefVisible = ref(false)
 
+/// 服务器连接状态：idle / connecting / connected / failed / unconfigured
+const connState = ref<'idle' | 'connecting' | 'connected' | 'failed' | 'unconfigured'>('idle')
+
 /// 当前时间戳（每秒刷新，驱动倒计时）
 const now = ref(Math.floor(Date.now() / 1000))
 let timer: ReturnType<typeof setInterval> | null = null
@@ -92,17 +95,31 @@ const renderedBrief = computed(() =>
   renderMarkdown(contest.value?.description ?? '', baseUrl.value),
 )
 
-/// 加载比赛信息（匿名 list_contests + 配置的 contestId 筛选）
+/// 加载比赛信息（匿名 list_contests + 配置的 contestId 筛选）。
+/// 同时根据请求结果驱动左下角的服务器连接状态。
 async function loadContestBrief() {
+  connState.value = 'connecting'
+  let config
   try {
-    const config = await getConfig()
-    baseUrl.value = config.oj.hojUrl
-    const contestId = config.oj.contestId
-    if (!contestId) return
+    config = await getConfig()
+  } catch {
+    connState.value = 'failed'
+    return
+  }
+
+  baseUrl.value = config.oj.hojUrl
+  const contestId = config.oj.contestId
+  if (!contestId) {
+    connState.value = 'unconfigured'
+    return
+  }
+
+  try {
     const contests = await listContests()
     contest.value = contests.find((c) => c.id === String(contestId)) ?? null
+    connState.value = 'connected'
   } catch {
-    // 无网络或未配置时保持占位，不影响登录
+    connState.value = 'failed'
   }
 }
 
@@ -241,10 +258,25 @@ onUnmounted(() => {
         <div class="flex flex-col gap-2 border-t border-[var(--border-color)] pt-4">
           <div class="flex items-center justify-between text-[11px] text-[var(--text-secondary)]">
             <div class="flex items-center gap-1.5">
-              <span class="h-2 w-2 rounded-full" :class="contest ? 'bg-[#22c55e]' : 'bg-[var(--text-muted)]'"></span>
-              <span class="font-medium">{{ contest ? '已连接比赛服务器' : '比赛服务器待配置' }}</span>
+              <span
+                class="h-2 w-2 rounded-full"
+                :class="{
+                  'bg-[#22c55e]': connState === 'connected',
+                  'bg-[#f59e0b] animate-pulse': connState === 'connecting',
+                  'bg-[#ef4444]': connState === 'failed',
+                  'bg-[var(--text-muted)]': connState === 'unconfigured' || connState === 'idle',
+                }"
+              ></span>
+              <span class="font-medium">
+                {{
+                  connState === 'connected' ? '已连接比赛服务器'
+                  : connState === 'connecting' ? '正在连接服务器…'
+                  : connState === 'failed' ? '服务器连接失败'
+                  : '比赛服务器待配置'
+                }}
+              </span>
             </div>
-            <span class="font-mono text-[10px]" :class="contest ? 'text-[#22c55e]' : 'text-[var(--text-muted)]'">Hinina v0.1.0</span>
+            <span class="font-mono text-[10px] text-[var(--text-muted)]">Hinina v0.1.0</span>
           </div>
         </div>
       </section>
