@@ -81,11 +81,11 @@ impl HOJAdapter {
     /// 此方法在收到轮换的新 token 时自动更新内部存储，避免后续请求 401。
     async fn get_json_authed<T: serde::de::DeserializeOwned>(&self, url: &str) -> AppResult<T> {
         let token = self.get_token();
-        let (data, refreshed) = self
+        let (data, headers) = self
             .http
-            .get_json_with_refresh::<T>(url, token.as_deref())
+            .get_json_with_headers::<T>(url, token.as_deref())
             .await?;
-        if let Some(new_token) = refreshed {
+        if let Some(new_token) = extract_refreshed_token(&headers) {
             debug!("HOJ token 已轮换，更新本地缓存");
             self.set_token(new_token);
         }
@@ -151,6 +151,22 @@ impl HOJAdapter {
             });
         }
         samples
+    }
+}
+
+/// 从响应头检测 HOJ 服务端的 token 轮换，返回新 token（未轮换返回 `None`）。
+///
+/// 这是 HOJ 私有的协议语义：服务端在 token 到期前于响应头附加
+/// `Refresh-Token: true` 和新的 `Authorization` 头。该约定只属于 HOJ Adapter，
+/// 不应上移到 OJ 无关的 infra 层。
+fn extract_refreshed_token(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    if headers.contains_key("refresh-token") {
+        headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    } else {
+        None
     }
 }
 
@@ -496,13 +512,13 @@ impl SubmissionProvider for HOJAdapter {
 
         info!(contest_id = contest_id, problem_id = problem_id, language = language, "HOJ 提交代码");
 
-        // 使用带 token 轮换检测的 POST，避免内联重复逻辑
-        let (api_resp, refreshed) = self
+        // 使用返回响应头的 POST，检测 HOJ 私有 token 轮换语义
+        let (api_resp, headers) = self
             .http
-            .post_json_with_refresh::<ApiResponse<JudgeVO>, _>(&url, &body, Some(&token))
+            .post_json_with_headers::<ApiResponse<JudgeVO>, _>(&url, &body, Some(&token))
             .await
             .map_err(|e| AppError::Submission(format!("HOJ submit 请求失败: {}", e)))?;
-        if let Some(new_token) = refreshed {
+        if let Some(new_token) = extract_refreshed_token(&headers) {
             debug!("HOJ token 已轮换（submit），更新本地缓存");
             self.set_token(new_token);
         }

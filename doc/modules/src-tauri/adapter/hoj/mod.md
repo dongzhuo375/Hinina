@@ -9,11 +9,12 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
 - `parse_time(s)` — ISO 时间 → Unix 秒级时间戳（纯 std）
 - `parse_samples(html)` — HTML `<input>/<output>` 样例 → `Vec<Sample>`（成对匹配）
 - `extract_tag_contents(html, tag)` / `unescape_html(s)` — HTML 标签提取与实体反转义
-- `get_json_authed(url)` — 带认证 GET，自动处理服务端 token 轮换（`Refresh-Token` 头）
+- `extract_refreshed_token(headers)` — HOJ 私有协议：响应头存在 `refresh-token` 时提取新 `authorization` 头作为轮换 token
+- `get_json_authed(url)` — 带认证 GET，经 `HttpClient::get_json_with_headers` 取响应头后自动处理 token 轮换
 
 ## 关键实现约定
 - **登录密码**：HOJ 服务端对收到的密码自行 `SecureUtil.md5()` 后比对，客户端发送**明文密码**（不自行 MD5）。
-- **token 轮换**：HOJ 服务端在 token 到期前返回 `Refresh-Token: true` + 新 `Authorization` 头，`get_json_authed` 会自动更新本地 token，避免后续请求 401。
+- **token 轮换**：HOJ 服务端在 token 到期前返回 `Refresh-Token: true` + 新 `Authorization` 头。轮换语义为 HOJ 私有协议，由本模块的 `extract_refreshed_token()` 解析（infra 层仅透传原始响应头）；`get_json_authed` 与 submit 路径在检测到轮换时自动更新本地 token，避免后续请求 401。
 - **token 回注**：`restore_token(token)` 供 `AuthService::get_session()` 在应用重启后回注会话 token。
 
 ## 直接依赖
