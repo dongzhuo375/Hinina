@@ -22,6 +22,18 @@ pub struct Contest {
     /// 权限：0=公开，1=私有（需密码），2=保护
     #[serde(default)]
     pub auth: i32,
+    /// 榜单显示名规则：`username` / `realname` / `nickname`（为空时前端回退 username）
+    #[serde(default)]
+    pub rank_show_name: String,
+    /// 是否封榜（封榜期间榜单只显示尝试次数，不显示通过状态）
+    #[serde(default)]
+    pub seal_rank: bool,
+    /// 封榜起始时间（UTC 秒级时间戳）；未封榜或未设置时为 `None`
+    #[serde(default)]
+    pub seal_rank_time: Option<i64>,
+    /// 是否允许赛后提交（决定榜单查询的 `containsEnd` 是否真正生效）
+    #[serde(default)]
+    pub allow_end_submit: bool,
 }
 
 /// 比赛题目摘要（问题列表用）
@@ -45,6 +57,9 @@ pub struct ContestProblem {
     /// 总提交数
     #[serde(default)]
     pub total: i64,
+    /// 气球颜色（如 "#FF0000"）；驱动题目卡片字母徽章与榜单列头配色，可能为空
+    #[serde(default)]
+    pub color: String,
 }
 
 /// 配置比赛加载结果：比赛详情 + 题目列表。

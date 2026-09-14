@@ -124,6 +124,7 @@ impl AppContext {
         let problem = Arc::new(ProblemService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&event_bus),
+            Arc::clone(&storage),
         ));
         let submission = Arc::new(SubmissionService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,

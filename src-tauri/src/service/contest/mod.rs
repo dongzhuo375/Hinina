@@ -9,6 +9,7 @@ use std::time::Instant;
 use tracing::{debug, info, warn};
 
 use crate::core::entity::contest::{Contest, ContestBundle};
+use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, ContestEvent};
 use crate::core::event::event_bus::EventBus;
@@ -115,6 +116,35 @@ impl ContestService {
 
         // 使用 TTL=0 强制刷新
         self.list_contests(0).await
+    }
+
+    /// 获取比赛排行榜（分页）。
+    ///
+    /// **不做缓存**：HOJ 内榜每次实时计算（见 `doc/HOJ/HOJ-Contest-Rank-API.md` §4），
+    /// 缓存反而会给出过期名次；轮询节奏由前端控制（≥10s 且加抖动错峰、后台暂停）。
+    pub async fn get_rank(
+        &self,
+        contest_id: &str,
+        query: &RankQuery,
+    ) -> AppResult<ContestRankPage> {
+        let oj_type = self.registry.current_oj();
+        let provider = self.registry.get_contest(&oj_type)?;
+
+        let page = provider
+            .get_contest_rank(contest_id, query)
+            .await
+            .map_err(|e| {
+                warn!(contest_id = contest_id, error = %e, "获取比赛榜单失败");
+                AppError::Contest(format!("获取比赛榜单失败: {}", e))
+            })?;
+
+        debug!(
+            contest_id = contest_id,
+            rows = page.records.len(),
+            total = page.total,
+            "比赛榜单已获取"
+        );
+        Ok(page)
     }
 
     /// 加载指定比赛及其题目列表，并自动选中。

@@ -5,6 +5,7 @@
 pub mod types;
 pub mod error;
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -12,6 +13,7 @@ use tracing::{debug, info, warn};
 
 use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::problem::{Problem, Sample};
+use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::entity::submission::{JudgementResult, JudgementStatus};
 use crate::core::entity::user::User;
 use crate::core::error::{AppError, AppResult};
@@ -24,8 +26,8 @@ use crate::core::provider::submission::SubmissionProvider;
 use crate::infra::http::HttpClient;
 
 use self::types::{
-    map_status, ApiResponse, ContestProblemVO, ContestVO, JudgeVO, LoginRequest,
-    ProblemInfoVO, SubmitRequest, UserInfoVO,
+    map_status, ApiResponse, ContestProblemVO, ContestRankDTO, ContestRankVO, ContestVO, JudgeVO,
+    LoginRequest, ProblemInfoVO, SubmitRequest, UserInfoVO, UserProblemStatusDTO,
 };
 
 /// HOJ OJ 适配器。
@@ -61,6 +63,16 @@ impl HOJAdapter {
         format!("{}/api{}", self.base_url, path)
     }
 
+    /// 解析比赛 ID（HOJ 的 cid 是数字，Hinina 内部统一用字符串传递）。
+    ///
+    /// 非法 ID 必须报错而不是回退 0：HOJ 以 `cid = 0` 表示「非比赛场景」，
+    /// 静默回退会让比赛中的提交落到练习题库 —— 不计入榜单，选手在赛场上无从察觉。
+    fn parse_cid(contest_id: &str) -> AppResult<i64> {
+        contest_id
+            .parse::<i64>()
+            .map_err(|_| AppError::Contest(format!("比赛 ID 非法: {}", contest_id)))
+    }
+
     /// 获取当前存储的 token。
     fn get_token(&self) -> Option<String> {
         self.token.read().ok()?.clone()
@@ -90,7 +102,31 @@ impl HOJAdapter {
             .http
             .get_json_with_headers::<T>(url, token.as_deref())
             .await?;
-        if let Some(new_token) = extract_refreshed_token(&headers) {
+        self.handle_token_rotation(&headers);
+        Ok(data)
+    }
+
+    /// 发送带认证的 POST 请求（JSON body），同样处理 token 轮换。
+    ///
+    /// 榜单轮询、题目状态等高频 POST 场景必须走此方法：
+    /// 若漏掉轮换处理，token 到期后会出现周期性 401。
+    async fn post_json_authed<T: serde::de::DeserializeOwned, B: serde::Serialize>(
+        &self,
+        url: &str,
+        body: &B,
+    ) -> AppResult<T> {
+        let token = self.get_token();
+        let (data, headers) = self
+            .http
+            .post_json_with_headers::<T, B>(url, body, token.as_deref())
+            .await?;
+        self.handle_token_rotation(&headers);
+        Ok(data)
+    }
+
+    /// 解析响应头中的 HOJ 私有轮换协议：更新内存 token 并发布事件供 AuthService 回写磁盘会话。
+    fn handle_token_rotation(&self, headers: &reqwest::header::HeaderMap) {
+        if let Some(new_token) = extract_refreshed_token(headers) {
             debug!("HOJ token 已轮换，更新本地缓存并发布事件");
             self.set_token(new_token.clone());
             // 通知 AuthService 将新 token 回写磁盘会话，避免重启后回注过期凭证
@@ -98,10 +134,32 @@ impl HOJAdapter {
                 token: new_token,
             }));
         }
-        Ok(data)
     }
 
     // ── 工具方法 ──
+
+    /// ContestVO → 领域实体（比赛列表与比赛详情共用，避免两处映射漂移）。
+    fn into_contest(c: ContestVO) -> Contest {
+        Contest {
+            id: c.id.to_string(),
+            title: c.title,
+            start_time: Self::parse_time(&c.start_time),
+            end_time: Self::parse_time(&c.end_time),
+            description: c.description.unwrap_or_default(),
+            contest_type: c.r#type,
+            status: c.status,
+            auth: c.auth,
+            rank_show_name: c.rank_show_name.unwrap_or_default(),
+            seal_rank: c.seal_rank,
+            // 封榜时间为空串或无法解析时视为未设置
+            seal_rank_time: c
+                .seal_rank_time
+                .filter(|s| !s.is_empty())
+                .map(|s| Self::parse_time(&s))
+                .filter(|t| *t > 0),
+            allow_end_submit: c.allow_end_submit,
+        }
+    }
 
     /// 解析 ISO 时间字符串为秒级 UTC 时间戳。
     /// 格式："2024-01-01T08:00:00" 或 "2024-01-01 08:00:00"
@@ -347,16 +405,7 @@ impl ContestProvider for HOJAdapter {
         let contests: Vec<Contest> = page
             .records
             .into_iter()
-            .map(|c| Contest {
-                id: c.id.to_string(),
-                title: c.title,
-                start_time: Self::parse_time(&c.start_time),
-                end_time: Self::parse_time(&c.end_time),
-                description: c.description.unwrap_or_default(),
-                contest_type: c.r#type,
-                status: c.status,
-                auth: c.auth,
-            })
+            .map(Self::into_contest)
             .collect();
 
         debug!(count = contests.len(), "HOJ 比赛列表已获取");
@@ -375,16 +424,7 @@ impl ContestProvider for HOJAdapter {
             AppError::Contest(format!("HOJ contest info 失败: {}", msg))
         })?;
 
-        Ok(Contest {
-            id: c.id.to_string(),
-            title: c.title,
-            start_time: Self::parse_time(&c.start_time),
-            end_time: Self::parse_time(&c.end_time),
-            description: c.description.unwrap_or_default(),
-            contest_type: c.r#type,
-            status: c.status,
-            auth: c.auth,
-        })
+        Ok(Self::into_contest(c))
     }
 
     async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
@@ -409,10 +449,56 @@ impl ContestProvider for HOJAdapter {
                 display_title: p.display_title,
                 ac: p.ac,
                 total: p.total,
+                color: p.color,
             })
             .collect();
 
         Ok(problems)
+    }
+
+    async fn get_contest_rank(
+        &self,
+        contest_id: &str,
+        query: &RankQuery,
+    ) -> AppResult<ContestRankPage> {
+        let cid: i64 = Self::parse_cid(contest_id)?;
+
+        let url = self.api_url("/get-contest-rank");
+        let body = ContestRankDTO {
+            cid,
+            current_page: query.current_page.max(1),
+            // 榜单为全量计算后分页，limit 越大单次越慢；上限做防御性收敛
+            limit: query.limit.clamp(1, 200),
+            // 非比赛创建者/超管传 true 会被服务端忽略，故恒为 false
+            force_refresh: false,
+            remove_star: query.remove_star,
+            keyword: query.keyword.clone().filter(|k| !k.trim().is_empty()),
+            contains_end: query.contains_end,
+            concerned_list: Vec::new(),
+            external_cid_list: None,
+        };
+
+        let api_resp = self
+            .post_json_authed::<ApiResponse<types::PageResult<ContestRankVO>>, _>(&url, &body)
+            .await
+            .map_err(|e| AppError::Network(format!("HOJ contest rank 请求失败: {}", e)))?;
+
+        let page = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Contest(format!("HOJ contest rank 失败: {}", msg)))?;
+
+        // 注意：records 可能含服务端前置的「当前用户/关注用户」副本，
+        // 去重与真实参赛人数推导由前端按 uid 处理（见 ContestRankPage 文档注释）
+        let records = page.records.into_iter().map(ContestRankVO::into_rank_row).collect();
+
+        debug!(contest_id = contest_id, "HOJ 比赛榜单已获取");
+        Ok(ContestRankPage {
+            records,
+            total: page.total,
+            size: page.size,
+            current: page.current,
+            pages: page.pages,
+        })
     }
 }
 
@@ -490,6 +576,43 @@ impl ProblemProvider for HOJAdapter {
         debug!(contest_id = contest_id, problem_id = problem_id, title = problem.title, "HOJ 题目详情已获取");
         Ok(problem)
     }
+
+    async fn get_user_problem_status(
+        &self,
+        contest_id: &str,
+        problem_ids: &[String],
+    ) -> AppResult<HashMap<String, i32>> {
+        // 空列表直接返回，避免向服务端发无意义请求
+        if problem_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let url = self.api_url("/get-user-problem-status");
+        let body = UserProblemStatusDTO {
+            pid_list: problem_ids.to_vec(),
+            is_contest_problem_list: false,
+            cid: Self::parse_cid(contest_id)?,
+            gid: None,
+            contains_end: false,
+        };
+
+        let api_resp = self
+            .post_json_authed::<ApiResponse<HashMap<String, serde_json::Value>>, _>(&url, &body)
+            .await
+            .map_err(|e| AppError::Network(format!("HOJ user problem status 请求失败: {}", e)))?;
+
+        let raw = api_resp.into_data().map_err(|msg| {
+            AppError::Problem(format!("HOJ user problem status 失败: {}", msg))
+        })?;
+
+        let statuses = raw
+            .into_iter()
+            .map(|(pid, value)| (pid, types::coerce_problem_status(&value)))
+            .collect();
+
+        debug!(contest_id = contest_id, "HOJ 用户题目状态已获取");
+        Ok(statuses)
+    }
 }
 
 // ── SubmissionProvider ──
@@ -508,7 +631,7 @@ impl SubmissionProvider for HOJAdapter {
             .get_token()
             .ok_or_else(|| AppError::Auth("请先登录".into()))?;
 
-        let cid: i64 = contest_id.parse().unwrap_or(0);
+        let cid: i64 = Self::parse_cid(contest_id)?;
         let body = SubmitRequest {
             pid: problem_id.to_string(),
             language: language.to_string(),

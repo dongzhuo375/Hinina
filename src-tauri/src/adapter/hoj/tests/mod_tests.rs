@@ -129,3 +129,26 @@ fn parse_samples_trim_whitespace() {
     assert_eq!(samples[0].input, "hello");
     assert_eq!(samples[0].output, "world");
 }
+
+// ── parse_cid ──
+
+#[test]
+fn parse_cid_accepts_numeric_id() {
+    assert_eq!(HOJAdapter::parse_cid("123").unwrap(), 123);
+}
+
+#[test]
+fn parse_cid_rejects_invalid_id_instead_of_falling_back_to_zero() {
+    // HOJ 以 cid = 0 表示「非比赛场景」：静默回退会让比赛中的提交落到练习题库，
+    // 不计入榜单，而选手在赛场上完全无从察觉 —— 必须显式报错
+    for invalid in ["", "abc", "12.5", "12345678901234567890123456789"] {
+        let err = HOJAdapter::parse_cid(invalid)
+            .expect_err(&format!("非法比赛 ID {:?} 应报错", invalid));
+        assert!(
+            matches!(err, AppError::Contest(_)),
+            "非法比赛 ID {:?} 应报 Contest 错误，实际 {:?}",
+            invalid,
+            err
+        );
+    }
+}
