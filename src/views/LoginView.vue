@@ -99,45 +99,6 @@ const canEnter = computed(() => auth.isLoggedIn && hasContestStarted(contestPhas
 /// 比赛信息是否仍在加载（用于区分 `none` 阶段的"加载中"与"加载失败"）
 const isBriefLoading = computed(() => connState.value === 'idle' || connState.value === 'connecting')
 
-/// 已登录状态主标题
-const sessionTitle = computed(() => {
-  switch (contestPhase.value) {
-    case 'upcoming':
-      return '已就绪，等待开赛'
-    case 'running':
-      return '比赛进行中'
-    case 'ended':
-      return '比赛已结束'
-    default:
-      return isBriefLoading.value ? '正在同步赛程…' : '登录成功'
-  }
-})
-
-/// 已登录状态说明文案
-const sessionDesc = computed(() => {
-  switch (contestPhase.value) {
-    case 'upcoming':
-      return '参赛账号已通过验证，比赛开始后客户端将自动进入赛场，请保持窗口开启'
-    case 'running':
-      return '正在进入赛场…'
-    case 'ended':
-      return '本场比赛已结束，可进入赛场查看题目与提交记录'
-    default:
-      if (isBriefLoading.value) return '正在获取比赛信息，随后将按赛程自动进入赛场'
-      return connState.value === 'unconfigured'
-        ? '客户端尚未配置比赛 ID，请完成配置后重新加载'
-        : '未能获取比赛信息，请重新加载后确认赛程，或直接进入赛场'
-  }
-})
-
-/// 左侧等待卡片的紧凑倒计时文本（超过一天时附带天数）
-const countdownText = computed(() => {
-  const { days, hours, mins, secs } = countdown.value
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const hms = `${pad(hours)}:${pad(mins)}:${pad(secs)}`
-  return days > 0 ? `${days} 天 ${hms}` : hms
-})
-
 /// 进入比赛页面（导航统一走命名路由，避免路径硬编码）
 function enterContest() {
   void router.replace({ name: 'Contest' })
@@ -198,19 +159,14 @@ async function handleSwitchAccount() {
 let precheckTimer: ReturnType<typeof setTimeout> | null = null
 /// 本轮排程是否已因 unknown 重试过（只重试一次，避免重试风暴）
 let precheckRetried = false
-/// 最近一次预检结果（展示用，让选手知道客户端在持续校验会话）
-const lastPrecheckText = ref('')
 
-/// 重新排程：仅"已登录 + 比赛未开始"时预检，其余状态取消并清空提示
+/// 重新排程：仅"已登录 + 比赛未开始"时预检，其余状态取消
 function reschedulePrecheck() {
   clearPrecheck()
   precheckRetried = false
 
   const startSecs = brief.value?.startTime
-  if (!auth.isLoggedIn || contestPhase.value !== 'upcoming' || !startSecs) {
-    lastPrecheckText.value = ''
-    return
-  }
+  if (!auth.isLoggedIn || contestPhase.value !== 'upcoming' || !startSecs) return
   const plan = planNextPrecheck(Date.now(), startSecs * 1000)
   if (!plan) return
   precheckTimer = setTimeout(() => {
@@ -224,18 +180,12 @@ async function runPrecheck(reason: PrecheckReason) {
   precheckTimer = null
   const validity = await auth.validateSession()
 
-  if (validity === 'valid') {
-    const at = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    lastPrecheckText.value = `会话校验通过 · ${at}`
-  } else if (validity === 'unknown') {
-    lastPrecheckText.value = '会话校验未完成（网络异常）'
-    if (!precheckRetried) {
-      precheckRetried = true
-      precheckTimer = setTimeout(() => {
-        void runPrecheck(reason)
-      }, planRetryDelayMs())
-      return
-    }
+  if (validity === 'unknown' && !precheckRetried) {
+    precheckRetried = true
+    precheckTimer = setTimeout(() => {
+      void runPrecheck(reason)
+    }, planRetryDelayMs())
+    return
   }
 
   // 周期复检继续排程；窗口内/立即预检为一次性，之后交给进场流程与全局 401 兜底
@@ -286,93 +236,74 @@ onUnmounted(() => {
           <span class="text-lg font-bold tracking-tight text-[var(--text-primary)]">Hinina</span>
         </div>
 
-        <!-- ══ 已登录：会话状态 + 等待开赛 / 进入赛场 ══ -->
-        <div v-if="auth.isLoggedIn" class="flex-1">
-          <div class="mb-3 inline-flex items-center gap-1.5 rounded-full border border-[#dcfce7] bg-[#f0fdf4] px-2.5 py-1 text-[11px] font-medium text-[#16a34a]">
-            <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"></span>
-            会话已建立 · Hinina OJ
-          </div>
-          <h1 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">{{ sessionTitle }}</h1>
-          <p class="mt-2.5 text-xs leading-relaxed text-[var(--text-secondary)]">{{ sessionDesc }}</p>
+        <!-- ══ 已登录：欢迎 + 用户名（居中），赛程/倒计时/阶段说明由右侧氛围区承担 ══ -->
+        <div v-if="auth.isLoggedIn" class="relative flex flex-1 flex-col items-center justify-center text-center">
+          <!-- 背景光晕：给居中的身份块一点纵深，不承载信息 -->
+          <div class="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(124,92,255,0.10),transparent_68%)]"></div>
 
-          <!-- 账号信息卡 -->
-          <div class="mt-8 rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)]/60 p-4">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold tracking-wide text-[var(--text-secondary)]">参赛账号 / Seat UID</span>
-              <span class="rounded bg-[#f5f3ff] px-1.5 py-0.5 font-mono text-[10px] text-[#6845f5]">已验证</span>
-            </div>
-            <p class="mt-2 truncate font-mono text-sm font-medium text-[var(--text-primary)]">{{ auth.username }}</p>
+          <h1 class="text-4xl font-extrabold tracking-tight text-[var(--text-primary)]">欢迎</h1>
 
-            <!-- 等待开赛时展示紧凑倒计时与最近一次会话预检结果 -->
-            <div v-if="contestPhase === 'upcoming'" class="mt-4 border-t border-[var(--border-color)] pt-3">
-              <div class="flex items-center justify-between">
-                <span class="text-[11px] font-medium tracking-wide text-[var(--text-muted)]">距离开赛</span>
-                <span class="font-mono text-sm font-semibold tabular-nums text-[#6845f5]">{{ countdownText }}</span>
-              </div>
-              <p v-if="lastPrecheckText" class="mt-2 text-right text-[10px] text-[var(--text-muted)]">
-                {{ lastPrecheckText }}
-              </p>
-            </div>
-          </div>
+          <!-- 用户名徽章：沿用全局 pill 样式，过长时截断并以 title 显示全名 -->
+          <span
+            class="mt-4 inline-flex max-w-full items-center rounded-full border border-[#ede9fe] bg-[#f5f3ff] px-4 py-1.5 font-mono text-sm font-semibold text-[#6845f5]"
+            :title="auth.username ?? undefined"
+          >
+            <span class="truncate">{{ auth.username }}</span>
+          </span>
 
-          <!-- 操作区 -->
-          <div class="mt-6 space-y-3">
-            <!-- 比赛已开始：自动跳转，同时保留手动入口 -->
+          <!-- 渐变细线：分隔身份与操作 -->
+          <div class="mt-9 h-px w-32 bg-gradient-to-r from-transparent via-[#7c5cff]/45 to-transparent"></div>
+
+          <!-- 操作区：只保留必要动作，居中文字链，不与右侧信息重复 -->
+          <div class="mt-7 flex flex-col items-center gap-3.5">
+            <!-- 比赛已开始时会自动跳转，此处仅作为自动导航失败时的手动入口 -->
             <button
               v-if="canEnter"
               type="button"
-              class="group flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#6845f5] to-[#7c5cff] text-sm font-semibold text-white shadow-[0_0_25px_-5px_rgba(124,92,255,0.4)] transition-all hover:from-[#5631e0] hover:to-[#6845f5] active:scale-[0.99]"
+              class="group inline-flex items-center gap-1.5 text-sm font-semibold text-[#6845f5] transition-colors hover:text-[#5631e0]"
               @click="enterContest"
             >
-              <span class="tracking-wide">进入赛场</span>
-              <svg class="h-4 w-4 stroke-current stroke-2 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24">
+              进入赛场
+              <svg class="h-3.5 w-3.5 stroke-current stroke-2 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24">
                 <path d="M5 12h14M12 5l7 7-7 7"></path>
               </svg>
             </button>
 
-            <!-- 比赛信息缺失：加载中占位 / 失败后重试 + 手动兜底入口 -->
-            <template v-else-if="contestPhase === 'none'">
-              <p v-if="isBriefLoading" class="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border-color)] py-3.5 text-xs text-[var(--text-secondary)]">
-                <span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#7c5cff]/30 border-t-[#7c5cff]"></span>
-                正在同步比赛信息…
-              </p>
-              <template v-else>
-                <button
-                  type="button"
-                  class="flex h-12 w-full items-center justify-center rounded-xl border border-[var(--border-color)] text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[#7c5cff] hover:text-[#6845f5]"
-                  @click="reloadBrief"
-                >
-                  重新加载比赛信息
-                </button>
-                <button
-                  type="button"
-                  class="w-full text-center text-xs font-medium text-[var(--text-muted)] transition-colors hover:text-[#6845f5]"
-                  @click="enterContest"
-                >
-                  直接进入赛场
-                </button>
-              </template>
+            <!-- 比赛信息拉取失败：重试 + 手动兜底入口（加载中由底部连接状态提示） -->
+            <template v-else-if="contestPhase === 'none' && !isBriefLoading">
+              <button
+                type="button"
+                class="text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[#6845f5]"
+                @click="reloadBrief"
+              >
+                重新加载比赛信息
+              </button>
+              <button
+                type="button"
+                class="text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[#6845f5]"
+                @click="enterContest"
+              >
+                直接进入赛场
+              </button>
             </template>
 
-            <!-- 比赛未开始：留在登录页等待开赛 -->
-            <p v-else class="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border-color)] py-3.5 text-xs text-[var(--text-secondary)]">
-              <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-[#7c5cff]"></span>
-              等待比赛开始，开赛后自动进入赛场
-            </p>
-
-            <!-- 切换账号 -->
             <button
               type="button"
-              class="flex h-10 w-full items-center justify-center text-xs font-medium text-[var(--text-muted)] transition-colors hover:text-[var(--color-error)] disabled:cursor-not-allowed disabled:opacity-50"
+              class="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] transition-colors hover:text-[var(--color-error)] disabled:cursor-not-allowed disabled:opacity-50"
               :disabled="isSigningOut"
               @click="handleSwitchAccount"
             >
-              {{ isSigningOut ? '正在登出…' : '切换账号 / 登出' }}
+              <svg class="h-3.5 w-3.5 stroke-current stroke-2" fill="none" viewBox="0 0 24 24">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <path d="M16 17l5-5-5-5"></path>
+                <path d="M21 12H9"></path>
+              </svg>
+              {{ isSigningOut ? '正在登出…' : '切换账号' }}
             </button>
           </div>
 
-          <!-- 登出异常提示 -->
-          <p v-if="auth.error" class="mt-4 text-xs text-[var(--color-error)]">{{ auth.error }}</p>
+          <!-- 会话失效 / 登出异常提示 -->
+          <p v-if="auth.error" class="mt-7 max-w-[280px] text-xs leading-relaxed text-[var(--color-error)]">{{ auth.error }}</p>
         </div>
 
         <!-- ══ 未登录：登录表单 ══ -->
