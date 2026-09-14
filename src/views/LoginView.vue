@@ -27,6 +27,9 @@ const connState = computed(() => contestStore.briefState)
 /// 简报加载失败原因（展示在左下角连接状态下方，便于现场排障）
 const briefError = computed(() => contestStore.briefError)
 
+/// 版本号构建期注入（vite define ← package.json），与 StatusBar 同源，避免写死后漂移
+const version = __APP_VERSION__
+
 /// 当前时间戳（每秒刷新，驱动倒计时）
 const now = ref(Math.floor(Date.now() / 1000))
 let timer: ReturnType<typeof setInterval> | null = null
@@ -413,7 +416,7 @@ onUnmounted(() => {
                 }}
               </span>
             </div>
-            <span class="font-mono text-[10px] text-[var(--text-muted)]">Hinina v0.1.0</span>
+            <span class="font-mono text-[10px] text-[var(--text-muted)]">Hinina v{{ version }}</span>
           </div>
           <!-- 失败原因（IPC/网络错误的归一化消息，便于现场排障） -->
           <p

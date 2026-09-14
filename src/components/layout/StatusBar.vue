@@ -6,6 +6,9 @@ const contestStore = useContestStore()
 
 /// 连接状态判据：比赛数据已加载且无错误（复用 store 状态，不额外发探测请求）
 const connected = computed(() => contestStore.contest !== null && !contestStore.error)
+
+/// 版本号构建期注入（vite define ← package.json），写死会与发布版本漂移
+const version = __APP_VERSION__
 </script>
 
 <template>
@@ -24,6 +27,6 @@ const connected = computed(() => contestStore.contest !== null && !contestStore.
         {{ connected ? '已连接比赛服务器' : '连接异常' }}
       </span>
     </div>
-    <span class="font-mono text-[10px] text-[var(--text-muted)]">Hinina v0.1.0</span>
+    <span class="font-mono text-[10px] text-[var(--text-muted)]">Hinina v{{ version }}</span>
   </footer>
 </template>

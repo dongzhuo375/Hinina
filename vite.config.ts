@@ -1,9 +1,15 @@
 import { defineConfig } from "vitest/config";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
+import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 
 const host = process.env.TAURI_DEV_HOST;
+
+/// 客户端版本号在构建期注入（来源 package.json），避免 UI 里写死后与发布版本漂移
+const pkgVersion: string = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf-8"),
+).version;
 
 export default defineConfig(async () => ({
   plugins: [
@@ -18,6 +24,10 @@ export default defineConfig(async () => ({
   },
 
   clearScreen: false,
+
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
 
   server: {
     port: 1420,
