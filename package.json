@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -28,6 +30,7 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^6",
+    "vitest": "^5.0.0",
     "vue-tsc": "^2"
   }
 }

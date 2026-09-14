@@ -200,14 +200,16 @@ src/
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情状态
 │   ├── submissionStore.ts                # 提交记录 + 评测轮询编排（终态/超时停止，登出时统一回收定时器）
-│   └── workspaceStore.ts                 # 工作区 + 代码编辑器状态
+│   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态
+│   └── __tests__/                        # authStore.spec.ts（登录/登出/三态校验/失效清理状态机）
 ├── services/
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
 │   ├── config.service.ts                 # 配置读取唯一入口（进程内缓存）+ 派生参数（OJ 基址、轮询调度）
 │   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
 │   ├── problem.service.ts                # 获取题目详情/列表
 │   ├── submission.service.ts             # 提交代码/轮询评测
-│   └── workspace.service.ts              # 工作区创建/保存/恢复
+│   ├── workspace.service.ts              # 工作区创建/保存/恢复
+│   └── __tests__/                        # auth.service.spec.ts（本地缓存清理与三态归一契约）
 ├── bridge/
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
 │   ├── auth.bridge.ts                    # login / logout / get_session / validate_session
@@ -215,7 +217,8 @@ src/
 │   ├── problem.bridge.ts                 # get_problem / list_problems
 │   ├── submission.bridge.ts              # submit_code / get_judgement
 │   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile
-│   └── config.bridge.ts                  # get_config
+│   ├── config.bridge.ts                  # get_config
+│   └── __tests__/                        # index.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数）
 ├── types/
 │   ├── user.ts                           # User 实体 + SessionValidity（valid/invalid/unknown 三态）
 │   ├── contest.ts                        # Contest + ContestProblem 实体
@@ -226,7 +229,8 @@ src/
 ├── utils/
 │   ├── markdown.ts                       # Markdown 渲染（marked）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
-│   └── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust is_terminal_status 对齐）
+│   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust is_terminal_status 对齐）
+│   └── __tests__/                        # contest / submission / session-check .spec.ts（阶段判据、终态判据、预检调度边界）
 └── styles/
     └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题
 ```
