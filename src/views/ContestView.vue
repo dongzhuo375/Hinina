@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import ProblemSidebar from '@/components/problem/ProblemSidebar.vue'
 import ProblemStatement from '@/components/problem/ProblemStatement.vue'
@@ -8,22 +7,17 @@ import CodeEditor from '@/components/editor/CodeEditor.vue'
 import SubmissionPanel from '@/components/submission/SubmissionPanel.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
-import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { getConfig } from '@/bridge/config.bridge'
 
-const router = useRouter()
-const auth = useAuthStore()
 const contest = useContestStore()
 const problem = useProblemStore()
 const submission = useSubmissionStore()
 const workspace = useWorkspaceStore()
 
 const rightRatio = ref(0.5)
-const pollingTimers = ref<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
 /// 分栏拖拽
 function startDrag(e: MouseEvent) {
@@ -66,46 +60,24 @@ async function openProblem(displayId: string, problemId: string) {
   await problem.openProblem(contest.contest.id, displayId)
 }
 
-/// 提交代码
+/// 提交代码（评测轮询由 submissionStore 编排，View 只表达提交意图）
 async function handleSubmit() {
   if (!contest.contest || !problem.currentProblem) return
-  const subId = await submission.submitCode(
-    contest.contest.id,
-    problem.currentProblem.id,
-    workspace.language,
-    workspace.code,
-  )
-  // Start polling for result
-  const config = await getConfig()
-  const interval = (config.oj.pollIntervalSecs || 2) * 1000
-  const timer = setInterval(async () => {
-    try {
-      const result = await submission.pollResult(subId)
-      const terminalStatuses = ['Accepted', 'WrongAnswer', 'TimeLimitExceeded', 'MemoryLimitExceeded', 'RuntimeError', 'CompilationError']
-      if (terminalStatuses.includes(result.status)) {
-        clearInterval(timer)
-        pollingTimers.value.delete(subId)
-      }
-    } catch {
-      // Will retry on next interval
-    }
-  }, interval)
-  pollingTimers.value.set(subId, timer)
+  try {
+    await submission.submitCode(
+      contest.contest.id,
+      problem.currentProblem.id,
+      workspace.language,
+      workspace.code,
+    )
+  } catch {
+    // 失败原因已由 submissionStore 写入 error
+  }
 }
 
-/// 页面加载
-onMounted(async () => {
-  // 检查登录状态
-  const hasSession = await auth.checkSession()
-  if (!hasSession) {
-    router.replace('/login')
-    return
-  }
-  await loadContest()
-})
-
-onUnmounted(() => {
-  pollingTimers.value.forEach((t) => clearInterval(t))
+/// 页面加载：会话有效性已由路由守卫（meta.requiresAuth）保证，此处只负责加载比赛数据
+onMounted(() => {
+  void loadContest()
 })
 </script>
 

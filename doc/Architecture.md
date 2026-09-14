@@ -198,16 +198,17 @@ src/
 │   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/工作区）
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情状态
-│   ├── submissionStore.ts                # 提交记录 + 轮询状态
+│   ├── submissionStore.ts                # 提交记录 + 评测轮询编排（终态/超时停止，登出时统一回收定时器）
 │   └── workspaceStore.ts                 # 工作区 + 代码编辑器状态
 ├── services/
 │   ├── auth.service.ts                   # 登录/登出/会话检查（localStorage 缓存，登出失败也清本地）
+│   ├── config.service.ts                 # 配置读取唯一入口（进程内缓存）+ 派生参数（OJ 基址、轮询调度）
 │   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
 │   ├── problem.service.ts                # 获取题目详情/列表
 │   ├── submission.service.ts             # 提交代码/轮询评测
 │   └── workspace.service.ts              # 工作区创建/保存/恢复
 ├── bridge/
-│   ├── index.ts                          # ipcInvoke 统一封装
+│   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
 │   ├── auth.bridge.ts                    # login / logout / get_session
 │   ├── contest.bridge.ts                 # load_configured_contest / list_contests（匿名，登录页比赛信息）
 │   ├── problem.bridge.ts                 # get_problem / list_problems
@@ -222,8 +223,9 @@ src/
 │   ├── workspace.ts                      # Workspace 实体
 │   └── config.ts                         # AppConfig 及其子配置
 ├── utils/
+│   ├── markdown.ts                       # Markdown 渲染（marked）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
-│   └── markdown.ts                       # Markdown 渲染（marked）+ 相对图片 URL 改写为 HOJ 绝对地址
+│   └── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust is_terminal_status 对齐）
 └── styles/
     └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题
 ```
@@ -269,3 +271,5 @@ src/
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求
 - **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；登录页依据比赛阶段（`utils/contest`）决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入；登出时经 `stores/session.ts` 清空会话级领域状态
+- **IPC 错误归一化**：Rust `AppError` 经 serde 序列化为 `{ Variant: msg }` 对象，`bridge/index.ts` 在唯一出口转换为 `IpcError extends Error`，保证上层 `e instanceof Error` 与 `e.message` 可用；日志不记录调用参数（含明文密码）
+- **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询定时器由 `submissionStore` 编排（终态判据见 `utils/submission.ts`，超时兜底），View 只表达提交意图

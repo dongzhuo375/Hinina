@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import type { Problem } from '@/types/problem'
 import { NCard, NTag, NScrollbar, NTabs, NTabPane } from 'naive-ui'
 import { renderMarkdown } from '@/utils/markdown'
-import { getConfig } from '@/bridge/config.bridge'
+import { configService } from '@/services/config.service'
 
 const props = defineProps<{
   problem: Problem
@@ -13,12 +13,8 @@ const props = defineProps<{
 const baseUrl = ref('')
 
 onMounted(async () => {
-  try {
-    const config = await getConfig()
-    baseUrl.value = config.oj.hojUrl
-  } catch {
-    // 配置获取失败时保持空，相对路径将按原样输出
-  }
+  // 配置服务内部已兜底：读取失败返回空串，相对路径按原样输出
+  baseUrl.value = await configService.getOjBaseUrl()
 })
 
 /// 将 Markdown 题面渲染为 HTML

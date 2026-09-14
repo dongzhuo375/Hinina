@@ -18,8 +18,12 @@ export function clearDomainState(): void {
   workspace.cancelPendingSync()
   workspace.$reset()
 
+  // 停止评测轮询，避免定时器脱离会话继续请求
+  const submission = useSubmissionStore()
+  submission.stopAllPolling()
+  submission.$reset()
+
   // 比赛 store 内含登录页匿名简报，只清理会话相关部分
   useContestStore().clearSessionData()
   useProblemStore().$reset()
-  useSubmissionStore().$reset()
 }

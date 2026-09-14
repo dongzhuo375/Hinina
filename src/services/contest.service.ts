@@ -1,6 +1,6 @@
 import type { Contest, ContestProblem } from '@/types/contest'
 import * as contestBridge from '@/bridge/contest.bridge'
-import { getConfig } from '@/bridge/config.bridge'
+import { configService } from '@/services/config.service'
 
 /**
  * 登录页匿名比赛简报的加载结果。
@@ -32,7 +32,7 @@ export class ContestService {
    * 同时返回 OJ 基址，供题面/简介中的相对图片 URL 改写使用。
    */
   async loadContestBrief(): Promise<ContestBriefResult> {
-    const config = await getConfig()
+    const config = await configService.getConfig()
     const baseUrl = config.oj.hojUrl
     const contestId = config.oj.contestId
     if (!contestId) return { status: 'unconfigured', baseUrl }
