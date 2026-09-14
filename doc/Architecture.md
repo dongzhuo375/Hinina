@@ -273,5 +273,6 @@ src/
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求
 - **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；登录页依据比赛阶段（`utils/contest`）决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入；登出时经 `stores/session.ts` 清空会话级领域状态
 - **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Rust `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验。全局兜底由 `stores/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
+- **赛前预检错峰**：登录页等待开赛时按 `utils/session-check.ts` 的策略校验会话 —— 距开赛 >10min 每 5min±60s 周期复检，进入 [T-10min, T-3min] 窗口后在剩余区间随机取点做一次性预检，迟到启动则 0–3s 抖动后立即执行，距开赛 ≤30s 不再预检。目的是把全场客户端的校验请求散布开，避免开赛前形成同步尖峰；**进场（T-0 导航）不错峰**，准点进场是公平性要求
 - **IPC 错误归一化**：Rust `AppError` 经 serde 序列化为 `{ Variant: msg }` 对象，`bridge/index.ts` 在唯一出口转换为 `IpcError extends Error`，保证上层 `e instanceof Error` 与 `e.message` 可用；日志不记录调用参数（含明文密码）
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询定时器由 `submissionStore` 编排（终态判据见 `utils/submission.ts`，超时兜底），View 只表达提交意图

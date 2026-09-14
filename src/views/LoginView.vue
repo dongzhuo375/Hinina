@@ -5,6 +5,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { renderMarkdown } from '@/utils/markdown'
 import { getContestPhase, hasContestStarted } from '@/utils/contest'
+import { planNextPrecheck, planRetryDelayMs } from '@/utils/session-check'
+import type { PrecheckReason } from '@/utils/session-check'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -191,6 +193,66 @@ async function handleSwitchAccount() {
   }
 }
 
+// ── 赛前会话预检（错峰调度，策略见 utils/session-check） ──
+
+let precheckTimer: ReturnType<typeof setTimeout> | null = null
+/// 本轮排程是否已因 unknown 重试过（只重试一次，避免重试风暴）
+let precheckRetried = false
+/// 最近一次预检结果（展示用，让选手知道客户端在持续校验会话）
+const lastPrecheckText = ref('')
+
+/// 重新排程：仅"已登录 + 比赛未开始"时预检，其余状态取消并清空提示
+function reschedulePrecheck() {
+  clearPrecheck()
+  precheckRetried = false
+
+  const startSecs = brief.value?.startTime
+  if (!auth.isLoggedIn || contestPhase.value !== 'upcoming' || !startSecs) {
+    lastPrecheckText.value = ''
+    return
+  }
+  const plan = planNextPrecheck(Date.now(), startSecs * 1000)
+  if (!plan) return
+  precheckTimer = setTimeout(() => {
+    void runPrecheck(plan.reason)
+  }, plan.delayMs)
+}
+
+/// 执行一次预检。
+/// `invalid` 由 authStore 就地清理会话并退回登录表单；`unknown` 只重试一次。
+async function runPrecheck(reason: PrecheckReason) {
+  precheckTimer = null
+  const validity = await auth.validateSession()
+
+  if (validity === 'valid') {
+    const at = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    lastPrecheckText.value = `会话校验通过 · ${at}`
+  } else if (validity === 'unknown') {
+    lastPrecheckText.value = '会话校验未完成（网络异常）'
+    if (!precheckRetried) {
+      precheckRetried = true
+      precheckTimer = setTimeout(() => {
+        void runPrecheck(reason)
+      }, planRetryDelayMs())
+      return
+    }
+  }
+
+  // 周期复检继续排程；窗口内/立即预检为一次性，之后交给进场流程与全局 401 兜底
+  if (reason === 'periodic') reschedulePrecheck()
+}
+
+/// 取消待执行的预检
+function clearPrecheck() {
+  if (precheckTimer) {
+    clearTimeout(precheckTimer)
+    precheckTimer = null
+  }
+}
+
+/// 登录态或比赛阶段变化时重新排程（登录成功、登出、简报到达、开赛）
+watch([() => auth.isLoggedIn, contestPhase], reschedulePrecheck)
+
 onMounted(async () => {
   reloadBrief()
   timer = setInterval(() => {
@@ -199,10 +261,12 @@ onMounted(async () => {
   // 恢复既有会话（路由守卫可能已确认过，跳过以避免重复 IPC）；
   // 恢复后的导航同样交由 canEnter 侦听器决策
   if (!auth.sessionResolved) await auth.checkSession()
+  reschedulePrecheck()
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  clearPrecheck()
 })
 </script>
 
@@ -239,10 +303,15 @@ onUnmounted(() => {
             </div>
             <p class="mt-2 truncate font-mono text-sm font-medium text-[var(--text-primary)]">{{ auth.username }}</p>
 
-            <!-- 等待开赛时展示紧凑倒计时，与右侧大屏倒计时同源 -->
-            <div v-if="contestPhase === 'upcoming'" class="mt-4 flex items-center justify-between border-t border-[var(--border-color)] pt-3">
-              <span class="text-[11px] font-medium tracking-wide text-[var(--text-muted)]">距离开赛</span>
-              <span class="font-mono text-sm font-semibold tabular-nums text-[#6845f5]">{{ countdownText }}</span>
+            <!-- 等待开赛时展示紧凑倒计时与最近一次会话预检结果 -->
+            <div v-if="contestPhase === 'upcoming'" class="mt-4 border-t border-[var(--border-color)] pt-3">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-medium tracking-wide text-[var(--text-muted)]">距离开赛</span>
+                <span class="font-mono text-sm font-semibold tabular-nums text-[#6845f5]">{{ countdownText }}</span>
+              </div>
+              <p v-if="lastPrecheckText" class="mt-2 text-right text-[10px] text-[var(--text-muted)]">
+                {{ lastPrecheckText }}
+              </p>
             </div>
           </div>
 
