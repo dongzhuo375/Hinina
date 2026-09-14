@@ -36,6 +36,12 @@ pub enum AuthEvent {
     LoginSuccess { user: User },
     Logout,
     SessionExpired,
+    /// Provider 侧会话凭证已轮换（如 HOJ 的 Refresh-Token 机制）。
+    ///
+    /// 事件本身是认证域通用概念，仅携带新凭证字符串，不含任何 OJ 私有语义；
+    /// 各 Provider 自行决定何时发布（qduoj/hustoj 当前不发布）。
+    /// AuthService 订阅后将新凭证回写磁盘会话，避免重启后回注过期 token。
+    TokenRefreshed { token: String },
 }
 
 #[derive(Debug, Clone)]

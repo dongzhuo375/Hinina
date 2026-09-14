@@ -92,6 +92,7 @@ impl AppContext {
             let hoj = Arc::new(HOJAdapter::new(
                 Arc::clone(&http_client),
                 hoj_base,
+                Arc::clone(&event_bus),
             ));
             provider_registry.register_auth(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::auth::AuthProvider>);
             provider_registry.register_contest(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::contest::ContestProvider>);

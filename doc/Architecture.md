@@ -75,8 +75,10 @@ Hinina/
         │   │   ├── mod.rs                # ThemeService：主题切换/配色方案管理
         │   │   └── error.rs              # ThemeError
         │   ├── auth/
-        │   │   ├── mod.rs                # AuthService：登录编排/会话持久化/登出
-        │   │   └── error.rs              # AuthError
+        │   │   ├── mod.rs                # AuthService：登录编排/会话持久化/登出/凭证轮换回写
+        │   │   ├── error.rs              # AuthError
+        │   │   └── tests/
+        │   │       └── auth_tests.rs     # AuthService 单元测试（会话持久化/轮换回写/失效清理）
         │   ├── contest/
         │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存/比赛切换
         │   │   └── error.rs              # ContestError

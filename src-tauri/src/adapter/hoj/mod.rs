@@ -15,6 +15,8 @@ use crate::core::entity::problem::{Problem, Sample};
 use crate::core::entity::submission::{JudgementResult, JudgementStatus};
 use crate::core::entity::user::User;
 use crate::core::error::{AppError, AppResult};
+use crate::core::event::app_event::{AppEvent, AuthEvent};
+use crate::core::event::event_bus::EventBus;
 use crate::core::provider::auth::AuthProvider;
 use crate::core::provider::contest::ContestProvider;
 use crate::core::provider::problem::ProblemProvider;
@@ -35,19 +37,22 @@ pub struct HOJAdapter {
     base_url: String,
     /// 当前 JWT token（登录后设置）
     token: RwLock<Option<String>>,
+    /// 事件总线：token 轮换时发布 `AuthEvent::TokenRefreshed`，供 AuthService 回写磁盘会话
+    event_bus: Arc<EventBus>,
 }
 
 impl HOJAdapter {
     /// 创建 HOJAdapter。
     ///
     /// `base_url` 不含尾部 `/api`，如 `https://hoj.dongzhuo.top`。
-    pub fn new(http: Arc<HttpClient>, base_url: String) -> Self {
+    pub fn new(http: Arc<HttpClient>, base_url: String, event_bus: Arc<EventBus>) -> Self {
         // 去掉尾部斜杠以统一拼接
         let base_url = base_url.trim_end_matches('/').to_string();
         Self {
             http,
             base_url,
             token: RwLock::new(None),
+            event_bus,
         }
     }
 
@@ -86,8 +91,12 @@ impl HOJAdapter {
             .get_json_with_headers::<T>(url, token.as_deref())
             .await?;
         if let Some(new_token) = extract_refreshed_token(&headers) {
-            debug!("HOJ token 已轮换，更新本地缓存");
-            self.set_token(new_token);
+            debug!("HOJ token 已轮换，更新本地缓存并发布事件");
+            self.set_token(new_token.clone());
+            // 通知 AuthService 将新 token 回写磁盘会话，避免重启后回注过期凭证
+            self.event_bus.publish(&AppEvent::Auth(AuthEvent::TokenRefreshed {
+                token: new_token,
+            }));
         }
         Ok(data)
     }
@@ -519,8 +528,11 @@ impl SubmissionProvider for HOJAdapter {
             .await
             .map_err(|e| AppError::Submission(format!("HOJ submit 请求失败: {}", e)))?;
         if let Some(new_token) = extract_refreshed_token(&headers) {
-            debug!("HOJ token 已轮换（submit），更新本地缓存");
-            self.set_token(new_token);
+            debug!("HOJ token 已轮换（submit），更新本地缓存并发布事件");
+            self.set_token(new_token.clone());
+            self.event_bus.publish(&AppEvent::Auth(AuthEvent::TokenRefreshed {
+                token: new_token,
+            }));
         }
 
         let judge = api_resp.into_data().map_err(|msg| {

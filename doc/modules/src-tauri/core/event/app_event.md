@@ -6,7 +6,7 @@
 ## 核心类型/函数
 - **`AppEvent`** — 顶层事件枚举，变体：`Auth`, `Contest`, `Problem`, `Submission`, `Workspace`, `System`
 - **`AppEvent::category()`** — 返回事件对应的 EventCategory
-- **`AuthEvent`** — 认证事件：`LoginSuccess`, `Logout`, `SessionExpired`
+- **`AuthEvent`** — 认证事件：`LoginSuccess`, `Logout`, `SessionExpired`, `TokenRefreshed { token }`（Provider 侧凭证轮换，仅携带新凭证字符串，不含 OJ 私有语义；AuthService 订阅后回写磁盘会话）
 - **`ContestEvent`** — 比赛事件：`ListLoaded`, `Selected`, `CountdownTick`
 - **`ProblemEvent`** — 题目事件：`Opened`, `CodeChanged`
 - **`SubmissionEvent`** — 提交事件：`Created`, `Judged`, `PollTimeout`

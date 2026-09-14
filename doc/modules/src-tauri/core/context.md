@@ -13,7 +13,7 @@
   4. EventBus — 事件总线
   5. ConfigService — 通过 `FsConfigRepository` 加载配置（首次启动使用默认值并持久化）
   6. HttpClient — 网络客户端
-  7. ProviderRegistry — 默认 HOJ（Provider 在阶段 5 注册）
+  7. ProviderRegistry — 默认 HOJ（HOJAdapter 注入 `Arc<EventBus>`，token 轮换时发布 `AuthEvent::TokenRefreshed`）
   8. WorkspaceManager — 通过 `FsWorkspaceRepository` 创建，包装为 `Some(Arc<...>)`
   9. 装配 5 个 Service：ThemeService → AuthService → ContestService → ProblemService → SubmissionService
   10. 装配 AppContext 并返回
