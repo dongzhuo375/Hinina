@@ -5,10 +5,41 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 递归剔除 JSON 中值为 `null` 的对象成员与数组元素。
+///
+/// 为什么需要：HOJ 对未设置的字段返回 `null` 而不是省略（实测
+/// `GET /api/get-contest-list` 的 `sealRank` / `rankShowName` / `count` / `now` /
+/// `openPrint` 全为 `null`），而 serde 的 `#[serde(default)]` **只在字段缺失时生效**，
+/// 遇到显式 `null` 仍会报 `invalid type: null, expected a boolean`，
+/// 导致一个可选字段为 null 就让整个响应解析失败。
+///
+/// 剔除后 `null` 与「字段缺失」等价：非 Option 字段落到 `#[serde(default)]` 的默认值，
+/// Option 字段落到 `None` —— 与 HOJ 的语义一致（null 就是「没有值」）。
+/// 在解析入口统一处理，新增 DTO 字段无需逐个标注，也不会再犯同类错误。
+pub fn strip_nulls(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.retain(|_, v| !v.is_null());
+            for v in map.values_mut() {
+                strip_nulls(v);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            items.retain(|v| !v.is_null());
+            for v in items.iter_mut() {
+                strip_nulls(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// HOJ 统一响应包装。
 /// `data` 在空响应时为 `null`，在错误时为 `Option::None`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
+    /// 成功恒为 200（不是 0）；缺失时按失败处理，由 `into_data` 给出消息
+    #[serde(default)]
     pub status: i32,
     pub msg: Option<String>,
     pub data: Option<T>,
@@ -31,9 +62,19 @@ impl<T> ApiResponse<T> {
 }
 
 /// 分页响应（用于比赛列表等）。
+///
+/// 全部字段可缺失：HOJ 的分页对象在不同接口上返回的键并不一致
+/// （`get-contest-list` 实测含 `records/total/size/current/orders/searchCount/pages`，
+/// 文档只承诺 `records/total`），缺任何一个都不应让整页数据解析失败。
+///
+/// `bound` 显式声明是必需的：`records` 上的 `#[serde(default)]` 会让 serde 自动
+/// 给 `T` 加上 `Default` 约束，而各 VO 并没有（也不该有）`Default` 实现。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(deserialize = "T: serde::Deserialize<'de>"))]
 pub struct PageResult<T> {
+    #[serde(default)]
     pub records: Vec<T>,
+    #[serde(default)]
     pub total: i64,
     #[serde(default)]
     pub size: i64,
@@ -75,6 +116,7 @@ pub struct UserInfoVO {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContestVO {
+    #[serde(default)]
     pub id: i64,
     #[serde(default)]
     pub title: String,
@@ -372,6 +414,7 @@ pub struct ProblemInfoVO {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagVO {
+    #[serde(default)]
     pub id: i64,
     #[serde(default)]
     pub name: String,

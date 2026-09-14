@@ -323,3 +323,135 @@ fn contest_vo_tolerates_missing_rank_fields() {
     assert_eq!(vo.seal_rank_time, None);
     assert!(!vo.allow_end_submit);
 }
+
+// ── strip_nulls 与 null 容错 ──
+//
+// 回归背景：HOJ 对未设置的字段返回 null 而不是省略（实测 get-contest-list 的
+// sealRank / rankShowName / count / now / openPrint 全为 null），而 serde 的
+// #[serde(default)] 只在字段**缺失**时生效，显式 null 会让整个响应解析失败 ——
+// 登录页因此拿不到比赛列表，界面报「获取比赛列表失败」。
+
+#[test]
+fn strip_nulls_removes_null_members_and_array_items() {
+    let mut value: serde_json::Value = serde_json::from_str(
+        r#"{
+            "keep": 1,
+            "drop": null,
+            "nested": { "a": null, "b": "x" },
+            "list": [null, { "c": null, "d": 2 }, 3],
+            "falseButNotNull": false,
+            "zeroButNotNull": 0
+        }"#,
+    )
+    .expect("测试夹具本身应是合法 JSON");
+
+    strip_nulls(&mut value);
+
+    let obj = value.as_object().expect("顶层应仍是对象");
+    assert!(!obj.contains_key("drop"), "null 成员应被剔除");
+    assert_eq!(obj.get("keep").and_then(|v| v.as_i64()), Some(1));
+    // false 与 0 不是 null，必须保留（否则封榜、打星、零分等语义会被抹掉）
+    assert_eq!(obj.get("falseButNotNull").and_then(|v| v.as_bool()), Some(false));
+    assert_eq!(obj.get("zeroButNotNull").and_then(|v| v.as_i64()), Some(0));
+    let nested = obj.get("nested").and_then(|v| v.as_object()).expect("nested 应保留");
+    assert!(!nested.contains_key("a"));
+    assert_eq!(nested.get("b").and_then(|v| v.as_str()), Some("x"));
+    let list = obj.get("list").and_then(|v| v.as_array()).expect("list 应保留");
+    assert_eq!(list.len(), 2, "数组中的 null 元素应被剔除");
+}
+
+#[test]
+fn contest_vo_tolerates_hoj_null_fields() {
+    // 与 get-contest-list 实测响应同形：未设置的字段一律是 null 而不是缺失
+    let body = r#"{
+        "id": 1012, "author": "someone", "title": "测试赛", "type": 0,
+        "description": "<p>desc</p>", "status": -1, "source": 0, "auth": 0,
+        "now": null, "startTime": "2026-09-21T16:00:00.000+0000",
+        "endTime": "2026-09-29T16:00:00.000+0000", "duration": 691200,
+        "sealRank": null, "openPrint": null, "sealRankTime": null,
+        "rankShowName": null, "openRank": false, "oiRankScoreType": "Recent",
+        "count": null, "gid": null, "allowEndSubmit": false
+    }"#;
+
+    // 未经去 null 处理时必然失败 —— 这正是线上故障的成因，锁死它防止回退
+    assert!(
+        serde_json::from_str::<ContestVO>(body).is_err(),
+        "显式 null 直接喂给 serde 应当失败，否则说明本测试已失去意义"
+    );
+
+    let mut value: serde_json::Value = serde_json::from_str(body).expect("夹具应是合法 JSON");
+    strip_nulls(&mut value);
+    let vo: ContestVO = serde_json::from_value(value).expect("去 null 后应能解析");
+
+    assert_eq!(vo.id, 1012);
+    assert_eq!(vo.status, -1);
+    assert!(!vo.seal_rank, "null 的 sealRank 应落到默认 false");
+    assert_eq!(vo.rank_show_name, None);
+    assert_eq!(vo.seal_rank_time, None);
+    assert!(!vo.allow_end_submit);
+    assert_eq!(vo.duration, 691200);
+}
+
+#[test]
+fn page_result_accepts_documented_and_degenerate_shapes() {
+    // 文档只承诺 records/total；实测还会带 size/current/orders/searchCount/pages
+    let minimal = r#"{ "records": [{ "id": 1 }], "total": 1 }"#;
+    let page: PageResult<ContestVO> =
+        serde_json::from_str(minimal).expect("最小分页形状应可解析");
+    assert_eq!(page.records.len(), 1);
+    assert_eq!(page.total, 1);
+    assert_eq!(page.pages, 0, "未返回的字段落到默认值");
+
+    // records / total 为 null 也不应让整页失败
+    let mut degenerate: serde_json::Value =
+        serde_json::from_str(r#"{ "records": null, "total": null }"#).expect("夹具合法");
+    strip_nulls(&mut degenerate);
+    let page: PageResult<ContestVO> =
+        serde_json::from_value(degenerate).expect("空分页应可解析");
+    assert!(page.records.is_empty());
+    assert_eq!(page.total, 0);
+}
+
+#[test]
+fn submission_detail_tolerates_null_judge_fields() {
+    // 评测未完成时 HOJ 的 time / memory / score 为 null；
+    // 此前会让整条轮询链路解析失败，表现为提交后状态永远停在 Pending
+    let body = r#"{
+        "submitId": 42, "pid": 1061, "displayPid": "A", "username": "u",
+        "submitTime": "2026-09-14 20:00:00", "status": 1,
+        "errorMessage": null, "time": null, "memory": null, "score": null,
+        "length": null, "language": "C++", "code": null, "cid": 1011
+    }"#;
+    let mut value: serde_json::Value = serde_json::from_str(body).expect("夹具合法");
+    strip_nulls(&mut value);
+    let detail: SubmissionDetail = serde_json::from_value(value).expect("去 null 后应能解析");
+    assert_eq!(detail.submit_id, 42);
+    assert_eq!(detail.status, 1);
+    assert_eq!(detail.time, 0);
+    assert_eq!(detail.memory, 0);
+    assert_eq!(detail.score, None);
+}
+
+#[test]
+fn acm_submission_info_tolerates_null_cells() {
+    // 封榜期间单元格可能只给 tryNum，其余字段为 null
+    let body = r#"{ "errorNum": null, "tryNum": 3, "isAC": null, "isFirstAC": null, "ACTime": null, "isAfterContest": null }"#;
+    let mut value: serde_json::Value = serde_json::from_str(body).expect("夹具合法");
+    strip_nulls(&mut value);
+    let info: AcmSubmissionInfo = serde_json::from_value(value).expect("去 null 后应能解析");
+    assert_eq!(info.error_num, 0);
+    assert_eq!(info.try_num, Some(3));
+    assert!(!info.is_ac);
+    assert!(!info.is_first_ac);
+    assert_eq!(info.ac_time, None);
+}
+
+#[test]
+fn api_response_null_data_becomes_none() {
+    let body = r#"{ "status": 401, "msg": "未登录", "data": null }"#;
+    let mut value: serde_json::Value = serde_json::from_str(body).expect("夹具合法");
+    strip_nulls(&mut value);
+    let resp: ApiResponse<ContestVO> = serde_json::from_value(value).expect("应能解析");
+    assert!(!resp.is_success(), "status=401 不是成功（成功恒为 200）");
+    assert_eq!(resp.into_data().unwrap_err(), "未登录");
+}

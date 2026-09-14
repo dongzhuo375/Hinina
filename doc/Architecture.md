@@ -35,7 +35,9 @@ Hinina/
         ├── core/
         │   ├── mod.rs                    # core 模块声明
         │   ├── context.rs                # AppContext 统一应用上下文
-        │   ├── error.rs                  # AppError 枚举 + user_message() + AppResult<T> + From 转换
+        │   ├── error.rs                  # AppError 枚举 + user_message() + context()（补环节名但保留变体）+ AppResult<T> + From 转换
+        │   ├── tests/
+        │   │   └── error_tests.rs        # AppError::context 测试（变体绝不被改写，前端 isAuthError 分流依赖它）
         │   ├── entity/
         │   │   ├── mod.rs
         │   │   ├── config.rs            # AppConfig 实体（用户/OJ/编辑器/主题/布局配置 + contest_id）
@@ -100,12 +102,15 @@ Hinina/
         ├── adapter/
         │   ├── mod.rs
         │   ├── hoj/
-        │   │   ├── mod.rs                # HOJAdapter：实现 4 个 Provider trait + get_json_authed/post_json_authed（共用 handle_token_rotation 做 Refresh-Token 轮换）
-        │   │   ├── types.rs              # HOJ DTO：ApiResponse/Login/Contest/Problem/Submission/ContestRank(ACM+OI)/UserProblemStatus + 状态码映射
+        │   │   ├── mod.rs                # HOJAdapter：实现 4 个 Provider trait + get/post_json_authed（共用 handle_token_rotation 做 Refresh-Token 轮换）
+        │   │   │                         #   + parse_hoj_json（全部响应的唯一解析入口：去 null → 识别体内鉴权失败 → 类型化解析）
+        │   │   ├── types.rs              # HOJ DTO：ApiResponse/Login/Contest/Problem/Submission/ContestRank(ACM+OI)/UserProblemStatus + 状态码映射 + strip_nulls
         │   │   ├── error.rs              # HOJError
         │   │   └── tests/
-        │   │       ├── mod_tests.rs      # Adapter 行为测试（token 轮换等）
-        │   │       └── types_tests.rs    # DTO 解析测试（榜单 ACM/OI 归一、封榜只有 tryNum、打星 rank=-1、字段缺失容错）
+        │   │       ├── mod_tests.rs      # Adapter 行为测试（token 轮换、parse_cid、parse_hoj_json、体内鉴权失败判定、preview）
+        │   │       ├── types_tests.rs    # DTO 解析测试（榜单 ACM/OI 归一、封榜只有 tryNum、打星 rank=-1、字段缺失与 null 容错）
+        │   │       └── fixtures/
+        │   │           └── contest_list_anon.json  # 真实 get-contest-list 响应（已脱敏），锁定 null 容错回归
         │   ├── qduoj/
         │   │   ├── mod.rs
         │   │   ├── types.rs              # QDUOJ DTO 类型（骨架）
@@ -116,7 +121,7 @@ Hinina/
         │       └── error.rs              # HUSTOJError
         ├── infra/
         │   ├── mod.rs
-        │   ├── http.rs                   # HttpClient 封装
+        │   ├── http.rs                   # HttpClient 封装（超时/重试/UA/Cookie；只返回原始响应体与响应头，不做反序列化）
         │   ├── storage.rs                # Storage 底层文件工具
         │   ├── cache.rs                  # Cache 预留
         │   ├── logger.rs                 # Logger（基于 Tracing）
@@ -305,6 +310,9 @@ src/
 - **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Rust `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验。全局兜底由 `stores/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
 - **赛前预检错峰**：登录页等待开赛时按 `utils/session-check.ts` 的策略校验会话 —— 距开赛 >10min 每 5min±60s 周期复检，进入 [T-10min, T-3min] 窗口后在剩余区间随机取点做一次性预检，迟到启动则 0–3s 抖动后立即执行，距开赛 ≤30s 不再预检。目的是把全场客户端的校验请求散布开，避免开赛前形成同步尖峰；**进场（T-0 导航）不错峰**，准点进场是公平性要求
 - **IPC 错误归一化**：Rust `AppError` 经 serde 序列化为 `{ Variant: msg }` 对象，`bridge/index.ts` 在唯一出口转换为 `IpcError extends Error`，保证上层 `e instanceof Error` 与 `e.message` 可用；日志不记录调用参数（含明文密码）
+- **错误变体是分流依据，后端不得改写**：前端 `isAuthError`（`variant === 'Auth'`）与 `stores/sessionGuard.ts` 的会话失效兜底完全依赖变体。补上下文一律用 `AppError::context()`（保留变体，只在消息前拼环节名），**禁止** `AppError::Network(format!("xx 请求失败: {}", e))` 这类重新包装 —— 它会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」自相矛盾的嵌套消息，把 DTO 问题当断网查，还会让 401 不再触发登出
+- **OJ 响应解析归 Adapter，infra 只传字节**：`infra/http.rs` 只返回原始响应体与响应头（含状态码判定与 5xx 退避重试），不做反序列化；OJ 特有的响应归一化在 Adapter 的唯一入口完成。HOJ 侧有两个必须处理的协议事实：① 对未设置字段返回 `null` 而非省略（实测 `get-contest-list` 的 `sealRank`/`rankShowName`/`count`/`now` 全为 null），而 serde 的 `#[serde(default)]` **只在字段缺失时生效**，显式 null 会让整个响应解析失败 → 解析前统一 `strip_nulls`（`false`/`0`/`""` 不是 null，必须保留，否则封榜、打星、零分语义会被抹掉）；② 鉴权失败放在**响应体的 status**（HTTP 仍是 200，实测匿名访问 `get-contest-problem` 返回 `{"status":403,"msg":"请您先登录！"}`）→ 必须翻译成 `AppError::Auth`，且 403 要保守判定（仅当消息指向登录/凭证时才算会话失效，否则「私有赛未注册」会把已登录选手误踢回登录页）
+- **真实响应夹具**：`adapter/hoj/tests/fixtures/contest_list_anon.json` 取自真实接口、仅脱敏自由文本，完整保留键名与 null 分布；配套一条正向测试（真实响应可解析）与一条反向测试（不去 null 必然失败），防止后来者把 `strip_nulls` 当冗余删掉
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询定时器由 `submissionStore` 编排（终态判据见 `utils/submission.ts`，超时兜底），View 只表达提交意图
 - **比赛工作台外壳**：`ContestLayout` 承载 TopBar + ActivityBar + `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；窗口拖拽与窗口控制只在 TopBar（登录页由 `App.vue` 提供兜底窗口条）。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
 - **轮询统一原语**：周期性刷新（榜单、题目总览）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止；榜单 10s±2s，题目总览 30s±5s。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），仍由 `submissionStore` 自行编排，迁移到统一原语留待后续

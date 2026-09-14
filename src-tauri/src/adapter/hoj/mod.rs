@@ -92,21 +92,24 @@ impl HOJAdapter {
         }
     }
 
-    /// 发送带认证的 GET 请求，自动处理服务端 token 轮换。
+    /// 发送 GET 请求并解析为 HOJ 响应，自动处理服务端 token 轮换。
     ///
     /// HOJ 服务端会在 token 到期前返回 `Refresh-Token: true` 和新 `Authorization` 头。
     /// 此方法在收到轮换的新 token 时自动更新内部存储，避免后续请求 401。
+    ///
+    /// token 缺失时**不报错**，按匿名请求发出：`get-contest-list` 等 `@AnonApi`
+    /// 接口在登录页（尚无会话）就要能用；HOJ 对匿名接口带无效 token 也照常返回 200。
     async fn get_json_authed<T: serde::de::DeserializeOwned>(&self, url: &str) -> AppResult<T> {
         let token = self.get_token();
-        let (data, headers) = self
+        let (body, headers) = self
             .http
-            .get_json_with_headers::<T>(url, token.as_deref())
+            .get_text_with_headers(url, token.as_deref())
             .await?;
         self.handle_token_rotation(&headers);
-        Ok(data)
+        Self::parse_hoj_json::<T>(&body, url)
     }
 
-    /// 发送带认证的 POST 请求（JSON body），同样处理 token 轮换。
+    /// 发送 POST 请求（JSON body）并解析为 HOJ 响应，同样处理 token 轮换。
     ///
     /// 榜单轮询、题目状态等高频 POST 场景必须走此方法：
     /// 若漏掉轮换处理，token 到期后会出现周期性 401。
@@ -116,12 +119,23 @@ impl HOJAdapter {
         body: &B,
     ) -> AppResult<T> {
         let token = self.get_token();
-        let (data, headers) = self
+        let (text, headers) = self
             .http
-            .post_json_with_headers::<T, B>(url, body, token.as_deref())
+            .post_text_with_headers(url, body, token.as_deref())
             .await?;
         self.handle_token_rotation(&headers);
-        Ok(data)
+        Self::parse_hoj_json::<T>(&text, url)
+    }
+
+    /// 断言已持有 token（提交等必须登录的操作的前置校验）。
+    ///
+    /// `get/post_json_authed` 允许匿名（登录页要在无会话时拉比赛列表），
+    /// 因此需要登录的接口自行前置断言，给出「请先登录」而不是等服务端返回 401。
+    fn require_token(&self) -> AppResult<()> {
+        if self.get_token().is_none() {
+            return Err(AppError::Auth("请先登录".into()));
+        }
+        Ok(())
     }
 
     /// 解析响应头中的 HOJ 私有轮换协议：更新内存 token 并发布事件供 AuthService 回写磁盘会话。
@@ -134,6 +148,71 @@ impl HOJAdapter {
                 token: new_token,
             }));
         }
+    }
+
+    /// 解析 HOJ 响应体：剔除 `null` 成员 → 识别响应体内的认证失败 → 类型化解析。
+    ///
+    /// 去 null 的必要性见 `types::strip_nulls` 注释（HOJ 对未设置字段返回 `null`，
+    /// 而 `#[serde(default)]` 只管字段缺失，显式 null 会让整个响应解析失败）。
+    ///
+    /// 两类解析失败都归为 `AppError::Serialization` 并带上 URL 与响应体前缀：
+    /// 「不是合法 JSON」通常是网关返回了 HTML 错误页，「字段不匹配」才是 DTO 问题，
+    /// 分开描述才能一眼定位，而不是笼统报一个「网络错误」。
+    fn parse_hoj_json<T: serde::de::DeserializeOwned>(body: &str, url: &str) -> AppResult<T> {
+        let mut value: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+            AppError::Serialization(format!(
+                "HOJ 响应不是合法 JSON {}: {}（响应前 200 字符: {}）",
+                url,
+                e,
+                preview(body)
+            ))
+        })?;
+        types::strip_nulls(&mut value);
+
+        if let Some(err) = Self::auth_failure_from_body(&value) {
+            return Err(err);
+        }
+
+        serde_json::from_value::<T>(value).map_err(|e| {
+            AppError::Serialization(format!(
+                "HOJ 响应字段不匹配 {}: {}（响应前 200 字符: {}）",
+                url,
+                e,
+                preview(body)
+            ))
+        })
+    }
+
+    /// 识别 HOJ 放在**响应体**里的认证失败，返回 `AppError::Auth`。
+    ///
+    /// HOJ 的鉴权失败不走 HTTP 状态码：实测匿名访问 `get-contest-problem` 返回
+    /// HTTP 200 + `{"status":403,"msg":"请您先登录！"}`。若不在这里识别，
+    /// 各调用点会把它包成 Contest / Problem / Submission 变体，而前端 sessionGuard
+    /// 是依据 `variant === 'Auth'` 判定会话失效的 —— token 过期时选手只会看到一堆
+    /// 「比赛数据错误」，永远不会被带回登录页。
+    ///
+    /// 判定刻意保守，避免把「无权访问某场私有赛」误判成会话失效而踢人：
+    /// - `status == 401`：语义明确是未认证，一律视为会话问题；
+    /// - `status == 403`：仅当消息指向登录/凭证时才视为会话问题，
+    ///   否则保留为业务错误（如私有赛未注册、需要密码）。
+    fn auth_failure_from_body(value: &serde_json::Value) -> Option<AppError> {
+        let status = value.get("status")?.as_i64()?;
+        if status != 401 && status != 403 {
+            return None;
+        }
+        let msg = value
+            .get("msg")
+            .and_then(|v| v.as_str())
+            .unwrap_or("登录状态已失效");
+        let looks_like_auth = status == 401
+            || ["登录", "登陆", "token", "Token", "认证", "未授权"]
+                .iter()
+                .any(|kw| msg.contains(kw));
+        if !looks_like_auth {
+            return None;
+        }
+        warn!(status = status, msg = msg, "HOJ 响应体报告认证失败");
+        Some(AppError::Auth(format!("{}（HOJ status={}）", msg, status)))
     }
 
     // ── 工具方法 ──
@@ -237,6 +316,22 @@ fn extract_refreshed_token(headers: &reqwest::header::HeaderMap) -> Option<Strin
     }
 }
 
+/// 截取响应体前 200 字符用于错误诊断。
+///
+/// 解析失败时最有价值的信息是「服务端究竟返回了什么」—— 网关 502 的 HTML 页、
+/// 未登录的重定向页、以及真正的 JSON 结构变更，三者处置方式完全不同。
+/// 只取前缀，避免把上百 KB 的响应体整段写进错误消息与日志。
+fn preview(body: &str) -> String {
+    const MAX_CHARS: usize = 200;
+    let trimmed = body.trim();
+    if trimmed.chars().count() <= MAX_CHARS {
+        return trimmed.to_string();
+    }
+    // 按字符而非字节截断：响应含中文比赛标题，按字节切会落在 UTF-8 序列中间
+    let cut: String = trimmed.chars().take(MAX_CHARS).collect();
+    format!("{}…", cut)
+}
+
 /// 提取指定 HTML 标签的内容（支持 `<tag>` 与 `<tag attr="...">` 形式）。
 fn extract_tag_contents(html: &str, tag: &str) -> Vec<String> {
     let mut result = Vec::new();
@@ -313,10 +408,16 @@ impl AuthProvider for HOJAdapter {
             .text()
             .await
             .map_err(|e| AppError::Serialization(format!("HOJ login 读取响应体失败: {}", e)))?;
-        let api_resp: ApiResponse<UserInfoVO> = serde_json::from_str(&raw_body).map_err(|e| {
-            warn!(body = raw_body, error = %e, "HOJ login 响应解析失败");
-            AppError::Serialization(format!("HOJ login 响应解析失败: {}", e))
-        })?;
+        // 解析响应体：走统一的「去 null」解析入口。
+        // HOJ 对未设置字段返回 null（如 roleList），直接 from_str 会报 invalid type；
+        // 错误消息里已含响应体前缀，无需再把整个 body 写进日志。
+        let api_resp: ApiResponse<UserInfoVO> = match Self::parse_hoj_json(&raw_body, &url) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(error = %e, "HOJ login 响应解析失败");
+                return Err(e);
+            }
+        };
 
         let user_info = api_resp.into_data().map_err(|msg| {
             warn!(error = msg, "HOJ 登录失败");
@@ -396,7 +497,7 @@ impl ContestProvider for HOJAdapter {
         let api_resp = self
             .get_json_authed::<ApiResponse<types::PageResult<ContestVO>>>(&url)
             .await
-            .map_err(|e| AppError::Network(format!("HOJ contest list 请求失败: {}", e)))?;
+            .map_err(|e| e.context("HOJ contest list"))?;
 
         let page = api_resp.into_data().map_err(|msg| {
             AppError::Contest(format!("HOJ contest list 失败: {}", msg))
@@ -418,7 +519,7 @@ impl ContestProvider for HOJAdapter {
         let api_resp = self
             .get_json_authed::<ApiResponse<ContestVO>>(&url)
             .await
-            .map_err(|e| AppError::Network(format!("HOJ contest info 请求失败: {}", e)))?;
+            .map_err(|e| e.context("HOJ contest info"))?;
 
         let c = api_resp.into_data().map_err(|msg| {
             AppError::Contest(format!("HOJ contest info 失败: {}", msg))
@@ -433,7 +534,7 @@ impl ContestProvider for HOJAdapter {
         let api_resp = self
             .get_json_authed::<ApiResponse<Vec<ContestProblemVO>>>(&url)
             .await
-            .map_err(|e| AppError::Network(format!("HOJ contest problem list 请求失败: {}", e)))?;
+            .map_err(|e| e.context("HOJ contest problem list"))?;
 
         let problem_list = api_resp.into_data().map_err(|msg| {
             AppError::Contest(format!("HOJ contest problem list 失败: {}", msg))
@@ -481,7 +582,7 @@ impl ContestProvider for HOJAdapter {
         let api_resp = self
             .post_json_authed::<ApiResponse<types::PageResult<ContestRankVO>>, _>(&url, &body)
             .await
-            .map_err(|e| AppError::Network(format!("HOJ contest rank 请求失败: {}", e)))?;
+            .map_err(|e| e.context("HOJ contest rank"))?;
 
         let page = api_resp
             .into_data()
@@ -512,7 +613,7 @@ impl ProblemProvider for HOJAdapter {
         let api_resp = self
             .get_json_authed::<ApiResponse<Vec<ContestProblemVO>>>(&url)
             .await
-            .map_err(|e| AppError::Network(format!("HOJ contest problem list 请求失败: {}", e)))?;
+            .map_err(|e| e.context("HOJ contest problem list"))?;
 
         let problem_list = api_resp.into_data().map_err(|msg| {
             AppError::Problem(format!("HOJ contest problem list 失败: {}", msg))
@@ -554,7 +655,7 @@ impl ProblemProvider for HOJAdapter {
         let api_resp = self
             .get_json_authed::<ApiResponse<ProblemInfoVO>>(&url)
             .await
-            .map_err(|e| AppError::Network(format!("HOJ problem detail 请求失败: {}", e)))?;
+            .map_err(|e| e.context("HOJ problem detail"))?;
 
         let info = api_resp.into_data().map_err(|msg| {
             AppError::Problem(format!("HOJ problem detail 失败: {}", msg))
@@ -599,7 +700,7 @@ impl ProblemProvider for HOJAdapter {
         let api_resp = self
             .post_json_authed::<ApiResponse<HashMap<String, serde_json::Value>>, _>(&url, &body)
             .await
-            .map_err(|e| AppError::Network(format!("HOJ user problem status 请求失败: {}", e)))?;
+            .map_err(|e| e.context("HOJ user problem status"))?;
 
         let raw = api_resp.into_data().map_err(|msg| {
             AppError::Problem(format!("HOJ user problem status 失败: {}", msg))
@@ -627,9 +728,8 @@ impl SubmissionProvider for HOJAdapter {
         source_code: &str,
     ) -> AppResult<String> {
         let url = self.api_url("/submit-problem-judge");
-        let token = self
-            .get_token()
-            .ok_or_else(|| AppError::Auth("请先登录".into()))?;
+        // 提交必须已登录：前置断言给出明确错误，而不是让服务端回一个 401
+        self.require_token()?;
 
         let cid: i64 = Self::parse_cid(contest_id)?;
         let body = SubmitRequest {
@@ -644,19 +744,12 @@ impl SubmissionProvider for HOJAdapter {
 
         info!(contest_id = contest_id, problem_id = problem_id, language = language, "HOJ 提交代码");
 
-        // 使用返回响应头的 POST，检测 HOJ 私有 token 轮换语义
-        let (api_resp, headers) = self
-            .http
-            .post_json_with_headers::<ApiResponse<JudgeVO>, _>(&url, &body, Some(&token))
+        // 走统一的 POST 封装：原始响应体 → 去 null 解析 → token 轮换。
+        // 此前这里自带一份轮换逻辑，与 get/post_json_authed 的实现容易漂移
+        let api_resp = self
+            .post_json_authed::<ApiResponse<JudgeVO>, _>(&url, &body)
             .await
-            .map_err(|e| AppError::Submission(format!("HOJ submit 请求失败: {}", e)))?;
-        if let Some(new_token) = extract_refreshed_token(&headers) {
-            debug!("HOJ token 已轮换（submit），更新本地缓存并发布事件");
-            self.set_token(new_token.clone());
-            self.event_bus.publish(&AppEvent::Auth(AuthEvent::TokenRefreshed {
-                token: new_token,
-            }));
-        }
+            .map_err(|e| e.context("HOJ submit"))?;
 
         let judge = api_resp.into_data().map_err(|msg| {
             warn!(error = msg, "HOJ 提交失败");
@@ -671,12 +764,15 @@ impl SubmissionProvider for HOJAdapter {
     async fn get_judgement(&self, submission_id: &str) -> AppResult<JudgementResult> {
         let url = self.api_url(&format!("/get-submission-detail?submitId={}", submission_id));
 
-        // 使用 get_json 统一走重试逻辑（而非裸 client.get）
+        // 走统一 GET 封装：带上 token（若已登录）、处理轮换、去 null 解析。
+        // 此前固定传 None：评测详情在需要认证的部署上会直接 401，
+        // 且轮询期间感知不到 token 轮换，长时间比赛会出现周期性查询失败。
+        // 另外 SubmissionDetail 的 time/memory 在评测未完成时为 null，
+        // 不经去 null 处理会让整个轮询链路解析失败。
         let api_resp = self
-            .http
-            .get_json::<ApiResponse<types::SubmissionInfoVO>>(&url, None)
+            .get_json_authed::<ApiResponse<types::SubmissionInfoVO>>(&url)
             .await
-            .map_err(|e| AppError::Network(format!("HOJ judgement 请求失败: {}", e)))?;
+            .map_err(|e| e.context("HOJ judgement"))?;
 
         let info = api_resp.into_data().map_err(|msg| {
             AppError::Submission(format!("HOJ 评测查询失败: {}", msg))
