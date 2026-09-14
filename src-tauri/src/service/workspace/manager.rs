@@ -86,17 +86,7 @@ impl WorkspaceManager {
         );
 
         // 持久化元数据到 workspace.json，避免从 workspace_id 字符串解析元数据
-        let meta = WorkspaceMeta {
-            contest_id: contest_id.to_string(),
-            problem_id: problem_id.to_string(),
-            root_path: root_path.to_string(),
-            language: String::new(),
-            created_at: ws.created_at,
-            updated_at: ws.updated_at,
-        };
-        let meta_json = serde_json::to_string_pretty(&meta)
-            .map_err(|e| AppError::Serialization(format!("序列化工作区元数据失败: {}", e)))?;
-        self.repo.save_file(&ws.id, &PathBuf::from("workspace.json"), &meta_json)?;
+        self.persist_meta(&ws)?;
 
         {
             let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
@@ -210,6 +200,10 @@ impl WorkspaceManager {
             saved += 1;
         }
 
+        // 元数据随保存一并落盘：语言等字段不属于任何代码文件，
+        // 只写文件会让它们永远停留在创建时的初值
+        self.persist_meta(ws)?;
+
         ws.mark_clean();
 
         debug!(
@@ -227,6 +221,46 @@ impl WorkspaceManager {
             }));
 
         Ok(())
+    }
+
+    /// 设置当前工作区的编程语言，并**立即**持久化元数据。
+    ///
+    /// 语言不属于任何代码文件，`update_file` 与「仅写文件」的保存路径都带不上它，
+    /// 因此必须单独落盘。否则切换语言后切题或重启客户端会退回默认语言 ——
+    /// 选手的 Java 代码会被当作 C++ 提交，属于赛场上最难排查的静默故障。
+    ///
+    /// 不修改脏标记：语言变更不需要重写代码文件。
+    pub fn set_language(&self, language: &str) -> AppResult<Workspace> {
+        let ws = {
+            let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
+            let ws = current
+                .as_mut()
+                .ok_or_else(|| AppError::Workspace("无当前工作区".into()))?;
+            ws.language = language.to_string();
+            ws.touch();
+            ws.clone()
+        };
+
+        self.persist_meta(&ws)?;
+
+        debug!(workspace_id = ws.id, language = language, "工作区语言已更新并落盘");
+        Ok(ws)
+    }
+
+    /// 把工作区元数据写入 `workspace.json`（create / save / set_language 共用）。
+    fn persist_meta(&self, ws: &Workspace) -> AppResult<()> {
+        let meta = WorkspaceMeta {
+            contest_id: ws.contest_id.clone(),
+            problem_id: ws.problem_id.clone(),
+            root_path: ws.root_path.clone(),
+            language: ws.language.clone(),
+            created_at: ws.created_at,
+            updated_at: ws.updated_at,
+        };
+        let meta_json = serde_json::to_string_pretty(&meta)
+            .map_err(|e| AppError::Serialization(format!("序列化工作区元数据失败: {}", e)))?;
+        self.repo
+            .save_file(&ws.id, &PathBuf::from("workspace.json"), &meta_json)
     }
 
     /// 启动后台自动保存。
