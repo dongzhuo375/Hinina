@@ -2,6 +2,15 @@ import { defineStore } from 'pinia'
 import type { Contest, ContestProblem } from '@/types/contest'
 import { contestService } from '@/services/contest.service'
 
+/**
+ * 进行中的比赛加载请求（模块级，不进响应式状态）。
+ *
+ * 外壳 `ContestLayout` 与各视图（题目总览/榜单/解题）都可能在同一时刻发现
+ * 「比赛数据还没加载」而各自触发一次加载；共享同一个 in-flight Promise 可避免
+ * 重复 IPC —— 开赛瞬间全场客户端同时进场时，这类重复请求会成倍放大服务端压力。
+ */
+let loadInFlight: Promise<void> | null = null
+
 export const useContestStore = defineStore('contest', {
   state: () => ({
     contest: null as Contest | null,
@@ -25,20 +34,32 @@ export const useContestStore = defineStore('contest', {
   },
 
   actions: {
-    /** 加载已配置的比赛数据 */
+    /**
+     * 加载已配置的比赛数据（并发去重）。
+     *
+     * 同一时刻的多次调用共享一个请求；失败时所有调用方都会收到同一个 rejection，
+     * 因此调用方必须自行 catch（错误信息已写入 `error`）。
+     */
     async loadContest() {
+      if (loadInFlight) return loadInFlight
+
       this.isLoading = true
       this.error = null
-      try {
-        const result = await contestService.loadConfiguredContest()
-        this.contest = result.contest
-        this.problems = result.problems
-      } catch (e) {
-        this.error = e instanceof Error ? e.message : '加载比赛失败'
-        throw e
-      } finally {
-        this.isLoading = false
-      }
+      const task = (async () => {
+        try {
+          const result = await contestService.loadConfiguredContest()
+          this.contest = result.contest
+          this.problems = result.problems
+        } catch (e) {
+          this.error = e instanceof Error ? e.message : '加载比赛失败'
+          throw e
+        } finally {
+          this.isLoading = false
+          loadInFlight = null
+        }
+      })()
+      loadInFlight = task
+      return task
     },
 
     /**

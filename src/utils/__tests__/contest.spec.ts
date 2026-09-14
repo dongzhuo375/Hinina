@@ -13,6 +13,10 @@ function makeContest(overrides: Partial<Contest> = {}): Contest {
     contestType: 0,
     status: -1,
     auth: 0,
+    rankShowName: 'username',
+    sealRank: false,
+    sealRankTime: null,
+    allowEndSubmit: false,
     ...overrides,
   }
 }

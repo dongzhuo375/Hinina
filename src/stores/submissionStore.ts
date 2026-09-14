@@ -66,6 +66,8 @@ export const useSubmissionStore = defineStore('submission', {
         if (entry) {
           entry.status = result.status
           entry.time = result.timeMs
+          // 内存占用同样回填，否则控制台条/提交列表只能显示耗时
+          entry.memory = result.memoryKb
         }
         return result
       } catch (e) {

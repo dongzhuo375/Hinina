@@ -11,6 +11,20 @@
   --color-error: #ef4444;
   --color-pending: #00c7be;
 
+  /* ── 榜单 / 工作台状态色（浅色）──
+     榜单格与行级状态：一血、AC/WA 格、封榜冻结格、打星/女生行、待评测 */
+  --color-first-ac: #047857; /* 一血格背景（配白字） */
+  --color-ac-bg: #ecfdf5; /* AC 格背景 */
+  --color-ac-border: #a7f3d0; /* AC 格边框 */
+  --color-wa-bg: #fff1f2; /* WA / 未通过格背景 */
+  --color-wa-border: #fecdd3; /* WA / 未通过格边框 */
+  --color-frozen-bg: #f1f5f9; /* 封榜 try 格背景（冻结提交，赛后才揭晓） */
+  --color-frozen-border: #cbd5e1; /* 封榜 try 格边框 */
+  --color-star-row-bg: #f8fafc; /* 打星队（不计排名）整行背景 */
+  --color-girls-row-bg: #fdf2f8; /* 女生队整行背景 */
+  --color-pending-bg: #fffbeb; /* 待评测 amber 背景 */
+  --color-pending-border: #fde68a; /* 待评测 amber 边框 */
+
   --radius: 8px;
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;

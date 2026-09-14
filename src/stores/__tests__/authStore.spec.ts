@@ -40,6 +40,10 @@ const contest: Contest = {
   contestType: 0,
   status: 0,
   auth: 0,
+  rankShowName: 'username',
+  sealRank: false,
+  sealRankTime: null,
+  allowEndSubmit: false,
 }
 
 /// 预置"上一位选手"的会话级领域状态，用于验证登出清理

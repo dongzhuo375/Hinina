@@ -1,5 +1,6 @@
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
+import { useRankStore } from '@/stores/rankStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -22,6 +23,11 @@ export function clearDomainState(): void {
   const submission = useSubmissionStore()
   submission.stopAllPolling()
   submission.$reset()
+
+  // 停止榜单实时刷新并清空榜单数据（含「我的行」，属于会话数据）
+  const rank = useRankStore()
+  rank.stopLive()
+  rank.$reset()
 
   // 比赛 store 内含登录页匿名简报，只清理会话相关部分
   useContestStore().clearSessionData()
