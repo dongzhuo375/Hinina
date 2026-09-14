@@ -15,7 +15,7 @@
   6. HttpClient — 网络客户端
   7. ProviderRegistry — 默认 HOJ（HOJAdapter 注入 `Arc<EventBus>`，token 轮换时发布 `AuthEvent::TokenRefreshed`）
   8. WorkspaceManager — 通过 `FsWorkspaceRepository` 创建，包装为 `Some(Arc<...>)`
-  9. 装配 5 个 Service：ThemeService → AuthService → ContestService → ProblemService → SubmissionService
+  9. 装配 5 个 Service：ThemeService → AuthService → ContestService → ProblemService（注入 `Arc<Storage>`，供题目 limits 磁盘缓存 `cache/problem_limits/`）→ SubmissionService
   10. 装配 AppContext 并返回
 
 ## 直接依赖
@@ -48,4 +48,4 @@
 - `commands::workspace_cmd`
 
 ## 逻辑流程
-`AppContext::init(base_dir)` 按依赖顺序初始化：Logger → Storage → EventBus → ConfigService → HttpClient → ProviderRegistry → WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ 装配 AppContext。所有 Service 通过 Arc 共享 EventBus、ConfigService、ProviderRegistry 和 Storage。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
+`AppContext::init(base_dir)` 按依赖顺序初始化：Logger → Storage → EventBus → ConfigService → HttpClient → ProviderRegistry → WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ 装配 AppContext。所有 Service 通过 Arc 共享 EventBus、ConfigService、ProviderRegistry 和 Storage（AuthService 用于会话持久化，ProblemService 用于 limits 磁盘缓存）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。

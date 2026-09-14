@@ -34,3 +34,7 @@ status ∈ {Pending, Compiling, Running} → 非终态，继续轮询
 - `Unknown` 必须视为终态：HOJ 的 OLE/SE/RJE/FREQ/UE 因无对应枚举被映射为 `Unknown`，
   若当作非终态将导致这些提交被无限轮询（此前 View 内硬编码状态列表即存在该缺陷）。
 - 纯函数、无副作用，便于单元测试与跨层复用。
+
+## 测试
+
+`src/utils/__tests__/submission.spec.ts` 锁定两条回归契约：`Unknown` 必须视为终态（防止 OLE/SE/RJE 等被无限轮询）、终态清单与 `JudgementStatus` 全量取值一一对应（借 `Record<JudgementStatus, boolean>` 穷尽映射，新增枚举值时直接类型报错，逼迫显式归类）。

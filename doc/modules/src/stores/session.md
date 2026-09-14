@@ -4,18 +4,19 @@
 
 ## 职责
 
-登出或切换账号时统一清空会话级领域状态，避免上一位选手的比赛、题面、提交记录与编辑器代码残留到下一个会话。
+登出或切换账号时统一清空会话级领域状态，避免上一位选手的比赛、题面、提交记录、榜单与编辑器代码残留到下一个会话。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `clearDomainState` | `() => void` | 重置 contest / problem / submission / workspace 四个 store；重置工作区前先取消其防抖同步定时器 |
+| `clearDomainState` | `() => void` | 重置 contest / problem / submission / rank / workspace 五个 store；重置工作区前先取消其防抖同步定时器，重置榜单前先停止实时刷新轮询 |
 
 ## 直接依赖
 
 - `@/stores/contestStore`（`clearSessionData()`，保留匿名比赛简报）
 - `@/stores/problemStore`
+- `@/stores/rankStore`（`stopLive()` + `$reset()`）
 - `@/stores/submissionStore`（`stopAllPolling()` + `$reset()`）
 - `@/stores/workspaceStore`（`cancelPendingSync()` + `$reset()`）
 
@@ -34,6 +35,8 @@ authStore.logout()
       → workspaceStore.$reset()
       → submissionStore.stopAllPolling()     // 回收评测轮询定时器
       → submissionStore.$reset()
+      → rankStore.stopLive()                 // 回收榜单轮询定时器
+      → rankStore.$reset()                   // 「我的行」属会话数据，一并清空
       → contestStore.clearSessionData()      // 保留登录页匿名比赛简报
       → problemStore.$reset()
 ```
@@ -45,4 +48,6 @@ authStore.logout()
   （`authStore → session → 各领域 store`，各领域 store 不反向依赖 `authStore`）。
 - `contestStore` 同时持有登录页的匿名比赛简报（不依赖会话），因此走定向清理
   `clearSessionData()` 而非 `$reset()`，避免切换账号时右侧氛围区与倒计时被清空。
+- `rankStore` 的轮询器句柄在模块作用域（不在 state 里），`$reset()` 清不掉它，
+  必须先 `stopLive()` 回收定时器，否则登出后轮询继续带着旧 `contestId` 打请求。
 - 竞赛场景下机位账号常被复用，残留数据既是误操作风险也是信息泄露风险。

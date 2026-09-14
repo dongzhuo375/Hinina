@@ -36,3 +36,6 @@
 - **get_session**：读取 `sessions/{oj_type}.json` 反序列化为 `Session`；恢复成功后调用 `ProviderRegistry::get_auth()` 获取 Provider 并回注 token；文件不存在或损坏返回 `None`
 - **validate_session**：先 `get_session()`（无本地会话 → `Invalid`；有则顺带把 token 回注 Provider，否则重启后的校验请求必然 401）→ 取不到 AuthProvider → `Unknown`；调用远端 `validate_session()`：`Ok(true)` → `Valid`；`Ok(false)` → `clear_session()` 删除磁盘会话 + 发布 `SessionExpired` → `Invalid`；`Err(_)`（网络异常）→ `Unknown` 并保留本地会话
 - **TokenRefreshed 订阅**：构造时注册 `EventCategory::Auth` 订阅；事件到达时读取当前 OJ 磁盘会话 → 更新 token 字段 → 回写。会话不存在（如轮换发生在登录持久化之前的极端时序）静默跳过。订阅句柄随 AuthService 进程级生命周期共存
+
+## 测试
+`src-tauri/src/service/auth/tests/auth_tests.rs` 锁定：会话保存/恢复 roundtrip（含 token 回注）、`TokenRefreshed` 事件回写磁盘会话（无会话静默跳过、多订阅者都能收到）、logout 删除磁盘会话、损坏会话文件返回 `None`、`clear_session` 幂等、`validate_session` 三态全覆盖（无本地会话/无 Provider → Invalid/Unknown、有效恢复 token、明确失效清会话并发事件、网络错误 Unknown 保留会话）、`SessionValidity` snake_case 序列化契约。

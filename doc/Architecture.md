@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-09-14 | 分支：`feat/polish-ui`
+> 最后更新：2026-09-21 | 分支：`feat/polish-ui`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -40,17 +40,18 @@ Hinina/
         │   │   ├── mod.rs
         │   │   ├── config.rs            # AppConfig 实体（用户/OJ/编辑器/主题/布局配置 + contest_id）
         │   │   ├── user.rs               # User 实体
-        │   │   ├── contest.rs            # Contest + ContestProblem 实体（阶段 7 扩展字段）
+        │   │   ├── contest.rs            # Contest（+ rank_show_name/seal_rank/seal_rank_time/allow_end_submit）+ ContestProblem（+ color 气球色）
         │   │   ├── problem.rs            # Problem + Sample 实体
         │   │   ├── submission.rs         # Submission + JudgementStatus + JudgementResult
+        │   │   ├── rank.rs               # 榜单实体：RankCell / ContestRankRow / ContestRankPage / RankQuery / ProblemLimits（ACM 与 OI 两套 VO 在 Adapter 归一到此）
         │   │   ├── workspace.rs          # Workspace 核心实体（阶段 3 完善）
         │   │   └── tests/
         │   │       └── workspace_tests.rs     # Workspace 单元测试
         │   ├── provider/
         │   │   ├── mod.rs
         │   │   ├── auth.rs               # AuthProvider trait
-        │   │   ├── contest.rs            # ContestProvider trait（+ list_contest_problems）
-        │   │   ├── problem.rs            # ProblemProvider trait
+        │   │   ├── contest.rs            # ContestProvider trait（+ list_contest_problems / get_contest_rank）
+        │   │   ├── problem.rs            # ProblemProvider trait（+ get_user_problem_status）
         │   │   ├── submission.rs         # SubmissionProvider trait
         │   │   ├── oj_type.rs            # OJType 枚举
         │   │   └── registry.rs           # ProviderRegistry trait
@@ -80,24 +81,31 @@ Hinina/
         │   │   └── tests/
         │   │       └── auth_tests.rs     # AuthService 单元测试（会话持久化/轮换回写/失效清理）
         │   ├── contest/
-        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存/比赛切换
+        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存/比赛切换/get_rank（榜单不缓存，内榜每次实时重算）
         │   │   └── error.rs              # ContestError
         │   ├── problem/
-        │   │   ├── mod.rs                # ProblemService：题目获取/打开题目
-        │   │   └── error.rs              # ProblemError
+        │   │   ├── mod.rs                # ProblemService：题目获取/打开题目/我的题目状态/load_problem_limits（内存+磁盘双层缓存、并发上限 4、部分失败跳过）
+        │   │   ├── error.rs              # ProblemError
+        │   │   └── tests/
+        │   │       └── problem_tests.rs  # limits 缓存测试（首次落盘/二次命中零请求/损坏文件降级/401 不回退默认值）
         │   ├── submission/
         │   │   ├── mod.rs                # SubmissionService：代码提交/评测轮询/超时
         │   │   └── error.rs              # SubmissionError
         │   └── workspace/
         │       ├── mod.rs
         │       ├── error.rs              # WorkspaceError
-        │       └── manager.rs            # WorkspaceManager：完整生命周期实现
+        │       ├── manager.rs            # WorkspaceManager：完整生命周期 + set_language/persist_meta（语言等元数据随保存落盘）
+        │       └── tests/
+        │           └── manager_tests.rs  # 工作区生命周期测试（含语言跨实例持久化）
         ├── adapter/
         │   ├── mod.rs
         │   ├── hoj/
-        │   │   ├── mod.rs                # HOJAdapter：实现 4 个 Provider trait（阶段 5 完成）
-        │   │   ├── types.rs              # HOJ DTO：ApiResponse/Login/Contest/Problem/Submission + 状态码映射
-        │   │   └── error.rs              # HOJError
+        │   │   ├── mod.rs                # HOJAdapter：实现 4 个 Provider trait + get_json_authed/post_json_authed（共用 handle_token_rotation 做 Refresh-Token 轮换）
+        │   │   ├── types.rs              # HOJ DTO：ApiResponse/Login/Contest/Problem/Submission/ContestRank(ACM+OI)/UserProblemStatus + 状态码映射
+        │   │   ├── error.rs              # HOJError
+        │   │   └── tests/
+        │   │       ├── mod_tests.rs      # Adapter 行为测试（token 轮换等）
+        │   │       └── types_tests.rs    # DTO 解析测试（榜单 ACM/OI 归一、封榜只有 tryNum、打星 rank=-1、字段缺失容错）
         │   ├── qduoj/
         │   │   ├── mod.rs
         │   │   ├── types.rs              # QDUOJ DTO 类型（骨架）
@@ -142,10 +150,10 @@ Hinina/
         └── commands/                     # NEW: Tauri Command 薄封装
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login / logout / get_session / validate_session（三态）
-            ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest
-            ├── problem_cmd.rs            # get_problem / list_problems
+            ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest / get_contest_rank
+            ├── problem_cmd.rs            # get_problem / list_problems / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement
-            ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file
+            ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
             ├── config_cmd.rs             # get_config / reload_config / update_config
             ├── theme_cmd.rs              # get_theme / set_theme
             └── tests/
@@ -174,49 +182,63 @@ src/
 ├── App.vue                               # 根组件（n-config-provider + n-dialog-provider）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
-│   └── index.ts                          # Vue Router（/login, /contest）+ requiresAuth 认证守卫（未登录重定向登录页）
+│   └── index.ts                          # Vue Router（/login + /contest 嵌套子树：problems / problem/:displayId / rank / submissions / announcements / settings）+ requiresAuth 认证守卫
 ├── views/
-│   ├── LoginView.vue                     # 登录页（左右分栏：登录表单/已登录会话状态 + 几何 SVG 氛围区/比赛简介/倒计时）
+│   ├── LoginView.vue                     # 登录页（左右分栏：登录表单/已登录身份块 + 几何 SVG 氛围区/比赛简介/倒计时）
 │   │                                     #   已登录且比赛未开始时留在本页等待，倒计时归零自动进入赛场
-│   └── ContestView.vue                   # 核心页面（三栏分割：题目列表｜题面｜编辑器+提交）
+│   ├── ContestLayout.vue                 # 比赛工作台外壳：TopBar + ActivityBar + <router-view> + StatusBar
+│   ├── ProblemSetView.vue                # 题目总览（统计条 + 卡片网格，limits 渐进填充）
+│   ├── ProblemSolveView.vue              # 解题页（题面分节 ｜ 编辑器 + 控制台条，可拖拽分栏）
+│   ├── RankView.vue                      # 实时榜单（工具条 + 表格 + 分页，10s±2s 轮询、后台暂停、结束即停）
+│   └── PlaceholderView.vue               # 「功能开发中」占位页（评测 / 公告 / 设置共用）
 ├── components/
 │   ├── layout/
-│   │   ├── TitleBar.vue                  # 窗口标题栏（拖拽区 + 最小化/最大化/关闭，decorations:false）
-│   │   └── AppHeader.vue                 # 顶部栏（比赛标题 + 倒计时 + 用户）
+│   │   ├── TopBar.vue                    # 顶栏（拖拽区 + 窗口控制 + 状态徽章 + 倒计时胶囊 + 比赛简介抽屉 + 用户 pill）
+│   │   ├── ActivityBar.vue               # 左侧活动栏（题目/榜单/评测/公告 + 底部设置，router-link 驱动高亮）
+│   │   └── StatusBar.vue                 # 底部状态条（连接状态 + 客户端版本）
+│   ├── contest/
+│   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时，数据源=榜单我的行）
 │   ├── editor/
-│   │   └── CodeEditor.vue                # Monaco Editor 封装（手动 worker 配置）
+│   │   ├── CodeEditor.vue                # Monaco Editor 封装（浅色主题 + 语言工具条 + 自动备份指示 + focus()）
+│   │   └── EditorConsoleBar.vue          # 编辑器底部控制台条（最新记录 pill / 提交记录入口 / 提交代码 / 光标状态行）
 │   ├── problem/
-│   │   ├── ProblemSidebar.vue            # 题目列表侧边栏
-│   │   └── ProblemStatement.vue          # 题面展示（Markdown 渲染 + 相对图片 URL 改写）
-│   ├── submission/
-│   │   └── SubmissionPanel.vue           # 提交记录列表 + 评测状态 Badge
+│   │   ├── ProblemCard.vue               # 题目卡片（字母徽章取 HOJ 气球色、limits、通过数、我的状态、快捷入口）
+│   │   ├── ProblemTabStrip.vue           # 题目快速切换条（A/B/C… chips，标记已 AC / 已尝试）
+│   │   └── ProblemStatement.vue          # 题面分节展示（描述/输入/输出/样例+复制/提示，Markdown 渲染 + 相对图片 URL 改写）
+│   ├── rank/
+│   │   ├── RankToolbar.vue               # 榜单工具条（服务端 keyword 搜索 300ms 防抖 + 分组 tab + 赛制图例）
+│   │   ├── ScoreboardTable.vue           # 榜单表格（粘性表头/我的行/前两列，ACM 与 OI 分流渲染）
+│   │   └── RankCell.vue                  # ACM 单元格（一血/通过/未通过/封榜/赛后提交/未作答）
 │   └── common/
 │       ├── LoadingSpinner.vue            # 通用加载动画
 │       └── ErrorMessage.vue              # 通用错误提示 + 重试按钮
 ├── stores/
 │   ├── authStore.ts                      # 用户认证状态（登录/登出/会话恢复/三态校验 + sessionResolved 守卫标记）
-│   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/工作区）
+│   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/榜单/工作区并回收定时器）
 │   ├── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配
-│   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + 登录页匿名比赛简报状态（brief*）
-│   ├── problemStore.ts                   # 当前题目详情状态
+│   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + loadContest 并发去重 + 登录页匿名比赛简报状态（brief*）
+│   ├── problemStore.ts                   # 当前题目详情 + limits 缓存 + 我的题目状态（limitsOf/statusOf 派生读取）
+│   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数修正、分组筛选、我的行、后台暂停）
 │   ├── submissionStore.ts                # 提交记录 + 评测轮询编排（终态/超时停止，登出时统一回收定时器）
-│   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态
-│   └── __tests__/                        # authStore.spec.ts（登录/登出/三态校验/失效清理状态机）
+│   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（语言切换即时持久化到后端元数据）
+│   └── __tests__/                        # authStore / contestStore / rankStore .spec.ts（会话状态机、加载去重、榜单去重与轮询）
 ├── services/
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
 │   ├── config.service.ts                 # 配置读取唯一入口（进程内缓存）+ 派生参数（OJ 基址、轮询调度）
 │   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
-│   ├── problem.service.ts                # 获取题目详情/列表
+│   ├── problem.service.ts                # 获取题目详情/列表 + 我的题目状态 + 批量 limits
+│   ├── rank.service.ts                   # 榜单查询（分页/关键词/去打星参数编排）
 │   ├── submission.service.ts             # 提交代码/轮询评测
-│   ├── workspace.service.ts              # 工作区创建/保存/恢复
+│   ├── workspace.service.ts              # 工作区创建/保存/恢复/语言持久化
 │   └── __tests__/                        # auth.service.spec.ts（本地缓存清理与三态归一契约）
 ├── bridge/
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
 │   ├── auth.bridge.ts                    # login / logout / get_session / validate_session
 │   ├── contest.bridge.ts                 # load_configured_contest / list_contests（匿名，登录页比赛信息）
-│   ├── problem.bridge.ts                 # get_problem / list_problems
+│   ├── problem.bridge.ts                 # get_problem / list_problems / getUserProblemStatus / getContestProblemLimits
+│   ├── rank.bridge.ts                    # get_contest_rank
 │   ├── submission.bridge.ts              # submit_code / get_judgement
-│   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile
+│   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile / setWorkspaceLanguage
 │   ├── config.bridge.ts                  # get_config
 │   └── __tests__/                        # index.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数）
 ├── types/
@@ -224,13 +246,17 @@ src/
 │   ├── contest.ts                        # Contest + ContestProblem 实体
 │   ├── problem.ts                        # Problem + Sample 实体
 │   ├── submission.ts                     # JudgementStatus + JudgementResult
+│   ├── rank.ts                           # RankCell / ContestRankRow / ContestRankPage / RankQuery / ProblemLimits（榜单与题目限制跨端契约）
 │   ├── workspace.ts                      # Workspace 实体
 │   └── config.ts                         # AppConfig 及其子配置
 ├── utils/
 │   ├── markdown.ts                       # Markdown 渲染（marked）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust is_terminal_status 对齐）
-│   └── __tests__/                        # contest / submission / session-check .spec.ts（阶段判据、终态判据、预检调度边界）
+│   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入）
+│   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式类别、显示名回退、uid 去重、参与人数推算、罚时格式化）
+│   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
+│   └── __tests__/                        # contest / submission / session-check / polling / rank / limits .spec.ts（阶段判据、终态判据、预检调度边界、轮询节奏、榜单映射、limits 换算）
 └── styles/
     └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题
 ```
@@ -280,3 +306,11 @@ src/
 - **赛前预检错峰**：登录页等待开赛时按 `utils/session-check.ts` 的策略校验会话 —— 距开赛 >10min 每 5min±60s 周期复检，进入 [T-10min, T-3min] 窗口后在剩余区间随机取点做一次性预检，迟到启动则 0–3s 抖动后立即执行，距开赛 ≤30s 不再预检。目的是把全场客户端的校验请求散布开，避免开赛前形成同步尖峰；**进场（T-0 导航）不错峰**，准点进场是公平性要求
 - **IPC 错误归一化**：Rust `AppError` 经 serde 序列化为 `{ Variant: msg }` 对象，`bridge/index.ts` 在唯一出口转换为 `IpcError extends Error`，保证上层 `e instanceof Error` 与 `e.message` 可用；日志不记录调用参数（含明文密码）
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询定时器由 `submissionStore` 编排（终态判据见 `utils/submission.ts`，超时兜底），View 只表达提交意图
+- **比赛工作台外壳**：`ContestLayout` 承载 TopBar + ActivityBar + `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；窗口拖拽与窗口控制只在 TopBar（登录页由 `App.vue` 提供兜底窗口条）。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
+- **轮询统一原语**：周期性刷新（榜单、题目总览）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止；榜单 10s±2s，题目总览 30s±5s。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），仍由 `submissionStore` 自行编排，迁移到统一原语留待后续
+- **榜单数据源职责**：卡片「我的状态」取 `get-user-problem-status`（轻量、不受榜单分页/搜索影响）；统计卡「解题进度 / 实时排名 / 总罚时」取榜单我的行（服务端前置复制，天然可得）；`ac/total` 与气球色取比赛题目列表。HOJ 会把当前用户与关注列表**前置复制**进 `records`，渲染前必须按 `uid` 去重，`total` 因此偏大、不能直接当参赛人数（用 `total - 本页重复数`）；`rank == -1` 是打星队伍；封榜以 `contest.sealRank + sealRankTime` 自行判断，**不依赖 `forceRefresh`**（对非管理员无效）
+- **ACM / OI 归一**：两套 VO（`ac/total/submissionInfo{对象}` vs `totalScore/submissionInfo{分数}/timeInfo{毫秒}`）在 Adapter 层归一为 OJ 无关实体，前端不感知赛制差异；单元格判档是纯函数（`utils/rank.resolveRankCell` / `resolveOiRankCell`），组件只做样式映射。ACM `totalTime` 是**秒**、OI 是**毫秒**，混用会差 1000 倍
+- **题目 limits 缓存**：列表接口不返回 limits，只能按题请求 `get-contest-problem-details`；`ProblemService::load_problem_limits` 做「内存 + 磁盘（`cache/problem_limits/{cid}.json`）」双层缓存、并发上限 4、部分失败跳过、全部失败才上抛；401/403 **不得静默回退默认值**（未注册私有赛必须让选手看见真因）。展示需标注语言倍率（题面是 C/C++ 基准，其它语言时间与内存 ×2）
+- **状态文案以接口返回为准**：评测状态直接用后端 `JudgementStatus` 原词（Accepted / Wrong Answer…），不强行缩写为 AC/WA；`get-user-problem-status` 的 0/1/2 映射为「未作答 / 已通过 / 尝试过」
+- **工作区语言必须落盘**：语言不属于任何代码文件，`update_workspace_file` 带不上它；`workspaceStore.changeLanguage` 乐观更新本地并调用 `set_workspace_language` 立即持久化元数据，否则切题或重启后退回默认语言，会把 Java 代码当 C++ 提交
+- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；本轮只做浅色主题（Monaco `vs`）
