@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-07-13 | 分支：`feat/stage7-frontend`
+> 最后更新：2026-09-14 | 分支：`feat/polish-ui`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -174,9 +174,10 @@ src/
 ├── App.vue                               # 根组件（n-config-provider + n-dialog-provider）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
-│   └── index.ts                          # Vue Router（/login, /contest）
+│   └── index.ts                          # Vue Router（/login, /contest）+ requiresAuth 认证守卫（未登录重定向登录页）
 ├── views/
-│   ├── LoginView.vue                     # 登录页（左右分栏：登录表单 + 几何 SVG 氛围区/比赛简介/倒计时）
+│   ├── LoginView.vue                     # 登录页（左右分栏：登录表单/已登录会话状态 + 几何 SVG 氛围区/比赛简介/倒计时）
+│   │                                     #   已登录且比赛未开始时留在本页等待，倒计时归零自动进入赛场
 │   └── ContestView.vue                   # 核心页面（三栏分割：题目列表｜题面｜编辑器+提交）
 ├── components/
 │   ├── layout/
@@ -193,14 +194,15 @@ src/
 │       ├── LoadingSpinner.vue            # 通用加载动画
 │       └── ErrorMessage.vue              # 通用错误提示 + 重试按钮
 ├── stores/
-│   ├── authStore.ts                      # 用户认证状态
-│   ├── contestStore.ts                   # 比赛 + 题目摘要状态
+│   ├── authStore.ts                      # 用户认证状态（登录/登出/会话恢复 + sessionResolved 守卫标记）
+│   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/工作区）
+│   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情状态
 │   ├── submissionStore.ts                # 提交记录 + 轮询状态
 │   └── workspaceStore.ts                 # 工作区 + 代码编辑器状态
 ├── services/
-│   ├── auth.service.ts                   # 登录/登出/会话检查（localStorage 缓存）
-│   ├── contest.service.ts                # 加载配置的比赛
+│   ├── auth.service.ts                   # 登录/登出/会话检查（localStorage 缓存，登出失败也清本地）
+│   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
 │   ├── problem.service.ts                # 获取题目详情/列表
 │   ├── submission.service.ts             # 提交代码/轮询评测
 │   └── workspace.service.ts              # 工作区创建/保存/恢复
@@ -220,6 +222,7 @@ src/
 │   ├── workspace.ts                      # Workspace 实体
 │   └── config.ts                         # AppConfig 及其子配置
 ├── utils/
+│   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
 │   └── markdown.ts                       # Markdown 渲染（marked）+ 相对图片 URL 改写为 HOJ 绝对地址
 └── styles/
     └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题
@@ -265,3 +268,4 @@ src/
 - **插件系统**：v0.x 仅预留架构，不实现运行时。插件只能访问 `plugin/api/`，禁止直接调用内部 Service
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求
+- **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；登录页依据比赛阶段（`utils/contest`）决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入；登出时经 `stores/session.ts` 清空会话级领域状态

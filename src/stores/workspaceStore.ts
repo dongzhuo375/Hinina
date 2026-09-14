@@ -68,6 +68,14 @@ export const useWorkspaceStore = defineStore('workspace', {
       }, 2000)
     },
 
+    /** 取消尚未触发的防抖同步（登出/切换账号时调用，避免向已失效会话写入代码） */
+    cancelPendingSync() {
+      if (this._syncTimer) {
+        clearTimeout(this._syncTimer)
+        this._syncTimer = null
+      }
+    },
+
     /** 切换编辑器语言 */
     changeLanguage(lang: string) {
       this.language = lang

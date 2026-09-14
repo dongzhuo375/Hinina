@@ -18,10 +18,15 @@ export class AuthService {
 
   /**
    * 登出并清除本地缓存。
+   *
+   * 后端登出失败时仍清理本地缓存：本地状态必须与"已登出"的 UI 语义保持一致。
    */
   async logout(): Promise<void> {
-    await authBridge.logout()
-    localStorage.removeItem(STORED_USER_KEY)
+    try {
+      await authBridge.logout()
+    } finally {
+      localStorage.removeItem(STORED_USER_KEY)
+    }
   }
 
   /**
