@@ -31,6 +31,22 @@ pub struct Session {
     pub oj_type: String,
 }
 
+/// 会话校验结果（三态），经 IPC 以 snake_case 字符串传递给前端。
+///
+/// 必须区分"服务端明确判定失效"与"无法判定"：前者要让用户重新登录，
+/// 后者（网络抖动、Provider 缺失）若同样按失效处理，会在赛前把选手踢回登录页，
+/// 反复重登还可能触发 HOJ 的暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionValidity {
+    /// 服务端确认会话有效
+    Valid,
+    /// 本地无会话，或服务端明确判定失效（此时磁盘会话已清除）
+    Invalid,
+    /// 无法判定（网络异常 / Provider 不可用），本地会话保留
+    Unknown,
+}
+
 /// 认证服务。
 ///
 /// 编排登录/登出流程，管理本地会话持久化。
@@ -185,40 +201,46 @@ impl AuthService {
         }
     }
 
-    /// 验证当前会话是否有效。
+    /// 校验当前会话有效性（三态）。
     ///
-    /// 先从本地恢复 session，再调用远端 validate_session。
-    /// 如果本地无 session 或远端校验失败，返回 `false`。
-    pub async fn validate_session(&self) -> bool {
+    /// 先从本地恢复 session（`get_session` 会把 token 回注 Provider，
+    /// 否则重启后的校验请求会因缺少 Authorization 头而必然 401），再请求远端校验：
+    /// - 本地无会话 → `Invalid`
+    /// - 远端确认有效 → `Valid`
+    /// - 远端明确判定失效 → 清除磁盘会话 + 发布 `SessionExpired`，返回 `Invalid`
+    /// - 网络异常 / 无 Provider → `Unknown`（保留本地会话，由调用方决定重试）
+    pub async fn validate_session(&self) -> SessionValidity {
         let oj_type = self.registry.current_oj();
-        let _session = match self.get_session() {
-            Some(s) => s,
-            None => return false,
-        };
+        if self.get_session().is_none() {
+            debug!("本地无会话，判定为未登录");
+            return SessionValidity::Invalid;
+        }
 
         let provider = match self.registry.get_auth(&oj_type) {
             Ok(p) => p,
             Err(e) => {
-                warn!(error = %e, "获取 AuthProvider 失败");
-                return false;
+                warn!(error = %e, "获取 AuthProvider 失败，会话有效性无法判定");
+                return SessionValidity::Unknown;
             }
         };
 
         match provider.validate_session().await {
-            Ok(valid) => {
-                if !valid {
-                    debug!("会话已过期");
-                    // 服务端明确判定失效：清除磁盘会话，避免重启后回注过期 token
-                    self.clear_session(&oj_type);
-                    self.event_bus
-                        .publish(&AppEvent::Auth(AuthEvent::SessionExpired));
-                }
-                valid
+            Ok(true) => {
+                debug!("会话校验通过");
+                SessionValidity::Valid
+            }
+            Ok(false) => {
+                // 服务端明确判定失效：清除磁盘会话，避免重启后回注过期 token
+                info!("会话已失效，清除本地会话");
+                self.clear_session(&oj_type);
+                self.event_bus
+                    .publish(&AppEvent::Auth(AuthEvent::SessionExpired));
+                SessionValidity::Invalid
             }
             Err(e) => {
                 // 网络错误不代表会话失效，保留本地会话
-                warn!(error = %e, "会话验证请求失败");
-                false
+                warn!(error = %e, "会话校验请求失败，有效性未知");
+                SessionValidity::Unknown
             }
         }
     }

@@ -3,19 +3,37 @@ use super::*;
 use std::sync::Arc;
 
 use crate::core::event::event_category::EventCategory;
+use crate::core::provider::auth::AuthProvider;
 use crate::core::provider::oj_type::OJType;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 
 /// 构造基于独立临时目录的 AuthService 及其依赖。
 fn make_service(test_name: &str) -> (AuthService, Arc<EventBus>, std::path::PathBuf) {
+    let (service, event_bus, dir, _registry) = make_service_with_auth(test_name, None);
+    (service, event_bus, dir)
+}
+
+/// 同 `make_service`，但可注入 AuthProvider（会话校验路径测试用）。
+fn make_service_with_auth(
+    test_name: &str,
+    provider: Option<Arc<dyn AuthProvider>>,
+) -> (
+    AuthService,
+    Arc<EventBus>,
+    std::path::PathBuf,
+    Arc<dyn ProviderRegistry>,
+) {
     let dir = std::env::temp_dir().join(format!("hinina-test-auth-{}", test_name));
     let _ = std::fs::remove_dir_all(&dir);
     let storage = Arc::new(Storage::new(dir.clone()));
     let event_bus = Arc::new(EventBus::new());
     let registry: Arc<dyn ProviderRegistry> =
         Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
-    let service = AuthService::new(registry, storage, Arc::clone(&event_bus));
-    (service, event_bus, dir)
+    if let Some(p) = provider {
+        registry.register_auth(OJType::HOJ, p);
+    }
+    let service = AuthService::new(Arc::clone(&registry), storage, Arc::clone(&event_bus));
+    (service, event_bus, dir, registry)
 }
 
 /// 在当前线程创建独立 tokio runtime，避免嵌套 runtime panic。
@@ -147,4 +165,176 @@ fn clear_session_is_idempotent() {
     service.clear_session(&OJType::HOJ);
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── 会话校验（三态）──
+
+/// Stub Provider 的预设校验结果
+#[derive(Clone, Copy)]
+enum StubOutcome {
+    /// 服务端确认有效
+    Valid,
+    /// 服务端明确判定失效
+    Invalid,
+    /// 请求失败（网络异常）
+    NetworkErr,
+}
+
+/// 测试用 AuthProvider：以固定预设结果响应校验，并记录被回注的 token。
+struct StubAuthProvider {
+    outcome: StubOutcome,
+    restored: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+#[async_trait::async_trait]
+impl AuthProvider for StubAuthProvider {
+    async fn login(&self, username: &str, _password: &str) -> AppResult<User> {
+        Ok(User {
+            id: "u1".into(),
+            username: username.into(),
+            token: "stub-token".into(),
+        })
+    }
+
+    async fn logout(&self) -> AppResult<()> {
+        Ok(())
+    }
+
+    async fn validate_session(&self) -> AppResult<bool> {
+        match self.outcome {
+            StubOutcome::Valid => Ok(true),
+            StubOutcome::Invalid => Ok(false),
+            StubOutcome::NetworkErr => Err(AppError::Network("stub: 网络异常".into())),
+        }
+    }
+
+    fn restore_token(&self, token: &str) {
+        if let Ok(mut slot) = self.restored.lock() {
+            *slot = Some(token.to_string());
+        }
+    }
+}
+
+/// 构造带 Stub AuthProvider 的服务与 token 回注记录槽。
+fn make_stub_service(
+    test_name: &str,
+    outcome: StubOutcome,
+) -> (
+    AuthService,
+    Arc<EventBus>,
+    std::path::PathBuf,
+    Arc<std::sync::Mutex<Option<String>>>,
+) {
+    let restored = Arc::new(std::sync::Mutex::new(None));
+    let provider = Arc::new(StubAuthProvider {
+        outcome,
+        restored: Arc::clone(&restored),
+    });
+    let (service, bus, dir, _registry) = make_service_with_auth(test_name, Some(provider));
+    (service, bus, dir, restored)
+}
+
+#[test]
+fn validate_session_without_local_session_is_invalid() {
+    let (service, _bus, dir, _reg) = make_service_with_auth("validate-no-session", None);
+
+    assert_eq!(
+        block_on(service.validate_session()),
+        SessionValidity::Invalid,
+        "本地无会话应判定为 Invalid"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_session_without_provider_is_unknown_and_keeps_session() {
+    let (service, _bus, dir, _reg) = make_service_with_auth("validate-no-provider", None);
+    service.save_session(&sample_session("token-a")).expect("保存会话失败");
+
+    assert_eq!(
+        block_on(service.validate_session()),
+        SessionValidity::Unknown,
+        "无 Provider 时无法判定，应为 Unknown"
+    );
+    assert!(session_path(&dir).exists(), "无法判定时不应清除本地会话");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_session_valid_restores_token_and_keeps_session() {
+    let (service, _bus, dir, restored) = make_stub_service("validate-valid", StubOutcome::Valid);
+    service.save_session(&sample_session("token-a")).expect("保存会话失败");
+
+    assert_eq!(block_on(service.validate_session()), SessionValidity::Valid);
+    assert!(session_path(&dir).exists(), "有效会话不应被清除");
+    // 校验前必须把磁盘 token 回注 Provider，否则应用重启后的校验请求必然 401
+    assert_eq!(
+        restored.lock().expect("锁中毒").as_deref(),
+        Some("token-a"),
+        "校验前应回注磁盘会话的 token"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_session_invalid_clears_session_and_publishes_event() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let (service, bus, dir, _restored) =
+        make_stub_service("validate-invalid", StubOutcome::Invalid);
+    service.save_session(&sample_session("token-a")).expect("保存会话失败");
+
+    let expired = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&expired);
+    bus.subscribe(
+        EventCategory::Auth,
+        Arc::new(move |event: &AppEvent| {
+            if matches!(event, AppEvent::Auth(AuthEvent::SessionExpired)) {
+                flag.store(true, Ordering::SeqCst);
+            }
+        }),
+    );
+
+    assert_eq!(block_on(service.validate_session()), SessionValidity::Invalid);
+    assert!(!session_path(&dir).exists(), "服务端判定失效应清除磁盘会话");
+    assert!(expired.load(Ordering::SeqCst), "应发布 SessionExpired 事件");
+    assert!(service.get_session().is_none());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_session_network_error_is_unknown_and_keeps_session() {
+    let (service, _bus, dir, _restored) =
+        make_stub_service("validate-network-err", StubOutcome::NetworkErr);
+    service.save_session(&sample_session("token-a")).expect("保存会话失败");
+
+    assert_eq!(
+        block_on(service.validate_session()),
+        SessionValidity::Unknown,
+        "网络异常不等于会话失效"
+    );
+    assert!(session_path(&dir).exists(), "网络异常时应保留本地会话");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn session_validity_serializes_as_snake_case() {
+    // 序列化形态属于跨端契约：前端按 'valid' / 'invalid' / 'unknown' 分支处理
+    assert_eq!(
+        serde_json::to_string(&SessionValidity::Valid).expect("序列化失败"),
+        "\"valid\""
+    );
+    assert_eq!(
+        serde_json::to_string(&SessionValidity::Invalid).expect("序列化失败"),
+        "\"invalid\""
+    );
+    assert_eq!(
+        serde_json::to_string(&SessionValidity::Unknown).expect("序列化失败"),
+        "\"unknown\""
+    );
 }

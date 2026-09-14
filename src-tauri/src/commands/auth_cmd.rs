@@ -5,6 +5,7 @@ use crate::core::context::AppContext;
 use crate::core::entity::user::User;
 use crate::core::error::AppResult;
 use crate::core::provider::oj_type::OJType;
+use crate::service::auth::SessionValidity;
 
 /// 从字符串解析 OJType（大小写不敏感）。
 /// 提取为公开函数以支持 P40 测试。
@@ -69,4 +70,18 @@ pub async fn get_session(ctx: State<'_, AppContext>) -> AppResult<Option<User>> 
         username: s.username,
         token: s.token,
     }))
+}
+
+/// 校验当前会话是否仍然有效 Command。
+///
+/// 前端 invoke 签名: `validate_session`
+///
+/// 三态返回 `valid` / `invalid` / `unknown`：
+/// - `invalid`：本地无会话或服务端已判定失效（磁盘会话已被清除），前端须回到登录页
+/// - `unknown`：网络异常等无法判定，本地会话保留，前端应稍后重试而非踢出用户
+///
+/// 供登录页赛前预检与全局会话守卫使用。
+#[tauri::command]
+pub async fn validate_session(ctx: State<'_, AppContext>) -> AppResult<SessionValidity> {
+    Ok(ctx.auth.validate_session().await)
 }

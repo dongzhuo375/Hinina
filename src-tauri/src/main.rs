@@ -31,6 +31,7 @@ fn main() {
             commands::auth_cmd::login,
             commands::auth_cmd::logout,
             commands::auth_cmd::get_session,
+            commands::auth_cmd::validate_session,
             commands::contest_cmd::list_contests,
             commands::contest_cmd::select_contest,
             commands::contest_cmd::load_configured_contest,

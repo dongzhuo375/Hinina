@@ -75,7 +75,7 @@ Hinina/
         │   │   ├── mod.rs                # ThemeService：主题切换/配色方案管理
         │   │   └── error.rs              # ThemeError
         │   ├── auth/
-        │   │   ├── mod.rs                # AuthService：登录编排/会话持久化/登出/凭证轮换回写
+        │   │   ├── mod.rs                # AuthService：登录编排/会话持久化/登出/凭证轮换回写/三态会话校验（SessionValidity）
         │   │   ├── error.rs              # AuthError
         │   │   └── tests/
         │   │       └── auth_tests.rs     # AuthService 单元测试（会话持久化/轮换回写/失效清理）
@@ -141,7 +141,7 @@ Hinina/
         │       └── mod.rs
         └── commands/                     # NEW: Tauri Command 薄封装
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
-            ├── auth_cmd.rs               # login / logout / get_session
+            ├── auth_cmd.rs               # login / logout / get_session / validate_session（三态）
             ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest
             ├── problem_cmd.rs            # get_problem / list_problems
             ├── submission_cmd.rs         # submit_code / get_judgement
@@ -170,7 +170,7 @@ Hinina/
 
 ```
 src/
-├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI）
+├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配）
 ├── App.vue                               # 根组件（n-config-provider + n-dialog-provider）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
@@ -194,14 +194,15 @@ src/
 │       ├── LoadingSpinner.vue            # 通用加载动画
 │       └── ErrorMessage.vue              # 通用错误提示 + 重试按钮
 ├── stores/
-│   ├── authStore.ts                      # 用户认证状态（登录/登出/会话恢复 + sessionResolved 守卫标记）
+│   ├── authStore.ts                      # 用户认证状态（登录/登出/会话恢复/三态校验 + sessionResolved 守卫标记）
 │   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/工作区）
+│   ├── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情状态
 │   ├── submissionStore.ts                # 提交记录 + 评测轮询编排（终态/超时停止，登出时统一回收定时器）
 │   └── workspaceStore.ts                 # 工作区 + 代码编辑器状态
 ├── services/
-│   ├── auth.service.ts                   # 登录/登出/会话检查（localStorage 缓存，登出失败也清本地）
+│   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
 │   ├── config.service.ts                 # 配置读取唯一入口（进程内缓存）+ 派生参数（OJ 基址、轮询调度）
 │   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
 │   ├── problem.service.ts                # 获取题目详情/列表
@@ -209,14 +210,14 @@ src/
 │   └── workspace.service.ts              # 工作区创建/保存/恢复
 ├── bridge/
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
-│   ├── auth.bridge.ts                    # login / logout / get_session
+│   ├── auth.bridge.ts                    # login / logout / get_session / validate_session
 │   ├── contest.bridge.ts                 # load_configured_contest / list_contests（匿名，登录页比赛信息）
 │   ├── problem.bridge.ts                 # get_problem / list_problems
 │   ├── submission.bridge.ts              # submit_code / get_judgement
 │   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile
 │   └── config.bridge.ts                  # get_config
 ├── types/
-│   ├── user.ts                           # User 实体
+│   ├── user.ts                           # User 实体 + SessionValidity（valid/invalid/unknown 三态）
 │   ├── contest.ts                        # Contest + ContestProblem 实体
 │   ├── problem.ts                        # Problem + Sample 实体
 │   ├── submission.ts                     # JudgementStatus + JudgementResult
@@ -271,5 +272,6 @@ src/
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求
 - **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；登录页依据比赛阶段（`utils/contest`）决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入；登出时经 `stores/session.ts` 清空会话级领域状态
+- **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Rust `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验。全局兜底由 `stores/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
 - **IPC 错误归一化**：Rust `AppError` 经 serde 序列化为 `{ Variant: msg }` 对象，`bridge/index.ts` 在唯一出口转换为 `IpcError extends Error`，保证上层 `e instanceof Error` 与 `e.message` 可用；日志不记录调用参数（含明文密码）
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询定时器由 `submissionStore` 编排（终态判据见 `utils/submission.ts`，超时兜底），View 只表达提交意图

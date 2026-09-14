@@ -1,4 +1,4 @@
-import type { User } from '@/types/user'
+import type { SessionValidity, User } from '@/types/user'
 import * as authBridge from '@/bridge/auth.bridge'
 
 const STORED_USER_KEY = 'hinina_user'
@@ -41,6 +41,21 @@ export class AuthService {
       return user
     } catch {
       return null
+    }
+  }
+
+  /**
+   * 校验后端会话有效性（三态）。
+   *
+   * IPC 自身异常（序列化/通道故障）归一为 `unknown`：调用方只需面对三种业务语义，
+   * 且传输层故障不会被误判为"会话失效"而把用户踢回登录页。
+   */
+  async validateSession(): Promise<SessionValidity> {
+    try {
+      return await authBridge.validateSession()
+    } catch (e) {
+      console.error('[authService] 会话校验调用失败，按无法判定处理:', e)
+      return 'unknown'
     }
   }
 
