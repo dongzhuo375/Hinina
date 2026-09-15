@@ -14,10 +14,10 @@
 |------|------|------|
 | `phase` / `formatLabel` / `startTimeText` | computed | 比赛阶段（`utils/contest`）、赛制文案（OI/ACM）、开赛时间 |
 | `showLoading` / `showError` / `showUpcoming` | computed | 三种全屏兜底的判据（见设计要点） |
-| `ensureContest` | `() => Promise<void>` | 外壳已拉取则跳过；在途则 `waitLoadingSettled` 等待；否则自己 `loadContest` |
+| `ensureContest` | `() => Promise<void>` | 统一走 `contestStore.whenLoaded()`（P59：外壳已拉取则跳过、在途则复用、无人拉取则发起；原 `waitLoadingSettled` watch 写法已删除） |
 | `loadSupplementary` | `() => void` | 并发拉 limits / myStatus / 榜单第 1 页，**不 await**、各自吞错 |
 | `startPolling` / `stopPolling` / `refresh` | — | 30s±5s 轮询：重拉比赛（刷新 ac/total）+ 我的状态（刷新卡片 pill） |
-| `openProblem` / `quickSubmit` | `(p: ContestProblem) => void` | 跳转解题页；快捷提交 = 跳转 + `?focus=1`（意图经 query 传递） |
+| `openProblem` | `(p: ContestProblem) => void` | 跳转解题页（ProblemCard 的 open 事件；快捷提交弹窗已由卡片自持，本视图无处理器） |
 
 ## 直接依赖
 

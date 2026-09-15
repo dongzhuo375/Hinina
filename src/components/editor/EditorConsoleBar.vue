@@ -70,7 +70,7 @@ watch([displayId, () => props.problemId], () => {
 })
 
 /// 本地提交到达终态（store 轮询回填状态）后刷新服务端摘要，
-/// 覆盖「快捷提交成功 → pill 换成服务端最新记录」的链路
+/// 覆盖「本页提交收敛 → pill 换成服务端最新记录（含测试点提示）」的链路
 watch(
   () => latest.value?.status,
   (status) => {

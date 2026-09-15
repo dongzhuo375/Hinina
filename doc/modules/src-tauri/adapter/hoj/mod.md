@@ -24,10 +24,18 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
   - `Err(AppError::Auth(msg))` → `Ok(false)`：服务端明确判定失效。**两条来源都要认** —— ① HTTP 401（infra `status_error` 映射为 `Auth`）；② HTTP 200 + 体内 `status=401`/`403`+登录提示（`parse_hoj_json` 的 `auth_failure_from_body` 映射为 `Auth`）。实测 HOJ 两种报法都存在，漏掉任一条都会让真过期的 token 永不登出
   - 其它 `Err(e)` → `Err(e.context("HOJ 会话校验"))`：网络异常、超时、5xx、响应解析失败一律属「无法判定」，**变体保留**后由 `AuthService` 映射为 `SessionValidity::Unknown` 并保留本地会话
 - `handle_token_rotation(headers)` — GET/POST/submit 共用的轮换逻辑：检测到新 token 时更新内存缓存并发布 `AuthEvent::TokenRefreshed`
-- `into_contest(ContestVO) -> Contest` — 映射 helper，比赛列表与比赛详情共用，避免两处映射漂移；`seal_rank_time` 为空串或无法解析时视为未设置（`None`）
+- `into_contest(ContestVO) -> Contest` — 映射 helper，比赛列表与比赛详情共用，避免两处映射漂移；`seal_rank_time` 为空串或无法解析时视为未设置（`None`）；`oi_rank_score_type` 直接透传（OI 榜单计分规则 "Recent"/"Highest"，非 OI 赛为 `None`）
+- `into_announcement(AnnouncementVO) -> Announcement` — 公告映射：id 转字符串、`username` → `author`、时间经 `parse_time` 转秒级时间戳、`content` 为 null 时回退空串
+- `into_submission_record(JudgeVO) -> SubmissionRecord` — 提交列表条目映射：`submit_id`/`pid` 转字符串、状态经 `map_status`、`time`/`memory`/`length` 评测未完成时为 null（去 null 后为 0），负值经 `.max(0)` 钳制后转 `u64`
+- `into_submission_detail(types::SubmissionDetail) -> SubmissionDetail` — 提交详情映射（含 code / errorMessage / judger / oiRankScore）；`code` 为 null（未开分享或权限不足）时回退空串，详情面板显示空而不是整页报错
+- `into_judge_case(JudgeCaseDTO) -> JudgeCase` — 测试点映射：宽松字段全部落默认值；`status` 缺失按 `-1` 走 `map_status` 归入 `Unknown`
 - `AuthProvider::validate_session()` — HOJ 无专门的 session 校验接口，改用需认证的 `GET /api/get-user-auth-info` 间接验证。本地无 token 时**不发请求**直接 `Ok(false)`（本地即可判定失效，不是网络问题）；否则 `Self::session_validity_from_response(self.get_json_authed(&url).await)`。**必须走 `get_json_authed` 而不是 raw `http.client()`**：只有前者才提供去 null 解析、体内鉴权失败识别（`auth_failure_from_body`）、token 轮换处理与 5xx 退避重试；直连 raw client 时既不解析响应体（拿不到体内 401/403）、也不处理轮换头，且会把网络异常与「服务端判定失效」混为一谈
 - `ContestProvider::get_contest_rank(contest_id, query)` — `POST /api/get-contest-rank`：组装 `ContestRankDTO`（`current_page.max(1)`、`limit.clamp(1, 200)` 防御性收敛、`force_refresh` 恒 false、空白 keyword 过滤为 None、`concerned_list` 空、`external_cid_list` None），响应经 `ContestRankVO::into_rank_row` 归一为 `ContestRankPage`；records 的前置副本去重交由前端处理
+- `ContestProvider::list_announcements(contest_id, current_page, limit)` — `GET /api/get-contest-announcement?cid=&limit=&currentPage=`（分页参数 `.max(1)` 收敛），响应 `PageResult<AnnouncementVO>` 逐条经 `into_announcement` 归一为 `AnnouncementPage`。**不做缓存**：公告可能含裁判组临场规则变更
 - `ProblemProvider::get_user_problem_status(contest_id, problem_ids)` — `POST /api/get-user-problem-status`：空列表直接返回空 map（不发无意义请求）；响应为 `HashMap<pid, serde_json::Value>`，逐项经 `types::coerce_problem_status` 归一为 `0/1/2`
+- `SubmissionProvider::list_contest_submissions(query)` — `GET /api/contest-submissions`：固定携带 `beforeContestSubmit=false`（**必传**：赛前提交不计入榜单，混入会误导选手）与 `completeProblemID=true`（让 `displayPid` 返回完整展示 ID）；`onlyMine` 取自 query（Command 层强制 true）；`problemID`（题目展示 ID）与 `status`（HOJ 状态码）为可选筛选，None/空串时不出现在查询串里。响应 `PageResult<JudgeVO>` 逐条经 `into_submission_record` 归一为 `SubmissionPage`
+- `SubmissionProvider::get_submission_detail(submit_id)` — `GET /api/get-submission-detail?submitId=`：与 `get_judgement` 同一端点，但投影为完整实体 `SubmissionDetail`（含 code / errorMessage / judger），经 `into_submission_detail` 映射
+- `SubmissionProvider::get_submission_cases(submit_id)` — `GET /api/get-all-case-result?submitId=`：响应 `JudgeCaseVO` 的两个列表经 `types::lenient_case_list` 逐条宽松转换（单条测试点/单个分组形态异常只跳过该条，绝不让整个响应解析失败 —— 测试点面板降级展示好过整页报错），归一为 `SubmissionCases { cases, sub_tasks, mode }`
 
 ## 关键实现约定
 - **登录密码**：HOJ 服务端对收到的密码自行 `SecureUtil.md5()` 后比对，客户端发送**明文密码**（不自行 MD5）。
@@ -43,7 +51,7 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
 - `infra::http::HttpClient` — 网络请求
 - `core::event::event_bus::EventBus` — 凭证轮换事件发布
 - `adapter::hoj::types` — DTO 类型 + 状态码映射 + 榜单/题目状态归一函数
-- `core::entity::*` — 领域实体（含 `rank::{ContestRankPage, RankQuery}`）
+- `core::entity::*` — 领域实体（含 `announcement::{Announcement, AnnouncementPage}`、`rank::{ContestRankPage, RankQuery}`、`submission::{SubmissionRecord, SubmissionPage, SubmissionQuery, SubmissionDetail, SubmissionCases, JudgeCase, SubTaskCases, ...}`）
 - `core::error::{AppError, AppResult}` — 统一错误
 - `serde_json::Value` — 会话校验只关心 `ApiResponse` 的 `status`，不解析 `data`
 
@@ -56,7 +64,7 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
 3. `handle_token_rotation(headers)` 处理 HOJ 私有轮换协议
 4. `parse_hoj_json(body, url)`：`from_str` → `strip_nulls` → `auth_failure_from_body`（体内 401/403 → `AppError::Auth`）→ `from_value` 得到 `ApiResponse<T>`
 5. `ApiResponse::into_data()` 校验 `status == 200` 并取出 `data`
-6. 适配为领域实体（User/Contest/Problem/ContestRankPage/JudgementResult）
+6. 适配为领域实体（User/Contest/Problem/ContestRankPage/JudgementResult/AnnouncementPage/SubmissionPage/SubmissionDetail/SubmissionCases）
 7. 返回 `AppResult`；传输/解析失败经 `AppError::context("HOJ xxx")` 补环节名，**变体保持不变**
 
 **会话校验专用流程**（`validate_session`，三态契约）：
@@ -83,3 +91,5 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
 **联调实测事实**：`GET /api/get-user-auth-info` 对伪 token / 无 token / 空 token 一律返回 **HTTP 401**（无 token 时体内还带 `{"status":401,"msg":"请您先登录！"}`），即该端点走 HTTP 状态码而非体内 `status` —— 与 `get-contest-problem`（HTTP 200 + 体内 403）报法不同，故两条 `Auth` 来源都必须认。三条路径实测：无 token → `Ok(false)`（不发请求）；伪 token → `Ok(false)`；指向不可达地址模拟断网 → `Err(Network("HOJ 会话校验: GET 请求失败 …"))`，耗时约 9s（传输错误有 2 次指数退避重试，见 `infra/http.md`）。
 
 **真实响应夹具** `tests/fixtures/contest_list_anon.json`：取自真实 `GET /api/get-contest-list?limit=1000`，仅替换标题/作者/简介等自由文本，完整保留键名、数字、布尔与 null 分布（不含主机名与凭证）。两条测试配套：正向证明真实响应经 `parse_hoj_json` 可解析出 13 场比赛并筛出配置的 contestId；反向证明**不去 null 就必然失败**，防止后来者把 `strip_nulls` 当冗余删掉。（DTO 解析与归一函数的测试见 `tests/types_tests.rs`，对应 `types.md`）
+
+**公告 / 提交列表 / 测试点夹具（P57 待联调）**：`tests/fixtures/announcement_list.json` / `contest_submissions.json` / `case_result.json` 三个夹具按 `doc/HOJ/HOJ-API-Documentation.md` §3.7 / §3.9 / §5.6 的响应形状**手工构造**（保留 HOJ 的显式 null 风格与 `status:200` 信封），字段名与真实服务端的出入需在联调时校正 —— 每个配套测试都标注「按文档构造，未经真实联调校正 —— P57 待联调清单」。覆盖：公告夹具解析 + `into_announcement` 映射（id 转字符串、username→author、时间戳与 `parse_time` 同源）与 null content/updateTime 降级（并反向锁定不去 null 必然失败）；提交列表夹具解析 + `into_submission_record` 映射（含 `status=13 → PartiallyAccepted`，P41 不再折算 AC；null 数值全部落 0）与同样的反向去 null 锁定；测试点夹具解析 + `into_judge_case` 映射、畸形条目（非对象/字段类型异常）只跳过不致命（SubTask 形态文档不完整，宽松转换是刻意设计）；提交详情内联 JSON → 完整实体映射（CE 的 errorMessage、评测未完成时 time/memory 为 null 落 0）与 null code 降级空串；`ContestVO.oiRankScoreType` → `Contest.oi_rank_score_type` 映射（字段缺失为 None）。

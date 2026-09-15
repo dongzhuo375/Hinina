@@ -1,17 +1,34 @@
-# submission（评测终态判据）
+# submission（评测状态判据、文案映射与展示格式化）
 
 > 源文件：`src/utils/submission.ts`
 
 ## 职责
 
-提供"评测是否结束"的单一判据，决定轮询何时停止。
+提供"评测是否结束"的单一判据（决定轮询何时停止）、评测状态的文案/缩写/语义色调唯一映射表（驱动评测页、详情页、最新记录 pill 的状态渲染），以及提交数据的展示格式化纯函数（时间/内存/代码长度/语言映射，评测页 / 提交详情页 / 最新记录 pill / 快捷提交弹窗共用）。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `isTerminalStatus` | `(status: JudgementStatus) => boolean` | 状态是否为终态（终态即停止轮询） |
-| `NON_TERMINAL_STATUSES` | `ReadonlySet<JudgementStatus>`（模块内私有） | 非终态集合：`Pending` / `Compiling` / `Running` |
+| `isJudging` | `(status: JudgementStatus) => boolean` | 是否仍在评测中（= 非终态，评测页温和刷新的判据） |
+| `StatusTone` | `'ac' \| 'wa' \| 'tle' \| 'pending' \| 'system' \| 'neutral'` | 状态语义色调（组件层映射到具体样式类） |
+| `statusLabel` | `(status) => string` | 状态原词（HOJ 文案，架构约束「状态文案以接口返回为准」） |
+| `statusAbbr` | `(status) => string` | 缩写（AC/WA/TLE…，紧凑 pill 用） |
+| `statusTone` | `(status) => StatusTone` | 语义色调 |
+| `STATUS_OPTIONS` | `{ value: number; label: string }[]` | 评测页状态筛选下拉（value = HOJ 状态码，与后端 `status` 查询参数对齐；只列高频状态） |
+| `STATUS_META` / `NON_TERMINAL_STATUSES` | 模块内私有 | 变体 → 文案/缩写/色调 的唯一映射表；非终态集合 `Pending`/`Compiling`/`Running` |
+
+**展示格式化纯函数**（评测页 / 提交详情页 / 最新记录 pill 共用）：
+
+| 名称 | 签名 | 用途 |
+|------|------|------|
+| `formatClock` | `(epochSecs: number) => string` | epoch 秒 → **本地时区** `HH:MM:SS`（提交时间列），补零两位 |
+| `formatDurationHms` | `(totalSecs: number) => string` | 秒数时长 → `HH:MM:SS`（赛时相对时间）；负值（赛前提交）/非有限值钳制 `--:--:--`，不显示负号时长 |
+| `formatMemoryKb` | `(kb: number) => string` | 内存：<1024 显示 `N KB`（取整），≥1024 换算 `X.X MB`（1 位小数）；非正值（评测中/未回填）显示 `-` |
+| `formatCodeLength` | `(bytes: number) => string` | 代码长度（字节）→ `X.X KB`（1 位小数）；非法/负值 `-` |
+| `formatMsToSeconds` | `(ms: number) => string` | 毫秒 → 秒保留两位小数（最新记录 pill 失败测试点的 `2.01s` 口径）；非法/负值 `-` |
+| `mapLanguageToMonaco` | `(language: string) => string` | HOJ 语言**显示名**（"C++17 (GCC 13.2)"/"Python 3.10"…）按前缀归一为 Monaco language id（cpp/java/python/c）；无法识别回退 `'cpp'`（赛场绝大多数提交为 C++），提交详情页只读代码视图用 |
 
 ## 直接依赖
 
@@ -19,22 +36,29 @@
 
 ## 被依赖
 
-- `stores/submissionStore.ts` — `pollOnce()` 判定是否停止轮询
+- `stores/submissionStore.ts` — `pollOnce()` 终态判定
+- `views/SubmissionsView.vue` — 状态 pill 渲染、筛选下拉（`STATUS_OPTIONS`）与时间/内存/代码长度格式化
+- `views/SubmissionDetailView.vue` — 状态渲染、格式化与 `mapLanguageToMonaco`（只读代码视图）
+- `components/editor/EditorConsoleBar.vue` — 最新记录 pill（`statusAbbr` / `statusTone` / `formatMsToSeconds` / `isTerminalStatus`）
+- `components/problem/QuickSubmitDialog.vue` — 弹窗内评测状态行（`statusLabel` / `statusTone` / `formatMemoryKb` / `isTerminalStatus`）
+- `utils/__tests__/submission.spec.ts` — 单元测试
 
 ## 逻辑流程
 
 ```
 status ∈ {Pending, Compiling, Running} → 非终态，继续轮询
-其余（含 Unknown）                      → 终态，停止轮询
+其余（含全部扩展状态与 Unknown）        → 终态，停止轮询
 ```
 
 设计要点：
 
 - 判据与 Rust `adapter::hoj::types::is_terminal_status`（仅 HOJ 状态码 0/1 为非终态）严格对齐。
-- `Unknown` 必须视为终态：HOJ 的 OLE/SE/RJE/FREQ/UE 因无对应枚举被映射为 `Unknown`，
-  若当作非终态将导致这些提交被无限轮询（此前 View 内硬编码状态列表即存在该缺陷）。
+- `JudgementStatus` 已扩展覆盖 HOJ 全部状态码（PE/OLE/SE/RJE/SF/PA/FREQ/UE 拥有独立变体，不再折叠进 Unknown）；`Unknown` 仍必须视为终态，防止无法识别的状态码被无限轮询。
+- 新增状态只改 `STATUS_META` 一处；未收录变体兜底为变体名本身/`neutral`，避免两端升级不同步时前端崩溃。
+- 格式化函数对非法值（NaN/Infinity/负数/未回填的 0）一律返回占位符（`-` / `--:--:--`）而非抛错或显示假 0——评测中的行没有耗时/内存可言。
+- `mapLanguageToMonaco` 按**前缀**匹配显示名（"C++17 (GCC 13.2)" 之类带版本后缀也能归一）；`c` 的判定放在 C++ 系之后，避免 "c++" 被 `/^c\b/` 误吞。
 - 纯函数、无副作用，便于单元测试与跨层复用。
 
 ## 测试
 
-`src/utils/__tests__/submission.spec.ts` 锁定两条回归契约：`Unknown` 必须视为终态（防止 OLE/SE/RJE 等被无限轮询）、终态清单与 `JudgementStatus` 全量取值一一对应（借 `Record<JudgementStatus, boolean>` 穷尽映射，新增枚举值时直接类型报错，逼迫显式归类）。
+`src/utils/__tests__/submission.spec.ts`（16 例）锁定：`Unknown` 必须视为终态、终态清单与 `JudgementStatus` 全量取值（18 个）一一对应（借 `Record<JudgementStatus, boolean>` 穷尽映射，新增枚举值时直接类型报错，逼迫显式归类）；格式化纯函数——`formatClock` 本地时区与补零、`formatDurationHms` 负值/非有限值钳制、`formatMemoryKb` KB/MB 分界与非正值 `-`、`formatCodeLength` 字节换算、`formatMsToSeconds` 两位小数、`mapLanguageToMonaco` 显示名归一与未知语言回退 cpp。

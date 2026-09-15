@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-**props**：`modelValue: string`（代码）、`language: string`、`isDirty: boolean`（驱动备份指示）。
+**props**：`modelValue: string`（代码）、`language: string`、`isDirty: boolean`（驱动备份指示）、`readonly?: boolean`（只读模式：隐藏工具条、禁用编辑与 Ctrl+Enter 提交快捷键，供提交详情页代码查看复用）。
 **emits**：`update:modelValue`、`update:language`、`submit`、`cursor: [{ line, column }]`。
 **expose**：`focus()` —— 供 `?focus=1` 快捷提交联动程序化聚焦；Monaco 未就绪时静默降级为 no-op，不抛错不阻塞。
 
@@ -22,16 +22,19 @@
 | `handleFileChange` | 原生 `input[type=file]` + `file.text()` 读取上传代码（**不引入 Tauri dialog 插件**）；读后立即重置 `input.value` 允许连续选同一文件 |
 | `showSettingsHint` | 设置按钮本轮未实现：点击显示「设置功能开发中」气泡 2s，而不是留一个死按钮 |
 
-编辑器配置：`theme: 'vs'`（浅色）、fontSize 14、JetBrains Mono 字体栈、minimap 关闭、tabSize 4、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）。
+编辑器配置：`theme: 'vs'`（浅色）、**fontSize / tabSize 挂载时经 `configService.getEditorPrefs()` 读取**（设置页可调，对新打开的编辑器实例生效；读取失败服务内部回退 14 / 4）、JetBrains Mono 字体栈、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 readonly prop（只读时行高亮关闭）。
 
 ## 直接依赖
 
 - `vue`
 - `monaco-editor`（含 5 个 `?worker` 导入）
+- `@/services/config.service`（编辑器偏好）
 
 ## 被依赖
 
 - `views/ProblemSolveView.vue` — 右栏编辑器（`v-model` 绑 `workspaceStore.code`，语言切换绑 `workspaceStore.changeLanguage`，cursor 转发给 EditorConsoleBar）
+- `views/SubmissionDetailView.vue` — 只读代码查看（readonly 模式）
+- `components/problem/QuickSubmitDialog.vue` — 快捷提交对话框内的代码输入
 
 ## 逻辑流程
 

@@ -11,7 +11,7 @@
 | 名称 | 用途 |
 |------|------|
 | `RouteMeta` 声明扩展 | `title?` / `requiresAuth?`，避免 `to.meta.*` 退化为 any |
-| 路由表 | `Login`(/login)；`Contest`(/contest, **requiresAuth**, redirect→ProblemSet, 组件 ContestLayout) 及子路由：`ProblemSet`(problems)、`ProblemSolve`(problem/:displayId)、`Rank`(rank)、`Submissions`/`Announcements`/`Settings`（三者复用 PlaceholderView，静态 props 注入文案）；通配 `/:pathMatch(.*)*` → 重定向 /login |
+| 路由表 | `Login`(/login)；`Contest`(/contest, **requiresAuth**, redirect→ProblemSet, 组件 ContestLayout) 及子路由：`ProblemSet`(problems)、`ProblemSolve`(problem/:displayId)、`Rank`(rank)、`Submissions`(submissions)、`SubmissionDetail`(submissions/:submitId)、`Announcements`(announcements)、`Settings`(settings)；通配 `/:pathMatch(.*)*` → 重定向 /login |
 | `router.beforeEach` | 会话守卫，见逻辑流程 |
 
 ## 直接依赖

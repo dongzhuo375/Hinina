@@ -10,13 +10,14 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `clearDomainState` | `() => void` | 重置 contest / problem / submission / rank / workspace 五个 store；重置工作区前先取消其防抖同步定时器，重置榜单前先停止实时刷新轮询 |
+| `clearDomainState` | `() => void` | 重置 contest / problem / submission / rank / announcement / workspace 六个 store；重置工作区前先取消其防抖同步定时器，重置榜单/公告前先停止各自的实时刷新轮询 |
 
 ## 直接依赖
 
 - `@/stores/contestStore`（`clearSessionData()`，保留匿名比赛简报）
 - `@/stores/problemStore`
 - `@/stores/rankStore`（`stopLive()` + `$reset()`）
+- `@/stores/announcementStore`（`stopLive()` + `$reset()`）
 - `@/stores/submissionStore`（`stopAllPolling()` + `$reset()`）
 - `@/stores/workspaceStore`（`cancelPendingSync()` + `$reset()`）
 
@@ -37,6 +38,8 @@ authStore.logout()
       → submissionStore.$reset()
       → rankStore.stopLive()                 // 回收榜单轮询定时器
       → rankStore.$reset()                   // 「我的行」属会话数据，一并清空
+      → announcementStore.stopLive()         // 回收公告轮询定时器
+      → announcementStore.$reset()           // 已读状态按用户隔离，不得跨会话残留
       → contestStore.clearSessionData()      // 保留登录页匿名比赛简报
       → problemStore.$reset()
 ```
