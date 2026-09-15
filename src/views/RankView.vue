@@ -96,28 +96,19 @@ const pageItems = computed<(number | '…')[]>(() => {
   return items
 })
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 /**
  * 确保比赛数据就绪。
  *
  * 外壳 `ContestLayout` 也会拉取比赛，但子视图的 `onMounted` 先于父视图触发，
- * 直接进入榜单页时这里才是实际发起方；若外壳已在加载中则等它落地，避免重复请求。
+ * 直接进入榜单页时这里才是实际发起方；`whenLoaded` 复用在途请求（P59 统一入口），
+ * 失败原因已写入 contestStore.error，模板据此展示重试入口。
  */
 async function ensureContest(): Promise<void> {
   if (contest.value) return
-  if (!contestStore.isLoading) {
-    try {
-      await contestStore.loadContest()
-    } catch {
-      // 失败原因已写入 contestStore.error，模板据此展示重试入口
-    }
-    return
-  }
-  for (let i = 0; i < 100 && alive && contestStore.isLoading && !contest.value; i++) {
-    await sleep(100)
+  try {
+    await contestStore.whenLoaded()
+  } catch {
+    // 失败原因已写入 contestStore.error
   }
 }
 

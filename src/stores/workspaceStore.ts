@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { Workspace } from '@/types/workspace'
 import { workspaceService } from '@/services/workspace.service'
+import { configService } from '@/services/config.service'
 
 /// 语言 → 默认文件名映射
 const langFileMap: Record<string, string> = {
@@ -33,7 +34,8 @@ export const useWorkspaceStore = defineStore('workspace', {
     /** 加载指定比赛与题目的工作区 */
     async loadWorkspace(contestId: string, problemId: string) {
       this.workspace = await workspaceService.loadWorkspace(contestId, problemId)
-      this.language = this.workspace.language || 'cpp'
+      // 工作区未记录语言时用配置的默认语言（Monaco id，P55 消费落地），兜底 cpp
+      this.language = this.workspace.language || (await configService.getDefaultLanguage())
       this.isDirty = this.workspace.isDirty
       // 查找代码文件（main.cpp / main.c / Main.java / main.py）
       const codeKeys = Object.keys(this.workspace.files)

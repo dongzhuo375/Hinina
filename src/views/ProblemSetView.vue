@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
@@ -61,37 +61,16 @@ onUnmounted(() => {
   stopPolling()
 })
 
-/// 外壳（ContestLayout）通常已发起 loadContest：仅在无人拉取时兜底请求，
-/// 在途时等待其结束，避免重复请求
+/// 外壳（ContestLayout）通常已发起 loadContest：`whenLoaded` 复用在途请求、
+/// 无人拉取时兜底发起（P59 统一入口）；失败原因已由 store 写入 error，
+/// 模板展示 ErrorMessage 并提供重试
 async function ensureContest() {
   if (contest.value) return
-  if (contestStore.isLoading) {
-    await waitLoadingSettled()
-    return
-  }
   try {
-    await contestStore.loadContest()
+    await contestStore.whenLoaded()
   } catch {
-    // 失败原因已由 store 写入 error，模板展示 ErrorMessage 并提供重试
+    // 失败原因已写入 contestStore.error
   }
-}
-
-function waitLoadingSettled(): Promise<void> {
-  return new Promise((resolve) => {
-    if (!contestStore.isLoading) {
-      resolve()
-      return
-    }
-    const stop = watch(
-      () => contestStore.isLoading,
-      (loading) => {
-        if (!loading) {
-          stop()
-          resolve()
-        }
-      },
-    )
-  })
 }
 
 /// 补充数据并发拉取且不 await：卡片先用 ac/total 渲染首屏，

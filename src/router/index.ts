@@ -46,32 +46,27 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'submissions',
         name: 'Submissions',
-        component: () => import('@/views/PlaceholderView.vue'),
-        props: {
-          title: '评测',
-          description: '集中查看本场提交记录与实时评测结果，支持按题目与判定结果筛选。',
-        },
+        component: () => import('@/views/SubmissionsView.vue'),
         meta: { title: '评测 - Hinina' },
+      },
+      {
+        // 提交详情（测试点/代码/错误信息）；从评测页表格或解题页「最新记录」进入
+        path: 'submissions/:submitId',
+        name: 'SubmissionDetail',
+        component: () => import('@/views/SubmissionDetailView.vue'),
+        meta: { title: '提交详情 - Hinina' },
       },
       {
         path: 'announcements',
         name: 'Announcements',
-        component: () => import('@/views/PlaceholderView.vue'),
-        props: {
-          title: '公告',
-          description: '接收裁判组发布的比赛公告、勘误与澄清信息。',
-        },
+        component: () => import('@/views/AnnouncementsView.vue'),
         meta: { title: '公告 - Hinina' },
       },
       {
         // 设置属于工作台的一部分：放在外壳内，切换时不丢失顶栏/活动栏/状态条
         path: 'settings',
         name: 'Settings',
-        component: () => import('@/views/PlaceholderView.vue'),
-        props: {
-          title: '设置',
-          description: '配置 OJ 服务器、编辑器偏好、主题与快捷键等客户端选项。',
-        },
+        component: () => import('@/views/SettingsView.vue'),
         meta: { title: '设置 - Hinina' },
       },
     ],

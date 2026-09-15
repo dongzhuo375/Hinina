@@ -11,6 +11,7 @@ import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
+import { configService } from '@/services/config.service'
 
 /// 解题工作台：左题面（48%）/ 右代码编辑器（52%），中间 1px 拖拽条可调。
 const route = useRoute()
@@ -34,8 +35,9 @@ let isLoadingPage = false
 
 async function ensureContestId(): Promise<string> {
   if (!contestStore.contest) {
-    // 直接进入本页（刷新/深链）时外壳可能尚未加载完比赛数据
-    await contestStore.loadContest()
+    // 直接进入本页（刷新/深链）时外壳可能尚未加载完比赛数据；
+    // whenLoaded 复用在途请求，避免重复 IPC（P59 统一入口）
+    await contestStore.whenLoaded()
   }
   const id = contestStore.contest?.id
   if (!id) throw new Error(contestStore.error ?? '加载比赛失败')
@@ -120,6 +122,25 @@ watch(
 
 const splitRatio = ref(0.48)
 const splitContainer = ref<HTMLElement>()
+/// 用户是否已手动拖拽 —— 配置异步到达时不得覆盖用户刚调好的比例
+let userAdjustedSplit = false
+
+// 初始分栏比例读取配置（P55：layout.splitRatio 消费落地）；失败回退设计稿 0.48
+void configService.getSplitRatio().then((ratio) => {
+  if (!userAdjustedSplit) splitRatio.value = ratio
+})
+
+/// 拖拽结束后把比例写回配置（下次进入解题页生效）；失败只记录，不打断使用
+function persistSplitRatio() {
+  const ratio = splitRatio.value
+  configService
+    .updateConfig((draft) => {
+      draft.layout.splitRatio = ratio
+    })
+    .catch((e) => {
+      console.error('[ProblemSolveView] 分栏比例持久化失败:', e)
+    })
+}
 
 function startDrag(e: MouseEvent) {
   e.preventDefault()
@@ -130,6 +151,7 @@ function startDrag(e: MouseEvent) {
 
   const onMove = (ev: MouseEvent) => {
     const ratio = (ev.clientX - rect.left) / rect.width
+    userAdjustedSplit = true
     splitRatio.value = Math.min(0.7, Math.max(0.3, ratio))
   }
   const onUp = () => {
@@ -137,6 +159,7 @@ function startDrag(e: MouseEvent) {
     window.removeEventListener('mouseup', onUp)
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
+    if (userAdjustedSplit) persistSplitRatio()
   }
   // 拖拽期间全局锁定光标与选区，避免划过题面时选中文字
   document.body.style.cursor = 'col-resize'

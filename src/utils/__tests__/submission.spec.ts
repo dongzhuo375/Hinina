@@ -13,6 +13,14 @@ const TERMINAL: JudgementStatus[] = [
   'MemoryLimitExceeded',
   'RuntimeError',
   'CompilationError',
+  'PresentationError',
+  'OutputLimitExceeded',
+  'SystemError',
+  'RemoteJudgeError',
+  'SubmitFailed',
+  'PartiallyAccepted',
+  'FrequentLimit',
+  'UnknownError',
   'Unknown',
 ]
 
@@ -29,6 +37,14 @@ const TERMINAL_MAP: Record<JudgementStatus, boolean> = {
   MemoryLimitExceeded: true,
   RuntimeError: true,
   CompilationError: true,
+  PresentationError: true,
+  OutputLimitExceeded: true,
+  SystemError: true,
+  RemoteJudgeError: true,
+  SubmitFailed: true,
+  PartiallyAccepted: true,
+  FrequentLimit: true,
+  UnknownError: true,
   Unknown: true,
 }
 
@@ -42,14 +58,14 @@ describe('isTerminalStatus', () => {
   })
 
   it('回归：Unknown 必须视为终态', () => {
-    // HOJ 的 OLE/SE/RJE/FREQ/UE 因无对应枚举被 Rust map_status 归为 Unknown。
+    // 无法识别的状态码被 Rust map_status 归为 Unknown。
     // 此前 View 内硬编码的终态列表漏掉 Unknown，导致这些提交被无限轮询。
     expect(isTerminalStatus('Unknown')).toBe(true)
   })
 
   it('终态清单与 JudgementStatus 全量取值一一对应', () => {
     const entries = Object.entries(TERMINAL_MAP)
-    expect(entries).toHaveLength(10)
+    expect(entries).toHaveLength(18)
     for (const [status, terminal] of entries) {
       expect(isTerminalStatus(status as JudgementStatus), status).toBe(terminal)
     }

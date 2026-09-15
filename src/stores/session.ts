@@ -1,3 +1,4 @@
+import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useRankStore } from '@/stores/rankStore'
@@ -28,6 +29,11 @@ export function clearDomainState(): void {
   const rank = useRankStore()
   rank.stopLive()
   rank.$reset()
+
+  // 停止公告轮询并清空列表与已读状态（已读按用户隔离，不得跨会话残留）
+  const announcement = useAnnouncementStore()
+  announcement.stopLive()
+  announcement.$reset()
 
   // 比赛 store 内含登录页匿名简报，只清理会话相关部分
   useContestStore().clearSessionData()

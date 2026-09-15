@@ -19,9 +19,9 @@ export interface PollSchedule {
  * 分层约定：View / Store 一律不得直接调用 `config.bridge`，配置字段的读取与
  * 兜底逻辑集中在本服务，避免 IPC 细节与魔法数字散落各处。
  *
- * 缓存策略：配置属于应用级只读数据、无跨视图同步需求，故不引入额外 store，
- * 由本服务在进程内缓存（缓存 Promise，使并发调用共享同一次 IPC）。
- * v0.x 尚无设置界面，配置在运行期稳定；后续接入热重载时调用 `invalidate()` 即可。
+ * 缓存策略：配置属于应用级数据，由本服务在进程内缓存（缓存 Promise，使并发
+ * 调用共享同一次 IPC）。设置页保存走 `updateConfig()`（写后端 + 失效缓存），
+ * 其余读取方下次调用即拿到新值。
  */
 export class ConfigService {
   private cache: Promise<AppConfig> | null = null
@@ -74,6 +74,110 @@ export class ConfigService {
       return { intervalMs: DEFAULT_POLL_INTERVAL_MS, timeoutMs: DEFAULT_POLL_TIMEOUT_MS }
     }
   }
+
+  /**
+   * 编辑器偏好（字号 / Tab 宽度）。
+   *
+   * 读取失败或值非法时回退兜底值（14 / 4），编辑器渲染不因配置问题阻断。
+   */
+  async getEditorPrefs(): Promise<EditorPrefs> {
+    try {
+      const config = await this.getConfig()
+      return {
+        fontSize: clampInt(config.editor?.fontSize, 8, 32, DEFAULT_FONT_SIZE),
+        tabSize: clampInt(config.editor?.tabSize, 1, 8, DEFAULT_TAB_SIZE),
+      }
+    } catch (e) {
+      console.error('[configService] 读取编辑器配置失败，使用兜底值:', e)
+      return { fontSize: DEFAULT_FONT_SIZE, tabSize: DEFAULT_TAB_SIZE }
+    }
+  }
+
+  /**
+   * 默认语言（Monaco language id）。
+   *
+   * 值域校验：只接受已知 Monaco id，历史配置遗留的显示名（如 "C++"）
+   * 经映射表归一，无法识别时回退 'cpp' —— 保证喂给 Monaco 的恒为合法 id（P55）。
+   */
+  async getDefaultLanguage(): Promise<string> {
+    try {
+      const config = await this.getConfig()
+      return normalizeLanguageId(config.editor?.defaultLanguage)
+    } catch (e) {
+      console.error('[configService] 读取默认语言失败，回退 cpp:', e)
+      return 'cpp'
+    }
+  }
+
+  /**
+   * 解题页初始分栏比例（左栏占比）。
+   *
+   * 非法值回退设计稿默认 0.48；读取失败同样回退，不阻断页面渲染。
+   */
+  async getSplitRatio(): Promise<number> {
+    try {
+      const config = await this.getConfig()
+      const ratio = config.layout?.splitRatio
+      return typeof ratio === 'number' && ratio >= 0.2 && ratio <= 0.8 ? ratio : DEFAULT_SPLIT_RATIO
+    } catch (e) {
+      console.error('[configService] 读取分栏比例失败，使用默认值:', e)
+      return DEFAULT_SPLIT_RATIO
+    }
+  }
+
+  /**
+   * 更新配置的唯一入口：读取当前配置 → 应用变更 → 整体写回后端 → 失效本地缓存。
+   *
+   * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
+   * 避免局部字段把其余配置冲掉。返回写入后的配置供调用方直接使用。
+   */
+  async updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
+    const current = await this.getConfig()
+    const draft: AppConfig = structuredClone(current)
+    mutate(draft)
+    try {
+      await configBridge.updateConfig(draft)
+    } finally {
+      // 无论成败都失效缓存：失败时下次读取重新拉后端真值，避免缓存与磁盘漂移
+      this.invalidate()
+    }
+    return draft
+  }
+}
+
+/// 编辑器偏好（字号 / Tab 宽度）
+export interface EditorPrefs {
+  fontSize: number
+  tabSize: number
+}
+
+/// 编辑器兜底值，与 Rust `core::entity::config` 默认值一致
+const DEFAULT_FONT_SIZE = 14
+const DEFAULT_TAB_SIZE = 4
+/// 分栏比例兜底值（设计稿 48% / 52%）
+const DEFAULT_SPLIT_RATIO = 0.48
+
+/// 显示名 → Monaco language id 映射（历史配置可能存的是显示名，P55）
+const LANGUAGE_ID_BY_DISPLAY_NAME: Record<string, string> = {
+  c: 'c',
+  cpp: 'cpp',
+  'c++': 'cpp',
+  java: 'java',
+  python: 'python',
+  py: 'python',
+}
+
+/// 归一化为合法 Monaco language id；无法识别时回退 'cpp'
+export function normalizeLanguageId(raw: string | undefined | null): string {
+  if (typeof raw !== 'string' || raw.trim() === '') return 'cpp'
+  return LANGUAGE_ID_BY_DISPLAY_NAME[raw.trim().toLowerCase()] ?? 'cpp'
+}
+
+/// 整数钳位：非法值（非数字/越界）回退兜底
+function clampInt(value: number | undefined, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  const rounded = Math.round(value)
+  return rounded >= min && rounded <= max ? rounded : fallback
 }
 
 /// 秒 → 毫秒；非正数或非法值回退兜底

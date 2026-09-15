@@ -17,6 +17,7 @@ function makeContest(overrides: Partial<Contest> = {}): Contest {
     sealRank: false,
     sealRankTime: null,
     allowEndSubmit: false,
+    oiRankScoreType: null,
     ...overrides,
   }
 }
