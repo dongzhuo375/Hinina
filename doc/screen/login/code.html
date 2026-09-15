@@ -1,0 +1,164 @@
+<!DOCTYPE html><html lang="zh-CN" style=""><head></head><body class="h-screen w-screen overflow-hidden text-slate-800 select-none bg-slate-100 flex items-center justify-center p-4 sm:p-6 font-sans"><svg class="inline-defs-container" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"></svg>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Hinina OJ 竞赛客户端</title>
+<!-- Tailwind CSS CDN with forms and container queries plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script data-purpose="tailwind-config">
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#F5F3FF',
+              100: '#EDE9FE',
+              200: '#DDD6FE',
+              500: '#7C5CFF',
+              600: '#6845F5',
+              700: '#5631E0',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'Menlo', 'monospace']
+          },
+          boxShadow: {
+            'glow-purple': '0 0 25px -5px rgba(124, 92, 255, 0.28)',
+            'subtle-card': '0 20px 40px -15px rgba(15, 23, 42, 0.05), 0 0 0 1px rgba(226, 232, 240, 0.8)',
+          }
+        }
+      }
+    };
+  </script>
+<style data-purpose="custom-decorations">
+    /* Subtle dot grid */
+    .bg-dot-grid {
+      background-image: radial-gradient(rgba(148, 163, 184, 0.25) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    /* Input focus glow */
+    .field-box:focus-within {
+      border-color: #7C5CFF;
+      box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.12), 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+  </style>
+
+
+<!-- BEGIN: DesktopClientWindow -->
+<div class="relative w-full max-w-[1240px] h-[820px] bg-white rounded-3xl shadow-2xl border border-slate-200/80 flex flex-col overflow-hidden">
+<!-- Ambient subtle glow backgrounds -->
+<!-- BEGIN: ClientTitlebar -->
+<header class="h-12 border-b border-slate-100/80 px-5 flex items-center justify-between bg-white/80 backdrop-blur-md select-none z-30 shrink-0">
+<!-- Left: Logo & Client Badge -->
+<div class="flex items-center gap-3">
+<div class="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center text-white shadow-sm shadow-brand-500/30">
+<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+<path d="M12 2C9.5 5 7 7.5 7 11.5C7 14.54 9.46 17 12.5 17C10.5 15.5 10 13.5 10.5 11.8C11.5 14 13.5 14.5 14.5 13.2C15.8 11.5 15.5 9 14 7C16.8 8.8 18 11.4 18 14C18 17.87 14.87 21 11 21C6.03 21 2 16.97 2 12C2 7.8 5.5 4 8.5 2.5C9.5 2 10.8 1.5 12 2Z"></path>
+</svg>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-slate-900 font-bold tracking-tight text-sm">Hinina</span>
+
+</div>
+</div>
+<!-- Right: Windows Controls -->
+<div class="flex items-center space-x-1 text-slate-400">
+<button aria-label="最小化" class="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 hover:text-slate-600 transition-colors" type="button">
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewBox="0 0 16 16">
+<path d="M3 8H13"></path>
+</svg>
+</button>
+<button aria-label="最大化" class="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 hover:text-slate-600 transition-colors" type="button">
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewBox="0 0 16 16">
+<rect height="9" rx="1.5" width="9" x="3.5" y="3.5"></rect>
+</svg>
+</button>
+<button aria-label="关闭窗口" class="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-colors" type="button">
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewBox="0 0 16 16">
+<path d="M4 4L12 12M12 4L4 12"></path>
+</svg>
+</button>
+</div>
+</header>
+<!-- END: ClientTitlebar -->
+<!-- BEGIN: MainContentArea (Modern Clean Layout) -->
+<main class="flex-1 flex overflow-hidden relative z-10 bg-white">
+<!-- Left Column: Authentic Clean Login Sidebar (400px fixed width, subtle right border) -->
+<section class="w-[400px] shrink-0 border-r border-slate-100 bg-white flex flex-col justify-between px-10 py-8 z-20 relative"><!-- Center Container for Main Form --><div class="flex-1 flex flex-col pt-12"><!-- Greeting Header --><div class="mb-8 overflow-hidden"><div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-brand-50 text-brand-600 mb-3.5 border border-brand-100/30"><span class="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse"></span>比赛验证通道 · Hinina OJ</div><h1 class="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">欢迎参赛</h1><p class="text-xs text-slate-500 mt-2.5 font-normal leading-relaxed">请使用比赛专用账号登录，赛前将会分发账号密码</p></div><!-- Clean Form --><form class="space-y-4" onsubmit="event.preventDefault();"><div><label class="block text-xs font-semibold text-slate-600 mb-2 tracking-wide" for="contest-username">参赛账号 / Seat UID</label><div class="field-box relative border border-slate-200 rounded-xl transition-all duration-150 bg-slate-50/50 hover:border-slate-300"><span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400"><svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span><input class="w-full pl-10 pr-3.5 py-2.5 bg-transparent text-sm text-slate-800 placeholder-slate-400 focus:outline-none border-0 font-mono font-medium" id="contest-username" placeholder="请输入参赛机位账号" type="text" value="dongzhuo375"></div></div><div><label class="block text-xs font-semibold text-slate-600 mb-2 tracking-wide" for="contest-password">参赛密码 / Contest PIN</label><div class="field-box relative border border-slate-200 rounded-xl transition-all duration-150 bg-slate-50/50 hover:border-slate-300"><span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400"><svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewBox="0 0 24 24"><rect height="11" rx="2" ry="2" width="18" x="3" y="11"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span><input class="w-full pl-10 pr-10 py-2.5 bg-transparent text-sm text-slate-800 placeholder-slate-400 focus:outline-none border-0 tracking-widest font-mono" id="contest-password" placeholder="输入比赛认证密码" type="password" value="••••••••••••"><button aria-label="显示/隐藏密码" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition-colors" type="button"><svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" x2="23" y1="1"></line></svg></button></div></div><!-- Main Action CTA with comfortable spacing and size --><div class="pt-4"><button class="w-full h-12 px-5 bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600 active:scale-[0.99] text-white font-semibold rounded-xl text-sm shadow-glow-purple shadow-brand-500/30 transition-all flex items-center justify-center gap-2 group" type="submit"><span class="tracking-wide">登录</span><svg class="w-4 h-4 stroke-current stroke-2 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></button></div></form></div><!-- Left Bottom: Grounded subtle metadata & status footer docked at bottom --><div class="pt-4 border-t border-slate-100 flex flex-col gap-2 select-none shrink-0"><div class="flex items-center justify-between text-[11px] text-slate-500"><div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><span class="font-medium text-slate-600">已连接比赛服务器</span></div><span class="text-[10px] text-emerald-600 font-mono font-medium">12ms</span></div><div class="flex items-center justify-between text-slate-400 text-[11px]"><button class="inline-flex items-center gap-1.5 hover:text-slate-600 transition-colors" type="button"><svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="16" y2="12"></line><line x1="12" x2="12.01" y1="8" y2="8"></line></svg><span class="">网络自检</span></button><span class="text-[10px] text-slate-300 font-mono">Client v2.6.4</span></div></div></section>
+<!-- Right Column: Atmosphere, Refined Geometric Artwork & Downward Anchored Breathable Countdown -->
+<section class="flex-1 flex flex-col justify-between p-12 lg:p-14 relative bg-slate-50/50 overflow-hidden select-none">
+<!-- Sophisticated Abstract Geometric Vector / Mesh Ambient Pattern -->
+<div class="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-end pr-6 select-none"><svg class="w-full h-full absolute inset-0 pointer-events-none" viewBox="0 0 700 700" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="circleGrad1" x1="200" y1="200" x2="600" y2="600" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#7C5CFF" stop-opacity="0.18"></stop><stop offset="50%" stop-color="#3B82F6" stop-opacity="0.08"></stop><stop offset="100%" stop-color="#94A3B8" stop-opacity="0.02"></stop></linearGradient><linearGradient id="circleGrad2" x1="300" y1="100" x2="650" y2="500" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#6366F1" stop-opacity="0.12"></stop><stop offset="100%" stop-color="#CBD5E1" stop-opacity="0.02"></stop></linearGradient></defs><g transform="translate(120, -40)"><circle cx="420" cy="350" r="340" stroke="url(#circleGrad1)" stroke-width="1.2" stroke-dasharray="6 6" opacity="0.6"></circle><circle cx="420" cy="350" r="280" stroke="url(#circleGrad1)" stroke-width="1.2" opacity="0.5"></circle><circle cx="420" cy="350" r="220" stroke="url(#circleGrad2)" stroke-width="1.5" opacity="0.7"></circle><circle cx="420" cy="350" r="160" stroke="url(#circleGrad1)" stroke-width="1" stroke-dasharray="3 8" opacity="0.8"></circle><circle cx="420" cy="350" r="100" stroke="url(#circleGrad2)" stroke-width="1.2" opacity="0.6"></circle><circle cx="420" cy="350" r="40" stroke="#7C5CFF" stroke-width="1.5" stroke-dasharray="2 4" opacity="0.4"></circle><line x1="80" y1="350" x2="420" y2="350" stroke="url(#circleGrad1)" stroke-width="1" stroke-dasharray="4 6" opacity="0.4"></line><line x1="420" y1="70" x2="420" y2="350" stroke="url(#circleGrad1)" stroke-width="1" stroke-dasharray="4 6" opacity="0.4"></line><circle cx="420" cy="130" r="3" fill="#7C5CFF" opacity="0.4"></circle><circle cx="200" cy="350" r="3" fill="#3B82F6" opacity="0.4"></circle><circle cx="420" cy="70" r="4" fill="#7C5CFF" opacity="0.3"></circle><circle cx="420" cy="630" r="3" fill="#94A3B8" opacity="0.3"></circle></g></svg></div>
+<div class="absolute -top-24 -right-24 w-96 h-96 bg-brand-100/30 rounded-full blur-3xl pointer-events-none"></div>
+<!-- Upper Middle: Contest Identity Header -->
+<div class="absolute top-8 right-8 z-30"><details class="group relative"><summary class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/80 hover:bg-white border border-slate-200/70 hover:border-brand-200 text-slate-600 hover:text-brand-600 text-xs font-medium backdrop-blur-md shadow-sm cursor-pointer select-none transition-all [&amp;::-webkit-details-marker]:hidden list-none"><svg class="w-3.5 h-3.5 stroke-current stroke-2 text-brand-500" fill="none" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg><span class="">比赛简介</span><svg class="w-3 h-3 text-slate-400 group-open:rotate-180 transition-transform stroke-current stroke-2" fill="none" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"></path></svg></summary><div class="absolute right-0 mt-2 w-80 p-4 rounded-2xl bg-white/95 backdrop-blur-md border border-slate-200/80 shadow-2xl space-y-3 z-50 text-xs text-slate-600 select-none"><div class="flex items-center justify-between pb-2 border-b border-slate-100"><span class="font-semibold text-slate-900 tracking-tight flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-brand-500"></span>比赛须知与指南</span><span class="text-[10px] text-brand-600 font-mono bg-brand-50 px-1.5 py-0.5 rounded">ACM / ICPC</span></div><div class="space-y-2 text-[11px] leading-relaxed"><div class="p-2 rounded-lg bg-slate-50 border border-slate-100"><div class="text-slate-400 mb-0.5 font-medium">赛制说明</div><div class="text-slate-700 font-medium">实时评测反馈 · 最后 1 小时停止封榜更新</div></div><div class="p-2 rounded-lg bg-slate-50 border border-slate-100"><div class="text-slate-400 mb-0.5 font-medium">支持语言环境</div><div class="font-mono text-slate-700">C++17 / Java 17 / Python 3.11</div></div><div class="p-2 rounded-lg bg-brand-50/40 border border-brand-100/30 text-slate-500"><span class="font-semibold text-brand-600 block mb-0.5">防作弊提醒</span>机房内网客户端全屏锁定，严禁外接通信与便携式电子介质。</div></div></div></details></div><div class="relative z-10 mt-6 max-w-lg">
+<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/80 border border-slate-200/60 shadow-sm backdrop-blur-md mb-4 text-xs font-semibold text-brand-600">
+<span class="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse"></span>
+<span class="">ACM / ICPC 赛制 · 即将开始</span>
+</div>
+<h2 class="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight">
+        2024 校赛模拟赛
+      </h2>
+<p class="text-xs text-slate-500 mt-2 tracking-wide font-normal max-w-sm">
+        竞赛倒计时结束后自动解锁题目并开启实时评测系统
+      </p>
+</div><!-- Contest Brief Collapsible Drawer -->
+
+<!-- Downward Anchored: Air-light, Elegant Minimalist Countdown Section -->
+<div class="relative z-10 mb-4">
+<div class="flex items-center justify-between border-b border-slate-200/60 pb-3 mb-6 max-w-md">
+<span class="text-[11px] font-semibold text-slate-400 tracking-wider uppercase">距离比赛正式开始 COUNTDOWN</span>
+<div class="flex items-center gap-1 bg-white px-2 py-0.5 rounded-full border border-slate-200/50 shadow-sm">
+<span class="w-2 h-2 rounded-full bg-blue-500"></span>
+<span class="w-2 h-2 rounded-full bg-amber-400"></span>
+<span class="w-2 h-2 rounded-full bg-rose-500"></span>
+</div>
+</div>
+<!-- Breathable, Clean Numbers Layout -->
+<div class="flex items-baseline gap-6 lg:gap-8 font-mono max-w-md">
+<div class="flex flex-col">
+<span class="text-4xl lg:text-5xl font-extrabold text-slate-800 tracking-tight">00</span>
+<span class="text-[11px] text-slate-400 font-sans mt-1.5 tracking-wider">DAYS 天</span>
+</div>
+<span class="text-2xl text-slate-300 font-light -mt-4">:</span>
+<div class="flex flex-col">
+<span class="text-4xl lg:text-5xl font-extrabold text-slate-800 tracking-tight">00</span>
+<span class="text-[11px] text-slate-400 font-sans mt-1.5 tracking-wider">HOURS 时</span>
+</div>
+<span class="text-2xl text-slate-300 font-light -mt-4">:</span>
+<div class="flex flex-col">
+<span class="text-4xl lg:text-5xl font-extrabold text-brand-600 tracking-tight">24</span>
+<span class="text-[11px] text-brand-600 font-sans mt-1.5 tracking-wider font-semibold">MINS 分</span>
+</div>
+<span class="text-2xl text-brand-300 font-light -mt-4">:</span>
+<div class="flex flex-col">
+<span class="text-4xl lg:text-5xl font-extrabold text-brand-600 tracking-tight">36</span>
+<span class="text-[11px] text-brand-600 font-sans mt-1.5 tracking-wider font-semibold">SECS 秒</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- END: MainContentArea -->
+</div>
+<!-- END: DesktopClientWindow -->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</body></html>
