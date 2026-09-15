@@ -31,9 +31,9 @@
 - `commands::problem_cmd`（经 AppContext 转发 `get_problem` / `list_problems` / `get_user_problem_status` / `get_contest_problem_limits`）
 
 ## 逻辑流程
-- **list_problems(contest_id)**：直接调 `ProblemProvider::list_problems()` 从远端拉取，不做本地缓存
-- **open_problem(contest_id, problem_id)**：调 `ProblemProvider::get_problem()` → 发布 `ProblemEvent::Opened` → 调用方通过事件驱动 WorkspaceManager 创建或切换工作区
-- **get_user_problem_status(contest_id, problem_ids)**：空列表短路 → `registry.get_problem()` → `ProblemProvider::get_user_problem_status()` → 失败包装为 `AppError::Problem`
+- **list_problems(contest_id)**：直接调 `ProblemProvider::list_problems()` 从远端拉取，不做本地缓存；失败 `warn!` + `e.context("获取题目列表失败")` 上抛（**变体原样穿透**）
+- **open_problem(contest_id, problem_id)**：调 `ProblemProvider::get_problem()`（失败 `e.context("获取题目详情失败")`）→ 发布 `ProblemEvent::Opened` → 调用方通过事件驱动 WorkspaceManager 创建或切换工作区
+- **get_user_problem_status(contest_id, problem_ids)**：空列表短路 → `registry.get_problem()` → `ProblemProvider::get_user_problem_status()` → 失败 `e.context("获取用户题目状态失败")`，变体不改写
 - **load_problem_limits(contest_id, display_ids)**：
 
 ```
@@ -53,5 +53,14 @@
 6. 按 display_ids 顺序 filter_map 输出（失败题自然缺失）
 ```
 
+## 设计要点
+- **错误处理约定：用 `context()` 而不是重新包装**。传播 Provider 错误一律 `e.context("环节名")`（保留变体、仍补环节名、`warn!` 日志保留），**禁止** `AppError::Problem(format!("…: {}", e))` —— 变体是前端 `isAuthError` 分流与 `stores/sessionGuard.ts` 会话失效兜底的唯一依据（见 `core/error.md`）。改写成 `Problem` 后，token 过期时选手只会看到「题目错误」文案而不会被带回登录页，反复重试全部失败。
+- **`load_problem_limits` 同样遵守**：401/403 原样上抛，既不回退默认值，也不改写成 `Problem` 变体。`fetch_limits` 内部只在 JoinSet 任务 join 失败时自行构造 `AppError::Unknown`（那是本层自己的错误，不存在改写下游变体的问题）。
+- **`get_user_problem_status` 空入参短路**：`problem_ids` 为空时直接返回空 map，不发请求 —— 因此针对它的错误路径测试**必须传非空列表**才能真正走到 Provider。
+
 ## 测试
 `src-tauri/src/service/problem/tests/problem_tests.rs` 以桩 Provider + 临时目录锁定：limits 首次全量拉取并落盘、二次调用命中内存缓存零请求、磁盘缓存跨 Service 实例复用、部分失败只返回成功子集、**全部失败上抛错误而非回退假默认值**、损坏缓存文件重新获取、空入参短路不发请求；`get_user_problem_status` 空列表短路与按 pid 映射。
+
+**错误变体穿透**（3 项）：`open_problem_preserves_auth_variant`（`Auth` 变体保留且消息含「获取题目详情失败」环节名）、`list_problems_preserves_auth_variant`、`get_user_problem_status_preserves_auth_variant`（题目总览的「我的状态」每 30s 轮询一次，变体被改写会让守卫失灵；用例传非空 pid 列表以绕开空入参短路）。
+
+为支撑这组用例，`StubProblemProvider` 新增 `fail_all: bool` 字段（为 true 时 `list_problems` / `get_user_problem_status` 也返回 `Auth` 错误），并新增 `build_service_with(dir, calls, failing, fail_all)` 构造函数；`build_service` 保持原签名（内部转调 `build_service_with(…, false)`），以免影响既有 limits 测试。`open_problem` 的失败路径复用既有 `failing` 列表机制（Stub 对列表内 displayId 返回 `Auth`，模拟 401 或私有赛未注册）。
