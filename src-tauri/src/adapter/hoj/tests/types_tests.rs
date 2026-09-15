@@ -6,11 +6,12 @@ use super::*;
 
 #[test]
 fn map_status_pending() {
-    assert!(matches!(map_status(0), crate::core::entity::submission::JudgementStatus::Running));
+    assert!(matches!(map_status(0), crate::core::entity::submission::JudgementStatus::Pending));
 }
 
 #[test]
 fn map_status_judging() {
+    // Judging 沿用既有 Running 语义（轮询判据不变）
     assert!(matches!(map_status(1), crate::core::entity::submission::JudgementStatus::Running));
 }
 
@@ -21,8 +22,7 @@ fn map_status_ce() {
 
 #[test]
 fn map_status_pe() {
-    // PE → WrongAnswer（无对应枚举）
-    assert!(matches!(map_status(3), crate::core::entity::submission::JudgementStatus::WrongAnswer));
+    assert!(matches!(map_status(3), crate::core::entity::submission::JudgementStatus::PresentationError));
 }
 
 #[test]
@@ -47,8 +47,7 @@ fn map_status_mle() {
 
 #[test]
 fn map_status_ole() {
-    // OLE → Unknown（无对应枚举）
-    assert!(matches!(map_status(8), crate::core::entity::submission::JudgementStatus::Unknown));
+    assert!(matches!(map_status(8), crate::core::entity::submission::JudgementStatus::OutputLimitExceeded));
 }
 
 #[test]
@@ -58,38 +57,33 @@ fn map_status_re() {
 
 #[test]
 fn map_status_se() {
-    // SE → Unknown
-    assert!(matches!(map_status(10), crate::core::entity::submission::JudgementStatus::Unknown));
+    assert!(matches!(map_status(10), crate::core::entity::submission::JudgementStatus::SystemError));
 }
 
 #[test]
 fn map_status_rje() {
-    // RJE → Unknown
-    assert!(matches!(map_status(11), crate::core::entity::submission::JudgementStatus::Unknown));
+    assert!(matches!(map_status(11), crate::core::entity::submission::JudgementStatus::RemoteJudgeError));
 }
 
 #[test]
 fn map_status_sf() {
-    // SF → WrongAnswer
-    assert!(matches!(map_status(12), crate::core::entity::submission::JudgementStatus::WrongAnswer));
+    assert!(matches!(map_status(12), crate::core::entity::submission::JudgementStatus::SubmitFailed));
 }
 
 #[test]
 fn map_status_pa() {
-    // Partial AC → Accepted（保守映射）
-    assert!(matches!(map_status(13), crate::core::entity::submission::JudgementStatus::Accepted));
+    // P41 修复：Partial AC 不再折算为 Accepted，使用独立变体
+    assert!(matches!(map_status(13), crate::core::entity::submission::JudgementStatus::PartiallyAccepted));
 }
 
 #[test]
 fn map_status_freq() {
-    // FREQ → Unknown
-    assert!(matches!(map_status(14), crate::core::entity::submission::JudgementStatus::Unknown));
+    assert!(matches!(map_status(14), crate::core::entity::submission::JudgementStatus::FrequentLimit));
 }
 
 #[test]
 fn map_status_ue() {
-    // UE → Unknown
-    assert!(matches!(map_status(15), crate::core::entity::submission::JudgementStatus::Unknown));
+    assert!(matches!(map_status(15), crate::core::entity::submission::JudgementStatus::UnknownError));
 }
 
 #[test]
@@ -100,6 +94,52 @@ fn map_status_negative() {
 #[test]
 fn map_status_out_of_range() {
     assert!(matches!(map_status(999), crate::core::entity::submission::JudgementStatus::Unknown));
+}
+
+#[test]
+fn map_status_covers_full_hoj_code_table() {
+    // 全码表锁定（doc/HOJ/HOJ-API-Documentation.md §7）：任何一格改动都会让此测试失败
+    use crate::core::entity::submission::JudgementStatus::*;
+    let expected = [
+        (0, Pending),
+        (1, Running),
+        (2, CompilationError),
+        (3, PresentationError),
+        (4, WrongAnswer),
+        (5, Accepted),
+        (6, TimeLimitExceeded),
+        (7, MemoryLimitExceeded),
+        (8, OutputLimitExceeded),
+        (9, RuntimeError),
+        (10, SystemError),
+        (11, RemoteJudgeError),
+        (12, SubmitFailed),
+        (13, PartiallyAccepted),
+        (14, FrequentLimit),
+        (15, UnknownError),
+    ];
+    for (code, want) in expected {
+        assert_eq!(
+            format!("{:?}", map_status(code)),
+            format!("{:?}", want),
+            "状态码 {} 映射错误",
+            code
+        );
+    }
+}
+
+// ── is_terminal_status ──
+
+#[test]
+fn is_terminal_full_table() {
+    // 非终态仅 Pending(0) / Judging(1)，其余（含码表外）一律终态
+    assert!(!is_terminal_status(0));
+    assert!(!is_terminal_status(1));
+    for code in 2..=15 {
+        assert!(is_terminal_status(code), "状态码 {} 应为终态", code);
+    }
+    assert!(is_terminal_status(-1));
+    assert!(is_terminal_status(999));
 }
 
 // ── is_terminal_status ──

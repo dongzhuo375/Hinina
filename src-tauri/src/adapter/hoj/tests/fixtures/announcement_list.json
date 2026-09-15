@@ -1,0 +1,30 @@
+{
+  "status": 200,
+  "msg": "success",
+  "data": {
+    "records": [
+      {
+        "id": 9001,
+        "title": "开赛通知",
+        "content": "<p>比赛已开始，请注意封榜时间安排。</p>",
+        "uid": "admin-uid-0001",
+        "username": "admin",
+        "createTime": "2026-09-15T08:00:00",
+        "updateTime": "2026-09-15T08:05:00"
+      },
+      {
+        "id": 9002,
+        "title": "关于 A 题的澄清",
+        "content": null,
+        "uid": null,
+        "username": "jury",
+        "createTime": "2026-09-15T09:30:00",
+        "updateTime": null
+      }
+    ],
+    "total": 2,
+    "size": 50,
+    "current": 1,
+    "pages": 1
+  }
+}

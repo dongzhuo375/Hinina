@@ -34,6 +34,9 @@ pub struct Contest {
     /// 是否允许赛后提交（决定榜单查询的 `containsEnd` 是否真正生效）
     #[serde(default)]
     pub allow_end_submit: bool,
+    /// OI 榜单计分规则："Recent"（最近一次）/ "Highest"（最高分）；非 OI 赛或未设置时为 `None`
+    #[serde(default)]
+    pub oi_rank_score_type: Option<String>,
 }
 
 /// 比赛题目摘要（问题列表用）

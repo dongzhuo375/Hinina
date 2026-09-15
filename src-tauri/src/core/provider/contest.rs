@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use crate::core::entity::announcement::AnnouncementPage;
 use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::AppResult;
@@ -27,4 +28,15 @@ pub trait ContestProvider: Send + Sync {
         contest_id: &str,
         query: &RankQuery,
     ) -> AppResult<ContestRankPage>;
+
+    /// 获取比赛公告（分页）。
+    ///
+    /// 公告可能包含裁判组临场发布的规则变更，实现方**不得缓存**，
+    /// 刷新节奏由调用方控制。
+    async fn list_announcements(
+        &self,
+        contest_id: &str,
+        current_page: i64,
+        limit: i64,
+    ) -> AppResult<AnnouncementPage>;
 }

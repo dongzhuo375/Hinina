@@ -3,7 +3,10 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crate::core::entity::submission::{JudgementResult, JudgementStatus};
+use crate::core::entity::submission::{
+    JudgeCase, JudgementResult, JudgementStatus, SubmissionCases, SubmissionDetail, SubmissionPage,
+    SubmissionQuery, SubmissionRecord,
+};
 use crate::core::error::AppError;
 use crate::core::provider::oj_type::OJType;
 use crate::core::provider::registry::ProviderRegistry;
@@ -90,6 +93,87 @@ impl SubmissionProvider for StubSubmissionProvider {
                     Ok(accepted())
                 }
             }
+        }
+    }
+
+    async fn list_contest_submissions(
+        &self,
+        _query: &SubmissionQuery,
+    ) -> AppResult<SubmissionPage> {
+        match self.mode {
+            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_) => {
+                Ok(SubmissionPage {
+                    records: vec![SubmissionRecord {
+                        submit_id: "12345".into(),
+                        pid: "1061".into(),
+                        display_pid: "HOJ-1061".into(),
+                        title: "A + B".into(),
+                        display_id: "A".into(),
+                        username: "alice".into(),
+                        submit_time: 1_700_000_000,
+                        status: JudgementStatus::Accepted,
+                        time_ms: 15,
+                        memory_kb: 2048,
+                        score: None,
+                        length: 256,
+                        language: "C++".into(),
+                    }],
+                    total: 1,
+                    size: 20,
+                    current: 1,
+                    pages: 1,
+                })
+            }
+            StubMode::Auth => Err(AppError::Auth("stub: HTTP 401 Unauthorized".into())),
+            StubMode::Network => Err(AppError::Network("stub: connection reset".into())),
+        }
+    }
+
+    async fn get_submission_detail(&self, _submit_id: &str) -> AppResult<SubmissionDetail> {
+        match self.mode {
+            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_) => {
+                Ok(SubmissionDetail {
+                    submit_id: "12345".into(),
+                    pid: "1061".into(),
+                    display_pid: "HOJ-1061".into(),
+                    username: "alice".into(),
+                    submit_time: 1_700_000_000,
+                    status: JudgementStatus::CompilationError,
+                    time_ms: 0,
+                    memory_kb: 0,
+                    score: None,
+                    length: 256,
+                    language: "C++".into(),
+                    code: "int main(){}".into(),
+                    error_message: Some("expected ';'".into()),
+                    judger: None,
+                    oi_rank_score: None,
+                })
+            }
+            StubMode::Auth => Err(AppError::Auth("stub: HTTP 401 Unauthorized".into())),
+            StubMode::Network => Err(AppError::Network("stub: connection reset".into())),
+        }
+    }
+
+    async fn get_submission_cases(&self, _submit_id: &str) -> AppResult<SubmissionCases> {
+        match self.mode {
+            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_) => {
+                Ok(SubmissionCases {
+                    cases: vec![JudgeCase {
+                        case_id: 1,
+                        seq: 1,
+                        status: JudgementStatus::Accepted,
+                        time_ms: 10,
+                        memory_kb: 1024,
+                        score: None,
+                        group_num: None,
+                    }],
+                    sub_tasks: Vec::new(),
+                    mode: "default".into(),
+                })
+            }
+            StubMode::Auth => Err(AppError::Auth("stub: HTTP 401 Unauthorized".into())),
+            StubMode::Network => Err(AppError::Network("stub: connection reset".into())),
         }
     }
 }
@@ -212,4 +296,102 @@ fn poll_judgement_returns_terminal_result() {
         result.status
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1, "终态应一次返回，不再轮询");
+}
+
+// ── 提交列表 / 详情 / 测试点：错误变体穿透 + 正常路径 ──
+
+fn sample_query() -> SubmissionQuery {
+    SubmissionQuery {
+        contest_id: "1011".into(),
+        current_page: 1,
+        limit: 20,
+        only_mine: true,
+        problem_display_id: None,
+        status: None,
+    }
+}
+
+#[test]
+fn list_contest_submissions_preserves_auth_variant() {
+    let (service, _calls) = make_service(StubMode::Auth);
+    let err = block_on(service.list_contest_submissions(&sample_query()))
+        .expect_err("token 过期应报错");
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "提交列表是认证调用，401 必须触发会话守卫，实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("获取提交列表失败"),
+        "应补上环节名: {}",
+        err.user_message()
+    );
+}
+
+#[test]
+fn list_contest_submissions_returns_page_on_success() {
+    let (service, _calls) = make_service(StubMode::Ok);
+    let page = block_on(service.list_contest_submissions(&sample_query())).expect("应成功");
+    assert_eq!(page.records.len(), 1);
+    assert_eq!(page.records[0].submit_id, "12345");
+}
+
+#[test]
+fn get_submission_detail_preserves_auth_variant() {
+    let (service, _calls) = make_service(StubMode::Auth);
+    let err = block_on(service.get_submission_detail("12345")).expect_err("token 过期应报错");
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("获取提交详情失败"),
+        "应补上环节名: {}",
+        err.user_message()
+    );
+}
+
+#[test]
+fn get_submission_detail_returns_entity_on_success() {
+    let (service, _calls) = make_service(StubMode::Ok);
+    let detail = block_on(service.get_submission_detail("12345")).expect("应成功");
+    assert_eq!(detail.submit_id, "12345");
+    assert_eq!(detail.code, "int main(){}");
+    assert_eq!(detail.error_message.as_deref(), Some("expected ';'"));
+}
+
+#[test]
+fn get_submission_cases_preserves_auth_variant() {
+    let (service, _calls) = make_service(StubMode::Auth);
+    let err = block_on(service.get_submission_cases("12345")).expect_err("token 过期应报错");
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("获取测试点结果失败"),
+        "应补上环节名: {}",
+        err.user_message()
+    );
+}
+
+#[test]
+fn get_submission_cases_preserves_network_variant() {
+    let (service, _calls) = make_service(StubMode::Network);
+    let err = block_on(service.get_submission_cases("12345")).expect_err("断网应报错");
+    assert!(
+        matches!(err, AppError::Network(_)),
+        "断网不应被改写成 Submission 变体，实际 {:?}",
+        err
+    );
+}
+
+#[test]
+fn get_submission_cases_returns_cases_on_success() {
+    let (service, _calls) = make_service(StubMode::Ok);
+    let cases = block_on(service.get_submission_cases("12345")).expect("应成功");
+    assert_eq!(cases.cases.len(), 1);
+    assert_eq!(cases.mode, "default");
 }

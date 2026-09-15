@@ -1,6 +1,8 @@
-// 比赛服务：比赛获取、列表缓存、当前比赛切换、榜单查询。
+// 比赛服务：比赛获取、列表缓存、当前比赛切换、榜单查询、比赛公告与已读状态。
 //
 // 比赛列表带 TTL 缓存，切换比赛时发布 ContestEvent::Selected。
+// 公告**不缓存**（可能含裁判组临场规则变更）；已读状态是客户端本地特性，
+// 持久化在 `announcements_read/{cid}_{uid}.json`。
 //
 // **错误处理约定**：向上传播 Provider 错误时一律用 `AppError::context()` 补环节名，
 // 不得用 `AppError::Contest(format!(...))` 重新包装 —— 变体是前端 `sessionGuard`
@@ -12,14 +14,17 @@ pub mod error;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
+use crate::core::entity::announcement::AnnouncementPage;
 use crate::core::entity::contest::{Contest, ContestBundle};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, ContestEvent};
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::registry::ProviderRegistry;
+use crate::infra::storage::Storage;
 
 /// 比赛列表缓存。
 struct ContestCache {
@@ -27,10 +32,21 @@ struct ContestCache {
     fetched_at: Instant,
 }
 
+/// 公告已读状态持久化目录（客户端本地特性，HOJ 无对应服务端接口）。
+const ANNOUNCEMENTS_READ_DIR: &str = "announcements_read";
+
+/// 公告已读状态文件结构。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadAnnouncementState {
+    #[serde(rename = "readIds", default)]
+    pub read_ids: Vec<String>,
+}
+
 /// 比赛服务。
 pub struct ContestService {
     registry: Arc<dyn ProviderRegistry>,
     event_bus: Arc<EventBus>,
+    storage: Arc<Storage>,
     /// 当前选中的比赛 ID
     current_contest: RwLock<Option<String>>,
     /// 比赛列表缓存
@@ -39,10 +55,15 @@ pub struct ContestService {
 
 impl ContestService {
     /// 创建 ContestService。
-    pub fn new(registry: Arc<dyn ProviderRegistry>, event_bus: Arc<EventBus>) -> Self {
+    pub fn new(
+        registry: Arc<dyn ProviderRegistry>,
+        event_bus: Arc<EventBus>,
+        storage: Arc<Storage>,
+    ) -> Self {
         Self {
             registry,
             event_bus,
+            storage,
             current_contest: RwLock::new(None),
             cache: RwLock::new(None),
         }
@@ -189,6 +210,93 @@ impl ContestService {
 
         debug!(problem_count = problems.len(), "比赛加载完成");
         Ok(ContestBundle { contest, problems })
+    }
+
+    /// 获取比赛公告（分页）。
+    ///
+    /// **不做缓存**：公告可能包含裁判组临场发布的规则变更，必须每次拉取最新数据。
+    pub async fn list_announcements(
+        &self,
+        contest_id: &str,
+        current_page: i64,
+        limit: i64,
+    ) -> AppResult<AnnouncementPage> {
+        let oj_type = self.registry.current_oj();
+        let provider = self.registry.get_contest(&oj_type)?;
+
+        let page = provider
+            .list_announcements(contest_id, current_page, limit)
+            .await
+            .map_err(|e| {
+                warn!(contest_id = contest_id, error = %e, "获取比赛公告失败");
+                e.context("获取比赛公告")
+            })?;
+
+        debug!(contest_id = contest_id, count = page.records.len(), "比赛公告已获取");
+        Ok(page)
+    }
+
+    // ── 公告已读状态（客户端本地特性）──
+
+    /// 读取某用户在某比赛下已读的公告 ID 列表。
+    ///
+    /// 文件不存在视为「从未读过」；文件损坏只告警并降级为空列表 ——
+    /// 已读状态是纯 UI 便利特性，任何情况下都不应阻断公告展示。
+    pub fn get_read_announcement_ids(&self, contest_id: &str, uid: &str) -> AppResult<Vec<String>> {
+        let path = Self::read_state_path(contest_id, uid)?;
+        let raw = match self.storage.read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(_) => return Ok(Vec::new()), // 不存在或读取失败：按未读处理
+        };
+        match serde_json::from_str::<ReadAnnouncementState>(&raw) {
+            Ok(state) => Ok(state.read_ids),
+            Err(e) => {
+                warn!(path = %path, error = %e, "公告已读状态文件损坏，降级为空列表");
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    /// 标记公告为已读：与既有记录合并去重后落盘。
+    pub fn mark_announcements_read(
+        &self,
+        contest_id: &str,
+        uid: &str,
+        ids: &[String],
+    ) -> AppResult<()> {
+        let path = Self::read_state_path(contest_id, uid)?;
+
+        // 合并去重（保留首次出现顺序）；旧状态损坏时从空列表重建
+        let mut merged = self.get_read_announcement_ids(contest_id, uid)?;
+        for id in ids {
+            if !merged.iter().any(|existing| existing == id) {
+                merged.push(id.clone());
+            }
+        }
+
+        let state = ReadAnnouncementState { read_ids: merged };
+        let json = serde_json::to_string_pretty(&state)
+            .map_err(|e| AppError::Serialization(format!("公告已读状态序列化失败: {}", e)))?;
+        self.storage
+            .write_string(&path, &json)
+            .map_err(|e| e.context("写入公告已读状态失败"))?;
+        debug!(contest_id = contest_id, path = %path, "公告已读状态已保存");
+        Ok(())
+    }
+
+    /// 构造已读状态文件路径：`announcements_read/{cid}_{uid}.json`。
+    ///
+    /// cid / uid 来自会话与前端入参，必须拒绝路径分隔符，防止写出存储根目录之外的文件。
+    fn read_state_path(contest_id: &str, uid: &str) -> AppResult<String> {
+        fn sanitize(part: &str, name: &str) -> AppResult<String> {
+            if part.is_empty() || part.contains(['/', '\\', ':']) || part.contains("..") {
+                return Err(AppError::Io(format!("{} 含非法路径字符: {}", name, part)));
+            }
+            Ok(part.to_string())
+        }
+        let cid = sanitize(contest_id, "contest_id")?;
+        let uid = sanitize(uid, "uid")?;
+        Ok(format!("{}/{}_{}.json", ANNOUNCEMENTS_READ_DIR, cid, uid))
     }
 }
 

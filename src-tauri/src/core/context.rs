@@ -54,8 +54,8 @@ impl AppContext {
     /// 7. WorkspaceManager — `None`（WorkspaceManager 实现后补全）
     /// 8. 装配 AppContext
     pub async fn init(base_dir: PathBuf) -> AppResult<Self> {
-        // 1. 初始化日志
-        Logger::init();
+        // 1. 初始化日志（stderr + {base_dir}/logs/hinina.log 双路输出）
+        Logger::init(&base_dir);
         tracing::info!("Hinina 启动中... base_dir={}", base_dir.display());
 
         // 确保 base_dir 存在
@@ -76,10 +76,15 @@ impl AppContext {
         ));
         let config = Arc::new(ConfigService::new(config_repo, Arc::clone(&event_bus)));
 
-        // 5. 初始化 HTTP 客户端
-        let http_client = Arc::new(HttpClient::new().map_err(|e| {
-            crate::core::error::AppError::Network(format!("HttpClient 创建失败: {}", e))
-        })?);
+        // 5. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
+        let timeout_secs = config.get().oj.timeout_secs;
+        let http_client = Arc::new(
+            HttpClient::with_timeout(std::time::Duration::from_secs(timeout_secs.max(1))).map_err(
+                |e| {
+                    crate::core::error::AppError::Network(format!("HttpClient 创建失败: {}", e))
+                },
+            )?,
+        );
 
         // 6. 创建 Provider 注册中心，默认使用 HOJ
         let provider_registry: Arc<dyn ProviderRegistry> =
@@ -120,6 +125,7 @@ impl AppContext {
         let contest = Arc::new(ContestService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&event_bus),
+            Arc::clone(&storage),
         ));
         let problem = Arc::new(ProblemService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,

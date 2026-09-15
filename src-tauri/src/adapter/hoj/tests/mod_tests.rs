@@ -408,3 +408,249 @@ fn validity_non_success_body_status_is_unknown() {
         );
     }
 }
+
+// ── 公告 / 提交列表 / 测试点夹具（按文档构造，未经真实联调校正 —— P57 待联调清单）──
+//
+// 以下三个夹具均按 doc/HOJ/HOJ-API-Documentation.md §3.7 / §3.9 / §5.6 的响应形状
+// 手工构造，保留了 HOJ 的显式 null 风格与 status:200 信封；字段名与真实服务端的
+// 出入需在联调时校正（P57）。
+
+const ANNOUNCEMENT_LIST: &str = include_str!("fixtures/announcement_list.json");
+const CONTEST_SUBMISSIONS: &str = include_str!("fixtures/contest_submissions.json");
+const CASE_RESULT: &str = include_str!("fixtures/case_result.json");
+
+#[test]
+fn announcement_list_fixture_parses_and_maps() {
+    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    let resp: ApiResponse<types::PageResult<AnnouncementVO>> =
+        HOJAdapter::parse_hoj_json(ANNOUNCEMENT_LIST, "http://oj/api/get-contest-announcement")
+            .expect("公告夹具应能解析");
+    let page = resp.into_data().expect("data 非空");
+    assert_eq!(page.records.len(), 2);
+    assert_eq!(page.total, 2);
+    assert_eq!(page.pages, 1);
+
+    let first = HOJAdapter::into_announcement(page.records.into_iter().next().unwrap());
+    assert_eq!(first.id, "9001", "id 应转为字符串");
+    assert_eq!(first.title, "开赛通知");
+    assert_eq!(first.author, "admin", "username 映射为 author");
+    assert!(first.content.contains("比赛已开始"));
+    // 时间为秒级时间戳，且与 parse_time 同一算法
+    assert_eq!(first.created_at, HOJAdapter::parse_time("2026-09-15T08:00:00"));
+    assert!(first.created_at > 1_700_000_000);
+    assert!(first.updated_at >= first.created_at);
+}
+
+#[test]
+fn announcement_null_content_and_times_degrade_to_defaults() {
+    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    // 第二条公告 content / updateTime / uid 均为 null：去 null 后落默认值而不是解析失败
+    let resp: ApiResponse<types::PageResult<AnnouncementVO>> =
+        HOJAdapter::parse_hoj_json(ANNOUNCEMENT_LIST, "http://oj/api/get-contest-announcement")
+            .expect("公告夹具应能解析");
+    let mut page = resp.into_data().expect("data 非空");
+    let second = page.records.remove(1);
+    assert_eq!(second.id, 9002);
+    let a = HOJAdapter::into_announcement(second);
+    assert_eq!(a.content, "", "content 为 null 应回退空串");
+    assert_eq!(a.updated_at, 0, "updateTime 为 null 应回退 0");
+
+    // 反向锁定：不去 null 直接解析必然失败（strip_nulls 不可省）
+    assert!(
+        serde_json::from_str::<ApiResponse<types::PageResult<AnnouncementVO>>>(ANNOUNCEMENT_LIST)
+            .is_err(),
+        "含显式 null 的公告响应直接解析应当失败"
+    );
+}
+
+#[test]
+fn contest_submissions_fixture_parses_and_maps() {
+    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    let resp: ApiResponse<types::PageResult<JudgeVO>> =
+        HOJAdapter::parse_hoj_json(CONTEST_SUBMISSIONS, "http://oj/api/contest-submissions")
+            .expect("提交列表夹具应能解析");
+    let page = resp.into_data().expect("data 非空");
+    assert_eq!(page.records.len(), 2);
+    assert_eq!(page.size, 20);
+
+    let records: Vec<SubmissionRecord> =
+        page.records.into_iter().map(HOJAdapter::into_submission_record).collect();
+
+    let r1 = &records[0];
+    assert_eq!(r1.submit_id, "12345", "submitId i64 → String");
+    assert_eq!(r1.pid, "1061", "pid i64 → String");
+    assert_eq!(r1.display_pid, "HOJ-1061");
+    assert_eq!(r1.display_id, "A");
+    assert_eq!(r1.title, "A + B Problem");
+    assert!(matches!(r1.status, JudgementStatus::Accepted));
+    assert_eq!(r1.time_ms, 15);
+    assert_eq!(r1.memory_kb, 10240);
+    assert_eq!(r1.length, 256);
+    assert_eq!(r1.submit_time, HOJAdapter::parse_time("2026-09-15T10:00:00"));
+
+    // 第二条：status=13 → PartiallyAccepted（P41：不再折算 AC），null 数值全部落 0
+    let r2 = &records[1];
+    assert!(
+        matches!(r2.status, JudgementStatus::PartiallyAccepted),
+        "PA 应有独立变体，实际 {:?}",
+        r2.status
+    );
+    assert_eq!(r2.display_id, "", "displayId 为 null 应回退空串");
+    assert_eq!(r2.time_ms, 0);
+    assert_eq!(r2.memory_kb, 0);
+    assert_eq!(r2.length, 0);
+    assert_eq!(r2.score, Some(60.0));
+}
+
+#[test]
+fn contest_submissions_fixture_fails_without_null_stripping() {
+    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    let err = serde_json::from_str::<ApiResponse<types::PageResult<JudgeVO>>>(CONTEST_SUBMISSIONS)
+        .expect_err("含显式 null 的提交列表直接解析应当失败");
+    assert!(err.to_string().contains("null"), "实际: {}", err);
+}
+
+#[test]
+fn case_result_fixture_parses_and_maps() {
+    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    let resp: ApiResponse<types::JudgeCaseVO> =
+        HOJAdapter::parse_hoj_json(CASE_RESULT, "http://oj/api/get-all-case-result")
+            .expect("测试点夹具应能解析");
+    let vo = resp.into_data().expect("data 非空");
+    assert_eq!(vo.judge_case_mode.as_deref(), Some("default"));
+    assert!(
+        vo.sub_task_judge_case_vo_list.is_empty(),
+        "subTaskJudgeCaseVoList 为 null 时应落空列表"
+    );
+
+    let cases: Vec<JudgeCase> = types::lenient_case_list(&vo.judge_case_list)
+        .into_iter()
+        .map(HOJAdapter::into_judge_case)
+        .collect();
+    assert_eq!(cases.len(), 2);
+    assert_eq!(cases[0].case_id, 1);
+    assert_eq!(cases[0].seq, 1);
+    assert!(matches!(cases[0].status, JudgementStatus::Accepted));
+    assert_eq!(cases[0].time_ms, 10);
+    assert_eq!(cases[0].memory_kb, 5120);
+    assert_eq!(cases[0].group_num, None);
+    assert_eq!(cases[1].case_id, 2);
+}
+
+#[test]
+fn case_result_malformed_entries_are_skipped_not_fatal() {
+    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    // SubTask 形态文档不完整：单条测试点/单个分组类型异常时只跳过该条，
+    // 绝不让整个响应解析失败（测试点面板降级展示好过整页报错）
+    let body = r#"{
+        "status": 200, "msg": "success",
+        "data": {
+            "judgeCaseList": [
+                { "caseId": 1, "status": 5, "time": 10, "memory": 100, "seq": 1 },
+                "不是测试点对象",
+                { "caseId": 3, "status": "不是数字" }
+            ],
+            "subTaskJudgeCaseVoList": [
+                { "groupNum": 1, "judgeCaseList": [{ "caseId": 9, "status": 4, "seq": 1, "groupNum": 1 }] },
+                42
+            ],
+            "judgeCaseMode": "subtask_lowest"
+        }
+    }"#;
+    let resp: ApiResponse<types::JudgeCaseVO> =
+        HOJAdapter::parse_hoj_json(body, "http://oj/api/get-all-case-result").expect("应能解析");
+    let vo = resp.into_data().expect("data 非空");
+
+    let cases = types::lenient_case_list(&vo.judge_case_list);
+    assert_eq!(cases.len(), 1, "两条异常测试点应被跳过");
+    assert_eq!(cases[0].case_id.unwrap(), 1);
+
+    let sub_tasks: Vec<types::SubTaskDTO> = vo
+        .sub_task_judge_case_vo_list
+        .iter()
+        .filter_map(|v| serde_json::from_value(v.clone()).ok())
+        .collect();
+    assert_eq!(sub_tasks.len(), 1, "非对象分组应被跳过");
+    assert_eq!(sub_tasks[0].group_num, Some(1));
+    assert_eq!(types::lenient_case_list(&sub_tasks[0].judge_case_list).len(), 1);
+    assert_eq!(vo.judge_case_mode.as_deref(), Some("subtask_lowest"));
+}
+
+// ── 提交详情 DTO → 完整实体映射 ──
+
+#[test]
+fn submission_detail_maps_full_entity() {
+    // get_judgement 只投影轮询所需的四个字段；提交详情面板需要完整实体
+    let body = r#"{
+        "status": 200, "msg": "success",
+        "data": {
+            "submission": {
+                "submitId": 12345, "pid": 1061, "displayPid": "HOJ-1061",
+                "uid": "uuid-alice", "username": "alice",
+                "submitTime": "2026-09-15T10:00:00", "status": 2,
+                "errorMessage": "error: expected ';' before '}' token",
+                "time": null, "memory": null, "score": null,
+                "length": 256, "language": "C++",
+                "code": "int main(){}", "cid": 1011,
+                "judger": null, "oiRankScore": null
+            },
+            "codeShare": true
+        }
+    }"#;
+    let resp: ApiResponse<types::SubmissionInfoVO> =
+        HOJAdapter::parse_hoj_json(body, "http://oj/api/get-submission-detail").expect("应能解析");
+    let info = resp.into_data().expect("data 非空");
+    let detail = HOJAdapter::into_submission_detail(info.submission);
+
+    assert_eq!(detail.submit_id, "12345");
+    assert_eq!(detail.pid, "1061");
+    assert_eq!(detail.username, "alice");
+    assert_eq!(detail.submit_time, HOJAdapter::parse_time("2026-09-15T10:00:00"));
+    assert!(matches!(detail.status, JudgementStatus::CompilationError));
+    assert_eq!(detail.code, "int main(){}");
+    assert!(detail.error_message.unwrap().contains("expected ';'"));
+    assert_eq!(detail.language, "C++");
+    assert_eq!(detail.length, 256);
+    // 评测未完成：time/memory 为 null 落 0
+    assert_eq!(detail.time_ms, 0);
+    assert_eq!(detail.memory_kb, 0);
+    assert_eq!(detail.judger, None);
+    assert_eq!(detail.oi_rank_score, None);
+}
+
+#[test]
+fn submission_detail_null_code_degrades_to_empty_string() {
+    // 未开分享或权限不足时 code 可能为 null：详情面板显示空而不是整页报错
+    let body = r#"{
+        "status": 200,
+        "data": {
+            "submission": {
+                "submitId": 1, "pid": 2, "displayPid": "HOJ-2", "username": "u",
+                "submitTime": null, "status": 5, "code": null, "language": null
+            }
+        }
+    }"#;
+    let resp: ApiResponse<types::SubmissionInfoVO> =
+        HOJAdapter::parse_hoj_json(body, "http://oj/api/get-submission-detail").expect("应能解析");
+    let detail = HOJAdapter::into_submission_detail(resp.into_data().expect("data 非空").submission);
+    assert_eq!(detail.code, "");
+    assert_eq!(detail.language, "");
+    assert_eq!(detail.submit_time, 0, "submitTime 为 null 应回退 0");
+}
+
+// ── ContestVO.oiRankScoreType → Contest 实体 ──
+
+#[test]
+fn contest_vo_maps_oi_rank_score_type() {
+    let vo: ContestVO = serde_json::from_str(
+        r#"{ "id": 1011, "title": "OI 赛", "oiRankScoreType": "Highest" }"#,
+    )
+    .expect("解析失败");
+    let contest = HOJAdapter::into_contest(vo);
+    assert_eq!(contest.oi_rank_score_type.as_deref(), Some("Highest"));
+
+    // 非 OI 赛 / 列表接口不返回该字段 → None
+    let vo: ContestVO =
+        serde_json::from_str(r#"{ "id": 1012, "title": "ACM 赛" }"#).expect("解析失败");
+    assert_eq!(HOJAdapter::into_contest(vo).oi_rank_score_type, None);
+}

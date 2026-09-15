@@ -78,10 +78,15 @@ fn classify_status(status: reqwest::StatusCode, attempt: u32) -> StatusDecision 
 impl HttpClient {
     /// 创建默认 HttpClient：30 秒超时、Cookie Store 已启用、UA 为 Hinina/{version}。
     pub fn new() -> Result<Self, reqwest::Error> {
+        Self::with_timeout(Duration::from_secs(30))
+    }
+
+    /// 创建指定超时的 HttpClient（超时来自 `oj.timeout_secs` 配置）。
+    pub fn with_timeout(timeout: Duration) -> Result<Self, reqwest::Error> {
         let client = reqwest::Client::builder()
             .cookie_store(true)
             .user_agent(format!("Hinina/{}", env!("CARGO_PKG_VERSION")))
-            .timeout(Duration::from_secs(30))
+            .timeout(timeout)
             .build()?;
         Ok(Self { client })
     }

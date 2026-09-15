@@ -1,8 +1,10 @@
 use super::*;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
 
+use crate::core::entity::announcement::{Announcement, AnnouncementPage};
 use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::rank::{ContestRankPage, ContestRankRow, RankQuery};
 use crate::core::error::AppError;
@@ -41,8 +43,33 @@ impl StubMode {
 }
 
 /// Stub ContestProvider：所有方法按同一模式响应，便于逐方法断言变体是否被保留。
+///
+/// `mode` 可在测试中途切换（模拟「缓存命中后服务端开始 401」等时序），
+/// `calls` 记录 list_contests 的调用次数，用于断言缓存真的省掉了请求。
 struct StubContestProvider {
-    mode: StubMode,
+    mode: RwLock<StubMode>,
+    calls: AtomicUsize,
+}
+
+impl StubContestProvider {
+    fn new(mode: StubMode) -> Self {
+        Self {
+            mode: RwLock::new(mode),
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn set_mode(&self, mode: StubMode) {
+        *self.mode.write().unwrap() = mode;
+    }
+
+    fn current_mode(&self) -> StubMode {
+        *self.mode.read().unwrap()
+    }
+
+    fn call_count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
 }
 
 fn sample_contest() -> Contest {
@@ -59,6 +86,7 @@ fn sample_contest() -> Contest {
         seal_rank: false,
         seal_rank_time: None,
         allow_end_submit: false,
+        oi_rank_score_type: None,
     }
 }
 
@@ -100,24 +128,42 @@ fn sample_rank_page() -> ContestRankPage {
     }
 }
 
+fn sample_announcement_page() -> AnnouncementPage {
+    AnnouncementPage {
+        records: vec![Announcement {
+            id: "9001".into(),
+            title: "开赛通知".into(),
+            content: "<p>比赛已开始</p>".into(),
+            author: "admin".into(),
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_100,
+        }],
+        total: 1,
+        size: 50,
+        current: 1,
+        pages: 1,
+    }
+}
+
 #[async_trait::async_trait]
 impl ContestProvider for StubContestProvider {
     async fn list_contests(&self) -> AppResult<Vec<Contest>> {
-        match self.mode {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        match self.current_mode() {
             StubMode::Ok => Ok(vec![sample_contest()]),
             m => Err(m.into_err("stub list_contests")),
         }
     }
 
     async fn get_contest(&self, _contest_id: &str) -> AppResult<Contest> {
-        match self.mode {
+        match self.current_mode() {
             StubMode::Ok => Ok(sample_contest()),
             m => Err(m.into_err("stub get_contest")),
         }
     }
 
     async fn list_contest_problems(&self, _contest_id: &str) -> AppResult<Vec<ContestProblem>> {
-        match self.mode {
+        match self.current_mode() {
             StubMode::Ok => Ok(vec![sample_problem()]),
             m => Err(m.into_err("stub list_contest_problems")),
         }
@@ -128,18 +174,44 @@ impl ContestProvider for StubContestProvider {
         _contest_id: &str,
         _query: &RankQuery,
     ) -> AppResult<ContestRankPage> {
-        match self.mode {
+        match self.current_mode() {
             StubMode::Ok => Ok(sample_rank_page()),
             m => Err(m.into_err("stub get_contest_rank")),
         }
     }
+
+    async fn list_announcements(
+        &self,
+        _contest_id: &str,
+        _current_page: i64,
+        _limit: i64,
+    ) -> AppResult<AnnouncementPage> {
+        match self.current_mode() {
+            StubMode::Ok => Ok(sample_announcement_page()),
+            m => Err(m.into_err("stub list_announcements")),
+        }
+    }
 }
 
-fn make_service(mode: StubMode) -> ContestService {
-    let provider = Arc::new(StubContestProvider { mode });
+/// 构造基于独立临时目录的 ContestService；返回服务、Stub 句柄与目录。
+fn make_service(mode: StubMode) -> (ContestService, Arc<StubContestProvider>, std::path::PathBuf) {
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "hinina-test-contest-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let provider = Arc::new(StubContestProvider::new(mode));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
-    registry.register_contest(OJType::HOJ, provider);
-    ContestService::new(registry, Arc::new(EventBus::new()))
+    registry.register_contest(OJType::HOJ, Arc::clone(&provider) as Arc<dyn ContestProvider>);
+    let service = ContestService::new(
+        registry,
+        Arc::new(EventBus::new()),
+        Arc::new(Storage::new(dir.clone())),
+    );
+    (service, provider, dir)
 }
 
 // ── 错误变体必须穿透 Service 层 ──
@@ -151,7 +223,7 @@ fn make_service(mode: StubMode) -> ContestService {
 
 #[test]
 fn get_rank_preserves_auth_variant() {
-    let service = make_service(StubMode::Auth);
+    let (service, _stub, _dir) = make_service(StubMode::Auth);
     let err = block_on(service.get_rank("1011", &RankQuery::default()))
         .expect_err("token 过期应报错");
     assert!(
@@ -168,7 +240,7 @@ fn get_rank_preserves_auth_variant() {
 
 #[test]
 fn get_rank_preserves_network_variant() {
-    let service = make_service(StubMode::Network);
+    let (service, _stub, _dir) = make_service(StubMode::Network);
     let err = block_on(service.get_rank("1011", &RankQuery::default()))
         .expect_err("网络异常应报错");
     assert!(
@@ -181,7 +253,7 @@ fn get_rank_preserves_network_variant() {
 #[test]
 fn list_contests_preserves_auth_variant() {
     // 登录页匿名简报链路：失败时前端要能区分「连不上」与「凭证无效」
-    let service = make_service(StubMode::Auth);
+    let (service, _stub, _dir) = make_service(StubMode::Auth);
     let err = block_on(service.list_contests(0)).expect_err("token 过期应报错");
     assert!(
         matches!(err, AppError::Auth(_)),
@@ -193,7 +265,7 @@ fn list_contests_preserves_auth_variant() {
 #[test]
 fn load_contest_with_problems_preserves_auth_variant() {
     // 进场链路：外壳 loadContest 走的就是这个方法
-    let service = make_service(StubMode::Auth);
+    let (service, _stub, _dir) = make_service(StubMode::Auth);
     let err = block_on(service.load_contest_with_problems("1011", None))
         .expect_err("token 过期应报错");
     assert!(
@@ -203,11 +275,40 @@ fn load_contest_with_problems_preserves_auth_variant() {
     );
 }
 
+#[test]
+fn list_announcements_preserves_auth_variant() {
+    let (service, _stub, _dir) = make_service(StubMode::Auth);
+    let err = block_on(service.list_announcements("1011", 1, 50))
+        .expect_err("token 过期应报错");
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "公告拉取失败必须保留 Auth 变体，实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("获取比赛公告"),
+        "应补上环节名: {}",
+        err.user_message()
+    );
+}
+
+#[test]
+fn list_announcements_preserves_network_variant() {
+    let (service, _stub, _dir) = make_service(StubMode::Network);
+    let err = block_on(service.list_announcements("1011", 1, 50))
+        .expect_err("网络异常应报错");
+    assert!(
+        matches!(err, AppError::Network(_)),
+        "网络异常不应被改写成 Contest 变体，实际 {:?}",
+        err
+    );
+}
+
 // ── 正常路径 ──
 
 #[test]
 fn get_rank_returns_page_on_success() {
-    let service = make_service(StubMode::Ok);
+    let (service, _stub, _dir) = make_service(StubMode::Ok);
     let page =
         block_on(service.get_rank("1011", &RankQuery::default())).expect("成功路径不应报错");
     assert_eq!(page.records.len(), 1);
@@ -216,7 +317,7 @@ fn get_rank_returns_page_on_success() {
 
 #[test]
 fn load_contest_with_problems_returns_bundle_and_selects() {
-    let service = make_service(StubMode::Ok);
+    let (service, _stub, _dir) = make_service(StubMode::Ok);
     let bundle = block_on(service.load_contest_with_problems("1011", None))
         .expect("成功路径不应报错");
     assert_eq!(bundle.contest.id, "1011");
@@ -226,4 +327,149 @@ fn load_contest_with_problems_returns_bundle_and_selects() {
         Some("1011".to_string()),
         "加载后应自动选中该比赛"
     );
+}
+
+#[test]
+fn list_announcements_returns_page_on_success() {
+    let (service, _stub, _dir) = make_service(StubMode::Ok);
+    let page = block_on(service.list_announcements("1011", 1, 50)).expect("成功路径不应报错");
+    assert_eq!(page.records.len(), 1);
+    assert_eq!(page.records[0].id, "9001");
+    assert_eq!(page.records[0].author, "admin");
+}
+
+// ── 比赛列表 TTL 缓存语义 ──
+
+#[test]
+fn list_contests_cache_hit_skips_second_provider_call() {
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+
+    let first = block_on(service.list_contests(60)).expect("首次拉取应成功");
+    let second = block_on(service.list_contests(60)).expect("缓存命中应成功");
+
+    assert_eq!(stub.call_count(), 1, "TTL 内第二次调用不应再打 Provider");
+    assert_eq!(first.len(), second.len());
+}
+
+#[test]
+fn list_contests_expired_cache_refetches() {
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+
+    block_on(service.list_contests(60)).expect("首次拉取应成功");
+    // TTL=0：缓存立即视为过期，必须重新请求
+    block_on(service.list_contests(0)).expect("过期后重新拉取应成功");
+
+    assert_eq!(stub.call_count(), 2, "缓存过期后应重新请求 Provider");
+}
+
+#[test]
+fn refresh_forces_provider_call_even_within_ttl() {
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+
+    block_on(service.list_contests(60)).expect("首次拉取应成功");
+    block_on(service.refresh()).expect("refresh 应成功");
+
+    assert_eq!(stub.call_count(), 2, "refresh 必须跳过缓存强制拉取");
+}
+
+#[test]
+fn failed_refresh_leaves_no_stale_cache() {
+    // refresh 先清缓存再拉取：拉取失败后不得残留旧数据，
+    // 下一次调用必须重新打到 Provider（而不是静默返回过期列表）
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    block_on(service.list_contests(60)).expect("首次拉取应成功");
+    assert_eq!(stub.call_count(), 1);
+
+    stub.set_mode(StubMode::Auth);
+    let err = block_on(service.refresh()).expect_err("刷新失败应报错");
+    assert!(matches!(err, AppError::Auth(_)), "实际 {:?}", err);
+
+    stub.set_mode(StubMode::Ok);
+    block_on(service.list_contests(60)).expect("恢复后应重新拉取成功");
+    assert_eq!(
+        stub.call_count(),
+        3,
+        "失败的 refresh 已清空缓存，恢复后必须重新请求而不是吃旧缓存"
+    );
+}
+
+// ── 公告已读状态（客户端本地特性）──
+
+#[test]
+fn read_state_roundtrip_merges_and_dedupes() {
+    let (service, _stub, dir) = make_service(StubMode::Ok);
+
+    // 初始无文件：空列表而不是报错
+    assert_eq!(
+        service.get_read_announcement_ids("1011", "uid-1").unwrap(),
+        Vec::<String>::new()
+    );
+
+    service
+        .mark_announcements_read("1011", "uid-1", &["a".into(), "b".into()])
+        .expect("标记已读应成功");
+    // 重复 + 新增：合并去重，保留首次出现顺序
+    service
+        .mark_announcements_read("1011", "uid-1", &["b".into(), "c".into()])
+        .expect("标记已读应成功");
+
+    let ids = service
+        .get_read_announcement_ids("1011", "uid-1")
+        .expect("读取应成功");
+    assert_eq!(ids, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+
+    // 落盘位置与格式锁定：announcements_read/{cid}_{uid}.json + {"readIds":[...]}
+    let file = dir.join("announcements_read").join("1011_uid-1.json");
+    assert!(file.exists(), "已读状态应持久化到 {:?}", file);
+    let raw = std::fs::read_to_string(&file).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&raw).expect("应为合法 JSON");
+    assert_eq!(value["readIds"].as_array().map(|a| a.len()), Some(3));
+
+    // 不同用户互相隔离
+    assert_eq!(
+        service.get_read_announcement_ids("1011", "uid-2").unwrap(),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn read_state_corrupt_file_degrades_to_empty() {
+    let (service, _stub, dir) = make_service(StubMode::Ok);
+
+    let read_dir = dir.join("announcements_read");
+    std::fs::create_dir_all(&read_dir).unwrap();
+    std::fs::write(read_dir.join("1011_uid-1.json"), "not-json{{{").unwrap();
+
+    // 损坏文件只告警降级，绝不阻断公告展示
+    let ids = service
+        .get_read_announcement_ids("1011", "uid-1")
+        .expect("损坏文件应降级为空列表而不是报错");
+    assert!(ids.is_empty());
+
+    // 损坏后仍可正常标记（重建文件）
+    service
+        .mark_announcements_read("1011", "uid-1", &["x".into()])
+        .expect("标记应成功");
+    assert_eq!(
+        service.get_read_announcement_ids("1011", "uid-1").unwrap(),
+        vec!["x".to_string()]
+    );
+}
+
+#[test]
+fn read_state_rejects_path_separators() {
+    let (service, _stub, _dir) = make_service(StubMode::Ok);
+
+    // uid / cid 来自会话与前端入参，含路径分隔符或 .. 时必须拒绝，防止写出存储根目录之外
+    for bad in ["../evil", "a/b", "a\\b", ""] {
+        let err = service
+            .get_read_announcement_ids("1011", bad)
+            .expect_err(&format!("非法 uid {:?} 应被拒绝", bad));
+        assert!(matches!(err, AppError::Io(_)), "实际 {:?}", err);
+
+        let err = service
+            .mark_announcements_read(bad, "uid-1", &["a".into()])
+            .expect_err(&format!("非法 cid {:?} 应被拒绝", bad));
+        assert!(matches!(err, AppError::Io(_)), "实际 {:?}", err);
+    }
 }

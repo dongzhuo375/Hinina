@@ -1,9 +1,39 @@
+use serde::Serialize;
 use tauri::State;
 use tracing::info;
 
 use crate::core::context::AppContext;
 use crate::core::entity::config::AppConfig;
 use crate::core::error::AppResult;
+
+/// 存储与版本信息（排障用：前端「关于/诊断」面板展示日志位置与客户端版本）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageInfo {
+    /// 应用数据根目录
+    pub base_dir: String,
+    /// 日志文件完整路径（与 `infra/logger.rs` 的落盘位置一致）
+    pub log_path: String,
+    /// 客户端版本（构建时注入的 Cargo 包版本，与 HttpClient UA 同源）
+    pub version: String,
+}
+
+/// 获取存储与版本信息。
+///
+/// 前端 invoke 签名: `get_storage_info`
+#[tauri::command]
+pub async fn get_storage_info(ctx: State<'_, AppContext>) -> AppResult<StorageInfo> {
+    let base_dir = ctx.storage.base_dir();
+    Ok(StorageInfo {
+        log_path: base_dir
+            .join("logs")
+            .join("hinina.log")
+            .to_string_lossy()
+            .into_owned(),
+        base_dir: base_dir.to_string_lossy().into_owned(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
 
 /// 获取完整应用配置。
 ///

@@ -1,0 +1,32 @@
+{
+  "status": 200,
+  "msg": "success",
+  "data": {
+    "judgeCaseList": [
+      {
+        "submitId": 12345,
+        "caseId": 1,
+        "status": 5,
+        "time": 10,
+        "memory": 5120,
+        "score": null,
+        "groupNum": null,
+        "seq": 1,
+        "mode": "default"
+      },
+      {
+        "submitId": 12345,
+        "caseId": 2,
+        "status": 5,
+        "time": 12,
+        "memory": 5248,
+        "score": null,
+        "groupNum": null,
+        "seq": 2,
+        "mode": null
+      }
+    ],
+    "subTaskJudgeCaseVoList": null,
+    "judgeCaseMode": "default"
+  }
+}

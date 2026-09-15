@@ -12,7 +12,10 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use crate::core::entity::submission::{JudgementResult, JudgementStatus};
+use crate::core::entity::submission::{
+    JudgementResult, JudgementStatus, SubmissionCases, SubmissionDetail, SubmissionPage,
+    SubmissionQuery,
+};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, SubmissionEvent};
 use crate::core::event::event_bus::EventBus;
@@ -155,6 +158,56 @@ impl SubmissionService {
 
             tokio::time::sleep(std::time::Duration::from_secs(poll_interval_secs)).await;
         }
+    }
+
+    /// 查询比赛提交列表（分页）。
+    ///
+    /// **不做缓存**：提交状态随时在变（评测中 → 终态），必须由前端控制刷新节奏。
+    pub async fn list_contest_submissions(
+        &self,
+        query: &SubmissionQuery,
+    ) -> AppResult<SubmissionPage> {
+        let oj_type = self.registry.current_oj();
+        let provider = self.registry.get_submission(&oj_type)?;
+
+        let page = provider
+            .list_contest_submissions(query)
+            .await
+            .map_err(|e| {
+                warn!(contest_id = query.contest_id, error = %e, "获取提交列表失败");
+                e.context("获取提交列表失败")
+            })?;
+
+        debug!(contest_id = query.contest_id, count = page.records.len(), "提交列表已获取");
+        Ok(page)
+    }
+
+    /// 查询提交详情（含源代码与错误信息）。
+    pub async fn get_submission_detail(&self, submit_id: &str) -> AppResult<SubmissionDetail> {
+        let oj_type = self.registry.current_oj();
+        let provider = self.registry.get_submission(&oj_type)?;
+
+        provider
+            .get_submission_detail(submit_id)
+            .await
+            .map_err(|e| {
+                warn!(submit_id = submit_id, error = %e, "获取提交详情失败");
+                e.context("获取提交详情失败")
+            })
+    }
+
+    /// 查询提交的全部测试点结果。
+    pub async fn get_submission_cases(&self, submit_id: &str) -> AppResult<SubmissionCases> {
+        let oj_type = self.registry.current_oj();
+        let provider = self.registry.get_submission(&oj_type)?;
+
+        provider
+            .get_submission_cases(submit_id)
+            .await
+            .map_err(|e| {
+                warn!(submit_id = submit_id, error = %e, "获取测试点结果失败");
+                e.context("获取测试点结果失败")
+            })
     }
 }
 

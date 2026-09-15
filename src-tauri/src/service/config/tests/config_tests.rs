@@ -41,10 +41,36 @@ fn new_uses_defaults_when_no_config() {
     let (service, _storage) = test_config_service("defaults");
 
     let cfg = service.get();
-    assert_eq!(cfg.theme.theme_name, "dark");
+    assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.editor.font_size, 14);
-    assert_eq!(cfg.editor.default_language, "C++");
+    assert_eq!(cfg.editor.default_language, "cpp");
     assert_eq!(cfg.user.last_oj_type, "HOJ");
+}
+
+#[test]
+fn new_normalizes_legacy_config_from_disk() {
+    // P55：旧版落盘的 "C++" / dark / 0.45 在加载路径一次性归一
+    let dir = std::env::temp_dir().join("hinina-test-cfg-legacy-normalize");
+    let _ = std::fs::remove_dir_all(&dir);
+    let storage = Arc::new(Storage::new(dir));
+    storage
+        .write_string(
+            "config.json",
+            r#"{
+                "editor": { "defaultLanguage": "C++" },
+                "theme": { "themeName": "dark", "editorTheme": "vs-dark" },
+                "layout": { "splitRatio": 0.45 }
+            }"#,
+        )
+        .unwrap();
+    let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
+
+    let service = ConfigService::new(repo, Arc::new(EventBus::new()));
+    let cfg = service.get();
+    assert_eq!(cfg.editor.default_language, "cpp");
+    assert_eq!(cfg.theme.theme_name, "light");
+    assert_eq!(cfg.theme.editor_theme, "vs");
+    assert_eq!(cfg.layout.split_ratio, 0.48);
 }
 
 #[test]
@@ -77,7 +103,7 @@ fn reload_from_disk_overwrites_memory() {
     let (service, storage) = test_config_service("reload");
 
     // service loads defaults
-    assert_eq!(service.get().theme.theme_name, "dark");
+    assert_eq!(service.get().theme.theme_name, "light");
 
     // modify config directly on disk, bypassing the service
     let repo = FsConfigRepository::new(Arc::clone(&storage), "config.json");

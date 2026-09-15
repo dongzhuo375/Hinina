@@ -11,10 +11,14 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
 
+use crate::core::entity::announcement::{Announcement, AnnouncementPage};
 use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::problem::{Problem, Sample};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
-use crate::core::entity::submission::{JudgementResult, JudgementStatus};
+use crate::core::entity::submission::{
+    JudgeCase, JudgementResult, JudgementStatus, SubTaskCases, SubmissionCases, SubmissionDetail,
+    SubmissionPage, SubmissionQuery, SubmissionRecord,
+};
 use crate::core::entity::user::User;
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, AuthEvent};
@@ -26,8 +30,9 @@ use crate::core::provider::submission::SubmissionProvider;
 use crate::infra::http::HttpClient;
 
 use self::types::{
-    map_status, ApiResponse, ContestProblemVO, ContestRankDTO, ContestRankVO, ContestVO, JudgeVO,
-    LoginRequest, ProblemInfoVO, SubmitRequest, UserInfoVO, UserProblemStatusDTO,
+    map_status, AnnouncementVO, ApiResponse, ContestProblemVO, ContestRankDTO, ContestRankVO,
+    ContestVO, JudgeCaseDTO, JudgeVO, LoginRequest, ProblemInfoVO, SubmitRequest, UserInfoVO,
+    UserProblemStatusDTO,
 };
 
 /// HOJ OJ 适配器。
@@ -266,6 +271,72 @@ impl HOJAdapter {
                 .map(|s| Self::parse_time(&s))
                 .filter(|t| *t > 0),
             allow_end_submit: c.allow_end_submit,
+            oi_rank_score_type: c.oi_rank_score_type,
+        }
+    }
+
+    /// AnnouncementVO → 领域实体（content 为 null 时回退空串，时间转秒级时间戳）。
+    fn into_announcement(a: AnnouncementVO) -> Announcement {
+        Announcement {
+            id: a.id.to_string(),
+            title: a.title,
+            content: a.content.unwrap_or_default(),
+            author: a.username,
+            created_at: Self::parse_time(&a.create_time),
+            updated_at: Self::parse_time(&a.update_time),
+        }
+    }
+
+    /// JudgeVO → 提交列表条目（time/memory 评测未完成时为 null，去 null 后落 0）。
+    fn into_submission_record(j: JudgeVO) -> SubmissionRecord {
+        SubmissionRecord {
+            submit_id: j.submit_id.to_string(),
+            pid: j.pid.to_string(),
+            display_pid: j.display_pid,
+            title: j.title,
+            display_id: j.display_id,
+            username: j.username,
+            submit_time: Self::parse_time(&j.submit_time),
+            status: map_status(j.status),
+            time_ms: j.time.max(0) as u64,
+            memory_kb: j.memory.max(0) as u64,
+            score: j.score,
+            length: j.length.max(0) as u64,
+            language: j.language,
+        }
+    }
+
+    /// 提交详情 DTO → 领域实体（code 为 null 时回退空串）。
+    fn into_submission_detail(d: types::SubmissionDetail) -> SubmissionDetail {
+        SubmissionDetail {
+            submit_id: d.submit_id.to_string(),
+            pid: d.pid.to_string(),
+            display_pid: d.display_pid,
+            username: d.username,
+            submit_time: Self::parse_time(&d.submit_time),
+            status: map_status(d.status),
+            time_ms: d.time.max(0) as u64,
+            memory_kb: d.memory.max(0) as u64,
+            score: d.score,
+            length: d.length.max(0) as u64,
+            language: d.language,
+            code: d.code.unwrap_or_default(),
+            error_message: d.error_message,
+            judger: d.judger,
+            oi_rank_score: d.oi_rank_score,
+        }
+    }
+
+    /// JudgeCaseDTO → 测试点结果（宽松字段全部落默认值）。
+    fn into_judge_case(c: JudgeCaseDTO) -> JudgeCase {
+        JudgeCase {
+            case_id: c.case_id.unwrap_or(0),
+            seq: c.seq.unwrap_or(0),
+            status: map_status(c.status.unwrap_or(-1)),
+            time_ms: c.time.unwrap_or(0).max(0) as u64,
+            memory_kb: c.memory.unwrap_or(0).max(0) as u64,
+            score: c.score,
+            group_num: c.group_num,
         }
     }
 
@@ -629,6 +700,40 @@ impl ContestProvider for HOJAdapter {
             pages: page.pages,
         })
     }
+
+    async fn list_announcements(
+        &self,
+        contest_id: &str,
+        current_page: i64,
+        limit: i64,
+    ) -> AppResult<AnnouncementPage> {
+        let cid = Self::parse_cid(contest_id)?;
+        let url = self.api_url(&format!(
+            "/get-contest-announcement?cid={}&limit={}&currentPage={}",
+            cid,
+            limit.max(1),
+            current_page.max(1)
+        ));
+
+        let api_resp = self
+            .get_json_authed::<ApiResponse<types::PageResult<AnnouncementVO>>>(&url)
+            .await
+            .map_err(|e| e.context("HOJ contest announcement"))?;
+
+        let page = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Contest(format!("HOJ contest announcement 失败: {}", msg)))?;
+
+        let records = page.records.into_iter().map(Self::into_announcement).collect();
+        debug!(contest_id = contest_id, "HOJ 比赛公告已获取");
+        Ok(AnnouncementPage {
+            records,
+            total: page.total,
+            size: page.size,
+            current: page.current,
+            pages: page.pages,
+        })
+    }
 }
 
 // ── ProblemProvider ──
@@ -834,5 +939,105 @@ impl SubmissionProvider for HOJAdapter {
         );
 
         Ok(result)
+    }
+
+    async fn list_contest_submissions(
+        &self,
+        query: &SubmissionQuery,
+    ) -> AppResult<SubmissionPage> {
+        let cid = Self::parse_cid(&query.contest_id)?;
+
+        // beforeContestSubmit=false 必传：赛前提交不计入榜单，混入会误导选手；
+        // completeProblemID=true 让 displayPid 返回完整展示 ID。
+        // onlyMine / problemID / status 为可选筛选，None 时不出现在查询串里。
+        let mut url = format!(
+            "/contest-submissions?contestID={}&limit={}&currentPage={}&onlyMine={}&beforeContestSubmit=false&completeProblemID=true",
+            cid,
+            query.limit.max(1),
+            query.current_page.max(1),
+            query.only_mine
+        );
+        if let Some(display_id) = query.problem_display_id.as_deref().filter(|s| !s.is_empty()) {
+            url.push_str(&format!("&problemID={}", display_id));
+        }
+        if let Some(status) = query.status {
+            url.push_str(&format!("&status={}", status));
+        }
+        let url = self.api_url(&url);
+
+        let api_resp = self
+            .get_json_authed::<ApiResponse<types::PageResult<JudgeVO>>>(&url)
+            .await
+            .map_err(|e| e.context("HOJ contest submissions"))?;
+
+        let page = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Submission(format!("HOJ contest submissions 失败: {}", msg)))?;
+
+        let records = page.records.into_iter().map(Self::into_submission_record).collect();
+        debug!(contest_id = query.contest_id, "HOJ 比赛提交列表已获取");
+        Ok(SubmissionPage {
+            records,
+            total: page.total,
+            size: page.size,
+            current: page.current,
+            pages: page.pages,
+        })
+    }
+
+    async fn get_submission_detail(&self, submit_id: &str) -> AppResult<SubmissionDetail> {
+        let url = self.api_url(&format!("/get-submission-detail?submitId={}", submit_id));
+
+        // 与 get_judgement 同一端点，但投影为完整实体（含 code / errorMessage / judger）
+        let api_resp = self
+            .get_json_authed::<ApiResponse<types::SubmissionInfoVO>>(&url)
+            .await
+            .map_err(|e| e.context("HOJ submission detail"))?;
+
+        let info = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Submission(format!("HOJ 提交详情查询失败: {}", msg)))?;
+
+        debug!(submit_id = submit_id, "HOJ 提交详情已获取");
+        Ok(Self::into_submission_detail(info.submission))
+    }
+
+    async fn get_submission_cases(&self, submit_id: &str) -> AppResult<SubmissionCases> {
+        let url = self.api_url(&format!("/get-all-case-result?submitId={}", submit_id));
+
+        let api_resp = self
+            .get_json_authed::<ApiResponse<types::JudgeCaseVO>>(&url)
+            .await
+            .map_err(|e| e.context("HOJ submission cases"))?;
+
+        let vo = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Submission(format!("HOJ 测试点结果查询失败: {}", msg)))?;
+
+        let cases = types::lenient_case_list(&vo.judge_case_list)
+            .into_iter()
+            .map(Self::into_judge_case)
+            .collect();
+
+        // 子任务分组逐条宽松转换：单组形态异常只跳过该组，不影响其余分组
+        let sub_tasks = vo
+            .sub_task_judge_case_vo_list
+            .iter()
+            .filter_map(|v| serde_json::from_value::<types::SubTaskDTO>(v.clone()).ok())
+            .map(|t| SubTaskCases {
+                group_num: t.group_num.unwrap_or(0),
+                cases: types::lenient_case_list(&t.judge_case_list)
+                    .into_iter()
+                    .map(Self::into_judge_case)
+                    .collect(),
+            })
+            .collect();
+
+        debug!(submit_id = submit_id, "HOJ 测试点结果已获取");
+        Ok(SubmissionCases {
+            cases,
+            sub_tasks,
+            mode: vo.judge_case_mode.unwrap_or_default(),
+        })
     }
 }

@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use tracing::{debug, info, warn};
 
-use crate::core::entity::config::AppConfig;
+use crate::core::entity::config::{normalize_legacy_values, AppConfig};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, SystemEvent};
 use crate::core::event::event_bus::EventBus;
@@ -25,8 +25,10 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 首次启动时配置文件不存在，自动使用默认值并持久化。
     pub fn new(repo: Arc<R>, event_bus: Arc<EventBus>) -> Self {
         let config = match repo.load_config::<AppConfig>() {
-            Ok(cfg) => {
+            Ok(mut cfg) => {
                 info!("配置加载成功");
+                // 历史配置可能仍存着旧默认值（"C++" / dark / 0.45），加载时一次性归一
+                normalize_legacy_values(&mut cfg);
                 cfg
             }
             Err(e) => {
@@ -91,6 +93,9 @@ impl<R: ConfigRepository> ConfigService<R> {
             warn!(error = %e, "配置重新加载失败");
             AppError::Config(format!("配置重新加载失败: {}", e))
         })?;
+        // 与 new() 同一归一入口：手改磁盘文件后 reload 同样要修正旧值
+        let mut new_config = new_config;
+        normalize_legacy_values(&mut new_config);
 
         {
             let mut cfg = self

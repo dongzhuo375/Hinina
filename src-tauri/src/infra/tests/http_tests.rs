@@ -142,3 +142,13 @@ fn classify_fails_redirect_leftovers() {
         StatusDecision::Fail
     );
 }
+
+// ── 超时来自配置（oj.timeout_secs），不再硬编码 ──
+
+#[test]
+fn with_timeout_builds_client() {
+    // reqwest::Client 不暴露 timeout getter，此处锁定构造路径可用；
+    // 「配置值确实被传入」由 context.rs 的装配代码保证（timeout_secs → with_timeout）
+    HttpClient::with_timeout(Duration::from_secs(7)).expect("应能创建指定超时的客户端");
+    HttpClient::new().expect("默认构造应保持可用");
+}

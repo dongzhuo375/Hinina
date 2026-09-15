@@ -152,6 +152,9 @@ pub struct ContestVO {
     /// 是否允许赛后提交
     #[serde(default)]
     pub allow_end_submit: bool,
+    /// OI 榜单计分规则："Recent" / "Highest"（非 OI 赛为 null）
+    #[serde(default)]
+    pub oi_rank_score_type: Option<String>,
 }
 
 /// 比赛题目列表条目（ContestProblemVO）。
@@ -445,7 +448,10 @@ pub struct SubmitRequest {
     pub is_remote: bool,
 }
 
-/// 提交后返回的 Judge 对象。
+/// 提交后返回的 Judge 对象，同时作为提交列表（`contest-submissions`）条目的宽松 DTO。
+///
+/// 列表场景比提交响应多出 title / displayId / time / memory / score 等字段，
+/// 全部按可缺失处理：两个接口共用一个 DTO，缺哪个都落到默认值。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JudgeVO {
@@ -457,11 +463,32 @@ pub struct JudgeVO {
     pub display_pid: String,
     #[serde(default)]
     pub username: String,
+    /// 提交者 uid（列表接口返回）
+    #[serde(default)]
+    pub uid: String,
+    /// 题目标题（列表接口返回）
+    #[serde(default)]
+    pub title: String,
+    /// 比赛中题目序号（如 "A"，列表接口返回，可为 null）
+    #[serde(default)]
+    pub display_id: String,
     /// 评测状态码（0-15，见 map_status）
     #[serde(default)]
     pub status: i32,
     #[serde(default)]
     pub submit_time: String,
+    /// 运行耗时（ms，评测未完成时为 null）
+    #[serde(default)]
+    pub time: i64,
+    /// 运行内存（KB，评测未完成时为 null）
+    #[serde(default)]
+    pub memory: i64,
+    /// OI 题目得分（ACM 题为 null）
+    #[serde(default)]
+    pub score: Option<f64>,
+    /// OI 榜单计入分数（可为 null）
+    #[serde(default)]
+    pub oi_rank_score: Option<i32>,
     #[serde(default)]
     pub length: i64,
     #[serde(default)]
@@ -511,6 +538,95 @@ pub struct SubmissionDetail {
     pub code: Option<String>,
     #[serde(default)]
     pub cid: i64,
+    /// 判题机标识（可为 null）
+    #[serde(default)]
+    pub judger: Option<String>,
+    /// OI 榜单计入分数（可为 null）
+    #[serde(default)]
+    pub oi_rank_score: Option<i32>,
+}
+
+// ── 公告 ──
+
+/// 比赛公告条目（AnnouncementVO）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnouncementVO {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+    /// 公告正文（HTML，可为 null）
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub uid: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub create_time: String,
+    #[serde(default)]
+    pub update_time: String,
+}
+
+// ── 测试点结果 ──
+
+/// `GET /api/get-all-case-result` 响应（JudgeCaseVO）。
+///
+/// 两个列表都保留为原始 `Value` 逐条转换：SubTask 形态在文档中不完整，
+/// 单条测试点字段类型异常时只跳过该条，绝不让整个响应解析失败。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JudgeCaseVO {
+    #[serde(default)]
+    pub judge_case_list: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub sub_task_judge_case_vo_list: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub judge_case_mode: Option<String>,
+}
+
+/// 单个测试点（JudgeCaseDTO），全字段宽松。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JudgeCaseDTO {
+    #[serde(default)]
+    pub submit_id: Option<i64>,
+    #[serde(default)]
+    pub case_id: Option<i64>,
+    /// 评测状态码（与提交状态同一张表）
+    #[serde(default)]
+    pub status: Option<i32>,
+    #[serde(default)]
+    pub time: Option<i64>,
+    #[serde(default)]
+    pub memory: Option<i64>,
+    #[serde(default)]
+    pub score: Option<f64>,
+    #[serde(default)]
+    pub group_num: Option<i64>,
+    #[serde(default)]
+    pub seq: Option<i64>,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// 子任务分组（SubTaskDTO），文档未完整给出形态，按宽松结构解析。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubTaskDTO {
+    #[serde(default)]
+    pub group_num: Option<i64>,
+    #[serde(default)]
+    pub judge_case_list: Vec<serde_json::Value>,
+}
+
+/// 逐条宽松转换测试点列表：类型异常的条目直接跳过（warn 由调用方记录）。
+pub fn lenient_case_list(values: &[serde_json::Value]) -> Vec<JudgeCaseDTO> {
+    values
+        .iter()
+        .filter_map(|v| serde_json::from_value::<JudgeCaseDTO>(v.clone()).ok())
+        .collect()
 }
 
 // ── 状态码映射 ──
@@ -519,26 +635,28 @@ pub struct SubmissionDetail {
 
 /// 将 HOJ 评测状态码（0-15）映射为 JudgementStatus。
 ///
-/// 非终态（0=Pending, 1=Judging）映射为 Running 供上层轮询。
-/// JudgementStatus 无 PE/OLE/SE/RJE/FREQ 枚举，统一归入 WrongAnswer/Unknown。
+/// 全表覆盖 HOJ `Constants.Judge` 状态码；非终态的 0（Pending）/ 1（Judging）
+/// 分别映射为 Pending / Running（Judging 沿用既有 Running 语义，轮询判据不变）。
+/// 码表之外的值一律归入 Unknown。
 pub fn map_status(status: i32) -> crate::core::entity::submission::JudgementStatus {
     use crate::core::entity::submission::JudgementStatus;
     match status {
-        0 | 1 => JudgementStatus::Running,          // Pending / Judging
+        0 => JudgementStatus::Pending,               // 等待评测
+        1 => JudgementStatus::Running,               // Judging
         2 => JudgementStatus::CompilationError,      // CE
-        3 => JudgementStatus::WrongAnswer,           // PE（无对应枚举）
+        3 => JudgementStatus::PresentationError,     // PE
         4 => JudgementStatus::WrongAnswer,           // WA
         5 => JudgementStatus::Accepted,              // AC
         6 => JudgementStatus::TimeLimitExceeded,     // TLE
         7 => JudgementStatus::MemoryLimitExceeded,   // MLE
-        8 => JudgementStatus::Unknown,               // OLE（无对应枚举）
-        9 => JudgementStatus::RuntimeError,           // RE
-        10 => JudgementStatus::Unknown,               // SE
-        11 => JudgementStatus::Unknown,               // RJE
-        12 => JudgementStatus::WrongAnswer,           // SF
-        13 => JudgementStatus::Accepted,              // PA（Partial AC，保守映射为 AC）
-        14 => JudgementStatus::Unknown,               // FREQ
-        15 => JudgementStatus::Unknown,               // UE
+        8 => JudgementStatus::OutputLimitExceeded,   // OLE
+        9 => JudgementStatus::RuntimeError,          // RE
+        10 => JudgementStatus::SystemError,          // SE
+        11 => JudgementStatus::RemoteJudgeError,     // RJE
+        12 => JudgementStatus::SubmitFailed,         // SF
+        13 => JudgementStatus::PartiallyAccepted,    // PA（部分通过，独立变体，不再折算 AC）
+        14 => JudgementStatus::FrequentLimit,        // FREQ（提交过于频繁）
+        15 => JudgementStatus::UnknownError,         // UE
         _ => JudgementStatus::Unknown,
     }
 }

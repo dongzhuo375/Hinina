@@ -138,7 +138,7 @@ pub struct EditorConfig {
     /// 自动保存间隔（秒），仅 auto_save 为 true 时生效
     #[serde(default = "default_auto_save_interval")]
     pub auto_save_interval_secs: u64,
-    /// 默认编程语言
+    /// 默认编程语言（Monaco language id，取值域：cpp / java / python / c 等）
     #[serde(default = "default_language")]
     pub default_language: String,
 }
@@ -168,7 +168,7 @@ const fn default_auto_save_interval() -> u64 {
     30
 }
 fn default_language() -> String {
-    "C++".into()
+    "cpp".into()
 }
 
 // ── 主题配置 ──
@@ -176,10 +176,10 @@ fn default_language() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeConfig {
-    /// 当前主题名称（light / dark）
+    /// 当前主题名称（取值域：light；dark 尚未实现，加载时会被归一为 light）
     #[serde(default = "default_theme_name")]
     pub theme_name: String,
-    /// 编辑器主题（Monaco 主题名）
+    /// 编辑器主题（Monaco 主题名，取值域：vs；vs-dark 随 dark 主题一并实现）
     #[serde(default = "default_editor_theme")]
     pub editor_theme: String,
 }
@@ -194,10 +194,10 @@ impl Default for ThemeConfig {
 }
 
 fn default_theme_name() -> String {
-    "dark".into()
+    "light".into()
 }
 fn default_editor_theme() -> String {
-    "vs-dark".into()
+    "vs".into()
 }
 
 // ── 布局配置 ──
@@ -208,7 +208,7 @@ pub struct LayoutConfig {
     /// 侧边栏宽度（像素）
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: u32,
-    /// 题面与编辑器分栏比例（0.0 ~ 1.0，0.5 表示各占一半）
+    /// 题面与编辑器分栏比例（0.0 ~ 1.0，0.5 表示各占一半；默认 0.48）
     #[serde(default = "default_split_ratio")]
     pub split_ratio: f64,
 }
@@ -226,5 +226,48 @@ const fn default_sidebar_width() -> u32 {
     280
 }
 const fn default_split_ratio() -> f64 {
-    0.45
+    0.48
 }
+
+// ── 旧值归一（P55）──
+
+/// 旧版默认语言显示名 → Monaco language id。
+fn normalize_language_id(raw: &str) -> Option<&'static str> {
+    match raw {
+        "C++" => Some("cpp"),
+        "Java" => Some("java"),
+        "Python" => Some("python"),
+        "C" => Some("c"),
+        _ => None,
+    }
+}
+
+/// 一次性归一历史配置文件中的旧默认值（加载路径调用，纯函数便于测试）。
+///
+/// 背景：旧版默认值写入了「显示名」而非取值域内的合法值 ——
+/// `editor.defaultLanguage = "C++"`（Monaco 只认 `cpp`）、`theme = dark/vs-dark`
+/// （深色主题尚未实现，前端只有浅色）、`splitRatio = 0.45`（旧默认，现默认 0.48）。
+/// 只修正**恰好等于旧默认值**的项，用户显式设置的其他值一律不动。
+pub fn normalize_legacy_values(cfg: &mut AppConfig) {
+    if let Some(id) = normalize_language_id(&cfg.editor.default_language) {
+        cfg.editor.default_language = id.to_string();
+    }
+
+    // dark 主题未实现：归一到浅色，避免前端拿到不存在的主题名
+    if cfg.theme.theme_name == "dark" {
+        cfg.theme.theme_name = "light".into();
+    }
+    if cfg.theme.editor_theme == "vs-dark" {
+        cfg.theme.editor_theme = "vs".into();
+    }
+
+    // 0.45 是旧版默认值；用户手动调出的其他比例（含恰好 0.45 之外的任意值）不受影响。
+    // 浮点精确比较是刻意的：只有原样落盘的旧默认值才会二进制相等
+    if cfg.layout.split_ratio == 0.45 {
+        cfg.layout.split_ratio = default_split_ratio();
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/config_tests.rs"]
+mod tests;
