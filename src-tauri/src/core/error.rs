@@ -82,7 +82,42 @@ impl AppError {
     pub fn is_user_facing(&self) -> bool {
         true
     }
+
+    /// 补上「哪个环节失败」的上下文，**保留原始变体**。
+    ///
+    /// 为什么不用 `AppError::Network(format!("xx 请求失败: {}", e))` 重新包装：
+    /// 那样会把反序列化失败、认证失败等一律改写成「网络错误」，现场看到的是
+    /// 「网络错误: … 序列化错误: …」这类自相矛盾的嵌套消息，把排障引向错误方向
+    /// （例如把 DTO 字段不匹配当成断网去查）。变体是前端 `isAuthError` 分流的依据，
+    /// 改写变体还会让会话失效兜底失灵。
+    #[must_use]
+    pub fn context(self, ctx: &str) -> Self {
+        // 逐变体展开而非统一取 user_message()：Display 会带上「网络错误:」等前缀，
+        // 与变体本身重复；这里只在原始消息前拼接调用方给出的环节名。
+        match self {
+            AppError::Auth(msg) => AppError::Auth(prepend(ctx, msg)),
+            AppError::Contest(msg) => AppError::Contest(prepend(ctx, msg)),
+            AppError::Problem(msg) => AppError::Problem(prepend(ctx, msg)),
+            AppError::Submission(msg) => AppError::Submission(prepend(ctx, msg)),
+            AppError::Workspace(msg) => AppError::Workspace(prepend(ctx, msg)),
+            AppError::Io(msg) => AppError::Io(prepend(ctx, msg)),
+            AppError::Network(msg) => AppError::Network(prepend(ctx, msg)),
+            AppError::Config(msg) => AppError::Config(prepend(ctx, msg)),
+            AppError::ProviderNotFound(msg) => AppError::ProviderNotFound(prepend(ctx, msg)),
+            AppError::Serialization(msg) => AppError::Serialization(prepend(ctx, msg)),
+            AppError::Unknown(msg) => AppError::Unknown(prepend(ctx, msg)),
+        }
+    }
+}
+
+/// 把环节名拼到消息前面（`ctx: msg`）。
+fn prepend(ctx: &str, msg: String) -> String {
+    format!("{}: {}", ctx, msg)
 }
 
 /// 应用全局 Result 类型别名
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+#[path = "tests/error_tests.rs"]
+mod tests;

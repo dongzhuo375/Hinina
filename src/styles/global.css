@@ -1,44 +1,71 @@
 @import "tailwindcss";
 
 :root {
-  --color-primary: #18a058;
-  --color-primary-hover: #36ad6a;
-  --color-primary-pressed: #0c7a43;
+  --color-primary: #7c5cff;
+  --color-primary-hover: #6845f5;
+  --color-primary-pressed: #5631e0;
 
-  --color-info: #2080f0;
-  --color-success: #18a058;
-  --color-warning: #f0a020;
-  --color-error: #d03050;
+  --color-info: #2563eb;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-pending: #00c7be;
 
-  --radius: 6px;
+  /* ── 榜单 / 工作台状态色（浅色）──
+     榜单格与行级状态：一血、AC/WA 格、封榜冻结格、打星/女生行、待评测 */
+  --color-first-ac: #047857; /* 一血格背景（配白字） */
+  --color-ac-bg: #ecfdf5; /* AC 格背景 */
+  --color-ac-border: #a7f3d0; /* AC 格边框 */
+  --color-wa-bg: #fff1f2; /* WA / 未通过格背景 */
+  --color-wa-border: #fecdd3; /* WA / 未通过格边框 */
+  --color-frozen-bg: #f1f5f9; /* 封榜 try 格背景（冻结提交，赛后才揭晓） */
+  --color-frozen-border: #cbd5e1; /* 封榜 try 格边框 */
+  --color-star-row-bg: #f8fafc; /* 打星队（不计排名）整行背景 */
+  --color-girls-row-bg: #fdf2f8; /* 女生队整行背景 */
+  --color-pending-bg: #fffbeb; /* 待评测 amber 背景 */
+  --color-pending-border: #fde68a; /* 待评测 amber 边框 */
+
+  --radius: 8px;
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --font-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
 
-  --bg-body: #fafafa;
+  --bg-body: #f8fafc;
   --bg-card: #ffffff;
-  --bg-sidebar: #f5f5f5;
-  --text-primary: #1a1a2e;
-  --text-secondary: #555770;
-  --border-color: #e5e5e9;
+  --bg-sidebar: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --border-color: #e2e8f0;
 
   font-family: var(--font);
   color: var(--text-primary);
-  background-color: var(--bg-body);
 }
 
 html.dark {
-  --bg-body: #101014;
-  --bg-card: #1e1e24;
-  --bg-sidebar: #18181c;
-  --text-primary: #e5e5e9;
-  --text-secondary: #9999ab;
-  --border-color: #2e2e36;
+  --bg-body: #0d1117;
+  --bg-card: #161b22;
+  --bg-sidebar: #161b22;
+  --text-primary: #f0f6fc;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --border-color: #30363d;
+}
+
+html,
+body {
+  background: transparent;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  overflow: hidden;
+}
+
+/* 数字/倒计时使用等宽数字，避免跳动 */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Scrollbar */
@@ -50,7 +77,7 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--text-secondary);
+  background: var(--text-muted);
   border-radius: 3px;
   opacity: 0.5;
 }
@@ -66,3 +93,4 @@ body {
 .monaco-editor .monaco-editor-background {
   background-color: var(--bg-card) !important;
 }
+

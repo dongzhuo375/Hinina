@@ -206,3 +206,54 @@ fn current_returns_none_when_no_workspace() {
     mgr.destroy(&ws.id).unwrap();
     assert!(mgr.current().is_none());
 }
+
+// ── 语言持久化 ──
+//
+// 语言不属于任何代码文件：若保存路径只写文件，切换语言后切题或重启会退回默认语言，
+// 选手的 Java 代码会被当作 C++ 提交 —— 赛场上最难排查的静默故障。
+
+#[test]
+fn set_language_persists_across_manager_instances() {
+    let (mgr, storage) = test_manager_with_storage("set-language");
+    let ws = mgr
+        .create("contest-1", "problem-A", "/ws")
+        .expect("创建工作区失败");
+    assert_eq!(ws.language, "", "新建工作区语言为空");
+
+    let updated = mgr.set_language("java").expect("设置语言失败");
+    assert_eq!(updated.language, "java");
+    assert!(!updated.is_dirty, "语言变更不应把代码文件标记为脏");
+
+    // 换一个 manager 实例，模拟切题后重新加载 / 客户端重启
+    let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
+    let mgr2 = WorkspaceManager::new(repo, Arc::new(EventBus::new()));
+    let loaded = mgr2.load(&ws.id, "/ws").expect("加载工作区失败");
+    assert_eq!(loaded.language, "java", "语言必须跨实例持久化");
+}
+
+#[test]
+fn save_persists_language_metadata() {
+    let (mgr, storage) = test_manager_with_storage("save-language");
+    let ws = mgr
+        .create("contest-1", "problem-A", "/ws")
+        .expect("创建工作区失败");
+    mgr.update_file("Main.java", "class Main {}").expect("写入文件失败");
+    mgr.set_language("java").expect("设置语言失败");
+    mgr.save().expect("保存失败");
+
+    let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
+    let mgr2 = WorkspaceManager::new(repo, Arc::new(EventBus::new()));
+    let loaded = mgr2.load(&ws.id, "/ws").expect("加载工作区失败");
+    assert_eq!(loaded.language, "java");
+    assert_eq!(
+        loaded.files.get("Main.java").map(String::as_str),
+        Some("class Main {}")
+    );
+}
+
+#[test]
+fn set_language_without_current_workspace_errors() {
+    let mgr = test_manager("set-language-no-ws");
+    let err = mgr.set_language("cpp").expect_err("无当前工作区时应报错");
+    assert!(matches!(err, AppError::Workspace(_)));
+}

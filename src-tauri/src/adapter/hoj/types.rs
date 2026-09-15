@@ -5,10 +5,41 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 递归剔除 JSON 中值为 `null` 的对象成员与数组元素。
+///
+/// 为什么需要：HOJ 对未设置的字段返回 `null` 而不是省略（实测
+/// `GET /api/get-contest-list` 的 `sealRank` / `rankShowName` / `count` / `now` /
+/// `openPrint` 全为 `null`），而 serde 的 `#[serde(default)]` **只在字段缺失时生效**，
+/// 遇到显式 `null` 仍会报 `invalid type: null, expected a boolean`，
+/// 导致一个可选字段为 null 就让整个响应解析失败。
+///
+/// 剔除后 `null` 与「字段缺失」等价：非 Option 字段落到 `#[serde(default)]` 的默认值，
+/// Option 字段落到 `None` —— 与 HOJ 的语义一致（null 就是「没有值」）。
+/// 在解析入口统一处理，新增 DTO 字段无需逐个标注，也不会再犯同类错误。
+pub fn strip_nulls(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.retain(|_, v| !v.is_null());
+            for v in map.values_mut() {
+                strip_nulls(v);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            items.retain(|v| !v.is_null());
+            for v in items.iter_mut() {
+                strip_nulls(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// HOJ 统一响应包装。
 /// `data` 在空响应时为 `null`，在错误时为 `Option::None`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
+    /// 成功恒为 200（不是 0）；缺失时按失败处理，由 `into_data` 给出消息
+    #[serde(default)]
     pub status: i32,
     pub msg: Option<String>,
     pub data: Option<T>,
@@ -31,9 +62,19 @@ impl<T> ApiResponse<T> {
 }
 
 /// 分页响应（用于比赛列表等）。
+///
+/// 全部字段可缺失：HOJ 的分页对象在不同接口上返回的键并不一致
+/// （`get-contest-list` 实测含 `records/total/size/current/orders/searchCount/pages`，
+/// 文档只承诺 `records/total`），缺任何一个都不应让整页数据解析失败。
+///
+/// `bound` 显式声明是必需的：`records` 上的 `#[serde(default)]` 会让 serde 自动
+/// 给 `T` 加上 `Default` 约束，而各 VO 并没有（也不该有）`Default` 实现。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(deserialize = "T: serde::Deserialize<'de>"))]
 pub struct PageResult<T> {
+    #[serde(default)]
     pub records: Vec<T>,
+    #[serde(default)]
     pub total: i64,
     #[serde(default)]
     pub size: i64,
@@ -75,6 +116,7 @@ pub struct UserInfoVO {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContestVO {
+    #[serde(default)]
     pub id: i64,
     #[serde(default)]
     pub title: String,
@@ -98,6 +140,18 @@ pub struct ContestVO {
     pub auth: i32,
     #[serde(default)]
     pub author: String,
+    /// 榜单显示名规则：username / realname / nickname
+    #[serde(default)]
+    pub rank_show_name: Option<String>,
+    /// 是否封榜
+    #[serde(default)]
+    pub seal_rank: bool,
+    /// 封榜起始时间（ISO 字符串，可为 null）
+    #[serde(default)]
+    pub seal_rank_time: Option<String>,
+    /// 是否允许赛后提交
+    #[serde(default)]
+    pub allow_end_submit: bool,
 }
 
 /// 比赛题目列表条目（ContestProblemVO）。
@@ -123,6 +177,179 @@ pub struct ContestProblemVO {
     pub ac: i64,
     #[serde(default)]
     pub total: i64,
+}
+
+// ── 榜单 ──
+
+/// `POST /api/get-contest-rank` 请求体（ContestRankDTO）。
+///
+/// `force_refresh` 恒为 false：非比赛创建者/超管传 true 会被服务端忽略，
+/// 封榜状态应由 `Contest::seal_rank` + `seal_rank_time` 自行判断。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContestRankDTO {
+    pub cid: i64,
+    pub current_page: i64,
+    pub limit: i64,
+    pub force_refresh: bool,
+    pub remove_star: bool,
+    /// 只匹配学校或榜单显示名
+    pub keyword: Option<String>,
+    pub contains_end: bool,
+    /// 关注用户 uid 列表（客户端本地维护），本项目暂不使用
+    pub concerned_list: Vec<String>,
+    /// 联赛合并榜单用，单场比赛恒为 null
+    pub external_cid_list: Option<Vec<i64>>,
+}
+
+/// 榜单记录（ACM `ACMContestRankVO` 与 OI `OIContestRankVO` 共用的宽松 DTO）。
+///
+/// 两种赛制的 `submissionInfo` 值类型不同（ACM 为对象、OI 为得分整数），
+/// 故保留为 `serde_json::Value` 后由 `into_rank_row` 归一 —— 这样即使赛制判断失误
+/// 或 HOJ 调整字段，也只是单元格降级为默认值，不会让整页解析失败。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContestRankVO {
+    /// -1 表示打星队伍
+    #[serde(default)]
+    pub rank: i32,
+    #[serde(default)]
+    pub uid: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub realname: Option<String>,
+    #[serde(default)]
+    pub nickname: Option<String>,
+    #[serde(default)]
+    pub school: Option<String>,
+    #[serde(default)]
+    pub gender: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
+    /// ACM：总罚时（秒）
+    #[serde(default)]
+    pub total_time: Option<i64>,
+    /// ACM：总提交数
+    #[serde(default)]
+    pub total: Option<i64>,
+    /// ACM：AC 题数
+    #[serde(default)]
+    pub ac: Option<i64>,
+    /// OI：总得分
+    #[serde(default)]
+    pub total_score: Option<i64>,
+    /// key = displayId
+    #[serde(default)]
+    pub submission_info: std::collections::HashMap<String, serde_json::Value>,
+    /// OI：key = displayId，value = 最优耗时（ms）
+    #[serde(default)]
+    pub time_info: std::collections::HashMap<String, i64>,
+}
+
+/// ACM 榜单单元格明细（`submissionInfo` 的对象形态）。
+///
+/// 字段名按 HOJ 原始 JSON 显式 rename（`isAC` / `isFirstAC` / `ACTime` 大小写不规则，
+/// 不能依赖 `rename_all = "camelCase"`）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AcmSubmissionInfo {
+    #[serde(default, rename = "errorNum")]
+    pub error_num: i32,
+    #[serde(default, rename = "tryNum")]
+    pub try_num: Option<i32>,
+    #[serde(default, rename = "isAC")]
+    pub is_ac: bool,
+    #[serde(default, rename = "isFirstAC")]
+    pub is_first_ac: bool,
+    #[serde(default, rename = "ACTime")]
+    pub ac_time: Option<i64>,
+    #[serde(default, rename = "isAfterContest")]
+    pub is_after_contest: bool,
+}
+
+/// `POST /api/get-user-problem-status` 请求体。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserProblemStatusDTO {
+    pub pid_list: Vec<String>,
+    pub is_contest_problem_list: bool,
+    pub cid: i64,
+    pub gid: Option<i64>,
+    pub contains_end: bool,
+}
+
+impl ContestRankVO {
+    /// 归一为 OJ 无关的榜单行（ACM 与 OI 共用同一入口）。
+    pub fn into_rank_row(self) -> crate::core::entity::rank::ContestRankRow {
+        use crate::core::entity::rank::ContestRankRow;
+        ContestRankRow {
+            rank: self.rank,
+            uid: self.uid,
+            username: self.username,
+            realname: self.realname.unwrap_or_default(),
+            nickname: self.nickname.unwrap_or_default(),
+            school: self.school.unwrap_or_default(),
+            gender: self.gender.unwrap_or_default(),
+            avatar: self.avatar.unwrap_or_default(),
+            ac: self.ac.unwrap_or(0),
+            total: self.total.unwrap_or(0),
+            total_time: self.total_time.unwrap_or(0),
+            total_score: self.total_score,
+            submission_info: self
+                .submission_info
+                .into_iter()
+                .map(|(display_id, value)| (display_id, cell_from_value(&value)))
+                .collect(),
+            time_info: self.time_info,
+        }
+    }
+}
+
+/// 把 `submissionInfo` 的值归一为 `RankCell`。
+///
+/// OI 赛制的值是整数（该题得分），ACM 赛制的值是明细对象。
+/// 对象解析失败时降级为默认单元格，而不是让整行/整页解析失败 ——
+/// 榜单在赛场上是高频只读数据，局部字段异常不应导致整页不可用。
+fn cell_from_value(value: &serde_json::Value) -> crate::core::entity::rank::RankCell {
+    use crate::core::entity::rank::RankCell;
+
+    if let Some(score) = value.as_i64() {
+        return RankCell {
+            score: Some(score as i32),
+            ..Default::default()
+        };
+    }
+
+    match serde_json::from_value::<AcmSubmissionInfo>(value.clone()) {
+        Ok(info) => RankCell {
+            error_num: info.error_num,
+            try_num: info.try_num,
+            is_ac: info.is_ac,
+            is_first_ac: info.is_first_ac,
+            ac_time: info.ac_time,
+            is_after_contest: info.is_after_contest,
+            score: None,
+        },
+        Err(_) => RankCell::default(),
+    }
+}
+
+/// 归一用户题目状态：HOJ 语义为 `0=未提交 / 1=已AC / 2=尝试过`。
+///
+/// 文档标注响应值类型为 `Object`，故对数字/布尔/对象三种形态都做容错，
+/// 无法识别时按「未提交」处理（保守：不会把未做的题标成已通过）。
+pub fn coerce_problem_status(value: &serde_json::Value) -> i32 {
+    if let Some(n) = value.as_i64() {
+        return n as i32;
+    }
+    if let Some(b) = value.as_bool() {
+        return i32::from(b);
+    }
+    value
+        .get("status")
+        .and_then(|v| v.as_i64())
+        .map(|n| n as i32)
+        .unwrap_or(0)
 }
 
 // ── 题目 ──
@@ -187,6 +414,7 @@ pub struct ProblemInfoVO {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagVO {
+    #[serde(default)]
     pub id: i64,
     #[serde(default)]
     pub name: String,

@@ -1,4 +1,4 @@
-import type { User } from '@/types/user'
+import type { SessionValidity, User } from '@/types/user'
 import { ipcInvoke } from '@/bridge'
 
 /** 登录，返回用户信息 */
@@ -14,4 +14,9 @@ export async function logout(): Promise<void> {
 /** 获取当前会话 */
 export async function getSession(): Promise<User | null> {
   return ipcInvoke<User | null>('get_session')
+}
+
+/** 校验当前会话是否仍然有效（三态：valid / invalid / unknown） */
+export async function validateSession(): Promise<SessionValidity> {
+  return ipcInvoke<SessionValidity>('validate_session')
 }

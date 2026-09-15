@@ -14,8 +14,12 @@
         "title": "Hinina",
         "width": 1200,
         "height": 800,
+        "minWidth": 960,
+        "minHeight": 640,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": true
       }
     ],
     "security": {

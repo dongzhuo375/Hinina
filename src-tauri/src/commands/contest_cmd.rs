@@ -3,7 +3,11 @@ use tracing::info;
 
 use crate::core::context::AppContext;
 use crate::core::entity::contest::{Contest, ContestBundle};
+use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
+
+/// 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）
+const DEFAULT_RANK_LIMIT: i64 = 50;
 
 /// 获取比赛列表（带缓存）。
 ///
@@ -54,4 +58,39 @@ pub async fn load_configured_contest(
     ctx.contest
         .load_contest_with_problems(&contest_id.to_string(), password.as_deref())
         .await
+}
+
+/// 获取比赛排行榜（分页）。
+///
+/// 前端 invoke 签名: `get_contest_rank`({ contestId, currentPage?, limit?, keyword?, removeStar?, containsEnd? })
+///
+/// 除 `contestId` 外均可省略（默认第 1 页、每页 50 条、不过滤）。
+///
+/// 注意：返回的 `records` 可能包含服务端前置的「当前用户/关注用户」副本，
+/// 前端渲染前需按 `uid` 去重；`total` 含这些前置条目，不能当作真实参赛人数。
+#[tauri::command]
+pub async fn get_contest_rank(
+    ctx: State<'_, AppContext>,
+    contest_id: String,
+    current_page: Option<i64>,
+    limit: Option<i64>,
+    keyword: Option<String>,
+    remove_star: Option<bool>,
+    contains_end: Option<bool>,
+) -> AppResult<ContestRankPage> {
+    let query = RankQuery {
+        current_page: current_page.unwrap_or(1).max(1),
+        limit: limit.unwrap_or(DEFAULT_RANK_LIMIT),
+        keyword,
+        remove_star: remove_star.unwrap_or(false),
+        contains_end: contains_end.unwrap_or(false),
+    };
+
+    info!(
+        contest_id = %contest_id,
+        page = query.current_page,
+        limit = query.limit,
+        "Command: 获取比赛榜单"
+    );
+    ctx.contest.get_rank(&contest_id, &query).await
 }

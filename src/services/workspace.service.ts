@@ -32,6 +32,13 @@ export class WorkspaceService {
   async updateWorkspaceFile(fileName: string, content: string): Promise<void> {
     return workspaceBridge.updateWorkspaceFile(fileName, content)
   }
+
+  /**
+   * 设置当前工作区的编程语言（后端立即持久化元数据）。
+   */
+  async setLanguage(language: string): Promise<Workspace> {
+    return workspaceBridge.setWorkspaceLanguage(language)
+  }
 }
 
 export const workspaceService = new WorkspaceService()

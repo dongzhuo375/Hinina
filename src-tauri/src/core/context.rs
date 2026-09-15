@@ -92,6 +92,7 @@ impl AppContext {
             let hoj = Arc::new(HOJAdapter::new(
                 Arc::clone(&http_client),
                 hoj_base,
+                Arc::clone(&event_bus),
             ));
             provider_registry.register_auth(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::auth::AuthProvider>);
             provider_registry.register_contest(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::contest::ContestProvider>);
@@ -123,6 +124,7 @@ impl AppContext {
         let problem = Arc::new(ProblemService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&event_bus),
+            Arc::clone(&storage),
         ));
         let submission = Arc::new(SubmissionService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,

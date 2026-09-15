@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 
 use crate::core::entity::problem::Problem;
@@ -11,4 +13,14 @@ pub trait ProblemProvider: Send + Sync {
 
     /// 获取比赛下所有题目列表
     async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<Problem>>;
+
+    /// 批量获取当前用户对指定题目的提交状态。
+    ///
+    /// 返回 map 的 key 为题目真实 ID（pid）字符串，value 为 `0=未提交 / 1=已AC / 2=尝试过`；
+    /// 未出现在 map 中的题目视为未提交。
+    async fn get_user_problem_status(
+        &self,
+        contest_id: &str,
+        problem_ids: &[String],
+    ) -> AppResult<HashMap<String, i32>>;
 }

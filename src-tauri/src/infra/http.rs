@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::core::error::AppResult;
@@ -8,6 +7,10 @@ use crate::core::error::AppResult;
 /// HTTP 客户端封装（基于 Reqwest）。
 ///
 /// 提供统一的超时、重试、UA、Cookie Store、认证头管理。
+///
+/// **只返回原始响应体，不做反序列化**：各 OJ 的响应往往需要协议特定的归一化
+/// （例如 HOJ 对未设置字段返回 `null`，必须先剔除才能喂给 serde），这类语义属于
+/// Adapter 层；infra 只负责传输、状态码判定与重试，不感知任何 OJ 私有约定。
 pub struct HttpClient {
     client: reqwest::Client,
 }
@@ -21,23 +24,55 @@ const fn retry_delay(attempt: u32) -> Duration {
     Duration::from_millis(RETRY_BASE_DELAY_MS * 2u64.pow(attempt))
 }
 
-/// 从响应头检测 token 轮换，返回轮换后的新 token（未轮换返回 `None`）。
-fn extract_refreshed_token(response: &reqwest::Response) -> Option<String> {
-    if response.headers().get("refresh-token").is_some() {
-        response
-            .headers()
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-    } else {
-        None
-    }
-}
-
-/// 将 HTTP 状态码转为 AppError
+/// 将 HTTP 状态码转为 AppError。
+///
+/// **401 单独映射为 `Auth`**：HTTP 401 的标准语义就是「未认证」，与会话失效等价。
+/// 前端 `sessionGuard` 与 `AuthService::validate_session` 都依据 `Auth` 变体判定失效，
+/// 若一律归为 `Network`，token 过期时守卫不会触发 —— 选手只会看到「网络错误」，
+/// 永远回不到登录页。这是 HTTP 通用语义而非 OJ 私有约定，故由 infra 层承担；
+/// OJ 把鉴权失败藏在响应体（HTTP 200 + body status=403）的情形由 Adapter 层识别。
+///
+/// **403 保持 `Network`**：它可能是「无权访问某场私有赛」这类业务限制而非会话问题，
+/// 误判为 Auth 会把已登录选手踢回登录页。
 fn status_error(url: &str, status: reqwest::StatusCode) -> crate::core::error::AppError {
     let msg = format!("HTTP {} {}: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), url);
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return crate::core::error::AppError::Auth(msg);
+    }
     crate::core::error::AppError::Network(msg)
+}
+
+/// GET 响应的处置决策。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusDecision {
+    /// 2xx：交给调用方读取响应体
+    Accept,
+    /// 5xx 且仍有重试额度：退避后重试
+    Retry,
+    /// 其余非成功状态（4xx、以及重试耗尽的 5xx）：立即报错
+    Fail,
+}
+
+/// 按状态码与当前尝试次数决定处置方式。
+///
+/// 抽成纯函数是为了让「哪些状态码重试、哪些立即失败」可被单元测试穷尽锁定 ——
+/// 这里曾经有个 bug：5xx 在重试耗尽后落到 `return Ok(response)`，
+/// 把网关的 HTML 错误页当成正常响应交给上层，最终报成「响应不是合法 JSON」
+/// 而不是「HTTP 502」，把排障引向错误方向；同时末尾的 `Err(last_error)` 成了死代码。
+fn classify_status(status: reqwest::StatusCode, attempt: u32) -> StatusDecision {
+    if status.is_server_error() {
+        return if attempt < MAX_RETRIES {
+            StatusDecision::Retry
+        } else {
+            StatusDecision::Fail
+        };
+    }
+    if status.is_success() {
+        StatusDecision::Accept
+    } else {
+        // 4xx（含 401/403）与 3xx 等其它非成功状态：重试同样的请求只会得到同样的结果
+        StatusDecision::Fail
+    }
 }
 
 impl HttpClient {
@@ -56,62 +91,36 @@ impl HttpClient {
         &self.client
     }
 
-    // ── 便捷请求方法 ──
+    // ── 请求方法 ──
 
-    /// 发送 GET 请求并反序列化 JSON 响应体（自动重试 5xx）。
+    /// 发送 GET 请求，返回**原始响应体**与响应头（自动重试 5xx）。
     ///
     /// `auth_token` 为 `Some` 时自动附加 `Authorization` 头。
     /// 对 4xx 错误直接返回 `AppError::Network`（含状态码），不重试。
-    pub async fn get_json<T: DeserializeOwned>(
+    /// 响应头原样暴露给调用方，用于解析协议特定的头语义（如 HOJ 的 token 轮换）。
+    pub async fn get_text_with_headers(
         &self,
         url: &str,
         auth_token: Option<&str>,
-    ) -> AppResult<T> {
+    ) -> AppResult<(String, reqwest::header::HeaderMap)> {
         let response = self.retry_get(url, auth_token).await?;
+        let headers = response.headers().clone();
         let body = response.text().await.map_err(|e| {
             crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
         })?;
-        serde_json::from_str::<T>(&body).map_err(|e| {
-            crate::core::error::AppError::Serialization(format!(
-                "JSON 反序列化失败 {}: {}",
-                url, e
-            ))
-        })
+        Ok((body, headers))
     }
 
-    /// 发送 GET 请求并反序列化 JSON，同时检测服务端 token 轮换。
-    ///
-    /// HOJ 服务端在 token 到期前会返回 `Refresh-Token: true` 头和新 `Authorization` 头。
-    /// 返回 `(解析后的数据, 轮换后的新 token)`，未轮换时新 token 为 `None`。
-    pub async fn get_json_with_refresh<T: DeserializeOwned>(
-        &self,
-        url: &str,
-        auth_token: Option<&str>,
-    ) -> AppResult<(T, Option<String>)> {
-        let response = self.retry_get(url, auth_token).await?;
-        let new_token = extract_refreshed_token(&response);
-        let body = response.text().await.map_err(|e| {
-            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
-        })?;
-        let parsed = serde_json::from_str::<T>(&body).map_err(|e| {
-            crate::core::error::AppError::Serialization(format!(
-                "JSON 反序列化失败 {}: {}",
-                url, e
-            ))
-        })?;
-        Ok((parsed, new_token))
-    }
-
-    /// 发送 POST 请求（JSON body）并反序列化 JSON 响应体。
+    /// 发送 POST 请求（JSON body），返回**原始响应体**与响应头。
     ///
     /// POST 为非幂等方法，不执行自动重试。
     /// 对 4xx/5xx 错误直接返回 `AppError::Network`（含状态码）。
-    pub async fn post_json<T: DeserializeOwned, B: Serialize>(
+    pub async fn post_text_with_headers<B: Serialize>(
         &self,
         url: &str,
         body: &B,
         auth_token: Option<&str>,
-    ) -> AppResult<T> {
+    ) -> AppResult<(String, reqwest::header::HeaderMap)> {
         let mut req = self.client.post(url).json(body);
         if let Some(token) = auth_token {
             req = req.header("Authorization", token);
@@ -122,54 +131,20 @@ impl HttpClient {
         if !response.status().is_success() {
             return Err(status_error(url, response.status()));
         }
-        let body = response.text().await.map_err(|e| {
+        let headers = response.headers().clone();
+        let text = response.text().await.map_err(|e| {
             crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
         })?;
-        serde_json::from_str::<T>(&body).map_err(|e| {
-            crate::core::error::AppError::Serialization(format!(
-                "JSON 反序列化失败 {}: {}",
-                url, e
-            ))
-        })
-    }
-
-    /// 发送 POST 请求（JSON body）并反序列化 JSON 响应体，同时检测 token 轮换。
-    ///
-    /// POST 为非幂等方法，不执行自动重试。
-    /// 返回 `(解析后的数据, 轮换后的新 token)`，未轮换时新 token 为 `None`。
-    pub async fn post_json_with_refresh<T: DeserializeOwned, B: Serialize>(
-        &self,
-        url: &str,
-        body: &B,
-        auth_token: Option<&str>,
-    ) -> AppResult<(T, Option<String>)> {
-        let mut req = self.client.post(url).json(body);
-        if let Some(token) = auth_token {
-            req = req.header("Authorization", token);
-        }
-        let response = req.send().await.map_err(|e| {
-            crate::core::error::AppError::Network(format!("POST 请求失败 {}: {}", url, e))
-        })?;
-        if !response.status().is_success() {
-            return Err(status_error(url, response.status()));
-        }
-        let new_token = extract_refreshed_token(&response);
-        let body = response.text().await.map_err(|e| {
-            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
-        })?;
-        let parsed = serde_json::from_str::<T>(&body).map_err(|e| {
-            crate::core::error::AppError::Serialization(format!(
-                "JSON 反序列化失败 {}: {}",
-                url, e
-            ))
-        })?;
-        Ok((parsed, new_token))
+        Ok((text, headers))
     }
 
     // ── 内部重试逻辑 ──
 
-    /// 发送 GET 请求，对 5xx 响应自动重试（最多 2 次，指数退避）。
-    /// 4xx 错误直接返回，不重试（非幂等场景客户端错误不应重试）。
+    /// 发送 GET 请求，对 5xx 与传输错误自动重试（最多 2 次，指数退避 1s/2s）。
+    ///
+    /// 4xx 直接报错不重试（客户端错误重试只会得到同样的结果）；
+    /// **5xx 在重试耗尽后同样报错**，不会把错误页当成正常响应交给上层解析
+    /// （处置判据见 `classify_status`）。
     async fn retry_get(
         &self,
         url: &str,
@@ -185,22 +160,22 @@ impl HttpClient {
 
             match req.send().await {
                 Ok(response) => {
-                    // 4xx 客户端错误不重试，直接返回
-                    if response.status().is_client_error() {
-                        return Err(status_error(url, response.status()));
+                    let status = response.status();
+                    match classify_status(status, attempt) {
+                        StatusDecision::Accept => return Ok(response),
+                        StatusDecision::Fail => return Err(status_error(url, status)),
+                        StatusDecision::Retry => {
+                            let delay = retry_delay(attempt);
+                            tokio::time::sleep(delay).await;
+                            last_error = Some(crate::core::error::AppError::Network(format!(
+                                "服务端错误 {} (status: {})，第 {} 次重试",
+                                url,
+                                status,
+                                attempt + 1
+                            )));
+                            continue;
+                        }
                     }
-                    if response.status().is_server_error() && attempt < MAX_RETRIES {
-                        let delay = retry_delay(attempt);
-                        tokio::time::sleep(delay).await;
-                        last_error = Some(crate::core::error::AppError::Network(format!(
-                            "服务端错误 {} (status: {})，第 {} 次重试",
-                            url,
-                            response.status(),
-                            attempt + 1
-                        )));
-                        continue;
-                    }
-                    return Ok(response);
                 }
                 Err(e) => {
                     if attempt < MAX_RETRIES {
@@ -222,8 +197,14 @@ impl HttpClient {
             }
         }
 
+        // 防御性兜底：循环体内每条路径都已 return（Retry 仅在 attempt < MAX_RETRIES 时发生），
+        // 正常不会走到这里；保留它是为了让「循环意外退出」也返回带上下文的错误而不是 panic
         Err(last_error.unwrap_or_else(|| {
             crate::core::error::AppError::Network(format!("GET 请求失败（已达最大重试）: {}", url))
         }))
     }
 }
+
+#[cfg(test)]
+#[path = "tests/http_tests.rs"]
+mod tests;

@@ -1,15 +1,16 @@
 // Hinina 入口点
 //
-// 初始化顺序：
-//   1. Logger          — 最先初始化，后续步骤可记录日志
-//   2. ConfigService   — 加载配置，决定后续行为
-//   3. Storage         — 文件系统根目录
-//   4. HttpClient      — Reqwest 客户端
-//   5. EventBus        — 事件总线（纯内存，可较早初始化）
-//   6. ProviderRegistry — 注册各 OJ Adapter
-//   7. WorkspaceManager — 扫描并恢复工作区
-//   8. AppContext      — 装配上述所有
-//   9. Tauri App       — 注入 AppContext 到 State
+// 初始化顺序（实际执行在 `AppContext::init`，此处为速查，改动请同步 core/context.md）：
+//   1. Logger           — 最先初始化，后续步骤才能记录日志
+//   2. Storage          — 文件系统根目录（base_dir），配置与工作区都依赖它
+//   3. EventBus         — 纯内存事件总线，ConfigService 与各 Service 都要发布事件
+//   4. ConfigService    — 经 FsConfigRepository 读 config.json，决定 OJ 基址等后续行为
+//   5. HttpClient       — Reqwest 客户端
+//   6. ProviderRegistry — 注册各 OJ Adapter（默认 HOJ，基址取自配置）
+//   7. WorkspaceManager — 工作区生命周期（按需创建/恢复，启动时不扫描磁盘）
+//   8. Service 层       — theme / auth / contest / problem / submission
+//   9. AppContext       — 装配上述所有
+//  10. Tauri App        — manage(AppContext) + generate_handler! 注册 Command
 
 use hinina_lib::commands;
 use hinina_lib::core::context::AppContext;
@@ -31,11 +32,15 @@ fn main() {
             commands::auth_cmd::login,
             commands::auth_cmd::logout,
             commands::auth_cmd::get_session,
+            commands::auth_cmd::validate_session,
             commands::contest_cmd::list_contests,
             commands::contest_cmd::select_contest,
             commands::contest_cmd::load_configured_contest,
+            commands::contest_cmd::get_contest_rank,
             commands::problem_cmd::get_problem,
             commands::problem_cmd::list_problems,
+            commands::problem_cmd::get_user_problem_status,
+            commands::problem_cmd::get_contest_problem_limits,
             commands::submission_cmd::submit_code,
             commands::submission_cmd::get_judgement,
             commands::workspace_cmd::load_workspace,
@@ -43,6 +48,7 @@ fn main() {
             commands::workspace_cmd::switch_workspace,
             commands::workspace_cmd::current_workspace,
             commands::workspace_cmd::update_workspace_file,
+            commands::workspace_cmd::set_workspace_language,
             commands::config_cmd::get_config,
             commands::config_cmd::reload_config,
             commands::config_cmd::update_config,

@@ -121,3 +121,20 @@ pub async fn update_workspace_file(
     })?;
     wm.update_file(&file_name, &content)
 }
+
+/// 设置当前工作区的编程语言并立即落盘。
+///
+/// 前端 invoke 签名: `set_workspace_language`({ language })
+///
+/// 语言不属于任何代码文件，`update_workspace_file` 带不上它；
+/// 若不单独持久化，切题或重启后会退回默认语言，导致用错语言提交。
+#[tauri::command]
+pub async fn set_workspace_language(
+    ctx: State<'_, AppContext>,
+    language: String,
+) -> AppResult<Workspace> {
+    let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
+        AppError::Workspace("WorkspaceManager 未初始化".into())
+    })?;
+    wm.set_language(&language)
+}
