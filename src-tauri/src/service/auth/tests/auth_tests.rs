@@ -2,6 +2,7 @@ use super::*;
 
 use std::sync::Arc;
 
+use crate::core::error::AppError;
 use crate::core::event::event_category::EventCategory;
 use crate::core::provider::auth::AuthProvider;
 use crate::core::provider::oj_type::OJType;

@@ -324,3 +324,87 @@ fn parse_hoj_json_surfaces_body_auth_failure_as_auth_variant() {
         err
     );
 }
+
+// ── session_validity_from_response（三态契约）──
+//
+// 这条判据直接决定选手会不会在赛前被误踢回登录页：
+// Ok(false) 会让 AuthService 清磁盘会话 + 发布 SessionExpired + 前端登出，
+// 而反复重登可能触发 HOJ 的暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。
+// 因此「无法判定」必须走 Err（映射为 Unknown、保留本地会话），绝不能折成 Ok(false)。
+
+fn ok_resp(status: i32) -> AppResult<ApiResponse<serde_json::Value>> {
+    Ok(ApiResponse {
+        status,
+        msg: Some("success".into()),
+        data: None,
+    })
+}
+
+#[test]
+fn validity_success_is_valid() {
+    assert_eq!(
+        HOJAdapter::session_validity_from_response(ok_resp(200)).expect("不应报错"),
+        true
+    );
+}
+
+#[test]
+fn validity_auth_error_is_definitively_invalid() {
+    // 两条路径都归到 Auth 变体：HTTP 401（infra status_error）
+    // 与 HTTP 200 + 体内 status=403「请您先登录！」（parse_hoj_json）
+    for err in [
+        AppError::Auth("HTTP 401 Unauthorized: http://oj/api/get-user-auth-info".into()),
+        AppError::Auth("请您先登录！（HOJ status=403）".into()),
+    ] {
+        assert_eq!(
+            HOJAdapter::session_validity_from_response(Err(err)).expect("不应报错"),
+            false,
+            "服务端明确判定失效应返回 Ok(false)"
+        );
+    }
+}
+
+#[test]
+fn validity_network_error_propagates_as_unknown_not_invalid() {
+    // 回归：此前 `Err(_) => Ok(false)` 把网络异常当成「服务端判定失效」，
+    // 使 SessionValidity::Unknown 分支对 HOJ 成为死代码
+    let err = HOJAdapter::session_validity_from_response(Err(AppError::Network(
+        "GET 请求失败: connection reset".into(),
+    )))
+    .expect_err("网络异常必须上抛，不能折成 Ok(false)");
+    assert!(
+        matches!(err, AppError::Network(_)),
+        "变体应保留为 Network，实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("HOJ 会话校验"),
+        "应带上环节名: {}",
+        err.user_message()
+    );
+}
+
+#[test]
+fn validity_serialization_error_propagates_not_invalid() {
+    // 响应解析失败同样属于「无法判定」：DTO 与服务端不匹配不代表 token 失效
+    let err = HOJAdapter::session_validity_from_response(Err(AppError::Serialization(
+        "HOJ 响应字段不匹配".into(),
+    )))
+    .expect_err("解析失败必须上抛");
+    assert!(matches!(err, AppError::Serialization(_)), "实际 {:?}", err);
+}
+
+#[test]
+fn validity_non_success_body_status_is_unknown() {
+    // status=500/400 既不是鉴权失败也不是成功，无法据此断定会话状态
+    for status in [400, 500] {
+        let err = HOJAdapter::session_validity_from_response(ok_resp(status))
+            .expect_err(&format!("status={} 应上抛为无法判定", status));
+        assert!(
+            matches!(err, AppError::Unknown(_)),
+            "status={} 应为 Unknown 变体，实际 {:?}",
+            status,
+            err
+        );
+    }
+}

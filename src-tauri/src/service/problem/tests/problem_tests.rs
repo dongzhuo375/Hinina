@@ -23,6 +23,9 @@ struct StubProblemProvider {
     calls: Arc<AtomicUsize>,
     /// 需要失败的 displayId（模拟 403「该比赛题目当前不可访问」）
     failing: Vec<String>,
+    /// 为 true 时 `list_problems` / `get_user_problem_status` 也返回 Auth 错误，
+    /// 用于断言 Service 层不改写错误变体（见「错误变体穿透」小节）
+    fail_all: bool,
 }
 
 #[async_trait::async_trait]
@@ -45,6 +48,9 @@ impl ProblemProvider for StubProblemProvider {
     }
 
     async fn list_problems(&self, _contest_id: &str) -> AppResult<Vec<Problem>> {
+        if self.fail_all {
+            return Err(AppError::Auth("stub: HTTP 401 Unauthorized".into()));
+        }
         Ok(Vec::new())
     }
 
@@ -53,6 +59,9 @@ impl ProblemProvider for StubProblemProvider {
         _contest_id: &str,
         problem_ids: &[String],
     ) -> AppResult<HashMap<String, i32>> {
+        if self.fail_all {
+            return Err(AppError::Auth("stub: HTTP 401 Unauthorized".into()));
+        }
         Ok(problem_ids.iter().map(|id| (id.clone(), 0)).collect())
     }
 }
@@ -63,7 +72,21 @@ fn build_service(
     calls: Arc<AtomicUsize>,
     failing: Vec<String>,
 ) -> ProblemService {
-    let provider = Arc::new(StubProblemProvider { calls, failing });
+    build_service_with(dir, calls, failing, false)
+}
+
+/// 同 `build_service`，但可让全部方法以 Auth 错误失败。
+fn build_service_with(
+    dir: &std::path::Path,
+    calls: Arc<AtomicUsize>,
+    failing: Vec<String>,
+    fail_all: bool,
+) -> ProblemService {
+    let provider = Arc::new(StubProblemProvider {
+        calls,
+        failing,
+        fail_all,
+    });
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
     registry.register_problem(OJType::HOJ, provider);
     ProblemService::new(
@@ -243,4 +266,59 @@ fn user_problem_status_maps_by_problem_id() {
     assert_eq!(result.get("1002"), Some(&0));
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── 错误变体穿透 ──
+//
+// 变体是前端 sessionGuard 判定会话失效的唯一依据（见 core/error.rs 的 context() 文档）。
+// Service 层若用 AppError::Problem(format!(...)) 重新包装，token 过期时选手只会看到
+// 「题目错误」文案而不会被带回登录页，反复重试也全部失败。
+
+/// 构造一个所有方法都以 Auth 失败的服务。
+fn make_failing_service(test_name: &str) -> (ProblemService, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("hinina-test-problem-{}", test_name));
+    let _ = std::fs::remove_dir_all(&dir);
+    let service = build_service_with(&dir, Arc::new(AtomicUsize::new(0)), Vec::new(), true);
+    (service, dir)
+}
+
+#[test]
+fn open_problem_preserves_auth_variant() {
+    // Stub 对 failing 列表内的 displayId 返回 Auth（模拟 401 / 私有赛未注册）
+    let (service, _calls, _dir) = make_service("variant-open", ids(&["A"]));
+    let err = block_on(service.open_problem("1011", "A")).expect_err("应报错");
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "open_problem 必须保留 Auth 变体，实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("获取题目详情失败"),
+        "应补上环节名: {}",
+        err.user_message()
+    );
+}
+
+#[test]
+fn list_problems_preserves_auth_variant() {
+    let (service, _dir) = make_failing_service("variant-list");
+    let err = block_on(service.list_problems("1011")).expect_err("应报错");
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "实际 {:?}",
+        err
+    );
+}
+
+#[test]
+fn get_user_problem_status_preserves_auth_variant() {
+    let (service, _dir) = make_failing_service("variant-status");
+    // 空入参会短路返回空 map，必须传非空才能真正走到 Provider
+    let err = block_on(service.get_user_problem_status("1011", &ids(&["1061", "1062"])))
+        .expect_err("应报错");
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "题目总览的「我的状态」每 30s 轮询一次，变体被改写会让守卫失灵，实际 {:?}",
+        err
+    );
 }

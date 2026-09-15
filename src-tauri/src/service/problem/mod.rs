@@ -1,6 +1,11 @@
 // 题目服务：题目获取、limits 批量缓存、我的题目状态。
 //
 // 打开题目时自动创建/加载对应 Workspace，实现代码保留。
+//
+// **错误处理约定**：传播 Provider 错误一律用 `AppError::context()` 补环节名，
+// 不得重新包装成 `AppError::Problem` —— 变体是前端 `sessionGuard` 判定会话失效的依据
+// （见 `core/error.rs`）。`load_problem_limits` 同样遵守：401/403 原样上抛，
+// 既不回退默认值，也不改写成 Problem 变体。
 pub mod error;
 
 use std::collections::HashMap;
@@ -57,7 +62,7 @@ impl ProblemService {
         debug!(contest_id = contest_id, "获取题目列表");
         let problems = provider.list_problems(contest_id).await.map_err(|e| {
             warn!(contest_id = contest_id, error = %e, "获取题目列表失败");
-            AppError::Problem(format!("获取题目列表失败: {}", e))
+            e.context("获取题目列表失败")
         })?;
 
         debug!(contest_id = contest_id, count = problems.len(), "题目列表已获取");
@@ -82,7 +87,7 @@ impl ProblemService {
             .await
             .map_err(|e| {
                 warn!(contest_id = contest_id, problem_id = problem_id, error = %e, "获取题目详情失败");
-                AppError::Problem(format!("获取题目详情失败: {}", e))
+                e.context("获取题目详情失败")
             })?;
 
         self.event_bus
@@ -115,7 +120,7 @@ impl ProblemService {
             .await
             .map_err(|e| {
                 warn!(contest_id = contest_id, error = %e, "获取用户题目状态失败");
-                AppError::Problem(format!("获取用户题目状态失败: {}", e))
+                e.context("获取用户题目状态失败")
             })?;
 
         debug!(contest_id = contest_id, count = statuses.len(), "用户题目状态已获取");

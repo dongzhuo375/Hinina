@@ -24,9 +24,21 @@ const fn retry_delay(attempt: u32) -> Duration {
     Duration::from_millis(RETRY_BASE_DELAY_MS * 2u64.pow(attempt))
 }
 
-/// 将 HTTP 状态码转为 AppError
+/// 将 HTTP 状态码转为 AppError。
+///
+/// **401 单独映射为 `Auth`**：HTTP 401 的标准语义就是「未认证」，与会话失效等价。
+/// 前端 `sessionGuard` 与 `AuthService::validate_session` 都依据 `Auth` 变体判定失效，
+/// 若一律归为 `Network`，token 过期时守卫不会触发 —— 选手只会看到「网络错误」，
+/// 永远回不到登录页。这是 HTTP 通用语义而非 OJ 私有约定，故由 infra 层承担；
+/// OJ 把鉴权失败藏在响应体（HTTP 200 + body status=403）的情形由 Adapter 层识别。
+///
+/// **403 保持 `Network`**：它可能是「无权访问某场私有赛」这类业务限制而非会话问题，
+/// 误判为 Auth 会把已登录选手踢回登录页。
 fn status_error(url: &str, status: reqwest::StatusCode) -> crate::core::error::AppError {
     let msg = format!("HTTP {} {}: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), url);
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return crate::core::error::AppError::Auth(msg);
+    }
     crate::core::error::AppError::Network(msg)
 }
 
@@ -154,3 +166,7 @@ impl HttpClient {
         }))
     }
 }
+
+#[cfg(test)]
+#[path = "tests/http_tests.rs"]
+mod tests;

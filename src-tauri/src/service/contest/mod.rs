@@ -1,6 +1,12 @@
-// 比赛服务：比赛获取、列表缓存、当前比赛切换。
+// 比赛服务：比赛获取、列表缓存、当前比赛切换、榜单查询。
 //
 // 比赛列表带 TTL 缓存，切换比赛时发布 ContestEvent::Selected。
+//
+// **错误处理约定**：向上传播 Provider 错误时一律用 `AppError::context()` 补环节名，
+// 不得用 `AppError::Contest(format!(...))` 重新包装 —— 变体是前端 `sessionGuard`
+// 判定会话失效的唯一依据（见 `core/error.rs` 的 `context()` 文档）。
+// `get_rank` 尤其关键：它是全场最高频的认证调用（每 10s 一次），
+// 变体被改写会让 token 过期时榜单静默 stale、选手永远回不到登录页。
 pub mod error;
 
 use std::sync::{Arc, RwLock};
@@ -10,7 +16,7 @@ use tracing::{debug, info, warn};
 
 use crate::core::entity::contest::{Contest, ContestBundle};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
-use crate::core::error::{AppError, AppResult};
+use crate::core::error::AppResult;
 use crate::core::event::app_event::{AppEvent, ContestEvent};
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::registry::ProviderRegistry;
@@ -63,7 +69,7 @@ impl ContestService {
         info!("获取比赛列表");
         let contests = provider.list_contests().await.map_err(|e| {
             warn!(error = %e, "获取比赛列表失败");
-            AppError::Contest(format!("获取比赛列表失败: {}", e))
+            e.context("获取比赛列表失败")
         })?;
 
         debug!(count = contests.len(), "比赛列表已获取");
@@ -135,7 +141,7 @@ impl ContestService {
             .await
             .map_err(|e| {
                 warn!(contest_id = contest_id, error = %e, "获取比赛榜单失败");
-                AppError::Contest(format!("获取比赛榜单失败: {}", e))
+                e.context("获取比赛榜单失败")
             })?;
 
         debug!(
@@ -162,7 +168,7 @@ impl ContestService {
         info!(contest_id = contest_id, "加载比赛");
         let contest = provider.get_contest(contest_id).await.map_err(|e| {
             warn!(error = %e, "获取比赛详情失败");
-            AppError::Contest(format!("获取比赛详情失败: {}", e))
+            e.context("获取比赛详情失败")
         })?;
 
         // 私有赛需要密码
@@ -175,7 +181,7 @@ impl ContestService {
 
         let problems = provider.list_contest_problems(contest_id).await.map_err(|e| {
             warn!(error = %e, "获取比赛题目列表失败");
-            AppError::Contest(format!("获取比赛题目列表失败: {}", e))
+            e.context("获取比赛题目列表失败")
         })?;
 
         // 自动选中
@@ -185,3 +191,7 @@ impl ContestService {
         Ok(ContestBundle { contest, problems })
     }
 }
+
+#[cfg(test)]
+#[path = "tests/contest_tests.rs"]
+mod tests;

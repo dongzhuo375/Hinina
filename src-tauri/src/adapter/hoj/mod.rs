@@ -127,6 +127,35 @@ impl HOJAdapter {
         Self::parse_hoj_json::<T>(&text, url)
     }
 
+    /// 把 `get-user-auth-info` 的调用结果映射为三态契约的 `Ok(true)` / `Ok(false)` / `Err`。
+    ///
+    /// 抽成纯函数是为了让「哪些情况算服务端**明确**判定失效」可被单元测试锁定 ——
+    /// 这条判据直接决定选手会不会在赛前被一次网络抖动踢回登录页。
+    fn session_validity_from_response(
+        result: AppResult<ApiResponse<serde_json::Value>>,
+    ) -> AppResult<bool> {
+        match result {
+            Ok(resp) if resp.is_success() => Ok(true),
+            // 非 200 且不属于鉴权失败（如 400 参数错误、500 服务端异常）：
+            // 无法据此断定会话状态，按「无法判定」上抛，避免误清会话
+            Ok(resp) => Err(AppError::Unknown(format!(
+                "HOJ 会话校验返回非成功状态 status={}",
+                resp.status
+            ))),
+            // 服务端明确判定失效，两条路径都要认：
+            // ① HTTP 401 —— infra 的 status_error 映射为 Auth；
+            // ② HTTP 200 + 体内 status=401/403+登录提示 —— parse_hoj_json 的
+            //    auth_failure_from_body 映射为 Auth（HOJ 部分端点用这种方式报鉴权失败）
+            Err(AppError::Auth(msg)) => {
+                info!(reason = %msg, "HOJ 判定会话已失效");
+                Ok(false)
+            }
+            // 其余一律上抛：网络异常、超时、5xx、响应解析失败都属于「无法判定」，
+            // 由 AuthService 映射为 SessionValidity::Unknown 并保留本地会话
+            Err(e) => Err(e.context("HOJ 会话校验")),
+        }
+    }
+
     /// 断言已持有 token（提交等必须登录的操作的前置校验）。
     ///
     /// `get/post_json_authed` 允许匿名（登录页要在无会话时拉比赛列表），
@@ -458,27 +487,26 @@ impl AuthProvider for HOJAdapter {
         Ok(())
     }
 
+    /// 校验会话有效性。
+    ///
+    /// HOJ 无专门的 session 校验接口，改用需认证的 `get-user-auth-info` 间接验证。
+    ///
+    /// **三态契约**（`AuthService::validate_session` 依赖它区分「服务端判定失效」与「无法判定」）：
+    /// - `Ok(true)`  服务端确认有效
+    /// - `Ok(false)` 服务端**明确**判定失效 → 清磁盘会话 + 发布 SessionExpired + 前端登出
+    /// - `Err(_)`    无法判定（网络异常/超时/5xx/解析失败）→ 映射为 `Unknown`，**保留**本地会话
+    ///
+    /// 绝不能把网络错误折成 `Ok(false)`：那会让赛前一次网络抖动就把选手踢回登录页，
+    /// 而反复重登可能触发 HOJ 的暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。
     async fn validate_session(&self) -> AppResult<bool> {
-        // HOJ 无专门 session 校验接口，通过调用需认证的接口间接验证
-        // 尝试获取比赛列表（需要认证的端点）来判断 token 是否有效
-        let url = self.api_url("/get-user-auth-info");
-        let token = match self.get_token() {
-            Some(t) => t,
-            None => return Ok(false),
-        };
-
-        let response = self
-            .http
-            .client()
-            .get(&url)
-            .header("Authorization", &token)
-            .send()
-            .await;
-
-        match response {
-            Ok(resp) => Ok(resp.status().is_success()),
-            Err(_) => Ok(false),
+        // 本地无 token：无需发请求即可判定失效（不是网络问题）
+        if self.get_token().is_none() {
+            debug!("本地无 token，会话判定为失效");
+            return Ok(false);
         }
+
+        let url = self.api_url("/get-user-auth-info");
+        Self::session_validity_from_response(self.get_json_authed(&url).await)
     }
 
     fn restore_token(&self, token: &str) {

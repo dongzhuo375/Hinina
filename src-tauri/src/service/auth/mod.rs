@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
 use crate::core::entity::user::User;
-use crate::core::error::{AppError, AppResult};
+use crate::core::error::AppResult;
 use crate::core::event::app_event::{AppEvent, AuthEvent};
 use crate::core::event::event_bus::EventBus;
 use crate::core::event::event_category::EventCategory;
@@ -125,7 +125,9 @@ impl AuthService {
         info!(username = username, oj = ?oj_type, "尝试登录");
         let user = provider.login(username, password).await.map_err(|e| {
             warn!(username = username, error = %e, "登录失败");
-            AppError::Auth(format!("登录失败: {}", e))
+            // 保留变体：密码错误（Auth）与网络中断（Network）对用户的处置完全不同，
+            // 一律改写成 Auth 会让「服务器连不上」显示成「认证错误」
+            e.context("登录失败")
         })?;
 
         // 持久化会话
