@@ -138,15 +138,6 @@ async function retry() {
 function openProblem(problem: ContestProblem) {
   router.push({ name: 'ProblemSolve', params: { displayId: problem.displayId } })
 }
-
-/// 快捷提交本轮简化为「跳转解题页并聚焦编辑器」，意图经 query 传递
-function quickSubmit(problem: ContestProblem) {
-  router.push({
-    name: 'ProblemSolve',
-    params: { displayId: problem.displayId },
-    query: { focus: '1' },
-  })
-}
 </script>
 
 <template>
@@ -237,7 +228,6 @@ function quickSubmit(problem: ContestProblem) {
             :key="problem.displayId"
             :problem="problem"
             @open="openProblem(problem)"
-            @quick-submit="quickSubmit(problem)"
           />
         </div>
       </div>

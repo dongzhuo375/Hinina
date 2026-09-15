@@ -94,3 +94,60 @@ export const STATUS_OPTIONS: readonly { value: number; label: string }[] = [
   { value: 0, label: 'Pending' },
   { value: 1, label: 'Judging' },
 ]
+
+// ── 展示格式化纯函数（评测页 / 提交详情页 / 最新记录 pill 共用） ──
+
+/** 秒补零两位 */
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/** epoch 秒 → 本地时区 HH:MM:SS（提交时间列） */
+export function formatClock(epochSecs: number): string {
+  const d = new Date(epochSecs * 1000)
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+}
+
+/**
+ * 秒数时长 → HH:MM:SS（赛时相对时间）。
+ * 负值（赛前提交）钳制为 `--:--:--`，不显示负号时长。
+ */
+export function formatDurationHms(totalSecs: number): string {
+  if (!Number.isFinite(totalSecs) || totalSecs < 0) return '--:--:--'
+  const s = Math.floor(totalSecs)
+  return `${pad2(Math.floor(s / 3600))}:${pad2(Math.floor((s % 3600) / 60))}:${pad2(s % 60)}`
+}
+
+/** 内存（KB）→ 可读文本：<1024 显示 KB，≥1024 换算 MB（1 位小数）；非正值显示 `-` */
+export function formatMemoryKb(kb: number): string {
+  if (!Number.isFinite(kb) || kb <= 0) return '-'
+  if (kb < 1024) return `${Math.round(kb)} KB`
+  return `${(kb / 1024).toFixed(1)} MB`
+}
+
+/** 代码长度（字节）→ `X.X KB` */
+export function formatCodeLength(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '-'
+  return `${(bytes / 1024).toFixed(1)} KB`
+}
+
+/** 毫秒 → 秒保留两位小数（最新记录 pill 的 `2.01s` 口径） */
+export function formatMsToSeconds(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '-'
+  return `${(ms / 1000).toFixed(2)}s`
+}
+
+/**
+ * HOJ 语言显示名 → Monaco language id（提交详情页只读代码视图用）。
+ *
+ * 服务端返回的是展示名（"C++"/"C++17 (GCC 13.2)"/"Java"/"Python 3.10"/"C" 等），
+ * 按前缀归一；无法识别时回退 'cpp'（赛场绝大多数提交为 C++）。
+ */
+export function mapLanguageToMonaco(language: string): string {
+  const s = (language ?? '').trim().toLowerCase()
+  if (s.startsWith('c++') || s.startsWith('cpp') || s.startsWith('cxx') || s.startsWith('g++')) return 'cpp'
+  if (s.startsWith('java')) return 'java'
+  if (s.startsWith('python') || s.startsWith('py')) return 'python'
+  if (s === 'c' || /^c\b/.test(s)) return 'c'
+  return 'cpp'
+}
