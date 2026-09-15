@@ -6,6 +6,7 @@ import type { RankGroupFilter } from '@/stores/rankStore'
 
 /// 榜单工具条：搜索 + 分组切换 + 图例。
 const rankStore = useRankStore()
+const contestStore = useContestStore()
 
 /// 搜索框本地态：与 `rankStore.keyword`（服务端已生效的关键词）解耦，防抖后才提交
 const input = ref(rankStore.keyword)
@@ -88,8 +89,27 @@ const OI_LEGEND: readonly LegendItem[] = [
 
 /// 赛制决定图例：ACM 与 OI 是两套 VO，单元格档位完全不同
 const legend = computed<readonly LegendItem[]>(() =>
-  useContestStore().contest?.contestType === 1 ? OI_LEGEND : ACM_LEGEND,
+  contestStore.contest?.contestType === 1 ? OI_LEGEND : ACM_LEGEND,
 )
+
+/**
+ * OI 计分规则徽章文案。
+ *
+ * `oiRankScoreType` 是比赛属性（服务端只读，文档 §2.4）：`Highest` 取最高分、
+ * `Recent` 取最后一次提交；未知取值原样展示。ACM 比赛或未返回时为 null（不渲染）。
+ */
+const oiScoreTypeText = computed<string | null>(() => {
+  const contest = contestStore.contest
+  if (contest?.contestType !== 1 || !contest.oiRankScoreType) return null
+  switch (contest.oiRankScoreType) {
+    case 'Highest':
+      return '得分规则：最高分'
+    case 'Recent':
+      return '得分规则：最近提交'
+    default:
+      return `得分规则：${contest.oiRankScoreType}`
+  }
+})
 </script>
 
 <template>
@@ -143,6 +163,13 @@ const legend = computed<readonly LegendItem[]>(() =>
     </div>
 
     <div class="flex select-none flex-wrap items-center space-x-3 text-xs text-slate-500">
+      <span
+        v-if="oiScoreTypeText"
+        class="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600"
+        title="OI 计分规则由比赛属性决定（服务端只读）：最高分 = 取每题最高分；最近提交 = 取最后一次提交的得分"
+      >
+        {{ oiScoreTypeText }}
+      </span>
       <div v-for="item in legend" :key="item.label" class="flex items-center space-x-1.5">
         <span class="inline-block h-2.5 w-2.5 rounded" :class="item.swatch"></span>
         <span class="text-[11px]">{{ item.label }}</span>

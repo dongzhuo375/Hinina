@@ -170,17 +170,98 @@ export function formatPenaltyMinutes(totalTimeSeconds: number): string {
  * 该函数取的是「传入行的最大 rank」，在第 1 页（limit=50）上只能得到 ~50，
  * 而不是全场人数。
  *
- * 这里改用 `total - 本页重复行数`：`total` 的偏大量恰好等于服务端前置复制的条目数
- * （文档 §9.2），而前置副本与其自然位置同时出现在本页时即可被去重计数捕获。
- * 残余误差：当「我」的自然名次不在本页时，前置副本不构成重复，分母会偏大 1 —— 
- * 对展示无实质影响，故不再为此额外请求末页。
+ * 口径：`total - 本页重复行数 - 未被去重捕获的「我的前置副本」`。
+ * `total` 的偏大量等于服务端前置复制的条目数（文档 §9.2）：
+ * - 前置副本与其自然位置**同页**出现时，uid 重复，被去重计数捕获；
+ * - 「我」的自然名次**不在本页**时，本页只有前置副本这一条（uid 仅出现一次，
+ *   不构成重复），需要额外减 1。判据：myUid 在 records 中恰好出现一次，且其
+ *   rank 不落在本页名次窗口 `[(current-1)*size+1, current*size]` 内
+ *   （打星行 `rank === -1` 自然位置无定义，同样按前置副本处理）。
+ *   若单条出现的 rank 恰在窗口内，说明它就是自然行（服务端未再前置副本），不减。
  * `total` 缺失（<=0）时才退回最大 rank 口径。
+ *
+ * @param myUid 当前登录用户 uid（null 表示未登录/取不到，跳过前置副本修正）
  */
-export function resolveParticipantCountFromPage(page: ContestRankPage): number {
-  const duplicates = page.records.length - dedupeRankRows(page.records).length
-  const corrected = page.total - duplicates
+export function resolveParticipantCountFromPage(
+  page: ContestRankPage,
+  myUid: string | null,
+): number {
+  const deduped = dedupeRankRows(page.records)
+  const duplicates = page.records.length - deduped.length
+  let corrected = page.total - duplicates
+
+  if (corrected > 0 && myUid) {
+    const myRow = resolveMyRow(page.records, myUid)
+    const occurrences = page.records.filter((row) => row.uid === myUid).length
+    if (myRow && occurrences === 1) {
+      const windowStart = (page.current - 1) * page.size + 1
+      const windowEnd = page.current * page.size
+      const inWindow = myRow.rank >= windowStart && myRow.rank <= windowEnd
+      if (!inWindow) corrected -= 1
+    }
+  }
+
   if (corrected > 0) return corrected
   return resolveParticipantCount(page.records, page.total)
+}
+
+// ── 全量快照模式（打星/女生队跨页过滤）──
+
+/// 榜单分组筛选：official 走服务端 removeStar；star/female 服务端无对应参数，
+/// 只筛当前页会跨页漏行，须全量拉取后客户端过滤（见 rankStore.fetchAllRows）
+export type RankGroupFilter = 'all' | 'official' | 'star' | 'female'
+
+/**
+ * 跨页合并榜单行：按 uid 去重，已存在的行保留（首次出现优先），新行按序追加。
+ *
+ * 全量快照逐页拉取时，服务端在**每一页**都会前置复制当前用户/关注用户（文档 §9.2），
+ * 页与页之间因此存在同 uid 重复行，合并时必须去重。
+ */
+export function mergeRankPages(
+  existing: ContestRankRow[],
+  incoming: ContestRankRow[],
+): ContestRankRow[] {
+  const seen = new Set(existing.map((row) => row.uid))
+  const merged = [...existing]
+  for (const row of incoming) {
+    if (seen.has(row.uid)) continue
+    seen.add(row.uid)
+    merged.push(row)
+  }
+  return merged
+}
+
+/**
+ * 按分组过滤榜单行（纯函数，全量快照与当前页共用同一判据）：
+ * `star` → `rank === -1`；`female` → `gender === 'female'`；其余原样返回。
+ */
+export function filterRankRowsByGroup(
+  rows: ContestRankRow[],
+  filter: RankGroupFilter,
+): ContestRankRow[] {
+  switch (filter) {
+    case 'star':
+      return rows.filter((row) => row.rank === -1)
+    case 'female':
+      return rows.filter((row) => row.gender === 'female')
+    default:
+      return rows
+  }
+}
+
+/**
+ * 客户端分页切片（全量快照模式用）。
+ *
+ * `current` 钳到 >=1；越界页返回空数组；`size <= 0` 视为不分页原样返回。
+ */
+export function paginateRankRows(
+  rows: ContestRankRow[],
+  current: number,
+  size: number,
+): ContestRankRow[] {
+  if (size <= 0) return rows
+  const page = Math.max(1, Math.floor(current))
+  return rows.slice((page - 1) * size, page * size)
 }
 
 // ── OI 赛制单元格 ──

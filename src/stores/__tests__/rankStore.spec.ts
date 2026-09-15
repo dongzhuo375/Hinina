@@ -209,24 +209,17 @@ describe('分页与筛选', () => {
     )
   })
 
-  it('切到打星/女生队是客户端过滤，不重新请求', async () => {
+  it('切到打星/女生队进入全量快照模式（跨页过滤，见下方专节）', async () => {
+    // 旧语义「仅客户端过滤当前页、不发请求」已废弃：那样跨页会漏行。
+    // 现在 setGroupFilter('star'|'female') 触发 fetchAllRows 全量拉取，
+    // 详细断言见「全量快照模式」describe。
+    rankService.getRank.mockResolvedValue(makePage([makeRow({ uid: 'star', rank: -1 })], 1))
     const rank = useRankStore()
     rank.contestId = CONTEST_ID
-    rank.rows = [
-      makeRow({ uid: 'u1', rank: 1 }),
-      makeRow({ uid: 'star', rank: -1 }),
-      makeRow({ uid: 'f1', rank: 2, gender: 'female' }),
-    ]
 
     await rank.setGroupFilter('star')
-    expect(rankService.getRank).not.toHaveBeenCalled()
-    expect(rank.visibleRows.map((r) => r.uid)).toEqual(['star'])
-
-    await rank.setGroupFilter('female')
-    expect(rank.visibleRows.map((r) => r.uid)).toEqual(['f1'])
-
-    await rank.setGroupFilter('all')
-    expect(rank.visibleRows).toHaveLength(3)
+    expect(rankService.getRank).toHaveBeenCalled()
+    expect(rank.isFullMode).toBe(true)
   })
 
   it('从 official 切回 all 会复位 removeStar 并重新请求', async () => {
@@ -322,5 +315,222 @@ describe('startLive / stopLive — 实时刷新', () => {
       rank.stopLive()
     }).not.toThrow()
     expect(rank.isLive).toBe(false)
+  })
+})
+
+describe('全量快照模式 — 打星/女生队跨页过滤', () => {
+  /// 三页服务端响应：每页都前置复制一份「我」（文档 §9.2），跨页合并须去重
+  function mockThreePages() {
+    const me = makeRow({ uid: MY_UID, rank: 42 })
+    rankService.getRank.mockImplementation(async (q: { currentPage?: number }) => {
+      const current = q.currentPage ?? 1
+      if (current === 1) {
+        return makePage(
+          [me, makeRow({ uid: 'starA', rank: -1 }), makeRow({ uid: 'u1', rank: 1 })],
+          120,
+          1,
+        )
+      }
+      if (current === 2) {
+        return makePage(
+          [
+            me,
+            makeRow({ uid: 'u2', rank: 2 }),
+            makeRow({ uid: 'f1', rank: 3, gender: 'female' }),
+          ],
+          120,
+          2,
+        )
+      }
+      return makePage([me, makeRow({ uid: 'starB', rank: -1 })], 120, 3)
+    })
+  }
+
+  it('setGroupFilter(star) 顺序拉取全部页并按 uid 跨页去重合并', async () => {
+    mockThreePages()
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+    rank.uid = MY_UID
+
+    await rank.setGroupFilter('star')
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(3)
+    // 快照必须包含打星行（removeStar=false），否则 star 筛选恒为空
+    expect(rankService.getRank).toHaveBeenCalledWith(
+      expect.objectContaining({ removeStar: false, limit: 50 }),
+    )
+    expect(rank.fullFetchState).toBe('done')
+    // me/starA/u1/u2/f1/starB —— me 的每页前置副本被去重
+    expect(rank.fullLoadedRows).toBe(6)
+    expect(rank.isFullMode).toBe(true)
+    expect(rank.visibleRows.map((r) => r.uid)).toEqual(['starA', 'starB'])
+    expect(rank.pages).toBe(1)
+    expect(rank.current).toBe(1)
+  })
+
+  it('star ↔ female 互切重拉快照并按新分组过滤', async () => {
+    mockThreePages()
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+
+    await rank.setGroupFilter('star')
+    await rank.setGroupFilter('female')
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(6)
+    expect(rank.visibleRows.map((r) => r.uid)).toEqual(['f1'])
+    expect(rank.groupFilter).toBe('female')
+  })
+
+  it('全量模式下翻页是纯客户端切片，不发请求', async () => {
+    const stars = Array.from({ length: 120 }, (_, i) => makeRow({ uid: `s${i}`, rank: -1 }))
+    rankService.getRank.mockResolvedValue(makePage(stars, 120, 1))
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+
+    await rank.setGroupFilter('star')
+    expect(rank.pages).toBe(3) // ceil(120/50)
+    expect(rank.visibleRows).toHaveLength(50)
+
+    const callsBefore = rankService.getRank.mock.calls.length
+    await rank.setPage(2)
+    expect(rankService.getRank).toHaveBeenCalledTimes(callsBefore)
+    expect(rank.current).toBe(2)
+    expect(rank.fullPage).toBe(2)
+    expect(rank.visibleRows).toHaveLength(50)
+    expect(rank.visibleRows[0].uid).toBe('s50')
+
+    await rank.setPage(3)
+    expect(rank.visibleRows).toHaveLength(20)
+
+    await rank.setPage(99) // 越界忽略
+    expect(rank.current).toBe(3)
+  })
+
+  it('服务端页数超过 40 页上限时截断并标记 truncated', async () => {
+    rankService.getRank.mockImplementation(async (q: { currentPage?: number }) => {
+      const current = q.currentPage ?? 1
+      const records = Array.from({ length: 50 }, (_, i) =>
+        makeRow({ uid: `u${(current - 1) * 50 + i}`, rank: (current - 1) * 50 + i + 1 }),
+      )
+      return makePage(records, 5000, current) // pages = 100
+    })
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+
+    await rank.setGroupFilter('star')
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(40)
+    expect(rank.fullFetchState).toBe('truncated')
+    expect(rank.fullLoadedRows).toBe(2000)
+  })
+
+  it('全量模式下自动轮询暂停，refresh() 手动触发重拉快照', async () => {
+    vi.useFakeTimers()
+    try {
+      rankService.getRank.mockResolvedValue(
+        makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1),
+      )
+      const rank = useRankStore()
+      rank.contestId = CONTEST_ID
+      rank.uid = MY_UID
+
+      rank.startLive()
+      await rank.setGroupFilter('star')
+      const callsAfterFilter = rankService.getRank.mock.calls.length
+
+      // 全量快照太重，60s 内轮询器不得发出任何请求
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(rankService.getRank).toHaveBeenCalledTimes(callsAfterFilter)
+
+      // 手动刷新 → 重拉快照
+      await rank.refresh()
+      expect(rankService.getRank.mock.calls.length).toBeGreaterThan(callsAfterFilter)
+
+      // 切回全场总榜 → 恢复正常轮询
+      await rank.setGroupFilter('all')
+      const callsAfterExit = rankService.getRank.mock.calls.length
+      await vi.advanceTimersByTimeAsync(12_000)
+      expect(rankService.getRank.mock.calls.length).toBeGreaterThan(callsAfterExit)
+      rank.stopLive()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('切回 all/official 清空快照并恢复服务端分页', async () => {
+    rankService.getRank.mockResolvedValue(
+      makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1),
+    )
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+
+    await rank.setGroupFilter('star')
+    expect(rank.fullRows).not.toBeNull()
+
+    await rank.setGroupFilter('all')
+    expect(rank.fullRows).toBeNull()
+    expect(rank.fullFetchState).toBe('idle')
+    expect(rank.fullLoadedRows).toBe(0)
+    expect(rank.isFullMode).toBe(false)
+    // 退出全量模式时 pages/current 已被客户端分页覆写，即使 removeStar 未变也须重载第 1 页
+    expect(rankService.getRank).toHaveBeenLastCalledWith(
+      expect.objectContaining({ currentPage: 1, removeStar: false }),
+    )
+  })
+
+  it('全量模式下 setKeyword 携带关键词重拉快照并回到第 1 页', async () => {
+    rankService.getRank.mockResolvedValue(
+      makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1),
+    )
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+
+    await rank.setGroupFilter('star')
+    await rank.setKeyword('  XX大学  ')
+
+    expect(rank.keyword).toBe('XX大学')
+    expect(rank.fullPage).toBe(1)
+    expect(rankService.getRank).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyword: 'XX大学', currentPage: 1, removeStar: false }),
+    )
+  })
+
+  it('快照拉取失败且无旧快照时标记 error，visibleRows 退化为筛当前页', async () => {
+    rankService.getRank.mockRejectedValue(new Error('网络异常'))
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+    rank.rows = [makeRow({ uid: 'star', rank: -1 }), makeRow({ uid: 'u1', rank: 1 })]
+
+    await expect(rank.setGroupFilter('star')).rejects.toThrow('网络异常')
+    expect(rank.fullFetchState).toBe('error')
+    expect(rank.fullRows).toBeNull()
+    expect(rank.isFullMode).toBe(false)
+    expect(rank.error).toBe('网络异常')
+    // 退化：仍按当前页客户端过滤，聊胜于无
+    expect(rank.visibleRows.map((r) => r.uid)).toEqual(['star'])
+  })
+
+  it('重拉失败时保留旧快照继续浏览（状态不回退）', async () => {
+    rankService.getRank.mockResolvedValue(
+      makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1),
+    )
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+
+    await rank.setGroupFilter('star')
+    expect(rank.fullFetchState).toBe('done')
+
+    rankService.getRank.mockRejectedValue(new Error('超时'))
+    await rank.refresh() // refresh 吞异常
+    expect(rank.fullRows).not.toBeNull()
+    expect(rank.fullFetchState).toBe('done')
+    expect(rank.error).toBe('超时')
+    expect(rank.visibleRows.map((r) => r.uid)).toEqual(['star'])
+  })
+
+  it('未设置 contestId 时不发请求', async () => {
+    const rank = useRankStore()
+    await rank.setGroupFilter('star')
+    expect(rankService.getRank).not.toHaveBeenCalled()
   })
 })
