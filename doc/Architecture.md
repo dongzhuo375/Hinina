@@ -136,7 +136,7 @@ Hinina/
         │   ├── provider_registry_impl.rs # ProviderRegistryImpl
         │   └── tests/
         │       ├── storage_tests.rs      # Storage 单元测试
-        │       ├── http_tests.rs         # HttpClient 单元测试（HTTP 401→Auth、403/5xx→Network、退避延迟）
+        │       ├── http_tests.rs         # HttpClient 单元测试（401→Auth、403/5xx→Network、退避延迟、classify_status 重试判据）
         │       ├── fs_workspace_repo_tests.rs  # FsWorkspaceRepository 单元测试
         │       └── fs_config_repo_tests.rs     # FsConfigRepository 单元测试
         ├── plugin/

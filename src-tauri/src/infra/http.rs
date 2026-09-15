@@ -42,6 +42,39 @@ fn status_error(url: &str, status: reqwest::StatusCode) -> crate::core::error::A
     crate::core::error::AppError::Network(msg)
 }
 
+/// GET 响应的处置决策。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusDecision {
+    /// 2xx：交给调用方读取响应体
+    Accept,
+    /// 5xx 且仍有重试额度：退避后重试
+    Retry,
+    /// 其余非成功状态（4xx、以及重试耗尽的 5xx）：立即报错
+    Fail,
+}
+
+/// 按状态码与当前尝试次数决定处置方式。
+///
+/// 抽成纯函数是为了让「哪些状态码重试、哪些立即失败」可被单元测试穷尽锁定 ——
+/// 这里曾经有个 bug：5xx 在重试耗尽后落到 `return Ok(response)`，
+/// 把网关的 HTML 错误页当成正常响应交给上层，最终报成「响应不是合法 JSON」
+/// 而不是「HTTP 502」，把排障引向错误方向；同时末尾的 `Err(last_error)` 成了死代码。
+fn classify_status(status: reqwest::StatusCode, attempt: u32) -> StatusDecision {
+    if status.is_server_error() {
+        return if attempt < MAX_RETRIES {
+            StatusDecision::Retry
+        } else {
+            StatusDecision::Fail
+        };
+    }
+    if status.is_success() {
+        StatusDecision::Accept
+    } else {
+        // 4xx（含 401/403）与 3xx 等其它非成功状态：重试同样的请求只会得到同样的结果
+        StatusDecision::Fail
+    }
+}
+
 impl HttpClient {
     /// 创建默认 HttpClient：30 秒超时、Cookie Store 已启用、UA 为 Hinina/{version}。
     pub fn new() -> Result<Self, reqwest::Error> {
@@ -107,8 +140,11 @@ impl HttpClient {
 
     // ── 内部重试逻辑 ──
 
-    /// 发送 GET 请求，对 5xx 响应自动重试（最多 2 次，指数退避）。
-    /// 4xx 错误直接返回，不重试（非幂等场景客户端错误不应重试）。
+    /// 发送 GET 请求，对 5xx 与传输错误自动重试（最多 2 次，指数退避 1s/2s）。
+    ///
+    /// 4xx 直接报错不重试（客户端错误重试只会得到同样的结果）；
+    /// **5xx 在重试耗尽后同样报错**，不会把错误页当成正常响应交给上层解析
+    /// （处置判据见 `classify_status`）。
     async fn retry_get(
         &self,
         url: &str,
@@ -124,22 +160,22 @@ impl HttpClient {
 
             match req.send().await {
                 Ok(response) => {
-                    // 4xx 客户端错误不重试，直接返回
-                    if response.status().is_client_error() {
-                        return Err(status_error(url, response.status()));
+                    let status = response.status();
+                    match classify_status(status, attempt) {
+                        StatusDecision::Accept => return Ok(response),
+                        StatusDecision::Fail => return Err(status_error(url, status)),
+                        StatusDecision::Retry => {
+                            let delay = retry_delay(attempt);
+                            tokio::time::sleep(delay).await;
+                            last_error = Some(crate::core::error::AppError::Network(format!(
+                                "服务端错误 {} (status: {})，第 {} 次重试",
+                                url,
+                                status,
+                                attempt + 1
+                            )));
+                            continue;
+                        }
                     }
-                    if response.status().is_server_error() && attempt < MAX_RETRIES {
-                        let delay = retry_delay(attempt);
-                        tokio::time::sleep(delay).await;
-                        last_error = Some(crate::core::error::AppError::Network(format!(
-                            "服务端错误 {} (status: {})，第 {} 次重试",
-                            url,
-                            response.status(),
-                            attempt + 1
-                        )));
-                        continue;
-                    }
-                    return Ok(response);
                 }
                 Err(e) => {
                     if attempt < MAX_RETRIES {
@@ -161,6 +197,8 @@ impl HttpClient {
             }
         }
 
+        // 防御性兜底：循环体内每条路径都已 return（Retry 仅在 attempt < MAX_RETRIES 时发生），
+        // 正常不会走到这里；保留它是为了让「循环意外退出」也返回带上下文的错误而不是 panic
         Err(last_error.unwrap_or_else(|| {
             crate::core::error::AppError::Network(format!("GET 请求失败（已达最大重试）: {}", url))
         }))
