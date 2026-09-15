@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAnnouncementStore } from '@/stores/announcementStore'
 
 const route = useRoute()
+const announcementStore = useAnnouncementStore()
 
 /// 当前高亮项：/contest/problems 与 /contest/problem/:displayId 均归属「题目」
 const activeKey = computed(() => {
@@ -14,6 +16,12 @@ const activeKey = computed(() => {
   if (p.startsWith('/contest/settings')) return 'settings'
   return ''
 })
+
+/// 公告未读红点：公告页处于激活态时不显示 —— 进入该页即全部标记已读，
+/// 避免已读回写往返期间红点残留造成误导
+const showAnnouncementDot = computed(
+  () => announcementStore.unreadCount > 0 && activeKey.value !== 'announcements',
+)
 
 /// 导航项样式：激活=浅紫底 + 紫色文字，悬停=中性浅底
 function itemClass(key: string): string {
@@ -82,20 +90,26 @@ function itemClass(key: string): string {
         ></span>
       </router-link>
 
-      <!-- 公告：红点徽标待公告接口接入后再显示，本轮不画假徽标 -->
+      <!-- 公告：未读红点由外壳轮询保持鲜活（数据源 announcementStore.unreadCount） -->
       <router-link
         :to="{ name: 'Announcements' }"
         :class="itemClass('announcements')"
         title="比赛公告 (Announcements)"
       >
-        <svg class="mb-0.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-          ></path>
-        </svg>
+        <span class="relative mb-0.5">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+            ></path>
+          </svg>
+          <span
+            v-if="showAnnouncementDot"
+            class="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white"
+          ></span>
+        </span>
         <span class="scale-90 text-[10px] font-semibold">公告</span>
         <span
           v-if="activeKey === 'announcements'"
