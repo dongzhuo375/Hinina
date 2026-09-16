@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
 import * as monaco from 'monaco-editor'
 import { configService } from '@/services/config.service'
-import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf } from '@/utils/language'
+import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf, resolveAllowedLanguage } from '@/utils/language'
 
 // ── Monaco Editor Workers（手动配置，避免 worker 打包问题） ──
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -46,10 +46,11 @@ const editorContainer = ref<HTMLDivElement>()
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
 /// 语言下拉候选：以**题目详情返回的允许列表**为准（HOJ 比赛按题限制语言），
-/// 服务端未提供时回退内置默认列表；当前语言不在列表中时补入（工作区历史选择优先可见）
+/// 服务端未提供时回退内置默认列表；当前语言无法按语言族解析进列表时补入
+///（工作区历史选择优先可见，如列表未加载完成的瞬间）
 const availableLanguages = computed<string[]>(() => {
   const list = props.languages?.length ? [...props.languages] : [...DEFAULT_LANGUAGES]
-  if (props.language && !list.includes(props.language)) list.unshift(props.language)
+  if (props.language && !resolveAllowedLanguage(props.language, list)) list.unshift(props.language)
   return list
 })
 
@@ -168,11 +169,13 @@ async function handleFileChange(e: Event) {
   try {
     const text = await file.text()
     emit('update:modelValue', text)
-    // 按扩展名自动识别语言（上传 .java 就该切到 Java）；
-    // 仅当识别结果在本题允许列表内才切换 —— 切到不允许的语言只会换来一次提交失败
+    // 按扩展名自动识别语言（上传 .java 就该切到 Java）；经语言族解析为
+    // 本题允许列表中的服务端原名（"Python3" 等变体也能命中），
+    // 不在允许列表内则不切换 —— 切到不允许的语言只会换来一次提交失败
     const detected = hojLanguageOfFileName(file.name)
-    if (detected && availableLanguages.value.includes(detected) && detected !== props.language) {
-      emit('update:language', detected)
+    if (detected) {
+      const target = resolveAllowedLanguage(detected, availableLanguages.value)
+      if (target && target !== props.language) emit('update:language', target)
     }
     editor.value?.focus()
   } catch (err) {

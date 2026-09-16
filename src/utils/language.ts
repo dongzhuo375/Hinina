@@ -56,6 +56,25 @@ export function monacoIdOf(language: string): string {
 }
 
 /**
+ * 把识别出的语言解析为**允许列表中的服务端原名**。
+ *
+ * 精确匹配优先；否则按语言族匹配（`monacoIdStrict` 同族即命中）——
+ * HOJ 部署的列表值可能是 "Python3"/"Python 3.10"/"C++17" 等变体，
+ * 与扩展名反推的规范名（"Python"/"C++"）精确比较必然失配。
+ * 命中时返回列表中的原值（提交参数必须用服务端认得的写法）；无命中返回 null。
+ */
+export function resolveAllowedLanguage(
+  detected: string,
+  allowed: readonly string[],
+): string | null {
+  if (!detected || allowed.length === 0) return null
+  if (allowed.includes(detected)) return detected
+  const family = monacoIdStrict(detected)
+  if (family === null) return null
+  return allowed.find((lang) => monacoIdStrict(lang) === family) ?? null
+}
+
+/**
  * 是否 C/C++ 族语言（limits 1 倍基准）。
  *
  * 判题端以源文件后缀 `.c`/`.cpp` 为 1 倍基准（HOJ-Problem-Limits-API.md §5）；

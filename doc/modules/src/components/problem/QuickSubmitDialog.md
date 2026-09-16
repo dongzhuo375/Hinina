@@ -17,7 +17,7 @@
 | `submitError` / `fileError` | ref | 提交失败原因（store.error 兜底文案）/ 文件导入错误 |
 | `TONE_CLASSES` | 常量 | `StatusTone` → pill 样式类（与评测页/详情页同一套语义色） |
 | `onKeydown` | fn | window 级 Esc 监听（onMounted 挂 / onUnmounted 摘） |
-| `MAX_FILE_BYTES` / `ACCEPTED_EXTENSIONS` | 常量 | 256KB 大小护栏（快捷提交场景无需超大文件）；可导入扩展名白名单与 `hojLanguageOfFileName` 识别面一致（17 种源代码后缀 + .txt）。语言自动切换经 `hojLanguageOfFileName` 反推 HOJ 显示名，且**仅当推断语言在本题允许列表内才切**（拖入 .py 但本题只允许 C++ 时保持原选择，避免换来一次必然失败的提交）；.txt 不切语言 |
+| `MAX_FILE_BYTES` / `ACCEPTED_EXTENSIONS` | 常量 | 256KB 大小护栏（快捷提交场景无需超大文件）；可导入扩展名白名单与 `hojLanguageOfFileName` 识别面一致（17 种源代码后缀 + .txt）。语言自动切换经 `hojLanguageOfFileName` 反推 + `resolveAllowedLanguage` 按语言族解析为允许列表中的服务端原名（"Python3" 等变体命中）；无命中保持原选择（拖入 .py 但本题只允许 C++ 时不切换）；.txt 不切语言 |
 | `pickFile` / `onFileChange` / `ingestFile` | fn | 原生 `input[type=file]`（读后立即重置 value 允许连续选同一文件）；ingestFile 校验扩展名与大小 → `file.text()` 读入 → 按扩展名切语言 |
 | `dragging` / `dragDepth` / `onDragEnter…onDrop` | ref/计数/fn | HTML5 拖放：`tauri.conf.json` 已关闭 `dragDropEnabled`，事件才能到达 WebView；进入/离开**深度计数**避免掠过子元素时高亮闪烁；拖拽中高亮层接管 drop（Monaco 会吞掉文件拖放事件） |
 | `submittedId` / `entry` / `entryTerminal` | ref/computed | 本弹窗提交的 ID → 从 `submissionStore.submissions` 观察对应条目；`isTerminalStatus` 判定是否收敛 |

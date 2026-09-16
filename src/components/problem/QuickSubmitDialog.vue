@@ -11,6 +11,7 @@ import {
   DEFAULT_LANGUAGE,
   DEFAULT_LANGUAGES,
   hojLanguageOfFileName,
+  resolveAllowedLanguage,
 } from '@/utils/language'
 import {
   formatMemoryKb,
@@ -43,10 +44,10 @@ async function loadAllowedLanguages() {
     const detail = await problemService.getProblem(contestId, props.problem.displayId)
     if (detail.languages.length > 0) {
       allowedLanguages.value = detail.languages
-      // 当前选择不在允许列表内时切到列表首项，避免提交被服务端拒绝
-      if (!allowedLanguages.value.includes(language.value)) {
-        language.value = allowedLanguages.value[0]
-      }
+      // 当前选择按语言族解析为列表中的服务端原名（"C++"→"C++17" 等变体归位）；
+      // 无法解析（本题不允许该语言族）时切到列表首项，避免提交被服务端拒绝
+      const resolved = resolveAllowedLanguage(language.value, allowedLanguages.value)
+      language.value = resolved ?? allowedLanguages.value[0]
     }
   } catch (e) {
     // 语言列表不可得只影响下拉候选（回退默认列表），不阻断快捷提交
@@ -125,10 +126,14 @@ async function ingestFile(file: File) {
     return
   }
   fileError.value = null
-  // 按扩展名自动切换语言（.txt 保持当前选择）；仅当推断语言在本题允许列表内才切，
-  // 否则保持原选择（拖入 .py 但本题只允许 C++ 时，静默切过去只会换来一次提交失败）
+  // 按扩展名自动识别语言（.txt 保持当前选择）；经语言族解析为本题允许列表中的
+  // 服务端原名（"Python3" 等变体也能命中）。无命中保持原选择 ——
+  // 拖入 .py 但本题只允许 C++ 时，静默切过去只会换来一次提交失败
   const detected = hojLanguageOfFileName(file.name)
-  if (detected && allowedLanguages.value.includes(detected)) language.value = detected
+  if (detected) {
+    const target = resolveAllowedLanguage(detected, allowedLanguages.value)
+    if (target) language.value = target
+  }
 }
 
 // HTML5 拖放（tauri.conf.json 已关闭 dragDropEnabled，事件才能到达 WebView）；
@@ -292,7 +297,7 @@ function goDetail() {
             <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           <p class="text-xs font-medium text-[var(--color-primary)]">松开以导入代码文件</p>
-          <p class="font-mono text-[11px] text-[var(--text-muted)]">.cpp / .c / .java / .py，≤ 256 KB</p>
+          <p class="font-mono text-[11px] text-[var(--text-muted)]">.cpp / .c / .java / .py / .go / .rs 等源代码文件，≤ 256 KB</p>
         </div>
       </div>
 
@@ -307,7 +312,7 @@ function goDetail() {
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
-            <span>选择 .cpp 文件</span>
+            <span>选择代码文件</span>
           </button>
           <span class="text-[11px] text-[var(--text-muted)]">
             也可直接把文件拖入编辑器区域 · Ctrl + Enter 提交

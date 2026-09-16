@@ -5,6 +5,7 @@ import {
   hojLanguageOfFileName,
   monacoIdOf,
   normalizeHojLanguage,
+  resolveAllowedLanguage,
   sourceFileNameOf,
 } from '@/utils/language'
 
@@ -92,6 +93,33 @@ describe('hojLanguageOfFileName — 扩展名 → 显示名（快捷提交拖拽
     expect(hojLanguageOfFileName('notes.txt')).toBeNull()
     expect(hojLanguageOfFileName('data.json')).toBeNull()
     expect(hojLanguageOfFileName('noext')).toBeNull()
+  })
+})
+
+describe('resolveAllowedLanguage — 识别语言 → 允许列表中的服务端原名', () => {
+  const ALLOWED = ['C', 'C++17', 'Java', 'Python3', 'Go']
+
+  it('精确匹配优先', () => {
+    expect(resolveAllowedLanguage('Java', ALLOWED)).toBe('Java')
+  })
+
+  it('按语言族命中部署变体（HOJ 列表值可能是 Python3/C++17 等写法）', () => {
+    expect(resolveAllowedLanguage('Python', ALLOWED)).toBe('Python3')
+    expect(resolveAllowedLanguage('C++', ALLOWED)).toBe('C++17')
+  })
+
+  it('列表含版本后缀时同样按族命中', () => {
+    expect(resolveAllowedLanguage('Python', ['Python 3.10', 'C++'])).toBe('Python 3.10')
+  })
+
+  it('本题不允许该语言族时返回 null（调用方保持原选择）', () => {
+    expect(resolveAllowedLanguage('Rust', ALLOWED)).toBeNull()
+    expect(resolveAllowedLanguage('Python', ['C', 'C++'])).toBeNull()
+  })
+
+  it('空识别值或空列表返回 null', () => {
+    expect(resolveAllowedLanguage('', ALLOWED)).toBeNull()
+    expect(resolveAllowedLanguage('Python', [])).toBeNull()
   })
 })
 
