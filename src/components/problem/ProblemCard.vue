@@ -57,7 +57,7 @@ const pill = computed(() => {
     class="group flex min-h-[175px] flex-col justify-between rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-sm transition-all duration-200 hover:border-slate-300 hover:shadow-md"
   >
     <div class="flex items-start justify-between gap-3">
-      <div class="flex items-start space-x-3.5">
+      <div class="flex min-w-0 items-start space-x-3.5">
         <!-- 字母徽章：40px 圆角方块，底色优先用 HOJ 气球色 -->
         <div
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-mono text-lg font-bold text-white shadow-xs"
@@ -65,7 +65,8 @@ const pill = computed(() => {
         >
           {{ problem.displayId }}
         </div>
-        <div>
+        <!-- min-w-0：三列窄卡片下允许标题块收缩换行，而不是撑破卡片 -->
+        <div class="min-w-0">
           <h3
             class="cursor-pointer text-base font-bold tracking-tight text-[var(--text-primary)] transition group-hover:text-[var(--color-primary)]"
             @click="emit('open')"

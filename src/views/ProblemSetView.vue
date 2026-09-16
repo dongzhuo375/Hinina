@@ -221,8 +221,8 @@ function openProblem(problem: ContestProblem) {
           </button>
         </div>
 
-        <!-- 题目卡片网格 -->
-        <div v-else class="mx-auto grid max-w-7xl grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+        <!-- 题目卡片网格：桌面端一行三卡（lg 起），窄窗口逐级降为两列/单列；三列时收窄间距保持卡片呼吸感 -->
+        <div v-else class="mx-auto grid max-w-7xl grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:gap-6">
           <ProblemCard
             v-for="problem in problems"
             :key="problem.displayId"
