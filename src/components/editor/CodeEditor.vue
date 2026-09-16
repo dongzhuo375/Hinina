@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
 import * as monaco from 'monaco-editor'
 import { configService } from '@/services/config.service'
-import { DEFAULT_LANGUAGES, monacoIdOf } from '@/utils/language'
+import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf } from '@/utils/language'
 
 // ── Monaco Editor Workers（手动配置，避免 worker 打包问题） ──
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -168,6 +168,12 @@ async function handleFileChange(e: Event) {
   try {
     const text = await file.text()
     emit('update:modelValue', text)
+    // 按扩展名自动识别语言（上传 .java 就该切到 Java）；
+    // 仅当识别结果在本题允许列表内才切换 —— 切到不允许的语言只会换来一次提交失败
+    const detected = hojLanguageOfFileName(file.name)
+    if (detected && availableLanguages.value.includes(detected) && detected !== props.language) {
+      emit('update:language', detected)
+    }
     editor.value?.focus()
   } catch (err) {
     console.error('[CodeEditor] 读取上传文件失败:', err)
@@ -311,7 +317,7 @@ defineExpose({ focus })
         <input
           ref="fileInput"
           type="file"
-          accept=".c,.cpp,.java,.py,.txt"
+          accept=".c,.cpp,.cc,.cxx,.java,.kt,.py,.go,.rs,.js,.ts,.cs,.php,.rb,.pl,.hs,.sql,.txt"
           class="hidden"
           @change="handleFileChange"
         />

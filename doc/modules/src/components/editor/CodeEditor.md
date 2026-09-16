@@ -19,7 +19,7 @@
 | `availableLanguages` | computed | 语言下拉候选：以 props.languages（题目详情允许列表，HOJ 显示名）为准，空则回退 `DEFAULT_LANGUAGES`；当前语言不在列表时补入首位（工作区历史选择优先可见） |
 | `suppressChangeEmit` | 外部改写代码（切题加载/清空/上传）时 `setValue` 会触发 change 事件，此标志抑制回流，避免把程序化写入误标为「用户编辑（dirty）」 |
 | `handleKeydown` | window 级监听 Ctrl/Cmd+Enter → emit submit；onUnmounted 移除 |
-| `handleFileChange` | 原生 `input[type=file]` + `file.text()` 读取上传代码（**不引入 Tauri dialog 插件**）；读后立即重置 `input.value` 允许连续选同一文件 |
+| `handleFileChange` | 原生 `input[type=file]` + `file.text()` 读取上传代码（**不引入 Tauri dialog 插件**）；读后立即重置 `input.value` 允许连续选同一文件；**按扩展名自动识别语言**（`hojLanguageOfFileName`），识别结果在本题允许列表内才切换（切到不允许的语言只会换来一次提交失败） |
 | `showSettingsHint` | 设置按钮本轮未实现：点击显示「设置功能开发中」气泡 2s，而不是留一个死按钮 |
 
 编辑器配置：`theme: 'vs'`（浅色）、**fontSize / tabSize 挂载时经 `configService.getEditorPrefs()` 读取**（设置页可调，对新打开的编辑器实例生效；读取失败服务内部回退 14 / 4）、JetBrains Mono 字体栈、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 readonly prop（只读时行高亮关闭）。

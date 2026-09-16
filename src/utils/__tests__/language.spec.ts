@@ -81,11 +81,16 @@ describe('hojLanguageOfFileName — 扩展名 → 显示名（快捷提交拖拽
     expect(hojLanguageOfFileName('main.c')).toBe('C')
     expect(hojLanguageOfFileName('Main.java')).toBe('Java')
     expect(hojLanguageOfFileName('main.py')).toBe('Python')
+    expect(hojLanguageOfFileName('main.go')).toBe('Go')
+    expect(hojLanguageOfFileName('main.rs')).toBe('Rust')
+    expect(hojLanguageOfFileName('Main.kt')).toBe('Kotlin')
+    expect(hojLanguageOfFileName('main.js')).toBe('JavaScript')
+    expect(hojLanguageOfFileName('Main.cs')).toBe('C#')
   })
 
   it('无法识别返回 null（调用方保持当前语言选择）', () => {
     expect(hojLanguageOfFileName('notes.txt')).toBeNull()
-    expect(hojLanguageOfFileName('main.go')).toBeNull()
+    expect(hojLanguageOfFileName('data.json')).toBeNull()
     expect(hojLanguageOfFileName('noext')).toBeNull()
   })
 })

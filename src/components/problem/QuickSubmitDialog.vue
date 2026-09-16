@@ -82,8 +82,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 /// 与 CodeEditor 上传口径一致，另加 256KB 大小护栏（快捷提交场景无需超大文件）
 const MAX_FILE_BYTES = 256 * 1024
-/// 可导入的扩展名白名单（.txt 纯文本不切换语言）
-const ACCEPTED_EXTENSIONS = ['.cpp', '.cc', '.cxx', '.c', '.java', '.py', '.txt']
+/// 可导入的扩展名白名单（与 hojLanguageOfFileName 的识别面一致；.txt 纯文本不切换语言）
+const ACCEPTED_EXTENSIONS = [
+  '.cpp', '.cc', '.cxx', '.c', '.java', '.kt', '.py', '.go', '.rs',
+  '.js', '.ts', '.cs', '.php', '.rb', '.pl', '.hs', '.sql', '.txt',
+]
 
 const fileInput = ref<HTMLInputElement>()
 
@@ -107,7 +110,7 @@ function extOf(name: string): string {
 async function ingestFile(file: File) {
   const ext = extOf(file.name)
   if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-    fileError.value = `不支持的文件类型「${file.name}」，仅接受 .cpp / .c / .java / .py / .txt`
+    fileError.value = `不支持的文件类型「${file.name}」，仅接受源代码文件或 .txt`
     return
   }
   if (file.size > MAX_FILE_BYTES) {
@@ -312,7 +315,7 @@ function goDetail() {
           <input
             ref="fileInput"
             type="file"
-            accept=".c,.cpp,.cc,.cxx,.java,.py,.txt"
+            accept=".c,.cpp,.cc,.cxx,.java,.kt,.py,.go,.rs,.js,.ts,.cs,.php,.rb,.pl,.hs,.sql,.txt"
             class="hidden"
             @change="onFileChange"
           />

@@ -16,7 +16,7 @@
 | `isCLikeLanguage` | `(language) => boolean` | 是否 C/C++ 族（limits 1 倍基准，判题端按 .c/.cpp 后缀判定）；空/未知返回 false，调用方按保守 ×2 |
 | `sourceFileNameOf` | `(language) => string` | 显示名 → 工作区源文件名（C++→main.cpp、Java→Main.java、C#→Main.cs、Kotlin→Main.kt…）；**未知语言回退 main.txt，绝不猜 .cpp**（判题端按后缀判语言，猜错后缀 = 用错语言评测） |
 | `normalizeHojLanguage` | `(raw) => string` | 任意历史值 → 显示名：旧 Monaco id（'cpp' 等，P55 时代工作区/配置遗留）映射回显示名；其它非空值原样保留（OJ 可能提供映射外语言）；空 → "C++" |
-| `hojLanguageOfFileName` | `(fileName) => string \| null` | 扩展名 → 显示名（快捷提交拖拽 .cpp/.c/.java/.py 自动切语言）；无法识别返回 null |
+| `hojLanguageOfFileName` | `(fileName) => string \| null` | 扩展名 → 显示名（上传/拖拽代码文件自动识别语言，覆盖 .c/.cpp/.cc/.cxx/.java/.kt/.py/.go/.rs/.js/.ts/.cs/.php/.rb/.pl/.hs/.sql）；无法识别返回 null。**调用方须校验结果在题目允许列表内再切换** |
 | `monacoIdStrict` | 模块内私有 | 严格识别（未知返回 null）—— 区分「高亮可回退」与「后缀/倍率判定不可猜测」两种语义 |
 
 判定顺序陷阱（测试锁定）：`c#` 必须先于 `c`（`/^c\b/` 会吞 "c#"）；`javascript` 必须先于 `java`（`startsWith('java')` 会吞 "javascript"）。

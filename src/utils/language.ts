@@ -128,7 +128,8 @@ export function normalizeHojLanguage(raw: string | undefined | null): string {
   return HOJ_NAME_BY_LEGACY_ID[trimmed.toLowerCase()] ?? trimmed
 }
 
-/// 文件扩展名 → HOJ 显示名（快捷提交拖拽 .cpp 自动切语言用）；无法识别返回 null
+/// 文件扩展名 → HOJ 显示名（上传/拖拽代码文件时自动识别语言）；无法识别返回 null。
+/// 调用方须自行校验结果是否在题目允许列表内再切换（见 CodeEditor / QuickSubmitDialog）
 export function hojLanguageOfFileName(fileName: string): string | null {
   const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
   switch (ext) {
@@ -140,8 +141,30 @@ export function hojLanguageOfFileName(fileName: string): string | null {
       return 'C++'
     case '.java':
       return 'Java'
+    case '.kt':
+      return 'Kotlin'
     case '.py':
       return 'Python'
+    case '.go':
+      return 'Go'
+    case '.rs':
+      return 'Rust'
+    case '.js':
+      return 'JavaScript'
+    case '.ts':
+      return 'TypeScript'
+    case '.cs':
+      return 'C#'
+    case '.php':
+      return 'PHP'
+    case '.rb':
+      return 'Ruby'
+    case '.pl':
+      return 'Perl'
+    case '.hs':
+      return 'Haskell'
+    case '.sql':
+      return 'SQL'
     default:
       return null
   }
