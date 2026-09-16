@@ -12,6 +12,7 @@ import {
   DEFAULT_LANGUAGES,
   hojLanguageOfFileName,
   resolveAllowedLanguage,
+  SOURCE_FILE_EXTENSIONS,
 } from '@/utils/language'
 import {
   formatMemoryKb,
@@ -83,11 +84,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 /// 与 CodeEditor 上传口径一致，另加 256KB 大小护栏（快捷提交场景无需超大文件）
 const MAX_FILE_BYTES = 256 * 1024
-/// 可导入的扩展名白名单（与 hojLanguageOfFileName 的识别面一致；.txt 纯文本不切换语言）
-const ACCEPTED_EXTENSIONS = [
-  '.cpp', '.cc', '.cxx', '.c', '.java', '.kt', '.py', '.go', '.rs',
-  '.js', '.ts', '.cs', '.php', '.rb', '.pl', '.hs', '.sql', '.txt',
-]
+/// 可导入扩展名白名单：从 utils/language 的识别面唯一来源派生（防多处清单漂移），另加 .txt
+const ACCEPTED_EXTENSIONS: readonly string[] = [...SOURCE_FILE_EXTENSIONS, '.txt']
+/// 文件选择器 accept 属性（与白名单同源）
+const FILE_ACCEPT = ACCEPTED_EXTENSIONS.join(',')
 
 const fileInput = ref<HTMLInputElement>()
 
@@ -320,7 +320,7 @@ function goDetail() {
           <input
             ref="fileInput"
             type="file"
-            accept=".c,.cpp,.cc,.cxx,.java,.kt,.py,.go,.rs,.js,.ts,.cs,.php,.rb,.pl,.hs,.sql,.txt"
+            :accept="FILE_ACCEPT"
             class="hidden"
             @change="onFileChange"
           />

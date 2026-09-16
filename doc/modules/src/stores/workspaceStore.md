@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-常量：`CODE_FILE_EXTENSIONS`（探测历史工作区代码文件的后缀白名单；新文件名一律经 `sourceFileNameOf` 从语言派生）。语言权威值为 **HOJ 显示名**（"C++" 等，见 `utils/language`）。
+常量：`CODE_FILE_EXTENSIONS` = `utils/language` 的 `SOURCE_FILE_EXTENSIONS`（探测历史工作区代码文件的后缀清单，**从识别面唯一来源派生**防漂移；新文件名一律经 `sourceFileNameOf` 从语言派生）。语言权威值为 **HOJ 显示名**（"C++" 等，见 `utils/language`）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|

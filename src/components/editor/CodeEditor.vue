@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
 import * as monaco from 'monaco-editor'
 import { configService } from '@/services/config.service'
-import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf, resolveAllowedLanguage } from '@/utils/language'
+import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf, resolveAllowedLanguage, SOURCE_FILE_EXTENSIONS } from '@/utils/language'
 
 // ── Monaco Editor Workers（手动配置，避免 worker 打包问题） ──
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -45,14 +45,20 @@ const emit = defineEmits<{
 const editorContainer = ref<HTMLDivElement>()
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
-/// 语言下拉候选：以**题目详情返回的允许列表**为准（HOJ 比赛按题限制语言），
-/// 服务端未提供时回退内置默认列表；当前语言无法按语言族解析进列表时补入
-///（工作区历史选择优先可见，如列表未加载完成的瞬间）
+/// 语言下拉候选：以**题目详情返回的允许列表**为准（HOJ 比赛按题限制语言）。
+/// 服务端列表存在时**原样呈现、不补入当前语言** —— 列表外语言（如工作区遗留的
+/// 不允许语言）可见可选只会换来一次被拒的提交；归位由 ProblemSolveView 在题目
+/// 加载后统一做（resolveAllowedLanguage → changeLanguage）。
+/// 仅当列表未提供（未加载完成/服务端未返回）时回退内置默认并补入当前语言保持可见。
 const availableLanguages = computed<string[]>(() => {
-  const list = props.languages?.length ? [...props.languages] : [...DEFAULT_LANGUAGES]
+  if (props.languages?.length) return [...props.languages]
+  const list = [...DEFAULT_LANGUAGES]
   if (props.language && !resolveAllowedLanguage(props.language, list)) list.unshift(props.language)
   return list
 })
+
+/// 文件选择器 accept 属性（从识别面唯一来源派生，另加 .txt 纯文本）
+const fileAccept = computed(() => [...SOURCE_FILE_EXTENSIONS, '.txt'].join(','))
 
 /// Ctrl+Enter 提交
 function handleKeydown(e: KeyboardEvent) {
@@ -320,7 +326,7 @@ defineExpose({ focus })
         <input
           ref="fileInput"
           type="file"
-          accept=".c,.cpp,.cc,.cxx,.java,.kt,.py,.go,.rs,.js,.ts,.cs,.php,.rb,.pl,.hs,.sql,.txt"
+          :accept="fileAccept"
           class="hidden"
           @change="handleFileChange"
         />

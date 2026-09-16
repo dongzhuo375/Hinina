@@ -16,7 +16,7 @@
 |------|------|
 | `MonacoEnvironment.getWorker` | 手动配置 5 个 worker（editor/ts/css/html/json，Vite `?worker` 导入），避免 worker 打包问题 |
 | `editor: shallowRef<IStandaloneCodeEditor>` | Monaco 实例用 **shallowRef**：编辑器实例巨大且自带内部状态，深层响应式代理既昂贵又可能破坏其内部引用 |
-| `availableLanguages` | computed | 语言下拉候选：以 props.languages（题目详情允许列表，HOJ 显示名）为准，空则回退 `DEFAULT_LANGUAGES`；当前语言不在列表时补入首位（工作区历史选择优先可见） |
+| `availableLanguages` | computed | 语言下拉候选：**服务端列表存在时原样呈现、不补入当前语言**（列表外语言可见可选只会换来被拒的提交；归位由 ProblemSolveView 加载后统一做）；仅列表未提供（未加载/未返回）时回退 `DEFAULT_LANGUAGES` 并补入当前语言保持可见 |
 | `suppressChangeEmit` | 外部改写代码（切题加载/清空/上传）时 `setValue` 会触发 change 事件，此标志抑制回流，避免把程序化写入误标为「用户编辑（dirty）」 |
 | `handleKeydown` | window 级监听 Ctrl/Cmd+Enter → emit submit；onUnmounted 移除 |
 | `handleFileChange` | 原生 `input[type=file]` + `file.text()` 读取上传代码（**不引入 Tauri dialog 插件**）；读后立即重置 `input.value` 允许连续选同一文件；**按扩展名自动识别语言**（`hojLanguageOfFileName` → `resolveAllowedLanguage` 按语言族解析为允许列表中的服务端原名，"Python3" 等变体也能命中），无命中不切换（切到不允许的语言只会换来一次提交失败） |

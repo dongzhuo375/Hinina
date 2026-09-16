@@ -2,13 +2,10 @@ import { defineStore } from 'pinia'
 import type { Workspace } from '@/types/workspace'
 import { workspaceService } from '@/services/workspace.service'
 import { configService } from '@/services/config.service'
-import { normalizeHojLanguage, sourceFileNameOf } from '@/utils/language'
+import { normalizeHojLanguage, SOURCE_FILE_EXTENSIONS, sourceFileNameOf } from '@/utils/language'
 
-/// 工作区代码文件的已知后缀（探测历史文件用；新文件名一律经 sourceFileNameOf 派生）
-const CODE_FILE_EXTENSIONS = [
-  '.cpp', '.cc', '.cxx', '.c', '.java', '.kt', '.py', '.go', '.rs',
-  '.js', '.ts', '.cs', '.php', '.rb', '.pl', '.hs', '.sql',
-] as const
+/// 工作区代码文件探测后缀 = utils/language 识别面唯一来源（新文件名一律经 sourceFileNameOf 派生）
+const CODE_FILE_EXTENSIONS = SOURCE_FILE_EXTENSIONS
 
 export const useWorkspaceStore = defineStore('workspace', {
   state: () => ({

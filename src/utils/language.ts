@@ -147,44 +147,37 @@ export function normalizeHojLanguage(raw: string | undefined | null): string {
   return HOJ_NAME_BY_LEGACY_ID[trimmed.toLowerCase()] ?? trimmed
 }
 
-/// 文件扩展名 → HOJ 显示名（上传/拖拽代码文件时自动识别语言）；无法识别返回 null。
-/// 调用方须自行校验结果是否在题目允许列表内再切换（见 CodeEditor / QuickSubmitDialog）
+/// 扩展名 → HOJ 显示名映射（**识别面唯一来源**：上传白名单、工作区探测清单、
+/// accept 属性全部由它派生，防止多处清单各自维护漂移）
+const HOJ_LANGUAGE_BY_EXT: Readonly<Record<string, string>> = {
+  '.c': 'C',
+  '.cpp': 'C++',
+  '.cc': 'C++',
+  '.cxx': 'C++',
+  '.java': 'Java',
+  '.kt': 'Kotlin',
+  '.py': 'Python',
+  '.go': 'Go',
+  '.rs': 'Rust',
+  '.js': 'JavaScript',
+  '.ts': 'TypeScript',
+  '.cs': 'C#',
+  '.php': 'PHP',
+  '.rb': 'Ruby',
+  '.pl': 'Perl',
+  '.hs': 'Haskell',
+  '.sql': 'SQL',
+}
+
+/// 可识别的源代码扩展名集合（含点号，小写；由映射表派生）
+export const SOURCE_FILE_EXTENSIONS: readonly string[] = Object.keys(HOJ_LANGUAGE_BY_EXT)
+
+/**
+ * 文件扩展名 → HOJ 显示名（上传/拖拽代码文件时自动识别语言）；无法识别返回 null。
+ * 调用方应经 `resolveAllowedLanguage` 归位到题目允许列表中的服务端原名再切换。
+ */
 export function hojLanguageOfFileName(fileName: string): string | null {
-  const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
-  switch (ext) {
-    case '.c':
-      return 'C'
-    case '.cpp':
-    case '.cc':
-    case '.cxx':
-      return 'C++'
-    case '.java':
-      return 'Java'
-    case '.kt':
-      return 'Kotlin'
-    case '.py':
-      return 'Python'
-    case '.go':
-      return 'Go'
-    case '.rs':
-      return 'Rust'
-    case '.js':
-      return 'JavaScript'
-    case '.ts':
-      return 'TypeScript'
-    case '.cs':
-      return 'C#'
-    case '.php':
-      return 'PHP'
-    case '.rb':
-      return 'Ruby'
-    case '.pl':
-      return 'Perl'
-    case '.hs':
-      return 'Haskell'
-    case '.sql':
-      return 'SQL'
-    default:
-      return null
-  }
+  const idx = fileName.lastIndexOf('.')
+  if (idx < 0) return null
+  return HOJ_LANGUAGE_BY_EXT[fileName.slice(idx).toLowerCase()] ?? null
 }

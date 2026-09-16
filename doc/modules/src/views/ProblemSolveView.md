@@ -48,6 +48,11 @@ load(id):
   3. contestStore.problems 按 displayId 找 ContestProblem（找不到 → localError）
   4. workspaceStore.loadWorkspace(contestId, cp.problemId)   // 工作区按题目真实 ID(pid) 隔离
   5. problemStore.openProblem(contestId, id)                 // 题面详情按比赛内展示题号查询
+  5.5 允许语言归位：题目 languages 非空时
+      changeLanguage(resolveAllowedLanguage(当前语言, languages) ?? languages[0])
+      // 工作区/配置默认存规范名（"C++"），服务端列表可能是部署变体（"C++17 (GCC 13.2)"）
+      // 或不含当前语言族；提交参数必须用服务端认得的写法（与 QuickSubmitDialog 同款语义）。
+      // changeLanguage 同名短路 → 归位幂等；写回服务端原名让下次加载直接命中
   6. void loadLimits([id]) + void loadMyStatus(全部 pid)      // 补齐题面限制/Tab 状态点，不 await
   每步之后 token !== loadToken → 直接 return（被更新的切题取代）
   finally: 仅最新加载负责 isLoadingPage = false 并 consumeFocusQuery()

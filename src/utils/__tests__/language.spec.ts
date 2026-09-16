@@ -6,6 +6,7 @@ import {
   monacoIdOf,
   normalizeHojLanguage,
   resolveAllowedLanguage,
+  SOURCE_FILE_EXTENSIONS,
   sourceFileNameOf,
 } from '@/utils/language'
 
@@ -120,6 +121,21 @@ describe('resolveAllowedLanguage — 识别语言 → 允许列表中的服务�
   it('空识别值或空列表返回 null', () => {
     expect(resolveAllowedLanguage('', ALLOWED)).toBeNull()
     expect(resolveAllowedLanguage('Python', [])).toBeNull()
+  })
+})
+
+describe('SOURCE_FILE_EXTENSIONS — 识别面唯一来源', () => {
+  it('清单由扩展名映射表派生，每一项都能被 hojLanguageOfFileName 识别', () => {
+    expect(SOURCE_FILE_EXTENSIONS.length).toBeGreaterThanOrEqual(17)
+    for (const ext of SOURCE_FILE_EXTENSIONS) {
+      expect(hojLanguageOfFileName(`main${ext}`), ext).not.toBeNull()
+    }
+  })
+
+  it('覆盖常用后缀（上传白名单/工作区探测/accept 属性共用此清单，防三处漂移）', () => {
+    for (const ext of ['.c', '.cpp', '.cc', '.cxx', '.java', '.py', '.go', '.rs']) {
+      expect(SOURCE_FILE_EXTENSIONS, ext).toContain(ext)
+    }
   })
 })
 
