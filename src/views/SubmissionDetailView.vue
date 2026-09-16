@@ -139,35 +139,50 @@ async function copyErrorMessage() {
 
 // ── 数据加载与收敛轮询 ──
 
-async function loadAll(): Promise<void> {
+/**
+ * 拉取提交详情；到达终态后补拉一次测试点明细。
+ *
+ * 轮询周期只走本函数：评测中 `get-all-case-result` 尚无稳定结果，
+ * 每周期重复拉取纯属浪费（终态判据命中后 cases 只请求一次）。
+ */
+async function loadDetail(): Promise<void> {
   const id = submitId.value
   if (!id) return
-  const [detailResult, casesResult] = await Promise.allSettled([
-    submissionService.getSubmissionDetail(id),
-    submissionService.getSubmissionCases(id),
-  ])
-  if (!alive) return
-  if (detailResult.status === 'fulfilled') {
-    detail.value = detailResult.value
+  try {
+    const d = await submissionService.getSubmissionDetail(id)
+    if (!alive) return
+    detail.value = d
     loadError.value = null
-  } else if (!detail.value) {
+  } catch (e) {
+    if (!alive) return
     // 已有旧数据时瞬时失败不清空页面，只等下一周期
-    loadError.value =
-      detailResult.reason instanceof Error ? detailResult.reason.message : '加载提交详情失败'
-  }
-  if (casesResult.status === 'fulfilled') {
-    cases.value = casesResult.value
-    casesError.value = null
-  } else {
-    casesError.value = '测试点明细加载失败'
+    if (!detail.value) {
+      loadError.value = e instanceof Error ? e.message : '加载提交详情失败'
+    }
   }
   isLoading.value = false
   syncPoller()
+  if (detail.value && isTerminalStatus(detail.value.status)) await loadCases()
+}
+
+/// 拉取测试点明细；失败不致命，降级为提示条（详情主体照常展示）
+async function loadCases(): Promise<void> {
+  const id = submitId.value
+  if (!id) return
+  try {
+    const c = await submissionService.getSubmissionCases(id)
+    if (!alive) return
+    cases.value = c
+    casesError.value = null
+  } catch {
+    if (!alive) return
+    casesError.value = '测试点明细加载失败'
+  }
 }
 
 async function retry(): Promise<void> {
   isLoading.value = true
-  await loadAll()
+  await loadDetail()
 }
 
 function stopPoller() {
@@ -187,7 +202,7 @@ function syncPoller() {
           stopPoller()
           return
         }
-        await loadAll()
+        await loadDetail()
       },
       intervalMs: pollIntervalMs,
       jitterMs: pollJitterMs,
@@ -211,7 +226,7 @@ onMounted(async () => {
   pollIntervalMs = schedule.intervalMs
   pollJitterMs = Math.min(JITTER_CAP_MS, Math.round(schedule.intervalMs * JITTER_RATIO))
   deadline = Date.now() + schedule.timeoutMs
-  await loadAll()
+  await loadDetail()
 })
 
 onUnmounted(() => {

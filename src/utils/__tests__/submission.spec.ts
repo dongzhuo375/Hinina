@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  findFirstFailedCase,
   formatClock,
   formatCodeLength,
   formatDurationHms,
@@ -8,7 +9,7 @@ import {
   isTerminalStatus,
   mapLanguageToMonaco,
 } from '@/utils/submission'
-import type { JudgementStatus } from '@/types/submission'
+import type { JudgeCase, JudgementStatus, SubmissionCases } from '@/types/submission'
 
 /// 非终态：评测仍在排队/编译/运行
 const NON_TERMINAL: JudgementStatus[] = ['Pending', 'Compiling', 'Running']
@@ -174,5 +175,77 @@ describe('mapLanguageToMonaco', () => {
   it('无法识别的语言回退 cpp', () => {
     expect(mapLanguageToMonaco('')).toBe('cpp')
     expect(mapLanguageToMonaco('Rust')).toBe('cpp')
+  })
+})
+
+describe('findFirstFailedCase', () => {
+  function makeCase(over: Partial<JudgeCase> = {}): JudgeCase {
+    return {
+      caseId: 1,
+      seq: 1,
+      status: 'Accepted',
+      timeMs: 100,
+      memoryKb: 1024,
+      score: null,
+      groupNum: null,
+      ...over,
+    }
+  }
+
+  function makeCases(over: Partial<SubmissionCases> = {}): SubmissionCases {
+    return { cases: [], subTasks: [], mode: 'default', ...over }
+  }
+
+  it('平铺 cases 中返回首个非 Accepted 测试点', () => {
+    const result = makeCases({
+      cases: [
+        makeCase({ caseId: 1, seq: 1 }),
+        makeCase({ caseId: 2, seq: 2, status: 'WrongAnswer', timeMs: 2010 }),
+        makeCase({ caseId: 3, seq: 3, status: 'TimeLimitExceeded' }),
+      ],
+    })
+    const first = findFirstFailedCase(result)
+    expect(first?.seq).toBe(2)
+    expect(first?.status).toBe('WrongAnswer')
+  })
+
+  it('平铺 cases 全部通过时返回 null（不再查 subTasks）', () => {
+    const result = makeCases({
+      cases: [makeCase({ caseId: 1, seq: 1 })],
+      subTasks: [
+        { groupNum: 1, cases: [makeCase({ caseId: 9, seq: 9, status: 'WrongAnswer' })] },
+      ],
+    })
+    expect(findFirstFailedCase(result)).toBeNull()
+  })
+
+  it('子任务制（cases 为空）按 groupNum、组内按 seq 展开查找', () => {
+    const result = makeCases({
+      mode: 'subtask',
+      // 刻意乱序：helper 须按 groupNum / seq 排序后取首个非 AC
+      subTasks: [
+        {
+          groupNum: 2,
+          cases: [
+            makeCase({ caseId: 3, seq: 2, status: 'TimeLimitExceeded', groupNum: 2 }),
+            makeCase({ caseId: 2, seq: 1, groupNum: 2 }),
+          ],
+        },
+        {
+          groupNum: 1,
+          cases: [
+            makeCase({ caseId: 4, seq: 2, status: 'WrongAnswer', timeMs: 1500, groupNum: 1 }),
+            makeCase({ caseId: 1, seq: 1, groupNum: 1 }),
+          ],
+        },
+      ],
+    })
+    const first = findFirstFailedCase(result)
+    expect(first?.caseId).toBe(4)
+    expect(first?.seq).toBe(2)
+  })
+
+  it('cases 与 subTasks 均为空时返回 null', () => {
+    expect(findFirstFailedCase(makeCases())).toBeNull()
   })
 })

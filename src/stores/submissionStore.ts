@@ -233,6 +233,18 @@ export const useSubmissionStore = defineStore('submission', {
       await this.fetchHistory(contestId, 1)
     },
 
+    /**
+     * 清空题目/状态筛选（不发起请求）。
+     *
+     * 与 setHistoryProblemFilter 分开：后者是「用户改筛选」语义，清空即重拉第 1 页；
+     * 本方法供评测页无 `?problem=` 深链进入时清除上次访问的残留筛选，
+     * 请求由调用方随后的 fetchHistory 统一发出，避免同一引导链路重复拉取。
+     */
+    resetHistoryFilters() {
+      this.history.problemFilter = null
+      this.history.statusFilter = null
+    },
+
     /** 设置状态筛选并回到第 1 页（HOJ 状态码；null=全部状态） */
     async setHistoryStatusFilter(contestId: string, status: number | null) {
       this.history.statusFilter = status

@@ -332,6 +332,7 @@ src/
 - **插件系统**：v0.x 仅预留架构，不实现运行时。插件只能访问 `plugin/api/`，禁止直接调用内部 Service
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求
+- **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
 - **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；登录页依据比赛阶段（`utils/contest`）决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入；登出时经 `stores/session.ts` 清空会话级领域状态
 - **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Adapter → `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验，且反复重登可能触发 HOJ 暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。全局兜底由 `stores/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
 - **三态契约必须由 Adapter 兑现**：`AuthProvider::validate_session` 的返回值语义是 `Ok(true)` 有效 / `Ok(false)` 服务端**明确**判定失效 / `Err(_)` 无法判定。**绝不可把网络错误折成 `Ok(false)`** —— 那会让 `SessionValidity::Unknown` 分支成为死代码，一次赛前网络抖动就把选手踢回登录页。HOJ 侧的判据抽成纯函数 `session_validity_from_response` 以便测试锁定：仅 `AppError::Auth` 算明确失效，非 200 的其它状态码（400/500）归 `Unknown`，网络/超时/解析失败一律上抛。同理，长轮询（`SubmissionService::poll_judgement`，默认超时 300s）**不得吞掉认证错误**：必须立即上抛，否则选手干等五分钟后只收到「评测超时」，守卫也拿不到 Auth 变体
@@ -342,7 +343,16 @@ src/
 - **HTTP 401 由 infra 映射为 `Auth` 变体**：401 的标准语义就是「未认证」，属 HTTP 通用语义而非 OJ 私有约定，故由 `infra/http.rs` 的 `status_error` 承担；**403 保持 `Network`**（可能是业务性无权访问）。这条映射是会话校验能成立的前提 —— `get_json_authed` 遇到 401 时若仍归为 `Network`，`session_validity_from_response` 会把它当「无法判定」上抛，导致 token 真正过期时反而永不登出。实测 HOJ 两种报法都存在：`get-user-auth-info` 走 HTTP 401，`get-contest-problem` 走 HTTP 200 + 体内 403，两条路径都必须认- **真实响应夹具**：`adapter/hoj/tests/fixtures/contest_list_anon.json` 取自真实接口、仅脱敏自由文本，完整保留键名与 null 分布；配套一条正向测试（真实响应可解析）与一条反向测试（不去 null 必然失败），防止后来者把 `strip_nulls` 当冗余删掉
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询定时器由 `submissionStore` 编排（终态判据见 `utils/submission.ts`，超时兜底），View 只表达提交意图
 - **比赛工作台外壳**：`ContestLayout` 承载 TopBar + ActivityBar + `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；窗口拖拽与窗口控制只在 TopBar（登录页由 `App.vue` 提供兜底窗口条）。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
-- **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止；榜单 10s±2s，题目总览 30s±5s，公告 60s±10s。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期；评测页对含非终态行的当前页做 5s±1s 温和刷新，全部终态即停
+- **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：
+
+  | 场景 | 节奏 | hidden 暂停 | 停止判据 | 归属 |
+  |------|------|------------|---------|------|
+  | 榜单实时刷新 | 10s ± 2s | ✅ | 离开榜单页 / 比赛结束 / 全量快照模式转手动 | `rankStore` |
+  | 题目总览刷新 | 30s ± 5s | ✅ | 离开路由 | `ProblemSetView`（视图自持） |
+  | 公告未读保鲜 | 60s ± 10s | ✅ | 外壳卸载 / 比赛结束 / 登出 | `announcementStore`（ContestLayout 启动） |
+  | 评测页当前页温和刷新 | 5s ± 1s | ✅ | 当前页无「评测中」行 / 离页 | `SubmissionsView`（视图自持） |
+  | 提交结果收敛轮询 | 配置 `oj.pollIntervalSecs`（默认 2s），抖动 ±20% 封顶 500ms | ❌（刻意） | 终态 / 总超时（默认 300s）/ 登出 | `submissionStore`（每提交一个 Poller） |
+  | 提交详情页收敛轮询 | 同上（读同一配置） | ❌（刻意） | 终态（终态后补拉一次测试点）/ 总超时 / 离页 | `SubmissionDetailView`（视图自持，评测中只拉 detail 不拉 cases，避免请求放大） |
 - **公告已读状态是客户端特性**：HOJ 无已读概念，已读 ID 集合由 Rust 端按「比赛 + 用户」持久化（`announcements_read/{cid}_{uid}.json`，合并去重、损坏降级为空 + warn）；未读红点 = 列表与已读集合的差集，由外壳启动的公告轮询在全部页面保持鲜活，进入公告页即全部标记已读（乐观更新，持久化失败回滚 —— 红点复发优于假已读）
 - **提交列表「只看本人」由后端强制**：`list_contest_submissions` 命令层恒置 `onlyMine = true`，前端不传该参数、不可绕过（产品决策：评测页只显示本人提交）
 - **榜单数据源职责**：卡片「我的状态」取 `get-user-problem-status`（轻量、不受榜单分页/搜索影响，AC 判定与榜单我的行取并集且 **AC 优先**）；统计卡「解题进度 / 实时排名 / 总罚时」取榜单我的行（服务端前置复制，天然可得）；`ac/total` 与气球色取比赛题目列表。HOJ 会把当前用户与关注列表**前置复制**进 `records`，渲染前必须按 `uid` 去重，`total` 因此偏大、不能直接当参赛人数（口径：`total − 本页重复数`，且当「我的前置副本在页内而自然名次不在本页窗口」时再 −1，见 `utils/rank.resolveParticipantCountFromPage`；关注用户的页外副本仍是已知残差）；`rank == -1` 是打星队伍；封榜以 `contest.sealRank + sealRankTime` 自行判断，**不依赖 `forceRefresh`**（对非管理员无效）

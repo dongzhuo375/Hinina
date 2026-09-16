@@ -1,4 +1,4 @@
-import type { Announcement, AnnouncementPage } from '@/types/announcement'
+import type { AnnouncementPage } from '@/types/announcement'
 import * as announcementBridge from '@/bridge/announcement.bridge'
 
 /// 公告列表单页容量：比赛公告总量通常 < 30 条，一页取满免去翻页交互
@@ -31,11 +31,6 @@ export class AnnouncementService {
     if (ids.length === 0) return this.getReadIds(contestId)
     await announcementBridge.markAnnouncementsRead(contestId, ids)
     return this.getReadIds(contestId)
-  }
-
-  /** 过滤出未读公告（保持列表顺序） */
-  filterUnread(announcements: Announcement[], readIds: Set<string>): Announcement[] {
-    return announcements.filter((a) => !readIds.has(a.id))
   }
 }
 

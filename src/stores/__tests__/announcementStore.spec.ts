@@ -8,7 +8,6 @@ const { announcementService } = vi.hoisted(() => ({
     listAnnouncements: vi.fn(),
     getReadIds: vi.fn(),
     markRead: vi.fn(),
-    filterUnread: vi.fn(),
   },
 }))
 vi.mock('@/services/announcement.service', () => ({ announcementService }))

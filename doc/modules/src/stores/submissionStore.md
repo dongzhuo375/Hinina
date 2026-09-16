@@ -23,6 +23,7 @@
 | `stopPolling` / `stopAllPolling` | `(submissionId?) => void` | 停单个 / 停全部（登出经 `stores/session` 调用） |
 | `fetchHistory` | `(contestId, page?) => Promise<void>` | 拉一页提交历史，透传 `problemFilter`/`statusFilter`/`pageSize`；失败写 `history.error` 并抛出 |
 | `setHistoryProblemFilter` / `setHistoryStatusFilter` | `(contestId, value) => Promise<void>` | 设置筛选并回到第 1 页 |
+| `resetHistoryFilters` | `() => void` | 清空题目/状态筛选，**不发请求**——评测页无 `?problem=` 深链进入时清除上次访问残留（L2），首查由调用方随后的 `fetchHistory` 统一发出；与 setHistoryProblemFilter（用户改筛选、清空即重拉）语义不同 |
 | `setHistoryPage` | `(contestId, page) => Promise<void>` | 翻页（越界不发请求） |
 | `fetchProblemSummary` | `(contestId, displayId) => Promise<{ latest, total }>` | 只取 1 条，供解题页「最新记录」pill 与「提交记录 (n)」；**不污染 `history`** |
 
@@ -71,7 +72,8 @@ pollOnce(id)
 - **总超时兜底**：deadline（默认 300s）保证服务端一直返回非终态时也会停止。
 - **句柄放模块级 Map**：进响应式系统会被 Vue 深层代理且 `$reset()` 清不掉；登出必须先 `stopAllPolling()` 再 `$reset()`。
 - **history 与 fetchProblemSummary 隔离**：解题页 pill 的轻量查询不干扰评测页的列表/筛选/分页状态。
+- **筛选不跨访问泄漏（L2）**：history 是模块级持久状态，评测页无深链筛选进入时须先 `resetHistoryFilters()` 再首查，否则上次访问的题目/状态筛选会静默过滤列表。
 
 ## 测试
 
-`src/stores/__tests__/submissionStore.spec.ts`：终态停止、memory 回填、超时兜底、瞬时失败恢复后清 error（P69）、stopAllPolling 回收、startPolling 幂等、fetchHistory 参数透传与错误、筛选回第 1 页、翻页越界、fetchProblemSummary（latest+total、空提交、不污染 history）、latestLocalFor。轮询用 `vi.useFakeTimers()` 推进。
+`src/stores/__tests__/submissionStore.spec.ts`：终态停止、memory 回填、超时兜底、瞬时失败恢复后清 error（P69）、stopAllPolling 回收、startPolling 幂等、fetchHistory 参数透传与错误、筛选回第 1 页、resetHistoryFilters（清空筛选且不发请求）、翻页越界、fetchProblemSummary（latest+total、空提交、不污染 history）、latestLocalFor。轮询用 `vi.useFakeTimers()` 推进。

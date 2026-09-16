@@ -1,4 +1,4 @@
-import type { JudgementStatus } from '@/types/submission'
+import type { JudgeCase, JudgementStatus, SubmissionCases } from '@/types/submission'
 
 /**
  * 非终态状态集：评测仍在排队/编译/运行，需要继续轮询。
@@ -74,6 +74,27 @@ export function statusTone(status: JudgementStatus): StatusTone {
 /** 评测是否仍在进行中（非终态） */
 export function isJudging(status: JudgementStatus): boolean {
   return !isTerminalStatus(status)
+}
+
+/**
+ * 找出首个非 Accepted 测试点（「Test N」失败提示的数据源）。
+ *
+ * 先查平铺 `cases`；子任务制判题下 `cases` 常为空（明细在 `subTasks[].cases`），
+ * 此时按 groupNum、组内按 seq 展开查找，避免失败提示静默消失。
+ * 全部通过或无任何明细时返回 null。
+ */
+export function findFirstFailedCase(result: SubmissionCases): JudgeCase | null {
+  const flat = result.cases.find((c) => c.status !== 'Accepted')
+  if (flat) return flat
+  if (result.cases.length > 0) return null
+  const groups = [...(result.subTasks ?? [])].sort((a, b) => a.groupNum - b.groupNum)
+  for (const group of groups) {
+    const first = [...group.cases]
+      .sort((a, b) => a.seq - b.seq)
+      .find((c) => c.status !== 'Accepted')
+    if (first) return first
+  }
+  return null
 }
 
 /**

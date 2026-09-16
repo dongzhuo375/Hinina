@@ -4,7 +4,7 @@
 
 ## 职责
 
-比赛公告获取与本地已读状态编排：透传 Bridge 调用、把已读 ID 数组组装为 `Set`、提供未读过滤纯函数。不做缓存（公告必须实时）。
+比赛公告获取与本地已读状态编排：透传 Bridge 调用、把已读 ID 数组组装为 `Set`。不做缓存（公告必须实时）；未读判定由 `announcementStore` 的 getters（`unreadCount` / `isUnread`）承担，服务层不重复提供过滤函数。
 
 ## 核心类型/函数
 
@@ -13,7 +13,6 @@
 | `AnnouncementService.listAnnouncements` | `(contestId) => Promise<AnnouncementPage>` | 单页大容量拉取（`ANNOUNCEMENT_PAGE_SIZE = 100`，比赛公告总量通常 < 30 条，免去翻页交互） |
 | `AnnouncementService.getReadIds` | `(contestId) => Promise<Set<string>>` | 当前用户在该比赛下的已读 ID 集合 |
 | `AnnouncementService.markRead` | `(contestId, ids) => Promise<Set<string>>` | 标记已读并返回**后端合并后的权威集合**（前端直接替换本地状态）；空 ids 短路为只读查询 |
-| `AnnouncementService.filterUnread` | `(announcements, readIds) => Announcement[]` | 未读过滤（保持列表顺序） |
 | `announcementService` | 单例 | 全局唯一实例 |
 
 ## 直接依赖

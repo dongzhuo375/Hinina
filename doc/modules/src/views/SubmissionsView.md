@@ -47,7 +47,9 @@ onMounted → bootstrap():
   contestStore.whenLoaded()                    // P59 统一入口，复用在途请求
   route.query.problem 为非空字符串
     → submissionStore.setHistoryProblemFilter(contestId, displayId)  // 深链首查即带题目筛选
-    → 否则 fetchHistory(contestId, 1)
+    → 否则 resetHistoryFilters() + fetchHistory(contestId, 1)
+      // L2：history 是模块级持久状态，无深链进入时先清掉上次访问残留的
+      // 题目/状态筛选（不发请求），否则列表会被静默过滤
 
 watch(history.records) → syncPoller():
   当前页存在 isJudging 记录且无 poller → createPoller(5s±1s, task=重拉当前页,

@@ -12,6 +12,7 @@
 |------|------|------|
 | `isTerminalStatus` | `(status: JudgementStatus) => boolean` | 状态是否为终态（终态即停止轮询） |
 | `isJudging` | `(status: JudgementStatus) => boolean` | 是否仍在评测中（= 非终态，评测页温和刷新的判据） |
+| `findFirstFailedCase` | `(result: SubmissionCases) => JudgeCase \| null` | 首个非 Accepted 测试点（「Test N」失败提示数据源）：先查平铺 `cases`；子任务制下 `cases` 常为空，此时按 groupNum、组内按 seq 展开 `subTasks` 查找（L1：避免提示静默消失） |
 | `StatusTone` | `'ac' \| 'wa' \| 'tle' \| 'pending' \| 'system' \| 'neutral'` | 状态语义色调（组件层映射到具体样式类） |
 | `statusLabel` | `(status) => string` | 状态原词（HOJ 文案，架构约束「状态文案以接口返回为准」） |
 | `statusAbbr` | `(status) => string` | 缩写（AC/WA/TLE…，紧凑 pill 用） |
@@ -39,7 +40,7 @@
 - `stores/submissionStore.ts` — `pollOnce()` 终态判定
 - `views/SubmissionsView.vue` — 状态 pill 渲染、筛选下拉（`STATUS_OPTIONS`）与时间/内存/代码长度格式化
 - `views/SubmissionDetailView.vue` — 状态渲染、格式化与 `mapLanguageToMonaco`（只读代码视图）
-- `components/editor/EditorConsoleBar.vue` — 最新记录 pill（`statusAbbr` / `statusTone` / `formatMsToSeconds` / `isTerminalStatus`）
+- `components/editor/EditorConsoleBar.vue` — 最新记录 pill（`statusAbbr` / `statusTone` / `formatMsToSeconds` / `isTerminalStatus` / `findFirstFailedCase`）
 - `components/problem/QuickSubmitDialog.vue` — 弹窗内评测状态行（`statusLabel` / `statusTone` / `formatMemoryKb` / `isTerminalStatus`）
 - `utils/__tests__/submission.spec.ts` — 单元测试
 
@@ -61,4 +62,4 @@ status ∈ {Pending, Compiling, Running} → 非终态，继续轮询
 
 ## 测试
 
-`src/utils/__tests__/submission.spec.ts`（16 例）锁定：`Unknown` 必须视为终态、终态清单与 `JudgementStatus` 全量取值（18 个）一一对应（借 `Record<JudgementStatus, boolean>` 穷尽映射，新增枚举值时直接类型报错，逼迫显式归类）；格式化纯函数——`formatClock` 本地时区与补零、`formatDurationHms` 负值/非有限值钳制、`formatMemoryKb` KB/MB 分界与非正值 `-`、`formatCodeLength` 字节换算、`formatMsToSeconds` 两位小数、`mapLanguageToMonaco` 显示名归一与未知语言回退 cpp。
+`src/utils/__tests__/submission.spec.ts`（20 例）锁定：`Unknown` 必须视为终态、终态清单与 `JudgementStatus` 全量取值（18 个）一一对应（借 `Record<JudgementStatus, boolean>` 穷尽映射，新增枚举值时直接类型报错，逼迫显式归类）；格式化纯函数——`formatClock` 本地时区与补零、`formatDurationHms` 负值/非有限值钳制、`formatMemoryKb` KB/MB 分界与非正值 `-`、`formatCodeLength` 字节换算、`formatMsToSeconds` 两位小数、`mapLanguageToMonaco` 显示名归一与未知语言回退 cpp；`findFirstFailedCase` 平铺优先/全 AC 返回 null/子任务制按 groupNum+seq 展开/双空返回 null。

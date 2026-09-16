@@ -144,6 +144,8 @@ async function bootstrap(): Promise<void> {
     if (typeof problemQuery === 'string' && problemQuery) {
       await submissionStore.setHistoryProblemFilter(contestId, problemQuery)
     } else {
+      // 无深链筛选时先清掉上次访问残留的筛选，避免列表被静默过滤
+      submissionStore.resetHistoryFilters()
       await submissionStore.fetchHistory(contestId, 1)
     }
   } catch {

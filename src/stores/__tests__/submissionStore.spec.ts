@@ -231,6 +231,18 @@ describe('提交历史（评测页数据源）', () => {
     )
   })
 
+  it('resetHistoryFilters 清空筛选且不发起请求（L2：筛选不得跨访问泄漏）', () => {
+    const store = useSubmissionStore()
+    store.history.problemFilter = 'B'
+    store.history.statusFilter = 5
+
+    store.resetHistoryFilters()
+
+    expect(store.history.problemFilter).toBeNull()
+    expect(store.history.statusFilter).toBeNull()
+    expect(submissionService.listContestSubmissions).not.toHaveBeenCalled()
+  })
+
   it('setHistoryPage 越界不发请求', async () => {
     submissionService.listContestSubmissions.mockResolvedValue(makePage([], 40))
     const store = useSubmissionStore()

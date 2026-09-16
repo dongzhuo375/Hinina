@@ -5,7 +5,7 @@ import { submissionService } from '@/services/submission.service'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import type { JudgementStatus, SubmissionRecord } from '@/types/submission'
-import { formatMsToSeconds, isTerminalStatus, statusAbbr, statusTone } from '@/utils/submission'
+import { findFirstFailedCase, formatMsToSeconds, isTerminalStatus, statusAbbr, statusTone } from '@/utils/submission'
 import type { StatusTone } from '@/utils/submission'
 
 /// 编辑器底部控制台条：最新评测记录 pill + 提交入口 + 光标/编码状态行。
@@ -94,7 +94,8 @@ watch(
     if (tone !== 'wa' && tone !== 'tle') return
     try {
       const result = await submissionService.getSubmissionCases(record.submitId)
-      const first = result.cases.find((c) => c.status !== 'Accepted')
+      // 子任务制下平铺 cases 常为空，helper 会展开 subTasks 查找，避免提示静默消失
+      const first = findFirstFailedCase(result)
       if (first) failedCaseHint.value = `Test ${first.seq} · ${formatMsToSeconds(first.timeMs)}`
     } catch (e) {
       // 测试点不可得时回退记录自身耗时（下方 serverPill 兜底）

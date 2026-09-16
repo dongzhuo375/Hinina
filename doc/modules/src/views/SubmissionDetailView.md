@@ -4,7 +4,7 @@
 
 ## 职责
 
-单条提交的完整详情（路由 `SubmissionDetail`，`/contest/submissions/:submitId`）：判定横幅（大状态 pill + 指标条 + 元信息）、CE/错误信息面板（可复制）、测试点明细（平铺 / 子任务分组）、源代码只读查看（默认折叠）；评测未收敛时以配置驱动的收敛轮询自动刷新，终态或总超时即停。
+单条提交的完整详情（路由 `SubmissionDetail`，`/contest/submissions/:submitId`）：判定横幅（大状态 pill + 指标条 + 元信息）、CE/错误信息面板（可复制）、测试点明细（平铺 / 子任务分组）、源代码只读查看（默认折叠）；评测未收敛时以配置驱动的收敛轮询自动刷新——**轮询周期只拉详情**，到达终态后测试点明细只补拉一次，终态或总超时即停。
 
 ## 核心类型/函数
 
@@ -21,7 +21,7 @@
 | `codeLanguage` | computed | `mapLanguageToMonaco(detail.language)` —— 服务端返回展示名，按前缀归一为 Monaco id |
 | `caseList` / `acCaseCount` / `hasSubTasks` / `showScoreColumn` / `modeBadge` | computed | 测试点表派生：通过计数、子任务制判定（`subTasks` 非空）、得分列仅在有 score 时出现、判题模式徽章（非 `default` 才显示，如 spj/subtask） |
 | `copyErrorMessage` | fn | 剪贴板复制 CE 信息；WebView API 不可用时兜底隐藏 textarea + `execCommand('copy')`；「已复制」1.5s 回弹 |
-| `loadAll` / `retry` | — | `Promise.allSettled` 并行拉详情与测试点，见逻辑流程 |
+| `loadDetail` / `loadCases` / `retry` | — | 详情与测试点分离拉取：轮询周期只走 `loadDetail`，终态命中后补拉一次 `loadCases`，见逻辑流程 |
 | `syncPoller` / `stopPoller` | — | 收敛轮询启停决策 |
 | `goBack` / `openProblem` | — | 返回评测列表（`Submissions` 路由）/ 跳解题页 |
 
@@ -49,17 +49,22 @@ onMounted:
   pollIntervalMs = schedule.intervalMs
   pollJitterMs   = min(500, round(intervalMs × 0.2))
   deadline       = now + schedule.timeoutMs
-  loadAll()
+  loadDetail()
 
-loadAll():
-  Promise.allSettled([getSubmissionDetail(id), getSubmissionCases(id)])
-  详情成功 → 覆盖 detail、清 loadError
-  详情失败 → 仅当**无旧数据**时写 loadError（轮询期间瞬时失败不清空页面）
-  测试点失败 → casesError 提示条（主体不受影响）
-  → syncPoller()
+loadDetail():
+  getSubmissionDetail(id)
+  成功 → 覆盖 detail、清 loadError
+  失败 → 仅当**无旧数据**时写 loadError（轮询期间瞬时失败不清空页面）
+  isLoading = false → syncPoller()
+  detail 已到终态 → loadCases()（只补拉一次；直接打开终态提交时同样走这里）
+
+loadCases():
+  getSubmissionCases(id)
+  成功 → 覆盖 cases、清 casesError
+  失败 → casesError 提示条（**不致命**，主体不受影响）
 
 syncPoller():
-  detail 非终态且 now < deadline 且无 poller → createPoller(task=loadAll, 不配置 isPaused)
+  detail 非终态且 now < deadline 且无 poller → createPoller(task=loadDetail, 不配置 isPaused)
   终态或超时 → stopPoller()                    // 收敛即停
 
 onUnmounted: alive = false；stopPoller()；清理 copiedTimer
@@ -69,8 +74,11 @@ onUnmounted: alive = false；stopPoller()；清理 copiedTimer
 
 - **收敛轮询与 submissionStore 同一取舍**：不配置 `isPaused`（页面隐藏不暂停）——
   有限生命周期轮询，选手切窗口查资料回来就该看到结果；总超时（deadline）兜底防无限轮询。
-- **详情/测试点并行且各自降级**：`allSettled` 保证一个失败不拖垮另一个；测试点明细
-  在部分 OJ 配置下会被隐藏，终态无明细时提示「以最终判定为准」而非报错。
+- **轮询周期只拉详情（M3）**：评测中 `get-all-case-result` 无稳定结果，每周期重复
+  拉取纯属浪费（且同会话提交已有 store 收敛轮询在打 `get_judgement`）；终态判据
+  （`isTerminalStatus`）命中后测试点明细只请求一次，随后 syncPoller 停轮询。
+- **详情/测试点各自降级**：测试点明细在部分 OJ 配置下会被隐藏，终态无明细时
+  提示「以最终判定为准」而非报错；详情瞬时失败不清空已有页面。
 - 评测中且无明细时渲染 4 行脉冲骨架（渐进透明度），提示「测试点结果将自动刷新」。
 - 子任务制按 `subTasks[].groupNum` 分组渲染，每组独立表头与「N/M 通过」计数；
   平铺制直接一张表。得分列（OI）仅在任一测试点带 score 时出现。
