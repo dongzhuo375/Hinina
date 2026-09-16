@@ -9,7 +9,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 - `pub mod config_cmd` — 配置读取 / 热重载 / 更新 + `get_storage_info`（存储与版本信息）
 - `pub mod contest_cmd` — 比赛列表 / 选中 / 加载配置比赛 / 榜单 / 公告与已读状态
 - `pub mod problem_cmd` — 题目详情 / 列表 / 用户题目状态 / 题目限制
-- `pub mod submission_cmd` — 提交 / 评测轮询 / 提交列表 / 详情 / 测试点
+- `pub mod submission_cmd` — 提交 / 评测结果单次查询 / 提交列表 / 详情 / 测试点
 - `pub mod theme_cmd` — 主题读取 / 设置
 - `pub mod workspace_cmd` — 工作区加载 / 保存 / 切换 / 当前 / 文件更新 / 语言设置
 - `#[cfg(test)] #[path = "tests/mod_tests.rs"] mod tests` — 本层单元测试

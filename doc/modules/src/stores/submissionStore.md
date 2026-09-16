@@ -67,6 +67,7 @@ pollOnce(id)
 设计要点：
 
 - **P54 迁移到 createPoller**：递归 setTimeout + 逐周期抖动 + 重入保护，取代裸 `setInterval`。
+- **节拍唯一归属前端**：后端 `get_judgement` 是单次查询（无内层阻塞循环），服务端请求节奏 = 本 store 的 Poller 周期，±20% 抖动真实生效；`stopPolling`（登出）即刻停发请求，不存在停不掉的在途后端循环。历史教训：曾经后端 `poll_judgement` 自带固定 2s 内层循环（阻塞到终态才返回），前端 Poller 的重入保护令后续 tick 全部空转 —— 抖动沦为装饰、真实节奏是后端固定间隔、`stopPolling` 停不掉在途循环，双层轮询已拆除。
 - **刻意不配置 `isPaused`**：提交结果轮询是有限生命周期的收敛轮询，选手切窗口查资料回来就该看到结果；后台暂停只会推迟收敛、拉长「评测中」焦虑期（与榜单类无限轮询取舍相反）。
 - **终态判据单一来源**：`utils/submission.isTerminalStatus`（与 Rust `is_terminal_status` 对齐，`Unknown` 视为终态）——store 不自建状态列表。
 - **总超时兜底**：deadline（默认 300s）保证服务端一直返回非终态时也会停止。

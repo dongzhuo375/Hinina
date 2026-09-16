@@ -20,7 +20,7 @@
 - `core::provider::registry`（ProviderRegistry 注册/获取 SubmissionProvider）
 - `infra::provider_registry_impl`
 - `adapter::hoj`（实现全部五个方法）
-- `service::submission`（`submit` / `poll_judgement` / `list_contest_submissions` / `get_submission_detail` / `get_submission_cases` 经 registry 调用）
+- `service::submission`（`submit` / `get_judgement` / `list_contest_submissions` / `get_submission_detail` / `get_submission_cases` 经 registry 调用）
 
 ## 逻辑流程
 无（纯 trait 定义）。

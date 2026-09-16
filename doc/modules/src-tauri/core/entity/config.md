@@ -20,8 +20,8 @@
 ### OjConfig
 - `hoj_url: String`（默认 `"https://hoj.dongzhuo.top"`）— HOJ 服务端地址
 - `timeout_secs: u64`（默认 `30`）— HTTP 请求超时
-- `poll_interval_secs: u64`（默认 `2`）— 评测轮询间隔
-- `poll_timeout_secs: u64`（默认 `300`）— 评测最大等待时间
+- `poll_interval_secs: u64`（默认 `2`）— 评测轮询间隔（由前端 submissionStore 的 createPoller 经 get_config 消费，后端单次查询不读取）
+- `poll_timeout_secs: u64`（默认 `300`）— 评测最大等待时间（同上，前端 poller 的 deadline 判据）
 - `cache_ttl_secs: u64`（默认 `60`）— 比赛列表缓存 TTL
 - `contest_id: i64`（默认 `0`）— 默认加载的比赛 ID（阶段 7 单比赛模式），`0` 表示不自动加载
 - `contest_password: Option<String>`（默认 `None`）— 比赛密码（私有赛需要），公开赛留空
@@ -63,7 +63,6 @@
 - `service::config::ConfigService`（通过 `ConfigRepository` 加载/保存 `AppConfig`，并在 `new()` / `reload()` 加载路径调用 `normalize_legacy_values`）
 - `commands::config_cmd`（`update_config` 持久化前调用 `validate()` + `sanitize()` 做后端兜底）
 - `service::theme::ThemeService`（读取/写入 `ThemeConfig`）
-- `service::submission::SubmissionService`（通过 `OjConfig` 获取轮询参数）
 - `service::contest::ContestService`（通过 `OjConfig::cache_ttl_secs` 控制缓存 TTL）
 - `core::context`（`AppContext::init` 读取 `OjConfig::timeout_secs` 构造 HttpClient）
 

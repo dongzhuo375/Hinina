@@ -23,6 +23,19 @@ const RANK_POLL_JITTER_MS = 2_000
 const FULL_FETCH_MAX_PAGES = 40
 const FULL_FETCH_MAX_ROWS = 2_000
 
+/// 全量快照页间节流：HOJ 榜单页是「整榜全量重算后分页」，背靠背连发会让服务端
+/// 连续做最多 40 次整榜计算 —— 这是全应用最重的突发路径，必须摊开：
+/// 页间 400ms（打满上限也只多 ~16s，手动刷新场景无感知）
+const FULL_FETCH_PAGE_DELAY_MS = 400
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/// 全量拉取代际令牌：每次 fetchAllRows 自增。切筛选/登出后旧循环经令牌与
+/// groupFilter 双重校验作废，防止过期循环把旧快照写回（复活）或并发双写
+let fullFetchGeneration = 0
+
 /// 榜单分组筛选（判据与过滤纯函数见 `utils/rank`）
 export type { RankGroupFilter }
 
@@ -178,6 +191,7 @@ export const useRankStore = defineStore('rank', {
       if (!this.contestId || this.fullFetchState === 'loading') return
       // 记住拉取前状态：失败且仍有旧快照时回退到它（不能停在 loading，否则重入保护会永久锁死）
       const previousState = this.fullFetchState
+      const generation = ++fullFetchGeneration
       this.fullFetchState = 'loading'
       this.isLoading = true
       this.error = null
@@ -192,12 +206,18 @@ export const useRankStore = defineStore('rank', {
             keyword: this.keyword || null,
             removeStar: false,
           })
+          // 拉取期间已被更新的拉取取代，或用户已退出全量模式（切筛选/登出 $reset）：
+          // 中止且不写快照 —— 过期数据复活比缺一次刷新更糟
+          if (generation !== fullFetchGeneration || !isFullSnapshotFilter(this.groupFilter)) return
           merged = mergeRankPages(merged, result.records)
           if (page >= result.pages) break
           if (page >= FULL_FETCH_MAX_PAGES || merged.length >= FULL_FETCH_MAX_ROWS) {
             truncated = true
             break
           }
+          // 页间节流（见 FULL_FETCH_PAGE_DELAY_MS 注释）；节流窗口同样是中止检查点
+          await sleep(FULL_FETCH_PAGE_DELAY_MS)
+          if (generation !== fullFetchGeneration || !isFullSnapshotFilter(this.groupFilter)) return
         }
         this.fullRows = merged
         this.fullLoadedRows = merged.length

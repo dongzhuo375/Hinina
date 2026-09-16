@@ -9,7 +9,7 @@
 - **`AuthEvent`** — 认证事件：`LoginSuccess`, `Logout`, `SessionExpired`, `TokenRefreshed { token }`（Provider 侧凭证轮换，仅携带新凭证字符串，不含 OJ 私有语义；AuthService 订阅后回写磁盘会话）
 - **`ContestEvent`** — 比赛事件：`ListLoaded`, `Selected`, `CountdownTick`
 - **`ProblemEvent`** — 题目事件：`Opened`, `CodeChanged`
-- **`SubmissionEvent`** — 提交事件：`Created`, `Judged`, `PollTimeout`
+- **`SubmissionEvent`** — 提交事件：`Created`, `Judged`（评测轮询超时是前端关注点，由 submissionStore 的 createPoller 判定，原 `PollTimeout` 变体已随后端单次查询化删除）
 - **`WorkspaceEvent`** — 工作区事件：`Loaded`, `Saved`, `AutoSaveTriggered`, `Switched`
 - **`SystemEvent`** — 系统事件：`ConfigReloaded`, `ThemeChanged`, `OJSwitched`, `WindowClosing`
 

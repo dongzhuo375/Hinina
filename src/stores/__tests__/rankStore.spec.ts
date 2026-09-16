@@ -41,6 +41,19 @@ function makePage(records: ContestRankRow[], total: number, current = 1): Contes
   return { records, total, size: 50, current, pages: Math.max(1, Math.ceil(total / 50)) }
 }
 
+/// 在 fake timers 下驱动含页间节流（400ms/页）的全量拉取直至完成：
+/// 先挂起业务 Promise，再推进虚拟时钟让 sleep 定时器逐个落地
+async function runWithFakeTimers(fn: () => Promise<void>, advanceMs = 5_000): Promise<void> {
+  vi.useFakeTimers()
+  try {
+    const pending = fn()
+    await vi.advanceTimersByTimeAsync(advanceMs)
+    await pending
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -352,7 +365,8 @@ describe('全量快照模式 — 打星/女生队跨页过滤', () => {
     rank.contestId = CONTEST_ID
     rank.uid = MY_UID
 
-    await rank.setGroupFilter('star')
+    // 页间节流 400ms 需推进定时器（fake timers 驱动，见 runWithFakeTimers）
+    await runWithFakeTimers(() => rank.setGroupFilter('star'))
 
     expect(rankService.getRank).toHaveBeenCalledTimes(3)
     // 快照必须包含打星行（removeStar=false），否则 star 筛选恒为空
@@ -373,8 +387,10 @@ describe('全量快照模式 — 打星/女生队跨页过滤', () => {
     const rank = useRankStore()
     rank.contestId = CONTEST_ID
 
-    await rank.setGroupFilter('star')
-    await rank.setGroupFilter('female')
+    await runWithFakeTimers(async () => {
+      await rank.setGroupFilter('star')
+      await rank.setGroupFilter('female')
+    })
 
     expect(rankService.getRank).toHaveBeenCalledTimes(6)
     expect(rank.visibleRows.map((r) => r.uid)).toEqual(['f1'])
@@ -387,7 +403,7 @@ describe('全量快照模式 — 打星/女生队跨页过滤', () => {
     const rank = useRankStore()
     rank.contestId = CONTEST_ID
 
-    await rank.setGroupFilter('star')
+    await runWithFakeTimers(() => rank.setGroupFilter('star'))
     expect(rank.pages).toBe(3) // ceil(120/50)
     expect(rank.visibleRows).toHaveLength(50)
 
@@ -417,11 +433,36 @@ describe('全量快照模式 — 打星/女生队跨页过滤', () => {
     const rank = useRankStore()
     rank.contestId = CONTEST_ID
 
-    await rank.setGroupFilter('star')
+    // 39 次页间节流 × 400ms ≈ 15.6s，推进 20s 覆盖全程
+    await runWithFakeTimers(() => rank.setGroupFilter('star'), 20_000)
 
     expect(rankService.getRank).toHaveBeenCalledTimes(40)
     expect(rank.fullFetchState).toBe('truncated')
     expect(rank.fullLoadedRows).toBe(2000)
+  })
+
+  it('拉取中途退出全量模式：旧循环中止，过期快照不复活', async () => {
+    const rank = useRankStore()
+    rank.contestId = CONTEST_ID
+    rankService.getRank.mockImplementation(async (q: { currentPage?: number }) => {
+      const current = q.currentPage ?? 1
+      if (current === 2) {
+        // 模拟选手在第 2 页在途时切回全场总榜（清快照、恢复服务端分页）
+        await rank.setGroupFilter('all')
+      }
+      const stars = Array.from({ length: 50 }, (_, i) =>
+        makeRow({ uid: `s${(current - 1) * 50 + i}`, rank: -1 }),
+      )
+      return makePage(stars, 150, current) // pages = 3
+    })
+
+    await runWithFakeTimers(() => rank.setGroupFilter('star'), 2_000).catch(() => {})
+
+    // 旧循环必须已中止且不写快照：退出后 fullRows 保持 null（不复活）、状态 idle
+    expect(rank.fullRows).toBeNull()
+    expect(rank.fullFetchState).toBe('idle')
+    expect(rank.isFullMode).toBe(false)
+    expect(rank.isLoading).toBe(false)
   })
 
   it('全量模式下自动轮询暂停，refresh() 手动触发重拉快照', async () => {

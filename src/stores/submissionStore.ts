@@ -44,10 +44,14 @@ const HISTORY_PAGE_SIZE = 20
  * 轮询语义（P54 迁移到 createPoller 后的不变量）：
  * - 每条提交一个独立 Poller（递归 setTimeout + 抖动 + 重入保护），
  *   命中终态或超过总超时（deadline）自动停止；
+ * - **节拍唯一归属前端**：后端 `get_judgement` 是单次查询（无内层阻塞循环），
+ *   服务端请求节奏 = 本 store 的 Poller 周期，±20% 抖动真实生效；
+ *   `stopPolling`（登出）即刻停发请求，不存在停不掉的在途后端循环；
  * - **刻意不配置 isPaused（页面隐藏不暂停）**：提交结果轮询是有限生命周期的
  *   收敛轮询，选手切窗口查资料回来就该看到结果；暂停只会推迟收敛、
  *   拉长「评测中」焦虑期（与榜单类无限轮询的取舍相反）；
- * - 瞬时失败不中断循环，由总超时兜底。
+ * - 瞬时失败不中断循环，由总超时兜底；认证类失败经 bridge 观察者触发全局
+ *   会话守卫（登出清理会调用 stopAllPolling，循环随之终止）。
  */
 export const useSubmissionStore = defineStore('submission', {
   state: () => ({

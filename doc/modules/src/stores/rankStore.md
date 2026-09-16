@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-常量：`RANK_POLL_INTERVAL_MS`(10s)、`RANK_POLL_JITTER_MS`(2s) —— HOJ 文档 §9.9 要求间隔 ≥10s 且切后台暂停，抖动打散全场客户端的同步相位；`FULL_FETCH_MAX_PAGES`(40)、`FULL_FETCH_MAX_ROWS`(2000) —— 全量快照拉取上限（40 页 × 50 行），超限截断并由 UI 明示「结果可能不完整」，避免赛场上无限拉页打爆 OJ。
+常量：`RANK_POLL_INTERVAL_MS`(10s)、`RANK_POLL_JITTER_MS`(2s) —— HOJ 文档 §9.9 要求间隔 ≥10s 且切后台暂停，抖动打散全场客户端的同步相位；`FULL_FETCH_MAX_PAGES`(40)、`FULL_FETCH_MAX_ROWS`(2000) —— 全量快照拉取上限（40 页 × 50 行），超限截断并由 UI 明示「结果可能不完整」，避免赛场上无限拉页打爆 OJ；`FULL_FETCH_PAGE_DELAY_MS`(400ms) —— 全量快照**页间节流**（HOJ 每页都是整榜重算，连发是全应用最重的突发路径）；模块级 `fullFetchGeneration` 代际令牌 —— 中止过期拉取循环。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
@@ -75,9 +75,14 @@ setGroupFilter(filter)
 
 fetchAllRows()
   无 contestId 或已在 loading → 短路（重入保护）
+  generation = ++fullFetchGeneration           // 代际令牌：新拉取/退出模式后旧循环作废
   从第 1 页起顺序 getRank({ keyword, removeStar: false, limit: 50 })
     // removeStar 恒 false：快照必须包含打星行，否则「打星队」筛选恒为空
     // keyword 保持生效：每页请求都带上
+  每页返回后 + 每次页间 sleep(400ms) 后双重校验：
+    generation 已过期 或 groupFilter 已离开 star/female → 静默中止，不写快照
+    // HOJ 榜单页是整榜全量重算后分页，连发即让服务端背靠背算整榜 —— 页间节流摊开突发；
+    // 中止校验防止过期循环把旧快照写回（复活）或与新循环并发双写
   merged = mergeRankPages(merged, records)     // 每页都会前置复制我/关注用户，跨页按 uid 去重
   page >= pages → done；page >= 40 或 merged >= 2000 行 → truncated
   成功 → fullRows/fullLoadedRows/fullFetchState/lastUpdated + syncFullPaging()
@@ -126,13 +131,18 @@ stopLive → poller?.stop() + 置 null + isLive = false
 - **快照失败保留旧数据**：重拉失败且有旧快照时回退到拉取前状态继续浏览（状态不能停在
   `loading`，否则重入保护会把 `fetchAllRows` 永久锁死）；毫无快照才标记 `error`，
   此时 `visibleRows` 退化为筛当前页——数据不完整也好过整页空白。
+- **页间节流与代际中止**：全量拉取每页之间强制 `sleep(400ms)`（服务端每页整榜重算，
+  零间隔连发 40 页是唯一可能打出请求尖峰的路径）；循环持代际令牌并在每次 await 后
+  校验「令牌未过期 && 仍处于 star/female 筛选」，中途切筛选/登出即静默中止且不写快照
+  —— 过期数据复活比缺一次刷新更糟。
 
 ## 测试
 
-`src/stores/__tests__/rankStore.spec.ts`（mock rankService，31 例）锁定：
+`src/stores/__tests__/rankStore.spec.ts`（mock rankService，32 例；多页场景经
+`runWithFakeTimers` 辅助以 fake timers 推进页间节流）锁定：
 
 - **applyPage 三处归一**：uid 去重、我的行从未去重 records 定位（uid 为空不抛错）、参与人数 `resolveParticipantCountFromPage(page, uid)` 修正、分页信息与刷新时间记录。
 - **loadRank / refresh**：失败记录原因、复位 loading 并抛出但**保留上一次数据**；`refresh` 吞异常且无 contestId 不发请求。
 - **分页与筛选**：`setPage` 越界短路 / 范围内按页请求；`setKeyword` trim 后回第 1 页且空串传 null；official 置 removeStar 重新请求（服务端参数）、从 official 切回 all 复位重载。
-- **全量快照模式专节**：`setGroupFilter(star)` 顺序拉取全部页并按 uid 跨页去重合并；star↔female 互切重拉快照并按新分组过滤；全量模式翻页是纯客户端切片不发请求；超过 40 页上限截断并标记 `truncated`；全量模式自动轮询暂停、`refresh()` 手动触发重拉快照；切回 all/official 清空快照恢复服务端分页；全量模式 `setKeyword` 携带关键词重拉快照并回第 1 页；快照失败且无旧快照标记 `error`（`visibleRows` 退化为筛当前页）；重拉失败保留旧快照继续浏览（状态不回退、不停在 loading）；无 contestId 不发请求。
+- **全量快照模式专节**：`setGroupFilter(star)` 顺序拉取全部页并按 uid 跨页去重合并；star↔female 互切重拉快照并按新分组过滤；全量模式翻页是纯客户端切片不发请求；超过 40 页上限截断并标记 `truncated`；**拉取中途退出全量模式时旧循环中止、过期快照不复活**；全量模式自动轮询暂停、`refresh()` 手动触发重拉快照；切回 all/official 清空快照恢复服务端分页；全量模式 `setKeyword` 携带关键词重拉快照并回第 1 页；快照失败且无旧快照标记 `error`（`visibleRows` 退化为筛当前页）；重拉失败保留旧快照继续浏览（状态不回退、不停在 loading）；无 contestId 不发请求。
 - **startLive / stopLive**：按 10s±2s 抖动刷新、停止后不再刷新、重复调用不产生多个轮询器、暂停判据生效时跳过请求但轮询存活、`stopLive` 幂等。

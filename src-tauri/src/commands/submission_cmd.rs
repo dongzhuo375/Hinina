@@ -30,23 +30,21 @@ pub async fn submit_code(
         .await
 }
 
-/// 轮询评测结果。
+/// 单次查询评测结果。
 ///
 /// 前端 invoke 签名: `get_judgement`({ submissionId })
 ///
-/// 轮询间隔和超时从 Config 读取（`oj.poll_interval_secs` / `oj.poll_timeout_secs`）。
-/// 评测完成时返回 `JudgementResult`，超时或查询失败时返回错误。
-/// 发布 `SubmissionEvent::Judged` 或 `SubmissionEvent::PollTimeout`。
+/// 轮询节拍 / 总超时 / 终态停止全部由前端 submissionStore 编排
+/// （createPoller，抖动 ±20% 封顶 500ms）；`oj.poll_interval_secs` /
+/// `poll_timeout_secs` 由前端经 get_config 消费，本命令不再读取。
+/// 终态发布 `SubmissionEvent::Judged`；非终态原样透传、不发事件。
 #[tauri::command]
 pub async fn get_judgement(
     ctx: State<'_, AppContext>,
     submission_id: String,
 ) -> AppResult<JudgementResult> {
     info!(submission_id = %submission_id, "Command: 查询评测结果");
-    let cfg = ctx.config.get().oj;
-    ctx.submission
-        .poll_judgement(&submission_id, cfg.poll_interval_secs, cfg.poll_timeout_secs)
-        .await
+    ctx.submission.get_judgement(&submission_id).await
 }
 
 /// 获取比赛提交列表（分页）。
