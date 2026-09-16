@@ -9,7 +9,7 @@ const { getConfig, updateConfig, reloadConfig } = vi.hoisted(() => ({
 }))
 vi.mock('@/bridge/config.bridge', () => ({ getConfig, updateConfig, reloadConfig }))
 
-import { configService, normalizeLanguageId } from '@/services/config.service'
+import { configService } from '@/services/config.service'
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -28,7 +28,7 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
       tabSize: 4,
       autoSave: true,
       autoSaveIntervalSecs: 30,
-      defaultLanguage: 'cpp',
+      defaultLanguage: 'C++',
     },
     theme: { themeName: 'light', editorTheme: 'vs' },
     layout: { sidebarWidth: 280, splitRatio: 0.48 },
@@ -41,27 +41,6 @@ beforeEach(() => {
   // 单例服务的进程内缓存必须逐用例清空，否则相互串扰
   configService.invalidate()
   vi.spyOn(console, 'error').mockImplementation(() => {})
-})
-
-describe('normalizeLanguageId — 显示名 → Monaco id 归一（P55）', () => {
-  it.each([
-    ['cpp', 'cpp'],
-    ['C++', 'cpp'],
-    ['c', 'c'],
-    ['C', 'c'],
-    ['Java', 'java'],
-    ['python', 'python'],
-    ['py', 'python'],
-  ])('%s → %s', (raw, expected) => {
-    expect(normalizeLanguageId(raw)).toBe(expected)
-  })
-
-  it('空值与无法识别的 id 回退 cpp（保证喂给 Monaco 的恒为合法值）', () => {
-    expect(normalizeLanguageId('')).toBe('cpp')
-    expect(normalizeLanguageId(undefined)).toBe('cpp')
-    expect(normalizeLanguageId(null)).toBe('cpp')
-    expect(normalizeLanguageId('rust')).toBe('cpp')
-  })
 })
 
 describe('getConfig — 进程内缓存', () => {
@@ -90,21 +69,21 @@ describe('getEditorPrefs / getDefaultLanguage / getSplitRatio — 派生参数�
     const config = makeConfig()
     config.editor.fontSize = 16
     config.editor.tabSize = 2
-    config.editor.defaultLanguage = 'java'
+    config.editor.defaultLanguage = 'Java'
     config.layout.splitRatio = 0.55
     getConfig.mockResolvedValue(config)
 
     expect(await configService.getEditorPrefs()).toEqual({ fontSize: 16, tabSize: 2 })
-    expect(await configService.getDefaultLanguage()).toBe('java')
+    expect(await configService.getDefaultLanguage()).toBe('Java')
     expect(await configService.getSplitRatio()).toBe(0.55)
   })
 
-  it('历史配置遗留显示名 "C++" 归一为 Monaco id', async () => {
+  it('历史配置遗留 Monaco id "cpp" 归一为 HOJ 显示名', async () => {
     const config = makeConfig()
-    config.editor.defaultLanguage = 'C++'
+    config.editor.defaultLanguage = 'cpp'
     getConfig.mockResolvedValue(config)
 
-    expect(await configService.getDefaultLanguage()).toBe('cpp')
+    expect(await configService.getDefaultLanguage()).toBe('C++')
   })
 
   it('越界/非法值回退兜底（字号 14、Tab 4、分栏 0.48）', async () => {
@@ -122,7 +101,7 @@ describe('getEditorPrefs / getDefaultLanguage / getSplitRatio — 派生参数�
     getConfig.mockRejectedValue(new Error('IPC 失败'))
 
     expect(await configService.getEditorPrefs()).toEqual({ fontSize: 14, tabSize: 4 })
-    expect(await configService.getDefaultLanguage()).toBe('cpp')
+    expect(await configService.getDefaultLanguage()).toBe('C++')
     expect(await configService.getSplitRatio()).toBe(0.48)
   })
 })

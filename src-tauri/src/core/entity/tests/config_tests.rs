@@ -7,8 +7,8 @@ use super::*;
 #[test]
 fn defaults_are_in_value_domain() {
     let cfg = AppConfig::default();
-    // Monaco language id，而不是显示名 "C++"
-    assert_eq!(cfg.editor.default_language, "cpp");
+    // HOJ 语言显示名（与提交契约一致），而不是 Monaco id "cpp"
+    assert_eq!(cfg.editor.default_language, "C++");
     // 深色主题尚未实现，默认必须是浅色
     assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.theme.editor_theme, "vs");
@@ -18,19 +18,22 @@ fn defaults_are_in_value_domain() {
 // ── 旧值归一 ──
 
 #[test]
-fn normalize_maps_legacy_language_display_names_to_monaco_ids() {
+fn normalize_maps_legacy_monaco_ids_to_display_names() {
+    // 值域翻转：被上一版归一成 Monaco id 的配置映射回 HOJ 显示名（大小写不敏感）
     for (legacy, expected) in [
-        ("C++", "cpp"),
-        ("Java", "java"),
-        ("Python", "python"),
-        ("C", "c"),
+        ("cpp", "C++"),
+        ("java", "Java"),
+        ("python", "Python"),
+        ("c", "C"),
+        ("CPP", "C++"),
+        ("Java", "Java"),
     ] {
         let mut cfg = AppConfig::default();
         cfg.editor.default_language = legacy.into();
         normalize_legacy_values(&mut cfg);
         assert_eq!(
             cfg.editor.default_language, expected,
-            "旧显示名 {:?} 应归一为 Monaco id",
+            "旧 Monaco id {:?} 应归一为显示名",
             legacy
         );
     }
@@ -38,13 +41,22 @@ fn normalize_maps_legacy_language_display_names_to_monaco_ids() {
 
 #[test]
 fn normalize_keeps_valid_and_unknown_languages_untouched() {
-    // 已是合法 id 或用户自定义值：一律不动
-    for kept in ["cpp", "java", "python", "c", "rust", ""] {
+    // 已是显示名或 OJ 可能提供的其他语言：一律不动（不强制回退 C++）
+    for kept in ["C++", "C", "Java", "Python", "Go", "Rust"] {
         let mut cfg = AppConfig::default();
         cfg.editor.default_language = kept.into();
         normalize_legacy_values(&mut cfg);
         assert_eq!(cfg.editor.default_language, kept);
     }
+}
+
+#[test]
+fn normalize_falls_back_to_default_language_for_empty() {
+    // 仅空串回退默认值
+    let mut cfg = AppConfig::default();
+    cfg.editor.default_language = "".into();
+    normalize_legacy_values(&mut cfg);
+    assert_eq!(cfg.editor.default_language, "C++");
 }
 
 #[test]
@@ -89,7 +101,7 @@ fn normalize_replaces_only_legacy_default_split_ratio() {
 fn normalize_is_idempotent() {
     // 归一后的配置再过一遍不应有任何变化（每次加载都会执行）
     let mut cfg = AppConfig::default();
-    cfg.editor.default_language = "C++".into();
+    cfg.editor.default_language = "cpp".into();
     cfg.theme.theme_name = "dark".into();
     cfg.theme.editor_theme = "vs-dark".into();
     cfg.layout.split_ratio = 0.45;
@@ -104,15 +116,15 @@ fn normalize_is_idempotent() {
 
 #[test]
 fn normalize_fixes_legacy_json_from_disk() {
-    // 端到端：旧版落盘的 config.json 反序列化后归一
+    // 端到端：上一版落盘的 config.json（defaultLanguage 被归一成 'cpp'）反序列化后重新归一
     let legacy = r#"{
-        "editor": { "defaultLanguage": "C++" },
+        "editor": { "defaultLanguage": "cpp" },
         "theme": { "themeName": "dark", "editorTheme": "vs-dark" },
         "layout": { "splitRatio": 0.45 }
     }"#;
     let mut cfg: AppConfig = serde_json::from_str(legacy).expect("旧配置应能解析");
     normalize_legacy_values(&mut cfg);
-    assert_eq!(cfg.editor.default_language, "cpp");
+    assert_eq!(cfg.editor.default_language, "C++");
     assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.theme.editor_theme, "vs");
     assert_eq!(cfg.layout.split_ratio, 0.48);
@@ -194,7 +206,7 @@ fn sanitize_keeps_valid_config_unchanged() {
     cfg.editor.font_size = 8;
     cfg.editor.tab_size = 8;
     cfg.editor.auto_save_interval_secs = 300;
-    cfg.editor.default_language = "java".into();
+    cfg.editor.default_language = "Java".into();
     cfg.layout.split_ratio = 0.30;
     let before = cfg.clone();
     assert!(!cfg.sanitize());
@@ -203,14 +215,14 @@ fn sanitize_keeps_valid_config_unchanged() {
 
 #[test]
 fn sanitize_normalizes_default_language() {
-    // 旧显示名 → Monaco id；未知值 → cpp 回退；合法 id 保留
+    // 旧 Monaco id → 显示名；非空未知值保留（OJ 可能提供 Go/Rust 等）；仅空串回退默认
     for (raw, expected) in [
-        ("C++", "cpp"),
-        ("Java", "java"),
-        ("rust", "cpp"),
-        ("", "cpp"),
-        ("python", "python"),
-        ("c", "c"),
+        ("cpp", "C++"),
+        ("java", "Java"),
+        ("C++", "C++"),
+        ("Go", "Go"),
+        ("Rust", "Rust"),
+        ("", "C++"),
     ] {
         let mut cfg = AppConfig::default();
         cfg.editor.default_language = raw.into();
@@ -244,6 +256,7 @@ fn sanitize_fixes_hand_edited_json_from_disk() {
     assert_eq!(cfg.oj.timeout_secs, 120);
     assert_eq!(cfg.oj.contest_id, 0);
     assert_eq!(cfg.editor.font_size, 8);
-    assert_eq!(cfg.editor.default_language, "cpp");
+    // 未知非空语言不再强制回退：OJ 可能提供 Haskell 等
+    assert_eq!(cfg.editor.default_language, "Haskell");
     assert_eq!(cfg.layout.split_ratio, 0.30);
 }

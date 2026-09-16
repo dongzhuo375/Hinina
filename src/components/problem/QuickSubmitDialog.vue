@@ -5,7 +5,13 @@ import CodeEditor from '@/components/editor/CodeEditor.vue'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { problemService } from '@/services/problem.service'
 import type { ContestProblem } from '@/types/contest'
+import {
+  DEFAULT_LANGUAGE,
+  DEFAULT_LANGUAGES,
+  hojLanguageOfFileName,
+} from '@/utils/language'
 import {
   formatMemoryKb,
   isTerminalStatus,
@@ -23,16 +29,30 @@ const contestStore = useContestStore()
 const submissionStore = useSubmissionStore()
 const workspaceStore = useWorkspaceStore()
 
-const LANGUAGES = [
-  { label: 'C', value: 'c' },
-  { label: 'C++', value: 'cpp' },
-  { label: 'Java', value: 'java' },
-  { label: 'Python', value: 'python' },
-] as const
+/// 本题允许的提交语言（HOJ 显示名）：挂载时从题目详情拉取，失败回退内置默认列表
+const allowedLanguages = ref<string[]>([...DEFAULT_LANGUAGES])
 
 const code = ref('')
-/// 默认语言沿用工作区当前选择（与解题页习惯一致），兜底 cpp
-const language = ref(workspaceStore.language || 'cpp')
+/// 默认语言沿用工作区当前选择（与解题页习惯一致），兜底 C++
+const language = ref(workspaceStore.language || DEFAULT_LANGUAGE)
+
+async function loadAllowedLanguages() {
+  const contestId = contestStore.contest?.id
+  if (!contestId) return
+  try {
+    const detail = await problemService.getProblem(contestId, props.problem.displayId)
+    if (detail.languages.length > 0) {
+      allowedLanguages.value = detail.languages
+      // 当前选择不在允许列表内时切到列表首项，避免提交被服务端拒绝
+      if (!allowedLanguages.value.includes(language.value)) {
+        language.value = allowedLanguages.value[0]
+      }
+    }
+  } catch (e) {
+    // 语言列表不可得只影响下拉候选（回退默认列表），不阻断快捷提交
+    console.warn('[QuickSubmitDialog] 获取题目允许语言失败，使用默认列表:', e)
+  }
+}
 
 const submitError = ref<string | null>(null)
 const fileError = ref<string | null>(null)
@@ -52,22 +72,18 @@ const TONE_CLASSES: Record<StatusTone, string> = {
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('close')
 }
-onMounted(() => window.addEventListener('keydown', onKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  void loadAllowedLanguages()
+})
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 // ── 文件导入（拖放 + 选择文件） ──
 
 /// 与 CodeEditor 上传口径一致，另加 256KB 大小护栏（快捷提交场景无需超大文件）
 const MAX_FILE_BYTES = 256 * 1024
-const EXT_LANG: Record<string, string | null> = {
-  '.cpp': 'cpp',
-  '.cc': 'cpp',
-  '.cxx': 'cpp',
-  '.c': 'c',
-  '.java': 'java',
-  '.py': 'python',
-  '.txt': null, // 纯文本不切换语言
-}
+/// 可导入的扩展名白名单（.txt 纯文本不切换语言）
+const ACCEPTED_EXTENSIONS = ['.cpp', '.cc', '.cxx', '.c', '.java', '.py', '.txt']
 
 const fileInput = ref<HTMLInputElement>()
 
@@ -90,7 +106,7 @@ function extOf(name: string): string {
 
 async function ingestFile(file: File) {
   const ext = extOf(file.name)
-  if (!(ext in EXT_LANG)) {
+  if (!ACCEPTED_EXTENSIONS.includes(ext)) {
     fileError.value = `不支持的文件类型「${file.name}」，仅接受 .cpp / .c / .java / .py / .txt`
     return
   }
@@ -106,9 +122,10 @@ async function ingestFile(file: File) {
     return
   }
   fileError.value = null
-  // 按扩展名自动切换语言（.txt 保持当前选择）
-  const lang = EXT_LANG[ext]
-  if (lang) language.value = lang
+  // 按扩展名自动切换语言（.txt 保持当前选择）；仅当推断语言在本题允许列表内才切，
+  // 否则保持原选择（拖入 .py 但本题只允许 C++ 时，静默切过去只会换来一次提交失败）
+  const detected = hojLanguageOfFileName(file.name)
+  if (detected && allowedLanguages.value.includes(detected)) language.value = detected
 }
 
 // HTML5 拖放（tauri.conf.json 已关闭 dragDropEnabled，事件才能到达 WebView）；
@@ -214,8 +231,8 @@ function goDetail() {
               v-model="language"
               class="cursor-pointer appearance-none rounded-lg border border-[var(--border-color)] bg-white py-1.5 pl-3 pr-8 font-mono text-xs font-medium text-[var(--text-primary)] shadow-xs transition-colors hover:bg-slate-50 focus:border-[var(--color-primary)] focus:outline-none"
             >
-              <option v-for="lang in LANGUAGES" :key="lang.value" :value="lang.value">
-                {{ lang.label }}
+              <option v-for="lang in allowedLanguages" :key="lang" :value="lang">
+                {{ lang }}
               </option>
             </select>
             <svg
@@ -254,6 +271,7 @@ function goDetail() {
           <CodeEditor
             v-model="code"
             :language="language"
+            :languages="allowedLanguages"
             :is-dirty="false"
             @update:language="language = $event"
             @submit="doSubmit"

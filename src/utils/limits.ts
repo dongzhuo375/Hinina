@@ -4,11 +4,12 @@
  * 单位约定（HOJ-Problem-Limits-API.md §4）：`timeLimit` 毫秒、`memoryLimit` MB。
  * 倍率约定（同文档 §5）：题面 limits 是 C/C++ 基准值，HOJ 服务端判题时按
  * **源文件后缀**判定 —— `.c`/`.cpp` 为 1 倍，其它语言时间与内存都 ×2
- * （栈限制不放大）。前端语言 id（`c`/`cpp`/`java`/`python`）与后缀一一对应，
- * 因此按 id 判定即可与判题端行为一致。
+ * （栈限制不放大）。语言权威值是 HOJ 显示名（见 `utils/language`），
+ * 经 `monacoIdOf` 归一后按 c/cpp 判定，与判题端后缀行为一致。
  */
 
 import type { ProblemLimits } from '@/types/rank'
+import { isCLikeLanguage } from '@/utils/language'
 
 /// 非法/零值 limits 的占位符（服务端未返回或脏数据时不留空白）
 const INVALID_PLACEHOLDER = '—'
@@ -38,12 +39,12 @@ export function formatMemoryLimit(mb: number): string {
  * 该语言是否适用 2 倍 limits（时间 ×2、内存 ×2）。
  *
  * 倍率来源：HOJ-Problem-Limits-API.md §5 —— 判题端 `JudgeContext` 以源文件后缀
- * `.c`/`.cpp` 为 1 倍基准，其它语言一律 ×2。前端语言 id 中 `c`/`cpp` 对应 1 倍，
- * `java`/`python` 等其余 id（含未知/空 id，按保守放大处理）均为 2 倍。
+ * `.c`/`.cpp` 为 1 倍基准，其它语言一律 ×2。入参是 HOJ 显示名（"C"/"C++"/"Java"…，
+ * 兼容历史 Monaco id），经 `isCLikeLanguage` 严格判定；空/未知语言按保守放大
+ * 处理（×2，宁可显示宽松阈值）。
  */
 export function isDoubleLimitLanguage(language: string): boolean {
-  const id = language.trim().toLowerCase()
-  return id !== 'c' && id !== 'cpp'
+  return !isCLikeLanguage(language ?? '')
 }
 
 /**

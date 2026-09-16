@@ -1,5 +1,6 @@
 import type { AppConfig } from '@/types/config'
 import * as configBridge from '@/bridge/config.bridge'
+import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
 
 /// 轮询参数兜底值，与 Rust `core::entity::config` 的默认值保持一致（2 秒 / 300 秒）
 const DEFAULT_POLL_INTERVAL_MS = 2_000
@@ -94,18 +95,19 @@ export class ConfigService {
   }
 
   /**
-   * 默认语言（Monaco language id）。
+   * 默认语言（HOJ 显示名，如 "C++"）。
    *
-   * 值域校验：只接受已知 Monaco id，历史配置遗留的显示名（如 "C++"）
-   * 经映射表归一，无法识别时回退 'cpp' —— 保证喂给 Monaco 的恒为合法 id（P55）。
+   * 值域归一：历史配置遗留的 Monaco id（'cpp' 等）经 `normalizeHojLanguage`
+   * 映射回显示名，空值回退 "C++"；其它非空值（"Go"/"Rust"…）原样保留 ——
+   * OJ 可能提供映射表之外的语言（值域约定见 `utils/language`）。
    */
   async getDefaultLanguage(): Promise<string> {
     try {
       const config = await this.getConfig()
-      return normalizeLanguageId(config.editor?.defaultLanguage)
+      return normalizeHojLanguage(config.editor?.defaultLanguage)
     } catch (e) {
-      console.error('[configService] 读取默认语言失败，回退 cpp:', e)
-      return 'cpp'
+      console.error('[configService] 读取默认语言失败，回退 C++:', e)
+      return DEFAULT_LANGUAGE
     }
   }
 
@@ -156,22 +158,6 @@ const DEFAULT_FONT_SIZE = 14
 const DEFAULT_TAB_SIZE = 4
 /// 分栏比例兜底值（设计稿 48% / 52%）
 const DEFAULT_SPLIT_RATIO = 0.48
-
-/// 显示名 → Monaco language id 映射（历史配置可能存的是显示名，P55）
-const LANGUAGE_ID_BY_DISPLAY_NAME: Record<string, string> = {
-  c: 'c',
-  cpp: 'cpp',
-  'c++': 'cpp',
-  java: 'java',
-  python: 'python',
-  py: 'python',
-}
-
-/// 归一化为合法 Monaco language id；无法识别时回退 'cpp'
-export function normalizeLanguageId(raw: string | undefined | null): string {
-  if (typeof raw !== 'string' || raw.trim() === '') return 'cpp'
-  return LANGUAGE_ID_BY_DISPLAY_NAME[raw.trim().toLowerCase()] ?? 'cpp'
-}
 
 /// 整数钳位：非法值（非数字/越界）回退兜底
 function clampInt(value: number | undefined, min: number, max: number, fallback: number): number {

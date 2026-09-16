@@ -226,6 +226,7 @@ async function handleSubmit() {
           ref="codeEditor"
           :model-value="workspaceStore.code"
           :language="workspaceStore.language"
+          :languages="problemStore.currentProblem?.languages ?? []"
           :is-dirty="workspaceStore.isDirty"
           @update:model-value="workspaceStore.updateCode"
           @update:language="workspaceStore.changeLanguage"

@@ -7,7 +7,6 @@ import {
   formatMemoryKb,
   formatMsToSeconds,
   isTerminalStatus,
-  mapLanguageToMonaco,
 } from '@/utils/submission'
 import type { JudgeCase, JudgementStatus, SubmissionCases } from '@/types/submission'
 
@@ -156,25 +155,6 @@ describe('formatMsToSeconds', () => {
   it('非法值显示 -', () => {
     expect(formatMsToSeconds(-5)).toBe('-')
     expect(formatMsToSeconds(Number.NaN)).toBe('-')
-  })
-})
-
-describe('mapLanguageToMonaco', () => {
-  it('HOJ 显示名归一到 Monaco language id', () => {
-    expect(mapLanguageToMonaco('C++')).toBe('cpp')
-    expect(mapLanguageToMonaco('C++17 (GCC 13.2)')).toBe('cpp')
-    expect(mapLanguageToMonaco('cpp')).toBe('cpp')
-    expect(mapLanguageToMonaco('C')).toBe('c')
-    expect(mapLanguageToMonaco('C (GCC 13.2)')).toBe('c')
-    expect(mapLanguageToMonaco('Java')).toBe('java')
-    expect(mapLanguageToMonaco('Java 17 (OpenJDK)')).toBe('java')
-    expect(mapLanguageToMonaco('Python 3.10')).toBe('python')
-    expect(mapLanguageToMonaco('python')).toBe('python')
-  })
-
-  it('无法识别的语言回退 cpp', () => {
-    expect(mapLanguageToMonaco('')).toBe('cpp')
-    expect(mapLanguageToMonaco('Rust')).toBe('cpp')
   })
 })
 

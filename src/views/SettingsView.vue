@@ -2,8 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import { configService, normalizeLanguageId } from '@/services/config.service'
+import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
+import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
 import type { AppConfig } from '@/types/config'
 import type { StorageInfo } from '@/types/system'
 
@@ -45,7 +46,7 @@ const form = reactive<SettingsForm>({
   cacheTtlSecs: '60',
   fontSize: '14',
   tabSize: 4,
-  defaultLanguage: 'cpp',
+  defaultLanguage: 'C++',
   autoSave: true,
   autoSaveIntervalSecs: '30',
   splitRatio: 0.48,
@@ -104,12 +105,8 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 
 const TAB_SIZES: readonly number[] = [2, 4, 8]
-const LANGUAGE_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
-  { label: 'C', value: 'c' },
-  { label: 'C++', value: 'cpp' },
-  { label: 'Java', value: 'java' },
-  { label: 'Python', value: 'python' },
-]
+/// 默认语言候选 = HOJ 显示名（值域权威见 utils/language；与提交契约同源）
+const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
 
 /// 分栏比例钳位到滑杆值域 [0.30, 0.70]，两位小数（与 step 0.01 对齐）
 function clampRatio(value: number): number {
@@ -127,7 +124,7 @@ function populate(config: AppConfig): void {
   form.cacheTtlSecs = String(config.oj.cacheTtlSecs)
   form.fontSize = String(config.editor.fontSize)
   form.tabSize = TAB_SIZES.includes(config.editor.tabSize) ? config.editor.tabSize : 4
-  form.defaultLanguage = normalizeLanguageId(config.editor.defaultLanguage)
+  form.defaultLanguage = normalizeHojLanguage(config.editor.defaultLanguage)
   form.autoSave = config.editor.autoSave
   form.autoSaveIntervalSecs = String(config.editor.autoSaveIntervalSecs)
   form.splitRatio = clampRatio(config.layout.splitRatio)
@@ -480,8 +477,8 @@ onBeforeUnmount(() => {
                     默认语言
                   </span>
                   <select v-model="form.defaultLanguage" :class="INPUT">
-                    <option v-for="lang in LANGUAGE_OPTIONS" :key="lang.value" :value="lang.value">
-                      {{ lang.label }}
+                    <option v-for="lang in LANGUAGE_OPTIONS" :key="lang" :value="lang">
+                      {{ lang }}
                     </option>
                   </select>
                   <span class="mt-1 block text-xs text-[var(--text-muted)]">

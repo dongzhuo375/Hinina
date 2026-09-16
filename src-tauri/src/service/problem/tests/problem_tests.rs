@@ -44,6 +44,7 @@ impl ProblemProvider for StubProblemProvider {
             samples: Vec::<Sample>::new(),
             time_limit: 1000,
             memory_limit: 256,
+            languages: Vec::new(),
         })
     }
 

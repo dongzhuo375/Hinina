@@ -10,7 +10,7 @@
 
 | 名称 | 形状 | 关键语义 |
 |------|------|----------|
-| `Workspace` | `{ id, contestId, problemId, rootPath, files: Record<string, string>, language, isDirty, createdAt, updatedAt }` | `id` 含随机后缀防碰撞；`files` 为文件名 → 内容的内存快照（代码文件按后缀识别，见 workspaceStore.loadWorkspace）；`language` 为语言 id（'c'/'cpp'/'java'/'python'，新建时后端为空串，前端回退 'cpp'）；`isDirty` 后端脏标记；`createdAt`/`updatedAt` 为 **UTC 毫秒级时间戳**（updated_at 用于崩溃恢复时判断最近活跃工作区） |
+| `Workspace` | `{ id, contestId, problemId, rootPath, files: Record<string, string>, language, isDirty, createdAt, updatedAt }` | `id` 含随机后缀防碰撞；`files` 为文件名 → 内容的内存快照（代码文件按后缀识别，见 workspaceStore.loadWorkspace）；`language` 为 **HOJ 显示名**（"C++" 等，权威值域见 `utils/language`；新建时后端为空串，前端经 `normalizeHojLanguage` 归一历史 Monaco id 并回退配置默认语言）；`isDirty` 后端脏标记；`createdAt`/`updatedAt` 为 **UTC 毫秒级时间戳**（updated_at 用于崩溃恢复时判断最近活跃工作区） |
 
 ## 直接依赖
 

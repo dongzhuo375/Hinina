@@ -8,16 +8,16 @@
 
 ## 核心类型/函数
 
-常量：`langFileMap`（语言 → 默认文件名：c→main.c / cpp→main.cpp / java→Main.java / python→main.py）。
+常量：`CODE_FILE_EXTENSIONS`（探测历史工作区代码文件的后缀白名单；新文件名一律经 `sourceFileNameOf` 从语言派生）。语言权威值为 **HOJ 显示名**（"C++" 等，见 `utils/language`）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | state | `workspace` / `activeFile` / `code` / `language`（默认 'cpp'）/ `isDirty` / `_syncTimer` | `_syncTimer` 是 2s 防抖定时器句柄（下划线前缀标记非持久化状态） |
 | `currentCode` / `currentLanguage` | getters | 编辑器当前代码与语言 |
-| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | 加载工作区：恢复 language（工作区未记录语言时用 `configService.getDefaultLanguage()` 的配置默认语言，兜底 'cpp' —— P55 消费落地）/ isDirty，从 `files` 中按后缀（.cpp/.c/.java/.py）找出代码文件填充 `code` 与 `activeFile`（找不到回退 'main.cpp'） |
+| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | 加载工作区：恢复 language（元数据残留的历史 Monaco id 经 `normalizeHojLanguage` 归一为 HOJ 显示名；未记录语言时用 `configService.getDefaultLanguage()`，兜底 "C++"）、isDirty；代码文件优先取当前语言派生名，其次按 `CODE_FILE_EXTENSIONS` 后缀探测（兼容历史任意命名） |
 | `saveWorkspace` | `() => Promise<void>` | 显式保存并清脏标记（切题前落盘由 ProblemSolveView 调用） |
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + 标脏 + 触发防抖同步 |
-| `debouncedSync` | `() => void` | 2s 无操作后把代码按 `langFileMap[language]` 推送到后端（`updateWorkspaceFile`）；失败只 console.error |
+| `debouncedSync` | `() => void` | 2s 无操作后把代码按 `sourceFileNameOf(language)` 派生的文件名推送到后端（`updateWorkspaceFile`）；失败只 console.error |
 | `cancelPendingSync` | `() => void` | 取消未触发的防抖同步（登出/切换账号时调用，避免向已失效会话写入代码） |
 | `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程 |
 
@@ -41,7 +41,7 @@
 updateCode(code)
   → code 更新 + isDirty = true
   → debouncedSync：重置 2s 定时器 → 到点仍 dirty 时
-     workspaceService.updateWorkspaceFile(langFileMap[language] ?? 'main.cpp', code)
+     workspaceService.updateWorkspaceFile(sourceFileNameOf(language), code)
      （后端 update_file 写内存 + 落盘；auto-save 与 save_workspace 再兜底）
 
 changeLanguage(lang)

@@ -45,7 +45,7 @@ Hinina/
         │   │   ├── config.rs            # AppConfig 实体（用户/OJ/编辑器/主题/布局配置 + contest_id）+ normalize_legacy_values（旧值一次性归一：C++→cpp、dark→light、0.45→0.48）
         │   │   ├── user.rs               # User 实体
         │   │   ├── contest.rs            # Contest（+ rank_show_name/seal_rank/seal_rank_time/allow_end_submit/oi_rank_score_type）+ ContestProblem（+ color 气球色）
-        │   │   ├── problem.rs            # Problem + Sample 实体
+        │   │   ├── problem.rs            # Problem（+ languages 本题允许提交语言，HOJ 显示名）+ Sample 实体
         │   │   ├── announcement.rs       # Announcement + AnnouncementPage（公告实体，时间为 epoch 秒；已读状态是客户端特性，见 service/contest）
         │   │   ├── submission.rs         # JudgementStatus（HOJ 全状态码 0-15）+ JudgementResult + SubmissionRecord/Page/Query/Detail + JudgeCase/SubTaskCases/SubmissionCases
         │   │   ├── rank.rs               # 榜单实体：RankCell / ContestRankRow / ContestRankPage / RankQuery / ProblemLimits（ACM 与 OI 两套 VO 在 Adapter 归一到此）
@@ -222,7 +222,7 @@ src/
 │   ├── contest/
 │   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时，数据源=榜单我的行）
 │   ├── editor/
-│   │   ├── CodeEditor.vue                # Monaco Editor 封装（浅色主题 + 语言工具条 + 自动备份指示 + focus()；readonly 模式供详情页复用；字号/Tab 读配置）
+│   │   ├── CodeEditor.vue                # Monaco Editor 封装（浅色主题 + 语言工具条（候选=题目允许语言列表）+ 自动备份指示 + focus()；readonly 模式供详情页复用；字号/Tab 读配置）
 │   │   └── EditorConsoleBar.vue          # 编辑器底部控制台条（最新记录 pill=服务端真实最新提交+首个失败测试点 / 提交记录 (n) 入口 / 提交代码 / 光标状态行）
 │   ├── problem/
 │   │   ├── ProblemCard.vue               # 题目卡片（字母徽章取 HOJ 气球色、limits、通过数、我的状态 AC 优先、评测记录带 ?problem= 跳转、快捷提交弹窗入口）
@@ -245,7 +245,7 @@ src/
 │   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页）
 │   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
 │   ├── announcementStore.ts              # 公告列表 + 客户端已读状态（unreadCount 红点数据源、markAllRead 乐观更新+失败回滚、60s±10s 轮询）
-│   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（语言切换即时持久化；默认语言读配置）
+│   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（语言权威值=HOJ 显示名，切换即时持久化；默认语言读配置；源文件名经 utils/language 派生）
 │   └── __tests__/                        # authStore / contestStore / rankStore / submissionStore / announcementStore .spec.ts（会话状态机、加载去重与 whenLoaded、榜单去重/轮询/全量模式、评测收敛轮询、公告未读语义）
 ├── services/
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
@@ -273,7 +273,7 @@ src/
 ├── types/
 │   ├── user.ts                           # User 实体 + SessionValidity（valid/invalid/unknown 三态）
 │   ├── contest.ts                        # Contest（+ oiRankScoreType OI 计分规则）+ ContestProblem 实体
-│   ├── problem.ts                        # Problem + Sample 实体
+│   ├── problem.ts                        # Problem（+ languages 本题允许提交语言）+ Sample 实体
 │   ├── announcement.ts                   # Announcement + AnnouncementPage（时间为 epoch 秒）
 │   ├── submission.ts                     # JudgementStatus（HOJ 全状态码 18 变体）+ JudgementResult + SubmissionRecord/Page/Detail + JudgeCase/SubTaskCases/SubmissionCases + SubmissionListQuery
 │   ├── system.ts                         # StorageInfo（存储目录/日志路径/版本）
@@ -283,7 +283,8 @@ src/
 ├── utils/
 │   ├── markdown.ts                       # Markdown 渲染（marked）+ DOMPurify 出口统一消毒（P49/P63）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
-│   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS）+ 时间/内存/长度格式化 + 语言→Monaco id 映射
+│   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS）+ 时间/内存/长度格式化 + findFirstFailedCase
+├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
 │   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入）
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
@@ -356,6 +357,7 @@ src/
 - **公告已读状态是客户端特性**：HOJ 无已读概念，已读 ID 集合由 Rust 端按「比赛 + 用户」持久化（`announcements_read/{cid}_{uid}.json`，合并去重、损坏降级为空 + warn）；未读红点 = 列表与已读集合的差集，由外壳启动的公告轮询在全部页面保持鲜活，进入公告页即全部标记已读（乐观更新，持久化失败回滚 —— 红点复发优于假已读）
 - **提交列表「只看本人」由后端强制**：`list_contest_submissions` 命令层恒置 `onlyMine = true`，前端不传该参数、不可绕过（产品决策：评测页只显示本人提交）
 - **榜单数据源职责**：卡片「我的状态」取 `get-user-problem-status`（轻量、不受榜单分页/搜索影响，AC 判定与榜单我的行取并集且 **AC 优先**）；统计卡「解题进度 / 实时排名 / 总罚时」取榜单我的行（服务端前置复制，天然可得）；`ac/total` 与气球色取比赛题目列表。HOJ 会把当前用户与关注列表**前置复制**进 `records`，渲染前必须按 `uid` 去重，`total` 因此偏大、不能直接当参赛人数（口径：`total − 本页重复数`，且当「我的前置副本在页内而自然名次不在本页窗口」时再 −1，见 `utils/rank.resolveParticipantCountFromPage`；关注用户的页外副本仍是已知残差）；`rank == -1` 是打星队伍；封榜以 `contest.sealRank + sealRankTime` 自行判断，**不依赖 `forceRefresh`**（对非管理员无效）
+- **语言权威值 = HOJ 显示名**：提交契约（`submit-problem-judge` 的 `language: "C++"`）、题目详情 `languages` 允许列表、工作区元数据与配置 `defaultLanguage` 全部使用 HOJ 显示名；Monaco 高亮 id 与源文件名是**派生值**，只在消费点经 `utils/language` 映射（`monacoIdOf` / `sourceFileNameOf`），绝不反向作为存储值 —— Monaco id 有损（C++17/C++20 同归 'cpp'）且无法承载 Go/Rust 等语言。语言下拉候选以**题目详情返回的允许列表**为准（HOJ 按题限制语言），服务端未提供时回退内置 `DEFAULT_LANGUAGES`；历史遗留的 Monaco id（P55 时代的 'cpp'）由前后端归一函数双向兜底迁移。未知语言的文件名回退 `main.txt` 而非猜测 `.cpp` —— 判题端按后缀判语言，猜错后缀等于用错语言评测
 - **打星队/女生队跨页过滤**：服务端只有 `removeStar`（正式参赛队走它，跨页正确）；打星/女生无服务端参数，切「全量快照模式」—— 顺序拉全部分页（上限 40 页 / 2000 行，超限标记 truncated 并提示）、跨页 uid 去重后客户端过滤 + 客户端分页，轮询暂停改手动刷新（全量重拉太重）。HOJ 榜单页是整榜全量重算后分页，连发即让服务端背靠背算整榜 —— **页间强制 400ms 节流**摊开突发；拉取循环持代际令牌并逐页校验筛选态，中途切筛选/登出即中止且不写快照（过期数据不复活、不并发双写）
 - **OI 计分规则只读展示**：`oiRankScoreType`（Recent/Highest）是比赛属性（get-contest-info 返回），不是请求参数 —— 客户端在榜单工具条渲染徽章，不提供切换
 - **ACM / OI 归一**：两套 VO（`ac/total/submissionInfo{对象}` vs `totalScore/submissionInfo{分数}/timeInfo{毫秒}`）在 Adapter 层归一为 OJ 无关实体，前端不感知赛制差异；单元格判档是纯函数（`utils/rank.resolveRankCell` / `resolveOiRankCell`），组件只做样式映射。ACM `totalTime` 是**秒**、OI 是**毫秒**，混用会差 1000 倍
