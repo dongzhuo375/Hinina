@@ -8,6 +8,9 @@ export interface Problem {
   samples: Sample[]
   timeLimit: number
   memoryLimit: number
+  /// 题目允许的提交语言（HOJ 显示名，如 "C++"），来自 get-contest-problem-details；
+  /// 空数组 = 服务端未提供，消费方回退 utils/language 的 DEFAULT_LANGUAGES
+  languages: string[]
 }
 
 export interface Sample {

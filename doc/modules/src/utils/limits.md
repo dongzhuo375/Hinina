@@ -12,7 +12,7 @@
 |------|------|------|
 | `formatTimeLimit` | `(ms: number) => string` | `1000` → `1.0s`、`500` → `500ms`（<1s 按毫秒整数，否则秒保留 1 位小数）；非法/≤0 → `—` |
 | `formatMemoryLimit` | `(mb: number) => string` | `256` → `256 MB`、`1536` → `1.5 GB`（≥1024 MB 换算 GB，最多 2 位小数去尾零）；非法/≤0 → `—` |
-| `isDoubleLimitLanguage` | `(language: string) => boolean` | 该语言是否适用 2 倍 limits（trim + 小写后非 `c`/`cpp` 即 true） |
+| `isDoubleLimitLanguage` | `(language: string) => boolean` | 该语言是否适用 2 倍 limits（经 `utils/language.isCLikeLanguage` 严格判定：仅 C/C++ 族为 1 倍；空/未知语言保守放大为 true） |
 | `effectiveLimits` | `(limits: ProblemLimits, language: string) => ProblemLimits` | 按倍率返回实际生效 limits；不修改入参，1 倍语言也返回新对象 |
 | `formatLimitsSummary` | `(limits: ProblemLimits) => string` | 题目卡片紧凑文案，如 `1.0s / 256 MB`（C/C++ 基准值） |
 | `INVALID_PLACEHOLDER` | `'—'`（模块内私有） | 非法/零值 limits 的占位符 |
@@ -36,7 +36,7 @@
 倍率换算（同文档 §5）：
   判题端 JudgeContext 按源文件后缀判定 —— `.c`/`.cpp` 为 1 倍基准，
   其它语言时间与内存都 ×2（栈限制不放大，本模块也不建模栈）
-  前端语言 id（c/cpp/java/python…）与后缀一一对应 → 按 id 判定即与判题端行为一致
+  语言权威值是 HOJ 显示名（见 `utils/language`），经 `isCLikeLanguage` 严格判定 → 与判题端后缀行为一致
   未知/空 id → 按 2 倍处理（保守放大，宁可显示宽松阈值也不误导用户 TLE 判据）
 
 effectiveLimits(limits, lang):

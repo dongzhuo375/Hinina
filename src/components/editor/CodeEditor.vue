@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick, shallowRef } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
 import * as monaco from 'monaco-editor'
 import { configService } from '@/services/config.service'
+import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf, resolveAllowedLanguage, SOURCE_FILE_EXTENSIONS } from '@/utils/language'
 
 // ── Monaco Editor Workers（手动配置，避免 worker 打包问题） ──
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -22,11 +23,14 @@ self.MonacoEnvironment = {
 
 const props = defineProps<{
   modelValue: string
+  /// 当前语言 —— HOJ 显示名（"C++" 等，权威值域见 utils/language）
   language: string
   /// 工作区脏状态，驱动工具条右侧的自动备份指示
   isDirty: boolean
   /// 只读模式（提交详情页代码查看）：隐藏工具条、禁用编辑与提交快捷键
   readonly?: boolean
+  /// 本题允许的提交语言（来自题目详情 languages）；空/缺省回退内置默认列表
+  languages?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -41,24 +45,20 @@ const emit = defineEmits<{
 const editorContainer = ref<HTMLDivElement>()
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
-/// 支持的语言
-const languages = [
-  { label: 'C', value: 'c' },
-  { label: 'C++', value: 'cpp' },
-  { label: 'Java', value: 'java' },
-  { label: 'Python', value: 'python' },
-]
+/// 语言下拉候选：以**题目详情返回的允许列表**为准（HOJ 比赛按题限制语言）。
+/// 服务端列表存在时**原样呈现、不补入当前语言** —— 列表外语言（如工作区遗留的
+/// 不允许语言）可见可选只会换来一次被拒的提交；归位由 ProblemSolveView 在题目
+/// 加载后统一做（resolveAllowedLanguage → changeLanguage）。
+/// 仅当列表未提供（未加载完成/服务端未返回）时回退内置默认并补入当前语言保持可见。
+const availableLanguages = computed<string[]>(() => {
+  if (props.languages?.length) return [...props.languages]
+  const list = [...DEFAULT_LANGUAGES]
+  if (props.language && !resolveAllowedLanguage(props.language, list)) list.unshift(props.language)
+  return list
+})
 
-/// Monaco language ID 映射
-const langMap: Record<string, string> = {
-  c: 'c',
-  cpp: 'cpp',
-  java: 'java',
-  python: 'python',
-}
-
-const currentLanguageLabel = () =>
-  languages.find((l) => l.value === props.language)?.label ?? props.language
+/// 文件选择器 accept 属性（从识别面唯一来源派生，另加 .txt 纯文本）
+const fileAccept = computed(() => [...SOURCE_FILE_EXTENSIONS, '.txt'].join(','))
 
 /// Ctrl+Enter 提交
 function handleKeydown(e: KeyboardEvent) {
@@ -93,7 +93,7 @@ onMounted(async () => {
 
   const ed = monaco.editor.create(editorContainer.value, {
     value: props.modelValue,
-    language: langMap[props.language] || 'cpp',
+    language: monacoIdOf(props.language),
     theme: 'vs',
     fontSize: prefs.fontSize,
     fontFamily: 'JetBrains Mono, Cascadia Code, Consolas, monospace',
@@ -134,7 +134,7 @@ watch(
   (lang) => {
     const model = editor.value?.getModel()
     if (model) {
-      monaco.editor.setModelLanguage(model, langMap[lang] || 'cpp')
+      monaco.editor.setModelLanguage(model, monacoIdOf(lang))
     }
   },
 )
@@ -175,6 +175,14 @@ async function handleFileChange(e: Event) {
   try {
     const text = await file.text()
     emit('update:modelValue', text)
+    // 按扩展名自动识别语言（上传 .java 就该切到 Java）；经语言族解析为
+    // 本题允许列表中的服务端原名（"Python3" 等变体也能命中），
+    // 不在允许列表内则不切换 —— 切到不允许的语言只会换来一次提交失败
+    const detected = hojLanguageOfFileName(file.name)
+    if (detected) {
+      const target = resolveAllowedLanguage(detected, availableLanguages.value)
+      if (target && target !== props.language) emit('update:language', target)
+    }
     editor.value?.focus()
   } catch (err) {
     console.error('[CodeEditor] 读取上传文件失败:', err)
@@ -219,7 +227,7 @@ defineExpose({ focus })
           class="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1 font-mono text-[11px] font-semibold text-slate-800 shadow-sm transition-colors hover:border-[var(--color-primary)]"
           @click="langMenuOpen = !langMenuOpen"
         >
-          <span class="font-bold text-[var(--color-primary)]">{{ currentLanguageLabel() }}</span>
+          <span class="font-bold text-[var(--color-primary)]">{{ language }}</span>
           <svg
             class="h-3.5 w-3.5 text-slate-400 transition-transform"
             :class="{ 'rotate-180': langMenuOpen }"
@@ -237,20 +245,20 @@ defineExpose({ focus })
             class="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg"
           >
             <button
-              v-for="lang in languages"
-              :key="lang.value"
+              v-for="lang in availableLanguages"
+              :key="lang"
               type="button"
               class="flex w-full items-center justify-between px-3 py-1.5 text-left font-mono text-[11px] transition-colors"
               :class="
-                lang.value === language
+                lang === language
                   ? 'bg-[#f5f3ff] font-semibold text-[#6845f5]'
                   : 'text-slate-700 hover:bg-slate-50'
               "
-              @click="selectLanguage(lang.value)"
+              @click="selectLanguage(lang)"
             >
-              {{ lang.label }}
+              {{ lang }}
               <svg
-                v-if="lang.value === language"
+                v-if="lang === language"
                 class="h-3 w-3"
                 fill="none"
                 stroke="currentColor"
@@ -318,7 +326,7 @@ defineExpose({ focus })
         <input
           ref="fileInput"
           type="file"
-          accept=".c,.cpp,.java,.py,.txt"
+          :accept="fileAccept"
           class="hidden"
           @change="handleFileChange"
         />

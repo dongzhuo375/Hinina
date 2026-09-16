@@ -8,13 +8,13 @@ import { configService } from '@/services/config.service'
 import { submissionService } from '@/services/submission.service'
 import { useContestStore } from '@/stores/contestStore'
 import type { JudgeCase, SubmissionCases, SubmissionDetail } from '@/types/submission'
+import { monacoIdOf } from '@/utils/language'
 import {
   formatCodeLength,
   formatDurationHms,
   formatMemoryKb,
   isJudging,
   isTerminalStatus,
-  mapLanguageToMonaco,
   statusAbbr,
   statusLabel,
   statusTone,
@@ -84,7 +84,7 @@ const contestElapsedText = computed(() => {
   return formatDurationHms(d.submitTime - start)
 })
 
-const codeLanguage = computed(() => mapLanguageToMonaco(detail.value?.language ?? ''))
+const codeLanguage = computed(() => monacoIdOf(detail.value?.language ?? ''))
 
 // ── 测试点明细 ──
 

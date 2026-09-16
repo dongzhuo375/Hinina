@@ -13,7 +13,7 @@
 | `AppConfig` | `{ user, oj, editor, theme, layout }` | 五组配置 |
 | `UserConfig` | `{ lastOjType, lastUsername }` | 上次登录的 OJ 类型与用户名（自动填充） |
 | `OjConfig` | `{ hojUrl, timeoutSecs, pollIntervalSecs, pollTimeoutSecs, cacheTtlSecs, contestId: number, contestPassword: string \| null }` | 时长字段一律**秒**；`contestId` 为数字，**0 = 未配置**（简报链路据此走 `unconfigured` 态，后端 `load_configured_contest` 据此报错提示配置）；`contestPassword` 私有赛用，公开赛为 null |
-| `EditorConfig` | `{ fontSize, tabSize, autoSave, autoSaveIntervalSecs, defaultLanguage }` | autoSaveIntervalSecs 秒；`defaultLanguage` 是 Rust 侧默认值 "C++"（**注意：与前端语言 id 约定 'cpp' 不同**，当前前端未消费该字段，workspaceStore 默认 'cpp'） |
+| `EditorConfig` | `{ fontSize, tabSize, autoSave, autoSaveIntervalSecs, defaultLanguage }` | autoSaveIntervalSecs 秒；`defaultLanguage` 值域为 **HOJ 显示名**（默认 "C++"，与提交契约同源；历史 Monaco id 由 Rust `normalize_language_display_name` 与前端 `normalizeHojLanguage` 双向兜底归一），消费方为 workspaceStore 新建工作区的默认语言 |
 | `ThemeConfig` | `{ themeName, editorTheme }` | Rust 默认 dark / vs-dark；当前前端固定浅色（App.vue `:theme="null"`、Monaco `theme: 'vs'`），字段预留 |
 | `LayoutConfig` | `{ sidebarWidth, splitRatio }` | 像素 / 0–1 比例；当前前端未消费（分栏比例由 ProblemSolveView 本地 state 管理），字段预留 |
 

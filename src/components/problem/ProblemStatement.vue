@@ -73,6 +73,7 @@ const baseMemoryText = computed(() =>
 )
 
 const LANG_LABELS: Record<string, string> = { c: 'C', cpp: 'C++', java: 'Java', python: 'Python' }
+/// 语言权威值已是 HOJ 显示名（"C++"），直接展示；历史 Monaco id 经映射表兜底
 const languageLabel = computed(
   () => LANG_LABELS[workspaceStore.language] ?? workspaceStore.language,
 )

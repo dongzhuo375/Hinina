@@ -2,21 +2,18 @@ import { defineStore } from 'pinia'
 import type { Workspace } from '@/types/workspace'
 import { workspaceService } from '@/services/workspace.service'
 import { configService } from '@/services/config.service'
+import { normalizeHojLanguage, SOURCE_FILE_EXTENSIONS, sourceFileNameOf } from '@/utils/language'
 
-/// 语言 → 默认文件名映射
-const langFileMap: Record<string, string> = {
-  c: 'main.c',
-  cpp: 'main.cpp',
-  java: 'Main.java',
-  python: 'main.py',
-}
+/// 工作区代码文件探测后缀 = utils/language 识别面唯一来源（新文件名一律经 sourceFileNameOf 派生）
+const CODE_FILE_EXTENSIONS = SOURCE_FILE_EXTENSIONS
 
 export const useWorkspaceStore = defineStore('workspace', {
   state: () => ({
     workspace: null as Workspace | null,
     activeFile: null as string | null,
     code: '',
-    language: 'cpp',
+    /// 当前语言 —— 权威值为 HOJ 显示名（"C++" 等，与提交契约同源，见 utils/language）
+    language: 'C++',
     isDirty: false,
     /// 2 秒防抖定时器句柄（非持久化状态）
     _syncTimer: null as ReturnType<typeof setTimeout> | null,
@@ -34,14 +31,21 @@ export const useWorkspaceStore = defineStore('workspace', {
     /** 加载指定比赛与题目的工作区 */
     async loadWorkspace(contestId: string, problemId: string) {
       this.workspace = await workspaceService.loadWorkspace(contestId, problemId)
-      // 工作区未记录语言时用配置的默认语言（Monaco id，P55 消费落地），兜底 cpp
-      this.language = this.workspace.language || (await configService.getDefaultLanguage())
+      // 工作区元数据可能残留历史 Monaco id（'cpp'），统一归一为 HOJ 显示名；
+      // 未记录语言时用配置的默认语言，兜底 "C++"
+      this.language = this.workspace.language
+        ? normalizeHojLanguage(this.workspace.language)
+        : await configService.getDefaultLanguage()
       this.isDirty = this.workspace.isDirty
-      // 查找代码文件（main.cpp / main.c / Main.java / main.py）
+      // 查找代码文件：优先取当前语言派生的文件名，其次按已知代码后缀探测
+      //（兼容历史工作区中已存在的任意命名；后缀清单覆盖 HOJ 常见语言）
       const codeKeys = Object.keys(this.workspace.files)
-      const codeFile = codeKeys.find(k => k.endsWith('.cpp') || k.endsWith('.c') || k.endsWith('.java') || k.endsWith('.py'))
+      const derivedName = sourceFileNameOf(this.language)
+      const codeFile =
+        (codeKeys.includes(derivedName) ? derivedName : undefined) ??
+        codeKeys.find((k) => CODE_FILE_EXTENSIONS.some((ext) => k.endsWith(ext)))
       this.code = codeFile ? this.workspace.files[codeFile] : ''
-      this.activeFile = codeFile ?? 'main.cpp'
+      this.activeFile = codeFile ?? derivedName
     },
 
     /** 保存当前工作区 */
@@ -62,7 +66,8 @@ export const useWorkspaceStore = defineStore('workspace', {
       if (this._syncTimer) clearTimeout(this._syncTimer)
       this._syncTimer = setTimeout(() => {
         if (this.isDirty) {
-          const fileName = langFileMap[this.language] || 'main.cpp'
+          // 文件名后缀必须与语言严格一致：判题端按后缀判定语言与 limits 倍率
+          const fileName = sourceFileNameOf(this.language)
           workspaceService.updateWorkspaceFile(fileName, this.code).catch((e) => {
             console.error('[workspaceStore] 代码同步失败:', e)
           })

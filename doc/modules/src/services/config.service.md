@@ -18,7 +18,7 @@
 | `ConfigService.getOjBaseUrl` | `() => Promise<string>` | OJ 基址，用于题面/简介/公告相对图片 URL 改写；失败返回空串 |
 | `ConfigService.getPollSchedule` | `() => Promise<PollSchedule>` | 轮询间隔与总超时；失败或非法配置回退 2s / 300s |
 | `ConfigService.getEditorPrefs` | `() => Promise<EditorPrefs>` | 字号/Tab 宽度（越界回退 14 / 4）；CodeEditor 挂载时消费 |
-| `ConfigService.getDefaultLanguage` | `() => Promise<string>` | 默认语言（Monaco id）；经 `normalizeLanguageId` 归一，历史配置遗留显示名（"C++"）也能得到合法 id |
+| `ConfigService.getDefaultLanguage` | `() => Promise<string>` | 默认语言（**HOJ 显示名**，如 "C++"）；经 `normalizeHojLanguage` 归一，历史配置遗留的 Monaco id（'cpp'）映射回显示名，空值回退 "C++"，其它非空值（Go/Rust…）原样保留 |
 | `ConfigService.getSplitRatio` | `() => Promise<number>` | 解题页初始分栏比例（非法回退 0.48） |
 | `normalizeLanguageId` | `(raw: string \| undefined \| null) => string` | 显示名/大小写变体 → Monaco language id；无法识别回退 `'cpp'`（P55：保证喂给 Monaco 的恒为合法值） |
 | `configService` | 单例 | 全局唯一实例 |
@@ -62,9 +62,10 @@ getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / g
 - **分层约定**：View / Store 不得直接调用 `config.bridge`，配置读写一律经本服务。
 - **不引入 store**：缓存 Promise 而非结果，使多处调用共享一次 IPC；设置页保存经
   `updateConfig` 写后端 + 失效缓存，其余读取方下次调用即拿到新值。
-- **P55 值域统一**：`defaultLanguage` 值域为 Monaco id（`c`/`cpp`/`java`/`python`），
-  历史配置遗留的显示名经 `normalizeLanguageId` 归一；Rust 端默认值同步改为
-  `cpp` / `light` / `vs` / `0.48`，加载时做一次性归一化。
+- **P55 值域统一（后经语言权威值改造修订）**：`defaultLanguage` 值域为 **HOJ 显示名**
+  （与提交契约同源，见 `utils/language`）；历史 Monaco id 由前后端各自的归一函数
+  映射回显示名（前端 `normalizeHojLanguage`、Rust `normalize_language_display_name`）。
+  Rust 端默认值 `light` / `vs` / `0.48` 不变。
 - 兜底值与 Rust `core::entity::config` 的默认值保持一致（`poll_interval=2s`、`poll_timeout=300s`、字号 14、Tab 4、分栏 0.48）。
 
 ## 测试

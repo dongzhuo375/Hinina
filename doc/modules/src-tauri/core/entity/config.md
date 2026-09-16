@@ -31,7 +31,7 @@
 - `tab_size: u32`（默认 `4`）— Tab 宽度
 - `auto_save: bool`（默认 `true`）— 是否启用自动保存
 - `auto_save_interval_secs: u64`（默认 `30`）— 自动保存间隔
-- `default_language: String`（默认 `"cpp"`）— 默认编程语言（**Monaco language id**，取值域：cpp / java / python / c 等；旧版默认值曾是显示名 `"C++"`，Monaco 不识别，由 `normalize_legacy_values` 归一）
+- `default_language: String`（默认 `"C++"`）— 默认编程语言（**值域 = HOJ 语言显示名**，与提交契约一致；Monaco 高亮 id 由前端派生。上一版曾把值域归一为 Monaco id `'cpp'`，现由 `normalize_legacy_values` 重新映射回显示名）
 
 ### ThemeConfig
 - `theme_name: String`（默认 `"light"`）— 当前主题名称（取值域：light；dark 尚未实现，加载时会被归一为 light）
@@ -45,8 +45,8 @@
 所有默认值通过模块级私有函数提供（如 `default_hoj_url()`, `default_timeout()`, `default_font_size()` 等），`const fn` 用于编译期常量、`fn` 用于需要 `String` 的默认值。
 
 ## 旧值归一（P55）
-- **`normalize_legacy_values(cfg: &mut AppConfig)`**（公开纯函数）— 一次性归一历史配置文件中的旧默认值，由 `ConfigService::new()` 与 `reload()` 两条加载路径调用。背景：旧版默认值写入了「显示名」而非取值域内的合法值 —— `editor.defaultLanguage = "C++"`（Monaco 只认 `cpp`）、`theme = dark/vs-dark`（深色主题尚未实现，前端只有浅色）、`splitRatio = 0.45`（旧默认，现默认 0.48）。**只修正恰好等于旧默认值的项，用户显式设置的其他值一律不动**：
-  - 语言：经私有 `normalize_language_id` 把显示名映射为 Monaco id（`"C++"→"cpp"` / `"Java"→"java"` / `"Python"→"python"` / `"C"→"c"`），未知值不动
+- **`normalize_legacy_values(cfg: &mut AppConfig)`**（公开纯函数）— 一次性归一历史配置文件中的旧默认值，由 `ConfigService::new()` 与 `reload()` 两条加载路径调用。背景：`editor.defaultLanguage` 的值域已翻转为 HOJ 语言显示名（与提交契约一致）—— 被上一版归一成 Monaco id（`'cpp'` 等）的配置在此重新映射回显示名；另有 `theme = dark/vs-dark`（深色主题尚未实现，前端只有浅色）、`splitRatio = 0.45`（旧默认，现默认 0.48）仍按旧规则修正。**只修正恰好等于旧默认值的项，用户显式设置的其他值一律不动**：
+  - 语言：经私有 `normalize_language_display_name` 把旧 Monaco id 映射为显示名（大小写不敏感：`cpp→"C++"` / `c→"C"` / `java→"Java"` / `python→"Python"`）；已是显示名或其他非空值（OJ 可能提供 Go/Rust 等）原样保留，仅空串回退默认 `"C++"`
   - 主题：`theme_name == "dark"` → `"light"`；`editor_theme == "vs-dark"` → `"vs"`
   - 分栏比例：`split_ratio == 0.45` → `0.48`。浮点精确比较是刻意的：只有原样落盘的旧默认值才会二进制相等
 - 抽成纯函数（而非埋在 ConfigService 里）是为了可被单元测试直接锁定，且幂等（每次加载都会执行）
@@ -54,7 +54,7 @@
 ## 写入路径校验与净化（M4）
 `update_config` Command 持久化前调用（config.json 可被手改，前端 SettingsView 不是唯一防线）。均为纯函数/纯方法，可直接单测：
 - **`AppConfig::validate(&self) -> Result<(), String>`** — 校验不可钳制项（目前仅 `oj.hoj_url`），失败返回可直接展示的错误消息。判据与前端一致：trim 后以 `http://` 或 `https://` 开头（大小写不敏感）且其余部分非空、不含空白（等价 `/^https?:\/\/\S+$/i`）。Command 层把 `Err(msg)` 映射为 `AppError::Config(msg)` 拒绝落盘
-- **`AppConfig::sanitize(&mut self) -> bool`** — 就地钳制越界字段，取值域与前端 SettingsView 校验一致：`timeout_secs 1..=120`、`poll_interval_secs 1..=30`、`poll_timeout_secs 30..=3600`、`cache_ttl_secs 0..=600`、`contest_id >= 0`、`font_size 8..=32`、`tab_size 1..=8`、`auto_save_interval_secs 5..=300`、`split_ratio 0.30..=0.70`（非有限值先回退默认 0.48 再钳制）；`hoj_url` trim；`default_language` 经私有 `sanitize_language_id` 净化 —— 旧显示名先走 `normalize_language_id` 映射，合法 Monaco id（cpp/java/python/c）保留，其余未知值回退 `cpp`。返回是否修改了任何字段（调用方据此记 warn 日志），为此各配置 struct 追加了 `PartialEq` derive
+- **`AppConfig::sanitize(&mut self) -> bool`** — 就地钳制越界字段，取值域与前端 SettingsView 校验一致：`timeout_secs 1..=120`、`poll_interval_secs 1..=30`、`poll_timeout_secs 30..=3600`、`cache_ttl_secs 0..=600`、`contest_id >= 0`、`font_size 8..=32`、`tab_size 1..=8`、`auto_save_interval_secs 5..=300`、`split_ratio 0.30..=0.70`（非有限值先回退默认 0.48 再钳制）；`hoj_url` trim；`default_language` 经私有 `sanitize_language_id` 净化 —— 旧 Monaco id 先走 `normalize_language_display_name` 映射为显示名，其余非空值（含 OJ 可能提供的 Go/Rust 等）原样保留，仅空串回退默认 `"C++"`。返回是否修改了任何字段（调用方据此记 warn 日志），为此各配置 struct 追加了 `PartialEq` derive
 
 ## 直接依赖
 - `serde::{Deserialize, Serialize}`
@@ -73,4 +73,4 @@
 - 源文件：`src-tauri/src/core/entity/config.rs`
 
 ## 测试
-`src-tauri/src/core/entity/tests/config_tests.rs`（由 `config.rs` 底部 `#[cfg(test)] #[path = "tests/config_tests.rs"] mod tests;` 引用）锁定：默认值全部落在取值域内（`cpp` / `light` / `vs` / `0.48`）、四种旧语言显示名归一为 Monaco id、合法 id 与未知值（含空串）不动、dark/vs-dark 归一为 light/vs 而浅色不动、`split_ratio` 只替换恰好 0.45 的旧默认（0.44/0.46/0.5 等用户值不动）、归一幂等、旧版落盘 JSON 端到端反序列化 + 归一。M4 校验/净化用例：`validate` 拒绝空串 / `ftp://x` / 裸域名 / 只有 scheme 头 / 含空白地址并接受大小写混合的 http(s)（trim 后校验）、`sanitize` 钳制全部越界字段并返回 true、合法配置（默认值与边界值）原样不动且返回 false、未知语言（`rust` / 空串）回退 `cpp` 而合法 id 保留、URL trim 与 NaN 分栏比例回退默认、手改 JSON 端到端 validate + sanitize 收敛。
+`src-tauri/src/core/entity/tests/config_tests.rs`（由 `config.rs` 底部 `#[cfg(test)] #[path = "tests/config_tests.rs"] mod tests;` 引用）锁定：默认值全部落在取值域内（`C++` / `light` / `vs` / `0.48`）、旧 Monaco id（大小写不敏感）归一为显示名、已是显示名或未知非空值（Go/Rust 等）不动、仅空串回退 `C++`、dark/vs-dark 归一为 light/vs 而浅色不动、`split_ratio` 只替换恰好 0.45 的旧默认（0.44/0.46/0.5 等用户值不动）、归一幂等、上一版落盘 JSON（`defaultLanguage: "cpp"`）端到端反序列化 + 重新归一。M4 校验/净化用例：`validate` 拒绝空串 / `ftp://x` / 裸域名 / 只有 scheme 头 / 含空白地址并接受大小写混合的 http(s)（trim 后校验）、`sanitize` 钳制全部越界字段并返回 true、合法配置（默认值与边界值）原样不动且返回 false、旧 Monaco id 净化为显示名而非空未知值保留（仅空串回退 `C++`）、URL trim 与 NaN 分栏比例回退默认、手改 JSON 端到端 validate + sanitize 收敛。

@@ -10,7 +10,7 @@
 
 | 名称 | 形状 | 关键语义 |
 |------|------|----------|
-| `Problem` | `{ id, title, description, inputDescription, outputDescription, samples, timeLimit, memoryLimit }` | `id` 为题目真实 ID（pid 字符串化）；description/input/output 为 Markdown 原文（渲染经 `utils/markdown`）；`timeLimit` **毫秒** / `memoryLimit` **MB**，为 C/C++ 基准值（来源 HOJ ProblemVO，其它语言判题 ×2，见 `utils/limits`） |
+| `Problem` | `{ id, title, description, inputDescription, outputDescription, samples, timeLimit, memoryLimit, languages }` | `id` 为题目真实 ID（pid 字符串化）；description/input/output 为 Markdown 原文（渲染经 `utils/markdown`）；`timeLimit` **毫秒** / `memoryLimit` **MB**，为 C/C++ 基准值（来源 HOJ ProblemVO，其它语言判题 ×2，见 `utils/limits`）；`languages` 为本题允许的提交语言（**HOJ 显示名**，如 "C++"，来源 get-contest-problem-details；空数组 = 服务端未提供，消费方回退 `utils/language` 的 `DEFAULT_LANGUAGES`） |
 | `Sample` | `{ input: string; output: string }` | 样例对（Rust 侧从 HOJ 的 `<input>/<output>` HTML 成对提取） |
 
 ## 直接依赖

@@ -696,3 +696,63 @@ fn contest_vo_maps_oi_rank_score_type() {
         serde_json::from_str(r#"{ "id": 1012, "title": "ACM 赛" }"#).expect("解析失败");
     assert_eq!(HOJAdapter::into_contest(vo).oi_rank_score_type, None);
 }
+
+// ── get-contest-problem-details → Problem 实体（含允许语言列表）──
+
+/// 按 doc/HOJ/HOJ-API-Documentation.md §4.2 形状构造的详情响应（保留 HOJ 显式 null 风格）。
+fn problem_details_body(languages_json: &str) -> String {
+    format!(
+        r#"{{
+            "status": 200, "msg": "success",
+            "data": {{
+                "problem": {{
+                    "id": 1061, "problemId": "HOJ-1061", "title": "A + B Problem",
+                    "timeLimit": 1000, "memoryLimit": 256,
+                    "description": "<p>求两数之和</p>",
+                    "input": "两个整数", "output": "一个整数",
+                    "examples": "<input>1 2</input><output>3</output>",
+                    "hint": null, "source": null
+                }},
+                "tags": [],
+                {}
+                "codeTemplate": {{}}
+            }}
+        }}"#,
+        languages_json
+    )
+}
+
+#[test]
+fn problem_details_languages_pass_through() {
+    // languages 是前端语言选择器的唯一权威来源，映射时不得丢弃
+    let body = problem_details_body(r#""languages": ["C", "C++", "Java", "Python"],"#);
+    let resp: ApiResponse<ProblemInfoVO> =
+        HOJAdapter::parse_hoj_json(&body, "http://oj/api/get-contest-problem-details")
+            .expect("详情夹具应能解析");
+    let problem = HOJAdapter::into_problem(resp.into_data().expect("data 非空"));
+
+    assert_eq!(problem.languages, vec!["C", "C++", "Java", "Python"]);
+    // 其余字段映射不回归
+    assert_eq!(problem.id, "1061");
+    assert_eq!(problem.title, "A + B Problem");
+    assert_eq!(problem.time_limit, 1000);
+    assert_eq!(problem.memory_limit, 256);
+    assert_eq!(problem.samples.len(), 1);
+}
+
+#[test]
+fn problem_details_missing_or_null_languages_yield_empty_vec() {
+    // 字段缺失 / 显式 null：空列表表示服务端未提供，前端回退内置默认
+    for languages_json in ["", r#""languages": null,"#] {
+        let body = problem_details_body(languages_json);
+        let resp: ApiResponse<ProblemInfoVO> =
+            HOJAdapter::parse_hoj_json(&body, "http://oj/api/get-contest-problem-details")
+                .expect("详情夹具应能解析");
+        let problem = HOJAdapter::into_problem(resp.into_data().expect("data 非空"));
+        assert!(
+            problem.languages.is_empty(),
+            "languages={:?} 应落空列表",
+            languages_json
+        );
+    }
+}

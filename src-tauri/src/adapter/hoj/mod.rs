@@ -275,6 +275,22 @@ impl HOJAdapter {
         }
     }
 
+    /// ProblemInfoVO → 题目实体（携带允许提交语言列表；null 字段去 null 后落默认值）。
+    fn into_problem(info: ProblemInfoVO) -> Problem {
+        let samples = Self::parse_samples(info.problem.examples.as_deref().unwrap_or(""));
+        Problem {
+            id: info.problem.id.to_string(),
+            title: info.problem.title,
+            description: info.problem.description.unwrap_or_default(),
+            input_description: info.problem.input.unwrap_or_default(),
+            output_description: info.problem.output.unwrap_or_default(),
+            samples,
+            time_limit: info.problem.time_limit as u32,
+            memory_limit: info.problem.memory_limit as u32,
+            languages: info.languages,
+        }
+    }
+
     /// AnnouncementVO → 领域实体（content 为 null 时回退空串，时间转秒级时间戳）。
     fn into_announcement(a: AnnouncementVO) -> Announcement {
         Announcement {
@@ -789,6 +805,8 @@ impl ProblemProvider for HOJAdapter {
                 samples: Vec::new(),
                 time_limit: 0,
                 memory_limit: 0,
+                // 列表接口不含语言列表，详情接口（get_problem）才提供
+                languages: Vec::new(),
             })
             .collect();
 
@@ -816,18 +834,7 @@ impl ProblemProvider for HOJAdapter {
             AppError::Problem(format!("HOJ problem detail 失败: {}", msg))
         })?;
 
-        let samples = Self::parse_samples(info.problem.examples.as_deref().unwrap_or(""));
-
-        let problem = Problem {
-            id: info.problem.id.to_string(),
-            title: info.problem.title,
-            description: info.problem.description.unwrap_or_default(),
-            input_description: info.problem.input.unwrap_or_default(),
-            output_description: info.problem.output.unwrap_or_default(),
-            samples,
-            time_limit: info.problem.time_limit as u32,
-            memory_limit: info.problem.memory_limit as u32,
-        };
+        let problem = Self::into_problem(info);
 
         debug!(contest_id = contest_id, problem_id = problem_id, title = problem.title, "HOJ 题目详情已获取");
         Ok(problem)

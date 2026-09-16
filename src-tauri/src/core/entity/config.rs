@@ -138,7 +138,8 @@ pub struct EditorConfig {
     /// 自动保存间隔（秒），仅 auto_save 为 true 时生效
     #[serde(default = "default_auto_save_interval")]
     pub auto_save_interval_secs: u64,
-    /// 默认编程语言（Monaco language id，取值域：cpp / java / python / c 等）
+    /// 默认编程语言（值域 = HOJ 语言显示名，与提交契约一致，如 "C++"；
+    /// Monaco 高亮 id 由前端派生）
     #[serde(default = "default_language")]
     pub default_language: String,
 }
@@ -168,7 +169,7 @@ const fn default_auto_save_interval() -> u64 {
     30
 }
 fn default_language() -> String {
-    "cpp".into()
+    "C++".into()
 }
 
 // ── 主题配置 ──
@@ -231,26 +232,30 @@ const fn default_split_ratio() -> f64 {
 
 // ── 旧值归一（P55）──
 
-/// 旧版默认语言显示名 → Monaco language id。
-fn normalize_language_id(raw: &str) -> Option<&'static str> {
-    match raw {
-        "C++" => Some("cpp"),
-        "Java" => Some("java"),
-        "Python" => Some("python"),
-        "C" => Some("c"),
+/// 旧版 Monaco language id → HOJ 语言显示名（大小写不敏感）。
+fn normalize_language_display_name(raw: &str) -> Option<&'static str> {
+    match raw.to_ascii_lowercase().as_str() {
+        "cpp" => Some("C++"),
+        "c" => Some("C"),
+        "java" => Some("Java"),
+        "python" => Some("Python"),
         _ => None,
     }
 }
 
 /// 一次性归一历史配置文件中的旧默认值（加载路径调用，纯函数便于测试）。
 ///
-/// 背景：旧版默认值写入了「显示名」而非取值域内的合法值 ——
-/// `editor.defaultLanguage = "C++"`（Monaco 只认 `cpp`）、`theme = dark/vs-dark`
-/// （深色主题尚未实现，前端只有浅色）、`splitRatio = 0.45`（旧默认，现默认 0.48）。
+/// 背景：`editor.defaultLanguage` 的值域已翻转为 HOJ 语言显示名（与提交契约一致）——
+/// 被上一版归一成 Monaco id（'cpp' 等）的配置在此映射回显示名；
+/// 已是显示名或其他非空值（OJ 可能提供 Go/Rust 等）原样保留，仅空串回退默认 "C++"。
+/// 另外 `theme = dark/vs-dark`（深色主题尚未实现，前端只有浅色）、
+/// `splitRatio = 0.45`（旧默认，现默认 0.48）仍按旧规则修正。
 /// 只修正**恰好等于旧默认值**的项，用户显式设置的其他值一律不动。
 pub fn normalize_legacy_values(cfg: &mut AppConfig) {
-    if let Some(id) = normalize_language_id(&cfg.editor.default_language) {
-        cfg.editor.default_language = id.to_string();
+    if cfg.editor.default_language.is_empty() {
+        cfg.editor.default_language = default_language();
+    } else if let Some(name) = normalize_language_display_name(&cfg.editor.default_language) {
+        cfg.editor.default_language = name.to_string();
     }
 
     // dark 主题未实现：归一到浅色，避免前端拿到不存在的主题名
@@ -326,15 +331,16 @@ fn is_valid_http_url(raw: &str) -> bool {
     !rest.is_empty() && !rest.chars().any(|c| c.is_whitespace())
 }
 
-/// 语言净化：旧显示名先经 `normalize_language_id` 映射，
-/// 已在取值域内的合法 Monaco id 保留，其余未知值一律回退 `cpp`。
+/// 语言净化：旧 Monaco id 先经 `normalize_language_display_name` 映射为显示名，
+/// 其余非空值（含 OJ 可能提供的 Go/Rust 等）原样保留，仅空串回退默认 "C++"。
 fn sanitize_language_id(raw: &str) -> String {
-    if let Some(id) = normalize_language_id(raw) {
-        return id.to_string();
+    if let Some(name) = normalize_language_display_name(raw) {
+        return name.to_string();
     }
-    match raw {
-        "cpp" | "java" | "python" | "c" => raw.to_string(),
-        _ => default_language(),
+    if raw.is_empty() {
+        default_language()
+    } else {
+        raw.to_string()
     }
 }
 

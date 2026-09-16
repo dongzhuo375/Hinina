@@ -157,18 +157,3 @@ export function formatMsToSeconds(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return '-'
   return `${(ms / 1000).toFixed(2)}s`
 }
-
-/**
- * HOJ 语言显示名 → Monaco language id（提交详情页只读代码视图用）。
- *
- * 服务端返回的是展示名（"C++"/"C++17 (GCC 13.2)"/"Java"/"Python 3.10"/"C" 等），
- * 按前缀归一；无法识别时回退 'cpp'（赛场绝大多数提交为 C++）。
- */
-export function mapLanguageToMonaco(language: string): string {
-  const s = (language ?? '').trim().toLowerCase()
-  if (s.startsWith('c++') || s.startsWith('cpp') || s.startsWith('cxx') || s.startsWith('g++')) return 'cpp'
-  if (s.startsWith('java')) return 'java'
-  if (s.startsWith('python') || s.startsWith('py')) return 'python'
-  if (s === 'c' || /^c\b/.test(s)) return 'c'
-  return 'cpp'
-}

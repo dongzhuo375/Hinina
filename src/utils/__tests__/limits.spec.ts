@@ -70,6 +70,15 @@ describe('isDoubleLimitLanguage', () => {
     expect(isDoubleLimitLanguage('python')).toBe(true)
   })
 
+  it('HOJ 显示名同样正确判定（语言权威值已是显示名）', () => {
+    expect(isDoubleLimitLanguage('C')).toBe(false)
+    expect(isDoubleLimitLanguage('C++')).toBe(false)
+    expect(isDoubleLimitLanguage('C++17 (GCC 13.2)')).toBe(false)
+    expect(isDoubleLimitLanguage('Java')).toBe(true)
+    expect(isDoubleLimitLanguage('Python')).toBe(true)
+    expect(isDoubleLimitLanguage('Go')).toBe(true)
+  })
+
   it('未知/空语言 id 按保守放大处理（宁可显示宽松阈值）', () => {
     expect(isDoubleLimitLanguage('go')).toBe(true)
     expect(isDoubleLimitLanguage('')).toBe(true)

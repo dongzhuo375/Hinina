@@ -12,6 +12,7 @@ import { useProblemStore } from '@/stores/problemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { configService } from '@/services/config.service'
+import { resolveAllowedLanguage } from '@/utils/language'
 
 /// 解题工作台：左题面（48%）/ 右代码编辑器（52%），中间 1px 拖拽条可调。
 const route = useRoute()
@@ -70,6 +71,16 @@ async function load(id: string) {
     if (token !== loadToken) return
     await problemStore.openProblem(contestId, id)
     if (token !== loadToken) return
+
+    // 允许语言归位（与 QuickSubmitDialog 同款语义）：工作区/配置默认存的是规范名
+    //（"C++"），服务端按题列表可能是部署变体（"C++17 (GCC 13.2)"）或不含当前语言族。
+    // 提交参数必须用服务端认得的写法，故加载后统一归位；changeLanguage 同名短路、
+    // 归位幂等，写回服务端原名反而让下次加载直接命中
+    const allowed = problemStore.currentProblem?.languages ?? []
+    if (allowed.length > 0) {
+      const target = resolveAllowedLanguage(workspaceStore.language, allowed) ?? allowed[0]
+      if (target !== workspaceStore.language) workspaceStore.changeLanguage(target)
+    }
 
     // limits 与我的状态供题面限制/Tab 状态点使用；失败不抛出（store 内部已兜底），
     // 从题目总览进入时通常已缓存，此处补齐直接进入本页的场景
@@ -226,6 +237,7 @@ async function handleSubmit() {
           ref="codeEditor"
           :model-value="workspaceStore.code"
           :language="workspaceStore.language"
+          :languages="problemStore.currentProblem?.languages ?? []"
           :is-dirty="workspaceStore.isDirty"
           @update:model-value="workspaceStore.updateCode"
           @update:language="workspaceStore.changeLanguage"

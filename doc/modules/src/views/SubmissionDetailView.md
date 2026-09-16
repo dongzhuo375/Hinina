@@ -18,7 +18,7 @@
 | `judging` | computed | `isJudging(detail.status)`，驱动「评测中，自动刷新…」指示与骨架占位 |
 | `matchedProblem` | computed | `detail.pid` 匹配当前比赛题目 → 可跳解题页；匹配不到（如赛后换配置）只显示 displayPid |
 | `submitTimeText` / `contestElapsedText` | computed | 本地化提交时间；赛时相对时间（`formatDurationHms(submitTime − startTime)`） |
-| `codeLanguage` | computed | `mapLanguageToMonaco(detail.language)` —— 服务端返回展示名，按前缀归一为 Monaco id |
+| `codeLanguage` | computed | `monacoIdOf(detail.language)`（`utils/language`）—— 服务端返回展示名，按前缀归一为 Monaco id |
 | `caseList` / `acCaseCount` / `hasSubTasks` / `showScoreColumn` / `modeBadge` | computed | 测试点表派生：通过计数、子任务制判定（`subTasks` 非空）、得分列仅在有 score 时出现、判题模式徽章（非 `default` 才显示，如 spj/subtask） |
 | `copyErrorMessage` | fn | 剪贴板复制 CE 信息；WebView API 不可用时兜底隐藏 textarea + `execCommand('copy')`；「已复制」1.5s 回弹 |
 | `loadDetail` / `loadCases` / `retry` | — | 详情与测试点分离拉取：轮询周期只走 `loadDetail`，终态命中后补拉一次 `loadCases`，见逻辑流程 |
@@ -32,7 +32,8 @@
 - `@/services/config.service`（`getPollSchedule` 轮询参数）、`@/services/submission.service`（`getSubmissionDetail` / `getSubmissionCases`）
 - `@/stores/contestStore`（`whenLoaded`：赛时相对时间与题目跳转）
 - `@/types/submission`（仅类型）
-- `@/utils/submission`（`formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `isTerminalStatus` / `mapLanguageToMonaco` / `statusAbbr` / `statusLabel` / `statusTone` + `StatusTone` 类型）
+- `@/utils/submission`（`formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `isTerminalStatus` / `statusAbbr` / `statusLabel` / `statusTone` + `StatusTone` 类型）
+- `@/utils/language`（`monacoIdOf` 只读代码视图高亮）
 - `@/utils/polling`（`createPoller` + `Poller` 类型）
 
 ## 被依赖
