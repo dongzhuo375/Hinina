@@ -16,7 +16,7 @@ use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::problem::{Problem, Sample};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::entity::submission::{
-    JudgeCase, JudgementResult, JudgementStatus, SubTaskCases, SubmissionCases, SubmissionDetail,
+    JudgeCase, JudgementResult, SubTaskCases, SubmissionCases, SubmissionDetail,
     SubmissionPage, SubmissionQuery, SubmissionRecord,
 };
 use crate::core::entity::user::User;
@@ -324,6 +324,28 @@ impl HOJAdapter {
             error_message: d.error_message,
             judger: d.judger,
             oi_rank_score: d.oi_rank_score,
+        }
+    }
+
+    /// 提交详情 DTO → 轮询投影（`get_judgement` 用，纯函数便于测试）。
+    ///
+    /// 非终态原样透传 `map_status` 结果（0→Pending、1→Running），指标清零；
+    /// 终态携带 score/time/memory。
+    fn into_judgement_result(d: &types::SubmissionDetail) -> JudgementResult {
+        let status = map_status(d.status);
+        if !types::is_terminal_status(d.status) {
+            return JudgementResult {
+                status,
+                score: 0.0,
+                time_ms: 0,
+                memory_kb: 0,
+            };
+        }
+        JudgementResult {
+            status,
+            score: d.score.unwrap_or(0.0),
+            time_ms: d.time as u64,
+            memory_kb: d.memory as u64,
         }
     }
 
@@ -912,24 +934,12 @@ impl SubmissionProvider for HOJAdapter {
         })?;
 
         let detail = &info.submission;
-        let status = map_status(detail.status);
 
-        // 非终态返回 Running，供上层按 JudgementStatus::Running 继续轮询
-        if !types::is_terminal_status(detail.status) {
-            return Ok(JudgementResult {
-                status: JudgementStatus::Running,
-                score: 0.0,
-                time_ms: 0,
-                memory_kb: 0,
-            });
-        }
-
-        let result = JudgementResult {
-            status,
-            score: detail.score.unwrap_or(0.0),
-            time_ms: detail.time as u64,
-            memory_kb: detail.memory as u64,
-        };
+        // 非终态原样透传（Pending/Running），不再折叠为 Running —— 与
+        // get_submission_detail 的 map_status 输出保持一致，同一排队提交在
+        // 两处展示同一状态。前端终态判据 isTerminalStatus 以「非
+        // Pending/Compiling/Running 即终态」收敛轮询，语义不受影响。
+        let result = Self::into_judgement_result(detail);
 
         debug!(
             submission_id = submission_id,

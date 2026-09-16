@@ -11,8 +11,11 @@ use tracing_subscriber::{
     EnvFilter,
 };
 
-/// 日志文件相对 base_dir 的路径（`get_storage_info` Command 依赖同一约定）。
-const LOG_RELATIVE_PATH: &str = "logs/hinina.log";
+/// 日志文件相对 base_dir 的路径。
+///
+/// 落盘与展示的唯一事实来源：`get_storage_info` Command 直接引用此常量
+/// 拼接展示路径，避免两处硬编码漂移。
+pub const LOG_RELATIVE_PATH: &str = "logs/hinina.log";
 
 /// 日志文件大小上限：超过即在启动时截断重开。
 ///

@@ -35,6 +35,8 @@ enum StubMode {
     AlwaysRunning,
     /// 查询前 `n` 次返回 Network 错误，之后成功（模拟瞬时抖动后恢复）
     FlakyThenOk(usize),
+    /// 查询前 `n` 次返回 Pending（排队中），之后返回终态 Accepted
+    PendingThenOk(usize),
 }
 
 struct StubSubmissionProvider {
@@ -61,6 +63,15 @@ fn running() -> JudgementResult {
     }
 }
 
+fn pending() -> JudgementResult {
+    JudgementResult {
+        status: JudgementStatus::Pending,
+        score: 0.0,
+        time_ms: 0,
+        memory_kb: 0,
+    }
+}
+
 #[async_trait::async_trait]
 impl SubmissionProvider for StubSubmissionProvider {
     async fn submit(
@@ -71,9 +82,8 @@ impl SubmissionProvider for StubSubmissionProvider {
         _source_code: &str,
     ) -> AppResult<String> {
         match self.mode {
-            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_) => {
-                Ok("submit-1".into())
-            }
+            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_)
+            | StubMode::PendingThenOk(_) => Ok("submit-1".into()),
             StubMode::Auth => Err(AppError::Auth("stub: HTTP 401 Unauthorized".into())),
             StubMode::Network => Err(AppError::Network("stub: connection reset".into())),
         }
@@ -86,6 +96,13 @@ impl SubmissionProvider for StubSubmissionProvider {
             StubMode::Auth => Err(AppError::Auth("stub: HTTP 401 Unauthorized".into())),
             StubMode::Network => Err(AppError::Network("stub: connection reset".into())),
             StubMode::AlwaysRunning => Ok(running()),
+            StubMode::PendingThenOk(pending_count) => {
+                if n < pending_count {
+                    Ok(pending())
+                } else {
+                    Ok(accepted())
+                }
+            }
             StubMode::FlakyThenOk(failures) => {
                 if n < failures {
                     Err(AppError::Network("stub: 瞬时抖动".into()))
@@ -101,7 +118,8 @@ impl SubmissionProvider for StubSubmissionProvider {
         _query: &SubmissionQuery,
     ) -> AppResult<SubmissionPage> {
         match self.mode {
-            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_) => {
+            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_)
+            | StubMode::PendingThenOk(_) => {
                 Ok(SubmissionPage {
                     records: vec![SubmissionRecord {
                         submit_id: "12345".into(),
@@ -131,7 +149,8 @@ impl SubmissionProvider for StubSubmissionProvider {
 
     async fn get_submission_detail(&self, _submit_id: &str) -> AppResult<SubmissionDetail> {
         match self.mode {
-            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_) => {
+            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_)
+            | StubMode::PendingThenOk(_) => {
                 Ok(SubmissionDetail {
                     submit_id: "12345".into(),
                     pid: "1061".into(),
@@ -157,7 +176,8 @@ impl SubmissionProvider for StubSubmissionProvider {
 
     async fn get_submission_cases(&self, _submit_id: &str) -> AppResult<SubmissionCases> {
         match self.mode {
-            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_) => {
+            StubMode::Ok | StubMode::AlwaysRunning | StubMode::FlakyThenOk(_)
+            | StubMode::PendingThenOk(_) => {
                 Ok(SubmissionCases {
                     cases: vec![JudgeCase {
                         case_id: 1,
@@ -296,6 +316,21 @@ fn poll_judgement_returns_terminal_result() {
         result.status
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1, "终态应一次返回，不再轮询");
+}
+
+#[test]
+fn poll_judgement_keeps_polling_on_pending() {
+    // get_judgement 现原样透传非终态：排队中的 Pending 不是终态，
+    // 轮询必须继续而不是把 Pending 当最终结果返回
+    let (service, calls) = make_service(StubMode::PendingThenOk(2));
+    let result = block_on(service.poll_judgement("submit-1", 0, 60))
+        .expect("排队结束后应拿到终态");
+    assert!(
+        matches!(result.status, JudgementStatus::Accepted),
+        "实际 {:?}",
+        result.status
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 3, "两次 Pending + 第三次终态");
 }
 
 // ── 提交列表 / 详情 / 测试点：错误变体穿透 + 正常路径 ──

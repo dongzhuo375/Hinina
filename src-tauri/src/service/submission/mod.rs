@@ -112,8 +112,15 @@ impl SubmissionService {
 
             match provider.get_judgement(submission_id).await {
                 Ok(result) => {
-                    // 非终态（Running）：继续轮询
-                    if matches!(result.status, JudgementStatus::Running) {
+                    // 非终态（Pending/Compiling/Running）：继续轮询。
+                    // get_judgement 现原样透传非终态（排队中为 Pending），
+                    // 只认 Running 会把排队提交误判为已完成
+                    if matches!(
+                        result.status,
+                        JudgementStatus::Pending
+                            | JudgementStatus::Compiling
+                            | JudgementStatus::Running
+                    ) {
                         debug!(
                             submission_id = submission_id,
                             attempt = attempt,

@@ -4,7 +4,7 @@
 日志追踪模块（基于 Tracing）。**双路输出**：stderr（开发调试）+ `{base_dir}/logs/hinina.log` 文件（现场排障 —— 选手机器上没有控制台），支持 debug/release 自适应级别与 RUST_LOG 覆盖。日志文件采用「截断式轮转」防止无限膨胀。
 
 ## 核心类型/函数
-- 常量 `LOG_RELATIVE_PATH = "logs/hinina.log"` — 日志文件相对 base_dir 的路径（`get_storage_info` Command 依赖同一约定向前端展示日志位置）
+- 常量 **`pub LOG_RELATIVE_PATH = "logs/hinina.log"`** — 日志文件相对 base_dir 的路径，**落盘与展示的唯一事实来源**：`open_log_file` 用它写日志，`commands/config_cmd.rs` 的 `get_storage_info` 直接引用同一常量拼出展示路径（`base_dir.join(LOG_RELATIVE_PATH)`），杜绝两处硬编码漂移
 - 常量 `MAX_LOG_FILE_BYTES = 5MB` — 日志文件大小上限，超过即在启动时截断重开。采用「截断式轮转」而不是按天/按份数滚动：客户端无长期日志留存需求，日志只服务于近期排障，单文件 + 上限截断足以防止占满选手磁盘
 - **`Logger`** — 日志 struct（单元结构体）
 - **`Logger::init(base_dir: &Path)`** — 初始化日志系统：
@@ -20,6 +20,7 @@
 
 ## 被依赖
 - `core::context`（`AppContext::init()` 序列第一步调用 `Logger::init(&base_dir)`，后续步骤才能记录日志）
+- `commands::config_cmd`（`get_storage_info` 引用 `LOG_RELATIVE_PATH` 拼出日志展示路径）
 
 ## 逻辑流程
 `Logger::init(base_dir)` 在应用启动时最先调用：构造 `EnvFilter`（RUST_LOG 优先，否则按编译模式取默认级别）→ 构造 stderr 层 → `open_log_file(base_dir)` 尝试打开文件层（建目录 → 超限截断 → 追加打开）→ 成功则 `registry + filter + stderr 层 + 文件层` 三层组装 `init()`；失败则 `eprintln!` 留痕并退回单路 stderr。此后所有 `tracing` 宏事件同时写往两路。

@@ -117,3 +117,133 @@ fn normalize_fixes_legacy_json_from_disk() {
     assert_eq!(cfg.theme.editor_theme, "vs");
     assert_eq!(cfg.layout.split_ratio, 0.48);
 }
+
+// ── 写入路径校验与净化（M4）──
+
+#[test]
+fn validate_rejects_url_without_http_scheme() {
+    // 空串 / 其他 scheme / 裸域名 / 只有 scheme 头 / 含空白，一律拒绝
+    for bad in [
+        "",
+        "ftp://x",
+        "hoj.example.com",
+        "http://",
+        "https://",
+        "https://hoj.example.com/a b",
+    ] {
+        let mut cfg = AppConfig::default();
+        cfg.oj.hoj_url = bad.into();
+        let err = cfg.validate().expect_err(&format!("{:?} 应被拒绝", bad));
+        assert_eq!(err, "服务器地址必须以 http:// 或 https:// 开头");
+    }
+}
+
+#[test]
+fn validate_accepts_http_and_https_case_insensitive() {
+    for good in [
+        "https://hoj.dongzhuo.top",
+        "http://127.0.0.1:8080",
+        "HTTP://OJ.EXAMPLE.COM",
+        "  https://hoj.example.com  ", // 与前端一致：trim 后校验
+    ] {
+        let mut cfg = AppConfig::default();
+        cfg.oj.hoj_url = good.into();
+        assert!(cfg.validate().is_ok(), "{:?} 应通过", good);
+    }
+}
+
+#[test]
+fn sanitize_clamps_out_of_range_values() {
+    let mut cfg = AppConfig::default();
+    cfg.oj.timeout_secs = 0;
+    cfg.oj.poll_interval_secs = 999;
+    cfg.oj.poll_timeout_secs = 1;
+    cfg.oj.cache_ttl_secs = 601;
+    cfg.oj.contest_id = -5;
+    cfg.editor.font_size = 100;
+    cfg.editor.tab_size = 0;
+    cfg.editor.auto_save_interval_secs = 1;
+    cfg.layout.split_ratio = 0.95;
+
+    assert!(cfg.sanitize(), "有字段被钳制时应返回 true");
+    assert_eq!(cfg.oj.timeout_secs, 1);
+    assert_eq!(cfg.oj.poll_interval_secs, 30);
+    assert_eq!(cfg.oj.poll_timeout_secs, 30);
+    assert_eq!(cfg.oj.cache_ttl_secs, 600);
+    assert_eq!(cfg.oj.contest_id, 0);
+    assert_eq!(cfg.editor.font_size, 32);
+    assert_eq!(cfg.editor.tab_size, 1);
+    assert_eq!(cfg.editor.auto_save_interval_secs, 5);
+    assert_eq!(cfg.layout.split_ratio, 0.70);
+}
+
+#[test]
+fn sanitize_keeps_valid_config_unchanged() {
+    // 默认配置全部落在取值域内
+    let mut cfg = AppConfig::default();
+    assert!(!cfg.sanitize(), "无越界字段应返回 false");
+    assert_eq!(cfg, AppConfig::default());
+
+    // 用户合法自定义值同样不动
+    let mut cfg = AppConfig::default();
+    cfg.oj.timeout_secs = 120;
+    cfg.oj.poll_interval_secs = 30;
+    cfg.oj.poll_timeout_secs = 3600;
+    cfg.oj.cache_ttl_secs = 0;
+    cfg.oj.contest_id = 1011;
+    cfg.editor.font_size = 8;
+    cfg.editor.tab_size = 8;
+    cfg.editor.auto_save_interval_secs = 300;
+    cfg.editor.default_language = "java".into();
+    cfg.layout.split_ratio = 0.30;
+    let before = cfg.clone();
+    assert!(!cfg.sanitize());
+    assert_eq!(cfg, before);
+}
+
+#[test]
+fn sanitize_normalizes_default_language() {
+    // 旧显示名 → Monaco id；未知值 → cpp 回退；合法 id 保留
+    for (raw, expected) in [
+        ("C++", "cpp"),
+        ("Java", "java"),
+        ("rust", "cpp"),
+        ("", "cpp"),
+        ("python", "python"),
+        ("c", "c"),
+    ] {
+        let mut cfg = AppConfig::default();
+        cfg.editor.default_language = raw.into();
+        cfg.sanitize();
+        assert_eq!(cfg.editor.default_language, expected, "raw={:?}", raw);
+    }
+}
+
+#[test]
+fn sanitize_trims_url_and_handles_non_finite_ratio() {
+    let mut cfg = AppConfig::default();
+    cfg.oj.hoj_url = "  https://hoj.example.com  ".into();
+    cfg.layout.split_ratio = f64::NAN;
+    assert!(cfg.sanitize());
+    assert_eq!(cfg.oj.hoj_url, "https://hoj.example.com");
+    // NaN 不可钳制：回退默认值（NaN.clamp 会原样返回 NaN）
+    assert_eq!(cfg.layout.split_ratio, 0.48);
+}
+
+#[test]
+fn sanitize_fixes_hand_edited_json_from_disk() {
+    // 端到端：手改 config.json 绕过前端校验后，写入路径兜底收敛
+    let edited = r#"{
+        "oj": { "hojUrl": "https://hoj.dongzhuo.top", "timeoutSecs": 9999, "contestId": -1 },
+        "editor": { "fontSize": 3, "defaultLanguage": "Haskell" },
+        "layout": { "splitRatio": 0.05 }
+    }"#;
+    let mut cfg: AppConfig = serde_json::from_str(edited).expect("应能解析");
+    cfg.validate().expect("URL 合法应通过");
+    assert!(cfg.sanitize());
+    assert_eq!(cfg.oj.timeout_secs, 120);
+    assert_eq!(cfg.oj.contest_id, 0);
+    assert_eq!(cfg.editor.font_size, 8);
+    assert_eq!(cfg.editor.default_language, "cpp");
+    assert_eq!(cfg.layout.split_ratio, 0.30);
+}

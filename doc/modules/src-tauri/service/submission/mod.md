@@ -15,7 +15,7 @@
 - **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`
 
 ## 直接依赖
-- `core::entity::submission::{JudgementResult, JudgementStatus, SubmissionCases, SubmissionDetail, SubmissionPage, SubmissionQuery}`（`Running` 为继续轮询的判据）
+- `core::entity::submission::{JudgementResult, JudgementStatus, SubmissionCases, SubmissionDetail, SubmissionPage, SubmissionQuery}`（非终态 `Pending`/`Compiling`/`Running` 为继续轮询的判据）
 - `core::error::{AppError, AppResult}`（`AppError::Submission` 用于轮询超时；`AppError::Auth` 用于 `matches!` 短路判定）
 - `core::event::app_event::{AppEvent, SubmissionEvent}`
 - `core::event::event_bus::EventBus`
@@ -30,7 +30,7 @@
 - **submit**：调 `SubmissionProvider::submit()`（失败 `warn!` + `e.context("提交失败")`，变体不改写）→ 发布 `SubmissionEvent::Created { submission_id }` → 返回 submission_id
 - **poll_judgement**：计算 deadline = now + timeout → 循环：先判超时（超时则发布 `PollTimeout { submission_id }` 并返回 `AppError::Submission`）→ `provider.get_judgement(id)`：
   - `Ok` 且为终态 → 发布 `Judged { submission_id, result }` → 返回
-  - `Ok` 且为 `Running` → 继续轮询
+  - `Ok` 且为非终态（`Pending`/`Compiling`/`Running`）→ 继续轮询（Provider 的 `get_judgement` 原样透传非终态，排队中为 `Pending`，只认 `Running` 会把它误判为已完成）
   - `Err(AppError::Auth(_))` → **立即上抛** `e.context("评测查询失败")`，不再轮询
   - `Err(其它)` → 仅 `warn!` 并重试（瞬时抖动）
   - 每轮末尾 `sleep(poll_interval_secs)`
@@ -42,8 +42,8 @@
 - **超时归 `Submission` 变体**：一直 `Running` 到 deadline 是评测语义问题（不是会话问题），必须是 `Submission` 才能与 `Auth` 区分开。
 
 ## 测试
-`src-tauri/src/service/submission/tests/submission_tests.rs`（由 `mod.rs` 底部 `#[cfg(test)] #[path = "tests/submission_tests.rs"] mod tests;` 引用）以 `StubSubmissionProvider` 锁定变体穿透与轮询语义。Stub 用 `StubMode::{Ok, Auth, Network, AlwaysRunning, FlakyThenOk(n)}` 覆盖成功、token 过期、断网、永远 `Running`、前 n 次抖动后恢复五种情形，并用 `Arc<AtomicUsize>` 记录 `get_judgement` 调用次数；异步用例各自建 current-thread runtime 避免嵌套 panic。
+`src-tauri/src/service/submission/tests/submission_tests.rs`（由 `mod.rs` 底部 `#[cfg(test)] #[path = "tests/submission_tests.rs"] mod tests;` 引用）以 `StubSubmissionProvider` 锁定变体穿透与轮询语义。Stub 用 `StubMode::{Ok, Auth, Network, AlwaysRunning, FlakyThenOk(n), PendingThenOk(n)}` 覆盖成功、token 过期、断网、永远 `Running`、前 n 次抖动后恢复、前 n 次排队 `Pending` 后终态六种情形，并用 `Arc<AtomicUsize>` 记录 `get_judgement` 调用次数；异步用例各自建 current-thread runtime 避免嵌套 panic。
 
-覆盖：`submit` 保留 `Auth` 变体（且消息含「提交失败」环节名）与 `Network` 变体；`poll_judgement` 遇认证错误**立即上抛 `Auth`、只调用 Provider 一次、5s 内返回**（用例故意把 timeout 给到 300s、interval 给到 60s —— 若认证错误被当瞬时错误重试，这里会挂住五分钟并报「评测超时」）；瞬时抖动 `FlakyThenOk(2)` 仍重试后成功（共 3 次调用，拿到 `Accepted` 与 time/memory）；一直 `Running` 时超时错误为 `Submission` 变体且消息含「评测超时」；终态一次返回不再轮询（调用次数为 1）。
+覆盖：`submit` 保留 `Auth` 变体（且消息含「提交失败」环节名）与 `Network` 变体；`poll_judgement` 遇认证错误**立即上抛 `Auth`、只调用 Provider 一次、5s 内返回**（用例故意把 timeout 给到 300s、interval 给到 60s —— 若认证错误被当瞬时错误重试，这里会挂住五分钟并报「评测超时」）；瞬时抖动 `FlakyThenOk(2)` 仍重试后成功（共 3 次调用，拿到 `Accepted` 与 time/memory）；一直 `Running` 时超时错误为 `Submission` 变体且消息含「评测超时」；终态一次返回不再轮询（调用次数为 1）；排队非终态 `PendingThenOk(2)` 继续轮询直至终态（两次 `Pending` + 第三次 `Accepted`，共 3 次调用）。
 
 **提交列表 / 详情 / 测试点**（同一 Stub 实现全部五个 trait 方法）：`list_contest_submissions` 保留 `Auth` 变体且成功路径返回分页、`get_submission_detail` 保留 `Auth` 且成功路径返回完整实体、`get_submission_cases` 保留 `Auth` / `Network` 变体且成功路径返回测试点列表 —— 锁定三个查询方法与 `submit`/`poll_judgement` 遵守同一「`e.context()` 补环节名、变体不改写」约定。

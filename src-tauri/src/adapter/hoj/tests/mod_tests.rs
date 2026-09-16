@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::core::entity::submission::JudgementStatus;
+
 // ── parse_time ──
 
 #[test]
@@ -636,6 +638,46 @@ fn submission_detail_null_code_degrades_to_empty_string() {
     assert_eq!(detail.code, "");
     assert_eq!(detail.language, "");
     assert_eq!(detail.submit_time, 0, "submitTime 为 null 应回退 0");
+}
+
+// ── get_judgement 轮询投影（非终态原样透传）──
+
+#[test]
+fn judgement_projection_pending_passthrough_with_zeroed_metrics() {
+    // 状态码 0（等待评测）：透传 Pending 而非折叠为 Running，与
+    // get_submission_detail 展示一致；评测未开始，指标清零
+    // （线上响应中的 null 由 parse_hoj_json 的 strip_nulls 去除，此处直接省略字段等价）
+    let d: types::SubmissionDetail =
+        serde_json::from_str(r#"{ "submitId": 1, "status": 0 }"#).expect("解析失败");
+    let result = HOJAdapter::into_judgement_result(&d);
+    assert!(matches!(result.status, JudgementStatus::Pending));
+    assert_eq!(result.score, 0.0);
+    assert_eq!(result.time_ms, 0);
+    assert_eq!(result.memory_kb, 0);
+}
+
+#[test]
+fn judgement_projection_running_passthrough() {
+    // 状态码 1（Judging）：透传 Running，轮询继续
+    let d: types::SubmissionDetail =
+        serde_json::from_str(r#"{ "submitId": 1, "status": 1 }"#).expect("解析失败");
+    let result = HOJAdapter::into_judgement_result(&d);
+    assert!(matches!(result.status, JudgementStatus::Running));
+    assert_eq!(result.time_ms, 0);
+    assert_eq!(result.memory_kb, 0);
+}
+
+#[test]
+fn judgement_projection_terminal_carries_metrics() {
+    // 终态（5=AC）：携带 score/time/memory
+    let d: types::SubmissionDetail =
+        serde_json::from_str(r#"{ "submitId": 1, "status": 5, "time": 15, "memory": 2048, "score": 100.0 }"#)
+            .expect("解析失败");
+    let result = HOJAdapter::into_judgement_result(&d);
+    assert!(matches!(result.status, JudgementStatus::Accepted));
+    assert_eq!(result.score, 100.0);
+    assert_eq!(result.time_ms, 15);
+    assert_eq!(result.memory_kb, 2048);
 }
 
 // ── ContestVO.oiRankScoreType → Contest 实体 ──

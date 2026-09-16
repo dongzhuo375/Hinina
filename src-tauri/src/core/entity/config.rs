@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 以 JSON 格式持久化，ConfigService 负责加载/保存。
 /// 所有可变行为参数均从 Config 读取，支持运行时热更新。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     /// 用户偏好
@@ -38,7 +38,7 @@ impl Default for AppConfig {
 
 // ── 用户偏好 ──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserConfig {
     /// 上次登录的 OJ 类型
@@ -64,7 +64,7 @@ fn default_oj_type() -> String {
 
 // ── OJ 连接配置 ──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OjConfig {
     /// HOJ 服务端地址
@@ -123,7 +123,7 @@ const fn default_cache_ttl() -> u64 {
 
 // ── 编辑器配置 ──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorConfig {
     /// 字体大小
@@ -173,7 +173,7 @@ fn default_language() -> String {
 
 // ── 主题配置 ──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeConfig {
     /// 当前主题名称（取值域：light；dark 尚未实现，加载时会被归一为 light）
@@ -202,7 +202,7 @@ fn default_editor_theme() -> String {
 
 // ── 布局配置 ──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutConfig {
     /// 侧边栏宽度（像素）
@@ -265,6 +265,76 @@ pub fn normalize_legacy_values(cfg: &mut AppConfig) {
     // 浮点精确比较是刻意的：只有原样落盘的旧默认值才会二进制相等
     if cfg.layout.split_ratio == 0.45 {
         cfg.layout.split_ratio = default_split_ratio();
+    }
+}
+
+// ── 写入路径校验与净化（M4）──
+//
+// config.json 可被手改，前端 SettingsView 不是唯一防线：
+// `update_config` 持久化前必须先 `validate()`（不可钳制项拒绝）再
+// `sanitize()`（可钳制项收敛到与前端一致的取值域）。
+
+impl AppConfig {
+    /// 校验不可钳制的字段（目前仅服务器地址），失败返回可直接展示的错误消息。
+    ///
+    /// 判据与前端 SettingsView 一致：trim 后以 http:// 或 https:// 开头
+    /// （大小写不敏感），且其余部分非空、不含空白（等价 `/^https?:\/\/\S+$/i`）。
+    pub fn validate(&self) -> Result<(), String> {
+        if !is_valid_http_url(&self.oj.hoj_url) {
+            return Err("服务器地址必须以 http:// 或 https:// 开头".into());
+        }
+        Ok(())
+    }
+
+    /// 就地钳制越界字段，取值域与前端 SettingsView 校验一致。
+    ///
+    /// 返回是否修改了任何字段（调用方据此记 warn 日志）。
+    pub fn sanitize(&mut self) -> bool {
+        let before = self.clone();
+
+        self.oj.hoj_url = self.oj.hoj_url.trim().to_string();
+        self.oj.timeout_secs = self.oj.timeout_secs.clamp(1, 120);
+        self.oj.poll_interval_secs = self.oj.poll_interval_secs.clamp(1, 30);
+        self.oj.poll_timeout_secs = self.oj.poll_timeout_secs.clamp(30, 3600);
+        self.oj.cache_ttl_secs = self.oj.cache_ttl_secs.clamp(0, 600);
+        self.oj.contest_id = self.oj.contest_id.max(0);
+        self.editor.font_size = self.editor.font_size.clamp(8, 32);
+        self.editor.tab_size = self.editor.tab_size.clamp(1, 8);
+        self.editor.auto_save_interval_secs = self.editor.auto_save_interval_secs.clamp(5, 300);
+        self.editor.default_language = sanitize_language_id(&self.editor.default_language);
+        // NaN.clamp 返回 NaN：非有限值先回退默认，再钳制到滑杆值域 [0.30, 0.70]
+        if !self.layout.split_ratio.is_finite() {
+            self.layout.split_ratio = default_split_ratio();
+        }
+        self.layout.split_ratio = self.layout.split_ratio.clamp(0.30, 0.70);
+
+        *self != before
+    }
+}
+
+/// 是否为合法 http(s) 地址（判据见 `AppConfig::validate` 文档）。
+fn is_valid_http_url(raw: &str) -> bool {
+    let url = raw.trim();
+    let lower = url.to_ascii_lowercase();
+    let rest = if let Some(r) = lower.strip_prefix("https://") {
+        r
+    } else if let Some(r) = lower.strip_prefix("http://") {
+        r
+    } else {
+        return false;
+    };
+    !rest.is_empty() && !rest.chars().any(|c| c.is_whitespace())
+}
+
+/// 语言净化：旧显示名先经 `normalize_language_id` 映射，
+/// 已在取值域内的合法 Monaco id 保留，其余未知值一律回退 `cpp`。
+fn sanitize_language_id(raw: &str) -> String {
+    if let Some(id) = normalize_language_id(raw) {
+        return id.to_string();
+    }
+    match raw {
+        "cpp" | "java" | "python" | "c" => raw.to_string(),
+        _ => default_language(),
     }
 }
 
