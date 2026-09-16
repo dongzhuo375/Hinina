@@ -16,6 +16,9 @@ export interface Contest {
   sealRankTime: number | null
   /// 是否允许赛后提交（决定榜单查询 containsEnd 是否真正生效）
   allowEndSubmit: boolean
+  /// OI 榜单计分规则："Recent"（取最后一次提交）/ "Highest"（取最高分）；
+  /// ACM 比赛或未返回时为 null（服务端属性，客户端只读展示，不可切换）
+  oiRankScoreType: string | null
 }
 
 /// 比赛题目摘要，对应 Rust `core::entity::contest::ContestProblem`。

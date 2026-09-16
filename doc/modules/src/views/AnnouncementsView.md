@@ -1,0 +1,66 @@
+# AnnouncementsView（公告页）
+
+> 源文件：`src/views/AnnouncementsView.vue`
+
+## 职责
+
+比赛公告卡片流页面：Markdown 正文渲染（相对图片 URL 改写为 OJ 绝对地址）、未读圆点与高亮边框、长文折叠/展开（仅对实际溢出的卡片显示切换按钮）、进入页面即全部标记已读；轮询不在本视图 —— 由外壳 `ContestLayout` 统一持有，保证 ActivityBar 红点在全部页面鲜活。
+
+## 核心类型/函数
+
+普通变量：`alive`（卸载标记）、`bodyEls: Map<string, HTMLElement>`（正文元素引用，非渲染状态）。
+
+| 名称 | 签名 | 用途 |
+|------|------|------|
+| `baseUrl` | ref | OJ 基址（`configService.getOjBaseUrl()`，失败回退空串），供 `renderMarkdown` 把正文中的相对图片 URL 改写为绝对地址 |
+| `headerTitle` | computed | `{比赛标题} 赛事公告` |
+| `isContestFailed` / `isBootstrapping` / `isAnnouncementFailed` / `isEmpty` | computed | 四态分流：比赛加载彻底失败（整页 ErrorMessage）→ 首次加载 spinner → 公告失败且**无旧数据**（有旧数据时保留列表，错误交给下一轮轮询自愈）→ 空态 |
+| `renderedContents` | computed | 公告 id → 正文 HTML 的 Map 缓存：内容或基址变化才重渲染，避免模板里反复调 `renderMarkdown`（出口已消毒，`v-html` 安全） |
+| `formatTime` | `(epochSecs) => string` | createdAt（epoch 秒，与 Contest.startTime 同口径）→ zh-CN 本地化；非正值显示 `—` |
+| `overflowIds` / `expandedIds` | `ref<Set<string>>` | 已判定溢出的公告 ID（展开后不再复测，标记保留）/ 用户手动展开的 ID |
+| `setBodyRef` | `(id) => (el) => void` | 正文元素的 ref 回调工厂，维护 `bodyEls` |
+| `measureOverflow` | fn | 溢出测量：`scrollHeight > clientHeight + 2` 才判定需要折叠；展开状态下二者相等，跳过复测；沿用仍在列表中的既有标记 |
+| `toggleExpand` | fn | 展开/收起（替换 Set 触发响应式） |
+| `bootstrap` / `retryAnnouncements` / `onRefresh` | — | 引导链 / 重试（无 contestId 时重走 bootstrap）/ 手动刷新按钮（`announcementStore.refresh()`） |
+
+## 直接依赖
+
+- `vue`
+- 组件：`ErrorMessage` / `LoadingSpinner`
+- `@/services/config.service`（`getOjBaseUrl`）
+- stores：`announcementStore`（列表/已读/未读数）、`contestStore`（`whenLoaded` + 标题）
+- `@/utils/markdown`（`renderMarkdown`）
+
+## 被依赖
+
+- `router/index.ts` — 路由 `Announcements`（`/contest/announcements`）；ActivityBar 入口带未读红点
+
+## 逻辑流程
+
+```
+onMounted:
+  baseUrl = await configService.getOjBaseUrl()   // 先于渲染取基址，图片 URL 一步到位
+  bootstrap():
+    contestStore.whenLoaded()                    // 失败 → isContestFailed 整页报错
+    announcementStore.load(contestId)            // 列表 + 已读集合（store 内并行拉取）
+    announcementStore.markAllRead()              // 产品决策：进入公告页即全部已读，
+                                                 // ActivityBar 红点随之消失（不 await）
+  nextTick → measureOverflow()                   // 首测折叠
+
+watch([announcements, baseUrl]) → nextTick → measureOverflow()
+  // 轮询落新数据或基址就绪后正文高度变化，需要重测
+
+onUnmounted: alive = false（只标记失效，**不停止轮询** —— 轮询归外壳 ContestLayout）
+```
+
+设计要点：
+
+- **轮询所有权在外壳**：未读红点徽标在所有页面可见，公告轮询必须与工作台同生命周期
+  （见 `ContestLayout.md`）；本视图卸载只置 `alive`，防止异步回调在卸载后写状态。
+- **长文折叠按实测溢出而非字数**：`max-h-36` + 渐变遮罩，只有 `scrollHeight` 真正超出
+  的卡片才显示「展开全部」——短公告不出现无意义按钮；已展开卡片不复测（展开后
+  scrollHeight === clientHeight 会误判为不溢出）。
+- `markAllRead` 是乐观更新（store 内先改本地再持久化，失败回滚），本页调用后不等待结果。
+- 正文样式 scoped `.prose` 与题面同风格；`renderMarkdown` 出口消毒是 `v-html` 的安全前提。
+- 有旧数据时公告加载失败不打断阅读（列表保留，错误由下一轮外壳轮询自愈），
+  只有「一条公告都没有」才整块换 ErrorMessage。

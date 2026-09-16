@@ -14,7 +14,7 @@
 |------|------|------|
 | state | `workspace` / `activeFile` / `code` / `language`（默认 'cpp'）/ `isDirty` / `_syncTimer` | `_syncTimer` 是 2s 防抖定时器句柄（下划线前缀标记非持久化状态） |
 | `currentCode` / `currentLanguage` | getters | 编辑器当前代码与语言 |
-| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | 加载工作区：恢复 language / isDirty，从 `files` 中按后缀（.cpp/.c/.java/.py）找出代码文件填充 `code` 与 `activeFile`（找不到回退 'main.cpp'） |
+| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | 加载工作区：恢复 language（工作区未记录语言时用 `configService.getDefaultLanguage()` 的配置默认语言，兜底 'cpp' —— P55 消费落地）/ isDirty，从 `files` 中按后缀（.cpp/.c/.java/.py）找出代码文件填充 `code` 与 `activeFile`（找不到回退 'main.cpp'） |
 | `saveWorkspace` | `() => Promise<void>` | 显式保存并清脏标记（切题前落盘由 ProblemSolveView 调用） |
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + 标脏 + 触发防抖同步 |
 | `debouncedSync` | `() => void` | 2s 无操作后把代码按 `langFileMap[language]` 推送到后端（`updateWorkspaceFile`）；失败只 console.error |
@@ -26,6 +26,7 @@
 - `pinia`
 - `@/types/workspace`（仅类型）
 - `@/services/workspace.service`（`workspaceService`）
+- `@/services/config.service`（`getDefaultLanguage` 默认语言）
 
 ## 被依赖
 

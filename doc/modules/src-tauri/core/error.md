@@ -8,7 +8,7 @@
 - **`AppResult<T>`** — `Result<T, AppError>` 类型别名
 - **`AppError::user_message()`** — 返回用户可读的错误信息（不含变体前缀）
 - **`AppError::is_user_facing()`** — 判断是否应向用户展示（当前恒为 `true`）
-- **`AppError::context(ctx)`** — 补上「哪个环节失败」的上下文，**逐变体保留原始变体**，只在原始消息前拼接环节名（`ctx: msg`）。为什么不能用 `AppError::Network(format!("xx 请求失败: {}", e))` 重新包装：那样会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」这类自相矛盾的嵌套消息，把排障引向错误方向；更严重的是**变体是前端 `isAuthError` 分流与 `sessionGuard` 会话失效兜底的唯一依据**，改写变体会让 401 不再触发登出，选手被卡在比赛页反复失败。取的是原始消息而非 `Display`，否则会重复带上「网络错误:」等前缀。**Service 层传播 Provider 错误一律用 `context()`，这是全项目约定，不得用 `AppError::Xxx(format!(...))` 重新包装** —— `service::{contest, problem, submission, auth}` 全部遵守（`get_rank` 是全场最高频的认证调用，每 10s 一次；`submit` / `login` 同理），`SubmissionService::poll_judgement` 还额外对 `Auth` 变体短路（不重试直接上抛），以免会话失效被拖成「评测超时」（`Submission` 变体）
+- **`AppError::context(ctx)`** — 补上「哪个环节失败」的上下文，**逐变体保留原始变体**，只在原始消息前拼接环节名（`ctx: msg`）。为什么不能用 `AppError::Network(format!("xx 请求失败: {}", e))` 重新包装：那样会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」这类自相矛盾的嵌套消息，把排障引向错误方向；更严重的是**变体是前端 `isAuthError` 分流与 `sessionGuard` 会话失效兜底的唯一依据**，改写变体会让 401 不再触发登出，选手被卡在比赛页反复失败。取的是原始消息而非 `Display`，否则会重复带上「网络错误:」等前缀。**Service 层传播 Provider 错误一律用 `context()`，这是全项目约定，不得用 `AppError::Xxx(format!(...))` 重新包装** —— `service::{contest, problem, submission, auth}` 全部遵守（`get_rank` 是全场最高频的认证调用，每 10s 一次；`submit` / `login` 同理），`SubmissionService::get_judgement` 为单次查询、`Auth` 同样经 `context()` 直接上抛（后端不循环不重试，轮询节拍与瞬时错误容忍由前端 createPoller 拥有），会话失效不会被拖成「评测超时」
 - **`prepend(ctx, msg)`**（私有）— `context()` 的消息拼接实现
 - **`From` 转换** — `std::io::Error` → `Io`、`reqwest::Error` → `Network`、`serde_json::Error` → `Serialization`，让 `?` 自动转换
 
@@ -41,7 +41,7 @@
 - `service::auth`（`login` 用 `context()` 传播 Provider 错误）
 - `service::contest`（`list_contests` / `get_rank` / `load_contest_with_problems` 用 `context()` 传播）
 - `service::problem`（`list_problems` / `open_problem` / `get_user_problem_status` 用 `context()` 传播；`fetch_limits` 构造 `Unknown`）
-- `service::submission`（`submit` 用 `context()` 传播；`poll_judgement` 构造 `Submission`（超时）并 `matches!` 判定 `Auth` 短路）
+- `service::submission`（`submit` / `get_judgement` / 三个查询方法均用 `context()` 传播，本层不构造变体）
 - `service::workspace::manager`
 
 ## 逻辑流程
@@ -56,7 +56,7 @@ adapter::hoj                体内 401/403+登录提示 → Auth（auth_failure_
                             传播时 e.context("HOJ xxx")
 service::{contest,problem,submission,auth}
                             传播时 e.context("环节名")；仅本层自身语义才构造变体
-                            （如 poll_judgement 超时 → Submission）
+                            （如 problem::fetch_limits → Unknown）
 commands::*                 原样返回 AppResult，经 serde 序列化为 { Variant: msg }
 前端 bridge/index.ts        parseAppError → IpcError；isAuthError(variant === 'Auth')
                             → stores/sessionGuard.ts 会话失效兜底 → 登出

@@ -44,6 +44,7 @@ const contest: Contest = {
   sealRank: false,
   sealRankTime: null,
   allowEndSubmit: false,
+  oiRankScoreType: null,
 }
 
 /// 预置"上一位选手"的会话级领域状态，用于验证登出清理

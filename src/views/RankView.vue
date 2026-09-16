@@ -63,11 +63,25 @@ const updatedText = computed(() => {
   return `更新于 ${Math.floor(mins / 60)} 小时前`
 })
 
-/// 刷新状态文案：比赛已结束时 HOJ 网页端会禁用刷新，这里同样停掉轮询并说明原因
+/// 刷新状态文案：比赛已结束时 HOJ 网页端会禁用刷新，这里同样停掉轮询并说明原因；
+/// 全量快照模式（打星/女生筛选）下自动轮询暂停，只保留手动刷新
 const liveText = computed(() => {
   if (isEnded.value) return '比赛已结束，停止刷新'
+  if (rankStore.isFullMode) return '全量快照 · 手动刷新'
   return rankStore.isLive ? '实时刷新中' : '实时刷新未开启'
 })
+
+/// 是否处于打星/女生的客户端筛选（含快照尚未就位的拉取中/失败态）
+const isFullFilterActive = computed(
+  () => rankStore.groupFilter === 'star' || rankStore.groupFilter === 'female',
+)
+
+/// 底栏「共 N 队」：全量模式显示筛选后的行数，常规模式显示修正后的真实参与人数
+const totalLabel = computed(() =>
+  rankStore.isFullMode
+    ? `共 ${rankStore.fullFilteredRows.length} 队（筛选后）`
+    : `共 ${rankStore.participants} 队`,
+)
 
 /**
  * 页码窗口：首尾页 + 当前页 ±1，其余折叠成省略号。
@@ -96,28 +110,19 @@ const pageItems = computed<(number | '…')[]>(() => {
   return items
 })
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 /**
  * 确保比赛数据就绪。
  *
  * 外壳 `ContestLayout` 也会拉取比赛，但子视图的 `onMounted` 先于父视图触发，
- * 直接进入榜单页时这里才是实际发起方；若外壳已在加载中则等它落地，避免重复请求。
+ * 直接进入榜单页时这里才是实际发起方；`whenLoaded` 复用在途请求（P59 统一入口），
+ * 失败原因已写入 contestStore.error，模板据此展示重试入口。
  */
 async function ensureContest(): Promise<void> {
   if (contest.value) return
-  if (!contestStore.isLoading) {
-    try {
-      await contestStore.loadContest()
-    } catch {
-      // 失败原因已写入 contestStore.error，模板据此展示重试入口
-    }
-    return
-  }
-  for (let i = 0; i < 100 && alive && contestStore.isLoading && !contest.value; i++) {
-    await sleep(100)
+  try {
+    await contestStore.whenLoaded()
+  } catch {
+    // 失败原因已写入 contestStore.error
   }
 }
 
@@ -137,6 +142,11 @@ async function bootstrap(): Promise<void> {
 }
 
 async function retry(): Promise<void> {
+  // 全量快照模式下错误来自快照拉取，重试即重拉快照
+  if (isFullFilterActive.value) {
+    await rankStore.refresh()
+    return
+  }
   const contestId = rankStore.contestId || contest.value?.id
   if (!contestId) {
     await bootstrap()
@@ -147,6 +157,11 @@ async function retry(): Promise<void> {
   } catch {
     // 同上
   }
+}
+
+/// 手动刷新：常规模式重拉当前页，全量模式重拉整个快照（refresh 内部吞异常）
+function manualRefresh(): void {
+  void rankStore.refresh()
 }
 
 function goToPage(page: number) {
@@ -246,6 +261,46 @@ watch(isEnded, (ended) => {
         </button>
       </div>
 
+      <!-- 全量快照模式状态行：打星/女生为客户端跨页筛选，展示快照规模与手动刷新入口 -->
+      <div
+        v-if="isFullFilterActive"
+        class="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500"
+      >
+        <svg
+          class="h-3.5 w-3.5 shrink-0"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            d="M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4zm3 7a1 1 0 1 0 0 2h12a1 1 0 1 0 0-2H6zm3 7a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H9z"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <span v-if="rankStore.isFullMode" class="min-w-0">
+          客户端筛选 · 已加载 {{ rankStore.fullLoadedRows }} 行
+          <template v-if="rankStore.fullFetchState === 'truncated'">
+            （已达 2000 行上限，结果可能不完整）
+          </template>
+        </span>
+        <span v-else-if="rankStore.fullFetchState === 'loading'">正在拉取全量榜单…</span>
+        <span v-else-if="rankStore.fullFetchState === 'error'">
+          全量榜单拉取失败，当前仅筛选本页数据
+        </span>
+        <span v-else>客户端筛选（等待快照）</span>
+        <button
+          type="button"
+          class="ml-auto shrink-0 rounded-md border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-600 transition-colors enabled:hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="rankStore.isLoading"
+          @click="manualRefresh"
+        >
+          手动刷新
+        </button>
+      </div>
+
       <div
         class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-white shadow-sm"
       >
@@ -282,7 +337,7 @@ watch(isEnded, (ended) => {
               :class="
                 isEnded
                   ? 'bg-[var(--text-muted)]'
-                  : rankStore.isLive
+                  : rankStore.isLive && !rankStore.isFullMode
                     ? 'animate-pulse bg-emerald-500'
                     : 'bg-amber-400'
               "
@@ -294,7 +349,7 @@ watch(isEnded, (ended) => {
           </div>
 
           <div v-if="rankStore.pages > 1" class="flex items-center gap-2 text-xs">
-            <span class="font-mono text-[var(--text-muted)]">共 {{ rankStore.participants }} 队</span>
+            <span class="font-mono text-[var(--text-muted)]">{{ totalLabel }}</span>
             <div class="flex items-center gap-1">
               <button
                 type="button"

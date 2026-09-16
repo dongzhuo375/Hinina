@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ContestProblem } from '@/types/contest'
 import { useProblemStore } from '@/stores/problemStore'
 import { useRankStore } from '@/stores/rankStore'
 import { formatLimitsSummary } from '@/utils/limits'
 import { formatRankTime } from '@/utils/rank'
+import QuickSubmitDialog from '@/components/problem/QuickSubmitDialog.vue'
 
 const props = defineProps<{ problem: ContestProblem }>()
-const emit = defineEmits<{ open: []; quickSubmit: [] }>()
+const emit = defineEmits<{ open: [] }>()
 
 const problemStore = useProblemStore()
 const rankStore = useRankStore()
+
+/// 快捷提交弹窗开关（弹窗内完成提交与评测跟踪，不离开题目总览）
+const quickSubmitOpen = ref(false)
 
 /// 徽章回退调色板（取自设计稿 A–F 六卡配色）：HOJ 气球色可能为空串（组织者未配置），
 /// 此时按题号序号循环取色 —— 同一题号恒定同色，轮询刷新时徽章不会跳变
@@ -53,7 +57,7 @@ const pill = computed(() => {
     class="group flex min-h-[175px] flex-col justify-between rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-sm transition-all duration-200 hover:border-slate-300 hover:shadow-md"
   >
     <div class="flex items-start justify-between gap-3">
-      <div class="flex items-start space-x-3.5">
+      <div class="flex min-w-0 items-start space-x-3.5">
         <!-- 字母徽章：40px 圆角方块，底色优先用 HOJ 气球色 -->
         <div
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-mono text-lg font-bold text-white shadow-xs"
@@ -61,7 +65,8 @@ const pill = computed(() => {
         >
           {{ problem.displayId }}
         </div>
-        <div>
+        <!-- min-w-0：三列窄卡片下允许标题块收缩换行，而不是撑破卡片 -->
+        <div class="min-w-0">
           <h3
             class="cursor-pointer text-base font-bold tracking-tight text-[var(--text-primary)] transition group-hover:text-[var(--color-primary)]"
             @click="emit('open')"
@@ -120,7 +125,7 @@ const pill = computed(() => {
       <div class="flex justify-end pb-2">
         <button
           class="flex cursor-pointer items-center gap-1 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-secondary)]"
-          @click="emit('quickSubmit')"
+          @click="quickSubmitOpen = true"
         >
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -134,9 +139,9 @@ const pill = computed(() => {
         </button>
       </div>
       <div class="flex items-center justify-between border-t border-slate-100 pt-2.5">
-        <!-- 提交历史接口本轮未接入：不显示数量，跳到评测占位页 -->
+        <!-- 评测记录：跳到评测页并携带题目筛选（?problem=displayId 自动过滤本题） -->
         <router-link
-          :to="{ name: 'Submissions' }"
+          :to="{ name: 'Submissions', query: { problem: problem.displayId } }"
           class="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-secondary)]"
         >
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -157,5 +162,8 @@ const pill = computed(() => {
         </button>
       </div>
     </div>
+
+    <!-- 快捷提交弹窗：v-if 保证同一时刻至多挂载一个实例 -->
+    <QuickSubmitDialog v-if="quickSubmitOpen" :problem="problem" @close="quickSubmitOpen = false" />
   </article>
 </template>

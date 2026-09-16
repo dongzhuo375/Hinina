@@ -1,0 +1,526 @@
+<!DOCTYPE html><html lang="zh-CN" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>评测 - Hinina OJ Desktop Contest Client</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Fonts: Inter & JetBrains Mono -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-low": "#171c23",
+            "text-primary-dark": "#F0F6FC",
+            "surface-bright": "#343941",
+            "surface-tint": "#cabeff",
+            "surface-variant": "#30353d",
+            "error-container": "#93000a",
+            "inverse-primary": "#603ce2",
+            "on-tertiary-fixed": "#00201e",
+            "outline": "#938ea1",
+            "on-secondary-fixed": "#00174b",
+            "bg-surface-dark": "#161B22",
+            "secondary-container": "#0053db",
+            "on-error-container": "#ffdad6",
+            "primary-fixed": "#e6deff",
+            "text-secondary-light": "#64748B",
+            "surface-container-highest": "#30353d",
+            "on-tertiary-container": "#00302d",
+            "on-primary-fixed": "#1c0062",
+            "status-wa": "#EF4444",
+            "inverse-surface": "#dee2ec",
+            "inverse-on-surface": "#2c3138",
+            "surface-container": "#1b2027",
+            "border-subtle-light": "#E2E8F0",
+            "tertiary-fixed": "#61f9ef",
+            "bg-surface-light": "#FFFFFF",
+            "surface": "#0f141b",
+            "primary-fixed-dim": "#cabeff",
+            "on-tertiary-fixed-variant": "#00504c",
+            "status-pending": "#00C7BE",
+            "surface-dim": "#0f141b",
+            "background": "#0f141b",
+            "on-surface": "#dee2ec",
+            "on-primary-container": "#2a0088",
+            "bg-canvas-light": "#F8FAFC",
+            "text-primary-light": "#0F172A",
+            "surface-container-high": "#252a32",
+            "status-tle": "#F59E0B",
+            "tertiary": "#39dcd2",
+            "on-tertiary": "#003734",
+            "on-primary-fixed-variant": "#4816cb",
+            "status-ac": "#22C55E",
+            "error": "#ffb4ab",
+            "surface-container-lowest": "#090f15",
+            "primary-container": "#947dff",
+            "on-error": "#690005",
+            "text-secondary-dark": "#8B949E",
+            "secondary-fixed": "#dbe1ff",
+            "on-primary": "#31009a",
+            "bg-canvas-dark": "#0D1117",
+            "on-secondary": "#002a78",
+            "secondary-fixed-dim": "#b4c5ff",
+            "tertiary-fixed-dim": "#39dcd2",
+            "on-surface-variant": "#c9c4d8",
+            "tertiary-container": "#00a29a",
+            "primary": "#7C5CFF",
+            "border-subtle-dark": "#30363D",
+            "secondary": "#b4c5ff",
+            "text-muted-dark": "#6E7681",
+            "on-secondary-container": "#cdd7ff",
+            "outline-variant": "#484555",
+            "on-background": "#dee2ec",
+            "bg-surface-elevated": "#21262D",
+            "on-secondary-fixed-variant": "#003ea8"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          spacing: {
+            "space-xs": "0.25rem",
+            "space-sm": "0.5rem",
+            "space-md": "0.75rem",
+            "space-lg": "1rem",
+            "space-xl": "1.5rem",
+            "gutter": "0.75rem",
+            "margin": "1rem"
+          },
+          fontFamily: {
+            "label-code-lg": ["JetBrains Mono"],
+            "label-code-md": ["JetBrains Mono"],
+            "label-code-sm": ["JetBrains Mono"],
+            "headline-lg": ["Inter"],
+            "headline-md": ["Inter"],
+            "headline-sm": ["Inter"],
+            "body-lg": ["Inter"],
+            "body-md": ["Inter"],
+            "body-sm": ["Inter"],
+            "display-hero": ["Inter"]
+          },
+          fontSize: {
+            "label-code-lg": ["14px", { lineHeight: "22px", fontWeight: "500" }],
+            "label-code-md": ["12px", { lineHeight: "18px", fontWeight: "500" }],
+            "label-code-sm": ["11px", { lineHeight: "16px", fontWeight: "600" }],
+            "headline-lg": ["24px", { lineHeight: "32px", fontWeight: "700" }],
+            "headline-md": ["18px", { lineHeight: "26px", fontWeight: "600" }],
+            "headline-sm": ["15px", { lineHeight: "22px", fontWeight: "600" }],
+            "body-lg": ["15px", { lineHeight: "24px", fontWeight: "400" }],
+            "body-md": ["13px", { lineHeight: "20px", fontWeight: "400" }],
+            "body-sm": ["12px", { lineHeight: "18px", fontWeight: "400" }],
+            "display-hero": ["32px", { lineHeight: "40px", fontWeight: "700" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    /* Custom subtle scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #F8FAFC;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #CBD5E1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94A3B8;
+    }
+  </style>
+</head>
+<body class="bg-bg-canvas-light text-text-primary-light font-body-md select-none overflow-hidden h-screen flex flex-col antialiased">
+<!-- 1. Native Desktop Window Top Bar -->
+<header class="h-10 bg-bg-surface-light border-b border-border-subtle-light px-space-md flex items-center justify-between select-none z-30 shrink-0">
+<!-- Left branding & contest name -->
+<div class="flex items-center gap-space-md min-w-0">
+<div class="flex items-center gap-space-sm shrink-0">
+<div class="w-6 h-6 rounded-lg bg-primary flex items-center justify-center text-white font-headline-sm font-bold shadow-sm">
+          H
+        </div>
+<span class="font-headline-sm font-bold text-text-primary-light tracking-tight">Hinina OJ</span>
+</div>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-status-ac text-label-code-sm border border-emerald-200 shrink-0 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-status-ac animate-pulse"></span>
+<span class="">运行中</span>
+</div>
+<div class="h-3.5 w-px bg-border-subtle-light shrink-0"></div>
+<div class="truncate text-body-sm font-medium text-text-secondary-light">
+<span class="text-text-primary-light font-semibold">The 49th ICPC Regional Contest - Preliminaries</span>
+<span class="mx-1.5 text-text-secondary-light/60">·</span>
+<span class="">2024 校赛模拟赛 (BAPC Model Round)</span>
+</div>
+</div>
+<!-- Right Controls & Status Pill -->
+<div class="flex items-center gap-space-sm shrink-0">
+<!-- Countdown timer pill -->
+<div class="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100/80 rounded-md border border-border-subtle-light text-text-secondary-light font-label-code-sm">
+<span class="material-symbols-outlined text-text-secondary-light" style="font-size: 15px;">timer</span>
+<span class="">剩余时间:</span>
+<span class="font-semibold text-text-primary-light">04:35:24</span>
+<span class="text-text-secondary-light/70">/ 05:00:00</span>
+</div>
+<!-- Contest Info Pill -->
+<button class="flex items-center gap-1 px-2 py-1 hover:bg-slate-100 rounded-md border border-border-subtle-light text-text-secondary-light hover:text-text-primary-light transition-colors text-body-sm">
+<span class="material-symbols-outlined text-text-secondary-light" style="font-size: 15px;">info</span>
+<span class="">比赛简介</span>
+</button>
+<!-- User Pill -->
+<div class="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100/80 rounded-md border border-border-subtle-light text-text-primary-light text-label-code-sm font-medium">
+<span class="material-symbols-outlined text-text-secondary-light" style="font-size: 16px;">account_circle</span>
+<span class="">dongzhuo375</span>
+</div>
+<!-- Window control buttons -->
+<div class="flex items-center ml-1 border-l border-border-subtle-light pl-1">
+<button class="w-7 h-7 flex items-center justify-center text-text-secondary-light hover:bg-slate-100 hover:text-text-primary-light rounded transition-colors" title="最小化">
+<span class="material-symbols-outlined" style="font-size: 16px;">remove</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-secondary-light hover:bg-slate-100 hover:text-text-primary-light rounded transition-colors" title="最大化">
+<span class="material-symbols-outlined" style="font-size: 15px;">crop_square</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-secondary-light hover:bg-rose-500 hover:text-white rounded transition-colors" title="关闭">
+<span class="material-symbols-outlined" style="font-size: 16px;">close</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Middle Core Layout: SideNav + Content Canvas -->
+<div class="flex-1 flex overflow-hidden">
+<!-- 2. Left Vertical Navigation Bar (Width 56px) -->
+<aside class="w-14 bg-bg-surface-light border-r border-border-subtle-light flex flex-col justify-between items-center py-space-sm shrink-0 z-20">
+<div class="flex flex-col items-center gap-2 w-full">
+<!-- 题目 (Problems) -->
+<button class="w-11 h-12 rounded-lg flex flex-col items-center justify-center gap-0.5 text-text-secondary-light hover:text-text-primary-light hover:bg-slate-50 transition-colors group">
+<span class="material-symbols-outlined group-hover:scale-105 transition-transform" style="font-size: 20px;">code_blocks</span>
+<span class="text-[10px] font-medium leading-none">题目</span>
+</button>
+<!-- 榜单 (Leaderboard) -->
+<button class="w-11 h-12 rounded-lg flex flex-col items-center justify-center gap-0.5 text-text-secondary-light hover:text-text-primary-light hover:bg-slate-50 transition-colors group">
+<span class="material-symbols-outlined group-hover:scale-105 transition-transform" style="font-size: 20px;">leaderboard</span>
+<span class="text-[10px] font-medium leading-none">榜单</span>
+</button>
+<!-- 评测 (Judgements) - ACTIVE TAB -->
+<button class="w-11 h-12 rounded-lg flex flex-col items-center justify-center gap-0.5 bg-purple-50 text-primary border border-purple-200/80 shadow-xs relative transition-all">
+<span class="material-symbols-outlined text-primary font-bold" style="font-size: 20px; font-variation-settings: &quot;FILL&quot; 1;">history</span>
+<span class="text-[10px] font-bold leading-none">评测</span>
+</button>
+<!-- 公告 (Announcements) -->
+<button class="w-11 h-12 rounded-lg flex flex-col items-center justify-center gap-0.5 text-text-secondary-light hover:text-text-primary-light hover:bg-slate-50 transition-colors group">
+<span class="material-symbols-outlined group-hover:scale-105 transition-transform" style="font-size: 20px;">campaign</span>
+<span class="text-[10px] font-medium leading-none">公告</span>
+</button>
+</div>
+<!-- Settings Icon Bottom -->
+<div class="w-full flex justify-center pt-2 border-t border-border-subtle-light/70">
+<button class="w-11 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 text-text-secondary-light hover:text-text-primary-light hover:bg-slate-50 transition-colors" title="客户端设置">
+<span class="material-symbols-outlined" style="font-size: 20px;">settings</span>
+<span class="text-[10px] font-medium leading-none">设置</span>
+</button>
+</div>
+</aside>
+<!-- Main Content Canvas Area -->
+<main class="flex-1 flex flex-col overflow-hidden bg-bg-canvas-light">
+<!-- 3. Header & Filter Area -->
+<section class="p-space-lg pb-space-md border-b border-border-subtle-light bg-bg-surface-light shrink-0">
+<div class="flex items-center justify-between mb-space-md">
+<div>
+<h1 class="text-headline-md font-headline-md font-bold text-text-primary-light flex items-center gap-2">
+<span class="">2024 校赛模拟赛 评测状态</span>
+<span class="text-text-secondary-light font-label-code-sm font-normal">/ Submissions</span>
+</h1>
+
+</div>
+<!-- Statistics Counters -->
+
+</div>
+<!-- Filter & Search Toolbar -->
+<div class="flex items-center justify-between gap-space-md flex-wrap"><div class="flex items-center gap-2 flex-wrap"><div class="relative"><select class="appearance-none bg-bg-surface-light border border-border-subtle-light rounded-lg pl-3 pr-8 py-1.5 text-body-sm text-text-primary-light hover:bg-slate-50 transition-colors cursor-pointer shadow-2xs font-medium"><option value="all">全部题目</option><option value="A">A 两数之和</option><option value="B">B 新港之瓶</option><option value="C">C 计算混淆</option><option value="D">D 最短路径规划</option></select><span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary-light pointer-events-none" style="font-size: 16px;">expand_more</span></div><div class="relative"><select class="appearance-none bg-bg-surface-light border border-border-subtle-light rounded-lg pl-3 pr-8 py-1.5 text-body-sm text-text-primary-light hover:bg-slate-50 transition-colors cursor-pointer shadow-2xs font-medium"><option value="all">全部状态</option><option value="AC">Accepted</option><option value="WA">Wrong Answer</option><option value="TLE">Time Limit Exceeded</option><option value="CE">Compilation Error</option><option value="PENDING">评测中</option></select><span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary-light pointer-events-none" style="font-size: 16px;">expand_more</span></div><div class="relative flex items-center"><span class="material-symbols-outlined absolute left-2.5 text-text-secondary-light pointer-events-none" style="font-size: 15px;">search</span><input type="text" placeholder="搜索提交编号 / 题目..." class="pl-8 pr-3 py-1.5 bg-bg-surface-light border border-border-subtle-light rounded-lg text-body-sm text-text-primary-light placeholder:text-text-secondary-light/60 hover:bg-slate-50 focus:bg-white transition-colors shadow-2xs w-52 font-normal"></div></div><div class="flex items-center gap-2"><button class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-border-subtle-light text-text-primary-light text-body-sm font-medium rounded-lg shadow-2xs transition-colors" title="刷新列表"><span class="material-symbols-outlined text-text-secondary-light hover:text-primary transition-colors" style="font-size: 16px;">sync</span><span class="">刷新</span></button></div></div>
+</section>
+<!-- 4. Judgements / Submissions Table Container -->
+<div class="flex-1 overflow-auto p-space-lg pt-space-md">
+<div class="bg-bg-surface-light border border-border-subtle-light rounded-xl overflow-hidden shadow-xs">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-slate-50/80 border-b border-border-subtle-light text-text-secondary-light font-label-code-sm text-[11px] uppercase tracking-wider">
+<th class="py-3 px-4 font-semibold">运行编号</th>
+<th class="py-3 px-4 font-semibold">提交时间</th>
+<th class="py-3 px-4 font-semibold">题目</th>
+<th class="py-3 px-4 font-semibold">语言</th>
+<th class="py-3 px-4 font-semibold">评测结果</th>
+<th class="py-3 px-4 font-semibold text-right">耗时</th>
+<th class="py-3 px-4 font-semibold text-right">内存</th>
+<th class="py-3 px-4 font-semibold text-right">代码长度</th>
+<th class="py-3 px-4 font-semibold text-center">操作</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-subtle-light text-body-sm font-normal text-text-primary-light">
+<!-- Row 1: Compiling / Pending -->
+<tr class="hover:bg-slate-50/70 transition-colors bg-purple-50/10">
+<td class="py-3 px-4 font-label-code-md text-text-primary-light font-semibold">#10842</td>
+<td class="py-3 px-4 text-text-secondary-light font-label-code-sm">
+<div class="">04:32:10</div>
+<div class="text-[10px] text-text-secondary-light/70">赛时 00:27:50</div>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded flex items-center justify-center bg-blue-100 text-blue-700 font-label-code-sm font-bold text-xs">C</span>
+<span class="font-medium">计算混淆</span>
+</div>
+</td>
+<td class="py-3 px-4 font-label-code-sm text-text-secondary-light">C++17 (GCC 13.2)</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs">
+<span class="material-symbols-outlined text-blue-600 animate-spin" style="font-size: 14px;">sync</span>
+<span class="">评测中 (Compiling)</span>
+</span>
+</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">-</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">-</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">1.8 KB</td>
+<td class="py-3 px-4 text-center">
+<div class="flex items-center justify-center gap-2"><button class="text-primary hover:text-primary/80 font-medium text-xs flex items-center gap-0.5"><span class="material-symbols-outlined" style="font-size: 14px;">visibility</span><span class="">查看详情</span></button></div>
+</td>
+</tr>
+<!-- Row 2: Accepted (AC) -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-4 font-label-code-md text-text-primary-light font-semibold">#10839</td>
+<td class="py-3 px-4 text-text-secondary-light font-label-code-sm">
+<div class="">04:28:44</div>
+<div class="text-[10px] text-text-secondary-light/70">赛时 00:24:24</div>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded flex items-center justify-center bg-emerald-100 text-emerald-700 font-label-code-sm font-bold text-xs">A</span>
+<span class="font-medium">两数之和</span>
+</div>
+</td>
+<td class="py-3 px-4 font-label-code-sm text-text-secondary-light">C++17 (GCC 13.2)</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-status-ac border border-emerald-200 shadow-2xs">
+<span class="material-symbols-outlined text-status-ac" style="font-size: 15px; font-variation-settings: &quot;FILL&quot; 1;">check_circle</span>
+<span class="">Accepted</span>
+</span>
+</td>
+<td class="py-3 px-4 text-right font-label-code-sm font-semibold text-text-primary-light">16 ms</td>
+<td class="py-3 px-4 text-right font-label-code-sm font-semibold text-text-primary-light">2.1 MB</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">1.2 KB</td>
+<td class="py-3 px-4 text-center">
+<div class="flex items-center justify-center gap-3"><button class="text-primary hover:text-primary/80 font-medium text-xs flex items-center gap-0.5"><span class="material-symbols-outlined" style="font-size: 14px;">visibility</span><span class="">查看详情</span></button></div>
+</td>
+</tr>
+<!-- Row 3: Wrong Answer (WA) -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-4 font-label-code-md text-text-primary-light font-semibold">#10834</td>
+<td class="py-3 px-4 text-text-secondary-light font-label-code-sm">
+<div class="">04:21:19</div>
+<div class="text-[10px] text-text-secondary-light/70">赛时 00:16:59</div>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded flex items-center justify-center bg-blue-100 text-blue-700 font-label-code-sm font-bold text-xs">C</span>
+<span class="font-medium">计算混淆</span>
+</div>
+</td>
+<td class="py-3 px-4 font-label-code-sm text-text-secondary-light">C++17 (GCC 13.2)</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-status-wa border border-rose-200 shadow-2xs">
+<span class="material-symbols-outlined text-status-wa" style="font-size: 15px; font-variation-settings: &quot;FILL&quot; 1;">cancel</span>
+<span class="">Wrong Answer on Test 4</span>
+</span>
+</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-primary-light">32 ms</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-primary-light">3.4 MB</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">1.6 KB</td>
+<td class="py-3 px-4 text-center">
+<div class="flex items-center justify-center gap-3"><button class="text-primary hover:text-primary/80 font-medium text-xs flex items-center gap-0.5"><span class="material-symbols-outlined" style="font-size: 14px;">visibility</span><span class="">查看详情</span></button></div>
+</td>
+</tr>
+<!-- Row 4: Time Limit Exceeded (TLE) -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-4 font-label-code-md text-text-primary-light font-semibold">#10826</td>
+<td class="py-3 px-4 text-text-secondary-light font-label-code-sm">
+<div class="">04:14:02</div>
+<div class="text-[10px] text-text-secondary-light/70">赛时 00:09:42</div>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded flex items-center justify-center bg-amber-100 text-amber-700 font-label-code-sm font-bold text-xs">B</span>
+<span class="font-medium">新港之瓶</span>
+</div>
+</td>
+<td class="py-3 px-4 font-label-code-sm text-text-secondary-light">Python 3.10</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-status-tle border border-amber-200 shadow-2xs">
+<span class="material-symbols-outlined text-status-tle" style="font-size: 15px;">hourglass_empty</span>
+<span class="">Time Limit Exceeded</span>
+</span>
+</td>
+<td class="py-3 px-4 text-right font-label-code-sm font-semibold text-status-tle">1005 ms</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-primary-light">14.8 MB</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">0.9 KB</td>
+<td class="py-3 px-4 text-center">
+<div class="flex items-center justify-center gap-3"><button class="text-primary hover:text-primary/80 font-medium text-xs flex items-center gap-0.5"><span class="material-symbols-outlined" style="font-size: 14px;">visibility</span><span class="">查看详情</span></button></div>
+</td>
+</tr>
+<!-- Row 5: Compilation Error (CE) -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-4 font-label-code-md text-text-primary-light font-semibold">#10820</td>
+<td class="py-3 px-4 text-text-secondary-light font-label-code-sm">
+<div class="">04:08:50</div>
+<div class="text-[10px] text-text-secondary-light/70">赛时 00:04:30</div>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded flex items-center justify-center bg-emerald-100 text-emerald-700 font-label-code-sm font-bold text-xs">A</span>
+<span class="font-medium">两数之和</span>
+</div>
+</td>
+<td class="py-3 px-4 font-label-code-sm text-text-secondary-light">C++17 (GCC 13.2)</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs">
+<span class="material-symbols-outlined text-purple-700" style="font-size: 15px;">error_outline</span>
+<span class="">Compilation Error</span>
+</span>
+</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">-</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">-</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">1.1 KB</td>
+<td class="py-3 px-4 text-center">
+<div class="flex items-center justify-center gap-3"><button class="text-primary hover:text-primary/80 font-medium text-xs flex items-center gap-0.5"><span class="material-symbols-outlined" style="font-size: 14px;">visibility</span><span class="">查看详情</span></button></div>
+</td>
+</tr>
+<!-- Row 6: Accepted (AC) -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-4 font-label-code-md text-text-primary-light font-semibold">#10815</td>
+<td class="py-3 px-4 text-text-secondary-light font-label-code-sm">
+<div class="">04:05:12</div>
+<div class="text-[10px] text-text-secondary-light/70">赛时 00:00:52</div>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded flex items-center justify-center bg-emerald-100 text-emerald-700 font-label-code-sm font-bold text-xs">A</span>
+<span class="font-medium">两数之和</span>
+</div>
+</td>
+<td class="py-3 px-4 font-label-code-sm text-text-secondary-light">Python 3.10</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-status-ac border border-emerald-200 shadow-2xs">
+<span class="material-symbols-outlined text-status-ac" style="font-size: 15px; font-variation-settings: &quot;FILL&quot; 1;">check_circle</span>
+<span class="">Accepted</span>
+</span>
+</td>
+<td class="py-3 px-4 text-right font-label-code-sm font-semibold text-text-primary-light">48 ms</td>
+<td class="py-3 px-4 text-right font-label-code-sm font-semibold text-text-primary-light">8.6 MB</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">0.4 KB</td>
+<td class="py-3 px-4 text-center">
+<div class="flex items-center justify-center gap-3"><button class="text-primary hover:text-primary/80 font-medium text-xs flex items-center gap-0.5"><span class="material-symbols-outlined" style="font-size: 14px;">visibility</span><span class="">查看详情</span></button></div>
+</td>
+</tr>
+<!-- Row 7: Wrong Answer (WA) -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-4 font-label-code-md text-text-primary-light font-semibold">#10809</td>
+<td class="py-3 px-4 text-text-secondary-light font-label-code-sm">
+<div class="">03:58:30</div>
+<div class="text-[10px] text-text-secondary-light/70">赛前热身</div>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded flex items-center justify-center bg-indigo-100 text-indigo-700 font-label-code-sm font-bold text-xs">D</span>
+<span class="font-medium">最短路径规划</span>
+</div>
+</td>
+<td class="py-3 px-4 font-label-code-sm text-text-secondary-light">C++17 (GCC 13.2)</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-status-wa border border-rose-200 shadow-2xs">
+<span class="material-symbols-outlined text-status-wa" style="font-size: 15px; font-variation-settings: &quot;FILL&quot; 1;">cancel</span>
+<span class="">Wrong Answer on Test 12</span>
+</span>
+</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-primary-light">64 ms</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-primary-light">5.2 MB</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">2.3 KB</td>
+<td class="py-3 px-4 text-center">
+<div class="flex items-center justify-center gap-3"><button class="text-primary hover:text-primary/80 font-medium text-xs flex items-center gap-0.5"><span class="material-symbols-outlined" style="font-size: 14px;">visibility</span><span class="">查看详情</span></button></div>
+</td>
+</tr>
+<!-- Row 8: Wrong Answer (WA) -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-4 font-label-code-md text-text-primary-light font-semibold">#10802</td>
+<td class="py-3 px-4 text-text-secondary-light font-label-code-sm">
+<div class="">03:52:10</div>
+<div class="text-[10px] text-text-secondary-light/70">赛前热身</div>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded flex items-center justify-center bg-indigo-100 text-indigo-700 font-label-code-sm font-bold text-xs">D</span>
+<span class="font-medium">最短路径规划</span>
+</div>
+</td>
+<td class="py-3 px-4 font-label-code-sm text-text-secondary-light">C++17 (GCC 13.2)</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-status-wa border border-rose-200 shadow-2xs">
+<span class="material-symbols-outlined text-status-wa" style="font-size: 15px; font-variation-settings: &quot;FILL&quot; 1;">cancel</span>
+<span class="">Wrong Answer on Test 2</span>
+</span>
+</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-primary-light">12 ms</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-primary-light">3.1 MB</td>
+<td class="py-3 px-4 text-right font-label-code-sm text-text-secondary-light">1.9 KB</td>
+<td class="py-3 px-4 text-center">
+<div class="flex items-center justify-center gap-3"><button class="text-primary hover:text-primary/80 font-medium text-xs flex items-center gap-0.5"><span class="material-symbols-outlined" style="font-size: 14px;">visibility</span><span class="">查看详情</span></button></div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- 5. Bottom Pagination Bar -->
+<div class="flex items-center justify-between mt-space-md px-1">
+<div class="text-body-sm text-text-secondary-light font-medium">
+            共 <span class="text-text-primary-light font-semibold">8</span> 条提交记录
+          </div>
+<div class="flex items-center gap-1">
+<button class="px-2.5 py-1 rounded border border-border-subtle-light bg-white text-text-secondary-light text-body-sm hover:text-text-primary-light hover:bg-slate-50 disabled:opacity-50 transition-colors" disabled="">
+              上一页
+            </button>
+<button class="w-7 h-7 rounded border border-primary bg-primary text-white text-body-sm font-medium flex items-center justify-center shadow-xs">
+              1
+            </button>
+<button class="px-2.5 py-1 rounded border border-border-subtle-light bg-white text-text-secondary-light text-body-sm hover:text-text-primary-light hover:bg-slate-50 disabled:opacity-50 transition-colors" disabled="">
+              下一页
+            </button>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- 6. Bottom Window Status Bar (Fixed bottom-0, strictly identical) -->
+<footer class="h-6 bg-bg-surface-light border-t border-border-subtle-light px-space-md flex items-center justify-between text-text-secondary-light text-label-code-sm select-none shrink-0 z-30 font-medium">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-status-ac"></span>
+<span class="">● 已连接比赛服务器</span>
+</div>
+<div>
+<span class="">Client v2.4.4</span>
+</div>
+</footer>
+
+
+</body></html>

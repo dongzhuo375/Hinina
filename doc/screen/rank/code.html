@@ -1,0 +1,201 @@
+<!DOCTYPE html><html lang="zh-CN" style=""><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hinina 比赛工作台 (实时榜单 Scoreboard)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Microsoft YaHei', 'sans-serif'],
+            mono: ['Fira Code', 'JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              100: '#ede9fe',
+              500: '#7c5cff',
+              600: '#6a45ff',
+              700: '#582be8',
+            },
+            arena: {
+              ac: '#10b981',
+              'ac-light': '#ecfdf5',
+              'ac-border': '#a7f3d0',
+              'ac-first': '#047857',
+              wa: '#ef4444',
+              'wa-light': '#fef2f2',
+              'wa-border': '#fecaca',
+              pending: '#f59e0b',
+              'pending-light': '#fffbeb',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f8fafc;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="bg-[#f8fafc] text-slate-800 h-screen flex flex-col overflow-hidden text-[13px]">
+
+  <!-- Top App Window Bar -->
+  <header class="bg-white text-slate-800 h-12 flex items-center justify-between px-4 shrink-0 border-b border-slate-200 z-50 shadow-xs">
+<div class="flex items-center space-x-3">
+<div class="flex items-center space-x-2">
+<div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center font-bold text-white shadow-xs text-sm">H</div>
+<span class="font-bold tracking-tight text-slate-900 text-base">Hinina</span>
+</div>
+<div class="h-4 w-px bg-slate-200 mx-1"></div>
+<div class="flex items-center space-x-2">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-600 border border-emerald-200">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+进行中
+</span>
+<h1 class="text-sm font-bold text-slate-900 truncate max-w-xs md:max-w-md">2024 校赛模拟赛 (BAPC Model Round)</h1>
+</div>
+</div>
+<div class="hidden lg:flex items-center flex-col justify-center px-4 py-0.5">
+<div class="flex items-center space-x-2 text-xs font-mono">
+<span class="text-slate-500">剩余时间:</span>
+<span class="text-slate-900 font-bold tracking-wider text-sm bg-slate-50 px-2 py-0.5 rounded border border-slate-200 font-mono">04:35:24</span>
+<span class="text-slate-400 text-[11px]">/ 05:00:00</span>
+</div>
+<div class="w-48 h-1 bg-slate-100 rounded-full mt-1 overflow-hidden border border-slate-200">
+<div class="bg-amber-400 h-full rounded-full" style="width: 8.2%;"></div>
+</div>
+</div>
+<div class="flex items-center space-x-3">
+<button class="text-xs bg-white hover:bg-slate-50 text-slate-700 px-2.5 py-1 rounded-md transition flex items-center space-x-1.5 border border-slate-200 shadow-xs">
+<svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="font-medium">比赛简介</span>
+</button>
+<div class="flex items-center space-x-2 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200 text-xs">
+<div class="w-5 h-5 rounded-full bg-brand-500 text-white font-bold flex items-center justify-center text-[10px]">DZ</div>
+<span class="text-slate-800 font-medium font-mono">dongzhuo375</span>
+</div>
+<div class="flex items-center space-x-1 pl-2 border-l border-slate-200">
+<button class="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition" title="最小化">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 12H4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+<button class="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition" title="最大化">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect height="16" rx="2" stroke-width="2" width="16" x="4" y="4"></rect></svg>
+</button>
+<button class="w-7 h-7 flex items-center justify-center rounded hover:bg-red-600 hover:text-white text-slate-500 transition" title="关闭">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+</div>
+</header>
+
+  <!-- Main Body Layout: Vertical Nav + Central Content -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- Left Vertical Nav -->
+    <aside class="w-14 bg-white border-r border-slate-200/80 flex flex-col items-center py-3 justify-between shrink-0 select-none z-10">
+      <div class="flex flex-col items-center space-y-3 w-full">
+        <!-- Problems Nav Button (Inactive) -->
+        <button class="w-10 h-10 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all group relative">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+          </svg>
+          <span class="text-[9px] mt-0.5 scale-90">题目</span>
+        </button>
+
+        <!-- Scoreboard Nav Button (ACTIVE) -->
+        <button class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex flex-col items-center justify-center transition-all shadow-sm relative">
+          <div class="absolute left-0 top-2 bottom-2 w-1 bg-brand-500 rounded-r"></div>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+          </svg>
+          <span class="text-[9px] mt-0.5 scale-90 font-semibold">榜单</span>
+        </button>
+
+        <!-- Submissions Nav Button -->
+        <button class="w-10 h-10 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all group relative">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+          </svg>
+          <span class="text-[9px] mt-0.5 scale-90">评测</span>
+        </button>
+
+        <!-- Clarifications Nav Button with Badge -->
+        <button class="w-10 h-10 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all group relative"><span class="absolute top-1 right-1 w-4 h-4 bg-rose-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center border border-white">1</span>
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"></path>
+</svg>
+<span class="text-[9px] mt-0.5 scale-90">公告</span></button>
+      </div>
+
+      <!-- Bottom Settings -->
+      <div class="flex flex-col items-center space-y-2">
+        <button class="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Center Content: Scoreboard -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-[#f8fafc]"><!-- Scoreboard Top Header & Filter Bar -->
+<div class="px-5 pt-3.5 pb-2.5 border-b border-slate-200/80 bg-white/90 backdrop-blur-sm shrink-0 shadow-xs"><div class="flex items-center justify-between mb-2.5"><div><div class="flex items-center space-x-3"><h1 class="text-lg font-bold text-slate-800 tracking-tight">2024 校赛模拟赛 实时榜单</h1><span class="text-slate-400 font-mono text-xs">/ Live Scoreboard</span></div></div><div class="flex items-center gap-6 bg-slate-50/80 border border-slate-200/80 rounded-xl px-4 py-2 text-xs shadow-xs"><div class="flex flex-col"><span class="text-[11px] text-slate-400 font-medium">解题进度</span><span class="text-sm font-bold text-slate-800 font-mono mt-0.5">2 <span class="text-slate-400 font-normal text-xs">/ 6 AC</span></span></div><div class="h-6 w-px bg-slate-200"></div><div class="flex flex-col"><span class="text-[11px] text-slate-400 font-medium">实时排名</span><span class="text-sm font-bold text-slate-800 font-mono mt-0.5">#42 <span class="text-slate-400 font-normal text-xs">/ 360</span></span></div><div class="h-6 w-px bg-slate-200"></div><div class="flex flex-col"><span class="text-[11px] text-slate-400 font-medium">总罚时</span><span class="text-sm font-bold text-slate-800 font-mono mt-0.5">45m</span></div></div></div><div class="flex items-center justify-between pt-2 border-t border-slate-100"><div class="flex items-center space-x-3"><div class="relative"><input type="text" placeholder="搜索用户名次 / 学院 / 题号..." class="w-64 pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 focus:bg-white transition-all"><svg class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></div><div class="flex items-center bg-slate-100 p-0.5 rounded-lg text-xs border border-slate-200/80"><button class="px-3 py-1 bg-white text-slate-800 font-medium rounded-md shadow-xs">全场总榜</button><button class="px-3 py-1 text-slate-500 hover:text-slate-800 rounded-md transition-colors">正式参赛队</button><button class="px-3 py-1 text-slate-500 hover:text-slate-800 rounded-md transition-colors">打星队 (Star)</button><button class="px-3 py-1 text-slate-500 hover:text-slate-800 rounded-md transition-colors">女生队</button></div></div><div class="flex items-center space-x-3 text-xs text-slate-500 select-none"><div class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded bg-emerald-700 inline-block"></span><span class="text-[11px]">一血 (First Solve)</span></div><div class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded bg-emerald-500 inline-block"></span><span class="text-[11px]">通过 (AC)</span></div><div class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded bg-rose-500 inline-block"></span><span class="text-[11px]">未通过 (WA)</span></div><div class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded bg-amber-400 inline-block"></span><span class="text-[11px]">待评测 (Pending)</span></div></div></div></div>
+
+<!-- Scoreboard Table Container -->
+<div class="flex-1 flex flex-col min-h-0 px-4 py-3 overflow-hidden"><div class="bg-white border border-slate-200/80 rounded-xl shadow-sm flex flex-col flex-1 min-h-0 overflow-hidden"><div class="flex-1 overflow-y-auto overflow-x-auto custom-scrollbar relative"><table class="w-full text-left border-collapse text-xs"><thead class="sticky top-0 z-20 shadow-xs"><tr class="bg-slate-50/95 border-b border-slate-200 text-slate-500 select-none backdrop-blur-sm"><th class="py-2.5 px-3 w-16 font-semibold text-center">排名</th><th class="py-2.5 px-4 min-w-[220px] font-semibold">选手 / 团队</th><th class="py-2.5 px-2 w-16 text-center font-semibold text-slate-700">解题</th><th class="py-2.5 px-2 w-20 text-center font-semibold text-slate-700">总用时</th><th class="py-2 px-1.5 w-20 text-center"><div class="flex flex-col items-center"><span class="w-6 h-6 rounded-md bg-rose-600 text-white font-bold flex items-center justify-center text-xs shadow-xs">A</span><span class="text-[10px] text-slate-400 font-normal mt-0.5 font-mono">210/298</span></div></th><th class="py-2 px-1.5 w-20 text-center"><div class="flex flex-col items-center"><span class="w-6 h-6 rounded-md bg-emerald-500 text-white font-bold flex items-center justify-center text-xs shadow-xs">B</span><span class="text-[10px] text-slate-400 font-normal mt-0.5 font-mono">185/298</span></div></th><th class="py-2 px-1.5 w-20 text-center"><div class="flex flex-col items-center"><span class="w-6 h-6 rounded-md bg-blue-600 text-white font-bold flex items-center justify-center text-xs shadow-xs">C</span><span class="text-[10px] text-slate-400 font-normal mt-0.5 font-mono">94/298</span></div></th><th class="py-2 px-1.5 w-20 text-center"><div class="flex flex-col items-center"><span class="w-6 h-6 rounded-md bg-purple-600 text-white font-bold flex items-center justify-center text-xs shadow-xs">D</span><span class="text-[10px] text-slate-400 font-normal mt-0.5 font-mono">42/298</span></div></th><th class="py-2 px-1.5 w-20 text-center"><div class="flex flex-col items-center"><span class="w-6 h-6 rounded-md bg-amber-500 text-white font-bold flex items-center justify-center text-xs shadow-xs">E</span><span class="text-[10px] text-slate-400 font-normal mt-0.5 font-mono">28/298</span></div></th><th class="py-2 px-1.5 w-20 text-center"><div class="flex flex-col items-center"><span class="w-6 h-6 rounded-md bg-cyan-600 text-white font-bold flex items-center justify-center text-xs shadow-xs">F</span><span class="text-[10px] text-slate-400 font-normal mt-0.5 font-mono">12/298</span></div></th></tr></thead><tbody class="divide-y divide-slate-100 font-mono"><tr class="sticky top-[45px] z-10 bg-slate-50 border-b-2 border-brand-500/50 shadow-xs"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="text-xs font-mono font-bold text-slate-700">#42</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-bold text-slate-900">董卓</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2022级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">2</td><td class="py-2.5 px-2 text-center text-slate-700 font-bold font-mono">45</td><td class="p-1.5 text-center"><div class="bg-emerald-50 border border-emerald-300 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:08</div><div class="text-[9px] text-emerald-600 font-sans font-medium">1试 ✔</div></div></td><td class="p-1.5 text-center"><div class="bg-emerald-50 border border-emerald-300 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:19</div><div class="text-[9px] text-emerald-600 font-sans font-medium">1试 ✔</div></div></td><td class="p-1.5 text-center"><div class="bg-rose-50 border border-rose-300 rounded p-1 text-rose-600"><div class="text-[11px] font-bold text-rose-600">-4</div><div class="text-[9px] text-rose-500 font-sans">WA 未过</div></div></td><td class="p-1.5 text-center text-slate-300 font-sans text-xs">-</td><td class="p-1.5 text-center text-slate-300 font-sans text-xs">-</td><td class="p-1.5 text-center text-slate-300 font-sans text-xs">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-800 text-xs border border-amber-300 font-sans font-bold shadow-xs">1</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-bold text-slate-900">张子昂</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2022级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">6</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">342</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:04</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-700 text-white rounded p-1 shadow-xs"><div class="text-[11px] font-bold">00:07</div><div class="text-[10px] text-emerald-100">1 试 ⚡</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:26</div><div class="text-[10px] text-emerald-600">2 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-700 text-white rounded p-1 shadow-xs"><div class="text-[11px] font-bold">00:48</div><div class="text-[10px] text-emerald-100">1 试 ⚡</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">01:15</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">01:42</div><div class="text-[10px] text-emerald-600">3 试</div></div></td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-800 text-xs border border-amber-300 font-sans font-bold shadow-xs">2</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-bold text-slate-900">林思远</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2021级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">5</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">285</td><td class="p-1 text-center"><div class="bg-emerald-700 text-white rounded p-1 shadow-xs"><div class="text-[11px] font-bold">00:03</div><div class="text-[10px] text-emerald-100">1 试 ⚡</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:12</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-700 text-white rounded p-1 shadow-xs"><div class="text-[11px] font-bold">00:18</div><div class="text-[10px] text-emerald-100">1 试 ⚡</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:55</div><div class="text-[10px] text-emerald-600">2 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">01:37</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-800 text-xs border border-amber-300 font-sans font-bold shadow-xs">3</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-bold text-slate-900">陈立舟</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2023级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">4</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">198</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:05</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:15</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:32</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">01:06</div><div class="text-[10px] text-emerald-600">2 试</div></div></td><td class="p-1 text-center"><div class="bg-rose-50 border border-rose-200 rounded p-1 text-rose-600"><div class="text-[11px] font-semibold">-1</div><div class="text-[10px] text-rose-400">尝试中</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 text-xs border border-amber-200 font-sans font-bold shadow-xs">4</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-semibold text-slate-800">周梦琪</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2022级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">4</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">214</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:09</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:22</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:41</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">01:02</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 text-xs border border-amber-200 font-sans font-bold shadow-xs">5</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-semibold text-slate-800">黄浩然</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2023级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">3</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">126</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:11</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:25</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:50</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 text-xs border border-amber-200 font-sans font-bold shadow-xs">6</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-semibold text-slate-800">宋以恒</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2021级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">3</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">138</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:14</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:34</div><div class="text-[10px] text-emerald-600">2 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:50</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 text-xs border border-amber-200 font-sans font-bold shadow-xs">7</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-semibold text-slate-800">徐嘉佑</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2022级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">3</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">152</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:08</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:29</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">01:15</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 text-xs border border-amber-200 font-sans font-bold shadow-xs">8</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-semibold text-slate-800">杨千羽</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2021级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">3</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">167</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:16</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:31</div><div class="text-[10px] text-emerald-600">2 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">01:00</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 text-xs border border-amber-200 font-sans font-bold shadow-xs">9</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-semibold text-slate-800">吴俊峰</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2023级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">3</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">174</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:20</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:36</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">01:18</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr><tr class="hover:bg-slate-50/80 transition-colors"><td class="py-2.5 px-3 text-center font-bold"><div class="inline-flex items-center justify-center"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-50 text-amber-800 text-xs border border-amber-200 font-sans font-bold shadow-xs">10</span></div></td><td class="py-2.5 px-4 font-sans"><div class="flex items-center space-x-2"><span class="font-semibold text-slate-800">郭承志</span><span class="text-slate-300">·</span><span class="text-xs text-slate-500 font-mono">2022级</span></div></td><td class="py-2.5 px-2 text-center font-bold text-sm text-emerald-600">2</td><td class="py-2.5 px-2 text-center text-slate-600 font-medium">64</td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:12</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-emerald-50 border border-emerald-200 rounded p-1"><div class="text-[11px] font-bold text-emerald-700">00:32</div><div class="text-[10px] text-emerald-600">1 试</div></div></td><td class="p-1 text-center"><div class="bg-amber-50 border border-amber-200 rounded p-1 text-amber-700"><div class="text-[11px] font-semibold animate-pulse">评测中</div><div class="text-[10px] text-amber-600">1 待判</div></div></td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td><td class="p-1 text-center text-slate-300 font-sans text-[11px]">-</td></tr></tbody></table></div><div class="px-4 py-2.5 bg-slate-50/90 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 font-sans select-none shrink-0"><div class="flex items-center space-x-2"><span class="text-slate-600">共 <span class="font-semibold font-mono text-slate-800">360</span> 位选手</span><span class="text-slate-300">·</span><span class="">显示第 <span class="font-mono font-medium text-slate-800">1 - 10</span> 名</span><span class="text-slate-300">(第 <span class="font-mono font-medium text-slate-800">1</span> 页 / 共 <span class="font-mono font-medium text-slate-800">36</span> 页)</span></div><div class="flex items-center space-x-2"><div class="flex items-center space-x-1 mr-2"><span class="text-slate-400 text-[11px]">每页</span><button class="bg-white border border-slate-200 rounded px-2 py-0.5 font-medium text-slate-700 font-mono shadow-xs flex items-center space-x-1 hover:bg-slate-50"><span class="">10条/页</span><span class="text-[9px] text-slate-400">▾</span></button></div><div class="flex items-center space-x-1"><button class="px-2.5 py-1 rounded-md border border-slate-200 bg-slate-100 text-slate-400 font-medium cursor-not-allowed" disabled="">上一页</button><button class="w-7 h-7 rounded-md bg-brand-600 text-white font-semibold font-mono shadow-xs flex items-center justify-center">1</button><button class="w-7 h-7 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium font-mono flex items-center justify-center transition">2</button><button class="w-7 h-7 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium font-mono flex items-center justify-center transition">3</button><button class="w-7 h-7 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium font-mono flex items-center justify-center transition">4</button><button class="w-7 h-7 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium font-mono flex items-center justify-center transition">5</button><span class="px-1 text-slate-400 font-mono">...</span><button class="w-7 h-7 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium font-mono flex items-center justify-center transition">36</button><button class="px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-medium transition shadow-xs">下一页</button></div><div class="flex items-center space-x-1.5 ml-2 pl-2 border-l border-slate-200 text-slate-400 text-[11px]"><span class="">跳至</span><input type="text" value="1" class="w-8 h-6 bg-white border border-slate-200 rounded text-center font-mono text-slate-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"><span class="">页</span></div></div></div></div></div></main>
+  </div>
+
+  <!-- Bottom Global Status Bar (Consistent with Screen 2) -->
+  <footer class="border-t border-slate-200 bg-white/90 backdrop-blur px-6 py-2.5 flex items-center justify-between shrink-0 select-none z-20"><div class="flex items-center gap-4 text-xs font-mono text-slate-500"><div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span><span class="text-slate-700 font-medium font-sans">已连接比赛服务器</span></div></div><div class="text-xs font-mono text-slate-400 flex items-center gap-4"><span class="">Client v2.4.4</span></div></footer>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</body></html>

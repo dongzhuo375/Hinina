@@ -1,0 +1,365 @@
+<!DOCTYPE html><html lang="zh-CN" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Hinina Contest Client - 题目总览与全场提交热力矩阵</title>
+<!-- Tailwind CSS v3 with Forms & Container Queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              100: '#ede9fe',
+              500: '#7c3aed',
+              600: '#6d28d9',
+              700: '#5b21b6',
+              900: '#3b0764',
+            },
+            domjudge: {
+              green: '#28a745',
+              greenDark: '#1e7e34',
+              red: '#dc3545',
+              darkRed: '#a71d2a',
+              neutral: '#e2e8f0',
+              btnDark: '#56606a',
+              btnDarkHover: '#434b53'
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'Menlo', 'Consolas', 'monospace'],
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'PingFang SC', 'Microsoft YaHei', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+<!-- BEGIN: Custom CSS -->
+<style data-purpose="custom-scrollbars">
+    /* Custom subtle scrollbars for modern desktop experience */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+<style data-purpose="heatmap-dots">
+    /* Styling for submission matrix dot squares */
+    .heat-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      display: inline-block;
+      transition: transform 0.15s ease;
+    }
+    .heat-dot:hover {
+      transform: scale(1.35);
+      z-index: 10;
+    }
+    .dot-blank {
+      background-color: #e5e7eb;
+    }
+    .dot-ac-light {
+      background-color: #86efac;
+    }
+    .dot-ac-solid {
+      background-color: #22c55e;
+    }
+    .dot-ac-deep {
+      background-color: #15803d;
+    }
+    .dot-wa-light {
+      background-color: #fca5a5;
+    }
+    .dot-wa-solid {
+      background-color: #ef4444;
+    }
+    .dot-wa-deep {
+      background-color: #991b1b;
+    }
+  </style>
+<!-- END: Custom CSS -->
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans h-screen flex flex-col overflow-hidden select-none antialiased">
+<!-- BEGIN: Desktop Window Header & Global Bar -->
+<header class="bg-white text-slate-800 h-12 flex items-center justify-between px-4 shrink-0 border-b border-slate-200 z-50 shadow-xs">
+<div class="flex items-center space-x-3">
+<div class="flex items-center space-x-2">
+<div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center font-bold text-white shadow-xs text-sm">H</div>
+<span class="font-bold tracking-tight text-slate-900 text-base">Hinina</span>
+
+</div>
+<div class="h-4 w-px bg-slate-200 mx-1"></div>
+<div class="flex items-center space-x-2">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-600 border border-emerald-200">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+进行中
+</span>
+<h1 class="text-sm font-bold text-slate-900 truncate max-w-xs md:max-w-md">2024 校赛模拟赛 (BAPC Model Round)</h1>
+</div>
+</div>
+<div class="hidden lg:flex items-center flex-col justify-center px-4 py-0.5">
+<div class="flex items-center space-x-2 text-xs font-mono">
+<span class="text-slate-500">剩余时间:</span>
+<span class="text-slate-900 font-bold tracking-wider text-sm bg-slate-50 px-2 py-0.5 rounded border border-slate-200 font-mono">04:35:24</span>
+<span class="text-slate-400 text-[11px]">/ 05:00:00</span>
+</div>
+<div class="w-48 h-1 bg-slate-100 rounded-full mt-1 overflow-hidden border border-slate-200">
+<div class="bg-amber-400 h-full rounded-full" style="width: 8.2%;"></div>
+</div>
+</div>
+<div class="flex items-center space-x-3">
+<button class="text-xs bg-white hover:bg-slate-50 text-slate-700 px-2.5 py-1 rounded-md transition flex items-center space-x-1.5 border border-slate-200 shadow-xs">
+<svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="font-medium">比赛简介</span>
+</button>
+<div class="flex items-center space-x-2 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200 text-xs">
+<div class="w-5 h-5 rounded-full bg-brand-500 text-white font-bold flex items-center justify-center text-[10px]">DZ</div>
+<span class="text-slate-800 font-medium font-mono">dongzhuo375</span>
+
+
+</div>
+<div class="flex items-center space-x-1 pl-2 border-l border-slate-200">
+<button class="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition" title="最小化">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 12H4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+<button class="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition" title="最大化">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect height="16" rx="2" stroke-width="2" width="16" x="4" y="4"></rect></svg>
+</button>
+<button class="w-7 h-7 flex items-center justify-center rounded hover:bg-red-600 hover:text-white text-slate-500 transition" title="关闭">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+</div>
+</header>
+<!-- END: Desktop Window Header & Global Bar -->
+<!-- BEGIN: Main Client Workspace -->
+<div class="flex-1 flex overflow-hidden">
+<!-- BEGIN: Left Vertical Navigation Rail -->
+<nav class="w-16 bg-white border-r border-slate-200 flex flex-col items-center py-3 justify-between shrink-0 shadow-sm">
+<!-- Core Action Tabs -->
+<div class="flex flex-col space-y-3 w-full items-center">
+<!-- 题目 (Active) -->
+<button class="group relative flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-brand-50 text-brand-600 font-semibold shadow-sm border border-brand-100" title="题目列表 (Problemset)">
+<svg class="w-5 h-5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="text-[10px] scale-90">题目</span>
+<!-- Active Indicator Bar -->
+<span class="absolute -left-2 top-3 bottom-3 w-1 bg-brand-600 rounded-r"></span>
+</button>
+<!-- 排名 (Scoreboard) -->
+<button class="group relative flex flex-col items-center justify-center w-12 h-12 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition" title="实时榜单 (Scoreboard)">
+<svg class="w-5 h-5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="text-[10px] scale-90">榜单</span>
+</button>
+<!-- 提交记录 (Submissions) -->
+<button class="group relative flex flex-col items-center justify-center w-12 h-12 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition" title="我的提交 (Submissions)">
+<svg class="w-5 h-5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="text-[10px] scale-90">评测</span>
+</button>
+<!-- 答疑 / 提问 (Clarifications with active notification badge) -->
+<button class="group relative flex flex-col items-center justify-center w-12 h-12 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition" title="比赛公告 (Announcements)">
+<svg class="w-5 h-5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="text-[10px] scale-90">公告</span>
+<span class="absolute top-1.5 right-1.5 bg-red-500 text-white font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center shadow-sm ring-2 ring-white animate-pulse">1</span>
+</button>
+</div>
+<!-- Bottom System Tools -->
+<div class="flex flex-col space-y-2 w-full items-center">
+<!-- 快捷键 -->
+
+<!-- 设置 -->
+<button class="w-10 h-10 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center transition" title="环境设置">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+<path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+</nav>
+<!-- END: Left Vertical Navigation Rail -->
+<!-- BEGIN: Problemset Main Content Container -->
+<main class="flex-1 flex flex-col overflow-hidden bg-slate-50">
+<!-- BEGIN: Subheader & Overview Status Bar -->
+<section class="bg-white border-b border-slate-200 px-6 py-4 shrink-0 shadow-xs" data-purpose="contest-banner">
+<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+<!-- Big Title directly reminiscent of DOMjudge header -->
+<div>
+<div class="flex items-center space-x-3">
+<h2 class="text-2xl font-bold tracking-tight text-slate-900">
+                2024 校赛模拟赛 题目总览 <span class="text-slate-400 font-normal text-lg">/ Problemset</span>
+</h2>
+<!-- DOMjudge style "problemset" PDF button directly referencing Image -->
+
+</div>
+<p class="text-xs text-slate-500 mt-1 flex items-center gap-4"><span class="">共 6 道题目&nbsp;</span><span class=""><span style="font-size: 0.75rem;" class="">•&nbsp; &nbsp; &nbsp;ACM赛制&nbsp; &nbsp;&nbsp;</span>•</span><span class="">点击题目卡片可提交解答与查看详情</span></p>
+</div>
+<!-- Realtime Contest Stats Metrics -->
+<div class="flex items-center space-x-4 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+<!-- Metric 1: AC count -->
+<div class="text-center px-2">
+<span class="text-[11px] text-slate-500 font-medium block">解题进度</span>
+<span class="text-base font-bold text-emerald-600 font-mono">2 <span class="text-xs text-slate-400 font-normal">/ 10 AC</span></span>
+</div>
+<div class="h-6 w-px bg-slate-200"></div>
+<!-- Metric 2: Rank -->
+<div class="text-center px-2">
+<span class="text-[11px] text-slate-500 font-medium block">实时排名</span>
+<span class="text-base font-bold text-slate-800 font-mono">#14 <span class="text-xs text-slate-400 font-normal">/ 120</span></span>
+</div>
+<div class="h-6 w-px bg-slate-200"></div>
+<!-- Metric 3: Penalty -->
+<div class="text-center px-2">
+<span class="text-[11px] text-slate-500 font-medium block">总罚时</span>
+<span class="text-base font-bold text-slate-700 font-mono">45m</span>
+</div>
+</div>
+</div>
+<!-- Filter Tabs & Quick Actions -->
+
+</section>
+<!-- END: Subheader & Overview Status Bar -->
+<!-- BEGIN: DOMjudge-Inspired Problem Cards Grid Area -->
+<div class="flex-1 overflow-y-auto p-6">
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 max-w-7xl mx-auto"><!-- Card A -->
+<article class="bg-white rounded-xl border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between group min-h-[175px]">
+  <div class="flex items-start justify-between gap-3">
+    <div class="flex items-start space-x-3.5">
+      <div class="w-10 h-10 rounded-xl bg-red-600 text-white font-bold text-lg flex items-center justify-center shadow-xs font-mono shrink-0">A</div>
+      <div><h3 class="text-base font-bold text-slate-900 tracking-tight group-hover:text-brand-600 transition cursor-pointer">两数之和</h3><div class="mt-1 space-y-1 font-mono"><div class="text-[11px] text-slate-500">Limits: 2.5s / 2 GB</div><div class="text-xs text-emerald-600 font-medium flex items-center gap-1"><span class="">210 / 298</span> <span class="text-slate-400 font-sans">通过</span></div></div></div>
+    </div>
+    <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 text-xs font-medium font-mono shrink-0">
+      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path clip-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" fill-rule="evenodd"></path></svg>
+      <span class="">AC 00:08</span>
+    </div>
+  </div>
+  <div class="mt-4 flex flex-col justify-end"><div class="flex justify-end pb-2"><button class="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1 cursor-pointer font-medium"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">快捷提交</span></button></div><div class="pt-2.5 border-t border-slate-100 flex items-center justify-between"><a href="#submissions" class="text-xs text-slate-400 hover:text-slate-700 transition font-medium flex items-center gap-1.5 cursor-pointer"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">评测记录 (1)</span></a><button class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1 shadow-xs"><span class="">查看题目 →</span></button></div></div>
+</article>
+
+<!-- Card B -->
+<article class="bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between group min-h-[175px] border border-slate-200 hover:border-slate-300">
+  <div class="flex items-start justify-between gap-3">
+    <div class="flex items-start space-x-3.5">
+      <div class="w-10 h-10 rounded-xl bg-[#00c853] text-white font-bold text-lg flex items-center justify-center shadow-xs font-mono shrink-0">B</div>
+      <div><h3 class="text-base font-bold text-slate-900 tracking-tight group-hover:text-brand-600 transition cursor-pointer">新港之瓶</h3><div class="mt-1 space-y-1 font-mono"><div class="text-[11px] text-slate-500">Limits: 1.0s / 2 GB</div><div class="text-xs text-emerald-600 font-medium flex items-center gap-1"><span class="">185 / 298</span> <span class="text-slate-400 font-sans">通过</span></div></div></div>
+    </div>
+    <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 text-xs font-medium font-mono shrink-0">
+      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path clip-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" fill-rule="evenodd"></path></svg>
+      <span class="">AC 00:19</span>
+    </div>
+  </div>
+  <div class="mt-4 flex flex-col justify-end"><div class="flex justify-end pb-2"><button class="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1 cursor-pointer font-medium"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">快捷提交</span></button></div><div class="pt-2.5 border-t border-slate-100 flex items-center justify-between"><a href="#submissions" class="text-xs text-slate-400 hover:text-slate-700 transition font-medium flex items-center gap-1.5 cursor-pointer"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">评测记录 (1)</span></a><button class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1 shadow-xs"><span class="">查看题目 →</span></button></div></div>
+</article>
+
+<!-- Card C -->
+<article class="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between group min-h-[175px] border-slate-200 hover:border-slate-300">
+  <div class="flex items-start justify-between gap-3">
+    <div class="flex items-start space-x-3.5">
+      <div class="w-10 h-10 rounded-xl bg-blue-600 text-white font-bold text-lg flex items-center justify-center shadow-xs font-mono shrink-0">C</div>
+      <div><h3 class="text-base font-bold text-slate-900 tracking-tight group-hover:text-brand-600 transition cursor-pointer">计算混淆</h3><div class="mt-1 space-y-1 font-mono"><div class="text-[11px] text-slate-500">Limits: 2.0s / 2 GB</div><div class="text-xs text-emerald-600 font-medium flex items-center gap-1"><span class="">94 / 298</span> <span class="text-slate-400 font-sans">通过</span></div></div></div>
+    </div>
+    <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-xs font-medium font-mono shrink-0">
+      <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+      <span class="">WA #4 尝试中</span>
+    </div>
+  </div>
+  <div class="mt-4 flex flex-col justify-end"><div class="flex justify-end pb-2"><button class="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1 cursor-pointer font-medium"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">快捷提交</span></button></div><div class="pt-2.5 border-t border-slate-100 flex items-center justify-between"><a href="#submissions" class="text-xs text-slate-400 hover:text-slate-700 transition font-medium flex items-center gap-1.5 cursor-pointer"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">评测记录 (4)</span></a><button class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1 shadow-xs"><span class="">查看题目 →</span></button></div></div>
+</article>
+
+<!-- Card D -->
+<article class="bg-white rounded-xl border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between group min-h-[175px]">
+  <div class="flex items-start justify-between gap-3">
+    <div class="flex items-start space-x-3.5">
+      <div class="w-10 h-10 rounded-xl bg-purple-600 text-white font-bold text-lg flex items-center justify-center shadow-xs font-mono shrink-0">D</div>
+      <div><h3 class="text-base font-bold text-slate-900 tracking-tight group-hover:text-brand-600 transition cursor-pointer">最短路径规划</h3><div class="mt-1 space-y-1 font-mono"><div class="text-[11px] text-slate-500">Limits: 2.0s / 512 MB</div><div class="text-xs text-emerald-600 font-medium flex items-center gap-1"><span class="">42 / 298</span> <span class="text-slate-400 font-sans">通过</span></div></div></div>
+    </div>
+    <span class="text-xs font-medium text-slate-400 font-mono px-2.5 py-1 bg-slate-50 rounded-full border border-slate-200 shrink-0">未作答</span>
+  </div>
+  <div class="mt-4 flex flex-col justify-end"><div class="flex justify-end pb-2"><button class="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1 cursor-pointer font-medium"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">快捷提交</span></button></div><div class="pt-2.5 border-t border-slate-100 flex items-center justify-between"><span class="text-xs text-slate-400 font-medium flex items-center gap-1.5 select-none"><svg class="w-3.5 h-3.5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">评测记录 (0)</span></span><button class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1 shadow-xs"><span class="">查看题目 →</span></button></div></div>
+</article>
+
+<!-- Card E -->
+<article class="bg-white rounded-xl border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between group min-h-[175px]">
+  <div class="flex items-start justify-between gap-3">
+    <div class="flex items-start space-x-3.5">
+      <div class="w-10 h-10 rounded-xl bg-amber-500 text-white font-bold text-lg flex items-center justify-center shadow-xs font-mono shrink-0">E</div>
+      <div><h3 class="text-base font-bold text-slate-900 tracking-tight group-hover:text-brand-600 transition cursor-pointer">动态规划背包</h3><div class="mt-1 space-y-1 font-mono"><div class="text-[11px] text-slate-500">Limits: 1.0s / 256 MB</div><div class="text-xs text-emerald-600 font-medium flex items-center gap-1"><span class="">28 / 298</span> <span class="text-slate-400 font-sans">通过</span></div></div></div>
+    </div>
+    <span class="text-xs font-medium text-slate-400 font-mono px-2.5 py-1 bg-slate-50 rounded-full border border-slate-200 shrink-0">未作答</span>
+  </div>
+  <div class="mt-4 flex flex-col justify-end"><div class="flex justify-end pb-2"><button class="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1 cursor-pointer font-medium"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">快捷提交</span></button></div><div class="pt-2.5 border-t border-slate-100 flex items-center justify-between"><span class="text-xs text-slate-400 font-medium flex items-center gap-1.5 select-none"><svg class="w-3.5 h-3.5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">评测记录 (0)</span></span><button class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1 shadow-xs"><span class="">查看题目 →</span></button></div></div>
+</article>
+
+<!-- Card F -->
+<article class="bg-white rounded-xl border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all duration-200 p-5 flex flex-col justify-between group min-h-[175px]">
+  <div class="flex items-start justify-between gap-3">
+    <div class="flex items-start space-x-3.5">
+      <div class="w-10 h-10 rounded-xl bg-cyan-600 text-white font-bold text-lg flex items-center justify-center shadow-xs font-mono shrink-0">F</div>
+      <div><h3 class="text-base font-bold text-slate-900 tracking-tight group-hover:text-brand-600 transition cursor-pointer">字符串匹配</h3><div class="mt-1 space-y-1 font-mono"><div class="text-[11px] text-slate-500">Limits: 1.5s / 512 MB</div><div class="text-xs text-emerald-600 font-medium flex items-center gap-1"><span class="">12 / 298</span> <span class="text-slate-400 font-sans">通过</span></div></div></div>
+    </div>
+    <span class="text-xs font-medium text-slate-400 font-mono px-2.5 py-1 bg-slate-50 rounded-full border border-slate-200 shrink-0">未作答</span>
+  </div>
+  <div class="mt-4 flex flex-col justify-end"><div class="flex justify-end pb-2"><button class="text-xs text-slate-400 hover:text-slate-600 transition flex items-center gap-1 cursor-pointer font-medium"><svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">快捷提交</span></button></div><div class="pt-2.5 border-t border-slate-100 flex items-center justify-between"><span class="text-xs text-slate-400 font-medium flex items-center gap-1.5 select-none"><svg class="w-3.5 h-3.5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">评测记录 (0)</span></span><button class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1 shadow-xs"><span class="">查看题目 →</span></button></div></div>
+</article></div>
+</div>
+<!-- END: DOMjudge-Inspired Problem Cards Grid Area -->
+</main>
+<!-- END: Problemset Main Content Container -->
+</div>
+<!-- END: Main Client Workspace -->
+<!-- BEGIN: Bottom Desktop Status Footer -->
+<footer class="bg-white border-t border-slate-200 px-6 py-2 flex items-center justify-between shrink-0 select-none z-50">
+<div class="flex items-center gap-4 text-xs font-mono text-slate-500">
+  <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span><span class="text-slate-700 font-medium font-sans">已连接比赛服务器</span></div>
+  
+</div>
+<div class="text-xs font-mono text-slate-400 flex items-center gap-4">
+  <span class="">Client v2.4.4</span>
+</div>
+</footer>
+<!-- END: Bottom Desktop Status Footer -->
+<!-- BEGIN: Client Interactivity Handlers -->
+<script data-purpose="event-handlers">
+    // Interactive feedback when clicking Submit
+    document.querySelectorAll('button').forEach(btn => {
+      if (btn.textContent.includes('Submit')) {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const card = btn.closest('article');
+          const title = card ? card.querySelector('h3').textContent.trim() : '当前题目';
+          alert(`[Hinina 客户端] 正在调出代码提交对话框...\n目标题目: ${title}\n支持拖拽 .cpp, .java, .py 文件或直接粘贴代码`);
+        });
+      }
+    });
+  </script>
+<!-- END: Client Interactivity Handlers -->
+
+
+
+
+
+
+
+
+
+
+</body></html>

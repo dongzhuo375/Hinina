@@ -9,7 +9,8 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 
 ## 核心类型/函数
 - **`HttpClient`** — HTTP 客户端 struct，封装 `reqwest::Client`
-- **`HttpClient::new() -> Result<Self, reqwest::Error>`** — 创建默认客户端：30s 超时、Cookie Store、UA 为 `Hinina/{version}`
+- **`HttpClient::new() -> Result<Self, reqwest::Error>`** — 创建默认客户端：30s 超时、Cookie Store、UA 为 `Hinina/{version}`（内部委托 `with_timeout(30s)`）
+- **`HttpClient::with_timeout(timeout: Duration) -> Result<Self, reqwest::Error>`** — 创建指定超时的客户端。**超时来自 `oj.timeout_secs` 配置**（由 `core/context.rs` 装配时读取并注入，`timeout_secs.max(1)` 防 0 值），不再硬编码；其余行为（Cookie Store、UA、重试）与 `new()` 一致
 - **`HttpClient::client() -> &reqwest::Client`** — 获取内部 client 引用，供 Adapter 层直接调用原始 API（HOJ 的 `login` 需自行读响应头取 token、`logout` 忽略响应体）。**`validate_session` 已不再走 raw client**：它改走 `get_json_authed`，才能拿到去 null 解析、体内鉴权失败识别、token 轮换与 5xx 退避重试（见 `adapter/hoj/mod.md`）
 - **`HttpClient::get_text_with_headers(url, auth_token) -> AppResult<(String, HeaderMap)>`** — GET，返回**原始响应体**与响应头；5xx 与传输错误自动重试，4xx 直接报错
 - **`HttpClient::post_text_with_headers<B: Serialize>(url, body, auth_token) -> AppResult<(String, HeaderMap)>`** — POST（JSON body），返回**原始响应体**与响应头；非幂等，不重试，非 2xx 直接报错
@@ -37,7 +38,7 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 - `adapter/hoj`（HOJ Adapter 将通过 HttpClient 发送 API 请求）
 
 ## 逻辑流程
-创建时配置全局超时与 Cookie Store。GET 请求自动对 5xx 响应执行重试（最多 2 次，指数退避），4xx 客户端错误直接返回含状态码的错误。POST 为非幂等操作，任何非 2xx 状态码直接报错。通过 `auth_token` 参数可选附加 `Authorization` 请求头。`*_with_headers` 变体将响应头原样返回，infra 层不感知任何 OJ 私有协议语义（如 HOJ 的 `Refresh-Token` 轮换约定由 `adapter/hoj` 自行解析）。
+创建时配置全局超时（`with_timeout` 由配置驱动，见上）与 Cookie Store。GET 请求自动对 5xx 响应执行重试（最多 2 次，指数退避），4xx 客户端错误直接返回含状态码的错误。POST 为非幂等操作，任何非 2xx 状态码直接报错。通过 `auth_token` 参数可选附加 `Authorization` 请求头。`*_with_headers` 变体将响应头原样返回，infra 层不感知任何 OJ 私有协议语义（如 HOJ 的 `Refresh-Token` 轮换约定由 `adapter/hoj` 自行解析）。
 
 **状态码 → 错误变体映射**（GET 与 POST 共用 `status_error`）：
 
@@ -53,4 +54,4 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 > 变体是前端 `isAuthError` 分流与 `sessionGuard` 会话失效兜底的唯一依据，因此本层**只在传输环节构造错误，绝不改写下游变体**；Adapter 与 Service 补环节名一律用 `AppError::context()`（见 `core/error.md`）。
 
 ## 测试
-`src-tauri/src/infra/tests/http_tests.rs`（由 `http.rs` 底部 `#[cfg(test)] #[path = "tests/http_tests.rs"] mod tests;` 引用）锁定：`status_error` 把 **HTTP 401 映射为 `Auth`** 变体（并断言消息保留状态码与 URL，便于现场排障）、**403 保持 `Network`**（业务性无权访问不得误判为会话失效）、400 / 404 / 500 / 502 / 503 一律 `Network`、`retry_delay` 指数退避 1s / 2s / 4s（纯函数性质；实际重试只用到 attempt 0/1，即 1s / 2s）；`classify_status` 的完整判据 —— 2xx 在任意 attempt 都 `Accept`、5xx（500/502/503/504）在额度内 `Retry` 而**耗尽后 `Fail`**（正面锁定上述回归）、4xx（400/401/403/404）在任意 attempt 都 `Fail` 不重试、3xx 残留同样 `Fail`。
+`src-tauri/src/infra/tests/http_tests.rs`（由 `http.rs` 底部 `#[cfg(test)] #[path = "tests/http_tests.rs"] mod tests;` 引用）锁定：`status_error` 把 **HTTP 401 映射为 `Auth`** 变体（并断言消息保留状态码与 URL，便于现场排障）、**403 保持 `Network`**（业务性无权访问不得误判为会话失效）、400 / 404 / 500 / 502 / 503 一律 `Network`、`retry_delay` 指数退避 1s / 2s / 4s（纯函数性质；实际重试只用到 attempt 0/1，即 1s / 2s）；`classify_status` 的完整判据 —— 2xx 在任意 attempt 都 `Accept`、5xx（500/502/503/504）在额度内 `Retry` 而**耗尽后 `Fail`**（正面锁定上述回归）、4xx（400/401/403/404）在任意 attempt 都 `Fail` 不重试、3xx 残留同样 `Fail`；`with_timeout` 构造路径可用（reqwest::Client 不暴露 timeout getter，「配置值确实被传入」由 context.rs 的装配代码保证：`timeout_secs → with_timeout`）。

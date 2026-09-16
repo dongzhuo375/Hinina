@@ -1,0 +1,434 @@
+<!DOCTYPE html><html class="light" lang="zh-CN" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Hinina 比赛工作台 - 题目详情与代码编辑/评测</title>
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "inverse-surface": "#dee2ec",
+            "secondary-container": "#dbe1ff",
+            "surface-tint": "#603ce2",
+            "primary-container": "#e6deff",
+            "bg-surface-dark": "#161B22",
+            "surface-dim": "#f8fafc",
+            "outline": "#cbd5e1",
+            "surface-bright": "#f1f5f9",
+            "surface-container-highest": "#e2e8f0",
+            "on-primary-container": "#2a0088",
+            "error": "#ef4444",
+            "on-background": "#0f172a",
+            "on-primary-fixed-variant": "#4816cb",
+            "on-surface": "#0f172a",
+            "tertiary": "#0d9488",
+            "surface-container-lowest": "#ffffff",
+            "tertiary-container": "#ccfbf1",
+            "border-subtle-dark": "#30363D",
+            "on-error-container": "#ffdad6",
+            "border-subtle-light": "#e2e8f0",
+            "on-surface-variant": "#64748b",
+            "inverse-primary": "#603ce2",
+            "on-error": "#ffffff",
+            "text-secondary-dark": "#64748b",
+            "on-secondary-fixed": "#00174b",
+            "on-tertiary-fixed": "#00201e",
+            "secondary-fixed-dim": "#b4c5ff",
+            "inverse-on-surface": "#2c3138",
+            "on-tertiary-container": "#00302d",
+            "secondary": "#3b82f6",
+            "secondary-fixed": "#dbe1ff",
+            "outline-variant": "#e2e8f0",
+            "surface-container": "#f8fafc",
+            "status-pending": "#0284c7",
+            "status-ac": "#16a34a",
+            "text-primary-light": "#0F172A",
+            "tertiary-fixed-dim": "#39dcd2",
+            "background": "#f8fafc",
+            "bg-canvas-light": "#F8FAFC",
+            "surface": "#ffffff",
+            "on-primary-fixed": "#1c0062",
+            "bg-canvas-dark": "#0D1117",
+            "on-tertiary": "#ffffff",
+            "on-secondary": "#ffffff",
+            "surface-variant": "#f1f5f9",
+            "on-secondary-fixed-variant": "#003ea8",
+            "tertiary-fixed": "#61f9ef",
+            "primary-fixed-dim": "#cabeff",
+            "surface-container-low": "#f8fafc",
+            "surface-container-high": "#f1f5f9",
+            "status-wa": "#dc2626",
+            "text-secondary-light": "#64748B",
+            "text-primary-dark": "#0f172a",
+            "primary-fixed": "#e6deff",
+            "on-tertiary-fixed-variant": "#00504c",
+            "primary": "#7c5cff",
+            "bg-surface-light": "#FFFFFF",
+            "on-primary": "#ffffff",
+            "text-muted-dark": "#94a3b8",
+            "error-container": "#fee2e2",
+            "on-secondary-container": "#002a78",
+            "bg-surface-elevated": "#f8fafc",
+            "status-tle": "#d97706"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-xs": "0.25rem",
+            "gutter": "0.75rem",
+            "space-sm": "0.5rem",
+            "space-xl": "1.5rem",
+            "margin": "1rem",
+            "space-lg": "1rem",
+            "space-md": "0.75rem"
+          },
+          "fontFamily": {
+            "headline-sm": ["Inter", "sans-serif"],
+            "label-code-md": ["JetBrains Mono", "monospace"],
+            "label-code-sm": ["JetBrains Mono", "monospace"],
+            "body-sm": ["Inter", "sans-serif"],
+            "label-code-lg": ["JetBrains Mono", "monospace"],
+            "headline-lg": ["Inter", "sans-serif"],
+            "headline-md": ["Inter", "sans-serif"],
+            "body-md": ["Inter", "sans-serif"],
+            "display-hero": ["Inter", "sans-serif"],
+            "body-lg": ["Inter", "sans-serif"]
+          },
+          "fontSize": {
+            "headline-sm": ["15px", { "lineHeight": "22px", "fontWeight": "600" }],
+            "label-code-md": ["12px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "label-code-sm": ["11px", { "lineHeight": "16px", "fontWeight": "600" }],
+            "body-sm": ["12px", { "lineHeight": "18px", "fontWeight": "400" }],
+            "label-code-lg": ["14px", { "lineHeight": "22px", "fontWeight": "500" }],
+            "headline-lg": ["24px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "headline-md": ["18px", { "lineHeight": "26px", "fontWeight": "600" }],
+            "body-md": ["13px", { "lineHeight": "20px", "fontWeight": "400" }],
+            "display-hero": ["32px", { "lineHeight": "40px", "fontWeight": "700" }],
+            "body-lg": ["15px", { "lineHeight": "24px", "fontWeight": "400" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+      font-size: 18px;
+      line-height: 1;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    .custom-code-editor {
+      tab-size: 4;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-body-md text-body-md antialiased overflow-hidden h-screen select-none flex flex-col">
+<!-- ================= TOP WINDOW BAR (TitleBar) ================= -->
+<header class="bg-white border-b border-slate-200 flex justify-between items-center w-full px-space-md h-10 select-none z-50 shrink-0">
+<!-- Brand / Title / State -->
+<div class="flex items-center space-x-3">
+<!-- Purple Rounded Square Logo with white 'H' -->
+<div class="w-6 h-6 rounded bg-primary flex items-center justify-center shadow-sm">
+<span class="text-white font-bold text-headline-sm leading-none">H</span>
+</div>
+<span class="text-headline-sm font-headline-sm font-bold text-slate-900 tracking-tight">Hinina OJ</span>
+<!-- Divider -->
+<div class="h-3.5 w-px bg-slate-200"></div>
+<!-- Contest Status Badge -->
+<div class="flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-label-code-sm font-label-code-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+<span class="">进行中</span>
+</div>
+<!-- Contest Title -->
+<span class="text-slate-700 font-medium text-body-sm truncate max-w-xs md:max-w-md">
+        The 49th ICPC Regional Contest - Preliminaries (2024 校赛模拟赛)
+      </span>
+</div>
+<!-- Center: Countdown Pill Capsule -->
+<div class="hidden lg:flex items-center px-3 py-1 rounded-full bg-slate-100 border border-slate-200 space-x-2 text-label-code-md font-label-code-md">
+<span class="material-symbols-outlined text-primary text-[16px]" data-icon="timer">timer</span>
+<span class="text-slate-500">剩余时间:</span>
+<span class="text-slate-800 font-semibold tracking-wider">04:35:24</span>
+<span class="text-slate-400">/ 05:00:00</span>
+</div>
+<!-- Right Window Controls & User info -->
+<div class="flex items-center space-x-3">
+<!-- 比赛简介 Button -->
+<button class="hidden sm:flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 text-body-sm transition-colors duration-150">
+<span class="material-symbols-outlined text-[15px]" data-icon="campaign">campaign</span>
+<span class="">比赛简介</span>
+</button>
+<!-- User Profile Pill -->
+<div class="flex items-center space-x-2 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-body-sm">
+<div class="w-5 h-5 rounded-full bg-primary text-white text-label-code-sm font-bold flex items-center justify-center">
+          DZ
+        </div>
+<span class="text-slate-800 text-label-code-sm font-label-code-sm pr-1">dongzhuo375</span>
+</div>
+<!-- Window Control Buttons (Native Affordance) -->
+<div class="flex items-center space-x-1 pl-1 border-l border-slate-200">
+<button class="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors" title="最小化">
+<span class="material-symbols-outlined text-[16px]" data-icon="remove">remove</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors" title="最大化">
+<span class="material-symbols-outlined text-[14px]" data-icon="crop_square">crop_square</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white hover:bg-rose-500 rounded transition-colors" title="关闭">
+<span class="material-symbols-outlined text-[16px]" data-icon="close">close</span>
+</button>
+</div>
+</div>
+</header>
+<!-- ================= CORE WORKSPACE BODY ================= -->
+<div class="flex flex-1 overflow-hidden relative pb-6">
+<!-- Activity Bar (Leftmost Nav) -->
+<aside class="bg-slate-50 border-r border-slate-200 flex flex-col items-center py-space-sm w-14 h-[calc(100vh-40px-24px)] justify-between shrink-0 select-none z-30">
+<div class="flex flex-col items-center space-y-2 w-full">
+<!-- Problems (Active) -->
+<button class="w-full flex flex-col items-center py-2 relative text-primary border-l-2 border-primary bg-purple-50 transition-colors duration-150" title="题目">
+<span class="material-symbols-outlined text-[20px]" data-icon="code_blocks" style="font-variation-settings: &quot;FILL&quot; 1;">code_blocks</span>
+<span class="text-label-code-sm font-label-code-sm mt-1 font-semibold">题目</span>
+</button>
+<!-- Standings -->
+<button class="w-full flex flex-col items-center py-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors duration-150" title="榜单">
+<span class="material-symbols-outlined text-[20px]" data-icon="leaderboard">leaderboard</span>
+<span class="text-label-code-sm font-label-code-sm mt-1">榜单</span>
+</button>
+<!-- Submissions -->
+<button class="w-full flex flex-col items-center py-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors duration-150" title="评测">
+<span class="material-symbols-outlined text-[20px]" data-icon="history">history</span>
+<span class="text-label-code-sm font-label-code-sm mt-1">评测</span>
+</button>
+<!-- Announcements with Unread Badge -->
+<button class="w-full flex flex-col items-center py-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors duration-150 relative" title="公告">
+<span class="material-symbols-outlined text-[20px]" data-icon="campaign">campaign</span>
+<span class="text-label-code-sm font-label-code-sm mt-1">公告</span>
+<span class="absolute top-1 right-2 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center shadow">1</span>
+</button>
+</div>
+<!-- Bottom Settings Action -->
+<div class="w-full flex flex-col items-center pb-2">
+<button class="w-full flex flex-col items-center py-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors duration-150" title="设置">
+<span class="material-symbols-outlined text-[20px]" data-icon="settings">settings</span>
+<span class="text-label-code-sm font-label-code-sm mt-1">设置</span>
+</button>
+</div>
+</aside>
+<!-- Main Workspace Container -->
+<main class="flex-1 flex flex-col min-w-0 bg-slate-50 overflow-hidden">
+<!-- Problem Tab Fast-Switcher Header -->
+
+<!-- Split Layout: Left Problem Statement, Right Monaco Code Editor -->
+<div class="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
+<!-- ================= LEFT COLUMN: PROBLEM DESCRIPTION (48%) ================= -->
+<section class="w-full md:w-[48%] border-r border-slate-200 bg-white flex flex-col h-full overflow-hidden">
+<!-- Problem Meta Header -->
+<div class="px-5 py-4 border-b border-slate-200 bg-slate-50/80 shrink-0"><div class="flex items-start justify-between"><div><h1 class="text-headline-md font-headline-md text-slate-900 tracking-tight font-bold">C. 计算混淆</h1><div class="flex flex-wrap items-center gap-3.5 mt-2.5 text-slate-500 font-label-code-sm text-[12px]"><span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[15px] text-slate-400" data-icon="timer">timer</span> 时间限制: <span class="text-slate-700 font-medium">2.0s</span></span><span class="text-slate-300">•</span><span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[15px] text-slate-400" data-icon="memory">memory</span> 空间限制: <span class="text-slate-700 font-medium">2 GB</span></span><span class="text-slate-300">•</span><span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[15px] text-slate-400" data-icon="group">group</span> 通过率: <span class="text-slate-700 font-medium">94 / 298</span></span></div></div></div></div>
+<!-- Scrollable Markdown Content -->
+<div class="flex-1 overflow-y-auto p-5 space-y-6 text-slate-800 bg-white">
+<!-- Section 1: 题目描述 -->
+<div class="space-y-2">
+<div class="flex items-center space-x-2 text-headline-sm font-headline-sm text-primary">
+<span class="w-1.5 h-4 bg-primary rounded-full"></span>
+<h2 class="text-slate-900 font-semibold">题目描述 (Problem Description)</h2>
+</div>
+<div class="text-body-md text-slate-600 leading-relaxed space-y-3 pl-3.5">
+<p class="">
+                  在密码学与高级编译器混淆中，有一种常见的数据流保护机制称为“算术多项式混淆”。现给定一个长度为 <code class="px-1.5 py-0.5 rounded bg-slate-100 text-purple-700 border border-slate-200 font-label-code-sm">N</code> 的初始正整数序列 <code class="px-1.5 py-0.5 rounded bg-slate-100 text-purple-700 border border-slate-200 font-label-code-sm">A = [a₁, a₂, ..., aₙ]</code>。
+                </p>
+<p class="">
+                  你需要执行 <code class="px-1.5 py-0.5 rounded bg-slate-100 text-purple-700 border border-slate-200 font-label-code-sm">M</code> 次连续的混淆指令，每一项操作由三个整数 <code class="px-1.5 py-0.5 rounded bg-slate-100 text-purple-700 border border-slate-200 font-label-code-sm">op, l, r</code> 组成：
+                </p>
+<ul class="list-disc pl-5 space-y-1 text-slate-700 text-body-sm">
+<li class=""><strong class="text-slate-900">操作 1 (加法异或卷积):</strong> 对于区间 <code class="text-label-code-sm bg-slate-100 px-1 rounded border border-slate-200">[l, r]</code> 内的所有元素，执行 <code class="text-label-code-sm text-teal-700 bg-teal-50 px-1 rounded">aᵢ = (aᵢ ⊕ x) + (aᵢ &amp; y) mod 998244353</code>。</li>
+<li class=""><strong class="text-slate-900">操作 2 (逆序重构变换):</strong> 将区间 <code class="text-label-code-sm bg-slate-100 px-1 rounded border border-slate-200">[l, r]</code> 内的前 <code class="text-label-code-sm font-semibold">k</code> 个最大元素按位取反并翻转排列。</li>
+<li class=""><strong class="text-slate-900">操作 3 (区间求和校验):</strong> 查询区间 <code class="text-label-code-sm bg-slate-100 px-1 rounded border border-slate-200">[l, r]</code> 的元素和对 <code class="text-label-code-sm text-purple-700 bg-purple-50 px-1 rounded">998244353</code> 取模的结果。</li>
+</ul>
+<p class="">
+                  你的程序需要在规定时限内输出所有“操作 3”的校验值。如果答案计算溢出或区间未正确更新，系统将判定为错误结果（Wrong Answer）。
+                </p>
+</div>
+</div>
+<!-- Section 2: 输入格式 -->
+<div class="space-y-2">
+<div class="flex items-center space-x-2 text-headline-sm font-headline-sm text-primary">
+<span class="w-1.5 h-4 bg-primary rounded-full"></span>
+<h2 class="text-slate-900 font-semibold">输入格式 (Input Format)</h2>
+</div>
+<div class="text-body-md text-slate-600 leading-relaxed pl-3.5 space-y-1.5">
+<p class="">第一行输入两个正整数 <code class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200 font-label-code-sm">N, M</code> (1 ≤ N, M ≤ 100,000)，表示序列长度与操作次数。</p>
+<p class="">第二行输入 <code class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200 font-label-code-sm">N</code> 个空格分隔的整数，表示初始数组 <code class="font-label-code-sm text-slate-800">a₁, a₂, ..., aₙ</code>。</p>
+<p class="">接下来 <code class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200 font-label-code-sm">M</code> 行，每行描述一个操作，格式为：</p>
+<ul class="list-disc pl-5 text-body-sm space-y-0.5">
+<li class=""><code class="font-label-code-sm text-slate-800">1 l r x y</code></li>
+<li class=""><code class="font-label-code-sm text-slate-800">2 l r k</code></li>
+<li class=""><code class="font-label-code-sm text-slate-800">3 l r</code></li>
+</ul>
+</div>
+</div>
+<!-- Section 3: 输出格式 -->
+<div class="space-y-2">
+<div class="flex items-center space-x-2 text-headline-sm font-headline-sm text-primary">
+<span class="w-1.5 h-4 bg-primary rounded-full"></span>
+<h2 class="text-slate-900 font-semibold">输出格式 (Output Format)</h2>
+</div>
+<div class="text-body-md text-slate-600 leading-relaxed pl-3.5">
+<p class="">对于每个操作 3，单行输出一个整数代表该次区间求和校验的计算结果。</p>
+</div>
+</div>
+<!-- Section 4: 样例输入输出 -->
+<div class="space-y-3">
+<div class="flex items-center space-x-2 text-headline-sm font-headline-sm text-primary">
+<span class="w-1.5 h-4 bg-primary rounded-full"></span>
+<h2 class="text-slate-900 font-semibold">样例数据 (Sample Testcases)</h2>
+</div>
+<!-- Sample 1 -->
+<div class="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+<div class="flex items-center justify-between px-3 py-1.5 bg-slate-50 border-b border-slate-200">
+<span class="text-label-code-sm font-label-code-sm text-slate-800 font-semibold">样例 1 (Sample #1)</span>
+<button class="flex items-center space-x-1 text-label-code-sm text-slate-500 hover:text-primary transition-colors" onclick="navigator.clipboard.writeText('5 4\n1 2 3 4 5\n1 1 3 2 1\n3 1 3\n2 2 5 2\n3 1 5')">
+<span class="material-symbols-outlined text-[14px]" data-icon="content_copy">content_copy</span>
+<span class="">复制输入</span>
+</button>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200">
+<div class="p-3 bg-slate-50/50">
+<div class="text-label-code-sm text-slate-400 mb-1">输入 (Input):</div>
+<pre class="font-label-code-sm text-slate-800 text-label-code-sm overflow-x-auto selection:bg-purple-100">5 4
+1 2 3 4 5
+1 1 3 2 1
+3 1 3
+2 2 5 2
+3 1 5</pre>
+</div>
+<div class="p-3 bg-white">
+<div class="text-label-code-sm text-slate-400 mb-1">输出 (Output):</div>
+<pre class="font-label-code-sm text-emerald-600 font-semibold text-label-code-sm overflow-x-auto selection:bg-emerald-100">12
+28</pre>
+</div>
+</div>
+</div>
+<!-- Sample 2 -->
+<div class="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+<div class="flex items-center justify-between px-3 py-1.5 bg-slate-50 border-b border-slate-200">
+<span class="text-label-code-sm font-label-code-sm text-slate-800 font-semibold">样例 2 (Sample #2)</span>
+<button class="flex items-center space-x-1 text-label-code-sm text-slate-500 hover:text-primary transition-colors" onclick="navigator.clipboard.writeText('3 2\n100 200 300\n1 1 2 5 2\n3 1 3')">
+<span class="material-symbols-outlined text-[14px]" data-icon="content_copy">content_copy</span>
+<span class="">复制输入</span>
+</button>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200">
+<div class="p-3 bg-slate-50/50">
+<div class="text-label-code-sm text-slate-400 mb-1">输入 (Input):</div>
+<pre class="font-label-code-sm text-slate-800 text-label-code-sm overflow-x-auto selection:bg-purple-100">3 2
+100 200 300
+1 1 2 5 2
+3 1 3</pre>
+</div>
+<div class="p-3 bg-white">
+<div class="text-label-code-sm text-slate-400 mb-1">输出 (Output):</div>
+<pre class="font-label-code-sm text-emerald-600 font-semibold text-label-code-sm overflow-x-auto selection:bg-emerald-100">606</pre>
+</div>
+</div>
+</div>
+</div>
+<!-- Section 5: 数据范围与提示 -->
+<div class="space-y-2 pb-6">
+<div class="flex items-center space-x-2 text-headline-sm font-headline-sm text-primary">
+<span class="w-1.5 h-4 bg-primary rounded-full"></span>
+<h2 class="text-slate-900 font-semibold">提示与数据范围 (Constraints &amp; Notes)</h2>
+</div>
+<div class="pl-3.5 text-body-sm text-slate-600 space-y-2">
+<div class="p-3 rounded bg-slate-50 border border-slate-200 space-y-1 font-label-code-sm text-label-code-sm">
+<div class="">• 子任务 1 (15分): <span class="text-slate-900 font-medium">N, M ≤ 1,000</span>，无操作 2。</div>
+<div class="">• 子任务 2 (30分): <span class="text-slate-900 font-medium">N, M ≤ 50,000</span>，所有 <span class="text-slate-900 font-medium">x = 0</span>。</div>
+<div class="">• 子任务 3 (55分): <span class="text-slate-900 font-medium">N, M ≤ 100,000</span>，无特殊限制。</div>
+</div>
+<p class="text-slate-400 text-body-sm italic">
+                  * 提示：对于带有位运算与加法混合的区间线段树维护，需考虑高阶吉司机线段树 (Segment Tree Beats) 或分块势能分析。
+                </p>
+</div>
+</div>
+</div>
+</section>
+<!-- ================= RIGHT COLUMN: CODE EDITOR & CONSOLE (52%) ================= -->
+<section class="w-full md:w-[52%] bg-slate-50 flex flex-col h-full overflow-hidden">
+<!-- Editor Top Toolbar -->
+<div class="h-10 bg-slate-100 border-b border-slate-200 px-4 flex items-center justify-between shrink-0 select-none"><div class="flex items-center space-x-3"><div class="relative"><button class="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-800 hover:border-primary text-label-code-sm font-label-code-sm transition-colors shadow-sm"><span class="text-primary font-bold">C++</span><span class="text-slate-600">17 (GCC 13.2)</span><span class="material-symbols-outlined text-[15px] text-slate-400" data-icon="arrow_drop_down">arrow_drop_down</span></button></div></div><div class="flex items-center space-x-2"><button class="w-7 h-7 flex items-center justify-center rounded bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-600 shadow-sm transition-colors duration-150" title="清空代码"><span class="material-symbols-outlined text-[16px]" data-icon="delete_outline">delete_outline</span></button><button class="w-7 h-7 flex items-center justify-center rounded bg-white hover:bg-slate-50 border border-slate-200 hover:border-primary text-slate-500 hover:text-primary shadow-sm transition-colors duration-150" title="上传代码"><span class="material-symbols-outlined text-[16px]" data-icon="upload_file">upload_file</span></button><button class="w-7 h-7 flex items-center justify-center rounded bg-white hover:bg-slate-50 border border-slate-200 hover:border-primary text-slate-500 hover:text-primary shadow-sm transition-colors duration-150" title="编辑器设置"><span class="material-symbols-outlined text-[16px]" data-icon="tune">tune</span></button><div class="h-3.5 w-px bg-slate-300"></div><span class="text-label-code-sm font-label-code-sm text-emerald-600 flex items-center gap-1.5 font-medium pl-1"><span class="material-symbols-outlined text-[14px]" data-icon="cloud_done">cloud_done</span><span class="hidden sm:inline">已自动备份</span></span></div></div>
+<!-- Monaco-style Code Canvas (Light VS Code theme) -->
+<div class="flex-1 min-h-0 overflow-y-auto bg-white font-label-code-md text-label-code-md flex flex-col relative select-text">
+<div class="flex min-h-full">
+<!-- Line Numbers Column -->
+<div class="w-12 py-3 bg-slate-50/80 border-r border-slate-200 text-slate-400 text-right pr-3 select-none shrink-0 font-label-code-sm leading-6">
+<div class="">1</div><div class="">2</div><div class="">3</div><div class="">4</div><div class="">5</div>
+<div class="">6</div><div class="">7</div><div class="">8</div><div class="">9</div><div class="">10</div>
+<div class="">11</div><div class="">12</div><div class="">13</div><div class="">14</div><div class="">15</div>
+<div class="">16</div><div class="">17</div><div class="">18</div><div class="">19</div><div class="">20</div>
+<div class="">21</div><div class="">22</div><div class="">23</div><div class="">24</div>
+</div>
+<!-- Syntax Highlighted Code Canvas -->
+<div class="flex-1 py-3 px-4 font-label-code-md leading-6 text-slate-800 overflow-x-auto whitespace-pre bg-white">
+<div><span class="text-purple-700 font-semibold">#include</span> <span class="text-emerald-700">&lt;bits/stdc++.h&gt;</span></div>
+<div><span class="text-blue-700 font-medium">using namespace</span> <span class="text-slate-900">std;</span></div>
+<div class="text-slate-400 italic">// ICPC Problem C - Calculation Obfuscation</div>
+<div class=""><span class="text-blue-700 font-medium">using</span> <span class="text-teal-700">ll</span> = <span class="text-blue-700 font-medium">long long</span>;</div>
+<div class=""><span class="text-blue-700 font-medium">const int</span> <span class="text-teal-700">MOD</span> = <span class="text-amber-700 font-semibold">998244353</span>;</div>
+<div class=""><span class="text-blue-700 font-medium">const int</span> <span class="text-teal-700">MAXN</span> = <span class="text-amber-700 font-semibold">100005</span>;</div>
+<div></div>
+<div class=""><span class="text-blue-700 font-medium">struct</span> <span class="text-indigo-600 font-semibold">Node</span> {</div>
+<div class=""> <span class="text-blue-700 font-medium">ll</span> sum, tag_add, tag_xor;</div>
+<div class=""> <span class="text-blue-700 font-medium">int</span> max_val, sec_val;</div>
+<div class="">} tree[<span class="text-teal-700">MAXN</span> &lt;&lt; <span class="text-amber-700 font-semibold">2</span>];</div>
+<div></div>
+<div class=""><span class="text-blue-700 font-medium">void</span> <span class="text-purple-700 font-semibold">pushup</span>(<span class="text-blue-700 font-medium">int</span> <span class="text-slate-700">p</span>) {</div>
+<div class="">    tree[p].sum = (tree[p &lt;&lt; <span class="text-amber-700 font-semibold">1</span>].sum + tree[p &lt;&lt; <span class="text-amber-700 font-semibold">1</span> | <span class="text-amber-700 font-semibold">1</span>].sum) % <span class="text-teal-700">MOD</span>;</div>
+<div class="">    tree[p].max_val = max(tree[p &lt;&lt; <span class="text-amber-700 font-semibold">1</span>].max_val, tree[p &lt;&lt; <span class="text-amber-700 font-semibold">1</span> | <span class="text-amber-700 font-semibold">1</span>].max_val);</div>
+<div class="">}</div>
+<div></div>
+<div class=""><span class="text-blue-700 font-medium">int</span> <span class="text-purple-700 font-semibold">main</span>() {</div>
+<div class=""> <span class="text-teal-700">ios::sync_with_stdio</span>(<span class="text-blue-700 font-medium">false</span>);</div>
+<div class=""> <span class="text-teal-700">cin.tie</span>(<span class="text-blue-700 font-medium">nullptr</span>);</div>
+<div class=""> <span class="text-blue-700 font-medium">int</span> n, m;</div>
+<div class=""> <span class="text-teal-700">cin</span> &gt;&gt; n &gt;&gt; m;</div>
+<div> <span class="text-slate-400 italic">// TODO: Fix Segment Tree Beats lazy propagation tag</span></div>
+<div class=""> <span class="text-blue-700 font-medium">return</span> <span class="text-amber-700 font-semibold">0</span>;</div>
+<div class="">}</div>
+</div>
+</div>
+</div>
+<!-- ================= EDITOR BOTTOM CONSOLE / TEST RUNNER ================= -->
+<div class="shrink-0 bg-white border-t border-slate-200 px-5 py-3 flex flex-col gap-3 select-none z-30 shadow-sm"><div class="flex items-center justify-between gap-4"><div class="flex items-center space-x-3 min-w-0"><div class="flex items-center space-x-2 px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-700 font-label-code-sm hover:bg-rose-100 transition-colors cursor-pointer group whitespace-nowrap"><span class="material-symbols-outlined text-[15px] text-rose-500" data-icon="cancel">cancel</span><span class="font-semibold text-[11px]">最新记录: #2 WA</span><span class="text-[11px] text-rose-500/70 font-mono">(Test 4 · 2.01s)</span><span class="text-slate-300">|</span><span class="text-[11px] text-rose-700 font-sans group-hover:underline flex items-center gap-0.5 font-medium">查看详情<span class="material-symbols-outlined text-[12px] text-rose-400 group-hover:text-rose-600" data-icon="open_in_new">open_in_new</span></span></div></div><div class="flex items-center space-x-3 shrink-0"><button class="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 active:scale-[0.98] text-slate-700 text-[12px] font-medium transition-all duration-150 flex items-center space-x-1.5 shadow-sm whitespace-nowrap" title="查看当前题目的历史提交记录"><span class="material-symbols-outlined text-[15px] text-slate-500" data-icon="history">history</span><span class="">提交记录 (2)</span></button><button class="flex items-center space-x-2 px-5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-[13px] font-semibold shadow-sm hover:shadow transition-all duration-150 whitespace-nowrap"><span class="tracking-wide">提交代码</span><span class="material-symbols-outlined text-[16px]" data-icon="send">send</span></button></div></div><div class="flex items-center justify-between text-slate-400 text-[11px] font-mono select-none pt-2 border-t border-slate-100/80"><div class="flex items-center space-x-2.5 whitespace-nowrap"><span class="">Ln 23, Col 14</span><span class="text-slate-300">|</span><span class="">UTF-8</span><span class="text-slate-300">|</span><span class="">Spaces: 4</span></div><div class="flex items-center space-x-1 whitespace-nowrap text-slate-400"><span class="">Ctrl + Enter 快捷提交</span></div></div></div>
+</section>
+</div>
+</main>
+</div>
+<!-- ================= FOOTER / BOTTOM STATUS BAR ================= -->
+<footer class="fixed bottom-0 left-0 w-full h-6 px-space-md flex justify-between items-center z-40 text-slate-500 bg-white border-t border-slate-200 select-none text-label-code-sm font-label-code-sm"><div class="flex items-center gap-4 text-xs font-mono text-slate-500"><div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span><span class="text-slate-700 font-medium font-sans">已连接比赛服务器</span></div></div><div class="text-xs font-mono text-slate-400 flex items-center gap-4"><span class="">Client v2.4.4</span></div></footer>
+
+
+</body></html>

@@ -13,10 +13,12 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `displayId` | computed | 路由参数 `:displayId`（比赛内题号 A/B/C…） |
-| `ensureContestId` | `() => Promise<string>` | 深链/刷新直达本页时外壳可能未加载完比赛，兜底 `loadContest` 后取 id |
+| `ensureContestId` | `() => Promise<string>` | 深链/刷新直达本页时外壳可能未加载完比赛，`contestStore.whenLoaded()`（P59 统一入口，复用在途请求）后取 id |
 | `load` | `(id: string) => Promise<void>` | 加载编排主流程（见逻辑流程），每步之后校验 `token !== loadToken` 则放弃 |
 | `consumeFocusQuery` | `() => Promise<void>` | 消费 `?focus=1`：`nextTick` 后调 `codeEditor.focus()`，随后 `router.replace({ query: {} })` 清掉 |
+| `splitRatio` | ref | 初始值经 `configService.getSplitRatio()` 从配置读取（P55 消费落地；异步到达时若用户已拖拽则不覆盖） |
 | `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例钳制 0.3–0.7，拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
+| `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.updateConfig` 写回配置（下次进入解题页生效）；失败只 console.error 不打断使用 |
 | `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, workspaceStore.language, workspaceStore.code)`；轮询由 store 自动启动 |
 | `cursor` | ref | Monaco 光标位置（CodeEditor emit → 本视图 → EditorConsoleBar prop，单向数据流） |
 | `viewError` | computed | `localError ?? problemStore.error`（本地编排错误优先） |
@@ -26,11 +28,12 @@
 - `vue` / `vue-router`
 - 组件：`ProblemTabStrip` / `ProblemStatement` / `CodeEditor` / `EditorConsoleBar` / `LoadingSpinner` / `ErrorMessage`
 - stores：`contestStore` / `problemStore` / `workspaceStore` / `submissionStore`
+- `@/services/config.service`（分栏比例读取/回写 —— 配置读写的指定唯一入口，不违反「View 不得 import bridge」约束）
 
 ## 被依赖
 
 - `router/index.ts` — 路由 `ProblemSolve`（`/contest/problem/:displayId`）
-- 入口：`ProblemSetView` 的卡片 open / quickSubmit（后者带 `?focus=1`）、`ProblemTabStrip` 的 chip 切换
+- 入口：`ProblemSetView` 的卡片 open、`ProblemTabStrip` 的 chip 切换（原 quickSubmit 跳转 + `?focus=1` 入口已随 ProblemCard 改为卡片内弹窗而移除；`consumeFocusQuery` 机制保留，当前无调用方携带该 query）
 
 ## 逻辑流程
 
@@ -67,4 +70,4 @@ load(id):
   静默降级为不聚焦，但 query 仍清除，保证幂等。
 - 提交语言取 `workspaceStore.language`（乐观更新 + 后端持久化，见 workspaceStore 文档），
   提交失败原因由 store 写入 `submissionStore.error`，EditorConsoleBar 负责展示。
-- 分层约束：View 只经 store，不 import `@/bridge` / `@/services`。
+- 分层约束：View 不 import `@/bridge`；配置读写走 `config.service`（架构指定的配置唯一入口）。

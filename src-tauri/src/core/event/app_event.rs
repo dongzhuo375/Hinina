@@ -61,7 +61,6 @@ pub enum ProblemEvent {
 pub enum SubmissionEvent {
     Created { submission_id: String },
     Judged { submission_id: String, result: JudgementResult },
-    PollTimeout { submission_id: String },
 }
 
 #[derive(Debug, Clone)]

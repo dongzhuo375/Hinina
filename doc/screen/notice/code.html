@@ -1,0 +1,169 @@
+<!DOCTYPE html><html class="stitch-anim-fade-in" lang="zh-CN" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Hinina OJ - 比赛公告 / Contest Announcements</title>
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "surface": "#0f141b",
+            "surface-bright": "#343941",
+            "on-tertiary": "#003734",
+            "inverse-surface": "#dee2ec",
+            "text-primary-light": "#0F172A",
+            "surface-container-highest": "#30353d",
+            "tertiary-fixed-dim": "#39dcd2",
+            "text-secondary-light": "#64748B",
+            "on-primary-container": "#2a0088",
+            "secondary-container": "#0053db",
+            "text-secondary-dark": "#8B949E",
+            "outline": "#938ea1",
+            "background": "#0f141b",
+            "primary-fixed-dim": "#cabeff",
+            "tertiary": "#39dcd2",
+            "bg-canvas-dark": "#0D1117",
+            "on-secondary-fixed": "#00174b",
+            "surface-tint": "#cabeff",
+            "bg-canvas-light": "#F8FAFC",
+            "error": "#ffb4ab",
+            "error-container": "#93000a",
+            "bg-surface-elevated": "#21262D",
+            "primary-fixed": "#e6deff",
+            "on-secondary": "#002a78",
+            "on-background": "#dee2ec",
+            "surface-variant": "#30353d",
+            "secondary": "#b4c5ff",
+            "bg-surface-dark": "#161B22",
+            "border-subtle-light": "#E2E8F0",
+            "status-tle": "#F59E0B",
+            "surface-container-lowest": "#090f15",
+            "on-error-container": "#ffdad6",
+            "text-primary-dark": "#F0F6FC",
+            "on-tertiary-fixed-variant": "#00504c",
+            "text-muted-dark": "#6E7681",
+            "inverse-on-surface": "#2c3138",
+            "on-primary-fixed-variant": "#4816cb",
+            "surface-container-low": "#171c23",
+            "primary": "#cabeff",
+            "on-secondary-container": "#cdd7ff",
+            "surface-container": "#1b2027",
+            "secondary-fixed": "#dbe1ff",
+            "outline-variant": "#484555",
+            "on-surface": "#dee2ec",
+            "primary-container": "#947dff",
+            "on-secondary-fixed-variant": "#003ea8",
+            "surface-container-high": "#252a32",
+            "status-pending": "#00C7BE",
+            "border-subtle-dark": "#30363D",
+            "tertiary-fixed": "#61f9ef",
+            "tertiary-container": "#00a29a",
+            "bg-surface-light": "#FFFFFF",
+            "surface-dim": "#0f141b",
+            "on-surface-variant": "#c9c4d8",
+            "on-primary": "#31009a",
+            "on-error": "#690005",
+            "on-tertiary-container": "#00302d",
+            "on-tertiary-fixed": "#00201e",
+            "on-primary-fixed": "#1c0062",
+            "inverse-primary": "#603ce2",
+            "status-wa": "#EF4444",
+            "secondary-fixed-dim": "#b4c5ff",
+            "status-ac": "#22C55E"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-lg": "1rem",
+            "space-xl": "1.5rem",
+            "margin": "1rem",
+            "space-md": "0.75rem",
+            "space-sm": "0.5rem",
+            "gutter": "0.75rem",
+            "space-xs": "0.25rem"
+          },
+          "fontFamily": {
+            "label-code-lg": ["JetBrains Mono"],
+            "headline-sm": ["Inter"],
+            "body-sm": ["Inter"],
+            "headline-md": ["Inter"],
+            "headline-lg": ["Inter"],
+            "label-code-sm": ["JetBrains Mono"],
+            "label-code-md": ["JetBrains Mono"],
+            "body-md": ["Inter"],
+            "body-lg": ["Inter"],
+            "display-hero": ["Inter"]
+          },
+          "fontSize": {
+            "label-code-lg": ["14px", { "lineHeight": "22px", "fontWeight": "500" }],
+            "headline-sm": ["15px", { "lineHeight": "22px", "fontWeight": "600" }],
+            "body-sm": ["12px", { "lineHeight": "18px", "fontWeight": "400" }],
+            "headline-md": ["18px", { "lineHeight": "26px", "fontWeight": "600" }],
+            "headline-lg": ["24px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "label-code-sm": ["11px", { "lineHeight": "16px", "fontWeight": "600" }],
+            "label-code-md": ["12px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "body-md": ["13px", { "lineHeight": "20px", "fontWeight": "400" }],
+            "body-lg": ["15px", { "lineHeight": "24px", "fontWeight": "400" }],
+            "display-hero": ["32px", { "lineHeight": "40px", "fontWeight": "700" }]
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-bg-canvas-dark text-text-primary-dark font-body-md text-body-md antialiased h-screen w-screen overflow-hidden flex flex-col select-none">
+<!-- 1. Native Desktop Top App Bar -->
+<header class="bg-white flex justify-between items-center w-full px-space-md h-10 select-none border-b border-slate-200 flex-shrink-0 z-50"><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs"><div class="w-6 h-6 rounded bg-indigo-600 text-white font-headline-sm text-headline-sm font-bold flex items-center justify-center shadow-sm">H</div><span class="text-headline-sm font-headline-sm font-bold text-slate-800 tracking-tight">Hinina OJ</span></div><div class="h-4 w-px bg-slate-200"></div><div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-label-code-sm text-label-code-sm"><span class="w-1.5 h-1.5 rounded-full bg-status-ac animate-pulse"></span><span class="">进行中</span></div><div class="text-slate-800 font-medium text-body-md truncate max-w-xs md:max-w-md">The 49th ICPC Regional Contest - Preliminaries <span class="text-slate-500 font-normal">· 2024 校赛模拟赛 (BAPC Model Round)</span></div></div><div class="flex items-center gap-space-xs bg-slate-50 px-space-md py-1 rounded border border-slate-200"><span class="material-symbols-outlined text-indigo-600 text-[16px]">timer</span><span class="text-slate-500 font-label-code-sm text-label-code-sm">剩余时间:</span><span class="font-label-code-md text-label-code-md text-slate-800 tracking-wider font-semibold">04:35:24</span><span class="text-slate-500 font-label-code-sm text-label-code-sm">/ 05:00:00</span></div><div class="flex items-center gap-space-sm"><button class="px-space-sm py-1 rounded text-body-sm font-body-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors duration-150 flex items-center gap-1"><span class="material-symbols-outlined text-[15px]">info</span><span class="">比赛简介</span></button><div class="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-100 border border-slate-200 text-label-code-sm font-label-code-sm text-slate-700"><span class="material-symbols-outlined text-indigo-600 text-[15px]">account_circle</span><span class="">dongzhuo375</span></div><div class="h-4 w-px bg-slate-200 mx-0.5"></div><div class="flex items-center"><button class="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded transition-colors duration-100 active:scale-95" title="Minimize"><span class="material-symbols-outlined text-[16px]">remove</span></button><button class="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded transition-colors duration-100 active:scale-95" title="Maximize"><span class="material-symbols-outlined text-[15px]">crop_square</span></button><button class="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-status-wa hover:text-white rounded transition-colors duration-100 active:scale-95" title="Close"><span class="material-symbols-outlined text-[16px]">close</span></button></div></div></header>
+<!-- Middle Layout Area: Side Nav + Central Canvas -->
+<div class="flex flex-1 overflow-hidden relative">
+<!-- 2. SideNavBar (Activity Bar w-14, 56px) -->
+<aside class="bg-slate-50 border-r border-slate-200 flex flex-col items-center py-space-sm w-14 h-[calc(100vh-40px-24px)] justify-between flex-shrink-0 z-40"><div class="flex flex-col items-center w-full gap-space-xs"><a class="group w-full flex flex-col items-center justify-center py-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors duration-150 relative" href="#problems" title="题目 (Problems)"><span class="material-symbols-outlined text-[20px] transition-transform duration-100 group-hover:scale-105">code_blocks</span><span class="text-label-code-sm font-label-code-sm mt-0.5 scale-90">题目</span></a><a class="group w-full flex flex-col items-center justify-center py-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors duration-150 relative" href="#standings" title="榜单 (Standings)"><span class="material-symbols-outlined text-[20px] transition-transform duration-100 group-hover:scale-105">leaderboard</span><span class="text-label-code-sm font-label-code-sm mt-0.5 scale-90">榜单</span></a><a class="group w-full flex flex-col items-center justify-center py-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors duration-150 relative" href="#submissions" title="评测 (Submissions)"><span class="material-symbols-outlined text-[20px] transition-transform duration-100 group-hover:scale-105">history</span><span class="text-label-code-sm font-label-code-sm mt-0.5 scale-90">评测</span></a><a class="group w-full flex flex-col items-center justify-center py-2.5 text-indigo-600 border-l-2 border-indigo-600 bg-white transition-colors duration-150 relative" href="#announcements" title="公告 (Announcements)"><div class="relative"><span class="material-symbols-outlined text-[20px]" style="font-variation-settings: &quot;FILL&quot; 1;">campaign</span></div><span class="text-label-code-sm font-label-code-sm mt-0.5 font-semibold scale-90">公告</span></a></div><div class="flex flex-col items-center w-full"><a class="group w-full flex flex-col items-center justify-center py-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors duration-150" href="#settings" title="设置 (Settings)"><span class="material-symbols-outlined text-[20px] transition-transform duration-100 group-hover:rotate-45">settings</span><span class="text-label-code-sm font-label-code-sm mt-0.5 scale-90">设置</span></a></div></aside>
+<!-- 3. Main Content Stage (Contest Announcements Feed in Minimalist Light-Tint Workspace) -->
+<main class="flex-1 bg-bg-canvas-light text-text-primary-light flex flex-col overflow-hidden">
+<!-- Sub-Header & Controls Bar -->
+<div class="bg-bg-surface-light border-b border-border-subtle-light px-space-xl py-space-lg flex-shrink-0 shadow-sm">
+<div class="max-w-5xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+<!-- Title & Meta Indicator -->
+<div>
+<div class="flex items-center gap-space-sm">
+
+<h1 class="text-headline-lg font-headline-lg text-text-primary-light tracking-tight">
+                2024 校赛模拟赛 赛事公告 / Announcements
+              </h1>
+</div>
+
+</div>
+<!-- Quick Action Buttons -->
+<div class="flex items-center gap-space-sm">
+
+<button class="px-3 py-1.5 rounded-lg border border-border-subtle-light bg-white text-text-secondary-light hover:text-text-primary-light hover:bg-slate-50 transition-colors duration-150 text-body-sm font-body-sm font-medium flex items-center gap-1.5 shadow-sm" title="Refresh">
+<span class="material-symbols-outlined text-[16px]">refresh</span>
+<span class="">刷新</span>
+</button>
+</div>
+</div>
+<!-- Filter Tabs & Search Bar -->
+
+</div>
+<!-- Announcements Scrollable Feed -->
+<div class="flex-1 overflow-y-auto px-space-xl py-space-lg space-y-space-md">
+<div class="max-w-5xl mx-auto space-y-space-md pb-8"><article class="bg-white rounded-xl border border-border-subtle-light p-space-lg shadow-sm hover:border-slate-300 transition-all duration-200"><h2 class="text-headline-md font-headline-md text-slate-900 font-bold mb-space-md">程序设计竞赛学术诚信与现场纪律违规判定细则（2024版）</h2><div class="relative"><div id="rule-article-body" class="text-body-md font-body-md text-slate-700 space-y-space-md leading-relaxed max-h-28 overflow-hidden transition-[max-height] duration-300"><p class="">为保证本届程序设计竞赛的公平、公正与严肃性，竞赛组委会制定本细则。所有参赛队伍及选手自登入 Hinina OJ 客户端起，即视为知晓并完全承诺遵守下列行为规范：</p><div class="space-y-2"><h3 class="font-bold text-slate-800 text-body-md">一、代码原创性与查重认定机制</h3><p class="text-slate-600 text-body-sm">1. 比赛期间提交的所有源代码，必须由当前参赛队伍的正式注册成员在现场独立编写。严禁在比赛中使用任何形式的代码生成工具、预先录制的外部代码片段（非队伍携带的标准纸质资料）或未经许可的第三方库。<br>2. 比赛结束后，系统将自动进入代码静态查重程序，结合语法树（AST）分析与隐式特征比对。凡相似度超过 85% 且无合理算法特异性的队伍提交，经裁判组复核后将取消比赛成绩并通报所属高校。</p></div><div class="space-y-2"><h3 class="font-bold text-slate-800 text-body-md">二、网络与通信设备使用规范</h3><p class="text-slate-600 text-body-sm">1. 严禁选手在竞赛用机上通过任何手段访问局域网以外的公网服务，包括但不限于即时通讯工具、私有代码仓库、在线编译平台及技术论坛。<br>2. 参赛期间机位周围严禁开启移动热点、智能手表、带通信功能的可穿戴设备。一经发现违规携带已开启无线通信模块的电子设备，将直接记为严重违纪并终止其参赛资格。</p></div><div class="space-y-2"><h3 class="font-bold text-slate-800 text-body-md">三、现场质疑与违纪申诉程序</h3><p class="text-slate-600 text-body-sm">若队伍对现场评测结果或题目题意存在严重异议，应通过客户端内置 Clarification（答疑通道）提出，或在规定时间内举手向现场裁判长提交书面申诉。对于扰乱考场纪律、恶意攻击评测系统或破坏机房网络拓扑的队伍，组委会保留追加纪律处分的权利。</p></div></div><div id="rule-article-gradient" class="absolute bottom-8 left-0 w-full h-16 pointer-events-none bg-gradient-to-t from-white to-transparent"></div><div class="pt-2 flex justify-center"><button onclick="const body = document.getElementById('rule-article-body'); const grad = document.getElementById('rule-article-gradient'); const label = document.getElementById('rule-btn-label'); const icon = document.getElementById('rule-btn-icon'); if (body.classList.contains('max-h-28')) { body.classList.remove('max-h-28'); body.classList.add('max-h-[1000px]'); grad.classList.add('hidden'); label.innerText = '收起'; icon.innerText = 'keyboard_arrow_up'; } else { body.classList.remove('max-h-[1000px]'); body.classList.add('max-h-28'); grad.classList.remove('hidden'); label.innerText = '展开全部'; icon.innerText = 'keyboard_arrow_down'; }" class="inline-flex items-center gap-1 text-slate-500 hover:text-indigo-600 text-body-sm font-medium transition-colors duration-150 py-1 px-3 rounded hover:bg-slate-50 active:scale-95"><span id="rule-btn-label" class="">展开全部</span><span id="rule-btn-icon" class="material-symbols-outlined text-[18px]">keyboard_arrow_down</span></button></div></div></article><article class="bg-white rounded-xl border border-border-subtle-light p-space-lg shadow-sm hover:border-slate-300 transition-all duration-200 relative" id="rules-long-announcement"><h2 class="text-headline-md font-headline-md text-slate-900 font-bold mb-space-md">程序设计竞赛参赛守则、网络环境合规与突发情况应急预案</h2><div class="relative"><div id="rules-content-body" class="text-body-md font-body-md text-slate-700 leading-relaxed space-y-space-md max-h-36 overflow-hidden transition-all duration-300"><p class="">为保障 2024 年度校赛模拟赛及后续 ICPC/CCPC 选拔赛事的公正、严肃与平稳运行，组委会与技术仲裁委员会特此发布本规范细则。请全体参赛选手知悉并严格遵守：</p><div class="space-y-2"><h3 class="font-bold text-slate-900 text-body-md">一、行为规范与学术诚信</h3><p class="text-slate-600 text-body-sm">比赛期间严格禁止任何形式的代码抄袭、多队协同交流或外部作弊行为。所有提交至评测机系统的源代码均会在赛后及赛中实时运行 AST（抽象语法树）同源相似度分析。任何雷同代码经仲裁委员会复核确认后，将直接取消涉事队伍参赛成绩，并依规通报院校处理。</p></div><div class="space-y-2"><h3 class="font-bold text-slate-900 text-body-md">二、本地文件保存与自动备份注意</h3><p class="text-slate-600 text-body-sm">客户端底部状态栏已启用 Auto-Save Active 自动草稿缓存功能，但选手本地编写的代码文件仍须规范存放在桌面指定的 <code>workspace/team_code</code> 工作目录中。严禁随意修改评测沙箱运行环境路径或覆盖系统配置文件，以防突发断电或重启导致未提交的未保存代码丢失。</p></div><div class="space-y-2"><h3 class="font-bold text-slate-900 text-body-md">三、网络限制与外联违规定义</h3><p class="text-slate-600 text-body-sm">机房网络处于白名单隔离模式，仅允许访问 Hinina OJ 内部评测通信域名（judge.hinina.internal）及官方预置的离线语言文档（C++ cppreference、Java API docs 与 Python docs）。选手严禁尝试使用代理工具绕过白名单，禁止携带或接入未经报备的随身 WiFi、移动热点及私有存储设备，违者按严重违纪处理。</p></div><div class="space-y-2"><h3 class="font-bold text-slate-900 text-body-md">四、硬件或评测机故障应对动线</h3><p class="text-slate-600 text-body-sm">如遇本地机器死机、键盘鼠标故障、网络连接中断或评测长时间处于 Judgement Pending 超过合理时限（2 分钟以上），请勿自行强制切断电源或大声喧哗。请保持座位端正并立即举手示意现场技术志愿者，由现场技术主管裁判到场核实记录，并根据故障时长及影响范围启动补时或更换备用机动席位流程。</p></div></div><div id="rules-fade-overlay" class="absolute bottom-0 left-0 w-full h-16 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none transition-opacity duration-200"></div></div><div class="mt-3 pt-2 text-center border-t border-slate-100"><button type="button" id="rules-expand-btn" onclick="const body = document.getElementById('rules-content-body'); const overlay = document.getElementById('rules-fade-overlay'); const btnText = document.getElementById('rules-btn-text'); const btnIcon = document.getElementById('rules-btn-icon'); const isExpanded = body.classList.contains('max-h-none'); if (isExpanded) { body.classList.remove('max-h-none'); body.classList.add('max-h-36'); overlay.classList.remove('opacity-0'); overlay.classList.add('opacity-100'); btnText.textContent = '展开全文'; btnIcon.textContent = 'expand_more'; } else { body.classList.remove('max-h-36'); body.classList.add('max-h-none'); overlay.classList.remove('opacity-100'); overlay.classList.add('opacity-0'); btnText.textContent = '收起'; btnIcon.textContent = 'expand_less'; }" class="inline-flex items-center justify-center gap-1 text-slate-500 hover:text-slate-800 text-body-sm font-medium py-1 px-3 rounded hover:bg-slate-100 transition-colors duration-150"><span id="rules-btn-text" class="">展开全文</span><span id="rules-btn-icon" class="material-symbols-outlined text-[18px] transition-transform">expand_more</span></button></div></article><article class="bg-white rounded-xl border border-border-subtle-light p-space-lg shadow-sm hover:border-slate-300 transition-all duration-200"><h2 class="text-headline-md font-headline-md text-slate-900 font-bold mb-space-md">关于 C 题「计算混淆」数据范围与输出格式补充说明</h2><div class="text-body-md font-body-md text-slate-700 leading-relaxed space-y-space-md"><p class="">经裁判组核实，原题面中子任务 2 的数据规模约束描述存在歧义。请参赛队伍注意以下补充与修正，评测机后台已同步更新数据校验脚本：</p><div class="bg-slate-50 text-slate-700 rounded-lg p-space-md font-label-code-sm text-label-code-sm space-y-1.5 border border-slate-200"><div class="text-slate-700 font-label-code-md">1. 对于 100% 的评测数据，保证序列长度 <span class="text-amber-700 font-bold">1 ≤ N ≤ 10^5</span>（原描述误写作 10^3）。<br>2. 若存在多组最优逆序对变换路径，只需输出字典序最小的一组解。<br>3. 输出每行末尾允许包含多余空格，但最后一行必须以换行符 '\n' 结束。</div></div></div></article><article class="bg-white rounded-xl border border-border-subtle-light p-space-lg shadow-sm hover:border-slate-300 transition-all duration-200"><h2 class="text-headline-md font-headline-md text-slate-900 font-bold mb-space-md">B 题「新港之瓶」样例 2 解释修正说明</h2><div class="text-body-md font-body-md text-slate-700 leading-relaxed"><p class="">题目 B 中 Sample 2 的解释文本中第二步倒水操作容量计算中，“倒出 3L 残液”应修正为“倒出 2L 残液”。样例输入数据及期望输出标准答案保持不变，无需重新提交已通过的代码。</p></div></article><article class="bg-white rounded-xl border border-border-subtle-light p-space-lg shadow-sm hover:border-slate-300 transition-all duration-200"><h2 class="text-headline-md font-headline-md text-slate-900 font-bold mb-space-md">关于比赛最后 1 小时封榜规则与气球发放通知</h2><div class="text-body-md font-body-md text-slate-700 space-y-2 leading-relaxed"><p class="">各位参赛选手请注意以下赛中关键节点时间：</p><ul class="list-disc pl-5 space-y-1 text-slate-600 font-body-sm"><li class=""><strong class="text-slate-800">封榜时间：</strong>比赛将于第四小时结束时（13:00:00）准时开启滚榜冻结，期间各队仍可正常提交，但榜单将显示 <span class="font-label-code-sm text-status-pending font-semibold">? (Pending)</span> 状态。</li><li class=""><strong class="text-slate-800">气球发放：</strong>最后 1 小时内通过的题目将暂停发放对应颜色气球，闭幕式滚榜环节统一公布。</li><li class="">如遇客户端故障或网络异常，请举手示意现场技术志愿者。</li></ul></div></article><article class="bg-white rounded-xl border border-border-subtle-light p-space-lg shadow-sm hover:border-slate-300 transition-all duration-200"><h2 class="text-headline-md font-headline-md text-slate-900 font-bold mb-space-md">Hinina 竞赛客户端实时网络与评测队列运行正常</h2><div class="text-body-md font-body-md text-slate-700 leading-relaxed"><p class="">本场比赛由 Hinina OJ 专有评测集群支持，共计 16 台评测沙箱节点待命。当前评测队列无积压，平均出评测结果耗时小于 1.2 秒。预祝各位选手发挥出色！</p></div></article></div>
+</div>
+</main>
+</div>
+<!-- 4. Footer Component (Docked full-width bottom-0 h-6, 24px) -->
+<footer class="bg-white text-slate-500 border-t border-slate-200 fixed bottom-0 left-0 w-full h-6 px-space-md flex justify-between items-center z-40 select-none font-label-code-sm text-label-code-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-status-ac animate-pulse"></span><span class="font-semibold text-slate-700">已连接比赛服务器</span><span class="text-slate-300">|</span></div><div class="flex items-center"><span class="text-slate-500 font-medium font-label-code-sm">Client v2.4.4</span></div></footer>
+
+
+</body></html>

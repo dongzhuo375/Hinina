@@ -28,6 +28,7 @@ const contest: Contest = {
   sealRank: false,
   sealRankTime: null,
   allowEndSubmit: false,
+  oiRankScoreType: null,
 }
 
 const problems = [
@@ -178,5 +179,53 @@ describe('clearSessionData — 登出清理', () => {
     // 匿名简报与登录态无关
     expect(store.brief).toEqual(contest)
     expect(store.briefState).toBe('connected')
+  })
+})
+
+describe('whenLoaded — 等待比赛数据就绪（P59 统一入口）', () => {
+  it('已有数据时立即返回，不发请求', async () => {
+    const store = useContestStore()
+    store.contest = contest
+
+    await store.whenLoaded()
+
+    expect(contestService.loadConfiguredContest).not.toHaveBeenCalled()
+  })
+
+  it('加载在途时复用同一个请求（不重复打服务端）', async () => {
+    let resolveFn: (value: unknown) => void = () => {}
+    contestService.loadConfiguredContest.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFn = resolve
+        }),
+    )
+    const store = useContestStore()
+
+    const first = store.loadContest()
+    const second = store.whenLoaded()
+    expect(contestService.loadConfiguredContest).toHaveBeenCalledTimes(1)
+
+    resolveFn({ contest, problems })
+    await Promise.all([first, second])
+    expect(store.contest).toEqual(contest)
+  })
+
+  it('无人加载时由 whenLoaded 发起请求', async () => {
+    contestService.loadConfiguredContest.mockResolvedValue({ contest, problems })
+    const store = useContestStore()
+
+    await store.whenLoaded()
+
+    expect(contestService.loadConfiguredContest).toHaveBeenCalledTimes(1)
+    expect(store.contest).toEqual(contest)
+  })
+
+  it('失败时 rejection 透传给调用方（错误已写入 error）', async () => {
+    contestService.loadConfiguredContest.mockRejectedValueOnce(new Error('网络异常'))
+    const store = useContestStore()
+
+    await expect(store.whenLoaded()).rejects.toThrow('网络异常')
+    expect(store.error).toBe('网络异常')
   })
 })

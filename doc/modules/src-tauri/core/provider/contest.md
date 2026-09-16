@@ -1,7 +1,7 @@
 # contest
 
 ## 职责
-定义比赛 Provider trait `ContestProvider`，声明比赛列表、详情、题目列表与排行榜四个异步方法。各 OJ Adapter 需实现此 trait 以对接不同 OJ 的比赛数据。
+定义比赛 Provider trait `ContestProvider`，声明比赛列表、详情、题目列表、排行榜与比赛公告五个异步方法。各 OJ Adapter 需实现此 trait 以对接不同 OJ 的比赛数据。
 
 ## 核心类型/函数
 - **`ContestProvider`** — 比赛 Provider trait（`#[async_trait]`），方法：
@@ -12,9 +12,11 @@
     - 返回的行可能包含服务端前置的「当前用户/关注用户」副本，调用方渲染前需按 `uid` 去重
     - `total` 含这些前置条目，**不能**当作真实参赛人数
     - 榜单为服务端实时计算，本方法不做缓存，轮询节奏由调用方控制（建议 ≥10s 且加抖动错峰）
+  - `list_announcements(&self, contest_id, current_page: i64, limit: i64) -> AppResult<AnnouncementPage>` — 获取比赛公告（分页）。实现约定：公告可能包含裁判组临场发布的规则变更，实现方**不得缓存**，刷新节奏由调用方控制
 
 ## 直接依赖
 - `async_trait::async_trait`
+- `core::entity::announcement::AnnouncementPage`
 - `core::entity::contest::{Contest, ContestProblem}`
 - `core::entity::rank::{ContestRankPage, RankQuery}`
 - `core::error::AppResult`
@@ -22,8 +24,8 @@
 ## 被依赖
 - `core::provider::registry`（ProviderRegistry 注册/获取 ContestProvider）
 - `infra::provider_registry_impl`
-- `adapter::hoj`（实现全部四个方法）
-- `service::contest`（`get_rank` 经 registry 调用 `get_contest_rank`）
+- `adapter::hoj`（实现全部五个方法）
+- `service::contest`（`get_rank` 经 registry 调用 `get_contest_rank`；`list_announcements` 经 registry 调用同名方法）
 
 ## 逻辑流程
 无（纯 trait 定义）。

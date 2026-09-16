@@ -35,6 +35,22 @@ export const useContestStore = defineStore('contest', {
 
   actions: {
     /**
+     * 等待比赛数据就绪（P59 统一入口）。
+     *
+     * 外壳 `ContestLayout` 与各子视图都可能发现「比赛还没加载」：
+     * - 已有数据 → 立即返回；
+     * - 加载在途 → 复用同一个 in-flight Promise（不重复请求）；
+     * - 无人加载 → 由本调用发起。
+     *
+     * 失败时 rejection 透传给调用方（错误已写入 `error`），调用方自行 catch。
+     */
+    async whenLoaded(): Promise<void> {
+      if (this.contest) return
+      if (loadInFlight) return loadInFlight
+      return this.loadContest()
+    },
+
+    /**
      * 加载已配置的比赛数据（并发去重）。
      *
      * 同一时刻的多次调用共享一个请求；失败时所有调用方都会收到同一个 rejection，

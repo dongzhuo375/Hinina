@@ -1,0 +1,60 @@
+{
+  "status": 200,
+  "msg": "success",
+  "data": {
+    "records": [
+      {
+        "uid": "uuid-alice",
+        "submitId": 12345,
+        "username": "alice",
+        "pid": 1061,
+        "displayPid": "HOJ-1061",
+        "title": "A + B Problem",
+        "displayId": "A",
+        "submitTime": "2026-09-15T10:00:00",
+        "status": 5,
+        "share": false,
+        "time": 15,
+        "memory": 10240,
+        "score": null,
+        "oiRankScore": null,
+        "length": 256,
+        "language": "C++",
+        "cid": 1011,
+        "cpid": 0,
+        "source": null,
+        "judger": "judge-server-1",
+        "ip": null,
+        "isManual": false
+      },
+      {
+        "uid": "uuid-alice",
+        "submitId": 12340,
+        "username": "alice",
+        "pid": 1062,
+        "displayPid": "HOJ-1062",
+        "title": "图论作业",
+        "displayId": null,
+        "submitTime": "2026-09-15T09:40:00",
+        "status": 13,
+        "share": null,
+        "time": null,
+        "memory": null,
+        "score": 60.0,
+        "oiRankScore": 60,
+        "length": null,
+        "language": "Java",
+        "cid": 1011,
+        "cpid": null,
+        "source": null,
+        "judger": null,
+        "ip": null,
+        "isManual": null
+      }
+    ],
+    "total": 2,
+    "size": 20,
+    "current": 1,
+    "pages": 1
+  }
+}

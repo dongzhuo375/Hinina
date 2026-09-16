@@ -1,13 +1,17 @@
 use tauri::State;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::core::context::AppContext;
+use crate::core::entity::announcement::AnnouncementPage;
 use crate::core::entity::contest::{Contest, ContestBundle};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
 
 /// 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）
 const DEFAULT_RANK_LIMIT: i64 = 50;
+
+/// 公告默认分页大小
+const DEFAULT_ANNOUNCEMENT_LIMIT: i64 = 50;
 
 /// 获取比赛列表（带缓存）。
 ///
@@ -93,4 +97,71 @@ pub async fn get_contest_rank(
         "Command: 获取比赛榜单"
     );
     ctx.contest.get_rank(&contest_id, &query).await
+}
+
+/// 获取比赛公告（分页）。
+///
+/// 前端 invoke 签名: `list_contest_announcements`({ contestId, currentPage?, limit? })
+///
+/// 默认第 1 页、每页 50 条。**不做缓存**：公告可能包含裁判组临场发布的规则变更。
+#[tauri::command]
+pub async fn list_contest_announcements(
+    ctx: State<'_, AppContext>,
+    contest_id: String,
+    current_page: Option<i64>,
+    limit: Option<i64>,
+) -> AppResult<AnnouncementPage> {
+    let page = current_page.unwrap_or(1).max(1);
+    let limit = limit.unwrap_or(DEFAULT_ANNOUNCEMENT_LIMIT).max(1);
+
+    info!(contest_id = %contest_id, page = page, limit = limit, "Command: 获取比赛公告");
+    ctx.contest.list_announcements(&contest_id, page, limit).await
+}
+
+/// 从当前会话解析公告已读状态使用的 uid。
+///
+/// 优先用 HOJ 的用户 UUID（user_id）；旧版会话文件可能缺失该字段，回退 username。
+fn session_uid(ctx: &AppContext) -> Option<String> {
+    ctx.auth.get_session().map(|s| {
+        if s.user_id.is_empty() {
+            s.username
+        } else {
+            s.user_id
+        }
+    })
+}
+
+/// 获取当前用户在某比赛下已读的公告 ID 列表。
+///
+/// 前端 invoke 签名: `get_read_announcement_ids`({ contestId })
+///
+/// 已读状态是客户端本地特性（HOJ 无对应接口），按会话 uid 隔离存储。
+/// 无会话时返回空列表而不是报错 —— 登录页也可能预渲染公告。
+#[tauri::command]
+pub async fn get_read_announcement_ids(
+    ctx: State<'_, AppContext>,
+    contest_id: String,
+) -> AppResult<Vec<String>> {
+    let Some(uid) = session_uid(&ctx) else {
+        return Ok(Vec::new());
+    };
+    ctx.contest.get_read_announcement_ids(&contest_id, &uid)
+}
+
+/// 标记公告为已读（与既有记录合并去重）。
+///
+/// 前端 invoke 签名: `mark_announcements_read`({ contestId, ids })
+///
+/// 无会话时静默跳过（warn 日志）：已读状态是纯 UI 便利特性，不值得为此报错。
+#[tauri::command]
+pub async fn mark_announcements_read(
+    ctx: State<'_, AppContext>,
+    contest_id: String,
+    ids: Vec<String>,
+) -> AppResult<()> {
+    let Some(uid) = session_uid(&ctx) else {
+        warn!(contest_id = %contest_id, "无会话，跳过公告已读标记");
+        return Ok(());
+    };
+    ctx.contest.mark_announcements_read(&contest_id, &uid, &ids)
 }

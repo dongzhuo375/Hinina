@@ -11,22 +11,33 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `PollSchedule` | `{ intervalMs: number; timeoutMs: number }` | 评测轮询调度参数 |
+| `EditorPrefs` | `{ fontSize: number; tabSize: number }` | 编辑器偏好 |
 | `ConfigService.getConfig` | `() => Promise<AppConfig>` | 读取配置（进程内缓存，并发共享同一次 IPC） |
-| `ConfigService.invalidate` | `() => void` | 使缓存失效（预留配置热重载） |
-| `ConfigService.getOjBaseUrl` | `() => Promise<string>` | OJ 基址，用于题面/简介相对图片 URL 改写；失败返回空串 |
+| `ConfigService.invalidate` | `() => void` | 使缓存失效（设置页保存后 / 需要磁盘真值时） |
+| `ConfigService.updateConfig` | `(mutate: (draft: AppConfig) => void) => Promise<AppConfig>` | **设置页保存唯一入口**：读当前配置 → structuredClone 副本上应用变更 → 整体写回后端（`update_config` 是整体替换语义）→ 失效缓存；写回失败同样失效缓存（避免缓存与磁盘漂移）并抛出 |
+| `ConfigService.getOjBaseUrl` | `() => Promise<string>` | OJ 基址，用于题面/简介/公告相对图片 URL 改写；失败返回空串 |
 | `ConfigService.getPollSchedule` | `() => Promise<PollSchedule>` | 轮询间隔与总超时；失败或非法配置回退 2s / 300s |
+| `ConfigService.getEditorPrefs` | `() => Promise<EditorPrefs>` | 字号/Tab 宽度（越界回退 14 / 4）；CodeEditor 挂载时消费 |
+| `ConfigService.getDefaultLanguage` | `() => Promise<string>` | 默认语言（Monaco id）；经 `normalizeLanguageId` 归一，历史配置遗留显示名（"C++"）也能得到合法 id |
+| `ConfigService.getSplitRatio` | `() => Promise<number>` | 解题页初始分栏比例（非法回退 0.48） |
+| `normalizeLanguageId` | `(raw: string \| undefined \| null) => string` | 显示名/大小写变体 → Monaco language id；无法识别回退 `'cpp'`（P55：保证喂给 Monaco 的恒为合法值） |
 | `configService` | 单例 | 全局唯一实例 |
 
 ## 直接依赖
 
-- `@/bridge/config.bridge`（`get_config`）
+- `@/bridge/config.bridge`（`get_config` / `update_config`）
 - `@/types/config`（仅类型）
 
 ## 被依赖
 
 - `services/contest.service.ts` — 登录页匿名简报需要 `contestId` 与 OJ 基址
 - `stores/submissionStore.ts` — `startPolling()` 读取轮询调度参数
+- `stores/workspaceStore.ts` — `loadWorkspace()` 读取默认语言
+- `stores/announcementStore.ts`（经 announcement.service 间接）
 - `components/problem/ProblemStatement.vue` — 题面图片基址
+- `components/editor/CodeEditor.vue` — 字号/Tab 宽度
+- `views/ProblemSolveView.vue` — 初始分栏比例读取与拖拽回写
+- `views/SettingsView.vue` — 配置读取与保存
 
 ## 逻辑流程
 
@@ -37,15 +48,25 @@ getConfig()
                  ├─ 成功 → 写入缓存
                  └─ 失败 → 清空缓存（下次调用重试）并抛出
 
-getOjBaseUrl() / getPollSchedule()
-  └─ 内部吞掉异常并返回安全兜底值：
-     基址缺失只影响图片显示、轮询参数缺失只影响节奏，均不应阻断主流程
+updateConfig(mutate)
+  getConfig() → structuredClone 副本 → mutate(draft)
+  → bridge.updateConfig(draft)（整体替换）
+  → finally invalidate()（成败都失效，防缓存与磁盘漂移）
+
+getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / getSplitRatio()
+  └─ 内部吞掉异常并返回安全兜底值：派生参数缺失只影响局部展示/节奏，不阻断主流程
 ```
 
 设计要点：
 
-- **分层约定**：View / Store 不得直接调用 `config.bridge`，配置读取一律经本服务。
-- **不引入 store**：配置是应用级只读数据，无跨视图状态同步需求；缓存 Promise 而非结果，
-  使登录页简报、题面图片基址、轮询参数三处调用共享一次 IPC。
-- 兜底值与 Rust `core::entity::config` 的默认值保持一致（`poll_interval=2s`、`poll_timeout=300s`）。
-- v0.x 无设置界面，运行期配置稳定；接入热重载后由调用方触发 `invalidate()`。
+- **分层约定**：View / Store 不得直接调用 `config.bridge`，配置读写一律经本服务。
+- **不引入 store**：缓存 Promise 而非结果，使多处调用共享一次 IPC；设置页保存经
+  `updateConfig` 写后端 + 失效缓存，其余读取方下次调用即拿到新值。
+- **P55 值域统一**：`defaultLanguage` 值域为 Monaco id（`c`/`cpp`/`java`/`python`），
+  历史配置遗留的显示名经 `normalizeLanguageId` 归一；Rust 端默认值同步改为
+  `cpp` / `light` / `vs` / `0.48`，加载时做一次性归一化。
+- 兜底值与 Rust `core::entity::config` 的默认值保持一致（`poll_interval=2s`、`poll_timeout=300s`、字号 14、Tab 4、分栏 0.48）。
+
+## 测试
+
+`src/services/__tests__/config.service.spec.ts`：normalizeLanguageId 全表、缓存并发去重与失败重试、派生参数透传/越界回退/读取失败兜底、updateConfig 整体写回 + 缓存失效 + 副本隔离 + 失败仍失效缓存。

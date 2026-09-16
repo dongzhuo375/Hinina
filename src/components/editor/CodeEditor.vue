@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, shallowRef } from 'vue'
 import * as monaco from 'monaco-editor'
+import { configService } from '@/services/config.service'
 
 // ── Monaco Editor Workers（手动配置，避免 worker 打包问题） ──
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -24,6 +25,8 @@ const props = defineProps<{
   language: string
   /// 工作区脏状态，驱动工具条右侧的自动备份指示
   isDirty: boolean
+  /// 只读模式（提交详情页代码查看）：隐藏工具条、禁用编辑与提交快捷键
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -85,19 +88,25 @@ onMounted(async () => {
   await nextTick()
   if (!editorContainer.value) return
 
+  // 编辑器偏好来自应用配置（设置页可调）；读取失败时服务内部已回退兜底值
+  const prefs = await configService.getEditorPrefs()
+
   const ed = monaco.editor.create(editorContainer.value, {
     value: props.modelValue,
     language: langMap[props.language] || 'cpp',
     theme: 'vs',
-    fontSize: 14,
+    fontSize: prefs.fontSize,
     fontFamily: 'JetBrains Mono, Cascadia Code, Consolas, monospace',
     minimap: { enabled: false },
     lineNumbers: 'on',
     scrollBeyondLastLine: false,
     automaticLayout: true,
-    tabSize: 4,
+    tabSize: prefs.tabSize,
     wordWrap: 'on',
     padding: { top: 12, bottom: 12 },
+    readOnly: props.readonly === true,
+    // 只读查看无需行内建议/高亮干扰
+    renderLineHighlight: props.readonly ? 'none' : 'line',
   })
 
   ed.onDidChangeModelContent(() => {
@@ -111,8 +120,8 @@ onMounted(async () => {
 
   editor.value = ed
 
-  // Ctrl+Enter 提交快捷键
-  window.addEventListener('keydown', handleKeydown)
+  // Ctrl+Enter 提交快捷键（只读模式无提交语义，不注册）
+  if (!props.readonly) window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
@@ -198,8 +207,9 @@ defineExpose({ focus })
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-    <!-- 工具条 -->
+    <!-- 工具条（只读模式隐藏：详情页代码查看无语言切换/提交语义） -->
     <div
+      v-if="!readonly"
       class="flex h-10 shrink-0 items-center justify-between border-b border-slate-200 bg-slate-100 px-4 select-none"
     >
       <!-- 左：语言选择 -->

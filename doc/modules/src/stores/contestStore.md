@@ -21,6 +21,7 @@
 |------|------|------|
 | `currentProblemIds` | getter | 当前比赛所有题目的 displayId 列表 |
 | `problemCount` | getter | 比赛题目数量 |
+| `whenLoaded` | `() => Promise<void>` | **等待比赛数据就绪的统一入口（P59）**：已有数据立即返回；加载在途复用同一 in-flight Promise；无人加载则由本调用发起。失败 rejection 透传（错误已写入 `error`），调用方自行 catch |
 | `loadContest` | `() => Promise<void>` | 加载配置比赛（并发去重，见逻辑流程）；失败写入 `error` 并抛出 |
 | `loadBrief` | `() => Promise<void>` | 加载匿名简报；三态映射，**失败不抛出** |
 | `clearSessionData` | `() => void` | 只清空会话相关四项，保留匿名简报 |
@@ -35,8 +36,8 @@
 
 ## 被依赖
 
-- `views/ContestLayout.vue` — 外壳挂载时触发 `loadContest()`（与三个子视图并发，靠去重收敛为一次请求）
-- `views/RankView.vue` / `ProblemSetView.vue` / `ProblemSolveView.vue` — 比赛数据读取与 `loadContest()` 兜底加载
+- `views/ContestLayout.vue` — 外壳挂载时经 `whenLoaded()` 触发加载，就绪后启动公告轮询
+- `views/RankView.vue` / `ProblemSetView.vue` / `ProblemSolveView.vue` / `AnnouncementsView.vue` / `SubmissionsView.vue` — 比赛数据读取与 `whenLoaded()` 统一等待入口（P59：三视图各自的 sleep 轮询 / watch 写法已删除）
 - `views/LoginView.vue` — 匿名简报（`brief` / `briefState` / `briefError` / `briefBaseUrl`，驱动右侧氛围区与重试入口）
 - `components/contest/ContestStatsBar.vue`（赛制与题目数）、`components/rank/ScoreboardTable.vue` / `RankToolbar.vue`（赛制、rankShowName、题目列头）、`components/layout/TopBar.vue` / `StatusBar.vue`（标题、倒计时、连接状态）、`components/problem/ProblemTabStrip.vue` / `ProblemStatement.vue`（题目列表）
 - `stores/session.ts` — 登出清理走 `clearSessionData()` 而非 `$reset()`
@@ -85,4 +86,4 @@ briefState = 'connecting'
 
 ## 测试
 
-`src/stores/__tests__/contestStore.spec.ts` 锁定：并发调用共享同一请求、失败时两个调用方都收到 rejection 且 `loadInFlight` 被清理（允许后续重试）、`loadBrief` 三态（unconfigured 不算 failed、失败不抛出）、`clearSessionData` 清空会话状态但保留匿名简报。
+`src/stores/__tests__/contestStore.spec.ts` 锁定：并发调用共享同一请求、失败时两个调用方都收到 rejection 且 `loadInFlight` 被清理（允许后续重试）、`loadBrief` 三态（unconfigured 不算 failed、失败不抛出）、`clearSessionData` 清空会话状态但保留匿名简报、`whenLoaded` 四态（已有数据零请求 / 在途复用 / 无人加载时发起 / 失败透传）。

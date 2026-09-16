@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
@@ -61,37 +61,16 @@ onUnmounted(() => {
   stopPolling()
 })
 
-/// 外壳（ContestLayout）通常已发起 loadContest：仅在无人拉取时兜底请求，
-/// 在途时等待其结束，避免重复请求
+/// 外壳（ContestLayout）通常已发起 loadContest：`whenLoaded` 复用在途请求、
+/// 无人拉取时兜底发起（P59 统一入口）；失败原因已由 store 写入 error，
+/// 模板展示 ErrorMessage 并提供重试
 async function ensureContest() {
   if (contest.value) return
-  if (contestStore.isLoading) {
-    await waitLoadingSettled()
-    return
-  }
   try {
-    await contestStore.loadContest()
+    await contestStore.whenLoaded()
   } catch {
-    // 失败原因已由 store 写入 error，模板展示 ErrorMessage 并提供重试
+    // 失败原因已写入 contestStore.error
   }
-}
-
-function waitLoadingSettled(): Promise<void> {
-  return new Promise((resolve) => {
-    if (!contestStore.isLoading) {
-      resolve()
-      return
-    }
-    const stop = watch(
-      () => contestStore.isLoading,
-      (loading) => {
-        if (!loading) {
-          stop()
-          resolve()
-        }
-      },
-    )
-  })
 }
 
 /// 补充数据并发拉取且不 await：卡片先用 ac/total 渲染首屏，
@@ -158,15 +137,6 @@ async function retry() {
 
 function openProblem(problem: ContestProblem) {
   router.push({ name: 'ProblemSolve', params: { displayId: problem.displayId } })
-}
-
-/// 快捷提交本轮简化为「跳转解题页并聚焦编辑器」，意图经 query 传递
-function quickSubmit(problem: ContestProblem) {
-  router.push({
-    name: 'ProblemSolve',
-    params: { displayId: problem.displayId },
-    query: { focus: '1' },
-  })
 }
 </script>
 
@@ -251,14 +221,13 @@ function quickSubmit(problem: ContestProblem) {
           </button>
         </div>
 
-        <!-- 题目卡片网格 -->
-        <div v-else class="mx-auto grid max-w-7xl grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+        <!-- 题目卡片网格：桌面端一行三卡（lg 起），窄窗口逐级降为两列/单列；三列时收窄间距保持卡片呼吸感 -->
+        <div v-else class="mx-auto grid max-w-7xl grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:gap-6">
           <ProblemCard
             v-for="problem in problems"
             :key="problem.displayId"
             :problem="problem"
             @open="openProblem(problem)"
-            @quick-submit="quickSubmit(problem)"
           />
         </div>
       </div>
