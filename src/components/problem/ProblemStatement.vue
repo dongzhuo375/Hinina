@@ -7,15 +7,15 @@ import { configService } from '@/services/config.service'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { createLogger } from '@/utils/logger'
-
-const log = createLogger('ProblemStatement')
 import {
   effectiveLimits,
   formatMemoryLimit,
   formatTimeLimit,
   isDoubleLimitLanguage,
 } from '@/utils/limits'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ProblemStatement')
 
 /// 题面视图：头部元信息（标题 + 限制 + 通过率）+ 分节滚动正文（描述/输入/输出/样例）。
 const props = defineProps<{

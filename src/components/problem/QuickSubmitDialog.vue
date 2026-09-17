@@ -7,9 +7,6 @@ import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { problemService } from '@/services/problem.service'
 import type { ContestProblem } from '@/types/contest'
-import { createLogger } from '@/utils/logger'
-
-const log = createLogger('QuickSubmitDialog')
 import {
   DEFAULT_LANGUAGE,
   DEFAULT_LANGUAGES,
@@ -24,6 +21,9 @@ import {
   statusTone,
 } from '@/utils/submission'
 import type { StatusTone } from '@/utils/submission'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('QuickSubmitDialog')
 
 /// 题目总览「快捷提交」弹窗：不进入解题页即可完成一次提交并跟踪评测结果。
 const props = defineProps<{ problem: ContestProblem }>()

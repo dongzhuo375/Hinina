@@ -17,7 +17,7 @@
 | `ConfigService.updateConfig` | `(mutate: (draft: AppConfig) => void) => Promise<AppConfig>` | **设置页保存唯一入口**：读当前配置 → structuredClone 副本上应用变更 → 整体写回后端（`update_config` 是整体替换语义）→ 失效缓存；写回失败同样失效缓存（避免缓存与磁盘漂移）并抛出 |
 | `ConfigService.getOjBaseUrl` | `() => Promise<string>` | OJ 基址，用于题面/简介/公告相对图片 URL 改写；失败返回空串 |
 | `ConfigService.getPollSchedule` | `() => Promise<PollSchedule>` | 轮询间隔与总超时；失败或非法配置回退 2s / 300s |
-| `ConfigService.getEditorPrefs` | `() => Promise<EditorPrefs>` | 字号 / Tab 宽度 / 编辑器主题（越界与未知主题回退 14 / 4 / `'vs'`）；CodeEditor 挂载时消费 |
+| `ConfigService.getEditorPrefs` | `() => Promise<EditorPrefs>` | 字号 / Tab 宽度 / 编辑器主题（钳位上下界取自 `utils/editor`，越界与未知主题回退 14 / 4 / `'vs'`）；CodeEditor 挂载时消费 |
 | `ConfigService.updateEditorPrefs` | `(patch: Partial<EditorPrefs>) => Promise<void>` | **解题页编辑器设置弹层落盘入口**：只写传入字段（读-改-写保留其余配置）；主题落 `theme.editorTheme` 且**不触碰 `theme.themeName`**，落盘前经 `normalizeEditorTheme` 归一 |
 | `ConfigService.getDefaultLanguage` | `() => Promise<string>` | 默认语言（**HOJ 显示名**，如 "C++"）；经 `normalizeHojLanguage` 归一，历史配置遗留的 Monaco id（'cpp'）映射回显示名，空值回退 "C++"，其它非空值（Go/Rust…）原样保留 |
 | `ConfigService.getSplitRatio` | `() => Promise<number>` | 解题页初始分栏比例（非法回退 0.48） |
@@ -28,7 +28,7 @@
 
 - `@/bridge/config.bridge`（`get_config` / `update_config`）
 - `@/types/config`（仅类型）
-- `@/utils/language`（`normalizeHojLanguage`）、`@/utils/editor`（偏好默认值与主题归一）
+- `@/utils/language`（`normalizeHojLanguage`）、`@/utils/editor`（偏好默认值、钳位上下界与主题归一）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
@@ -74,9 +74,10 @@ getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / g
   映射回显示名（前端 `normalizeHojLanguage`、Rust `normalize_language_display_name`）。
   Rust 端默认值 `light` / `vs` / `0.48` 不变。
 - 兜底值与 Rust `core::entity::config` 的默认值保持一致（`poll_interval=2s`、`poll_timeout=300s`、字号 14、Tab 4、编辑器主题 `vs`、分栏 0.48）。
-- **编辑器偏好值域归 `utils/editor`**：字号 8–32、Tab 1–8（候选 2/4/8）、主题 `vs`/`vs-dark`。
+- **编辑器偏好值域归 `utils/editor`**：字号 8–32、Tab 1–8（候选档位 2/4/8）、主题 `vs`/`vs-dark` ——
+  本服务只取该模块常量做钳位，不复制字面量。
   `updateEditorPrefs` 落盘前对主题做归一，未知主题名不会写进配置文件（Rust 端 `sanitize`
-  还会再收敛一次）。
+  还会再收敛一次）；**部分写语义**：只写传入字段，未传入的偏好保持磁盘原值。
 
 ## 测试
 

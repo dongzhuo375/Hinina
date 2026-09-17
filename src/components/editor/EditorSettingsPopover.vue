@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   EDITOR_FONT_SIZE_MAX,
   EDITOR_FONT_SIZE_MIN,
@@ -28,6 +28,15 @@ const emit = defineEmits<{
 }>()
 
 const open = ref(false)
+
+/// Tab 宽度候选：**始终包含当前值**。存储域（1–8）比候选集宽，`config.json` 可被
+/// 手改为 6 这类非候选值 —— 此时若只渲染候选档位，会出现「一个都不选中」的假象，
+/// 用户会以为设置丢了。故非候选值也作为一枚档位呈现（升序插入）。
+const tabSizeOptions = computed(() => {
+  const list = [...EDITOR_TAB_SIZES]
+  if (!list.includes(props.tabSize)) list.push(props.tabSize)
+  return list.sort((a, b) => a - b)
+})
 
 /// 字号滑杆：`input[type=range]` 的 value 是字符串，统一转数字后再上抛
 function onFontSizeInput(e: Event) {
@@ -96,7 +105,7 @@ function onFontSizeInput(e: Event) {
           <span class="text-xs font-medium text-slate-700">Tab 宽度</span>
           <div class="mt-2 flex gap-1.5">
             <button
-              v-for="size in EDITOR_TAB_SIZES"
+              v-for="size in tabSizeOptions"
               :key="size"
               type="button"
               class="flex-1 rounded border py-1 font-mono text-[11px] transition-colors"

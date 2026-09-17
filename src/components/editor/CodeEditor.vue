@@ -8,14 +8,14 @@ import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf, resolveAllowedLan
 import { DEFAULT_EDITOR_FONT_SIZE, DEFAULT_EDITOR_TAB_SIZE, DEFAULT_EDITOR_THEME } from '@/utils/editor'
 import { createLogger } from '@/utils/logger'
 
-const log = createLogger('CodeEditor')
-
 // ── Monaco Editor Workers（手动配置，避免 worker 打包问题） ──
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
 import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
+
+const log = createLogger('CodeEditor')
 
 self.MonacoEnvironment = {
   getWorker(_: string, label: string) {
@@ -98,10 +98,9 @@ onMounted(async () => {
   if (!editorContainer.value) return
 
   // 编辑器偏好来自应用配置（设置页 / 编辑器设置弹层可调）；读取失败时服务内部已回退兜底值。
-  // 工具栏先于编辑器实例渲染，若用户在读取到达前就动了设置，以用户值为准
-  //（否则这次赋值会把刚改的值弹回去，且落盘的是被覆盖前的旧值）
-  const loaded = await configService.getEditorPrefs()
-  if (!prefsTouched) Object.assign(prefs, loaded)
+  // 工具栏先于编辑器实例渲染：逐字段并入，已触碰字段保持用户当前值，
+  // 未触碰字段采纳磁盘真值（整块覆盖会把存量的字号/主题抹成默认值）
+  applyLoadedPrefs(await configService.getEditorPrefs())
   emit('prefs-change', { ...prefs })
 
   const ed = monaco.editor.create(editorContainer.value, {
@@ -229,15 +228,24 @@ const editorSurfaceClass = computed(() =>
   prefs.editorTheme === 'vs-dark' ? 'bg-[#1e1e1e]' : 'bg-white',
 )
 
-/// 用户是否已改动过偏好（挂载读配置到达前动了设置时，以用户值为准）
-let prefsTouched = false
+/// 用户已改动过的偏好字段。挂载读配置到达前动过的字段以用户值为准，落盘也只写这些
+/// 字段 —— 未触碰字段必须保持磁盘原值，整块覆盖会把存量的字号/主题抹成默认值
+const touched = new Set<keyof EditorPrefs>()
+
+/// 并入配置读到的偏好：逐字段跳过已触碰项（配置读取失败时 service 已返回兜底值，
+/// 同样只并入未触碰字段）
+function applyLoadedPrefs(loaded: EditorPrefs) {
+  if (!touched.has('fontSize')) prefs.fontSize = loaded.fontSize
+  if (!touched.has('tabSize')) prefs.tabSize = loaded.tabSize
+  if (!touched.has('editorTheme')) prefs.editorTheme = loaded.editorTheme
+}
 
 /// 落盘防抖：拖字号滑杆会连发多次变更，逐次写配置既浪费 IPC 也可能撞上写竞态
 const PERSIST_DEBOUNCE_MS = 400
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
 function handlePrefsChange(patch: Partial<EditorPrefs>) {
-  prefsTouched = true
+  for (const key of Object.keys(patch) as (keyof EditorPrefs)[]) touched.add(key)
   Object.assign(prefs, patch)
   applyPrefs()
   emit('prefs-change', { ...prefs })
@@ -246,6 +254,15 @@ function handlePrefsChange(patch: Partial<EditorPrefs>) {
     persistTimer = null
     void persistPrefs()
   }, PERSIST_DEBOUNCE_MS)
+}
+
+/// 只取用户真正改过的字段：`updateEditorPrefs` 是部分写语义，未触碰字段保持磁盘原值
+function touchedPatch(): Partial<EditorPrefs> {
+  const patch: Partial<EditorPrefs> = {}
+  if (touched.has('fontSize')) patch.fontSize = prefs.fontSize
+  if (touched.has('tabSize')) patch.tabSize = prefs.tabSize
+  if (touched.has('editorTheme')) patch.editorTheme = prefs.editorTheme
+  return patch
 }
 
 /// 即时应用到 Monaco 实例。字号/Tab 是实例选项；**主题是全局选项**
@@ -266,8 +283,11 @@ function resetPrefs() {
 }
 
 async function persistPrefs() {
+  const patch = touchedPatch()
+  // 无改动可写（只读实例等）：不发起无意义的配置写
+  if (Object.keys(patch).length === 0) return
   try {
-    await configService.updateEditorPrefs({ ...prefs })
+    await configService.updateEditorPrefs(patch)
     prefsError.value = null
   } catch (e) {
     // 已应用到编辑器，仅落盘失败：提示「仅本次会话生效」而不是回滚 ——

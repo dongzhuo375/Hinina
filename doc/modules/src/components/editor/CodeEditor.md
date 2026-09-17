@@ -20,11 +20,14 @@
 | `suppressChangeEmit` | 外部改写代码（切题加载/清空/上传）时 `setValue` 会触发 change 事件，此标志抑制回流，避免把程序化写入误标为「用户编辑（dirty）」 |
 | `handleKeydown` | window 级监听 Ctrl/Cmd+Enter → emit submit；onUnmounted 移除 |
 | `handleFileChange` | 原生 `input[type=file]` + `file.text()` 读取上传代码（**不引入 Tauri dialog 插件**）；读后立即重置 `input.value` 允许连续选同一文件；**按扩展名自动识别语言**（`hojLanguageOfFileName` → `resolveAllowedLanguage` 按语言族解析为允许列表中的服务端原名，"Python3" 等变体也能命中），无命中不切换（切到不允许的语言只会换来一次提交失败） |
-| `prefs` | `reactive<EditorPrefs>` | 当前偏好（字号 / Tab 宽度 / 主题）：挂载时 `Object.assign` 配置值，弹层改动就地更新（**不重读配置**，避免与在途写入打架） |
-| `handlePrefsChange` | `(patch: Partial<EditorPrefs>) => void` | 弹层变更入口：更新 `prefs` → `applyPrefs()` 即时生效 → `emit('prefs-change')` → 400ms debounce 落盘 |
+| `prefs` | `reactive<EditorPrefs>` | 当前偏好（字号 / Tab 宽度 / 主题）：挂载时经 `applyLoadedPrefs` 并入配置值，弹层改动就地更新（**不重读配置**，避免与在途写入打架） |
+| `touched` | `Set<keyof EditorPrefs>` | 用户**已改动过**的偏好字段。挂载读配置到达前动过的字段以用户值为准；落盘只写这些字段 —— 未触碰字段保持磁盘原值，避免把存量配置抹成默认值 |
+| `applyLoadedPrefs` | `(loaded: EditorPrefs) => void` | 逐字段并入配置读到的偏好，**跳过已触碰字段**（读取失败时 service 已返回兜底值，同样只并入未触碰字段） |
+| `handlePrefsChange` | `(patch: Partial<EditorPrefs>) => void` | 弹层变更入口：登记 `touched` → 更新 `prefs` → `applyPrefs()` 即时生效 → `emit('prefs-change')` → 400ms debounce 落盘 |
+| `touchedPatch` | `() => Partial<EditorPrefs>` | 由 `touched` 组装落盘载荷（只含用户改过的字段） |
 | `applyPrefs` | `fn` | `editor.updateOptions({ fontSize, tabSize })` + `monaco.editor.setTheme(editorTheme)`；**主题是全局选项**（Monaco 无按实例主题），同页其它编辑器一并跟随；实例未就绪时直接返回 |
 | `resetPrefs` | `fn` | 恢复默认值（`utils/editor` 常量）：与手动改动同一条链路（即时生效 + 落盘），不是只改本地内存 |
-| `persistPrefs` | `async fn` | `configService.updateEditorPrefs({...prefs})`；失败置 `prefsError`（「保存失败，设置仅本次会话生效」）但**不回滚已应用的值** |
+| `persistPrefs` | `async fn` | `configService.updateEditorPrefs(touchedPatch())` —— **只写用户改过的字段**（部分写语义；载荷为空则直接返回）；失败置 `prefsError`（「保存失败，设置仅本次会话生效」）但**不回滚已应用的值** |
 | `prefsError` | ref | 落盘失败提示，透传给 `EditorSettingsPopover` 的 `error`（成功路径不展示任何状态文案） |
 | `editorSurfaceClass` | computed | 容器底色跟随主题（`vs-dark` → `#1e1e1e`，否则白）：Monaco 实例创建前与尺寸重算瞬间不露白底。**编辑器背景本身由 Monaco 主题绘制** —— `styles/global.css` 刻意不再用 `!important` 覆写 `.margin` / `.monaco-editor-background`，否则 vs-dark 只换字色、底色仍被钉在浅色 |
 
@@ -49,7 +52,7 @@
 ## 逻辑流程
 
 ```
-onMounted → nextTick → Object.assign(prefs, await configService.getEditorPrefs())
+onMounted → nextTick → applyLoadedPrefs(await configService.getEditorPrefs())
                                   → emit prefs-change → monaco.editor.create(container, {...})
   onDidChangeModelContent → （非抑制时）emit update:modelValue → workspaceStore.updateCode
                              → 标脏 + 2s 防抖同步到 Rust 后端
@@ -60,7 +63,7 @@ watch props.language → monaco.editor.setModelLanguage
 语言下拉选择 → emit update:language（父级走 workspaceStore.changeLanguage：
                本地乐观更新 + set_workspace_language 立即持久化）
 EditorSettingsPopover change/reset → handlePrefsChange → applyPrefs（即时生效）
-                → emit prefs-change → 400ms debounce → configService.updateEditorPrefs
+                → emit prefs-change → 400ms debounce → configService.updateEditorPrefs(touchedPatch())
 onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补一次落盘
 ```
 
@@ -76,3 +79,7 @@ onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补
   落盘失败不回滚，只提示「仅本次会话生效」。
 - **在途改动不丢**：卸载时若 debounce 未到期，补一次落盘 —— 调完字号立刻切题/离页
   不该丢设置。
+- **落盘是部分写**：只有用户改过的字段（`touched`）进入载荷，未触碰字段保持磁盘原值。
+  整块覆盖会在「挂载读配置的 IPC 往返期间用户改了任一设置」或「读取失败走兜底值」时，
+  把存量的 `fontSize: 20` / `editorTheme: vs-dark` 静默抹成默认值（配置可被设置页或
+  手改文件维护，组件无权代其决定）。

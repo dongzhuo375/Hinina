@@ -5,6 +5,10 @@ import {
   DEFAULT_EDITOR_FONT_SIZE,
   DEFAULT_EDITOR_TAB_SIZE,
   DEFAULT_EDITOR_THEME,
+  EDITOR_FONT_SIZE_MAX,
+  EDITOR_FONT_SIZE_MIN,
+  EDITOR_TAB_SIZE_MAX,
+  EDITOR_TAB_SIZE_MIN,
   normalizeEditorTheme,
 } from '@/utils/editor'
 import { createLogger } from '@/utils/logger'
@@ -97,8 +101,18 @@ export class ConfigService {
     try {
       const config = await this.getConfig()
       return {
-        fontSize: clampInt(config.editor?.fontSize, 8, 32, DEFAULT_EDITOR_FONT_SIZE),
-        tabSize: clampInt(config.editor?.tabSize, 1, 8, DEFAULT_EDITOR_TAB_SIZE),
+        fontSize: clampInt(
+          config.editor?.fontSize,
+          EDITOR_FONT_SIZE_MIN,
+          EDITOR_FONT_SIZE_MAX,
+          DEFAULT_EDITOR_FONT_SIZE,
+        ),
+        tabSize: clampInt(
+          config.editor?.tabSize,
+          EDITOR_TAB_SIZE_MIN,
+          EDITOR_TAB_SIZE_MAX,
+          DEFAULT_EDITOR_TAB_SIZE,
+        ),
         editorTheme: normalizeEditorTheme(config.theme?.editorTheme),
       }
     } catch (e) {

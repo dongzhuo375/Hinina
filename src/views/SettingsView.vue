@@ -5,6 +5,11 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
 import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
+import {
+  EDITOR_FONT_SIZE_MAX,
+  EDITOR_FONT_SIZE_MIN,
+  EDITOR_TAB_SIZES,
+} from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
 import type { AppConfig } from '@/types/config'
 import type { StorageInfo } from '@/types/system'
@@ -93,7 +98,7 @@ const errors = computed<Record<string, string | null>>(() => ({
   pollIntervalSecs: intError(form.pollIntervalSecs, 1, 30, '轮询间隔'),
   pollTimeoutSecs: intError(form.pollTimeoutSecs, 30, 3600, '轮询总超时'),
   cacheTtlSecs: intError(form.cacheTtlSecs, 0, 600, '缓存 TTL'),
-  fontSize: intError(form.fontSize, 8, 32, '字号'),
+  fontSize: intError(form.fontSize, EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX, '字号'),
   autoSaveIntervalSecs: intError(form.autoSaveIntervalSecs, 5, 300, '自动保存间隔'),
 }))
 
@@ -105,7 +110,7 @@ const canSave = computed(() => dirty.value && isValid.value && !saving.value)
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 
-const TAB_SIZES: readonly number[] = [2, 4, 8]
+const TAB_SIZES: readonly number[] = EDITOR_TAB_SIZES
 /// 默认语言候选 = HOJ 显示名（值域权威见 utils/language；与提交契约同源）
 const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
 
