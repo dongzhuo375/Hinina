@@ -19,6 +19,8 @@ export interface OjConfig {
   pollIntervalSecs: number
   pollTimeoutSecs: number
   cacheTtlSecs: number
+  /// 题面缓存开关（内存 + 磁盘）；默认开启，关闭后每次打开题目都直连服务端
+  cacheProblemStatement: boolean
   contestId: number
   contestPassword: string | null
 }

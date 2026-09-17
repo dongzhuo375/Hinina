@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `SettingsForm` | interface | 表单草稿；**数字字段保留原始字符串**——输入中间态（空串/半截数字）不应被强转成 NaN 写回，只有校验通过的值才进入保存载荷 |
-| `form` | `reactive<SettingsForm>` | hojUrl / contestId / contestPassword / timeoutSecs / pollIntervalSecs / pollTimeoutSecs / cacheTtlSecs / fontSize / tabSize / defaultLanguage / autoSave / autoSaveIntervalSecs / splitRatio |
+| `form` | `reactive<SettingsForm>` | hojUrl / contestId / contestPassword / timeoutSecs / pollIntervalSecs / pollTimeoutSecs / cacheTtlSecs / cacheProblemStatement / fontSize / tabSize / defaultLanguage / autoSave / autoSaveIntervalSecs / splitRatio |
 | `baseline` / `snapshot` / `dirty` | ref/fn/computed | 基线 = 上次加载/保存成功时的表单 JSON 序列化；dirty 判定与「放弃更改」共用同一快照 |
 | `parseIntStrict` | `(raw) => number \| null` | 严格非负整数解析：正则 `^\d+$` 拒绝空串/小数/负号/科学计数法等 `Number()` 会宽容接受的形式 |
 | `intError` / `errors` / `isValid` / `canSave` | computed | 逐字段错误映射（hojUrl 须 `http(s)://` 前缀；各整数字段带值域：超时 1–120、轮询间隔 1–30、轮询总超时 30–3600、缓存 TTL 0–600、字号 8–32、自动保存间隔 5–300）；canSave = dirty && valid && !saving |
@@ -66,6 +66,10 @@ discard(): Object.assign(form, JSON.parse(baseline))
 - **编辑器分组与解题页弹层同源**：两处写的是同一份 `editor.*` 配置。解题页
   「编辑器设置」弹层是**即时生效**入口（改完立刻作用当前编辑器），设置页是**批量编辑**
   入口（改动对新打开的解题页生效）—— 分组标题旁的提示文案即表达这一分工。
+- **OJ 分组新增「题面缓存」开关**：`oj.cacheProblemStatement`（默认开启）。开启时后端按
+  `{contest_id}/{display_id}` 做内存 + 磁盘缓存（TTL 30 分钟），切题来回与断网时秒开；
+  关闭后每次打开题目都请求服务端（题面被管理员中途修正时可临时关闭）。表单为布尔字段，
+  不参与 `intError` 校验（无值域）。
 - hojUrl 修改后需重启客户端生效、contestId 保存后下次进入赛场生效——提示文案明示生效时机。
 - 存储信息每次挂载实时读取（service 不缓存：版本号构建期固定，但存储目录可能随
   用户数据迁移变化）。

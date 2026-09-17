@@ -10,6 +10,7 @@ pub mod error;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use tracing::{debug, info, warn};
 
@@ -19,6 +20,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, ProblemEvent};
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::registry::ProviderRegistry;
+use crate::infra::cache::{JsonDiskCache, TtlCache};
 use crate::infra::storage::Storage;
 // WorkspaceManager 循环依赖通过运行时 Arc 注入解决
 // （ProblemService 需要 WorkspaceManager, WorkspaceManager 可能切换到新的 problem）
@@ -30,6 +32,20 @@ const LIMITS_CACHE_DIR: &str = "cache/problem_limits";
 /// limits 并发扇出上限：既要让首屏尽快补齐，也不能让单客户端瞬间打爆 OJ。
 const LIMITS_CONCURRENCY: usize = 4;
 
+/// 题面缓存 TTL。
+///
+/// 题面在比赛期间基本不变（改题罕见），但**并非永不变化**：管理员可能中途修正
+/// 题面或样例。30 分钟是「切题来回/重进应用几乎总能命中」与「修正最多滞后半小时」
+/// 之间的折中；想立刻看真值可在设置里临时关闭题面缓存
+/// （`oj.cacheProblemStatement`）。
+pub const PROBLEM_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// 题面内存缓存容量上限（一场比赛题目量级远小于此，跨比赛也够用）。
+const PROBLEM_CACHE_CAPACITY: usize = 200;
+
+/// 题面磁盘缓存目录（跨重启复用；过期由 `fetchedAt` 判定并懒删除）。
+const PROBLEM_CACHE_NAMESPACE: &str = "cache/problem_statement";
+
 /// 题目服务。
 pub struct ProblemService {
     registry: Arc<dyn ProviderRegistry>,
@@ -37,6 +53,9 @@ pub struct ProblemService {
     storage: Arc<Storage>,
     /// 内存缓存：contest_id → (display_id → limits)
     limits_cache: RwLock<HashMap<String, HashMap<String, ProblemLimits>>>,
+    /// 题面缓存（内存 + 磁盘）：`{contest_id}/{display_id}` → Problem
+    statement_cache: TtlCache<String, Problem>,
+    statement_disk: JsonDiskCache,
 }
 
 impl ProblemService {
@@ -49,6 +68,8 @@ impl ProblemService {
         Self {
             registry,
             event_bus,
+            statement_cache: TtlCache::new(PROBLEM_CACHE_TTL, PROBLEM_CACHE_CAPACITY),
+            statement_disk: JsonDiskCache::new(Arc::clone(&storage), PROBLEM_CACHE_NAMESPACE),
             storage,
             limits_cache: RwLock::new(HashMap::new()),
         }
@@ -73,28 +94,72 @@ impl ProblemService {
     ///
     /// 调用方在收到此事件后应通过 WorkspaceManager 创建或切换工作区。
     /// 题目详情本身不依赖 WorkspaceManager，解耦关注点。
+    ///
+    /// **缓存策略**（`cache_enabled` 来自配置 `oj.cache_problem_statement`）：
+    /// 开启时按 `{contest_id}/{display_id}` 走内存 → 磁盘 → 网络并回写两层；
+    /// 关闭时直连服务端。无论命中与否都照常发布 `ProblemEvent::Opened`
+    /// （WorkspaceManager 依赖它切换工作区）。
+    ///
+    /// 只缓存**成功结果**：Provider 错误（含 401/403）原样上抛，绝不入缓存。
     pub async fn open_problem(
         &self,
         contest_id: &str,
         problem_id: &str,
+        cache_enabled: bool,
     ) -> AppResult<Problem> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_problem(&oj_type)?;
-
-        info!(contest_id = contest_id, problem_id = problem_id, "打开题目");
-        let problem = provider
-            .get_problem(contest_id, problem_id)
-            .await
-            .map_err(|e| {
-                warn!(contest_id = contest_id, problem_id = problem_id, error = %e, "获取题目详情失败");
-                e.context("获取题目详情失败")
-            })?;
+        let problem = self
+            .load_problem_statement(contest_id, problem_id, cache_enabled)
+            .await?;
 
         self.event_bus
             .publish(&AppEvent::Problem(ProblemEvent::Opened {
                 contest_id: contest_id.to_string(),
                 problem_id: problem_id.to_string(),
             }));
+
+        Ok(problem)
+    }
+
+    /// 题面获取（含缓存编排）；`cache_enabled` 为 false 时完全直连服务端。
+    async fn load_problem_statement(
+        &self,
+        contest_id: &str,
+        problem_id: &str,
+        cache_enabled: bool,
+    ) -> AppResult<Problem> {
+        let key = statement_key(contest_id, problem_id);
+
+        if cache_enabled {
+            if let Some(problem) = self.statement_cache.get(&key) {
+                debug!(cache = "problem_statement", contest_id, problem_id, hit = true, "命中题面内存缓存");
+                return Ok(problem);
+            }
+            if let Some(problem) = self
+                .statement_disk
+                .read::<Problem>(&key, PROBLEM_CACHE_TTL)
+            {
+                debug!(cache = "problem_statement", contest_id, problem_id, hit = true, "命中题面磁盘缓存");
+                self.statement_cache.insert(key.clone(), problem.clone());
+                return Ok(problem);
+            }
+        }
+
+        let oj_type = self.registry.current_oj();
+        let provider = self.registry.get_problem(&oj_type)?;
+
+        info!(contest_id, problem_id, "打开题目");
+        let problem = provider
+            .get_problem(contest_id, problem_id)
+            .await
+            .map_err(|e| {
+                warn!(contest_id, problem_id, error = %e, "获取题目详情失败");
+                e.context("获取题目详情失败")
+            })?;
+
+        if cache_enabled {
+            self.statement_cache.insert(key.clone(), problem.clone());
+            self.statement_disk.write(&key, &problem);
+        }
 
         Ok(problem)
     }
@@ -297,6 +362,15 @@ impl ProblemService {
             Err(e) => warn!(error = %e, "limits 缓存序列化失败"),
         }
     }
+}
+
+/// 题面缓存键：`{contest_id}/{display_id}`。
+///
+/// 比赛维度隔离（同一 `display_id` 在不同比赛是不同题目），并让磁盘缓存
+/// 按比赛分目录；键的安全性（拒绝 `..` / 绝对路径）由 `JsonDiskCache::key_path`
+/// 统一把关，这里只负责拼装。
+fn statement_key(contest_id: &str, display_id: &str) -> String {
+    format!("{}/{}", contest_id, display_id)
 }
 
 #[cfg(test)]

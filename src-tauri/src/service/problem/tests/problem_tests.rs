@@ -269,6 +269,87 @@ fn user_problem_status_maps_by_problem_id() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ── 题面缓存（内存 + 磁盘，受 oj.cacheProblemStatement 开关控制）──
+
+#[test]
+fn statement_cache_hit_skips_second_get_problem() {
+    let (service, calls, dir) = make_service("statement-hit", Vec::new());
+
+    block_on(service.open_problem("1011", "A", true)).expect("首次打开失败");
+    assert_eq!(call_count(&calls), 1);
+
+    let problem = block_on(service.open_problem("1011", "A", true)).expect("二次打开失败");
+    assert_eq!(call_count(&calls), 1, "题面应命中缓存，不再请求 Provider");
+    assert_eq!(problem.id, "pid-A");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn statement_cache_disabled_always_fetches() {
+    let (service, calls, dir) = make_service("statement-off", Vec::new());
+
+    block_on(service.open_problem("1011", "A", false)).expect("首次打开失败");
+    block_on(service.open_problem("1011", "A", false)).expect("二次打开失败");
+
+    assert_eq!(call_count(&calls), 2, "关闭缓存后每次打开都直连服务端");
+    assert!(
+        !dir.join("cache").join("problem_statement").exists(),
+        "关闭缓存时不得落盘（开关关闭 = 不读不写）"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn statement_cache_survives_new_service_instance() {
+    let dir = std::env::temp_dir().join("hinina-test-problem-statement-disk");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // 第一个实例：拉取并落盘
+    let first = build_service(&dir, Arc::new(AtomicUsize::new(0)), Vec::new());
+    block_on(first.open_problem("1011", "A", true)).expect("首次打开失败");
+    drop(first);
+
+    // 第二个实例复用同一目录：应命中磁盘缓存（模拟客户端重启）
+    let calls = Arc::new(AtomicUsize::new(0));
+    let second = build_service(&dir, Arc::clone(&calls), Vec::new());
+    block_on(second.open_problem("1011", "A", true)).expect("重启后打开失败");
+
+    assert_eq!(call_count(&calls), 0, "重启后应命中题面磁盘缓存，零请求");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn statement_cache_isolates_contest_and_problem() {
+    let (service, calls, dir) = make_service("statement-isolation", Vec::new());
+
+    block_on(service.open_problem("1011", "A", true)).expect("打开失败");
+    // 同一 displayId、不同比赛 = 不同题目
+    block_on(service.open_problem("1012", "A", true)).expect("打开失败");
+    // 同一比赛、不同题目
+    block_on(service.open_problem("1011", "B", true)).expect("打开失败");
+
+    assert_eq!(call_count(&calls), 3, "缓存键必须含比赛与题目两个维度");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn statement_cache_never_stores_errors() {
+    let (service, calls, dir) = make_service("statement-error", ids(&["A"]));
+
+    let first = block_on(service.open_problem("1011", "A", true)).expect_err("应报错");
+    let second = block_on(service.open_problem("1011", "A", true)).expect_err("应再次报错");
+
+    assert!(matches!(first, AppError::Auth(_)), "实际 {:?}", first);
+    assert!(matches!(second, AppError::Auth(_)), "实际 {:?}", second);
+    assert_eq!(call_count(&calls), 2, "错误不得入缓存，重试必须重新请求");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ── 错误变体穿透 ──
 //
 // 变体是前端 sessionGuard 判定会话失效的唯一依据（见 core/error.rs 的 context() 文档）。
@@ -287,7 +368,7 @@ fn make_failing_service(test_name: &str) -> (ProblemService, std::path::PathBuf)
 fn open_problem_preserves_auth_variant() {
     // Stub 对 failing 列表内的 displayId 返回 Auth（模拟 401 / 私有赛未注册）
     let (service, _calls, _dir) = make_service("variant-open", ids(&["A"]));
-    let err = block_on(service.open_problem("1011", "A")).expect_err("应报错");
+    let err = block_on(service.open_problem("1011", "A", true)).expect_err("应报错");
     assert!(
         matches!(err, AppError::Auth(_)),
         "open_problem 必须保留 Auth 变体，实际 {:?}",

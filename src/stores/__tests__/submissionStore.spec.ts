@@ -21,6 +21,7 @@ vi.mock('@/services/config.service', () => ({ configService }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
 import { useSubmissionStore } from '@/stores/submissionStore'
+import { useProblemStore } from '@/stores/problemStore'
 
 const CONTEST_ID = '1'
 /// 轮询节奏：2s 间隔（抖动 ≤500ms）、10s 总超时
@@ -81,6 +82,48 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       // 终态后停止：再推进多个周期也不发请求
       await vi.advanceTimersByTimeAsync(30_000)
       expect(submissionService.pollJudgement).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('终态到达时标记「我的题目状态」过期（总览页据此重拉一次）', async () => {
+    vi.useFakeTimers()
+    try {
+      submissionService.submitCode.mockResolvedValue('s1')
+      submissionService.pollJudgement.mockResolvedValue(makeResult('Accepted'))
+      const store = useSubmissionStore()
+      const problem = useProblemStore()
+      problem.myStatusStale = false
+
+      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      // 非终态阶段不应触发失效（评测中状态未定）
+      expect(problem.myStatusStale).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(2_600)
+      expect(problem.myStatusStale).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('轮询超时（终态未知）同样标记过期，避免 pill 长期错误', async () => {
+    // 开场判题积压时超过 pollTimeoutSecs 是现实场景：轮询停止后服务端可能才出结果，
+    // 若不置位，总览页的增量门控会让 AC/尝试过 pill 一直错到用户进入某题
+    vi.useFakeTimers()
+    try {
+      submissionService.submitCode.mockResolvedValue('s1')
+      submissionService.pollJudgement.mockResolvedValue(makeResult('Pending'))
+      const store = useSubmissionStore()
+      const problem = useProblemStore()
+      problem.myStatusStale = false
+
+      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      // 推进到总超时（10s）之后若干周期：抖动使「首个越过 deadline 的 tick」可能落在
+      // 10–14.4s 之间，故给足余量；轮询停止，但终态未知
+      await vi.advanceTimersByTimeAsync(20_000)
+
+      expect(problem.myStatusStale).toBe(true)
     } finally {
       vi.useRealTimers()
     }

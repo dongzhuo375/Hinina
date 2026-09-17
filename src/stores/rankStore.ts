@@ -29,8 +29,31 @@ const FULL_FETCH_MAX_ROWS = 2_000
 /// 页间 400ms（打满上限也只多 ~16s，手动刷新场景无感知）
 const FULL_FETCH_PAGE_DELAY_MS = 400
 
+/// 用户操作路径（翻页 / 搜索 / 切筛选）的榜单查询 memo 有效期。
+///
+/// 只用于**去抖**：连点筛选或分页会让服务端背靠背重算整榜，而同一查询在数秒内
+/// 重复发起的第二次结果必然相同。**轮询与手动刷新不走 memo** —— 榜单的实时性
+/// 是公平性要求（`get_rank` 在后端也刻意不缓存）。
+const RANK_QUERY_MEMO_TTL_MS = 3_000
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/// 用户操作路径的查询 memo 与在途合并（模块级：非渲染状态，不进响应式系统）
+let queryMemo: { key: string; at: number } | null = null
+let queryInFlight: { key: string; promise: Promise<void> } | null = null
+
+/// 查询指纹：同一比赛 + 同一用户 + 同一页 + 同一关键词 + 同一 removeStar
+/// 才算「同一查询」。含 uid 是为了避免换账号后误命中上一位用户的查询。
+function rankQueryKey(
+  contestId: string,
+  uid: string | null,
+  page: number,
+  keyword: string,
+  removeStar: boolean,
+): string {
+  return [contestId, uid ?? '', page, keyword, removeStar ? '1' : '0'].join('|')
 }
 
 /// 全量拉取代际令牌：每次 fetchAllRows 自增。切筛选/登出后旧循环经令牌与
@@ -271,7 +294,34 @@ export const useRankStore = defineStore('rank', {
         this.current = page
         return
       }
-      await this.loadRank(this.contestId, this.uid, page)
+      await this.loadRankDeduped(page)
+    },
+
+    /**
+     * 用户操作路径的榜单加载：同查询 in-flight 合并 + 短 TTL memo。
+     *
+     * 轮询（`refresh`）与手动刷新**不经过这里**：前者每 10s±2s 必须真打服务端，
+     * 后者是用户显式要求真值。这里只处理「同一查询在数秒内被重复发起」——
+     * 连点分页/筛选/搜索会命中合并或 memo，避免服务端背靠背重算整榜。
+     */
+    async loadRankDeduped(page: number) {
+      const key = rankQueryKey(this.contestId, this.uid, page, this.keyword, this.removeStar)
+
+      if (queryInFlight?.key === key) return queryInFlight.promise
+
+      if (queryMemo?.key === key && Date.now() - queryMemo.at < RANK_QUERY_MEMO_TTL_MS) {
+        return
+      }
+
+      const promise = this.loadRank(this.contestId, this.uid, page)
+        .then(() => {
+          queryMemo = { key, at: Date.now() }
+        })
+        .finally(() => {
+          if (queryInFlight?.key === key) queryInFlight = null
+        })
+      queryInFlight = { key, promise }
+      return promise
     },
 
     /** 设置搜索关键词并回到第 1 页（服务端会在全量排名上重新过滤，total 随之变化） */
@@ -283,7 +333,7 @@ export const useRankStore = defineStore('rank', {
         await this.fetchAllRows()
         return
       }
-      await this.loadRank(this.contestId, this.uid, 1)
+      await this.loadRankDeduped(1)
     },
 
     /**
@@ -314,7 +364,7 @@ export const useRankStore = defineStore('rank', {
       // 退出全量模式时 pages/current 已被客户端分页覆写，即使 removeStar 未变也须重载
       if (removeStar === this.removeStar && !wasFullMode) return
       this.removeStar = removeStar
-      await this.loadRank(this.contestId, this.uid, 1)
+      await this.loadRankDeduped(1)
     },
 
     /**
@@ -328,6 +378,10 @@ export const useRankStore = defineStore('rank', {
      */
     startLive(isPaused?: () => boolean) {
       this.stopLive()
+      // 进入榜单页 = 新的一次会话上下文：清掉上一次的查询 memo/在途记录，
+      // 避免「登出 → 重新登录 → 首次翻页」因 memo 命中而跳过请求（界面停空）
+      queryMemo = null
+      queryInFlight = null
       poller = createPoller({
         task: () => this.refresh(),
         intervalMs: RANK_POLL_INTERVAL_MS,
@@ -351,6 +405,10 @@ export const useRankStore = defineStore('rank', {
       poller?.stop()
       poller = null
       this.isLive = false
+      // 查询去抖 memo 只在「停留榜单页期间」有意义：离开页面后下一次进入是新上下文，
+      // 保留 memo 会让「登出 → 重新登录 → 首次翻页」跳过请求（界面停空）
+      queryMemo = null
+      queryInFlight = null
     },
   },
 })

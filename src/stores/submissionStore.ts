@@ -7,6 +7,7 @@ import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
+import { useProblemStore } from '@/stores/problemStore'
 
 const log = createLogger('submissionStore')
 
@@ -177,12 +178,21 @@ export const useSubmissionStore = defineStore('submission', {
       if (!ctx) return
       if (Date.now() >= ctx.deadline) {
         log.warn(`提交 ${submissionId} 评测轮询超时，已停止`)
+        // 超时停止时**终态未知**（服务端可能稍后才出结果）：安全动作是把「我的题目
+        // 状态」标记为过期，让总览页重拉一次 —— 否则 AC/尝试过 pill 与解题进度会一直
+        // 停留在错误值，直到用户进入某题或下次提交。开场判题积压时超过 5 分钟是现实场景。
+        useProblemStore().invalidateMyStatus()
         this.stopPolling(submissionId)
         return
       }
       try {
         const result = await this.pollResult(submissionId)
-        if (isTerminalStatus(result.status)) this.stopPolling(submissionId)
+        if (isTerminalStatus(result.status)) {
+          // 评测终结意味着「我的题目状态」可能已变（AC / 尝试过）：标记过期，
+          // 由总览页在下次可见刷新时重拉一次，而不是让它每 30s 整表重拉
+          useProblemStore().invalidateMyStatus()
+          this.stopPolling(submissionId)
+        }
       } catch {
         // 网络抖动等瞬时错误：等待下一次轮询
       }

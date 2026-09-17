@@ -57,6 +57,8 @@ async function runWithFakeTimers(fn: () => Promise<void>, advanceMs = 5_000): Pr
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  // 用户操作路径的查询 memo 是模块级状态，逐用例清空以免相互串扰
+  useRankStore().stopLive()
 })
 
 describe('applyPage — 服务端响应归一', () => {
@@ -244,6 +246,110 @@ describe('分页与筛选', () => {
     await rank.setGroupFilter('all')
     expect(rank.removeStar).toBe(false)
     expect(rankService.getRank).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('用户操作路径查询去抖 — in-flight 合并 + 3s memo', () => {
+  /// 进入榜单页的等价前置（stopLive 会清掉模块级 memo）。
+  /// 注意 mock 响应必须给出足够的 pages（total=200 → 4 页），
+  /// 否则 `applyPage` 会把 pages 覆写成 1，后续 setPage 直接越界短路。
+  function enterPage(rank: ReturnType<typeof useRankStore>) {
+    rank.stopLive()
+    rank.contestId = CONTEST_ID
+    rank.uid = MY_UID
+    rank.pages = 5
+  }
+
+  it('同一查询在 3s 内重复发起只请求一次', async () => {
+    rankService.getRank.mockResolvedValue(makePage([makeRow({ uid: 'u1' })], 200, 2))
+    const rank = useRankStore()
+    enterPage(rank)
+
+    await rank.setPage(2)
+    await rank.setPage(2)
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(1)
+  })
+
+  it('并发同查询合并为一次请求（in-flight 合并）', async () => {
+    let release!: (page: ContestRankPage) => void
+    rankService.getRank.mockImplementation(
+      () =>
+        new Promise<ContestRankPage>((resolve) => {
+          release = resolve
+        }),
+    )
+    const rank = useRankStore()
+    enterPage(rank)
+
+    const first = rank.setPage(2)
+    const second = rank.setPage(2)
+    release(makePage([makeRow()], 1, 2))
+    await Promise.all([first, second])
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(1)
+  })
+
+  it('不同页不共享 memo', async () => {
+    rankService.getRank.mockResolvedValue(makePage([makeRow()], 200))
+    const rank = useRankStore()
+    enterPage(rank)
+
+    await rank.setPage(2)
+    await rank.setPage(3)
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(2)
+  })
+
+  it('超过 3s 后同一查询重新请求', async () => {
+    vi.useFakeTimers()
+    try {
+      rankService.getRank.mockResolvedValue(makePage([makeRow()], 200, 2))
+      const rank = useRankStore()
+      enterPage(rank)
+
+      await rank.setPage(2)
+      await vi.advanceTimersByTimeAsync(3_100)
+      await rank.setPage(2)
+
+      expect(rankService.getRank).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('轮询 refresh 不走 memo（榜单实时性优先）', async () => {
+    rankService.getRank.mockResolvedValue(makePage([makeRow()], 200, 2))
+    const rank = useRankStore()
+    enterPage(rank)
+
+    await rank.setPage(2)
+    await rank.refresh()
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(2)
+  })
+
+  it('离开榜单页（stopLive）后 memo 失效', async () => {
+    rankService.getRank.mockResolvedValue(makePage([makeRow()], 200, 2))
+    const rank = useRankStore()
+    enterPage(rank)
+
+    await rank.setPage(2)
+    rank.stopLive()
+    await rank.setPage(2)
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(2)
+  })
+
+  it('失败不进 memo：下一次同查询仍会重新请求', async () => {
+    rankService.getRank.mockRejectedValue(new Error('超时'))
+    const rank = useRankStore()
+    enterPage(rank)
+
+    await rank.setPage(2).catch(() => {})
+    await rank.setPage(2).catch(() => {})
+
+    expect(rankService.getRank).toHaveBeenCalledTimes(2)
   })
 })
 

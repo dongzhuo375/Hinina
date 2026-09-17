@@ -20,6 +20,7 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
       pollIntervalSecs: 2,
       pollTimeoutSecs: 300,
       cacheTtlSecs: 60,
+      cacheProblemStatement: true,
       contestId: 7,
       contestPassword: null,
     },

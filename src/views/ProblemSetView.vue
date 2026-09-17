@@ -108,7 +108,12 @@ function stopPolling() {
   poller = null
 }
 
-/// 每周期：重拉比赛（刷新 ac/total）+ 我的提交状态（刷新卡片 pill）
+/// 每周期：重拉比赛（刷新 ac/total）+ 我的提交状态（仅在需要时）
+///
+/// 我的题目状态**只由我自己的提交改变**（他人 AC 不影响它），故不再每周期整表重拉：
+/// 提交到达终态（或轮询超时、终态未知）时 `submissionStore` 会置 `myStatusStale`；
+/// 另外数据归属的比赛变化（设置页改 contestId）也必须重拉 —— 状态表以 pid 为键，
+/// 同一题可能出现在多场比赛里。两个判据由 `myStatusNeedsReloadFor` 统一表达。
 async function refresh() {
   try {
     await contestStore.loadContest()
@@ -117,7 +122,7 @@ async function refresh() {
   }
   if (supplementaryLoaded) {
     const c = contest.value
-    if (c && problems.value.length > 0) {
+    if (c && problems.value.length > 0 && problemStore.myStatusNeedsReloadFor(c.id)) {
       await problemStore.loadMyStatus(c.id, problems.value.map((p) => p.problemId))
     }
   } else {

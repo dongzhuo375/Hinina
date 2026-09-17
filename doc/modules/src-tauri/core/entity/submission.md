@@ -5,6 +5,7 @@
 
 ## 核心类型/函数
 - **`JudgementStatus`** — 评测状态枚举：`Pending`, `Compiling`, `Running`, `Accepted`, `WrongAnswer`, `TimeLimitExceeded`, `MemoryLimitExceeded`, `RuntimeError`, `CompilationError`, `PresentationError`, `OutputLimitExceeded`, `SystemError`, `RemoteJudgeError`, `SubmitFailed`, `PartiallyAccepted`, `FrequentLimit`, `UnknownError`, `Unknown`。**变体名即 IPC 序列化值**（前端按这些确切名称做文案与配色映射），完整覆盖 HOJ 全部状态码 0–15（映射表见 `adapter/hoj/types.rs` 的 `map_status`）；`PartiallyAccepted` 为独立变体，不再折算为 `Accepted`（P41 修复）
+  - `fn is_terminal(&self) -> bool` — **核心层终态判据**：非终态仅 `Pending` / `Compiling` / `Running`，其余（含 `Unknown` 与系统类错误）一律终态。三处判据必须同步：本方法、`adapter::hoj::types::is_terminal_status`（原始状态码 → 终态）、前端 `utils/submission.isTerminalStatus`。用途：提交详情/测试点**只有终态结果才可缓存**（评测中的结果随时会变）
 - **`JudgementResult`** — 轮询用评测结果：`status`, `score: f64`, `time_ms: u64`, `memory_kb: u64`
 - **`SubmissionRecord`** — 提交列表条目（比赛提交记录页用）：`submit_id` / `pid`（题目真实 ID）/ `display_pid`（如 "HOJ-1061"）/ `title` / `display_id`（比赛中序号如 "A"）均为 `String`；`username`, `submit_time: i64`（UTC 秒级时间戳）, `status`, `time_ms`, `memory_kb`, `score: Option<f64>`（OI 题得分，ACM 题为 None）, `length: u64`（代码字节数）, `language`
 - **`SubmissionPage`** — 提交列表分页：`records: Vec<SubmissionRecord>`, `total`, `size`, `current`, `pages`
@@ -25,6 +26,9 @@
 - `commands::submission_cmd`（提交列表 / 详情 / 测试点 Command 返回值）
 
 ## 逻辑流程
-无（纯类型定义）。
+无（纯类型定义，`JudgementStatus::is_terminal` 为纯函数判据）。
+
+## 测试
+`src-tauri/src/core/entity/tests/submission_tests.rs`（由 `submission.rs` 底部 `#[cfg(test)] #[path = "tests/submission_tests.rs"] mod tests;` 引用）以**穷尽表**锁定全部 18 个变体的终态性（新增状态时表必须同步，否则非终态集合漂移会让评测中的提交被缓存、界面停在「评测中」），并单独断言非终态集合恰好是 `Pending` / `Compiling` / `Running`。
 
 > 历史说明：旧版的 `Submission` struct（`id/problem_id/language/source_code/status`）从未被任何调用方使用，属死代码，已随本次提交列表/详情能力重写一并删除。

@@ -13,6 +13,8 @@ fn defaults_are_in_value_domain() {
     assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.theme.editor_theme, "vs");
     assert_eq!(cfg.layout.split_ratio, 0.48);
+    // 题面缓存默认开启（关闭只影响性能，不影响正确性）
+    assert!(cfg.oj.cache_problem_statement);
 }
 
 // ── 旧值归一 ──
@@ -221,6 +223,8 @@ fn sanitize_keeps_valid_config_unchanged() {
     cfg.editor.default_language = "Java".into();
     cfg.theme.editor_theme = "vs-dark".into();
     cfg.layout.split_ratio = 0.30;
+    // 布尔开关无值域，sanitize 不得改写用户选择
+    cfg.oj.cache_problem_statement = false;
     let before = cfg.clone();
     assert!(!cfg.sanitize());
     assert_eq!(cfg, before);

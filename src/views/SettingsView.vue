@@ -34,6 +34,7 @@ interface SettingsForm {
   pollIntervalSecs: string
   pollTimeoutSecs: string
   cacheTtlSecs: string
+  cacheProblemStatement: boolean
   fontSize: string
   tabSize: number
   defaultLanguage: string
@@ -50,6 +51,7 @@ const form = reactive<SettingsForm>({
   pollIntervalSecs: '2',
   pollTimeoutSecs: '300',
   cacheTtlSecs: '60',
+  cacheProblemStatement: true,
   fontSize: '14',
   tabSize: 4,
   defaultLanguage: 'C++',
@@ -128,6 +130,7 @@ function populate(config: AppConfig): void {
   form.pollIntervalSecs = String(config.oj.pollIntervalSecs)
   form.pollTimeoutSecs = String(config.oj.pollTimeoutSecs)
   form.cacheTtlSecs = String(config.oj.cacheTtlSecs)
+  form.cacheProblemStatement = config.oj.cacheProblemStatement ?? true
   form.fontSize = String(config.editor.fontSize)
   form.tabSize = TAB_SIZES.includes(config.editor.tabSize) ? config.editor.tabSize : 4
   form.defaultLanguage = normalizeHojLanguage(config.editor.defaultLanguage)
@@ -168,6 +171,7 @@ async function save(): Promise<void> {
       draft.oj.pollIntervalSecs = Number(form.pollIntervalSecs)
       draft.oj.pollTimeoutSecs = Number(form.pollTimeoutSecs)
       draft.oj.cacheTtlSecs = Number(form.cacheTtlSecs)
+      draft.oj.cacheProblemStatement = form.cacheProblemStatement
       draft.editor.fontSize = Number(form.fontSize)
       draft.editor.tabSize = form.tabSize
       draft.editor.defaultLanguage = form.defaultLanguage
@@ -421,6 +425,35 @@ onBeforeUnmount(() => {
                     0 表示禁用缓存，0–600
                   </span>
                 </label>
+
+                <div class="block">
+                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                    题面缓存
+                  </span>
+                  <div class="flex items-center gap-3 py-1">
+                    <button
+                      type="button"
+                      role="switch"
+                      :aria-checked="form.cacheProblemStatement"
+                      class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+                      :class="
+                        form.cacheProblemStatement ? 'bg-[var(--color-primary)]' : 'bg-slate-300'
+                      "
+                      @click="form.cacheProblemStatement = !form.cacheProblemStatement"
+                    >
+                      <span
+                        class="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                        :class="form.cacheProblemStatement ? 'translate-x-5' : ''"
+                      ></span>
+                    </button>
+                    <span class="text-xs text-[var(--text-secondary)]">
+                      {{ form.cacheProblemStatement ? '已开启' : '已关闭' }}
+                    </span>
+                  </div>
+                  <span class="mt-1 block text-xs text-[var(--text-muted)]">
+                    缓存题面（内存 + 磁盘），切题来回与断网时秒开；关闭后每次打开都请求服务端
+                  </span>
+                </div>
               </div>
             </section>
 

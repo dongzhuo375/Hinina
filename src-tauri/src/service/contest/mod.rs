@@ -1,6 +1,9 @@
-// 比赛服务：比赛获取、列表缓存、当前比赛切换、榜单查询、比赛公告与已读状态。
+// 比赛服务：比赛获取、列表缓存、比赛元信息缓存、当前比赛切换、榜单查询、比赛公告与已读状态。
 //
-// 比赛列表带 TTL 缓存，切换比赛时发布 ContestEvent::Selected。
+// 比赛列表带 TTL 缓存（TTL 来自配置，逐调用可变）；比赛元信息（标题/时间窗/封榜设置）
+// 带固定 TTL 的内存 + 磁盘缓存 —— 题目总览页每 30s 轮询 `load_configured_contest`
+// （元信息 + 题目列表两次请求），缓存元信息可把轮询请求量减半，而 ac/total 仍在
+// 每次轮询实时拉取。切换比赛时发布 ContestEvent::Selected。
 // 公告**不缓存**（可能含裁判组临场规则变更）；已读状态是客户端本地特性，
 // 持久化在 `announcements_read/{cid}_{uid}.json`。
 //
@@ -12,7 +15,7 @@
 pub mod error;
 
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
@@ -24,6 +27,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::event::app_event::{AppEvent, ContestEvent};
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::registry::ProviderRegistry;
+use crate::infra::cache::{JsonDiskCache, TtlCache};
 use crate::infra::storage::Storage;
 
 /// 比赛列表缓存。
@@ -31,6 +35,20 @@ struct ContestCache {
     contests: Vec<Contest>,
     fetched_at: Instant,
 }
+
+/// 比赛元信息缓存 TTL。
+///
+/// 120s 覆盖题目总览页 30s±5s 轮询的 4 个周期（请求量 −75%），同时把
+/// 「管理员改比赛时间/封榜设置」的滞后压到 2 分钟内。
+/// 比赛是否结束由前端依 `endTime` 推导（`utils/contest.getContestPhase`），
+/// **不受**本缓存影响 —— 时间窗本身极少变化。
+const CONTEST_META_TTL: Duration = Duration::from_secs(120);
+
+/// 比赛元信息内存缓存容量（同时打开的比赛数量级远小于此）。
+const CONTEST_META_CAPACITY: usize = 8;
+
+/// 比赛元信息磁盘缓存目录（跨重启复用；过期由 `fetchedAt` 判定）。
+const CONTEST_META_NAMESPACE: &str = "cache/contest_meta";
 
 /// 公告已读状态持久化目录（客户端本地特性，HOJ 无对应服务端接口）。
 const ANNOUNCEMENTS_READ_DIR: &str = "announcements_read";
@@ -49,8 +67,12 @@ pub struct ContestService {
     storage: Arc<Storage>,
     /// 当前选中的比赛 ID
     current_contest: RwLock<Option<String>>,
-    /// 比赛列表缓存
+    /// 比赛列表缓存（TTL 来自配置，逐调用可变，故保留自持实现）
     cache: RwLock<Option<ContestCache>>,
+    /// 比赛元信息内存缓存（固定 TTL，见 [`CONTEST_META_TTL`]）
+    meta_cache: TtlCache<String, Contest>,
+    /// 比赛元信息磁盘缓存（跨重启；用户域数据不落盘，本项属公共数据）
+    meta_disk: JsonDiskCache,
 }
 
 impl ContestService {
@@ -63,10 +85,45 @@ impl ContestService {
         Self {
             registry,
             event_bus,
+            meta_cache: TtlCache::new(CONTEST_META_TTL, CONTEST_META_CAPACITY),
+            meta_disk: JsonDiskCache::new(Arc::clone(&storage), CONTEST_META_NAMESPACE),
             storage,
             current_contest: RwLock::new(None),
             cache: RwLock::new(None),
         }
+    }
+
+    /// 获取比赛元信息（内存 → 磁盘 → 网络），命中即回填上游缓存。
+    ///
+    /// 只缓存**成功结果**：Provider 错误（含 401/403）原样上抛，绝不入缓存 ——
+    /// 否则会话失效会被缓存掩盖，前端 `sessionGuard` 拿不到 `Auth` 变体。
+    async fn load_contest_meta(&self, contest_id: &str) -> AppResult<Contest> {
+        let key = contest_id.to_string();
+
+        if let Some(contest) = self.meta_cache.get(&key) {
+            debug!(cache = "contest_meta", contest_id = contest_id, hit = true, "命中比赛元信息内存缓存");
+            return Ok(contest);
+        }
+
+        if let Some(contest) = self
+            .meta_disk
+            .read::<Contest>(contest_id, CONTEST_META_TTL)
+        {
+            debug!(cache = "contest_meta", contest_id = contest_id, hit = true, "命中比赛元信息磁盘缓存");
+            self.meta_cache.insert(key, contest.clone());
+            return Ok(contest);
+        }
+
+        let oj_type = self.registry.current_oj();
+        let provider = self.registry.get_contest(&oj_type)?;
+        let contest = provider.get_contest(contest_id).await.map_err(|e| {
+            warn!(error = %e, "获取比赛详情失败");
+            e.context("获取比赛详情失败")
+        })?;
+
+        self.meta_cache.insert(key, contest.clone());
+        self.meta_disk.write(contest_id, &contest);
+        Ok(contest)
     }
 
     /// 获取比赛列表，优先使用缓存（TTL 由 Config 控制）。
@@ -140,6 +197,10 @@ impl ContestService {
             let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
             *cache = None;
         }
+        // 元信息缓存同步失效：强制刷新意味着「要服务端真值」，两层都要清
+        // （磁盘按 namespace 粗粒度清空：比赛元信息体量小，重拉代价可忽略）
+        self.meta_cache.clear();
+        self.meta_disk.clear_namespace();
 
         // 使用 TTL=0 强制刷新
         self.list_contests(0).await
@@ -178,6 +239,10 @@ impl ContestService {
     ///
     /// 阶段 7 单比赛模式入口：从配置文件读取 contest_id 后调用此方法，
     /// 一次性获取比赛详情 + 题目列表 + 自动选中。
+    ///
+    /// **缓存策略**：比赛元信息走内存 → 磁盘 → 网络（TTL 120s）；题目列表
+    /// **每次实时拉取** —— 题目总览页轮询它就是为了刷新 ac/total 计数，
+    /// 缓存题目列表等于让轮询失去意义。
     pub async fn load_contest_with_problems(
         &self,
         contest_id: &str,
@@ -187,10 +252,7 @@ impl ContestService {
         let provider = self.registry.get_contest(&oj_type)?;
 
         info!(contest_id = contest_id, "加载比赛");
-        let contest = provider.get_contest(contest_id).await.map_err(|e| {
-            warn!(error = %e, "获取比赛详情失败");
-            e.context("获取比赛详情失败")
-        })?;
+        let contest = self.load_contest_meta(contest_id).await?;
 
         // 私有赛需要密码
         if contest.auth == 1 {

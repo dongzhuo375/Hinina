@@ -34,6 +34,7 @@
 - `@/services/submission.service`（提交、查询、历史、详情）
 - `@/services/config.service`（轮询间隔与总超时）
 - `@/utils/submission`（`isTerminalStatus` 终态判据）
+- `@/stores/problemStore`（终态到达**与轮询超时**时 `invalidateMyStatus()`：我的题目状态只由自己的提交改变、超时时终态未知，两种情形都由本 store 显式触发失效而非让总览页按周期整表重拉）
 - `@/utils/polling`（`createPoller` 轮询原语）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
@@ -72,6 +73,8 @@ pollOnce(id)
 - **节拍唯一归属前端**：后端 `get_judgement` 是单次查询（无内层阻塞循环），服务端请求节奏 = 本 store 的 Poller 周期，±20% 抖动真实生效；`stopPolling`（登出）即刻停发请求，不存在停不掉的在途后端循环。历史教训：曾经后端 `poll_judgement` 自带固定 2s 内层循环（阻塞到终态才返回），前端 Poller 的重入保护令后续 tick 全部空转 —— 抖动沦为装饰、真实节奏是后端固定间隔、`stopPolling` 停不掉在途循环，双层轮询已拆除。
 - **刻意不配置 `isPaused`**：提交结果轮询是有限生命周期的收敛轮询，选手切窗口查资料回来就该看到结果；后台暂停只会推迟收敛、拉长「评测中」焦虑期（与榜单类无限轮询取舍相反）。
 - **终态判据单一来源**：`utils/submission.isTerminalStatus`（与 Rust `is_terminal_status` 对齐，`Unknown` 视为终态）——store 不自建状态列表。
+- **终态触发 myStatus 失效**：轮询拿到终态时调用 `useProblemStore().invalidateMyStatus()`，总览页据此在下次可见刷新时重拉一次我的题目状态 —— 该数据只由我自己的提交改变（他人 AC 不影响），按 30s 周期整表重拉纯属浪费；失败路径不触发（还会继续轮询）。
+- **超时停止也必须失效**：deadline 分支（`pollTimeoutSecs`，默认 300s）同样调 `invalidateMyStatus()` —— 超时意味着**终态未知**（服务端可能稍后才出结果），安全动作就是让总览页重拉。开场判题积压时评测超过 5 分钟是现实场景，漏掉这一处置会让 AC/尝试过 pill 与解题进度一直错到用户进入某题或下次提交。
 - **总超时兜底**：deadline（默认 300s）保证服务端一直返回非终态时也会停止。
 - **句柄放模块级 Map**：进响应式系统会被 Vue 深层代理且 `$reset()` 清不掉；登出必须先 `stopAllPolling()` 再 `$reset()`。
 - **history 与 fetchProblemSummary 隔离**：解题页 pill 的轻量查询不干扰评测页的列表/筛选/分页状态。
@@ -79,4 +82,4 @@ pollOnce(id)
 
 ## 测试
 
-`src/stores/__tests__/submissionStore.spec.ts`：终态停止、memory 回填、超时兜底、瞬时失败恢复后清 error（P69）、stopAllPolling 回收、startPolling 幂等、fetchHistory 参数透传与错误、筛选回第 1 页、resetHistoryFilters（清空筛选且不发请求）、翻页越界、fetchProblemSummary（latest+total、空提交、不污染 history）、latestLocalFor。轮询用 `vi.useFakeTimers()` 推进。
+`src/stores/__tests__/submissionStore.spec.ts`：终态停止、memory 回填、超时兜底、瞬时失败恢复后清 error（P69）、stopAllPolling 回收、startPolling 幂等、fetchHistory 参数透传与错误、筛选回第 1 页、resetHistoryFilters（清空筛选且不发请求）、翻页越界、fetchProblemSummary（latest+total、空提交、不污染 history）、latestLocalFor、终态触发 `problemStore.invalidateMyStatus`、**轮询超时（终态未知）同样触发失效**。轮询用 `vi.useFakeTimers()` 推进。
