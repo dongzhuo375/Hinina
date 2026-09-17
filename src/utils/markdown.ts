@@ -1,4 +1,4 @@
-import { marked } from 'marked'
+import { marked, type MarkedExtension, type Tokens } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import DOMPurify from 'dompurify'
 
@@ -29,6 +29,74 @@ marked.use(
     strict: 'ignore',
   }),
 )
+
+/// Vditor 排版容器（`:::` 块）的 token 结构（marked 扩展自定义类型）。
+interface ContainerToken extends Tokens.Generic {
+  type: 'vditorContainer'
+  /// 容器名（`hljs-center` 等），直接作为输出 div 的 class
+  className: string
+}
+
+/**
+ * Vditor 排版容器 —— HOJ 管理端 Vditor 编辑器"居中/居右"按钮的产物：
+ *
+ * ```md
+ * ::: hljs-center
+ * $$
+ * h(x) = e^{e^x}
+ * $$
+ * :::
+ * ```
+ *
+ * marked 没有 `:::` 容器概念：不接管时整块按字面输出 —— 题面上 "::: hljs-center"
+ * 直接印在页面里，容器内本应居中的公式连 KaTeX 都不经过（`$$` 与容器行同段时
+ * 块级公式规则无法命中）。实现为块级扩展：
+ *
+ * - `start`：marked 的 startBlock 钩子。容器紧跟正文段落（无空行分隔）时，
+ *   按此位置截断段落候选，容器才能作为独立块被识别，而不是被吞进段落文本。
+ * - 类名限定 `[\w-]+`：容器名直接进 `class` 属性，字符集白名单杜绝属性注入；
+ *   不合法（含引号/空格等）或不闭合的容器一律不匹配，按字面降级为文本 ——
+ *   组织者手写错误不致整块内容丢失。
+ * - 内部内容递归走完整块级管线（`lexer.blockTokens`）：容器内的 `$$` 公式、
+ *   列表、表格照常解析，对齐语义由 global.css 的 `.hljs-center` 等类提供。
+ */
+const vditorContainer: MarkedExtension = {
+  extensions: [
+    {
+      name: 'vditorContainer',
+      level: 'block',
+      start(src: string) {
+        return src.match(/^:::[ \t]*[\w-]/m)?.index
+      },
+      tokenizer(
+        this: { lexer: { blockTokens(src: string): Tokens.Generic[] } },
+        src: string,
+      ) {
+        const match = src.match(
+          /^:::[ \t]*([\w-]+)[ \t]*\n([\s\S]*?)\n?:::(?:[ \t]*(?=\n|$))/,
+        )
+        if (!match) return undefined
+        const token: ContainerToken = {
+          type: 'vditorContainer',
+          raw: match[0],
+          className: match[1],
+          tokens: this.lexer.blockTokens(match[2]),
+        }
+        return token
+      },
+      renderer(
+        this: { parser: { parse(tokens: Tokens.Generic[]): string } },
+        token: Tokens.Generic,
+      ) {
+        const { className, tokens } = token as ContainerToken
+        // tokenizer 恒置 tokens，?? [] 仅安抚类型（Tokens.Generic.tokens 可选）
+        return `<div class="${className}">${this.parser.parse(tokens ?? [])}</div>`
+      },
+    },
+  ],
+}
+
+marked.use(vditorContainer)
 
 /// 将 Markdown 文本渲染为 HTML（含 LaTeX 公式），消毒后输出，并把相对 URL 改写为绝对地址。
 ///

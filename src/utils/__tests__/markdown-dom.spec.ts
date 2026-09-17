@@ -65,4 +65,20 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toContain('katex-error')
     expect(html).toMatch(/style="color:#dc2626"/)
   })
+
+  it('Vditor 容器 div 与类名消毒后保留（居中公式完整链路）', () => {
+    const html = renderMarkdown('::: hljs-center\n$$\nh(x)=e^{e^x}\n$$\n:::', '')
+    expect(html).toContain('<div class="hljs-center">')
+    expect(html).toContain('katex-display')
+    expect(html).toContain('class="katex"')
+  })
+
+  it('消毒后容器 + 恶意内联 HTML 共存时 script 仍被剥', () => {
+    const html = renderMarkdown(
+      '::: hljs-center\n$$\ne^{e^x}\n$$\n:::\n\n<script>evil()</script>',
+      '',
+    )
+    expect(html).toContain('<div class="hljs-center">')
+    expect(html).not.toContain('<script')
+  })
 })

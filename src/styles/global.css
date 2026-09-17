@@ -111,3 +111,20 @@ body {
   line-height: 1.2;
 }
 
+/* ── Vditor 排版容器（题面 / 公告 / 比赛简介共用，故放全局） ── */
+
+/* HOJ 管理端 Vditor 编辑器"居中/居右"按钮产出 `::: hljs-center` 等容器，
+   utils/markdown.ts 的容器扩展将其渲染为同名 div；
+   text-align 即其全部语义 —— 与 Vditor 官方 Web 端一致 */
+.hljs-center {
+  text-align: center;
+}
+
+.hljs-right {
+  text-align: right;
+}
+
+.hljs-left {
+  text-align: left;
+}
+

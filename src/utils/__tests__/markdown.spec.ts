@@ -112,3 +112,51 @@ describe('renderMarkdown — 数学公式', () => {
     expect(html).toContain('class="katex"')
   })
 })
+
+/**
+ * Vditor `:::` 排版容器（HOJ 管理端编辑器"居中/居右"按钮的产物）。
+ * 此前整块按字面输出："::: hljs-center" 直接印在页面里，容器内公式不渲染也不对齐。
+ */
+describe('renderMarkdown — Vditor ::: 容器', () => {
+  it('容器渲染为同名 div，内部块级公式照常渲染', () => {
+    const html = renderMarkdown('::: hljs-center\n$$\nh(x)=e^{e^x}\n$$\n:::', '')
+    expect(html).toContain('<div class="hljs-center">')
+    expect(html).toContain('katex-display')
+    // 字面 ::: 不得残留在输出里
+    expect(html).not.toContain(':::')
+  })
+
+  it('容器紧跟正文段落（无空行分隔）也能打断段落', () => {
+    const html = renderMarkdown(
+      '题面正文。\n::: hljs-center\n居中文字\n:::\n后续文字。',
+      '',
+    )
+    expect(html).toContain('<p>题面正文。</p>')
+    // 容器 div 包裹其内容（闭合标签前的换行随内部块渲染器而定，不锁细节）
+    expect(html).toMatch(/<div class="hljs-center">[\s\S]*<p>居中文字<\/p>[\s\S]*<\/div>/)
+    expect(html).not.toContain(':::')
+  })
+
+  it('容器内的行内公式与嵌套结构（列表）照常解析', () => {
+    const html = renderMarkdown(
+      '::: hljs-right\n- 设 $n$ 为整数\n- 求最小值\n:::',
+      '',
+    )
+    expect(html).toContain('<div class="hljs-right">')
+    expect(html).toContain('<li>')
+    expect(html).toContain('class="katex"')
+  })
+
+  it('未闭合的容器整块降级为字面文本（不吞内容）', () => {
+    const html = renderMarkdown('::: hljs-center\n只有开头没有结尾', '')
+    expect(html).toContain('::: hljs-center')
+    expect(html).toContain('只有开头没有结尾')
+  })
+
+  it('类名不合法（含引号等）不匹配容器（class 属性注入防护）', () => {
+    const html = renderMarkdown('::: a"onclick=alert(1)\n内容\n:::', '')
+    // 不构成容器 → 按字面文本输出，onclick 永远不会成为属性
+    expect(html).not.toMatch(/class="a"/)
+    expect(html).toContain('内容')
+  })
+})
