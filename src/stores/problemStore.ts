@@ -20,6 +20,12 @@ export const useProblemStore = defineStore('problem', {
     /// pid → 我的提交状态（0=未提交 / 1=已AC / 2=尝试过）
     myStatus: {} as Record<string, UserProblemStatus>,
     isStatusLoading: false,
+    /// 我的题目状态是否已过期。
+    ///
+    /// 该数据**只由我自己的提交**改变（他人 AC 不影响它），因此不必按轮询周期
+    /// 整表重拉：提交到达终态时由 `submissionStore` 调 `invalidateMyStatus()` 置位，
+    /// 总览页在下次可见刷新时重拉一次即清位。初始为 true（首屏必拉一次）。
+    myStatusStale: true,
   }),
 
   getters: {
@@ -88,17 +94,32 @@ export const useProblemStore = defineStore('problem', {
      * 批量加载我的题目提交状态（驱动卡片状态标记与解题进度）。
      *
      * 同 `loadLimits`：失败不抛出，状态缺失时按「未提交」展示。
+     * 成功后清除 `myStatusStale`；失败则置为过期（数据仍是旧的），下一周期重试。
      */
     async loadMyStatus(contestId: string, problemIds: string[]) {
       if (problemIds.length === 0) return
       this.isStatusLoading = true
       try {
         this.myStatus = await problemService.getUserProblemStatus(contestId, problemIds)
+        this.myStatusStale = false
       } catch (e) {
+        // 拉取失败：数据仍是旧的 → 置为过期，下一周期重试（与改造前「每周期重拉」
+        // 的容错等价，只是不再在成功路径上白打请求）
+        this.myStatusStale = true
         log.error('我的题目状态加载失败:', e)
       } finally {
         this.isStatusLoading = false
       }
+    },
+
+    /**
+     * 标记「我的题目状态」已过期（提交到达终态时由 `submissionStore` 调用）。
+     *
+     * 只置位、不发请求 —— 真正的重拉交给总览页在下次可见刷新时执行，
+     * 避免在解题页后台凭空多打一次请求。
+     */
+    invalidateMyStatus() {
+      this.myStatusStale = true
     },
   },
 })

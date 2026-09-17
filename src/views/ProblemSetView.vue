@@ -108,7 +108,11 @@ function stopPolling() {
   poller = null
 }
 
-/// 每周期：重拉比赛（刷新 ac/total）+ 我的提交状态（刷新卡片 pill）
+/// 每周期：重拉比赛（刷新 ac/total）+ 我的提交状态（仅在过期时）
+///
+/// 我的题目状态**只由我自己的提交改变**（他人 AC 不影响它），故不再每周期整表重拉：
+/// 提交到达终态时 `submissionStore` 会调 `invalidateMyStatus()` 置位，这里看到
+/// `myStatusStale` 才补拉一次（首屏由 `loadSupplementary` 拉取并清位）。
 async function refresh() {
   try {
     await contestStore.loadContest()
@@ -117,7 +121,7 @@ async function refresh() {
   }
   if (supplementaryLoaded) {
     const c = contest.value
-    if (c && problems.value.length > 0) {
+    if (c && problems.value.length > 0 && problemStore.myStatusStale) {
       await problemStore.loadMyStatus(c.id, problems.value.map((p) => p.problemId))
     }
   } else {

@@ -15,13 +15,15 @@
 | state.`isLimitsLoading` | `boolean` | limits 加载中标记 |
 | state.`myStatus` | `Record<pid, UserProblemStatus>` | 我的提交状态（0=未提交 / 1=已AC / 2=尝试过） |
 | state.`isStatusLoading` | `boolean` | 状态加载中标记 |
+| state.`myStatusStale` | `boolean` | 我的题目状态是否过期。该数据**只由我自己的提交**改变，故不按轮询周期整表重拉：提交终态时 `submissionStore` 调 `invalidateMyStatus()` 置位，总览页在下次可见刷新时重拉一次并清位；初始 `true`（首屏必拉一次） |
 | `currentProblemId` | getter | 当前打开的题目 ID（无则 null） |
 | `limitsOf` | getter `(displayId) => ProblemLimits \| null` | 取某题 limits；**null = 后端获取失败**，视图应显示占位而非假默认值 |
 | `statusOf` | getter `(problemId) => UserProblemStatus` | 取某题我的状态；未出现在 map 中视为未提交（0） |
 | `openProblem` | `(contestId, problemId) => Promise<void>` | 加载详情并设为当前题目；失败记录 error 并抛出 |
 | `loadProblems` | `(contestId) => Promise<void>` | 加载比赛题目列表；失败记录 error 并抛出 |
 | `loadLimits` | `(contestId, displayIds) => Promise<void>` | 批量加载 limits（后端双层缓存，命中时零网络请求）；**失败不抛出** |
-| `loadMyStatus` | `(contestId, problemIds) => Promise<void>` | 批量加载我的提交状态；**失败不抛出** |
+| `loadMyStatus` | `(contestId, problemIds) => Promise<void>` | 批量加载我的提交状态；**失败不抛出**；成功后清除 `myStatusStale`，失败则置为过期（数据仍是旧的）以便下一周期重试 |
+| `invalidateMyStatus` | `() => void` | 标记我的题目状态已过期（提交终态时由 `submissionStore` 调用）；**只置位不发请求** —— 重拉交给总览页在下次可见刷新时执行，避免在解题页后台凭空多打一次请求 |
 
 ## 直接依赖
 
@@ -48,8 +50,8 @@ loadLimits(contestId, displayIds)
   → 失败：log.error 记录（utils/logger 作用域日志），不抛出、不清空已有数据
 
 loadMyStatus(contestId, problemIds)
-  → 空列表短路 → problemService.getUserProblemStatus → 整体替换 myStatus
-  → 失败：同上，状态缺失按「未提交」展示
+  → 空列表短路 → problemService.getUserProblemStatus → 整体替换 myStatus + myStatusStale = false
+  → 失败：myStatusStale = true（下一周期重试）+ log.error 记录，状态缺失按「未提交」展示
 ```
 
 设计要点：

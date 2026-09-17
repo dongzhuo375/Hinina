@@ -207,7 +207,7 @@ src/
 │   ├── LoginView.vue                     # 登录页（左右分栏：登录表单/已登录身份块 + 几何 SVG 氛围区/比赛简介/倒计时）
 │   │                                     #   已登录且比赛未开始时留在本页等待，倒计时归零自动进入赛场
 │   ├── ContestLayout.vue                 # 比赛工作台外壳：TopBar + ActivityBar + <router-view> + StatusBar；比赛就绪后启动公告轮询（红点全页面鲜活）
-│   ├── ProblemSetView.vue                # 题目总览（统计条 + 卡片网格，limits 渐进填充，30s±5s 轮询含我的状态刷新）
+│   ├── ProblemSetView.vue                # 题目总览（统计条 + 卡片网格，limits 渐进填充，30s±5s 轮询；我的状态改为增量失效后按需重拉）
 │   ├── ProblemSolveView.vue              # 解题页（题面分节 ｜ 编辑器 + 控制台条，可拖拽分栏；splitRatio 读配置 + 拖拽回写）
 │   ├── RankView.vue                      # 实时榜单（工具条 + 表格 + 分页，10s±2s 轮询、后台暂停、结束即停；打星/女生队全量快照模式）
 │   ├── SubmissionsView.vue               # 评测页（筛选工具条 + 全场提交表格 + 分页，onlyMine 后端强制；?problem= 自动预筛；非终态行 5s±1s 温和刷新）
@@ -242,9 +242,9 @@ src/
 │   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/榜单/公告/工作区并回收定时器）
 │   ├── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + loadContest 并发去重 + whenLoaded 统一等待入口（P59）+ 登录页匿名比赛简报状态（brief*）
-│   ├── problemStore.ts                   # 当前题目详情 + limits 缓存 + 我的题目状态（limitsOf/statusOf 派生读取）
-│   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页）
-│   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
+│   ├── problemStore.ts                   # 当前题目详情 + limits 缓存 + 我的题目状态（limitsOf/statusOf 派生读取；myStatusStale 增量失效，提交终态触发重拉）
+│   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页；用户操作路径查询去抖 in-flight 合并 + 3s memo，轮询与手动刷新不走去抖）
+│   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收；终态时触发 problemStore.invalidateMyStatus）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
 │   ├── announcementStore.ts              # 公告列表 + 客户端已读状态（unreadCount 红点数据源、markAllRead 乐观更新+失败回滚、60s±10s 轮询）
 │   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（语言权威值=HOJ 显示名，切换即时持久化；默认语言读配置；源文件名经 utils/language 派生）
 │   └── __tests__/                        # authStore / contestStore / rankStore / submissionStore / announcementStore .spec.ts（会话状态机、加载去重与 whenLoaded、榜单去重/轮询/全量模式、评测收敛轮询、公告未读语义）

@@ -27,11 +27,12 @@
 | `fetchAllRows` | `() => Promise<void>` | 全量快照拉取，见逻辑流程 |
 | `syncFullPaging` | `() => void` | 把客户端分页状态同步到 `pages`/`current`（RankView 分页条直接读这两个字段） |
 | `refresh` | `() => Promise<void>` | 轮询/手动刷新：**吞掉异常**；全量筛选态下重拉整个快照（只会被手动刷新触发），否则重拉当前页 |
-| `setPage` | `(page) => Promise<void>` | 翻页（越界忽略）；全量模式为**纯客户端切片，不发请求** |
-| `setKeyword` | `(keyword) => Promise<void>` | 搜索（trim 后回到第 1 页）；全量模式下 keyword 是快照拉取的请求参数，须**重拉快照** |
-| `setGroupFilter` | `(filter) => Promise<void>` | 分组切换，见逻辑流程 |
-| `startLive` | `(isPaused?: () => boolean) => void` | 开启实时刷新；先 `stopLive()` 防重复；暂停判据 = 页面隐藏 ‖ **全量快照模式** ‖ 调用方条件 |
-| `stopLive` | `() => void` | 停止轮询并置空句柄（离开榜单页、比赛结束、登出时调用） |
+| `setPage` | `(page) => Promise<void>` | 翻页（越界忽略）；全量模式为**纯客户端切片，不发请求**；常规模式走 `loadRankDeduped`（去抖） |
+| `setKeyword` | `(keyword) => Promise<void>` | 搜索（trim 后回到第 1 页）；全量模式下 keyword 是快照拉取的请求参数，须**重拉快照**；常规模式走 `loadRankDeduped` |
+| `setGroupFilter` | `(filter) => Promise<void>` | 分组切换，见逻辑流程；常规模式走 `loadRankDeduped` |
+| `loadRankDeduped` | `(page) => Promise<void>` | **用户操作路径**的榜单加载：同查询 in-flight 合并 + 3s memo（`RANK_QUERY_MEMO_TTL_MS`）。查询指纹 = `contestId｜uid｜page｜keyword｜removeStar`（含 uid 避免换账号误命中）。**轮询 `refresh()` 与手动刷新不走这里**（榜单实时性是公平性要求，后端 `get_rank` 同样刻意不缓存） |
+| `startLive` | `(isPaused?: () => boolean) => void` | 开启实时刷新；先 `stopLive()` 防重复；暂停判据 = 页面隐藏 ‖ **全量快照模式** ‖ 调用方条件；同时清空查询去抖 memo（进入页面 = 新上下文） |
+| `stopLive` | `() => void` | 停止轮询并置空句柄（离开榜单页、比赛结束、登出时调用）；**同时清空查询去抖 memo** —— memo 只在停留榜单页期间有意义，保留会让「登出 → 重新登录 → 首次翻页」跳过请求（界面停空） |
 
 ## 直接依赖
 
@@ -105,7 +106,7 @@ startLive(isPaused?)
   → poller.start()；首次执行在一个完整周期后 —— 首屏数据由调用方自行 loadRank，
     进入页面立刻可见而不是等 10 秒
 
-stopLive → poller?.stop() + 置 null + isLive = false
+stopLive → poller?.stop() + 置 null + isLive = false + 清空查询去抖 memo
 ```
 
 设计要点：

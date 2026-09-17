@@ -7,6 +7,7 @@ import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
+import { useProblemStore } from '@/stores/problemStore'
 
 const log = createLogger('submissionStore')
 
@@ -182,7 +183,12 @@ export const useSubmissionStore = defineStore('submission', {
       }
       try {
         const result = await this.pollResult(submissionId)
-        if (isTerminalStatus(result.status)) this.stopPolling(submissionId)
+        if (isTerminalStatus(result.status)) {
+          // 评测终结意味着「我的题目状态」可能已变（AC / 尝试过）：标记过期，
+          // 由总览页在下次可见刷新时重拉一次，而不是让它每 30s 整表重拉
+          useProblemStore().invalidateMyStatus()
+          this.stopPolling(submissionId)
+        }
       } catch {
         // 网络抖动等瞬时错误：等待下一次轮询
       }
