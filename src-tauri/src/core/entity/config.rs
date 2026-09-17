@@ -180,7 +180,8 @@ pub struct ThemeConfig {
     /// 当前主题名称（取值域：light；dark 尚未实现，加载时会被归一为 light）
     #[serde(default = "default_theme_name")]
     pub theme_name: String,
-    /// 编辑器主题（Monaco 主题名，取值域：vs；vs-dark 随 dark 主题一并实现）
+    /// 编辑器主题（Monaco 主题名，取值域：vs / vs-dark；由解题页编辑器设置切换，
+    /// **只作用于编辑器区域** —— 客户端界面仍只有浅色）
     #[serde(default = "default_editor_theme")]
     pub editor_theme: String,
 }
@@ -248,7 +249,7 @@ fn normalize_language_display_name(raw: &str) -> Option<&'static str> {
 /// 背景：`editor.defaultLanguage` 的值域已翻转为 HOJ 语言显示名（与提交契约一致）——
 /// 被上一版归一成 Monaco id（'cpp' 等）的配置在此映射回显示名；
 /// 已是显示名或其他非空值（OJ 可能提供 Go/Rust 等）原样保留，仅空串回退默认 "C++"。
-/// 另外 `theme = dark/vs-dark`（深色主题尚未实现，前端只有浅色）、
+/// 另外 `theme = dark`（深色 UI 尚未实现，前端只有浅色）、
 /// `splitRatio = 0.45`（旧默认，现默认 0.48）仍按旧规则修正。
 /// 只修正**恰好等于旧默认值**的项，用户显式设置的其他值一律不动。
 pub fn normalize_legacy_values(cfg: &mut AppConfig) {
@@ -258,12 +259,15 @@ pub fn normalize_legacy_values(cfg: &mut AppConfig) {
         cfg.editor.default_language = name.to_string();
     }
 
-    // dark 主题未实现：归一到浅色，避免前端拿到不存在的主题名
+    // dark 主题未实现：整机主题归一到浅色，并把它一并写入的编辑器主题也归位。
+    // **仅在 theme_name == "dark" 时**才动 editor_theme —— 编辑器主题已是用户可选
+    // 项（解题页编辑器设置），`theme_name = light` + `editor_theme = vs-dark`
+    // 是合法组合，无条件重置会把选手刚选的深色编辑器悄悄改回浅色。
     if cfg.theme.theme_name == "dark" {
-        cfg.theme.theme_name = "light".into();
-    }
-    if cfg.theme.editor_theme == "vs-dark" {
-        cfg.theme.editor_theme = "vs".into();
+        cfg.theme.theme_name = default_theme_name();
+        if cfg.theme.editor_theme == "vs-dark" {
+            cfg.theme.editor_theme = default_editor_theme();
+        }
     }
 
     // 0.45 是旧版默认值；用户手动调出的其他比例（含恰好 0.45 之外的任意值）不受影响。
@@ -307,6 +311,7 @@ impl AppConfig {
         self.editor.tab_size = self.editor.tab_size.clamp(1, 8);
         self.editor.auto_save_interval_secs = self.editor.auto_save_interval_secs.clamp(5, 300);
         self.editor.default_language = sanitize_language_id(&self.editor.default_language);
+        self.theme.editor_theme = sanitize_editor_theme(&self.theme.editor_theme);
         // NaN.clamp 返回 NaN：非有限值先回退默认，再钳制到滑杆值域 [0.30, 0.70]
         if !self.layout.split_ratio.is_finite() {
             self.layout.split_ratio = default_split_ratio();
@@ -341,6 +346,18 @@ fn sanitize_language_id(raw: &str) -> String {
         default_language()
     } else {
         raw.to_string()
+    }
+}
+
+/// 编辑器主题净化：取值域 = Monaco 内置主题 `vs` / `vs-dark`（解题页编辑器设置可选），
+/// 其余值（手改配置、未来自定义主题名）回退默认 `vs`。
+///
+/// 必须收敛：`monaco.editor.setTheme` 收到未知主题名会静默保留上一个主题，
+/// 配置与界面就此不一致，且用户无从察觉。
+fn sanitize_editor_theme(raw: &str) -> String {
+    match raw {
+        "vs" | "vs-dark" => raw.to_string(),
+        _ => default_editor_theme(),
     }
 }
 

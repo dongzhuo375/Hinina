@@ -437,7 +437,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">编辑器</h2>
                 <span class="ml-auto text-xs text-[var(--text-muted)]">
-                  编辑器设置对新打开的解题页生效
+                  解题页编辑器设置可即时调整，此处改动对新打开的解题页生效
                 </span>
               </div>
               <div class="grid grid-cols-1 gap-x-4 gap-y-4 px-5 py-4 sm:grid-cols-2">
@@ -620,11 +620,11 @@ onBeforeUnmount(() => {
                     编辑器主题
                   </span>
                   <select disabled :class="INPUT">
-                    <option>浅色（Visual Studio）</option>
+                    <option>由解题页「编辑器设置」控制</option>
                   </select>
                 </label>
                 <p class="text-xs text-[var(--text-muted)] sm:col-span-2">
-                  暗色主题即将上线，当前版本固定浅色
+                  界面暗色主题即将上线，当前版本固定浅色；编辑器主题在解题页「编辑器设置」中即时切换
                 </p>
               </div>
             </section>

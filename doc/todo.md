@@ -99,6 +99,7 @@
 - [x] **比赛页** — `views/ContestView.vue`（单比赛模式，三栏布局：题目列表 + 题面 + 编辑器/提交面板）
 - [x] **题目阅读器** — `components/problem/ProblemStatement.vue`（分栏布局：题面 + 样例）
 - [x] **代码编辑器** — `components/editor/CodeEditor.vue`（Monaco Editor + 语言切换 + 提交按钮）
+- [x] **编辑器设置弹层** — `components/editor/EditorSettingsPopover.vue`（字号 / Tab 宽度 / 编辑器主题 `vs`·`vs-dark`，即时生效 + debounce 落盘；值域唯一来源 `utils/editor.ts`，Rust `EditorConfig::sanitize` 兜底收敛）
 - [x] **提交结果面板** — `components/submission/SubmissionPanel.vue`
 - [x] **Rust 后端补齐** — OjConfig 增加 contest_id、Contest 实体扩展、load_configured_contest 命令、WorkspaceManager find_or_create（P36）、auto-save Tauri runtime（P39）
 - [x] **评测页** — `views/SubmissionsView.vue`（筛选工具条 + 提交表格 + 分页；onlyMine 后端强制；`?problem=` 自动预筛）+ `views/SubmissionDetailView.vue`（判定横幅 + 测试点明细/子任务 + 只读代码）

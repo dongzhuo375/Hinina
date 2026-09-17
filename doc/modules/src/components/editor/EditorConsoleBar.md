@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-**props**：`cursor: { line, column } | null`（Monaco 光标，由 CodeEditor 经父级转发；null = 尚未产生光标事件）、`problemId: string | null`（当前题 pid，用于筛「本题最新一条」）。
+**props**：`cursor: { line, column } | null`（Monaco 光标，由 CodeEditor 经父级转发；null = 尚未产生光标事件）、`problemId: string | null`（当前题 pid，用于筛「本题最新一条」）、`tabSize?: number`（编辑器当前 Tab 宽度，默认 `utils/editor.DEFAULT_EDITOR_TAB_SIZE`；解题页弹层可改，故不写死）。
 **emits**：`submit: []`。
 
 | 名称 | 签名 | 用途 |
@@ -27,7 +27,7 @@
 | `totalCount` | computed | `summary.total`（「提交记录 (n)」计数；摘要未到达/为 0 时不显示 n） |
 | `goSubmissions` / `goDetail` | fn | 跳 `Submissions`（携带 `?problem=displayId`）/ `SubmissionDetail` |
 
-状态行常量：`UTF-8`（工作区文件由 Rust 后端以 UTF-8 落盘）、`Spaces: 4`（Monaco tabSize=4 且未关 insertSpaces）——二者是固定事实，按常量展示而非实时读取；`Ctrl + Enter 快捷提交` 快捷键提示。
+状态行：`UTF-8`（工作区文件由 Rust 后端以 UTF-8 落盘）、`Spaces: {{ tabSize }}`（Monaco 未关 insertSpaces，缩进恒为空格；宽度取编辑器当前 tabSize，由 CodeEditor 经父级转发，弹层可改故不写死）、`Ctrl + Enter 快捷提交` 快捷键提示。
 
 ## 直接依赖
 
@@ -36,10 +36,11 @@
 - stores：`contestStore`（contestId）、`submissionStore`（`submissions` / `error` / `isSubmitting` / `fetchProblemSummary`）
 - `@/types/submission`（仅 `JudgementStatus` / `SubmissionRecord` 类型）
 - `@/utils/submission`（`findFirstFailedCase` / `formatMsToSeconds` / `isTerminalStatus` / `statusAbbr` / `statusTone` + `StatusTone` 类型）
+- `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — tabSize prop 兜底）
 
 ## 被依赖
 
-- `views/ProblemSolveView.vue` — 右栏编辑器下方（`:cursor` + `:problem-id`，submit 事件与 CodeEditor 共用同一 `handleSubmit`）
+- `views/ProblemSolveView.vue` — 右栏编辑器下方（`:cursor` + `:problem-id` + `:tab-size`，submit 事件与 CodeEditor 共用同一 `handleSubmit`）
 
 ## 逻辑流程
 

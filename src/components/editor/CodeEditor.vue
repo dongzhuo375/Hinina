@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
 import * as monaco from 'monaco-editor'
+import EditorSettingsPopover from '@/components/editor/EditorSettingsPopover.vue'
 import { configService } from '@/services/config.service'
+import type { EditorPrefs } from '@/services/config.service'
 import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf, resolveAllowedLanguage, SOURCE_FILE_EXTENSIONS } from '@/utils/language'
+import { DEFAULT_EDITOR_FONT_SIZE, DEFAULT_EDITOR_TAB_SIZE, DEFAULT_EDITOR_THEME } from '@/utils/editor'
 
 // ── Monaco Editor Workers（手动配置，避免 worker 打包问题） ──
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -40,6 +43,9 @@ const emit = defineEmits<{
   /// 光标位置（供底部状态行显示 Ln/Col）。选择 emit 而非 provide/inject：
   /// 保持单向数据流，CodeEditor 不感知消费方，父级显式转发给 EditorConsoleBar
   cursor: [pos: { line: number; column: number }]
+  /// 编辑器偏好（挂载读取配置后 + 每次弹层改动后上报）：父级据此同步状态行
+  /// 的缩进宽度等派生展示，无需自己再读一次配置
+  'prefs-change': [prefs: EditorPrefs]
 }>()
 
 const editorContainer = ref<HTMLDivElement>()
@@ -88,13 +94,17 @@ onMounted(async () => {
   await nextTick()
   if (!editorContainer.value) return
 
-  // 编辑器偏好来自应用配置（设置页可调）；读取失败时服务内部已回退兜底值
-  const prefs = await configService.getEditorPrefs()
+  // 编辑器偏好来自应用配置（设置页 / 编辑器设置弹层可调）；读取失败时服务内部已回退兜底值。
+  // 工具栏先于编辑器实例渲染，若用户在读取到达前就动了设置，以用户值为准
+  //（否则这次赋值会把刚改的值弹回去，且落盘的是被覆盖前的旧值）
+  const loaded = await configService.getEditorPrefs()
+  if (!prefsTouched) Object.assign(prefs, loaded)
+  emit('prefs-change', { ...prefs })
 
   const ed = monaco.editor.create(editorContainer.value, {
     value: props.modelValue,
     language: monacoIdOf(props.language),
-    theme: 'vs',
+    theme: prefs.editorTheme,
     fontSize: prefs.fontSize,
     fontFamily: 'JetBrains Mono, Cascadia Code, Consolas, monospace',
     minimap: { enabled: false },
@@ -127,6 +137,12 @@ onMounted(async () => {
 onUnmounted(() => {
   editor.value?.dispose()
   window.removeEventListener('keydown', handleKeydown)
+  // 关闭前把在途的偏好改动补一次落盘（debounce 窗口内离页不该丢设置）
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+    void persistPrefs()
+  }
 })
 
 watch(
@@ -189,20 +205,72 @@ async function handleFileChange(e: Event) {
   }
 }
 
-// ── 编辑器设置（本轮未实现，点击给出提示而非死按钮） ──
+// ── 编辑器设置（字号 / Tab 宽度 / 主题） ──
+//
+// 偏好是**应用级配置**（与设置页「编辑器」分组同一份数据），因此改动走
+// configService.updateEditorPrefs 落盘，而非仅作用于本实例。落盘前先即时应用到
+// Monaco —— 赛场调字号是「边看边调」，等 IPC 回来才生效是不可接受的交互延迟。
 
-const settingsHintOpen = ref(false)
-let settingsHintTimer: ReturnType<typeof setTimeout> | null = null
+/// 当前偏好：挂载时读配置，弹层改动就地更新（不重读配置，避免与在途写入打架）
+const prefs = reactive<EditorPrefs>({
+  fontSize: DEFAULT_EDITOR_FONT_SIZE,
+  tabSize: DEFAULT_EDITOR_TAB_SIZE,
+  editorTheme: DEFAULT_EDITOR_THEME,
+})
 
-function showSettingsHint() {
-  settingsHintOpen.value = true
-  if (settingsHintTimer) clearTimeout(settingsHintTimer)
-  settingsHintTimer = setTimeout(() => (settingsHintOpen.value = false), 2000)
+const prefsSaving = ref(false)
+const prefsError = ref<string | null>(null)
+
+/// 用户是否已改动过偏好（挂载读配置到达前动了设置时，以用户值为准）
+let prefsTouched = false
+
+/// 落盘防抖：拖字号滑杆会连发多次变更，逐次写配置既浪费 IPC 也可能撞上写竞态
+const PERSIST_DEBOUNCE_MS = 400
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+function handlePrefsChange(patch: Partial<EditorPrefs>) {
+  prefsTouched = true
+  Object.assign(prefs, patch)
+  applyPrefs()
+  emit('prefs-change', { ...prefs })
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    void persistPrefs()
+  }, PERSIST_DEBOUNCE_MS)
 }
 
-onUnmounted(() => {
-  if (settingsHintTimer) clearTimeout(settingsHintTimer)
-})
+/// 即时应用到 Monaco 实例。字号/Tab 是实例选项；**主题是全局选项**
+/// （Monaco 无按实例主题），故同页其它编辑器（快捷提交对话框等）一并跟随。
+function applyPrefs() {
+  if (!editor.value) return
+  editor.value.updateOptions({ fontSize: prefs.fontSize, tabSize: prefs.tabSize })
+  monaco.editor.setTheme(prefs.editorTheme)
+}
+
+/// 恢复默认值：与手动改动同一条链路（即时生效 + 落盘），不是只改本地内存
+function resetPrefs() {
+  handlePrefsChange({
+    fontSize: DEFAULT_EDITOR_FONT_SIZE,
+    tabSize: DEFAULT_EDITOR_TAB_SIZE,
+    editorTheme: DEFAULT_EDITOR_THEME,
+  })
+}
+
+async function persistPrefs() {
+  prefsSaving.value = true
+  try {
+    await configService.updateEditorPrefs({ ...prefs })
+    prefsError.value = null
+  } catch (e) {
+    // 已应用到编辑器，仅落盘失败：提示「仅本次会话生效」而不是回滚 ——
+    // 把用户刚调好的字号弹回去比不持久化更糟
+    console.error('[CodeEditor] 保存编辑器设置失败:', e)
+    prefsError.value = '保存失败，设置仅本次会话生效'
+  } finally {
+    prefsSaving.value = false
+  }
+}
 
 /// 供父级程序化聚焦（题目总览「快捷提交」跳转 ?focus=1）；
 /// Monaco 实例尚未就绪时静默降级为 no-op，不抛错、不阻塞调用方
@@ -331,24 +399,15 @@ defineExpose({ focus })
           @change="handleFileChange"
         />
 
-        <div class="relative">
-          <button
-            type="button"
-            title="编辑器设置"
-            class="flex h-7 w-7 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors duration-150 hover:border-[var(--color-primary)] hover:bg-slate-50 hover:text-[var(--color-primary)]"
-            @click="showSettingsHint"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          <div
-            v-if="settingsHintOpen"
-            class="absolute right-0 top-full z-50 mt-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium whitespace-nowrap text-slate-600 shadow-lg"
-          >
-            设置功能开发中
-          </div>
-        </div>
+        <EditorSettingsPopover
+          :font-size="prefs.fontSize"
+          :tab-size="prefs.tabSize"
+          :editor-theme="prefs.editorTheme"
+          :saving="prefsSaving"
+          :error="prefsError"
+          @change="handlePrefsChange"
+          @reset="resetPrefs"
+        />
 
         <div class="h-3.5 w-px bg-slate-300"></div>
 

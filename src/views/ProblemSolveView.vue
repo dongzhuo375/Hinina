@@ -12,7 +12,9 @@ import { useProblemStore } from '@/stores/problemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { configService } from '@/services/config.service'
+import type { EditorPrefs } from '@/services/config.service'
 import { resolveAllowedLanguage } from '@/utils/language'
+import { DEFAULT_EDITOR_TAB_SIZE } from '@/utils/editor'
 
 /// 解题工作台：左题面（48%）/ 右代码编辑器（52%），中间 1px 拖拽条可调。
 const route = useRoute()
@@ -184,6 +186,10 @@ function startDrag(e: MouseEvent) {
 /// Monaco 光标位置（CodeEditor emit → 本视图 → EditorConsoleBar prop，单向数据流）
 const cursor = ref<{ line: number; column: number } | null>(null)
 
+/// 编辑器偏好（CodeEditor 挂载读配置后 + 每次弹层改动后上报）。本视图只消费
+/// `tabSize` 供状态行展示缩进宽度，不重复读配置，避免与弹层写入竞态
+const editorPrefs = ref<EditorPrefs | null>(null)
+
 const currentProblemId = computed(() => problemStore.currentProblem?.id ?? null)
 
 async function handleSubmit() {
@@ -243,8 +249,14 @@ async function handleSubmit() {
           @update:language="workspaceStore.changeLanguage"
           @cursor="cursor = $event"
           @submit="handleSubmit"
+          @prefs-change="editorPrefs = $event"
         />
-        <EditorConsoleBar :cursor="cursor" :problem-id="currentProblemId" @submit="handleSubmit" />
+        <EditorConsoleBar
+          :cursor="cursor"
+          :problem-id="currentProblemId"
+          :tab-size="editorPrefs?.tabSize ?? DEFAULT_EDITOR_TAB_SIZE"
+          @submit="handleSubmit"
+        />
       </section>
     </div>
   </div>

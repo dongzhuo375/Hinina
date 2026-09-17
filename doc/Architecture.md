@@ -222,8 +222,9 @@ src/
 │   ├── contest/
 │   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时，数据源=榜单我的行）
 │   ├── editor/
-│   │   ├── CodeEditor.vue                # Monaco Editor 封装（浅色主题 + 语言工具条（候选=题目允许语言列表）+ 自动备份指示 + focus()；readonly 模式供详情页复用；字号/Tab 读配置）
-│   │   └── EditorConsoleBar.vue          # 编辑器底部控制台条（最新记录 pill=服务端真实最新提交+首个失败测试点 / 提交记录 (n) 入口 / 提交代码 / 光标状态行）
+│   │   ├── CodeEditor.vue                # Monaco Editor 封装（语言工具条（候选=题目允许语言列表）+ 自动备份指示 + focus()；readonly 模式供详情页复用；字号/Tab/主题读配置，弹层改动即时生效 + debounce 落盘）
+│   │   ├── EditorSettingsPopover.vue     # 编辑器设置弹层（字号 8–32 滑杆 / Tab 宽度 2/4/8 / 编辑器主题 vs·vs-dark / 恢复默认；受控组件，应用与落盘由 CodeEditor 承担）
+│   │   └── EditorConsoleBar.vue          # 编辑器底部控制台条（最新记录 pill=服务端真实最新提交+首个失败测试点 / 提交记录 (n) 入口 / 提交代码 / 光标与缩进状态行）
 │   ├── problem/
 │   │   ├── ProblemCard.vue               # 题目卡片（字母徽章取 HOJ 气球色、limits、通过数、我的状态 AC 优先、评测记录带 ?problem= 跳转、快捷提交弹窗入口）
 │   │   ├── QuickSubmitDialog.vue         # 快捷提交对话框（语言下拉 + Monaco + 拖拽/选择 .cpp/.c/.java/.py ≤256KB 扩展名识别语言 + 提交与内联评测结果）
@@ -284,6 +285,7 @@ src/
 │   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白；剥离只为安全，表现性标记保真渲染）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS）+ 时间/内存/长度格式化 + findFirstFailedCase
+│   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 候选 2·4·8，与 Rust sanitize、SettingsView 同域）
 ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
 │   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入）
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
@@ -364,4 +366,4 @@ src/
 - **题目 limits 缓存**：列表接口不返回 limits，只能按题请求 `get-contest-problem-details`；`ProblemService::load_problem_limits` 做「内存 + 磁盘（`cache/problem_limits/{cid}.json`）」双层缓存、并发上限 4、部分失败跳过、全部失败才上抛；401/403 **不得静默回退默认值**（未注册私有赛必须让选手看见真因）。展示需标注语言倍率（题面是 C/C++ 基准，其它语言时间与内存 ×2）
 - **状态文案以接口返回为准**：评测状态直接用后端 `JudgementStatus` 原词（Accepted / Wrong Answer…），不强行缩写为 AC/WA；`get-user-problem-status` 的 0/1/2 映射为「未作答 / 已通过 / 尝试过」
 - **工作区语言必须落盘**：语言不属于任何代码文件，`update_workspace_file` 带不上它；`workspaceStore.changeLanguage` 乐观更新本地并调用 `set_workspace_language` 立即持久化元数据，否则切题或重启后退回默认语言，会把 Java 代码当 C++ 提交
-- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；本轮只做浅色主题（Monaco `vs`）。例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）
+- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）

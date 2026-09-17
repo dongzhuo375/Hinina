@@ -1,6 +1,12 @@
 import type { AppConfig } from '@/types/config'
 import * as configBridge from '@/bridge/config.bridge'
 import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
+import {
+  DEFAULT_EDITOR_FONT_SIZE,
+  DEFAULT_EDITOR_TAB_SIZE,
+  DEFAULT_EDITOR_THEME,
+  normalizeEditorTheme,
+} from '@/utils/editor'
 
 /// 轮询参数兜底值，与 Rust `core::entity::config` 的默认值保持一致（2 秒 / 300 秒）
 const DEFAULT_POLL_INTERVAL_MS = 2_000
@@ -77,20 +83,23 @@ export class ConfigService {
   }
 
   /**
-   * 编辑器偏好（字号 / Tab 宽度）。
+   * 编辑器偏好（字号 / Tab 宽度 / 编辑器主题）。
    *
-   * 读取失败或值非法时回退兜底值（14 / 4），编辑器渲染不因配置问题阻断。
+   * 读取失败或值非法时回退兜底值（14 / 4 / 'vs'），编辑器渲染不因配置问题阻断。
+   * 主题经 `normalizeEditorTheme` 收敛到 Monaco 主题值域 —— 未知主题名会让
+   * `setTheme` 静默无效。
    */
   async getEditorPrefs(): Promise<EditorPrefs> {
     try {
       const config = await this.getConfig()
       return {
-        fontSize: clampInt(config.editor?.fontSize, 8, 32, DEFAULT_FONT_SIZE),
-        tabSize: clampInt(config.editor?.tabSize, 1, 8, DEFAULT_TAB_SIZE),
+        fontSize: clampInt(config.editor?.fontSize, 8, 32, DEFAULT_EDITOR_FONT_SIZE),
+        tabSize: clampInt(config.editor?.tabSize, 1, 8, DEFAULT_EDITOR_TAB_SIZE),
+        editorTheme: normalizeEditorTheme(config.theme?.editorTheme),
       }
     } catch (e) {
       console.error('[configService] 读取编辑器配置失败，使用兜底值:', e)
-      return { fontSize: DEFAULT_FONT_SIZE, tabSize: DEFAULT_TAB_SIZE }
+      return { fontSize: DEFAULT_EDITOR_FONT_SIZE, tabSize: DEFAULT_EDITOR_TAB_SIZE, editorTheme: DEFAULT_EDITOR_THEME }
     }
   }
 
@@ -128,6 +137,21 @@ export class ConfigService {
   }
 
   /**
+   * 保存编辑器偏好（字号 / Tab 宽度 / 编辑器主题）—— 解题页编辑器设置弹层的落盘入口。
+   *
+   * 只写传入的字段，其余配置经 `updateConfig` 读-改-写保留。编辑器主题落在
+   * `theme.editorTheme`（Monaco 主题），**不触碰 `theme.themeName`**：
+   * 客户端界面仍只有浅色，深色只作用于编辑器区域。
+   */
+  async updateEditorPrefs(patch: Partial<EditorPrefs>): Promise<void> {
+    await this.updateConfig((draft) => {
+      if (patch.fontSize !== undefined) draft.editor.fontSize = patch.fontSize
+      if (patch.tabSize !== undefined) draft.editor.tabSize = patch.tabSize
+      if (patch.editorTheme !== undefined) draft.theme.editorTheme = normalizeEditorTheme(patch.editorTheme)
+    })
+  }
+
+  /**
    * 更新配置的唯一入口：读取当前配置 → 应用变更 → 整体写回后端 → 失效本地缓存。
    *
    * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
@@ -147,15 +171,14 @@ export class ConfigService {
   }
 }
 
-/// 编辑器偏好（字号 / Tab 宽度）
+/// 编辑器偏好（字号 / Tab 宽度 / 编辑器主题）
 export interface EditorPrefs {
   fontSize: number
   tabSize: number
+  /// Monaco 主题名（值域见 `utils/editor`）
+  editorTheme: string
 }
 
-/// 编辑器兜底值，与 Rust `core::entity::config` 默认值一致
-const DEFAULT_FONT_SIZE = 14
-const DEFAULT_TAB_SIZE = 4
 /// 分栏比例兜底值（设计稿 48% / 52%）
 const DEFAULT_SPLIT_RATIO = 0.48
 

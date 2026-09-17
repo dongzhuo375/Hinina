@@ -49,8 +49,9 @@ save(): canSave 才执行 → updateConfig(读-改-写整体替换 + 失效缓�
         → baseline 前移、showSaved 3s；失败写 saveError（表单值保留）
 discard(): Object.assign(form, JSON.parse(baseline))
 
-主题分组：界面/编辑器主题下拉均 disabled（当前版本固定浅色，暗色即将上线）——
-          展示占位而非隐藏，管理用户预期
+主题分组：界面主题下拉 disabled（整机只有浅色，暗色即将上线）；编辑器主题下拉同样 disabled，
+但文案指向「由解题页编辑器设置控制」—— 编辑器主题已可切换（`theme.editorTheme`），
+只是入口在解题页弹层，置灰项不得再宣称「固定浅色」
 ```
 
 设计要点：
@@ -60,6 +61,9 @@ discard(): Object.assign(form, JSON.parse(baseline))
 - **后端 `update_config` 是整体替换语义**：必须经 `configService.updateConfig` 的
   读-改-写路径，直接提交局部字段会把其余配置冲掉。
 - 加载前失效缓存与保存后失效缓存（service 内部）闭环，保证「所见 = 磁盘真值」。
+- **编辑器分组与解题页弹层同源**：两处写的是同一份 `editor.*` 配置。解题页
+  「编辑器设置」弹层是**即时生效**入口（改完立刻作用当前编辑器），设置页是**批量编辑**
+  入口（改动对新打开的解题页生效）—— 分组标题旁的提示文案即表达这一分工。
 - hojUrl 修改后需重启客户端生效、contestId 保存后下次进入赛场生效——提示文案明示生效时机。
 - 存储信息每次挂载实时读取（service 不缓存：版本号构建期固定，但存储目录可能随
   用户数据迁移变化）。

@@ -10,7 +10,7 @@
   - `fn current_theme(&self) -> String` — 获取当前主题名称（light / dark）
   - `fn current_editor_theme(&self) -> String` — 获取当前 Monaco 编辑器主题名
   - `fn get_theme_config(&self) -> ThemeConfig` — 获取当前主题配置完整副本
-  - `fn set_theme(&self, theme_name) -> AppResult<()>` — 切换主题并自动匹配编辑器主题（light → "vs"，其余 → "vs-dark"）；非内置主题仅警告但仍允许切换；发布 `SystemEvent::ThemeChanged`
+  - `fn set_theme(&self, theme_name) -> AppResult<()>` — 切换主题并自动匹配编辑器主题（light → "vs"，其余 → "vs-dark"）；非内置主题仅警告但仍允许切换；发布 `SystemEvent::ThemeChanged`。**注意**：该方法会一并覆盖 `editor_theme`，而编辑器主题自「解题页编辑器设置」起已可独立选择（`theme_name = light` + `editor_theme = vs-dark` 是合法组合）—— 前端若日后接入整机主题切换（当前无调用方，无 theme bridge），需改为不覆盖 `editor_theme` 或先征询用户
   - `fn list_themes(&self) -> &[&str]` — 返回内置主题列表 `["light", "dark"]`
 - **字段**：`config: Arc<ConfigService<R>>`, `event_bus: Arc<EventBus>`
 - 常量：`BUILTIN_THEMES: &[&str] = &["light", "dark"]`
