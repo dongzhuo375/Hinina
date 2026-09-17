@@ -47,7 +47,7 @@ Hinina/
         │   │   ├── contest.rs            # Contest（+ rank_show_name/seal_rank/seal_rank_time/allow_end_submit/oi_rank_score_type）+ ContestProblem（+ color 气球色）
         │   │   ├── problem.rs            # Problem（+ languages 本题允许提交语言，HOJ 显示名）+ Sample 实体
         │   │   ├── announcement.rs       # Announcement + AnnouncementPage（公告实体，时间为 epoch 秒；已读状态是客户端特性，见 service/contest）
-        │   │   ├── submission.rs         # JudgementStatus（HOJ 全状态码 0-15）+ JudgementResult + SubmissionRecord/Page/Query/Detail + JudgeCase/SubTaskCases/SubmissionCases
+        │   │   ├── submission.rs         # JudgementStatus（HOJ 全状态码 0-15；is_terminal 核心层终态判据，三处对齐）+ JudgementResult + SubmissionRecord/Page/Query/Detail + JudgeCase/SubTaskCases/SubmissionCases
         │   │   ├── rank.rs               # 榜单实体：RankCell / ContestRankRow / ContestRankPage / RankQuery / ProblemLimits（ACM 与 OI 两套 VO 在 Adapter 归一到此）
         │   │   ├── workspace.rs          # Workspace 核心实体（阶段 3 完善）
         │   │   └── tests/
@@ -97,7 +97,7 @@ Hinina/
         │   │   └── tests/
         │   │       └── problem_tests.rs  # limits 与题面缓存测试（首次落盘/二次命中零请求/开关关闭直连且不落盘/跨实例命中/键隔离/错误不入缓存/401 不回退默认值）
         │   ├── submission/
-        │   │   ├── mod.rs                # SubmissionService：代码提交/评测轮询/超时（认证错误立即上抛）+ 提交历史/详情/测试点查询（list_contest_submissions / get_submission_detail / get_submission_cases，均不缓存）
+        │   │   ├── mod.rs                # SubmissionService：代码提交/评测轮询/超时（认证错误立即上抛）+ 提交历史/详情/测试点查询（列表不缓存；终态详情与测试点走仅内存 TTL 缓存，评测中永不缓存；clear_user_caches 由登出编排）
         │   │   ├── error.rs              # SubmissionError
         │   │   └── tests/
         │   │       └── submission_tests.rs  # SubmissionService 单元测试（变体穿透、认证错误短路、瞬时抖动仍重试、超时语义、历史/详情/测试点穿透）
@@ -169,7 +169,7 @@ Hinina/
         │       └── mod.rs
         └── commands/                     # Tauri Command 薄封装
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
-            ├── auth_cmd.rs               # login / logout / get_session / validate_session（三态）
+            ├── auth_cmd.rs               # login / logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
             ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest / get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
             ├── problem_cmd.rs            # get_problem / list_problems / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases

@@ -26,6 +26,24 @@ pub enum JudgementStatus {
     Unknown,
 }
 
+impl JudgementStatus {
+    /// 是否已到达**终态**（评测不再变化，可停止轮询）。
+    ///
+    /// 非终态仅 `Pending` / `Compiling` / `Running` 三个 —— 其余（含 `Unknown`
+    /// 与各类系统错误）一律视为终态：把无法识别的状态当非终态会让轮询无限进行。
+    ///
+    /// 三处判据必须保持一致（新增状态时同步）：
+    /// - 本方法（核心层，OI/ACM 无关）
+    /// - `adapter::hoj::types::is_terminal_status`（OJ 原始状态码 → 终态，0/1 之外皆终态）
+    /// - 前端 `utils/submission.isTerminalStatus`（同一非终态集合）
+    ///
+    /// 用途：提交详情/测试点**只有终态结果才可缓存** —— 评测中的状态随时会变，
+    /// 缓存它等于让界面停在「评测中」。
+    pub fn is_terminal(&self) -> bool {
+        !matches!(self, Self::Pending | Self::Compiling | Self::Running)
+    }
+}
+
 /// 评测结果详情
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -147,3 +165,7 @@ pub struct SubmissionCases {
     /// 判题模式："default" / "subtask_lowest" / "subtask_lowest_all" / "ergodic_without_skipped" 等
     pub mode: String,
 }
+
+#[cfg(test)]
+#[path = "tests/submission_tests.rs"]
+mod tests;

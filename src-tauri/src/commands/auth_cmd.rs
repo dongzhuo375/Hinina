@@ -51,9 +51,15 @@ pub async fn login(
 /// 登出 Command。
 ///
 /// 前端 invoke 签名: `logout`
+///
+/// 编排两件事：清除会话（`AuthService::logout`，其内部即使远端登出失败也返回 Ok），
+/// 以及**清空用户域缓存**（终态提交详情/测试点，含源代码）—— 缓存是内存态，
+/// 不清理会让同机换账号后仍能读到上一位选手的提交内容。
 #[tauri::command]
 pub async fn logout(ctx: State<'_, AppContext>) -> AppResult<()> {
-    ctx.auth.logout().await
+    let result = ctx.auth.logout().await;
+    ctx.submission.clear_user_caches();
+    result
 }
 
 /// 获取本地保存的会话信息。
