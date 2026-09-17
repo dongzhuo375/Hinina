@@ -198,7 +198,7 @@ Hinina/
 
 ```
 src/
-├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配）
+├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配 + KaTeX 公式样式全局引入，字体本地打包不经 CDN）
 ├── App.vue                               # 根组件（n-config-provider + n-dialog-provider）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
@@ -281,16 +281,16 @@ src/
 │   ├── workspace.ts                      # Workspace 实体
 │   └── config.ts                         # AppConfig 及其子配置
 ├── utils/
-│   ├── markdown.ts                       # Markdown 渲染（marked）+ DOMPurify 出口统一消毒（P49/P63）+ 相对图片 URL 改写为 HOJ 绝对地址
+│   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS）+ 时间/内存/长度格式化 + findFirstFailedCase
 ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
 │   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入）
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
-│   └── __tests__/                        # contest / submission / session-check / polling / rank / limits / markdown .spec.ts（阶段判据、终态穷尽映射、预检调度边界、轮询节奏、榜单映射与口径、limits 换算、渲染契约）
+│   └── __tests__/                        # contest / submission / session-check / polling / rank / limits / markdown / markdown-dom .spec.ts（阶段判据、终态穷尽映射、预检调度边界、轮询节奏、榜单映射与口径、limits 换算、渲染契约、jsdom 消毒激活态的生产链路契约）
 └── styles/
-    └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题
+    └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题 + KaTeX 公式全局样式（块级公式横向滚动防裁切，题面/公告/简介共用）
 ```
 
 ---
@@ -364,4 +364,4 @@ src/
 - **题目 limits 缓存**：列表接口不返回 limits，只能按题请求 `get-contest-problem-details`；`ProblemService::load_problem_limits` 做「内存 + 磁盘（`cache/problem_limits/{cid}.json`）」双层缓存、并发上限 4、部分失败跳过、全部失败才上抛；401/403 **不得静默回退默认值**（未注册私有赛必须让选手看见真因）。展示需标注语言倍率（题面是 C/C++ 基准，其它语言时间与内存 ×2）
 - **状态文案以接口返回为准**：评测状态直接用后端 `JudgementStatus` 原词（Accepted / Wrong Answer…），不强行缩写为 AC/WA；`get-user-problem-status` 的 0/1/2 映射为「未作答 / 已通过 / 尝试过」
 - **工作区语言必须落盘**：语言不属于任何代码文件，`update_workspace_file` 带不上它；`workspaceStore.changeLanguage` 乐观更新本地并调用 `set_workspace_language` 立即持久化元数据，否则切题或重启后退回默认语言，会把 Java 代码当 C++ 提交
-- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；本轮只做浅色主题（Monaco `vs`）。唯一例外是安全依赖 `dompurify`：`renderMarkdown` 出口统一消毒（题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）
+- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；本轮只做浅色主题（Monaco `vs`）。例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）

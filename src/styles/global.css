@@ -94,3 +94,20 @@ body {
   background-color: var(--bg-card) !important;
 }
 
+/* ── KaTeX 数学公式（题面 / 公告 / 比赛简介共用，故放全局） ── */
+
+/* 块级公式自带外边距，窄栏里与段落间距叠加会显得松散，收敛一下 */
+.katex-display {
+  margin: 0.5rem 0;
+  /* 宽公式（长推导式）在窄分栏里必须能横向滚动：题面外层是 overflow-hidden，
+     不自己开滚动条就会被直接裁掉且无从查看 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+/* 行内公式跟随正文行高，避免撑高段落导致上下跳动 */
+.katex {
+  line-height: 1.2;
+}
+
