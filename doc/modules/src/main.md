@@ -15,6 +15,7 @@
 | `app.use(router)` | 装配路由（含 `beforeEach` 会话守卫，见 `router/index.md`） |
 | `installSessionGuard(router)` | **组合根注入**：把「认证类 IPC 失败 → 判定会话失效 → 清理并回登录页」的观察者挂到 Bridge 层，随后传入 router 供失效后导航 |
 | `import '@/styles/global.css'` | 全局样式（CSS 变量主题、榜单状态色等） |
+| `import 'katex/dist/katex.min.css'` | KaTeX 公式样式与字体（题面/公告/简介的 LaTeX 公式）；字体由 katex 包本地打包、不经 CDN，符合离线客户端约束 |
 | `app.mount('#app')` | 挂载 |
 
 注：Naive UI **不在此处 `app.use`**——`App.vue` 直接按需引入 `NConfigProvider` / `NDialogProvider` 组件（tree-shaking 友好，无全量插件安装）。
@@ -25,6 +26,7 @@
 - `@/router` / `@/App.vue`
 - `@/stores/sessionGuard`（`installSessionGuard`）
 - `@/styles/global.css`
+- `katex/dist/katex.min.css`（公式渲染的消费前提，与 `utils/markdown.ts` 的 KaTeX 输出配套）
 
 ## 被依赖
 

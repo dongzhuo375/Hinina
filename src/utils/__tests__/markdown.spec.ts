@@ -39,3 +39,124 @@ describe('renderMarkdown', () => {
     expect(html).toContain('src="/api/public/img/a.png"')
   })
 })
+
+/**
+ * LaTeX 公式渲染（KaTeX）。
+ *
+ * 题面数学符号此前完全无法渲染（`$...$` 按字面输出，且下标 `_` 先被 markdown
+ * 吃成 `<em>`），以下用例锁定修复后的契约。
+ */
+describe('renderMarkdown — 数学公式', () => {
+  it('行内公式 $...$ 渲染为 KaTeX 结构', () => {
+    const html = renderMarkdown('设 $n$ 为整数', '')
+    expect(html).toContain('class="katex"')
+    expect(html).not.toContain('$n$')
+  })
+
+  it('块级公式 $$...$$ 渲染为 display 模式', () => {
+    const html = renderMarkdown('$$\n\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}\n$$', '')
+    expect(html).toContain('katex-display')
+    expect(html).toContain('class="katex"')
+  })
+
+  it('下标不被 markdown 吃成 <em>（tokenizer 层接管的意义）', () => {
+    const html = renderMarkdown('其中 $x_1 + x_2 = y$', '')
+    expect(html).toContain('class="katex"')
+    expect(html).not.toContain('<em>')
+  })
+
+  it('中文紧邻 $ 无空格也能识别（nonStandard：中文题面常态）', () => {
+    const html = renderMarkdown('保证$1 \\le n \\le 10^5$成立，求最小值', '')
+    expect(html).toContain('class="katex"')
+    // 公式前后的中文正文必须完整保留
+    expect(html).toContain('保证')
+    expect(html).toContain('成立，求最小值')
+  })
+
+  it('LaTeX 写错时降级为可见错误文本，绝不抛错（throwOnError:false）', () => {
+    // 组织者手写公式出错是常态：抛错会让整段题面白屏
+    expect(() => renderMarkdown('数据范围 $\\frac{$ 与 $\\unknownmacro{x}$', '')).not.toThrow()
+    const html = renderMarkdown('$\\frac{$', '')
+    expect(html).toContain('katex-error')
+  })
+
+  it('行内代码与围栏代码块中的 $ 保持字面（不当公式渲染）', () => {
+    const inline = renderMarkdown('执行 `echo $HOME` 查看', '')
+    expect(inline).toContain('<code>')
+    expect(inline).not.toContain('class="katex"')
+
+    const fenced = renderMarkdown('```\nprice = $5\n```\n', '')
+    expect(fenced).toContain('<code>')
+    expect(fenced).not.toContain('class="katex"')
+  })
+
+  it('公式与普通 Markdown 结构共存（列表/加粗/标题）', () => {
+    const html = renderMarkdown(
+      '## 输入\n\n- 第一行包含 **整数** $n$\n- 第二行包含 $a_i$\n',
+      '',
+    )
+    expect(html).toContain('<h2>输入</h2>')
+    expect(html).toContain('<strong>整数</strong>')
+    expect(html).toContain('<li>')
+    expect(html.match(/class="katex"/g)?.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('已知取舍：正文成对货币 $ 会被当作公式（ACM 题面极少出现，取中文数学式优先）', () => {
+    const html = renderMarkdown('价格 $5 和 $10 之间', '')
+    expect(html).toContain('class="katex"')
+  })
+
+  it('公式渲染不影响图片相对 URL 改写', () => {
+    const html = renderMarkdown('![图](/api/public/img/a.png)\n\n设 $n$ 为整数', 'https://oj.example.com')
+    expect(html).toContain('src="https://oj.example.com/api/public/img/a.png"')
+    expect(html).toContain('class="katex"')
+  })
+})
+
+/**
+ * Vditor `:::` 排版容器（HOJ 管理端编辑器"居中/居右"按钮的产物）。
+ * 此前整块按字面输出："::: hljs-center" 直接印在页面里，容器内公式不渲染也不对齐。
+ */
+describe('renderMarkdown — Vditor ::: 容器', () => {
+  it('容器渲染为同名 div，内部块级公式照常渲染', () => {
+    const html = renderMarkdown('::: hljs-center\n$$\nh(x)=e^{e^x}\n$$\n:::', '')
+    expect(html).toContain('<div class="hljs-center">')
+    expect(html).toContain('katex-display')
+    // 字面 ::: 不得残留在输出里
+    expect(html).not.toContain(':::')
+  })
+
+  it('容器紧跟正文段落（无空行分隔）也能打断段落', () => {
+    const html = renderMarkdown(
+      '题面正文。\n::: hljs-center\n居中文字\n:::\n后续文字。',
+      '',
+    )
+    expect(html).toContain('<p>题面正文。</p>')
+    // 容器 div 包裹其内容（闭合标签前的换行随内部块渲染器而定，不锁细节）
+    expect(html).toMatch(/<div class="hljs-center">[\s\S]*<p>居中文字<\/p>[\s\S]*<\/div>/)
+    expect(html).not.toContain(':::')
+  })
+
+  it('容器内的行内公式与嵌套结构（列表）照常解析', () => {
+    const html = renderMarkdown(
+      '::: hljs-right\n- 设 $n$ 为整数\n- 求最小值\n:::',
+      '',
+    )
+    expect(html).toContain('<div class="hljs-right">')
+    expect(html).toContain('<li>')
+    expect(html).toContain('class="katex"')
+  })
+
+  it('未闭合的容器整块降级为字面文本（不吞内容）', () => {
+    const html = renderMarkdown('::: hljs-center\n只有开头没有结尾', '')
+    expect(html).toContain('::: hljs-center')
+    expect(html).toContain('只有开头没有结尾')
+  })
+
+  it('类名不合法（含引号等）不匹配容器（class 属性注入防护）', () => {
+    const html = renderMarkdown('::: a"onclick=alert(1)\n内容\n:::', '')
+    // 不构成容器 → 按字面文本输出，onclick 永远不会成为属性
+    expect(html).not.toMatch(/class="a"/)
+    expect(html).toContain('内容')
+  })
+})
