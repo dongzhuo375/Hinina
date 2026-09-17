@@ -92,10 +92,10 @@ Hinina/
         │   │   └── tests/
         │   │       └── contest_tests.rs  # ContestService 单元测试（错误变体穿透 + TTL 缓存语义：命中零请求/过期重取/refresh 强制/失败不留 stale + 元信息缓存：命中跳过 get_contest 而题目列表仍实时/磁盘跨实例命中/按比赛隔离/refresh 清两层/错误不入缓存 + 公告已读读写与损坏降级）
         │   ├── problem/
-        │   │   ├── mod.rs                # ProblemService：题目获取/打开题目/我的题目状态/load_problem_limits（内存+磁盘双层缓存、并发上限 4、部分失败跳过）
+        │   │   ├── mod.rs                # ProblemService：题目获取/打开题目（题面内存+磁盘缓存，TTL 30min，受 oj.cacheProblemStatement 开关控制）/我的题目状态/load_problem_limits（内存+磁盘双层缓存、并发上限 4、部分失败跳过）
         │   │   ├── error.rs              # ProblemError
         │   │   └── tests/
-        │   │       └── problem_tests.rs  # limits 缓存测试（首次落盘/二次命中零请求/损坏文件降级/401 不回退默认值）
+        │   │       └── problem_tests.rs  # limits 与题面缓存测试（首次落盘/二次命中零请求/开关关闭直连且不落盘/跨实例命中/键隔离/错误不入缓存/401 不回退默认值）
         │   ├── submission/
         │   │   ├── mod.rs                # SubmissionService：代码提交/评测轮询/超时（认证错误立即上抛）+ 提交历史/详情/测试点查询（list_contest_submissions / get_submission_detail / get_submission_cases，均不缓存）
         │   │   ├── error.rs              # SubmissionError
@@ -280,7 +280,7 @@ src/
 │   ├── system.ts                         # StorageInfo（存储目录/日志路径/版本）
 │   ├── rank.ts                           # RankCell / ContestRankRow / ContestRankPage / RankQuery / ProblemLimits（榜单与题目限制跨端契约）
 │   ├── workspace.ts                      # Workspace 实体
-│   └── config.ts                         # AppConfig 及其子配置
+│   └── config.ts                         # AppConfig 及其子配置（含 oj.cacheProblemStatement 题面缓存开关）
 ├── utils/
 │   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白；剥离只为安全，表现性标记保真渲染）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）

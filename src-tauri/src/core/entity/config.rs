@@ -82,6 +82,13 @@ pub struct OjConfig {
     /// 比赛列表缓存 TTL（秒）
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_secs: u64,
+    /// 是否启用题面缓存（内存 + 磁盘，TTL 见 `service::problem::PROBLEM_CACHE_TTL`）。
+    ///
+    /// 默认开启：题面在比赛期间基本不变，缓存可省掉「切题来回/重进应用」的重复请求，
+    /// 并在断网时仍可打开已缓存的题面。关闭后每次打开题目都直连服务端
+    /// （题面被管理员中途修正时想立刻看到真值，可临时关闭）。
+    #[serde(default = "default_cache_problem_statement")]
+    pub cache_problem_statement: bool,
     /// 默认加载的比赛 ID（阶段 7：单比赛模式，从配置读取）。
     /// 设为 0 表示不自动加载。
     #[serde(default)]
@@ -101,6 +108,7 @@ impl Default for OjConfig {
             cache_ttl_secs: default_cache_ttl(),
             contest_id: 0,
             contest_password: None,
+            cache_problem_statement: default_cache_problem_statement(),
         }
     }
 }
@@ -119,6 +127,10 @@ const fn default_poll_timeout() -> u64 {
 }
 const fn default_cache_ttl() -> u64 {
     60
+}
+/// 题面缓存默认开启（关掉只影响性能，不影响正确性）
+const fn default_cache_problem_statement() -> bool {
+    true
 }
 
 // ── 编辑器配置 ──
