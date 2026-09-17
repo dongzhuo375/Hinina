@@ -107,6 +107,28 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
     }
   })
 
+  it('轮询超时（终态未知）同样标记过期，避免 pill 长期错误', async () => {
+    // 开场判题积压时超过 pollTimeoutSecs 是现实场景：轮询停止后服务端可能才出结果，
+    // 若不置位，总览页的增量门控会让 AC/尝试过 pill 一直错到用户进入某题
+    vi.useFakeTimers()
+    try {
+      submissionService.submitCode.mockResolvedValue('s1')
+      submissionService.pollJudgement.mockResolvedValue(makeResult('Pending'))
+      const store = useSubmissionStore()
+      const problem = useProblemStore()
+      problem.myStatusStale = false
+
+      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      // 推进到总超时（10s）之后若干周期：抖动使「首个越过 deadline 的 tick」可能落在
+      // 10–14.4s 之间，故给足余量；轮询停止，但终态未知
+      await vi.advanceTimersByTimeAsync(20_000)
+
+      expect(problem.myStatusStale).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('评测结果回填耗时与内存（memory 不得缺失）', async () => {
     vi.useFakeTimers()
     try {

@@ -71,17 +71,22 @@ where
 
     /// 写入（已存在的键视为更新，刷新其插入时间）。
     ///
-    /// 容量满时：先清过期条目，仍满则淘汰 `inserted_at` 最旧的一条。
+    /// **容量上界恒成立**：先无条件清理过期条目（既回收无压力时残留的过期项，
+    /// 也让容量判定以存活数为准），再在满员时淘汰 `inserted_at` 最旧的一条。
+    ///
+    /// 反例（修复前）：容量 2、表中已有「已过期但未回收」的键 a 与存活的 b、c 时，
+    /// 重新插入 a 会因 `contains_key` 短路而跳过容量检查 —— 过期键被「复活」，
+    /// 存活数涨到 3。故容量检查不能以 `!contains_key` 为前提。
     pub fn insert(&self, key: K, value: V) {
         let mut guard = self.inner.write().unwrap_or_else(|e| e.into_inner());
 
-        if !guard.contains_key(&key) && self.live_len(&guard) >= self.capacity {
-            self.purge_expired(&mut guard);
-            if self.live_len(&guard) >= self.capacity {
-                if let Some(oldest) = self.oldest_key(&guard) {
-                    guard.remove(&oldest);
-                    debug!(capacity = self.capacity, "缓存容量已满，淘汰最旧条目");
-                }
+        self.purge_expired(&mut guard);
+
+        // purge 后表中只剩存活条目，`len()` 即存活数
+        if !guard.contains_key(&key) && guard.len() >= self.capacity {
+            if let Some(oldest) = self.oldest_key(&guard) {
+                guard.remove(&oldest);
+                debug!(capacity = self.capacity, "缓存容量已满，淘汰最旧条目");
             }
         }
 

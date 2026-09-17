@@ -12,7 +12,7 @@
 |------|------|------|
 | `TtlCache<K, V>` | `new(ttl: Duration, capacity: usize) -> Self` | 内存缓存；`capacity` 为 0 时按 1 处理 |
 | | `get(&K) -> Option<V>` | 读锁；未命中或已过期返回 `None`。**过期条目不在读路径删除**（读锁不写），由 `insert` 的清理步骤回收 |
-| | `insert(K, V)` | 写锁；同键视为更新（刷新计时、不占新容量）；容量满时先清过期、仍满则淘汰 `inserted_at` 最旧的一条 |
+| | `insert(K, V)` | 写锁；**先无条件清理过期条目**（既回收无压力时残留的过期项，也让容量判定以存活数为准），再在满员且键不存在时淘汰 `inserted_at` 最旧的一条；同键视为更新（刷新计时）。**容量上界恒成立** —— 容量检查不能以 `!contains_key` 为前提，否则「已过期但未回收」的键被重新插入时会复活并突破上界 |
 | | `invalidate(&K) -> bool` / `clear()` / `len()` / `is_empty()` | `len()` 只统计存活条目（不含残留过期项） |
 | `JsonDiskCache` | `new(storage: Arc<Storage>, namespace: &'static str) -> Self` | 磁盘缓存，落盘路径 `cache/{namespace}/{key}.json` |
 | | `read<T: DeserializeOwned>(&self, key, ttl: Duration) -> Option<T>` | 不存在 / 不安全键 / 解析失败 / 已过期一律 `None`；**过期文件懒删除**（删失败只告警） |
@@ -40,9 +40,9 @@ TtlCache::get(key)
   读锁 → 命中且 elapsed < ttl ? Some(clone) : None      // 不加写锁，并发读无竞争
 
 TtlCache::insert(key, value)
-  写锁 → 键不存在且存活数 >= capacity
-        → 先 purge 过期条目 → 仍满 → 淘汰 inserted_at 最旧
-        → 写入/覆盖（刷新 inserted_at）
+  写锁 → 无条件 purge 过期条目（回收无压力时的残留）
+       → 键不存在且 guard.len() >= capacity → 淘汰 inserted_at 最旧
+       → 写入/覆盖（刷新 inserted_at）              // 存活数恒 <= capacity
 
 JsonDiskCache::read(key, ttl)
   key_path(key)（拒绝空键 / 绝对路径 / 含 ".."）
@@ -61,6 +61,9 @@ JsonDiskCache::write(key, value)
 - **近似 FIFO 而非精确 LRU**：精确 LRU 需在命中时更新访问序 → 读路径变写锁；
   本仓库缓存容量仅数百条、TTL 分钟级，收益不抵复杂度。淘汰顺序「先过期、再最旧插入」
   已保证内存有界。
+- **容量上界是硬约束**（用户域缓存的内存边界）：`insert` 每次先清过期再判容量，
+  使「存活数 ≤ capacity」恒成立。曾经的写法把容量检查挂在 `!contains_key` 之后，
+  让「已过期但未回收」的键被重新插入时绕过检查（复活）而突破上界。
 - **磁盘缓存必须带 `fetchedAt`**：只存值会让重启后的条目永远「新鲜」，
   等于把 TTL 变成「进程生命周期」。
 - **键的作用域由调用方保证**：本模块只做路径安全校验（拒绝 `..`/绝对路径/空键，
@@ -73,5 +76,5 @@ JsonDiskCache::write(key, value)
 
 ## 测试
 
-`src-tauri/src/infra/tests/cache_tests.rs`（由 `cache.rs` 底部 `#[cfg(test)] #[path = "tests/cache_tests.rs"] mod tests;` 引用）锁定 15 例：TTL 内命中/过期未命中/同键重插刷新计时、容量淘汰最旧、满容量时先清过期（不挤掉存活条目）、容量 0 钳为 1、键隔离、`invalidate`/`clear`、并发读写下不死锁且有命中、磁盘往返含 `fetchedAt`、未命中与非法键（`..`）不落盘、按 `fetchedAt` 过期并懒删除文件、损坏 JSON 视为未命中、跨实例（模拟重启）命中 + `remove`/`clear_namespace` 幂等、嵌套键按比赛分目录互不覆盖。
+`src-tauri/src/infra/tests/cache_tests.rs`（由 `cache.rs` 底部 `#[cfg(test)] #[path = "tests/cache_tests.rs"] mod tests;` 引用）锁定 17 例：TTL 内命中/过期未命中/同键重插刷新计时、容量淘汰最旧、满容量时先清过期（不挤掉存活条目）、**复活已过期键仍受容量约束（回归）**、**无压力时也回收过期条目**、容量 0 钳为 1、键隔离、`invalidate`/`clear`、并发读写下不死锁且有命中、磁盘往返含 `fetchedAt`、未命中与非法键（`..`）不落盘、按 `fetchedAt` 过期并懒删除文件、损坏 JSON 视为未命中、跨实例（模拟重启）命中 + `remove`/`clear_namespace` 幂等、嵌套键按比赛分目录互不覆盖。
 

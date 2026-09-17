@@ -124,6 +124,38 @@ fn ttl_cache_invalidate_and_clear() {
     assert!(cache.is_empty());
 }
 
+#[test]
+fn ttl_cache_capacity_is_enforced_even_when_reviving_expired_key() {
+    // 回归：容量检查曾以 `!contains_key` 为前提，导致「已过期但未回收」的键被重新
+    // 插入时跳过检查（复活），存活数可超过容量上限。
+    let cache: TtlCache<String, i32> = TtlCache::new(ms(50), 2);
+    cache.insert("a".into(), 1);
+    thread::sleep(ms(70)); // a 过期但仍在表中（无容量压力时不会被回收）
+
+    cache.insert("b".into(), 2);
+    cache.insert("c".into(), 3);
+    cache.insert("a".into(), 10); // 复活已过期键
+
+    assert_eq!(cache.len(), 2, "容量上界必须恒成立");
+    assert_eq!(cache.get(&"a".into()), Some(10));
+    assert_eq!(cache.get(&"c".into()), Some(3));
+    assert_eq!(cache.get(&"b".into()), None, "满员时应淘汰最旧插入的 b");
+}
+
+#[test]
+fn ttl_cache_insert_reclaims_expired_entries_without_pressure() {
+    // 无容量压力时也回收过期条目（否则过期项常驻内存，容量语义名不副实）
+    let cache: TtlCache<String, i32> = TtlCache::new(ms(30), 8);
+    cache.insert("a".into(), 1);
+    thread::sleep(ms(50));
+
+    cache.insert("b".into(), 2);
+
+    assert_eq!(cache.len(), 1);
+    assert_eq!(cache.get(&"a".into()), None);
+    assert_eq!(cache.get(&"b".into()), Some(2));
+}
+
 // ── TtlCache：并发（读路径不加写锁，不死锁） ──
 
 #[test]

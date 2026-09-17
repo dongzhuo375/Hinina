@@ -178,6 +178,10 @@ export const useSubmissionStore = defineStore('submission', {
       if (!ctx) return
       if (Date.now() >= ctx.deadline) {
         log.warn(`提交 ${submissionId} 评测轮询超时，已停止`)
+        // 超时停止时**终态未知**（服务端可能稍后才出结果）：安全动作是把「我的题目
+        // 状态」标记为过期，让总览页重拉一次 —— 否则 AC/尝试过 pill 与解题进度会一直
+        // 停留在错误值，直到用户进入某题或下次提交。开场判题积压时超过 5 分钟是现实场景。
+        useProblemStore().invalidateMyStatus()
         this.stopPolling(submissionId)
         return
       }
