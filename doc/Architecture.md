@@ -222,8 +222,9 @@ src/
 │   ├── contest/
 │   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时，数据源=榜单我的行）
 │   ├── editor/
-│   │   ├── CodeEditor.vue                # Monaco Editor 封装（浅色主题 + 语言工具条（候选=题目允许语言列表）+ 自动备份指示 + focus()；readonly 模式供详情页复用；字号/Tab 读配置）
-│   │   └── EditorConsoleBar.vue          # 编辑器底部控制台条（最新记录 pill=服务端真实最新提交+首个失败测试点 / 提交记录 (n) 入口 / 提交代码 / 光标状态行）
+│   │   ├── CodeEditor.vue                # Monaco Editor 封装（语言工具条（候选=题目允许语言列表）+ 自动备份指示 + focus()；readonly 模式供详情页复用；字号/Tab/主题读配置，弹层改动即时生效 + debounce 落盘）
+│   │   ├── EditorSettingsPopover.vue     # 编辑器设置弹层（字号 8–32 滑杆 / Tab 宽度 2/4/8 / 编辑器主题 vs·vs-dark / 恢复默认；受控组件，应用与落盘由 CodeEditor 承担）
+│   │   └── EditorConsoleBar.vue          # 编辑器底部控制台条（最新记录 pill=服务端真实最新提交+首个失败测试点 / 提交记录 (n) 入口 / 提交代码 / 光标与缩进状态行）
 │   ├── problem/
 │   │   ├── ProblemCard.vue               # 题目卡片（字母徽章取 HOJ 气球色、limits、通过数、我的状态 AC 优先、评测记录带 ?problem= 跳转、快捷提交弹窗入口）
 │   │   ├── QuickSubmitDialog.vue         # 快捷提交对话框（语言下拉 + Monaco + 拖拽/选择 .cpp/.c/.java/.py ≤256KB 扩展名识别语言 + 提交与内联评测结果）
@@ -284,13 +285,16 @@ src/
 │   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白；剥离只为安全，表现性标记保真渲染）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS）+ 时间/内存/长度格式化 + findFirstFailedCase
+│   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 存储域 1–8 与候选档位 2·4·8；前端各消费方一律取此处常量，Rust sanitize 同域）
+│   ├── logger.ts                         # 前端日志唯一入口（createLogger 作用域前缀 + debug/info 仅开发环境、warn/error 恒输出；不落盘，持久化日志归 Rust tracing）
+│   ├── error.ts                          # 错误文案收敛唯一出口（errorMessage：Error/字符串取信息，空值与非 Error 载荷回退兜底文案；不依赖 bridge，纯函数）
 ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
 │   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入）
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
-│   └── __tests__/                        # contest / submission / session-check / polling / rank / limits / markdown / markdown-dom .spec.ts（阶段判据、终态穷尽映射、预检调度边界、轮询节奏、榜单映射与口径、limits 换算、渲染契约、jsdom 消毒激活态的生产链路契约）
+│   └── __tests__/                        # contest / submission / session-check / polling / rank / limits / markdown / markdown-dom / editor / logger / error .spec.ts（阶段判据、终态穷尽映射、预检调度边界、轮询节奏、榜单映射与口径、limits 换算、渲染契约、jsdom 消毒激活态的生产链路契约、编辑器偏好值域、日志级别分流与作用域前缀、错误文案收敛）
 └── styles/
-    └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题 + KaTeX 公式全局样式（块级公式横向滚动防裁切，题面/公告/简介共用）
+    └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题 + KaTeX 公式全局样式（块级公式横向滚动防裁切，题面/公告/简介共用）；**不覆写 Monaco 背景**（编辑器底色由 theme.editorTheme 自绘，否则 vs-dark 只换字色）
 ```
 
 ---
@@ -339,6 +343,7 @@ src/
 - **三态契约必须由 Adapter 兑现**：`AuthProvider::validate_session` 的返回值语义是 `Ok(true)` 有效 / `Ok(false)` 服务端**明确**判定失效 / `Err(_)` 无法判定。**绝不可把网络错误折成 `Ok(false)`** —— 那会让 `SessionValidity::Unknown` 分支成为死代码，一次赛前网络抖动就把选手踢回登录页。HOJ 侧的判据抽成纯函数 `session_validity_from_response` 以便测试锁定：仅 `AppError::Auth` 算明确失效，非 200 的其它状态码（400/500）归 `Unknown`，网络/超时/解析失败一律上抛。同理，评测查询（`SubmissionService::get_judgement`，单次查询）**不得吞掉认证错误**：必须原样上抛，否则前端收敛轮询会把 401 当瞬时抖动重试到超时，选手干等五分钟后只收到「评测超时」，守卫也拿不到 Auth 变体
 - **赛前预检错峰**：登录页等待开赛时按 `utils/session-check.ts` 的策略校验会话 —— 距开赛 >10min 每 5min±60s 周期复检，进入 [T-10min, T-3min] 窗口后在剩余区间随机取点做一次性预检，迟到启动则 0–3s 抖动后立即执行，距开赛 ≤30s 不再预检。目的是把全场客户端的校验请求散布开，避免开赛前形成同步尖峰；**进场（T-0 导航）不错峰**，准点进场是公平性要求
 - **IPC 错误归一化**：Rust `AppError` 经 serde 序列化为 `{ Variant: msg }` 对象，`bridge/index.ts` 在唯一出口转换为 `IpcError extends Error`，保证上层 `e instanceof Error` 与 `e.message` 可用；日志不记录调用参数（含明文密码）
+- **错误文案与日志各有一个出口**：面向用户的错误文案统一经 `utils/error.errorMessage(e, '兜底')` 收敛（空 message、非 Error 载荷一律回退兜底文案，杜绝白屏式空白提示），禁止各处再写 `e instanceof Error ? e.message : '…'`；日志统一经 `utils/logger.createLogger('<模块名>')`（`[模块名]` 前缀、`debug`/`info` 仅开发环境、`warn`/`error` 恒输出），禁止散落 `console.*`。前端日志**只进 console 不落盘**（持久化由 Rust `tracing` 负责），且与 bridge 同款安全约束：不记录敏感参数
 - **错误变体是分流依据，后端不得改写**：前端 `isAuthError`（`variant === 'Auth'`）与 `stores/sessionGuard.ts` 的会话失效兜底完全依赖变体。补上下文一律用 `AppError::context()`（保留变体，只在消息前拼环节名），**禁止** `AppError::Network(format!("xx 请求失败: {}", e))` 这类重新包装 —— 它会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」自相矛盾的嵌套消息，把 DTO 问题当断网查，还会让 401 不再触发登出。**Service 层传播 Provider 错误同样适用此约定**（`contest` / `problem` / `submission` / `auth` 全部用 `e.context("…")`）：`get_rank` 是全场最高频的认证调用（每 10s 一次），变体被改写会让 token 过期时榜单静默 stale、提交只弹一条文案、选手永远回不到登录页
 - **OJ 响应解析归 Adapter，infra 只传字节**：`infra/http.rs` 只返回原始响应体与响应头（含状态码判定与 5xx 退避重试），不做反序列化；OJ 特有的响应归一化在 Adapter 的唯一入口完成。HOJ 侧有两个必须处理的协议事实：① 对未设置字段返回 `null` 而非省略（实测 `get-contest-list` 的 `sealRank`/`rankShowName`/`count`/`now` 全为 null），而 serde 的 `#[serde(default)]` **只在字段缺失时生效**，显式 null 会让整个响应解析失败 → 解析前统一 `strip_nulls`（`false`/`0`/`""` 不是 null，必须保留，否则封榜、打星、零分语义会被抹掉）；② 鉴权失败放在**响应体的 status**（HTTP 仍是 200，实测匿名访问 `get-contest-problem` 返回 `{"status":403,"msg":"请您先登录！"}`）→ 必须翻译成 `AppError::Auth`，且 403 要保守判定（仅当消息指向登录/凭证时才算会话失效，否则「私有赛未注册」会把已登录选手误踢回登录页）
 - **HTTP 401 由 infra 映射为 `Auth` 变体**：401 的标准语义就是「未认证」，属 HTTP 通用语义而非 OJ 私有约定，故由 `infra/http.rs` 的 `status_error` 承担；**403 保持 `Network`**（可能是业务性无权访问）。这条映射是会话校验能成立的前提 —— `get_json_authed` 遇到 401 时若仍归为 `Network`，`session_validity_from_response` 会把它当「无法判定」上抛，导致 token 真正过期时反而永不登出。实测 HOJ 两种报法都存在：`get-user-auth-info` 走 HTTP 401，`get-contest-problem` 走 HTTP 200 + 体内 403，两条路径都必须认- **真实响应夹具**：`adapter/hoj/tests/fixtures/contest_list_anon.json` 取自真实接口、仅脱敏自由文本，完整保留键名与 null 分布；配套一条正向测试（真实响应可解析）与一条反向测试（不去 null 必然失败），防止后来者把 `strip_nulls` 当冗余删掉
@@ -364,4 +369,4 @@ src/
 - **题目 limits 缓存**：列表接口不返回 limits，只能按题请求 `get-contest-problem-details`；`ProblemService::load_problem_limits` 做「内存 + 磁盘（`cache/problem_limits/{cid}.json`）」双层缓存、并发上限 4、部分失败跳过、全部失败才上抛；401/403 **不得静默回退默认值**（未注册私有赛必须让选手看见真因）。展示需标注语言倍率（题面是 C/C++ 基准，其它语言时间与内存 ×2）
 - **状态文案以接口返回为准**：评测状态直接用后端 `JudgementStatus` 原词（Accepted / Wrong Answer…），不强行缩写为 AC/WA；`get-user-problem-status` 的 0/1/2 映射为「未作答 / 已通过 / 尝试过」
 - **工作区语言必须落盘**：语言不属于任何代码文件，`update_workspace_file` 带不上它；`workspaceStore.changeLanguage` 乐观更新本地并调用 `set_workspace_language` 立即持久化元数据，否则切题或重启后退回默认语言，会把 Java 代码当 C++ 提交
-- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；本轮只做浅色主题（Monaco `vs`）。例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）
+- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）

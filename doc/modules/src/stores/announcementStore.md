@@ -28,6 +28,8 @@
 - `@/types/announcement`（仅类型）
 - `@/services/announcement.service`
 - `@/utils/polling`（`createPoller`）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 
@@ -47,7 +49,7 @@ AnnouncementsView onMounted
   → contestStore.whenLoaded() → refresh() → markAllRead()
      ├─ 本地乐观：readIds += 未读 ids（红点立即消失）
      ├─ service.markRead → 后端合并集合 → 替换 readIds
-     └─ 失败 → 回滚 readIds + console.error
+     └─ 失败 → 回滚 readIds + log.error 记录（utils/logger 作用域日志）
 ```
 
 设计要点：

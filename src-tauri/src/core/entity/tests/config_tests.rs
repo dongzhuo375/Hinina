@@ -65,7 +65,7 @@ fn normalize_maps_dark_theme_to_light() {
     cfg.theme.theme_name = "dark".into();
     cfg.theme.editor_theme = "vs-dark".into();
     normalize_legacy_values(&mut cfg);
-    // 深色主题未实现：归一到浅色，避免前端拿到不存在的主题名
+    // 整机深色主题未实现：theme_name 与随它一并写入的编辑器主题一起归位
     assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.theme.editor_theme, "vs");
 }
@@ -78,6 +78,18 @@ fn normalize_keeps_light_theme_untouched() {
     normalize_legacy_values(&mut cfg);
     assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.theme.editor_theme, "vs");
+}
+
+#[test]
+fn normalize_keeps_user_chosen_dark_editor_theme() {
+    // 编辑器主题是解题页可选项：浅色界面 + 深色编辑器是**合法组合**，
+    // 归一不得把用户选择改回浅色（曾无条件重置 vs-dark）
+    let mut cfg = AppConfig::default();
+    cfg.theme.theme_name = "light".into();
+    cfg.theme.editor_theme = "vs-dark".into();
+    normalize_legacy_values(&mut cfg);
+    assert_eq!(cfg.theme.theme_name, "light");
+    assert_eq!(cfg.theme.editor_theme, "vs-dark");
 }
 
 #[test]
@@ -207,6 +219,7 @@ fn sanitize_keeps_valid_config_unchanged() {
     cfg.editor.tab_size = 8;
     cfg.editor.auto_save_interval_secs = 300;
     cfg.editor.default_language = "Java".into();
+    cfg.theme.editor_theme = "vs-dark".into();
     cfg.layout.split_ratio = 0.30;
     let before = cfg.clone();
     assert!(!cfg.sanitize());
@@ -228,6 +241,24 @@ fn sanitize_normalizes_default_language() {
         cfg.editor.default_language = raw.into();
         cfg.sanitize();
         assert_eq!(cfg.editor.default_language, expected, "raw={:?}", raw);
+    }
+}
+
+#[test]
+fn sanitize_normalizes_editor_theme() {
+    // 取值域 = Monaco 内置 vs / vs-dark；未知值（手改配置 / 自定义主题名）回退默认，
+    // 否则 setTheme 静默无效，界面与配置不一致
+    for (raw, expected) in [
+        ("vs", "vs"),
+        ("vs-dark", "vs-dark"),
+        ("", "vs"),
+        ("dracula", "vs"),
+        ("VS-DARK", "vs"),
+    ] {
+        let mut cfg = AppConfig::default();
+        cfg.theme.editor_theme = raw.into();
+        cfg.sanitize();
+        assert_eq!(cfg.theme.editor_theme, expected, "raw={:?}", raw);
     }
 }
 

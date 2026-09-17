@@ -5,6 +5,12 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
 import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
+import {
+  EDITOR_FONT_SIZE_MAX,
+  EDITOR_FONT_SIZE_MIN,
+  EDITOR_TAB_SIZES,
+} from '@/utils/editor'
+import { errorMessage } from '@/utils/error'
 import type { AppConfig } from '@/types/config'
 import type { StorageInfo } from '@/types/system'
 
@@ -92,7 +98,7 @@ const errors = computed<Record<string, string | null>>(() => ({
   pollIntervalSecs: intError(form.pollIntervalSecs, 1, 30, '轮询间隔'),
   pollTimeoutSecs: intError(form.pollTimeoutSecs, 30, 3600, '轮询总超时'),
   cacheTtlSecs: intError(form.cacheTtlSecs, 0, 600, '缓存 TTL'),
-  fontSize: intError(form.fontSize, 8, 32, '字号'),
+  fontSize: intError(form.fontSize, EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX, '字号'),
   autoSaveIntervalSecs: intError(form.autoSaveIntervalSecs, 5, 300, '自动保存间隔'),
 }))
 
@@ -104,7 +110,7 @@ const canSave = computed(() => dirty.value && isValid.value && !saving.value)
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 
-const TAB_SIZES: readonly number[] = [2, 4, 8]
+const TAB_SIZES: readonly number[] = EDITOR_TAB_SIZES
 /// 默认语言候选 = HOJ 显示名（值域权威见 utils/language；与提交契约同源）
 const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
 
@@ -139,7 +145,7 @@ async function load(): Promise<void> {
     configService.invalidate()
     populate(await configService.getConfig())
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : '读取配置失败'
+    loadError.value = errorMessage(e, '读取配置失败')
   } finally {
     loading.value = false
   }
@@ -177,7 +183,7 @@ async function save(): Promise<void> {
       savedTimer = null
     }, 3_000)
   } catch (e) {
-    saveError.value = e instanceof Error ? e.message : '保存配置失败'
+    saveError.value = errorMessage(e, '保存配置失败')
   } finally {
     saving.value = false
   }
@@ -437,7 +443,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">编辑器</h2>
                 <span class="ml-auto text-xs text-[var(--text-muted)]">
-                  编辑器设置对新打开的解题页生效
+                  解题页编辑器设置可即时调整，此处改动对新打开的解题页生效
                 </span>
               </div>
               <div class="grid grid-cols-1 gap-x-4 gap-y-4 px-5 py-4 sm:grid-cols-2">
@@ -620,11 +626,11 @@ onBeforeUnmount(() => {
                     编辑器主题
                   </span>
                   <select disabled :class="INPUT">
-                    <option>浅色（Visual Studio）</option>
+                    <option>由解题页「编辑器设置」控制</option>
                   </select>
                 </label>
                 <p class="text-xs text-[var(--text-muted)] sm:col-span-2">
-                  暗色主题即将上线，当前版本固定浅色
+                  界面暗色主题即将上线，当前版本固定浅色；编辑器主题在解题页「编辑器设置」中即时切换
                 </p>
               </div>
             </section>

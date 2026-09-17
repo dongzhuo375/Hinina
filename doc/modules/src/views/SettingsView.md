@@ -15,7 +15,7 @@
 | `baseline` / `snapshot` / `dirty` | ref/fn/computed | 基线 = 上次加载/保存成功时的表单 JSON 序列化；dirty 判定与「放弃更改」共用同一快照 |
 | `parseIntStrict` | `(raw) => number \| null` | 严格非负整数解析：正则 `^\d+$` 拒绝空串/小数/负号/科学计数法等 `Number()` 会宽容接受的形式 |
 | `intError` / `errors` / `isValid` / `canSave` | computed | 逐字段错误映射（hojUrl 须 `http(s)://` 前缀；各整数字段带值域：超时 1–120、轮询间隔 1–30、轮询总超时 30–3600、缓存 TTL 0–600、字号 8–32、自动保存间隔 5–300）；canSave = dirty && valid && !saving |
-| `TAB_SIZES` / `LANGUAGE_OPTIONS` / `clampRatio` | 常量/fn | Tab 宽度档位 [2,4,8]；默认语言四选项；分栏比例钳位到滑杆值域 [0.30, 0.70] 两位小数（与 step 0.01 对齐） |
+| `TAB_SIZES` / `LANGUAGE_OPTIONS` / `clampRatio` | 常量/fn | Tab 宽度档位（取 `utils/editor.EDITOR_TAB_SIZES`，值域唯一权威）；默认语言四选项；分栏比例钳位到滑杆值域 [0.30, 0.70] 两位小数（与 step 0.01 对齐） |
 | `populate` / `load` | fn | 配置 → 表单回填（tabSize 不在档位内回退 4、语言经 `normalizeLanguageId` 归一）；加载前**先 `configService.invalidate()`** |
 | `save` / `discard` | fn | 保存：`updateConfig(draft => …)` 把校验通过的表单值写入草稿（contestPassword 空串 → null）；成功后基线前移 + 「已保存」提示 3s。放弃：从基线 JSON 恢复表单 |
 | `storage` / `storageFailed` / `loadStorage` | ref/fn | 「关于」区块数据（`systemService.getStorageInfo()`：版本 / 存储目录 / 日志路径）；失败**非致命**，仅该区块降级为「获取失败」 |
@@ -29,6 +29,8 @@
 - 组件：`ErrorMessage` / `LoadingSpinner`
 - `@/services/config.service`（`configService` + `normalizeLanguageId`）、`@/services/system.service`（`systemService`）
 - `@/types/config` / `@/types/system`（仅类型）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/utils/editor`（`EDITOR_TAB_SIZES` / `EDITOR_FONT_SIZE_MIN` / `EDITOR_FONT_SIZE_MAX` —— 编辑器分组的值域唯一权威）
 
 ## 被依赖
 
@@ -49,8 +51,9 @@ save(): canSave 才执行 → updateConfig(读-改-写整体替换 + 失效缓�
         → baseline 前移、showSaved 3s；失败写 saveError（表单值保留）
 discard(): Object.assign(form, JSON.parse(baseline))
 
-主题分组：界面/编辑器主题下拉均 disabled（当前版本固定浅色，暗色即将上线）——
-          展示占位而非隐藏，管理用户预期
+主题分组：界面主题下拉 disabled（整机只有浅色，暗色即将上线）；编辑器主题下拉同样 disabled，
+但文案指向「由解题页编辑器设置控制」—— 编辑器主题已可切换（`theme.editorTheme`），
+只是入口在解题页弹层，置灰项不得再宣称「固定浅色」
 ```
 
 设计要点：
@@ -60,6 +63,9 @@ discard(): Object.assign(form, JSON.parse(baseline))
 - **后端 `update_config` 是整体替换语义**：必须经 `configService.updateConfig` 的
   读-改-写路径，直接提交局部字段会把其余配置冲掉。
 - 加载前失效缓存与保存后失效缓存（service 内部）闭环，保证「所见 = 磁盘真值」。
+- **编辑器分组与解题页弹层同源**：两处写的是同一份 `editor.*` 配置。解题页
+  「编辑器设置」弹层是**即时生效**入口（改完立刻作用当前编辑器），设置页是**批量编辑**
+  入口（改动对新打开的解题页生效）—— 分组标题旁的提示文案即表达这一分工。
 - hojUrl 修改后需重启客户端生效、contestId 保存后下次进入赛场生效——提示文案明示生效时机。
 - 存储信息每次挂载实时读取（service 不缓存：版本号构建期固定，但存储目录可能随
   用户数据迁移变化）。

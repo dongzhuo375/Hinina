@@ -18,7 +18,7 @@
 | `isDouble` / `shownLimits` | computed | 当前语言是否 ×2（`isDoubleLimitLanguage(workspaceStore.language)`）；头部展示的是**当前语言实际生效阈值**（`effectiveLimits`），与判题行为一致（HOJ-Problem-Limits-API.md §5） |
 | `timeText` / `memoryText` / `baseTimeText` / `baseMemoryText` / `languageLabel` | computed | 生效值与基准值文案；×2 语言时头部下方标注「题面限制为 C/C++ 基准（x / y），当前语言 {lang} 判题时时间与内存 ×2」 |
 | `renderedDescription/Input/Output` | computed | `renderMarkdown(文本, baseUrl)` → v-html |
-| `samples` / `copySampleInput` / `copiedIndex` | — | 样例列表；复制输入到剪贴板并显示「已复制」1.5s 反馈；剪贴板不可用只 console.error **不打断做题** |
+| `samples` / `copySampleInput` / `copiedIndex` | — | 样例列表；复制输入到剪贴板并显示「已复制」1.5s 反馈；剪贴板不可用只 `log.error` 记录（`utils/logger` 作用域日志），**不打断做题** |
 
 ## 直接依赖
 
@@ -27,6 +27,7 @@
 - `@/utils/markdown`（`renderMarkdown`）、`@/utils/limits`（`effectiveLimits` / `isDoubleLimitLanguage` / `formatTimeLimit` / `formatMemoryLimit`）
 - `@/services/config.service`（OJ 基址；配置读取按约定一律经该服务，不直接调 config.bridge）
 - `@/stores/contestStore`（通过率）/ `problemStore`（limits）/ `workspaceStore`（当前语言）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 

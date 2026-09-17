@@ -3,6 +3,10 @@ import type { Announcement } from '@/types/announcement'
 import { announcementService } from '@/services/announcement.service'
 import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
+import { errorMessage } from '@/utils/error'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('announcementStore')
 
 /// 公告刷新节奏：60s ± 10s。公告由裁判组低频发布，无需榜单级实时性；
 /// 抖动打散全场客户端相位（见 utils/polling 头注释）
@@ -78,7 +82,7 @@ export const useAnnouncementStore = defineStore('announcement', {
         const [page, readIds] = await Promise.all([
           announcementService.listAnnouncements(contestId),
           announcementService.getReadIds(contestId).catch((e) => {
-            console.warn('[announcementStore] 读取已读状态失败，按全部未读处理:', e)
+            log.warn('读取已读状态失败，按全部未读处理:', e)
             return new Set<string>()
           }),
         ])
@@ -86,7 +90,7 @@ export const useAnnouncementStore = defineStore('announcement', {
         this.total = page.total
         this.readIds = [...readIds]
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '加载公告失败'
+        this.error = errorMessage(e, '加载公告失败')
         throw e
       } finally {
         this.isLoading = false
@@ -123,7 +127,7 @@ export const useAnnouncementStore = defineStore('announcement', {
         this.readIds = [...merged]
       } catch (e) {
         this.readIds = previous
-        console.error('[announcementStore] 已读状态持久化失败，已回滚本地标记:', e)
+        log.error('已读状态持久化失败，已回滚本地标记:', e)
       }
     },
 
@@ -145,7 +149,7 @@ export const useAnnouncementStore = defineStore('announcement', {
         jitterMs: ANNOUNCEMENT_POLL_JITTER_MS,
         isPaused: () => isPageHidden() || (isPaused?.() ?? false),
         onError: (e) => {
-          this.error = e instanceof Error ? e.message : '公告刷新失败'
+          this.error = errorMessage(e, '公告刷新失败')
         },
       })
       poller.start()

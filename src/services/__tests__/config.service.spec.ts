@@ -70,10 +70,15 @@ describe('getEditorPrefs / getDefaultLanguage / getSplitRatio — 派生参数�
     config.editor.fontSize = 16
     config.editor.tabSize = 2
     config.editor.defaultLanguage = 'Java'
+    config.theme.editorTheme = 'vs-dark'
     config.layout.splitRatio = 0.55
     getConfig.mockResolvedValue(config)
 
-    expect(await configService.getEditorPrefs()).toEqual({ fontSize: 16, tabSize: 2 })
+    expect(await configService.getEditorPrefs()).toEqual({
+      fontSize: 16,
+      tabSize: 2,
+      editorTheme: 'vs-dark',
+    })
     expect(await configService.getDefaultLanguage()).toBe('Java')
     expect(await configService.getSplitRatio()).toBe(0.55)
   })
@@ -86,23 +91,71 @@ describe('getEditorPrefs / getDefaultLanguage / getSplitRatio — 派生参数�
     expect(await configService.getDefaultLanguage()).toBe('C++')
   })
 
-  it('越界/非法值回退兜底（字号 14、Tab 4、分栏 0.48）', async () => {
+  it('越界/非法值回退兜底（字号 14、Tab 4、主题 vs、分栏 0.48）', async () => {
     const config = makeConfig()
     config.editor.fontSize = 999
     config.editor.tabSize = -1
+    config.theme.editorTheme = 'dracula'
     config.layout.splitRatio = 5
     getConfig.mockResolvedValue(config)
 
-    expect(await configService.getEditorPrefs()).toEqual({ fontSize: 14, tabSize: 4 })
+    expect(await configService.getEditorPrefs()).toEqual({
+      fontSize: 14,
+      tabSize: 4,
+      editorTheme: 'vs',
+    })
     expect(await configService.getSplitRatio()).toBe(0.48)
   })
 
   it('读取失败全部回退兜底值，不向上抛错', async () => {
     getConfig.mockRejectedValue(new Error('IPC 失败'))
 
-    expect(await configService.getEditorPrefs()).toEqual({ fontSize: 14, tabSize: 4 })
+    expect(await configService.getEditorPrefs()).toEqual({
+      fontSize: 14,
+      tabSize: 4,
+      editorTheme: 'vs',
+    })
     expect(await configService.getDefaultLanguage()).toBe('C++')
     expect(await configService.getSplitRatio()).toBe(0.48)
+  })
+})
+
+describe('updateEditorPrefs — 解题页编辑器设置落盘入口', () => {
+  it('只写传入字段，其余配置整体保留（读-改-写）', async () => {
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockResolvedValue(undefined)
+
+    await configService.updateEditorPrefs({ fontSize: 18 })
+
+    const written = updateConfig.mock.calls[0][0] as AppConfig
+    expect(written.editor.fontSize).toBe(18)
+    // 未传入的偏好与其它分组不得被冲掉
+    expect(written.editor.tabSize).toBe(4)
+    expect(written.editor.autoSaveIntervalSecs).toBe(30)
+    expect(written.theme.editorTheme).toBe('vs')
+    expect(written.oj.contestId).toBe(7)
+  })
+
+  it('编辑器主题落在 theme.editorTheme，且不触碰 themeName（界面仍只有浅色）', async () => {
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockResolvedValue(undefined)
+
+    await configService.updateEditorPrefs({ editorTheme: 'vs-dark', tabSize: 2 })
+
+    const written = updateConfig.mock.calls[0][0] as AppConfig
+    expect(written.theme.editorTheme).toBe('vs-dark')
+    expect(written.theme.themeName).toBe('light')
+    expect(written.editor.tabSize).toBe(2)
+  })
+
+  it('非法主题名归一为默认值后再落盘（不让未知主题名进配置文件）', async () => {
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockResolvedValue(undefined)
+
+    await configService.updateEditorPrefs({ editorTheme: 'dracula' })
+
+    const written = updateConfig.mock.calls[0][0] as AppConfig
+    expect(written.theme.editorTheme).toBe('vs')
   })
 })
 

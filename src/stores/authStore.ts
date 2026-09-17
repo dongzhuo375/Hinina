@@ -2,6 +2,10 @@ import { defineStore } from 'pinia'
 import type { SessionValidity, User } from '@/types/user'
 import { authService } from '@/services/auth.service'
 import { clearDomainState } from '@/stores/session'
+import { errorMessage } from '@/utils/error'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('authStore')
 
 /**
  * 会话失效的统一提示文案。
@@ -37,7 +41,7 @@ export const useAuthStore = defineStore('auth', {
         this.user = await authService.login(username, password, ojType)
         this.sessionResolved = true
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '登录失败'
+        this.error = errorMessage(e, '登录失败')
         throw e
       } finally {
         this.isLoading = false
@@ -59,8 +63,8 @@ export const useAuthStore = defineStore('auth', {
         await authService.logout()
       } catch (e) {
         backendCleared = false
-        this.error = e instanceof Error ? e.message : '登出失败'
-        console.error('[authStore] 后端登出失败，已强制清理本地会话:', e)
+        this.error = errorMessage(e, '登出失败')
+        log.error('后端登出失败，已强制清理本地会话:', e)
       }
       this.user = null
       this.sessionResolved = backendCleared
@@ -104,7 +108,7 @@ export const useAuthStore = defineStore('auth', {
         this.user = user
         return user !== null
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '会话检查失败'
+        this.error = errorMessage(e, '会话检查失败')
         return false
       } finally {
         this.sessionResolved = true

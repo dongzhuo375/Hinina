@@ -25,7 +25,7 @@
 - `service::theme::ThemeService`（通过 `ConfigService` 读写主题配置）
 
 ## 逻辑流程
-- **初始化**：`new()` 从 Repo 加载配置，成功则调用 `normalize_legacy_values(&mut cfg)` 一次性归一历史旧默认值（`"C++"`→`"cpp"`、`dark`/`vs-dark`→`light`/`vs`、`splitRatio 0.45`→`0.48`，只修正恰好等于旧默认值的项，详见 `core/entity/config.md`）；失败时回退到 `AppConfig::default()` 并尝试写回磁盘
+- **初始化**：`new()` 从 Repo 加载配置，成功则调用 `normalize_legacy_values(&mut cfg)` 一次性归一历史旧默认值（`"C++"`→`"cpp"`、整机 `dark`→`light`（含随之写入的 `vs-dark`→`vs`）、`splitRatio 0.45`→`0.48`，只修正恰好等于旧默认值的项，详见 `core/entity/config.md`）；失败时回退到 `AppConfig::default()` 并尝试写回磁盘
 - **读取**：`get()` 从 `RwLock<AppConfig>` 中 clone 返回，无副作用
 - **更新**：`update(f)` 先通过闭包修改内存 → 持久化磁盘 → 返回新配置；磁盘写入失败时保留内存修改、上报错误
 - **热重载**：`reload()` 从磁盘读最新配置 → 同样经 `normalize_legacy_values` 归一（用户手改磁盘文件塞回旧值也会被修正）→ 覆盖内存 → 发布 `SystemEvent::ConfigReloaded` 通知其他 Service 响应变更

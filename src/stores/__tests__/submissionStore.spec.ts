@@ -120,7 +120,11 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
 
       await vi.advanceTimersByTimeAsync(60_000)
       expect(submissionService.pollJudgement).toHaveBeenCalledTimes(callsAtTimeout)
-      expect(console.warn).toHaveBeenCalled()
+      // 作用域日志（utils/logger）：前缀由 createLogger 统一添加
+      expect(console.warn).toHaveBeenCalledWith(
+        '[submissionStore]',
+        expect.stringContaining('评测轮询超时'),
+      )
     } finally {
       vi.useRealTimers()
     }

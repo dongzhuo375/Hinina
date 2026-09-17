@@ -7,14 +7,24 @@ import { useSubmissionStore } from '@/stores/submissionStore'
 import type { JudgementStatus, SubmissionRecord } from '@/types/submission'
 import { findFirstFailedCase, formatMsToSeconds, isTerminalStatus, statusAbbr, statusTone } from '@/utils/submission'
 import type { StatusTone } from '@/utils/submission'
+import { DEFAULT_EDITOR_TAB_SIZE } from '@/utils/editor'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('EditorConsoleBar')
 
 /// 编辑器底部控制台条：最新评测记录 pill + 提交入口 + 光标/编码状态行。
-const props = defineProps<{
-  /// Monaco 光标位置（由 CodeEditor 经父级转发；null 表示尚未产生光标事件）
-  cursor: { line: number; column: number } | null
-  /// 当前题目 pid，用于从会话提交列表中筛出「本题最新一条」
-  problemId: string | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    /// Monaco 光标位置（由 CodeEditor 经父级转发；null 表示尚未产生光标事件）
+    cursor: { line: number; column: number } | null
+    /// 当前题目 pid，用于从会话提交列表中筛出「本题最新一条」
+    problemId: string | null
+    /// 编辑器当前 Tab 宽度（缩进状态行展示；由 CodeEditor 经父级转发，
+    /// 解题页弹层可改，故不能按常量写死）
+    tabSize?: number
+  }>(),
+  { tabSize: DEFAULT_EDITOR_TAB_SIZE },
+)
 
 defineEmits<{
   submit: []
@@ -53,7 +63,7 @@ async function refreshSummary() {
     summary.value = await submissionStore.fetchProblemSummary(contestId, displayId.value)
   } catch (e) {
     // 摘要失败不影响解题：回退本地会话记录 pill，仅记录日志
-    console.warn('[EditorConsoleBar] 获取题目提交摘要失败:', e)
+    log.warn('获取题目提交摘要失败:', e)
   }
 }
 
@@ -99,7 +109,7 @@ watch(
       if (first) failedCaseHint.value = `Test ${first.seq} · ${formatMsToSeconds(first.timeMs)}`
     } catch (e) {
       // 测试点不可得时回退记录自身耗时（下方 serverPill 兜底）
-      console.warn('[EditorConsoleBar] 获取测试点明细失败:', e)
+      log.warn('获取测试点明细失败:', e)
     }
   },
 )
@@ -351,8 +361,9 @@ function goDetail(submitId: string) {
     </div>
 
     <!-- 状态行：光标位置 / 编码 / 缩进 + 快捷键提示。
-         UTF-8：工作区文件由 Rust 后端以 UTF-8 落盘；Spaces: 4：Monaco 建编辑器时
-         tabSize=4 且未开启 insertSpaces=false，二者均为固定事实，故按常量展示 -->
+         UTF-8：工作区文件由 Rust 后端以 UTF-8 落盘；Spaces：Monaco 建编辑器时
+         未关 insertSpaces，缩进恒为空格，宽度取编辑器当前 tabSize（弹层可调，
+         经 CodeEditor 上报后由父级转发，不写死） -->
     <div
       class="flex items-center justify-between border-t border-slate-100 pt-2 font-mono text-[11px] text-slate-400 select-none"
     >
@@ -361,7 +372,7 @@ function goDetail(submitId: string) {
         <span class="text-slate-300">|</span>
         <span>UTF-8</span>
         <span class="text-slate-300">|</span>
-        <span>Spaces: 4</span>
+        <span>Spaces: {{ tabSize }}</span>
       </div>
       <div class="flex items-center gap-1 whitespace-nowrap">
         <span>Ctrl + Enter 快捷提交</span>

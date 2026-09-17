@@ -21,6 +21,9 @@ import {
   statusTone,
 } from '@/utils/submission'
 import type { StatusTone } from '@/utils/submission'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('QuickSubmitDialog')
 
 /// 题目总览「快捷提交」弹窗：不进入解题页即可完成一次提交并跟踪评测结果。
 const props = defineProps<{ problem: ContestProblem }>()
@@ -52,7 +55,7 @@ async function loadAllowedLanguages() {
     }
   } catch (e) {
     // 语言列表不可得只影响下拉候选（回退默认列表），不阻断快捷提交
-    console.warn('[QuickSubmitDialog] 获取题目允许语言失败，使用默认列表:', e)
+    log.warn('获取题目允许语言失败，使用默认列表:', e)
   }
 }
 
@@ -121,7 +124,7 @@ async function ingestFile(file: File) {
   try {
     code.value = await file.text()
   } catch (e) {
-    console.error('[QuickSubmitDialog] 读取文件失败:', e)
+    log.error('读取文件失败:', e)
     fileError.value = `读取「${file.name}」失败`
     return
   }

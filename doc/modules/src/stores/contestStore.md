@@ -33,6 +33,7 @@
 - `pinia`
 - `@/types/contest`（仅类型）
 - `@/services/contest.service`（`loadConfiguredContest` / `loadContestBrief`）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
 
 ## 被依赖
 

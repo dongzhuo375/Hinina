@@ -12,7 +12,13 @@ import { useProblemStore } from '@/stores/problemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { configService } from '@/services/config.service'
+import type { EditorPrefs } from '@/services/config.service'
 import { resolveAllowedLanguage } from '@/utils/language'
+import { DEFAULT_EDITOR_TAB_SIZE } from '@/utils/editor'
+import { errorMessage } from '@/utils/error'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ProblemSolveView')
 
 /// 解题工作台：左题面（48%）/ 右代码编辑器（52%），中间 1px 拖拽条可调。
 const route = useRoute()
@@ -54,7 +60,7 @@ async function load(id: string) {
     // 落盘失败不阻断切题（防抖同步大概率已写入文件），仅记录
     if (workspaceStore.isDirty) {
       await workspaceStore.saveWorkspace().catch((e) => {
-        console.error('[ProblemSolveView] 切题前保存工作区失败:', e)
+        log.error('切题前保存工作区失败:', e)
       })
     }
     const contestId = await ensureContestId()
@@ -91,7 +97,7 @@ async function load(id: string) {
     )
   } catch (e) {
     if (token !== loadToken) return
-    localError.value = e instanceof Error ? e.message : '加载题目失败'
+    localError.value = errorMessage(e, '加载题目失败')
   } finally {
     // 只有最新一次加载负责收尾；被取代的加载直接退出，由新加载统一消费 focus
     if (token === loadToken) {
@@ -149,7 +155,7 @@ function persistSplitRatio() {
       draft.layout.splitRatio = ratio
     })
     .catch((e) => {
-      console.error('[ProblemSolveView] 分栏比例持久化失败:', e)
+      log.error('分栏比例持久化失败:', e)
     })
 }
 
@@ -183,6 +189,10 @@ function startDrag(e: MouseEvent) {
 
 /// Monaco 光标位置（CodeEditor emit → 本视图 → EditorConsoleBar prop，单向数据流）
 const cursor = ref<{ line: number; column: number } | null>(null)
+
+/// 编辑器偏好（CodeEditor 挂载读配置后 + 每次弹层改动后上报）。本视图只消费
+/// `tabSize` 供状态行展示缩进宽度，不重复读配置，避免与弹层写入竞态
+const editorPrefs = ref<EditorPrefs | null>(null)
 
 const currentProblemId = computed(() => problemStore.currentProblem?.id ?? null)
 
@@ -243,8 +253,14 @@ async function handleSubmit() {
           @update:language="workspaceStore.changeLanguage"
           @cursor="cursor = $event"
           @submit="handleSubmit"
+          @prefs-change="editorPrefs = $event"
         />
-        <EditorConsoleBar :cursor="cursor" :problem-id="currentProblemId" @submit="handleSubmit" />
+        <EditorConsoleBar
+          :cursor="cursor"
+          :problem-id="currentProblemId"
+          :tab-size="editorPrefs?.tabSize ?? DEFAULT_EDITOR_TAB_SIZE"
+          @submit="handleSubmit"
+        />
       </section>
     </div>
   </div>

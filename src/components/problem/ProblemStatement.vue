@@ -13,6 +13,9 @@ import {
   formatTimeLimit,
   isDoubleLimitLanguage,
 } from '@/utils/limits'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ProblemStatement')
 
 /// 题面视图：头部元信息（标题 + 限制 + 通过率）+ 分节滚动正文（描述/输入/输出/样例）。
 const props = defineProps<{
@@ -104,7 +107,7 @@ async function copySampleInput(index: number, text: string) {
     copyTimer = setTimeout(() => (copiedIndex.value = -1), 1500)
   } catch (e) {
     // 剪贴板不可用（权限/环境）：不打断做题，仅记录
-    console.error('[ProblemStatement] 复制样例输入失败:', e)
+    log.error('复制样例输入失败:', e)
   }
 }
 

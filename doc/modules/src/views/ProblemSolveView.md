@@ -18,9 +18,10 @@
 | `consumeFocusQuery` | `() => Promise<void>` | 消费 `?focus=1`：`nextTick` 后调 `codeEditor.focus()`，随后 `router.replace({ query: {} })` 清掉 |
 | `splitRatio` | ref | 初始值经 `configService.getSplitRatio()` 从配置读取（P55 消费落地；异步到达时若用户已拖拽则不覆盖） |
 | `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例钳制 0.3–0.7，拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
-| `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.updateConfig` 写回配置（下次进入解题页生效）；失败只 console.error 不打断使用 |
+| `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.updateConfig` 写回配置（下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
 | `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, workspaceStore.language, workspaceStore.code)`；轮询由 store 自动启动 |
 | `cursor` | ref | Monaco 光标位置（CodeEditor emit → 本视图 → EditorConsoleBar prop，单向数据流） |
+| `editorPrefs` | `ref<EditorPrefs \| null>` | 编辑器偏好（CodeEditor `prefs-change` 上报，挂载读配置后 + 弹层每次改动后到达）；本视图只消费 `tabSize` 供状态行展示缩进宽度，**不重复读配置**（避免与弹层写入竞态） |
 | `viewError` | computed | `localError ?? problemStore.error`（本地编排错误优先） |
 
 ## 直接依赖
@@ -28,7 +29,10 @@
 - `vue` / `vue-router`
 - 组件：`ProblemTabStrip` / `ProblemStatement` / `CodeEditor` / `EditorConsoleBar` / `LoadingSpinner` / `ErrorMessage`
 - stores：`contestStore` / `problemStore` / `workspaceStore` / `submissionStore`
-- `@/services/config.service`（分栏比例读取/回写 —— 配置读写的指定唯一入口，不违反「View 不得 import bridge」约束）
+- `@/services/config.service`（分栏比例读取/回写、`EditorPrefs` 类型 —— 配置读写的指定唯一入口，不违反「View 不得 import bridge」约束）
+- `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — 偏好上报到达前的状态行兜底）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 
@@ -43,7 +47,7 @@ watch(displayId, load, { immediate: true })     // 挂载 + Tab 切题共用同�
 load(id):
   token = ++loadToken                            // 并发防护：只认最后一次加载
   1. workspaceStore.isDirty → saveWorkspace()    // 切题前先落盘（代码保留是工作区核心承诺）
-     失败不阻断切题，仅 console.error             // 防抖同步大概率已写入文件
+     失败不阻断切题，仅 log.error 记录           // 防抖同步大概率已写入文件
   2. ensureContestId()                           // contest 未加载则兜底拉取
   3. contestStore.problems 按 displayId 找 ContestProblem（找不到 → localError）
   4. workspaceStore.loadWorkspace(contestId, cp.problemId)   // 工作区按题目真实 ID(pid) 隔离
@@ -75,4 +79,7 @@ load(id):
   静默降级为不聚焦，但 query 仍清除，保证幂等。
 - 提交语言取 `workspaceStore.language`（乐观更新 + 后端持久化，见 workspaceStore 文档），
   提交失败原因由 store 写入 `submissionStore.error`，EditorConsoleBar 负责展示。
+- **编辑器偏好单向流转**：CodeEditor 读配置 → `prefs-change` 上报 → 本视图转发给
+  EditorConsoleBar 的 `tabSize`。本视图不自己读配置：弹层改动是即时的，重复读取只会
+  拿到滞后值并与弹层写入竞态。
 - 分层约束：View 不 import `@/bridge`；配置读写走 `config.service`（架构指定的配置唯一入口）。

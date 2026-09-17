@@ -3,6 +3,9 @@ import type { Workspace } from '@/types/workspace'
 import { workspaceService } from '@/services/workspace.service'
 import { configService } from '@/services/config.service'
 import { normalizeHojLanguage, SOURCE_FILE_EXTENSIONS, sourceFileNameOf } from '@/utils/language'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('workspaceStore')
 
 /// 工作区代码文件探测后缀 = utils/language 识别面唯一来源（新文件名一律经 sourceFileNameOf 派生）
 const CODE_FILE_EXTENSIONS = SOURCE_FILE_EXTENSIONS
@@ -69,7 +72,7 @@ export const useWorkspaceStore = defineStore('workspace', {
           // 文件名后缀必须与语言严格一致：判题端按后缀判定语言与 limits 倍率
           const fileName = sourceFileNameOf(this.language)
           workspaceService.updateWorkspaceFile(fileName, this.code).catch((e) => {
-            console.error('[workspaceStore] 代码同步失败:', e)
+            log.error('代码同步失败:', e)
           })
         }
       }, 2000)
@@ -96,7 +99,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.language = lang
       this.isDirty = true
       workspaceService.setLanguage(lang).catch((e) => {
-        console.error('[workspaceStore] 语言持久化失败（切题或重启后可能退回默认语言）:', e)
+        log.error('语言持久化失败（切题或重启后可能退回默认语言）:', e)
       })
     },
   },
