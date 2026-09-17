@@ -131,14 +131,14 @@ impl ProblemService {
 
         if cache_enabled {
             if let Some(problem) = self.statement_cache.get(&key) {
-                debug!(contest_id, problem_id, hit = true, "命中题面内存缓存");
+                debug!(cache = "problem_statement", contest_id, problem_id, hit = true, "命中题面内存缓存");
                 return Ok(problem);
             }
             if let Some(problem) = self
                 .statement_disk
                 .read::<Problem>(&key, PROBLEM_CACHE_TTL)
             {
-                debug!(contest_id, problem_id, hit = true, "命中题面磁盘缓存");
+                debug!(cache = "problem_statement", contest_id, problem_id, hit = true, "命中题面磁盘缓存");
                 self.statement_cache.insert(key.clone(), problem.clone());
                 return Ok(problem);
             }

@@ -190,7 +190,7 @@ impl SubmissionService {
     /// 缓存它等于让界面停在「评测中」。命中缓存即零请求。
     pub async fn get_submission_detail(&self, submit_id: &str) -> AppResult<SubmissionDetail> {
         if let Some(detail) = self.detail_cache.get(&submit_id.to_string()) {
-            debug!(submit_id, hit = true, "命中提交详情缓存");
+            debug!(cache = "submission_detail", submit_id, hit = true, "命中提交详情缓存");
             return Ok(detail);
         }
 
@@ -223,7 +223,7 @@ impl SubmissionService {
     /// 此时**不缓存**（保持与改造前一致的请求数，而不是为判定终态多发一次详情请求）。
     pub async fn get_submission_cases(&self, submit_id: &str) -> AppResult<SubmissionCases> {
         if let Some(cases) = self.cases_cache.get(&submit_id.to_string()) {
-            debug!(submit_id, hit = true, "命中测试点缓存");
+            debug!(cache = "submission_cases", submit_id, hit = true, "命中测试点缓存");
             return Ok(cases);
         }
 

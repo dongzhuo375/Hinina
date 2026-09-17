@@ -101,7 +101,7 @@ impl ContestService {
         let key = contest_id.to_string();
 
         if let Some(contest) = self.meta_cache.get(&key) {
-            debug!(contest_id = contest_id, hit = true, "命中比赛元信息内存缓存");
+            debug!(cache = "contest_meta", contest_id = contest_id, hit = true, "命中比赛元信息内存缓存");
             return Ok(contest);
         }
 
@@ -109,7 +109,7 @@ impl ContestService {
             .meta_disk
             .read::<Contest>(contest_id, CONTEST_META_TTL)
         {
-            debug!(contest_id = contest_id, hit = true, "命中比赛元信息磁盘缓存");
+            debug!(cache = "contest_meta", contest_id = contest_id, hit = true, "命中比赛元信息磁盘缓存");
             self.meta_cache.insert(key, contest.clone());
             return Ok(contest);
         }
