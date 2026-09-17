@@ -87,10 +87,10 @@ Hinina/
         │   │   └── tests/
         │   │       └── auth_tests.rs     # AuthService 单元测试（会话持久化/轮换回写/失效清理）
         │   ├── contest/
-        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存（TTL）/比赛切换/get_rank（榜单不缓存）/list_announcements（公告不缓存）+ 公告已读状态持久化（announcements_read/{cid}_{uid}.json，合并去重、损坏降级为空+warn）
+        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存（TTL 来自配置）/比赛元信息缓存（内存+磁盘，固定 TTL 120s，题面总览页轮询请求减半）/比赛切换/get_rank（榜单不缓存）/list_announcements（公告不缓存）+ 公告已读状态持久化（announcements_read/{cid}_{uid}.json，合并去重、损坏降级为空+warn）
         │   │   ├── error.rs              # ContestError
         │   │   └── tests/
-        │   │       └── contest_tests.rs  # ContestService 单元测试（错误变体穿透 + TTL 缓存语义：命中零请求/过期重取/refresh 强制/失败不留 stale + 公告已读读写与损坏降级）
+        │   │       └── contest_tests.rs  # ContestService 单元测试（错误变体穿透 + TTL 缓存语义：命中零请求/过期重取/refresh 强制/失败不留 stale + 元信息缓存：命中跳过 get_contest 而题目列表仍实时/磁盘跨实例命中/按比赛隔离/refresh 清两层/错误不入缓存 + 公告已读读写与损坏降级）
         │   ├── problem/
         │   │   ├── mod.rs                # ProblemService：题目获取/打开题目/我的题目状态/load_problem_limits（内存+磁盘双层缓存、并发上限 4、部分失败跳过）
         │   │   ├── error.rs              # ProblemError

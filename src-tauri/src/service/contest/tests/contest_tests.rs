@@ -45,10 +45,13 @@ impl StubMode {
 /// Stub ContestProvider：所有方法按同一模式响应，便于逐方法断言变体是否被保留。
 ///
 /// `mode` 可在测试中途切换（模拟「缓存命中后服务端开始 401」等时序），
-/// `calls` 记录 list_contests 的调用次数，用于断言缓存真的省掉了请求。
+/// `calls` 记录 list_contests 的调用次数，`meta_calls` / `problems_calls`
+/// 分别记录 get_contest / list_contest_problems 的次数（断言缓存真的省掉请求）。
 struct StubContestProvider {
     mode: RwLock<StubMode>,
     calls: AtomicUsize,
+    meta_calls: AtomicUsize,
+    problems_calls: AtomicUsize,
 }
 
 impl StubContestProvider {
@@ -56,6 +59,8 @@ impl StubContestProvider {
         Self {
             mode: RwLock::new(mode),
             calls: AtomicUsize::new(0),
+            meta_calls: AtomicUsize::new(0),
+            problems_calls: AtomicUsize::new(0),
         }
     }
 
@@ -69,6 +74,16 @@ impl StubContestProvider {
 
     fn call_count(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
+    }
+
+    /// get_contest（比赛元信息）调用次数
+    fn meta_call_count(&self) -> usize {
+        self.meta_calls.load(Ordering::SeqCst)
+    }
+
+    /// list_contest_problems（题目列表）调用次数
+    fn problems_call_count(&self) -> usize {
+        self.problems_calls.load(Ordering::SeqCst)
     }
 }
 
@@ -156,6 +171,7 @@ impl ContestProvider for StubContestProvider {
     }
 
     async fn get_contest(&self, _contest_id: &str) -> AppResult<Contest> {
+        self.meta_calls.fetch_add(1, Ordering::SeqCst);
         match self.current_mode() {
             StubMode::Ok => Ok(sample_contest()),
             m => Err(m.into_err("stub get_contest")),
@@ -163,6 +179,7 @@ impl ContestProvider for StubContestProvider {
     }
 
     async fn list_contest_problems(&self, _contest_id: &str) -> AppResult<Vec<ContestProblem>> {
+        self.problems_calls.fetch_add(1, Ordering::SeqCst);
         match self.current_mode() {
             StubMode::Ok => Ok(vec![sample_problem()]),
             m => Err(m.into_err("stub list_contest_problems")),
@@ -202,7 +219,14 @@ fn make_service(mode: StubMode) -> (ContestService, Arc<StubContestProvider>, st
         SEQ.fetch_add(1, Ordering::SeqCst)
     ));
     let _ = std::fs::remove_dir_all(&dir);
+    make_service_in(dir, mode)
+}
 
+/// 构造基于**指定目录**的 ContestService —— 磁盘缓存跨实例用例需共用同一目录。
+fn make_service_in(
+    dir: std::path::PathBuf,
+    mode: StubMode,
+) -> (ContestService, Arc<StubContestProvider>, std::path::PathBuf) {
     let provider = Arc::new(StubContestProvider::new(mode));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
     registry.register_contest(OJType::HOJ, Arc::clone(&provider) as Arc<dyn ContestProvider>);
@@ -391,6 +415,83 @@ fn failed_refresh_leaves_no_stale_cache() {
         3,
         "失败的 refresh 已清空缓存，恢复后必须重新请求而不是吃旧缓存"
     );
+}
+
+// ── 比赛元信息缓存（内存 + 磁盘，TTL 120s）──
+
+#[test]
+fn meta_cache_hit_skips_second_get_contest() {
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+
+    block_on(service.load_contest_with_problems("1011", None)).expect("首次加载应成功");
+    block_on(service.load_contest_with_problems("1011", None)).expect("二次加载应成功");
+
+    assert_eq!(stub.meta_call_count(), 1, "元信息应命中缓存，不再请求 Provider");
+    assert_eq!(
+        stub.problems_call_count(),
+        2,
+        "题目列表必须每次实时拉取（ac/total 是轮询存在的理由）"
+    );
+}
+
+#[test]
+fn meta_cache_survives_new_service_instance() {
+    // 磁盘缓存：新实例（模拟重启）仍能命中，且 TTL 依据落盘的 fetchedAt 继续计时
+    let dir = std::env::temp_dir().join(format!(
+        "hinina-test-contest-meta-persist-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let (service, stub, dir) = make_service_in(dir, StubMode::Ok);
+    block_on(service.load_contest_with_problems("1011", None)).expect("首次加载应成功");
+    assert_eq!(stub.meta_call_count(), 1);
+    drop(service);
+
+    let (reopened, stub2, _dir) = make_service_in(dir, StubMode::Ok);
+    block_on(reopened.load_contest_with_problems("1011", None)).expect("重启后加载应成功");
+
+    assert_eq!(stub2.meta_call_count(), 0, "元信息应命中磁盘缓存");
+    assert_eq!(stub2.problems_call_count(), 1, "题目列表仍实时拉取");
+}
+
+#[test]
+fn meta_cache_isolates_contests() {
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+
+    block_on(service.load_contest_with_problems("1011", None)).expect("加载 1011 应成功");
+    block_on(service.load_contest_with_problems("1012", None)).expect("加载 1012 应成功");
+
+    assert_eq!(stub.meta_call_count(), 2, "不同比赛的元信息不得互相命中");
+}
+
+#[test]
+fn refresh_clears_meta_cache() {
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+
+    block_on(service.load_contest_with_problems("1011", None)).expect("首次加载应成功");
+    block_on(service.refresh()).expect("refresh 应成功");
+    block_on(service.load_contest_with_problems("1011", None)).expect("刷新后加载应成功");
+
+    assert_eq!(
+        stub.meta_call_count(),
+        2,
+        "refresh 必须同时清掉元信息缓存（内存 + 磁盘）"
+    );
+}
+
+#[test]
+fn meta_cache_never_stores_errors() {
+    // 只缓存成功结果：首次 401 不得入缓存，否则会话恢复后仍返回旧错误
+    let (service, stub, _dir) = make_service(StubMode::Auth);
+
+    let err = block_on(service.load_contest_with_problems("1011", None))
+        .expect_err("token 过期应报错");
+    assert!(matches!(err, AppError::Auth(_)), "变体必须保留，实际 {:?}", err);
+
+    stub.set_mode(StubMode::Ok);
+    block_on(service.load_contest_with_problems("1011", None)).expect("恢复后应成功");
+    assert_eq!(stub.meta_call_count(), 2, "错误不得入缓存，恢复后必须重新请求");
 }
 
 // ── 公告已读状态（客户端本地特性）──
