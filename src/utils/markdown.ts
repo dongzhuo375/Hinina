@@ -134,6 +134,11 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
       // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外
       ADD_TAGS: ['semantics', 'annotation'],
       ADD_ATTR: ['encoding'],
+      // CF 导入题源惯用 <big> / <font size> 抬升字号 —— 会破坏客户端排印比例
+      // （题面正文被整体放大一档）。剥标签与属性、保留文字内容，字号回归
+      // .prose 统一控制；作者语义性的排版（<font color>、<center>、<small>）保留
+      FORBID_TAGS: ['big'],
+      FORBID_ATTR: ['size'],
     })
   }
 

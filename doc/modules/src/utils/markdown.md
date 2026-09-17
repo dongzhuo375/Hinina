@@ -1,10 +1,10 @@
-# markdown（题面/简介/公告渲染、公式、消毒与图片地址改写）
+# markdown（题面/简介/公告渲染、公式、容器、消毒与图片地址改写）
 
 > 源文件：`src/utils/markdown.ts`
 
 ## 职责
 
-把 HOJ 返回的 Markdown + LaTeX 混合文本（题目描述、比赛简介、公告正文）渲染为 HTML：`$...$` / `$$...$$` 公式经 KaTeX 渲染，在唯一出口做 DOMPurify 消毒（保住公式结构），并把其中的相对 URL 改写为指向 OJ 服务端的绝对地址。
+把 HOJ 返回的 Markdown + LaTeX 混合文本（题目描述、比赛简介、公告正文）渲染为 HTML：`$...$` / `$$...$$` 公式经 KaTeX 渲染，Vditor `:::` 排版容器（居中/居右）在块级接管，CF 导入题源的废弃字号标签（`<big>`/`<font size>`）在出口剥离，在唯一出口做 DOMPurify 消毒（保住公式结构），并把相对 URL 改写为指向 OJ 服务端的绝对地址。
 
 ## 核心类型/函数
 
@@ -30,6 +30,7 @@
 
 ```
 模块加载：marked.use(markedKatex({ nonStandard, throwOnError:false, strict:'ignore' }))
+         marked.use(vditorContainer)   // ::: 容器块级扩展
 
 renderMarkdown(md, baseUrl):
   md 为空 → ''
@@ -39,6 +40,8 @@ renderMarkdown(md, baseUrl):
       USE_PROFILES: { html, mathMl, svg },   // KaTeX 输出 MathML + SVG，只开 html 档会把公式剥成乱码
       ADD_TAGS: [semantics, annotation],     // KaTeX 无障碍树（LaTeX 源码）不在预置白名单，不补会被剥掉
       ADD_ATTR: [encoding],
+      FORBID_TAGS: [big],                    // CF 导入题源的 <big> 放大正文一档，剥离保内容
+      FORBID_ATTR: [size],                    // <font size> 同理；<font color> 保留
     })
   baseUrl 非空 → 去尾斜杠后正则替换 (src|href)="/…" → "{base}/…"
      例：![x](/api/public/img/a.png) → <img src="https://hoj…/api/public/img/a.png">
@@ -48,6 +51,15 @@ renderMarkdown(md, baseUrl):
 
 - **为什么必须在 tokenizer 层接管公式**：LaTeX 里的 `_`、`*`、`\` 会被 markdown 先行吃掉
   （`$x_1$` → `$x<em>1$`），「先渲染后找 $」无从还原。
+- **Vditor `:::` 容器（块级扩展）**：HOJ 管理端编辑器"居中/居右"按钮产出
+  `::: hljs-center … :::`。`start` 钩子让容器能打断紧贴的正文段落（无空行分隔）；
+  内部内容递归走完整块级管线（公式/列表照常解析）；类名限定 `[\w-]+` 杜绝 class
+  属性注入；未闭合容器按字面降级为文本（手写错误不丢内容）。对齐语义由
+  global.css 的 `.hljs-center/right/left` 提供。
+- **CF 导入题源的废弃字号标签**：`<big>` / `<font size>` 会把正文放大一档（"后续文字
+  放大一圈"的根因），经 `FORBID_TAGS/FORBID_ATTR` 剥离、内容保留，字号回归 `.prose`
+  统一控制；作者语义性排版（`<font color>`、`<center>`、`<small>`）保留。
+  公式内的 `\huge` / `\large` 是作者故意的 LaTeX 字号，不在剥离范围。
 - **`nonStandard: true`（中文题面关键开关）**：标准规则要求 `$` 前空格/行首，中文行文无空格
   （`保证$1 \le n \le 10^5$成立`）会整段失配。已知取舍：成对货币 `$`（`价格 $5 和 $10`）会被
   误判为公式——ACM 题面极少出现货币，取中文数学式优先（有测试锁定）。

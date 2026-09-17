@@ -66,13 +66,6 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toMatch(/style="color:#dc2626"/)
   })
 
-  it('Vditor 容器 div 与类名消毒后保留（居中公式完整链路）', () => {
-    const html = renderMarkdown('::: hljs-center\n$$\nh(x)=e^{e^x}\n$$\n:::', '')
-    expect(html).toContain('<div class="hljs-center">')
-    expect(html).toContain('katex-display')
-    expect(html).toContain('class="katex"')
-  })
-
   it('消毒后容器 + 恶意内联 HTML 共存时 script 仍被剥', () => {
     const html = renderMarkdown(
       '::: hljs-center\n$$\ne^{e^x}\n$$\n:::\n\n<script>evil()</script>',
@@ -80,5 +73,49 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     )
     expect(html).toContain('<div class="hljs-center">')
     expect(html).not.toContain('<script')
+  })
+
+  it('Vditor 容器 div 与类名消毒后保留（居中公式完整链路）', () => {
+    const html = renderMarkdown('::: hljs-center\n$$\nh(x)=e^{e^x}\n$$\n:::', '')
+    expect(html).toContain('<div class="hljs-center">')
+    expect(html).toContain('katex-display')
+    expect(html).toContain('class="katex"')
+  })
+})
+
+/**
+ * CF 导入题源的废弃字号标签 —— <big> / <font size> 是"后续文字放大一圈"的根因：
+ * DOMPurify 的 html 档默认放行它们，浏览器按 +1 档字号渲染，破坏客户端排印比例。
+ */
+describe('renderMarkdown — 废弃字号标签剥离', () => {
+  it('<big> 剥离、内容保留（修复后续文字放大一圈）', () => {
+    const html = renderMarkdown('<big>后续文字保持正文字号</big>。', '')
+    expect(html).toContain('后续文字保持正文字号')
+    expect(html).not.toContain('<big')
+  })
+
+  it('<font size> 属性剥离，font 标签与 color 强调保留', () => {
+    const html = renderMarkdown('<font size="5" color="red">强调文字</font>', '')
+    expect(html).not.toContain('size=')
+    expect(html).toContain('<font color="red">')
+    expect(html).toContain('强调文字')
+  })
+
+  it('<small> / <center> 保留（合法排版语义，不在剥离范围）', () => {
+    const html = renderMarkdown('<small>注释</small>', '')
+    expect(html).toContain('<small>注释</small>')
+  })
+
+  it('真实 CF 风格数据端到端：big 剥离与公式渲染互不干扰', () => {
+    // 来自实际题面的结构：容器内 \huge 公式 + <big> 包裹的后续段落（含 \large 行内公式）
+    const html = renderMarkdown(
+      '::: hljs-center\n\n' + '${\\huge h\\left ( x \\right ) = e^{e^{x}  }}$' + '\n:::\n\n' +
+        '<big>输出结果至少有 ${\\large n}$ 位数字。</big>',
+      '',
+    )
+    expect(html).toContain('<div class="hljs-center">')
+    expect(html).toContain('class="katex"')
+    expect(html).not.toContain('<big')
+    expect(html).toContain('位数字')
   })
 })
