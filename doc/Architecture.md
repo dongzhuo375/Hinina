@@ -281,7 +281,7 @@ src/
 │   ├── workspace.ts                      # Workspace 实体
 │   └── config.ts                         # AppConfig 及其子配置
 ├── utils/
-│   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白 + CF 题源 <big>/<font size> 字号标签剥离）+ 相对图片 URL 改写为 HOJ 绝对地址
+│   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白；剥离只为安全，表现性标记保真渲染）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS）+ 时间/内存/长度格式化 + findFirstFailedCase
 ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）

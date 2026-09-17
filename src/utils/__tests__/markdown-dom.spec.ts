@@ -84,29 +84,27 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
 })
 
 /**
- * CF 导入题源的废弃字号标签 —— <big> / <font size> 是"后续文字放大一圈"的根因：
- * DOMPurify 的 html 档默认放行它们，浏览器按 +1 档字号渲染，破坏客户端排印比例。
+ * 表现性 HTML 标记的保真渲染契约 —— 消毒只为安全剥（脚本/事件），作者排版
+ * （<big>/<font>/<center>，CF 导入题源惯例）必须原样保留，与 HOJ 网页端一致。
  */
-describe('renderMarkdown — 废弃字号标签剥离', () => {
-  it('<big> 剥离、内容保留（修复后续文字放大一圈）', () => {
-    const html = renderMarkdown('<big>后续文字保持正文字号</big>。', '')
-    expect(html).toContain('后续文字保持正文字号')
-    expect(html).not.toContain('<big')
+describe('renderMarkdown — 表现性标记保真渲染', () => {
+  it('<big> 原样保留（作者字号意图，浏览器 +1 档渲染）', () => {
+    const html = renderMarkdown('<big>后续文字</big>。', '')
+    expect(html).toContain('<big>后续文字</big>')
   })
 
-  it('<font size> 属性剥离，font 标签与 color 强调保留', () => {
+  it('<font size/color> 标签与属性原样保留', () => {
     const html = renderMarkdown('<font size="5" color="red">强调文字</font>', '')
-    expect(html).not.toContain('size=')
-    expect(html).toContain('<font color="red">')
-    expect(html).toContain('强调文字')
+    expect(html).toContain('<font size="5" color="red">强调文字</font>')
   })
 
-  it('<small> / <center> 保留（合法排版语义，不在剥离范围）', () => {
-    const html = renderMarkdown('<small>注释</small>', '')
-    expect(html).toContain('<small>注释</small>')
+  it('安全威胁仍被剥：script/onerror 与保真渲染并存', () => {
+    const html = renderMarkdown('<big>文字</big><script>evil()</script>', '')
+    expect(html).toContain('<big>文字</big>')
+    expect(html).not.toContain('<script')
   })
 
-  it('真实 CF 风格数据端到端：big 剥离与公式渲染互不干扰', () => {
+  it('真实 CF 风格数据端到端：big 保真 + 容器公式渲染互不干扰', () => {
     // 来自实际题面的结构：容器内 \huge 公式 + <big> 包裹的后续段落（含 \large 行内公式）
     const html = renderMarkdown(
       '::: hljs-center\n\n' + '${\\huge h\\left ( x \\right ) = e^{e^{x}  }}$' + '\n:::\n\n' +
@@ -115,7 +113,7 @@ describe('renderMarkdown — 废弃字号标签剥离', () => {
     )
     expect(html).toContain('<div class="hljs-center">')
     expect(html).toContain('class="katex"')
-    expect(html).not.toContain('<big')
+    expect(html).toContain('<big>')
     expect(html).toContain('位数字')
   })
 })

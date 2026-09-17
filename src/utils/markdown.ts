@@ -131,14 +131,13 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
       // KaTeX 的读屏无障碍树由 <semantics>/<annotation> 承载（annotation 内是 LaTeX
       // 源码，供辅助技术与复制公式用），二者均不在 DOMPurify 预置 mathMl 白名单里，
       // 不补会被整体剥掉、LaTeX 源码反而泄漏成 <math> 内的裸文本。
-      // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外
+      // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外。
+      //
+      // 剥离原则：只为安全剥（脚本/事件属性由 DOMPurify 白名单负责），表现性标记
+      // （<big>/<font size>/<center> 等老题面排版）按作者原意保真渲染，与 HOJ
+      // 网页端一致 —— 浏览器 font-size:larger 的放大比例在本客户端与 HOJ 等价
       ADD_TAGS: ['semantics', 'annotation'],
       ADD_ATTR: ['encoding'],
-      // CF 导入题源惯用 <big> / <font size> 抬升字号 —— 会破坏客户端排印比例
-      // （题面正文被整体放大一档）。剥标签与属性、保留文字内容，字号回归
-      // .prose 统一控制；作者语义性的排版（<font color>、<center>、<small>）保留
-      FORBID_TAGS: ['big'],
-      FORBID_ATTR: ['size'],
     })
   }
 

@@ -40,9 +40,7 @@ renderMarkdown(md, baseUrl):
       USE_PROFILES: { html, mathMl, svg },   // KaTeX 输出 MathML + SVG，只开 html 档会把公式剥成乱码
       ADD_TAGS: [semantics, annotation],     // KaTeX 无障碍树（LaTeX 源码）不在预置白名单，不补会被剥掉
       ADD_ATTR: [encoding],
-      FORBID_TAGS: [big],                    // CF 导入题源的 <big> 放大正文一档，剥离保内容
-      FORBID_ATTR: [size],                    // <font size> 同理；<font color> 保留
-    })
+    })                                       // 剥离只为安全；表现性标记（big/font 等）保真渲染
   baseUrl 非空 → 去尾斜杠后正则替换 (src|href)="/…" → "{base}/…"
      例：![x](/api/public/img/a.png) → <img src="https://hoj…/api/public/img/a.png">
 ```
@@ -56,10 +54,11 @@ renderMarkdown(md, baseUrl):
   内部内容递归走完整块级管线（公式/列表照常解析）；类名限定 `[\w-]+` 杜绝 class
   属性注入；未闭合容器按字面降级为文本（手写错误不丢内容）。对齐语义由
   global.css 的 `.hljs-center/right/left` 提供。
-- **CF 导入题源的废弃字号标签**：`<big>` / `<font size>` 会把正文放大一档（"后续文字
-  放大一圈"的根因），经 `FORBID_TAGS/FORBID_ATTR` 剥离、内容保留，字号回归 `.prose`
-  统一控制；作者语义性排版（`<font color>`、`<center>`、`<small>`）保留。
-  公式内的 `\huge` / `\large` 是作者故意的 LaTeX 字号，不在剥离范围。
+- **剥离原则：只为安全剥**：脚本/事件属性由 DOMPurify 白名单负责；表现性标记
+  （`<big>`/`<font size>`/`<center>`，CF 导入题源惯例）按作者原意保真渲染，与
+  HOJ 网页端一致——浏览器 `font-size: larger` 的放大比例（约 1.2×）在本客户端
+  与 HOJ 网页端等价。曾一度剥离 `<big>` 保客户端排印比例，后按"内容标记是数据、
+  应保真渲染"的原则回退（jsdom 契约测试锁定保真行为）。
 - **`nonStandard: true`（中文题面关键开关）**：标准规则要求 `$` 前空格/行首，中文行文无空格
   （`保证$1 \le n \le 10^5$成立`）会整段失配。已知取舍：成对货币 `$`（`价格 $5 和 $10`）会被
   误判为公式——ACM 题面极少出现货币，取中文数学式优先（有测试锁定）。
