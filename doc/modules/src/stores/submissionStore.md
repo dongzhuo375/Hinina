@@ -35,6 +35,8 @@
 - `@/services/config.service`（轮询间隔与总超时）
 - `@/utils/submission`（`isTerminalStatus` 终态判据）
 - `@/utils/polling`（`createPoller` 轮询原语）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 

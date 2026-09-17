@@ -19,6 +19,7 @@
 - `@/bridge`（`setIpcErrorObserver`、`IpcError` 类型）
 - `@/stores/authStore`（`useAuthStore`、`SESSION_INVALID_MESSAGE`）
 - `vue-router`（仅 `Router` 类型 + 导航）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 
@@ -32,7 +33,7 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
        ├─ variant !== 'Auth' 或正在处理中 → 忽略
        ├─ 本地无会话（如登录表单密码错误）→ 忽略，错误由调用方展示
        └─ 判定会话失效
-            → console.warn 记录命令名与原因（不含参数）
+            → log.warn 记录命令名与原因（不含参数；utils/logger 作用域日志）
             → authStore.invalidateSession(SESSION_INVALID_MESSAGE)
                  （复用 logout 清理链路：后端尽力清理 + 本地认证态 + 领域状态）
             → 当前路由 requiresAuth 时 replace 到登录页

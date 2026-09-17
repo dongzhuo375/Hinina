@@ -88,11 +88,10 @@ body {
   color: white;
 }
 
-/* Monaco editor overrides */
-.monaco-editor .margin,
-.monaco-editor .monaco-editor-background {
-  background-color: var(--bg-card) !important;
-}
+/* Monaco editor overrides
+   刻意**不覆写编辑器背景**（曾用 `!important` 把 .margin / .monaco-editor-background
+   钉成 --bg-card）：底色必须由 Monaco 主题自己绘制，否则切到 vs-dark 只换字色、
+   底色仍是浅色。编辑器区域配色统一由 `theme.editorTheme` 决定 */
 
 /* ── KaTeX 数学公式（题面 / 公告 / 比赛简介共用，故放全局） ── */
 

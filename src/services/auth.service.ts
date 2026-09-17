@@ -1,5 +1,8 @@
 import type { SessionValidity, User } from '@/types/user'
 import * as authBridge from '@/bridge/auth.bridge'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('authService')
 
 const STORED_USER_KEY = 'hinina_user'
 
@@ -54,7 +57,7 @@ export class AuthService {
     try {
       return await authBridge.validateSession()
     } catch (e) {
-      console.error('[authService] 会话校验调用失败，按无法判定处理:', e)
+      log.error('会话校验调用失败，按无法判定处理:', e)
       return 'unknown'
     }
   }

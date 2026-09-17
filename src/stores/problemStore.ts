@@ -2,6 +2,10 @@ import { defineStore } from 'pinia'
 import type { Problem } from '@/types/problem'
 import type { ProblemLimits, UserProblemStatus } from '@/types/rank'
 import { problemService } from '@/services/problem.service'
+import { errorMessage } from '@/utils/error'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('problemStore')
 
 export const useProblemStore = defineStore('problem', {
   state: () => ({
@@ -39,7 +43,7 @@ export const useProblemStore = defineStore('problem', {
       try {
         this.currentProblem = await problemService.getProblem(contestId, problemId)
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '加载题目失败'
+        this.error = errorMessage(e, '加载题目失败')
         throw e
       } finally {
         this.isLoading = false
@@ -53,7 +57,7 @@ export const useProblemStore = defineStore('problem', {
       try {
         this.problems = await problemService.listProblems(contestId)
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '加载题目列表失败'
+        this.error = errorMessage(e, '加载题目列表失败')
         throw e
       } finally {
         this.isLoading = false
@@ -74,7 +78,7 @@ export const useProblemStore = defineStore('problem', {
         const fetched = await problemService.getProblemLimits(contestId, displayIds)
         this.limits = { ...this.limits, ...fetched }
       } catch (e) {
-        console.error('[problemStore] 题目 limits 加载失败:', e)
+        log.error('题目 limits 加载失败:', e)
       } finally {
         this.isLimitsLoading = false
       }
@@ -91,7 +95,7 @@ export const useProblemStore = defineStore('problem', {
       try {
         this.myStatus = await problemService.getUserProblemStatus(contestId, problemIds)
       } catch (e) {
-        console.error('[problemStore] 我的题目状态加载失败:', e)
+        log.error('我的题目状态加载失败:', e)
       } finally {
         this.isStatusLoading = false
       }

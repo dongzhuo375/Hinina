@@ -15,6 +15,10 @@ import { configService } from '@/services/config.service'
 import type { EditorPrefs } from '@/services/config.service'
 import { resolveAllowedLanguage } from '@/utils/language'
 import { DEFAULT_EDITOR_TAB_SIZE } from '@/utils/editor'
+import { errorMessage } from '@/utils/error'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ProblemSolveView')
 
 /// 解题工作台：左题面（48%）/ 右代码编辑器（52%），中间 1px 拖拽条可调。
 const route = useRoute()
@@ -56,7 +60,7 @@ async function load(id: string) {
     // 落盘失败不阻断切题（防抖同步大概率已写入文件），仅记录
     if (workspaceStore.isDirty) {
       await workspaceStore.saveWorkspace().catch((e) => {
-        console.error('[ProblemSolveView] 切题前保存工作区失败:', e)
+        log.error('切题前保存工作区失败:', e)
       })
     }
     const contestId = await ensureContestId()
@@ -93,7 +97,7 @@ async function load(id: string) {
     )
   } catch (e) {
     if (token !== loadToken) return
-    localError.value = e instanceof Error ? e.message : '加载题目失败'
+    localError.value = errorMessage(e, '加载题目失败')
   } finally {
     // 只有最新一次加载负责收尾；被取代的加载直接退出，由新加载统一消费 focus
     if (token === loadToken) {
@@ -151,7 +155,7 @@ function persistSplitRatio() {
       draft.layout.splitRatio = ratio
     })
     .catch((e) => {
-      console.error('[ProblemSolveView] 分栏比例持久化失败:', e)
+      log.error('分栏比例持久化失败:', e)
     })
 }
 

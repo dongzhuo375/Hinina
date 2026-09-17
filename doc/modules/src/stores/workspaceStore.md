@@ -17,7 +17,7 @@
 | `loadWorkspace` | `(contestId, problemId) => Promise<void>` | 加载工作区：恢复 language（元数据残留的历史 Monaco id 经 `normalizeHojLanguage` 归一为 HOJ 显示名；未记录语言时用 `configService.getDefaultLanguage()`，兜底 "C++"）、isDirty；代码文件优先取当前语言派生名，其次按 `CODE_FILE_EXTENSIONS` 后缀探测（兼容历史任意命名） |
 | `saveWorkspace` | `() => Promise<void>` | 显式保存并清脏标记（切题前落盘由 ProblemSolveView 调用） |
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + 标脏 + 触发防抖同步 |
-| `debouncedSync` | `() => void` | 2s 无操作后把代码按 `sourceFileNameOf(language)` 派生的文件名推送到后端（`updateWorkspaceFile`）；失败只 console.error |
+| `debouncedSync` | `() => void` | 2s 无操作后把代码按 `sourceFileNameOf(language)` 派生的文件名推送到后端（`updateWorkspaceFile`）；失败只 `log.error` 记录（`utils/logger` 作用域日志） |
 | `cancelPendingSync` | `() => void` | 取消未触发的防抖同步（登出/切换账号时调用，避免向已失效会话写入代码） |
 | `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程 |
 
@@ -27,6 +27,7 @@
 - `@/types/workspace`（仅类型）
 - `@/services/workspace.service`（`workspaceService`）
 - `@/services/config.service`（`getDefaultLanguage` 默认语言）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 
@@ -48,7 +49,7 @@ changeLanguage(lang)
   → 相同语言直接 return
   → this.language = lang + isDirty = true      // 乐观更新：UI 立即生效，不等待 IPC
   → workspaceService.setLanguage(lang)          // 立即持久化到后端 workspace.json
-     失败 → 只 console.error，不回滚本地选择
+     失败 → 只 log.error 记录（utils/logger 作用域日志），不回滚本地选择
 ```
 
 设计要点：

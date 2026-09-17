@@ -2,6 +2,9 @@ import type { Router } from 'vue-router'
 import { setIpcErrorObserver } from '@/bridge'
 import type { IpcError } from '@/bridge'
 import { SESSION_INVALID_MESSAGE, useAuthStore } from '@/stores/authStore'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('sessionGuard')
 
 /// 失效处理进行中标记：多个请求同时返回认证错误时只处理一次
 let invalidating = false
@@ -32,7 +35,7 @@ async function handleAuthFailure(error: IpcError, router: Router): Promise<void>
 
   invalidating = true
   try {
-    console.warn(`[sessionGuard] ${error.cmd} 返回认证错误，判定会话失效: ${error.message}`)
+    log.warn(`${error.cmd} 返回认证错误，判定会话失效: ${error.message}`)
     await auth.invalidateSession(SESSION_INVALID_MESSAGE)
     // 仅当停留在受保护页面时需要跳转；登录页本身就是失效后的落点
     if (router.currentRoute.value.meta.requiresAuth) {

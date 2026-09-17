@@ -5,6 +5,10 @@ import { configService } from '@/services/config.service'
 import { isTerminalStatus } from '@/utils/submission'
 import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
+import { errorMessage } from '@/utils/error'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('submissionStore')
 
 interface SubmissionEntry {
   id: string
@@ -112,7 +116,7 @@ export const useSubmissionStore = defineStore('submission', {
           submittedAt: new Date().toISOString(),
         })
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '提交失败'
+        this.error = errorMessage(e, '提交失败')
         throw e
       } finally {
         this.isSubmitting = false
@@ -137,7 +141,7 @@ export const useSubmissionStore = defineStore('submission', {
         this.error = null
         return result
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '获取评测结果失败'
+        this.error = errorMessage(e, '获取评测结果失败')
         throw e
       }
     },
@@ -172,7 +176,7 @@ export const useSubmissionStore = defineStore('submission', {
       const ctx = pollContexts.get(submissionId)
       if (!ctx) return
       if (Date.now() >= ctx.deadline) {
-        console.warn(`[submissionStore] 提交 ${submissionId} 评测轮询超时，已停止`)
+        log.warn(`提交 ${submissionId} 评测轮询超时，已停止`)
         this.stopPolling(submissionId)
         return
       }
@@ -224,7 +228,7 @@ export const useSubmissionStore = defineStore('submission', {
         h.current = result.current
         h.pages = result.pages
       } catch (e) {
-        h.error = e instanceof Error ? e.message : '加载提交记录失败'
+        h.error = errorMessage(e, '加载提交记录失败')
         throw e
       } finally {
         h.isLoading = false

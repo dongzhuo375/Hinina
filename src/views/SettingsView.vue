@@ -5,6 +5,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
 import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
+import { errorMessage } from '@/utils/error'
 import type { AppConfig } from '@/types/config'
 import type { StorageInfo } from '@/types/system'
 
@@ -139,7 +140,7 @@ async function load(): Promise<void> {
     configService.invalidate()
     populate(await configService.getConfig())
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : '读取配置失败'
+    loadError.value = errorMessage(e, '读取配置失败')
   } finally {
     loading.value = false
   }
@@ -177,7 +178,7 @@ async function save(): Promise<void> {
       savedTimer = null
     }, 3_000)
   } catch (e) {
-    saveError.value = e instanceof Error ? e.message : '保存配置失败'
+    saveError.value = errorMessage(e, '保存配置失败')
   } finally {
     saving.value = false
   }

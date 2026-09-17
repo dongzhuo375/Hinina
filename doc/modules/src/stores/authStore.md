@@ -27,6 +27,8 @@
 - `@/types/user`（仅类型）
 - `@/services/auth.service`（`authService`）
 - `@/stores/session`（`clearDomainState`）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 

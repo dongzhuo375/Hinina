@@ -16,9 +16,7 @@ const props = defineProps<{
   fontSize: number
   tabSize: number
   editorTheme: string
-  /// 落盘进行中（父级 debounce 后的保存状态）
-  saving?: boolean
-  /// 落盘失败提示（父级写入；非空时优先于默认说明展示）
+  /// 落盘失败提示（父级写入；为空时不占位）
   error?: string | null
 }>()
 
@@ -116,10 +114,7 @@ function onFontSizeInput(e: Event) {
 
         <!-- 编辑器主题（仅编辑器区域；客户端界面仍为浅色） -->
         <div class="mt-3.5">
-          <div class="flex items-baseline justify-between">
-            <span class="text-xs font-medium text-slate-700">编辑器主题</span>
-            <span class="text-[10px] text-slate-400">仅编辑器区域</span>
-          </div>
+          <span class="text-xs font-medium text-slate-700">编辑器主题</span>
           <div class="mt-2 flex gap-1.5">
             <button
               v-for="theme in EDITOR_THEMES"
@@ -139,16 +134,12 @@ function onFontSizeInput(e: Event) {
           </div>
         </div>
 
-        <div class="mt-3.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
-          <span
-            class="text-[10px] leading-tight"
-            :class="error ? 'text-rose-600' : 'text-slate-400'"
-          >
-            {{ error ?? (saving ? '保存中…' : '改动即时生效并自动保存') }}
-          </span>
+        <div class="mt-3.5 flex items-center gap-2 border-t border-slate-100 pt-2.5">
+          <!-- 落盘失败才提示；成功路径无需打扰（改动已即时可见） -->
+          <span v-if="error" class="text-[10px] leading-tight text-rose-600">{{ error }}</span>
           <button
             type="button"
-            class="shrink-0 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-medium whitespace-nowrap text-slate-600 transition hover:bg-slate-100"
+            class="ml-auto shrink-0 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-medium whitespace-nowrap text-slate-600 transition hover:bg-slate-100"
             @click="emit('reset')"
           >
             恢复默认

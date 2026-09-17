@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { Contest, ContestProblem } from '@/types/contest'
 import { contestService } from '@/services/contest.service'
+import { errorMessage } from '@/utils/error'
 
 /**
  * 进行中的比赛加载请求（模块级，不进响应式状态）。
@@ -67,7 +68,7 @@ export const useContestStore = defineStore('contest', {
           this.contest = result.contest
           this.problems = result.problems
         } catch (e) {
-          this.error = e instanceof Error ? e.message : '加载比赛失败'
+          this.error = errorMessage(e, '加载比赛失败')
           throw e
         } finally {
           this.isLoading = false
@@ -99,7 +100,7 @@ export const useContestStore = defineStore('contest', {
         this.briefState = 'connected'
       } catch (e) {
         this.brief = null
-        this.briefError = e instanceof Error ? e.message : '获取比赛信息失败'
+        this.briefError = errorMessage(e, '获取比赛信息失败')
         this.briefState = 'failed'
       }
     },

@@ -12,6 +12,7 @@ import {
   resolveParticipantCountFromPage,
 } from '@/utils/rank'
 import type { RankGroupFilter } from '@/utils/rank'
+import { errorMessage } from '@/utils/error'
 
 /// 榜单轮询节奏：HOJ 文档 §9.9 要求间隔 ≥10s 且切后台暂停；
 /// 抖动用于打散全场客户端的同步相位（同一秒进入榜单页时不会每周期都齐发）
@@ -150,7 +151,7 @@ export const useRankStore = defineStore('rank', {
         })
         this.applyPage(result, uid)
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '加载榜单失败'
+        this.error = errorMessage(e, '加载榜单失败')
         throw e
       } finally {
         this.isLoading = false
@@ -227,7 +228,7 @@ export const useRankStore = defineStore('rank', {
       } catch (e) {
         // 有旧快照则保留并回退到拉取前状态供继续浏览；毫无快照才标记 error
         this.fullFetchState = this.fullRows === null ? 'error' : previousState
-        this.error = e instanceof Error ? e.message : '拉取全量榜单失败'
+        this.error = errorMessage(e, '拉取全量榜单失败')
         throw e
       } finally {
         this.isLoading = false
@@ -338,7 +339,7 @@ export const useRankStore = defineStore('rank', {
           isFullSnapshotFilter(this.groupFilter) ||
           (isPaused?.() ?? false),
         onError: (e) => {
-          this.error = e instanceof Error ? e.message : '榜单刷新失败'
+          this.error = errorMessage(e, '榜单刷新失败')
         },
       })
       poller.start()

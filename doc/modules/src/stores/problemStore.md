@@ -28,6 +28,8 @@
 - `pinia`
 - `@/types/problem`、`@/types/rank`（仅类型：`ProblemLimits` / `UserProblemStatus`）
 - `@/services/problem.service`（`problemService`）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 
@@ -43,7 +45,7 @@ loadLimits(contestId, displayIds)
   → 空列表短路
   → problemService.getProblemLimits（后端内存+磁盘缓存，缺失题不出现在结果里）
   → this.limits = { ...旧值, ...fetched }   // 合并而非替换：分批/重试时已到达的题不丢
-  → 失败：console.error 记录，不抛出、不清空已有数据
+  → 失败：log.error 记录（utils/logger 作用域日志），不抛出、不清空已有数据
 
 loadMyStatus(contestId, problemIds)
   → 空列表短路 → problemService.getUserProblemStatus → 整体替换 myStatus

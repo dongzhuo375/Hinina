@@ -40,6 +40,7 @@
 - `@/services/rank.service`（`rankService.getRank` + `DEFAULT_RANK_PAGE_SIZE`）
 - `@/utils/polling`（`createPoller` + `Poller` 类型）
 - `@/utils/rank`（`dedupeRankRows` / `filterRankRowsByGroup` / `mergeRankPages` / `paginateRankRows` / `resolveMyRow` / `resolveParticipantCountFromPage` + `RankGroupFilter` 类型）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
 
 ## 被依赖
 

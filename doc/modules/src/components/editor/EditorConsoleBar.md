@@ -16,7 +16,7 @@
 | `displayId` | computed | 当前路由的比赛内展示题号（`route.params.displayId`，解题页 `/contest/problem/:displayId`），摘要查询与 `?problem=` 深链的参数 |
 | `latest` | computed | 从 `submissionStore.submissions`（只存本会话提交）尾部倒序找本题最新一条；服务端摘要未到达时的**回退数据源** |
 | `summary` | `ref<{ latest: SubmissionRecord \| null; total: number } \| null>` | 服务端题目提交摘要，经 `submissionStore.fetchProblemSummary(contestId, displayId)`（limit=1 取最新一条 + total 计数）；独立于评测页 history state |
-| `refreshSummary` | fn | 拉取摘要；失败仅 console.warn——**摘要失败不影响解题**，回退本地会话 pill |
+| `refreshSummary` | fn | 拉取摘要；失败仅 `log.warn` 记录（`utils/logger` 作用域日志）——**摘要失败不影响解题**，回退本地会话 pill |
 | `failedCaseHint` / `hintSubmitId` | ref/普通变量 | 失败记录的测试点提示（如 `Test 4 · 2.01s`）；经 `findFirstFailedCase` 定位首个非 AC 测试点（**子任务制感知**：平铺 `cases` 为空时展开 `subTasks` 查找）；`hintSubmitId` 去重保证**每条提交只拉一次**测试点明细 |
 | `serverPill` | computed | 服务端 pill 组装：`最新记录: #123 WA (Test 4 · 2.01s)`；测试点不可得时回退记录自身耗时（wa/tle 用 `formatMsToSeconds` 秒口径，其余 `N ms`） |
 | `SERVER_TONE_MAP` | 常量 | `StatusTone`（utils/submission 语义色）→ 控制台条既有 `Tone` |
@@ -37,6 +37,7 @@
 - `@/types/submission`（仅 `JudgementStatus` / `SubmissionRecord` 类型）
 - `@/utils/submission`（`findFirstFailedCase` / `formatMsToSeconds` / `isTerminalStatus` / `statusAbbr` / `statusTone` + `StatusTone` 类型）
 - `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — tabSize prop 兜底）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 
@@ -57,7 +58,7 @@ watch summary.latest（服务端最新记录变化）:
     → submissionService.getSubmissionCases(submitId)
     → findFirstFailedCase（平铺 cases 优先；子任务制 cases 为空时按 groupNum/seq
       展开 subTasks）→ failedCaseHint = `Test {seq} · {formatMsToSeconds(timeMs)}`
-    → 失败 → console.warn，pill 回退记录自身耗时
+    → 失败 → log.warn 记录，pill 回退记录自身耗时
 
 pill 优先级：serverPill（#id + statusAbbr + 测试点/耗时）
            > latest（本会话提交，原词文案 + ms 耗时）

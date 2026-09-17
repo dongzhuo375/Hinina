@@ -6,6 +6,9 @@ import { configService } from '@/services/config.service'
 import type { EditorPrefs } from '@/services/config.service'
 import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf, resolveAllowedLanguage, SOURCE_FILE_EXTENSIONS } from '@/utils/language'
 import { DEFAULT_EDITOR_FONT_SIZE, DEFAULT_EDITOR_TAB_SIZE, DEFAULT_EDITOR_THEME } from '@/utils/editor'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('CodeEditor')
 
 // ── Monaco Editor Workers（手动配置，避免 worker 打包问题） ──
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -201,7 +204,7 @@ async function handleFileChange(e: Event) {
     }
     editor.value?.focus()
   } catch (err) {
-    console.error('[CodeEditor] 读取上传文件失败:', err)
+    log.error('读取上传文件失败:', err)
   }
 }
 
@@ -218,8 +221,13 @@ const prefs = reactive<EditorPrefs>({
   editorTheme: DEFAULT_EDITOR_THEME,
 })
 
-const prefsSaving = ref(false)
 const prefsError = ref<string | null>(null)
+
+/// 编辑器容器底色跟随主题：Monaco 实例创建前与尺寸重算的瞬间不露白底
+/// （背景本身由 Monaco 主题绘制，此处只是同色兜底）
+const editorSurfaceClass = computed(() =>
+  prefs.editorTheme === 'vs-dark' ? 'bg-[#1e1e1e]' : 'bg-white',
+)
 
 /// 用户是否已改动过偏好（挂载读配置到达前动了设置时，以用户值为准）
 let prefsTouched = false
@@ -258,17 +266,14 @@ function resetPrefs() {
 }
 
 async function persistPrefs() {
-  prefsSaving.value = true
   try {
     await configService.updateEditorPrefs({ ...prefs })
     prefsError.value = null
   } catch (e) {
     // 已应用到编辑器，仅落盘失败：提示「仅本次会话生效」而不是回滚 ——
     // 把用户刚调好的字号弹回去比不持久化更糟
-    console.error('[CodeEditor] 保存编辑器设置失败:', e)
+    log.error('保存编辑器设置失败:', e)
     prefsError.value = '保存失败，设置仅本次会话生效'
-  } finally {
-    prefsSaving.value = false
   }
 }
 
@@ -403,7 +408,6 @@ defineExpose({ focus })
           :font-size="prefs.fontSize"
           :tab-size="prefs.tabSize"
           :editor-theme="prefs.editorTheme"
-          :saving="prefsSaving"
           :error="prefsError"
           @change="handlePrefsChange"
           @reset="resetPrefs"
@@ -428,7 +432,7 @@ defineExpose({ focus })
       </div>
     </div>
 
-    <!-- Monaco Editor -->
-    <div ref="editorContainer" class="min-h-0 flex-1 bg-white" />
+    <!-- Monaco Editor（底色跟随主题，见 editorSurfaceClass） -->
+    <div ref="editorContainer" class="min-h-0 flex-1" :class="editorSurfaceClass" />
   </div>
 </template>

@@ -7,6 +7,9 @@ import { configService } from '@/services/config.service'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ProblemStatement')
 import {
   effectiveLimits,
   formatMemoryLimit,
@@ -104,7 +107,7 @@ async function copySampleInput(index: number, text: string) {
     copyTimer = setTimeout(() => (copiedIndex.value = -1), 1500)
   } catch (e) {
     // 剪贴板不可用（权限/环境）：不打断做题，仅记录
-    console.error('[ProblemStatement] 复制样例输入失败:', e)
+    log.error('复制样例输入失败:', e)
   }
 }
 

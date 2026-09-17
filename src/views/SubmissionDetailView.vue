@@ -22,6 +22,10 @@ import {
 import type { StatusTone } from '@/utils/submission'
 import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
+import { errorMessage } from '@/utils/error'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('SubmissionDetailView')
 
 /// 详情页收敛轮询抖动：±20% 间隔（封顶 500ms），与 submissionStore 同口径
 const JITTER_RATIO = 0.2
@@ -128,7 +132,7 @@ async function copyErrorMessage() {
     try {
       document.execCommand('copy')
     } catch (e) {
-      console.warn('[SubmissionDetailView] 复制错误信息失败:', e)
+      log.warn('复制错误信息失败:', e)
     }
     document.body.removeChild(ta)
   }
@@ -157,7 +161,7 @@ async function loadDetail(): Promise<void> {
     if (!alive) return
     // 已有旧数据时瞬时失败不清空页面，只等下一周期
     if (!detail.value) {
-      loadError.value = e instanceof Error ? e.message : '加载提交详情失败'
+      loadError.value = errorMessage(e, '加载提交详情失败')
     }
   }
   isLoading.value = false

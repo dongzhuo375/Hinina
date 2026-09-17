@@ -8,6 +8,9 @@ import type { JudgementStatus, SubmissionRecord } from '@/types/submission'
 import { findFirstFailedCase, formatMsToSeconds, isTerminalStatus, statusAbbr, statusTone } from '@/utils/submission'
 import type { StatusTone } from '@/utils/submission'
 import { DEFAULT_EDITOR_TAB_SIZE } from '@/utils/editor'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('EditorConsoleBar')
 
 /// 编辑器底部控制台条：最新评测记录 pill + 提交入口 + 光标/编码状态行。
 const props = withDefaults(
@@ -60,7 +63,7 @@ async function refreshSummary() {
     summary.value = await submissionStore.fetchProblemSummary(contestId, displayId.value)
   } catch (e) {
     // 摘要失败不影响解题：回退本地会话记录 pill，仅记录日志
-    console.warn('[EditorConsoleBar] 获取题目提交摘要失败:', e)
+    log.warn('获取题目提交摘要失败:', e)
   }
 }
 
@@ -106,7 +109,7 @@ watch(
       if (first) failedCaseHint.value = `Test ${first.seq} · ${formatMsToSeconds(first.timeMs)}`
     } catch (e) {
       // 测试点不可得时回退记录自身耗时（下方 serverPill 兜底）
-      console.warn('[EditorConsoleBar] 获取测试点明细失败:', e)
+      log.warn('获取测试点明细失败:', e)
     }
   },
 )

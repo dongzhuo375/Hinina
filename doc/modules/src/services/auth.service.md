@@ -23,6 +23,7 @@
 
 - `@/bridge/auth.bridge`（login / logout / getSession / validateSession）
 - `@/types/user`（仅类型）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 

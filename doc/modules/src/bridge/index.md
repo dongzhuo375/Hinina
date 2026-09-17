@@ -14,11 +14,12 @@
 | `IpcError` | `class extends Error` | 归一化错误：`cmd` / `variant: AppErrorVariant \| null` / `raw`（原始载荷）；getter `isAuthError`（variant === 'Auth'） |
 | `parseAppError` | `(raw) => { variant, message }`（私有） | 识别 AppError 外部标签形态 `{ Variant: message }`（单键 + 字符串值）；Error/字符串/`{message}` 各按其形处理；多键对象回退 JSON 文本 |
 | `IpcErrorObserver` / `setIpcErrorObserver` | type / `(observer \| null) => void` | 错误观察者注册（仅组合根 `main.ts` 调用一次）；Bridge 只回调，不感知 store/router |
-| `ipcInvoke<T>` | `(cmd, args?) => Promise<T>` | invoke 包装：成功透传；失败 → parseAppError → 构造 IpcError → console.error → 通知观察者 → 抛出 |
+| `ipcInvoke<T>` | `(cmd, args?) => Promise<T>` | invoke 包装：成功透传；失败 → parseAppError → 构造 IpcError → `log.error` 记录（`utils/logger` 作用域日志）→ 通知观察者 → 抛出 |
 
 ## 直接依赖
 
 - `@tauri-apps/api/core`（`invoke`）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 
@@ -36,7 +37,7 @@ ipcInvoke(cmd, args)
        —— 既不是 Error 也不是字符串！
        → parseAppError：单键+字符串值 → { variant（在白名单内）, message }
        → new IpcError(cmd, message, variant, raw)
-       → console.error(`[ipc] ${cmd} 调用失败 (${variant}): ${message}`)   // 绝不记录 args
+       → log.error(`${cmd} 调用失败 (${variant}): ${message}`)   // [scope] 前缀由 utils/logger 统一加；绝不记录 args
        → errorObserver?.(error)      // sessionGuard 据 isAuthError 分流
        → throw error
 ```

@@ -31,6 +31,7 @@
 - stores：`contestStore`（contestId，`whenLoaded` 兜底）、`submissionStore`（`submitCode` / `submissions` / `isSubmitting` / `error`）、`workspaceStore`（仅读 `language` 作默认值）
 - `@/types/contest`（仅类型）
 - `@/utils/submission`（`formatMemoryKb` / `isTerminalStatus` / `statusLabel` / `statusTone` + `StatusTone` 类型）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 

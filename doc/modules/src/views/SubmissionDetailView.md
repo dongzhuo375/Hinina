@@ -35,6 +35,8 @@
 - `@/utils/submission`（`formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `isTerminalStatus` / `statusAbbr` / `statusLabel` / `statusTone` + `StatusTone` 类型）
 - `@/utils/language`（`monacoIdOf` 只读代码视图高亮）
 - `@/utils/polling`（`createPoller` + `Poller` 类型）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 

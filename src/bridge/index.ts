@@ -1,4 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
+import { createLogger } from '@/utils/logger'
+
+/// IPC 单点日志（作用域 `ipc`）
+const log = createLogger('ipc')
 
 /**
  * Rust `core::error::AppError` 的变体名（serde 外部标签）。
@@ -109,7 +113,7 @@ export async function ipcInvoke<T>(cmd: string, args?: Record<string, unknown>):
   } catch (raw) {
     const { variant, message } = parseAppError(raw)
     const error = new IpcError(cmd, message, variant, raw)
-    console.error(`[ipc] ${cmd} 调用失败${variant ? ` (${variant})` : ''}: ${message}`)
+    log.error(`${cmd} 调用失败${variant ? ` (${variant})` : ''}: ${message}`)
     errorObserver?.(error)
     throw error
   }

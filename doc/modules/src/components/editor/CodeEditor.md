@@ -25,7 +25,8 @@
 | `applyPrefs` | `fn` | `editor.updateOptions({ fontSize, tabSize })` + `monaco.editor.setTheme(editorTheme)`；**主题是全局选项**（Monaco 无按实例主题），同页其它编辑器一并跟随；实例未就绪时直接返回 |
 | `resetPrefs` | `fn` | 恢复默认值（`utils/editor` 常量）：与手动改动同一条链路（即时生效 + 落盘），不是只改本地内存 |
 | `persistPrefs` | `async fn` | `configService.updateEditorPrefs({...prefs})`；失败置 `prefsError`（「保存失败，设置仅本次会话生效」）但**不回滚已应用的值** |
-| `prefsSaving` / `prefsError` | ref | 落盘状态，透传给 `EditorSettingsPopover` 的 `saving` / `error` |
+| `prefsError` | ref | 落盘失败提示，透传给 `EditorSettingsPopover` 的 `error`（成功路径不展示任何状态文案） |
+| `editorSurfaceClass` | computed | 容器底色跟随主题（`vs-dark` → `#1e1e1e`，否则白）：Monaco 实例创建前与尺寸重算瞬间不露白底。**编辑器背景本身由 Monaco 主题绘制** —— `styles/global.css` 刻意不再用 `!important` 覆写 `.margin` / `.monaco-editor-background`，否则 vs-dark 只换字色、底色仍被钉在浅色 |
 
 编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configService.getEditorPrefs()` 读取**（读取失败服务内部回退 14 / 4 / 'vs'）、JetBrains Mono 字体栈、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 readonly prop（只读时行高亮关闭）。
 
@@ -37,6 +38,7 @@
 - `@/services/config.service`（编辑器偏好读写 + `EditorPrefs` 类型）
 - `@/utils/language`（语言值域/文件名识别）
 - `@/utils/editor`（偏好默认值）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 

@@ -29,6 +29,7 @@
 - `@/bridge/config.bridge`（`get_config` / `update_config`）
 - `@/types/config`（仅类型）
 - `@/utils/language`（`normalizeHojLanguage`）、`@/utils/editor`（偏好默认值与主题归一）
+- `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
 

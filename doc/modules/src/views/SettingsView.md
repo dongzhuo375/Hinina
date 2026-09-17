@@ -29,6 +29,7 @@
 - 组件：`ErrorMessage` / `LoadingSpinner`
 - `@/services/config.service`（`configService` + `normalizeLanguageId`）、`@/services/system.service`（`systemService`）
 - `@/types/config` / `@/types/system`（仅类型）
+- `@/utils/error`（`errorMessage` —— 错误文案收敛）
 
 ## 被依赖
 
