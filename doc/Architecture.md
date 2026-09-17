@@ -136,7 +136,7 @@ Hinina/
         │   ├── mod.rs
         │   ├── http.rs                   # HttpClient 封装（超时可注入 with_timeout —— 由 oj.timeout_secs 驱动、重试/UA/Cookie；只返回原始响应体与响应头，不做反序列化）
         │   ├── storage.rs                # Storage 底层文件工具
-        │   ├── cache.rs                  # Cache 预留
+        │   ├── cache.rs                  # 缓存原语（TtlCache：TTL + 容量上限，近似 FIFO 淘汰；JsonDiskCache：cache/{ns}/{key}.json，条目带 fetchedAt 跨重启计时、损坏容忍、过期懒删除）
         │   ├── logger.rs                 # Logger（Tracing 双路输出：stderr + {base_dir}/logs/hinina.log，启动时 >5MB 截断；敏感信息不落日志靠调用点约束——IPC 日志不记参数）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
