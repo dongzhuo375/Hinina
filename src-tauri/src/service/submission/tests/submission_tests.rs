@@ -10,6 +10,7 @@ use crate::core::entity::submission::{
 use crate::core::error::AppError;
 use crate::core::event::event_category::EventCategory;
 use crate::core::provider::oj_id::OjId;
+use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::core::provider::submission::SubmissionProvider;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
@@ -203,7 +204,13 @@ fn build_service(mode: StubMode) -> (SubmissionService, StubCounters, Arc<EventB
         cases_calls: Arc::clone(&counters.cases),
     });
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
-    registry.register_submission(OjId::new("HOJ"), provider);
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            submission: Some(provider),
+            ..Default::default()
+        },
+    );
     let bus = Arc::new(EventBus::new());
     (
         SubmissionService::new(registry, Arc::clone(&bus)),

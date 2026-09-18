@@ -6,6 +6,7 @@ use crate::core::error::AppError;
 use crate::core::event::event_category::EventCategory;
 use crate::core::provider::auth::AuthProvider;
 use crate::core::provider::oj_id::OjId;
+use crate::core::provider::registry::ProviderSet;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 
 /// 构造基于独立临时目录的 AuthService 及其依赖。
@@ -31,7 +32,13 @@ fn make_service_with_auth(
     let registry: Arc<dyn ProviderRegistry> =
         Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     if let Some(p) = provider {
-        registry.register_auth(OjId::new("HOJ"), p);
+        registry.register(
+            OjId::new("HOJ"),
+            ProviderSet {
+                auth: Some(p),
+                ..Default::default()
+            },
+        );
     }
     let service = AuthService::new(Arc::clone(&registry), storage, Arc::clone(&event_bus));
     (service, event_bus, dir, registry)

@@ -114,8 +114,7 @@ impl ContestService {
             return Ok(contest);
         }
 
-        let oj_id = self.registry.current_oj();
-        let provider = self.registry.get_contest(&oj_id)?;
+        let provider = self.registry.current_contest()?;
         let contest = provider.get_contest(contest_id).await.map_err(|e| {
             warn!(error = %e, "获取比赛详情失败");
             e.context("获取比赛详情失败")
@@ -141,8 +140,7 @@ impl ContestService {
             }
         }
 
-        let oj_id = self.registry.current_oj();
-        let provider = self.registry.get_contest(&oj_id)?;
+        let provider = self.registry.current_contest()?;
 
         info!("获取比赛列表");
         let contests = provider.list_contests().await.map_err(|e| {
@@ -215,8 +213,7 @@ impl ContestService {
         contest_id: &str,
         query: &RankQuery,
     ) -> AppResult<ContestRankPage> {
-        let oj_id = self.registry.current_oj();
-        let provider = self.registry.get_contest(&oj_id)?;
+        let provider = self.registry.current_contest()?;
 
         let page = provider
             .get_contest_rank(contest_id, query)
@@ -248,8 +245,7 @@ impl ContestService {
         contest_id: &str,
         password: Option<&str>,
     ) -> AppResult<ContestBundle> {
-        let oj_id = self.registry.current_oj();
-        let provider = self.registry.get_contest(&oj_id)?;
+        let provider = self.registry.current_contest()?;
 
         info!(contest_id = contest_id, "加载比赛");
         let contest = self.load_contest_meta(contest_id).await?;
@@ -283,8 +279,7 @@ impl ContestService {
         current_page: i64,
         limit: i64,
     ) -> AppResult<AnnouncementPage> {
-        let oj_id = self.registry.current_oj();
-        let provider = self.registry.get_contest(&oj_id)?;
+        let provider = self.registry.current_contest()?;
 
         let page = provider
             .list_announcements(contest_id, current_page, limit)

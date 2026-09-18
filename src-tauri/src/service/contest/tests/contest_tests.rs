@@ -10,6 +10,7 @@ use crate::core::entity::rank::{ContestRankPage, ContestRankRow, RankQuery};
 use crate::core::error::AppError;
 use crate::core::provider::contest::ContestProvider;
 use crate::core::provider::oj_id::OjId;
+use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 
@@ -229,7 +230,13 @@ fn make_service_in(
 ) -> (ContestService, Arc<StubContestProvider>, std::path::PathBuf) {
     let provider = Arc::new(StubContestProvider::new(mode));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
-    registry.register_contest(OjId::new("HOJ"), Arc::clone(&provider) as Arc<dyn ContestProvider>);
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            contest: Some(Arc::clone(&provider) as Arc<dyn ContestProvider>),
+            ..Default::default()
+        },
+    );
     let service = ContestService::new(
         registry,
         Arc::new(EventBus::new()),

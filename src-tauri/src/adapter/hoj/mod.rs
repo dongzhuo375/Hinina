@@ -26,6 +26,7 @@ use crate::core::event::event_bus::EventBus;
 use crate::core::provider::auth::AuthProvider;
 use crate::core::provider::contest::ContestProvider;
 use crate::core::provider::problem::ProblemProvider;
+use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::submission::SubmissionProvider;
 use crate::infra::http::HttpClient;
 
@@ -55,8 +56,7 @@ impl HOJAdapter {
     /// Debug 输出一致以兼容既有会话文件）。
     pub const ID: &'static str = "HOJ";
 
-    /// 创建 HOJAdapter。
-    ///
+    /// 创建 HOJAdapter。    ///
     /// `base_url` 不含尾部 `/api`，如 `https://hoj.dongzhuo.top`。
     pub fn new(http: Arc<HttpClient>, base_url: String, event_bus: Arc<EventBus>) -> Self {
         // 去掉尾部斜杠以统一拼接
@@ -513,6 +513,37 @@ fn unescape_html(s: &str) -> String {
 #[cfg(test)]
 #[path = "tests/mod_tests.rs"]
 mod tests;
+
+// ── 适配器工厂 ──
+
+/// HOJ 工厂（`adapter::factories()` 清单成员）。
+///
+/// 注册侧聚合：四个 trait 实现包进一个 [`ProviderSet`]，组合根对每个 OJ
+/// 只见一行 `factory.build(&deps, base_url)`。
+pub struct HojFactory;
+
+impl crate::adapter::AdapterFactory for HojFactory {
+    fn id(&self) -> &'static str {
+        HOJAdapter::ID
+    }
+
+    fn build(&self, deps: &crate::adapter::AdapterDeps, base_url: &str) -> ProviderSet {
+        let adapter = Arc::new(HOJAdapter::new(
+            Arc::clone(&deps.http_client),
+            base_url.to_string(),
+            Arc::clone(&deps.event_bus),
+        ));
+        ProviderSet::full(
+            Arc::clone(&adapter) as Arc<dyn AuthProvider>,
+            Arc::clone(&adapter) as Arc<dyn ContestProvider>,
+            Arc::clone(&adapter) as Arc<dyn ProblemProvider>,
+            Arc::clone(&adapter) as Arc<dyn SubmissionProvider>,
+        )
+    }
+}
+
+/// HOJ 的工厂单例（零状态，静态常量即可）。
+pub static FACTORY: HojFactory = HojFactory;
 
 // ── AuthProvider ──
 

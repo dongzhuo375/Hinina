@@ -25,7 +25,7 @@ pub async fn login(
     if let Some(ref ot) = oj_type {
         let id = OjId::new(ot);
         if ctx.provider_registry.list_available().contains(&id) {
-            ctx.provider_registry.set_current_oj(id);
+            ctx.provider_registry.set_current(id);
             info!(oj_id = ot, "已切换 OJ");
         } else {
             warn!(oj_id = ot, "未注册的 OJ，沿用当前默认值");

@@ -86,7 +86,7 @@ impl AppContext {
             )?,
         );
 
-        // 6. 创建 Provider 注册中心。
+        // 6. 创建 Provider 注册中心 + 注册全部内建 OJ（工厂数据化：注册侧聚合）。
         //
         // 当前 OJ 取自配置的 `user.lastOjType`（身份是数据：字符串 id，不再是
         // 编译期枚举）。未注册的 id（配置手改/拼写错误）在注册完成后回退 HOJ
@@ -95,27 +95,26 @@ impl AppContext {
         let provider_registry: Arc<dyn ProviderRegistry> =
             Arc::new(ProviderRegistryImpl::new(configured_oj.clone()));
 
-        // 6.5 注册 HOJ Adapter（阶段 5）
-        {
-            let hoj_base = config.get().oj.hoj_url;
-            tracing::info!(base_url = hoj_base, "HOJ Adapter 注册中");
-            let hoj = Arc::new(HOJAdapter::new(
-                Arc::clone(&http_client),
-                hoj_base,
-                Arc::clone(&event_bus),
-            ));
-            let hoj_id = OjId::new(HOJAdapter::ID);
-            provider_registry.register_auth(hoj_id.clone(), Arc::clone(&hoj) as Arc<dyn crate::core::provider::auth::AuthProvider>);
-            provider_registry.register_contest(hoj_id.clone(), Arc::clone(&hoj) as Arc<dyn crate::core::provider::contest::ContestProvider>);
-            provider_registry.register_problem(hoj_id.clone(), Arc::clone(&hoj) as Arc<dyn crate::core::provider::problem::ProblemProvider>);
-            provider_registry.register_submission(hoj_id.clone(), Arc::clone(&hoj) as Arc<dyn crate::core::provider::submission::SubmissionProvider>);
+        let adapter_deps = crate::adapter::AdapterDeps {
+            http_client: Arc::clone(&http_client),
+            event_bus: Arc::clone(&event_bus),
+            storage: Arc::clone(&storage),
+        };
+        for factory in crate::adapter::factories() {
+            let id = OjId::new(factory.id());
+            // 按 OJ 取地址的能力随 instances 配置（下一改造）到达；当前 HOJ 是
+            // 唯一内建 OJ，地址取自 oj.hoj_url
+            let base_url = config.get().oj.hoj_url.clone();
+            let set = factory.build(&adapter_deps, &base_url);
+            provider_registry.register(id.clone(), set);
+            tracing::info!(oj_id = %id, base_url = base_url, "OJ 适配器已注册");
         }
 
         // 身份字符串化后失去编译期穷尽检查，此为第一道防线：启动时校验当前
         // OJ 已注册（另两道：查询未命中 ProviderNotFound、factories 测试）。
         if !provider_registry.list_available().contains(&configured_oj) {
             tracing::warn!(configured = %configured_oj, "配置的当前 OJ 未注册，回退 HOJ");
-            provider_registry.set_current_oj(OjId::new(HOJAdapter::ID));
+            provider_registry.set_current(OjId::new(HOJAdapter::ID));
         }
 
         // 7. 创建 WorkspaceManager

@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::core::entity::problem::{Problem, Sample};
 use crate::core::provider::oj_id::OjId;
+use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::problem::ProblemProvider;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
@@ -89,7 +90,13 @@ fn build_service_with(
         fail_all,
     });
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
-    registry.register_problem(OjId::new("HOJ"), provider);
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            problem: Some(provider),
+            ..Default::default()
+        },
+    );
     ProblemService::new(
         registry,
         Arc::new(EventBus::new()),

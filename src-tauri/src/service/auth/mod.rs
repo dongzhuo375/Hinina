@@ -93,7 +93,7 @@ impl AuthService {
                 let AppEvent::Auth(AuthEvent::TokenRefreshed { token }) = event else {
                     return;
                 };
-                let oj_id = registry.current_oj();
+                let oj_id = registry.current_id();
                 let path = format!("{}/{}", SESSIONS_DIR, oj_id.session_file());
                 let Ok(raw) = storage.read_to_string(&path) else {
                     return;
@@ -121,8 +121,8 @@ impl AuthService {
     ///
     /// 登录成功后持久化 session 到 `sessions/{oj_id}.json`。
     pub async fn login(&self, username: &str, password: &str) -> AppResult<User> {
-        let oj_id = self.registry.current_oj();
-        let provider = self.registry.get_auth(&oj_id)?;
+        let oj_id = self.registry.current_id();
+        let provider = self.registry.current_auth()?;
 
         info!(username = username, oj = %oj_id, "尝试登录");
         let user = provider.login(username, password).await.map_err(|e| {
@@ -154,10 +154,10 @@ impl AuthService {
     ///
     /// 即便远端 logout 失败，也会清除本地会话并发布事件。
     pub async fn logout(&self) -> AppResult<()> {
-        let oj_id = self.registry.current_oj();
+        let oj_id = self.registry.current_id();
 
         // 尝试远端登出（非致命错误）
-        if let Ok(provider) = self.registry.get_auth(&oj_id) {
+        if let Ok(provider) = self.registry.current_auth() {
             if let Err(e) = provider.logout().await {
                 warn!(error = %e, "远端登出失败，仅清除本地会话");
             }
@@ -176,7 +176,7 @@ impl AuthService {
     ///
     /// 恢复成功时将 token 回注到 Provider，确保重启后认证请求仍携带 Authorization 头。
     pub fn get_session(&self) -> Option<Session> {
-        let oj_id = self.registry.current_oj();
+        let oj_id = self.registry.current_id();
         let path = self.session_path(&oj_id);
 
         if !self.storage.exists(&path) {
@@ -187,7 +187,7 @@ impl AuthService {
             Ok(raw) => match serde_json::from_str::<Session>(&raw) {
                 Ok(session) => {
                     // 将 token 回注到 Provider，保证后续认证接口可用
-                    if let Ok(provider) = self.registry.get_auth(&oj_id) {
+                    if let Ok(provider) = self.registry.current_auth() {
                         provider.restore_token(&session.token);
                     }
                     debug!(username = session.username, "会话已恢复");
@@ -214,13 +214,13 @@ impl AuthService {
     /// - 远端明确判定失效 → 清除磁盘会话 + 发布 `SessionExpired`，返回 `Invalid`
     /// - 网络异常 / 无 Provider → `Unknown`（保留本地会话，由调用方决定重试）
     pub async fn validate_session(&self) -> SessionValidity {
-        let oj_id = self.registry.current_oj();
+        let oj_id = self.registry.current_id();
         if self.get_session().is_none() {
             debug!("本地无会话，判定为未登录");
             return SessionValidity::Invalid;
         }
 
-        let provider = match self.registry.get_auth(&oj_id) {
+        let provider = match self.registry.current_auth() {
             Ok(p) => p,
             Err(e) => {
                 warn!(error = %e, "获取 AuthProvider 失败，会话有效性无法判定");
