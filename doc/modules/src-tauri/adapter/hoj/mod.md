@@ -1,7 +1,7 @@
 # mod
 
 ## 职责
-HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、`SubmissionProvider` 四个 trait；并提供工厂 `HojFactory`（静态单例 `FACTORY`，`adapter::factories()` 清单成员）供组合根按配置实例构造。
+HOJ 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、`SubmissionProvider` 四个 trait；并提供工厂 `HojFactory`（静态单例 `FACTORY`，`adapter::factories()` 清单成员）供组合根按配置实例构造。
 
 ## 核心类型/函数
 - `HOJAdapter` — 封装 `Arc<HttpClient>` + `base_url` + `RwLock<Option<String>>`（JWT token）+ `Arc<EventBus>`（凭证轮换事件发布）

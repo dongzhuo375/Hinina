@@ -1,4 +1,4 @@
-# HOJ (Hydro Online Judge) API 参考文档
+# HOJ API 参考文档
 
 > 基于 HOJ 后端 `DataBackup` 与前端 `hoj-vue` 提取的关键 API 记录。
 >
