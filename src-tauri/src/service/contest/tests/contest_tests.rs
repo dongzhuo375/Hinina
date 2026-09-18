@@ -583,7 +583,7 @@ fn read_state_rejects_path_separators() {
 }
 
 
-// ?? OJSwitched?OJ ?????????? OJ ???? OJ ?? OJ ?????
+// ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
 
 #[test]
 fn oj_switched_clears_contest_scoped_caches() {
@@ -595,7 +595,7 @@ fn oj_switched_clears_contest_scoped_caches() {
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     let service = ContestService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
 
-    // ?? OJ ???????? + ???????
+    // 预置 OJ 域缓存：列表缓存 + 元信息内存缓存
     *service.cache.write().unwrap() = Some(ContestCache {
         contests: vec![],
         fetched_at: Instant::now(),
@@ -622,9 +622,9 @@ fn oj_switched_clears_contest_scoped_caches() {
 
     bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
 
-    assert!(service.cache.read().unwrap().is_none(), "????????");
-    assert!(service.meta_cache.is_empty(), "???????????");
-    // ???????????????? = ???
+    assert!(service.cache.read().unwrap().is_none(), "列表缓存应被清空");
+    assert!(service.meta_cache.is_empty(), "元信息内存缓存应被清空");
+    // 磁盘命名空间整体移除（目录不存在 = 已清）
     assert!(!dir.join("cache/contest_meta").exists());
 
     let _ = std::fs::remove_dir_all(&dir);

@@ -51,7 +51,12 @@ load():
 编辑表单 → errors 逐字段实时校验 → dirty = snapshot() !== baseline
 切换 OJ（下拉 @change → onSwitchOj）→ configService.switchOj(form.activeOj)
   ├─ 成功 → persistedActive 前移 + form.ojUrl 跟随新实例地址（防「保存」把旧实例地址写进新实例）
+  │         + resetSessionForOjSwitch()（含匿名简报复位：brief 属旧 OJ，canEnter
+  │           决策不得被旧时间窗驱动）+ router.replace(Login)
   └─ 失败 → form.activeOj 回滚到 persistedActive + switchError 展示（不静默停留未生效的 OJ）
+
+切换即离开 = 放弃设置页所有未保存的修改（地址/超时/比赛引用等，下拉提示已明示）——
+切换 OJ 是「换服务端」的应用级操作，跨越未保存的草稿继续编辑反而制造混淆。
 save(): canSave 才执行 → updateConfig(读-改-写整体替换 + 失效缓存)
         → baseline 前移、showSaved 3s；失败写 saveError（表单值保留）
 discard(): Object.assign(form, JSON.parse(baseline))

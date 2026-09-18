@@ -16,7 +16,7 @@
   - `async fn get_user_problem_status(&self, contest_id, problem_ids: &[String]) -> AppResult<HashMap<String, i32>>` — 批量查询当前用户提交状态（key=pid，`0=未提交 / 1=已AC / 2=尝试过`，未出现的题视为未提交）；空列表直接返回空 map，不发请求
   - `async fn load_problem_limits(&self, contest_id, display_ids: &[String]) -> AppResult<Vec<ProblemLimits>>` — 批量获取题目 limits（时间 ms / 内存 MB），带内存 + 磁盘双层缓存；返回顺序与入参一致，获取失败的题在结果中**缺失**
   - 内部：`fetch_limits()`（分批并发拉详情）、`limits_cache_path()` / `read_limits_cache()` / `write_limits_cache()`
-- **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `storage: Arc<Storage>`, `limits_cache: Arc<RwLock<HashMap<contest_id, HashMap<display_id, ProblemLimits>>>>`, `statement_cache: Arc<TtlCache<String, Problem>>`, `statement_disk: Arc<JsonDiskCache>`（Arc 包装是为了共享进 `OJSwitched` 订阅闭包，闭包不捕获 service/总线，无引用环）。构造时经 `subscribe_oj_switched` 订阅 `SystemEvent::OJSwitched`：清空题面与 limits 两层缓存 —— 键控（`{contest_id}/{display_id}`、`cache/problem_limits/{cid}.json`）不含 OJ 维度，跨 OJ 同 cid 会撞号，「切 OJ」因此是缓存失效路径之一
+- **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `storage: Arc<Storage>`, `limits_cache: Arc<RwLock<HashMap<contest_id, HashMap<display_id, ProblemLimits>>>>`, `statement_cache: Arc<TtlCache<String, Problem>>`, `statement_disk: Arc<JsonDiskCache>`（Arc 包装是为了共享进 `OJSwitched` 订阅闭包，闭包不捕获 service/总线，无引用环）。构造时经 `subscribe_oj_switched` 订阅 `SystemEvent::OJSwitched`：清空题面与 limits 两层缓存 —— 键控（`{contest_id}/{display_id}`、`cache/problem_limits/{cid}.json`）不含 OJ 维度，跨 OJ 同 cid 会撞号，「切 OJ」因此是缓存失效路径之一；limits 磁盘目录带存在性守卫（与 `clear_namespace` 同款：目录不存在时不清理不告警，避免每次切换都打误导性 warn）
 
 ## 直接依赖
 - `std::collections::HashMap`

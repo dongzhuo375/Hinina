@@ -372,7 +372,7 @@ onBeforeUnmount(() => {
                     {{ switchError }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
-                    切换即时生效并持久化；候选 = 配置文件 oj.instances 清单
+                    切换即时生效并持久化，将离开本页并放弃所有未保存的修改；候选 = oj.instances 清单
                   </span>
                 </label>
 

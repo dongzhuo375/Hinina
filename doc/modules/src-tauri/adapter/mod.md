@@ -27,4 +27,4 @@ adapter 模块根文件：声明 HOJ、QDUOJ、HUSTOJ 三个 OJ 适配器子模�
 无（模块声明 + 公共形状定义）。
 
 ## 测试
-`src-tauri/src/adapter/tests/adapter_tests.rs` 锁定工厂清单的编译期防线（取代闭集枚举的穷尽检查）：id 唯一（重复会让注册表互相覆盖、会话文件名撞车）、全部工厂可构建且**至少提供一个能力**（依赖只来自 infra；刻意不断言四能力齐备 —— `ProviderSet` 的 Option 字段正是「先实现部分接口」的扩展路径，全 None 的 ProviderSet 才是注册 bug）、HOJ 工厂身份契约（`HOJAdapter::ID == "HOJ"` 且 `session_file() == "HOJ.json"`，与历史枚举 Debug 输出一致）。接入新 OJ 后本测试自动覆盖新工厂。
+`src-tauri/src/adapter/tests/adapter_tests.rs` 锁定工厂清单的编译期防线（取代闭集枚举的穷尽检查）：id 唯一（重复会让注册表互相覆盖、会话文件名撞车）、全部工厂可构建且**至少提供一个能力**（依赖只来自 infra；刻意不断言四能力齐备 —— `ProviderSet` 的 Option 字段正是「先实现部分接口」的扩展路径，全 None 的 ProviderSet 才是注册 bug）、HOJ 工厂身份契约（`HOJAdapter::ID == "HOJ"` 且 `session_file() == "HOJ.json"`，与历史枚举 Debug 输出一致）、**HOJ 四能力齐备的专属锁定**（通用断言放宽后，HOJ 作为唯一全功能内建 OJ 由专属测试补回覆盖，漏装能力不再等到运行期 ProviderNotFound）。接入新 OJ 后通用断言自动覆盖新工厂。

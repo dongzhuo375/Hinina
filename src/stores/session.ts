@@ -58,6 +58,17 @@ export function clearDomainState(): void {
 export function resetSessionForOjSwitch(): void {
   clearDomainState()
 
+  // 匿名简报属于**旧 OJ**（换服务端），一并复位：clearSessionData 的保留语义
+  // 是登出场景（同服务端，简报不属会话数据）；若沿用，LoginView 的
+  // canEnter 侦听器（immediate）会先按旧 OJ 的时间窗计算阶段，在新 OJ 有
+  // 会话时立即自动推进赛场 —— 而新 OJ 可能未配置比赛。briefState 置 idle
+  // 让登录页先显示「加载中」，挂载时 loadBrief 按新 OJ 重拉。
+  const contest = useContestStore()
+  contest.brief = null
+  contest.briefBaseUrl = ''
+  contest.briefError = null
+  contest.briefState = 'idle'
+
   const auth = useAuthStore()
   auth.user = null
   auth.error = null

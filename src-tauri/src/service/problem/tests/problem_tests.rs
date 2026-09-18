@@ -413,7 +413,7 @@ fn get_user_problem_status_preserves_auth_variant() {
 }
 
 
-// ?? OJSwitched?OJ ?????????? OJ ???? OJ ?? OJ ?????
+// ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
 
 #[test]
 fn oj_switched_clears_problem_scoped_caches() {
@@ -425,7 +425,7 @@ fn oj_switched_clears_problem_scoped_caches() {
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     let service = ProblemService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
 
-    // ?? limits ????????????????? write_limits_cache ???
+    // 预置 limits 内存缓存与磁盘条目（磁盘目录结构由 write_limits_cache 落地）
     service
         .limits_cache
         .write()
@@ -435,9 +435,9 @@ fn oj_switched_clears_problem_scoped_caches() {
 
     bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
 
-    assert!(service.limits_cache.read().unwrap().is_empty(), "limits ????????");
-    assert!(service.statement_cache.is_empty(), "??????????");
-    // ???????????????? = ???
+    assert!(service.limits_cache.read().unwrap().is_empty(), "limits 内存缓存应被清空");
+    assert!(service.statement_cache.is_empty(), "题面内存缓存应被清空");
+    // 磁盘命名空间整体移除（目录不存在 = 已清）
     assert!(!dir.join("cache/problem_statement").exists());
     assert!(!dir.join("cache/problem_limits").exists());
 

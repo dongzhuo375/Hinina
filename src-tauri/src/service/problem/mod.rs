@@ -109,8 +109,12 @@ impl ProblemService {
                 }
                 statement_cache.clear();
                 let _ = statement_disk.clear_namespace();
-                if let Err(e) = storage.remove_all(LIMITS_CACHE_DIR) {
-                    warn!(error = %e, "OJ 切换后清理 limits 磁盘缓存失败");
+                // 与 clear_namespace 同款存在性守卫：目录不存在（从未缓存过
+                // limits 的常见情形）时 remove_all 会返回 NotFound，不告警
+                if storage.exists(LIMITS_CACHE_DIR) {
+                    if let Err(e) = storage.remove_all(LIMITS_CACHE_DIR) {
+                        warn!(error = %e, "OJ 切换后清理 limits 磁盘缓存失败");
+                    }
                 }
                 info!("OJ 已切换：清空题面与 limits 缓存（键控不含 OJ 维度，防跨 OJ 撞号）");
             }),

@@ -86,8 +86,12 @@ describe('resetSessionForOjSwitch — OJ 切换的会话上下文重置', () => 
     const contestStore = useContestStore()
     expect(contestStore.contest).toBeNull()
     expect(contestStore.problems).toEqual([])
-    // 匿名简报不属于会话数据（登录页挂载时按新 OJ 重拉），与登出语义一致保留
-    expect(contestStore.brief).toEqual(contest)
+    // 匿名简报属于旧 OJ（换服务端）：一并复位 —— 否则 LoginView 的 canEnter
+    // 侦听器会按旧 OJ 的时间窗计算阶段，在新 OJ 有会话时立即自动推进赛场
+    expect(contestStore.brief).toBeNull()
+    expect(contestStore.briefBaseUrl).toBe('')
+    expect(contestStore.briefError).toBeNull()
+    expect(contestStore.briefState).toBe('idle')
 
     const problem = useProblemStore()
     expect(problem.myStatus).toEqual({})
