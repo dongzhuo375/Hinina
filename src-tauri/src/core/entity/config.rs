@@ -38,38 +38,65 @@ impl Default for AppConfig {
 
 // ── 用户偏好 ──
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UserConfig {
-    /// 上次登录的 OJ 类型
-    #[serde(default = "default_oj_type")]
-    pub last_oj_type: String,
     /// 登录用户名（用于自动填充）
     #[serde(default)]
     pub last_username: String,
-}
-
-impl Default for UserConfig {
-    fn default() -> Self {
-        Self {
-            last_oj_type: default_oj_type(),
-            last_username: String::new(),
-        }
-    }
-}
-
-fn default_oj_type() -> String {
-    "HOJ".into()
+    /// 旧版「上次登录的 OJ 类型」，已迁移至 `oj.active`（OJ 选择是应用级状态，
+    /// 决定全部 Provider 行为，不属于用户偏好）。`skip_serializing` 保证
+    /// 读取迁移后不再写回（见 `normalize_legacy_values`）。
+    #[serde(default, skip_serializing, rename = "lastOjType")]
+    pub legacy_last_oj_type: Option<String>,
 }
 
 // ── OJ 连接配置 ──
 
+/// 单个 OJ 实例的连接配置。
+///
+/// 「配置了哪些 OJ」是数据：接一个新 OJ = 配置里加一条实例 + 适配器工厂清单
+/// 加一行，**不需要**给 `OjConfig` 加字段（旧版 `hoj_url` 那种以具体 OJ 命名
+/// 的字段，每接一个 OJ 就要加一条 + 三处校验分支）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OjInstance {
+    /// OJ 身份（须与适配器工厂 `id()` 一致，如 "HOJ"）
+    #[serde(default)]
+    pub id: String,
+    /// 服务端地址（站点根，如 `https://hoj.dongzhuo.top`，不带 `/api` 等前缀）
+    #[serde(default)]
+    pub base_url: String,
+    /// 是否启用（false = 组合根不注册该实例的 Provider）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// OJ 私有旋钮。刻意弱类型：强类型枚举会让「新 OJ 要改 core」原样复活。
+    #[serde(default)]
+    pub options: serde_json::Map<String, serde_json::Value>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OjConfig {
-    /// HOJ 服务端地址
-    #[serde(default = "default_hoj_url")]
-    pub hoj_url: String,
+    /// 当前 OJ 实例 id（取代旧 `user.lastOjType`：OJ 选择是应用级状态）
+    #[serde(default = "default_active_oj")]
+    pub active: String,
+    /// 已配置的 OJ 实例列表。
+    ///
+    /// serde 缺省为**空表**而非默认清单：旧格式文件（无 instances 键）须落到
+    /// `normalize_legacy_values` 的迁移分支（legacy hojUrl → 实例），而非被
+    /// 字段级默认直接填成默认地址 —— 那会静默丢掉用户自定义的旧地址。
+    /// 全新配置（无文件）走 `Default`，那里才是默认 HOJ 实例。
+    #[serde(default)]
+    pub instances: Vec<OjInstance>,
+    /// 当前比赛引用 —— **不透明字符串**：HOJ 是数字串，Hydro 是 hex ObjectId。
+    /// 「当前比赛」本质上是对服务端资源的引用，不该假设它是数字（旧
+    /// `contest_id: i64` 装不下非数字 ID）。空串 = 未配置，不自动加载。
+    #[serde(default)]
+    pub contest_ref: String,
+    /// 比赛密码（私有赛需要），公开赛留空。
+    #[serde(default)]
+    pub contest_password: Option<String>,
     /// 请求超时（秒）
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
@@ -86,31 +113,55 @@ pub struct OjConfig {
     ///
     /// 默认开启：题面在比赛期间基本不变，缓存可省掉「切题来回/重进应用」的重复请求，
     /// 并在断网时仍可打开已缓存的题面。关闭后每次打开题目都直连服务端
-    /// （题面被管理员中途修正时想立刻看到真值，可临时关闭）。
+    /// （题面被管理员中途修正时想立刻看真值，可临时关闭）。
     #[serde(default = "default_cache_problem_statement")]
     pub cache_problem_statement: bool,
-    /// 默认加载的比赛 ID（阶段 7：单比赛模式，从配置读取）。
-    /// 设为 0 表示不自动加载。
-    #[serde(default)]
-    pub contest_id: i64,
-    /// 比赛密码（私有赛需要），公开赛留空。
-    #[serde(default)]
-    pub contest_password: Option<String>,
+
+    // ── 旧版字段（仅读取用于迁移，skip_serializing 保证永不写回）──
+    /// 旧版 HOJ 专属地址 → 迁移为 `instances` 中 HOJ 实例的 `base_url`
+    #[serde(default, skip_serializing, rename = "hojUrl")]
+    pub legacy_hoj_url: Option<String>,
+    /// 旧版数字比赛 ID → 迁移为 `contest_ref` 字符串
+    #[serde(default, skip_serializing, rename = "contestId")]
+    pub legacy_contest_id: Option<i64>,
 }
 
 impl Default for OjConfig {
     fn default() -> Self {
         Self {
-            hoj_url: default_hoj_url(),
+            active: default_active_oj(),
+            instances: default_oj_instances(),
+            contest_ref: String::new(),
+            contest_password: None,
             timeout_secs: default_timeout(),
             poll_interval_secs: default_poll_interval(),
             poll_timeout_secs: default_poll_timeout(),
             cache_ttl_secs: default_cache_ttl(),
-            contest_id: 0,
-            contest_password: None,
             cache_problem_statement: default_cache_problem_statement(),
+            legacy_hoj_url: None,
+            legacy_contest_id: None,
         }
     }
+}
+
+/// 默认当前 OJ：HOJ（与旧版 `default_oj_type` 一致，行为零变化）
+fn default_active_oj() -> String {
+    "HOJ".into()
+}
+
+/// 默认实例清单：单 HOJ 实例（沿用旧版默认地址）
+fn default_oj_instances() -> Vec<OjInstance> {
+    vec![OjInstance {
+        id: default_active_oj(),
+        base_url: default_hoj_url(),
+        enabled: true,
+        options: serde_json::Map::new(),
+    }]
+}
+
+/// OJ 实例默认启用
+const fn default_true() -> bool {
+    true
 }
 
 fn default_hoj_url() -> String {
@@ -282,6 +333,61 @@ pub fn normalize_legacy_values(cfg: &mut AppConfig) {
         }
     }
 
+    // ── OJ 配置 v2 迁移（hojUrl/contestId/lastOjType → instances/contestRef/active）──
+    //
+    // 旧字段经 serde 过渡字段读入（skip_serializing：迁移后不再写回）；
+    // 磁盘文件在下一次写配置时自然收敛到新格式（与 splitRatio 归一同一模式）。
+    if cfg.oj.instances.is_empty() {
+        // 旧版单 OJ 配置（或缺失）：以旧 hojUrl（缺省用默认地址）建立 HOJ 实例
+        let base_url = cfg
+            .oj
+            .legacy_hoj_url
+            .clone()
+            .unwrap_or_else(default_hoj_url);
+        cfg.oj.instances = vec![OjInstance {
+            id: default_active_oj(),
+            base_url,
+            enabled: true,
+            options: serde_json::Map::new(),
+        }];
+    }
+    if let Some(t) = cfg.user.legacy_last_oj_type.take() {
+        let t = t.trim();
+        if !t.is_empty() {
+            cfg.oj.active = t.to_string();
+        }
+    }
+    if cfg.oj.contest_ref.is_empty() {
+        // 旧 contestId == 0 表示未配置，不迁移
+        if let Some(id) = cfg.oj.legacy_contest_id.filter(|v| *v > 0) {
+            cfg.oj.contest_ref = id.to_string();
+        }
+    }
+    cfg.oj.contest_ref = cfg.oj.contest_ref.trim().to_string();
+    // 实例 id / active 统一规整（手改配置常见首尾空白；id 带空白会让工厂匹配
+    // 静默失败 —— 「配了却注册不上」比报错更难排查）
+    for instance in &mut cfg.oj.instances {
+        instance.id = instance.id.trim().to_string();
+    }
+    cfg.oj.active = cfg.oj.active.trim().to_string();
+    // active 必须指向**已启用**的实例；否则回退首个启用实例（而非硬编码 HOJ
+    // —— HOJ 实例可能被禁用/移除，指向一个不存在或不可用的 id 都是死路）。
+    // 迁移分支保证 instances 至少有一条，故回退目标恒存在。
+    if !cfg
+        .oj
+        .instances
+        .iter()
+        .any(|i| i.enabled && i.id == cfg.oj.active)
+    {
+        cfg.oj.active = cfg
+            .oj
+            .instances
+            .iter()
+            .find(|i| i.enabled)
+            .map(|i| i.id.clone())
+            .unwrap_or_else(default_active_oj);
+    }
+
     // 0.45 是旧版默认值；用户手动调出的其他比例（含恰好 0.45 之外的任意值）不受影响。
     // 浮点精确比较是刻意的：只有原样落盘的旧默认值才会二进制相等
     if cfg.layout.split_ratio == 0.45 {
@@ -296,13 +402,39 @@ pub fn normalize_legacy_values(cfg: &mut AppConfig) {
 // `sanitize()`（可钳制项收敛到与前端一致的取值域）。
 
 impl AppConfig {
-    /// 校验不可钳制的字段（目前仅服务器地址），失败返回可直接展示的错误消息。
+    /// 校验不可钳制的字段，失败返回可直接展示的错误消息。
     ///
-    /// 判据与前端 SettingsView 一致：trim 后以 http:// 或 https:// 开头
-    /// （大小写不敏感），且其余部分非空、不含空白（等价 `/^https?:\/\/\S+$/i`）。
+    /// 覆盖：实例 id（非空 / 无路径字符 / 唯一）、启用实例地址
+    /// （trim 后以 http:// 或 https:// 开头，大小写不敏感，其余非空无空白 ——
+    /// 等价 `/^https?:\/\/\S+$/i`，与前端 SettingsView 一致）、active 指向启用实例。
     pub fn validate(&self) -> Result<(), String> {
-        if !is_valid_http_url(&self.oj.hoj_url) {
-            return Err("服务器地址必须以 http:// 或 https:// 开头".into());
+        // 实例 id 唯一（重复 id 会让注册表互相覆盖、会话文件名撞车）
+        let mut seen = std::collections::HashSet::new();
+        for instance in &self.oj.instances {
+            if instance.id.trim().is_empty() {
+                return Err("OJ 实例 id 不能为空".into());
+            }
+            // id 会拼进会话文件名（`sessions/{id}.json`）与注册表键：
+            // 拒绝路径分隔符与 `..`（路径穿越），`Storage::resolve` 是第二道防线
+            if instance.id.contains('/') || instance.id.contains('\\') || instance.id.contains("..") {
+                return Err(format!("OJ 实例 id 不得包含 /、\\ 或 ..：{}", instance.id));
+            }
+            if !seen.insert(instance.id.trim().to_string()) {
+                return Err(format!("OJ 实例 id 重复: {}", instance.id));
+            }
+        }
+        // 启用实例的地址必须合法（禁用实例不注册，地址可为占位）
+        for instance in self.oj.instances.iter().filter(|i| i.enabled) {
+            if !is_valid_http_url(&instance.base_url) {
+                return Err(format!(
+                    "{} 的服务器地址必须以 http:// 或 https:// 开头",
+                    instance.id
+                ));
+            }
+        }
+        // active 必须指向已启用的实例（禁用实例不会被注册，指向它等于死路）
+        if !self.oj.instances.iter().any(|i| i.enabled && i.id == self.oj.active) {
+            return Err(format!("当前 OJ（{}）不在已启用的实例列表中", self.oj.active));
         }
         Ok(())
     }
@@ -313,12 +445,16 @@ impl AppConfig {
     pub fn sanitize(&mut self) -> bool {
         let before = self.clone();
 
-        self.oj.hoj_url = self.oj.hoj_url.trim().to_string();
+        self.oj.active = self.oj.active.trim().to_string();
+        self.oj.contest_ref = self.oj.contest_ref.trim().to_string();
+        for instance in &mut self.oj.instances {
+            instance.id = instance.id.trim().to_string();
+            instance.base_url = instance.base_url.trim().to_string();
+        }
         self.oj.timeout_secs = self.oj.timeout_secs.clamp(1, 120);
         self.oj.poll_interval_secs = self.oj.poll_interval_secs.clamp(1, 30);
         self.oj.poll_timeout_secs = self.oj.poll_timeout_secs.clamp(30, 3600);
         self.oj.cache_ttl_secs = self.oj.cache_ttl_secs.clamp(0, 600);
-        self.oj.contest_id = self.oj.contest_id.max(0);
         self.editor.font_size = self.editor.font_size.clamp(8, 32);
         self.editor.tab_size = self.editor.tab_size.clamp(1, 8);
         self.editor.auto_save_interval_secs = self.editor.auto_save_interval_secs.clamp(5, 300);

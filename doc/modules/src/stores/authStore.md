@@ -15,7 +15,7 @@
 | state.`user` / `isLoading` / `error` | — | 认证态与请求状态 |
 | state.`sessionResolved` | `boolean` | **是否已与后端确认过会话状态**（登录/登出/会话恢复均视为已确认）；路由守卫据此决定是否发起 `get_session`，避免每次导航重复 IPC |
 | `isLoggedIn` / `username` | getters | `user !== null` / 用户名 |
-| `login` | `(username, password, ojType?) => Promise<void>` | 成功写入 user 并置 `sessionResolved = true`；失败记录 error 并**抛出**（登录表单需要感知失败） |
+| `login` | `(username, password) => Promise<void>` | 成功写入 user 并置 `sessionResolved = true`；失败记录 error 并**抛出**（登录表单需要感知失败；OJ 切换不经由登录，走 `configService.switchOj`） |
 | `logout` | `() => Promise<void>` | **永不 reject**：后端登出失败也一律清理本地（user=null + `clearDomainState()`），保证 UI 不停留在需认证页面；失败时 `sessionResolved` 复位 false（下次进受保护路由重新校验） |
 | `validateSession` | `() => Promise<SessionValidity>` | 三态校验；`invalid` 且已登录 → 就地 `invalidateSession(SESSION_INVALID_MESSAGE)`；**`unknown` 保持登录态不变**（赛前误踢回登录页的代价远大于多等一轮校验） |
 | `invalidateSession` | `(reason: string) => Promise<void>` | 复用 logout 清理链路，随后 `error = reason`（供登录页展示）+ `sessionResolved = false`（强制下次重新校验）；由全局会话守卫调用 |

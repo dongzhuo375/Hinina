@@ -40,7 +40,8 @@ describe('login', () => {
   it('成功后返回用户并写入本地缓存', async () => {
     bridge.login.mockResolvedValue(user)
     await expect(authService.login('team01', 'pin')).resolves.toEqual(user)
-    expect(bridge.login).toHaveBeenCalledWith('team01', 'pin', undefined)
+    // OJ 切换已与登录解耦（显式 switchOj）：login 只传凭据
+    expect(bridge.login).toHaveBeenCalledWith('team01', 'pin')
     expect(backing.get(STORED_KEY)).toBe(JSON.stringify(user))
   })
 

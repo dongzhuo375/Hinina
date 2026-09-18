@@ -24,8 +24,9 @@ use crate::core::entity::submission::{
     SubmissionQuery,
 };
 use crate::core::error::AppResult;
-use crate::core::event::app_event::{AppEvent, SubmissionEvent};
+use crate::core::event::app_event::{AppEvent, SubmissionEvent, SystemEvent};
 use crate::core::event::event_bus::EventBus;
+use crate::core::event::event_category::EventCategory;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::TtlCache;
 
@@ -47,27 +48,60 @@ pub struct SubmissionService {
     registry: Arc<dyn ProviderRegistry>,
     event_bus: Arc<EventBus>,
     /// 终态提交详情缓存（**仅内存**：用户域数据不落盘）
-    detail_cache: TtlCache<String, SubmissionDetail>,
+    detail_cache: Arc<TtlCache<String, SubmissionDetail>>,
     /// 终态测试点缓存（**仅内存**）
-    cases_cache: TtlCache<String, SubmissionCases>,
+    cases_cache: Arc<TtlCache<String, SubmissionCases>>,
     /// 「该提交已确认终态」标记（由详情查询填充）。
     ///
     /// 测试点接口**不返回状态**，无法自证可缓存；用本标记作为判据既不必为判定终态
     /// 多发一次详情请求，也不会把评测中的半截明细缓存下来（缓存半截明细会让
     /// 「评测完成后打开详情页」看到缺失的测试点）。
-    terminal_marks: TtlCache<String, bool>,
+    terminal_marks: Arc<TtlCache<String, bool>>,
 }
 
 impl SubmissionService {
     /// 创建 SubmissionService。
     pub fn new(registry: Arc<dyn ProviderRegistry>, event_bus: Arc<EventBus>) -> Self {
+        let detail_cache = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY));
+        let cases_cache = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_CASES_CAPACITY));
+        let terminal_marks = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY));
+        Self::subscribe_oj_switched(
+            Arc::clone(&event_bus),
+            Arc::clone(&detail_cache),
+            Arc::clone(&cases_cache),
+            Arc::clone(&terminal_marks),
+        );
         Self {
             registry,
             event_bus,
-            detail_cache: TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY),
-            cases_cache: TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_CASES_CAPACITY),
-            terminal_marks: TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY),
+            detail_cache,
+            cases_cache,
+            terminal_marks,
         }
+    }
+
+    /// 订阅 `OJSwitched`：清空用户域缓存。
+    ///
+    /// 缓存内是**旧 OJ 用户**的提交详情与测试点（含源代码），切换后不得复用
+    /// —— 与登出清理同一语义（换 OJ 即换用户上下文）。
+    fn subscribe_oj_switched(
+        event_bus: Arc<EventBus>,
+        detail_cache: Arc<TtlCache<String, SubmissionDetail>>,
+        cases_cache: Arc<TtlCache<String, SubmissionCases>>,
+        terminal_marks: Arc<TtlCache<String, bool>>,
+    ) {
+        event_bus.subscribe(
+            EventCategory::System,
+            Arc::new(move |event: &AppEvent| {
+                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
+                    return;
+                };
+                detail_cache.clear();
+                cases_cache.clear();
+                terminal_marks.clear();
+                info!("OJ 已切换：清空提交详情/测试点缓存（用户域数据不得跨 OJ 复用）");
+            }),
+        );
     }
 
     /// 清空用户域缓存（登出时由 `auth_cmd::logout` 编排调用）。
@@ -92,8 +126,7 @@ impl SubmissionService {
         language: &str,
         source_code: &str,
     ) -> AppResult<String> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let provider = self.registry.current_submission()?;
 
         info!(contest_id = contest_id, problem_id = problem_id, language = language, "提交代码");
         let submission_id = provider
@@ -122,8 +155,7 @@ impl SubmissionService {
     /// 终态发布 `SubmissionEvent::Judged`；非终态（Pending/Compiling/Running）
     /// 原样透传、不发事件，是否继续轮询由前端决定。
     pub async fn get_judgement(&self, submission_id: &str) -> AppResult<JudgementResult> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let provider = self.registry.current_submission()?;
 
         // 错误一律 context() 补环节名、变体穿透（Auth 变体是前端 sessionGuard 的判据）；
         // 瞬时抖动的容忍与重试同样由前端 poller 编排
@@ -169,8 +201,7 @@ impl SubmissionService {
         &self,
         query: &SubmissionQuery,
     ) -> AppResult<SubmissionPage> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let provider = self.registry.current_submission()?;
 
         let page = provider
             .list_contest_submissions(query)
@@ -194,8 +225,7 @@ impl SubmissionService {
             return Ok(detail);
         }
 
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let provider = self.registry.current_submission()?;
 
         let detail = provider
             .get_submission_detail(submit_id)
@@ -227,8 +257,7 @@ impl SubmissionService {
             return Ok(cases);
         }
 
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let provider = self.registry.current_submission()?;
 
         let cases = provider
             .get_submission_cases(submit_id)

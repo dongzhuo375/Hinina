@@ -1,6 +1,6 @@
 // 认证服务：登录流程编排、会话持久化、登出清理。
 //
-// 会话以 JSON 格式存储在 `sessions/{oj_type}.json`，v0.x 明文存储。
+// 会话以 JSON 格式存储在 `sessions/{oj_id}.json`，v0.x 明文存储。
 // v1.0 后考虑引入加密或系统凭据管理器。
 pub mod error;
 
@@ -28,7 +28,9 @@ pub struct Session {
     pub user_id: String,
     pub username: String,
     pub token: String,
-    pub oj_type: String,
+    /// 会话归属的 OJ id（旧版文件键名为 `oj_type`，经 alias 兼容读取）
+    #[serde(alias = "oj_type")]
+    pub oj_id: String,
 }
 
 /// 会话校验结果（三态），经 IPC 以 snake_case 字符串传递给前端。
@@ -91,8 +93,8 @@ impl AuthService {
                 let AppEvent::Auth(AuthEvent::TokenRefreshed { token }) = event else {
                     return;
                 };
-                let oj_type = registry.current_oj();
-                let path = format!("{}/{}.json", SESSIONS_DIR, format!("{:?}", oj_type));
+                let oj_id = registry.current_id();
+                let path = format!("{}/{}", SESSIONS_DIR, oj_id.session_file());
                 let Ok(raw) = storage.read_to_string(&path) else {
                     return;
                 };
@@ -117,12 +119,12 @@ impl AuthService {
 
     /// 登录：调用 AuthProvider → 保存会话 → 发布事件。
     ///
-    /// 登录成功后持久化 session 到 `sessions/{oj_type}.json`。
+    /// 登录成功后持久化 session 到 `sessions/{oj_id}.json`。
     pub async fn login(&self, username: &str, password: &str) -> AppResult<User> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_auth(&oj_type)?;
+        let oj_id = self.registry.current_id();
+        let provider = self.registry.current_auth()?;
 
-        info!(username = username, oj = ?oj_type, "尝试登录");
+        info!(username = username, oj = %oj_id, "尝试登录");
         let user = provider.login(username, password).await.map_err(|e| {
             warn!(username = username, error = %e, "登录失败");
             // 保留变体：密码错误（Auth）与网络中断（Network）对用户的处置完全不同，
@@ -135,7 +137,7 @@ impl AuthService {
             user_id: user.id.clone(),
             username: user.username.clone(),
             token: user.token.clone(),
-            oj_type: format!("{:?}", oj_type),
+            oj_id: oj_id.to_string(),
         };
         self.save_session(&session)?;
 
@@ -152,16 +154,16 @@ impl AuthService {
     ///
     /// 即便远端 logout 失败，也会清除本地会话并发布事件。
     pub async fn logout(&self) -> AppResult<()> {
-        let oj_type = self.registry.current_oj();
+        let oj_id = self.registry.current_id();
 
         // 尝试远端登出（非致命错误）
-        if let Ok(provider) = self.registry.get_auth(&oj_type) {
+        if let Ok(provider) = self.registry.current_auth() {
             if let Err(e) = provider.logout().await {
                 warn!(error = %e, "远端登出失败，仅清除本地会话");
             }
         }
 
-        self.clear_session(&oj_type);
+        self.clear_session(&oj_id);
 
         info!("已登出");
         self.event_bus.publish(&AppEvent::Auth(AuthEvent::Logout));
@@ -174,8 +176,8 @@ impl AuthService {
     ///
     /// 恢复成功时将 token 回注到 Provider，确保重启后认证请求仍携带 Authorization 头。
     pub fn get_session(&self) -> Option<Session> {
-        let oj_type = self.registry.current_oj();
-        let path = self.session_path(&oj_type);
+        let oj_id = self.registry.current_id();
+        let path = self.session_path(&oj_id);
 
         if !self.storage.exists(&path) {
             return None;
@@ -185,7 +187,7 @@ impl AuthService {
             Ok(raw) => match serde_json::from_str::<Session>(&raw) {
                 Ok(session) => {
                     // 将 token 回注到 Provider，保证后续认证接口可用
-                    if let Ok(provider) = self.registry.get_auth(&oj_type) {
+                    if let Ok(provider) = self.registry.current_auth() {
                         provider.restore_token(&session.token);
                     }
                     debug!(username = session.username, "会话已恢复");
@@ -212,13 +214,13 @@ impl AuthService {
     /// - 远端明确判定失效 → 清除磁盘会话 + 发布 `SessionExpired`，返回 `Invalid`
     /// - 网络异常 / 无 Provider → `Unknown`（保留本地会话，由调用方决定重试）
     pub async fn validate_session(&self) -> SessionValidity {
-        let oj_type = self.registry.current_oj();
+        let oj_id = self.registry.current_id();
         if self.get_session().is_none() {
             debug!("本地无会话，判定为未登录");
             return SessionValidity::Invalid;
         }
 
-        let provider = match self.registry.get_auth(&oj_type) {
+        let provider = match self.registry.current_auth() {
             Ok(p) => p,
             Err(e) => {
                 warn!(error = %e, "获取 AuthProvider 失败，会话有效性无法判定");
@@ -234,7 +236,7 @@ impl AuthService {
             Ok(false) => {
                 // 服务端明确判定失效：清除磁盘会话，避免重启后回注过期 token
                 info!("会话已失效，清除本地会话");
-                self.clear_session(&oj_type);
+                self.clear_session(&oj_id);
                 self.event_bus
                     .publish(&AppEvent::Auth(AuthEvent::SessionExpired));
                 SessionValidity::Invalid
@@ -250,8 +252,8 @@ impl AuthService {
     // ── 内部方法 ──
 
     /// 删除指定 OJ 的本地会话文件（不存在时静默跳过）。
-    fn clear_session(&self, oj_type: &crate::core::provider::oj_type::OJType) {
-        let path = self.session_path(oj_type);
+    fn clear_session(&self, oj_id: &crate::core::provider::oj_id::OjId) {
+        let path = self.session_path(oj_id);
         if self.storage.exists(&path) {
             if let Err(e) = self.storage.remove(&path) {
                 warn!(error = %e, path = %path, "清除失效会话文件失败");
@@ -263,7 +265,7 @@ impl AuthService {
 
     /// 保存会话到本地文件。
     fn save_session(&self, session: &Session) -> AppResult<()> {
-        let path = self.session_path_str(&session.oj_type);
+        let path = self.session_path_str(&session.oj_id);
         // 确保 sessions 目录存在
         self.storage.create_dir(SESSIONS_DIR)?;
         let json = serde_json::to_string_pretty(session)?;
@@ -273,13 +275,13 @@ impl AuthService {
     }
 
     /// 构建会话文件的相对路径。
-    fn session_path_str(&self, oj_type: &str) -> String {
-        format!("{}/{}.json", SESSIONS_DIR, oj_type)
+    fn session_path_str(&self, oj_id: &str) -> String {
+        format!("{}/{}.json", SESSIONS_DIR, oj_id)
     }
 
     /// 同 `session_path_str`，返回 `&str` 借用时需要 Path 的场景。
-    fn session_path(&self, oj_type: &crate::core::provider::oj_type::OJType) -> String {
-        self.session_path_str(&format!("{:?}", oj_type))
+    fn session_path(&self, oj_id: &crate::core::provider::oj_id::OjId) -> String {
+        self.session_path_str(oj_id.as_str())
     }
 }
 

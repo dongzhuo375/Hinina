@@ -16,7 +16,7 @@
   - `async fn get_user_problem_status(&self, contest_id, problem_ids: &[String]) -> AppResult<HashMap<String, i32>>` — 批量查询当前用户提交状态（key=pid，`0=未提交 / 1=已AC / 2=尝试过`，未出现的题视为未提交）；空列表直接返回空 map，不发请求
   - `async fn load_problem_limits(&self, contest_id, display_ids: &[String]) -> AppResult<Vec<ProblemLimits>>` — 批量获取题目 limits（时间 ms / 内存 MB），带内存 + 磁盘双层缓存；返回顺序与入参一致，获取失败的题在结果中**缺失**
   - 内部：`fetch_limits()`（分批并发拉详情）、`limits_cache_path()` / `read_limits_cache()` / `write_limits_cache()`
-- **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `storage: Arc<Storage>`, `limits_cache: RwLock<HashMap<contest_id, HashMap<display_id, ProblemLimits>>>`, `statement_cache: TtlCache<String, Problem>`, `statement_disk: JsonDiskCache`
+- **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `storage: Arc<Storage>`, `limits_cache: Arc<RwLock<HashMap<contest_id, HashMap<display_id, ProblemLimits>>>>`, `statement_cache: Arc<TtlCache<String, Problem>>`, `statement_disk: Arc<JsonDiskCache>`（Arc 包装是为了共享进 `OJSwitched` 订阅闭包，闭包不捕获 service/总线，无引用环）。构造时经 `subscribe_oj_switched` 订阅 `SystemEvent::OJSwitched`：清空题面与 limits 两层缓存 —— 键控（`{contest_id}/{display_id}`、`cache/problem_limits/{cid}.json`）不含 OJ 维度，跨 OJ 同 cid 会撞号，「切 OJ」因此是缓存失效路径之一；limits 磁盘目录带存在性守卫（与 `clear_namespace` 同款：目录不存在时不清理不告警，避免每次切换都打误导性 warn）
 
 ## 直接依赖
 - `std::collections::HashMap`
@@ -38,7 +38,7 @@
 ## 逻辑流程
 - **list_problems(contest_id)**：直接调 `ProblemProvider::list_problems()` 从远端拉取，不做本地缓存；失败 `warn!` + `e.context("获取题目列表失败")` 上抛（**变体原样穿透**）
 - **open_problem(contest_id, problem_id, cache_enabled)**：`load_problem_statement`（内存 → 磁盘 → 网络，命中即回填；`cache_enabled=false` 直连）→ 发布 `ProblemEvent::Opened` → 调用方通过事件驱动 WorkspaceManager 创建或切换工作区。**只缓存成功结果**：Provider 错误原样上抛，不入缓存
-- **get_user_problem_status(contest_id, problem_ids)**：空列表短路 → `registry.get_problem()` → `ProblemProvider::get_user_problem_status()` → 失败 `e.context("获取用户题目状态失败")`，变体不改写
+- **get_user_problem_status(contest_id, problem_ids)**：空列表短路 → `registry.current_problem()` → `ProblemProvider::get_user_problem_status()` → 失败 `e.context("获取用户题目状态失败")`，变体不改写
 - **load_problem_limits(contest_id, display_ids)**：
 
 ```

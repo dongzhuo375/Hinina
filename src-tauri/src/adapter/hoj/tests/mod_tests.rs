@@ -15,6 +15,27 @@ fn parse_time_iso_format() {
     assert_eq!(ts, 1_704_096_000);
 }
 
+// ── 认证头组装（infra 已去业务化，HOJ 的 JWT 约定收敛在本层）──
+
+#[test]
+fn auth_headers_carries_raw_jwt_without_bearer_prefix() {
+    // HOJ 约定：Authorization 头直接携带 JWT，不带 "Bearer " 前缀
+    let headers = HOJAdapter::auth_headers(Some("eyJhbGciOiJIUzI1NiJ9.payload.sig"));
+    assert_eq!(
+        headers.get(reqwest::header::AUTHORIZATION).unwrap(),
+        "eyJhbGciOiJIUzI1NiJ9.payload.sig"
+    );
+}
+
+#[test]
+fn auth_headers_empty_for_missing_or_invalid_token() {
+    // 无 token：空 map（匿名请求，@AnonApi 接口在登录页就要能用）
+    assert!(HOJAdapter::auth_headers(None).is_empty());
+
+    // 含非法头字符（控制字符）的 token：同样按匿名发出，不在传输层 panic
+    assert!(HOJAdapter::auth_headers(Some("bad\ntoken")).is_empty());
+}
+
 #[test]
 fn parse_time_space_separated() {
     let ts = HOJAdapter::parse_time("2024-01-01 08:00:00");

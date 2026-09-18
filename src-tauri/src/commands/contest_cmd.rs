@@ -43,24 +43,25 @@ pub async fn select_contest(
 ///
 /// 前端 invoke 签名: `load_configured_contest`
 ///
-/// 从 `OjConfig.contest_id` 读取比赛 ID，自动加载比赛详情与题目列表。
-/// 若 `contest_id == 0` 返回错误提示用户配置。
+/// 从 `OjConfig.contest_ref` 读取当前比赛引用（不透明字符串：HOJ 为数字串，
+/// 其它 OJ 可能是任意资源 ID），自动加载比赛详情与题目列表。
+/// 空串返回错误提示用户配置。
 /// 返回 `ContestBundle`（`{ contest, problems }`），前端据此渲染题目侧边栏。
 #[tauri::command]
 pub async fn load_configured_contest(
     ctx: State<'_, AppContext>,
 ) -> AppResult<ContestBundle> {
-    let contest_id = ctx.config.get().oj.contest_id;
-    if contest_id == 0 {
+    let contest_ref = ctx.config.get().oj.contest_ref.trim().to_string();
+    if contest_ref.is_empty() {
         return Err(AppError::Contest(
-            "未配置默认比赛 ID，请在 config.json 中设置 oj.contest_id".into(),
+            "未配置默认比赛，请在 config.json 中设置 oj.contestRef".into(),
         ));
     }
 
-    info!(contest_id = contest_id, "Command: 加载配置的比赛");
+    info!(contest_ref = %contest_ref, "Command: 加载配置的比赛");
     let password = ctx.config.get().oj.contest_password.clone();
     ctx.contest
-        .load_contest_with_problems(&contest_id.to_string(), password.as_deref())
+        .load_contest_with_problems(&contest_ref, password.as_deref())
         .await
 }
 

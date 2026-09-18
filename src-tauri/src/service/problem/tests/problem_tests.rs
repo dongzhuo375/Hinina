@@ -3,7 +3,8 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::core::entity::problem::{Problem, Sample};
-use crate::core::provider::oj_type::OJType;
+use crate::core::provider::oj_id::OjId;
+use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::problem::ProblemProvider;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
@@ -88,8 +89,14 @@ fn build_service_with(
         failing,
         fail_all,
     });
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
-    registry.register_problem(OJType::HOJ, provider);
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            problem: Some(provider),
+            ..Default::default()
+        },
+    );
     ProblemService::new(
         registry,
         Arc::new(EventBus::new()),
@@ -403,4 +410,36 @@ fn get_user_problem_status_preserves_auth_variant() {
         "题目总览的「我的状态」每 30s 轮询一次，变体被改写会让守卫失灵，实际 {:?}",
         err
     );
+}
+
+
+// ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
+
+#[test]
+fn oj_switched_clears_problem_scoped_caches() {
+    use crate::core::event::app_event::{AppEvent, SystemEvent};
+
+    let dir = std::env::temp_dir().join("hinina-test-problem-oj-switch");
+    let _ = std::fs::remove_dir_all(&dir);
+    let bus = Arc::new(EventBus::new());
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let service = ProblemService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
+
+    // 预置 limits 内存缓存与磁盘条目（磁盘目录结构由 write_limits_cache 落地）
+    service
+        .limits_cache
+        .write()
+        .unwrap()
+        .insert("7".into(), HashMap::new());
+    assert!(!service.limits_cache.read().unwrap().is_empty());
+
+    bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
+
+    assert!(service.limits_cache.read().unwrap().is_empty(), "limits 内存缓存应被清空");
+    assert!(service.statement_cache.is_empty(), "题面内存缓存应被清空");
+    // 磁盘命名空间整体移除（目录不存在 = 已清）
+    assert!(!dir.join("cache/problem_statement").exists());
+    assert!(!dir.join("cache/problem_limits").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

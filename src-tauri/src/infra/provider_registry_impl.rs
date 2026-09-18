@@ -2,112 +2,94 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::core::error::{AppError, AppResult};
-use crate::core::provider::auth::AuthProvider;
-use crate::core::provider::contest::ContestProvider;
-use crate::core::provider::oj_type::OJType;
-use crate::core::provider::problem::ProblemProvider;
-use crate::core::provider::registry::ProviderRegistry;
-use crate::core::provider::submission::SubmissionProvider;
+use crate::core::provider::oj_id::OjId;
+use crate::core::provider::registry::{ProviderRegistry, ProviderSet};
 
 /// ProviderRegistry 的默认实现
+///
+/// 单表 `HashMap<OjId, ProviderSet>`（取代旧的 4 个能力分表）：
+/// 注册哪些 OJ 是运行期数据，接入新 OJ 不需要修改本文件。
 pub struct ProviderRegistryImpl {
-    auth_providers: RwLock<HashMap<OJType, Arc<dyn AuthProvider>>>,
-    contest_providers: RwLock<HashMap<OJType, Arc<dyn ContestProvider>>>,
-    problem_providers: RwLock<HashMap<OJType, Arc<dyn ProblemProvider>>>,
-    submission_providers: RwLock<HashMap<OJType, Arc<dyn SubmissionProvider>>>,
-    current: RwLock<OJType>,
+    providers: RwLock<HashMap<OjId, ProviderSet>>,
+    current: RwLock<OjId>,
 }
 
 impl ProviderRegistryImpl {
-    pub fn new(default_oj: OJType) -> Self {
+    pub fn new(default_oj: OjId) -> Self {
         Self {
-            auth_providers: RwLock::new(HashMap::new()),
-            contest_providers: RwLock::new(HashMap::new()),
-            problem_providers: RwLock::new(HashMap::new()),
-            submission_providers: RwLock::new(HashMap::new()),
+            providers: RwLock::new(HashMap::new()),
             current: RwLock::new(default_oj),
         }
+    }
+
+    /// 按能力取当前 OJ 的 Provider（私有帮手，四个 current_xxx 共用）。
+    ///
+    /// 锁中毒统一 `into_inner` 取回内部数据（注册表进程级单例，中毒即全局
+    /// 异常；与其余方法的恢复策略一致，不做静默失败或二次报错）。
+    fn capability<T, F>(&self, pick: F) -> AppResult<Arc<T>>
+    where
+        F: FnOnce(&ProviderSet) -> &Option<Arc<T>>,
+        T: ?Sized,
+    {
+        let id = self.current_id();
+        let guard = self
+            .providers
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let set = guard
+            .get(&id)
+            .ok_or_else(|| AppError::ProviderNotFound(format!("OJ {} 未注册", id)))?;
+        pick(set)
+            .clone()
+            .ok_or_else(|| AppError::ProviderNotFound(format!("OJ {} 未提供该能力", id)))
     }
 }
 
 impl ProviderRegistry for ProviderRegistryImpl {
-    fn register_auth(&self, oj_type: OJType, provider: Arc<dyn AuthProvider>) {
-        if let Ok(mut map) = self.auth_providers.write() {
-            map.insert(oj_type, provider);
-        }
+    fn register(&self, oj_id: OjId, set: ProviderSet) {
+        let mut map = self.providers.write().unwrap_or_else(|e| e.into_inner());
+        map.insert(oj_id, set);
     }
 
-    fn register_contest(&self, oj_type: OJType, provider: Arc<dyn ContestProvider>) {
-        if let Ok(mut map) = self.contest_providers.write() {
-            map.insert(oj_type, provider);
-        }
+    fn current_auth(&self) -> AppResult<Arc<dyn crate::core::provider::auth::AuthProvider>> {
+        self.capability(|set| &set.auth)
     }
 
-    fn register_problem(&self, oj_type: OJType, provider: Arc<dyn ProblemProvider>) {
-        if let Ok(mut map) = self.problem_providers.write() {
-            map.insert(oj_type, provider);
-        }
+    fn current_contest(&self) -> AppResult<Arc<dyn crate::core::provider::contest::ContestProvider>> {
+        self.capability(|set| &set.contest)
     }
 
-    fn register_submission(&self, oj_type: OJType, provider: Arc<dyn SubmissionProvider>) {
-        if let Ok(mut map) = self.submission_providers.write() {
-            map.insert(oj_type, provider);
-        }
+    fn current_problem(&self) -> AppResult<Arc<dyn crate::core::provider::problem::ProblemProvider>> {
+        self.capability(|set| &set.problem)
     }
 
-    fn get_auth(&self, oj_type: &OJType) -> AppResult<Arc<dyn AuthProvider>> {
-        let map = self.auth_providers.read().map_err(|e| {
-            AppError::Unknown(format!("AuthProvider lock poisoned: {}", e))
-        })?;
-        map.get(oj_type)
-            .cloned()
-            .ok_or_else(|| AppError::ProviderNotFound(format!("AuthProvider for {:?}", oj_type)))
+    fn current_submission(&self) -> AppResult<Arc<dyn crate::core::provider::submission::SubmissionProvider>> {
+        self.capability(|set| &set.submission)
     }
 
-    fn get_contest(&self, oj_type: &OJType) -> AppResult<Arc<dyn ContestProvider>> {
-        let map = self.contest_providers.read().map_err(|e| {
-            AppError::Unknown(format!("ContestProvider lock poisoned: {}", e))
-        })?;
-        map.get(oj_type)
-            .cloned()
-            .ok_or_else(|| AppError::ProviderNotFound(format!("ContestProvider for {:?}", oj_type)))
-    }
-
-    fn get_problem(&self, oj_type: &OJType) -> AppResult<Arc<dyn ProblemProvider>> {
-        let map = self.problem_providers.read().map_err(|e| {
-            AppError::Unknown(format!("ProblemProvider lock poisoned: {}", e))
-        })?;
-        map.get(oj_type)
-            .cloned()
-            .ok_or_else(|| AppError::ProviderNotFound(format!("ProblemProvider for {:?}", oj_type)))
-    }
-
-    fn get_submission(&self, oj_type: &OJType) -> AppResult<Arc<dyn SubmissionProvider>> {
-        let map = self.submission_providers.read().map_err(|e| {
-            AppError::Unknown(format!("SubmissionProvider lock poisoned: {}", e))
-        })?;
-        map.get(oj_type)
-            .cloned()
-            .ok_or_else(|| AppError::ProviderNotFound(format!("SubmissionProvider for {:?}", oj_type)))
-    }
-
-    fn current_oj(&self) -> OJType {
+    fn current_id(&self) -> OjId {
+        // 锁中毒时取回内部数据（注册表进程级单例，中毒即全局异常，不静默回退）
         self.current
             .read()
-            .map(|oj| oj.clone())
-            .unwrap_or(OJType::HOJ)
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
-    fn set_current_oj(&self, oj_type: OJType) {
-        if let Ok(mut current) = self.current.write() {
-            *current = oj_type;
-        }
+    fn set_current(&self, oj_id: OjId) {
+        let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
+        *current = oj_id;
     }
 
-    fn list_available(&self) -> Vec<OJType> {
-        self.auth_providers
+    fn list_available(&self) -> Vec<OjId> {
+        self.providers
             .read()
-            .map(|map| map.keys().cloned().collect())
-            .unwrap_or_default()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect()
     }
 }
+
+#[cfg(test)]
+#[path = "tests/provider_registry_impl_tests.rs"]
+mod tests;

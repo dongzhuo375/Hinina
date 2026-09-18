@@ -33,6 +33,7 @@ fn main() {
             commands::auth_cmd::logout,
             commands::auth_cmd::get_session,
             commands::auth_cmd::validate_session,
+            commands::oj_cmd::switch_oj,
             commands::contest_cmd::list_contests,
             commands::contest_cmd::select_contest,
             commands::contest_cmd::load_configured_contest,

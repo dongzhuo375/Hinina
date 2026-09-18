@@ -58,18 +58,42 @@ export class ConfigService {
   }
 
   /**
+   * 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）。
+   *
+   * 后端编排：校验已注册 → 切 Registry → 持久化 `oj.active` → 发布
+   * `OJSwitched`。本地缓存在切换后失效，后续读取拿到新 active。
+   */
+  async switchOj(ojId: string): Promise<void> {
+    await configBridge.switchOj(ojId)
+    this.invalidate()
+  }
+
+  /**
    * OJ 基址：用于把题面/比赛简介中的相对图片 URL 改写为绝对地址。
    *
-   * 读取失败时返回空串而非抛出 —— 缺基址只影响图片显示，不应阻断题面渲染。
+   * 取当前 OJ 实例（`oj.active` 匹配）的 `baseUrl`。读取失败时返回空串而非
+   * 抛出 —— 缺基址只影响图片显示，不应阻断题面渲染。
    */
   async getOjBaseUrl(): Promise<string> {
     try {
       const config = await this.getConfig()
-      return config.oj.hojUrl
+      return this.activeOjBaseUrl(config)
     } catch (e) {
       log.error('读取 OJ 基址失败，题面图片将保持相对路径:', e)
       return ''
     }
+  }
+
+  /**
+   * 当前 OJ 实例的服务端地址（同步帮手，供已持有配置的调用方复用）。
+   *
+   * `active` 未命中实例列表时回退第一个启用实例 —— 正常配置经 Rust 归一
+   * 不会出现未命中，此回退仅兜底 IPC 写读竞态。
+   */
+  activeOjBaseUrl(config: AppConfig): string {
+    const enabled = config.oj.instances.filter((i) => i.enabled)
+    const active = enabled.find((i) => i.id === config.oj.active)
+    return (active ?? enabled[0])?.baseUrl ?? ''
   }
 
   /**

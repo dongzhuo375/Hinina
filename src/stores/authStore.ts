@@ -34,11 +34,11 @@ export const useAuthStore = defineStore('auth', {
 
   actions: {
     /** 登录并更新状态 */
-    async login(username: string, password: string, ojType?: string) {
+    async login(username: string, password: string) {
       this.isLoading = true
       this.error = null
       try {
-        this.user = await authService.login(username, password, ojType)
+        this.user = await authService.login(username, password)
         this.sessionResolved = true
       } catch (e) {
         this.error = errorMessage(e, '登录失败')

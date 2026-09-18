@@ -1,7 +1,7 @@
 # mod
 
 ## 职责
-`core/provider/` 模块入口，声明 OJ Provider trait 子模块：`auth`（认证）、`contest`（比赛）、`problem`（题目）、`submission`（提交）、`oj_type`（OJ 类型标识）、`registry`（Provider 注册中心）。
+`core/provider/` 模块入口，声明 OJ Provider trait 子模块：`auth`（认证）、`contest`（比赛）、`problem`（题目）、`submission`（提交）、`oj_id`（OJ 身份标识 newtype）、`registry`（Provider 注册中心，含能力集合 `ProviderSet`）。
 
 ## 核心类型/函数
 无（仅模块声明）。

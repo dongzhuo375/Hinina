@@ -13,8 +13,8 @@ export class AuthService {
   /**
    * 登录并持久化用户信息到 localStorage。
    */
-  async login(username: string, password: string, ojType?: string): Promise<User> {
-    const user = await authBridge.login(username, password, ojType)
+  async login(username: string, password: string): Promise<User> {
+    const user = await authBridge.login(username, password)
     localStorage.setItem(STORED_USER_KEY, JSON.stringify(user))
     return user
   }
@@ -74,6 +74,16 @@ export class AuthService {
       localStorage.removeItem(STORED_USER_KEY)
       return null
     }
+  }
+
+  /**
+   * 清除 localStorage 中的用户缓存（OJ 切换时调用）。
+   *
+   * 缓存里的用户属于**旧 OJ**，不得残留给新 OJ 的会话上下文；新会话由
+   * `checkSession`（后端 `get_session` 读新 OJ 的会话文件）重建并回写。
+   */
+  clearStoredUser(): void {
+    localStorage.removeItem(STORED_USER_KEY)
   }
 }
 

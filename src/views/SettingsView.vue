@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
+import { resetSessionForOjSwitch } from '@/stores/session'
 import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
 import {
   EDITOR_FONT_SIZE_MAX,
@@ -11,7 +13,7 @@ import {
   EDITOR_TAB_SIZES,
 } from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
-import type { AppConfig } from '@/types/config'
+import type { AppConfig, OjInstance } from '@/types/config'
 import type { StorageInfo } from '@/types/system'
 
 /**
@@ -27,8 +29,12 @@ import type { StorageInfo } from '@/types/system'
 // NaN 写回，只有校验通过的值才会进入保存载荷。
 
 interface SettingsForm {
-  hojUrl: string
-  contestId: string
+  /// 当前 OJ 实例 id（下拉选择，候选 = instances 清单）
+  activeOj: string
+  /// 当前 OJ 实例的服务端地址（保存时写回该实例的 baseUrl）
+  ojUrl: string
+  /// 当前比赛引用（不透明字符串：HOJ 数字 ID / 其它 OJ 资源引用；空 = 未配置）
+  contestRef: string
   contestPassword: string
   timeoutSecs: string
   pollIntervalSecs: string
@@ -44,8 +50,9 @@ interface SettingsForm {
 }
 
 const form = reactive<SettingsForm>({
-  hojUrl: '',
-  contestId: '0',
+  activeOj: 'HOJ',
+  ojUrl: '',
+  contestRef: '',
   contestPassword: '',
   timeoutSecs: '30',
   pollIntervalSecs: '2',
@@ -94,8 +101,9 @@ function intError(raw: string, min: number, max: number, label: string): string 
 }
 
 const errors = computed<Record<string, string | null>>(() => ({
-  hojUrl: /^https?:\/\/\S+$/i.test(form.hojUrl.trim()) ? null : '须以 http:// 或 https:// 开头',
-  contestId: intError(form.contestId, 0, Number.MAX_SAFE_INTEGER, '比赛 ID'),
+  ojUrl: /^https?:\/\/\S+$/i.test(form.ojUrl.trim()) ? null : '须以 http:// 或 https:// 开头',
+  // 比赛引用是自由格式字符串（HOJ 数字 / 其它 OJ 资源 ID）；空串 = 未配置，合法
+  contestRef: null,
   timeoutSecs: intError(form.timeoutSecs, 1, 120, '请求超时'),
   pollIntervalSecs: intError(form.pollIntervalSecs, 1, 30, '轮询间隔'),
   pollTimeoutSecs: intError(form.pollTimeoutSecs, 30, 3600, '轮询总超时'),
@@ -111,10 +119,49 @@ const canSave = computed(() => dirty.value && isValid.value && !saving.value)
 
 const loading = ref(true)
 const loadError = ref<string | null>(null)
+const router = useRouter()
 
 const TAB_SIZES: readonly number[] = EDITOR_TAB_SIZES
 /// 默认语言候选 = HOJ 显示名（值域权威见 utils/language；与提交契约同源）
 const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
+
+/// OJ 实例清单（populate 时从配置刷新；切换后取新实例地址、渲染禁用态）
+const ojInstances = ref<OjInstance[]>([])
+/// 下拉候选：全部实例（禁用者标注且不可选 —— 切到未注册的 OJ 只会得到
+/// ProviderNotFound；若当前 active 恰为禁用实例，仍如实显示为选中值）
+const ojOptions = computed(() =>
+  ojInstances.value.map((i) => ({ id: i.id, disabled: !i.enabled })),
+)
+/// 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）
+const persistedActive = ref('HOJ')
+/// 切换 OJ 的错误提示（独立于保存错误：两个不同意图）
+const switchError = ref<string | null>(null)
+
+/// 切换当前 OJ：显式命令（即时生效 + 持久化 oj.active + 发布 OJSwitched）。
+/// 与「保存」解耦 —— 保存仍负责地址/比赛引用等其余字段（active 两处写入同源同值）。
+/// 切换成功 = 整个应用换了服务端：重置会话上下文并回登录页，由路由守卫按新 OJ
+/// 的会话文件恢复会话（该 OJ 登录过则无感续用，否则落在登录表单）。
+async function onSwitchOj(): Promise<void> {
+  switchError.value = null
+  const target = form.activeOj
+  try {
+    await configService.switchOj(target)
+    persistedActive.value = target
+    // 地址栏跟随新实例：否则表单里仍是旧实例的地址，「保存」会把它写进
+    // 新实例的 baseUrl（数据损坏）。切换前未保存的地址编辑随之丢弃 ——
+    // 用户已切换编辑对象，这是预期行为。
+    form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
+    // 旧 OJ 的用户/比赛/题面/提交对新 OJ 全部失效（解题页还会拿旧 contest.id
+    // 向新 OJ 提交）：与登出同款清理，但不打后端 logout（Registry 已切换，
+    // 那会误删新 OJ 自己的会话文件）
+    resetSessionForOjSwitch()
+    void router.replace({ name: 'Login' })
+  } catch (e) {
+    // 回滚下拉到已持久化值，避免 UI 停留在一个未生效的 OJ
+    form.activeOj = persistedActive.value
+    switchError.value = errorMessage(e, '切换 OJ 失败')
+  }
+}
 
 /// 分栏比例钳位到滑杆值域 [0.30, 0.70]，两位小数（与 step 0.01 对齐）
 function clampRatio(value: number): number {
@@ -123,8 +170,15 @@ function clampRatio(value: number): number {
 }
 
 function populate(config: AppConfig): void {
-  form.hojUrl = config.oj.hojUrl
-  form.contestId = String(config.oj.contestId ?? 0)
+  form.activeOj = config.oj.active
+  persistedActive.value = config.oj.active
+  switchError.value = null
+  ojInstances.value = config.oj.instances
+  // 展示当前选中实例的地址（active 未命中时回退第一个启用实例，兜底竞态）
+  form.ojUrl =
+    config.oj.instances.find((i) => i.id === config.oj.active)?.baseUrl
+    ?? configService.activeOjBaseUrl(config)
+  form.contestRef = config.oj.contestRef ?? ''
   form.contestPassword = config.oj.contestPassword ?? ''
   form.timeoutSecs = String(config.oj.timeoutSecs)
   form.pollIntervalSecs = String(config.oj.pollIntervalSecs)
@@ -164,8 +218,12 @@ async function save(): Promise<void> {
     // 后端 update_config 是整体替换语义，updateConfig 内部已做读-改-写；
     // 这里只把校验通过的表单值写入草稿
     await configService.updateConfig((draft) => {
-      draft.oj.hojUrl = form.hojUrl.trim()
-      draft.oj.contestId = Number(form.contestId)
+      draft.oj.active = form.activeOj
+      // 地址写回当前选中实例（active 不在实例列表会被 Rust validate 拒绝，
+      // 下拉候选即实例清单，正常操作不会出现）
+      const instance = draft.oj.instances.find((i) => i.id === form.activeOj)
+      if (instance) instance.baseUrl = form.ojUrl.trim()
+      draft.oj.contestRef = form.contestRef.trim()
       draft.oj.contestPassword = form.contestPassword === '' ? null : form.contestPassword
       draft.oj.timeoutSecs = Number(form.timeoutSecs)
       draft.oj.pollIntervalSecs = Number(form.pollIntervalSecs)
@@ -296,19 +354,41 @@ onBeforeUnmount(() => {
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">OJ 服务器</h2>
               </div>
               <div class="grid grid-cols-1 gap-x-4 gap-y-4 px-5 py-4 sm:grid-cols-2">
-                <label class="block sm:col-span-2">
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                    当前 OJ
+                  </span>
+                  <select v-model="form.activeOj" :class="INPUT" @change="onSwitchOj">
+                    <option
+                      v-for="o in ojOptions"
+                      :key="o.id"
+                      :value="o.id"
+                      :disabled="o.disabled"
+                    >
+                      {{ o.id }}{{ o.disabled ? '（已禁用）' : '' }}
+                    </option>
+                  </select>
+                  <span v-if="switchError" class="mt-1 block text-xs text-rose-600">
+                    {{ switchError }}
+                  </span>
+                  <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
+                    切换即时生效并持久化，将离开本页并放弃所有未保存的修改；候选 = oj.instances 清单
+                  </span>
+                </label>
+
+                <label class="block">
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     服务器地址
                   </span>
                   <input
-                    v-model="form.hojUrl"
+                    v-model="form.ojUrl"
                     type="text"
                     spellcheck="false"
                     placeholder="https://example-oj.com"
-                    :class="inputClass('hojUrl')"
+                    :class="inputClass('ojUrl')"
                   />
-                  <span v-if="errors.hojUrl" class="mt-1 block text-xs text-rose-600">
-                    {{ errors.hojUrl }}
+                  <span v-if="errors.ojUrl" class="mt-1 block text-xs text-rose-600">
+                    {{ errors.ojUrl }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
                     修改后需重启客户端生效
@@ -317,20 +397,16 @@ onBeforeUnmount(() => {
 
                 <label class="block">
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
-                    比赛 ID
+                    比赛 ID / 引用
                   </span>
                   <input
-                    v-model="form.contestId"
+                    v-model="form.contestRef"
                     type="text"
-                    inputmode="numeric"
                     spellcheck="false"
-                    :class="inputClass('contestId')"
+                    :class="inputClass('contestRef')"
                   />
-                  <span v-if="errors.contestId" class="mt-1 block text-xs text-rose-600">
-                    {{ errors.contestId }}
-                  </span>
-                  <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
-                    保存后下次进入赛场生效
+                  <span class="mt-1 block text-xs text-[var(--text-muted)]">
+                    HOJ 为数字 ID，其它 OJ 为资源引用；留空 = 不自动加载
                   </span>
                 </label>
 

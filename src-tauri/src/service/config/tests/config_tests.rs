@@ -44,7 +44,10 @@ fn new_uses_defaults_when_no_config() {
     assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.editor.font_size, 14);
     assert_eq!(cfg.editor.default_language, "C++");
-    assert_eq!(cfg.user.last_oj_type, "HOJ");
+    // OJ 选择是应用级状态（oj.active），默认 HOJ；实例清单默认单 HOJ
+    assert_eq!(cfg.oj.active, "HOJ");
+    assert_eq!(cfg.oj.instances.len(), 1);
+    assert_eq!(cfg.oj.instances[0].id, "HOJ");
 }
 
 #[test]

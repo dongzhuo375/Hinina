@@ -6,11 +6,15 @@ use crate::core::error::AppResult;
 
 /// HTTP 客户端封装（基于 Reqwest）。
 ///
-/// 提供统一的超时、重试、UA、Cookie Store、认证头管理。
+/// 提供统一的超时、重试、UA、Cookie Store。
 ///
 /// **只返回原始响应体，不做反序列化**：各 OJ 的响应往往需要协议特定的归一化
 /// （例如 HOJ 对未设置字段返回 `null`，必须先剔除才能喂给 serde），这类语义属于
 /// Adapter 层；infra 只负责传输、状态码判定与重试，不感知任何 OJ 私有约定。
+///
+/// **请求头由调用方注入**（`HeaderMap` 原样附加）：不同 OJ 的凭证形态各异
+/// （HOJ 的 JWT 走 `Authorization` 头、Hydro 走 Cookie 会话、有的 OJ 还要
+/// CSRF 令牌）—— 认证方式是 Adapter 层概念，infra 不做任何假设。
 pub struct HttpClient {
     client: reqwest::Client,
 }
@@ -100,47 +104,46 @@ impl HttpClient {
 
     /// 发送 GET 请求，返回**原始响应体**与响应头（自动重试 5xx）。
     ///
-    /// `auth_token` 为 `Some` 时自动附加 `Authorization` 头。
+    /// `headers` 由调用方注入并**原样附加**（认证方式是 Adapter 层概念，
+    /// infra 不感知 —— 空 map 即无附加头）。
     /// 对 4xx 错误直接返回 `AppError::Network`（含状态码），不重试。
     /// 响应头原样暴露给调用方，用于解析协议特定的头语义（如 HOJ 的 token 轮换）。
     pub async fn get_text_with_headers(
         &self,
         url: &str,
-        auth_token: Option<&str>,
+        headers: &reqwest::header::HeaderMap,
     ) -> AppResult<(String, reqwest::header::HeaderMap)> {
-        let response = self.retry_get(url, auth_token).await?;
-        let headers = response.headers().clone();
+        let response = self.retry_get(url, headers).await?;
+        let response_headers = response.headers().clone();
         let body = response.text().await.map_err(|e| {
             crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
         })?;
-        Ok((body, headers))
+        Ok((body, response_headers))
     }
 
     /// 发送 POST 请求（JSON body），返回**原始响应体**与响应头。
     ///
+    /// `headers` 语义同 [`HttpClient::get_text_with_headers`]。
     /// POST 为非幂等方法，不执行自动重试。
     /// 对 4xx/5xx 错误直接返回 `AppError::Network`（含状态码）。
     pub async fn post_text_with_headers<B: Serialize>(
         &self,
         url: &str,
         body: &B,
-        auth_token: Option<&str>,
+        headers: &reqwest::header::HeaderMap,
     ) -> AppResult<(String, reqwest::header::HeaderMap)> {
-        let mut req = self.client.post(url).json(body);
-        if let Some(token) = auth_token {
-            req = req.header("Authorization", token);
-        }
+        let req = self.client.post(url).json(body).headers(headers.clone());
         let response = req.send().await.map_err(|e| {
             crate::core::error::AppError::Network(format!("POST 请求失败 {}: {}", url, e))
         })?;
         if !response.status().is_success() {
             return Err(status_error(url, response.status()));
         }
-        let headers = response.headers().clone();
+        let response_headers = response.headers().clone();
         let text = response.text().await.map_err(|e| {
             crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
         })?;
-        Ok((text, headers))
+        Ok((text, response_headers))
     }
 
     // ── 内部重试逻辑 ──
@@ -149,19 +152,16 @@ impl HttpClient {
     ///
     /// 4xx 直接报错不重试（客户端错误重试只会得到同样的结果）；
     /// **5xx 在重试耗尽后同样报错**，不会把错误页当成正常响应交给上层解析
-    /// （处置判据见 `classify_status`）。
+    /// （处置判据见 `classify_status`）。请求头每次重试原样重附。
     async fn retry_get(
         &self,
         url: &str,
-        auth_token: Option<&str>,
+        headers: &reqwest::header::HeaderMap,
     ) -> AppResult<reqwest::Response> {
         let mut last_error: Option<crate::core::error::AppError> = None;
 
         for attempt in 0..=MAX_RETRIES {
-            let mut req = self.client.get(url);
-            if let Some(token) = auth_token {
-                req = req.header("Authorization", token);
-            }
+            let req = self.client.get(url).headers(headers.clone());
 
             match req.send().await {
                 Ok(response) => {

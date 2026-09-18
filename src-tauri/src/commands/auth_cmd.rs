@@ -1,50 +1,22 @@
 use tauri::State;
-use tracing::{info, warn};
 
 use crate::core::context::AppContext;
 use crate::core::entity::user::User;
 use crate::core::error::AppResult;
-use crate::core::provider::oj_type::OJType;
 use crate::service::auth::SessionValidity;
-
-/// 从字符串解析 OJType（大小写不敏感）。
-/// 提取为公开函数以支持 P40 测试。
-pub fn parse_oj_type(s: &str) -> Option<OJType> {
-    match s.to_uppercase().as_str() {
-        "HOJ" => Some(OJType::HOJ),
-        "QDUOJ" => Some(OJType::QDUOJ),
-        "HUSTOJ" => Some(OJType::HUSTOJ),
-        _ => None,
-    }
-}
 
 /// 登录 Command。
 ///
-/// 前端 invoke 签名: `login`({ username, password, ojType? })
+/// 前端 invoke 签名: `login`({ username, password })
 ///
-/// 若传入 `ojType`，先切换 ProviderRegistry 的当前 OJ 再执行登录。
-/// `ojType` 支持 "HOJ" / "QDUOJ" / "HUSTOJ"（大小写不敏感）。
-/// 未传入时使用 Registry 当前配置的默认 OJ。
+/// OJ 切换走显式 `switch_oj`（应用级状态），不再作为登录的副作用 ——
+/// 切 OJ 与登录是两个独立意图，混在一起会让 `OJSwitched` 事件发了也无人能观察。
 #[tauri::command]
 pub async fn login(
     ctx: State<'_, AppContext>,
     username: String,
     password: String,
-    oj_type: Option<String>,
 ) -> AppResult<User> {
-    // 如果前端指定了 OJ 类型，先切换
-    if let Some(ref ot) = oj_type {
-        let oj = match parse_oj_type(ot) {
-            Some(oj) => oj,
-            None => {
-                warn!(oj_type = ot, "未知的 OJ 类型，使用当前默认值");
-                return ctx.auth.login(&username, &password).await;
-            }
-        };
-        ctx.provider_registry.set_current_oj(oj);
-        info!(oj_type = ot, "已切换 OJ 类型");
-    }
-
     ctx.auth.login(&username, &password).await
 }
 

@@ -9,7 +9,8 @@ use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::rank::{ContestRankPage, ContestRankRow, RankQuery};
 use crate::core::error::AppError;
 use crate::core::provider::contest::ContestProvider;
-use crate::core::provider::oj_type::OJType;
+use crate::core::provider::oj_id::OjId;
+use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 
@@ -228,8 +229,14 @@ fn make_service_in(
     mode: StubMode,
 ) -> (ContestService, Arc<StubContestProvider>, std::path::PathBuf) {
     let provider = Arc::new(StubContestProvider::new(mode));
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
-    registry.register_contest(OJType::HOJ, Arc::clone(&provider) as Arc<dyn ContestProvider>);
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            contest: Some(Arc::clone(&provider) as Arc<dyn ContestProvider>),
+            ..Default::default()
+        },
+    );
     let service = ContestService::new(
         registry,
         Arc::new(EventBus::new()),
@@ -573,4 +580,52 @@ fn read_state_rejects_path_separators() {
             .expect_err(&format!("非法 cid {:?} 应被拒绝", bad));
         assert!(matches!(err, AppError::Io(_)), "实际 {:?}", err);
     }
+}
+
+
+// ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
+
+#[test]
+fn oj_switched_clears_contest_scoped_caches() {
+    use crate::core::event::app_event::{AppEvent, SystemEvent};
+
+    let dir = std::env::temp_dir().join("hinina-test-contest-oj-switch");
+    let _ = std::fs::remove_dir_all(&dir);
+    let bus = Arc::new(EventBus::new());
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let service = ContestService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
+
+    // 预置 OJ 域缓存：列表缓存 + 元信息内存缓存
+    *service.cache.write().unwrap() = Some(ContestCache {
+        contests: vec![],
+        fetched_at: Instant::now(),
+    });
+    service.meta_cache.insert(
+        "7".into(),
+        Contest {
+            id: "7".into(),
+            title: "t".into(),
+            start_time: 0,
+            end_time: 0,
+            description: String::new(),
+            contest_type: 0,
+            status: 0,
+            auth: 0,
+            rank_show_name: String::new(),
+            seal_rank: false,
+            seal_rank_time: None,
+            allow_end_submit: false,
+            oi_rank_score_type: None,
+        },
+    );
+    assert!(!service.meta_cache.is_empty());
+
+    bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
+
+    assert!(service.cache.read().unwrap().is_none(), "列表缓存应被清空");
+    assert!(service.meta_cache.is_empty(), "元信息内存缓存应被清空");
+    // 磁盘命名空间整体移除（目录不存在 = 已清）
+    assert!(!dir.join("cache/contest_meta").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

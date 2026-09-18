@@ -10,7 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `loadConfiguredContest` | `() => Promise<{ contest: Contest; problems: ContestProblem[] }>` | invoke `load_configured_contest`（后端读 `oj.contest_id`，返回 ContestBundle 对象供直接解构；需有效会话） |
+| `loadConfiguredContest` | `() => Promise<{ contest: Contest; problems: ContestProblem[] }>` | invoke `load_configured_contest`（后端读 `oj.contestRef`，返回 ContestBundle 对象供直接解构；需有效会话） |
 | `listContests` | `() => Promise<Contest[]>` | invoke `list_contests`（匿名接口，登录页比赛简报/倒计时用；后端带 TTL 缓存） |
 
 ## 直接依赖
