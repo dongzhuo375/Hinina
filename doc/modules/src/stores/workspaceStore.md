@@ -17,10 +17,10 @@
 | state | `workspace` / `activeFile` / `code` / `language`（默认 'C++'）/ `isDirty` / `syncPending` | `isDirty` = 有改动尚未落盘；`syncPending` = 有改动尚未推送到后端内存（防抖窗口内） |
 | `currentCode` / `currentLanguage` | getters | 编辑器当前代码与语言 |
 | `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ 加载工作区：恢复 language（元数据残留的历史 Monaco id 经 `normalizeHojLanguage` 归一为 HOJ 显示名；未记录语言时用 `configService.getDefaultLanguage()`，兜底 "C++"）、isDirty；代码文件优先取当前语言派生名，其次按 `CODE_FILE_EXTENSIONS` 后缀探测（兼容历史任意命名） |
-| `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；推送失败时保留脏标记（内容未进后端，不能宣称已保存） |
+| `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；仅当「推送成功 **且** 期间无新改动（`!syncPending`）」才清 `isDirty`（推送失败 → 内容未进后端；期间又落键 → 最新改动连后端内存都还没到，清脏会显示假「已自动备份」） |
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + `isDirty = true` + `syncPending = true` + `scheduleSync()` |
 | `scheduleSync` | `() => void` | 重置 2s 定时器，到点调用 `flushPendingSync()` |
-| `flushPendingSync` | `() => Promise<boolean>` | 取消防抖窗口并立即把代码按 `sourceFileNameOf(language)` 派生的文件名推送到后端内存；返回是否成功，失败只 `log.error` 并保留 `syncPending`（调用方不应被一次 IPC 失败阻断） |
+| `flushPendingSync` | `() => Promise<boolean>` | 取消防抖窗口并立即把代码按 `sourceFileNameOf(language)` 派生的文件名推送到后端内存；返回是否成功，失败只 `log.error` 并保留 `syncPending`（调用方不应被一次 IPC 失败阻断）。**推送期间又有新改动时不清 `syncPending`**（本次推送带的是调用时刻的内容；清了会让新内容既不被本次携带、又被下次防抖短路跳过） |
 | `markPersisted` | `(workspaceId?: string) => void` | 后端落盘事件（`workspace-saved`）到达时清 `isDirty`；按 `workspaceId` 过滤过期事件（旧工作区的 `Saved` 可能在新工作区已编辑后才送达）；若期间又有新改动（`syncPending`）则不清 —— 后端在写失败或快照后又有新改动时不发该事件，故清除等价于「最新内容确已在磁盘上」 |
 | `cancelPendingSync` | `() => void` | 取消未触发的防抖同步并清 `syncPending`（登出/切换账号时调用，避免向已失效会话写入代码） |
 | `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程 |

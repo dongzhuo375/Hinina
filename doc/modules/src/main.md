@@ -15,7 +15,7 @@
 | `app.use(router)` | 装配路由（含 `beforeEach` 会话守卫，见 `router/index.md`） |
 | `installSessionGuard(router)` | **组合根注入**：把「认证类 IPC 失败 → 判定会话失效 → 清理并回登录页」的观察者挂到 Bridge 层，随后传入 router 供失效后导航 |
 | `installWorkspacePersistenceListener()` | **组合根注入**：订阅后端 `workspace-saved`（显式保存 / 后台 auto-save 成功）→ `workspaceStore.markPersisted()`，驱动「已自动备份」指示；订阅失败只降级指示器 |
-| `installCloseFlushGuard()` | **组合根注入**：`onCloseRequested` 握手 —— 首次拦截 `preventDefault` → 落盘工作区 → 再次 `close()` 放行（一次性标志防重入）；落盘等待上限 `CLOSE_FLUSH_TIMEOUT_MS = 3000`，超时即放行，避免 IPC 无响应时窗口关不掉 |
+| `installCloseFlushGuard()` | **组合根注入**：`onCloseRequested` 握手 —— 拦截 `preventDefault` → 落盘工作区 → 自身 `close()` 放行（`proceedClose` 标志区分「自身关闭」与「用户请求」：落盘在途时的重复请求**继续拦截等待**，避免双击以零超时中断在途落盘）；落盘等待上限 `CLOSE_FLUSH_TIMEOUT_MS = 3000`，超时即放行，避免 IPC 无响应时窗口关不掉 |
 | `import '@/styles/global.css'` | 全局样式（CSS 变量主题、榜单状态色等） |
 | `import 'katex/dist/katex.min.css'` | KaTeX 公式样式与字体（题面/公告/简介的 LaTeX 公式）；字体由 katex 包本地打包、不经 CDN，符合离线客户端约束 |
 | `app.mount('#app')` | 挂载 |

@@ -15,7 +15,7 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换�
   - `fn persist_meta(&self, ws) -> AppResult<()>`（私有）— 把 `WorkspaceMeta` 序列化写入 `workspace.json`，被 `create` / `save` / `set_language` 三处共用。**auto-save 刻意不写元数据**：`set_language` 会立即落盘语言，若 auto-save 用快照时刻的元数据回写，会把刚落盘的新语言覆盖回旧值
   - `fn save_current_if_dirty(&self) -> ()`（私有）— 落盘当前工作区（脏时才写），失败仅 `warn`。`create` / `load` / `switch` 替换 `current` 前都必须调用：内存是唯一权威副本，不先落盘则未落盘的改动随替换静默消失
   - `fn find_or_create(&self, contest_id, problem_id, root_path) -> AppResult<Workspace>` — 按 contest_id + problem_id 扫描所有工作区的 `workspace.json` 元数据：命中 → `load()` 恢复代码；未命中 → `create()` 新建（P36 修复；元数据持久化正是为了避免从 workspace_id 字符串解析字段）
-  - `fn start_auto_save(&self, interval_secs: u64)` — 启动后台自动保存（先停旧的再启动）。循环语义：脏才写；**快照（文件集）与修订号在同一读锁作用域内取得**；写盘失败保持脏、下轮重试且不发布事件；仅当修订号未变（快照之后无新改动）才 `mark_clean()` 并发布 `WorkspaceEvent::AutoSaveTriggered`
+  - `fn start_auto_save(&self, interval_secs: u64)` — 启动后台自动保存（先停旧的再启动）。循环语义：脏才写；**取快照与写盘整体在读锁内完成**（与 `save()` / `update_file` 的写锁互斥，保证「旧快照的写」不可能落在「更新的写」之后 —— 只锁「取快照」会让写盘期间到来的 `save()` 插进本次写盘之后被旧内容覆盖回退，且工作区已 clean → 新内容永不重写）；写盘失败保持脏、下轮重试且不发布事件；仅当修订号未变（快照之后无新改动）才 `mark_clean()` 并发布 `WorkspaceEvent::AutoSaveTriggered`
   - `fn stop_auto_save(&self) -> ()` — 停止自动保存：take 出 `auto_save_handle` 中的 JoinHandle 并 abort
   - `fn switch(&self, workspace_id, root_path) -> AppResult<Workspace>` — 切换工作区：先 `save_current_if_dirty()` → `load()` 目标 → 发布 `WorkspaceEvent::Switched { from, to }`
   - `fn destroy(&self, workspace_id) -> AppResult<()>` — 销毁工作区：删除所有文件 → 若为当前则清空 current
@@ -55,7 +55,7 @@ Workspace 生命周期状态机：
 - `set_language()` 只改内存语言字段 + `touch()` + 立即 `persist_meta()`，不动脏标记、不重写代码文件
 - `find_or_create()` 按元数据匹配已有工作区（恢复代码），未命中才 `create()`
 - `update_file()` 只写内存 + 递增修订号（不落盘）；`get_file()` 优先内存后回退磁盘
-- `start_auto_save()` 启动 tokio task 定时扫描 dirty 标记，落盘成功且快照之后无新改动才清脏并发布事件；`Drop` 确保 task 被 abort
+- `start_auto_save()` 启动 tokio task 定时扫描 dirty 标记；取快照与写盘在同一读锁内完成（与 `save()` 的写锁形成全序），落盘成功且快照之后无新改动才清脏并发布事件；`Drop` 确保 task 被 abort
 
 ## 测试
-`src-tauri/src/service/workspace/tests/manager_tests.rs` 锁定：create 设为当前、`update_file` **不落盘**（`save` 才落盘）、`save` 落盘并清脏、create / load 替换当前前先落盘旧工作区、get_file 内存优先、load 从磁盘恢复且**用元数据而非解析 workspace_id**、destroy/switch/current 语义，语言持久化三契约——`set_language` 跨 Manager 实例存活、`save` 一并持久化语言元数据、无当前工作区时 `set_language` 报错，以及 auto-save 三契约——落盘并发布一次事件、**写盘期间有新改动时保留脏且不发布事件**（`HookedRepo` 桩确定性复现时序）、**写盘失败保留脏且静默**。
+`src-tauri/src/service/workspace/tests/manager_tests.rs` 锁定：create 设为当前、`update_file` **不落盘**（`save` 才落盘）、`save` 落盘并清脏、create / load 替换当前前先落盘旧工作区、get_file 内存优先、load 从磁盘恢复且**用元数据而非解析 workspace_id**、destroy/switch/current 语义，语言持久化三契约——`set_language` 跨 Manager 实例存活、`save` 一并持久化语言元数据、无当前工作区时 `set_language` 报错，以及 auto-save 四契约——落盘并发布一次事件、**写盘与显式 `save()` 全序**（`HookedRepo` 的写前钩子阻塞 auto-save 的写盘，另一线程完成 `update_file` + `save()`，放行后磁盘必须仍是新内容：修复前该用例失败于 `left: "v1"`）、tick 期间到来的改动最终必须落盘且不留「clean 但磁盘落后」终态、**写盘失败保留脏且静默**。

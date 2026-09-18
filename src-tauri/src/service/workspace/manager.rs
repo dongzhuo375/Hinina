@@ -308,8 +308,11 @@ impl WorkspaceManager {
     /// 如果已有自动保存任务运行，则先停止旧的再启动。
     ///
     /// 循环语义（配合 `update_file` 只写内存）：
-    /// - 脏才写，且**快照与修订号在同一读锁作用域内取得**（否则「取快照 → 取修订号」
-    ///   之间到来的 `update_file` 会让修订号偏新，写盘的是旧内容却误判为可 clean）；
+    /// - 脏才写，且**取快照与写盘整体在读锁内完成**（与 `save()` / `update_file`
+    ///   的写锁互斥）：只锁住「取快照」会让写盘期间到来的 `save()` 插进本次写盘与
+    ///   后续检查之间 —— 新内容先落盘，被延迟的旧快照写再覆盖回旧内容，而工作区
+    ///   已由 `save()` 标 clean（rev 检查只能阻止 auto-save 误标 clean，无法撤销
+    ///   已发生的覆盖）→ 新内容永不重写，静默永久丢失；
     /// - 写盘失败保持脏，下一 tick 重试，且**不发布事件** —— 前端「已自动备份」
     ///   必须表示最新内容确已落盘；
     /// - 仅当快照之后没有新改动（修订号未变）才 `mark_clean` 并发布
@@ -331,40 +334,44 @@ impl WorkspaceManager {
             loop {
                 interval_timer.tick().await;
 
-                // 快照（文件集 + 修订号）在同一读锁内取得，见方法文档
-                let snapshot = {
+                // 取快照 + 写盘整体在读锁内完成（见方法文档）：写盘期间
+                // save()/update_file 无法插入，保证「旧快照的写」不可能落在
+                // 「更新的写」之后（否则磁盘会被回退到旧内容且永不重写）
+                let (ws_id, files_saved, snapshot_revision) = {
                     let guard = current.read().unwrap_or_else(|e| e.into_inner());
-                    match guard.as_ref() {
-                        Some(ws) if ws.is_dirty => Some((
-                            ws.id.clone(),
-                            ws.files.clone(),
-                            revision.load(Ordering::SeqCst),
-                        )),
-                        _ => None,
+                    let Some(ws) = guard.as_ref() else {
+                        continue;
+                    };
+                    if !ws.is_dirty {
+                        continue;
                     }
-                };
 
-                let Some((ws_id, files, snapshot_revision)) = snapshot else {
-                    continue;
-                };
+                    let ws_id = ws.id.clone();
+                    // 修订号与快照同一读锁作用域内取得（否则「取快照 → 取修订号」
+                    // 之间到来的改动会让修订号偏新，写盘的是旧内容却误判为可 clean）
+                    let snapshot_revision = revision.load(Ordering::SeqCst);
+                    let files = ws.files.clone();
 
-                let mut write_error = false;
-                for (file_name, content) in &files {
-                    let path = std::path::PathBuf::from(file_name);
-                    if let Err(e) = repo.save_file(&ws_id, &path, content) {
-                        warn!(
-                            workspace_id = ws_id,
-                            file = file_name,
-                            error = %e,
-                            "自动保存失败"
-                        );
-                        write_error = true;
+                    let mut write_error = false;
+                    for (file_name, content) in &files {
+                        let path = std::path::PathBuf::from(file_name);
+                        if let Err(e) = repo.save_file(&ws_id, &path, content) {
+                            warn!(
+                                workspace_id = ws_id,
+                                file = file_name,
+                                error = %e,
+                                "自动保存失败"
+                            );
+                            write_error = true;
+                        }
                     }
-                }
 
-                if write_error {
-                    continue; // 保持脏：下一 tick 重试，且不发布「已落盘」
-                }
+                    if write_error {
+                        continue; // 保持脏：下一 tick 重试，且不发布「已落盘」
+                    }
+
+                    (ws_id, files.len(), snapshot_revision)
+                };
 
                 // 仅当快照之后没有新改动才标记 clean：否则「快照写盘」会被当成
                 // 本次编辑已落盘，最新内容将停留在内存直到下一次编辑
@@ -388,7 +395,7 @@ impl WorkspaceManager {
                     }));
                     debug!(
                         workspace_id = ws_id,
-                        files_saved = files.len(),
+                        files_saved = files_saved,
                         "自动保存完成"
                     );
                 } else {

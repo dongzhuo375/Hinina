@@ -86,8 +86,11 @@ export const useWorkspaceStore = defineStore('workspace', {
     async saveWorkspace() {
       const pushed = await this.flushPendingSync()
       await workspaceService.saveWorkspace()
-      // 推送失败时内容未进后端，保留脏标记等下一次 flush 重试
-      if (pushed) this.isDirty = false
+      // 只有「推送成功 **且** 推送/落盘期间没有新改动」才能清脏：
+      // - 推送失败 → 内容未进后端；
+      // - 期间又落键（syncPending）→ 最新改动连后端内存都还没到，
+      //   此时清脏会显示「已自动备份」而磁盘落后于编辑器（假 clean）
+      if (pushed && !this.syncPending) this.isDirty = false
     },
 
     /** 更新编辑器内代码（标记脏状态 + 防抖推送到后端内存） */
@@ -111,6 +114,11 @@ export const useWorkspaceStore = defineStore('workspace', {
      *
      * 返回是否成功（无在途改动视为成功）。失败只记录日志、保留 `syncPending`
      * 供下次重试 —— 调用方（切题 / 关窗）不应被一次 IPC 失败阻断。
+     *
+     * **推送期间又有新改动时不清 `syncPending`**：本次推送的是调用时刻的内容，
+     * 若期间用户继续敲键（`updateCode` 已排定新的防抖），清掉标记会让新内容既
+     * 不被本次推送携带、又被下次防抖（`syncPending === false` 直接短路）跳过 ——
+     * 新内容永远到不了后端。
      */
     async flushPendingSync(): Promise<boolean> {
       if (syncTimer) {
@@ -121,9 +129,10 @@ export const useWorkspaceStore = defineStore('workspace', {
 
       // 文件名后缀必须与语言严格一致：判题端按后缀判定语言与 limits 倍率
       const fileName = sourceFileNameOf(this.language)
+      const content = this.code
       try {
-        await workspaceService.updateWorkspaceFile(fileName, this.code)
-        this.syncPending = false
+        await workspaceService.updateWorkspaceFile(fileName, content)
+        if (this.code === content) this.syncPending = false
         return true
       } catch (e) {
         log.error('代码同步失败（内容仍留在编辑器，稍后重试）:', e)

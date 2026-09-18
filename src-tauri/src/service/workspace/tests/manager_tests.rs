@@ -342,18 +342,24 @@ use crate::core::repository::workspace_repo::WorkspaceRepository;
 /// 写盘钩子：在真实写盘前执行（返回 Err 即模拟写失败）
 type SaveHook = Arc<dyn Fn(&str, &str) -> AppResult<()> + Send + Sync>;
 
-/// 可注入副作用的仓库桩：在真实写盘前执行钩子。
+/// 可注入副作用的仓库桩：在真实写盘前/后执行钩子。
 ///
-/// 用于确定性复现两种时序：写盘期间编辑器又推了新内容、写盘失败。
+/// `on_save` 用于确定性复现两种时序（写盘期间编辑器又推了新内容、写盘失败）；
+/// `on_saved` 用于等待「某一笔写确已落盘」（写盘后的完成信号，避免测试读到中间态）。
 struct HookedRepo {
     inner: Arc<FsWorkspaceRepository>,
     on_save: SaveHook,
+    on_saved: Option<SaveHook>,
 }
 
 impl WorkspaceRepository for HookedRepo {
     fn save_file(&self, workspace_id: &str, path: &Path, content: &str) -> AppResult<()> {
         (self.on_save)(workspace_id, content)?;
-        self.inner.save_file(workspace_id, path, content)
+        let result = self.inner.save_file(workspace_id, path, content);
+        if let Some(on_saved) = &self.on_saved {
+            let _ = on_saved(workspace_id, content);
+        }
+        result
     }
 
     fn read_file(&self, workspace_id: &str, path: &Path) -> AppResult<String> {
@@ -420,23 +426,110 @@ async fn auto_save_persists_dirty_workspace_and_publishes_once() {
     let _ = std::fs::remove_dir_all(std::env::temp_dir().join("hinina-test-mgr-autosave-persist"));
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_save_write_is_serialized_with_explicit_save() {
+    // 竞态复现（确定性）：auto-save 取快照后写盘期间，显式 save() 写入更新的内容。
+    // 若 auto-save 的写盘不持锁，旧快照的写会**落在新内容之后** → 磁盘回退到 v1；
+    // 而工作区在 save() 完成时已标 clean（rev 检查只能阻止 auto-save 误标 clean，
+    // 无法撤销已发生的覆盖）→ 内存 v2 且永不重写 = 最后一次编辑静默永久丢失。
+    let dir = std::env::temp_dir().join("hinina-test-mgr-autosave-serialize");
+    let _ = std::fs::remove_dir_all(&dir);
+    let storage = Arc::new(Storage::new(dir.clone()));
+    let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
+    let bus = Arc::new(EventBus::new());
+
+    // 钩子：auto-save 写 "v1" 时通知测试并阻塞（模拟被抢占 / 慢盘 / 杀毒扫描）；
+    // 写盘完成后再发一次信号，供测试确定性等待「旧写已落盘」
+    let (tx_started, rx_started) = std::sync::mpsc::channel::<()>();
+    let (tx_release, rx_release) = std::sync::mpsc::channel::<()>();
+    let (tx_written, rx_written) = std::sync::mpsc::channel::<()>();
+    let tx_started = Arc::new(std::sync::Mutex::new(tx_started));
+    let rx_release = Arc::new(std::sync::Mutex::new(rx_release));
+    let tx_written = Arc::new(std::sync::Mutex::new(tx_written));
+    let on_save: SaveHook = Arc::new(move |_ws_id, content| {
+        if content == "v1" {
+            let _ = tx_started.lock().unwrap().send(());
+            let _ = rx_release.lock().unwrap().recv();
+        }
+        Ok(())
+    });
+    let on_saved: SaveHook = Arc::new(move |_ws_id, content| {
+        if content == "v1" {
+            let _ = tx_written.lock().unwrap().send(());
+        }
+        Ok(())
+    });
+
+    let repo: Arc<dyn WorkspaceRepository> = Arc::new(HookedRepo {
+        inner: Arc::clone(&real_repo),
+        on_save,
+        on_saved: Some(on_saved),
+    });
+    let mgr = Arc::new(WorkspaceManager::new(repo, Arc::clone(&bus)));
+
+    mgr.create("c", "p", "/ws").unwrap();
+    mgr.update_file("main.cpp", "v1").unwrap();
+    mgr.start_auto_save(1);
+
+    // 等到 auto-save 确实进入写盘阶段（此刻它应当持有读锁）
+    rx_started
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("auto-save 未在 5 秒内进入写盘");
+
+    // 另一线程做「推入 v2 + 显式落盘」——即前端失焦/切题触发的 saveWorkspace
+    let mgr_for_thread = Arc::clone(&mgr);
+    let saver = std::thread::spawn(move || {
+        mgr_for_thread.update_file("main.cpp", "v2").unwrap();
+        mgr_for_thread.save().unwrap();
+    });
+
+    // 给显式保存足够时间完成（若写盘不受锁保护，它会在 auto-save 的写盘之前完成）
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // 放行被阻塞的 auto-save 写盘，并确定性等待它落盘完成
+    let _ = tx_release.send(());
+    rx_written
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("auto-save 的旧快照写盘未在 5 秒内完成");
+    saver.join().expect("显式保存线程 panic");
+
+    let ws = mgr.current().unwrap();
+    let on_disk = real_repo
+        .read_file(&ws.id, &std::path::PathBuf::from("main.cpp"))
+        .unwrap();
+
+    assert_eq!(
+        on_disk, "v2",
+        "最新内容必须是最后一次落盘（旧快照的写不得落在新内容之后）"
+    );
+    assert!(!ws.is_dirty, "v2 已落盘，工作区应为干净");
+    assert_eq!(ws.files.get("main.cpp").map(String::as_str), Some("v2"));
+
+    mgr.stop_auto_save();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[tokio::test]
-async fn auto_save_keeps_dirty_when_newer_edit_arrives_during_write() {
-    let dir = std::env::temp_dir().join("hinina-test-mgr-autosave-race");
+async fn auto_save_eventually_persists_newest_content_when_edit_arrives_mid_tick() {
+    // tick 期间到来的新改动不得被永久吞掉：无论竞态哪一方先拿到锁，
+    // 最终磁盘必须是新内容且工作区干净（不允许「clean 但磁盘落后」的终态）。
+    let dir = std::env::temp_dir().join("hinina-test-mgr-autosave-midtick");
     let _ = std::fs::remove_dir_all(&dir);
     let storage = Arc::new(Storage::new(dir.clone()));
     let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
     let bus = Arc::new(EventBus::new());
     let events = count_auto_save_events(&bus);
 
-    // 钩子：写 "v1" 期间编辑器推入 "v2"（模拟快照之后到来的新改动）
     let slot: Arc<std::sync::Mutex<Option<Arc<WorkspaceManager>>>> =
         Arc::new(std::sync::Mutex::new(None));
     let hook_slot = Arc::clone(&slot);
     let on_save: SaveHook = Arc::new(move |_ws_id, content| {
         if content == "v1" {
+            // 写盘期间推入新改动（另一线程，避免持锁自重入）
             if let Some(mgr) = hook_slot.lock().unwrap().clone() {
-                mgr.update_file("main.cpp", "v2").unwrap();
+                std::thread::spawn(move || {
+                    mgr.update_file("main.cpp", "v2").unwrap();
+                });
             }
         }
         Ok(())
@@ -445,6 +538,7 @@ async fn auto_save_keeps_dirty_when_newer_edit_arrives_during_write() {
     let repo: Arc<dyn WorkspaceRepository> = Arc::new(HookedRepo {
         inner: Arc::clone(&real_repo),
         on_save,
+        on_saved: None,
     });
     let mgr = Arc::new(WorkspaceManager::new(repo, Arc::clone(&bus)));
     *slot.lock().unwrap() = Some(Arc::clone(&mgr));
@@ -453,33 +547,22 @@ async fn auto_save_keeps_dirty_when_newer_edit_arrives_during_write() {
     mgr.update_file("main.cpp", "v1").unwrap();
 
     mgr.start_auto_save(1);
-    // 第一轮：写入的是快照 "v1"，但期间修订号已变 —— 不得标记干净、不得发布事件
-    tokio::time::sleep(std::time::Duration::from_millis(1_600)).await;
-    assert!(
-        mgr.current().unwrap().is_dirty,
-        "快照之后有新改动时必须保留脏标记（否则新内容永远不会落盘）"
-    );
-    assert_eq!(
-        events.load(AtomicOrdering::SeqCst),
-        0,
-        "内容未确证落盘时不得发布「已落盘」事件"
-    );
-    assert_eq!(mgr.get_file("main.cpp").unwrap(), "v2", "内存应保留最新内容");
-
-    // 第二轮：修订号未再变化，正常落盘并发布事件
-    tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+    // 两个 tick 足够让「新改动」被重新快照并落盘
+    tokio::time::sleep(std::time::Duration::from_millis(2_500)).await;
     mgr.stop_auto_save();
-    assert!(!mgr.current().unwrap().is_dirty, "第二轮应落盘并标记干净");
-    assert_eq!(events.load(AtomicOrdering::SeqCst), 1);
+
+    let ws = mgr.current().unwrap();
     assert_eq!(
         real_repo
-            .read_file(
-                &mgr.current().unwrap().id,
-                &std::path::PathBuf::from("main.cpp")
-            )
+            .read_file(&ws.id, &std::path::PathBuf::from("main.cpp"))
             .unwrap(),
         "v2",
-        "最新内容最终必须落盘"
+        "tick 期间的新改动最终必须落盘"
+    );
+    assert!(!ws.is_dirty, "落盘后应标记干净");
+    assert!(
+        events.load(AtomicOrdering::SeqCst) >= 1,
+        "至少发布一次「已落盘」事件"
     );
 
     let _ = std::fs::remove_dir_all(dir);
@@ -503,6 +586,7 @@ async fn auto_save_keeps_dirty_and_silent_when_write_fails() {
     let repo: Arc<dyn WorkspaceRepository> = Arc::new(HookedRepo {
         inner: real_repo,
         on_save,
+        on_saved: None,
     });
     let mgr = WorkspaceManager::new(repo, Arc::clone(&bus));
 

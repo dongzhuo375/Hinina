@@ -105,6 +105,45 @@ describe('updateCode / flushPendingSync — 防抖只推内存', () => {
     expect(store.syncPending).toBe(true)
     expect(store.isDirty).toBe(true)
   })
+
+  it('推送在途时又敲键：不清 syncPending，且新内容仍会被下次防抖推送', async () => {
+    vi.useFakeTimers()
+    try {
+      // 推送挂起，模拟 IPC 在途
+      let releasePush: () => void = () => {}
+      workspaceService.updateWorkspaceFile.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            releasePush = () => resolve()
+          }),
+      )
+
+      const store = useWorkspaceStore()
+      store.updateCode(CODE)
+      const flushing = store.flushPendingSync()
+
+      // 推送在途时用户继续敲键
+      store.updateCode(`${CODE}\n// 又改了`)
+      releasePush()
+      await flushing
+
+      // 本次推送只带走了旧内容 → 不能清标记（否则新内容既不被本次携带、
+      // 又被下次防抖短路跳过，永远到不了后端）
+      expect(store.syncPending).toBe(true)
+
+      // 新内容由防抖推送补上
+      workspaceService.updateWorkspaceFile.mockResolvedValue(undefined)
+      vi.advanceTimersByTime(2_000)
+      await vi.runOnlyPendingTimersAsync()
+      expect(workspaceService.updateWorkspaceFile).toHaveBeenLastCalledWith(
+        'main.cpp',
+        `${CODE}\n// 又改了`,
+      )
+      expect(store.syncPending).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('saveWorkspace — 先推内存再落盘', () => {
@@ -132,6 +171,30 @@ describe('saveWorkspace — 先推内存再落盘', () => {
 
     await store.saveWorkspace()
 
+    expect(store.isDirty).toBe(true)
+  })
+
+  it('落盘 IPC 在途时又敲键：不清脏标记（避免假「已自动备份」）', async () => {
+    // 落盘挂起，模拟 IPC 在途（失焦/路由切换保存与用户仍在敲键同时发生）
+    let releaseSave: () => void = () => {}
+    workspaceService.saveWorkspace.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseSave = () => resolve()
+        }),
+    )
+
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    const saving = store.saveWorkspace()
+    await vi.waitFor(() => expect(workspaceService.saveWorkspace).toHaveBeenCalled())
+
+    // 落盘在途时用户继续敲键：新改动连后端内存都还没到
+    store.updateCode(`${CODE}\n// 又改了`)
+    releaseSave()
+    await saving
+
+    expect(store.syncPending).toBe(true)
     expect(store.isDirty).toBe(true)
   })
 })
