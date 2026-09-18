@@ -1,37 +1,22 @@
 use tauri::State;
-use tracing::{info, warn};
 
 use crate::core::context::AppContext;
 use crate::core::entity::user::User;
 use crate::core::error::AppResult;
-use crate::core::provider::oj_id::OjId;
 use crate::service::auth::SessionValidity;
 
 /// 登录 Command。
 ///
-/// 前端 invoke 签名: `login`({ username, password, ojType? })
+/// 前端 invoke 签名: `login`({ username, password })
 ///
-/// 若传入 `ojType`，先切换 ProviderRegistry 的当前 OJ 再执行登录。
-/// OJ 身份是数据（字符串 id）：不再经闭集枚举解析，改为校验该 id 是否已注册
-/// （未注册只告警并沿用当前 OJ，不阻断登录）。
+/// OJ 切换走显式 `switch_oj`（应用级状态），不再作为登录的副作用 ——
+/// 切 OJ 与登录是两个独立意图，混在一起会让 `OJSwitched` 事件发了也无人能观察。
 #[tauri::command]
 pub async fn login(
     ctx: State<'_, AppContext>,
     username: String,
     password: String,
-    oj_type: Option<String>,
 ) -> AppResult<User> {
-    // 如果前端指定了 OJ，先切换（校验是否已注册，取代旧的闭集枚举解析）
-    if let Some(ref ot) = oj_type {
-        let id = OjId::new(ot);
-        if ctx.provider_registry.list_available().contains(&id) {
-            ctx.provider_registry.set_current(id);
-            info!(oj_id = ot, "已切换 OJ");
-        } else {
-            warn!(oj_id = ot, "未注册的 OJ，沿用当前默认值");
-        }
-    }
-
     ctx.auth.login(&username, &password).await
 }
 

@@ -58,6 +58,17 @@ export class ConfigService {
   }
 
   /**
+   * 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）。
+   *
+   * 后端编排：校验已注册 → 切 Registry → 持久化 `oj.active` → 发布
+   * `OJSwitched`。本地缓存在切换后失效，后续读取拿到新 active。
+   */
+  async switchOj(ojId: string): Promise<void> {
+    await configBridge.switchOj(ojId)
+    this.invalidate()
+  }
+
+  /**
    * OJ 基址：用于把题面/比赛简介中的相对图片 URL 改写为绝对地址。
    *
    * 取当前 OJ 实例（`oj.active` 匹配）的 `baseUrl`。读取失败时返回空串而非

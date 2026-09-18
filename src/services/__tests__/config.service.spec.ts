@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig } from '@/types/config'
 
 /// Bridge 层打桩：service 测试不触达 IPC（逐层隔离约定）
-const { getConfig, updateConfig, reloadConfig } = vi.hoisted(() => ({
+const { getConfig, updateConfig, reloadConfig, switchOj } = vi.hoisted(() => ({
   getConfig: vi.fn(),
   updateConfig: vi.fn(),
   reloadConfig: vi.fn(),
+  switchOj: vi.fn(),
 }))
-vi.mock('@/bridge/config.bridge', () => ({ getConfig, updateConfig, reloadConfig }))
+vi.mock('@/bridge/config.bridge', () => ({ getConfig, updateConfig, reloadConfig, switchOj }))
 
 import { configService } from '@/services/config.service'
 
@@ -191,6 +192,28 @@ describe('getOjBaseUrl / activeOjBaseUrl — 当前实例地址解析', () => {
   it('读取失败返回空串（缺基址只影响图片改写，不抛出）', async () => {
     getConfig.mockRejectedValue(new Error('IPC 失败'))
     await expect(configService.getOjBaseUrl()).resolves.toBe('')
+  })
+})
+
+describe('switchOj — 显式切换当前 OJ', () => {
+  it('调用 bridge 且切换后本地缓存失效（下次读取拿新 active）', async () => {
+    switchOj.mockResolvedValue(undefined)
+    getConfig.mockResolvedValue(makeConfig())
+    await configService.getConfig() // 预热缓存
+    expect(getConfig).toHaveBeenCalledTimes(1)
+
+    await configService.switchOj('X')
+
+    expect(switchOj).toHaveBeenCalledTimes(1)
+    expect(switchOj).toHaveBeenCalledWith('X')
+    // 缓存已失效：下次读取重新拉后端真值
+    await configService.getConfig()
+    expect(getConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it('bridge 失败时原样上抛（设置页据此回滚下拉显示）', async () => {
+    switchOj.mockRejectedValue(new Error('OJ X 未注册'))
+    await expect(configService.switchOj('X')).rejects.toThrow('未注册')
   })
 })
 

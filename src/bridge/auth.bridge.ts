@@ -1,9 +1,9 @@
 import type { SessionValidity, User } from '@/types/user'
 import { ipcInvoke } from '@/bridge'
 
-/** 登录，返回用户信息 */
-export async function login(username: string, password: string, ojType?: string): Promise<User> {
-  return ipcInvoke<User>('login', { username, password, ojType })
+/** 登录，返回用户信息（OJ 切换走显式 `switchOj`，与登录解耦） */
+export async function login(username: string, password: string): Promise<User> {
+  return ipcInvoke<User>('login', { username, password })
 }
 
 /** 登出 */

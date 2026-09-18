@@ -124,6 +124,24 @@ const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
 
 /// OJ 实例候选（populate 时从配置的 instances 清单刷新）
 const ojOptions = ref<string[]>(['HOJ'])
+/// 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）
+const persistedActive = ref('HOJ')
+/// 切换 OJ 的错误提示（独立于保存错误：两个不同意图）
+const switchError = ref<string | null>(null)
+
+/// 切换当前 OJ：显式命令（即时生效 + 持久化 oj.active + 发布 OJSwitched）。
+/// 与「保存」解耦 —— 保存仍负责地址/比赛引用等其余字段（active 两处写入同源同值）。
+async function onSwitchOj(): Promise<void> {
+  switchError.value = null
+  try {
+    await configService.switchOj(form.activeOj)
+    persistedActive.value = form.activeOj
+  } catch (e) {
+    // 回滚下拉到已持久化值，避免 UI 停留在一个未生效的 OJ
+    form.activeOj = persistedActive.value
+    switchError.value = errorMessage(e, '切换 OJ 失败')
+  }
+}
 
 /// 分栏比例钳位到滑杆值域 [0.30, 0.70]，两位小数（与 step 0.01 对齐）
 function clampRatio(value: number): number {
@@ -133,6 +151,8 @@ function clampRatio(value: number): number {
 
 function populate(config: AppConfig): void {
   form.activeOj = config.oj.active
+  persistedActive.value = config.oj.active
+  switchError.value = null
   ojOptions.value = config.oj.instances.map((i) => i.id)
   // 展示当前选中实例的地址（active 未命中时回退第一个启用实例，兜底竞态）
   form.ojUrl =
@@ -318,11 +338,14 @@ onBeforeUnmount(() => {
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     当前 OJ
                   </span>
-                  <select v-model="form.activeOj" :class="INPUT">
+                  <select v-model="form.activeOj" :class="INPUT" @change="onSwitchOj">
                     <option v-for="id in ojOptions" :key="id" :value="id">{{ id }}</option>
                   </select>
-                  <span class="mt-1 block text-xs text-[var(--text-muted)]">
-                    候选 = 配置文件 oj.instances 清单；切换后需重启客户端生效
+                  <span v-if="switchError" class="mt-1 block text-xs text-rose-600">
+                    {{ switchError }}
+                  </span>
+                  <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
+                    切换即时生效并持久化；候选 = 配置文件 oj.instances 清单
                   </span>
                 </label>
 

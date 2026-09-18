@@ -15,3 +15,11 @@ export async function updateConfig(config: AppConfig): Promise<void> {
 export async function reloadConfig(): Promise<void> {
   return ipcInvoke<void>('reload_config')
 }
+
+/**
+ * 切换当前 OJ：后端校验目标 OJ 已注册 → 切换 Registry → 持久化 `oj.active`
+ * → 发布 `OJSwitched` 事件。未注册的 OJ 报 ProviderNotFound。
+ */
+export async function switchOj(ojId: string): Promise<void> {
+  return ipcInvoke<void>('switch_oj', { ojId })
+}

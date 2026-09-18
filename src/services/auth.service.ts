@@ -13,8 +13,8 @@ export class AuthService {
   /**
    * 登录并持久化用户信息到 localStorage。
    */
-  async login(username: string, password: string, ojType?: string): Promise<User> {
-    const user = await authBridge.login(username, password, ojType)
+  async login(username: string, password: string): Promise<User> {
+    const user = await authBridge.login(username, password)
     localStorage.setItem(STORED_USER_KEY, JSON.stringify(user))
     return user
   }
