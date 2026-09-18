@@ -92,8 +92,8 @@ impl SubmissionService {
         language: &str,
         source_code: &str,
     ) -> AppResult<String> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let oj_id = self.registry.current_oj();
+        let provider = self.registry.get_submission(&oj_id)?;
 
         info!(contest_id = contest_id, problem_id = problem_id, language = language, "提交代码");
         let submission_id = provider
@@ -122,8 +122,8 @@ impl SubmissionService {
     /// 终态发布 `SubmissionEvent::Judged`；非终态（Pending/Compiling/Running）
     /// 原样透传、不发事件，是否继续轮询由前端决定。
     pub async fn get_judgement(&self, submission_id: &str) -> AppResult<JudgementResult> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let oj_id = self.registry.current_oj();
+        let provider = self.registry.get_submission(&oj_id)?;
 
         // 错误一律 context() 补环节名、变体穿透（Auth 变体是前端 sessionGuard 的判据）；
         // 瞬时抖动的容忍与重试同样由前端 poller 编排
@@ -169,8 +169,8 @@ impl SubmissionService {
         &self,
         query: &SubmissionQuery,
     ) -> AppResult<SubmissionPage> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let oj_id = self.registry.current_oj();
+        let provider = self.registry.get_submission(&oj_id)?;
 
         let page = provider
             .list_contest_submissions(query)
@@ -194,8 +194,8 @@ impl SubmissionService {
             return Ok(detail);
         }
 
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let oj_id = self.registry.current_oj();
+        let provider = self.registry.get_submission(&oj_id)?;
 
         let detail = provider
             .get_submission_detail(submit_id)
@@ -227,8 +227,8 @@ impl SubmissionService {
             return Ok(cases);
         }
 
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_submission(&oj_type)?;
+        let oj_id = self.registry.current_oj();
+        let provider = self.registry.get_submission(&oj_id)?;
 
         let cases = provider
             .get_submission_cases(submit_id)

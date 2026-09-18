@@ -4,27 +4,16 @@ use tracing::{info, warn};
 use crate::core::context::AppContext;
 use crate::core::entity::user::User;
 use crate::core::error::AppResult;
-use crate::core::provider::oj_type::OJType;
+use crate::core::provider::oj_id::OjId;
 use crate::service::auth::SessionValidity;
-
-/// 从字符串解析 OJType（大小写不敏感）。
-/// 提取为公开函数以支持 P40 测试。
-pub fn parse_oj_type(s: &str) -> Option<OJType> {
-    match s.to_uppercase().as_str() {
-        "HOJ" => Some(OJType::HOJ),
-        "QDUOJ" => Some(OJType::QDUOJ),
-        "HUSTOJ" => Some(OJType::HUSTOJ),
-        _ => None,
-    }
-}
 
 /// 登录 Command。
 ///
 /// 前端 invoke 签名: `login`({ username, password, ojType? })
 ///
 /// 若传入 `ojType`，先切换 ProviderRegistry 的当前 OJ 再执行登录。
-/// `ojType` 支持 "HOJ" / "QDUOJ" / "HUSTOJ"（大小写不敏感）。
-/// 未传入时使用 Registry 当前配置的默认 OJ。
+/// OJ 身份是数据（字符串 id）：不再经闭集枚举解析，改为校验该 id 是否已注册
+/// （未注册只告警并沿用当前 OJ，不阻断登录）。
 #[tauri::command]
 pub async fn login(
     ctx: State<'_, AppContext>,
@@ -32,17 +21,15 @@ pub async fn login(
     password: String,
     oj_type: Option<String>,
 ) -> AppResult<User> {
-    // 如果前端指定了 OJ 类型，先切换
+    // 如果前端指定了 OJ，先切换（校验是否已注册，取代旧的闭集枚举解析）
     if let Some(ref ot) = oj_type {
-        let oj = match parse_oj_type(ot) {
-            Some(oj) => oj,
-            None => {
-                warn!(oj_type = ot, "未知的 OJ 类型，使用当前默认值");
-                return ctx.auth.login(&username, &password).await;
-            }
-        };
-        ctx.provider_registry.set_current_oj(oj);
-        info!(oj_type = ot, "已切换 OJ 类型");
+        let id = OjId::new(ot);
+        if ctx.provider_registry.list_available().contains(&id) {
+            ctx.provider_registry.set_current_oj(id);
+            info!(oj_id = ot, "已切换 OJ");
+        } else {
+            warn!(oj_id = ot, "未注册的 OJ，沿用当前默认值");
+        }
     }
 
     ctx.auth.login(&username, &password).await

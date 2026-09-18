@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::adapter::hoj::HOJAdapter;
 use crate::core::error::AppResult;
 use crate::core::event::event_bus::EventBus;
-use crate::core::provider::oj_type::OJType;
+use crate::core::provider::oj_id::OjId;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::fs_config_repo::FsConfigRepository;
 use crate::infra::fs_workspace_repo::FsWorkspaceRepository;
@@ -86,9 +86,14 @@ impl AppContext {
             )?,
         );
 
-        // 6. 创建 Provider 注册中心，默认使用 HOJ
+        // 6. 创建 Provider 注册中心。
+        //
+        // 当前 OJ 取自配置的 `user.lastOjType`（身份是数据：字符串 id，不再是
+        // 编译期枚举）。未注册的 id（配置手改/拼写错误）在注册完成后回退 HOJ
+        // 并告警 —— 兜底语义与旧版 `unwrap_or(HOJ)` 一致。
+        let configured_oj = OjId::new(&config.get().user.last_oj_type);
         let provider_registry: Arc<dyn ProviderRegistry> =
-            Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
+            Arc::new(ProviderRegistryImpl::new(configured_oj.clone()));
 
         // 6.5 注册 HOJ Adapter（阶段 5）
         {
@@ -99,10 +104,18 @@ impl AppContext {
                 hoj_base,
                 Arc::clone(&event_bus),
             ));
-            provider_registry.register_auth(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::auth::AuthProvider>);
-            provider_registry.register_contest(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::contest::ContestProvider>);
-            provider_registry.register_problem(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::problem::ProblemProvider>);
-            provider_registry.register_submission(OJType::HOJ, Arc::clone(&hoj) as Arc<dyn crate::core::provider::submission::SubmissionProvider>);
+            let hoj_id = OjId::new(HOJAdapter::ID);
+            provider_registry.register_auth(hoj_id.clone(), Arc::clone(&hoj) as Arc<dyn crate::core::provider::auth::AuthProvider>);
+            provider_registry.register_contest(hoj_id.clone(), Arc::clone(&hoj) as Arc<dyn crate::core::provider::contest::ContestProvider>);
+            provider_registry.register_problem(hoj_id.clone(), Arc::clone(&hoj) as Arc<dyn crate::core::provider::problem::ProblemProvider>);
+            provider_registry.register_submission(hoj_id.clone(), Arc::clone(&hoj) as Arc<dyn crate::core::provider::submission::SubmissionProvider>);
+        }
+
+        // 身份字符串化后失去编译期穷尽检查，此为第一道防线：启动时校验当前
+        // OJ 已注册（另两道：查询未命中 ProviderNotFound、factories 测试）。
+        if !provider_registry.list_available().contains(&configured_oj) {
+            tracing::warn!(configured = %configured_oj, "配置的当前 OJ 未注册，回退 HOJ");
+            provider_registry.set_current_oj(OjId::new(HOJAdapter::ID));
         }
 
         // 7. 创建 WorkspaceManager

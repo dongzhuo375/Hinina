@@ -2,7 +2,6 @@ use crate::core::entity::contest::Contest;
 use crate::core::entity::submission::JudgementResult;
 use crate::core::entity::user::User;
 use crate::core::event::event_category::EventCategory;
-use crate::core::provider::oj_type::OJType;
 
 /// 应用全局事件枚举。
 /// 按领域分类，便于订阅者按类别过滤。
@@ -75,6 +74,6 @@ pub enum WorkspaceEvent {
 pub enum SystemEvent {
     ConfigReloaded,
     ThemeChanged,
-    OJSwitched { oj_type: OJType },
+    OJSwitched { oj_id: String },
     WindowClosing,
 }

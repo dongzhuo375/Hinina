@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::core::error::AppError;
 use crate::core::event::event_category::EventCategory;
 use crate::core::provider::auth::AuthProvider;
-use crate::core::provider::oj_type::OJType;
+use crate::core::provider::oj_id::OjId;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 
 /// 构造基于独立临时目录的 AuthService 及其依赖。
@@ -29,9 +29,9 @@ fn make_service_with_auth(
     let storage = Arc::new(Storage::new(dir.clone()));
     let event_bus = Arc::new(EventBus::new());
     let registry: Arc<dyn ProviderRegistry> =
-        Arc::new(ProviderRegistryImpl::new(OJType::HOJ));
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     if let Some(p) = provider {
-        registry.register_auth(OJType::HOJ, p);
+        registry.register_auth(OjId::new("HOJ"), p);
     }
     let service = AuthService::new(Arc::clone(&registry), storage, Arc::clone(&event_bus));
     (service, event_bus, dir, registry)
@@ -55,7 +55,7 @@ fn sample_session(token: &str) -> Session {
         user_id: "u1".into(),
         username: "tester".into(),
         token: token.into(),
-        oj_type: "HOJ".into(),
+        oj_id: "HOJ".into(),
     }
 }
 
@@ -158,14 +158,39 @@ fn clear_session_is_idempotent() {
     let (service, _bus, dir) = make_service("clear-idempotent");
 
     // 会话不存在时调用不报错
-    service.clear_session(&OJType::HOJ);
+    service.clear_session(&OjId::new("HOJ"));
     service.save_session(&sample_session("token-a")).expect("保存会话失败");
-    service.clear_session(&OJType::HOJ);
+    service.clear_session(&OjId::new("HOJ"));
     assert!(!session_path(&dir).exists());
     // 再次调用仍不报错
-    service.clear_session(&OJType::HOJ);
+    service.clear_session(&OjId::new("HOJ"));
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── 身份数据化（OjId）的持久化契约 ──
+
+#[test]
+fn oj_id_session_file_matches_legacy_enum_debug_output() {
+    // 契约：内建 OJ 的 id 必须与历史枚举变体的 Debug 输出一致，
+    // 否则升级后既有 sessions/{OJ}.json 全部失联（静默丢会话）
+    assert_eq!(crate::adapter::hoj::HOJAdapter::ID, "HOJ");
+    assert_eq!(OjId::new(crate::adapter::hoj::HOJAdapter::ID).session_file(), "HOJ.json");
+    assert_eq!(OjId::new("HOJ").to_string(), "HOJ");
+}
+
+#[test]
+fn session_deserializes_legacy_oj_type_key() {
+    // 旧版会话文件以 `oj_type` 为键名存储 OJ 身份；字段更名 `oj_id` 后
+    // 须经 serde alias 兼容读取，否则升级即丢会话
+    let raw = r#"{"user_id":"u1","username":"team01","token":"tk","oj_type":"HOJ"}"#;
+    let session: Session = serde_json::from_str(raw).expect("旧键名会话应可反序列化");
+    assert_eq!(session.oj_id, "HOJ");
+
+    // 新键名正常往返
+    let json = serde_json::to_string(&sample_session("tk")).expect("序列化失败");
+    let back: Session = serde_json::from_str(&json).expect("新键名会话应可反序列化");
+    assert_eq!(back.oj_id, "HOJ");
 }
 
 // ── 会话校验（三态）──

@@ -77,8 +77,8 @@ impl ProblemService {
 
     /// 获取比赛下所有题目列表。
     pub async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<Problem>> {
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_problem(&oj_type)?;
+        let oj_id = self.registry.current_oj();
+        let provider = self.registry.get_problem(&oj_id)?;
 
         debug!(contest_id = contest_id, "获取题目列表");
         let problems = provider.list_problems(contest_id).await.map_err(|e| {
@@ -144,8 +144,8 @@ impl ProblemService {
             }
         }
 
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_problem(&oj_type)?;
+        let oj_id = self.registry.current_oj();
+        let provider = self.registry.get_problem(&oj_id)?;
 
         info!(contest_id, problem_id, "打开题目");
         let problem = provider
@@ -177,8 +177,8 @@ impl ProblemService {
             return Ok(HashMap::new());
         }
 
-        let oj_type = self.registry.current_oj();
-        let provider = self.registry.get_problem(&oj_type)?;
+        let oj_id = self.registry.current_oj();
+        let provider = self.registry.get_problem(&oj_id)?;
 
         let statuses = provider
             .get_user_problem_status(contest_id, problem_ids)
@@ -281,8 +281,8 @@ impl ProblemService {
         contest_id: &str,
         display_ids: &[String],
     ) -> (Vec<ProblemLimits>, Vec<(String, AppError)>) {
-        let oj_type = self.registry.current_oj();
-        let provider = match self.registry.get_problem(&oj_type) {
+        let oj_id = self.registry.current_oj();
+        let provider = match self.registry.get_problem(&oj_id) {
             Ok(p) => p,
             // Provider 不可用时整批失败，交由调用方上抛
             Err(e) => {
