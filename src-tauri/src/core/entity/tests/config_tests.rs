@@ -158,9 +158,9 @@ fn validate_rejects_url_without_http_scheme() {
         "https://hoj.example.com/a b",
     ] {
         let mut cfg = AppConfig::default();
-        cfg.oj.hoj_url = bad.into();
+        cfg.oj.instances[0].base_url = bad.into();
         let err = cfg.validate().expect_err(&format!("{:?} 应被拒绝", bad));
-        assert_eq!(err, "服务器地址必须以 http:// 或 https:// 开头");
+        assert_eq!(err, "HOJ 的服务器地址必须以 http:// 或 https:// 开头");
     }
 }
 
@@ -173,7 +173,7 @@ fn validate_accepts_http_and_https_case_insensitive() {
         "  https://hoj.example.com  ", // 与前端一致：trim 后校验
     ] {
         let mut cfg = AppConfig::default();
-        cfg.oj.hoj_url = good.into();
+        cfg.oj.instances[0].base_url = good.into();
         assert!(cfg.validate().is_ok(), "{:?} 应通过", good);
     }
 }
@@ -185,7 +185,6 @@ fn sanitize_clamps_out_of_range_values() {
     cfg.oj.poll_interval_secs = 999;
     cfg.oj.poll_timeout_secs = 1;
     cfg.oj.cache_ttl_secs = 601;
-    cfg.oj.contest_id = -5;
     cfg.editor.font_size = 100;
     cfg.editor.tab_size = 0;
     cfg.editor.auto_save_interval_secs = 1;
@@ -196,7 +195,6 @@ fn sanitize_clamps_out_of_range_values() {
     assert_eq!(cfg.oj.poll_interval_secs, 30);
     assert_eq!(cfg.oj.poll_timeout_secs, 30);
     assert_eq!(cfg.oj.cache_ttl_secs, 600);
-    assert_eq!(cfg.oj.contest_id, 0);
     assert_eq!(cfg.editor.font_size, 32);
     assert_eq!(cfg.editor.tab_size, 1);
     assert_eq!(cfg.editor.auto_save_interval_secs, 5);
@@ -216,7 +214,6 @@ fn sanitize_keeps_valid_config_unchanged() {
     cfg.oj.poll_interval_secs = 30;
     cfg.oj.poll_timeout_secs = 3600;
     cfg.oj.cache_ttl_secs = 0;
-    cfg.oj.contest_id = 1011;
     cfg.editor.font_size = 8;
     cfg.editor.tab_size = 8;
     cfg.editor.auto_save_interval_secs = 300;
@@ -269,29 +266,122 @@ fn sanitize_normalizes_editor_theme() {
 #[test]
 fn sanitize_trims_url_and_handles_non_finite_ratio() {
     let mut cfg = AppConfig::default();
-    cfg.oj.hoj_url = "  https://hoj.example.com  ".into();
+    cfg.oj.instances[0].base_url = "  https://hoj.example.com  ".into();
     cfg.layout.split_ratio = f64::NAN;
     assert!(cfg.sanitize());
-    assert_eq!(cfg.oj.hoj_url, "https://hoj.example.com");
+    assert_eq!(cfg.oj.instances[0].base_url, "https://hoj.example.com");
     // NaN 不可钳制：回退默认值（NaN.clamp 会原样返回 NaN）
     assert_eq!(cfg.layout.split_ratio, 0.48);
 }
 
 #[test]
 fn sanitize_fixes_hand_edited_json_from_disk() {
-    // 端到端：手改 config.json 绕过前端校验后，写入路径兜底收敛
+    // 端到端：手改 config.json 绕过前端校验后，加载归一（normalize）+ 写入兜底
+    // （sanitize）双路径收敛 —— 与真实管线一致（磁盘文件必经加载归一）
     let edited = r#"{
         "oj": { "hojUrl": "https://hoj.dongzhuo.top", "timeoutSecs": 9999, "contestId": -1 },
         "editor": { "fontSize": 3, "defaultLanguage": "Haskell" },
         "layout": { "splitRatio": 0.05 }
     }"#;
     let mut cfg: AppConfig = serde_json::from_str(edited).expect("应能解析");
+    normalize_legacy_values(&mut cfg);
     cfg.validate().expect("URL 合法应通过");
     assert!(cfg.sanitize());
     assert_eq!(cfg.oj.timeout_secs, 120);
-    assert_eq!(cfg.oj.contest_id, 0);
+    // 旧 hojUrl 迁移进 HOJ 实例地址；contestId = -1 是脏值，不迁移
+    assert_eq!(cfg.oj.instances[0].base_url, "https://hoj.dongzhuo.top");
+    assert_eq!(cfg.oj.contest_ref, "");
     assert_eq!(cfg.editor.font_size, 8);
     // 未知非空语言不再强制回退：OJ 可能提供 Haskell 等
     assert_eq!(cfg.editor.default_language, "Haskell");
     assert_eq!(cfg.layout.split_ratio, 0.30);
+}
+
+// ── OJ 配置 v2 迁移（hojUrl/contestId/lastOjType → instances/contestRef/active）──
+
+#[test]
+fn normalize_migrates_legacy_oj_fields() {
+    // 旧配置（hojUrl + user.lastOjType + contestId）→ instances / active / contestRef
+    let legacy = r#"{
+        "user": { "lastOjType": "HOJ", "lastUsername": "team01" },
+        "oj": { "hojUrl": "https://hoj.example.com", "contestId": 1011 }
+    }"#;
+    let mut cfg: AppConfig = serde_json::from_str(legacy).expect("应能解析");
+    normalize_legacy_values(&mut cfg);
+
+    assert_eq!(cfg.oj.active, "HOJ");
+    assert_eq!(cfg.oj.contest_ref, "1011");
+    assert_eq!(cfg.oj.instances.len(), 1);
+    assert_eq!(cfg.oj.instances[0].id, "HOJ");
+    assert_eq!(cfg.oj.instances[0].base_url, "https://hoj.example.com");
+    assert!(cfg.oj.instances[0].enabled);
+
+    // 旧字段不再写回：序列化产物只含新格式键
+    let json = serde_json::to_string(&cfg).expect("序列化失败");
+    assert!(!json.contains("lastOjType"));
+    assert!(!json.contains("hojUrl"));
+    assert!(!json.contains("contestId"));
+    assert!(json.contains("contestRef"));
+    assert!(json.contains("instances"));
+}
+
+#[test]
+fn normalize_skips_zero_and_negative_contest_id_and_blank_last_oj_type() {
+    // contestId == 0 表示未配置（旧语义），负数是脏值 —— 都不迁移；
+    // 空白 lastOjType 回退默认 HOJ
+    let legacy = r#"{ "user": { "lastOjType": "   " }, "oj": { "hojUrl": "https://x.example.com", "contestId": 0 } }"#;
+    let mut cfg: AppConfig = serde_json::from_str(legacy).expect("应能解析");
+    normalize_legacy_values(&mut cfg);
+    assert_eq!(cfg.oj.contest_ref, "");
+    assert_eq!(cfg.oj.active, "HOJ");
+
+    let legacy_neg = r#"{ "oj": { "contestId": -5 } }"#;
+    let mut cfg: AppConfig = serde_json::from_str(legacy_neg).expect("应能解析");
+    normalize_legacy_values(&mut cfg);
+    assert_eq!(cfg.oj.contest_ref, "");
+}
+
+#[test]
+fn normalize_keeps_new_format_untouched() {
+    // 新格式原样通过：自定义实例清单不被覆盖，非数字比赛引用合法
+    let mut cfg = AppConfig::default();
+    cfg.oj.instances = vec![OjInstance {
+        id: "HOJ".into(),
+        base_url: "https://a.example.com".into(),
+        enabled: true,
+        options: serde_json::Map::new(),
+    }];
+    cfg.oj.active = "HOJ".into();
+    cfg.oj.contest_ref = "651f0f2ab87d3f2c9a4e5b6d".into();
+    normalize_legacy_values(&mut cfg);
+    assert_eq!(cfg.oj.instances.len(), 1);
+    assert_eq!(cfg.oj.instances[0].base_url, "https://a.example.com");
+    assert_eq!(cfg.oj.contest_ref, "651f0f2ab87d3f2c9a4e5b6d");
+}
+
+#[test]
+fn normalize_falls_back_when_active_points_to_missing_instance() {
+    // active 指向未配置实例（手改配置）：回退 HOJ，与组合根注册防线同语义
+    let mut cfg = AppConfig::default();
+    cfg.oj.active = "QDUOJ".into();
+    normalize_legacy_values(&mut cfg);
+    assert_eq!(cfg.oj.active, "HOJ");
+}
+
+#[test]
+fn validate_rejects_duplicate_instance_ids_and_unknown_active() {
+    // 重复实例 id：注册表会互相覆盖、会话文件名撞车，必须拒绝
+    let mut cfg = AppConfig::default();
+    cfg.oj.instances.push(OjInstance {
+        id: "HOJ".into(),
+        base_url: "https://dup.example.com".into(),
+        enabled: true,
+        options: serde_json::Map::new(),
+    });
+    assert!(cfg.validate().is_err(), "重复实例 id 应被拒绝");
+
+    // active 不在实例列表：拒绝（加载路径由 normalize 回退，写入路径拒绝）
+    let mut cfg = AppConfig::default();
+    cfg.oj.active = "GHOST".into();
+    assert!(cfg.validate().is_err(), "未知 active 应被拒绝");
 }

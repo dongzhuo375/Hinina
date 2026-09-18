@@ -13,16 +13,17 @@ import { configService } from '@/services/config.service'
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
-    user: { lastOjType: 'HOJ', lastUsername: 'team01' },
+    user: { lastUsername: 'team01' },
     oj: {
-      hojUrl: 'https://hoj.example.com',
+      active: 'HOJ',
+      instances: [{ id: 'HOJ', baseUrl: 'https://hoj.example.com', enabled: true, options: {} }],
+      contestRef: '7',
+      contestPassword: null,
       timeoutSecs: 30,
       pollIntervalSecs: 2,
       pollTimeoutSecs: 300,
       cacheTtlSecs: 60,
       cacheProblemStatement: true,
-      contestId: 7,
-      contestPassword: null,
     },
     editor: {
       fontSize: 14,
@@ -134,7 +135,8 @@ describe('updateEditorPrefs — 解题页编辑器设置落盘入口', () => {
     expect(written.editor.tabSize).toBe(4)
     expect(written.editor.autoSaveIntervalSecs).toBe(30)
     expect(written.theme.editorTheme).toBe('vs')
-    expect(written.oj.contestId).toBe(7)
+    expect(written.oj.contestRef).toBe('7')
+    expect(written.oj.instances[0].baseUrl).toBe('https://hoj.example.com')
   })
 
   it('编辑器主题落在 theme.editorTheme，且不触碰 themeName（界面仍只有浅色）', async () => {
@@ -160,6 +162,38 @@ describe('updateEditorPrefs — 解题页编辑器设置落盘入口', () => {
   })
 })
 
+describe('getOjBaseUrl / activeOjBaseUrl — 当前实例地址解析', () => {
+  it('取 active 实例的 baseUrl；active 未命中时回退第一个启用实例', async () => {
+    const config = makeConfig()
+    config.oj.instances.push({ id: 'X', baseUrl: 'https://x.example.com', enabled: true, options: {} })
+    config.oj.active = 'X'
+    getConfig.mockResolvedValue(config)
+    expect(await configService.getOjBaseUrl()).toBe('https://x.example.com')
+
+    config.oj.active = 'MISSING'
+    configService.invalidate()
+    getConfig.mockResolvedValue(config)
+    expect(await configService.getOjBaseUrl()).toBe('https://hoj.example.com')
+  })
+
+  it('禁用实例不参与 active 匹配与回退（enabled = 后端不注册）', async () => {
+    const config = makeConfig()
+    config.oj.instances = [
+      { id: 'HOJ', baseUrl: 'https://hoj.example.com', enabled: false, options: {} },
+      { id: 'X', baseUrl: 'https://x.example.com', enabled: true, options: {} },
+    ]
+    // active 指向禁用实例：回退第一个启用实例的地址
+    config.oj.active = 'HOJ'
+    getConfig.mockResolvedValue(config)
+    expect(await configService.getOjBaseUrl()).toBe('https://x.example.com')
+  })
+
+  it('读取失败返回空串（缺基址只影响图片改写，不抛出）', async () => {
+    getConfig.mockRejectedValue(new Error('IPC 失败'))
+    await expect(configService.getOjBaseUrl()).resolves.toBe('')
+  })
+})
+
 describe('updateConfig — 设置页保存唯一入口', () => {
   it('读取当前配置 → 应用变更 → 整体写回 → 失效缓存', async () => {
     getConfig.mockResolvedValue(makeConfig())
@@ -173,7 +207,7 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     expect(updateConfig).toHaveBeenCalledTimes(1)
     const written = updateConfig.mock.calls[0][0] as AppConfig
     expect(written.editor.fontSize).toBe(18)
-    expect(written.oj.contestId).toBe(7)
+    expect(written.oj.contestRef).toBe('7')
     expect(saved.editor.fontSize).toBe(18)
 
     // 缓存已失效：下次读取重新拉后端真值

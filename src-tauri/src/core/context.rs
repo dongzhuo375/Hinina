@@ -86,12 +86,12 @@ impl AppContext {
             )?,
         );
 
-        // 6. 创建 Provider 注册中心 + 注册全部内建 OJ（工厂数据化：注册侧聚合）。
+        // 6. 创建 Provider 注册中心 + 按配置实例注册全部内建 OJ（工厂数据化）。
         //
-        // 当前 OJ 取自配置的 `user.lastOjType`（身份是数据：字符串 id，不再是
-        // 编译期枚举）。未注册的 id（配置手改/拼写错误）在注册完成后回退 HOJ
-        // 并告警 —— 兜底语义与旧版 `unwrap_or(HOJ)` 一致。
-        let configured_oj = OjId::new(&config.get().user.last_oj_type);
+        // 当前 OJ 取自 `oj.active`；实例清单来自 `oj.instances`（enabled 的才注册），
+        // 与工厂按 id 匹配 —— 接一个新 OJ = 配置加一条实例 + 工厂清单加一行。
+        // 未注册的 active（配置手改/拼写错误）在注册完成后回退 HOJ 并告警。
+        let configured_oj = OjId::new(&config.get().oj.active);
         let provider_registry: Arc<dyn ProviderRegistry> =
             Arc::new(ProviderRegistryImpl::new(configured_oj.clone()));
 
@@ -100,14 +100,19 @@ impl AppContext {
             event_bus: Arc::clone(&event_bus),
             storage: Arc::clone(&storage),
         };
-        for factory in crate::adapter::factories() {
+        let configured_instances = config.get().oj.instances;
+        for instance in configured_instances.iter().filter(|i| i.enabled) {
+            let Some(factory) = crate::adapter::factories()
+                .into_iter()
+                .find(|f| f.id() == instance.id)
+            else {
+                tracing::warn!(oj_id = %instance.id, "配置了未知 OJ（无对应适配器），跳过");
+                continue;
+            };
             let id = OjId::new(factory.id());
-            // 按 OJ 取地址的能力随 instances 配置（下一改造）到达；当前 HOJ 是
-            // 唯一内建 OJ，地址取自 oj.hoj_url
-            let base_url = config.get().oj.hoj_url.clone();
-            let set = factory.build(&adapter_deps, &base_url);
+            let set = factory.build(&adapter_deps, &instance.base_url);
             provider_registry.register(id.clone(), set);
-            tracing::info!(oj_id = %id, base_url = base_url, "OJ 适配器已注册");
+            tracing::info!(oj_id = %id, base_url = %instance.base_url, "OJ 适配器已注册");
         }
 
         // 身份字符串化后失去编译期穷尽检查，此为第一道防线：启动时校验当前

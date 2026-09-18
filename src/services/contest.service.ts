@@ -28,17 +28,17 @@ export class ContestService {
   /**
    * 加载登录页展示用的比赛简报（匿名接口，无需会话）。
    *
-   * 编排：读取配置 → 取 contestId → 拉取匿名比赛列表 → 按 ID 筛选，
-   * 同时返回 OJ 基址，供题面/简介中的相对图片 URL 改写使用。
+   * 编排：读取配置 → 取 contestRef（不透明字符串引用）→ 拉取匿名比赛列表 →
+   * 按引用筛选，同时返回 OJ 基址，供题面/简介中的相对图片 URL 改写使用。
    */
   async loadContestBrief(): Promise<ContestBriefResult> {
     const config = await configService.getConfig()
-    const baseUrl = config.oj.hojUrl
-    const contestId = config.oj.contestId
-    if (!contestId) return { status: 'unconfigured', baseUrl }
+    const baseUrl = configService.activeOjBaseUrl(config)
+    const contestRef = config.oj.contestRef.trim()
+    if (!contestRef) return { status: 'unconfigured', baseUrl }
 
     const contests = await contestBridge.listContests()
-    const contest = contests.find((c) => c.id === String(contestId)) ?? null
+    const contest = contests.find((c) => c.id === contestRef) ?? null
     return { status: 'ok', contest, baseUrl }
   }
 }
