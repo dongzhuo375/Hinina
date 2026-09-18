@@ -63,6 +63,24 @@ struct WorkspaceMeta {
     updated_at: i64,
 }
 
+/// auto-save 写盘后能否把工作区标记为 clean 的判据。
+///
+/// 两个条件都必须成立：**仍是同一个工作区**（切题后不得清新工作区的脏标记）
+/// 与**修订号未变**（快照之后没有新改动）。后者是「快照写盘 ≠ 本次编辑已落盘」
+/// 的唯一防线：少了它，写盘期间/之后到来的改动会被静默吞掉。
+///
+/// 独立成纯函数是为了**确定性可测**：集成测试里「快照之后到来新改动」的窗口由
+/// 锁竞争决定（写盘持读锁，无法在同线程注入；跨线程注入则胜负不定，实测事件数
+/// 在 1/2 间浮动），因此判据的削弱只能由本函数的单测稳定证伪。
+fn can_mark_clean(
+    ws_id: &str,
+    current_id: &str,
+    snapshot_revision: u64,
+    current_revision: u64,
+) -> bool {
+    ws_id == current_id && snapshot_revision == current_revision
+}
+
 impl WorkspaceManager {
     /// 创建 WorkspaceManager。
     pub fn new(repo: Arc<dyn WorkspaceRepository>, event_bus: Arc<EventBus>) -> Self {
@@ -379,8 +397,12 @@ impl WorkspaceManager {
                     let mut guard = current.write().unwrap_or_else(|e| e.into_inner());
                     match guard.as_mut() {
                         Some(ws)
-                            if ws.id == ws_id
-                                && revision.load(Ordering::SeqCst) == snapshot_revision =>
+                            if can_mark_clean(
+                                &ws_id,
+                                &ws.id,
+                                snapshot_revision,
+                                revision.load(Ordering::SeqCst),
+                            ) =>
                         {
                             ws.mark_clean();
                             true

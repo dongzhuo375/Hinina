@@ -401,6 +401,27 @@ fn count_auto_save_events(bus: &Arc<EventBus>) -> Arc<AtomicUsize> {
     count
 }
 
+/// auto-save 清脏判据的确定性锁定。
+///
+/// 集成测试只能观测到「最终磁盘/脏标记」，判据被削弱（如删掉修订号比较）时它
+/// 在多数时序下仍会通过 —— 这里逐条钉死判据本身。
+#[test]
+fn can_mark_clean_requires_same_workspace_and_unchanged_revision() {
+    assert!(
+        can_mark_clean("ws-1", "ws-1", 7, 7),
+        "同一工作区且修订号未变：可以清脏"
+    );
+    assert!(
+        !can_mark_clean("ws-1", "ws-1", 7, 8),
+        "快照之后有新改动：不得清脏（否则新内容永不落盘）"
+    );
+    assert!(
+        !can_mark_clean("ws-1", "ws-2", 7, 7),
+        "已切到别的工作区：不得清新工作区的脏标记"
+    );
+    assert!(!can_mark_clean("ws-1", "ws-2", 7, 8));
+}
+
 #[tokio::test]
 async fn auto_save_persists_dirty_workspace_and_publishes_once() {
     let (mgr, storage, bus) = test_manager_with_bus("autosave-persist");
@@ -560,6 +581,11 @@ async fn auto_save_eventually_persists_newest_content_when_edit_arrives_mid_tick
         "tick 期间的新改动最终必须落盘"
     );
     assert!(!ws.is_dirty, "落盘后应标记干净");
+    // 事件数取决于锁竞争结果，合法取值 1 或 2（实测 1,2,2,2,1,2）：
+    // - 新改动先拿到写锁 → 本 tick 修订号已变 → 不发布；下 tick 落盘并发布 → 1
+    // - 本 tick 先拿到写锁 → 本 tick 发布；新改动随后标脏 → 下 tick 再发布 → 2
+    // 两者都是正确行为，故此处**不收紧为 == 1**（会 flaky）。判据本身由
+    // `can_mark_clean_requires_same_workspace_and_unchanged_revision` 确定性锁定。
     assert!(
         events.load(AtomicOrdering::SeqCst) >= 1,
         "至少发布一次「已落盘」事件"
