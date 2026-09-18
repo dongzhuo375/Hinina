@@ -13,7 +13,7 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
 - `parse_samples(html)` — HTML `<input>/<output>` 样例 → `Vec<Sample>`（成对匹配）
 - `extract_tag_contents(html, tag)` / `unescape_html(s)` — HTML 标签提取与实体反转义
 - `extract_refreshed_token(headers)` — HOJ 私有协议：响应头存在 `refresh-token` 时提取新 `authorization` 头作为轮换 token
-- `get_json_authed(url)` — GET，经 `HttpClient::get_text_with_headers` 取原始响应体与响应头，处理 token 轮换后交 `parse_hoj_json` 解析。**token 缺失时不报错**，按匿名请求发出：`get-contest-list` 等 `@AnonApi` 接口在登录页（尚无会话）就要能用，且 HOJ 对匿名接口带无效 token 也照常返回 200
+- `get_json_authed(url)` — GET，经 `HttpClient::get_text_with_headers` 取原始响应体与响应头，处理 token 轮换后交 `parse_hoj_json` 解析。**token 缺失时不报错**，按匿名请求发出：`get-contest-list` 等 `@AnonApi` 接口在登录页（尚无会话）就要能用，且 HOJ 对匿名接口带无效 token 也照常返回 200。请求头经 `auth_headers(token)` 组装（HOJ 约定：JWT 直接放 `Authorization` 头、无 `Bearer` 前缀；token 缺失/含非法头字符时为空 map，按匿名发出）—— 认证方式是 Adapter 层概念，infra 只收通用 `HeaderMap`
 - `post_json_authed(url, body)` — POST（JSON body），同样取原始响应体、处理轮换、交 `parse_hoj_json`。榜单轮询、题目状态等高频 POST 场景必须走此方法：若漏掉轮换处理，token 到期后会出现周期性 401
 - `parse_hoj_json::<T>(body, url)` — **全部 HOJ 响应的唯一解析入口**：`from_str` → `types::strip_nulls` → `auth_failure_from_body` → `from_value`。两类解析失败都归 `AppError::Serialization`，消息带 URL 与响应体前 200 字符 —— 「不是合法 JSON」通常是网关返回了 HTML 错误页，「字段不匹配」才是 DTO 问题，分开描述才能一眼定位
 - `auth_failure_from_body(&Value) -> Option<AppError>` — 识别 HOJ 放在**响应体**里的鉴权失败并翻译成 `AppError::Auth`。判定刻意保守（见「关键实现约定」）

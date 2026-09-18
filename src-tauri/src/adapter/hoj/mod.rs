@@ -103,6 +103,23 @@ impl HOJAdapter {
         }
     }
 
+    /// HOJ 认证头组装（infra 不感知认证方式，由本层负责）。
+    ///
+    /// HOJ 约定：JWT 直接放在 `Authorization` 头（无 `Bearer` 前缀）。
+    /// token 缺失或含非法字符时返回空 map —— 按匿名请求发出
+    /// （`@AnonApi` 接口本就要在登录页匿名可用，HOJ 对无效 token 也照常 200）。
+    fn auth_headers(token: Option<&str>) -> reqwest::header::HeaderMap {
+        let mut map = reqwest::header::HeaderMap::new();
+        if let Some(token) = token {
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(token) {
+                map.insert(reqwest::header::AUTHORIZATION, value);
+            } else {
+                debug!("token 含非法头字符，按匿名请求发出");
+            }
+        }
+        map
+    }
+
     /// 发送 GET 请求并解析为 HOJ 响应，自动处理服务端 token 轮换。
     ///
     /// HOJ 服务端会在 token 到期前返回 `Refresh-Token: true` 和新 `Authorization` 头。
@@ -111,11 +128,8 @@ impl HOJAdapter {
     /// token 缺失时**不报错**，按匿名请求发出：`get-contest-list` 等 `@AnonApi`
     /// 接口在登录页（尚无会话）就要能用；HOJ 对匿名接口带无效 token 也照常返回 200。
     async fn get_json_authed<T: serde::de::DeserializeOwned>(&self, url: &str) -> AppResult<T> {
-        let token = self.get_token();
-        let (body, headers) = self
-            .http
-            .get_text_with_headers(url, token.as_deref())
-            .await?;
+        let headers = Self::auth_headers(self.get_token().as_deref());
+        let (body, headers) = self.http.get_text_with_headers(url, &headers).await?;
         self.handle_token_rotation(&headers);
         Self::parse_hoj_json::<T>(&body, url)
     }
@@ -129,10 +143,10 @@ impl HOJAdapter {
         url: &str,
         body: &B,
     ) -> AppResult<T> {
-        let token = self.get_token();
+        let headers = Self::auth_headers(self.get_token().as_deref());
         let (text, headers) = self
             .http
-            .post_text_with_headers(url, body, token.as_deref())
+            .post_text_with_headers(url, body, &headers)
             .await?;
         self.handle_token_rotation(&headers);
         Self::parse_hoj_json::<T>(&text, url)
@@ -620,11 +634,12 @@ impl AuthProvider for HOJAdapter {
         }
 
         // 忽略远端响应（可能失败），以清除 token 为主
+        let headers = Self::auth_headers(token.as_deref());
         let _ = self
             .http
             .client()
             .get(&url)
-            .header("Authorization", &token.unwrap())
+            .headers(headers)
             .send()
             .await;
 
