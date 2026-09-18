@@ -86,6 +86,10 @@ discard(): Object.assign(form, JSON.parse(baseline))
   候选 = 配置文件 `oj.instances` 清单。
 - ojUrl 修改后需重启客户端生效、contestRef 保存后下次进入赛场生效（HOJ 为数字 ID，
   其它 OJ 为资源引用；留空 = 不自动加载）——提示文案明示生效时机。
+- **自动保存开关的文案随落盘语义更新**：定时落盘是「代码从后端内存写到磁盘」的唯一周期
+  路径，关闭后只剩切题 / 失焦 / 关窗三处显式落盘（`ProblemSolveView` 与 `main.ts` 编排），
+  故提示文案写明这一后果。开关与间隔的改动需**重启客户端**才生效（后端 auto-save 懒启动
+  且只读一次配置，见 `doc/problem.md` P74 遗留项）。
 - 存储信息每次挂载实时读取（service 不缓存：版本号构建期固定，但存储目录可能随
   用户数据迁移变化）。
 - 定时器（savedTimer/copiedTimer）onBeforeUnmount 统一清理。

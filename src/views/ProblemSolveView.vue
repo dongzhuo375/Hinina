@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProblemTabStrip from '@/components/problem/ProblemTabStrip.vue'
 import ProblemStatement from '@/components/problem/ProblemStatement.vue'
@@ -56,8 +56,9 @@ async function load(id: string) {
   localError.value = null
   isLoadingPage = true
   try {
-    // 切题前先落盘未保存代码 —— 代码保留是工作区的核心承诺；
-    // 落盘失败不阻断切题（防抖同步大概率已写入文件），仅记录
+    // 切题前先落盘未保存代码 —— 代码保留是工作区的核心承诺。
+    // saveWorkspace 内部会先把在途的防抖改动推送到后端内存再落盘，因此这里
+    // 同时覆盖「刚敲完就切题」：不先推送，落盘写的会是上一次同步的旧内容
     if (workspaceStore.isDirty) {
       await workspaceStore.saveWorkspace().catch((e) => {
         log.error('切题前保存工作区失败:', e)
@@ -134,6 +135,48 @@ watch(
     if (v === '1' && !isLoadingPage) void consumeFocusQuery()
   },
 )
+
+// ── 落盘时机：失焦 / 页面隐藏 / 离开解题页 ──
+//
+// 后端 auto-save 周期最长 30 秒（配置上限 300 秒），而「内存 → 磁盘」之间只有
+// 后端内存副本：这三处是内存可能被替换（切题/离开）或进程可能退出（关窗由
+// main.ts 的关窗握手负责）的时刻，必须主动落盘。
+
+/// 落盘进行中标记：失焦与页面隐藏可能同时触发，避免重复落盘
+let flushingToDisk = false
+
+async function flushToDisk(reason: string): Promise<void> {
+  if (flushingToDisk) return
+  flushingToDisk = true
+  try {
+    await workspaceStore.saveWorkspace()
+  } catch (e) {
+    // 落盘失败不打断使用：内容仍在编辑器与后端内存，下次时机或 auto-save 会重试
+    log.error(`${reason}落盘工作区失败:`, e)
+  } finally {
+    flushingToDisk = false
+  }
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') void flushToDisk('页面隐藏时')
+}
+
+function onWindowBlur() {
+  void flushToDisk('窗口失焦时')
+}
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('blur', onWindowBlur)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('blur', onWindowBlur)
+  // 离开解题页（切到评测/榜单/设置）：在途改动与未落盘内容一并落地
+  void flushToDisk('离开解题页时')
+})
 
 // ── 左右分栏拖拽（0.3 – 0.7） ──
 

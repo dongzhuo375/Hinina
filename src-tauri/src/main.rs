@@ -15,6 +15,49 @@
 use hinina_lib::commands;
 use hinina_lib::core::context::AppContext;
 
+/// 工作区落盘事件的前端通道名（与 `src/bridge/workspace.bridge.ts` 的监听一致）。
+const WORKSPACE_SAVED_EVENT: &str = "workspace-saved";
+
+/// 把工作区落盘事件桥接到 webview。
+///
+/// 前端「已自动备份」指示必须反映**磁盘真值**，而后台 auto-save 由 Rust 触发、
+/// 前端无从感知（这是唯一非前端发起的落盘路径），故在此订阅 `EventCategory::Workspace`
+/// 并 emit 到 webview。仅转发两种「内容确已落盘」的事件：
+/// - `Saved`（显式保存成功）
+/// - `AutoSaveTriggered`（auto-save 成功且快照之后无新改动，见 manager 的循环语义）
+///
+/// `Loaded` / `Switched` 不转发：前端是它们的发起方，无需回环。
+fn install_workspace_event_bridge(app: &tauri::AppHandle) {
+    use std::sync::Arc;
+
+    use tauri::{Emitter, Manager};
+
+    use hinina_lib::core::event::app_event::{AppEvent, WorkspaceEvent};
+    use hinina_lib::core::event::event_bus::EventHandler;
+    use hinina_lib::core::event::event_category::EventCategory;
+
+    let ctx = app.state::<AppContext>();
+    let handle = app.clone();
+
+    let handler: EventHandler = Arc::new(move |event: &AppEvent| {
+        let AppEvent::Workspace(workspace_event) = event else {
+            return;
+        };
+        let (workspace_id, auto) = match workspace_event {
+            WorkspaceEvent::Saved { workspace_id } => (workspace_id.clone(), false),
+            WorkspaceEvent::AutoSaveTriggered { workspace_id } => (workspace_id.clone(), true),
+            _ => return,
+        };
+        let payload = serde_json::json!({ "workspaceId": workspace_id, "auto": auto });
+        if let Err(e) = handle.emit(WORKSPACE_SAVED_EVENT, payload) {
+            tracing::warn!(error = %e, "工作区落盘事件下发前端失败");
+        }
+    });
+
+    ctx.event_bus
+        .subscribe(EventCategory::Workspace, handler);
+}
+
 fn main() {
     // 运行时初始化，阻塞式
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
@@ -28,6 +71,10 @@ fn main() {
 
     tauri::Builder::default()
         .manage(ctx)
+        .setup(|app| {
+            install_workspace_event_bridge(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::auth_cmd::login,
             commands::auth_cmd::logout,
