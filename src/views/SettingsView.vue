@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
+import { resetSessionForOjSwitch } from '@/stores/session'
 import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
 import {
   EDITOR_FONT_SIZE_MAX,
@@ -117,6 +119,7 @@ const canSave = computed(() => dirty.value && isValid.value && !saving.value)
 
 const loading = ref(true)
 const loadError = ref<string | null>(null)
+const router = useRouter()
 
 const TAB_SIZES: readonly number[] = EDITOR_TAB_SIZES
 /// 默认语言候选 = HOJ 显示名（值域权威见 utils/language；与提交契约同源）
@@ -136,6 +139,8 @@ const switchError = ref<string | null>(null)
 
 /// 切换当前 OJ：显式命令（即时生效 + 持久化 oj.active + 发布 OJSwitched）。
 /// 与「保存」解耦 —— 保存仍负责地址/比赛引用等其余字段（active 两处写入同源同值）。
+/// 切换成功 = 整个应用换了服务端：重置会话上下文并回登录页，由路由守卫按新 OJ
+/// 的会话文件恢复会话（该 OJ 登录过则无感续用，否则落在登录表单）。
 async function onSwitchOj(): Promise<void> {
   switchError.value = null
   const target = form.activeOj
@@ -146,6 +151,11 @@ async function onSwitchOj(): Promise<void> {
     // 新实例的 baseUrl（数据损坏）。切换前未保存的地址编辑随之丢弃 ——
     // 用户已切换编辑对象，这是预期行为。
     form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
+    // 旧 OJ 的用户/比赛/题面/提交对新 OJ 全部失效（解题页还会拿旧 contest.id
+    // 向新 OJ 提交）：与登出同款清理，但不打后端 logout（Registry 已切换，
+    // 那会误删新 OJ 自己的会话文件）
+    resetSessionForOjSwitch()
+    void router.replace({ name: 'Login' })
   } catch (e) {
     // 回滚下拉到已持久化值，避免 UI 停留在一个未生效的 OJ
     form.activeOj = persistedActive.value

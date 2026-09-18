@@ -4,13 +4,14 @@
 
 ## 职责
 
-登出或切换账号时统一清空会话级领域状态，避免上一位选手的比赛、题面、提交记录、榜单与编辑器代码残留到下一个会话。
+登出、切换账号或**切换 OJ** 时统一清空会话级领域状态，避免上一位选手（或上一个 OJ）的比赛、题面、提交记录、榜单与编辑器代码残留到下一个会话。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `clearDomainState` | `() => void` | 重置 contest / problem / submission / rank / announcement / workspace 六个 store；重置工作区前先取消其防抖同步定时器，重置榜单/公告前先停止各自的实时刷新轮询 |
+| `resetSessionForOjSwitch` | `() => void` | OJ 切换的会话上下文重置（调用点：SettingsView 切换成功后）。= `clearDomainState()` + 认证态清零（`user = null` / `error = null` / **`sessionResolved = false`**，下次导航由路由守卫 `checkSession` 按新 OJ 的 `sessions/{id}.json` 自动恢复会话）+ `authService.clearStoredUser()`。**刻意不调用 `authStore.logout()`**：Registry 已切到新 OJ，后端 logout 会拿新 OJ 的无凭证会话打它的登出端点、并误删新 OJ 自己的会话文件；各 OJ 会话文件按 id 隔离，**旧 OJ 登录态保留**（切回免登录） |
 
 ## 直接依赖
 
@@ -24,6 +25,7 @@
 ## 被依赖
 
 - `@/stores/authStore` — `logout()` 在清理认证态后调用
+- `@/views/SettingsView` — 「当前 OJ」切换成功后调用 `resetSessionForOjSwitch()`
 
 ## 逻辑流程
 
@@ -42,6 +44,14 @@ authStore.logout()
       → announcementStore.$reset()           // 已读状态按用户隔离，不得跨会话残留
       → contestStore.clearSessionData()      // 保留登录页匿名比赛简报
       → problemStore.$reset()
+
+SettingsView.onSwitchOj()（切换成功分支）
+  → resetSessionForOjSwitch()
+      → clearDomainState()                   // 同上：旧 OJ 的领域状态全部失效
+      → authStore: user/error 清零 + sessionResolved = false
+      → authService.clearStoredUser()        // localStorage 旧 OJ 用户缓存
+  → router.replace({ name: 'Login' })        // 守卫据此 checkSession：新 OJ 有
+                                             // 会话则无感续用，否则落在登录表单
 ```
 
 设计要点：

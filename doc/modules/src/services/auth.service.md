@@ -17,6 +17,7 @@
 | `AuthService.checkSession` | `() => Promise<User \| null>` | 查后端会话；有用户则刷新缓存；**IPC 异常吞掉返回 null**（启动路径不应因会话查询失败而中断） |
 | `AuthService.validateSession` | `() => Promise<SessionValidity>` | 透传后端三态；**IPC 自身异常（序列化/通道故障）归一为 `unknown` 而非 `invalid`** —— 调用方只面对三种业务语义，传输层故障不会把用户误踢回登录页 |
 | `AuthService.getStoredUser` | `() => User \| null` | 读 localStorage 缓存；JSON 损坏时清除脏数据返回 null |
+| `AuthService.clearStoredUser` | `() => void` | 清 localStorage 用户缓存（OJ 切换时由 `resetSessionForOjSwitch` 调用）：缓存里的用户属旧 OJ，不得残留给新 OJ；新会话由 `checkSession` 重建并回写 |
 | `authService` | 单例 | 全局唯一实例 |
 
 ## 直接依赖
