@@ -11,7 +11,7 @@ import {
   EDITOR_TAB_SIZES,
 } from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
-import type { AppConfig } from '@/types/config'
+import type { AppConfig, OjInstance } from '@/types/config'
 import type { StorageInfo } from '@/types/system'
 
 /**
@@ -122,8 +122,13 @@ const TAB_SIZES: readonly number[] = EDITOR_TAB_SIZES
 /// 默认语言候选 = HOJ 显示名（值域权威见 utils/language；与提交契约同源）
 const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
 
-/// OJ 实例候选（populate 时从配置的 instances 清单刷新）
-const ojOptions = ref<string[]>(['HOJ'])
+/// OJ 实例清单（populate 时从配置刷新；切换后取新实例地址、渲染禁用态）
+const ojInstances = ref<OjInstance[]>([])
+/// 下拉候选：全部实例（禁用者标注且不可选 —— 切到未注册的 OJ 只会得到
+/// ProviderNotFound；若当前 active 恰为禁用实例，仍如实显示为选中值）
+const ojOptions = computed(() =>
+  ojInstances.value.map((i) => ({ id: i.id, disabled: !i.enabled })),
+)
 /// 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）
 const persistedActive = ref('HOJ')
 /// 切换 OJ 的错误提示（独立于保存错误：两个不同意图）
@@ -133,9 +138,14 @@ const switchError = ref<string | null>(null)
 /// 与「保存」解耦 —— 保存仍负责地址/比赛引用等其余字段（active 两处写入同源同值）。
 async function onSwitchOj(): Promise<void> {
   switchError.value = null
+  const target = form.activeOj
   try {
-    await configService.switchOj(form.activeOj)
-    persistedActive.value = form.activeOj
+    await configService.switchOj(target)
+    persistedActive.value = target
+    // 地址栏跟随新实例：否则表单里仍是旧实例的地址，「保存」会把它写进
+    // 新实例的 baseUrl（数据损坏）。切换前未保存的地址编辑随之丢弃 ——
+    // 用户已切换编辑对象，这是预期行为。
+    form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
   } catch (e) {
     // 回滚下拉到已持久化值，避免 UI 停留在一个未生效的 OJ
     form.activeOj = persistedActive.value
@@ -153,7 +163,7 @@ function populate(config: AppConfig): void {
   form.activeOj = config.oj.active
   persistedActive.value = config.oj.active
   switchError.value = null
-  ojOptions.value = config.oj.instances.map((i) => i.id)
+  ojInstances.value = config.oj.instances
   // 展示当前选中实例的地址（active 未命中时回退第一个启用实例，兜底竞态）
   form.ojUrl =
     config.oj.instances.find((i) => i.id === config.oj.active)?.baseUrl
@@ -339,7 +349,14 @@ onBeforeUnmount(() => {
                     当前 OJ
                   </span>
                   <select v-model="form.activeOj" :class="INPUT" @change="onSwitchOj">
-                    <option v-for="id in ojOptions" :key="id" :value="id">{{ id }}</option>
+                    <option
+                      v-for="o in ojOptions"
+                      :key="o.id"
+                      :value="o.id"
+                      :disabled="o.disabled"
+                    >
+                      {{ o.id }}{{ o.disabled ? '（已禁用）' : '' }}
+                    </option>
                   </select>
                   <span v-if="switchError" class="mt-1 block text-xs text-rose-600">
                     {{ switchError }}

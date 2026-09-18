@@ -24,8 +24,9 @@ use crate::core::entity::announcement::AnnouncementPage;
 use crate::core::entity::contest::{Contest, ContestBundle};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
-use crate::core::event::app_event::{AppEvent, ContestEvent};
+use crate::core::event::app_event::{AppEvent, ContestEvent, SystemEvent};
 use crate::core::event::event_bus::EventBus;
+use crate::core::event::event_category::EventCategory;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::{JsonDiskCache, TtlCache};
 use crate::infra::storage::Storage;
@@ -68,11 +69,11 @@ pub struct ContestService {
     /// 当前选中的比赛 ID
     current_contest: RwLock<Option<String>>,
     /// 比赛列表缓存（TTL 来自配置，逐调用可变，故保留自持实现）
-    cache: RwLock<Option<ContestCache>>,
+    cache: Arc<RwLock<Option<ContestCache>>>,
     /// 比赛元信息内存缓存（固定 TTL，见 [`CONTEST_META_TTL`]）
-    meta_cache: TtlCache<String, Contest>,
+    meta_cache: Arc<TtlCache<String, Contest>>,
     /// 比赛元信息磁盘缓存（跨重启；用户域数据不落盘，本项属公共数据）
-    meta_disk: JsonDiskCache,
+    meta_disk: Arc<JsonDiskCache>,
 }
 
 impl ContestService {
@@ -82,15 +83,51 @@ impl ContestService {
         event_bus: Arc<EventBus>,
         storage: Arc<Storage>,
     ) -> Self {
+        let cache = Arc::new(RwLock::new(None));
+        let meta_cache = Arc::new(TtlCache::new(CONTEST_META_TTL, CONTEST_META_CAPACITY));
+        let meta_disk = Arc::new(JsonDiskCache::new(Arc::clone(&storage), CONTEST_META_NAMESPACE));
+        Self::subscribe_oj_switched(
+            Arc::clone(&event_bus),
+            Arc::clone(&cache),
+            Arc::clone(&meta_cache),
+            Arc::clone(&meta_disk),
+        );
         Self {
             registry,
             event_bus,
-            meta_cache: TtlCache::new(CONTEST_META_TTL, CONTEST_META_CAPACITY),
-            meta_disk: JsonDiskCache::new(Arc::clone(&storage), CONTEST_META_NAMESPACE),
+            meta_cache,
+            meta_disk,
             storage,
             current_contest: RwLock::new(None),
-            cache: RwLock::new(None),
+            cache,
         }
+    }
+
+    /// 订阅 `OJSwitched`：清空全部按 contest_id 键控的缓存。
+    ///
+    /// 这些缓存的键**不含 OJ 维度**（不同 OJ 的同 cid 会撞号），切换后旧 OJ
+    /// 的数据不得命中新 OJ 的查询 —— 「切 OJ」因此是缓存失效路径之一
+    /// （与 TTL / 切比赛 / 登出 / 配置开关并列）。
+    fn subscribe_oj_switched(
+        event_bus: Arc<EventBus>,
+        cache: Arc<RwLock<Option<ContestCache>>>,
+        meta_cache: Arc<TtlCache<String, Contest>>,
+        meta_disk: Arc<JsonDiskCache>,
+    ) {
+        event_bus.subscribe(
+            EventCategory::System,
+            Arc::new(move |event: &AppEvent| {
+                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
+                    return;
+                };
+                if let Ok(mut c) = cache.write() {
+                    *c = None;
+                }
+                meta_cache.clear();
+                let _ = meta_disk.clear_namespace();
+                info!("OJ 已切换：清空比赛列表与元信息缓存（键控不含 OJ 维度，防跨 OJ 撞号）");
+            }),
+        );
     }
 
     /// 获取比赛元信息（内存 → 磁盘 → 网络），命中即回填上游缓存。

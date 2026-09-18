@@ -364,9 +364,28 @@ pub fn normalize_legacy_values(cfg: &mut AppConfig) {
         }
     }
     cfg.oj.contest_ref = cfg.oj.contest_ref.trim().to_string();
-    // active 必须指向已配置实例，不指向时回退 HOJ（与组合根的注册防线同语义）
-    if !cfg.oj.instances.iter().any(|i| i.id == cfg.oj.active) {
-        cfg.oj.active = default_active_oj();
+    // 实例 id / active 统一规整（手改配置常见首尾空白；id 带空白会让工厂匹配
+    // 静默失败 —— 「配了却注册不上」比报错更难排查）
+    for instance in &mut cfg.oj.instances {
+        instance.id = instance.id.trim().to_string();
+    }
+    cfg.oj.active = cfg.oj.active.trim().to_string();
+    // active 必须指向**已启用**的实例；否则回退首个启用实例（而非硬编码 HOJ
+    // —— HOJ 实例可能被禁用/移除，指向一个不存在或不可用的 id 都是死路）。
+    // 迁移分支保证 instances 至少有一条，故回退目标恒存在。
+    if !cfg
+        .oj
+        .instances
+        .iter()
+        .any(|i| i.enabled && i.id == cfg.oj.active)
+    {
+        cfg.oj.active = cfg
+            .oj
+            .instances
+            .iter()
+            .find(|i| i.enabled)
+            .map(|i| i.id.clone())
+            .unwrap_or_else(default_active_oj);
     }
 
     // 0.45 是旧版默认值；用户手动调出的其他比例（含恰好 0.45 之外的任意值）不受影响。
@@ -383,16 +402,22 @@ pub fn normalize_legacy_values(cfg: &mut AppConfig) {
 // `sanitize()`（可钳制项收敛到与前端一致的取值域）。
 
 impl AppConfig {
-    /// 校验不可钳制的字段（目前仅服务器地址），失败返回可直接展示的错误消息。
+    /// 校验不可钳制的字段，失败返回可直接展示的错误消息。
     ///
-    /// 判据与前端 SettingsView 一致：trim 后以 http:// 或 https:// 开头
-    /// （大小写不敏感），且其余部分非空、不含空白（等价 `/^https?:\/\/\S+$/i`）。
+    /// 覆盖：实例 id（非空 / 无路径字符 / 唯一）、启用实例地址
+    /// （trim 后以 http:// 或 https:// 开头，大小写不敏感，其余非空无空白 ——
+    /// 等价 `/^https?:\/\/\S+$/i`，与前端 SettingsView 一致）、active 指向启用实例。
     pub fn validate(&self) -> Result<(), String> {
         // 实例 id 唯一（重复 id 会让注册表互相覆盖、会话文件名撞车）
         let mut seen = std::collections::HashSet::new();
         for instance in &self.oj.instances {
             if instance.id.trim().is_empty() {
                 return Err("OJ 实例 id 不能为空".into());
+            }
+            // id 会拼进会话文件名（`sessions/{id}.json`）与注册表键：
+            // 拒绝路径分隔符与 `..`（路径穿越），`Storage::resolve` 是第二道防线
+            if instance.id.contains('/') || instance.id.contains('\\') || instance.id.contains("..") {
+                return Err(format!("OJ 实例 id 不得包含 /、\\ 或 ..：{}", instance.id));
             }
             if !seen.insert(instance.id.trim().to_string()) {
                 return Err(format!("OJ 实例 id 重复: {}", instance.id));
@@ -407,9 +432,9 @@ impl AppConfig {
                 ));
             }
         }
-        // active 必须指向已配置实例
-        if !self.oj.instances.iter().any(|i| i.id == self.oj.active) {
-            return Err(format!("当前 OJ（{}）不在已配置实例列表中", self.oj.active));
+        // active 必须指向已启用的实例（禁用实例不会被注册，指向它等于死路）
+        if !self.oj.instances.iter().any(|i| i.enabled && i.id == self.oj.active) {
+            return Err(format!("当前 OJ（{}）不在已启用的实例列表中", self.oj.active));
         }
         Ok(())
     }

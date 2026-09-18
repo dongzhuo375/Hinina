@@ -411,3 +411,35 @@ fn get_user_problem_status_preserves_auth_variant() {
         err
     );
 }
+
+
+// ?? OJSwitched?OJ ?????????? OJ ???? OJ ?? OJ ?????
+
+#[test]
+fn oj_switched_clears_problem_scoped_caches() {
+    use crate::core::event::app_event::{AppEvent, SystemEvent};
+
+    let dir = std::env::temp_dir().join("hinina-test-problem-oj-switch");
+    let _ = std::fs::remove_dir_all(&dir);
+    let bus = Arc::new(EventBus::new());
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let service = ProblemService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
+
+    // ?? limits ????????????????? write_limits_cache ???
+    service
+        .limits_cache
+        .write()
+        .unwrap()
+        .insert("7".into(), HashMap::new());
+    assert!(!service.limits_cache.read().unwrap().is_empty());
+
+    bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
+
+    assert!(service.limits_cache.read().unwrap().is_empty(), "limits ????????");
+    assert!(service.statement_cache.is_empty(), "??????????");
+    // ???????????????? = ???
+    assert!(!dir.join("cache/problem_statement").exists());
+    assert!(!dir.join("cache/problem_limits").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

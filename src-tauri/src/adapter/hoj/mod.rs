@@ -36,8 +36,6 @@ use self::types::{
     UserProblemStatusDTO,
 };
 
-/// HOJ 的 OJ 身份标识（会话文件名 = `sessions/{ID}.json`，值须与历史枚举
-/// Debug 输出一致以兼容既有会话文件）。
 /// HOJ OJ 适配器。
 ///
 /// 实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、`SubmissionProvider`
@@ -56,7 +54,8 @@ impl HOJAdapter {
     /// Debug 输出一致以兼容既有会话文件）。
     pub const ID: &'static str = "HOJ";
 
-    /// 创建 HOJAdapter。    ///
+    /// 创建 HOJAdapter。
+    ///
     /// `base_url` 不含尾部 `/api`，如 `https://hoj.dongzhuo.top`。
     pub fn new(http: Arc<HttpClient>, base_url: String, event_bus: Arc<EventBus>) -> Self {
         // 去掉尾部斜杠以统一拼接

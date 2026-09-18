@@ -581,3 +581,51 @@ fn read_state_rejects_path_separators() {
         assert!(matches!(err, AppError::Io(_)), "实际 {:?}", err);
     }
 }
+
+
+// ?? OJSwitched?OJ ?????????? OJ ???? OJ ?? OJ ?????
+
+#[test]
+fn oj_switched_clears_contest_scoped_caches() {
+    use crate::core::event::app_event::{AppEvent, SystemEvent};
+
+    let dir = std::env::temp_dir().join("hinina-test-contest-oj-switch");
+    let _ = std::fs::remove_dir_all(&dir);
+    let bus = Arc::new(EventBus::new());
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let service = ContestService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
+
+    // ?? OJ ???????? + ???????
+    *service.cache.write().unwrap() = Some(ContestCache {
+        contests: vec![],
+        fetched_at: Instant::now(),
+    });
+    service.meta_cache.insert(
+        "7".into(),
+        Contest {
+            id: "7".into(),
+            title: "t".into(),
+            start_time: 0,
+            end_time: 0,
+            description: String::new(),
+            contest_type: 0,
+            status: 0,
+            auth: 0,
+            rank_show_name: String::new(),
+            seal_rank: false,
+            seal_rank_time: None,
+            allow_end_submit: false,
+            oi_rank_score_type: None,
+        },
+    );
+    assert!(!service.meta_cache.is_empty());
+
+    bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
+
+    assert!(service.cache.read().unwrap().is_none(), "????????");
+    assert!(service.meta_cache.is_empty(), "???????????");
+    // ???????????????? = ???
+    assert!(!dir.join("cache/contest_meta").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

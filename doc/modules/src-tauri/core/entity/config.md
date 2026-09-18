@@ -63,15 +63,15 @@
     - `instances` 为空 → 以旧 `legacy_hoj_url`（缺省用默认地址）建立单 HOJ 实例（id `"HOJ"`、enabled、空 options）
     - `user.legacy_last_oj_type` 非空白 → 写入 `oj.active`（`take()` 消费，配合 `skip_serializing` 不再写回）
     - `contest_ref` 为空且 `legacy_contest_id > 0` → 迁移为数字字符串；旧 `contestId == 0` 表示未配置、负数是脏值，均不迁移
-    - `contest_ref` trim；`active` 不指向已配置实例时回退 `"HOJ"`（与组合根的注册防线同语义）
+    - `contest_ref` trim；实例 `id` 与 `active` 统一 trim（id 带空白会让工厂匹配静默失败）；`active` 不指向**已启用**实例时回退首个启用实例（而非硬编码 HOJ —— HOJ 实例可能被禁用/移除，指向不存在或不可用的 id 都是死路；迁移分支保证 instances 至少一条，回退目标恒存在）
 - 抽成纯函数（而非埋在 ConfigService 里）是为了可被单元测试直接锁定，且幂等（每次加载都会执行）
 
 ## 写入路径校验与净化（M4）
 `update_config` Command 持久化前调用（config.json 可被手改，前端 SettingsView 不是唯一防线）。均为纯函数/纯方法，可直接单测：
-- **`AppConfig::validate(&self) -> Result<(), String>`** — 校验不可钳制项，失败返回可直接展示的错误消息（Command 层把 `Err(msg)` 映射为 `AppError::Config(msg)` 拒绝落盘）。三条判据：
-  1. 实例 id 非空且唯一（重复 id 会让注册表互相覆盖、会话文件名撞车）
+- **`AppConfig::validate(&self) -> Result<(), String>`** — 校验不可钳制项，失败返回可直接展示的错误消息（Command 层把 `Err(msg)` 映射为 `AppError::Config(msg)` 拒绝落盘）。四条判据：
+  1. 实例 id 非空、**不含路径分隔符与 `..`**（id 会拼进会话文件名 `sessions/{id}.json` 与注册表键，路径穿越必须拒绝；`Storage::resolve` 是第二道防线）且唯一（重复 id 会让注册表互相覆盖、会话文件名撞车）
   2. enabled 实例的 `base_url` 合法 —— 判据与前端 SettingsView 一致：trim 后以 `http://` 或 `https://` 开头（大小写不敏感）且其余部分非空、不含空白（等价 `/^https?:\/\/\S+$/i`）；禁用实例不注册，地址可为占位
-  3. `active` 必须指向已配置实例
+  3. `active` 必须指向**已启用**的实例（禁用实例不会被注册，指向它等于死路）
 - **`AppConfig::sanitize(&mut self) -> bool`** — 就地钳制越界字段，取值域与前端 SettingsView 校验一致：`timeout_secs 1..=120`、`poll_interval_secs 1..=30`、`poll_timeout_secs 30..=3600`、`cache_ttl_secs 0..=600`、`font_size 8..=32`、`tab_size 1..=8`、`auto_save_interval_secs 5..=300`、`split_ratio 0.30..=0.70`（非有限值先回退默认 0.48 再钳制）；`oj.active`、`oj.contest_ref` 与各实例的 `id` / `base_url` trim；`default_language` 经私有 `sanitize_language_id` 净化 —— 旧 Monaco id 先走 `normalize_language_display_name` 映射为显示名，其余非空值（含 OJ 可能提供的 Go/Rust 等）原样保留，仅空串回退默认 `"C++"`；`editor_theme` 经私有 `sanitize_editor_theme` 收敛到 Monaco 内置 `vs` / `vs-dark`（其余值回退默认 `vs` —— 未知主题名会让 `setTheme` 静默无效）。返回是否修改了任何字段（调用方据此记 warn 日志），为此各配置 struct 追加了 `PartialEq` derive
 
 ## 直接依赖
@@ -94,4 +94,4 @@
 - 源文件：`src-tauri/src/core/entity/config.rs`
 
 ## 测试
-`src-tauri/src/core/entity/tests/config_tests.rs`（由 `config.rs` 底部 `#[cfg(test)] #[path = "tests/config_tests.rs"] mod tests;` 引用）锁定：默认值全部落在取值域内（`C++` / `light` / `vs` / `0.48`）、旧 Monaco id（大小写不敏感）归一为显示名、已是显示名或未知非空值（Go/Rust 等）不动、仅空串回退 `C++`、整机 dark/vs-dark 归一为 light/vs 而浅色不动、**浅色界面 + `vs-dark` 编辑器（用户可选组合）归一后保持不动**、`split_ratio` 只替换恰好 0.45 的旧默认（0.44/0.46/0.5 等用户值不动）、归一幂等、上一版落盘 JSON（`defaultLanguage: "cpp"`）端到端反序列化 + 重新归一。M4 校验/净化用例：`validate` 拒绝空串 / `ftp://x` / 裸域名 / 只有 scheme 头 / 含空白地址并接受大小写混合的 http(s)（trim 后校验）、`sanitize` 钳制全部越界字段并返回 true、合法配置（默认值与边界值，含 `editor_theme = vs-dark`）原样不动且返回 false、旧 Monaco id 净化为显示名而非空未知值保留（仅空串回退 `C++`）、编辑器主题取值域收敛（`vs`/`vs-dark` 保留，空串/`dracula`/大小写变体回退 `vs`）、URL trim 与 NaN 分栏比例回退默认、手改 JSON 端到端 validate + sanitize 收敛。OJ 配置 v2 用例：旧配置（`hojUrl` + `lastOjType` + `contestId`）迁移为 instances / active / contestRef 且序列化产物只含新格式键（`lastOjType` / `hojUrl` / `contestId` 不再写回）、`contestId == 0` 与负数不迁移且空白 `lastOjType` 回退 HOJ、新格式原样通过（自定义实例清单不被覆盖、非数字 `contestRef` 合法）、active 指向未配置实例时归一回退 HOJ、validate 拒绝重复实例 id 与未知 active；手改 JSON 端到端用例改为与真实管线一致（加载归一 `normalize` + 写入兜底 `sanitize` 双路径收敛：旧 hojUrl 迁移进 HOJ 实例地址、脏值 `contestId = -1` 不迁移）。
+`src-tauri/src/core/entity/tests/config_tests.rs`（由 `config.rs` 底部 `#[cfg(test)] #[path = "tests/config_tests.rs"] mod tests;` 引用）锁定：默认值全部落在取值域内（`C++` / `light` / `vs` / `0.48`）、旧 Monaco id（大小写不敏感）归一为显示名、已是显示名或未知非空值（Go/Rust 等）不动、仅空串回退 `C++`、整机 dark/vs-dark 归一为 light/vs 而浅色不动、**浅色界面 + `vs-dark` 编辑器（用户可选组合）归一后保持不动**、`split_ratio` 只替换恰好 0.45 的旧默认（0.44/0.46/0.5 等用户值不动）、归一幂等、上一版落盘 JSON（`defaultLanguage: "cpp"`）端到端反序列化 + 重新归一。M4 校验/净化用例：`validate` 拒绝空串 / `ftp://x` / 裸域名 / 只有 scheme 头 / 含空白地址并接受大小写混合的 http(s)（trim 后校验）、`sanitize` 钳制全部越界字段并返回 true、合法配置（默认值与边界值，含 `editor_theme = vs-dark`）原样不动且返回 false、旧 Monaco id 净化为显示名而非空未知值保留（仅空串回退 `C++`）、编辑器主题取值域收敛（`vs`/`vs-dark` 保留，空串/`dracula`/大小写变体回退 `vs`）、URL trim 与 NaN 分栏比例回退默认、手改 JSON 端到端 validate + sanitize 收敛。OJ 配置 v2 用例：旧配置（`hojUrl` + `lastOjType` + `contestId`）迁移为 instances / active / contestRef 且序列化产物只含新格式键（`lastOjType` / `hojUrl` / `contestId` 不再写回）、`contestId == 0` 与负数不迁移且空白 `lastOjType` 回退 HOJ、新格式原样通过（自定义实例清单不被覆盖、非数字 `contestRef` 合法）、active 指向未配置实例时归一回退首个启用实例、active 指向**禁用**实例时回退首个启用实例（不停留在死路 id）、实例 id 与 active 的 trim 归一、validate 拒绝重复实例 id / 未知 active / 含路径字符的实例 id（`/`、`\`、`..`）；手改 JSON 端到端用例改为与真实管线一致（加载归一 `normalize` + 写入兜底 `sanitize` 双路径收敛：旧 hojUrl 迁移进 HOJ 实例地址、脏值 `contestId = -1` 不迁移）。

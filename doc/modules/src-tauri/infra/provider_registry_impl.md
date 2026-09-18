@@ -9,7 +9,8 @@
 - **`capability<T, F>(&self, pick: F) -> AppResult<Arc<T>>`**（私有帮手）— 按能力取当前 OJ 的 Provider，四个 `current_xxx` 共用：取 `current_id()` → 读锁查单表（未注册 → `ProviderNotFound`「OJ {} 未注册」）→ `pick(set)` 克隆（该能力为 `None` → `ProviderNotFound`「OJ {} 未提供该能力」）
 - **`register(oj_id, set)`** — 获取写锁，将 `(OjId, ProviderSet)` 插入单表（同 id 二次注册为覆盖）
 - **`current_auth / current_contest / current_problem / current_submission`** — 分别转调 `capability(|set| &set.xxx)`
-- **`current_id()` / `set_current(oj_id)`** — 读写当前 OJ；`current_id` 锁中毒时 `into_inner` 取回内部数据（注册表进程级单例，中毒即全局异常，不静默回退）
+- **`current_id()` / `set_current(oj_id)`** — 读写当前 OJ
+- **锁中毒策略（全方法一致）**：所有 RwLock 操作统一 `unwrap_or_else(|e| e.into_inner())` 取回内部数据 —— 注册表进程级单例，中毒即全局异常，不做静默丢弃（旧值丢失）或二次报错，各方法的恢复行为一致可预期
 - **`list_available()`** — 以 providers 单表 key 集合为准（注册过 `ProviderSet` 即视为可用 OJ）
 
 ## 直接依赖

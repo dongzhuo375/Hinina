@@ -24,8 +24,9 @@ use crate::core::entity::submission::{
     SubmissionQuery,
 };
 use crate::core::error::AppResult;
-use crate::core::event::app_event::{AppEvent, SubmissionEvent};
+use crate::core::event::app_event::{AppEvent, SubmissionEvent, SystemEvent};
 use crate::core::event::event_bus::EventBus;
+use crate::core::event::event_category::EventCategory;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::TtlCache;
 
@@ -47,27 +48,60 @@ pub struct SubmissionService {
     registry: Arc<dyn ProviderRegistry>,
     event_bus: Arc<EventBus>,
     /// 终态提交详情缓存（**仅内存**：用户域数据不落盘）
-    detail_cache: TtlCache<String, SubmissionDetail>,
+    detail_cache: Arc<TtlCache<String, SubmissionDetail>>,
     /// 终态测试点缓存（**仅内存**）
-    cases_cache: TtlCache<String, SubmissionCases>,
+    cases_cache: Arc<TtlCache<String, SubmissionCases>>,
     /// 「该提交已确认终态」标记（由详情查询填充）。
     ///
     /// 测试点接口**不返回状态**，无法自证可缓存；用本标记作为判据既不必为判定终态
     /// 多发一次详情请求，也不会把评测中的半截明细缓存下来（缓存半截明细会让
     /// 「评测完成后打开详情页」看到缺失的测试点）。
-    terminal_marks: TtlCache<String, bool>,
+    terminal_marks: Arc<TtlCache<String, bool>>,
 }
 
 impl SubmissionService {
     /// 创建 SubmissionService。
     pub fn new(registry: Arc<dyn ProviderRegistry>, event_bus: Arc<EventBus>) -> Self {
+        let detail_cache = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY));
+        let cases_cache = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_CASES_CAPACITY));
+        let terminal_marks = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY));
+        Self::subscribe_oj_switched(
+            Arc::clone(&event_bus),
+            Arc::clone(&detail_cache),
+            Arc::clone(&cases_cache),
+            Arc::clone(&terminal_marks),
+        );
         Self {
             registry,
             event_bus,
-            detail_cache: TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY),
-            cases_cache: TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_CASES_CAPACITY),
-            terminal_marks: TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY),
+            detail_cache,
+            cases_cache,
+            terminal_marks,
         }
+    }
+
+    /// 订阅 `OJSwitched`：清空用户域缓存。
+    ///
+    /// 缓存内是**旧 OJ 用户**的提交详情与测试点（含源代码），切换后不得复用
+    /// —— 与登出清理同一语义（换 OJ 即换用户上下文）。
+    fn subscribe_oj_switched(
+        event_bus: Arc<EventBus>,
+        detail_cache: Arc<TtlCache<String, SubmissionDetail>>,
+        cases_cache: Arc<TtlCache<String, SubmissionCases>>,
+        terminal_marks: Arc<TtlCache<String, bool>>,
+    ) {
+        event_bus.subscribe(
+            EventCategory::System,
+            Arc::new(move |event: &AppEvent| {
+                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
+                    return;
+                };
+                detail_cache.clear();
+                cases_cache.clear();
+                terminal_marks.clear();
+                info!("OJ 已切换：清空提交详情/测试点缓存（用户域数据不得跨 OJ 复用）");
+            }),
+        );
     }
 
     /// 清空用户域缓存（登出时由 `auth_cmd::logout` 编排调用）。

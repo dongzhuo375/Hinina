@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::adapter::hoj::HOJAdapter;
 use crate::core::error::AppResult;
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::oj_id::OjId;
@@ -117,9 +116,27 @@ impl AppContext {
 
         // 身份字符串化后失去编译期穷尽检查，此为第一道防线：启动时校验当前
         // OJ 已注册（另两道：查询未命中 ProviderNotFound、factories 测试）。
+        // 回退目标取**首个已注册 OJ**而非硬编码 HOJ —— HOJ 实例可能被禁用或
+        // 移除，回退到一个同样未注册的 id 是死路（所有查询 ProviderNotFound）。
         if !provider_registry.list_available().contains(&configured_oj) {
-            tracing::warn!(configured = %configured_oj, "配置的当前 OJ 未注册，回退 HOJ");
-            provider_registry.set_current(OjId::new(HOJAdapter::ID));
+            match provider_registry.list_available().into_iter().next() {
+                Some(fallback) => {
+                    tracing::warn!(
+                        configured = %configured_oj,
+                        fallback = %fallback,
+                        "配置的当前 OJ 未注册，回退首个已注册 OJ"
+                    );
+                    provider_registry.set_current(fallback);
+                }
+                None => {
+                    // instances 全部禁用或无匹配工厂：无 OJ 可用，只能告警；
+                    // 后续首次查询会以 ProviderNotFound 如实暴露
+                    tracing::warn!(
+                        configured = %configured_oj,
+                        "没有任何已注册的 OJ 适配器（instances 全部禁用或无匹配工厂）"
+                    );
+                }
+            }
         }
 
         // 7. 创建 WorkspaceManager

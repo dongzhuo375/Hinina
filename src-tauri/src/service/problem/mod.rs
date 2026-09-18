@@ -17,8 +17,9 @@ use tracing::{debug, info, warn};
 use crate::core::entity::problem::Problem;
 use crate::core::entity::rank::ProblemLimits;
 use crate::core::error::{AppError, AppResult};
-use crate::core::event::app_event::{AppEvent, ProblemEvent};
+use crate::core::event::app_event::{AppEvent, ProblemEvent, SystemEvent};
 use crate::core::event::event_bus::EventBus;
+use crate::core::event::event_category::EventCategory;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::{JsonDiskCache, TtlCache};
 use crate::infra::storage::Storage;
@@ -52,10 +53,10 @@ pub struct ProblemService {
     event_bus: Arc<EventBus>,
     storage: Arc<Storage>,
     /// 内存缓存：contest_id → (display_id → limits)
-    limits_cache: RwLock<HashMap<String, HashMap<String, ProblemLimits>>>,
+    limits_cache: Arc<RwLock<HashMap<String, HashMap<String, ProblemLimits>>>>,
     /// 题面缓存（内存 + 磁盘）：`{contest_id}/{display_id}` → Problem
-    statement_cache: TtlCache<String, Problem>,
-    statement_disk: JsonDiskCache,
+    statement_cache: Arc<TtlCache<String, Problem>>,
+    statement_disk: Arc<JsonDiskCache>,
 }
 
 impl ProblemService {
@@ -65,14 +66,55 @@ impl ProblemService {
         event_bus: Arc<EventBus>,
         storage: Arc<Storage>,
     ) -> Self {
+        let limits_cache = Arc::new(RwLock::new(HashMap::new()));
+        let statement_cache = Arc::new(TtlCache::new(PROBLEM_CACHE_TTL, PROBLEM_CACHE_CAPACITY));
+        let statement_disk = Arc::new(JsonDiskCache::new(Arc::clone(&storage), PROBLEM_CACHE_NAMESPACE));
+        Self::subscribe_oj_switched(
+            Arc::clone(&event_bus),
+            Arc::clone(&limits_cache),
+            Arc::clone(&statement_cache),
+            Arc::clone(&statement_disk),
+            Arc::clone(&storage),
+        );
         Self {
             registry,
             event_bus,
-            statement_cache: TtlCache::new(PROBLEM_CACHE_TTL, PROBLEM_CACHE_CAPACITY),
-            statement_disk: JsonDiskCache::new(Arc::clone(&storage), PROBLEM_CACHE_NAMESPACE),
+            statement_cache,
+            statement_disk,
             storage,
-            limits_cache: RwLock::new(HashMap::new()),
+            limits_cache,
         }
+    }
+
+    /// 订阅 `OJSwitched`：清空题面与 limits 缓存（内存 + 磁盘）。
+    ///
+    /// 键控（`{contest_id}/{display_id}`、`cache/problem_limits/{cid}.json`）
+    /// **不含 OJ 维度**，切换后旧 OJ 数据不得命中新 OJ 查询 —— 「切 OJ」
+    /// 因此是缓存失效路径之一（与 TTL / 切比赛 / 登出 / 配置开关并列）。
+    fn subscribe_oj_switched(
+        event_bus: Arc<EventBus>,
+        limits_cache: Arc<RwLock<HashMap<String, HashMap<String, ProblemLimits>>>>,
+        statement_cache: Arc<TtlCache<String, Problem>>,
+        statement_disk: Arc<JsonDiskCache>,
+        storage: Arc<Storage>,
+    ) {
+        event_bus.subscribe(
+            EventCategory::System,
+            Arc::new(move |event: &AppEvent| {
+                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
+                    return;
+                };
+                if let Ok(mut m) = limits_cache.write() {
+                    m.clear();
+                }
+                statement_cache.clear();
+                let _ = statement_disk.clear_namespace();
+                if let Err(e) = storage.remove_all(LIMITS_CACHE_DIR) {
+                    warn!(error = %e, "OJ 切换后清理 limits 磁盘缓存失败");
+                }
+                info!("OJ 已切换：清空题面与 limits 缓存（键控不含 OJ 维度，防跨 OJ 撞号）");
+            }),
+        );
     }
 
     /// 获取比赛下所有题目列表。

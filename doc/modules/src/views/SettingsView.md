@@ -12,13 +12,13 @@
 |------|------|------|
 | `SettingsForm` | interface | 表单草稿；**数字字段保留原始字符串**——输入中间态（空串/半截数字）不应被强转成 NaN 写回，只有校验通过的值才进入保存载荷 |
 | `form` | `reactive<SettingsForm>` | activeOj / ojUrl / contestRef / contestPassword / timeoutSecs / pollIntervalSecs / pollTimeoutSecs / cacheTtlSecs / cacheProblemStatement / fontSize / tabSize / defaultLanguage / autoSave / autoSaveIntervalSecs / splitRatio。`activeOj` = 当前 OJ 实例 id（下拉选择），`ojUrl` = 当前选中实例的服务端地址（保存时写回该实例 baseUrl），`contestRef` = 比赛引用（不透明字符串：HOJ 数字 ID / 其它 OJ 资源引用；空 = 未配置） |
-| `ojOptions` / `persistedActive` / `switchError` | ref | OJ 下拉候选（populate 时从 `config.oj.instances` 刷新）/ 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）/ 切换 OJ 的错误提示（独立于保存错误：两个不同意图） |
-| `onSwitchOj` | `() => Promise<void>` | 切换当前 OJ（显式命令：即时生效 + 持久化 `oj.active` + 发布 `OJSwitched`，经 `configService.switchOj`）；失败时回滚 `form.activeOj` 到 `persistedActive` 并写 `switchError` |
+| `ojInstances` / `ojOptions` / `persistedActive` / `switchError` | ref/computed | 实例清单（populate 时从 `config.oj.instances` 刷新）/ 下拉候选（全部实例，**禁用者标注「（已禁用）」且不可选** —— 切到未注册的 OJ 只会得到 ProviderNotFound；当前 active 恰为禁用实例时仍如实显示为选中值）/ 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）/ 切换 OJ 的错误提示（独立于保存错误：两个不同意图） |
+| `onSwitchOj` | `() => Promise<void>` | 切换当前 OJ（显式命令：即时生效 + 持久化 `oj.active` + 发布 `OJSwitched`，经 `configService.switchOj`）；成功后 `form.ojUrl` **跟随新实例地址**（否则表单里仍是旧实例地址，「保存」会把它写进新实例的 `baseUrl` —— 数据损坏；切换前未保存的地址编辑随之丢弃，用户已切换编辑对象）；失败时回滚 `form.activeOj` 到 `persistedActive` 并写 `switchError` |
 | `baseline` / `snapshot` / `dirty` | ref/fn/computed | 基线 = 上次加载/保存成功时的表单 JSON 序列化；dirty 判定与「放弃更改」共用同一快照 |
 | `parseIntStrict` | `(raw) => number \| null` | 严格非负整数解析：正则 `^\d+$` 拒绝空串/小数/负号/科学计数法等 `Number()` 会宽容接受的形式 |
 | `intError` / `errors` / `isValid` / `canSave` | computed | 逐字段错误映射（ojUrl 须 `http(s)://` 前缀；contestRef 为自由格式字符串，空串 = 未配置，合法不校验；各整数字段带值域：超时 1–120、轮询间隔 1–30、轮询总超时 30–3600、缓存 TTL 0–600、字号 8–32、自动保存间隔 5–300）；canSave = dirty && valid && !saving |
 | `TAB_SIZES` / `LANGUAGE_OPTIONS` / `clampRatio` | 常量/fn | Tab 宽度档位（取 `utils/editor.EDITOR_TAB_SIZES`，值域唯一权威）；默认语言四选项；分栏比例钳位到滑杆值域 [0.30, 0.70] 两位小数（与 step 0.01 对齐） |
-| `populate` / `load` | fn | 配置 → 表单回填（`activeOj` / `persistedActive` 取 `oj.active`，`ojOptions` 取 `oj.instances` 的 id 清单，`ojUrl` 取当前选中实例地址——active 未命中时回退第一个启用实例兜底竞态，`contestRef` 取 `oj.contestRef`；tabSize 不在档位内回退 4、语言经 `normalizeLanguageId` 归一）；加载前**先 `configService.invalidate()`** |
+| `populate` / `load` | fn | 配置 → 表单回填（`activeOj` / `persistedActive` 取 `oj.active`，`ojInstances` 取 `config.oj.instances` 全量清单，`ojUrl` 取当前选中实例地址——active 未命中时回退第一个启用实例兜底竞态，`contestRef` 取 `oj.contestRef`；tabSize 不在档位内回退 4、语言经 `normalizeLanguageId` 归一）；加载前**先 `configService.invalidate()`** |
 | `save` / `discard` | fn | 保存：`updateConfig(draft => …)` 把校验通过的表单值写入草稿（`draft.oj.active` 写 `form.activeOj`；`ojUrl` 写回当前选中实例的 `baseUrl`——active 不在实例列表会被 Rust validate 拒绝，而下拉候选即实例清单，正常操作不会出现；`contestRef` trim；contestPassword 空串 → null）。成功后基线前移 + 「已保存」提示 3s。放弃：从基线 JSON 恢复表单 |
 | `storage` / `storageFailed` / `loadStorage` | ref/fn | 「关于」区块数据（`systemService.getStorageInfo()`：版本 / 存储目录 / 日志路径）；失败**非致命**，仅该区块降级为「获取失败」 |
 | `copyText` / `copiedKey` | fn/ref | 关于区块逐项复制（版本/目录/路径），「已复制」2s 回弹；剪贴板不可用静默忽略 |
@@ -50,7 +50,7 @@ load():
 
 编辑表单 → errors 逐字段实时校验 → dirty = snapshot() !== baseline
 切换 OJ（下拉 @change → onSwitchOj）→ configService.switchOj(form.activeOj)
-  ├─ 成功 → persistedActive 前移（下拉保持新值；active 两处写入同源同值）
+  ├─ 成功 → persistedActive 前移 + form.ojUrl 跟随新实例地址（防「保存」把旧实例地址写进新实例）
   └─ 失败 → form.activeOj 回滚到 persistedActive + switchError 展示（不静默停留未生效的 OJ）
 save(): canSave 才执行 → updateConfig(读-改-写整体替换 + 失效缓存)
         → baseline 前移、showSaved 3s；失败写 saveError（表单值保留）

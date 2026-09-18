@@ -361,11 +361,53 @@ fn normalize_keeps_new_format_untouched() {
 
 #[test]
 fn normalize_falls_back_when_active_points_to_missing_instance() {
-    // active 指向未配置实例（手改配置）：回退 HOJ，与组合根注册防线同语义
+    // active 指向未配置实例（手改配置）：回退首个启用实例（与组合根注册防线同语义）
     let mut cfg = AppConfig::default();
     cfg.oj.active = "QDUOJ".into();
     normalize_legacy_values(&mut cfg);
     assert_eq!(cfg.oj.active, "HOJ");
+}
+
+#[test]
+fn normalize_falls_back_to_first_enabled_when_active_points_to_disabled_instance() {
+    // active 指向**禁用**实例：禁用实例不会被注册，指向它等于死路 ——
+    // 回退首个启用实例，而不是停留在禁用 id 上
+    let mut cfg = AppConfig::default();
+    cfg.oj.instances = vec![
+        OjInstance { id: "HOJ".into(), base_url: "https://a.example.com".into(), enabled: false, options: serde_json::Map::new() },
+        OjInstance { id: "QDUOJ".into(), base_url: "https://b.example.com".into(), enabled: true, options: serde_json::Map::new() },
+    ];
+    cfg.oj.active = "HOJ".into();
+    normalize_legacy_values(&mut cfg);
+    assert_eq!(cfg.oj.active, "QDUOJ", "应回退首个启用实例而非停留在禁用 id");
+}
+
+#[test]
+fn normalize_trims_instance_ids_and_active() {
+    // 手改配置常见的首尾空白：id 带空白会让工厂匹配静默失败（配了却注册不上）
+    let mut cfg = AppConfig::default();
+    cfg.oj.instances = vec![OjInstance {
+        id: "  HOJ  ".into(),
+        base_url: "https://a.example.com".into(),
+        enabled: true,
+        options: serde_json::Map::new(),
+    }];
+    cfg.oj.active = "  HOJ  ".into();
+    normalize_legacy_values(&mut cfg);
+    assert_eq!(cfg.oj.instances[0].id, "HOJ");
+    assert_eq!(cfg.oj.active, "HOJ");
+}
+
+#[test]
+fn validate_rejects_path_characters_in_instance_ids() {
+    // id 会拼进会话文件名（sessions/{id}.json）与注册表键：路径分隔符与
+    // `..`（路径穿越）必须拒绝；Storage::resolve 只是第二道防线
+    for bad in ["a/b", "a\\b", "a..b", ".."] {
+        let mut cfg = AppConfig::default();
+        cfg.oj.instances[0].id = bad.into();
+        let err = cfg.validate().expect_err(&format!("{:?} 应被拒绝", bad));
+        assert!(err.contains("不得包含"), "实际: {}", err);
+    }
 }
 
 #[test]

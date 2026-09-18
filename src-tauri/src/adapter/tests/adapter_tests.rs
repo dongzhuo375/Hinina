@@ -7,9 +7,14 @@ use crate::infra::http::HttpClient;
 use crate::infra::storage::Storage;
 
 /// 工厂清单的编译期防线（取代闭集枚举的穷尽检查）：
-/// id 唯一、全部可构建、四能力齐备。接入新 OJ 后本测试自动覆盖新工厂。
+/// id 唯一、全部可构建、至少提供一个能力。接入新 OJ 后本测试自动覆盖新工厂。
+///
+/// 刻意**不断言四能力齐备**：`ProviderSet` 的 Option 字段正是「新 Adapter
+/// 可先只实现部分接口」的扩展路径（开发手册明文），全能力断言会让部分实现的
+/// OJ 一接入就红灯 —— 那是把扩展路径焊死。此处只锁定「可构建且非空集」
+/// （全 None 的 ProviderSet 属注册 bug）。
 #[test]
-fn factory_ids_unique_and_fully_buildable() {
+fn factory_ids_unique_and_buildable() {
     let list = factories();
     assert!(!list.is_empty(), "工厂清单不能为空");
 
@@ -21,6 +26,7 @@ fn factory_ids_unique_and_fully_buildable() {
     assert_eq!(ids.len(), deduped.len(), "工厂 id 必须唯一: {:?}", ids);
 
     // 全部可构建（依赖只来自 infra —— AdapterDeps 不含任何 Service）
+    // 且至少提供一个能力（全 None 是注册 bug）
     let dir = std::env::temp_dir().join("hinina-test-adapter-factory");
     let _ = std::fs::remove_dir_all(&dir);
     let deps = AdapterDeps {
@@ -31,10 +37,11 @@ fn factory_ids_unique_and_fully_buildable() {
 
     for factory in &list {
         let set = factory.build(&deps, "https://example.com");
-        assert!(set.auth.is_some(), "{} 缺 Auth 能力", factory.id());
-        assert!(set.contest.is_some(), "{} 缺 Contest 能力", factory.id());
-        assert!(set.problem.is_some(), "{} 缺 Problem 能力", factory.id());
-        assert!(set.submission.is_some(), "{} 缺 Submission 能力", factory.id());
+        let capability_count = set.auth.is_some() as usize
+            + set.contest.is_some() as usize
+            + set.problem.is_some() as usize
+            + set.submission.is_some() as usize;
+        assert!(capability_count > 0, "{} 至少需提供一个能力（全空 ProviderSet 是注册 bug）", factory.id());
     }
 
     let _ = std::fs::remove_dir_all(&dir);
