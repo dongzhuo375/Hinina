@@ -10,7 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `login` | `(username, password, ojType?) => Promise<User>` | invoke `login`（**参数含明文密码**——HOJ 服务端自行 MD5 比对，客户端不哈希；日志安全由 `ipcInvoke` 的「不记 args」约束保障） |
+| `login` | `(username, password) => Promise<User>` | invoke `login`（OJ 切换走显式 `switchOj`，见 `config.bridge`；**参数含明文密码**——HOJ 服务端自行 MD5 比对，客户端不哈希；日志安全由 `ipcInvoke` 的「不记 args」约束保障） |
 | `logout` | `() => Promise<void>` | invoke `logout` |
 | `getSession` | `() => Promise<User \| null>` | invoke `get_session`（null = 无本地会话） |
 | `validateSession` | `() => Promise<SessionValidity>` | invoke `validate_session`，返回三态 `valid / invalid / unknown` |

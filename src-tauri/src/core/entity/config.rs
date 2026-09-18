@@ -38,7 +38,7 @@ impl Default for AppConfig {
 
 // ── 用户偏好 ──
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UserConfig {
     /// 登录用户名（用于自动填充）
@@ -49,15 +49,6 @@ pub struct UserConfig {
     /// 读取迁移后不再写回（见 `normalize_legacy_values`）。
     #[serde(default, skip_serializing, rename = "lastOjType")]
     pub legacy_last_oj_type: Option<String>,
-}
-
-impl Default for UserConfig {
-    fn default() -> Self {
-        Self {
-            last_username: String::new(),
-            legacy_last_oj_type: None,
-        }
-    }
 }
 
 // ── OJ 连接配置 ──

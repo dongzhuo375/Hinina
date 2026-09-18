@@ -12,7 +12,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `AuthService.login` | `(username, password, ojType?) => Promise<User>` | 调 bridge 登录，成功后把 User 写入 localStorage |
+| `AuthService.login` | `(username, password) => Promise<User>` | 调 bridge 登录（OJ 切换走显式 `switchOj`，与登录解耦），成功后把 User 写入 localStorage |
 | `AuthService.logout` | `() => Promise<void>` | `try { bridge.logout() } finally { localStorage.removeItem }` —— **后端登出失败也清本地缓存**（本地状态必须与"已登出"的 UI 语义一致），异常仍向上抛（由 authStore 决定吞掉） |
 | `AuthService.checkSession` | `() => Promise<User \| null>` | 查后端会话；有用户则刷新缓存；**IPC 异常吞掉返回 null**（启动路径不应因会话查询失败而中断） |
 | `AuthService.validateSession` | `() => Promise<SessionValidity>` | 透传后端三态；**IPC 自身异常（序列化/通道故障）归一为 `unknown` 而非 `invalid`** —— 调用方只面对三种业务语义，传输层故障不会把用户误踢回登录页 |
@@ -40,7 +40,7 @@ validateSession → bridge.validateSession → 'valid'|'invalid'|'unknown'；IPC
 
 设计要点：
 
-- **localStorage 缓存只是 UI 快照**：权威会话在后端（Rust 端 `sessions/{oj_type}.json` +
+- **localStorage 缓存只是 UI 快照**：权威会话在后端（Rust 端 `sessions/{oj_id}.json` +
   Provider token），缓存仅供展示层快速取用户名等；损坏即清除，不做修复。
 - 错误策略按调用场景分化：login 上抛（表单要展示原因）、logout 上抛但本地必清、
   checkSession/validateSession 吞传输异常（启动与预检路径不能被 IPC 故障打断）——

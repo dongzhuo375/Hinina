@@ -47,9 +47,9 @@
 - **select_contest(id)**：写入 `current_contest` → 发布 `Selected` 事件
 - **refresh**：清空比赛列表缓存 + 清空元信息内存缓存与磁盘 namespace → 调 `list_contests(0)` 跳过缓存检查
 - **load_contest_meta(contest_id)**：内存缓存命中 → 直接返回；否则磁盘缓存（`read` 按 `fetchedAt` 判 TTL）命中 → 回填内存并返回；仍未命中 → `ContestProvider::get_contest()`（失败 `e.context("获取比赛详情失败")`）→ **成功才**回写内存 + 磁盘
-- **get_rank(contest_id, query)**：`registry.get_contest()` → `ContestProvider::get_contest_rank()` → 失败先 `warn!` 再 `e.context("获取比赛榜单失败")` 上抛（**变体原样穿透**）；成功直接透传 `ContestRankPage`（records 前置副本的去重与真实人数推导由前端处理，Service 不加工）
+- **get_rank(contest_id, query)**：`registry.current_contest()` → `ContestProvider::get_contest_rank()` → 失败先 `warn!` 再 `e.context("获取比赛榜单失败")` 上抛（**变体原样穿透**）；成功直接透传 `ContestRankPage`（records 前置副本的去重与真实人数推导由前端处理，Service 不加工）
 - **load_contest_with_problems(id, password)**：`load_contest_meta()` 获取详情（命中缓存时零请求）→（私有赛校验密码）→ `list_contest_problems()` 获取题目（**每次实时**，失败 `e.context("获取比赛题目列表失败")`）→ `select_contest()` 自动选中 → 返回 `ContestBundle { contest, problems }`
-- **list_announcements(contest_id, page, limit)**：`registry.get_contest()` → `ContestProvider::list_announcements()` → 失败先 `warn!` 再 `e.context("获取比赛公告")` 上抛（**变体原样穿透**）；成功直接透传 `AnnouncementPage`，不缓存
+- **list_announcements(contest_id, page, limit)**：`registry.current_contest()` → `ContestProvider::list_announcements()` → 失败先 `warn!` 再 `e.context("获取比赛公告")` 上抛（**变体原样穿透**）；成功直接透传 `AnnouncementPage`，不缓存
 - **get_read_announcement_ids(cid, uid)**：`read_state_path()` 校验并拼路径 → `storage.read_to_string()` 失败（不存在/读取错误）按未读返回空列表 → JSON 解析失败 `warn!` 后降级空列表
 - **mark_announcements_read(cid, uid, ids)**：读既有已读列表（损坏时为空）→ 合并去重（保留首次出现顺序）→ `serde_json::to_string_pretty` 序列化（失败归 `AppError::Serialization`）→ `storage.write_string()` 落盘（失败 `e.context("写入公告已读状态失败")`）
 
@@ -62,7 +62,7 @@
 - **文件名净化是安全边界**：`{cid}_{uid}.json` 的两个组成部分分别来自前端入参与会话文件，`read_state_path` 拒绝空串、`/`、`\`、`:` 与 `..`，防止构造出存储根目录之外的写入路径。
 
 ## 测试
-`src-tauri/src/service/contest/tests/contest_tests.rs`（由 `mod.rs` 底部 `#[cfg(test)] #[path = "tests/contest_tests.rs"] mod tests;` 引用）以 `StubContestProvider` 锁定错误变体穿透与正常路径。Stub 用 `StubMode::{Ok, Auth, Network}` 让全部五个 trait 方法按同一模式响应（`Auth` 模拟 token 过期，即 HTTP 401 或 HOJ 体内 403「请您先登录」；`Network` 模拟断网），便于逐方法断言变体是否被保留；`mode` 可在测试中途切换（模拟「缓存命中后服务端开始 401」等时序），`calls` 计数用于断言缓存真的省掉了请求。服务经 `ProviderRegistryImpl::new(OJType::HOJ)` 注册后构造（`make_service` 基于独立临时目录注入 `Storage`），异步用例各自建 current-thread runtime 避免嵌套 panic。
+`src-tauri/src/service/contest/tests/contest_tests.rs`（由 `mod.rs` 底部 `#[cfg(test)] #[path = "tests/contest_tests.rs"] mod tests;` 引用）以 `StubContestProvider` 锁定错误变体穿透与正常路径。Stub 用 `StubMode::{Ok, Auth, Network}` 让全部五个 trait 方法按同一模式响应（`Auth` 模拟 token 过期，即 HTTP 401 或 HOJ 体内 403「请您先登录」；`Network` 模拟断网），便于逐方法断言变体是否被保留；`mode` 可在测试中途切换（模拟「缓存命中后服务端开始 401」等时序），`calls` 计数用于断言缓存真的省掉了请求。服务经 `ProviderRegistryImpl::new(OjId::new("HOJ"))` + `register(OjId, ProviderSet)`（只挂 contest 能力）注册后构造（`make_service` 基于独立临时目录注入 `Storage`），异步用例各自建 current-thread runtime 避免嵌套 panic。
 
 覆盖：`get_rank` 保留 `Auth` 变体且消息含「获取比赛榜单失败」环节名、`get_rank` 保留 `Network` 变体（不被改写成 `Contest`）、`list_contests` 保留 `Auth`、`load_contest_with_problems` 保留 `Auth`（进场时 401 必须触发会话守卫）、`list_announcements` 保留 `Auth` / `Network` 变体；成功路径 `get_rank` 返回分页（records/uid 正确）、`load_contest_with_problems` 返回 `ContestBundle` 并**自动选中比赛**（`current_contest_id()` 为 `Some("1011")`）、`list_announcements` 返回分页。
 

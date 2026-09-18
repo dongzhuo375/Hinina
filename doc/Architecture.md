@@ -42,7 +42,7 @@ Hinina/
         │   │   └── error_tests.rs        # AppError::context 测试（变体绝不被改写，前端 isAuthError 分流依赖它）
         │   ├── entity/
         │   │   ├── mod.rs
-        │   │   ├── config.rs            # AppConfig 实体（用户/OJ/编辑器/主题/布局配置 + contest_id）+ normalize_legacy_values（旧值一次性归一：C++→cpp、dark→light、0.45→0.48）
+        │   │   ├── config.rs            # AppConfig 实体（用户/OJ 实例清单(active+instances+contest_ref)/编辑器/主题/布局配置）+ normalize_legacy_values（旧值一次性归一：C++→cpp、dark→light、0.45→0.48、hojUrl/contestId/lastOjType→instances/contestRef/active）
         │   │   ├── user.rs               # User 实体
         │   │   ├── contest.rs            # Contest（+ rank_show_name/seal_rank/seal_rank_time/allow_end_submit/oi_rank_score_type）+ ContestProblem（+ color 气球色）
         │   │   ├── problem.rs            # Problem（+ languages 本题允许提交语言，HOJ 显示名）+ Sample 实体
@@ -59,8 +59,8 @@ Hinina/
         │   │   ├── contest.rs            # ContestProvider trait（+ list_contest_problems / get_contest_rank / list_announcements）
         │   │   ├── problem.rs            # ProblemProvider trait（+ get_user_problem_status）
         │   │   ├── submission.rs         # SubmissionProvider trait（+ list_contest_submissions / get_submission_detail / get_submission_cases）
-        │   │   ├── oj_type.rs            # OJType 枚举
-        │   │   └── registry.rs           # ProviderRegistry trait
+        │   │   ├── oj_id.rs             # OjId newtype（OJ 身份 = 数据而非枚举；session_file() 显式会话文件名契约，id 与历史枚举 Debug 输出一致）
+        │   │   └── registry.rs           # ProviderRegistry trait + ProviderSet（注册侧聚合 Option×4；查询侧按能力 current_xxx()，不提供聚合 current()）
         │   ├── event/
         │   │   ├── mod.rs
         │   │   ├── app_event.rs          # AppEvent + 6 个子事件枚举 + category() 映射
@@ -108,9 +108,11 @@ Hinina/
         │       └── tests/
         │           └── manager_tests.rs  # 工作区生命周期测试（含语言跨实例持久化）
         ├── adapter/
-        │   ├── mod.rs
+        │   ├── mod.rs                    # AdapterDeps（仅 infra 依赖，禁止塞 Service）+ AdapterFactory{id, build} + factories() 内建清单（接入新 OJ = 新子目录 + 此处一行）
+        │   ├── tests/
+        │   │   └── adapter_tests.rs      # 工厂防线测试（id 唯一 + 全部可构建 + 四能力齐备 + HOJ 会话文件名契约）
         │   ├── hoj/
-        │   │   ├── mod.rs                # HOJAdapter：实现 4 个 Provider trait + get/post_json_authed（共用 handle_token_rotation 做 Refresh-Token 轮换）
+        │   │   ├── mod.rs                # HOJAdapter：ID 常量 + FACTORY 工厂 + 实现 4 个 Provider trait + get/post_json_authed（共用 handle_token_rotation 做 Refresh-Token 轮换）
         │   │   │                         #   + parse_hoj_json（全部响应的唯一解析入口：去 null → 识别体内鉴权失败 → 类型化解析）
         │   │   │                         #   + session_validity_from_response（会话三态判据，网络异常绝不可折成「已失效」）
         │   │   │                         #   + 公告/提交历史/提交详情/测试点四端点（get-contest-announcement、contest-submissions、get-submission-detail 完整映射、get-all-case-result）
@@ -141,13 +143,15 @@ Hinina/
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
         │   ├── fs_plugin_repo.rs         # FsPluginRepository（骨架）
-        │   ├── provider_registry_impl.rs # ProviderRegistryImpl
+        │   ├── provider_registry_impl.rs # ProviderRegistryImpl（单表 HashMap<OjId, ProviderSet> + capability() 能力取件帮手）
         │   └── tests/
         │       ├── storage_tests.rs      # Storage 单元测试
         │       ├── http_tests.rs         # HttpClient 单元测试（401→Auth、403/5xx→Network、退避延迟、classify_status 重试判据、with_timeout 构造）
         │       ├── logger_tests.rs       # Logger 文件输出测试（落盘/追加/超限截断）
         │       ├── fs_workspace_repo_tests.rs  # FsWorkspaceRepository 单元测试
-        │       └── fs_config_repo_tests.rs     # FsConfigRepository 单元测试
+        │       ├── fs_config_repo_tests.rs     # FsConfigRepository 单元测试
+        │       ├── provider_registry_impl_tests.rs # 注册表查询侧契约（未注册/缺能力→ProviderNotFound、覆盖注册、active 规整）
+        │       └── cache_tests.rs        # 缓存原语测试（TTL/容量/复活回归/磁盘往返）
         ├── plugin/
         │   ├── mod.rs
         │   ├── host/
@@ -169,8 +173,9 @@ Hinina/
         │       └── mod.rs
         └── commands/                     # Tauri Command 薄封装
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
-            ├── auth_cmd.rs               # login / logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
-            ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest / get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
+            ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
+            ├── oj_cmd.rs                 # switch_oj（显式切换：校验已注册 → 切 Registry → 持久化 oj.active → 发布 OJSwitched）
+            ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest（读 oj.contest_ref，不透明字符串引用）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
             ├── problem_cmd.rs            # get_problem / list_problems / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
             ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
@@ -213,7 +218,7 @@ src/
 │   ├── SubmissionsView.vue               # 评测页（筛选工具条 + 全场提交表格 + 分页，onlyMine 后端强制；?problem= 自动预筛；非终态行 5s±1s 温和刷新）
 │   ├── SubmissionDetailView.vue          # 提交详情页（判定横幅 + CE 面板 + 测试点表格/子任务分组 + Monaco 只读代码区，评测中轮询至终态）
 │   ├── AnnouncementsView.vue             # 公告页（浅色卡片 feed：长文折叠 + 未读圆点，进入即全部已读）
-│   └── SettingsView.vue                  # 设置页（OJ/编辑器/布局/主题置灰/关于 五分组，读改写 AppConfig + 生效性提示）
+│   └── SettingsView.vue                  # 设置页（OJ（当前 OJ 下拉=显式 switch_oj + 实例地址 + 比赛 ID/引用）/编辑器/布局/主题置灰/关于 五分组，读改写 AppConfig + 生效性提示）
 ├── components/
 │   ├── layout/
 │   │   ├── TopBar.vue                    # 顶栏（拖拽区 + 窗口控制 + 状态徽章 + 倒计时胶囊 + 比赛简介抽屉 + 用户 pill）
@@ -347,6 +352,10 @@ src/
 - **错误变体是分流依据，后端不得改写**：前端 `isAuthError`（`variant === 'Auth'`）与 `stores/sessionGuard.ts` 的会话失效兜底完全依赖变体。补上下文一律用 `AppError::context()`（保留变体，只在消息前拼环节名），**禁止** `AppError::Network(format!("xx 请求失败: {}", e))` 这类重新包装 —— 它会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」自相矛盾的嵌套消息，把 DTO 问题当断网查，还会让 401 不再触发登出。**Service 层传播 Provider 错误同样适用此约定**（`contest` / `problem` / `submission` / `auth` 全部用 `e.context("…")`）：`get_rank` 是全场最高频的认证调用（每 10s 一次），变体被改写会让 token 过期时榜单静默 stale、提交只弹一条文案、选手永远回不到登录页
 - **OJ 响应解析归 Adapter，infra 只传字节**：`infra/http.rs` 只返回原始响应体与响应头（含状态码判定与 5xx 退避重试），不做反序列化；OJ 特有的响应归一化在 Adapter 的唯一入口完成。HOJ 侧有两个必须处理的协议事实：① 对未设置字段返回 `null` 而非省略（实测 `get-contest-list` 的 `sealRank`/`rankShowName`/`count`/`now` 全为 null），而 serde 的 `#[serde(default)]` **只在字段缺失时生效**，显式 null 会让整个响应解析失败 → 解析前统一 `strip_nulls`（`false`/`0`/`""` 不是 null，必须保留，否则封榜、打星、零分语义会被抹掉）；② 鉴权失败放在**响应体的 status**（HTTP 仍是 200，实测匿名访问 `get-contest-problem` 返回 `{"status":403,"msg":"请您先登录！"}`）→ 必须翻译成 `AppError::Auth`，且 403 要保守判定（仅当消息指向登录/凭证时才算会话失效，否则「私有赛未注册」会把已登录选手误踢回登录页）
 - **HTTP 401 由 infra 映射为 `Auth` 变体**：401 的标准语义就是「未认证」，属 HTTP 通用语义而非 OJ 私有约定，故由 `infra/http.rs` 的 `status_error` 承担；**403 保持 `Network`**（可能是业务性无权访问）。这条映射是会话校验能成立的前提 —— `get_json_authed` 遇到 401 时若仍归为 `Network`，`session_validity_from_response` 会把它当「无法判定」上抛，导致 token 真正过期时反而永不登出。实测 HOJ 两种报法都存在：`get-user-auth-info` 走 HTTP 401，`get-contest-problem` 走 HTTP 200 + 体内 403，两条路径都必须认- **真实响应夹具**：`adapter/hoj/tests/fixtures/contest_list_anon.json` 取自真实接口、仅脱敏自由文本，完整保留键名与 null 分布；配套一条正向测试（真实响应可解析）与一条反向测试（不去 null 必然失败），防止后来者把 `strip_nulls` 当冗余删掉
+- **OJ 身份与配置是数据，不是编译期常量**：`OjId(String)` 取代闭集枚举 `OJType`（接一个新 OJ 不再要求修改 Domain）；会话文件名 = `sessions/{id}.json` 显式契约（内建 id 与历史枚举 Debug 输出一致，`sessions/HOJ.json` 零迁移，有测试锁定）；`OJSwitched` 事件载荷为可序列化字符串。失去编译期穷尽检查的三道替代防线：启动时校验 active 已注册（未注册 warn + 回退 HOJ）、查询未命中返回 `ProviderNotFound`、`adapter/tests` 断言 `factories()` id 唯一且全部可构建
+- **注册侧聚合、查询侧按能力**：一个 OJ 的能力集合是 `ProviderSet`（字段 Option×4 —— 保住「新 Adapter 可先只实现部分接口」的扩展路径，缺能力报 `ProviderNotFound` 而非注册失败），组合根对每个 OJ 一次 `register(id, set)`；Service 查询只拿单项能力（`current_contest()?` 等一行转发），**禁止提供返回聚合体的 `current()`** —— 那会让 Service 拿到它不需要的三个能力，接口隔离从接口层面退化成约定层面
+- **`AdapterDeps` 只准 infra 依赖**：适配器工厂构造签名只接收 http_client / event_bus / storage，**禁止把 Service 塞进 `AdapterDeps`**（与「插件只能访问 `plugin/api`、禁止直调内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界彻底糊掉）。`AdapterFactory { id, build }` 的形状即 v1.0 插件 manifest 的雏形：将来把编译期工厂清单换成运行时扫描插件目录，上层（registry / context / Service）不用再改
+- **接入新 OJ = 1 个子目录 + `factories()` 一行 + `oj.instances` 一条配置**：`OjConfig` 按 `OjInstance{ id, baseUrl, enabled, options }` 实例清单组织（`options` 刻意弱类型 Map —— 强类型枚举会让「新 OJ 要改 core」原样复活）；`contest_ref` 是**不透明字符串引用**（HOJ 数字串 / 其它 OJ 任意资源 ID，装得下 Hydro 的 hex ObjectId），空串 = 未配置；旧格式（hojUrl / contestId / lastOjType）经 serde 过渡字段在 `normalize_legacy_values` 一次性迁移、永不写回。OJ 切换走显式 `switch_oj` 命令（校验已注册 → 切 Registry → 持久化 `oj.active` → 发布 `OJSwitched`），**不是 login 的副作用**
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询的**节拍与超时唯一归属前端** `submissionStore`（createPoller 驱动，终态判据见 `utils/submission.ts`，deadline 兜底），后端 `get_judgement` 是单次查询、无内层循环 —— 双层轮询会让前端抖动沦为装饰、`stopPolling` 停不掉在途后端循环；View 只表达提交意图
 - **比赛工作台外壳**：`ContestLayout` 承载 TopBar + ActivityBar + `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；窗口拖拽与窗口控制只在 TopBar（登录页由 `App.vue` 提供兜底窗口条）。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
 - **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：

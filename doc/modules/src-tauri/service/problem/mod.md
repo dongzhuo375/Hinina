@@ -38,7 +38,7 @@
 ## 逻辑流程
 - **list_problems(contest_id)**：直接调 `ProblemProvider::list_problems()` 从远端拉取，不做本地缓存；失败 `warn!` + `e.context("获取题目列表失败")` 上抛（**变体原样穿透**）
 - **open_problem(contest_id, problem_id, cache_enabled)**：`load_problem_statement`（内存 → 磁盘 → 网络，命中即回填；`cache_enabled=false` 直连）→ 发布 `ProblemEvent::Opened` → 调用方通过事件驱动 WorkspaceManager 创建或切换工作区。**只缓存成功结果**：Provider 错误原样上抛，不入缓存
-- **get_user_problem_status(contest_id, problem_ids)**：空列表短路 → `registry.get_problem()` → `ProblemProvider::get_user_problem_status()` → 失败 `e.context("获取用户题目状态失败")`，变体不改写
+- **get_user_problem_status(contest_id, problem_ids)**：空列表短路 → `registry.current_problem()` → `ProblemProvider::get_user_problem_status()` → 失败 `e.context("获取用户题目状态失败")`，变体不改写
 - **load_problem_limits(contest_id, display_ids)**：
 
 ```

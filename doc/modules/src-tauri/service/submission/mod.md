@@ -31,10 +31,10 @@
 
 ## 逻辑流程
 - **submit**：调 `SubmissionProvider::submit()`（失败 `warn!` + `e.context("提交失败")`，变体不改写）→ 发布 `SubmissionEvent::Created { submission_id }` → 返回 submission_id
-- **get_judgement**：`registry.get_submission()` → 单次调 `provider.get_judgement(id)`（失败 `warn!` + `e.context("评测查询失败")` 上抛，变体穿透）→ 按状态分流：
+- **get_judgement**：`registry.current_submission()` → 单次调 `provider.get_judgement(id)`（失败 `warn!` + `e.context("评测查询失败")` 上抛，变体穿透）→ 按状态分流：
   - 终态（非 `Pending`/`Compiling`/`Running`）→ 发布 `Judged { submission_id, result }` → 返回结果
   - 非终态 → 不发事件，原样透传结果（Provider 的 `get_judgement` 原样透传非终态，排队中为 `Pending`），由前端 poller 决定是否继续下一拍
-- **list_contest_submissions / get_submission_detail / get_submission_cases**：`registry.get_submission()` → 调 Provider 同名方法 → 失败 `warn!` + `e.context(环节名)` 上抛（**变体原样穿透**）→ 成功透传实体。列表查询不缓存（提交状态随时在变，刷新节奏由前端控制）；详情与测试点按终态缓存（见下）
+- **list_contest_submissions / get_submission_detail / get_submission_cases**：`registry.current_submission()` → 调 Provider 同名方法 → 失败 `warn!` + `e.context(环节名)` 上抛（**变体原样穿透**）→ 成功透传实体。列表查询不缓存（提交状态随时在变，刷新节奏由前端控制）；详情与测试点按终态缓存（见下）
 - **get_submission_detail**：命中 `detail_cache` → 直接返回（零请求）；未命中 → 调 Provider → **仅当 `status.is_terminal()`** 时写入 `detail_cache` 并留下 `terminal_marks` 标记
 - **get_submission_cases**：命中 `cases_cache` → 直接返回；未命中 → 调 Provider → **仅当 `terminal_marks` 存在该 submit_id** 时写入 `cases_cache`
 

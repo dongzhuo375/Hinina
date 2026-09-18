@@ -1,33 +1,33 @@
 # provider_registry_impl
 
 ## 职责
-`ProviderRegistry` trait 的默认实现，通过 `HashMap<RwLock>` 按 `OJType` 管理四类 Provider（Auth、Contest、Problem、Submission）的注册与查找，并维护当前选中的 OJ。
+`ProviderRegistry` trait 的默认实现，以单表 `HashMap<OjId, ProviderSet>`（取代旧的 4 个能力分表）管理所有 OJ 的 Provider 能力集合，并维护当前选中的 OJ。注册哪些 OJ 是运行期数据，接入新 OJ 不需要修改本文件。
 
 ## 核心类型/函数
-- **`ProviderRegistryImpl`** — Provider 注册中心实现 struct，含 4 个 `RwLock<HashMap<OJType, Arc<dyn Provider>>>` 和当前 OJType
-- **`ProviderRegistryImpl::new(default_oj: OJType)`** — 构造函数，初始化空 HashMap 并设置默认 OJ
-- **`register_auth / register_contest / register_problem / register_submission`** — 注册各类 Provider
-- **`get_auth / get_contest / get_problem / get_submission`** — 按 OJType 查找 Provider，不存在返回 `AppError::ProviderNotFound`
-- **`current_oj()` / `set_current_oj(oj_type)`** — 读写当前激活的 OJType
-- **`list_available()`** — 列出所有已注册 AuthProvider 的 OJType
+- **`ProviderRegistryImpl`** — Provider 注册中心实现 struct，含 `providers: RwLock<HashMap<OjId, ProviderSet>>` 与 `current: RwLock<OjId>`
+- **`ProviderRegistryImpl::new(default_oj: OjId)`** — 构造函数，初始化空 HashMap 并设置默认当前 OJ
+- **`capability<T, F>(&self, pick: F) -> AppResult<Arc<T>>`**（私有帮手）— 按能力取当前 OJ 的 Provider，四个 `current_xxx` 共用：取 `current_id()` → 读锁查单表（未注册 → `ProviderNotFound`「OJ {} 未注册」）→ `pick(set)` 克隆（该能力为 `None` → `ProviderNotFound`「OJ {} 未提供该能力」）
+- **`register(oj_id, set)`** — 获取写锁，将 `(OjId, ProviderSet)` 插入单表（同 id 二次注册为覆盖）
+- **`current_auth / current_contest / current_problem / current_submission`** — 分别转调 `capability(|set| &set.xxx)`
+- **`current_id()` / `set_current(oj_id)`** — 读写当前 OJ；`current_id` 锁中毒时 `into_inner` 取回内部数据（注册表进程级单例，中毒即全局异常，不静默回退）
+- **`list_available()`** — 以 providers 单表 key 集合为准（注册过 `ProviderSet` 即视为可用 OJ）
 
 ## 直接依赖
 - `std::collections::HashMap`
 - `std::sync::{Arc, RwLock}`
 - `core::error::{AppError, AppResult}`
-- `core::provider::auth::AuthProvider`
-- `core::provider::contest::ContestProvider`
-- `core::provider::oj_type::OJType`
-- `core::provider::problem::ProblemProvider`
-- `core::provider::registry::ProviderRegistry`
-- `core::provider::submission::SubmissionProvider`
+- `core::provider::oj_id::OjId`
+- `core::provider::registry::{ProviderRegistry, ProviderSet}`
 
 ## 被依赖
-暂无（未被 infra 外部模块直接引用，预期由 `core::context` 在初始化时创建并通过 `ProviderRegistry` trait 注入）
+- `core::context`（`AppContext::init` 创建并通过 `ProviderRegistry` trait 注入）
 
 ## 逻辑流程
-1. **初始化**：`new(default_oj)` 创建 4 个空 HashMap 并设置 current OJType
-2. **注册**：`register_*` 方法获取写锁，将 `(OJType, Arc<dyn Provider>)` 插入对应 HashMap
-3. **查找**：`get_*` 方法获取读锁，按 OJType 查找 HashMap，命中返回克隆的 Arc，未命中返回 `AppError::ProviderNotFound`
-4. **切换 OJ**：`set_current_oj` 获取写锁更新 current OJType，`current_oj` 获取读锁返回当前值
-5. **列出可用 OJ**：`list_available` 以 AuthProvider 的 key 集合为准（注册过 AuthProvider 即视为可用 OJ）
+1. **初始化**：`new(default_oj)` 创建空 HashMap 并设置 current OjId
+2. **注册**：`register` 获取写锁，将 `(OjId, ProviderSet)` 插入单表
+3. **按能力查询**：`current_xxx` 经私有 `capability` 取当前 OJ 的对应能力；「未注册」与「已注册但缺该能力」均返回 `AppError::ProviderNotFound`
+4. **切换 OJ**：`set_current` 获取写锁更新 current；`current_id` 获取读锁返回当前值（中毒时 `into_inner`）
+5. **列出可用 OJ**：`list_available` 以单表 key 集合为准
+
+## 测试
+`src-tauri/src/infra/tests/provider_registry_impl_tests.rs`（由 `provider_registry_impl.rs` 底部 `#[cfg(test)] #[path = "tests/provider_registry_impl_tests.rs"] mod tests;` 引用）锁定查询侧契约：未注册时四种能力均 `ProviderNotFound` 且列表为空、部分实现（`ProviderSet::default`）是合法注册但缺能力报 `ProviderNotFound`、切换到未注册 OJ 同样 `ProviderNotFound`、同 id 二次注册覆盖与 `list_available` 反映注册、`current_id` / `set_current` 往返与 `OjId` 身份规整（trim）。

@@ -1,10 +1,11 @@
 # mod
 
 ## 职责
-HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、`SubmissionProvider` 四个 trait。
+HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、`SubmissionProvider` 四个 trait；并提供工厂 `HojFactory`（静态单例 `FACTORY`，`adapter::factories()` 清单成员）供组合根按配置实例构造。
 
 ## 核心类型/函数
 - `HOJAdapter` — 封装 `Arc<HttpClient>` + `base_url` + `RwLock<Option<String>>`（JWT token）+ `Arc<EventBus>`（凭证轮换事件发布）
+- `HOJAdapter::ID`（关联常量 `"HOJ"`）— HOJ 的 OJ 身份标识（会话文件名 = `sessions/{ID}.json`，值须与历史枚举 Debug 输出一致以兼容既有会话文件）
 - `HOJAdapter::new(http, base_url, event_bus)` — 构造；`base_url` 自动去尾斜杠
 - `api_url(path)` — 拼接完整 API URL
 - `parse_cid(contest_id) -> AppResult<i64>` — 比赛 ID 解析（HOJ 的 cid 是数字，Hinina 内部统一用字符串传递）。**非法 ID 必须报错而不是回退 0**：HOJ 以 `cid = 0` 表示「非比赛场景」，静默回退会让比赛中的提交落到练习题库——不计入榜单，选手在赛场上无从察觉。`get_contest_rank` / `get_user_problem_status` / `submit` 共用
@@ -40,6 +41,7 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
 - `SubmissionProvider::get_judgement(submit_id)` — `GET /api/get-submission-detail?submitId=`：轮询投影，经 `into_judgement_result` 映射为 `JudgementResult`。**非终态原样透传**（0→Pending、1→Running，不再折叠为 Running），与 `get_submission_detail` 的 `map_status` 输出一致 —— 同一排队提交在两处展示同一状态；前端终态判据 `isTerminalStatus` 以「非 Pending/Compiling/Running 即终态」收敛轮询，语义不受影响（后端 `SubmissionService::get_judgement` 单次查询同样按三态判非终态：非终态不发 `Judged` 事件、原样透传，是否继续轮询由前端 poller 决定）
 - `SubmissionProvider::get_submission_detail(submit_id)` — `GET /api/get-submission-detail?submitId=`：与 `get_judgement` 同一端点，但投影为完整实体 `SubmissionDetail`（含 code / errorMessage / judger），经 `into_submission_detail` 映射
 - `SubmissionProvider::get_submission_cases(submit_id)` — `GET /api/get-all-case-result?submitId=`：响应 `JudgeCaseVO` 的两个列表经 `types::lenient_case_list` 逐条宽松转换（单条测试点/单个分组形态异常只跳过该条，绝不让整个响应解析失败 —— 测试点面板降级展示好过整页报错），归一为 `SubmissionCases { cases, sub_tasks, mode }`
+- `HojFactory`（`impl AdapterFactory`，静态单例 `pub static FACTORY`）— HOJ 工厂（`adapter::factories()` 清单成员）：`id()` 返回 `HOJAdapter::ID`；`build(&deps, base_url)` 构造 `HOJAdapter` 后以 `ProviderSet::full` 包装四个 trait 实现 —— 注册侧聚合，组合根对每个 OJ 只见一行 `factory.build(&deps, base_url)`
 
 ## 关键实现约定
 - **登录密码**：HOJ 服务端对收到的密码自行 `SecureUtil.md5()` 后比对，客户端发送**明文密码**（不自行 MD5）。
@@ -60,7 +62,8 @@ HOJ (Hydro Online Judge) 适配器，实现 `AuthProvider`、`ContestProvider`�
 - `serde_json::Value` — 会话校验只关心 `ApiResponse` 的 `status`，不解析 `data`
 
 ## 被依赖
-- `core::context.rs` — AppContext::init() 创建并注册到 ProviderRegistry
+- `core::context.rs` — AppContext::init() 经 `HojFactory::build` 构造 `ProviderSet` 注册到 ProviderRegistry（active 未注册时的回退目标也用 `HOJAdapter::ID`）
+- `adapter::factories()` — 工厂清单引用 `hoj::FACTORY`
 
 ## 逻辑流程
 1. Service 调用 trait 方法（如 `login()`）
