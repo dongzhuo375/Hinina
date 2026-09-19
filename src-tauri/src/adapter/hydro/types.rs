@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 use serde_json::Value;
+use tracing::warn;
 
 use crate::core::entity::rank::{ContestRankPage, ContestRankRow, RankCell};
 use crate::core::entity::submission::JudgementStatus;
@@ -110,6 +111,34 @@ pub fn login_redirect_url(value: &Value) -> Option<String> {
         return Some(url.to_string());
     }
     None
+}
+
+/// 识别「域相关」的 JSON 化重定向：`{"url":"/d/..."}`。
+///
+/// Hydro 用重定向表达三类「这次请求不该在这里处理」：
+/// 1. 未登录 → `/login?redirect=...`（已由 [`login_redirect_url`] 翻成 `Auth`）；
+/// 2. **域不匹配** → 按 `Host` 反查出的域与路径里指定的域不一致时，重定向到
+///    「把路径域换成推断域」的地址（文档 §1.1 补充行为）；
+/// 3. **未加入域** → 重定向到 `/d/<域>/domain/join?...`。
+///
+/// 带 `Accept: application/json` 时它们一律表现为 **HTTP 200 + `{"url":"..."}`**。
+/// 不识别的话，这个对象会漏进 DTO 解析并报成「响应字段不匹配」—— 把「base_url 里的
+/// 域前缀不对」这种**配置问题**伪装成 DTO 问题，排障方向完全错。
+///
+/// 判定同样保守：只认**相对路径**且以 `/d/` 开头者。绝对 URL（文件下载签名链接）与
+/// `{"url":"/"}`（登出）都不在此列。变体取 `Unknown` 而非 `Auth`：这不是会话失效，
+/// 不该触发登出（前端 `sessionGuard` 只认 `Auth`）。
+pub fn domain_redirect_error(value: &Value) -> Option<AppError> {
+    let url = value.get("url")?.as_str()?;
+    if !url.starts_with("/d/") {
+        return None;
+    }
+    warn!(redirect = %url, "Hydro 返回域相关重定向");
+    Some(AppError::Unknown(format!(
+        "Hydro 重定向到 {}：base_url 里的域前缀可能与该部署不匹配（Host 已被绑定到另一个域），\
+         或当前账号需要先加入该域",
+        url
+    )))
 }
 
 /// 从响应头提取 `Set-Cookie: sid=<32 位随机串>` 中的会话 ID。

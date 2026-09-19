@@ -16,7 +16,7 @@
 | **D1** | `ContestProblem.cid: i64` 装不下 hex 比赛 ID | ✅ 已解决 | `cid` 改 `String` |
 | **D2** | `OjConfig.contest_id: i64` 同上 | ✅ 已解决（#20） | 换成 `contest_ref: String` |
 | **D3** | 前端无 OJ 入口 | ✅ 已解决 | 枚举选择器 + 按需注册 + 保存即建实例 |
-| **D4** | 无域名（`/d/:domainId`）配置通道 | ⏸ **待决断** | `OjInstance.options` 传不进适配器 |
+| **D4** | 无域名（`/d/:domainId`）配置通道 | ✅ 有零代码解法 | 域前缀写进 `baseUrl` 即可；仅 Host 绑定到别的域时需改代码 |
 | **D5** | `Problem` 无「题面格式」判别位 | 🔶 已知降级 | HTML 题面会按 Markdown 渲染 |
 | **D6** | JSON 无样例字段 | 🔶 已知降级 | `samples` 恒空，样例只在题面里 |
 | **D7** | 记录无提交时间 | ✅ 已吸收 | ObjectId 前 4 字节反推，回退 `judgeAt` |
@@ -34,8 +34,9 @@
 | **D19** | 三个 HOJ 专属字段在 Hydro 无来源 | ✅ 无需动作 | 填安全默认值 |
 | **D20** | 前端语言域缺 Bash / Haskell 映射 | 🔶 已知降级 | 高亮回退 C++、文件名回退 `main.txt` |
 
-**结论**：设计基本成立 —— 20 条差异里 **19 条已在适配层吸收或已按需修复**，**只剩 D4 需要决断**
-（D14 仅备案）。🔶 的 8 条属**协议本身不提供该能力**，建议在用户文档里明示边界，而不是继续改代码。
+**结论**：设计基本成立 —— 20 条差异里 **19 条已在适配层吸收或已按需修复**；**D4 有零代码解法**
+（把域前缀写进 `baseUrl`，见 §5），仅当目标部署的 Host 被绑定到另一个域时才需扩展工厂签名。
+🔶 的 8 条属**协议本身不提供该能力**，建议在用户文档里明示边界，而不是继续改代码。
 
 ---
 
@@ -150,26 +151,51 @@ Java + MyBatis-Plus + Redis，Hydro 是 Node + MongoDB）：
 
 ### D4. 无域名（`/d/:domainId`）配置通道 ⏸
 
-- **现象**：Hydro 是**多租户**的 —— 一个实例可挂多个「域」（独立的比赛/题目/用户空间）。文档给出三种域解析：
-  ① 系统域 `system` → `/p/1000`（省略前缀）；② 其它域 → `/d/:domainId/p/1000`（显式前缀）；
-  ③ 绑定了域名的域 → `/p/1000`（靠 `Host` 头反查）。适配器目前按**系统域**拼路径，因此
-  **② 会 404**（①③ 正常）。
-- **最可能踩到的场景**：校赛跑在**公共 Hydro 实例**上（如 `hydro.ac` 挂着很多学校域），比赛在
-  `https://hydro.ac/d/<学校>/contest/xxx` → 我们请求 `https://hydro.ac/contest/xxx` 会落到 system 域
-  → 找不到（404 / 空）。**自建 Hydro 且比赛在系统域则不受影响。**
-- **现状**：`OjInstance.options` 已能承载 `{"domain": "<学校>"}` 这类私有旋钮（弱类型 Map 是
-  `#20` 有意为之），但 `AdapterFactory::build(&self, deps, base_url)` **只把地址交给适配器**，
-  options 没有传递通道。
-- **可选补丁**（择一）：
-  ```rust
-  // ① 推荐：build 接收整个实例（形状也更贴近 v1.0 插件 manifest）
-  fn build(&self, deps: &AdapterDeps, instance: &OjInstance) -> ProviderSet;
-  // ② 或单独传 options
-  fn build(&self, deps: &AdapterDeps, base_url: &str, options: &Map<String, Value>) -> ProviderSet;
+> **重要修正（2026-09-19）**：**多数情况下不需要改代码** —— 把域前缀直接写进
+> `oj.instances[].baseUrl` 即可（见下方「配置层解法」）。原来的「必须扩展工厂签名」结论
+> 只适用于 Host 被绑定到另一个域的部署。
+
+- **现象**：Hydro 是**多租户**的，域解析有三条规则（文档 §1.1）：
+  ① 路径前缀 `/d/:domainId/` **优先级最高**（命中即剥离前缀并强制该域）；
+  ② 未命中时按 `Host` 头反查域；③ 都取不到则回退 `system` 域。
+  补充行为：**若 Host 反查出的域与路径域不一致 → 302 重定向到「把路径域换成推断域」的地址**；
+  带 `Accept: application/json` 时该 302 表现为 **HTTP 200 + `{"url":"/d/<推断域>/..."}`**。
+
+- **配置层解法（推荐，零代码）**：
+  ```json
+  { "oj": { "active": "Hydro",
+            "instances": [ { "id": "Hydro",
+                             "baseUrl": "https://hydro.ac/d/myschool",   // ← 域前缀直接写在地址里
+                             "enabled": true, "options": {} } ] } }
   ```
-  适配器侧改动很小（`url()` 加前缀 + 构造参数）；**风险主要在工厂签名（3 个 adapter + 组合根）**。
-- **决策所需信息**：**目标 Hydro 部署是公共实例（比赛在学校域下）还是自建（系统域）**。
-  前者必须做，后者可降为备案。
+  适配器拼 URL 是 `base_url + path`（路径一律以 `/` 开头）→ 得到
+  `https://hydro.ac/d/myschool/login`、`/d/myschool/contest/<tid>`，**正好匹配
+  `^\/d\/([^/]+)\//` 并带上尾部斜杠**；`AppConfig::validate` 也接受这种地址
+  （只要求 `http(s)://` + 非空无空白）。副作用还是正向的：题面里相对图片 URL 经
+  `activeOjBaseUrl` 改写后会指向该域下的正确路径。
+
+- **唯一会失败的前提**：**Host 被绑定到另一个域**（规则②与补充行为）→ 服务端把请求重定向到
+  推断域，我们拿到的不是数据而是 `{"url":"/d/<推断域>/..."}`。此时该用**该域自己的地址**
+  （若学校域绑定了专属域名，直接把它写进 `baseUrl`，连前缀都不用）。
+  为让这种情况**可诊断**，适配器已把这类响应翻译成明确错误（`types::domain_redirect_error`）：
+  「Hydro 重定向到 /d/xxx/...：base_url 里的域前缀可能与该部署不匹配（Host 已被绑定到另一个域），
+  或当前账号需要先加入该域」—— 而不是漏进 DTO 解析报「响应字段不匹配」。
+
+- **怎么验证**（一条 curl 即可）：
+  ```bash
+  curl -sS -H 'Accept: application/json' 'https://hydro.ac/d/myschool/p/1000'
+  # 返回题目 JSON → 配置层解法可用；返回 {"url":"/d/..."} → 该 Host 被绑定到别的域
+  ```
+
+- **仍需改代码的场景**（低优先）：同一份配置要在**多个域**之间切换（如赛前热身域与正赛域），
+  或希望 UI 里单独填「域」而不是把它塞进地址。那时才需要扩展
+  `AdapterFactory::build` 让 `OjInstance.options` 传进来：
+  ```rust
+  fn build(&self, deps: &AdapterDeps, instance: &OjInstance) -> ProviderSet;   // ① 推荐
+  fn build(&self, deps: &AdapterDeps, base_url: &str, options: &Map<String, Value>) -> ProviderSet; // ②
+  ```
+- **决策所需信息**：目标部署的 Host 是否被绑定到另一个域（用上面那条 curl 一试便知）。
+  不是的话本条**无需任何改动**。
 
 ### D14. `HttpClient` 的 Cookie jar 全局共享 ⏸（当前无实害）
 

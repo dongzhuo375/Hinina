@@ -608,3 +608,41 @@ fn user_brief_display_falls_back_to_uname() {
     let empty: UserBriefVO = serde_json::from_value(serde_json::json!({})).unwrap();
     assert_eq!(empty.display(), "");
 }
+
+// ── 域相关重定向（`{"url":"/d/..."}`）──
+//
+// 背景：Hydro 的域解析是「路径前缀 /d/:domainId/ 优先，但 Host 反查出的域与路径域
+// 不一致时 302」。带 Accept: application/json 时该重定向表现为 HTTP 200 +
+// `{"url":"/d/<推断域>/..."}`。若把它当普通响应漏进 DTO 解析，会报「响应字段不匹配」——
+// 把「base_url 里的域前缀不对」这种配置问题伪装成 DTO 问题。
+//
+// 这类重定向同时还有第二种来源：未加入域 → `/d/<域>/domain/join?...`（业务问题）。
+// 两者无法从响应区分，故错误消息如实列出两种可能，且**不能**用 Auth 变体
+// （那会触发前端登出，把「域不对」误判成会话失效）。
+
+#[test]
+fn domain_redirect_is_translated_to_actionable_error() {
+    let value = serde_json::json!({ "url": "/d/system/contest/64f0c0f0f0f0f0f0f0f0f0f0" });
+    let err = domain_redirect_error(&value).expect("应识别为域相关重定向");
+    match err {
+        AppError::Unknown(msg) => {
+            assert!(msg.contains("/d/system/"), "应保留目标地址供定位: {}", msg);
+            assert!(msg.contains("域前缀"), "应点明可能原因: {}", msg);
+        }
+        other => panic!("应为 Unknown（不得触发登出），实际 {:?}", other),
+    }
+}
+
+#[test]
+fn domain_redirect_ignores_non_domain_urls() {
+    // 登出成功后的 {"url":"/"}：不是重定向问题，必须原样通过
+    assert!(domain_redirect_error(&serde_json::json!({ "url": "/" })).is_none());
+    // 文件下载的绝对签名链接：含 /d/ 但不以 /d/ 开头 → 不误判
+    assert!(domain_redirect_error(&serde_json::json!({
+        "url": "https://hydro.ac/d/system/file/1.in?sig=abc"
+    }))
+    .is_none());
+    // 登录重定向由 login_redirect_url 负责，此处不重复认领
+    assert!(domain_redirect_error(&serde_json::json!({ "url": "/login?redirect=%2Fp%2F1000" })).is_none());
+    assert!(domain_redirect_error(&serde_json::json!({})).is_none());
+}

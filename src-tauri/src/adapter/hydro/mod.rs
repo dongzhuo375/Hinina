@@ -159,6 +159,11 @@ impl HydroResponse {
                 redirect
             )));
         }
+        // 域相关重定向（`{"url":"/d/..."}`）：不识别会漏进 DTO 解析并报成
+        // 「响应字段不匹配」，把配置问题伪装成 DTO 问题
+        if let Some(err) = types::domain_redirect_error(&value) {
+            return Err(err);
+        }
         Ok(value)
     }
 
