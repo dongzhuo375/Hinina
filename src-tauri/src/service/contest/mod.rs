@@ -105,15 +105,16 @@ impl ContestService {
 
     /// 订阅 `OJSwitched`：清空全部按 contest_id 键控的缓存。
     ///
-    /// 这些缓存的键**不含 OJ 维度**（不同 OJ 的同 cid 会撞号），切换后旧 OJ
-    /// 的数据不得命中新 OJ 的查询 —— 「切 OJ」因此是缓存失效路径之一
-    /// （与 TTL / 切比赛 / 登出 / 配置开关并列）。
+    /// 缓存键自带 **OJ 维度**（`{oj}/{contest_id}`），因此跨 OJ 撞号在结构上不可能
+    /// —— 「切 OJ」的清理只是空间回收，不承担正确性职责，故磁盘段可延迟执行
+    /// （内存段仍是同步的：它便宜且让当前会话立刻回到干净状态）。
     fn subscribe_oj_switched(
         event_bus: Arc<EventBus>,
         cache: Arc<RwLock<Option<ContestCache>>>,
         meta_cache: Arc<TtlCache<String, Contest>>,
         meta_disk: Arc<JsonDiskCache>,
     ) {
+        // 同步段：纯内存清理（µs 级，发布方（switch_oj）立即回到干净状态）
         event_bus.subscribe(
             EventCategory::System,
             Arc::new(move |event: &AppEvent| {
@@ -124,8 +125,19 @@ impl ContestService {
                     *c = None;
                 }
                 meta_cache.clear();
+                info!("OJ 已切换：清空比赛列表与元信息内存缓存");
+            }),
+        );
+
+        // 延迟段：磁盘清理（I/O，仅空间回收 —— 键已带 OJ 维度，延迟不影响正确性）
+        event_bus.subscribe_deferred(
+            EventCategory::System,
+            Arc::new(move |event: &AppEvent| {
+                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
+                    return;
+                };
                 let _ = meta_disk.clear_namespace();
-                info!("OJ 已切换：清空比赛列表与元信息缓存（键控不含 OJ 维度，防跨 OJ 撞号）");
+                debug!("OJ 已切换：清理比赛元信息磁盘缓存");
             }),
         );
     }
@@ -135,7 +147,8 @@ impl ContestService {
     /// 只缓存**成功结果**：Provider 错误（含 401/403）原样上抛，绝不入缓存 ——
     /// 否则会话失效会被缓存掩盖，前端 `sessionGuard` 拿不到 `Auth` 变体。
     async fn load_contest_meta(&self, contest_id: &str) -> AppResult<Contest> {
-        let key = contest_id.to_string();
+        // 键带 OJ 维度：跨 OJ 同 cid 不会互相命中（不依赖「切 OJ 时清理及时」）
+        let key = format!("{}/{}", self.registry.current_id(), contest_id);
 
         if let Some(contest) = self.meta_cache.get(&key) {
             debug!(cache = "contest_meta", contest_id = contest_id, hit = true, "命中比赛元信息内存缓存");
@@ -144,7 +157,7 @@ impl ContestService {
 
         if let Some(contest) = self
             .meta_disk
-            .read::<Contest>(contest_id, CONTEST_META_TTL)
+            .read::<Contest>(&key, CONTEST_META_TTL)
         {
             debug!(cache = "contest_meta", contest_id = contest_id, hit = true, "命中比赛元信息磁盘缓存");
             self.meta_cache.insert(key, contest.clone());
@@ -157,8 +170,8 @@ impl ContestService {
             e.context("获取比赛详情失败")
         })?;
 
-        self.meta_cache.insert(key, contest.clone());
-        self.meta_disk.write(contest_id, &contest);
+        self.meta_cache.insert(key.clone(), contest.clone());
+        self.meta_disk.write(&key, &contest);
         Ok(contest)
     }
 

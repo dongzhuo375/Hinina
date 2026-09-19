@@ -16,7 +16,7 @@
   - `async fn get_user_problem_status(&self, contest_id, problem_ids: &[String]) -> AppResult<HashMap<String, i32>>` — 批量查询当前用户提交状态（key=pid，`0=未提交 / 1=已AC / 2=尝试过`，未出现的题视为未提交）；空列表直接返回空 map，不发请求
   - `async fn load_problem_limits(&self, contest_id, display_ids: &[String]) -> AppResult<Vec<ProblemLimits>>` — 批量获取题目 limits（时间 ms / 内存 MB），带内存 + 磁盘双层缓存；返回顺序与入参一致，获取失败的题在结果中**缺失**
   - 内部：`fetch_limits()`（分批并发拉详情）、`limits_cache_path()` / `read_limits_cache()` / `write_limits_cache()`
-- **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `storage: Arc<Storage>`, `limits_cache: Arc<RwLock<HashMap<contest_id, HashMap<display_id, ProblemLimits>>>>`, `statement_cache: Arc<TtlCache<String, Problem>>`, `statement_disk: Arc<JsonDiskCache>`（Arc 包装是为了共享进 `OJSwitched` 订阅闭包，闭包不捕获 service/总线，无引用环）。构造时经 `subscribe_oj_switched` 订阅 `SystemEvent::OJSwitched`：清空题面与 limits 两层缓存 —— 键控（`{contest_id}/{display_id}`、`cache/problem_limits/{cid}.json`）不含 OJ 维度，跨 OJ 同 cid 会撞号，「切 OJ」因此是缓存失效路径之一；limits 磁盘目录带存在性守卫（与 `clear_namespace` 同款：目录不存在时不清理不告警，避免每次切换都打误导性 warn）
+- **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `storage: Arc<Storage>`, `limits_cache: Arc<RwLock<HashMap<{oj}/{contest_id}, HashMap<display_id, ProblemLimits>>>>`, `statement_cache: Arc<TtlCache<String, Problem>>`, `statement_disk: Arc<JsonDiskCache>`（Arc 包装是为了共享进 `OJSwitched` 订阅闭包，闭包不捕获 service/总线，无引用环）。**三层缓存的键都带 OJ 维度**（`{oj}/{cid}/{display_id}`、`{oj}/{cid}`、`cache/problem_limits/{oj}/{cid}.json`）—— 跨 OJ 撞号在结构上不可能，故「切 OJ」的清理只是空间回收：构造时经 `subscribe_oj_switched` 注册两个订阅，**内存段同步清**、**磁盘段延迟清**（`subscribe_deferred`，I/O 不阻塞发布方）；limits 磁盘目录带存在性守卫（与 `clear_namespace` 同款：目录不存在时不清理不告警，避免每次切换都打误导性 warn）
 
 ## 直接依赖
 - `std::collections::HashMap`
@@ -42,8 +42,8 @@
 - **load_problem_limits(contest_id, display_ids)**：
 
 ```
-1. 内存缓存 limits_cache[contest_id] 整表克隆
-2. 内存无该比赛任何记录 → 读磁盘 cache/problem_limits/{cid}.json
+1. 内存缓存 limits_cache[{oj}/{contest_id}] 整表克隆
+2. 内存无该比赛任何记录 → 读磁盘 cache/problem_limits/{oj}/{cid}.json
    （不存在/损坏返回空表，损坏文件会被后续回写覆盖）
 3. missing = display_ids 中未命中的项
    → fetch_limits：按 LIMITS_CONCURRENCY=4 分块，每块用 JoinSet 并发调

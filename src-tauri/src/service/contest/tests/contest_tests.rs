@@ -586,46 +586,87 @@ fn read_state_rejects_path_separators() {
 // ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
 
 #[test]
+fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
+    // 「延迟清理磁盘缓存」安全的前提：键带 OJ 维度 → 跨 OJ 结构上不可能命中
+    use crate::core::event::event_bus::EventBus;
+
+    let dir = std::env::temp_dir().join("hinina-test-contest-oj-scope");
+    let _ = std::fs::remove_dir_all(&dir);
+    let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    for id in ["HOJ", "QDUOJ"] {
+        registry.register(
+            OjId::new(id),
+            ProviderSet {
+                contest: Some(Arc::clone(&provider) as Arc<dyn ContestProvider>),
+                ..Default::default()
+            },
+        );
+    }
+    let service = ContestService::new(
+        Arc::clone(&registry),
+        Arc::new(EventBus::new()),
+        Arc::new(Storage::new(dir.clone())),
+    );
+
+    // HOJ：首拉 + 二次命中
+    block_on(service.load_contest_meta("7")).expect("HOJ 元信息失败");
+    assert_eq!(provider.meta_call_count(), 1);
+    block_on(service.load_contest_meta("7")).expect("HOJ 元信息二次失败");
+    assert_eq!(provider.meta_call_count(), 1, "同一 OJ 应命中缓存");
+
+    // 切 OJ：同一 cid 必须重新请求
+    registry.set_current(OjId::new("QDUOJ"));
+    block_on(service.load_contest_meta("7")).expect("换 OJ 后元信息失败");
+    assert_eq!(
+        provider.meta_call_count(),
+        2,
+        "跨 OJ 不得命中同一键（键缺 OJ 维度会让旧 OJ 的比赛元信息驱动新 OJ 查询）"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn oj_switched_clears_contest_scoped_caches() {
     use crate::core::event::app_event::{AppEvent, SystemEvent};
 
     let dir = std::env::temp_dir().join("hinina-test-contest-oj-switch");
     let _ = std::fs::remove_dir_all(&dir);
     let bus = Arc::new(EventBus::new());
+    let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            contest: Some(Arc::clone(&provider) as Arc<dyn ContestProvider>),
+            ..Default::default()
+        },
+    );
     let service = ContestService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
 
-    // 预置 OJ 域缓存：列表缓存 + 元信息内存缓存
+    // 预置三层缓存：列表（内存）+ 元信息（内存 + **磁盘**）。
+    // 磁盘条目必须真实落盘 —— 否则「目录不存在」的断言恒真，等于零覆盖
     *service.cache.write().unwrap() = Some(ContestCache {
         contests: vec![],
         fetched_at: Instant::now(),
     });
-    service.meta_cache.insert(
-        "7".into(),
-        Contest {
-            id: "7".into(),
-            title: "t".into(),
-            start_time: 0,
-            end_time: 0,
-            description: String::new(),
-            contest_type: 0,
-            status: 0,
-            auth: 0,
-            rank_show_name: String::new(),
-            seal_rank: false,
-            seal_rank_time: None,
-            allow_end_submit: false,
-            oi_rank_score_type: None,
-        },
-    );
-    assert!(!service.meta_cache.is_empty());
+    block_on(service.load_contest_meta("7")).expect("预置元信息失败");
+    let disk_entry = dir.join("cache").join("contest_meta").join("HOJ").join("7.json");
+    assert!(disk_entry.exists(), "预置失败：元信息磁盘缓存未落盘");
+    assert!(!service.meta_cache.is_empty(), "预置失败：元信息内存缓存为空");
 
     bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
 
     assert!(service.cache.read().unwrap().is_none(), "列表缓存应被清空");
     assert!(service.meta_cache.is_empty(), "元信息内存缓存应被清空");
-    // 磁盘命名空间整体移除（目录不存在 = 已清）
-    assert!(!dir.join("cache/contest_meta").exists());
+    // 磁盘段是延迟投递（I/O 不阻塞发布方）：等队列排空后再断言。
+    // 删掉 subscribe_deferred 注册后本断言必须失败 —— 这是延迟清理的有效回归覆盖
+    bus.flush_deferred();
+    assert!(
+        !dir.join("cache/contest_meta").exists(),
+        "磁盘元信息缓存应被延迟清理"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -115,6 +115,15 @@ impl SubmissionService {
         info!("已清空提交详情/测试点缓存");
     }
 
+    /// 提交缓存键：`{oj}/{submit_id}`。
+    ///
+    /// `submit_id` 是**各 OJ 自增的资源号**，不同 OJ 必然重号 —— 键带 OJ 维度后，
+    /// 跨 OJ 串号在结构上不可能（「切 OJ 时清缓存」因此只是让当前会话立刻干净，
+    /// 而不是正确性的唯一依赖）。
+    fn cache_key(&self, submit_id: &str) -> String {
+        format!("{}/{}", self.registry.current_id(), submit_id)
+    }
+
     /// 提交代码到 OJ。
     ///
     /// 返回 submission_id 供后续轮询使用。
@@ -220,7 +229,8 @@ impl SubmissionService {
     /// **仅终态结果入缓存**：评测中的详情会变（状态、耗时、内存、错误信息），
     /// 缓存它等于让界面停在「评测中」。命中缓存即零请求。
     pub async fn get_submission_detail(&self, submit_id: &str) -> AppResult<SubmissionDetail> {
-        if let Some(detail) = self.detail_cache.get(&submit_id.to_string()) {
+        let key = self.cache_key(submit_id);
+        if let Some(detail) = self.detail_cache.get(&key) {
             debug!(cache = "submission_detail", submit_id, hit = true, "命中提交详情缓存");
             return Ok(detail);
         }
@@ -237,9 +247,8 @@ impl SubmissionService {
 
         // 只缓存成功且已终结的结果（错误绝不入缓存）；同时留下终态标记供测试点缓存判定
         if detail.status.is_terminal() {
-            self.terminal_marks.insert(submit_id.to_string(), true);
-            self.detail_cache
-                .insert(submit_id.to_string(), detail.clone());
+            self.terminal_marks.insert(key.clone(), true);
+            self.detail_cache.insert(key, detail.clone());
         }
 
         Ok(detail)
@@ -252,7 +261,8 @@ impl SubmissionService {
     /// 再拉测试点；控制台条的失败测试点提示直接拉测试点、没有详情上下文，
     /// 此时**不缓存**（保持与改造前一致的请求数，而不是为判定终态多发一次详情请求）。
     pub async fn get_submission_cases(&self, submit_id: &str) -> AppResult<SubmissionCases> {
-        if let Some(cases) = self.cases_cache.get(&submit_id.to_string()) {
+        let key = self.cache_key(submit_id);
+        if let Some(cases) = self.cases_cache.get(&key) {
             debug!(cache = "submission_cases", submit_id, hit = true, "命中测试点缓存");
             return Ok(cases);
         }
@@ -267,8 +277,8 @@ impl SubmissionService {
                 e.context("获取测试点结果失败")
             })?;
 
-        if self.terminal_marks.get(&submit_id.to_string()).is_some() {
-            self.cases_cache.insert(submit_id.to_string(), cases.clone());
+        if self.terminal_marks.get(&key).is_some() {
+            self.cases_cache.insert(key, cases.clone());
         }
 
         Ok(cases)

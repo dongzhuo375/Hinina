@@ -52,7 +52,10 @@ pub struct ProblemService {
     registry: Arc<dyn ProviderRegistry>,
     event_bus: Arc<EventBus>,
     storage: Arc<Storage>,
-    /// 内存缓存：contest_id → (display_id → limits)
+    /// 内存缓存：`{oj}/{contest_id}` → (display_id → limits)
+    ///
+    /// 键同样带 OJ 维度（与题面/磁盘一致）：跨 OJ 不撞号，因此「切 OJ」的清理
+    /// 只是让当前会话回到干净状态，而不是正确性的唯一依赖。
     limits_cache: Arc<RwLock<HashMap<String, HashMap<String, ProblemLimits>>>>,
     /// 题面缓存（内存 + 磁盘）：`{contest_id}/{display_id}` → Problem
     statement_cache: Arc<TtlCache<String, Problem>>,
@@ -86,11 +89,12 @@ impl ProblemService {
         }
     }
 
-    /// 订阅 `OJSwitched`：清空题面与 limits 缓存（内存 + 磁盘）。
+    /// 订阅 `OJSwitched`：清空题面与 limits 缓存。
     ///
-    /// 键控（`{contest_id}/{display_id}`、`cache/problem_limits/{cid}.json`）
-    /// **不含 OJ 维度**，切换后旧 OJ 数据不得命中新 OJ 查询 —— 「切 OJ」
-    /// 因此是缓存失效路径之一（与 TTL / 切比赛 / 登出 / 配置开关并列）。
+    /// 缓存键自带 **OJ 维度**（`{oj}/{contest_id}/{display_id}`、
+    /// `cache/problem_limits/{oj}/{cid}.json`），跨 OJ 撞号在结构上不可能 ——
+    /// 「切 OJ」的清理只是空间回收，不承担正确性职责，故磁盘段可延迟执行
+    /// （内存段仍是同步的：便宜，且让当前会话立刻回到干净状态）。
     fn subscribe_oj_switched(
         event_bus: Arc<EventBus>,
         limits_cache: Arc<RwLock<HashMap<String, HashMap<String, ProblemLimits>>>>,
@@ -98,6 +102,7 @@ impl ProblemService {
         statement_disk: Arc<JsonDiskCache>,
         storage: Arc<Storage>,
     ) {
+        // 同步段：纯内存清理（µs 级）
         event_bus.subscribe(
             EventCategory::System,
             Arc::new(move |event: &AppEvent| {
@@ -108,6 +113,17 @@ impl ProblemService {
                     m.clear();
                 }
                 statement_cache.clear();
+                info!("OJ 已切换：清空题面与 limits 内存缓存");
+            }),
+        );
+
+        // 延迟段：磁盘清理（I/O，仅空间回收 —— 键已带 OJ 维度，延迟不影响正确性）
+        event_bus.subscribe_deferred(
+            EventCategory::System,
+            Arc::new(move |event: &AppEvent| {
+                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
+                    return;
+                };
                 let _ = statement_disk.clear_namespace();
                 // 与 clear_namespace 同款存在性守卫：目录不存在（从未缓存过
                 // limits 的常见情形）时 remove_all 会返回 NotFound，不告警
@@ -116,7 +132,7 @@ impl ProblemService {
                         warn!(error = %e, "OJ 切换后清理 limits 磁盘缓存失败");
                     }
                 }
-                info!("OJ 已切换：清空题面与 limits 缓存（键控不含 OJ 维度，防跨 OJ 撞号）");
+                debug!("OJ 已切换：清理题面与 limits 磁盘缓存");
             }),
         );
     }
@@ -172,7 +188,7 @@ impl ProblemService {
         problem_id: &str,
         cache_enabled: bool,
     ) -> AppResult<Problem> {
-        let key = statement_key(contest_id, problem_id);
+        let key = statement_key(self.registry.current_id().as_str(), contest_id, problem_id);
 
         if cache_enabled {
             if let Some(problem) = self.statement_cache.get(&key) {
@@ -254,12 +270,13 @@ impl ProblemService {
             return Ok(Vec::new());
         }
 
-        // 1. 内存缓存
+        // 1. 内存缓存（键带 OJ 维度，与磁盘同源）
+        let limits_key = self.limits_key(contest_id);
         let mut resolved: HashMap<String, ProblemLimits> = self
             .limits_cache
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .get(contest_id)
+            .get(&limits_key)
             .cloned()
             .unwrap_or_default();
 
@@ -305,7 +322,7 @@ impl ProblemService {
                 self.limits_cache
                     .write()
                     .unwrap_or_else(|e| e.into_inner())
-                    .insert(contest_id.to_string(), resolved.clone());
+                    .insert(limits_key, resolved.clone());
                 self.write_limits_cache(contest_id, &resolved);
             }
         }
@@ -366,8 +383,22 @@ impl ProblemService {
         (fetched, failures)
     }
 
+    /// limits 内存缓存键：`{oj}/{cid}`（与磁盘路径同源作用域）。
+    fn limits_key(&self, contest_id: &str) -> String {
+        format!("{}/{}", self.registry.current_id(), contest_id)
+    }
+
+    /// limits 磁盘缓存路径：`cache/problem_limits/{oj}/{cid}.json`。
+    ///
+    /// 带 OJ 维度（与题面键同源理由）：跨 OJ 同 cid 不撞号，因此「切 OJ」的
+    /// 磁盘清理只承担空间回收，可以延迟执行而不影响正确性。
     fn limits_cache_path(&self, contest_id: &str) -> String {
-        format!("{}/{}.json", LIMITS_CACHE_DIR, contest_id)
+        format!(
+            "{}/{}/{}.json",
+            LIMITS_CACHE_DIR,
+            self.registry.current_id(),
+            contest_id
+        )
     }
 
     /// 读取磁盘 limits 缓存；不存在或损坏时返回空（损坏文件会被后续回写覆盖）。
@@ -406,13 +437,14 @@ impl ProblemService {
     }
 }
 
-/// 题面缓存键：`{contest_id}/{display_id}`。
+/// 题面缓存键：`{oj}/{contest_id}/{display_id}`。
 ///
-/// 比赛维度隔离（同一 `display_id` 在不同比赛是不同题目），并让磁盘缓存
-/// 按比赛分目录；键的安全性（拒绝 `..` / 绝对路径）由 `JsonDiskCache::key_path`
-/// 统一把关，这里只负责拼装。
-fn statement_key(contest_id: &str, display_id: &str) -> String {
-    format!("{}/{}", contest_id, display_id)
+/// 三重作用域：**OJ**（跨 OJ 同 cid/pid 是不同服务端的不同数据）、比赛
+/// （同一 `display_id` 在不同比赛是不同题目）、题目；同时让磁盘缓存按目录分层。
+/// 键的安全性（拒绝 `..` / 绝对路径）由 `JsonDiskCache::key_path` 统一把关，
+/// 这里只负责拼装。
+fn statement_key(oj_id: &str, contest_id: &str, display_id: &str) -> String {
+    format!("{}/{}/{}", oj_id, contest_id, display_id)
 }
 
 #[cfg(test)]

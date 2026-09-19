@@ -148,6 +148,18 @@ where
 
 // ── 磁盘缓存（JSON + TTL） ──
 
+/// 磁盘缓存布局版本。
+///
+/// 布局变更（如键的作用域增加 OJ 维度）时递增：旧布局的条目**既不匹配新键、
+/// 也不会被 TTL 懒删除**（永不读取 → 永不触发过期删除），不主动清扫就是永久孤儿。
+const CACHE_LAYOUT_VERSION: u32 = 2;
+
+/// 布局标记文件名（**每个 namespace 一个**）。
+///
+/// 刻意不放在 `cache/` 根下：清扫是按 namespace 进行的，全局标记会被
+/// 「先构造的那个 namespace」抢先写入，导致其余 namespace 的旧条目永不清扫。
+const LAYOUT_MARKER_FILE: &str = ".layout-version";
+
 /// `cache/{namespace}/{key}.json` 形式的磁盘缓存。
 ///
 /// 条目结构 `{ fetchedAt, value }`：`fetchedAt` 落盘后跨重启仍可判定 TTL，
@@ -169,7 +181,13 @@ struct DiskEntry<T> {
 
 impl JsonDiskCache {
     /// 创建磁盘缓存（`namespace` 决定子目录，如 `problem_statement`）。
+    ///
+    /// 顺带做**一次性布局清扫**（best-effort）：标记文件的版本落后于
+    /// [`CACHE_LAYOUT_VERSION`] 时清空本 namespace —— 布局变更后旧条目既不会被
+    /// 读取也不会被 TTL 懒删除，不清理就是永久孤儿（见常量注释）。清扫失败则不写
+    /// 标记，下次启动重试。
     pub fn new(storage: Arc<Storage>, namespace: &'static str) -> Self {
+        purge_legacy_layout_if_needed(&storage, namespace);
         Self { storage, namespace }
     }
 
@@ -215,6 +233,18 @@ impl JsonDiskCache {
             return;
         }
 
+        // 首次写入时落地布局标记：标记存在 = 本 namespace 已是新布局，
+        // 后续启动不再清扫（构造时只清扫、不建目录，见 purge_legacy_layout_if_needed）
+        let marker = format!("{}/{}", self.namespace, LAYOUT_MARKER_FILE);
+        if !self.storage.exists(&marker) {
+            if let Err(e) =
+                self.storage
+                    .write_string(&marker, &CACHE_LAYOUT_VERSION.to_string())
+            {
+                warn!(namespace = self.namespace, error = %e, "写入缓存布局标记失败");
+            }
+        }
+
         let entry = DiskEntry {
             fetched_at: now_unix(),
             value,
@@ -238,6 +268,10 @@ impl JsonDiskCache {
     }
 
     /// 删除整个 namespace 目录（登出 / 换比赛等场景的粗粒度失效）。
+    ///
+    /// 调用方需自行判断是否可延迟：**键自带作用域**（如 `{oj}/{cid}`）时，
+    /// 清理只承担空间回收，可放到 `EventBus::subscribe_deferred` 的延迟段执行；
+    /// 若清理是正确性依赖，则必须同步完成。
     pub fn clear_namespace(&self) -> bool {
         if !self.storage.exists(self.namespace) {
             return false;
@@ -251,11 +285,13 @@ impl JsonDiskCache {
         }
     }
 
-    /// 把键映射为 `cache/{namespace}/{key}.json`。
-    ///
-    /// 键可含 `/` 以按作用域分目录（如 `{contest_id}/{display_id}`）；空键、
+    /// 把键映射为 `cache/{namespace}/{key}.json`。    ///
+    /// 键可含 `/` 以按作用域分目录（如 `{oj}/{contest_id}/{display_id}`）；空键、
     /// 绝对路径与含 `..` 的键一律拒绝（返回 `None`，即放弃缓存而非报错）——
     /// `Storage::resolve` 也会拒绝 `..`，这里是第二道防线。
+    ///
+    /// **作用域是正确性的一部分**：跨维度（OJ / 比赛 / 题目）可能撞号的缓存，
+    /// 必须把该维度编进键，而不是依赖「切换时清理」—— 清理可能延迟或失败。
     fn key_path(&self, key: &str) -> Option<String> {
         if key.is_empty() || key.starts_with('/') || key.starts_with('\\') || key.contains("..") {
             warn!(namespace = self.namespace, key = key, "非法缓存键，跳过磁盘缓存");
@@ -271,6 +307,39 @@ fn now_unix() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// 一次性布局清扫：本 namespace 的标记版本落后时清空该 namespace（best-effort）。
+///
+/// 失败路径刻意保守：**清扫失败就不写标记**，下次启动重试 —— 宁可多扫一次，
+/// 也不要把「未清扫」当成「已清扫」而永久留下孤儿。
+///
+/// 只清扫、**不创建目录**：标记由首次 [`JsonDiskCache::write`] 落地，从而保住
+/// 「没有数据就没有目录」这一可观测语义（关闭题面缓存时不应凭空多出目录）。
+/// 标记落在 namespace 目录内（见 [`LAYOUT_MARKER_FILE`] 注释）；`clear_namespace`
+/// 会连标记一起删掉，下次构造再扫一遍（此时目录本就空，是 no-op）。
+fn purge_legacy_layout_if_needed(storage: &Storage, namespace: &str) {
+    let marker = format!("{}/{}", namespace, LAYOUT_MARKER_FILE);
+    let recorded = storage
+        .read_to_string(&marker)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok());
+    if recorded == Some(CACHE_LAYOUT_VERSION) {
+        return;
+    }
+
+    if !storage.exists(namespace) {
+        return; // 无目录即无旧条目（标记也随目录一并消失，见 clear_namespace）
+    }
+    if let Err(e) = storage.remove_all(namespace) {
+        warn!(
+            namespace = namespace,
+            error = %e,
+            "布局清扫失败，下次启动重试"
+        );
+        return;
+    }
+    debug!(namespace = namespace, "已清扫旧布局缓存");
 }
 
 #[cfg(test)]

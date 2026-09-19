@@ -247,12 +247,54 @@ fn disk_cache_expires_by_fetched_at_and_deletes_file() {
 #[test]
 fn disk_cache_treats_corrupted_file_as_miss() {
     let storage = temp_storage("corrupt");
-    storage.write_string("sample_ns/1/A.json", "{ 这不是 JSON").expect("写入损坏文件");
-
+    // 先构造（落地布局标记），**再**写损坏文件 —— 反过来的话会被布局清扫删掉，
+    // 用例退化成「文件缺失」而非「文件损坏」
     let cache = JsonDiskCache::new(Arc::clone(&storage), "sample_ns");
+    storage
+        .write_string("sample_ns/1/A.json", "{ 这不是 JSON")
+        .expect("写入损坏文件");
+
     let loaded: Option<Sample> = cache.read("1/A", ms(60_000));
 
     assert_eq!(loaded, None);
+}
+
+#[test]
+fn disk_cache_purges_legacy_layout_once_per_namespace() {
+    let storage = temp_storage("legacy-purge");
+    // 模拟升级前落下的旧布局条目（键无 OJ 维度），且各 namespace 都没有布局标记
+    storage
+        .write_string("sample_ns/1/A.json", r#"{"fetchedAt":4102444800,"value":{"id":"old","text":"旧"}}"#)
+        .expect("写入旧布局条目");
+    storage
+        .write_string("other_ns/1/A.json", r#"{"fetchedAt":4102444800,"value":{"id":"old","text":"旧"}}"#)
+        .expect("写入另一 namespace 的旧布局条目");
+
+    // 首次构造：只清自己的 namespace（标记是按 namespace 记的，
+    // 否则「先构造者写标记」会让其余 namespace 的旧条目永不清扫）
+    let cache = JsonDiskCache::new(Arc::clone(&storage), "sample_ns");
+    assert!(!storage.exists("sample_ns/1/A.json"), "本 namespace 的旧条目应被清扫");
+    assert!(
+        storage.exists("other_ns/1/A.json"),
+        "不得越界清理别的 namespace（它会在自己构造时清扫）"
+    );
+
+    // 标记就位后，新写入的数据跨实例存活（不得每次启动都清）
+    cache.write("1/A", &Sample { id: "new".into(), text: "新".into() });
+    let reopened = JsonDiskCache::new(Arc::clone(&storage), "sample_ns");
+    let loaded: Option<Sample> = reopened.read("1/A", ms(60_000));
+    assert_eq!(
+        loaded.map(|s| s.id),
+        Some("new".into()),
+        "布局标记就位后不得再次清扫（否则跨重启缓存失效）"
+    );
+
+    // 另一 namespace 自己构造时清扫（验证「每个 namespace 各扫一次」）
+    JsonDiskCache::new(Arc::clone(&storage), "other_ns");
+    assert!(
+        !storage.exists("other_ns/1/A.json"),
+        "other_ns 在自己的构造时清扫"
+    );
 }
 
 #[test]
