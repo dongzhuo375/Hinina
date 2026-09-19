@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-模块级普通变量：`loadToken: number`（并发防护令牌）、`isLoadingPage: boolean`（加载进行中标记，供 focus 监听让位）。
+模块级普通变量：`loadToken: number`（并发防护令牌）、`isLoadingPage: boolean`（加载进行中标记，供 focus 监听让位）、`flushingToDisk: boolean`（落盘进行中标记，避免失焦与页面隐藏重复落盘）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
@@ -21,6 +21,8 @@
 | `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.updateConfig` 写回配置（下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
 | `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, workspaceStore.language, workspaceStore.code)`；轮询由 store 自动启动 |
 | `cursor` | ref | Monaco 光标位置（CodeEditor emit → 本视图 → EditorConsoleBar prop，单向数据流） |
+| `flushToDisk` | `(reason: string) => Promise<void>` | `workspaceStore.saveWorkspace()`（内部先推送在途改动再落盘）；带 `flushingToDisk` 去重，失败只 `log.error` 不打断使用 |
+| `onVisibilityChange` / `onWindowBlur` | `() => void` | 页面隐藏（`visibilitychange` → hidden）与窗口失焦（`blur`）时落盘；`onMounted` 注册、`onBeforeUnmount` 注销并**再落盘一次**（离开解题页） |
 | `editorPrefs` | `ref<EditorPrefs \| null>` | 编辑器偏好（CodeEditor `prefs-change` 上报，挂载读配置后 + 弹层每次改动后到达）；本视图只消费 `tabSize` 供状态行展示缩进宽度，**不重复读配置**（避免与弹层写入竞态） |
 | `viewError` | computed | `localError ?? problemStore.error`（本地编排错误优先） |
 
@@ -47,10 +49,12 @@ watch(displayId, load, { immediate: true })     // 挂载 + Tab 切题共用同�
 load(id):
   token = ++loadToken                            // 并发防护：只认最后一次加载
   1. workspaceStore.isDirty → saveWorkspace()    // 切题前先落盘（代码保留是工作区核心承诺）
-     失败不阻断切题，仅 log.error 记录           // 防抖同步大概率已写入文件
+     内部先推送在途防抖改动再落盘                // 「刚敲完就切题」也不会写进旧内容
+     失败不阻断切题，仅 log.error 记录
   2. ensureContestId()                           // contest 未加载则兜底拉取
   3. contestStore.problems 按 displayId 找 ContestProblem（找不到 → localError）
   4. workspaceStore.loadWorkspace(contestId, cp.problemId)   // 工作区按题目真实 ID(pid) 隔离
+     （内部先 flushPendingSync：加载会整体替换 code，不先推送就会丢最后一次编辑）
   5. problemStore.openProblem(contestId, id)                 // 题面详情按比赛内展示题号查询
   5.5 允许语言归位：题目 languages 非空时
       changeLanguage(resolveAllowedLanguage(当前语言, languages) ?? languages[0])
@@ -73,8 +77,11 @@ load(id):
   共享代码；题面按 `displayId` 查询——HOJ 比赛题目详情接口以展示题号为键。
 - **loadToken 而非取消请求**：IPC 无法中途取消，用令牌让过期结果静默丢弃，防止快速切题时
   旧题的题面/工作区覆盖新题（竞态）。
-- **切题前落盘失败不阻断**：代码保留优先靠 2s 防抖同步兜底，保存失败只记录——阻断切题
-  会让选手卡在坏页面上，比日志更伤。
+- **切题前落盘失败不阻断**：代码保留优先靠 2s 防抖推送（进后端内存）兜底，保存失败只记录——
+  阻断切题会让选手卡在坏页面上，比日志更伤。
+- **落盘时机由本视图编排**：切题（load 第 1 步）、窗口失焦、页面隐藏、离开解题页
+  （`onBeforeUnmount`）四处显式调用 `flushToDisk`；关窗由 `main.ts` 的关窗握手负责。
+  后端 auto-save 周期最长 300 秒，这些时刻若只依赖周期，进程退出或内存被替换就会丢改动。
 - 消费 focus 后清除 query（保留 params）：避免切题回来或刷新后反复抢焦点；编辑器未就绪时
   静默降级为不聚焦，但 query 仍清除，保证幂等。
 - 提交语言取 `workspaceStore.language`（乐观更新 + 后端持久化，见 workspaceStore 文档），

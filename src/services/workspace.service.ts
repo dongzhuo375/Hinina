@@ -34,6 +34,15 @@ export class WorkspaceService {
   }
 
   /**
+   * 订阅工作区落盘事件（后台 auto-save 由 Rust 触发，前端无从感知）。
+   */
+  async onWorkspaceSaved(
+    handler: (payload: workspaceBridge.WorkspaceSavedPayload) => void,
+  ): Promise<() => void> {
+    return workspaceBridge.onWorkspaceSaved(handler)
+  }
+
+  /**
    * 设置当前工作区的编程语言（后端立即持久化元数据）。
    */
   async setLanguage(language: string): Promise<Workspace> {

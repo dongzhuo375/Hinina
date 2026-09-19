@@ -32,7 +32,7 @@ Hinina/
     ├── capabilities/
     │   └── default.json                  # Tauri 2 默认权限集（文件/网络/窗口控制/拖拽）
     └── src/
-        ├── main.rs                       # Rust 入口点，9 步初始化序列
+        ├── main.rs                       # Rust 入口点，9 步初始化序列 + setup 装配工作区落盘事件桥（Saved/AutoSaveTriggered → 前端 workspace-saved）
         ├── lib.rs                        # 库根，公开模块树
         ├── core/
         │   ├── mod.rs                    # core 模块声明
@@ -104,7 +104,7 @@ Hinina/
         │   └── workspace/
         │       ├── mod.rs
         │       ├── error.rs              # WorkspaceError
-        │       ├── manager.rs            # WorkspaceManager：完整生命周期 + set_language/persist_meta（语言等元数据随保存落盘）
+        │       ├── manager.rs            # WorkspaceManager：完整生命周期 + set_language/persist_meta（语言等元数据随保存落盘）；落盘语义=debounce-to-memory（update_file 只写内存，落盘仅经 save() 与 auto-save；替换 current 前先落盘旧的；auto-save 以修订号判定能否清脏）
         │       └── tests/
         │           └── manager_tests.rs  # 工作区生命周期测试（含语言跨实例持久化）
         ├── adapter/
@@ -203,7 +203,7 @@ Hinina/
 
 ```
 src/
-├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配 + KaTeX 公式样式全局引入，字体本地打包不经 CDN）
+├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配 + 工作区落盘事件订阅 + 关窗前落盘握手 + KaTeX 公式样式全局引入，字体本地打包不经 CDN）
 ├── App.vue                               # 根组件（n-config-provider + n-dialog-provider）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
@@ -213,7 +213,7 @@ src/
 │   │                                     #   已登录且比赛未开始时留在本页等待，倒计时归零自动进入赛场
 │   ├── ContestLayout.vue                 # 比赛工作台外壳：TopBar + ActivityBar + <router-view> + StatusBar；比赛就绪后启动公告轮询（红点全页面鲜活）
 │   ├── ProblemSetView.vue                # 题目总览（统计条 + 卡片网格，limits 渐进填充，30s±5s 轮询；我的状态改为增量失效后按需重拉）
-│   ├── ProblemSolveView.vue              # 解题页（题面分节 ｜ 编辑器 + 控制台条，可拖拽分栏；splitRatio 读配置 + 拖拽回写）
+│   ├── ProblemSolveView.vue              # 解题页（题面分节 ｜ 编辑器 + 控制台条，可拖拽分栏；splitRatio 读配置 + 拖拽回写；切题/失焦/页面隐藏/离开页面时落盘工作区）
 │   ├── RankView.vue                      # 实时榜单（工具条 + 表格 + 分页，10s±2s 轮询、后台暂停、结束即停；打星/女生队全量快照模式）
 │   ├── SubmissionsView.vue               # 评测页（筛选工具条 + 全场提交表格 + 分页，onlyMine 后端强制；?problem= 自动预筛；非终态行 5s±1s 温和刷新）
 │   ├── SubmissionDetailView.vue          # 提交详情页（判定横幅 + CE 面板 + 测试点表格/子任务分组 + Monaco 只读代码区，评测中轮询至终态）
@@ -251,8 +251,8 @@ src/
 │   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页；用户操作路径查询去抖 in-flight 合并 + 3s memo，轮询与手动刷新不走去抖）
 │   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收；终态时触发 problemStore.invalidateMyStatus）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
 │   ├── announcementStore.ts              # 公告列表 + 客户端已读状态（unreadCount 红点数据源、markAllRead 乐观更新+失败回滚、60s±10s 轮询）
-│   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（语言权威值=HOJ 显示名，切换即时持久化；默认语言读配置；源文件名经 utils/language 派生）
-│   └── __tests__/                        # authStore / contestStore / rankStore / submissionStore / announcementStore .spec.ts（会话状态机、加载去重与 whenLoaded、榜单去重/轮询/全量模式、评测收敛轮询、公告未读语义）
+│   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（两级状态机：syncPending=未推送内存 / isDirty=未落盘；语言权威值=HOJ 显示名，切换即时持久化；源文件名经 utils/language 派生；落盘事件订阅安装器）
+│   └── __tests__/                        # authStore / contestStore / rankStore / submissionStore / announcementStore / workspaceStore .spec.ts（会话状态机、加载去重与 whenLoaded、榜单去重/轮询/全量模式、评测收敛轮询、公告未读语义、工作区落盘状态机与 flush 顺序）
 ├── services/
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
 │   ├── config.service.ts                 # 配置读写唯一入口（进程内缓存 + 兜底）+ updateConfig 读改写 + 派生参数（OJ 基址、轮询调度、编辑器偏好、默认语言归一、分栏比例）
@@ -262,7 +262,7 @@ src/
 │   ├── submission.service.ts             # 提交代码/轮询评测 + 提交历史/详情/测试点查询
 │   ├── announcement.service.ts           # 公告列表 + 已读集合组装（markRead 返回后端合并后的权威集合）
 │   ├── system.service.ts                 # 客户端存储信息（存储目录/日志路径/版本，设置页「关于」）
-│   ├── workspace.service.ts              # 工作区创建/保存/恢复/语言持久化
+│   ├── workspace.service.ts              # 工作区创建/保存/恢复/语言持久化 + 落盘事件订阅（onWorkspaceSaved）
 │   └── __tests__/                        # auth.service / config.service .spec.ts（本地缓存清理与三态归一契约、配置缓存/派生兜底/updateConfig 读改写）
 ├── bridge/
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
@@ -273,7 +273,7 @@ src/
 │   ├── submission.bridge.ts              # submit_code / get_judgement / list_contest_submissions / get_submission_detail / get_submission_cases
 │   ├── announcement.bridge.ts            # list_contest_announcements / get_read_announcement_ids / mark_announcements_read
 │   ├── system.bridge.ts                  # get_storage_info
-│   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile / setWorkspaceLanguage
+│   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile / setWorkspaceLanguage + onWorkspaceSaved（workspace-saved 事件订阅）
 │   ├── config.bridge.ts                  # get_config / update_config / reload_config
 │   └── __tests__/                        # index.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数）
 ├── types/
@@ -378,5 +378,6 @@ src/
 - **题目 limits 缓存**：列表接口不返回 limits，只能按题请求 `get-contest-problem-details`；`ProblemService::load_problem_limits` 做「内存 + 磁盘（`cache/problem_limits/{cid}.json`）」双层缓存、并发上限 4、部分失败跳过、全部失败才上抛；401/403 **不得静默回退默认值**（未注册私有赛必须让选手看见真因）。展示需标注语言倍率（题面是 C/C++ 基准，其它语言时间与内存 ×2）
 - **状态文案以接口返回为准**：评测状态直接用后端 `JudgementStatus` 原词（Accepted / Wrong Answer…），不强行缩写为 AC/WA；`get-user-problem-status` 的 0/1/2 映射为「未作答 / 已通过 / 尝试过」
 - **工作区语言必须落盘**：语言不属于任何代码文件，`update_workspace_file` 带不上它；`workspaceStore.changeLanguage` 乐观更新本地并调用 `set_workspace_language` 立即持久化元数据，否则切题或重启后退回默认语言，会把 Java 代码当 C++ 提交
+- **代码落盘语义 = debounce-to-memory**：编辑器改动经 2s 防抖推送到**后端内存**（`update_workspace_file` 不写盘），磁盘写入只有两条路径 —— 后台 auto-save 周期与显式 `save_workspace`。因此「自动保存间隔」真正决定落盘频率（旧实现的写透让该配置形同虚设），前端状态分两级：`syncPending`（未推内存）/ `isDirty`（未落盘）。三条配套硬约定：① **任何替换内存工作区的操作先落盘旧的**（`create` / `load` / `switch` 共用 `save_current_if_dirty`，前端 `loadWorkspace` 前先 `flushPendingSync`）；② **落盘时机由调用点编排**：切题 / 失焦 / 页面隐藏 / 离开解题页（`ProblemSolveView`）与关窗（`main.ts` 的 `onCloseRequested` 握手）—— auto-save 周期最长 300 秒，这些时刻只靠周期就会丢改动；③ **auto-save 以修订号判定能否清脏，且取快照与写盘整体在读锁内完成**（读锁与 `save()` / `update_file` 的写锁互斥 → 「旧快照的写」不可能落在「更新的写」之后；写失败或快照后有新改动时保留脏、不发布事件），否则「快照写盘」会被当成新内容已落盘，或旧内容覆盖回退后因工作区已 clean 而永不重写。前端「已自动备份」指示的唯一真相来源是后端 `workspace-saved` 事件（`main.rs` 事件桥下发，仅转发真正落盘的 `Saved` / `AutoSaveTriggered`）
 - **客户端缓存策略**（本轮落地，判据 = 数据可变性分层）：**下次看到之前不会变**的数据 → 缓存（比赛元信息 TTL 120s、题面 TTL 30min，均内存 + 磁盘；终态提交详情/测试点 TTL 2h，**仅内存**）；**只由我自己的动作改变**的数据 → 本地增量 + 失效重取（我的题目状态：提交终态时 `problemStore.invalidateMyStatus()`，总览页按需重拉，不再 30s 整表重拉）；**随时可能被别人改变**的数据 → 只轮询，最多做同查询去抖（榜单用户操作路径 in-flight 合并 + 3s memo；**轮询与手动刷新不走 memo**）。四条硬约定：① **缓存是优化不是正确性依赖** —— 读失败回退网络、写失败只 warn、解析损坏视为未命中；② **只缓存成功结果** —— 401/403 等错误永不入缓存，否则会话失效会被掩盖、`sessionGuard` 拿不到 `Auth` 变体；③ **键必须带作用域**（`contest_id` / `submit_id`），**用户域数据不落盘**且登出由 `auth_cmd::logout` 编排 `SubmissionService::clear_user_caches()` 清空；④ **失效路径五条**：TTL、切比赛（键隔离）、**切 OJ**（`OJSwitched` 事件：三个 Service 的缓存键不含 OJ 维度，跨 OJ 同 cid 会撞号，切换即清）、登出、配置开关（`oj.cacheProblemStatement`）。可观测性：命中走 `debug`（字段 `cache` / 实体 id / `hit`），淘汰与写失败走 `warn`。**明确不做**：榜单名次缓存（实时性即公平性）、评测中状态缓存、公告内容缓存、会话校验缓存、按 URL 的通用 HTTP 响应缓存（会连错误体与按 uid 定制的响应一起缓存）
 - **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）

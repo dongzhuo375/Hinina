@@ -624,7 +624,7 @@ onBeforeUnmount(() => {
                     </span>
                   </div>
                   <span class="mt-1 block text-xs text-[var(--text-muted)]">
-                    定时保存解题页代码，崩溃后可恢复
+                    定时保存解题页代码，崩溃后可恢复；关闭后仅在切题、失焦或关窗时落盘
                   </span>
                 </div>
 

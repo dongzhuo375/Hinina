@@ -5,11 +5,16 @@
 
 ## 核心类型/函数
 - `fn main()` — 程序入口：创建 Tokio runtime → 阻塞式调用 `AppContext::init()` → 以 `generate_handler!` 注册 33 个 Command → 启动 Tauri App
+- `const WORKSPACE_SAVED_EVENT: &str` — 工作区落盘事件的前端通道名（`"workspace-saved"`），与 `src/bridge/workspace.bridge.ts` 的 `listen` 对应
+- `fn install_workspace_event_bridge(app: &tauri::AppHandle)` — 订阅 `EventCategory::Workspace`，把 `WorkspaceEvent::Saved`（显式保存）与 `AutoSaveTriggered`（auto-save 成功）emit 到 webview（载荷 `{ workspaceId, auto }`）。仅转发这两种「内容确已落盘」的事件；`Loaded` / `Switched` 不转发（前端是发起方，无需回环）
 
 ## 直接依赖
 - `hinina_lib::commands`
 - `hinina_lib::core::context::AppContext`
-- `tauri`（隐式通过 `tauri::Builder` 等）
+- `hinina_lib::core::event::{app_event, event_bus, event_category}`（事件桥）
+- `tauri::{Emitter, Manager}`（`app.state::<AppContext>()` + `handle.emit`）
+- `serde_json`（事件载荷）
+- `tracing`（下发失败告警）
 - `tokio::runtime::Runtime`
 
 ## 被依赖
@@ -25,7 +30,9 @@
    实例注册全部内建 OJ，active 未注册回退 HOJ）→
    WorkspaceManager → 五个 Service → AppContext）
 3. `tauri::Builder::default().manage(ctx)` 注入 `AppContext` 到 State
-4. `.invoke_handler(tauri::generate_handler![...])` 注册全部 33 个 IPC Command
+4. `.setup(|app| { install_workspace_event_bridge(app.handle()); Ok(()) })` 装配工作区落盘事件桥
+   （`app.state::<AppContext>()` 取 EventBus 订阅，`handle.emit("workspace-saved", …)` 下发前端）
+5. `.invoke_handler(tauri::generate_handler![...])` 注册全部 33 个 IPC Command
    （**不是** `setup` 中手动注册，`commands::register_commands()` 不存在；
    commands/mod.rs 注释亦说明选用 generate_handler 以避免 setup 手动注册的兼容性问题）：
    - `auth_cmd`：login / logout / get_session / validate_session
@@ -36,4 +43,4 @@
    - `workspace_cmd`：load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / **set_workspace_language**
    - `config_cmd`：get_config / reload_config / update_config / **get_storage_info**
    - `theme_cmd`：get_theme / set_theme
-5. `.run(tauri::generate_context!())` 启动 Tauri 桌面应用
+6. `.run(tauri::generate_context!())` 启动 Tauri 桌面应用

@@ -55,11 +55,12 @@ fn start_auto_save_if_needed(
     }
 }
 
-/// 持久化当前工作区的脏文件到磁盘。
+/// 持久化当前工作区到磁盘（脏时全量写入文件 + 元数据）。
 ///
 /// 前端 invoke 签名: `save_workspace`
 ///
-/// 仅保存已修改（dirty）的文件，发布 `WorkspaceEvent::Saved`。
+/// 未脏时直接返回且不发布事件；成功落盘时发布 `WorkspaceEvent::Saved`
+/// （经 `main.rs` 的事件桥转为前端的 `workspace-saved`，驱动「已自动备份」指示）。
 #[tauri::command]
 pub async fn save_workspace(ctx: State<'_, AppContext>) -> AppResult<()> {
     let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
@@ -108,8 +109,9 @@ pub async fn current_workspace(ctx: State<'_, AppContext>) -> AppResult<Option<W
 ///
 /// 前端 invoke 签名: `update_workspace_file`({ fileName, content })
 ///
-/// 仅更新内存中的文件内容，不立即持久化到磁盘。
-/// 持久化由 auto-save 或显式 save_workspace 负责。
+/// **只更新内存中的文件内容，不落盘**（前端 2 秒防抖的落点）：磁盘写入由
+/// auto-save 周期与显式 `save_workspace`（切题 / 失焦 / 关窗时前端编排）负责，
+/// 「自动保存间隔」因此真正决定落盘频率。
 #[tauri::command]
 pub async fn update_workspace_file(
     ctx: State<'_, AppContext>,

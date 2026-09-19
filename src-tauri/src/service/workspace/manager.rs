@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -42,6 +43,11 @@ pub struct WorkspaceManager {
     event_bus: Arc<EventBus>,
     /// 当前活动工作区（RwLock 内直接持有 Workspace，支持 auto-save 共享和可变访问）
     current: Arc<RwLock<Option<Workspace>>>,
+    /// 内容修订号：每次 `update_file` 在**写锁内**递增。
+    ///
+    /// auto-save 取快照时一并记录修订号，写盘后仅当修订号未变才 `mark_clean` ——
+    /// 否则「快照写盘」会被误当成本次编辑已落盘，最新内容将停留在内存直到下一次编辑。
+    revision: Arc<AtomicU64>,
     /// 自动保存的 JoinHandle
     auto_save_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -57,6 +63,24 @@ struct WorkspaceMeta {
     updated_at: i64,
 }
 
+/// auto-save 写盘后能否把工作区标记为 clean 的判据。
+///
+/// 两个条件都必须成立：**仍是同一个工作区**（切题后不得清新工作区的脏标记）
+/// 与**修订号未变**（快照之后没有新改动）。后者是「快照写盘 ≠ 本次编辑已落盘」
+/// 的唯一防线：少了它，写盘期间/之后到来的改动会被静默吞掉。
+///
+/// 独立成纯函数是为了**确定性可测**：集成测试里「快照之后到来新改动」的窗口由
+/// 锁竞争决定（写盘持读锁，无法在同线程注入；跨线程注入则胜负不定，实测事件数
+/// 在 1/2 间浮动），因此判据的削弱只能由本函数的单测稳定证伪。
+fn can_mark_clean(
+    ws_id: &str,
+    current_id: &str,
+    snapshot_revision: u64,
+    current_revision: u64,
+) -> bool {
+    ws_id == current_id && snapshot_revision == current_revision
+}
+
 impl WorkspaceManager {
     /// 创建 WorkspaceManager。
     pub fn new(repo: Arc<dyn WorkspaceRepository>, event_bus: Arc<EventBus>) -> Self {
@@ -64,6 +88,7 @@ impl WorkspaceManager {
             repo,
             event_bus,
             current: Arc::new(RwLock::new(None)),
+            revision: Arc::new(AtomicU64::new(0)),
             auto_save_handle: Mutex::new(None),
         }
     }
@@ -72,6 +97,8 @@ impl WorkspaceManager {
 
     /// 创建新工作区，初始化空文件集合并设为当前。
     ///
+    /// 替换当前工作区前先落盘旧的（内存是唯一权威副本，见 [`Self::save_current_if_dirty`]）。
+    ///
     /// 发布 `WorkspaceEvent::Loaded`。
     pub fn create(
         &self,
@@ -79,6 +106,8 @@ impl WorkspaceManager {
         problem_id: &str,
         root_path: &str,
     ) -> AppResult<Workspace> {
+        self.save_current_if_dirty();
+
         let ws = Workspace::new(
             contest_id.to_string(),
             problem_id.to_string(),
@@ -110,6 +139,9 @@ impl WorkspaceManager {
 
     /// 加载已有工作区：从磁盘恢复所有文件到内存。
     ///
+    /// 替换当前工作区前先落盘旧的（内存是唯一权威副本，见 [`Self::save_current_if_dirty`]）。
+    /// 重新加载同一工作区时，这一步同时保证「刚推送到内存的内容」先落盘再被读回。
+    ///
     /// 发布 `WorkspaceEvent::Loaded`。
     pub fn load(&self, workspace_id: &str, _root_path: &str) -> AppResult<Workspace> {
         if !self.repo.exists(workspace_id) {
@@ -118,6 +150,10 @@ impl WorkspaceManager {
                 workspace_id
             )));
         }
+
+        // 替换 current 之前落盘旧的：同一工作区重载时先落盘再读回，
+        // 保证「刚推送到内存的内容」出现在本次读取结果里（否则读回旧内容）
+        self.save_current_if_dirty();
 
         let file_paths = self.repo.list_files(workspace_id)?;
 
@@ -176,9 +212,15 @@ impl WorkspaceManager {
         Ok(ws)
     }
 
-    /// 保存当前工作区的所有脏文件到磁盘。
+    /// 保存当前工作区到磁盘（脏时**全量**写入 `files` 中的所有文件 + 元数据）。
     ///
-    /// 发布 `WorkspaceEvent::Saved`。
+    /// 落盘的唯一同步入口：`update_file` 只写内存，磁盘写入由本方法（前端在切题 /
+    /// 失焦 / 关窗时调用）与 auto-save 周期负责。工作区脏标记是整体粒度的，
+    /// 不区分单文件 —— 逐个跟踪需为每个文件维护独立脏标记，当前工作区通常只有
+    /// 一个源文件，收益不抵复杂度。
+    ///
+    /// 持有写锁完成写盘（保存期间不接受 `update_file`），因此不会与编辑器同步竞争；
+    /// 未脏时直接返回且**不发布** `WorkspaceEvent::Saved`。
     pub fn save(&self) -> AppResult<()> {
         let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
         let ws = match current.as_mut() {
@@ -248,6 +290,10 @@ impl WorkspaceManager {
     }
 
     /// 把工作区元数据写入 `workspace.json`（create / save / set_language 共用）。
+    ///
+    /// **auto-save 刻意不写元数据**：`set_language` 会立即落盘语言，若 auto-save
+    /// 用「快照时刻的元数据」回写，会把刚落盘的新语言覆盖回旧值（快照与写入之间的
+    /// 语言变更无从察觉）。元数据由显式落盘路径维护。
     fn persist_meta(&self, ws: &Workspace) -> AppResult<()> {
         let meta = WorkspaceMeta {
             contest_id: ws.contest_id.clone(),
@@ -263,16 +309,40 @@ impl WorkspaceManager {
             .save_file(&ws.id, &PathBuf::from("workspace.json"), &meta_json)
     }
 
+    /// 落盘当前工作区（脏时才写），失败仅告警。
+    ///
+    /// `create` / `load` / `switch` 都会替换 `current`，而内存是唯一权威副本
+    /// （`update_file` 不再写盘）：替换前必须先落盘旧工作区，否则未落盘的改动
+    /// 随替换静默消失。失败不阻断替换 —— 崩溃恢复与重新加载仍可用旧内容兜底，
+    /// 但必须在日志里留下痕迹。
+    fn save_current_if_dirty(&self) {
+        if let Err(e) = self.save() {
+            warn!(error = %e, "替换当前工作区前保存失败");
+        }
+    }
+
     /// 启动后台自动保存。
     ///
     /// 如果已有自动保存任务运行，则先停止旧的再启动。
+    ///
+    /// 循环语义（配合 `update_file` 只写内存）：
+    /// - 脏才写，且**取快照与写盘整体在读锁内完成**（与 `save()` / `update_file`
+    ///   的写锁互斥）：只锁住「取快照」会让写盘期间到来的 `save()` 插进本次写盘与
+    ///   后续检查之间 —— 新内容先落盘，被延迟的旧快照写再覆盖回旧内容，而工作区
+    ///   已由 `save()` 标 clean（rev 检查只能阻止 auto-save 误标 clean，无法撤销
+    ///   已发生的覆盖）→ 新内容永不重写，静默永久丢失；
+    /// - 写盘失败保持脏，下一 tick 重试，且**不发布事件** —— 前端「已自动备份」
+    ///   必须表示最新内容确已落盘；
+    /// - 仅当快照之后没有新改动（修订号未变）才 `mark_clean` 并发布
+    ///   `WorkspaceEvent::AutoSaveTriggered`；有新改动时保留脏标记，下轮重写。
     pub fn start_auto_save(&self, interval_secs: u64) {
         self.stop_auto_save();
 
-        // auto-save 通过 Arc 共享 current 状态，安全且 Send。
+        // auto-save 通过 Arc 共享 current 与修订号，安全且 Send。
         let repo = Arc::clone(&self.repo);
         let event_bus = Arc::clone(&self.event_bus);
         let current = Arc::clone(&self.current);
+        let revision = Arc::clone(&self.revision);
 
         let task = tokio::spawn(async move {
             let mut interval_timer = tokio::time::interval(Duration::from_secs(interval_secs));
@@ -282,53 +352,79 @@ impl WorkspaceManager {
             loop {
                 interval_timer.tick().await;
 
-                let guard = current.read().unwrap_or_else(|e| e.into_inner());
-
-                if let Some(ref ws) = *guard {
-                    if ws.is_dirty {
-                        // 克隆文件集，在释放锁后异步写入
-                        let files: HashMap<String, String> = ws.files.clone();
-                        let ws_id = ws.id.clone();
-                        drop(guard);
-
-                        let mut write_error = false;
-                        for (file_name, content) in &files {
-                            let path = std::path::PathBuf::from(file_name);
-                            if let Err(e) = repo.save_file(&ws_id, &path, content) {
-                                warn!(
-                                    workspace_id = ws_id,
-                                    file = file_name,
-                                    error = %e,
-                                    "自动保存失败"
-                                );
-                                write_error = true;
-                            }
-                        }
-
-                        // 写入成功后标记 clean，避免下一 tick 重复写入
-                        if !write_error {
-                            let mut guard = current
-                                .write()
-                                .unwrap_or_else(|e| e.into_inner());
-                            // 仅在仍是同一个工作区时重置 dirty 标记
-                            if let Some(ref mut ws) = *guard {
-                                if ws.id == ws_id {
-                                    ws.mark_clean();
-                                }
-                            }
-                        }
-
-                        event_bus.publish(&AppEvent::Workspace(
-                            WorkspaceEvent::AutoSaveTriggered {
-                                workspace_id: ws_id.clone(),
-                            },
-                        ));
-                        debug!(workspace_id = ws_id, "自动保存完成");
-                    } else {
-                        drop(guard);
+                // 取快照 + 写盘整体在读锁内完成（见方法文档）：写盘期间
+                // save()/update_file 无法插入，保证「旧快照的写」不可能落在
+                // 「更新的写」之后（否则磁盘会被回退到旧内容且永不重写）
+                let (ws_id, files_saved, snapshot_revision) = {
+                    let guard = current.read().unwrap_or_else(|e| e.into_inner());
+                    let Some(ws) = guard.as_ref() else {
+                        continue;
+                    };
+                    if !ws.is_dirty {
+                        continue;
                     }
+
+                    let ws_id = ws.id.clone();
+                    // 修订号与快照同一读锁作用域内取得（否则「取快照 → 取修订号」
+                    // 之间到来的改动会让修订号偏新，写盘的是旧内容却误判为可 clean）
+                    let snapshot_revision = revision.load(Ordering::SeqCst);
+                    let files = ws.files.clone();
+
+                    let mut write_error = false;
+                    for (file_name, content) in &files {
+                        let path = std::path::PathBuf::from(file_name);
+                        if let Err(e) = repo.save_file(&ws_id, &path, content) {
+                            warn!(
+                                workspace_id = ws_id,
+                                file = file_name,
+                                error = %e,
+                                "自动保存失败"
+                            );
+                            write_error = true;
+                        }
+                    }
+
+                    if write_error {
+                        continue; // 保持脏：下一 tick 重试，且不发布「已落盘」
+                    }
+
+                    (ws_id, files.len(), snapshot_revision)
+                };
+
+                // 仅当快照之后没有新改动才标记 clean：否则「快照写盘」会被当成
+                // 本次编辑已落盘，最新内容将停留在内存直到下一次编辑
+                let persisted = {
+                    let mut guard = current.write().unwrap_or_else(|e| e.into_inner());
+                    match guard.as_mut() {
+                        Some(ws)
+                            if can_mark_clean(
+                                &ws_id,
+                                &ws.id,
+                                snapshot_revision,
+                                revision.load(Ordering::SeqCst),
+                            ) =>
+                        {
+                            ws.mark_clean();
+                            true
+                        }
+                        _ => false,
+                    }
+                };
+
+                if persisted {
+                    event_bus.publish(&AppEvent::Workspace(WorkspaceEvent::AutoSaveTriggered {
+                        workspace_id: ws_id.clone(),
+                    }));
+                    debug!(
+                        workspace_id = ws_id,
+                        files_saved = files_saved,
+                        "自动保存完成"
+                    );
                 } else {
-                    drop(guard);
+                    debug!(
+                        workspace_id = ws_id,
+                        "自动保存期间有新改动，保留脏标记待下轮重写"
+                    );
                 }
             }
         });
@@ -357,10 +453,8 @@ impl WorkspaceManager {
             current.as_ref().map(|ws| ws.id.clone())
         };
 
-        // 保存当前工作区
-        if let Err(e) = self.save() {
-            warn!(error = %e, "切换前保存失败");
-        }
+        // 保存当前工作区（内存是唯一权威副本，替换前必须先落盘）
+        self.save_current_if_dirty();
 
         // 加载目标工作区
         let workspace = self.load(workspace_id, root_path)?;
@@ -403,7 +497,15 @@ impl WorkspaceManager {
 
     // ── 文件操作 ──
 
-    /// 更新当前工作区中的文件内容，标记为 dirty 并持久化到磁盘。
+    /// 更新当前工作区中的文件内容：**只写内存**，标记 dirty 并递增修订号。
+    ///
+    /// 落盘不是本方法的职责（与 `workspace_cmd::update_workspace_file` 的契约一致）：
+    /// 前端 2 秒防抖把编辑器内容推进内存，磁盘写入由 auto-save 周期与显式
+    /// [`Self::save`]（切题 / 失焦 / 关窗）负责。这样「自动保存间隔」才真正决定
+    /// 落盘频率，也避免每个输入停顿都产生一次磁盘写。
+    ///
+    /// 修订号必须在写锁内递增：它与 auto-save 取快照的读锁构成全序，
+    /// 是「快照写盘后能否标记 clean」的判据。
     pub fn update_file(&self, file_name: &str, content: &str) -> AppResult<()> {
         let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
         let ws = current
@@ -413,19 +515,16 @@ impl WorkspaceManager {
         // 更新内存中的文件 + 标记 dirty
         ws.files.insert(file_name.to_string(), content.to_string());
         ws.mark_dirty();
-
-        // 持久化到磁盘
-        self.repo
-            .save_file(&ws.id, &PathBuf::from(file_name), content)?;
+        self.revision.fetch_add(1, Ordering::SeqCst);
 
         debug!(
             workspace_id = ws.id,
             file = file_name,
             size = content.len(),
-            "文件已更新"
+            "文件已更新（内存，等待 auto-save 落盘）"
         );
 
-        // auto-save 负责发布事件，这里不重复发布
+        // auto-save 负责落盘与发布事件，这里不重复发布
         Ok(())
     }
 

@@ -139,10 +139,10 @@ describe('logout', () => {
       auth.user = user
 
       workspace.updateCode('int main(){ return 0; }') // 排定 2s 防抖同步
-      expect(workspace._syncTimer).not.toBeNull()
+      expect(workspace.syncPending).toBe(true)
 
       await auth.logout()
-      expect(workspace._syncTimer).toBeNull()
+      expect(workspace.syncPending).toBe(false)
 
       // 即使时间推进，也不应再向后端同步任何代码
       vi.advanceTimersByTime(5_000)

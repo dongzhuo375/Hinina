@@ -15,11 +15,13 @@
 | `WorkspaceService.currentWorkspace` | `() => Promise<Workspace \| null>` | 获取当前活跃工作区（可能为 null） |
 | `WorkspaceService.updateWorkspaceFile` | `(fileName, content) => Promise<void>` | 同步编辑器代码到后端 |
 | `WorkspaceService.setLanguage` | `(language) => Promise<Workspace>` | 设置语言（后端**立即持久化元数据**并返回更新后的 Workspace） |
+| `WorkspaceService.onWorkspaceSaved` | `(handler) => Promise<() => void>` | 订阅后端落盘事件（显式保存 / 后台 auto-save 成功），返回取消订阅函数 |
 | `workspaceService` | 单例 | 全局唯一实例 |
 
 ## 直接依赖
 
-- `@/bridge/workspace.bridge`（五个桥接函数）
+- `@/bridge/workspace.bridge`（六个桥接函数/订阅）
+- `@/types/workspace`（仅类型）
 - `@/types/workspace`（仅类型）
 
 ## 被依赖
@@ -38,4 +40,6 @@ workspaceStore 各 action → workspaceService 对应方法 → workspace.bridge
 - `setLanguage` 与 `updateWorkspaceFile` 分开：语言属于工作区**元数据**（workspace.json），
   代码属于**文件内容**，后端持久化路径不同（前者立即落盘、后者随保存/自动保存落盘），
   服务层保持两个独立方法而不是合并参数。
+- `onWorkspaceSaved` 是服务层唯一的订阅方法（其余方法都是一比一转发）：store 需要感知
+  后台 auto-save 的落盘结果，而事件来源在 Rust 侧，故由服务层暴露订阅、由组合根装配。
 - 无状态、无缓存：工作区的权威状态在后端（内存 + 磁盘），前端 store 只是投影。
