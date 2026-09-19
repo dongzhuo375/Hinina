@@ -1,10 +1,41 @@
 # Hydro 适配器 — 设计缺口报告
 
-> 生成日期：2026-09-17 ｜ 分支：`feat/hydro-adapter` ｜ 基线：`main` @ `0e0ccdb`
+> 2026-09-19 ｜ 分支 `feat/hydro-adapter`
 >
-> **本文档的用途**：实现 Hydro 兼容时，凡**适配层无法吸收**的差异一律**不修改现有框架代码**，
-> 在此逐条留档并附建议补丁，交由项目负责人决断设计是否修改。
+> **本文档讲两件事**：Hydro 协议**缺什么**（能力边界与有损映射），以及为接入它**改过哪些既有代码**。
+> 设计层面的撞车（架构冲突、双方设计不一致、后续处置）在
+> `doc/Hydro/适配新架构的冲突记录.md`；协议事实依据在 `doc/Hydro/HYDRO-API.md`；
 > 适配器实现见 `src-tauri/src/adapter/hydro/`，模块文档见 `doc/modules/src-tauri/adapter/hydro/`。
+
+---
+
+## 状态一览
+
+| # | 缺口 | 状态 | 一句话 |
+|---|---|---|---|
+| **D1** | `ContestProblem.cid: i64` 装不下 hex 比赛 ID | ✅ 已解决 | `cid` 改 `String` |
+| **D2** | `OjConfig.contest_id: i64` 同上 | ✅ 已解决（#20） | 换成 `contest_ref: String` |
+| **D3** | 前端无 OJ 入口 | ✅ 已解决 | 枚举选择器 + 按需注册 + 保存即建实例 |
+| **D4** | 无域名（`/d/:domainId`）配置通道 | ⏸ **待决断** | `OjInstance.options` 传不进适配器 |
+| **D5** | `Problem` 无「题面格式」判别位 | 🔶 已知降级 | HTML 题面会按 Markdown 渲染 |
+| **D6** | JSON 无样例字段 | 🔶 已知降级 | `samples` 恒空，样例只在题面里 |
+| **D7** | 记录无提交时间 | ✅ 已吸收 | ObjectId 前 4 字节反推，回退 `judgeAt` |
+| **D8** | `/record` 无总数 / 无 limit / 无 uid | 🔶 已知降级 | `total`/`pages` 按假定页大小推导 |
+| **D9** | `JudgementStatus` 缺 Hydro 专属状态 | 🔶 已知降级 | 折入 `Unknown`（文案落差） |
+| **D10** | 榜单是预渲染单元格矩阵 | 🔶 已知降级 | 分页/搜索失效，部分字段靠文本反推 |
+| **D11** | 无公告接口（对应能力是答疑） | 🔶 已知降级（已确认置空） | 公告页恒空 |
+| **D12** | 隐藏本人记录时提交只返回 `tid` | 🔶 已知降级 | 明确报错，无法轮询结果 |
+| **D13** | 状态筛选传的是 HOJ 码 | ✅ 已吸收 | 单向翻译；无对应语义时明确报错 |
+| **D14** | `HttpClient` 的 Cookie jar 全局共享 | ⏸ 待决断（当前无实害） | — |
+| **D15** | pid 可以是字符串（`P1000` / `A1`） | ✅ 已吸收 | 单字母歧义已缓解（提交路径不换算） |
+| **D16** | 全局限流 100 请求 / 5 秒 | ✅ 无需动作 | 顺序表缓存把请求放大降到 0 |
+| **D17** | `HttpClient` 无法注入自定义请求头 | ✅ 已解决（#20 + 收尾） | 注入 `HeaderMap` + 新增 raw 变体 |
+| **D18** | 部署不支持 `X-Hydro-Inject` 时 | ✅ 已吸收（最保守） | 按「无法判定」上抛，绝不判失效 |
+| **D19** | 三个 HOJ 专属字段在 Hydro 无来源 | ✅ 无需动作 | 填安全默认值 |
+| **D20** | 前端语言域缺 Bash / Haskell 映射 | 🔶 已知降级 | 高亮回退 C++、文件名回退 `main.txt` |
+
+**结论**：设计基本成立 —— 20 条差异里 **19 条已在适配层吸收或已按需修复**，**只剩 D4 需要决断**
+（D14 仅备案）。🔶 的 8 条属**协议本身不提供该能力**，建议在用户文档里明示边界，而不是继续改代码。
 
 ---
 
@@ -13,32 +44,23 @@
 **设计基本成立**：Hydro 与 HOJ 是两套协议，但差异几乎全部落在 Adapter 层 —— 4 个 Provider trait
 （`AuthProvider` / `ContestProvider` / `ProblemProvider` / `SubmissionProvider`）与领域实体**足以承载**
 Hydro 的 5 个核心闭环（登录 / 取比赛 / 看题目 / 提交 / 看评测），**没有一条差异迫使我们在 Service 层
-或 entity 层做妥协**。
+做妥协**；entity 层只有两处字段类型（D1 / D2）需要调整，且都已解决。
 
-> **状态更新（2026-09-19 晚）**：D1 / D2 / D3 / D17 及其衍生缺口**均已解决**
-> （`cid` 改字符串、`contest_ref: String`、OJ 枚举选择器 + 按需注册、infra raw 变体），
-> 详见 `doc/Hydro/适配新架构的冲突记录.md`。**仅剩 D4**（`OjInstance.options` 传不进
-> 适配器）待决断。以下条目保留完整背景与决策记录。
-
-按处置紧迫度分三档（括号内为 2026-09-19 状态）：
-
-| 档位 | 含义 | 条目 |
-|---|---|---|
-| **A. 必须改才能真正用起来** | 不改则 Hydro 无法被激活/关键流程不可用 | D1（**已解决**）、D2（**已解决**）、D3（**已解决**）、D4（**待定**）、D17（**已修复**，衍生缺口亦已修） |
-| **B. 建议改（有损但可用）** | 不改则功能降级或语义失真 | D5、D6、D8、D9、D10、D11、D12、D18 |
-| **C. 可接受 / 仅备案** | 记录事实，暂不建议动 | D7、D13、D14、D15、D16、D19、D20 |
+**接入成本实测**：新增 OJ = 1 个子目录 + `adapter::factories()` 一行 + 一条配置，且可从 UI 自助启用
+（见 §8）。
 
 ---
 
 ## 2. 为什么不能复用 HOJ 的调用方式（协议对照）
 
-HOJ 是 Hydro 的衍生版并自带一层 REST + JWT，**两者不是同一个 API**：
+HOJ 是 Hydro 的衍生版并自带一层 REST + JWT，**两者不是同一个 API**（连实现栈都不同：HOJ 是
+Java + MyBatis-Plus + Redis，Hydro 是 Node + MongoDB）：
 
 | 维度 | HOJ（`adapter/hoj`） | Hydro（`adapter/hydro`） |
 |---|---|---|
 | 接口体系 | 统一 REST `/api/*` | 传统 Handler 路由 + `Accept: application/json` 内容协商（JSON-RPC 只注册了 user/users/domain/problem，缺题目列表/记录/状态） |
 | 认证载体 | 响应头 `authorization` 里的 JWT | `Set-Cookie: sid=<32 位>`（登录响应体里**没有** token） |
-| 认证传递 | `Authorization: <jwt>` | `Authorization: Bearer <sid>`（取空格分隔第 2 段；**该头一旦出现即完全覆盖 Cookie**） |
+| 认证传递 | `Authorization: <jwt>` | `Authorization: Bearer <sid>`（服务端取空格分隔第 2 段；**该头一旦出现即完全覆盖 Cookie**） |
 | 响应包络 | `{status, msg, data}` | **无包络**：成功即原始 body；失败 `{"error":{"name","params","code"}}`（**无 message**） |
 | 未登录 | HTTP 401 或 HTTP 200 + 体内 `status:403` | HTTP 200 + `{"url":"/login?redirect=..."}`（重定向被 JSON 化）或 403 `PrivilegeError`；**无效 sid 静默降级为匿名** |
 | 当前用户 | `get-user-auth-info` | **无 `/user/me`**：靠 `X-Hydro-Inject: UserContext` 注入到任意路由的响应体 |
@@ -62,10 +84,10 @@ HOJ 是 Hydro 的衍生版并自带一层 REST + JWT，**两者不是同一个 A
 | A2 | 错误无 message | `HydroError::ApiError{code,name,params}` 原样携带，文案由调用方组织 |
 | A3 | 未登录是 HTTP 200 重定向 | `types::login_redirect_url` 只认指向 `/login` 的 url → `AppError::Auth` |
 | A4 | 无效 sid 静默匿名 | 会话失效判据改为 `UserContext._id == 0`（而非 HTTP 状态码） |
-| A5 | Cookie 会话 ↔ Hinina 的 token 契约 | `restore_token` 存裸 sid，`send` 补 `Bearer ` 前缀（服务端不校验 scheme 名） |
-| A6 | 登录响应体无 token | 直连 `HttpClient::client()` 读 `Set-Cookie`（并因 `Accept: application/json` 避免 302 丢失该头） |
-| A7 | 无 `/user/me` | `X-Hydro-Inject: UserContext` 注入头 + `probe_user_context`/`current_user` 双入口 |
-| A8 | 状态码值域不同（0–33 vs 0–15） | `types::map_status` 全表映射；`FETCHED(22)` 特意折入非终态的 `Pending` |
+| A5 | Cookie 会话 ↔ Hinina 的 token 契约 | `restore_token` 存裸 sid，`headers()` 组装时补 `Bearer ` 前缀（服务端不校验 scheme 名） |
+| A6 | 登录响应体无 token | 走 infra 的 raw 变体读响应头 `Set-Cookie`（并因 `Accept: application/json` 避免 302 丢失该头） |
+| A7 | 无 `/user/me` | `X-Hydro-Inject: UserContext` 注入头 + `probe_user_context`（严格）/`current_user`（宽松）双入口 |
+| A8 | 状态码值域不同（0–33 vs 0–15） | `types::map_status` 全表映射；`FETCHED(22)` 特意折入非终态的 `Pending`（否则轮询提前停住 + 在途结果进终态缓存） |
 | A9 | 前端状态筛选传 HOJ 码 | `types::hoj_status_to_hydro` 单向翻译，无对应语义时明确报错 |
 | A10 | 语言 key ↔ 显示名 | `types::LANG_TABLE` 双向静态表（29 项，双射由测试锁定），展示名刻意选前端能识别的前缀写法 |
 | A11 | 记录无提交时间 | `types::objectid_seconds` 从 `_id`（时间型 ObjectId）前 4 字节反推，回退 `judgeAt` |
@@ -73,369 +95,216 @@ HOJ 是 Hydro 的衍生版并自带一层 REST + JWT，**两者不是同一个 A
 | A13 | 展示字母只存在于 `tdoc.pids` 下标 | `resolve_problem_id`（字母 → pid）+ `map_contest_problems`（下标 → 字母），带 60s 顺序表缓存避免请求放大 |
 | A14 | 测试点无独立接口 | 复用 `/record/:rid` 的 `rdoc.testCases`，按 `subtaskId` 分组（不猜 `rdoc.subtasks` 结构） |
 | A15 | `psdict` 以 docId 为键而入参是 pid | 经 `pdict` 反查 docId，未提交的题不出现在返回 map 中 |
-| A16 | 比赛 ID 是 hex ObjectId | `Contest.id` 本就是 `String` ✓；题目/提交 ID 保持字符串 ✓ |
+| A16 | 比赛 ID 是 hex ObjectId | `Contest.id` 与 `ContestProblem.cid` 都是 `String` ✓ |
 | A17 | 比赛阶段需客户端推算 | `contest_status(start, end, now)` 纯函数（时间缺失按「进行中」，避免误判为已结束） |
 | A18 | 灵活时长模式 `endAt` 缺省 | 由 `beginAt + duration`（小时）推算 |
 
 ---
 
-## 4. 设计缺口清单（未修改，待决断）
+## 4. 已解决的缺口
 
-### A 档 — 必须改才能真正用起来
+### D1. `ContestProblem.cid: i64` 装不下 Hydro 的比赛 ID → ✅ 已解决
 
----
+- **当时的问题**：Hydro 的比赛主键是 24 位 hex ObjectId，`i64` 装不下 → 只能填 `0`。
+- **解法**：`cid` 改为 `String`，语义与 `OjConfig::contest_ref` 对齐（比赛是对服务端资源的
+  **不透明引用**）。HOJ 填数字串（`p.cid.to_string()`）、Hydro 如实携带 ObjectId。
+- **影响面**：entity + 两个 adapter + 前端 `types/contest.ts` + 2 处测试夹具（跨端契约，一次改完）。
 
-#### D1. `ContestProblem.cid: i64` 装不下 Hydro 的比赛 ID
+### D2. `OjConfig.contest_id: i64` 装不下 Hydro 的比赛 ID → ✅ 已解决（#20）
 
-**状态：✅ 已解决（`cid` 改为 `String`）** —— 语义与 `OjConfig::contest_ref` 对齐：
-比赛是对服务端资源的不透明引用。HOJ 填数字串、Hydro 如实携带 24 位 hex ObjectId。
-改动面：entity + 两个 adapter + 前端 `types/contest.ts` + 测试夹具。
+- **当时的问题**：`oj.contestId` 是 `i64`（`0` = 不自动加载），Hydro 的比赛 ID 是 hex 字符串 →
+  **「自动加载配置的比赛」这条路径对 Hydro 不可用**（`load_configured_contest` → 登录页简报 → 进场）。
+- **解法**：`#20` 把它换成 `contest_ref: String`（旧字段经 `legacy_contest_id` 一次性迁移）。
+- **影响面**：`core/entity/config.rs` + `commands/contest_cmd.rs` + `services/contest.service.ts`。
 
-- **现象**：Hydro 的比赛主键是 24 位 hex ObjectId（`"64f0c0f0f0f0f0f0f0f0f0f0"`），而 `ContestProblem.cid` 是 `i64`。
-- **影响**：`list_contest_problems` 返回的每条题目都只能把 `cid` 填 **0**。当前前端不消费该字段（渲染只用 `displayId`/`problemId`），故**暂无功能故障**；但一旦有「按 cid 过滤题目」之类的逻辑，Hydro 侧会全部落到 0。
-- **适配层现状**：填 0 并在代码注释中标注。
-- **建议补丁**（entity 层，Breaking Change，需评估前端同步）：
-  ```rust
-  // core/entity/contest.rs
-  pub struct ContestProblem {
-      // pub cid: i64,
-      pub cid: String,   // HOJ 的 cid 与 Hydro 的 ObjectId 都能承载
-      ...
-  }
-  // 前端 src/types/contest.ts: cid: number → cid: string
-  // HOJ 侧 adapter: cid: p.cid.to_string()
-  ```
-- **决策所需信息**：`cid` 目前无消费方 → 改动风险低；但它是跨端契约（`src/types/contest.ts`），需前后端同批改。
+### D3. 前端没有 OJ 切换入口 → ✅ 已解决
 
----
+- **当时的问题**：`SettingsView` 的 OJ 分组只有 `hojUrl`，下拉候选只有配置里已有的实例，
+  `LoginView` 也不传 `ojType` → **Hydro 无法从 UI 激活**（只能手改 `config.json`）。
+- **解法**（枚举方案，刻意不做实例 CRUD）：
+  1. `src/utils/oj.ts` 作为 OJ 类型域唯一权威（`OJ_TYPES` 枚举 + `ojSelectOptions` 候选组装）；
+  2. 选中尚未配置的类型 → 引导填地址 → 「保存」upsert 实例并**自动完成切换**；
+  3. 后端 `AppContext::ensure_oj_registered`（幂等）让新实例**免重启**生效，`switch_oj` 在校验前调用；
+     判定条件与启动注册同源（只认配置里已启用且 id 匹配的实例，不能凭空激活）。
+- **影响面**：前端 3 文件（含 6 例测试）+ `core/context.rs`（含 5 例测试）+ `commands/oj_cmd.rs`。
+- **遗留**：`OJ_TYPES` 与后端 `adapter::factories()` 需人工同步（新增 OJ 时两处各加一项）。
 
-#### D2. `OjConfig.contest_id: i64` 装不下 Hydro 的比赛 ID
+### D17. `HttpClient` 无法注入自定义请求头 → ✅ 已解决（#20 + 收尾）
 
-**状态：✅ 已解决（#20）** —— `OjConfig.contest_id: i64` 已被 `contest_ref: String` 取代
-（不透明引用：HOJ 是数字串、Hydro 是 ObjectId），旧字段经 `legacy_contest_id` 迁移。
-本条目保留为决策记录。
-
-- **现象**：`oj.contestId` 是 `i64`（0 = 不自动加载），而 Hydro 的比赛 ID 是 hex 字符串。
-- **影响**：**Hydro 无法使用「自动加载配置的比赛」这条路径**（`load_configured_contest` → 登录页比赛简报 → 进场）。当前 Hydro 只能靠 `list_contests` 取列表后在前端选（但前端也没有选择入口，见 D3）→ **Hydro 实际上无法进入比赛工作台**。
-- **适配层现状**：无解 —— `contest_id` 由配置直接传给 `get_contest`/`list_contest_problems`，Adapter 拿到的是已序列化的 `i64`。
-- **建议补丁**（配置层，同样跨端）：
-  ```rust
-  // core/entity/config.rs（OjConfig）
-  // pub contest_id: i64,
-  pub contest_id: String,   // "0" / "" = 不自动加载；HOJ 传 "123"，Hydro 传 ObjectId
-  // 同步：sanitize() 的 .max(0) → trim；validate() 不加限制（两种形态都合法）
-  // 前端 src/types/config.ts: contestId: number → string
-  //      src/services/contest.service.ts 的 config.oj.contestId 消费点
-  ```
-- **备选方案**：新增 `hydro_contest_id: String` 字段，仅在当前 OJ 是 Hydro 时使用 —— 改动面更小但配置语义分裂（同一概念两个字段）。
-- **决策所需信息**：这是**阻断 Hydro 可用性**的第一条，建议优先处理。
+- **当时的问题**：Hydro 的 JSON 输出**完全依赖** `Accept: application/json`，另有
+  `X-Hydro-Inject`；而 `HttpClient` 只能注入 `Authorization` → 适配器只能直连 `reqwest::Client`，
+  **代价是失去 5xx 退避重试**。
+- **解法（两步）**：
+  1. `#20`：两个 text 变体改为接收调用方构造的 `HeaderMap`（认证方式是 Adapter 层概念）；
+  2. 收尾：新增 **raw 变体** `get_text_raw` / `post_text_raw` —— 任意状态码都返回
+     `(status, headers, body)`、不做状态码映射（5xx 仍退避重试、耗尽后返回响应；4xx 不重试）。
+- **衍生缺口也已修**：infra 原本在非 2xx 时**丢弃响应体**，而 Hydro 的用户可见错误全在包络里
+  （`LoginError` / `OpcountExceededError` / `PermissionError`）。raw 变体解决了它，**Hydro 的
+  GET 与 POST 两条通道因此合一**，适配器不再直连 reqwest。
+- **代价**：401 不再由 infra 自动映射为 `Auth`，改由适配器的 `http_status_error` 承担
+  （判据与 infra 的 `status_error` 逐条对齐，否则前端会话守卫失效）。
 
 ---
 
-#### D3. 前端没有 OJ 切换入口（Hydro 无法从 UI 激活）
+## 5. 待决断
 
-**状态：✅ 已解决（枚举选择器 + 按需注册）** —— `SettingsView` 的下拉候选 = 已知 OJ 枚举
-（`src/utils/oj.ts`，含尚未配置者）+ 配置里的其它 id；选中未配置的类型会引导填地址，
-「保存」即创建实例并**自动切换**；后端 `AppContext::ensure_oj_registered` 让新实例免重启生效。
-详见 `适配新架构的冲突记录.md` §2.2。
-
-- **现象**：① `SettingsView` 的「OJ」分组只有服务器地址（且只有 `hojUrl`）；② `LoginView` 调用 `auth.login(username, password)` **不传** `ojType`；③ 因此 `ProviderRegistry` 的当前 OJ 永远停在启动时的默认值。
-- **影响**：即使后端注册了 HydroAdapter，用户也无法在界面上选择 Hydro。
-- **适配层现状**：`AppContext::init` 改为从 `user.lastOjType` 解析当前 OJ（本次接线之一），因此**手改 `config.json` 的 `user.lastOjType: "Hydro"` + 填 `oj.hydroUrl` 即可激活**（已记 warn 提示地址为空的情况）。但这是开发者路径，不是选手路径。
-- **建议补丁**（前端，3 处）：
-  1. `src/types/config.ts`：`oj` 增加 `hydroUrl: string`；
-  2. `SettingsView.vue` OJ 分组：增加「OJ 类型」选择器（`HOJ` / `Hydro`），切换时写 `user.lastOjType` 并提示需重启或重新登录；地址输入框按当前类型显示 `hojUrl` / `hydroUrl`；
-  3. `LoginView.vue` / `authStore.login`：把当前 OJ 类型经 `ojType` 传给 `login` 命令（后端已支持该参数）。
-- **决策所需信息**：本次任务范围明确排除前端改动，故仅留档。若确定要让 Hydro 真正可用，这是必须做的一步。
-
----
-
-#### D4. 无域名（domain）配置项，只能访问系统域
-
-**状态：⏸ 有配置位置但传不进适配器（#20 后）** —— `OjInstance.options` 已能承载
-`{"domain": "myschool"}` 这类私有旋钮，但 `AdapterFactory::build(&self, deps, base_url)`
-只把地址交给适配器，**options 没有传递通道**。要用起来需扩展 `build` 签名
-（见 `适配新架构的冲突记录.md` §2.4）。若目标部署不用自定义域，本条可降为 C 档。
+### D4. 无域名（`/d/:domainId`）配置通道 ⏸
 
 - **现象**：Hydro 多域部署的业务路由需要 `/d/:domainId` 前缀（系统域 `system` 可省略）。
-- **影响**：若目标 Hydro 部署把比赛放在自定义域（如 `hydro.ac/d/myschool/...`），本适配器按系统域拼路径会 **404**。
-- **适配层现状**：按系统域实现，类注释与文档均已标注。
-- **建议补丁**：
+  适配器目前按**系统域**拼路径。
+- **影响**：若目标部署把比赛放在自定义域（如 `hydro.ac/d/myschool/...`）→ 请求 **404**。
+- **现状**：`OjInstance.options` 已能承载 `{"domain": "myschool"}` 这类私有旋钮（弱类型 Map 是
+  `#20` 有意为之），但 `AdapterFactory::build(&self, deps, base_url)` **只把地址交给适配器**，
+  options 没有传递通道。
+- **可选补丁**（择一）：
   ```rust
-  // core/entity/config.rs（OjConfig）
-  pub hydro_domain: String,   // 默认 "" = 系统域；非空时路径前缀 /d/{domain}
-  // adapter/hydro: fn url(&self, path) → if domain.is_empty() { base+path } else { format!("{}/d/{}{}", base, domain, path) }
+  // ① 推荐：build 接收整个实例（形状也更贴近 v1.0 插件 manifest）
+  fn build(&self, deps: &AdapterDeps, instance: &OjInstance) -> ProviderSet;
+  // ② 或单独传 options
+  fn build(&self, deps: &AdapterDeps, base_url: &str, options: &Map<String, Value>) -> ProviderSet;
   ```
-  Adapter 侧改动很小（1 个 `url()` 方法 + 1 个构造参数），**风险主要在配置与前端**。
-- **决策所需信息**：**若你的目标 Hydro 部署不用自定义域，本条可降为 C 档**（请确认）。
+  适配器侧改动很小（`url()` 加前缀 + 构造参数）；**风险主要在工厂签名（3 个 adapter + 组合根）**。
+- **决策所需信息**：**目标 Hydro 部署是否用自定义域**。不用的话本条可降为备案。
+
+### D14. `HttpClient` 的 Cookie jar 全局共享 ⏸（当前无实害）
+
+- **现状**：`with_timeout` 启用 `cookie_store(true)`，jar 在进程内共享；Hydro 登录后 `sid` 会留在里面。
+- **影响**：当前只有一个「当前 OJ」，且不同 OJ 通常不同主机 → **无实害**。若将来支持「多 OJ 同时登录」，
+  同一主机的不同部署可能串扰。
+- **建议**：暂不处理。若引入多 OJ 并存，改为每 Adapter 一个 client（或关掉自动 cookie 存储 ——
+  Hydro 侧我们本就显式发 `Authorization`）。
 
 ---
 
-#### D17. `infra::http::HttpClient` 无法注入自定义请求头
+## 6. 已知降级（建议在用户文档明示边界，不改代码）
 
-**状态：✅ 已修复（#20）** —— `HttpClient` 的两个 text 变体现接收调用方构造的
-`HeaderMap`（认证方式是 Adapter 层概念，infra 不做假设）。Hydro 的
-`Accept: application/json` / `Authorization: Bearer <sid>` / `X-Hydro-Inject`
-现在都在适配器里组装。
+这 8 条都是**协议本身不提供该能力**，或**信息只存在于服务端渲染结果里**。适配层已按最保守的方式降级：
+不报错、不误导，但功能上确实弱于 HOJ。
 
-**但衍生出一条更窄的缺口**：infra 在**非 2xx 时丢弃响应体**，而 Hydro 的用户可见错误
-全在响应体包络里（`LoginError` / `OpcountExceededError` / `PermissionError`）。
-**该衍生缺口也已修**：`HttpClient` 新增 raw 变体（`get_text_raw` / `post_text_raw`，
-任意状态码都返回 status + headers + body，5xx 仍重试但耗尽后返回响应），Hydro 的
-GET 与 POST 两条通道因此合一，不再直连 reqwest。详见 `适配新架构的冲突记录.md` §2.1。
+### D5. `Problem` 没有「题面格式」判别位
 
-<details>
-<summary>原始记录（问题已修复，保留以说明背景）</summary>
+- Hydro 的 `pdoc.html: bool` 标明 `content` 是 HTML 还是 Markdown；`Problem.description` 只有字符串，
+  前端一律按 Markdown 渲染。
+- **影响**：HTML 题面（`html: true`）会被当 Markdown 渲染 → 标签被转义或结构错乱（DOMPurify 消毒后
+  显示为纯文本标记）。Hydro 后台默认 Markdown，HTML 是可选。
+- **若要修**：`Problem` 增加 `description_format` 字段 + 前端渲染分流（跨端契约）。
 
-- **现象**：Hydro 的 JSON 输出**完全依赖请求头** `Accept: application/json`（响应分支见文档 §1.5），另有 `X-Hydro-Inject: UserContext` 注入头；而 `HttpClient` 的 `get_text_with_headers` / `post_text_with_headers` **只能注入 `Authorization`**。
-- **影响**：① Hydro 适配器只能绕过 `HttpClient` 直连 `reqwest::Client`；② **代价是失去 infra 的 5xx 退避重试**（`MAX_RETRIES = 2`，1s/2s 指数退避）与统一的 `status_error` 映射 —— 后者已在 Adapter 内以 `http_status_error` 镜像（判据一致：401→`Auth`、403→`Network`），前者**没有补偿**（判定为「重试属 infra 职责，不在 Adapter 重复实现」）。
-- **影响评估**：客户端是高频轮询型（榜单 10s、题目总览 30s），单次 5xx 失败只影响一个刷新周期；但 `ProblemService::load_problem_limits` 的批量拉取中，一次 5xx 会让该题 limits 被跳过（已有「部分失败跳过」语义兜底）。**不构成功能阻断，但比 HOJ 路径的健壮性低一档**。
-- **建议补丁**（infra 层，向后兼容）：
-  ```rust
-  // infra/http.rs —— 新增一个可传任意请求头的变体，现有方法保持不动
-  pub async fn get_text_with_headers_and(
-      &self,
-      url: &str,
-      headers: &[(&str, &str)],
-      auth_token: Option<&str>,
-  ) -> AppResult<(String, reqwest::header::HeaderMap)> { /* retry_get 增加 headers 形参 */ }
-  pub async fn post_text_with_headers_and<B: Serialize>(...) -> AppResult<(...)> { ... }
-  ```
-  改完后 `adapter/hydro` 的 `send()` 可回归 infra，**顺带恢复 5xx 重试**；`retry_get` 需把 headers 透传进去（改动集中在 infra/http.rs 一个文件）。
-- **决策所需信息**：这是**唯一的「设计确实需要改」结论**（其余都是可选增强）。是否现在改由你定：不改也能跑，改了更稳。
+### D6. Hydro 的 JSON 没有样例字段 → `Problem.samples` 恒空
 
-</details>
+- 样例写在题面 Markdown 的代码块里（`pdoc.data` 只是测试数据文件列表，需额外权限）。
+- **影响**：题面下方的「样例」区块（含复制按钮）不可用；样例仍能在题面里看到。
+- **若要修**：前端从题面围栏代码块提取样例卡片（纯前端启发式，不动 entity）。
 
----
+### D8. `/record` 不返回总条数、无 limit / uid 参数
 
-### B 档 — 建议改（有损但可用）
+- 响应只有 `page` + `rdocs`；页大小由服务端 `pagination.record` 决定（默认 100），客户端不能指定；
+  用户筛选用 `uidOrName`（不是 `uid`）。
+- **影响**：`SubmissionPage.total/pages` 只能按 `ASSUMED_RECORD_PAGE_SIZE = 100` 推导。若部署改了
+  该设置，分页控件会出现「多一页空页」或「少一页」的偏差（`onlyMine` 恒真 + 选手通常 <100 条时不可见）。
+- **无法精确**：只能靠 `stat=true`，那需要 `PRIV_VIEW_JUDGE_STATISTICS` 特权（选手没有）。
 
----
+### D9. `JudgementStatus` 缺 Hydro 专属状态
 
-#### D5. `Problem` 没有「题面格式」判别位
+- Hydro 的 9 CANCELED / 11 HACKED / 30 IGNORED / 32 HACK_SUCCESSFUL / 33 HACK_UNSUCCESSFUL
+  在 HOJ 的 18 个变体里没有对应项。
+- **影响**：这些状态显示为 **"Unknown"**（Hydro 网页端显示 "Cancelled"/"Hacked"/…），文案落差。
+- **现状**：折入 `Unknown` 是**刻意不猜**（错映射会误导选手判断自己的提交结果）；31 FORMAT_ERROR
+  取语义最近的 `PresentationError`。校赛 ACM 场景极少出现这些状态。
 
-- **现象**：Hydro 的 `pdoc.html: bool` 标明 `content` 是 HTML 还是 Markdown；Hinina 的 `Problem.description` 只有字符串，前端**一律按 Markdown 渲染**（`utils/markdown.ts`）。
-- **影响**：若某题面是 HTML（`html: true`），前端会把它当 Markdown 渲染 —— 标签被转义或结构错乱（DOMPurify 消毒后仍会显示为纯文本标记）。
-- **适配层现状**：原样透传 `content` 到 `description`（Markdown 场景完全正确；HTML 场景降级显示）。
-- **建议补丁**：
-  ```rust
-  // core/entity/problem.rs
-  pub struct Problem {
-      ...
-      /// 题面内容格式："markdown"（默认）/ "html"
-      #[serde(default = "default_markdown")]
-      pub description_format: String,
-  }
-  // 前端 utils/markdown.ts 增加 renderProblemContent(content, format) 分流（HTML 走同一套 DOMPurify 消毒）
-  ```
-- **决策所需信息**：取决于目标 Hydro 部署是否使用 HTML 题面（Hydro 后台默认 Markdown，HTML 是可选）。
+### D10. 榜单是预渲染单元格矩阵，`RankQuery` 基本失效
 
----
+- **服务端不支持**分页/关键词搜索/移除打星/赛后提交，每题单元格只给展示文本与 `score`：
+  - `current_page` / `limit` → 忽略，单页全量（`pages = 1`）；
+  - `keyword` → 忽略（**榜单搜索框对 Hydro 无效**，会静默返回全量）；
+  - `remove_star` → 忽略（前端「全量快照模式」本就在客户端过滤，故实际可用）；
+  - `contains_end` → 忽略（赛后可见性由赛制 `showRecord` 决定）；
+  - ACM 单元格的 `error_num` / `ac_time` / `is_first_ac` / `try_num` **靠文本与 `style` 反推**
+    （`score == 100` 判 AC、首行 `+n`/`-n`/✓ 取失败次数、橙色 span 取待判次数、`style` 非空判首 A）；
+  - OI 家族每题只有分数 → `time_info` 恒空、`error_num` 恒 0；
+  - `gender` / `school` / `nickname` 无来源 → **「女生队高亮」不可用**；
+  - ACM 的 `total`（总提交数）由各题尝试次数求和反推。
+- **现状**：全部在 `types::scoreboard_rank_page` 内完成，并有 3 行（普通/打星/封榜待判）的逐字段测试锁定。
+- **建议**：接受，但应告知用户「Hydro 下榜单搜索无效、女生队高亮不可用」。
 
-#### D6. Hydro 的 JSON 没有样例字段 → `Problem.samples` 恒空
+### D11. Hydro 没有公告接口（对应能力是「答疑」）
 
-- **现象**：Hydro 把样例写在题面 Markdown 的代码块里，JSON 里没有结构化样例（`pdoc.data` 只是测试数据文件列表，需额外权限）。
-- **影响**：题面下方的「样例」区块（含复制按钮）在 Hydro 下不可用；样例仍能在题面 Markdown 中看到（只是没有独立区块与复制功能）。
-- **适配层现状**：`samples` 返回空 `Vec`，前端自然不渲染该区块（无报错）。
-- **建议补丁（二选一）**：
-  - 前端侧：题面渲染时提取围栏代码块生成样例卡片（不改 entity，纯前端启发式）；
-  - 或新增 Provider 能力 `list_problem_samples`（需要新的 trait 方法 → 属框架改动）。
-- **决策所需信息**：属体验增强，不影响正确性。
+- Hydro 只有 `/contest/:tid/clarification`（提问 + 裁判回复的会话），没有单向广播的公告。
+- **影响**：公告页恒为空（不报错）。
+- **已确认的决策**：**置空**。不做有损映射（把定向回复伪装成全场公告会让选手误读）；
+  后续若要支持，应由前端**按 OJ 能力**把「公告」面板切换为「问答」形态，并在 Provider 层新增
+  「答疑」能力（新 trait 方法或新实体）。HOJ 是第一优先级，短期不动。
 
----
+### D12. 比赛隐藏本人记录时，提交只返回 `tid` 而非 `rid`
 
-#### D8. `/record` 不返回总条数、无 limit/uid 参数
+- `POST /p/:pid/submit` 在 `tid && !pretest && !contest.canShowSelfRecord(...)` 时返回 `{tid}`。
+- **影响**：拿不到记录 ID → **无法轮询评测结果**（提交成功但看不到结果）。ACM 赛制下
+  `showSelfRecord` 恒真，常规校赛不受影响；`oi` / `strictioi` 在特定配置下会命中。
+- **现状**：明确报错「未返回评测记录 ID：本场比赛隐藏本人评测记录」—— 优于静默返回空串
+  （后者会让前端轮询一个空 ID 到超时）。
 
-- **现象**：Hydro 记录列表的响应只有 `page` + `rdocs`，**没有 total/pages**；页大小由服务端 `pagination.record` 决定（默认 100），客户端不能指定；用户筛选用 `uidOrName`（不是 `uid`）。
-- **影响**：`SubmissionPage.total/pages` 只能推导 —— 当前实现按 `ASSUMED_RECORD_PAGE_SIZE = 100` 计算：`total = (page-1)*100 + 本页条数`，`pages = 本页满 100 时 page+1 否则 page`。若部署改了 `pagination.record`，分页控件会出现「多一页空页」或「少一页」的偏差。
-- **适配层现状**：如上（`only_mine` 恒真 + 选手通常 <100 条提交时，实际表现为单页，偏差不可见）。
-- **建议补丁**：无（协议限制）。若要精确，只能改用 `stat=true`（需 `PRIV_VIEW_JUDGE_STATISTICS` 特权，选手没有）。**建议接受**。
+### D20. 前端语言域缺 Bash / Haskell 的扩展名与高亮映射
+
+- Hydro 提供 `bash` / `hs`；适配器译为 `"Bash"` / `"Haskell"` 后，前端 `utils/language.monacoIdStrict`
+  无法识别 → Monaco 高亮回退 `cpp`、工作区源文件名回退 `main.txt`。
+- **影响**：仅高亮与文件名（**提交不受影响** —— `lang` 由适配器从显示名反查回 key，往返恒等）。
+- **若要修**：`utils/language.ts` 补 `bash→.sh` / `haskell→.hs` 与 `monacoIdStrict` 前缀识别。
 
 ---
 
-#### D9. `JudgementStatus` 缺 Hydro 专属状态
+## 7. 备案（已吸收 / 无需动作）
 
-- **现象**：Hydro 的 9 CANCELED / 11 HACKED / 30 IGNORED / 32 HACK_SUCCESSFUL / 33 HACK_UNSUCCESSFUL 在 HOJ 的 18 个变体里没有对应项。
-- **影响**：这些状态在前端显示为 **"Unknown"**（Hydro 网页端分别显示 "Cancelled"/"Hacked"/"Ignored"/…），文案落差。
-- **适配层现状**：`map_status` 折入 `Unknown`（**刻意不猜**：错映射会误导选手判断自己的提交结果）。另 31 FORMAT_ERROR 取语义最近的 `PresentationError`。
-- **建议补丁**（entity + 前端，需同步）：
-  ```rust
-  // core/entity/submission.rs
-  pub enum JudgementStatus {
-      ...,
-      Cancelled, Ignored, Hacked, FormatError, HackSuccessful, HackUnsuccessful,
-  }
-  // 前端 src/utils/submission.ts 的 STATUS_META 补 6 项文案/缩写/色调（Record<JudgementStatus, ...> 会强制补齐）
-  // 前端 src/types/submission.ts 的联合类型同步
-  ```
-- **决策所需信息**：这些状态在**校赛 ACM 场景极少出现**（CANCELED 只在管理员取消时、HACK 只在 Hack 赛制）。**可接受**，建议暂不动。
-
----
-
-#### D10. 榜单是预渲染单元格矩阵，`RankQuery` 基本失效
-
-- **现象**：Hydro 榜单返回 `rows`（表头 + 单元格），**服务端不支持**分页/关键词搜索/移除打星/赛后提交；每题单元格只给展示文本与 `score`。
-- **影响**（逐项）：
-  - `RankQuery.current_page` / `limit` → 忽略，返回单页全量（`pages = 1`）；
-  - `keyword` → 忽略（前端工具条的搜索框对 Hydro 无效，会静默返回全量）；
-  - `remove_star` → 忽略（Hydro 的打星只能在客户端过滤，前端「全量快照模式」本就在客户端过滤，故实际可用）；
-  - `contains_end` → 忽略（Hydro 的赛后可见性由赛制 `showRecord` 决定，客户端无法在请求里切换）；
-  - ACM 单元格的 `error_num` / `ac_time` / `is_first_ac` / `try_num` **靠文本与 `style` 反推**（`score == 100` 判 AC、首行 `+n`/`-n`/✓ 取失败次数、橙色 span 取待判次数、`style` 非空判首 A）；
-  - OI 家族每题只有分数 → `time_info`（最优耗时）恒空、`RankCell.error_num` 恒 0；
-  - `ContestRankRow.gender` / `school` / `nickname` → Hydro 榜单投影无这些字段 → 前端「女生队高亮」不可用；
-  - `total`（ACM 总提交数）由各题尝试次数求和反推。
-- **适配层现状**：如上，全部在 `types::scoreboard_rank_page` 内完成，并有 3 行（普通/打星/封榜待判）的逐字段测试锁定。
-- **建议补丁**：无（协议限制）。**建议接受**，但应告知用户：Hydro 下榜单搜索框无效、女生队高亮不可用。
-
----
-
-#### D11. Hydro 没有公告接口（对应能力是「答疑」）
-
-- **现象**：Hydro 只有 `/contest/:tid/clarification`（提问 + 裁判回复的会话），没有单向广播的公告。
-- **影响**：公告页在 Hydro 下恒为空（不报错）。
-- **适配层现状**：`list_announcements` 返回空 `AnnouncementPage`，方法文档写明了原因与后续方案。
-- **本次决策记录（已与项目负责人确认）**：**置空**。后续若要支持，应由**前端按 OJ 能力自动把「公告」面板切换为「问答」形态**；但 HOJ 是第一优先级的 OJ，短期不为 Hydro 改前端，故先留空并在此留档。
-- **建议补丁（未来）**：不要在本方法里做有损映射（把定向回复伪装成全场公告会让选手误读），而应在 Provider 层新增「答疑」能力（新 trait 方法或新实体），由前端按能力切换面板。
-
----
-
-#### D12. 比赛隐藏本人记录时，提交只返回 `tid` 而非 `rid`
-
-- **现象**：Hydro 的 `POST /p/:pid/submit` 在 `tid && !pretest && !contest.canShowSelfRecord(...)` 时返回 `{tid}` 而不是 `{rid}`。
-- **影响**：客户端拿不到记录 ID → **无法轮询评测结果**（提交成功但看不到结果）。ACM 赛制下 `showSelfRecord` 恒真，故常规校赛不受影响；`oi`/`strictioi` 等赛制在特定配置下会命中。
-- **适配层现状**：明确报错「Hydro 未返回评测记录 ID：本场比赛隐藏本人评测记录，无法查询评测结果」——**优于静默返回空串**（后者会让前端轮询一个空 ID 到超时）。
-- **建议补丁**：无（协议限制）。若确需支持，只能在前端给出「已提交，本场比赛隐藏本人记录」的专门提示。
-
----
-
-#### D18. 部署不支持 `X-Hydro-Inject` 时的降级策略
-
-- **现象**：`X-Hydro-Inject: UserContext` 是获取当前用户的**唯一**途径（无 `/user/me`）。若目标部署版本不支持该头，响应里就没有 `UserContext` 字段。
-- **影响**：此时无法区分「匿名（sid 失效）」与「不支持注入头」。若按前者处理 → **一次版本差异会把全部在线选手踢回登录页**。
-- **适配层现状**：`probe_user_context` 对「字段缺失」返回 `Err(Unknown)`（= 无法判定 → 保留会话），只有「注入生效且 `_id == 0`」才判定失效。`validate_session` 因此只会因**明确**的匿名而登出。代价：若部署真的不支持注入头，会话将永远校验为 `unknown`（保留登录态但也不会主动登出），需靠 `sessionGuard` 的认证类 IPC 失败兜底。
-- **建议补丁**：无（已是最保守的正确处置）。**建议联调时优先验证该头**（见 §6 待办 1）。
-
----
-
-### C 档 — 可接受 / 仅备案
-
----
-
-#### D7. 记录无提交时间字段（已用 ObjectId 反推）
-
-- **现象**：`rdoc` 只有 `judgeAt`（评测完成时刻），没有提交时刻。
-- **适配层现状**：`objectid_seconds` 从 `_id` 前 4 字节反推（Hydro 自身也依赖 ObjectId 的时间有序性做跨域时间过滤）。**前提**：部署使用标准 MongoDB ObjectId（24 位 hex）。
-- **风险**：若部署换了 ID 方案，反推会返回 `None` 并回退 `judgeAt`（≈ 提交时间 + 评测耗时，通常差几秒）。已在测试中锁定「非 24 位 hex / 时间越界一律拒绝」。
-- **建议**：无需改动；联调时核对一次时间显示（§6 待办 2）。
-
----
-
-#### D13. `SubmissionQuery.status` 承载 HOJ 状态码
-
-- **现状**：前端状态下拉的 value 是 HOJ 码，Adapter 经 `hoj_status_to_hydro` 单向翻译；HOJ 的 PE(3)/RJE(11)/SF(12)/PA(13)/FREQ(14) 在 Hydro 无对应语义 → **明确报错**而不是静默忽略筛选。
-- **影响**：Hydro 用户选这些筛选项会看到一条明确错误提示。
-- **建议补丁（未来）**：前端按当前 OJ 过滤下拉候选（需前端改动）。**可接受**。
-
----
-
-#### D14. `HttpClient` 的 Cookie jar 是全局共享的
-
-- **现状**：`HttpClient::with_timeout` 启用 `cookie_store(true)`，jar 在整个进程内共享。Hydro 登录后 `sid` 会留在 jar 里。
-- **影响**：当前注册中心只有一个「当前 OJ」，且不同 OJ 通常不同主机，**无实害**。但若未来支持「多 OJ 同时登录」，jar 共享可能造成会话串扰（尤其同一主机的不同部署）。
-- **建议**：暂不处理；若引入多 OJ 并存，应改为每 Adapter 一个 client（或显式关闭自动 cookie 存储，因为 Hydro 侧我们已显式发送 `Authorization`）。
-
----
-
-#### D15. Hydro 的 pid 可以是字符串（`P1000` / `A1`）
-
-- **现状**：`Problem.id` / `SubmissionRecord.pid` / `display_pid` 本就是 `String` ✓；`ContestProblem.id: i64` 取数字 `docId` ✓。
-- **唯一歧义**：`resolve_problem_id` 把**单字母**入参当展示字母解析（依据 Hydro `record_main` 的规则）。若某题的**真实 pid 恰好是一个字母**（如 `"A"`）且它不是该比赛的第一题，`get_problem` 会取到错误的题面。
-  - 缓解：`submit` 路径**不做**该换算（提交永远收真实 pid），故**不会提交到错误的题**；影响仅限题面展示，且顺序表缺失时会回退原值并记 warn。
-- **建议**：无需改动；联调时留意（§6 待办 3）。
-
----
-
-#### D16. Hydro 全局限流 100 请求 / 5 秒
-
-- **现状**：每个 Handler 都跑 `limitRate('global', 5, 100)`（key = ip@user）；登录另有 60s/30 与 60s/5；超限抛 `OpcountExceededError`(403)。
-- **影响**：① 榜单「全量快照模式」（打星/女生队过滤）会顺序拉全部分页（前端上限 40 页）—— Hydro 榜单不分页，**实际只有 1 个请求**，风险消失；② 题目 limits 批量拉取（并发 4、每题 1 次 `get_problem`）已通过 60s 顺序表缓存把 `get_problem` 的额外开销降到 0；③ 若未来前端轮询节奏加密，需注意。
-- **适配层现状**：`OpcountExceededError` 被判为**业务错误**（不触发登出），消息里带错误名与 params，便于识别。
-- **建议**：无需改动。
-
----
-
-#### D19. 三个 HOJ 专属字段在 Hydro 下无来源
-
-| 字段 | Hydro 情况 | 适配层填值 | 影响 |
-|---|---|---|---|
-| `Contest.auth`（0 公开 / 1 私有 / 2 保护） | 可见性由 `tdoc.assign`（组限定）表达，且该字段不在投影里 | 固定 `0` | 前端未消费该字段，无影响 |
-| `Contest.rank_show_name`（榜单显示名规则） | Hydro 用 `displayName` 且仅管理员可见 | `""`（前端回退 username） | 无影响 |
-| `Contest.allow_end_submit` | 赛后可见性由赛制 `showRecord` 决定，请求不可切换 | `false` | `contains_end` 本就被忽略（D10） |
-| `SubmissionDetail.oi_rank_score` | 无该字段 | `None` | 前端未消费 |
-
-- **建议**：无需改动（这些字段的语义是 HOJ 专属，Adapter 填「安全默认值」是正确做法）。
-
----
-
-#### D20. 前端语言域缺 Bash / Haskell 的扩展名与高亮映射
-
-- **现状**：Hydro 提供 `bash` / `hs`（Haskell）等语言；Adapter 译为 `"Bash"` / `"Haskell"` 后，前端 `utils/language.monacoIdStrict` 无法识别 → Monaco 高亮回退 `cpp`、工作区源文件名回退 `main.txt`。
-- **影响**：用 Bash/Haskell 提交时，工作区文件名是 `main.txt`、高亮是 C++。**提交本身不受影响**（`lang` 由 Adapter 从显示名反查回 key，往返恒等）。
-- **建议补丁（前端）**：`utils/language.ts` 的 `monacoIdStrict` / `HOJ_LANGUAGE_BY_EXT` 补 `bash→.sh` / `haskell→.hs`（`hs` 已在扩展名表里，但 `monacoIdStrict` 不认 "Haskell" 前缀）。
-- **决策所需信息**：校赛以 C/C++ 为主，**可接受**。
-
----
-
-## 5. 对既有代码的改动
-
-### 5.1 本轮（适配新架构后）：只剩 2 行
-
-| 文件 | 改动 |
-|---|---|
-| `adapter/mod.rs` | `pub mod hydro;` + `factories()` 里加 `&hydro::FACTORY` |
-| `adapter/hydro/**` | 新增（工厂 + HTTP 入口按通道分工 + `TtlCache`） |
-
-**这正好验证了 #20 的价值**：接入一个新 OJ 不再触碰 `core/provider`、`core/entity/config.rs`、
-`core/context.rs`、`commands/auth_cmd.rs` —— 只在适配器目录与工厂清单里各加一处。
-
-### 5.2 上一轮（#20 之前）的 4 处接线：已全部作废
-
-以下改动曾用于接入 Hydro，现已被 #20 的实现取代（更彻底，故未保留）：
-
-| 文件 | 当时的改动 | 现状 |
+| # | 缺口 | 处置 |
 |---|---|---|
-| `core/provider/oj_type.rs` | 新增 `Hydro` 变体 + `OJType::from_name` | 文件已删除 → `oj_id.rs` |
-| `core/entity/config.rs` | `OjConfig` 新增 `hydro_url` + 两处校验分支 | 被 `oj.instances` 取代 |
-| `core/context.rs` | 15 行注册块 + 按 `lastOjType` 解析当前 OJ | 被工厂循环取代 |
-| `commands/auth_cmd.rs` | `parse_oj_type` 委托 `OJType::from_name`，支持 `HYDRO` | 被 `OjId` + `oj_cmd::switch_oj` 取代 |
+| **D7** | 记录无提交时间字段 | `objectid_seconds` 从 `_id` 前 4 字节反推（Hydro 自身也依赖 ObjectId 的时间有序性）；非 24 位 hex / 时间越界一律拒绝并回退 `judgeAt`（测试已锁定） |
+| **D13** | 状态筛选传 HOJ 码 | `hoj_status_to_hydro` 单向翻译；HOJ 的 PE(3)/RJE(11)/SF(12)/PA(13)/FREQ(14) 在 Hydro 无对应语义 → **明确报错**而非静默忽略筛选（静默忽略会让选手以为「筛出来的就是全部」） |
+| **D15** | pid 可为字符串 | `Problem.id` / `SubmissionRecord.pid` / `display_pid` 本就是 `String` ✓；唯一歧义是 `resolve_problem_id` 把**单字母**入参当展示字母 —— **提交路径刻意不做该换算**，故不会提交到错误的题；顺序表缺失时回退原值并记 warn |
+| **D16** | 全局限流 100 请求 / 5 秒 | ① 榜单「全量快照模式」在 Hydro 下只有 1 个请求（服务端不分页）；② limits 批量拉取的额外开销被 60s 顺序表缓存降到 0；③ `OpcountExceededError` 被判为业务错误（不触发登出），消息带错误名便于识别 |
+| **D18** | 部署不支持 `X-Hydro-Inject` | `probe_user_context` 对「字段缺失」返回 `Err(Unknown)`（无法判定 → **保留会话**），只有「注入生效且 `_id == 0`」才判失效 —— 若按「匿名」处理，一次版本差异就会把全部在线选手踢回登录页。代价：不支持该头的部署会话永远校验为 `unknown`，靠 `sessionGuard` 的认证类 IPC 失败兜底 |
+| **D19** | 三个 HOJ 专属字段无来源 | `Contest.auth` 固定 `0`、`rank_show_name` 空串（前端回退 username）、`allow_end_submit` false、`SubmissionDetail.oi_rank_score` None —— 语义是 HOJ 专属，填安全默认值是正确做法（前端均未消费） |
 
 ---
 
-## 6. 待联调清单（本次无可用 Hydro 实例）
+## 8. 对既有代码的改动（汇总）
+
+**本轮（Hydro 分支）全部改动，共 3 个提交**：
+
+| 提交 | 内容 | 触及既有文件 |
+|---|---|---|
+| `57c45bb` | Hydro 适配器接入数据化 OJ 身份/配置/注册 | `adapter/mod.rs`（2 行：`pub mod hydro;` + `&hydro::FACTORY`） |
+| `7ff6c51` | 冲突记录 + 文档同步 | 仅 `doc/**` |
+| `2773a67` | 四项收尾（infra raw 变体、OJ 枚举选择器、终态判据清单、`cid` 字符串化） | `infra/http.rs`、`core/context.rs`、`commands/oj_cmd.rs`、`core/entity/{contest,submission}.rs`、`adapter/hoj/mod.rs`、前端 3 文件 |
+
+**这验证了 `#20` 重构的价值**：接入一个新 OJ 不再触碰 `core/provider`、`core/entity/config.rs`、
+`core/context.rs`、`commands/auth_cmd.rs` —— 只需在适配器目录与工厂清单各加一处。随后的四项收尾里
+只有 D1 / D3 / D17 需要动既有代码，且都是**跨端契约或基础设施的通用改进**，不是为 Hydro 打的补丁。
+
+> **上一轮（`#20` 之前）的 4 处接线已全部作废**（`OJType::Hydro` + `from_name`、`OjConfig::hydro_url`、
+> `context.rs` 的 15 行注册块、`parse_oj_type`），原因与处置见 `适配新架构的冲突记录.md` §1。
+
+**新增 OJ 时需同步的位置**（当前 3 处，都是数据不是逻辑分支）：
+1. `src-tauri/src/adapter/<oj>/`（新目录 + `FACTORY`）；
+2. `adapter::factories()` 加一行；
+3. 前端 `src/utils/oj.ts` 的 `OJ_TYPES` 加一项（+ 可选 `ojBaseUrlHint`）。
+
+---
+
+## 9. 待联调清单（本次无可用 Hydro 实例）
 
 所有单元测试基于**按文档手工构造的夹具**（`adapter/hydro/tests/fixtures/`），以下必须在真实部署上验证：
 
-1. **`X-Hydro-Inject: UserContext` 是否生效**（最关键）：决定会话校验能否区分「匿名」与「无法判定」。验证方式：登录后抓 `GET /` 的响应体，确认含 `UserContext` 且 `_id` 为真实 uid。
+1. **`X-Hydro-Inject: UserContext` 是否生效**（最关键）：决定会话校验能否区分「匿名」与「无法判定」。
+   验证方式：登录后抓 `GET /` 的响应体，确认含 `UserContext` 且 `_id` 为真实 uid。
 2. **提交时间**：核对记录页显示的提交时刻与 Hydro 网页端一致（验证 ObjectId 反推）。
-3. **展示字母解析**：在真实比赛里逐题打开题面，确认 `resolve_problem_id` 的字母 → pid 换算正确（尤其题目数 >26 或 pid 形如 `A1` 的场景）。
-4. **榜单单元格形态**：确认 `rows` 的列顺序、AC 单元格 `score == 100`、首 A 的 `style`、封榜的橙色 span 与实现假设一致（这是反推最多的一处）。
-5. **登录响应头**：确认 `Set-Cookie: sid=...` 出现在带 `Accept: application/json` 的 200 响应上（而非 302 重定向）。
-6. **错误包络**：确认错误响应的 HTTP 状态码等于 `error.code`，且未登录场景确实表现为 HTTP 200 + `{"url":"/login?..."}`。
+3. **展示字母解析**：在真实比赛里逐题打开题面，确认 `resolve_problem_id` 的字母 → pid 换算正确
+   （尤其题目数 >26 或 pid 形如 `A1` 的场景）。
+4. **榜单单元格形态**：确认 `rows` 的列顺序、AC 单元格 `score == 100`、首 A 的 `style`、封榜的
+   橙色 span 与实现假设一致（这是反推最多的一处）。
+5. **登录响应头**：确认 `Set-Cookie: sid=...` 出现在带 `Accept: application/json` 的 200 响应上
+   （而非 302 重定向）。
+6. **错误包络**：确认错误响应的 HTTP 状态码等于 `error.code`，且未登录场景确实表现为
+   HTTP 200 + `{"url":"/login?..."}`。
 7. **限流**：确认 `OpcountExceededError` 的触发阈值与前端轮询节奏无冲突。
-8. **`tdoc.pids` 在 `/contest/:tid/problems` 响应里是否存在**（实现优先用响应自带的，缺失时回退带缓存的 `/contest/:tid`）。
-
----
-
-## 7. 建议的决策顺序（2026-09-19 晚更新）
-
-已落地：**D17 + 其衍生缺口**（infra raw 变体）、**D3**（OJ 枚举选择器 + 按需注册）、
-**D1**（`cid` 改字符串）、`is_terminal()` 判据清单补第四处。
-
-仍在等你决断：
-
-1. **D4**：若目标部署用自定义域，需让 `AdapterFactory::build` 能读到 `OjInstance.options`
-   （签名扩展）；不用自定义域的话本条可降为 C 档。见冲突记录 §2.4；
-2. **D14**：Cookie jar 全局共享（当前只有「一个 active OJ」，无实害）；
-3. D5 / D6 / D8 / D9 / D10 / D11 / D12 / D18 属**已知降级**，建议在 README 或用户文档里
-   明示 Hydro 的能力边界，而不是现在改代码；
-4. D7 / D13 / D15 / D16 / D19 / D20 备案即可。
+8. **`tdoc.pids` 在 `/contest/:tid/problems` 响应里是否存在**（实现优先用响应自带的，
+   缺失时回退带缓存的 `/contest/:tid`）。
+9. **UI 自助启用全流程**：设置页选 Hydro → 填地址 → 保存 → 自动切换 → 登录（验证 D3 的闭环，
+   含「免重启」这一点）。
