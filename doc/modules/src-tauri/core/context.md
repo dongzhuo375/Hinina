@@ -18,11 +18,16 @@
   9. 装配 5 个 Service：ThemeService → AuthService → ContestService（注入 `Arc<Storage>`，供公告已读状态持久化 `announcements_read/`）→ ProblemService（注入 `Arc<Storage>`，供题目 limits 磁盘缓存 `cache/problem_limits/`）→ SubmissionService
   10. 装配 AppContext 并返回
 
+- **`AppContext::ensure_oj_registered(oj_id: &str) -> bool`** — **按需注册**某个已配置且启用的 OJ 实例（幂等，返回是否本次新注册）。存在的理由：注册只发生在 `init`，而设置页允许用户从 OJ 枚举里挑一个尚未配置的类型、填地址保存后立即切换 —— 不补注册用户就得重启客户端（`commands/oj_cmd::switch_oj` 在校验前调用它）。注册条件与 `init` **同源**（共用私有纯函数 `enabled_instance`：只认配置里已启用且 id 匹配的实例），不能凭空激活未配置的 OJ，否则 `switch_oj` 会绕过配置成为后门
+- **`enabled_instance(config, oj_id) -> Option<&OjInstance>`**（私有纯函数）— 从配置里挑出指定 id 的已启用实例；抽成纯函数以便单测锁定判定（`init` 与按需注册两条路径共用）
+
 ## 直接依赖
+
 - `adapter::hoj::HOJAdapter` 及 `adapter::{AdapterDeps, factories}`（实例注册循环；未注册 active 的回退目标取自 `list_available()` 首项，不再引用 HOJAdapter::ID）
 - `core::event::event_bus::EventBus`
 - `core::provider::registry::ProviderRegistry`
 - `core::provider::oj_id::OjId`
+- `core::entity::config::{AppConfig, OjInstance}`（`ensure_oj_registered` 的实例判定）
 - `core::error::AppResult`
 - `infra::http::HttpClient`
 - `infra::logger::Logger`
@@ -51,3 +56,17 @@
 
 ## 逻辑流程
 `AppContext::init(base_dir)` 按依赖顺序初始化：Logger（双路输出，日志文件落在 base_dir 下，故最先拿到 base_dir）→ Storage → EventBus → ConfigService → HttpClient（超时由配置注入）→ ProviderRegistry（当前 OJ 取 `oj.active`，按 `oj.instances` 的 enabled 实例匹配工厂注册全部内建 OJ，active 未注册回退**首个已注册 OJ**并告警）→ WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ 装配 AppContext。所有 Service 通过 Arc 共享 EventBus、ConfigService、ProviderRegistry 和 Storage（AuthService 用于会话持久化，ContestService 用于公告已读状态，ProblemService 用于 limits 磁盘缓存）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
+
+**按需注册路径**（设置页新建实例后立即切换）：
+```
+switch_oj(id) → AppContext::ensure_oj_registered(id)
+                  ├─ 已注册 ────────────────────► false（幂等短路）
+                  ├─ 配置里无该 id / 实例被禁用 ► false（不凭空激活）
+                  ├─ 无匹配工厂 ────────────────► false + warn
+                  └─ 命中 ──► factories().find(id).build(&AdapterDeps, base_url)
+                              → registry.register(OjId, ProviderSet) → true
+                → 常规校验（未注册则 ProviderNotFound）→ 切换 → 发布 OJSwitched → 持久化 active
+```
+
+## 测试
+`src-tauri/src/core/tests/context_tests.rs` 锁定 `enabled_instance` 的判定：命中已启用实例、**跳过禁用实例**（否则会绕开「禁用」开关）、未配置 id / 大小写不符 / 空串一律 `None`（id 是精确匹配的键，不做模糊归一）、空实例清单、默认配置恰有一个启用实例（开箱即用的 HOJ）。`ensure_oj_registered` 本身需要完整 AppContext（http/事件总线/存储/注册表），构造代价大于收益，其正确性由「与 init 同判据」这条约束保证。

@@ -13,6 +13,7 @@ import {
   EDITOR_TAB_SIZES,
 } from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
+import { ojBaseUrlHint, ojSelectOptions } from '@/utils/oj'
 import type { AppConfig, OjInstance } from '@/types/config'
 import type { StorageInfo } from '@/types/system'
 
@@ -127,39 +128,63 @@ const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
 
 /// OJ 实例清单（populate 时从配置刷新；切换后取新实例地址、渲染禁用态）
 const ojInstances = ref<OjInstance[]>([])
-/// 下拉候选：全部实例（禁用者标注且不可选 —— 切到未注册的 OJ 只会得到
-/// ProviderNotFound；若当前 active 恰为禁用实例，仍如实显示为选中值）
-const ojOptions = computed(() =>
-  ojInstances.value.map((i) => ({ id: i.id, disabled: !i.enabled })),
-)
+/// 下拉候选 = 已知 OJ 枚举（含尚未配置者，选中即引导创建实例）+ 配置里的其它 id
+const ojOptions = computed(() => ojSelectOptions(ojInstances.value))
 /// 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）
 const persistedActive = ref('HOJ')
 /// 切换 OJ 的错误提示（独立于保存错误：两个不同意图）
 const switchError = ref<string | null>(null)
+/// 切换 OJ 的引导提示（尚未配置的 OJ：不是错误，只是告诉用户下一步做什么）
+const switchNotice = ref<string | null>(null)
+/// 本次保存新建的实例 id（保存成功后据此自动完成切换，null = 未新建）
+const createdOj = ref<string | null>(null)
 
-/// 切换当前 OJ：显式命令（即时生效 + 持久化 oj.active + 发布 OJSwitched）。
-/// 与「保存」解耦 —— 保存仍负责地址/比赛引用等其余字段（active 两处写入同源同值）。
-/// 切换成功 = 整个应用换了服务端：重置会话上下文并回登录页，由路由守卫按新 OJ
-/// 的会话文件恢复会话（该 OJ 登录过则无感续用，否则落在登录表单）。
-async function onSwitchOj(): Promise<void> {
-  switchError.value = null
-  const target = form.activeOj
+/// 切换的公共尾部：调用后端命令（后端会按需注册新实例）→ 重置会话上下文 → 回登录页。
+///
+/// 抽出来是因为有两条入口：下拉的显式切换、以及「保存新建实例后自动完成切换」
+/// （用户在选下拉时已表达切换意图，只是当时实例还不存在）。失败如实写 `switchError`，
+/// 由调用方决定是否回滚下拉显示。
+async function performSwitch(target: string): Promise<boolean> {
   try {
     await configService.switchOj(target)
     persistedActive.value = target
-    // 地址栏跟随新实例：否则表单里仍是旧实例的地址，「保存」会把它写进
-    // 新实例的 baseUrl（数据损坏）。切换前未保存的地址编辑随之丢弃 ——
-    // 用户已切换编辑对象，这是预期行为。
-    form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
     // 旧 OJ 的用户/比赛/题面/提交对新 OJ 全部失效（解题页还会拿旧 contest.id
     // 向新 OJ 提交）：与登出同款清理，但不打后端 logout（Registry 已切换，
     // 那会误删新 OJ 自己的会话文件）
     resetSessionForOjSwitch()
     void router.replace({ name: 'Login' })
+    return true
   } catch (e) {
+    switchError.value = errorMessage(e, '切换 OJ 失败')
+    return false
+  }
+}
+
+/// 切换当前 OJ：显式命令（即时生效 + 持久化 oj.active + 发布 OJSwitched）。
+/// 与「保存」解耦 —— 保存仍负责地址/比赛引用等其余字段。
+/// 切换成功 = 整个应用换了服务端：重置会话上下文并回登录页，由路由守卫按新 OJ
+/// 的会话文件恢复会话（该 OJ 登录过则无感续用，否则落在登录表单）。
+async function onSwitchOj(): Promise<void> {
+  switchError.value = null
+  switchNotice.value = null
+  const target = form.activeOj
+  // 尚未配置的 OJ（从枚举里挑出来的新类型）：**不切换**，引导先填地址保存。
+  // 直接切必然失败（无实例 → 后端无从注册），把用户丢进一个错误提示不如
+  // 明确告诉他下一步：填地址 → 保存（建实例并自动切换）。
+  const option = ojOptions.value.find((o) => o.id === target)
+  if (option && !option.configured) {
+    form.ojUrl = ''
+    switchNotice.value = `${target} 尚未配置：填写服务器地址后点「保存」，将自动创建实例并切换`
+    return
+  }
+  if (await performSwitch(target)) {
+    // 地址栏跟随新实例：否则表单里仍是旧实例的地址，「保存」会把它写进
+    // 新实例的 baseUrl（数据损坏）。切换前未保存的地址编辑随之丢弃 ——
+    // 用户已切换编辑对象，这是预期行为。
+    form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
+  } else {
     // 回滚下拉到已持久化值，避免 UI 停留在一个未生效的 OJ
     form.activeOj = persistedActive.value
-    switchError.value = errorMessage(e, '切换 OJ 失败')
   }
 }
 
@@ -173,6 +198,7 @@ function populate(config: AppConfig): void {
   form.activeOj = config.oj.active
   persistedActive.value = config.oj.active
   switchError.value = null
+  switchNotice.value = null
   ojInstances.value = config.oj.instances
   // 展示当前选中实例的地址（active 未命中时回退第一个启用实例，兜底竞态）
   form.ojUrl =
@@ -217,12 +243,27 @@ async function save(): Promise<void> {
   try {
     // 后端 update_config 是整体替换语义，updateConfig 内部已做读-改-写；
     // 这里只把校验通过的表单值写入草稿
-    await configService.updateConfig((draft) => {
-      draft.oj.active = form.activeOj
-      // 地址写回当前选中实例（active 不在实例列表会被 Rust validate 拒绝，
-      // 下拉候选即实例清单，正常操作不会出现）
+    const saved = await configService.updateConfig((draft) => {
+      // active **不在这里写**：它只由 switch_oj 改写（切换是即时生效的独立意图）。
+      // 若保存也写 active，新建实例的场景会出现「配置说 Hydro、运行中的 Registry
+      // 仍是 HOJ」的静默不一致（保存不触发切换）。
+      //
+      // 地址写回当前选中实例；实例不存在则**创建**（设置页支持从枚举里挑一个尚未
+      // 配置的 OJ —— 保存即建实例，之后切换无需手改 config.json）
       const instance = draft.oj.instances.find((i) => i.id === form.activeOj)
-      if (instance) instance.baseUrl = form.ojUrl.trim()
+      if (instance) {
+        instance.baseUrl = form.ojUrl.trim()
+        // 保存地址即视为启用该 OJ（否则实例不会注册，切换必失败）
+        instance.enabled = true
+      } else {
+        draft.oj.instances.push({
+          id: form.activeOj,
+          baseUrl: form.ojUrl.trim(),
+          enabled: true,
+          options: {},
+        })
+        createdOj.value = form.activeOj
+      }
       draft.oj.contestRef = form.contestRef.trim()
       draft.oj.contestPassword = form.contestPassword === '' ? null : form.contestPassword
       draft.oj.timeoutSecs = Number(form.timeoutSecs)
@@ -238,12 +279,25 @@ async function save(): Promise<void> {
       draft.layout.splitRatio = form.splitRatio
     })
     baseline.value = snapshot()
+    // 实例清单已变（可能新增了当前 OJ）：同步给下拉，使「configured」状态即时正确 ——
+    // 否则刚创建的实例仍被当成未配置，用户重试切换会被拦下
+    ojInstances.value = saved.oj.instances
     showSaved.value = true
     if (savedTimer) clearTimeout(savedTimer)
     savedTimer = setTimeout(() => {
       showSaved.value = false
       savedTimer = null
     }, 3_000)
+
+    // 保存时新建了实例（从枚举里挑的未配置 OJ）→ 完成用户**已经表达过**的切换意图：
+    // 实例已落盘，后端 `switch_oj` 会按需注册它，无需重启客户端。
+    // 失败不吞：给提示让用户在上方重试（此时实例已 configured，重试可成功）。
+    if (createdOj.value !== null) {
+      const target = createdOj.value
+      createdOj.value = null
+      if (await performSwitch(target)) return
+      switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
+    }
   } catch (e) {
     saveError.value = errorMessage(e, '保存配置失败')
   } finally {
@@ -365,14 +419,17 @@ onBeforeUnmount(() => {
                       :value="o.id"
                       :disabled="o.disabled"
                     >
-                      {{ o.id }}{{ o.disabled ? '（已禁用）' : '' }}
+                      {{ o.id }}{{ o.disabled ? '（已禁用）' : o.configured ? '' : '（未配置）' }}
                     </option>
                   </select>
                   <span v-if="switchError" class="mt-1 block text-xs text-rose-600">
                     {{ switchError }}
                   </span>
+                  <span v-else-if="switchNotice" class="mt-1 block text-xs text-amber-600">
+                    {{ switchNotice }}
+                  </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
-                    切换即时生效并持久化，将离开本页并放弃所有未保存的修改；候选 = oj.instances 清单
+                    切换即时生效并持久化，将离开本页并放弃所有未保存的修改；候选 = 已知 OJ 类型 + 配置里的其它实例
                   </span>
                 </label>
 
@@ -384,14 +441,14 @@ onBeforeUnmount(() => {
                     v-model="form.ojUrl"
                     type="text"
                     spellcheck="false"
-                    placeholder="https://example-oj.com"
+                    :placeholder="ojBaseUrlHint(form.activeOj)"
                     :class="inputClass('ojUrl')"
                   />
                   <span v-if="errors.ojUrl" class="mt-1 block text-xs text-rose-600">
                     {{ errors.ojUrl }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
-                    修改后需重启客户端生效
+                    属于当前 OJ（{{ form.activeOj }}）；改动当前 OJ 的地址后需重启生效，新建实例保存后会自动切换
                   </span>
                 </label>
 

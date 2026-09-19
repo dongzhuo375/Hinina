@@ -25,7 +25,8 @@ export interface Contest {
 export interface ContestProblem {
   id: number
   displayId: string
-  cid: number
+  /// 比赛 ID —— **字符串**：HOJ 是数字串，Hydro 是 24 位 hex ObjectId
+  cid: string
   problemId: string
   displayTitle: string
   ac: number

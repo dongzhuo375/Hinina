@@ -72,7 +72,7 @@ fn classify_accepts_success_on_any_attempt() {
     for status in [StatusCode::OK, StatusCode::CREATED, StatusCode::NO_CONTENT] {
         for attempt in 0..=MAX_RETRIES {
             assert_eq!(
-                classify_status(status, attempt),
+                classify_status(status, attempt, false),
                 StatusDecision::Accept,
                 "HTTP {} 应被接受",
                 status.as_u16()
@@ -91,7 +91,7 @@ fn classify_retries_server_error_while_budget_remains() {
     ] {
         for attempt in 0..MAX_RETRIES {
             assert_eq!(
-                classify_status(status, attempt),
+                classify_status(status, attempt, false),
                 StatusDecision::Retry,
                 "HTTP {} 第 {} 次应重试",
                 status.as_u16(),
@@ -105,11 +105,11 @@ fn classify_retries_server_error_while_budget_remains() {
 fn classify_fails_server_error_once_retry_budget_exhausted() {
     // 这条是上述回归的正面锁定：耗尽后必须报错，不能把错误页当成功响应
     assert_eq!(
-        classify_status(StatusCode::BAD_GATEWAY, MAX_RETRIES),
+        classify_status(StatusCode::BAD_GATEWAY, MAX_RETRIES, false),
         StatusDecision::Fail
     );
     assert_eq!(
-        classify_status(StatusCode::INTERNAL_SERVER_ERROR, MAX_RETRIES),
+        classify_status(StatusCode::INTERNAL_SERVER_ERROR, MAX_RETRIES, false),
         StatusDecision::Fail
     );
 }
@@ -125,7 +125,7 @@ fn classify_fails_client_error_without_retry() {
     ] {
         for attempt in 0..=MAX_RETRIES {
             assert_eq!(
-                classify_status(status, attempt),
+                classify_status(status, attempt, false),
                 StatusDecision::Fail,
                 "HTTP {} 不应重试",
                 status.as_u16()
@@ -138,7 +138,7 @@ fn classify_fails_client_error_without_retry() {
 fn classify_fails_redirect_leftovers() {
     // reqwest 默认自动跟随重定向，能走到这里说明重定向次数耗尽，同样不该当成功
     assert_eq!(
-        classify_status(StatusCode::MOVED_PERMANENTLY, 0),
+        classify_status(StatusCode::MOVED_PERMANENTLY, 0, false),
         StatusDecision::Fail
     );
 }
@@ -151,4 +151,60 @@ fn with_timeout_builds_client() {
     // 「配置值确实被传入」由 context.rs 的装配代码保证（timeout_secs → with_timeout）
     HttpClient::with_timeout(Duration::from_secs(7)).expect("应能创建指定超时的客户端");
     HttpClient::new().expect("默认构造应保持可用");
+}
+
+// ── classify_status 的 allow_error 分支（raw 变体：任意状态码都返回原始响应）──
+//
+// raw 变体存在的理由：有些 OJ 把用户可见的错误文案放在响应体里（Hydro 的
+// `{"error":{"name",…}}`），而非 raw 变体在非 2xx 时会丢弃响应体。
+// 两条不能错的判据：① raw 下 4xx **不重试**（重试只会得到同样的结果，
+// 而 4xx 常是「密码错」这类不该重放的请求）；② 5xx **仍重试**，只是耗尽后
+// 返回响应而不是报错（否则 raw 变体等于把 5xx 退避策略整体废掉）。
+
+#[test]
+fn raw_accepts_client_error_without_retry() {
+    for status in [
+        StatusCode::BAD_REQUEST,
+        StatusCode::UNAUTHORIZED,
+        StatusCode::FORBIDDEN,
+        StatusCode::NOT_FOUND,
+    ] {
+        for attempt in 0..=MAX_RETRIES {
+            assert_eq!(
+                classify_status(status, attempt, true),
+                StatusDecision::Accept,
+                "raw 下 HTTP {} 应原样返回（不重试）",
+                status.as_u16()
+            );
+        }
+    }
+}
+
+#[test]
+fn raw_still_retries_server_error_then_returns_it() {
+    for attempt in 0..MAX_RETRIES {
+        assert_eq!(
+            classify_status(StatusCode::BAD_GATEWAY, attempt, true),
+            StatusDecision::Retry,
+            "raw 下 5xx 仍应重试（第 {} 次）",
+            attempt
+        );
+    }
+    // 重试耗尽后返回响应，而不是报错 —— 调用方需要状态码与响应体
+    assert_eq!(
+        classify_status(StatusCode::BAD_GATEWAY, MAX_RETRIES, true),
+        StatusDecision::Accept
+    );
+}
+
+#[test]
+fn raw_accepts_success_same_as_default() {
+    for status in [StatusCode::OK, StatusCode::CREATED, StatusCode::NO_CONTENT] {
+        assert_eq!(
+            classify_status(status, 0, true),
+            StatusDecision::Accept,
+            "raw 下 HTTP {} 同样应被接受",
+            status.as_u16()
+        );
+    }
 }

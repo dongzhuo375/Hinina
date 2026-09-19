@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::core::entity::config::{AppConfig, OjInstance};
 use crate::core::error::AppResult;
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::oj_id::OjId;
@@ -187,4 +188,57 @@ impl AppContext {
             submission,
         })
     }
+
+    /// 确保某个**已配置且启用**的 OJ 实例已完成注册（幂等）。返回是否本次新注册。
+    ///
+    /// 为什么需要「按需注册」：注册只发生在启动时（`init`），而设置页允许用户从
+    /// 枚举里挑一个尚未配置的 OJ、填地址保存后**立即切换** —— 若切换时只查注册表，
+    /// 用户会撞上「OJ 未注册」，只能重启客户端才能用上新 OJ。
+    ///
+    /// 只认配置里已启用且 id 匹配的实例（与 `init` 的注册条件完全一致）：
+    /// 不能凭空激活一个未配置的 OJ，否则 `switch_oj` 会绕过配置成为后门。
+    pub fn ensure_oj_registered(&self, oj_id: &str) -> bool {
+        let id = OjId::new(oj_id);
+        if id.as_str().is_empty() || self.provider_registry.list_available().contains(&id) {
+            return false;
+        }
+
+        let config = self.config.get();
+        let Some(instance) = enabled_instance(&config, id.as_str()).cloned() else {
+            return false;
+        };
+        let Some(factory) = crate::adapter::factories()
+            .into_iter()
+            .find(|f| f.id() == instance.id)
+        else {
+            tracing::warn!(oj_id = %id, "配置了未知 OJ（无对应适配器），无法注册");
+            return false;
+        };
+
+        let deps = crate::adapter::AdapterDeps {
+            http_client: Arc::clone(&self.http_client),
+            event_bus: Arc::clone(&self.event_bus),
+            storage: Arc::clone(&self.storage),
+        };
+        self.provider_registry
+            .register(id.clone(), factory.build(&deps, &instance.base_url));
+        tracing::info!(oj_id = %id, base_url = %instance.base_url, "OJ 适配器已按需注册");
+        true
+    }
 }
+
+/// 从配置里挑出指定 id 的**已启用**实例（纯函数，便于单测锁定判定）。
+///
+/// `oj_id` 须是已归一（trim）的 id：调用方经 `OjId::new` 归一，
+/// 配置里的实例 id 也由 `AppConfig::sanitize` trim 过。
+fn enabled_instance<'a>(config: &'a AppConfig, oj_id: &str) -> Option<&'a OjInstance> {
+    config
+        .oj
+        .instances
+        .iter()
+        .find(|instance| instance.enabled && instance.id == oj_id)
+}
+
+#[cfg(test)]
+#[path = "tests/context_tests.rs"]
+mod tests;

@@ -15,18 +15,16 @@
 Hydro 的 5 个核心闭环（登录 / 取比赛 / 看题目 / 提交 / 看评测），**没有一条差异迫使我们在 Service 层
 或 entity 层做妥协**。
 
-> **状态更新（2026-09-19）**：main 的 #20（身份/配置/注册数据化）落地后，本报告的**改动面已变**：
-> 原先「本次对既有代码的 4 处接线改动」全部由 #20 取代（§5 已改写），并新增一条更窄的 infra 缺口
-> （非 2xx 丢弃响应体）。条目状态变化：**D2 已解决**（`contest_ref: String`）、
-> **D3 部分解决**（有 OJ 下拉与 `switch_oj`，但不能自助新增实例）、
-> **D17 已修复**（`HttpClient` 现接收 `HeaderMap`）但衍生新缺口、
-> **D4 有配置位置但传不进适配器**。细节见 `doc/Hydro/适配新架构的冲突记录.md`。
+> **状态更新（2026-09-19 晚）**：D1 / D2 / D3 / D17 及其衍生缺口**均已解决**
+> （`cid` 改字符串、`contest_ref: String`、OJ 枚举选择器 + 按需注册、infra raw 变体），
+> 详见 `doc/Hydro/适配新架构的冲突记录.md`。**仅剩 D4**（`OjInstance.options` 传不进
+> 适配器）待决断。以下条目保留完整背景与决策记录。
 
 按处置紧迫度分三档（括号内为 2026-09-19 状态）：
 
 | 档位 | 含义 | 条目 |
 |---|---|---|
-| **A. 必须改才能真正用起来** | 不改则 Hydro 无法被激活/关键流程不可用 | D1（仍未解决）、D2（**已解决**）、D3（**部分解决**）、D4（**待定**）、D17（**已修复**，衍生 infra 丢响应体） |
+| **A. 必须改才能真正用起来** | 不改则 Hydro 无法被激活/关键流程不可用 | D1（**已解决**）、D2（**已解决**）、D3（**已解决**）、D4（**待定**）、D17（**已修复**，衍生缺口亦已修） |
 | **B. 建议改（有损但可用）** | 不改则功能降级或语义失真 | D5、D6、D8、D9、D10、D11、D12、D18 |
 | **C. 可接受 / 仅备案** | 记录事实，暂不建议动 | D7、D13、D14、D15、D16、D19、D20 |
 
@@ -89,6 +87,10 @@ HOJ 是 Hydro 的衍生版并自带一层 REST + JWT，**两者不是同一个 A
 
 #### D1. `ContestProblem.cid: i64` 装不下 Hydro 的比赛 ID
 
+**状态：✅ 已解决（`cid` 改为 `String`）** —— 语义与 `OjConfig::contest_ref` 对齐：
+比赛是对服务端资源的不透明引用。HOJ 填数字串、Hydro 如实携带 24 位 hex ObjectId。
+改动面：entity + 两个 adapter + 前端 `types/contest.ts` + 测试夹具。
+
 - **现象**：Hydro 的比赛主键是 24 位 hex ObjectId（`"64f0c0f0f0f0f0f0f0f0f0f0"`），而 `ContestProblem.cid` 是 `i64`。
 - **影响**：`list_contest_problems` 返回的每条题目都只能把 `cid` 填 **0**。当前前端不消费该字段（渲染只用 `displayId`/`problemId`），故**暂无功能故障**；但一旦有「按 cid 过滤题目」之类的逻辑，Hydro 侧会全部落到 0。
 - **适配层现状**：填 0 并在代码注释中标注。
@@ -132,10 +134,10 @@ HOJ 是 Hydro 的衍生版并自带一层 REST + JWT，**两者不是同一个 A
 
 #### D3. 前端没有 OJ 切换入口（Hydro 无法从 UI 激活）
 
-**状态：⚠️ 部分解决（#20）** —— `SettingsView` 现有 OJ 下拉（候选 = `oj.instances`，
-`disabled` 的置灰）与显式 `switch_oj` 命令，`login` 不再承担切换副作用。
-**残差**：下拉候选来自配置，前端**不能新增/删除实例**，`default_oj_instances()` 只给 HOJ
-→ 启用 Hydro 仍需手改 `config.json`。详见 `适配新架构的冲突记录.md` §2.2。
+**状态：✅ 已解决（枚举选择器 + 按需注册）** —— `SettingsView` 的下拉候选 = 已知 OJ 枚举
+（`src/utils/oj.ts`，含尚未配置者）+ 配置里的其它 id；选中未配置的类型会引导填地址，
+「保存」即创建实例并**自动切换**；后端 `AppContext::ensure_oj_registered` 让新实例免重启生效。
+详见 `适配新架构的冲突记录.md` §2.2。
 
 - **现象**：① `SettingsView` 的「OJ」分组只有服务器地址（且只有 `hojUrl`）；② `LoginView` 调用 `auth.login(username, password)` **不传** `ojType`；③ 因此 `ProviderRegistry` 的当前 OJ 永远停在启动时的默认值。
 - **影响**：即使后端注册了 HydroAdapter，用户也无法在界面上选择 Hydro。
@@ -178,9 +180,9 @@ HOJ 是 Hydro 的衍生版并自带一层 REST + JWT，**两者不是同一个 A
 
 **但衍生出一条更窄的缺口**：infra 在**非 2xx 时丢弃响应体**，而 Hydro 的用户可见错误
 全在响应体包络里（`LoginError` / `OpcountExceededError` / `PermissionError`）。
-当前分工是 **GET 走 infra**（要回 5xx 重试）、**POST 走原始 reqwest**（要错误包络；
-POST 本就不重试，不损失重试）。建议 infra 增加「任意状态码都返回 status + headers + body」
-的变体，两条通道即可合一。详见 `适配新架构的冲突记录.md` §2.1。
+**该衍生缺口也已修**：`HttpClient` 新增 raw 变体（`get_text_raw` / `post_text_raw`，
+任意状态码都返回 status + headers + body，5xx 仍重试但耗尽后返回响应），Hydro 的
+GET 与 POST 两条通道因此合一，不再直连 reqwest。详见 `适配新架构的冲突记录.md` §2.1。
 
 <details>
 <summary>原始记录（问题已修复，保留以说明背景）</summary>
@@ -424,19 +426,16 @@ POST 本就不重试，不损失重试）。建议 infra 增加「任意状态�
 
 ---
 
-## 7. 建议的决策顺序（2026-09-19 更新）
+## 7. 建议的决策顺序（2026-09-19 晚更新）
 
-1. **D17 的衍生缺口**：infra 在非 2xx 时丢弃响应体 → 建议新增「任意状态码都返回
-   status + headers + body」的变体。收益明确（GET 也能读错误包络，两条通道可合一），
-   风险极低（新增方法、不动既有）。见 `适配新架构的冲突记录.md` §2.1；
-2. **D3 的残差**：设置页支持新增/删除 OJ 实例 —— 决定 Hydro 能否被选手**自助**启用
-   （现在只能手改 `config.json`）。见冲突记录 §2.2；
-3. **D4**：若目标部署用自定义域，需让 `AdapterFactory::build` 能读到 `OjInstance.options`
+已落地：**D17 + 其衍生缺口**（infra raw 变体）、**D3**（OJ 枚举选择器 + 按需注册）、
+**D1**（`cid` 改字符串）、`is_terminal()` 判据清单补第四处。
+
+仍在等你决断：
+
+1. **D4**：若目标部署用自定义域，需让 `AdapterFactory::build` 能读到 `OjInstance.options`
    （签名扩展）；不用自定义域的话本条可降为 C 档。见冲突记录 §2.4；
-4. **D1**：`ContestProblem.cid` 仍是 `i64`，装不下 hex 比赛 ID（当前无消费方，影响为零）；
-5. D5 / D6 / D8 / D9 / D10 / D11 / D12 / D18 属**已知降级**，建议在 README 或用户文档里
+2. **D14**：Cookie jar 全局共享（当前只有「一个 active OJ」，无实害）；
+3. D5 / D6 / D8 / D9 / D10 / D11 / D12 / D18 属**已知降级**，建议在 README 或用户文档里
    明示 Hydro 的能力边界，而不是现在改代码；
-6. D7 / D13–D16 / D19 / D20 备案即可。
-
-**顺带一条文档同步建议**：`core/entity/submission.rs` 的 `is_terminal()` 注释写着
-「三处判据必须保持一致」，实际已有四处（含 `adapter::hydro::types::is_terminal_status`）。见冲突记录 §2.3。
+4. D7 / D13 / D15 / D16 / D19 / D20 备案即可。

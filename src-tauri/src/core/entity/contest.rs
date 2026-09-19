@@ -47,8 +47,12 @@ pub struct ContestProblem {
     pub id: i64,
     /// 比赛中展示 ID（如 "A", "B", "C"）
     pub display_id: String,
-    /// 比赛 ID
-    pub cid: i64,
+    /// 比赛 ID。
+    ///
+    /// **字符串**：各 OJ 的比赛主键形态不同（HOJ 是数字，Hydro 是 24 位 hex
+    /// ObjectId），数字类型装不下后者。与 `OjConfig::contest_ref` 同源语义 ——
+    /// 「比赛」是对服务端资源的不透明引用，不该假设它是数字。
+    pub cid: String,
     /// 题目真实 ID（HOJ 的 pid）
     pub problem_id: String,
     /// 比赛中显示标题

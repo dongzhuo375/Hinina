@@ -14,12 +14,12 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
   - `into_value()` — 协议层判定，顺序刻意是「**状态码 → 错误包络 → 登录重定向 → 类型化解析**」。先看状态码才能把网关的 HTML 错误页报成 `HTTP 502` 而不是「响应不是合法 JSON」（把排障引向错误方向）；再认错误包络是因为 Hydro 用 HTTP 状态码承载 `error.code`，而**登录重定向却是 HTTP 200**
   - `parse_value(body, url)`（关联函数）— 协议层判定 + 解析的**共用入口**（GET/POST 两条通道都走它）：非法 JSON → `Serialization`（带 URL 与前 200 字符）；错误包络 → `AppError`；JSON 化登录重定向 → `Auth`
   - `into_json::<T>()` — `into_value()` + 反序列化
-- `http_status_error(url, status)` — HTTP 状态码 → `AppError`，镜像 `infra::http::status_error` 的判据（**401 → `Auth`**、403 保持 `Network`）。**只服务 POST 通道**（GET 走 infra，映射由 infra 负责）
+- `http_status_error(url, status)` — HTTP 状态码 → `AppError`，镜像 `infra::http::status_error` 的判据（**401 → `Auth`**、403 保持 `Network`）。**两条通道共用**（raw 变体不做状态码映射，故这一步归适配器）
 - `now_secs()` — 当前 UTC 秒
 - **请求入口（按通道分工）**：
   - `headers(inject_user) -> HeaderMap` — 组装 `Accept: application/json` + `Authorization: Bearer <sid>`（有会话时）+ 可选 `X-Hydro-Inject: UserContext`
-  - `get_value(path, inject_user)` / `get_json::<T>(path, inject_user)` — **走 infra**（`HttpClient::get_text_with_headers`）：拿回 5xx 退避重试与统一的状态码→变体映射（401→`Auth`）
-  - `post_raw(path, body)` / `post_json::<T>(path, body)` — **走原始 reqwest**：POST 本就不重试，且需要读非 2xx 的**错误包络**（用户可见文案全在那里）与 `Set-Cookie`（登录下发 sid）- `probe_user_context()`（私有）— **严格版**用户探测，三态：`Ok(Some)` 服务端确认已登录 / `Ok(None)` 注入生效但 `_id == 0`（明确匿名）/ `Err(_)` 无法判定（网络异常、错误包络、**或响应里根本没有 `UserContext` 字段** = 部署不支持注入头）
+  - `get_raw(path, inject_user)` / `get_value` / `get_json::<T>` — GET，走 infra raw 变体（保留 5xx 退避重试）
+  - `post_raw(path, body)` / `post_json::<T>(path, body)` — POST，走 infra raw 变体；无 body 时发 `{}`（Hydro 读 `this.request.body`，空对象等价于「无参数」，比 `null` 更不易触发解析歧义）- `probe_user_context()`（私有）— **严格版**用户探测，三态：`Ok(Some)` 服务端确认已登录 / `Ok(None)` 注入生效但 `_id == 0`（明确匿名）/ `Err(_)` 无法判定（网络异常、错误包络、**或响应里根本没有 `UserContext` 字段** = 部署不支持注入头）
 - `current_user()`（私有）— **宽松版**用户探测：把「无法判定」折成 `Ok(None)`，供登录与提交列表筛选使用（拿不到 uid 时走降级路径，不让主流程失败）
 - `contest_pids(tid)` / `cached_pids` / `store_pids` / `pids_of(tid, tdoc)`（私有）— 比赛题目顺序（`tdoc.pids`），带 60s TTL 缓存
 - `resolve_problem_id(contest_id, problem_id)`（私有）— **展示字母 → 真实 pid**：按 Hydro 自身规则 `tdoc.pids[parseInt(letter, 36) - 10]`（A→下标 0 … Z→下标 25）；非单字母入参原样返回；顺序表拿不到该下标时也原样返回并记 warn
@@ -48,7 +48,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 
 ## 关键实现约定
 - **必须发送 `Accept: application/json`**：Hydro 的响应分支是 `request.json || response.redirect || ?noTemplate=1 || !response.template`，不带该头会渲染 HTML 模板 —— 这是取 JSON 的唯一手段。请求头在适配器里用 `headers()` 组装（infra 只做透传，不假设认证方式）
-- **GET 走 infra、POST 走原始 reqwest**：infra 在**非 2xx 时丢弃响应体**，而 Hydro 的用户可见错误全在包络里（`LoginError` / `OpcountExceededError` / `PermissionError`），登录还要读 `Set-Cookie`；POST 本就不重试，走原始通道不损失重试。GET 则相反 —— 幂等、值得要回 5xx 退避重试，4xx 的包络缺失由「匿名 → HTTP 200 + 登录重定向」兜底（残余风险见 `doc/Hydro/适配新架构的冲突记录.md` §2.1）
+- **两条通道都走 infra 的 raw 变体**（`get_text_raw` / `post_text_raw`：任意状态码都返回 status + headers + body）：Hydro 的用户可见错误全在响应体包络里（`LoginError` / `OpcountExceededError` / `PermissionError`），登录还要读 `Set-Cookie`，而非 raw 变体会在非 2xx 时丢弃响应体。GET 的 5xx 仍由 infra 退避重试（耗尽后返回响应）；POST 不重试。代价是 **401 不再由 infra 自动映射为 `Auth`** —— 由本适配器的 `http_status_error` 承担（判据与 infra 的 `status_error` 逐条对齐，否则会话守卫失效）
 - **错误包络没有 message**：`{"error":{"name","params","code"}}`（`message` 是原型上的非枚举 getter，不参与序列化），文案必须由调用方或前端自行组织；`code` 即 HTTP 状态码
 - **未登录的 JSON 化重定向**：Hydro 在 `onerror` 里对未登录的 `PermissionError`/`PrivilegeError` 重定向到 `/login?redirect=...`，JSON 模式下是 **HTTP 200 + `{"url":"/login?..."}`**。不识别它会把「会话过期」当成「成功但数据为空」，前端永远回不到登录页 → `types::login_redirect_url` 只认指向 `/login` 的 url（`{"url":"/"}`、文件下载签名链接不算）
 - **`Authorization` 头一旦出现即完全覆盖 Cookie**：即使格式不对也不回退到 sid Cookie，故只在持有 sid 时附加该头（服务端取空格分隔的第 2 段，scheme 名不参与校验）
@@ -61,7 +61,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - **不缓存领域数据**：唯一的缓存是 `tid → tdoc.pids` 的顺序表（`TtlCache`，60s TTL / 32 容量），属于「协议换算所需的映射」而非业务数据 —— 前端「题目 limits 渐进填充」会对每道题各调一次 `get_problem`，不缓存会为一场 12 题的比赛重复发 12 次 `/contest/:tid`（Hydro 全局限流仅 100 请求/5 秒）。空列表不缓存（多为异常响应）。键是比赛 ID，天然带 OJ 作用域（适配器实例按 OJ 实例构造）
 
 ## 直接依赖
-- `infra::http::HttpClient` — 网络请求（GET 通道；POST 通道直连其 `client()`，原因见上）
+- `infra::http::HttpClient` — 网络请求（两条通道都走其 raw 变体，不再直连 `client()`）
 - `infra::cache::TtlCache` — 比赛题目顺序缓存（TTL + 容量淘汰由原语负责）
 - `adapter::{AdapterDeps, AdapterFactory}` — 工厂契约（`build()` 接收 deps 与 base_url）
 - `adapter::hydro::types` — DTO、响应归一化、状态码/语言映射、榜单单元格矩阵解析

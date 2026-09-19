@@ -202,7 +202,7 @@ fn map_contest_problems_derives_letters_from_pids_index() {
     let vo: ContestProblemListVO = serde_json::from_value(fixture("contest_problems")).unwrap();
     // pids = [1001, 1000]：docId 1001 → 下标 0 → A；docId 1000 → 下标 1 → B
     let pids = vec!["1001".to_string(), "1000".to_string()];
-    let problems = HydroAdapter::map_contest_problems(&vo, &pids);
+    let problems = HydroAdapter::map_contest_problems(&vo, "64f0c0f0f0f0f0f0f0f0f0f0", &pids);
 
     assert_eq!(problems.len(), 2);
     // 输出按 docId 升序（HashMap 迭代顺序随机，必须固定）
@@ -214,8 +214,8 @@ fn map_contest_problems_derives_letters_from_pids_index() {
     assert_eq!(problems[1].problem_id, "A1");
     assert_eq!(problems[1].ac, 8);
     assert_eq!(problems[1].total, 12);
-    // 比赛 ID 是 24 位 hex，装不进 i64 → 只能填 0（缺口 D1）
-    assert_eq!(problems[0].cid, 0);
+    // 比赛 ID 如实携带（Hydro 是 24 位 hex ObjectId，故 cid 为字符串）
+    assert_eq!(problems[0].cid, "64f0c0f0f0f0f0f0f0f0f0f0");
     // Hydro 无气球色
     assert_eq!(problems[0].color, "");
 }
@@ -223,7 +223,7 @@ fn map_contest_problems_derives_letters_from_pids_index() {
 #[test]
 fn map_contest_problems_without_pid_order_falls_back_to_position() {
     let vo: ContestProblemListVO = serde_json::from_value(fixture("contest_problems")).unwrap();
-    let problems = HydroAdapter::map_contest_problems(&vo, &[]);
+    let problems = HydroAdapter::map_contest_problems(&vo, "64f0c0f0f0f0f0f0f0f0f0f0", &[]);
     // 顺序表缺失时按 docId 升序的下标派生，至少保证字母唯一
     assert_eq!(problems[0].display_id, "A");
     assert_eq!(problems[1].display_id, "B");

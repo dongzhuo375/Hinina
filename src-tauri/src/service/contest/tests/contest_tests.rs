@@ -110,7 +110,7 @@ fn sample_problem() -> ContestProblem {
     ContestProblem {
         id: 1,
         display_id: "A".into(),
-        cid: 1011,
+        cid: "1011".to_string(),
         problem_id: "1061".into(),
         display_title: "A + B".into(),
         ac: 3,

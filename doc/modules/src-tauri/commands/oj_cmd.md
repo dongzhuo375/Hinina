@@ -6,7 +6,8 @@
 OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择是应用级状态（落 `oj.active`），不是某次登录的参数 —— 旧版 `login(username, password, ojType?)` 内部 `set_current_oj` 的副作用能力悬空（前端从不传参），且切换后无人能观察；显式化后一个意图一个命令。
 
 ## 核心类型/函数
-- `pub async fn switch_oj(ctx, oj_id: String) -> AppResult<()>` — 切换当前 OJ。前端 invoke 签名 `switch_oj`({ ojId })。编排三件事（顺序有意）：
+- `pub async fn switch_oj(ctx, oj_id: String) -> AppResult<()>` — 切换当前 OJ。前端 invoke 签名 `switch_oj`({ ojId })。编排四件事（顺序有意）：
+  0. **按需补注册**（`ctx.ensure_oj_registered(id.as_str())`）：设置页允许从 OJ 枚举里挑一个尚未配置的类型、填地址保存后立即切换，而注册只在启动时发生 —— 不补注册用户就得重启客户端，UI 上表现为「切换失败：OJ 未注册」。注册条件与启动同源（只认配置里已启用且 id 匹配的实例，共用纯函数 `enabled_instance`），不能凭空激活未配置的 OJ
   1. 校验目标 OJ 已注册（`provider_registry.list_available().contains(&id)`），未注册直接报 `AppError::ProviderNotFound`（不静默回退 —— 显式命令要显式结果）
   2. `set_current` 切换 Registry 当前 OJ，**紧接着**发布 `SystemEvent::OJSwitched { oj_id }`（状态变更走事件，符合 EventBus 原则）—— 两者之间**不得夹可失败操作**：Registry 一旦切换，缓存必须同步失效，否则旧 OJ 数据会继续服务新 OJ 的查询
   3. 经 `ConfigService::update` 持久化 `oj.active`；失败如实上报「OJ 切换已生效但保存配置失败」（前端可提示重启后回退）—— 放在最后，保证第 2 步的缓存失效不依赖持久化结果

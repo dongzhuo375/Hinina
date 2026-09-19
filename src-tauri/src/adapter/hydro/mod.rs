@@ -102,7 +102,7 @@ pub struct HydroAdapter {
     pid_cache: TtlCache<String, Vec<String>>,
 }
 
-/// 一次请求的原始结果（状态码 + 响应头 + 原始响应体）。
+/// HydroResponse 只由 infra 的 raw 变体产生（任意状态码都返回原始响应）
 struct HydroResponse {
     status: StatusCode,
     headers: HeaderMap,
@@ -117,9 +117,6 @@ impl HydroResponse {
     /// 先看状态码才能把网关的 HTML 错误页报成 `HTTP 502` 而不是
     /// 「响应不是合法 JSON」（把排障引向错误方向）；再认错误包络是因为
     /// Hydro 用 HTTP 状态码承载 `error.code`，但登录重定向却是 HTTP 200。
-    ///
-    /// **只有 POST 通道会走到状态码分支**：GET 走 infra，非 2xx 在 infra 内已
-    /// 变成 `Err`（见 `HydroAdapter::get_value`），故此路径的 `status` 恒为成功。
     fn into_value(self) -> AppResult<Value> {
         if !self.status.is_success() {
             if let Ok(value) = serde_json::from_str::<Value>(&self.body) {
@@ -177,12 +174,11 @@ impl HydroResponse {
 
 /// HTTP 状态码 → `AppError`（镜像 `infra::http::status_error` 的判据）。
 ///
-/// 仅服务于 **POST 原始通道**：GET 走 infra，状态码映射由 infra 负责。保留本函数
-/// 是因为原始通道绕过了 infra，而网关返回 HTML 错误页（如 502）时仍需把状态码
-/// 如实报出来，而不是笼统报「响应不是合法 JSON」。判据与 infra 一致：
-/// **401 → `Auth`**（标准语义即「未认证」，前端 `sessionGuard` 与三态会话校验
-/// 都依赖它）、**403 保持 `Network`**（可能是「无权访问某场私有赛」这类业务限制，
-/// 误判会把已登录选手踢回登录页）。
+/// 本适配器两条通道都走 infra 的 **raw** 变体（任意状态码都返回原始响应，为了读
+/// 错误包络），而 raw 变体**不做状态码映射** —— 故这一步由适配器自己承担，
+/// 判据与 infra 保持一致：**401 → `Auth`**（标准语义即「未认证」，前端
+/// `sessionGuard` 与三态会话校验都依赖它）、**403 保持 `Network`**
+/// （可能是「无权访问某场私有赛」这类业务限制，误判会把已登录选手踢回登录页）。
 fn http_status_error(url: &str, status: StatusCode) -> AppError {
     let msg = format!(
         "HTTP {} {}: {}",
@@ -292,21 +288,32 @@ impl HydroAdapter {
         headers
     }
 
-    /// GET 并解析为 JSON（**走 infra**）。
+    /// GET 并返回原始响应（**走 infra 的 raw 变体**：任意状态码都拿到 status + headers + body）。
     ///
-    /// 用 `HttpClient` 而不是原始 reqwest，是为了拿回 infra 的两件事：
-    /// 5xx 退避重试（GET 幂等，值得重试）与统一的状态码→变体映射（401→`Auth`）。
+    /// 用 raw 而不是 `get_text_with_headers` 的原因：infra 的非 raw 变体在非 2xx 时
+    /// **丢弃响应体**，而 Hydro 的用户可见错误全在响应体包络里
+    /// （`{"error":{"name","params","code"}}`，无 message）—— 丢掉就只能给用户看
+    /// 「HTTP 403」。代价是 401 不会自动变成 `Auth` 变体，故本适配器自己映射
+    /// （见 `http_status_error`，判据与 infra 的 `status_error` 一致）。
     ///
-    /// 代价：infra 在非 2xx 时**丢弃响应体**，故本路径拿不到 Hydro 的错误包络
-    /// （`{"error":{"name",…}}`）。取舍理由见 `post_raw`；会话失效仍由
-    /// 「匿名 → HTTP 200 + `{"url":"/login…"}`」这条路径可靠识别。
-    async fn get_value(&self, path: &str, inject_user: bool) -> AppResult<Value> {
+    /// 重试由 infra 负责：5xx 退避重试（GET 幂等），耗尽后返回响应而非报错。
+    async fn get_raw(&self, path: &str, inject_user: bool) -> AppResult<HydroResponse> {
         let url = self.url(path);
-        let (body, _headers) = self
+        let (status, headers, body) = self
             .http
-            .get_text_with_headers(&url, &self.headers(inject_user))
+            .get_text_raw(&url, &self.headers(inject_user))
             .await?;
-        HydroResponse::parse_value(&body, &url)
+        Ok(HydroResponse {
+            status,
+            headers,
+            body,
+            url,
+        })
+    }
+
+    /// GET 并解析为 JSON
+    async fn get_value(&self, path: &str, inject_user: bool) -> AppResult<Value> {
+        self.get_raw(path, inject_user).await?.into_value()
     }
 
     /// GET 并反序列化为目标 DTO
@@ -317,36 +324,22 @@ impl HydroAdapter {
             .map_err(|e| AppError::Serialization(format!("Hydro 响应字段不匹配 {}: {}", url, e)))
     }
 
-    /// POST 并返回**原始响应**（含状态码与响应头）。
+    /// POST 并返回原始响应（含状态码与响应头）。
     ///
-    /// **为什么 POST 不走 infra**：
-    /// - POST 是非幂等方法，infra 本就不重试，走原始通道不损失重试；
-    /// - 而 infra 在非 2xx 时丢弃响应体，Hydro 的**用户可见错误文案全在包络里**
-    ///   （登录失败的 `LoginError`、限流的 `OpcountExceededError`、权限的
-    ///   `PermissionError`）—— 丢掉就只能给用户看「HTTP 403」；
-    /// - 登录还要读响应头里的 `Set-Cookie: sid`（会话就在那里下发）。
+    /// 同样走 infra 的 raw 变体，两个理由：① 登录/提交失败的**用户可见文案在
+    /// 错误包络里**（`LoginError` / `OpcountExceededError` / `PermissionError`）；
+    /// ② 登录要读响应头里的 `Set-Cookie: sid`（会话就在那里下发）。
+    /// POST 为非幂等方法，infra 不做重试，与语义相符。
+    ///
+    /// 无 body 的 POST（登出）发 `{}` 而不是空请求体：Hydro 的参数装饰器读
+    /// `this.request.body`，空对象等价于「无参数」，比 `null` 更不容易触发解析歧义。
     async fn post_raw(&self, path: &str, body: Option<&Value>) -> AppResult<HydroResponse> {
         let url = self.url(path);
-        let mut request = self
+        let payload = body.cloned().unwrap_or_else(|| json!({}));
+        let (status, headers, body) = self
             .http
-            .client()
-            .post(&url)
-            .headers(self.headers(false));
-        if let Some(payload) = body {
-            request = request.json(payload);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|e| AppError::Network(format!("Hydro 请求失败 {}: {}", url, e)))?;
-        let status = response.status();
-        let headers = response.headers().clone();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| AppError::Network(format!("Hydro 读取响应体失败 {}: {}", url, e)))?;
-
+            .post_text_raw(&url, &payload, &self.headers(false))
+            .await?;
         Ok(HydroResponse {
             status,
             headers,
@@ -571,7 +564,14 @@ impl HydroAdapter {
     }
 
     /// `pdict` + 题目顺序 → `ContestProblem` 列表
-    fn map_contest_problems(vo: &ContestProblemListVO, pids: &[String]) -> Vec<ContestProblem> {
+    ///
+    /// `contest_id` 由调用方传入（Hydro 的比赛 ID 是 24 位 hex ObjectId，
+    /// `ContestProblem.cid` 已是字符串，可如实携带）。
+    fn map_contest_problems(
+        vo: &ContestProblemListVO,
+        contest_id: &str,
+        pids: &[String],
+    ) -> Vec<ContestProblem> {
         let Some(pdict) = vo.pdict.as_ref() else {
             return Vec::new();
         };
@@ -597,8 +597,7 @@ impl HydroAdapter {
                     // Hydro 的题目主键是数字 docId，与 `ContestProblem.id: i64` 同域
                     id: pdoc.doc_id_num(),
                     display_id: types::display_letter(index),
-                    // Hydro 的比赛 ID 是 24 位 hex ObjectId，装不进 i64（缺口 D1）
-                    cid: 0,
+                    cid: contest_id.to_string(),
                     problem_id: pdoc.problem_id(),
                     display_title: pdoc.title.clone().unwrap_or_default(),
                     ac: pdoc.n_accept.unwrap_or(0),
@@ -958,7 +957,7 @@ impl ContestProvider for HydroAdapter {
             .await
             .map_err(|e| e.context("Hydro 比赛题目列表"))?;
         let pids = self.pids_of(contest_id, vo.tdoc.as_ref()).await?;
-        let problems = Self::map_contest_problems(&vo, &pids);
+        let problems = Self::map_contest_problems(&vo, contest_id, &pids);
         debug!(
             contest_id = contest_id,
             count = problems.len(),
