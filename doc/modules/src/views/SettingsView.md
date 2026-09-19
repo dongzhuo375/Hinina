@@ -12,7 +12,7 @@
 |------|------|------|
 | `SettingsForm` | interface | 表单草稿；**数字字段保留原始字符串**——输入中间态（空串/半截数字）不应被强转成 NaN 写回，只有校验通过的值才进入保存载荷 |
 | `form` | `reactive<SettingsForm>` | activeOj / ojUrl / contestRef / contestPassword / timeoutSecs / pollIntervalSecs / pollTimeoutSecs / cacheTtlSecs / cacheProblemStatement / fontSize / tabSize / defaultLanguage / autoSave / autoSaveIntervalSecs / splitRatio。`activeOj` = 当前 OJ 实例 id（下拉选择），`ojUrl` = 当前选中实例的服务端地址（保存时写回该实例 baseUrl），`contestRef` = 比赛引用（不透明字符串：HOJ 数字 ID / 其它 OJ 资源引用；空 = 未配置） |
-| `ojInstances` / `ojOptions` / `persistedActive` / `switchError` / `switchNotice` / `createdOj` | ref/computed | 实例清单（populate 时从 `config.oj.instances` 刷新，保存后也用写回结果同步）/ 下拉候选（`ojSelectOptions`：**已知枚举在前**（含未配置者）+ 枚举外实例追加；禁用者标注「（已禁用）」且不可选）/ 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）/ 切换错误（rose，独立于保存错误）/ **切换引导**（amber：未配置的 OJ 提示「填地址后保存将自动创建并切换」）/ 本次保存新建的实例 id（据此在保存成功后自动完成切换） |
+| `ojInstances` / `ojOptions` / `persistedActive` / `switchError` / `switchNotice` | ref/computed | 实例清单（populate 时从 `config.oj.instances` 刷新，保存后也用写回结果同步）/ 下拉候选（`ojSelectOptions`：**已知枚举在前**（含未配置者）+ 枚举外实例追加；禁用者标注「（已禁用）」且不可选）/ 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）/ 切换错误（rose，独立于保存错误）/ **切换引导**（amber：未配置的 OJ 提示「填地址后保存将自动创建并切换」；与错误**并存**渲染 —— 两者语义独立，如「实例已保存但切换未成功」） |
 | `onSwitchOj` | `() => Promise<void>` | 切换当前 OJ（显式命令：即时生效 + 持久化 `oj.active` + 发布 `OJSwitched`，经 `configService.switchOj`）；成功后 `form.ojUrl` **跟随新实例地址**（否则表单里仍是旧实例地址，「保存」会把它写进新实例的 `baseUrl` —— 数据损坏；切换前未保存的地址编辑随之丢弃，用户已切换编辑对象）+ `resetSessionForOjSwitch()` 重置会话上下文（旧 OJ 的用户/比赛/题面/提交全部失效，解题页拿旧 `contest.id` 向新 OJ 提交是真实风险）+ `router.replace({ name: 'Login' })`（守卫按新 OJ 会话文件恢复：登录过则无感续用，否则落在登录表单）；失败时回滚 `form.activeOj` 到 `persistedActive` 并写 `switchError` |
 | `baseline` / `snapshot` / `dirty` | ref/fn/computed | 基线 = 上次加载/保存成功时的表单 JSON 序列化；dirty 判定与「放弃更改」共用同一快照 |
 | `parseIntStrict` | `(raw) => number \| null` | 严格非负整数解析：正则 `^\d+$` 拒绝空串/小数/负号/科学计数法等 `Number()` 会宽容接受的形式 |
@@ -51,6 +51,8 @@ load():
 编辑表单 → errors 逐字段实时校验 → dirty = snapshot() !== baseline
 切换 OJ（下拉 @change → onSwitchOj）
   ├─ 目标尚未配置（枚举里的新类型）→ 清空地址栏 + switchNotice 引导「填地址后保存」；**不调用后端**（无实例可注册，必失败）
+  │    （清空是必需的：地址栏属于「当前选中的 OJ」，留着旧 OJ 的地址会被「保存」写进新实例；
+  │      丢弃未保存编辑时在提示里显式告知，不静默）
   └─ 已配置 → performSwitch(target) → configService.switchOj(form.activeOj)
   ├─ 成功 → persistedActive 前移 + form.ojUrl 跟随新实例地址（防「保存」把旧实例地址写进新实例）
   │         + resetSessionForOjSwitch()（含匿名简报复位：brief 属旧 OJ，canEnter

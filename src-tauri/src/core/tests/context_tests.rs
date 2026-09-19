@@ -70,3 +70,75 @@ fn default_config_has_exactly_one_enabled_hoj_instance() {
         "默认只应有一个启用实例"
     );
 }
+
+// ── register_instance（init 与按需注册共用的实现）──
+//
+// 这条路径的回归价值：若「启动时注册」与「切换时补注册」各自实现，会漂移成
+// 「重启后能用、切换时不能用」这类最难排查的不一致。故用真实注册表 + 真实工厂
+// 锁定共享实现的行为。
+
+fn test_registry() -> Arc<dyn ProviderRegistry> {
+    Arc::new(crate::infra::provider_registry_impl::ProviderRegistryImpl::new(
+        OjId::new("HOJ"),
+    ))
+}
+
+fn test_deps(tag: &str) -> crate::adapter::AdapterDeps {
+    let dir = std::env::temp_dir().join(format!("hinina-test-context-{}", tag));
+    let _ = std::fs::remove_dir_all(&dir);
+    crate::adapter::AdapterDeps {
+        http_client: Arc::new(
+            crate::infra::http::HttpClient::with_timeout(std::time::Duration::from_secs(5))
+                .expect("HttpClient 构造失败"),
+        ),
+        event_bus: Arc::new(EventBus::new()),
+        storage: Arc::new(crate::infra::storage::Storage::new(dir)),
+    }
+}
+
+#[test]
+fn register_instance_registers_known_oj() {
+    let registry = test_registry();
+    let deps = test_deps("register-known");
+    let hoj = instance("HOJ", true);
+
+    assert!(register_instance(registry.as_ref(), &deps, &hoj));
+    let available = registry.list_available();
+    assert!(
+        available.contains(&OjId::new("HOJ")),
+        "注册后应出现在可用清单: {:?}",
+        available
+    );
+}
+
+#[test]
+fn register_instance_skips_unknown_oj_without_panicking() {
+    // 配置里写了没有适配器的 OJ：必须 warn + false，且不影响其它 OJ 的注册
+    let registry = test_registry();
+    let deps = test_deps("register-unknown");
+
+    assert!(!register_instance(registry.as_ref(), &deps, &instance("NotAnOj", true)));
+    assert!(registry.list_available().is_empty(), "未知 OJ 不应注册任何东西");
+}
+
+#[test]
+fn register_instance_is_idempotent() {
+    // 幂等：重复注册同一个 OJ 不应 panic，也不应产生重复项
+    let registry = test_registry();
+    let deps = test_deps("register-idempotent");
+    let hoj = instance("HOJ", true);
+
+    assert!(register_instance(registry.as_ref(), &deps, &hoj));
+    assert!(register_instance(registry.as_ref(), &deps, &hoj));
+    assert_eq!(registry.list_available().len(), 1);
+}
+
+#[test]
+fn register_instance_matches_factory_by_exact_id() {
+    // 工厂按 id 精确匹配（大小写敏感）：`hoj` 不是 `HOJ`，应跳过而不是误注册
+    let registry = test_registry();
+    let deps = test_deps("register-case");
+
+    assert!(!register_instance(registry.as_ref(), &deps, &instance("hoj", true)));
+    assert!(registry.list_available().is_empty());
+}

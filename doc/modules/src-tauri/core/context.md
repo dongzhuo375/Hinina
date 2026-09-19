@@ -18,8 +18,10 @@
   9. 装配 5 个 Service：ThemeService → AuthService → ContestService（注入 `Arc<Storage>`，供公告已读状态持久化 `announcements_read/`）→ ProblemService（注入 `Arc<Storage>`，供题目 limits 磁盘缓存 `cache/problem_limits/`）→ SubmissionService
   10. 装配 AppContext 并返回
 
-- **`AppContext::ensure_oj_registered(oj_id: &str) -> bool`** — **按需注册**某个已配置且启用的 OJ 实例（幂等，返回是否本次新注册）。存在的理由：注册只发生在 `init`，而设置页允许用户从 OJ 枚举里挑一个尚未配置的类型、填地址保存后立即切换 —— 不补注册用户就得重启客户端（`commands/oj_cmd::switch_oj` 在校验前调用它）。注册条件与 `init` **同源**（共用私有纯函数 `enabled_instance`：只认配置里已启用且 id 匹配的实例），不能凭空激活未配置的 OJ，否则 `switch_oj` 会绕过配置成为后门
-- **`enabled_instance(config, oj_id) -> Option<&OjInstance>`**（私有纯函数）— 从配置里挑出指定 id 的已启用实例；抽成纯函数以便单测锁定判定（`init` 与按需注册两条路径共用）
+- **`AppContext::ensure_oj_registered(oj_id: &str) -> bool`** — **按需注册**某个已配置且启用的 OJ 实例（幂等，返回是否本次新注册）。存在的理由：注册只发生在 `init`，而设置页允许用户从 OJ 枚举里挑一个尚未配置的类型、填地址保存后立即切换 —— 不补注册用户就得重启客户端（`commands/oj_cmd::switch_oj` 在校验前调用它）。判定与注册**与 `init` 同源**：共用 [`enabled_instance`] 与 [`register_instance`]，不能凭空激活未配置的 OJ，否则 `switch_oj` 会绕过配置成为后门
+- **`enabled_instances(config) -> impl Iterator<Item = &OjInstance>`**（私有）— 已启用的实例；**「启用」条件的唯一来源**（`init` 的全量注册与 `enabled_instance` 的单实例查找都经此，避免两处判定漂移）
+- **`enabled_instance(config, oj_id) -> Option<&OjInstance>`**（私有纯函数）— 从已启用实例里按 id 精确查找
+- **`register_instance(registry, deps, instance) -> bool`**（私有）— 按配置实例经 `adapter::factories()` 匹配工厂、`factory.build(deps, base_url)` 构造 `ProviderSet` 并注册；**`init` 与按需注册共用同一实现**（抽成自由函数而非方法：`init` 执行时 `AppContext` 尚未装配完成）。未知 OJ（无匹配工厂）→ `warn` + `false`，不 panic；重复注册幂等
 
 ## 直接依赖
 
@@ -69,4 +71,10 @@ switch_oj(id) → AppContext::ensure_oj_registered(id)
 ```
 
 ## 测试
-`src-tauri/src/core/tests/context_tests.rs` 锁定 `enabled_instance` 的判定：命中已启用实例、**跳过禁用实例**（否则会绕开「禁用」开关）、未配置 id / 大小写不符 / 空串一律 `None`（id 是精确匹配的键，不做模糊归一）、空实例清单、默认配置恰有一个启用实例（开箱即用的 HOJ）。`ensure_oj_registered` 本身需要完整 AppContext（http/事件总线/存储/注册表），构造代价大于收益，其正确性由「与 init 同判据」这条约束保证。
+`src-tauri/src/core/tests/context_tests.rs`（12 例）分两组：
+
+**实例判定**（`enabled_instance` / `enabled_instances`）：命中已启用实例、**跳过禁用实例**（否则会绕开「禁用」开关）、未配置 id / 大小写不符 / 空串一律 `None`（id 是精确匹配的键，不做模糊归一）、空实例清单、默认配置恰有一个启用实例（开箱即用的 HOJ）。
+
+**注册路径**（`register_instance`，用真实注册表 + 真实工厂）：已知 OJ 注册后出现在 `list_available()`、未知 OJ → `false` 且不注册任何东西（不 panic）、**重复注册幂等**（不产生重复项）、工厂按 id **精确匹配**（`hoj` 不是 `HOJ`）。这组用例的价值在于锁定「启动注册与按需注册共用同一实现」—— 若两处各自实现而漂移，会退化成「重启后能用、切换时不能用」这类最难排查的不一致。
+
+`ensure_oj_registered` 本身需要完整 `AppContext`（http / 事件总线 / 存储 / 注册表），构造代价大于收益；其正确性由「只调 `enabled_instance` + `register_instance`」这条结构约束 + 上两组用例保证。
