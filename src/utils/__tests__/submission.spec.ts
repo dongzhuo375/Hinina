@@ -13,8 +13,10 @@ import type { JudgeCase, JudgementStatus, SubmissionCases } from '@/types/submis
 /// 非终态：评测仍在排队/编译/运行
 const NON_TERMINAL: JudgementStatus[] = ['Pending', 'Compiling', 'Running']
 
-/// 终态：与 Rust `adapter::hoj::types::is_terminal_status`（仅 HOJ 状态码 0/1 为非终态）对齐
+/// 终态：与 Rust `adapter::hoj::types::is_terminal_status`（非终态 = HOJ 码 5/6/7/9）对齐
 const TERMINAL: JudgementStatus[] = [
+  'NotSubmitted',
+  'Cancelled',
   'Accepted',
   'WrongAnswer',
   'TimeLimitExceeded',
@@ -36,6 +38,8 @@ const TERMINAL: JudgementStatus[] = [
 /// 将来给 JudgementStatus 新增状态时此处会直接类型报错，逼迫显式归类，
 /// 而不是像从前那样漏掉一个状态（Unknown 无限轮询 bug 的成因）。
 const TERMINAL_MAP: Record<JudgementStatus, boolean> = {
+  NotSubmitted: true,
+  Cancelled: true,
   Pending: false,
   Compiling: false,
   Running: false,
@@ -73,7 +77,8 @@ describe('isTerminalStatus', () => {
 
   it('终态清单与 JudgementStatus 全量取值一一对应', () => {
     const entries = Object.entries(TERMINAL_MAP)
-    expect(entries).toHaveLength(18)
+    // 数量由「非终态 + 终态」两份清单推出，避免新增状态时还要改魔数
+    expect(entries).toHaveLength(NON_TERMINAL.length + TERMINAL.length)
     for (const [status, terminal] of entries) {
       expect(isTerminalStatus(status as JudgementStatus), status).toBe(terminal)
     }

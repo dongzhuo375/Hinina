@@ -19,7 +19,7 @@
 | `splitRatio` | ref | 初始值经 `configService.getSplitRatio()` 从配置读取（P55 消费落地；异步到达时若用户已拖拽则不覆盖） |
 | `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例钳制 0.3–0.7，拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
 | `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.updateConfig` 写回配置（下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
-| `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, workspaceStore.language, workspaceStore.code)`；轮询由 store 自动启动 |
+| `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, displayId, workspaceStore.language, workspaceStore.code)`，其中 `displayId` 取路由参数（比赛内题号 "A"）—— **HOJ 提交接口认的是它而不是数字 pid**；轮询由 store 自动启动 |
 | `cursor` | ref | Monaco 光标位置（CodeEditor emit → 本视图 → EditorConsoleBar prop，单向数据流） |
 | `flushToDisk` | `(reason: string) => Promise<void>` | `workspaceStore.saveWorkspace()`（内部先推送在途改动再落盘）；带 `flushingToDisk` 去重，失败只 `log.error` 不打断使用 |
 | `onVisibilityChange` / `onWindowBlur` | `() => void` | 页面隐藏（`visibilitychange` → hidden）与窗口失焦（`blur`）时落盘；`onMounted` 注册、`onBeforeUnmount` 注销并**再落盘一次**（离开解题页） |
@@ -74,7 +74,7 @@ load(id):
 设计要点：
 
 - **pid 与 displayId 双轨**：工作区按 `problemId`（pid）隔离——同一题在不同比赛/练习场景
-  共享代码；题面按 `displayId` 查询——HOJ 比赛题目详情接口以展示题号为键。
+  共享代码；题面查询与**代码提交**按 `displayId` —— HOJ 的比赛题目详情接口与提交接口都以展示题号为键（提交传数字 pid 会让服务端查不到 `contest_problem` 而返回 500）。两个标识在 `handleSubmit` 里都要送到 store。
 - **loadToken 而非取消请求**：IPC 无法中途取消，用令牌让过期结果静默丢弃，防止快速切题时
   旧题的题面/工作区覆盖新题（竞态）。
 - **切题前落盘失败不阻断**：代码保留优先靠 2s 防抖推送（进后端内存）兜底，保存失败只记录——

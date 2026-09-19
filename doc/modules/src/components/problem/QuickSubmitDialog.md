@@ -21,7 +21,7 @@
 | `pickFile` / `onFileChange` / `ingestFile` | fn | 原生 `input[type=file]`（读后立即重置 value 允许连续选同一文件）；ingestFile 校验扩展名与大小 → `file.text()` 读入 → 按扩展名切语言 |
 | `dragging` / `dragDepth` / `onDragEnter…onDrop` | ref/计数/fn | HTML5 拖放：`tauri.conf.json` 已关闭 `dragDropEnabled`，事件才能到达 WebView；进入/离开**深度计数**避免掠过子元素时高亮闪烁；拖拽中高亮层接管 drop（Monaco 会吞掉文件拖放事件） |
 | `submittedId` / `entry` / `entryTerminal` | ref/computed | 本弹窗提交的 ID → 从 `submissionStore.submissions` 观察对应条目；`isTerminalStatus` 判定是否收敛 |
-| `doSubmit` | fn | 提交链路，见逻辑流程 |
+| `doSubmit` | fn | 提交链路，见逻辑流程。`problemId` 与 `displayId` 都取自 `props.problem`（同一道题的两个标识，见 `stores/submissionStore.md`） |
 | `goDetail` | fn | 终态后跳 `SubmissionDetail` 路由 |
 
 ## 直接依赖
@@ -45,7 +45,8 @@
 doSubmit():
   isSubmitting 短路；空代码（trim 后）→ submitError「代码不能为空」
   contestId 缺失 → contestStore.whenLoaded() 兜底再取；仍无 → 报错终止
-  submissionStore.submitCode(contestId, problem.problemId, language, code)
+  submissionStore.submitCode(contestId, problem.problemId, problem.displayId, language, code)
+    // displayId（比赛内题号）必传：HOJ 提交接口收的是它，传数字 pid 会 500
     → 成功记录 submittedId（store 内部随即启动该提交的收敛轮询）
     → 失败 submitError = store.error
 

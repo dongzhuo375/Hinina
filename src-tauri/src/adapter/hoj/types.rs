@@ -337,22 +337,45 @@ fn cell_from_value(value: &serde_json::Value) -> crate::core::entity::rank::Rank
     }
 }
 
-/// 归一用户题目状态：HOJ 语义为 `0=未提交 / 1=已AC / 2=尝试过`。
+/// 从 `get-user-problem-status` 的响应条目里取出 **HOJ 原始评测状态码**。
 ///
-/// 文档标注响应值类型为 `Object`，故对数字/布尔/对象三种形态都做容错，
-/// 无法识别时按「未提交」处理（保守：不会把未做的题标成已通过）。
-pub fn coerce_problem_status(value: &serde_json::Value) -> i32 {
+/// 服务端返回的每个条目是 `{"status": <Constants.Judge 码>, "score": …}`；
+/// 文档标注值类型为 `Object`，故对数字/布尔/对象三种形态都做容错。
+/// 无法识别时返回 `None`，由调用方按「未提交」处理（保守：不会把未做的题标成已通过）。
+///
+/// 取到的是**原始码**（可能是 -10 / -1 / 0 …），不是前端契约值 ——
+/// 必须再经 `normalize_problem_status` 归一。
+pub fn extract_problem_status_code(value: &serde_json::Value) -> Option<i32> {
     if let Some(n) = value.as_i64() {
-        return n as i32;
+        return Some(n as i32);
     }
     if let Some(b) = value.as_bool() {
-        return i32::from(b);
+        // 历史形态：布尔直出（true=已 AC）
+        return Some(if b { 0 } else { -10 });
     }
-    value
-        .get("status")
-        .and_then(|v| v.as_i64())
-        .map(|n| n as i32)
-        .unwrap_or(0)
+    value.get("status").and_then(|v| v.as_i64()).map(|n| n as i32)
+}
+
+/// HOJ 原始状态码 → 前端「我的题目状态」契约 `0=未提交 / 1=已AC / 2=尝试过`。
+///
+/// HOJ 这里返回的是**评测状态码**（与提交状态同一张 `Constants.Judge` 码表），
+/// 而不是「0/1/2」三态。实测（比赛 1012，本人已 AC 该题）：
+/// - `isContestProblemList=false` → `{"1000":{"status":-10}}`（-10 = Not Submitted，**错**）
+/// - `isContestProblemList=true`  → `{"1000":{"status":0}}`（0 = Accepted，**对**）
+///
+/// 故调用方必须同时满足两点：请求体 `is_contest_problem_list = true`，
+/// 且把原始码经本函数归一。
+///
+/// 归一规则：
+/// - `0`（Accepted）→ `1` 已通过
+/// - `-10`（Not Submitted）/ 无法识别 → `0` 未提交
+/// - 其余（-4/-3/-2/-1/1..15）→ `2` 尝试过（未通过）
+pub fn normalize_problem_status(code: i32) -> i32 {
+    match code {
+        0 => 1,    // AC
+        -10 => 0,  // Not Submitted
+        _ => 2,    // 已尝试未通过
+    }
 }
 
 // ── 题目 ──
@@ -427,11 +450,12 @@ pub struct TagVO {
 
 // ── 提交与评测 ──
 
-/// 提交请求体。
+/// 提交请求体。`pid` 的取值必须经 [`submit_pid`] 计算，不要直接塞 `problem_id`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitRequest {
-    /// 题目展示ID
+    /// 题目标识 —— **比赛提交时是比赛内展示题号（"A"）**，非比赛提交时是题目展示 ID。
+    /// 详见 [`submit_pid`]。
     pub pid: String,
     /// 编程语言
     pub language: String,
@@ -446,6 +470,28 @@ pub struct SubmitRequest {
     pub gid: Option<i64>,
     #[serde(default)]
     pub is_remote: bool,
+}
+
+/// 计算提交请求体的 `pid`。
+///
+/// **HOJ 的 `pid` 语义随 `cid` 变化，这是本项目踩过的坑**：
+/// - `cid != 0`（比赛提交）→ 服务端 `BeforeDispatchInitManager.initContestSubmission(cid, displayId, …)`
+///   拿它查 `contest_problem.display_id`，查不到会直接 `contestProblem.getId()` **NPE → HTTP 500**。
+///   故比赛提交必须传**比赛内展示题号**（`"A"`），传数字 pid（`"1000"`）必 500。
+/// - `cid == 0`（非比赛提交）→ 走 `initCommonSubmission`，按 `problem_id` 查，此时传题目展示 ID。
+///
+/// `display_id` 为空/纯空白时退回 `problem_id`：非比赛场景两者同源，
+/// 且这条回退保证「没有比赛上下文」的调用不会退化成提交空 pid。
+///
+/// 抽成纯函数是为了让这条判据可被单测锁定 —— 它一旦写错，现场表现是**所有比赛提交都 500**，
+/// 而服务端不会留下任何记录，排查成本极高。
+pub fn submit_pid(problem_id: &str, display_id: &str) -> String {
+    let display = display_id.trim();
+    if display.is_empty() {
+        problem_id.trim().to_string()
+    } else {
+        display.to_string()
+    }
 }
 
 /// 提交后返回的 Judge 对象，同时作为提交列表（`contest-submissions`）条目的宽松 DTO。
@@ -549,6 +595,10 @@ pub struct SubmissionDetail {
 // ── 公告 ──
 
 /// 比赛公告条目（AnnouncementVO）。
+///
+/// **时间字段是 `gmtCreate` / `gmtModified`**，不是 `createTime` / `updateTime` ——
+/// 实测 `/api/get-contest-announcement` 返回的键就是 gmt* 形态；写成 createTime
+/// 会让 `createdAt` 恒为 0（界面显示 1970）。字段名不改，只改 serde rename。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnnouncementVO {
@@ -563,9 +613,9 @@ pub struct AnnouncementVO {
     pub uid: String,
     #[serde(default)]
     pub username: String,
-    #[serde(default)]
+    #[serde(default, rename = "gmtCreate")]
     pub create_time: String,
-    #[serde(default)]
+    #[serde(default, rename = "gmtModified")]
     pub update_time: String,
 }
 
@@ -633,37 +683,77 @@ pub fn lenient_case_list(values: &[serde_json::Value]) -> Vec<JudgeCaseDTO> {
 //
 // HOJ status → JudgementStatus
 
-/// 将 HOJ 评测状态码（0-15）映射为 JudgementStatus。
+/// HOJ 服务端在「错误信息不可查看」时回填的占位文案。
 ///
-/// 全表覆盖 HOJ `Constants.Judge` 状态码；非终态的 0（Pending）/ 1（Judging）
-/// 分别映射为 Pending / Running（Judging 沿用既有 Running 语义，轮询判据不变）。
-/// 码表之外的值一律归入 Unknown。
+/// 出处：HOJ `JudgeManager.getSubmissionInfo` —— 只要状态不是 CE / SE / SF，
+/// 就把 `errorMessage` 覆写成这句话（即 AC/WA/TLE… 全部都会带上它）。
+/// 它是「本状态没有错误信息」的标记而非错误内容，必须过滤，
+/// 否则提交详情页会对每一份 AC 代码弹出一块红色的「错误信息」面板。
+pub const ERROR_MESSAGE_PLACEHOLDER: &str = "The error message does not support viewing.";
+
+/// 过滤 HOJ 的占位错误文案：占位串与空串一律视为「无错误信息」。
+pub fn normalize_error_message(raw: Option<String>) -> Option<String> {
+    raw.filter(|msg| !msg.trim().is_empty() && msg.trim() != ERROR_MESSAGE_PLACEHOLDER)
+}
+
+/// 将 HOJ 评测状态码映射为 JudgementStatus。
+///
+/// 码表出自 HOJ `Constants.Judge`（`hoj-springboot/JudgeServer/.../util/Constants.java`），
+/// **注意其取值域含负数** —— 这不是「0 起顺排」的码表：
+///
+/// | 码 | 含义 | 变体 |
+/// |----|------|------|
+/// | -10 | Not Submitted | `NotSubmitted` |
+/// | -4 | Cancelled | `Cancelled` |
+/// | -3 | Presentation Error | `PresentationError` |
+/// | -2 | Compile Error | `CompilationError` |
+/// | -1 | Wrong Answer | `WrongAnswer` |
+/// | 0 | Accepted | `Accepted` |
+/// | 1 | Time Limit Exceeded | `TimeLimitExceeded` |
+/// | 2 | Memory Limit Exceeded | `MemoryLimitExceeded` |
+/// | 3 | Runtime Error | `RuntimeError` |
+/// | 4 | System Error | `SystemError` |
+/// | 5 | Pending | `Pending` |
+/// | 6 | Compiling | `Compiling` |
+/// | 7 | Judging | `Running` |
+/// | 8 | Partial Accepted | `PartiallyAccepted` |
+/// | 9 | Submitting | `Pending`（同属「尚未开跑」，必须是非终态） |
+/// | 10 | Submitted Failed | `SubmitFailed` |
+/// | 15 | No Status | `Unknown` |
+///
+/// 码表之外的值一律归入 `Unknown`。本表曾整体错位（把 `0` 当 Pending、`5` 当 AC），
+/// 后果是**所有 AC 提交被显示为 Pending 并无限轮询** —— 修改时务必对照 HOJ 源码，
+/// 不要凭「0 开头即排队中」的直觉推排。
 pub fn map_status(status: i32) -> crate::core::entity::submission::JudgementStatus {
     use crate::core::entity::submission::JudgementStatus;
     match status {
-        0 => JudgementStatus::Pending,               // 等待评测
-        1 => JudgementStatus::Running,               // Judging
-        2 => JudgementStatus::CompilationError,      // CE
-        3 => JudgementStatus::PresentationError,     // PE
-        4 => JudgementStatus::WrongAnswer,           // WA
-        5 => JudgementStatus::Accepted,              // AC
-        6 => JudgementStatus::TimeLimitExceeded,     // TLE
-        7 => JudgementStatus::MemoryLimitExceeded,   // MLE
-        8 => JudgementStatus::OutputLimitExceeded,   // OLE
-        9 => JudgementStatus::RuntimeError,          // RE
-        10 => JudgementStatus::SystemError,          // SE
-        11 => JudgementStatus::RemoteJudgeError,     // RJE
-        12 => JudgementStatus::SubmitFailed,         // SF
-        13 => JudgementStatus::PartiallyAccepted,    // PA（部分通过，独立变体，不再折算 AC）
-        14 => JudgementStatus::FrequentLimit,        // FREQ（提交过于频繁）
-        15 => JudgementStatus::UnknownError,         // UE
+        -10 => JudgementStatus::NotSubmitted,      // Not Submitted
+        -4 => JudgementStatus::Cancelled,          // Cancelled
+        -3 => JudgementStatus::PresentationError,  // PE
+        -2 => JudgementStatus::CompilationError,   // CE
+        -1 => JudgementStatus::WrongAnswer,        // WA
+        0 => JudgementStatus::Accepted,            // AC
+        1 => JudgementStatus::TimeLimitExceeded,   // TLE
+        2 => JudgementStatus::MemoryLimitExceeded, // MLE
+        3 => JudgementStatus::RuntimeError,        // RE
+        4 => JudgementStatus::SystemError,         // SE
+        5 => JudgementStatus::Pending,             // Pending
+        6 => JudgementStatus::Compiling,           // Compiling
+        7 => JudgementStatus::Running,             // Judging
+        8 => JudgementStatus::PartiallyAccepted,   // PA（部分通过，独立变体，不再折算 AC）
+        9 => JudgementStatus::Pending,             // Submitting（等待判题机接手）
+        10 => JudgementStatus::SubmitFailed,       // SF
+        15 => JudgementStatus::Unknown,            // No Status
         _ => JudgementStatus::Unknown,
     }
 }
 
 /// 判断是否终态（需要停止轮询）。
+///
+/// 非终态 = `{5 Pending, 6 Compiling, 7 Judging, 9 Submitting}`。
+/// 与 `map_status` 的输出必须等价：`map_status(code).is_terminal() == is_terminal_status(code)`。
 pub fn is_terminal_status(status: i32) -> bool {
-    !matches!(status, 0 | 1)
+    !matches!(status, 5 | 6 | 7 | 9)
 }
 
 #[cfg(test)]

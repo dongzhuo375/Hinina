@@ -55,10 +55,48 @@ fn other_error_status_codes_stay_network_variant() {
 }
 
 #[test]
+fn error_body_excerpt_is_attached_to_non_auth_errors() {
+    // 实测排查 HOJ 提交失败时，日志里十条一模一样的「HTTP 500」看不出服务端说了什么。
+    // 非 2xx 的响应体必须附进错误信息（HOJ 的 500 会带 {"status":500,"msg":"…"}）
+    let err = status_error_with_body(
+        "http://oj/api/submit-problem-judge",
+        StatusCode::INTERNAL_SERVER_ERROR,
+        r#"{"status":500,"msg":"题目不存在"}"#,
+    );
+    assert!(matches!(err, AppError::Network(_)));
+    let msg = err.user_message();
+    assert!(msg.contains("500"), "应含状态码: {}", msg);
+    assert!(msg.contains("submit-problem-judge"), "应含 URL: {}", msg);
+    assert!(msg.contains("题目不存在"), "应含服务端消息: {}", msg);
+}
+
+#[test]
+fn error_body_excerpt_never_leaks_into_auth_errors() {
+    // 401 响应可能回显请求凭证；认证失败的原因由 HTTP 语义本身说明，无需正文
+    let err = status_error_with_body(
+        "http://oj/api/x",
+        StatusCode::UNAUTHORIZED,
+        "token=super-secret-jwt",
+    );
+    assert!(matches!(err, AppError::Auth(_)));
+    assert!(
+        !err.user_message().contains("super-secret-jwt"),
+        "401 不得附带响应体: {}",
+        err.user_message()
+    );
+}
+
+#[test]
+fn empty_error_body_falls_back_to_plain_status_error() {
+    let err = status_error_with_body("http://oj/api/x", StatusCode::BAD_GATEWAY, "");
+    assert!(matches!(err, AppError::Network(_)));
+    assert!(!err.user_message().contains("|"), "空正文不应留下分隔符");
+}
+
+#[test]
 fn retry_delay_backs_off_exponentially() {
     assert_eq!(retry_delay(0), Duration::from_millis(1000));
-    assert_eq!(retry_delay(1), Duration::from_millis(2000));
-    assert_eq!(retry_delay(2), Duration::from_millis(4000));
+    assert_eq!(retry_delay(1), Duration::from_millis(2000));    assert_eq!(retry_delay(2), Duration::from_millis(4000));
 }
 
 // ── classify_status（GET 重试决策）──

@@ -13,6 +13,7 @@
 // （见 `core/error.rs`）。token 过期时提交若被改写成 Submission 变体，
 // 选手只会看到一条错误文案而不会被带回登录页，反复重试也全部失败。
 pub mod error;
+pub mod snapshot;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +30,7 @@ use crate::core::event::event_bus::EventBus;
 use crate::core::event::event_category::EventCategory;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::TtlCache;
+use crate::infra::storage::Storage;
 
 /// 终态提交详情/测试点的内存缓存 TTL。
 ///
@@ -57,11 +59,17 @@ pub struct SubmissionService {
     /// 多发一次详情请求，也不会把评测中的半截明细缓存下来（缓存半截明细会让
     /// 「评测完成后打开详情页」看到缺失的测试点）。
     terminal_marks: Arc<TtlCache<String, bool>>,
+    /// 文件存储：用于提交源码快照（本地留档，OJ 不回吐代码时的兜底）
+    storage: Arc<Storage>,
 }
 
 impl SubmissionService {
     /// 创建 SubmissionService。
-    pub fn new(registry: Arc<dyn ProviderRegistry>, event_bus: Arc<EventBus>) -> Self {
+    pub fn new(
+        registry: Arc<dyn ProviderRegistry>,
+        event_bus: Arc<EventBus>,
+        storage: Arc<Storage>,
+    ) -> Self {
         let detail_cache = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY));
         let cases_cache = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_CASES_CAPACITY));
         let terminal_marks = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY));
@@ -77,6 +85,7 @@ impl SubmissionService {
             detail_cache,
             cases_cache,
             terminal_marks,
+            storage,
         }
     }
 
@@ -128,18 +137,28 @@ impl SubmissionService {
     ///
     /// 返回 submission_id 供后续轮询使用。
     /// 发布 `SubmissionEvent::Created`。
+    ///
+    /// `problem_id` 与 `display_id` 同时下传（各 OJ 认的不是同一个标识，详见
+    /// `SubmissionProvider::submit`）；成功后在本地留一份源码快照。
     pub async fn submit(
         &self,
         contest_id: &str,
         problem_id: &str,
+        display_id: &str,
         language: &str,
         source_code: &str,
     ) -> AppResult<String> {
         let provider = self.registry.current_submission()?;
 
-        info!(contest_id = contest_id, problem_id = problem_id, language = language, "提交代码");
+        info!(
+            contest_id = contest_id,
+            problem_id = problem_id,
+            display_id = display_id,
+            language = language,
+            "提交代码"
+        );
         let submission_id = provider
-            .submit(contest_id, problem_id, language, source_code)
+            .submit(contest_id, problem_id, display_id, language, source_code)
             .await
             .map_err(|e| {
                 warn!(contest_id = contest_id, problem_id = problem_id, error = %e, "提交失败");
@@ -147,6 +166,16 @@ impl SubmissionService {
             })?;
 
         debug!(submission_id = submission_id, "代码已提交");
+
+        // 本地留档「当时提交的代码」：OJ 可能在比赛隐藏记录、codeShare=false、
+        // 赛后回收等情形下不回吐代码，届时详情页回落到这份快照（best-effort）
+        snapshot::write_snapshot(
+            &self.storage,
+            self.registry.current_id().as_str(),
+            &submission_id,
+            language,
+            source_code,
+        );
 
         self.event_bus.publish(&AppEvent::Submission(
             SubmissionEvent::Created {
@@ -237,13 +266,27 @@ impl SubmissionService {
 
         let provider = self.registry.current_submission()?;
 
-        let detail = provider
+        let mut detail = provider
             .get_submission_detail(submit_id)
             .await
             .map_err(|e| {
                 warn!(submit_id = submit_id, error = %e, "获取提交详情失败");
                 e.context("获取提交详情失败")
             })?;
+
+        // OJ 未回吐代码（比赛隐藏记录 / codeShare=false / 赛后回收）时回落到本地快照。
+        // 这是「当时的代码」唯一的本地来源 —— 没有它，选手只能看到一个空代码框
+        if detail.code.trim().is_empty() {
+            if let Some(code) = snapshot::read_snapshot(
+                &self.storage,
+                self.registry.current_id().as_str(),
+                submit_id,
+                &detail.language,
+            ) {
+                debug!(submit_id = submit_id, "OJ 未返回代码，已回落到本地快照");
+                detail.code = code;
+            }
+        }
 
         // 只缓存成功且已终结的结果（错误绝不入缓存）；同时留下终态标记供测试点缓存判定
         if detail.status.is_terminal() {

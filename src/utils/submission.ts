@@ -3,8 +3,9 @@ import type { JudgeCase, JudgementStatus, SubmissionCases } from '@/types/submis
 /**
  * 非终态状态集：评测仍在排队/编译/运行，需要继续轮询。
  *
- * 判据与 Rust `adapter::hoj::types::is_terminal_status`（仅 0=Pending、1=Judging 为非终态）
- * 保持一致 —— 其余状态（含扩展后的 PE/OLE/SE/RJE/SF/PA/FREQ/UE）均为终态。
+ * 判据与 Rust `adapter::hoj::types::is_terminal_status`（非终态 = HOJ 码
+ * 5 Pending / 6 Compiling / 7 Judging / 9 Submitting）保持一致 ——
+ * 其余状态（含各类失败与 `Unknown`）均为终态。
  * 若把 `Unknown` 当作非终态，无法识别的状态码将被无限轮询。
  */
 const NON_TERMINAL_STATUSES: ReadonlySet<JudgementStatus> = new Set<JudgementStatus>([
@@ -36,6 +37,8 @@ interface StatusMeta {
 
 /// 变体 → 文案/缩写/色调 的唯一映射表（新增状态只改这里）
 const STATUS_META: Readonly<Record<JudgementStatus, StatusMeta>> = {
+  NotSubmitted: { label: 'Not Submitted', abbr: 'NS', tone: 'neutral' },
+  Cancelled: { label: 'Cancelled', abbr: 'CANC', tone: 'system' },
   Pending: { label: 'Pending', abbr: 'PD', tone: 'pending' },
   Compiling: { label: 'Judging', abbr: 'JDG', tone: 'pending' },
   Running: { label: 'Judging', abbr: 'JDG', tone: 'pending' },
@@ -100,20 +103,27 @@ export function findFirstFailedCase(result: SubmissionCases): JudgeCase | null {
 /**
  * 评测页状态筛选下拉选项（value = HOJ 状态码，与后端 `status` 查询参数对齐）。
  *
- * 只列赛场高频状态；冷门状态（OLE/RJE/SF/FREQ/UE）归入「全部状态」查看，
- * 避免下拉过长。选项顺序按选手关注度排列。
+ * 码值出自 HOJ `Constants.Judge`（**含负数**，见 Rust `adapter/hoj/types.rs::map_status`）：
+ * 0=AC / -1=WA / 1=TLE / 2=MLE / 3=RE / -2=CE / -3=PE / 8=PA / 5=Pending /
+ * 7=Judging / 6=Compiling / 9=Submitting。曾经整表按「0 起顺排」写错，
+ * 结果选手选「Accepted」实际筛的是 HOJ 的 Pending（码 5）。
+ *
+ * 只列赛场高频状态；冷门状态（-4 Cancelled / 10 SF / 15 No Status / -10 Not Submitted）
+ * 归入「全部状态」查看，避免下拉过长。
+ * 选项顺序按选手关注度排列。
  */
 export const STATUS_OPTIONS: readonly { value: number; label: string }[] = [
-  { value: 5, label: 'Accepted' },
-  { value: 4, label: 'Wrong Answer' },
-  { value: 6, label: 'Time Limit Exceeded' },
-  { value: 7, label: 'Memory Limit Exceeded' },
-  { value: 9, label: 'Runtime Error' },
-  { value: 2, label: 'Compile Error' },
-  { value: 3, label: 'Presentation Error' },
-  { value: 13, label: 'Partially Accepted' },
-  { value: 0, label: 'Pending' },
-  { value: 1, label: 'Judging' },
+  { value: 0, label: 'Accepted' },
+  { value: -1, label: 'Wrong Answer' },
+  { value: 1, label: 'Time Limit Exceeded' },
+  { value: 2, label: 'Memory Limit Exceeded' },
+  { value: 3, label: 'Runtime Error' },
+  { value: -2, label: 'Compile Error' },
+  { value: -3, label: 'Presentation Error' },
+  { value: 8, label: 'Partially Accepted' },
+  { value: 5, label: 'Pending' },
+  { value: 6, label: 'Compiling' },
+  { value: 7, label: 'Judging' },
 ]
 
 // ── 展示格式化纯函数（评测页 / 提交详情页 / 最新记录 pill 共用） ──

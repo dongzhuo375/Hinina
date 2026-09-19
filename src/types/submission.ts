@@ -1,7 +1,10 @@
 /// 评测状态，对应 Rust `core::entity::submission::JudgementStatus`。
 ///
-/// 覆盖 HOJ 全部状态码（0-15）；变体名即 serde 序列化字符串，两端必须同步演进。
+/// 值域是 HOJ `Constants.Judge` 的（见 Rust `adapter/hoj/types.rs::map_status`）；
+/// 变体名即 serde 序列化字符串，两端必须同步演进。
 export type JudgementStatus =
+  | 'NotSubmitted'
+  | 'Cancelled'
   | 'Pending'
   | 'Compiling'
   | 'Running'
@@ -27,6 +30,11 @@ export interface JudgementResult {
   score: number
   timeMs: number
   memoryKb: number
+  /// 失败原因（CE / SE / SF 时非空）。
+  ///
+  /// 轮询是选手感知评测失败的唯一自动通道，故错误信息随轮询结果一起回来，
+  /// 而不是等选手点进详情页才发现。服务端的占位文案已在 Rust 侧过滤。
+  errorMessage: string | null
 }
 
 /// 提交列表行，对应 Rust `SubmissionRecord`（来源 HOJ JudgeVO）。

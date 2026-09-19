@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { JudgementResult, SubmissionPage, SubmissionRecord } from '@/types/submission'
 
@@ -28,7 +28,7 @@ const CONTEST_ID = '1'
 const SCHEDULE = { intervalMs: 2_000, timeoutMs: 10_000 }
 
 function makeResult(status: JudgementResult['status'], over: Partial<JudgementResult> = {}): JudgementResult {
-  return { status, score: 0, timeMs: 15, memoryKb: 1024, ...over }
+  return { status, score: 0, timeMs: 15, memoryKb: 1024, errorMessage: null, ...over }
 }
 
 function makeRecord(over: Partial<SubmissionRecord> = {}): SubmissionRecord {
@@ -70,7 +70,7 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       submissionService.pollJudgement.mockResolvedValue(makeResult('Accepted'))
       const store = useSubmissionStore()
 
-      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'int main(){}')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'int main(){}')
       expect(store.submissions).toHaveLength(1)
       expect(store.submissions[0].status).toBe('Pending')
 
@@ -96,7 +96,7 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       const problem = useProblemStore()
       problem.myStatusStale = false
 
-      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
       // 非终态阶段不应触发失效（评测中状态未定）
       expect(problem.myStatusStale).toBe(false)
 
@@ -118,7 +118,7 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       const problem = useProblemStore()
       problem.myStatusStale = false
 
-      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
       // 推进到总超时（10s）之后若干周期：抖动使「首个越过 deadline 的 tick」可能落在
       // 10–14.4s 之间，故给足余量；轮询停止，但终态未知
       await vi.advanceTimersByTimeAsync(20_000)
@@ -138,7 +138,7 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       )
       const store = useSubmissionStore()
 
-      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
       await vi.advanceTimersByTimeAsync(2_600)
 
       expect(store.submissions[0].time).toBe(2010)
@@ -155,7 +155,7 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       submissionService.pollJudgement.mockResolvedValue(makeResult('Pending'))
       const store = useSubmissionStore()
 
-      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
       // 超时 10s：推进到超时后必然停止
       await vi.advanceTimersByTimeAsync(11_000)
       const callsAtTimeout = submissionService.pollJudgement.mock.calls.length
@@ -182,9 +182,10 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
         .mockResolvedValue(makeResult('Accepted'))
       const store = useSubmissionStore()
 
-      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
       await vi.advanceTimersByTimeAsync(2_600)
-      expect(store.error).toBe('网络抖动')
+      // 单次瞬时失败刻意静默（不打扰选手），阈值由 notePollFailure 控制
+      expect(store.error).toBeNull()
 
       await vi.advanceTimersByTimeAsync(2_600)
       // 成功路径必须清 error，否则失败红字永久残留（P69）
@@ -202,8 +203,8 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       submissionService.pollJudgement.mockResolvedValue(makeResult('Pending'))
       const store = useSubmissionStore()
 
-      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code1')
-      await store.submitCode(CONTEST_ID, 'p2', 'cpp', 'code2')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code1')
+      await store.submitCode(CONTEST_ID, 'p2', 'B', 'cpp', 'code2')
       store.stopAllPolling()
 
       await vi.advanceTimersByTimeAsync(60_000)
@@ -220,7 +221,7 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       submissionService.pollJudgement.mockResolvedValue(makeResult('Pending'))
       const store = useSubmissionStore()
 
-      await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
       await store.startPolling('s1')
       await store.startPolling('s1')
 
@@ -340,11 +341,98 @@ describe('latestLocalFor getter', () => {
     submissionService.pollJudgement.mockResolvedValue(makeResult('Pending'))
     const store = useSubmissionStore()
 
-    await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code1')
-    await store.submitCode(CONTEST_ID, 'p1', 'cpp', 'code2')
+    await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code1')
+    await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code2')
     store.stopAllPolling()
 
     expect(store.latestLocalFor('p1')?.id).toBe('s2')
     expect(store.latestLocalFor('p2')).toBeNull()
+  })
+})
+
+describe('提交参数透传（pid 与 displayId 必须都送到后端）', () => {
+  it('submitCode 把 displayId 原样透传给 service', async () => {
+    // HOJ 的提交接口收的是比赛内展示题号：只传数字 pid 会让服务端 500（实测）
+    submissionService.submitCode.mockResolvedValue('s1')
+    submissionService.pollJudgement.mockResolvedValue(makeResult('Accepted'))
+    const store = useSubmissionStore()
+
+    await store.submitCode(CONTEST_ID, '1000', 'A', 'C++', 'int main(){}')
+    store.stopAllPolling()
+
+    expect(submissionService.submitCode).toHaveBeenCalledWith(
+      CONTEST_ID,
+      '1000',
+      'A',
+      'C++',
+      'int main(){}',
+    )
+  })
+})
+
+describe('失败原因可见性（CE 编译错误 / 轮询持续失败）', () => {
+  it('轮询回填失败原因到提交条目（控制台条直接展示首行）', async () => {
+    vi.useFakeTimers()
+    try {
+      submissionService.submitCode.mockResolvedValue('s1')
+      submissionService.pollJudgement.mockResolvedValue(
+        makeResult('CompilationError', {
+          errorMessage: "main.cpp:3:5: error: 'x' was not declared in this scope",
+        }),
+      )
+      const store = useSubmissionStore()
+
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      await vi.advanceTimersByTimeAsync(2_600)
+
+      expect(store.submissions[0].status).toBe('CompilationError')
+      expect(store.submissions[0].errorMessage).toContain('was not declared')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('AC 时失败原因为空（服务端占位文案已在 Rust 侧过滤）', async () => {
+    vi.useFakeTimers()
+    try {
+      submissionService.submitCode.mockResolvedValue('s1')
+      submissionService.pollJudgement.mockResolvedValue(makeResult('Accepted'))
+      const store = useSubmissionStore()
+
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      await vi.advanceTimersByTimeAsync(2_600)
+
+      expect(store.submissions[0].errorMessage).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('连续失败达阈值后提示到界面，恢复后自动清除', async () => {
+    // 阈值前静默是刻意的（不打扰选手），但永远静默会让「服务端挂了」与
+    // 「评测很慢」在界面上完全同形，选手只能干等
+    vi.useFakeTimers()
+    try {
+      // 本用例要跨越多个失败周期 + 恢复，把总超时放宽以免撞上轮询 deadline
+      configService.getPollSchedule.mockResolvedValue({ intervalMs: 2_000, timeoutMs: 60_000 })
+      submissionService.submitCode.mockResolvedValue('s1')
+      submissionService.pollJudgement.mockRejectedValue(new Error('网络断开'))
+      const store = useSubmissionStore()
+
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      expect(store.error).toBeNull()
+
+      // 节拍 2s±0.4s：推进 10s 足以累计 3 次以上失败
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(store.error).toContain('连续失败')
+
+      // 恢复：下一次成功必须清除错误提示
+      submissionService.pollJudgement.mockResolvedValue(makeResult('Accepted'))
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(store.error).toBeNull()
+      expect(store.submissions[0].status).toBe('Accepted')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

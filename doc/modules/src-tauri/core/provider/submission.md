@@ -5,7 +5,10 @@
 
 ## 核心类型/函数
 - **`SubmissionProvider`** — 提交 Provider trait（`#[async_trait]`），方法：
-  - `submit(&self, contest_id, problem_id, language, source_code) -> AppResult<String>` — 提交代码，返回提交 ID
+  - `submit(&self, contest_id, problem_id, display_id, language, source_code) -> AppResult<String>` — 提交代码，返回提交 ID。**`problem_id` 与 `display_id` 是同一道题的两个标识，各 OJ 认的不是同一个，故两个都传入由 Adapter 各取所需**：
+    - `problem_id`：题目真实 ID（HOJ 数字 pid / Hydro ObjectId），也是工作区隔离与 `get_user_problem_status` 的键
+    - `display_id`：比赛内展示题号（如 `"A"`）。HOJ 的 `POST /submit-problem-judge` 收的 `pid` 是**展示题号** —— 服务端拿它查 `contest_problem.display_id`，查不到直接 NPE 返回 **HTTP 500**（实测传数字 pid 必 500）；Hydro 的 `/p/{id}/submit` 收的则是真实 ID
+    - 不要在某一家里「猜」另一家的语义（Hydro 侧刻意不做字母换算：万一某题的 pid 恰好是 `"A"`，换算会把提交打到另一道题上）
   - `get_judgement(&self, submission_id) -> AppResult<JudgementResult>` — 查询评测结果（轮询用轻量投影）
   - `list_contest_submissions(&self, query: &SubmissionQuery) -> AppResult<SubmissionPage>` — 查询比赛提交列表（分页）
   - `get_submission_detail(&self, submit_id) -> AppResult<SubmissionDetail>` — 查询提交详情（含源代码与错误信息）

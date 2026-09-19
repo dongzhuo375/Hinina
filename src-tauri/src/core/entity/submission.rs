@@ -2,10 +2,15 @@ use serde::{Deserialize, Serialize};
 
 /// 评测状态。
 ///
-/// 变体名即 IPC 序列化值（前端按这些确切名称做文案与配色映射），
-/// 覆盖 HOJ 全部状态码（0-15，见 `adapter/hoj/types.rs` 的 `map_status`）。
+/// 变体名即 IPC 序列化值（前端按这些确切名称做文案与配色映射）。
+/// 值域是 HOJ 的（`adapter/hoj/types.rs` 的 `map_status` 给出完整码表映射），
+/// 其他 OJ 的码表折入语义最近的变体。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum JudgementStatus {
+    /// 尚未提交过该题（HOJ -10）；仅出现在「我的题目状态」查询中
+    NotSubmitted,
+    /// 提交被取消（HOJ -4）
+    Cancelled,
     Pending,
     Compiling,
     Running,
@@ -32,9 +37,9 @@ impl JudgementStatus {
     /// 非终态仅 `Pending` / `Compiling` / `Running` 三个 —— 其余（含 `Unknown`
     /// 与各类系统错误）一律视为终态：把无法识别的状态当非终态会让轮询无限进行。
     ///
-    /// 三处判据必须保持一致（新增状态时同步）：
+    /// 四处判据必须保持一致（新增状态时同步）：
     /// - 本方法（核心层，OI/ACM 无关）
-    /// - `adapter::hoj::types::is_terminal_status`（HOJ 原始状态码 → 终态，0/1 之外皆终态）
+    /// - `adapter::hoj::types::is_terminal_status`（HOJ 原始码 → 终态，非终态 = 5/6/7/9）
     /// - `adapter::hydro::types::is_terminal_status`（Hydro 原始状态码 → 终态，
     ///   0/20/21/22 之外皆终态；**22 FETCHED 特意折入 `Pending`** 而非 `Unknown`，
     ///   否则轮询会在评测开始前就停住，并把在途结果写进终态缓存）
@@ -55,6 +60,13 @@ pub struct JudgementResult {
     pub score: f64,
     pub time_ms: u64,
     pub memory_kb: u64,
+    /// 失败原因（编译错误 / 系统错误 / 提交失败时非空）。
+    ///
+    /// 轮询是选手感知评测失败的唯一自动通道：若这里不带错误信息，CE 只能靠选手
+    /// 自己点进详情页才发现，提交控制台条永远只显示「Compile Error」。
+    /// 服务端的占位文案（无权查看）已在 Adapter 层过滤，不会传到这里。
+    #[serde(default)]
+    pub error_message: Option<String>,
 }
 
 /// 提交列表条目（比赛提交记录页用）。

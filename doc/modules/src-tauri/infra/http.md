@@ -5,11 +5,11 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 
 **只负责传输，不做反序列化**：对外方法一律返回「原始响应体文本 + 响应头」，不感知任何 OJ 私有的响应约定。JSON 解析、字段归一化（如 HOJ 的剔除 `null`）、响应头私有语义（如 HOJ 的 token 轮换）全部由 Adapter 层承担。
 
-**两组变体，按「是否需要读非 2xx 的响应体」选**：
-- `*_with_headers` —— 非 2xx 映射为 `AppError`（401 → `Auth`），响应体丢弃；
+**两组变体，按「是否需要自己读非 2xx 的响应体」选**：
+- `*_with_headers` —— 非 2xx 映射为 `AppError`（401 → `Auth`），**并把响应体摘录附进错误信息**（见 `read_error_excerpt`）；排查「服务端到底说了什么」全靠它；
 - `*_raw` —— **任意状态码都返回 `(status, headers, body)`**，不做状态码映射。给把错误信息放在响应体里的 OJ 用（Hydro 的 `{"error":{"name",…}}` 是用户可见文案的唯一来源），代价是调用方需自行把 401 映射为 `Auth`（否则会话守卫失效）。
 
-分两组而不是「让非 raw 变体也带响应体」：后者会改变既有调用方（HOJ）依赖的语义，把两种用法混进一个返回值只会让每个调用点都要判断「这次算错误还是正常返回」。选择权交给调用点，各自语义单纯。
+分两组而不是「让非 raw 变体也带响应体」：后者会改变既有调用方（HOJ）依赖的语义，把两种用法混进一个返回值只会让每个调用点都要判断「这次算错误还是正常返回」。选择权交给调用点，各自语义单纯 —— 但**非 raw 变体在判定失败时会把响应体读出来附在错误信息里**（仍不把它当返回值交给调用方，语义不变）：此前直接丢弃响应体，调用方只拿到一句 `HTTP 500 Internal Server Error`，实测排查 HOJ 提交失败时日志里十条一模一样的「HTTP 500」，完全看不出服务端说了什么。
 
 **但承担 HTTP 通用语义的状态码判定**：`status_error` 把 HTTP 401 映射为 `AppError::Auth`、其余错误状态码映射为 `Network`（详见「核心类型/函数」与「逻辑流程」）。这是「通用语义 vs OJ 私有约定」的分界线，不是对上一条的例外。
 
@@ -19,7 +19,7 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 - **`HttpClient::with_timeout(timeout: Duration) -> Result<Self, reqwest::Error>`** — 创建指定超时的客户端。**超时来自 `oj.timeout_secs` 配置**（由 `core/context.rs` 装配时读取并注入，`timeout_secs.max(1)` 防 0 值），不再硬编码；其余行为（Cookie Store、UA、重试）与 `new()` 一致
 - **`HttpClient::client() -> &reqwest::Client`** — 获取内部 client 引用，供 Adapter 层直接调用原始 API（HOJ 的 `login` 需自行读响应头取 token、`logout` 忽略响应体）。**`validate_session` 已不再走 raw client**：它改走 `get_json_authed`，才能拿到去 null 解析、体内鉴权失败识别、token 轮换与 5xx 退避重试（见 `adapter/hoj/mod.md`）
 - **`HttpClient::get_text_with_headers(url, headers) -> AppResult<(String, HeaderMap)>`** — GET，返回**原始响应体**与响应头；5xx 与传输错误自动重试，4xx 直接报错；`headers` 由调用方注入并原样附加（空 map = 无附加头，重试时原样重附）
-- **`HttpClient::post_text_with_headers<B: Serialize>(url, body, headers) -> AppResult<(String, HeaderMap)>`** — POST（JSON body），返回**原始响应体**与响应头；非幂等，不重试，非 2xx 直接报错
+- **`HttpClient::post_text_with_headers<B: Serialize>(url, body, headers) -> AppResult<(String, HeaderMap)>`** — POST（JSON body），返回**原始响应体**与响应头；非幂等，不重试，非 2xx 直接报错（**错误信息附带响应体摘录**）
 - **`HttpClient::get_text_raw(url, headers) -> AppResult<(StatusCode, HeaderMap, String)>`** — GET，**任意状态码都返回原始响应**，不做状态码映射。5xx 仍退避重试（GET 幂等），**耗尽后返回响应而不是报错**；4xx 不重试。供需要读错误包络的适配器使用（`adapter/hydro`）
 - **`HttpClient::post_text_raw<B: Serialize>(url, body, headers) -> AppResult<(StatusCode, HeaderMap, String)>`** — POST（JSON body），语义同 `get_text_raw`，但非幂等、**不做任何重试**（Hydro 的登录/提交走它：既要错误包络，也要读 `Set-Cookie`）
 - **`retry_get(url, headers, allow_error) -> AppResult<Response>`**（私有）— 内部重试：最多 2 次，指数退避 1s/2s；4xx 立即报错不重试；**5xx 重试耗尽后**按 `allow_error` 决定「报错」还是「原样返回响应」（处置判据见 `classify_status`）
@@ -30,7 +30,9 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
   - 这条映射是 HOJ 会话校验能成立的**前提**：`get_json_authed` 遇到 HTTP 401 时若仍归 `Network`，`HOJAdapter::session_validity_from_response` 会把它当「无法判定」上抛 → `SessionValidity::Unknown` → **token 真正过期时反而永不登出**
   - **403 刻意保持 `Network`**：它可能是「无权访问某场私有赛」这类业务限制而非会话问题，误判为 `Auth` 会把已登录选手踢回登录页
 - **`retry_delay(attempt) -> Duration`**（私有 const）— 指数退避延迟 `RETRY_BASE_DELAY_MS * 2^attempt`
-- **常量 `MAX_RETRIES = 2` / `RETRY_BASE_DELAY_MS = 1000`** — 重试次数与退避基数
+- **常量 `MAX_RETRIES = 2` / `RETRY_BASE_DELAY_MS = 1000` / `ERROR_BODY_EXCERPT_LIMIT = 300`** — 重试次数、退避基数、错误体摘录字符上限
+- **`read_error_excerpt(response) -> String`**（私有 async）— 读取非 2xx 响应的响应体，压成单行并截断到 `ERROR_BODY_EXCERPT_LIMIT`。读取失败降级为空串（错误信息本身不该因为「读错误信息失败」而丢失）
+- **`status_error_with_body(url, status, excerpt) -> AppError`**（私有）— 带响应体摘录的状态码错误，格式 `HTTP {code} {reason}: {url} | {excerpt}`。**401 与空摘录走原 `status_error`**：401 是前端会话守卫的判据，且服务端可能在 401 响应里回显请求凭证 —— 认证失败的原因由 HTTP 语义本身说明，无需正文
 
 > 已移除：`get_json` / `get_json_with_headers` / `post_json` / `post_json_with_headers`。这些方法在 infra 内部调用 `serde_json::from_str`，使 Adapter 无法在「拿到原始 JSON」与「类型化解析」之间插入 OJ 特有的归一化步骤（HOJ 必须先剔除 `null`、再判定响应体内的鉴权失败），因此整体下沉为 `*_text_with_headers`。
 

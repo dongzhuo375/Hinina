@@ -6,7 +6,7 @@
       {
         "submitId": 12345,
         "caseId": 1,
-        "status": 5,
+        "status": 0,
         "time": 10,
         "memory": 5120,
         "score": null,
@@ -17,7 +17,7 @@
       {
         "submitId": 12345,
         "caseId": 2,
-        "status": 5,
+        "status": 0,
         "time": 12,
         "memory": 5248,
         "score": null,

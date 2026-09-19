@@ -48,6 +48,17 @@ pub enum ContestEvent {
     ListLoaded { contests: Vec<Contest> },
     Selected { contest_id: String },
     CountdownTick { remaining_seconds: i64 },
+    /// 检测到**新发布的比赛公告**（按公告 ID 对比上一次拉取结果得出）。
+    ///
+    /// 公告是外部状态（裁判组在服务端发布），客户端唯一能感知的方式仍是拉取，
+    /// 但「有新公告」这件事必须走事件而不是让各视图各自比对列表 —— 红点提醒
+    /// 属于状态变更，按项目约定归 EventBus（查询走 Service、状态变更走 EventBus）。
+    ///
+    /// 首次拉取**不发**（没有基线可比，发了等于给每位选手一开机就亮红点）。
+    AnnouncementsPublished {
+        contest_id: String,
+        new_ids: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone)]

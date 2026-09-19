@@ -359,25 +359,29 @@ pub fn is_terminal_status(status: i64) -> bool {
 /// HOJ 状态码 → Hydro 状态码（评测页「状态筛选」参数翻译）。
 ///
 /// 背景：前端状态下拉的取值域是 **HOJ 码表**（`utils/submission.ts` 的
-/// `STATUS_OPTIONS`），`SubmissionQuery.status` 原样把 HOJ 码透传到 Adapter。
+/// `STATUS_OPTIONS`，出自 HOJ `Constants.Judge`，含负数码），
+/// `SubmissionQuery.status` 原样把 HOJ 码透传到 Adapter。
 /// Hydro 的 `/record?status=` 收的是自己的码，故必须翻译。
 ///
-/// 返回 `None` 表示 Hydro **没有**该语义的状态：HOJ 的 PE(3) / RJE(11) /
-/// SF(12) / PA(13) / FREQ(14) 在 Hydro 码表中不存在。调用方据此给出明确错误
+/// 返回 `None` 表示 Hydro **没有**该语义的状态：HOJ 的 `-10` Not Submitted /
+/// `8` PA 在 Hydro 码表中不存在。调用方据此给出明确错误
 /// 而不是静默忽略筛选条件 —— 静默忽略会让选手以为「筛出来的就是全部」。
 pub fn hoj_status_to_hydro(code: i32) -> Option<i64> {
     match code {
-        0 => Some(0),  // Pending → WAITING
-        1 => Some(20), // Judging → JUDGING（Hydro 的 COMPILING/FETCHED 无法用单值筛出）
-        2 => Some(7),  // CE → COMPILE_ERROR
-        4 => Some(2),  // WA → WRONG_ANSWER
-        5 => Some(1),  // AC → ACCEPTED
-        6 => Some(3),  // TLE → TIME_LIMIT_EXCEEDED
-        7 => Some(4),  // MLE → MEMORY_LIMIT_EXCEEDED
-        8 => Some(5),  // OLE → OUTPUT_LIMIT_EXCEEDED
-        9 => Some(6),  // RE → RUNTIME_ERROR
-        10 => Some(8), // SE → SYSTEM_ERROR
-        15 => Some(10), // UE → ETC
+        5 => Some(0),   // Pending → WAITING
+        6 => Some(21),  // Compiling → COMPILING
+        7 => Some(20),  // Judging → JUDGING
+        9 => Some(0),   // Submitting → WAITING（Hydro 无独立变体，同为「未开跑」）
+        0 => Some(1),   // AC → ACCEPTED
+        -1 => Some(2),  // WA → WRONG_ANSWER
+        1 => Some(3),   // TLE → TIME_LIMIT_EXCEEDED
+        2 => Some(4),   // MLE → MEMORY_LIMIT_EXCEEDED
+        3 => Some(6),   // RE → RUNTIME_ERROR
+        -2 => Some(7),  // CE → COMPILE_ERROR
+        -3 => Some(31), // PE → FORMAT_ERROR（Hydro 语义最近者）
+        4 => Some(8),   // SE → SYSTEM_ERROR
+        -4 => Some(9),  // Cancelled → CANCELED
+        15 => Some(10), // No Status → ETC
         _ => None,
     }
 }

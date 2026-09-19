@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+﻿// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Announcement, AnnouncementPage } from '@/types/announcement'
 
@@ -33,11 +34,27 @@ function makePage(records: Announcement[]): AnnouncementPage {
   return { records, total: records.length, size: 100, current: 1, pages: 1 }
 }
 
+/// 覆盖 `document.hidden`（jsdom 默认 false = 可见）
+function setPageHidden(hidden: boolean): void {
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden })
+}
+
+/// 复位为「可见」。刻意不用 `delete`：jsdom 把 `hidden` 定义在原型上，
+/// ESM 严格模式下删除失败会抛 TypeError，反而污染所有用例
+function restorePageVisibility(): void {
+  setPageHidden(false)
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  restorePageVisibility()
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
+})
+
+afterEach(() => {
+  restorePageVisibility()
 })
 
 describe('load — 公告列表与已读集合', () => {
@@ -143,6 +160,58 @@ describe('markAllRead — 进入公告页全部已读', () => {
 
     expect(announcementService.markRead).not.toHaveBeenCalled()
   })
+
+  it('页面不可见时不标记已读（切走了 = 没看到，标记等于吞掉红点）', async () => {
+    announcementService.listAnnouncements.mockResolvedValue(makePage([makeAnnouncement('a1')]))
+    announcementService.getReadIds.mockResolvedValue(new Set())
+    const store = useAnnouncementStore()
+    await store.load(CONTEST_ID)
+
+    setPageHidden(true)
+    await store.markAllRead()
+
+    expect(announcementService.markRead).not.toHaveBeenCalled()
+    expect(store.unreadCount).toBe(1)
+  })
+})
+
+describe('isWatching — 用户正在看公告页时的已读语义', () => {
+  it('正在看时，load 落地的新公告自动标为已读（避免离开页面后冒出假红点）', async () => {
+    announcementService.listAnnouncements.mockResolvedValue(makePage([makeAnnouncement('a1')]))
+    announcementService.getReadIds.mockResolvedValue(new Set())
+    announcementService.markRead.mockResolvedValue(new Set(['a1']))
+    const store = useAnnouncementStore()
+    store.isWatching = true
+
+    await store.load(CONTEST_ID)
+    // markAllRead 由 load 内部触发（异步），等它落地
+    await vi.waitFor(() => expect(announcementService.markRead).toHaveBeenCalledWith(CONTEST_ID, ['a1']))
+    expect(store.unreadCount).toBe(0)
+  })
+
+  it('不在公告页时不标记：新公告必须保持未读以点亮红点', async () => {
+    announcementService.listAnnouncements.mockResolvedValue(makePage([makeAnnouncement('a1')]))
+    announcementService.getReadIds.mockResolvedValue(new Set())
+    const store = useAnnouncementStore()
+    store.isWatching = false
+
+    await store.load(CONTEST_ID)
+
+    expect(announcementService.markRead).not.toHaveBeenCalled()
+    expect(store.unreadCount).toBe(1)
+  })
+
+  it('正在看但页面不可见时不标记（切走期间落地的不算看过）', async () => {
+    announcementService.listAnnouncements.mockResolvedValue(makePage([makeAnnouncement('a1')]))
+    announcementService.getReadIds.mockResolvedValue(new Set())
+    const store = useAnnouncementStore()
+    store.isWatching = true
+
+    setPageHidden(true)
+    await store.load(CONTEST_ID)
+
+    expect(announcementService.markRead).not.toHaveBeenCalled()
+  })
 })
 
 describe('refresh / startLive / stopLive — 轮询编排', () => {
@@ -201,6 +270,96 @@ describe('refresh / startLive / stopLive — 轮询编排', () => {
         initialCalls + 1,
       )
       store.stopLive()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('窗口重新可见/聚焦时立即补拉一次（切回窗口不该等一整个周期）', async () => {
+    // 桌面客户端的常态是「切出去看题解，再切回来」；只靠 60s 节拍意味着
+    // 切回来最多要等 70s 才可能看到红点，被选手直接感知为「红点不出现」
+    vi.useFakeTimers()
+    try {
+      announcementService.listAnnouncements.mockResolvedValue(makePage([]))
+      announcementService.getReadIds.mockResolvedValue(new Set())
+      const store = useAnnouncementStore()
+
+      store.startLive(CONTEST_ID)
+      await vi.advanceTimersByTimeAsync(0)
+      const before = announcementService.listAnnouncements.mock.calls.length
+
+      // 越过模块级去重窗口（同一秒内 visibilitychange + focus 只补拉一次）。
+      // 窗口状态是模块级的、跨用例保留，故推进量要明显大于窗口而非刚好越过
+      await vi.advanceTimersByTimeAsync(5_000)
+      window.dispatchEvent(new Event('focus'))
+      expect(announcementService.listAnnouncements.mock.calls.length).toBe(before + 1)
+
+      store.stopLive()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('visibilitychange 与 focus 同时到达时只补拉一次（去重）', async () => {
+    vi.useFakeTimers()
+    try {
+      announcementService.listAnnouncements.mockResolvedValue(makePage([]))
+      announcementService.getReadIds.mockResolvedValue(new Set())
+      const store = useAnnouncementStore()
+
+      store.startLive(CONTEST_ID)
+      await vi.advanceTimersByTimeAsync(0)
+      const before = announcementService.listAnnouncements.mock.calls.length
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      window.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('visibilitychange'))
+
+      expect(announcementService.listAnnouncements.mock.calls.length).toBe(before + 1)
+      store.stopLive()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('页面仍不可见时不补拉（后台不产生无谓请求）', async () => {
+    vi.useFakeTimers()
+    try {
+      announcementService.listAnnouncements.mockResolvedValue(makePage([]))
+      announcementService.getReadIds.mockResolvedValue(new Set())
+      const store = useAnnouncementStore()
+
+      store.startLive(CONTEST_ID)
+      await vi.advanceTimersByTimeAsync(0)
+      const before = announcementService.listAnnouncements.mock.calls.length
+
+      setPageHidden(true)
+      await vi.advanceTimersByTimeAsync(5_000)
+      window.dispatchEvent(new Event('focus'))
+
+      expect(announcementService.listAnnouncements.mock.calls.length).toBe(before)
+      store.stopLive()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stopLive 后不再响应可见性补拉（离开工作台必须回收监听）', async () => {
+    vi.useFakeTimers()
+    try {
+      announcementService.listAnnouncements.mockResolvedValue(makePage([]))
+      announcementService.getReadIds.mockResolvedValue(new Set())
+      const store = useAnnouncementStore()
+
+      store.startLive(CONTEST_ID)
+      await vi.advanceTimersByTimeAsync(0)
+      store.stopLive()
+      const before = announcementService.listAnnouncements.mock.calls.length
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      window.dispatchEvent(new Event('focus'))
+
+      expect(announcementService.listAnnouncements.mock.calls.length).toBe(before)
     } finally {
       vi.useRealTimers()
     }

@@ -55,6 +55,7 @@ fn accepted() -> JudgementResult {
         score: 100.0,
         time_ms: 15,
         memory_kb: 2048,
+        error_message: None,
     }
 }
 
@@ -64,7 +65,20 @@ fn running() -> JudgementResult {
         score: 0.0,
         time_ms: 0,
         memory_kb: 0,
+        error_message: None,
     }
+}
+
+/// 每次调用一个独立存储根，避免并行测试相互覆盖快照。
+fn temp_storage() -> Arc<Storage> {
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "hinina-submission-service-test-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    Arc::new(Storage::new(dir))
 }
 
 #[async_trait::async_trait]
@@ -73,6 +87,7 @@ impl SubmissionProvider for StubSubmissionProvider {
         &self,
         _contest_id: &str,
         _problem_id: &str,
+        _display_id: &str,
         _language: &str,
         _source_code: &str,
     ) -> AppResult<String> {
@@ -213,7 +228,7 @@ fn build_service(mode: StubMode) -> (SubmissionService, StubCounters, Arc<EventB
     );
     let bus = Arc::new(EventBus::new());
     (
-        SubmissionService::new(registry, Arc::clone(&bus)),
+        SubmissionService::new(registry, Arc::clone(&bus), temp_storage()),
         counters,
         bus,
     )
@@ -248,7 +263,7 @@ fn collect_submission_events(bus: &Arc<EventBus>) -> Arc<Mutex<Vec<SubmissionEve
 #[test]
 fn submit_preserves_auth_variant() {
     let (service, _calls, _bus) = make_service(StubMode::Auth);
-    let err = block_on(service.submit("1011", "1061", "C++", "int main(){}"))
+    let err = block_on(service.submit("1011", "1061", "A", "C++", "int main(){}"))
         .expect_err("token 过期应报错");
     assert!(
         matches!(err, AppError::Auth(_)),
@@ -265,7 +280,7 @@ fn submit_preserves_auth_variant() {
 #[test]
 fn submit_preserves_network_variant() {
     let (service, _calls, _bus) = make_service(StubMode::Network);
-    let err = block_on(service.submit("1011", "1061", "C++", "int main(){}"))
+    let err = block_on(service.submit("1011", "1061", "A", "C++", "int main(){}"))
         .expect_err("断网应报错");
     assert!(
         matches!(err, AppError::Network(_)),
@@ -483,7 +498,11 @@ fn detail_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
             },
         );
     }
-    let service = SubmissionService::new(Arc::clone(&registry), Arc::new(EventBus::new()));
+    let service = SubmissionService::new(
+        Arc::clone(&registry),
+        Arc::new(EventBus::new()),
+        temp_storage(),
+    );
 
     block_on(service.get_submission_detail("12345")).expect("HOJ 详情失败");
     assert_eq!(counters.detail.load(Ordering::SeqCst), 1);

@@ -1,122 +1,138 @@
-// HOJ types.rs 单元测试：map_status / is_terminal_status
+// HOJ types.rs 单元测试：map_status / is_terminal_status / normalize_error_message
+//
+// 码表来源：HOJ `Constants.Judge`（JudgeServer/.../util/Constants.java）。
+// 注意取值域含负数 —— 曾因把它当成「0 起顺排」而导致所有 AC 显示为 Pending。
 
 use super::*;
 
 // ── map_status ──
 
 #[test]
+fn map_status_not_submitted() {
+    assert!(matches!(
+        map_status(-10),
+        crate::core::entity::submission::JudgementStatus::NotSubmitted
+    ));
+}
+
+#[test]
+fn map_status_cancelled() {
+    assert!(matches!(
+        map_status(-4),
+        crate::core::entity::submission::JudgementStatus::Cancelled
+    ));
+}
+
+#[test]
+fn map_status_ce() {
+    assert!(matches!(map_status(-2), crate::core::entity::submission::JudgementStatus::CompilationError));
+}
+
+#[test]
+fn map_status_pe() {
+    assert!(matches!(map_status(-3), crate::core::entity::submission::JudgementStatus::PresentationError));
+}
+
+#[test]
+fn map_status_wa() {
+    assert!(matches!(map_status(-1), crate::core::entity::submission::JudgementStatus::WrongAnswer));
+}
+
+#[test]
+fn map_status_ac() {
+    // 关键回归：0 是 Accepted 而非 Pending。实测 HOJ 提交 1166（status=0，time=2ms，
+    // memory=532KB）是一份通过的代码，旧表把它显示为 Pending 并无限轮询
+    assert!(matches!(map_status(0), crate::core::entity::submission::JudgementStatus::Accepted));
+}
+
+#[test]
+fn map_status_tle() {
+    assert!(matches!(map_status(1), crate::core::entity::submission::JudgementStatus::TimeLimitExceeded));
+}
+
+#[test]
+fn map_status_mle() {
+    assert!(matches!(map_status(2), crate::core::entity::submission::JudgementStatus::MemoryLimitExceeded));
+}
+
+#[test]
+fn map_status_re() {
+    assert!(matches!(map_status(3), crate::core::entity::submission::JudgementStatus::RuntimeError));
+}
+
+#[test]
+fn map_status_se() {
+    assert!(matches!(map_status(4), crate::core::entity::submission::JudgementStatus::SystemError));
+}
+
+#[test]
 fn map_status_pending() {
-    assert!(matches!(map_status(0), crate::core::entity::submission::JudgementStatus::Pending));
+    assert!(matches!(map_status(5), crate::core::entity::submission::JudgementStatus::Pending));
+}
+
+#[test]
+fn map_status_compiling() {
+    assert!(matches!(map_status(6), crate::core::entity::submission::JudgementStatus::Compiling));
 }
 
 #[test]
 fn map_status_judging() {
     // Judging 沿用既有 Running 语义（轮询判据不变）
-    assert!(matches!(map_status(1), crate::core::entity::submission::JudgementStatus::Running));
-}
-
-#[test]
-fn map_status_ce() {
-    assert!(matches!(map_status(2), crate::core::entity::submission::JudgementStatus::CompilationError));
-}
-
-#[test]
-fn map_status_pe() {
-    assert!(matches!(map_status(3), crate::core::entity::submission::JudgementStatus::PresentationError));
-}
-
-#[test]
-fn map_status_wa() {
-    assert!(matches!(map_status(4), crate::core::entity::submission::JudgementStatus::WrongAnswer));
-}
-
-#[test]
-fn map_status_ac() {
-    assert!(matches!(map_status(5), crate::core::entity::submission::JudgementStatus::Accepted));
-}
-
-#[test]
-fn map_status_tle() {
-    assert!(matches!(map_status(6), crate::core::entity::submission::JudgementStatus::TimeLimitExceeded));
-}
-
-#[test]
-fn map_status_mle() {
-    assert!(matches!(map_status(7), crate::core::entity::submission::JudgementStatus::MemoryLimitExceeded));
-}
-
-#[test]
-fn map_status_ole() {
-    assert!(matches!(map_status(8), crate::core::entity::submission::JudgementStatus::OutputLimitExceeded));
-}
-
-#[test]
-fn map_status_re() {
-    assert!(matches!(map_status(9), crate::core::entity::submission::JudgementStatus::RuntimeError));
-}
-
-#[test]
-fn map_status_se() {
-    assert!(matches!(map_status(10), crate::core::entity::submission::JudgementStatus::SystemError));
-}
-
-#[test]
-fn map_status_rje() {
-    assert!(matches!(map_status(11), crate::core::entity::submission::JudgementStatus::RemoteJudgeError));
-}
-
-#[test]
-fn map_status_sf() {
-    assert!(matches!(map_status(12), crate::core::entity::submission::JudgementStatus::SubmitFailed));
+    assert!(matches!(map_status(7), crate::core::entity::submission::JudgementStatus::Running));
 }
 
 #[test]
 fn map_status_pa() {
-    // P41 修复：Partial AC 不再折算为 Accepted，使用独立变体
-    assert!(matches!(map_status(13), crate::core::entity::submission::JudgementStatus::PartiallyAccepted));
+    // Partial AC 使用独立变体，不折算为 Accepted
+    assert!(matches!(map_status(8), crate::core::entity::submission::JudgementStatus::PartiallyAccepted));
 }
 
 #[test]
-fn map_status_freq() {
-    assert!(matches!(map_status(14), crate::core::entity::submission::JudgementStatus::FrequentLimit));
+fn map_status_submitting_is_non_terminal() {
+    // 9 = Submitting（判题机尚未接手）：折入 Pending，必须是非终态，
+    // 否则轮询会在开跑前就停住
+    assert!(matches!(map_status(9), crate::core::entity::submission::JudgementStatus::Pending));
 }
 
 #[test]
-fn map_status_ue() {
-    assert!(matches!(map_status(15), crate::core::entity::submission::JudgementStatus::UnknownError));
+fn map_status_sf() {
+    assert!(matches!(map_status(10), crate::core::entity::submission::JudgementStatus::SubmitFailed));
 }
 
 #[test]
-fn map_status_negative() {
-    assert!(matches!(map_status(-1), crate::core::entity::submission::JudgementStatus::Unknown));
+fn map_status_no_status() {
+    // 15 = No Status
+    assert!(matches!(map_status(15), crate::core::entity::submission::JudgementStatus::Unknown));
 }
 
 #[test]
 fn map_status_out_of_range() {
     assert!(matches!(map_status(999), crate::core::entity::submission::JudgementStatus::Unknown));
+    assert!(matches!(map_status(11), crate::core::entity::submission::JudgementStatus::Unknown));
 }
 
 #[test]
 fn map_status_covers_full_hoj_code_table() {
-    // 全码表锁定（doc/HOJ/HOJ-API-Documentation.md §7）：任何一格改动都会让此测试失败
+    // 全码表锁定（HOJ Constants.Judge）：任何一格改动都会让此测试失败
     use crate::core::entity::submission::JudgementStatus::*;
     let expected = [
-        (0, Pending),
-        (1, Running),
-        (2, CompilationError),
-        (3, PresentationError),
-        (4, WrongAnswer),
-        (5, Accepted),
-        (6, TimeLimitExceeded),
-        (7, MemoryLimitExceeded),
-        (8, OutputLimitExceeded),
-        (9, RuntimeError),
-        (10, SystemError),
-        (11, RemoteJudgeError),
-        (12, SubmitFailed),
-        (13, PartiallyAccepted),
-        (14, FrequentLimit),
-        (15, UnknownError),
+        (-10, NotSubmitted),
+        (-4, Cancelled),
+        (-3, PresentationError),
+        (-2, CompilationError),
+        (-1, WrongAnswer),
+        (0, Accepted),
+        (1, TimeLimitExceeded),
+        (2, MemoryLimitExceeded),
+        (3, RuntimeError),
+        (4, SystemError),
+        (5, Pending),
+        (6, Compiling),
+        (7, Running),
+        (8, PartiallyAccepted),
+        (9, Pending),
+        (10, SubmitFailed),
+        (15, Unknown),
     ];
     for (code, want) in expected {
         assert_eq!(
@@ -128,50 +144,52 @@ fn map_status_covers_full_hoj_code_table() {
     }
 }
 
+#[test]
+fn map_status_and_is_terminal_status_agree() {
+    // 两张表必须等价：map_status 的产物经 is_terminal() 应与 is_terminal_status 同判。
+    // 分开维护是为了让 adapter 能在不构造领域变体的情况下判定，代价是可能漂移
+    for code in -10..=16 {
+        assert_eq!(
+            map_status(code).is_terminal(),
+            is_terminal_status(code),
+            "状态码 {} 的两处终态判据不一致",
+            code
+        );
+    }
+}
+
 // ── is_terminal_status ──
 
 #[test]
 fn is_terminal_full_table() {
-    // 非终态仅 Pending(0) / Judging(1)，其余（含码表外）一律终态
-    assert!(!is_terminal_status(0));
-    assert!(!is_terminal_status(1));
-    for code in 2..=15 {
+    // 非终态仅 5 Pending / 6 Compiling / 7 Judging / 9 Submitting
+    for code in [5, 6, 7, 9] {
+        assert!(!is_terminal_status(code), "状态码 {} 应为非终态", code);
+    }
+    for code in [-10, -4, -3, -2, -1, 0, 1, 2, 3, 4, 8, 10, 15] {
         assert!(is_terminal_status(code), "状态码 {} 应为终态", code);
     }
-    assert!(is_terminal_status(-1));
     assert!(is_terminal_status(999));
 }
 
-// ── is_terminal_status ──
+// ── normalize_error_message ──
 
 #[test]
-fn is_terminal_pending() {
-    assert!(!is_terminal_status(0));
+fn normalize_error_message_drops_hoj_placeholder() {
+    // HOJ 对「非 CE/SE/SF」的状态一律回填这句占位文案（JudgeManager.getSubmissionInfo），
+    // 不过滤会让每份 AC 代码的详情页都弹出一块红色错误面板
+    assert_eq!(
+        normalize_error_message(Some(ERROR_MESSAGE_PLACEHOLDER.to_string())),
+        None
+    );
+    assert_eq!(normalize_error_message(Some("   ".to_string())), None);
+    assert_eq!(normalize_error_message(None), None);
 }
 
 #[test]
-fn is_terminal_judging() {
-    assert!(!is_terminal_status(1));
-}
-
-#[test]
-fn is_terminal_ce() {
-    assert!(is_terminal_status(2));
-}
-
-#[test]
-fn is_terminal_pe() {
-    assert!(is_terminal_status(3));
-}
-
-#[test]
-fn is_terminal_ac() {
-    assert!(is_terminal_status(5));
-}
-
-#[test]
-fn is_terminal_out_of_range() {
-    assert!(is_terminal_status(999));
+fn normalize_error_message_keeps_real_error() {
+    let msg = "main.cpp:3:5: error: 'x' was not declared in this scope".to_string();
+    assert_eq!(normalize_error_message(Some(msg.clone())), Some(msg));
 }
 
 // ── 榜单 DTO 解析（依据 doc/HOJ/HOJ-Contest-Rank-API.md，待内网联调校正）──
@@ -317,21 +335,96 @@ fn rank_dto_serializes_camel_case_and_never_force_refreshes() {
 // ── 用户题目状态归一 ──
 
 #[test]
-fn coerce_problem_status_accepts_number_bool_and_object() {
-    assert_eq!(coerce_problem_status(&serde_json::json!(0)), 0);
-    assert_eq!(coerce_problem_status(&serde_json::json!(1)), 1);
-    assert_eq!(coerce_problem_status(&serde_json::json!(2)), 2);
-    assert_eq!(coerce_problem_status(&serde_json::json!(true)), 1);
-    assert_eq!(coerce_problem_status(&serde_json::json!(false)), 0);
-    assert_eq!(coerce_problem_status(&serde_json::json!({"status": 2})), 2);
+fn extract_problem_status_code_accepts_number_bool_and_object() {
+    assert_eq!(extract_problem_status_code(&serde_json::json!(-10)), Some(-10));
+    assert_eq!(extract_problem_status_code(&serde_json::json!(0)), Some(0));
+    // 布尔形态：true = 已 AC（= HOJ 的 0），false = 未提交（= HOJ 的 -10）
+    assert_eq!(extract_problem_status_code(&serde_json::json!(true)), Some(0));
+    assert_eq!(extract_problem_status_code(&serde_json::json!(false)), Some(-10));
+    // 实测形态：{"status": <码>, "score": …}
+    assert_eq!(extract_problem_status_code(&serde_json::json!({"status": -10})), Some(-10));
+    assert_eq!(extract_problem_status_code(&serde_json::json!({"status": 0})), Some(0));
 }
 
 #[test]
-fn coerce_problem_status_unknown_shape_falls_back_to_not_submitted() {
-    // 保守策略：无法识别时按「未提交」，绝不把未做的题标成已通过
-    assert_eq!(coerce_problem_status(&serde_json::json!("AC")), 0);
-    assert_eq!(coerce_problem_status(&serde_json::json!(null)), 0);
-    assert_eq!(coerce_problem_status(&serde_json::json!({})), 0);
+fn extract_problem_status_code_unknown_shape_is_none() {
+    assert_eq!(extract_problem_status_code(&serde_json::json!("AC")), None);
+    assert_eq!(extract_problem_status_code(&serde_json::json!(null)), None);
+    assert_eq!(extract_problem_status_code(&serde_json::json!({})), None);
+}
+
+#[test]
+fn normalize_problem_status_maps_hoj_codes_to_frontend_contract() {
+    // 0 = Accepted → 1 已通过
+    assert_eq!(normalize_problem_status(0), 1);
+    // -10 = Not Submitted → 0 未提交
+    assert_eq!(normalize_problem_status(-10), 0);
+    // 其余（含负数与各类失败）→ 2 尝试过
+    for code in [-4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15] {
+        assert_eq!(normalize_problem_status(code), 2, "状态码 {} 应归一为「尝试过」", code);
+    }
+}
+
+#[test]
+fn problem_status_end_to_end_matches_live_server_samples() {
+    // 实测样本（比赛 1012，本人已 AC 该题，isContestProblemList=true）：
+    //   {"1000":{"score":null,"status":0}}    → 已通过
+    //   {"1000":{"status":-10}}（false 分支）  → 未提交
+    let ac = serde_json::json!({"score": null, "status": 0});
+    let not_submitted = serde_json::json!({"status": -10});
+    assert_eq!(
+        extract_problem_status_code(&ac).map(normalize_problem_status),
+        Some(1)
+    );
+    assert_eq!(
+        extract_problem_status_code(&not_submitted).map(normalize_problem_status),
+        Some(0)
+    );
+}
+
+// ── 提交请求体 ──
+
+#[test]
+fn submit_pid_prefers_contest_display_id() {
+    // 回归背景：比赛提交必须传比赛内展示题号。传数字 pid 会让 HOJ 在
+    // `contestProblem.getId()` 上 NPE 返回 HTTP 500（实测），且服务端不留任何记录
+    assert_eq!(submit_pid("1000", "A"), "A");
+    assert_eq!(submit_pid("1000", "B1"), "B1");
+    // display_id 两端空白应被裁掉（服务端按精确值查 display_id）
+    assert_eq!(submit_pid("1000", "  A  "), "A");
+}
+
+#[test]
+fn submit_pid_falls_back_to_problem_id_without_display_id() {
+    // 非比赛场景两者同源；回退保证「没有比赛上下文」时不会提交空 pid
+    assert_eq!(submit_pid("1000", ""), "1000");
+    assert_eq!(submit_pid("1000", "   "), "1000");
+    assert_eq!(submit_pid(" 1000 ", ""), "1000");
+    assert_eq!(submit_pid("HOJ-1001", ""), "HOJ-1001");
+}
+
+#[test]
+fn submit_request_serializes_with_hoj_field_names() {
+    // 锁定 wire 格式：pid / language / code / cid / tid / gid / isRemote
+    // （字段名漂移会让 HOJ 校验失败或落到错误分支）
+    let body = SubmitRequest {
+        pid: submit_pid("1000", "A"),
+        language: "C++".to_string(),
+        code: "int main(){}".to_string(),
+        cid: 1012,
+        tid: None,
+        gid: None,
+        is_remote: false,
+    };
+    let json: serde_json::Value = serde_json::to_value(&body).expect("序列化失败");
+    assert_eq!(json["pid"], "A", "比赛提交的 pid 必须是展示题号");
+    assert_eq!(json["language"], "C++");
+    assert_eq!(json["code"], "int main(){}");
+    assert_eq!(json["cid"], 1012);
+    assert!(json.get("isRemote").is_some(), "字段名必须是 isRemote");
+    assert_eq!(json["isRemote"], false);
+    assert!(json.get("tid").is_some() && json["tid"].is_null());
+    assert!(json.get("gid").is_some() && json["gid"].is_null());
 }
 
 // ── 比赛详情新增字段（榜单显示名 / 封榜 / 赛后提交）──

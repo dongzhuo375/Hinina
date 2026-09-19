@@ -18,12 +18,18 @@ interface SubmissionEntry {
   time?: number
   memory?: number
   submittedAt: string
+  /// 失败原因（CE 编译错误 / SE / SF 时非空）。轮询拿到后写入，
+  /// 供控制台条直接展示 —— 否则选手只看到「Compile Error」四个字
+  errorMessage?: string | null
 }
 
-/** 单条提交的轮询上下文：Poller 句柄 + 总超时截止时刻 */
+/** 单条提交的轮询上下文：Poller 句柄 + 总超时截止时刻 + 连续失败计数 */
 interface PollContext {
   poller: Poller
   deadline: number
+  /// 连续失败次数。瞬时抖动应静默重试，但**一直失败必须让选手知道** ——
+  /// 此前完全静默，网络断开时界面永远停在「评测中」，选手无从判断是评测慢还是断了
+  failures: number
 }
 
 /**
@@ -39,6 +45,12 @@ const pollContexts = new Map<string, PollContext>()
 /// 全场同时提交（如开题瞬间）后的同相位查询尖峰
 const POLL_JITTER_RATIO = 0.2
 const POLL_JITTER_CAP_MS = 500
+
+/// 连续失败多少次后把错误提示到界面。
+///
+/// 取 3 是为了同时满足两件事：偶发丢包/服务端瞬时 5xx 仍被静默容忍（不打扰选手），
+/// 而真正断网时一个轮询周期内就能给出反馈（默认节拍 1~2s，约 3~6s 可见）。
+const POLL_ERROR_REPORT_THRESHOLD = 3
 
 /// 提交历史默认页大小（与后端命令默认值一致）
 const HISTORY_PAGE_SIZE = 20
@@ -102,6 +114,7 @@ export const useSubmissionStore = defineStore('submission', {
     async submitCode(
       contestId: string,
       problemId: string,
+      displayId: string,
       language: string,
       sourceCode: string,
     ): Promise<string> {
@@ -109,7 +122,13 @@ export const useSubmissionStore = defineStore('submission', {
       this.error = null
       let submissionId: string
       try {
-        submissionId = await submissionService.submitCode(contestId, problemId, language, sourceCode)
+        submissionId = await submissionService.submitCode(
+          contestId,
+          problemId,
+          displayId,
+          language,
+          sourceCode,
+        )
         this.submissions.push({
           id: submissionId,
           problemId,
@@ -129,22 +148,19 @@ export const useSubmissionStore = defineStore('submission', {
 
     /** 轮询评测结果并更新对应提交的状态 */
     async pollResult(submissionId: string) {
-      try {
-        const result = await submissionService.pollJudgement(submissionId)
-        const entry = this.submissions.find((s) => s.id === submissionId)
-        if (entry) {
-          entry.status = result.status
-          entry.time = result.timeMs
-          // 内存占用同样回填，否则控制台条/提交列表只能显示耗时
-          entry.memory = result.memoryKb
-        }
-        // 成功即清除残留错误：轮询期间的一次瞬时失败不应永久挂在 UI 上（P69）
-        this.error = null
-        return result
-      } catch (e) {
-        this.error = errorMessage(e, '获取评测结果失败')
-        throw e
+      const result = await submissionService.pollJudgement(submissionId)
+      const entry = this.submissions.find((s) => s.id === submissionId)
+      if (entry) {
+        entry.status = result.status
+        entry.time = result.timeMs
+        // 内存占用同样回填，否则控制台条/提交列表只能显示耗时
+        entry.memory = result.memoryKb
+        // 失败原因随轮询回填：CE 的编译错误是选手改代码的唯一依据
+        entry.errorMessage = result.errorMessage
       }
+      // 成功即清除残留错误：轮询期间的一次瞬时失败不应永久挂在 UI 上
+      this.error = null
+      return result
     },
 
     /**
@@ -165,11 +181,28 @@ export const useSubmissionStore = defineStore('submission', {
         jitterMs: Math.min(POLL_JITTER_CAP_MS, Math.round(intervalMs * POLL_JITTER_RATIO)),
         // 不配置 isPaused：收敛轮询需在后台继续，切回窗口立即可见结果（见文件头注释）
         onError: () => {
-          // 瞬时失败静默：等待下一周期，总超时兜底
+          // 兜底：pollOnce 自己吞异常，正常不会走到这里；万一它抛了（例如
+          // 依赖的 store 初始化失败）也要记一次失败，不能让提示静默失效
+          this.notePollFailure(submissionId)
         },
       })
-      pollContexts.set(submissionId, { poller, deadline })
+      pollContexts.set(submissionId, { poller, deadline, failures: 0 })
       poller.start()
+    },
+
+    /**
+     * 记一次轮询失败：前几次静默容忍（瞬时抖动），超过阈值后提示到界面。
+     *
+     * 阈值之前完全静默是刻意设计（不打扰选手），但**永远静默**会让「服务端挂了」
+     * 与「评测很慢」在界面上完全同形 —— 选手只能干等。
+     */
+    notePollFailure(submissionId: string) {
+      const ctx = pollContexts.get(submissionId)
+      if (!ctx) return
+      ctx.failures += 1
+      if (ctx.failures >= POLL_ERROR_REPORT_THRESHOLD) {
+        this.error = `评测结果查询连续失败 ${ctx.failures} 次（提交 #${submissionId}），仍在重试`
+      }
     },
 
     /** 单次轮询：终态或超时即停止；瞬时失败不中断循环，由总超时兜底 */
@@ -187,6 +220,7 @@ export const useSubmissionStore = defineStore('submission', {
       }
       try {
         const result = await this.pollResult(submissionId)
+        ctx.failures = 0
         if (isTerminalStatus(result.status)) {
           // 评测终结意味着「我的题目状态」可能已变（AC / 尝试过）：标记过期，
           // 由总览页在下次可见刷新时重拉一次，而不是让它每 30s 整表重拉
@@ -194,7 +228,10 @@ export const useSubmissionStore = defineStore('submission', {
           this.stopPolling(submissionId)
         }
       } catch {
-        // 网络抖动等瞬时错误：等待下一次轮询
+        // 网络抖动等瞬时错误：等待下一次轮询。**计数上报在这里而不是 poller 的
+        // onError** —— pollOnce 自己吞掉异常，poller 永远收不到 rejection，
+        // 挂在 onError 上等于计数永不发生（错误提示静默失效）
+        this.notePollFailure(submissionId)
       }
     },
 
