@@ -14,7 +14,7 @@
   - `async fn list_contest_submissions(&self, query: &SubmissionQuery) -> AppResult<SubmissionPage>` — 查询比赛提交列表（分页），经 registry 调 `SubmissionProvider::list_contest_submissions`。**不做缓存**：提交状态随时在变（评测中 → 终态），必须由前端控制刷新节奏。失败 `warn!` + `e.context("获取提交列表失败")`，变体穿透
   - `async fn get_submission_detail(&self, submit_id) -> AppResult<SubmissionDetail>` — 查询提交详情（含源代码与错误信息）。**终态结果入内存缓存**（命中零请求）；失败 `warn!` + `e.context("获取提交详情失败")`，变体穿透
   - `async fn get_submission_cases(&self, submit_id) -> AppResult<SubmissionCases>` — 查询提交的全部测试点结果。**仅当该提交已被确认终态**（`terminal_marks`）时入缓存；失败 `warn!` + `e.context("获取测试点结果失败")`，变体穿透
-- **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `detail_cache: TtlCache<String, SubmissionDetail>`, `cases_cache: TtlCache<String, SubmissionCases>`, `terminal_marks: TtlCache<String, bool>`
+- **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `detail_cache: TtlCache<String, SubmissionDetail>`, `cases_cache: TtlCache<String, SubmissionCases>`, `terminal_marks: TtlCache<String, bool>`。三处缓存的键均为 **`{oj}/{submit_id}`**（`cache_key()` 统一构造）—— `submit_id` 是各 OJ 自增的资源号，必然重号；键带 OJ 维度后跨 OJ 串号在结构上不可能，`OJSwitched` 的同步清理因此只是让当前会话立刻干净，而不是正确性的唯一依赖
 
 ## 直接依赖
 - `std::time::Duration`（缓存 TTL 常量）

@@ -227,21 +227,33 @@ fn limits_all_failed_propagates_error_instead_of_defaults() {
 fn limits_corrupted_cache_file_is_refetched() {
     let dir = std::env::temp_dir().join("hinina-test-problem-limits-corrupt");
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("cache").join("problem_limits").join("HOJ"))
-        .expect("创建缓存目录失败");
-    std::fs::write(
-        dir.join("cache").join("problem_limits").join("HOJ").join("1.json"),
-        "{ not valid json",
-    )
-    .expect("写入损坏缓存失败");
 
     let calls = Arc::new(AtomicUsize::new(0));
+    // 先构造 service（其构造会做一次性布局清扫并落地标记），**再**写入损坏条目 ——
+    // 反过来的话损坏文件会被布局清扫删掉，用例就退化成「缓存缺失」而非「缓存损坏」
     let service = build_service(&dir, Arc::clone(&calls), Vec::new());
+
+    std::fs::create_dir_all(dir.join("cache").join("problem_limits").join("HOJ"))
+        .expect("创建缓存目录失败");
+    let corrupted = dir
+        .join("cache")
+        .join("problem_limits")
+        .join("HOJ")
+        .join("1.json");
+    std::fs::write(&corrupted, "{ not valid json").expect("写入损坏缓存失败");
+    assert!(corrupted.exists(), "预置失败：损坏条目未落盘");
 
     let result =
         block_on(service.load_problem_limits("1", &ids(&["A"]))).expect("损坏缓存应降级重取");
     assert_eq!(call_count(&calls), 1, "损坏缓存必须重新获取");
     assert_eq!(result.len(), 1);
+    // 重取后条目被有效内容覆盖（损坏文件不该长期滞留）
+    let rewritten = std::fs::read_to_string(&corrupted).expect("重取后应回写缓存");
+    assert!(
+        rewritten.contains("\"A\""),
+        "重取后应以有效内容覆盖损坏条目，实际: {}",
+        rewritten
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -558,25 +570,56 @@ fn oj_switched_clears_problem_scoped_caches() {
     let dir = std::env::temp_dir().join("hinina-test-problem-oj-switch");
     let _ = std::fs::remove_dir_all(&dir);
     let bus = Arc::new(EventBus::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(StubProblemProvider {
+        calls: Arc::clone(&calls),
+        failing: Vec::new(),
+        fail_all: false,
+    });
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            problem: Some(Arc::clone(&provider) as Arc<dyn ProblemProvider>),
+            ..Default::default()
+        },
+    );
     let service = ProblemService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
 
-    // 预置 limits 内存缓存与磁盘条目（磁盘目录结构由 write_limits_cache 落地）
-    service
-        .limits_cache
-        .write()
-        .unwrap()
-        .insert("7".into(), HashMap::new());
+    // 预置内存 + **磁盘**缓存：磁盘条目必须真实落盘 —— 否则「目录不存在」的断言恒真
+    block_on(service.open_problem("7", "A", true)).expect("预置题面失败");
+    block_on(service.load_problem_limits("7", &ids(&["A"]))).expect("预置 limits 失败");
+    let statement_entry = dir
+        .join("cache")
+        .join("problem_statement")
+        .join("HOJ")
+        .join("7")
+        .join("A.json");
+    let limits_entry = dir
+        .join("cache")
+        .join("problem_limits")
+        .join("HOJ")
+        .join("7.json");
+    assert!(statement_entry.exists(), "预置失败：题面磁盘缓存未落盘");
+    assert!(limits_entry.exists(), "预置失败：limits 磁盘缓存未落盘");
     assert!(!service.limits_cache.read().unwrap().is_empty());
+    assert!(!service.statement_cache.is_empty());
 
     bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
 
     assert!(service.limits_cache.read().unwrap().is_empty(), "limits 内存缓存应被清空");
     assert!(service.statement_cache.is_empty(), "题面内存缓存应被清空");
-    // 磁盘段是延迟投递（I/O 不阻塞发布方）：等队列排空后再断言
+    // 磁盘段是延迟投递（I/O 不阻塞发布方）：等队列排空后再断言。
+    // 删掉 subscribe_deferred 注册后本断言必须失败 —— 这是延迟清理的有效回归覆盖
     bus.flush_deferred();
-    assert!(!dir.join("cache/problem_statement").exists());
-    assert!(!dir.join("cache/problem_limits").exists());
+    assert!(
+        !dir.join("cache/problem_statement").exists(),
+        "题面磁盘缓存应被延迟清理"
+    );
+    assert!(
+        !dir.join("cache/problem_limits").exists(),
+        "limits 磁盘缓存应被延迟清理"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

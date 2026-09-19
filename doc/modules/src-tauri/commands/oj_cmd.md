@@ -8,8 +8,8 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 ## 核心类型/函数
 - `pub async fn switch_oj(ctx, oj_id: String) -> AppResult<()>` — 切换当前 OJ。前端 invoke 签名 `switch_oj`({ ojId })。编排三件事（顺序有意）：
   1. 校验目标 OJ 已注册（`provider_registry.list_available().contains(&id)`），未注册直接报 `AppError::ProviderNotFound`（不静默回退 —— 显式命令要显式结果）
-  2. `set_current` 切换 Registry 当前 OJ，并经 `ConfigService::update` 持久化 `oj.active`；持久化失败如实上报「OJ 切换已生效但保存配置失败」（前端可提示重启后回退）
-  3. 发布 `SystemEvent::OJSwitched { oj_id }`（状态变更走事件，符合 EventBus 原则）
+  2. `set_current` 切换 Registry 当前 OJ，**紧接着**发布 `SystemEvent::OJSwitched { oj_id }`（状态变更走事件，符合 EventBus 原则）—— 两者之间**不得夹可失败操作**：Registry 一旦切换，缓存必须同步失效，否则旧 OJ 数据会继续服务新 OJ 的查询
+  3. 经 `ConfigService::update` 持久化 `oj.active`；失败如实上报「OJ 切换已生效但保存配置失败」（前端可提示重启后回退）—— 放在最后，保证第 2 步的缓存失效不依赖持久化结果
 
 ## 直接依赖
 - `tauri::State`
@@ -26,7 +26,7 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 
 ## 逻辑流程
 1. 前端 `invoke('switch_oj', { ojId })`（设置页「当前 OJ」下拉的显式动作）
-2. `OjId::new` 规整入参（trim）→ 注册校验 → 切换 Registry + 持久化 `oj.active` → `info!` 日志 → 发布 `OJSwitched`
+2. `OjId::new` 规整入参（trim）→ 注册校验 → 切换 Registry → `info!` 日志 → 发布 `OJSwitched` → 持久化 `oj.active`
 3. 错误以 `AppError` 返回（`ProviderNotFound` / `Config`），经 serde 序列化为 `{ Variant: msg }`，前端在 `bridge/index.ts` 归一化为 `IpcError`
 4. 前端在**调用点**编排切换后果（`SettingsView.onSwitchOj` 成功分支）：`resetSessionForOjSwitch()` 清空旧 OJ 的会话与领域状态 → 导航登录页 → 路由守卫按新 OJ 的会话文件恢复会话
 

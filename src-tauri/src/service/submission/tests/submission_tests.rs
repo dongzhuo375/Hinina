@@ -459,6 +459,48 @@ fn get_submission_cases_returns_cases_on_success() {
 // 用户域数据不落盘，登出必须清空。
 
 #[test]
+fn detail_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
+    // 提交缓存键带 OJ 维度：submit_id 是各 OJ 自增的资源号，必然重号；
+    // 键隔离让跨 OJ 串号在结构上不可能（不依赖「切 OJ 时清缓存」）
+    let counters = StubCounters {
+        judgement: Arc::new(AtomicUsize::new(0)),
+        detail: Arc::new(AtomicUsize::new(0)),
+        cases: Arc::new(AtomicUsize::new(0)),
+    };
+    let provider = Arc::new(StubSubmissionProvider {
+        mode: StubMode::Ok,
+        calls: Arc::clone(&counters.judgement),
+        detail_calls: Arc::clone(&counters.detail),
+        cases_calls: Arc::clone(&counters.cases),
+    });
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    for id in ["HOJ", "QDUOJ"] {
+        registry.register(
+            OjId::new(id),
+            ProviderSet {
+                submission: Some(Arc::clone(&provider) as Arc<dyn SubmissionProvider>),
+                ..Default::default()
+            },
+        );
+    }
+    let service = SubmissionService::new(Arc::clone(&registry), Arc::new(EventBus::new()));
+
+    block_on(service.get_submission_detail("12345")).expect("HOJ 详情失败");
+    assert_eq!(counters.detail.load(Ordering::SeqCst), 1);
+    block_on(service.get_submission_detail("12345")).expect("HOJ 详情二次失败");
+    assert_eq!(counters.detail.load(Ordering::SeqCst), 1, "同一 OJ 应命中缓存");
+
+    // 切 OJ：同一 submit_id 必须重新请求（不得命中上一个 OJ 的详情缓存）
+    registry.set_current(OjId::new("QDUOJ"));
+    block_on(service.get_submission_detail("12345")).expect("换 OJ 后详情失败");
+    assert_eq!(
+        counters.detail.load(Ordering::SeqCst),
+        2,
+        "跨 OJ 不得命中同一键（会读到另一 OJ 的提交内容）"
+    );
+}
+
+#[test]
 fn terminal_detail_is_cached() {
     let (service, counters, _bus) = build_service(StubMode::Ok);
 

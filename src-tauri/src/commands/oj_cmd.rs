@@ -18,8 +18,10 @@ use crate::core::provider::oj_id::OjId;
 ///
 /// 编排三件事（顺序有意）：
 /// 1. 校验目标 OJ 已注册（未注册直接报错，不静默回退 —— 显式命令要显式结果）；
-/// 2. 切换 Registry 当前 OJ 并持久化 `oj.active`；
-/// 3. 发布 `OJSwitched`（状态变更走事件，符合 EventBus 原则）。
+/// 2. 切换 Registry 当前 OJ，**紧接着**发布 `OJSwitched`（缓存失效不得依赖后续
+///    可能失败的操作：`set_current` 已生效即必须清缓存，否则旧 OJ 数据会继续服务
+///    新 OJ 的查询）；
+/// 3. 持久化 `oj.active` —— 失败如实上报（切换已生效，重启后回退），但不影响第 2 步。
 #[tauri::command]
 pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<()> {
     let id = OjId::new(&oj_id);
@@ -31,6 +33,14 @@ pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<(
     }
 
     ctx.provider_registry.set_current(id.clone());
+    info!(oj_id = %id, "已切换当前 OJ");
+    // 与 set_current 相邻、中间不夹可失败操作：Registry 一旦切换，缓存必须同步失效
+    // （缓存键虽已带 OJ 维度、正确性不依赖它，但不清会让当前会话继续用旧 OJ 的数据）
+    ctx.event_bus
+        .publish(&AppEvent::System(SystemEvent::OJSwitched {
+            oj_id: id.to_string(),
+        }));
+
     ctx.config
         .update(|draft| {
             draft.oj.active = id.to_string();
@@ -40,8 +50,5 @@ pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<(
             AppError::Config(format!("OJ 切换已生效但保存配置失败: {}", e))
         })?;
 
-    info!(oj_id = %id, "已切换当前 OJ");
-    ctx.event_bus
-        .publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: id.to_string() }));
     Ok(())
 }
