@@ -150,10 +150,14 @@ Java + MyBatis-Plus + Redis，Hydro 是 Node + MongoDB）：
 
 ### D4. 无域名（`/d/:domainId`）配置通道 ⏸
 
-- **现象**：Hydro 多域部署的业务路由需要 `/d/:domainId` 前缀（系统域 `system` 可省略）。
-  适配器目前按**系统域**拼路径。
-- **影响**：若目标部署把比赛放在自定义域（如 `hydro.ac/d/myschool/...`）→ 请求 **404**。
-- **现状**：`OjInstance.options` 已能承载 `{"domain": "myschool"}` 这类私有旋钮（弱类型 Map 是
+- **现象**：Hydro 是**多租户**的 —— 一个实例可挂多个「域」（独立的比赛/题目/用户空间）。文档给出三种域解析：
+  ① 系统域 `system` → `/p/1000`（省略前缀）；② 其它域 → `/d/:domainId/p/1000`（显式前缀）；
+  ③ 绑定了域名的域 → `/p/1000`（靠 `Host` 头反查）。适配器目前按**系统域**拼路径，因此
+  **② 会 404**（①③ 正常）。
+- **最可能踩到的场景**：校赛跑在**公共 Hydro 实例**上（如 `hydro.ac` 挂着很多学校域），比赛在
+  `https://hydro.ac/d/<学校>/contest/xxx` → 我们请求 `https://hydro.ac/contest/xxx` 会落到 system 域
+  → 找不到（404 / 空）。**自建 Hydro 且比赛在系统域则不受影响。**
+- **现状**：`OjInstance.options` 已能承载 `{"domain": "<学校>"}` 这类私有旋钮（弱类型 Map 是
   `#20` 有意为之），但 `AdapterFactory::build(&self, deps, base_url)` **只把地址交给适配器**，
   options 没有传递通道。
 - **可选补丁**（择一）：
@@ -164,15 +168,19 @@ Java + MyBatis-Plus + Redis，Hydro 是 Node + MongoDB）：
   fn build(&self, deps: &AdapterDeps, base_url: &str, options: &Map<String, Value>) -> ProviderSet;
   ```
   适配器侧改动很小（`url()` 加前缀 + 构造参数）；**风险主要在工厂签名（3 个 adapter + 组合根）**。
-- **决策所需信息**：**目标 Hydro 部署是否用自定义域**。不用的话本条可降为备案。
+- **决策所需信息**：**目标 Hydro 部署是公共实例（比赛在学校域下）还是自建（系统域）**。
+  前者必须做，后者可降为备案。
 
 ### D14. `HttpClient` 的 Cookie jar 全局共享 ⏸（当前无实害）
 
 - **现状**：`with_timeout` 启用 `cookie_store(true)`，jar 在进程内共享；Hydro 登录后 `sid` 会留在里面。
-- **影响**：当前只有一个「当前 OJ」，且不同 OJ 通常不同主机 → **无实害**。若将来支持「多 OJ 同时登录」，
-  同一主机的不同部署可能串扰。
-- **建议**：暂不处理。若引入多 OJ 并存，改为每 Adapter 一个 client（或关掉自动 cookie 存储 ——
-  Hydro 侧我们本就显式发 `Authorization`）。
+- **影响**：Cookie 作用域是**主机**（不区分端口）→ 同主机的两个部署会互相带上对方的 cookie
+  （如本地 `:8888` / `:8889` 两个 Hydro）。当前**无实害**，三条理由：① 同时只用一个 active OJ；
+  ② Hydro 侧我们显式发 `Authorization: Bearer <当前 OJ 的 sid>`，而 Hydro 的规则是「该头一旦出现
+  即完全覆盖 Cookie」→ 错的 cookie 不生效；③ HOJ 走 JWT，完全忽略 cookie。
+- **何时成真问题**：将来支持「多 OJ 同时登录」且某 OJ **只用 cookie 认证**（不发 `Authorization`）→ 串号。
+- **建议**：暂不处理。届时改为每 Adapter 一个 client，或关掉自动 cookie 存储（Hydro 已显式发头，
+  本就不需要 jar）。
 
 ---
 
