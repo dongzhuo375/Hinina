@@ -1,0 +1,42 @@
+{
+  "page": 1,
+  "tpcount": 1,
+  "qs": "",
+  "rule": "",
+  "tdocs": [
+    {
+      "_id": "64f0c0f0f0f0f0f0f0f0f0f0",
+      "docId": "64f0c0f0f0f0f0f0f0f0f0f0",
+      "docType": 30,
+      "domainId": "system",
+      "title": "Example Contest",
+      "content": "欢迎参加 Example Contest",
+      "rule": "acm",
+      "pids": [1001],
+      "attend": 5,
+      "rated": false,
+      "beginAt": "2026-01-01T01:00:00.000Z",
+      "endAt": "2026-01-01T06:00:00.000Z",
+      "lockAt": null,
+      "unlocked": null,
+      "duration": null,
+      "allowTeam": null
+    },
+    {
+      "_id": "64f0c0f0f0f0f0f0f0f0f0f1",
+      "docId": "64f0c0f0f0f0f0f0f0f0f0f1",
+      "docType": 30,
+      "title": "OI Contest",
+      "content": null,
+      "rule": "oi",
+      "pids": [1000, 1001],
+      "attend": 3,
+      "rated": true,
+      "beginAt": "2026-01-01T01:00:00.000Z",
+      "duration": 5
+    }
+  ],
+  "tsdict": {
+    "64f0c0f0f0f0f0f0f0f0f0f0": null
+  }
+}

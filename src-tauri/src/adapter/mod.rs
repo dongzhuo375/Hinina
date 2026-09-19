@@ -4,6 +4,7 @@
 // 不需要修改 core / infra / commands 的任何文件。
 
 pub mod hoj;
+pub mod hydro;
 pub mod qduoj;
 pub mod hustoj;
 
@@ -40,7 +41,7 @@ pub trait AdapterFactory: Send + Sync {
 
 /// 内建 OJ 工厂清单。接入新 OJ：加 `pub mod xxx;` + 此处加一行 `&xxx::FACTORY`。
 pub fn factories() -> Vec<&'static dyn AdapterFactory> {
-    vec![&hoj::FACTORY]
+    vec![&hoj::FACTORY, &hydro::FACTORY]
 }
 
 #[cfg(test)]

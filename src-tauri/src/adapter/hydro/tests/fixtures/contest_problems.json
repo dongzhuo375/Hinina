@@ -1,0 +1,49 @@
+{
+  "pdict": {
+    "1001": {
+      "docId": 1001,
+      "pid": "A1",
+      "title": "A+B",
+      "config": {
+        "timeMin": 1000,
+        "memoryMin": 256,
+        "langs": ["cc"]
+      },
+      "nAccept": 8,
+      "nSubmit": 12
+    },
+    "1000": {
+      "docId": 1000,
+      "pid": "P1000",
+      "title": "Sum",
+      "config": "invalid yaml: cannot parse",
+      "nAccept": null,
+      "nSubmit": null
+    }
+  },
+  "psdict": {
+    "1001": { "score": 100, "status": 1, "star": false, "rid": "6530f0c1a1b2c3d4e5f60718" },
+    "1000": { "score": 0, "status": 2, "star": false, "rid": "6530f0c1a1b2c3d4e5f60719" }
+  },
+  "udict": {
+    "2": { "_id": 2, "uname": "admin" }
+  },
+  "rdict": {},
+  "rdocs": [],
+  "tdoc": {
+    "_id": "64f0c0f0f0f0f0f0f0f0f0f0",
+    "docId": "64f0c0f0f0f0f0f0f0f0f0f0",
+    "title": "Example Contest",
+    "rule": "acm",
+    "beginAt": "2026-01-01T01:00:00.000Z",
+    "endAt": "2026-01-01T06:00:00.000Z",
+    "lockAt": "2026-01-01T05:00:00.000Z",
+    "unlocked": false,
+    "pids": [1001, 1000]
+  },
+  "tcdocs": [],
+  "showScore": false,
+  "tsdoc": { "attend": 1, "startAt": "2026-01-01T01:02:11.000Z" },
+  "canViewRecord": true,
+  "correction": null
+}

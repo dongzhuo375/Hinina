@@ -1,0 +1,38 @@
+{
+  "rdoc": {
+    "_id": "6530f0c1a1b2c3d4e5f60718",
+    "domainId": "system",
+    "pid": 1000,
+    "uid": 2,
+    "lang": "cc.cc17",
+    "code": "int main(){return 0;}",
+    "score": 100,
+    "time": 12,
+    "memory": 1024,
+    "status": 1,
+    "judgeTexts": [],
+    "compilerTexts": [],
+    "testCases": [
+      { "id": 1, "subtaskId": 1, "status": 1, "score": 50, "time": 12, "memory": 1024, "message": "" },
+      { "id": 2, "subtaskId": 1, "status": 2, "score": 0, "time": 15, "memory": 2048, "message": "wrong answer" },
+      { "id": 3, "status": 1, "score": 50, "time": 8, "memory": 512 }
+    ],
+    "subtasks": [{ "subtaskId": 1, "score": 50 }],
+    "judger": 1,
+    "judgeAt": "2026-01-01T01:00:12.000Z",
+    "rejudged": false,
+    "progress": null,
+    "hackTarget": null,
+    "contest": null
+  },
+  "pdoc": {
+    "docId": 1000,
+    "pid": "P1000",
+    "title": "A+B Problem",
+    "config": { "type": "subtask", "timeMin": 1000, "memoryMin": 256, "langs": ["cc"] }
+  },
+  "udoc": { "_id": 2, "uname": "admin" },
+  "tdoc": null,
+  "rev": null,
+  "allRevs": null
+}

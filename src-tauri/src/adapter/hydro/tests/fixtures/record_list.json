@@ -1,0 +1,47 @@
+{
+  "page": 1,
+  "rdocs": [
+    {
+      "_id": "6530f0c1a1b2c3d4e5f60718",
+      "pid": 1000,
+      "uid": 2,
+      "lang": "cc",
+      "status": 1,
+      "score": 100,
+      "time": 12,
+      "memory": 1024,
+      "progress": null
+    },
+    {
+      "_id": "6530f0c1a1b2c3d4e5f60719",
+      "pid": 1001,
+      "uid": 3,
+      "lang": "py.py3",
+      "status": 20,
+      "score": 0,
+      "time": 0,
+      "memory": 0
+    }
+  ],
+  "tdoc": {
+    "_id": "64f0c0f0f0f0f0f0f0f0f0f0",
+    "rule": "acm",
+    "pids": [1000, 1001]
+  },
+  "pdict": {
+    "1000": { "docId": 1000, "pid": "P1000", "title": "A+B Problem" },
+    "1001": { "docId": 1001, "pid": "P1001", "title": "Sum" }
+  },
+  "udict": {
+    "2": { "_id": 2, "uname": "admin" },
+    "3": { "_id": 3, "uname": "alice" }
+  },
+  "all": false,
+  "allDomain": false,
+  "filterPid": "P1000",
+  "filterTid": "64f0c0f0f0f0f0f0f0f0f0f0",
+  "filterUidOrName": "2",
+  "filterLang": "",
+  "filterStatus": 1,
+  "notification": []
+}

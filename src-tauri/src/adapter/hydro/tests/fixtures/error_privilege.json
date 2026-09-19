@@ -1,0 +1,7 @@
+{
+  "error": {
+    "params": ["PRIV_USER_PROFILE"],
+    "name": "PrivilegeError",
+    "code": 403
+  }
+}
