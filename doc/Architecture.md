@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-09-15 | 分支：`feat/judging-announcements-settings`
+> 最后更新：2026-09-19 | 分支：`feat/hydro-adapter`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -21,6 +21,8 @@ Hinina/
 │   ├── todo.md                            # 开发路线图（8 阶段执行顺序）
 │   ├── problem.md                         # 已知问题与待决策项（本地 Review 文档，不入库）
 │   ├── HOJ/                              # HOJ API 文档（API 总览 / 榜单 / 题目 limits）
+│   ├── Hydro/                            # Hydro 上游 API 文档（逐路由源码级）+ 适配器设计缺口报告 + 适配新架构的冲突记录
+│   ├── 接入新OJ的改动清单与改造建议.md     # 接入新 OJ 曾要改 5 个既有文件的根因分析与改造建议（改造 1–4 已由 #20 落地，保留为决策记录）
 │   ├── screen/                           # 界面设计稿（login / problem_set / problem_solve / rank / submissios / notice，各含 DESIGN.md + code.html + screen.png）
 │   └── modules/
 │       └── README.md                     # 模块文档索引（格式约定与维护规则）
@@ -130,6 +132,25 @@ Hinina/
         │   │   ├── mod.rs
         │   │   ├── types.rs              # QDUOJ DTO 类型（骨架）
         │   │   └── error.rs              # QDUOJError
+        │   ├── hydro/
+        │   │   ├── mod.rs                # HydroAdapter：上游 Hydro OJ（与 HOJ 是两套协议），ID = "Hydro" + HydroFactory/FACTORY
+        │   │   │                         #   + 请求入口按通道分工：GET 走 infra（退避重试 + 401→Auth）/ POST 走原始 reqwest
+        │   │   │                         #     （infra 非 2xx 丢响应体，而 Hydro 的用户可见错误全在包络里；POST 本就不重试）
+        │   │   │                         #   + HydroResponse::parse_value（两条通道共用的协议层判定：错误包络 → 变体、JSON 化登录重定向 → Auth）
+        │   │   │                         #   + probe_user_context（会话三态严格版：注入头缺失按「无法判定」上抛，绝不判失效）/ current_user（宽松版）
+        │   │   │                         #   + resolve_problem_id（展示字母 → tdoc.pids 下标 → 真实 pid）+ contest_pids（TtlCache 顺序表缓存）
+        │   │   ├── types.rs              # Hydro DTO：Tdoc/Pdoc/Rdoc/RecordList/Scoreboard(CellVO)/Submit/UserBrief + 错误包络 + strip_nulls
+        │   │   │                         #   + Hydro 全状态码映射（FETCHED→Pending 保非终态）+ HOJ→Hydro 状态筛选翻译
+        │   │   │                         #   + 语言 key ↔ HOJ 显示名双向表 + ObjectId→提交时间 + 榜单单元格矩阵归一（ACM/OI 两套语义）
+        │   │   ├── error.rs              # HydroError：错误名 → 变体（PrivilegeError 算会话失效，PermissionError 不算）
+        │   │   └── tests/
+        │   │       ├── mod_tests.rs      # 响应处置、共用解析入口、工厂契约（ID/会话文件名/四能力）、映射 helper、评测投影、缓存语义
+        │   │       ├── types_tests.rs    # 纯函数与夹具解析（状态码全表、语言双射、单元格矩阵、ObjectId 时间、strip_html 保留换行）
+        │   │       └── fixtures/         # 按文档手工构造（无联调实例，见缺口报告待办清单）
+        │   │           ├── contest_list.json / contest_problems.json / problem_detail.json
+        │   │           ├── record_detail.json / record_list.json
+        │   │           ├── scoreboard_acm.json / scoreboard_oi.json
+        │   │           └── error_privilege.json / login_redirect.json
         │   └── hustoj/
         │       ├── mod.rs
         │       ├── types.rs              # HUSTOJ DTO 类型（骨架）
@@ -314,7 +335,7 @@ src/
                           │  Tauri IPC (invoke)
 ┌─────────────────────────┴───────────────────────────────┐
 │                   Rust 后端 (src-tauri/)                  │
-│  Service ←── Provider (trait) ←── Adapter (HOJ/QDUOJ/…) │
+│  Service ←── Provider (trait) ←── Adapter (HOJ/Hydro/QDUOJ/…) │
 │     │              │                                     │
 │  Entity        EventBus        Infra (http/storage/…)   │
 │     │              │                                     │
@@ -353,6 +374,8 @@ src/
 - **错误变体是分流依据，后端不得改写**：前端 `isAuthError`（`variant === 'Auth'`）与 `stores/sessionGuard.ts` 的会话失效兜底完全依赖变体。补上下文一律用 `AppError::context()`（保留变体，只在消息前拼环节名），**禁止** `AppError::Network(format!("xx 请求失败: {}", e))` 这类重新包装 —— 它会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」自相矛盾的嵌套消息，把 DTO 问题当断网查，还会让 401 不再触发登出。**Service 层传播 Provider 错误同样适用此约定**（`contest` / `problem` / `submission` / `auth` 全部用 `e.context("…")`）：`get_rank` 是全场最高频的认证调用（每 10s 一次），变体被改写会让 token 过期时榜单静默 stale、提交只弹一条文案、选手永远回不到登录页
 - **OJ 响应解析归 Adapter，infra 只传字节**：`infra/http.rs` 只返回原始响应体与响应头（含状态码判定与 5xx 退避重试），不做反序列化；**请求头也由调用方以通用 `HeaderMap` 注入** —— 认证方式是 Adapter 层概念（HOJ 的 JWT 走 `Authorization` 头、Hydro 走 Cookie 会话、有的 OJ 还要 CSRF 令牌），infra 不感知任何凭证形态，曾以 `auth_token` 参数 + 硬编码 `Authorization` 头把 HOJ 假设埋进传输层，已修正。HOJ 侧有两个必须处理的协议事实：① 对未设置字段返回 `null` 而非省略（实测 `get-contest-list` 的 `sealRank`/`rankShowName`/`count`/`now` 全为 null），而 serde 的 `#[serde(default)]` **只在字段缺失时生效**，显式 null 会让整个响应解析失败 → 解析前统一 `strip_nulls`（`false`/`0`/`""` 不是 null，必须保留，否则封榜、打星、零分语义会被抹掉）；② 鉴权失败放在**响应体的 status**（HTTP 仍是 200，实测匿名访问 `get-contest-problem` 返回 `{"status":403,"msg":"请您先登录！"}`）→ 必须翻译成 `AppError::Auth`，且 403 要保守判定（仅当消息指向登录/凭证时才算会话失效，否则「私有赛未注册」会把已登录选手误踢回登录页）
 - **HTTP 401 由 infra 映射为 `Auth` 变体**：401 的标准语义就是「未认证」，属 HTTP 通用语义而非 OJ 私有约定，故由 `infra/http.rs` 的 `status_error` 承担；**403 保持 `Network`**（可能是业务性无权访问）。这条映射是会话校验能成立的前提 —— `get_json_authed` 遇到 401 时若仍归为 `Network`，`session_validity_from_response` 会把它当「无法判定」上抛，导致 token 真正过期时反而永不登出。实测 HOJ 两种报法都存在：`get-user-auth-info` 走 HTTP 401，`get-contest-problem` 走 HTTP 200 + 体内 403，两条路径都必须认- **真实响应夹具**：`adapter/hoj/tests/fixtures/contest_list_anon.json` 取自真实接口、仅脱敏自由文本，完整保留键名与 null 分布；配套一条正向测试（真实响应可解析）与一条反向测试（不去 null 必然失败），防止后来者把 `strip_nulls` 当冗余删掉
+- **infra 在非 2xx 时丢弃响应体 → 需要读错误包络的 OJ 走 POST 原始通道**：Hydro 的用户可见错误全在响应体包络里（`{"error":{"name",…}}`，无 message），而 `HttpClient` 的非 2xx 分支只返回状态码 → 适配器按方法分工：**GET 走 infra**（幂等，要 5xx 退避重试与统一 401→`Auth`）、**POST 走原始 `reqwest`**（POST 本就不重试，不损失重试；且登录要读 `Set-Cookie`）。两条通道共用 `HydroResponse::parse_value` 做协议层判定（错误包络 → 变体、JSON 化登录重定向 → `Auth`）。**残余**：GET 的 4xx 包络拿不到，会话失效靠「匿名 → HTTP 200 + `{"url":"/login…"}`」兜底；建议 infra 增补「任意状态码都返回 status+headers+body」的变体，两条通道即可合一（见 `doc/Hydro/适配新架构的冲突记录.md` §2.1）
+- **Hydro 是第二个内建 OJ，也是首个非 HOJ 实现**：HOJ 是 Hydro 的衍生版但自带 REST + JWT 层，**两者是两套协议**（无统一包络、Cookie `sid` 会话、`Accept: application/json` 内容协商、无 `/user/me` 靠 `X-Hydro-Inject` 注入、状态码 0–33、榜单是预渲染单元格矩阵），因此不复用 HOJ 的调用方式，只共享 `core::entity::*` 与 infra。能力边界（无公告接口、JSON 无样例字段、榜单无服务端分页/搜索、记录无提交时间与总数、比赛隐藏本人记录时提交只返回 `tid` 等）在 `doc/Hydro/Hydro-Adapter-设计缺口报告.md`；接入成本实测：`adapter/mod.rs` 两行 + 自己的目录，未触碰 core/infra/commands
 - **OJ 身份与配置是数据，不是编译期常量**：`OjId(String)` 取代闭集枚举 `OJType`（接一个新 OJ 不再要求修改 Domain）；会话文件名 = `sessions/{id}.json` 显式契约（内建 id 与历史枚举 Debug 输出一致，`sessions/HOJ.json` 零迁移，有测试锁定；配置实例 id 拒绝路径分隔符与 `..`，`Storage::resolve` 为第二道防线）；`OJSwitched` 事件载荷为可序列化字符串（订阅者：contest/problem/submission 三个 Service 清各自 OJ 域缓存）。失去编译期穷尽检查的替代防线：启动时校验 active 已注册（未注册 warn + **回退首个已注册 OJ**——硬编码回退 HOJ 在 HOJ 被禁用/移除时是死路）、查询未命中返回 `ProviderNotFound`、`adapter/tests` 断言 `factories()` id 唯一且全部可构建
 - **注册侧聚合、查询侧按能力**：一个 OJ 的能力集合是 `ProviderSet`（字段 Option×4 —— 保住「新 Adapter 可先只实现部分接口」的扩展路径，缺能力报 `ProviderNotFound` 而非注册失败），组合根对每个 OJ 一次 `register(id, set)`；Service 查询只拿单项能力（`current_contest()?` 等一行转发），**禁止提供返回聚合体的 `current()`** —— 那会让 Service 拿到它不需要的三个能力，接口隔离从接口层面退化成约定层面
 - **`AdapterDeps` 只准 infra 依赖**：适配器工厂构造签名只接收 http_client / event_bus / storage，**禁止把 Service 塞进 `AdapterDeps`**（与「插件只能访问 `plugin/api`、禁止直调内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界彻底糊掉）。`AdapterFactory { id, build }` 的形状即 v1.0 插件 manifest 的雏形：将来把编译期工厂清单换成运行时扫描插件目录，上层（registry / context / Service）不用再改
