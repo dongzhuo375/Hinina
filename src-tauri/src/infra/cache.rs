@@ -238,6 +238,10 @@ impl JsonDiskCache {
     }
 
     /// 删除整个 namespace 目录（登出 / 换比赛等场景的粗粒度失效）。
+    ///
+    /// 调用方需自行判断是否可延迟：**键自带作用域**（如 `{oj}/{cid}`）时，
+    /// 清理只承担空间回收，可放到 `EventBus::subscribe_deferred` 的延迟段执行；
+    /// 若清理是正确性依赖，则必须同步完成。
     pub fn clear_namespace(&self) -> bool {
         if !self.storage.exists(self.namespace) {
             return false;
@@ -253,9 +257,12 @@ impl JsonDiskCache {
 
     /// 把键映射为 `cache/{namespace}/{key}.json`。
     ///
-    /// 键可含 `/` 以按作用域分目录（如 `{contest_id}/{display_id}`）；空键、
+    /// 键可含 `/` 以按作用域分目录（如 `{oj}/{contest_id}/{display_id}`）；空键、
     /// 绝对路径与含 `..` 的键一律拒绝（返回 `None`，即放弃缓存而非报错）——
     /// `Storage::resolve` 也会拒绝 `..`，这里是第二道防线。
+    ///
+    /// **作用域是正确性的一部分**：跨维度（OJ / 比赛 / 题目）可能撞号的缓存，
+    /// 必须把该维度编进键，而不是依赖「切换时清理」—— 清理可能延迟或失败。
     fn key_path(&self, key: &str) -> Option<String> {
         if key.is_empty() || key.starts_with('/') || key.starts_with('\\') || key.contains("..") {
             warn!(namespace = self.namespace, key = key, "非法缓存键，跳过磁盘缓存");

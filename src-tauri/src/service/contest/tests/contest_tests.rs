@@ -586,6 +586,48 @@ fn read_state_rejects_path_separators() {
 // ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
 
 #[test]
+fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
+    // 「延迟清理磁盘缓存」安全的前提：键带 OJ 维度 → 跨 OJ 结构上不可能命中
+    use crate::core::event::event_bus::EventBus;
+
+    let dir = std::env::temp_dir().join("hinina-test-contest-oj-scope");
+    let _ = std::fs::remove_dir_all(&dir);
+    let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    for id in ["HOJ", "QDUOJ"] {
+        registry.register(
+            OjId::new(id),
+            ProviderSet {
+                contest: Some(Arc::clone(&provider) as Arc<dyn ContestProvider>),
+                ..Default::default()
+            },
+        );
+    }
+    let service = ContestService::new(
+        Arc::clone(&registry),
+        Arc::new(EventBus::new()),
+        Arc::new(Storage::new(dir.clone())),
+    );
+
+    // HOJ：首拉 + 二次命中
+    block_on(service.load_contest_meta("7")).expect("HOJ 元信息失败");
+    assert_eq!(provider.meta_call_count(), 1);
+    block_on(service.load_contest_meta("7")).expect("HOJ 元信息二次失败");
+    assert_eq!(provider.meta_call_count(), 1, "同一 OJ 应命中缓存");
+
+    // 切 OJ：同一 cid 必须重新请求
+    registry.set_current(OjId::new("QDUOJ"));
+    block_on(service.load_contest_meta("7")).expect("换 OJ 后元信息失败");
+    assert_eq!(
+        provider.meta_call_count(),
+        2,
+        "跨 OJ 不得命中同一键（键缺 OJ 维度会让旧 OJ 的比赛元信息驱动新 OJ 查询）"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn oj_switched_clears_contest_scoped_caches() {
     use crate::core::event::app_event::{AppEvent, SystemEvent};
 
@@ -624,7 +666,8 @@ fn oj_switched_clears_contest_scoped_caches() {
 
     assert!(service.cache.read().unwrap().is_none(), "列表缓存应被清空");
     assert!(service.meta_cache.is_empty(), "元信息内存缓存应被清空");
-    // 磁盘命名空间整体移除（目录不存在 = 已清）
+    // 磁盘段是延迟投递（I/O 不阻塞发布方）：等队列排空后再断言
+    bus.flush_deferred();
     assert!(!dir.join("cache/contest_meta").exists());
 
     let _ = std::fs::remove_dir_all(&dir);

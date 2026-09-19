@@ -142,8 +142,12 @@ fn limits_first_call_fetches_all_and_persists_to_disk() {
     assert_eq!(result[0].time_limit, 1000);
     assert_eq!(result[0].memory_limit, 256);
     assert!(
-        dir.join("cache").join("problem_limits").join("1.json").exists(),
-        "limits 应落盘以便重启后复用"
+        dir.join("cache")
+            .join("problem_limits")
+            .join("HOJ")
+            .join("1.json")
+            .exists(),
+        "limits 应落盘以便重启后复用（路径含 OJ 维度，跨 OJ 不撞号）"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -223,9 +227,10 @@ fn limits_all_failed_propagates_error_instead_of_defaults() {
 fn limits_corrupted_cache_file_is_refetched() {
     let dir = std::env::temp_dir().join("hinina-test-problem-limits-corrupt");
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("cache").join("problem_limits")).expect("创建缓存目录失败");
+    std::fs::create_dir_all(dir.join("cache").join("problem_limits").join("HOJ"))
+        .expect("创建缓存目录失败");
     std::fs::write(
-        dir.join("cache").join("problem_limits").join("1.json"),
+        dir.join("cache").join("problem_limits").join("HOJ").join("1.json"),
         "{ not valid json",
     )
     .expect("写入损坏缓存失败");
@@ -416,6 +421,137 @@ fn get_user_problem_status_preserves_auth_variant() {
 // ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
 
 #[test]
+fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
+    // 这是「延迟清理磁盘缓存」之所以安全的前提：缓存键自带 OJ 维度，
+    // 跨 OJ 同 cid/pid 在结构上不可能互相命中 —— 不依赖任何清理事件。
+    use crate::core::event::event_bus::EventBus;
+
+    let dir = std::env::temp_dir().join("hinina-test-problem-oj-scope");
+    let _ = std::fs::remove_dir_all(&dir);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(StubProblemProvider {
+        calls: Arc::clone(&calls),
+        failing: Vec::new(),
+        fail_all: false,
+    });
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    // 同一个 Provider 同时注册到两个 OJ 下（数据相同也没关系 —— 我们要断言的是
+    // 「请求有没有再发出去」，即缓存有没有跨 OJ 命中）
+    for id in ["HOJ", "QDUOJ"] {
+        registry.register(
+            OjId::new(id),
+            ProviderSet {
+                problem: Some(Arc::clone(&provider) as Arc<dyn ProblemProvider>),
+                ..Default::default()
+            },
+        );
+    }
+    let service = ProblemService::new(
+        Arc::clone(&registry),
+        Arc::new(EventBus::new()),
+        Arc::new(Storage::new(dir.clone())),
+    );
+
+    // HOJ：首拉 + 二次命中（内存）
+    block_on(service.open_problem("1", "A", true)).expect("首次打开失败");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    block_on(service.open_problem("1", "A", true)).expect("二次打开失败");
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "同一 OJ 应命中缓存");
+
+    // 切到另一个 OJ：同一 contest/display 必须重新请求（不命中 HOJ 的缓存）
+    registry.set_current(OjId::new("QDUOJ"));
+    block_on(service.open_problem("1", "A", true)).expect("换 OJ 后打开失败");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "跨 OJ 不得命中同一键（键缺 OJ 维度会让旧 OJ 数据驱动新 OJ 查询）"
+    );
+
+    // 新 OJ 自己的缓存正常工作
+    block_on(service.open_problem("1", "A", true)).expect("新 OJ 二次打开失败");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    // 磁盘层同样隔离：换一个实例（模拟重启）读同一目录，仍是新 OJ 的键
+    let calls_after_restart = Arc::new(AtomicUsize::new(0));
+    let provider2 = Arc::new(StubProblemProvider {
+        calls: Arc::clone(&calls_after_restart),
+        failing: Vec::new(),
+        fail_all: false,
+    });
+    let registry2: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("QDUOJ")));
+    registry2.register(
+        OjId::new("QDUOJ"),
+        ProviderSet {
+            problem: Some(provider2),
+            ..Default::default()
+        },
+    );
+    let service2 = ProblemService::new(
+        registry2,
+        Arc::new(EventBus::new()),
+        Arc::new(Storage::new(dir.clone())),
+    );
+    block_on(service2.open_problem("1", "A", true)).expect("重启后打开失败");
+    assert_eq!(
+        calls_after_restart.load(Ordering::SeqCst),
+        0,
+        "重启后应命中本 OJ 的磁盘缓存（键含 OJ 维度）"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn limits_disk_cache_key_carries_oj_scope() {
+    // limits 的磁盘路径同样带 OJ 维度：`cache/problem_limits/{oj}/{cid}.json`
+    let dir = std::env::temp_dir().join("hinina-test-problem-limits-oj-scope");
+    let _ = std::fs::remove_dir_all(&dir);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(StubProblemProvider {
+        calls: Arc::clone(&calls),
+        failing: Vec::new(),
+        fail_all: false,
+    });
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    for id in ["HOJ", "QDUOJ"] {
+        registry.register(
+            OjId::new(id),
+            ProviderSet {
+                problem: Some(Arc::clone(&provider) as Arc<dyn ProblemProvider>),
+                ..Default::default()
+            },
+        );
+    }
+    let service = ProblemService::new(
+        Arc::clone(&registry),
+        Arc::new(EventBus::new()),
+        Arc::new(Storage::new(dir.clone())),
+    );
+
+    block_on(service.load_problem_limits("1", &ids(&["A"]))).expect("HOJ limits 失败");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(
+        dir.join("cache/problem_limits/HOJ/1.json").exists(),
+        "HOJ 的 limits 落在自己的目录下"
+    );
+
+    registry.set_current(OjId::new("QDUOJ"));
+    block_on(service.load_problem_limits("1", &ids(&["A"]))).expect("QDUOJ limits 失败");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "跨 OJ 不得命中 HOJ 的 limits 磁盘缓存"
+    );
+    assert!(
+        dir.join("cache/problem_limits/QDUOJ/1.json").exists(),
+        "QDUOJ 的 limits 落在自己的目录下"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn oj_switched_clears_problem_scoped_caches() {
     use crate::core::event::app_event::{AppEvent, SystemEvent};
 
@@ -437,7 +573,8 @@ fn oj_switched_clears_problem_scoped_caches() {
 
     assert!(service.limits_cache.read().unwrap().is_empty(), "limits 内存缓存应被清空");
     assert!(service.statement_cache.is_empty(), "题面内存缓存应被清空");
-    // 磁盘命名空间整体移除（目录不存在 = 已清）
+    // 磁盘段是延迟投递（I/O 不阻塞发布方）：等队列排空后再断言
+    bus.flush_deferred();
     assert!(!dir.join("cache/problem_statement").exists());
     assert!(!dir.join("cache/problem_limits").exists());
 
