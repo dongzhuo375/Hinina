@@ -15,6 +15,12 @@ use crate::core::error::AppResult;
 /// **请求头由调用方注入**（`HeaderMap` 原样附加）：不同 OJ 的凭证形态各异
 /// （HOJ 的 JWT 走 `Authorization` 头、Hydro 走 Cookie 会话、有的 OJ 还要
 /// CSRF 令牌）—— 认证方式是 Adapter 层概念，infra 不做任何假设。
+///
+/// **两组变体，按「是否需要读非 2xx 的响应体」选**：
+/// - `*_with_headers`：非 2xx 直接映射为 `AppError`（401 → `Auth`），响应体丢弃；
+/// - `*_raw`：任意状态码都返回 `(status, headers, body)`，**不做状态码映射** ——
+///   供把错误信息放在响应体里的 OJ 使用（Hydro 的 `{"error":{…}}` 是用户可见
+///   文案的唯一来源），代价是调用方需自行映射 401 → `Auth`。
 pub struct HttpClient {
     client: reqwest::Client,
 }
@@ -49,7 +55,7 @@ fn status_error(url: &str, status: reqwest::StatusCode) -> crate::core::error::A
 /// GET 响应的处置决策。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StatusDecision {
-    /// 2xx：交给调用方读取响应体
+    /// 2xx（或 raw 变体下的任意状态码）：交给调用方读取响应体
     Accept,
     /// 5xx 且仍有重试额度：退避后重试
     Retry,
@@ -57,24 +63,33 @@ enum StatusDecision {
     Fail,
 }
 
-/// 按状态码与当前尝试次数决定处置方式。
+/// 按状态码、当前尝试次数与「是否允许错误状态码」决定处置方式。
 ///
 /// 抽成纯函数是为了让「哪些状态码重试、哪些立即失败」可被单元测试穷尽锁定 ——
 /// 这里曾经有个 bug：5xx 在重试耗尽后落到 `return Ok(response)`，
 /// 把网关的 HTML 错误页当成正常响应交给上层，最终报成「响应不是合法 JSON」
 /// 而不是「HTTP 502」，把排障引向错误方向；同时末尾的 `Err(last_error)` 成了死代码。
-fn classify_status(status: reqwest::StatusCode, attempt: u32) -> StatusDecision {
+///
+/// `allow_error` 由 raw 变体传入（`get_text_raw` / `post_text_raw`）：**任意状态码
+/// 都返回原始响应**，因为有些 OJ 把错误信息放在响应体里，而响应体在非 raw 变体里
+/// 会被丢弃。5xx 仍然重试（GET 幂等），只是**重试耗尽后返回响应而不是报错**。
+fn classify_status(status: reqwest::StatusCode, attempt: u32, allow_error: bool) -> StatusDecision {
     if status.is_server_error() {
         return if attempt < MAX_RETRIES {
             StatusDecision::Retry
+        } else if allow_error {
+            StatusDecision::Accept
         } else {
             StatusDecision::Fail
         };
     }
     if status.is_success() {
+        return StatusDecision::Accept;
+    }
+    // 4xx（含 401/403）与 3xx 等其它非成功状态：重试同样的请求只会得到同样的结果
+    if allow_error {
         StatusDecision::Accept
     } else {
-        // 4xx（含 401/403）与 3xx 等其它非成功状态：重试同样的请求只会得到同样的结果
         StatusDecision::Fail
     }
 }
@@ -113,12 +128,39 @@ impl HttpClient {
         url: &str,
         headers: &reqwest::header::HeaderMap,
     ) -> AppResult<(String, reqwest::header::HeaderMap)> {
-        let response = self.retry_get(url, headers).await?;
+        let response = self.retry_get(url, headers, false).await?;
         let response_headers = response.headers().clone();
         let body = response.text().await.map_err(|e| {
             crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
         })?;
         Ok((body, response_headers))
+    }
+
+    /// 发送 GET 请求，**任意状态码都返回原始响应**（状态码 + 响应头 + 响应体）。
+    ///
+    /// 与 [`HttpClient::get_text_with_headers`] 的唯一区别是**不做状态码 → `AppError`
+    /// 映射**。存在理由：有些 OJ 把错误信息放在响应体里（如 Hydro 的
+    /// `{"error":{"name","params","code"}}` 是用户可见文案的唯一来源），而 4xx/5xx 的
+    /// 响应体在非 raw 变体里会被丢弃，调用方只能得到一句「HTTP 403」。
+    ///
+    /// 重试策略：5xx 仍按退避重试（GET 幂等），**重试耗尽后把最后一次响应原样返回**；
+    /// 4xx 不重试（重试只会得到同样的结果）。
+    ///
+    /// **调用方需自行处理状态码语义**：401 不会自动变成 `Auth` 变体，而前端
+    /// `sessionGuard` 的会话失效判定依赖该变体 —— 用本方法就必须自己映射
+    /// （判据见 `status_error`，Adapter 侧有同判据的镜像实现）。
+    pub async fn get_text_raw(
+        &self,
+        url: &str,
+        headers: &reqwest::header::HeaderMap,
+    ) -> AppResult<(reqwest::StatusCode, reqwest::header::HeaderMap, String)> {
+        let response = self.retry_get(url, headers, true).await?;
+        let status = response.status();
+        let response_headers = response.headers().clone();
+        let body = response.text().await.map_err(|e| {
+            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
+        })?;
+        Ok((status, response_headers, body))
     }
 
     /// 发送 POST 请求（JSON body），返回**原始响应体**与响应头。
@@ -146,17 +188,47 @@ impl HttpClient {
         Ok((text, response_headers))
     }
 
+    /// 发送 POST 请求（JSON body），**任意状态码都返回原始响应**。
+    ///
+    /// 语义同 [`HttpClient::get_text_raw`]（不做状态码映射，供需要读错误包络的
+    /// 适配器使用），差别是 POST 为非幂等方法、**不做任何重试**。
+    pub async fn post_text_raw<B: Serialize>(
+        &self,
+        url: &str,
+        body: &B,
+        headers: &reqwest::header::HeaderMap,
+    ) -> AppResult<(reqwest::StatusCode, reqwest::header::HeaderMap, String)> {
+        let response = self
+            .client
+            .post(url)
+            .json(body)
+            .headers(headers.clone())
+            .send()
+            .await
+            .map_err(|e| {
+                crate::core::error::AppError::Network(format!("POST 请求失败 {}: {}", url, e))
+            })?;
+        let status = response.status();
+        let response_headers = response.headers().clone();
+        let text = response.text().await.map_err(|e| {
+            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
+        })?;
+        Ok((status, response_headers, text))
+    }
+
     // ── 内部重试逻辑 ──
 
     /// 发送 GET 请求，对 5xx 与传输错误自动重试（最多 2 次，指数退避 1s/2s）。
     ///
     /// 4xx 直接报错不重试（客户端错误重试只会得到同样的结果）；
-    /// **5xx 在重试耗尽后同样报错**，不会把错误页当成正常响应交给上层解析
+    /// **5xx 在重试耗尽后**：`allow_error` 为假时报错（不把错误页当正常响应交给上层
+    /// 解析），为真时返回最后一次响应让调用方自己读状态码与响应体
     /// （处置判据见 `classify_status`）。请求头每次重试原样重附。
     async fn retry_get(
         &self,
         url: &str,
         headers: &reqwest::header::HeaderMap,
+        allow_error: bool,
     ) -> AppResult<reqwest::Response> {
         let mut last_error: Option<crate::core::error::AppError> = None;
 
@@ -166,7 +238,7 @@ impl HttpClient {
             match req.send().await {
                 Ok(response) => {
                     let status = response.status();
-                    match classify_status(status, attempt) {
+                    match classify_status(status, attempt, allow_error) {
                         StatusDecision::Accept => return Ok(response),
                         StatusDecision::Fail => return Err(status_error(url, status)),
                         StatusDecision::Retry => {

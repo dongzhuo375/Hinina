@@ -10,7 +10,7 @@
   - `seal_rank_time: Option<i64>` — 封榜起始时间（UTC 秒级时间戳）；未封榜或未设置时为 `None`
   - `allow_end_submit: bool` — 是否允许赛后提交（决定榜单查询的 `containsEnd` 是否真正生效）
   - `oi_rank_score_type: Option<String>` — OI 榜单计分规则（`"Recent"` 最近一次 / `"Highest"` 最高分）；非 OI 赛或未设置时为 `None`，前端据此解释 OI 榜单得分口径
-- **`ContestProblem`** — 比赛题目摘要，字段：`id`, `display_id`, `cid`, `problem_id`, `display_title`, `ac`, `total`, `color`（气球颜色如 "#FF0000"，驱动题目卡片字母徽章与榜单列头配色，可能为空）
+- **`ContestProblem`** — 比赛题目摘要，字段：`id`, `display_id`, `cid`, `problem_id`, `display_title`, `ac`, `total`, `color`（气球颜色如 "#FF0000"，驱动题目卡片字母徽章与榜单列头配色，可能为空）。**`cid` 是 `String`**：各 OJ 的比赛主键形态不同（HOJ 数字串 / Hydro 24 位 hex ObjectId），数字类型装不下后者；语义与 `OjConfig::contest_ref` 一致 —— 比赛是对服务端资源的不透明引用
 - **`ContestBundle`** — 配置比赛加载结果：`{ contest: Contest, problems: Vec<ContestProblem> }`，作为 `load_configured_contest` Command 的返回值（对象而非元组，供前端直接解构）
 
 ## 直接依赖
@@ -19,7 +19,8 @@
 ## 被依赖
 - `core::event::app_event`（ContestEvent::ListLoaded 携带 Vec<Contest>）
 - `core::provider::contest`（ContestProvider trait 使用 Contest）
-- `adapter::hoj`（`into_contest` 把 ContestVO 映射为 Contest，含榜单相关新字段与 `oi_rank_score_type`）
+- `adapter::hoj`（`into_contest` 把 ContestVO 映射为 Contest，含榜单相关新字段与 `oi_rank_score_type`；`cid` 由数字转字符串）
+- `adapter::hydro`（`map_contest_problems` 如实携带 Hydro 的 hex ObjectId 作为 `cid`）
 - `service::contest`（`load_contest_with_problems` 返回 ContestBundle）
 - `commands::contest_cmd`（`load_configured_contest` 返回 ContestBundle）
 - 前端 `src/types/contest.ts`（camelCase 跨端契约；`rankShowName` / `sealRank` 等驱动榜单渲染）

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::core::entity::config::{AppConfig, OjInstance};
 use crate::core::error::AppResult;
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::oj_id::OjId;
@@ -99,19 +100,9 @@ impl AppContext {
             event_bus: Arc::clone(&event_bus),
             storage: Arc::clone(&storage),
         };
-        let configured_instances = config.get().oj.instances;
-        for instance in configured_instances.iter().filter(|i| i.enabled) {
-            let Some(factory) = crate::adapter::factories()
-                .into_iter()
-                .find(|f| f.id() == instance.id)
-            else {
-                tracing::warn!(oj_id = %instance.id, "配置了未知 OJ（无对应适配器），跳过");
-                continue;
-            };
-            let id = OjId::new(factory.id());
-            let set = factory.build(&adapter_deps, &instance.base_url);
-            provider_registry.register(id.clone(), set);
-            tracing::info!(oj_id = %id, base_url = %instance.base_url, "OJ 适配器已注册");
+        let configured = config.get();
+        for instance in enabled_instances(&configured) {
+            register_instance(provider_registry.as_ref(), &adapter_deps, instance);
         }
 
         // 身份字符串化后失去编译期穷尽检查，此为第一道防线：启动时校验当前
@@ -187,4 +178,79 @@ impl AppContext {
             submission,
         })
     }
+
+    /// 确保某个**已配置且启用**的 OJ 实例已完成注册（幂等）。返回是否本次新注册。
+    ///
+    /// 为什么需要「按需注册」：注册只发生在启动时（`init`），而设置页允许用户从
+    /// 枚举里挑一个尚未配置的 OJ、填地址保存后**立即切换** —— 若切换时只查注册表，
+    /// 用户会撞上「OJ 未注册」，只能重启客户端才能用上新 OJ。
+    ///
+    /// 只认配置里已启用且 id 匹配的实例（与 `init` 同源：都用 [`enabled_instance`]
+    /// 与 [`register_instance`]）：不能凭空激活一个未配置的 OJ，否则 `switch_oj`
+    /// 会绕过配置成为后门。
+    pub fn ensure_oj_registered(&self, oj_id: &str) -> bool {
+        let id = OjId::new(oj_id);
+        if id.as_str().is_empty() || self.provider_registry.list_available().contains(&id) {
+            return false;
+        }
+
+        let config = self.config.get();
+        let Some(instance) = enabled_instance(&config, id.as_str()) else {
+            return false;
+        };
+        let deps = crate::adapter::AdapterDeps {
+            http_client: Arc::clone(&self.http_client),
+            event_bus: Arc::clone(&self.event_bus),
+            storage: Arc::clone(&self.storage),
+        };
+        let registered = register_instance(self.provider_registry.as_ref(), &deps, instance);
+        if registered {
+            tracing::debug!(oj_id = %id, "配置的 OJ 尚未注册，已按需补注册");
+        }
+        registered
+    }
 }
+
+/// 已启用的 OJ 实例 —— **「启用」条件的唯一来源**：`init` 的全量注册与
+/// [`enabled_instance`] 的单实例查找都经此，避免两处判定漂移。
+fn enabled_instances(config: &AppConfig) -> impl Iterator<Item = &OjInstance> {
+    config.oj.instances.iter().filter(|instance| instance.enabled)
+}
+
+/// 从配置里挑出指定 id 的**已启用**实例（纯函数，便于单测锁定判定）。
+///
+/// `oj_id` 须是已归一（trim）的 id：调用方经 `OjId::new` 归一，
+/// 配置里的实例 id 也由 `AppConfig::sanitize` trim 过。
+fn enabled_instance<'a>(config: &'a AppConfig, oj_id: &str) -> Option<&'a OjInstance> {
+    enabled_instances(config).find(|instance| instance.id == oj_id)
+}
+
+/// 按配置实例构造 `ProviderSet` 并注册 —— **`init` 与按需注册共用同一实现**。
+///
+/// 抽成自由函数而非 `AppContext` 方法：`init` 执行时 `AppContext` 尚未装配完成，
+/// 手上只有局部的注册表与依赖。两处必须同源 —— 否则「启动时注册」与「切换时补注册」
+/// 会漂移（例如一边认 `enabled`、一边不认），漂移的后果是「重启后能用、切换时不能用」
+/// 这类最难排查的不一致。
+///
+/// 返回是否注册成功；配置了未知 OJ（无匹配工厂）时 `warn` 并返回 `false`，不 panic。
+fn register_instance(
+    registry: &dyn ProviderRegistry,
+    deps: &crate::adapter::AdapterDeps,
+    instance: &OjInstance,
+) -> bool {
+    let Some(factory) = crate::adapter::factories()
+        .into_iter()
+        .find(|f| f.id() == instance.id)
+    else {
+        tracing::warn!(oj_id = %instance.id, "配置了未知 OJ（无对应适配器），跳过");
+        return false;
+    };
+    let id = OjId::new(factory.id());
+    registry.register(id.clone(), factory.build(deps, &instance.base_url));
+    tracing::info!(oj_id = %id, base_url = %instance.base_url, "OJ 适配器已注册");
+    true
+}
+
+#[cfg(test)]
+#[path = "tests/context_tests.rs"]
+mod tests;

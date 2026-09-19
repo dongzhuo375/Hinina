@@ -1,0 +1,38 @@
+{
+  "pdoc": {
+    "_id": "652faabbccddeeff00112233",
+    "docId": 1000,
+    "pid": "P1000",
+    "domainId": "system",
+    "title": "A+B Problem",
+    "content": "# A+B\n\n输入两个整数，输出它们的和。\n\n```\n1 2\n```",
+    "html": false,
+    "nSubmit": 12,
+    "nAccept": 8,
+    "tag": ["入门"],
+    "config": {
+      "type": "default",
+      "count": 10,
+      "memoryMin": 256,
+      "memoryMax": 256,
+      "timeMin": 1000,
+      "timeMax": 2000,
+      "langs": ["cc", "cc.cc17", "py.py3", "unknown_lang"],
+      "hackable": false
+    },
+    "difficulty": null,
+    "hidden": false,
+    "reference": null
+  },
+  "udoc": { "_id": 2, "uname": "admin" },
+  "psdoc": { "score": 100, "status": 1, "star": false, "rid": "6530f0c1a1b2c3d4e5f60718" },
+  "title": "A+B Problem",
+  "solutionCount": 0,
+  "discussionCount": 0,
+  "tdoc": null,
+  "owner_udoc": null,
+  "mode": "normal",
+  "page_name": "problem_detail",
+  "ctdocs": [],
+  "htdocs": []
+}

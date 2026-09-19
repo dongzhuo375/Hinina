@@ -733,7 +733,7 @@ impl ContestProvider for HOJAdapter {
             .map(|p| ContestProblem {
                 id: p.id,
                 display_id: p.display_id,
-                cid: p.cid,
+                cid: p.cid.to_string(),
                 problem_id: p.pid.to_string(),
                 display_title: p.display_title,
                 ac: p.ac,

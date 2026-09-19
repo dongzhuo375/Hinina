@@ -34,7 +34,10 @@ impl JudgementStatus {
     ///
     /// 三处判据必须保持一致（新增状态时同步）：
     /// - 本方法（核心层，OI/ACM 无关）
-    /// - `adapter::hoj::types::is_terminal_status`（OJ 原始状态码 → 终态，0/1 之外皆终态）
+    /// - `adapter::hoj::types::is_terminal_status`（HOJ 原始状态码 → 终态，0/1 之外皆终态）
+    /// - `adapter::hydro::types::is_terminal_status`（Hydro 原始状态码 → 终态，
+    ///   0/20/21/22 之外皆终态；**22 FETCHED 特意折入 `Pending`** 而非 `Unknown`，
+    ///   否则轮询会在评测开始前就停住，并把在途结果写进终态缓存）
     /// - 前端 `utils/submission.isTerminalStatus`（同一非终态集合）
     ///
     /// 用途：提交详情/测试点**只有终态结果才可缓存** —— 评测中的状态随时会变，

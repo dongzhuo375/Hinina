@@ -1,0 +1,45 @@
+{
+  "tdoc": {
+    "_id": "64f0c0f0f0f0f0f0f0f0f0f1",
+    "title": "OI Contest",
+    "rule": "oi",
+    "beginAt": "2026-01-01T01:00:00.000Z",
+    "endAt": "2026-01-01T06:00:00.000Z",
+    "pids": [1000, 1001]
+  },
+  "tsdoc": null,
+  "rows": [
+    [
+      { "type": "rank", "value": "#" },
+      { "type": "user", "value": "User" },
+      { "type": "total_score", "value": "Score" },
+      { "type": "problem", "value": "A", "raw": 1000 },
+      { "type": "problem", "value": "B", "raw": 1001 }
+    ],
+    [
+      { "type": "rank", "value": "1" },
+      { "type": "user", "value": "alice", "raw": 3 },
+      { "type": "total_score", "value": "150", "hover": "Original score: 150" },
+      { "type": "record", "value": "100", "score": 100 },
+      { "type": "record", "value": "50", "score": 50 }
+    ],
+    [
+      { "type": "rank", "value": "2" },
+      { "type": "user", "value": "bob", "raw": 4 },
+      { "type": "total_score", "value": "0" },
+      { "type": "record", "value": "0", "score": 0 },
+      { "type": "record", "value": "" }
+    ]
+  ],
+  "udict": {
+    "3": { "_id": 3, "uname": "alice" },
+    "4": { "_id": 4, "uname": "bob" }
+  },
+  "pdict": {
+    "1000": { "docId": 1000, "title": "A+B", "nAccept": 1, "nSubmit": 2 },
+    "1001": { "docId": 1001, "title": "Sum", "nAccept": 0, "nSubmit": 1 }
+  },
+  "page_name": "contest_scoreboard",
+  "groups": [],
+  "availableViews": { "default": "Default" }
+}

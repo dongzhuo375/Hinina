@@ -17,6 +17,8 @@ use crate::core::provider::oj_id::OjId;
 /// 前端 invoke 签名: `switch_oj`({ ojId })
 ///
 /// 编排三件事（顺序有意）：
+/// 0. **按需补注册**（`ensure_oj_registered`）：设置页允许从枚举里挑一个尚未配置的
+///    OJ、填地址保存后立即切换，而注册只在启动时发生 —— 不补注册就得重启客户端；
 /// 1. 校验目标 OJ 已注册（未注册直接报错，不静默回退 —— 显式命令要显式结果）；
 /// 2. 切换 Registry 当前 OJ，**紧接着**发布 `OJSwitched`（缓存失效不得依赖后续
 ///    可能失败的操作：`set_current` 已生效即必须清缓存，否则旧 OJ 数据会继续服务
@@ -25,6 +27,8 @@ use crate::core::provider::oj_id::OjId;
 #[tauri::command]
 pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<()> {
     let id = OjId::new(&oj_id);
+    // 新配置的实例可能尚未注册（注册只在启动时发生）——先补注册，再校验
+    ctx.ensure_oj_registered(id.as_str());
     if !ctx.provider_registry.list_available().contains(&id) {
         return Err(AppError::ProviderNotFound(format!(
             "OJ {} 未注册（需在 config.json 的 oj.instances 中启用对应实例）",

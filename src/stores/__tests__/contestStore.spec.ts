@@ -35,7 +35,7 @@ const problems = [
   {
     id: 1,
     displayId: 'A',
-    cid: 1,
+    cid: '1',
     problemId: '1001',
     displayTitle: '两数之和',
     ac: 210,
