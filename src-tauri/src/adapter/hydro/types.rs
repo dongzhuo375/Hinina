@@ -314,11 +314,14 @@ pub fn parse_duration_seconds(raw: &str) -> Option<i64> {
 /// 9 CANCELED / 10 ETC / 11 HACKED / 20 JUDGING / 21 COMPILING / 22 FETCHED /
 /// 30 IGNORED / 31 FORMAT_ERROR / 32 HACK_SUCCESSFUL / 33 HACK_UNSUCCESSFUL。
 ///
-/// `JudgementStatus` 的值域是 HOJ 的（entity 层不可改），Hydro 有 7 个状态
-/// 在 HOJ 侧没有对应变体：9 CANCELED / 11 HACKED / 22 FETCHED / 30 IGNORED /
-/// 32 HACK_SUCCESSFUL / 33 HACK_UNSUCCESSFUL 折入 `Unknown`（前端显示 "Unknown"，
-/// 与 Hydro 网页端的 "Cancelled"/"Hacked" 有文案落差，见设计缺口报告 D9）；
-/// 31 FORMAT_ERROR 取语义最近的 `PresentationError`。
+/// `JudgementStatus` 的值域是 HOJ 的（entity 层不可改），Hydro 有几个状态在 HOJ 侧
+/// 没有对应变体，一律按「不猜」原则折入语义最近的变体：
+/// - 9 CANCELED → `Cancelled`（HOJ `-4`，语义精确对应，无文案落差）
+/// - 11 HACKED / 30 IGNORED / 32 HACK_SUCCESSFUL / 33 HACK_UNSUCCESSFUL → `Unknown`
+///   （HOJ 值域里确实没有对应项，前端显示 "Unknown"，与 Hydro 网页端的 "Hacked"
+///   等有文案落差，见设计缺口报告 D9）
+/// - 31 FORMAT_ERROR → `PresentationError`（语义最近）
+/// - 22 FETCHED → `Pending`（见下）
 ///
 /// **22 FETCHED 必须折入非终态**（`Pending`）：它是「评测机已取件、尚未开跑」，
 /// 前端终态判据是「非 Pending/Compiling/Running 即终态」，若折成 `Unknown`
@@ -334,7 +337,7 @@ pub fn map_status(status: i64) -> JudgementStatus {
         6 => JudgementStatus::RuntimeError,        // RUNTIME_ERROR
         7 => JudgementStatus::CompilationError,    // COMPILE_ERROR
         8 => JudgementStatus::SystemError,         // SYSTEM_ERROR
-        9 => JudgementStatus::Unknown,             // CANCELED（HOJ 无对应变体）
+        9 => JudgementStatus::Cancelled,           // CANCELED → HOJ -4 语义精确对应
         10 => JudgementStatus::UnknownError,       // ETC
         11 => JudgementStatus::Unknown,            // HACKED（HOJ 无对应变体）
         20 => JudgementStatus::Running,            // JUDGING

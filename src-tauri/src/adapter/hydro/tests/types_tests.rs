@@ -198,8 +198,9 @@ fn map_status_covers_full_hydro_table() {
         (6, "RuntimeError"),
         (7, "CompilationError"),
         (8, "SystemError"),
-        // CANCELED / HACKED / IGNORED / HACK_* 在 HOJ 值域里没有对应变体 → Unknown
-        (9, "Unknown"),
+        // 9 CANCELED 折入 Cancelled（HOJ -4 语义精确对应，无文案落差）；
+        // HACKED / IGNORED / HACK_* 在 HOJ 值域里确实没有对应变体 → Unknown
+        (9, "Cancelled"),
         (10, "UnknownError"),
         (11, "Unknown"),
         (20, "Running"),
