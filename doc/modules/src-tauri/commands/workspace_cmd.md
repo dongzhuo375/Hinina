@@ -33,5 +33,5 @@
 
 - **懒启动 auto-save 的已知限制**：`start_auto_save_if_needed` 用 `static AtomicBool` 保证只启动一次，
   且只读取首次 `load_workspace` 时的 `config.editor` —— 设置页改「自动保存开关/间隔」需重启客户端才生效
-  （记录于 `doc/problem.md` P74 的范围外项）。
+  （记录于 `doc/problem.md` 的「遗留（归档自已清除的修复记录）」段）。
 - 落盘失败不影响前端继续编辑：内容仍在后端内存，下一次落盘时机或 auto-save 周期会重写。
