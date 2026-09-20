@@ -186,14 +186,48 @@ fn validate_target_rejects_file() {
 }
 
 #[test]
-fn validate_target_rejects_non_empty_dir() {
-    // 决策：拒绝非空目录 —— 覆盖会丢数据、合并会混入别人的配置
-    let legacy = unique_dir("validate-nonempty-legacy");
-    let dir = unique_dir("validate-nonempty");
-    write_file(&dir, "existing.json", "{}");
+fn validate_target_allows_previously_used_dir() {
+    // **回归**：曾经用 `dir_is_empty` 判据，而**我们自己写进去的数据本身就是"非空"**
+    // → 离开过的自定义目录再也选不回来（它必然含 `workspaces/`、`config.json` 等），
+    // 而错误指引「请选择一个空目录」实际是在要求用户**删掉自己的数据**。
+    //
+    // 现实场景：默认 → 自定义 A → 自定义 B → 想回到 A。A 里只有非冲突内容时应当放行。
+    let legacy = unique_dir("validate-revisit-legacy");
+    let dir = unique_dir("validate-revisit");
+    // A 里可能残留的「无害」内容：指针、WebView profile、日志、缓存、无关文件
+    write_file(&dir, "data_dir.json", "{}");
+    write_file(&dir, "EBWebView/Default/Cache/index", "binary");
+    write_file(&dir, "logs/hinina.log", "old");
+    write_file(&dir, "cache/problem_statement/1/A.json", "{}");
+    write_file(&dir, "我的笔记.txt", "unrelated");
 
-    let err = validate_target(&dir, &legacy).expect_err("非空目录应被拒");
-    assert!(err.to_string().contains("已有内容"), "错误信息应给出可操作提示");
+    assert!(!dir_is_empty(&dir), "前置条件：目录确实非空");
+    assert!(
+        validate_target(&dir, &legacy).is_ok(),
+        "非冲突内容不得阻止选回该目录 —— 否则用户只能删掉自己的东西"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&legacy);
+}
+
+#[test]
+fn validate_target_rejects_dir_with_conflicting_entries() {
+    // 真正该拒的情形：目标已有会被迁移**跳过**的条目 → 陈旧数据被静默采用
+    let legacy = unique_dir("validate-conflict-legacy");
+    let dir = unique_dir("validate-conflict");
+    write_file(&dir, "workspaces/old/main.cpp", "old");
+    write_file(&dir, "config.json", r#"{"stale":true}"#);
+
+    let err = validate_target(&dir, &legacy).expect_err("有冲突条目应被拒");
+    let msg = err.to_string();
+    assert!(msg.contains("workspaces"), "错误应点名冲突条目: {}", msg);
+    assert!(msg.contains("config.json"), "错误应点名全部冲突条目: {}", msg);
+    assert!(
+        !msg.contains("请选择一个空目录"),
+        "指引不应要求清空目录（那会诱导用户删数据）: {}",
+        msg
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&legacy);

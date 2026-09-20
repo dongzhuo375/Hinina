@@ -275,8 +275,15 @@ fn is_same_or_inside(path: &Path, base: &Path) -> bool {
 /// - 非绝对路径 → 相对路径会随进程工作目录漂移，等于数据位置不确定；
 /// - 指向旧临时目录 → 又回到会被系统清理的位置，正是本次要修的问题；
 /// - 指向已存在的文件 → 无法作为目录使用；
-/// - **非空目录** → 覆盖会丢数据、合并会混入别人的配置，故直接拒绝（要求空目录）；
+/// - **含冲突条目** → 迁移会跳过它们，界面将**静默采用那里的陈旧数据**（见
+///   [`conflicting_entries_in`]）；
 /// - 不可创建 / 不可写 → 现在就要报错，而不是等到写工作区时才失败。
+///
+/// **判据是「冲突条目」而不是「目录非空」**（曾经用 [`dir_is_empty`]，那是错的）：
+/// 我们自己写进去的数据本身就是"非空" —— 于是**离开过的自定义目录再也选不回来**
+/// （它必然含 `workspaces/`、`config.json` 等），而错误指引「请选择一个空目录」实际是在
+/// 要求用户**删掉自己的数据**。目录里的**无关**文件则不影响：迁移对已存在条目是**跳过**
+/// 而非覆盖，我们只创建自己的条目，不会动用户的东西。
 pub fn validate_target(path: &Path, legacy: &Path) -> AppResult<PathBuf> {
     if path.as_os_str().is_empty() {
         return Err(AppError::Config("数据目录不能为空".into()));
@@ -299,9 +306,12 @@ pub fn validate_target(path: &Path, legacy: &Path) -> AppResult<PathBuf> {
             path.display()
         )));
     }
-    if path.exists() && !dir_is_empty(path) {
+    let conflicts = conflicting_entries_in(path);
+    if !conflicts.is_empty() {
         return Err(AppError::Config(format!(
-            "目标目录已有内容，请选择一个空目录: {}",
+            "目标目录已有 {}（{}）—— 迁移会跳过它们，界面将采用那里的陈旧数据。\
+             请换一个目录，或先备份并删除这些条目",
+            conflicts.join(" / "),
             path.display()
         )));
     }
