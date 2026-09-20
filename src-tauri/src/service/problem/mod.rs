@@ -1,6 +1,8 @@
 // 题目服务：题目获取、limits 批量缓存、我的题目状态。
 //
-// 打开题目时自动创建/加载对应 Workspace，实现代码保留。
+// 打开题目只发布 `ProblemEvent::Opened`：本服务**不**持有 WorkspaceManager，
+// 工作区的创建/切换由事件订阅方编排（前端 `ProblemSolveView` →
+// `workspaceStore.loadWorkspace`），题目详情与工作区是两个独立关注点。
 //
 // **错误处理约定**：传播 Provider 错误一律用 `AppError::context()` 补环节名，
 // 不得重新包装成 `AppError::Problem` —— 变体是前端 `sessionGuard` 判定会话失效的依据
@@ -23,8 +25,6 @@ use crate::core::event::event_category::EventCategory;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::{JsonDiskCache, TtlCache};
 use crate::infra::storage::Storage;
-// WorkspaceManager 循环依赖通过运行时 Arc 注入解决
-// （ProblemService 需要 WorkspaceManager, WorkspaceManager 可能切换到新的 problem）
 
 /// 题目 limits 磁盘缓存目录。
 /// limits 只能从题目详情接口取得且对同一题基本不变，跨重启复用可省掉整批详情请求。
