@@ -164,102 +164,12 @@ pub fn extract_sid(headers: &reqwest::header::HeaderMap) -> Option<String> {
 
 // ── 时间 ──
 
-/// 月份累计天数（非闰年，下标 = 月份）
-static MONTH_DAYS: [i64; 13] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365];
-
-fn is_leap_year(year: i64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
-/// 统计 `[from, to)` 区间内的闰年数（`to` 不参与）。
-fn leap_years_between(from: i64, to: i64) -> i64 {
-    (from..to).filter(|y| is_leap_year(*y)).count() as i64
-}
-
-/// 把「日期 + 时刻」折算为 1970-01-01 起的秒数（纯 std，不引入时间库）。
-fn epoch_secs(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64) -> i64 {
-    let month = month.clamp(1, 12);
-    let mut days = (year - 1970) * 365 + leap_years_between(1970, year);
-    // 表是「该月之前的天数」，故 1 月取下标 0
-    days += MONTH_DAYS[(month - 1) as usize];
-    if month > 2 && is_leap_year(year) {
-        days += 1;
-    }
-    days += day - 1;
-    days * 86_400 + hour * 3_600 + minute * 60 + second
-}
-
-/// 从时刻串里切出时区偏移（秒），返回 `(去掉偏移的串, 偏移秒数)`。
+/// ISO 时间串 → 秒级 UTC 时间戳。
 ///
-/// 支持 `Z` / `z`（UTC）与 `±HH:MM` / `±HHMM`。**只扫时间部分**：
-/// 日期部分用 `-` 分隔，若连日期一起扫会把 `2026-01-01` 误判成负偏移。
-fn split_timezone(rest: &str) -> (&str, i64) {
-    let trimmed = rest.trim_end();
-    if let Some(stripped) = trimmed.strip_suffix('Z').or_else(|| trimmed.strip_suffix('z')) {
-        return (stripped, 0);
-    }
-    // 从第 1 个字符之后找符号，避免把 "12:00" 里的内容当偏移
-    if let Some(idx) = trimmed[1..].find(['+', '-']).map(|i| i + 1) {
-        let (time, tz) = trimmed.split_at(idx);
-        let sign = if tz.starts_with('-') { -1 } else { 1 };
-        let digits: String = tz.chars().filter(|c| c.is_ascii_digit()).collect();
-        let (h, m) = match digits.len() {
-            4 => (digits[..2].parse::<i64>().unwrap_or(0), digits[2..].parse::<i64>().unwrap_or(0)),
-            _ => (0, 0),
-        };
-        return (time, sign * (h * 3_600 + m * 60));
-    }
-    (trimmed, 0)
-}
-
-/// Hydro 的 ISO 时间串 → UTC 秒级时间戳。
-///
-/// 形如 `2026-01-01T01:00:00.000Z`（榜单/比赛文档）或 `2026-01-01 08:00:00`
-/// （无时区，按 UTC 解释）。无法解析时返回 0（调用方按「未设置」处理），
-/// 绝不 panic —— 时间解析失败不该让整场比赛的数据加载失败。
-pub fn parse_time(raw: &str) -> i64 {
-    let s = raw.trim();
-    if s.is_empty() {
-        return 0;
-    }
-    let (date, rest) = match s.find(['T', 't', ' ']) {
-        Some(idx) => (&s[..idx], &s[idx + 1..]),
-        None => (s, ""),
-    };
-    let (time, offset) = split_timezone(rest);
-
-    let mut date_parts = date.split('-');
-    let year = date_parts
-        .next()
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(1970);
-    let month = date_parts
-        .next()
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(1);
-    let day = date_parts
-        .next()
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(1);
-
-    let mut time_parts = time.split(':');
-    let hour = time_parts
-        .next()
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(0);
-    let minute = time_parts
-        .next()
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(0);
-    // 秒可能带小数（`.000`），按整数部分取值
-    let second = time_parts
-        .next()
-        .map(|v| v.split('.').next().unwrap_or("0"))
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(0);
-
-    epoch_secs(year, month, day, hour, minute, second) - offset
-}
+/// 实现已上提到 `adapter::time`（HOJ 与 Hydro 共用同一份，避免两份解析器
+/// 能力不一致 —— HOJ 那份曾按固定 19 字符取位，把 `.000+0000` 截断忽略）。
+/// 此处保留再导出，使本模块调用方与既有测试的路径不变。
+pub use crate::adapter::time::parse_time;
 
 /// 从 Hydro 记录的 `_id`（时间型 ObjectId）反推**提交时刻**（UTC 秒）。
 ///

@@ -7,6 +7,7 @@ pub mod hoj;
 pub mod hydro;
 pub mod qduoj;
 pub mod hustoj;
+pub mod time;
 
 use std::sync::Arc;
 
