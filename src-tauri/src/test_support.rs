@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static SEQ: AtomicUsize = AtomicUsize::new(0);
 
 /// 测试用临时目录。构造时清掉同名残留，`Drop` 时递归删除。
+#[derive(Debug)]
 pub struct TempDir(PathBuf);
 
 impl TempDir {
@@ -63,6 +64,30 @@ impl TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// `Deref` 到 `Path`：让守卫可以直接当路径用（`&dir` 传给 `&Path` 形参、
+/// `dir.join(..)`、`dir.exists()` 等都照常），既有测试因此不必逐处改写成 `dir.path()`。
+impl std::ops::Deref for TempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// `&dir` 能直接喂给 `AsRef<Path>` 形参（`std::fs::*`、`Storage::new` 等）。
+impl AsRef<Path> for TempDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// 让 `assert_eq!(pathbuf, dir)` 这类断言继续可用（守卫与路径按值比较）。
+impl PartialEq<TempDir> for PathBuf {
+    fn eq(&self, other: &TempDir) -> bool {
+        self.as_path() == other.path()
     }
 }
 
