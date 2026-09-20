@@ -175,9 +175,23 @@ pub async fn reset_data_dir(
 ///
 /// 用**回调 + oneshot** 而不是 `blocking_pick_folder`：后者会阻塞当前线程，
 /// 而命令跑在异步运行时上（阻塞工作线程是浪费，某些平台还要求弹窗在主线程）。
+///
+/// **先 `try_state` 探测插件**：`DialogExt::dialog()` 内部是 `state::<Dialog<R>>()`，
+/// 插件未注册时**直接 panic** —— 那会把「点一下更改目录」变成崩溃。
+/// 用 `try_state` 换成可读的错误，代价是一次哈希查找。
 #[tauri::command]
 pub async fn pick_data_dir(app: tauri::AppHandle) -> AppResult<Option<String>> {
+    use tauri::Manager;
     use tauri_plugin_dialog::DialogExt;
+
+    if app
+        .try_state::<tauri_plugin_dialog::Dialog<tauri::Wry>>()
+        .is_none()
+    {
+        return Err(AppError::Unknown(
+            "目录选择器插件未注册（缺少 .plugin(tauri_plugin_dialog::init())）".into(),
+        ));
+    }
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog().file().pick_folder(move |picked| {
