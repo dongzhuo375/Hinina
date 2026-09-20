@@ -14,6 +14,7 @@
 // 变体被改写会让 token 过期时榜单静默 stale、选手永远回不到登录页。
 pub mod error;
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -74,6 +75,12 @@ pub struct ContestService {
     meta_cache: Arc<TtlCache<String, Contest>>,
     /// 比赛元信息磁盘缓存（跨重启；用户域数据不落盘，本项属公共数据）
     meta_disk: Arc<JsonDiskCache>,
+    /// 上次拉取到的公告 ID 基线（contest_id → 公告 ID 列表）。
+    ///
+    /// 用于检测「新公告」并发布 `ContestEvent::AnnouncementsPublished`。
+    /// **每个比赛一条基线**：同一进程内可能先看 1011 再看 1012，
+    /// 只留一份会让切回旧比赛时把已有公告误判成新公告（红点误报）。
+    announcement_baseline: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
 impl ContestService {
@@ -100,6 +107,7 @@ impl ContestService {
             storage,
             current_contest: RwLock::new(None),
             cache,
+            announcement_baseline: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -323,6 +331,11 @@ impl ContestService {
     /// 获取比赛公告（分页）。
     ///
     /// **不做缓存**：公告可能包含裁判组临场发布的规则变更，必须每次拉取最新数据。
+    ///
+    /// 每次拉取都会与上次结果对比，**出现新公告 ID 时发布
+    /// `ContestEvent::AnnouncementsPublished`** —— 红点提醒属状态变更，
+    /// 由 `main.rs` 的事件桥转发到 webview，前端据此即时点亮红点。
+    /// 首次拉取（该比赛尚无基线）不发事件：没有基线可比，发了等于一开机就亮红点。
     pub async fn list_announcements(
         &self,
         contest_id: &str,
@@ -339,8 +352,61 @@ impl ContestService {
                 e.context("获取比赛公告")
             })?;
 
+        self.publish_new_announcements(contest_id, &page);
+
         debug!(contest_id = contest_id, count = page.records.len(), "比赛公告已获取");
         Ok(page)
+    }
+
+    /// 与上次结果对比并发布新公告事件（纯内存操作，无 I/O）。
+    ///
+    /// 基线**只在成功拉取后更新**：失败时保留旧基线，下一次成功拉取仍能正确
+    /// 报出期间新增的公告。基线按比赛隔离，切换比赛不会互相污染。
+    fn publish_new_announcements(&self, contest_id: &str, page: &AnnouncementPage) {
+        let current: Vec<String> = page.records.iter().map(|a| a.id.clone()).collect();
+
+        let new_ids = {
+            let mut baselines = match self.announcement_baseline.write() {
+                Ok(guard) => guard,
+                // 锁中毒（持有者 panic）不应让公告查询失败：公告本身已经拿到了，
+                // 只是红点提醒失效 —— 降级为不发事件
+                Err(e) => {
+                    warn!(contest_id = contest_id, error = %e, "公告基线锁中毒，跳过新公告检测");
+                    return;
+                }
+            };
+            match baselines.get(contest_id) {
+                None => {
+                    // 首次拉取：只建基线，不发事件
+                    baselines.insert(contest_id.to_string(), current);
+                    None
+                }
+                Some(previous) => {
+                    let fresh: Vec<String> = current
+                        .iter()
+                        .filter(|id| !previous.contains(id))
+                        .cloned()
+                        .collect();
+                    baselines.insert(contest_id.to_string(), current);
+                    (!fresh.is_empty()).then_some(fresh)
+                }
+            }
+        };
+
+        let Some(new_ids) = new_ids else {
+            return;
+        };
+
+        info!(
+            contest_id = contest_id,
+            new_count = new_ids.len(),
+            "检测到新比赛公告"
+        );
+        self.event_bus
+            .publish(&AppEvent::Contest(ContestEvent::AnnouncementsPublished {
+                contest_id: contest_id.to_string(),
+                new_ids,
+            }));
     }
 
     // ── 公告已读状态（客户端本地特性）──

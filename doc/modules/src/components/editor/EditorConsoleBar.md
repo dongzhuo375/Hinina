@@ -4,7 +4,7 @@
 
 ## 职责
 
-编辑器下方状态区：最新评测记录 pill（**服务端最新记录优先，本会话提交回退**，点击进提交详情）、失败记录的首个非 AC 测试点提示、提交失败信息、「提交记录 (n)」入口（携带本题筛选跳评测页）与「提交代码」按钮、光标位置 / 编码 / 缩进状态行。
+编辑器下方状态区：最新评测记录 pill（**服务端最新记录优先，本会话提交回退**，点击进提交详情）、**本会话提交的失败原因首行**（CE 编译错误等）、失败记录的首个非 AC 测试点提示、提交失败信息、「提交记录 (n)」入口（携带本题筛选跳评测页）与「提交代码」按钮、光标位置 / 编码 / 缩进状态行。
 
 ## 核心类型/函数
 
@@ -23,6 +23,7 @@
 | `toneOf(status)` | `(JudgementStatus) => Tone` | 本地 pill 配色：AC=success；TLE/MLE=warning；Pending/Compiling/Running=pending（旋转圈）；Unknown=muted；WA/RE/CE=error |
 | `TONE_STYLES` / `toneStyle` / `serverToneStyle` | — | Tone → global.css 语义色变量（fg/bg/border） |
 | `statusLabel(status)` | 组件私有 fn | 本地 pill 文案：驼峰拆空格 `WrongAnswer → Wrong Answer`，**不缩写**——原词与判题语义一一对应（服务端 pill 则用 `statusAbbr` 紧凑缩写） |
+| `failureDetail` | computed | 本会话最新提交的 `errorMessage` **首个非空行**（`\n` 切分后 trim 非空的第一行）；无错误为 null。渲染为 pill 旁等宽截断 span（`title` 悬浮全文，`max-w-[420px] truncate`）—— 完整多行编译错误在提交详情页。**没有它，选手在解题页只看到「Compile Error」四个字**，必须点进详情页才知道错在哪 |
 | `timeLabel` | computed | 本地条目轮询回填的耗时（`entry.time`，ms）；未到终态无值不显示 |
 | `totalCount` | computed | `summary.total`（「提交记录 (n)」计数；摘要未到达/为 0 时不显示 n） |
 | `goSubmissions` / `goDetail` | fn | 跳 `Submissions`（携带 `?problem=displayId`）/ `SubmissionDetail` |
@@ -64,7 +65,8 @@ pill 优先级：serverPill（#id + statusAbbr + 测试点/耗时）
            > latest（本会话提交，原词文案 + ms 耗时）
            > 留空（不显示假数据）
 点击 pill → SubmissionDetail；「提交记录 (n)」→ Submissions?problem=displayId
-submissionStore.error 非空 → pill 旁截断展示失败原因（title 悬浮全文）
+failureDetail 非空 → pill 旁等宽截断展示失败原因首行（title 悬浮全文）
+submissionStore.error 非空 → 紧随其后截断展示（提交失败 / 轮询连续失败提示；title 悬浮全文）
 提交按钮：isSubmitting 时禁用 + 「提交中…」旋转圈，点击 emit submit
 ```
 
@@ -78,6 +80,7 @@ submissionStore.error 非空 → pill 旁截断展示失败原因（title 悬浮
 - **子任务制感知（L1）**：subtask 判题下平铺 `cases` 常为空（明细在
   `subTasks[].cases`），`findFirstFailedCase`（utils/submission 纯函数）先查平铺、
   为空再按 groupNum/seq 展开子任务，避免「Test N」提示静默消失。
+- **失败原因首行就地可见**：`JudgementResult.errorMessage` 由轮询回填到本会话条目，控制台条取首行做条内提示 —— CE 的编译错误是选手改代码的唯一依据，只显示「Compile Error」等于把定位成本推给选手（点进详情页才发现第几行错了）。首行截断 + `title` 全文是「条内空间有限、完整内容在详情页」的折中。
 - 摘要查询走 `submissionStore.fetchProblemSummary`（独立于评测页 history，不干扰
   其列表/筛选）；测试点明细是组件级一次性只读查询，直接消费 submission.service。
 - 色彩语义与 global.css 变量对齐，与榜单/题目卡片/评测页的状态色体系一致

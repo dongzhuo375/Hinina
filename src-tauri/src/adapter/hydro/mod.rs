@@ -650,6 +650,8 @@ impl HydroAdapter {
             score,
             time_ms,
             memory_kb,
+            // 编译错误是选手判断「为什么挂了」的唯一线索，轮询通道必须带上
+            error_message: rdoc.compiler_message(),
         }
     }
 
@@ -1143,10 +1145,12 @@ impl SubmissionProvider for HydroAdapter {
     /// 入参 `problem_id` 是**真实 pid**（前端 `Problem.id` / `ContestProblem.problem_id`），
     /// 故这里**刻意不做字母换算** —— 万一某题的 pid 恰好是一个字母（如 "A"），
     /// 换算会把提交打到另一道题上，这个失败模式不可接受。
+    /// `display_id` 仅 HOJ 需要（其 `pid` 收比赛内题号），Hydro 忽略之。
     async fn submit(
         &self,
         contest_id: &str,
         problem_id: &str,
+        _display_id: &str,
         language: &str,
         source_code: &str,
     ) -> AppResult<String> {

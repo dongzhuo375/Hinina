@@ -198,8 +198,9 @@ fn map_status_covers_full_hydro_table() {
         (6, "RuntimeError"),
         (7, "CompilationError"),
         (8, "SystemError"),
-        // CANCELED / HACKED / IGNORED / HACK_* 在 HOJ 值域里没有对应变体 → Unknown
-        (9, "Unknown"),
+        // 9 CANCELED 折入 Cancelled（HOJ -4 语义精确对应，无文案落差）；
+        // HACKED / IGNORED / HACK_* 在 HOJ 值域里确实没有对应变体 → Unknown
+        (9, "Cancelled"),
         (10, "UnknownError"),
         (11, "Unknown"),
         (20, "Running"),
@@ -236,24 +237,28 @@ fn fetched_is_non_terminal_so_polling_continues() {
 
 #[test]
 fn hoj_status_to_hydro_maps_shared_semantics() {
-    assert_eq!(hoj_status_to_hydro(0), Some(0));
-    assert_eq!(hoj_status_to_hydro(1), Some(20));
-    assert_eq!(hoj_status_to_hydro(2), Some(7));
-    assert_eq!(hoj_status_to_hydro(4), Some(2));
-    assert_eq!(hoj_status_to_hydro(5), Some(1));
-    assert_eq!(hoj_status_to_hydro(6), Some(3));
-    assert_eq!(hoj_status_to_hydro(7), Some(4));
-    assert_eq!(hoj_status_to_hydro(8), Some(5));
-    assert_eq!(hoj_status_to_hydro(9), Some(6));
-    assert_eq!(hoj_status_to_hydro(10), Some(8));
-    assert_eq!(hoj_status_to_hydro(15), Some(10));
+    // HOJ 码 → Hydro 码（HOJ 码表含负数，见 adapter/hoj/types.rs::map_status）
+    assert_eq!(hoj_status_to_hydro(5), Some(0)); // Pending → WAITING
+    assert_eq!(hoj_status_to_hydro(6), Some(21)); // Compiling → COMPILING
+    assert_eq!(hoj_status_to_hydro(7), Some(20)); // Judging → JUDGING
+    assert_eq!(hoj_status_to_hydro(9), Some(0)); // Submitting → WAITING
+    assert_eq!(hoj_status_to_hydro(0), Some(1)); // AC → ACCEPTED
+    assert_eq!(hoj_status_to_hydro(-1), Some(2)); // WA → WRONG_ANSWER
+    assert_eq!(hoj_status_to_hydro(1), Some(3)); // TLE → TIME_LIMIT_EXCEEDED
+    assert_eq!(hoj_status_to_hydro(2), Some(4)); // MLE → MEMORY_LIMIT_EXCEEDED
+    assert_eq!(hoj_status_to_hydro(3), Some(6)); // RE → RUNTIME_ERROR
+    assert_eq!(hoj_status_to_hydro(-2), Some(7)); // CE → COMPILE_ERROR
+    assert_eq!(hoj_status_to_hydro(-3), Some(31)); // PE → FORMAT_ERROR
+    assert_eq!(hoj_status_to_hydro(4), Some(8)); // SE → SYSTEM_ERROR
+    assert_eq!(hoj_status_to_hydro(-4), Some(9)); // Cancelled → CANCELED
+    assert_eq!(hoj_status_to_hydro(15), Some(10)); // No Status → ETC
 }
 
 #[test]
 fn hoj_status_to_hydro_rejects_states_hydro_lacks() {
-    // PE/RJE/SF/PA/FREQ 在 Hydro 码表中不存在：必须返回 None 让调用方明确报错，
+    // Not Submitted(-10) / PA(8) 在 Hydro 码表中不存在：必须返回 None 让调用方明确报错，
     // 而不是静默忽略筛选条件
-    for code in [3, 11, 12, 13, 14, 99] {
+    for code in [-10, 8, 99] {
         assert_eq!(hoj_status_to_hydro(code), None, "HOJ {} 不应有映射", code);
     }
 }

@@ -26,6 +26,52 @@ function isPageHidden(): boolean {
   return typeof document !== 'undefined' && document.hidden
 }
 
+/// 窗口重新可见/聚焦时的补拉回调（模块作用域副作用句柄，与 poller 同款约定）
+let visibilityRefresh: (() => void) | null = null
+
+/// `visibilitychange` 与 `focus` 都可能触发，用时间窗去重，避免一次切回打两次请求
+const VISIBILITY_REFRESH_DEDUPE_MS = 1_000
+let lastVisibilityRefreshAt = 0
+
+/**
+ * 注册「窗口重新可见/聚焦 → 立即刷新」监听。
+ *
+ * 桌面客户端里「切回来」是最高频动作，而 `document.hidden` 从 true 变回 false
+ * 时轮询器只是恢复排程，不会补发一次 —— 选手因此要等一整个周期才可能看到红点。
+ * 事件触发点有两个（`visibilitychange` 与 `focus`），浏览器可能都触发，故去重。
+ */
+function installVisibilityRefresh(refresh: () => void): void {
+  removeVisibilityRefresh()
+  visibilityRefresh = () => {
+    if (isPageHidden()) return
+    const now = Date.now()
+    if (now - lastVisibilityRefreshAt < VISIBILITY_REFRESH_DEDUPE_MS) return
+    lastVisibilityRefreshAt = now
+    refresh()
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', visibilityRefresh)
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', visibilityRefresh)
+  }
+}
+
+/// 注销可见性补拉监听（幂等）
+function removeVisibilityRefresh(): void {
+  if (!visibilityRefresh) return
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', visibilityRefresh)
+  }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('focus', visibilityRefresh)
+  }
+  visibilityRefresh = null
+  // 复位去重时间戳：下一轮 startLive 的第一次可见性事件必须立即生效，
+  // 不能被上一轮留下的时间戳挡住（也避免模块级状态在测试间泄漏）
+  lastVisibilityRefreshAt = 0
+}
+
 /**
  * 公告 store — 比赛公告列表 + 客户端已读状态（HOJ 无已读概念，本地持久化）。
  *
@@ -48,6 +94,13 @@ export const useAnnouncementStore = defineStore('announcement', {
 
     /// 轮询上下文（登出时随 $reset 清理）
     contestId: '',
+
+    /// 公告页是否正处于「用户正在看」的状态（由 AnnouncementsView 挂载/卸载维护）。
+    ///
+    /// 语义：列表在屏幕上可见 = 用户已经看到 = 可以标为已读。
+    /// 没有它，用户停留在公告页期间到达的新公告会一直挂着未读 ——
+    /// 离开页面后突然冒出一个「新公告」红点，而内容其实早就看过了（假红点）。
+    isWatching: false,
   }),
 
   getters: {
@@ -89,6 +142,8 @@ export const useAnnouncementStore = defineStore('announcement', {
         this.announcements = page.records
         this.total = page.total
         this.readIds = [...readIds]
+        // 用户正在看公告页 → 刚落地的这批就是「屏幕上已有的」，标为已读
+        if (this.isWatching && !isPageHidden()) void this.markAllRead()
       } catch (e) {
         this.error = errorMessage(e, '加载公告失败')
         throw e
@@ -108,7 +163,10 @@ export const useAnnouncementStore = defineStore('announcement', {
     },
 
     /**
-     * 把当前列表中所有未读公告标记为已读（进入公告页时调用）。
+     * 把当前列表中所有未读公告标记为已读（进入公告页 / 公告页可见时刷新后调用）。
+     *
+     * **页面不可见时不标记**：用户切走了/最小化了，并没有「看到」这批公告，
+     * 标记已读等于把红点吞掉 —— 等他切回来时既没有红点、也没意识到有新内容。
      *
      * 先乐观更新本地（红点立即消失），再持久化；持久化失败回滚本地集合并记录 ——
      * 宁可红点复发（下次进入页面会再次尝试），不可让「已读」只存在于内存造成误导。
@@ -116,6 +174,8 @@ export const useAnnouncementStore = defineStore('announcement', {
     async markAllRead() {
       const contestId = this.contestId
       if (!contestId) return
+      // 不可见 = 没看到，不标记（见方法注释）
+      if (isPageHidden()) return
       const read = new Set(this.readIds)
       const unreadIds = this.announcements.filter((a) => !read.has(a.id)).map((a) => a.id)
       if (unreadIds.length === 0) return
@@ -137,6 +197,11 @@ export const useAnnouncementStore = defineStore('announcement', {
      * 由外壳 `ContestLayout` 在比赛数据就绪后启动，使红点在全部页面保持鲜活；
      * 首次数据由本方法立即拉取一次（红点不应等一个轮询周期才出现）。
      *
+     * **窗口重新可见/聚焦时立即补拉一次**：客户端常态是「切出去看题解/记笔记，
+     * 再切回来」。只靠 60s 节拍意味着切回来最多要等 70s 才可能看到红点 ——
+     * 实测这被选手直接感知为「红点不出现，必须手动刷新页面」。补拉是幂等的
+     * （`refresh` 内部吞错），且不改变 60s 的稳态节拍。
+     *
      * @param isPaused 额外暂停判据（比赛已结束等）
      */
     startLive(contestId: string, isPaused?: () => boolean) {
@@ -154,6 +219,10 @@ export const useAnnouncementStore = defineStore('announcement', {
       })
       poller.start()
       this.isLive = true
+      installVisibilityRefresh(() => {
+        if (isPaused?.() ?? false) return
+        void this.refresh()
+      })
     },
 
     /** 停止实时刷新（离开工作台、比赛结束、登出时调用） */
@@ -161,6 +230,7 @@ export const useAnnouncementStore = defineStore('announcement', {
       poller?.stop()
       poller = null
       this.isLive = false
+      removeVisibilityRefresh()
     },
   },
 })

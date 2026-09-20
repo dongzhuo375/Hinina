@@ -121,14 +121,13 @@ async function bootstrap(): Promise<void> {
   const contestId = contest.value?.id
   if (!contestId) return
   try {
+    // 产品决策：进入公告页即把当前列表全部标记已读 —— 由 store.load 在
+    // `isWatching` 为真时自动完成（含停留期间轮询落地的新公告），此处不再重复调用，
+    // 避免「加载后标记」与「刷新后标记」两条路径各自维护导致语义漂移
     await announcementStore.load(contestId)
   } catch {
     // 失败原因已写入 announcementStore.error
-    return
   }
-  if (!alive) return
-  // 产品决策：进入公告页即把当前列表全部标记已读，ActivityBar 红点随之消失
-  void announcementStore.markAllRead()
 }
 
 async function retryAnnouncements(): Promise<void> {
@@ -149,6 +148,8 @@ function onRefresh() {
 }
 
 onMounted(async () => {
+  // 先声明「用户正在看」：load 会据此把落地的那批公告标为已读
+  announcementStore.isWatching = true
   baseUrl.value = await configService.getOjBaseUrl()
   if (!alive) return
   await bootstrap()
@@ -160,6 +161,8 @@ onMounted(async () => {
 // 轮询由外壳 ContestLayout 统一持有，本视图卸载时只标记失效、不停止轮询
 onUnmounted(() => {
   alive = false
+  // 离开页面即「不再看着」：此后到达的新公告必须保持未读，红点才会亮
+  announcementStore.isWatching = false
 })
 </script>
 

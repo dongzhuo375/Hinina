@@ -12,7 +12,11 @@ const DEFAULT_SUBMISSION_LIMIT: i64 = 20;
 
 /// 提交代码到 OJ。
 ///
-/// 前端 invoke 签名: `submit_code`({ contestId, problemId, language, sourceCode })
+/// 前端 invoke 签名: `submit_code`({ contestId, problemId, displayId, language, sourceCode })
+///
+/// `problemId` 是题目真实 ID（工作区隔离与状态查询的键），`displayId` 是比赛内
+/// 展示题号（如 `"A"`）—— HOJ 的提交接口只认后者，传错会得到 HTTP 500
+/// （详见 `core::provider::submission::SubmissionProvider::submit`）。
 ///
 /// 返回 `submissionId` 字符串，前端可用 `get_judgement` 轮询结果。
 /// 发布 `SubmissionEvent::Created`。
@@ -21,12 +25,19 @@ pub async fn submit_code(
     ctx: State<'_, AppContext>,
     contest_id: String,
     problem_id: String,
+    display_id: String,
     language: String,
     source_code: String,
 ) -> AppResult<String> {
-    info!(contest_id = %contest_id, problem_id = %problem_id, language = %language, "Command: 提交代码");
+    info!(
+        contest_id = %contest_id,
+        problem_id = %problem_id,
+        display_id = %display_id,
+        language = %language,
+        "Command: 提交代码"
+    );
     ctx.submission
-        .submit(&contest_id, &problem_id, &language, &source_code)
+        .submit(&contest_id, &problem_id, &display_id, &language, &source_code)
         .await
 }
 

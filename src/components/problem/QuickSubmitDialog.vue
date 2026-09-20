@@ -204,6 +204,7 @@ async function doSubmit() {
     submittedId.value = await submissionStore.submitCode(
       contestId,
       props.problem.problemId,
+      props.problem.displayId,
       language.value,
       code.value,
     )

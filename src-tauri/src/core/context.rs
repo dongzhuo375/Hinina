@@ -160,6 +160,7 @@ impl AppContext {
         let submission = Arc::new(SubmissionService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&event_bus),
+            Arc::clone(&storage),
         ));
 
         // 8. 装配

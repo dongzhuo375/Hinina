@@ -49,6 +49,18 @@ const latest = computed(() => {
   return null
 })
 
+/// 本地提交的失败原因首行（CE 编译错误 / SE / SF）。
+///
+/// 轮询把错误信息一并带回（`JudgementResult.errorMessage`），此处只取首行做条内提示
+/// —— 完整多行编译错误在提交详情页展示。没有它，选手在解题页只看到「Compile Error」
+/// 四个字，必须点进详情页才知道错在哪。
+const failureDetail = computed(() => {
+  const raw = latest.value?.errorMessage
+  if (!raw) return null
+  const firstLine = raw.split('\n').find((line) => line.trim() !== '') ?? raw
+  return firstLine.trim() || null
+})
+
 // ── 服务端题目提交摘要（最新记录 pill + 提交记录计数） ──
 
 const summary = ref<{ latest: SubmissionRecord | null; total: number } | null>(null)
@@ -312,6 +324,14 @@ function goDetail(submitId: string) {
           <span>最新记录: #{{ latest.id }} {{ statusLabel(latest.status) }}</span>
           <span v-if="timeLabel" class="font-mono opacity-70">({{ timeLabel }})</span>
         </div>
+        <!-- 本地提交的失败原因（CE 编译错误等，轮询回填；完整内容在详情页） -->
+        <span
+          v-if="failureDetail"
+          class="max-w-[420px] truncate font-mono text-xs text-[var(--color-error)]"
+          :title="latest?.errorMessage ?? ''"
+        >
+          {{ failureDetail }}
+        </span>
         <!-- 提交失败信息（store.error 已由 submitCode/轮询写入） -->
         <span
           v-if="submissionStore.error"

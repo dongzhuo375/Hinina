@@ -10,7 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `SubmissionService.submitCode` | `(contestId, problemId, language, sourceCode) => Promise<string>` | 提交代码，返回 submissionId |
+| `SubmissionService.submitCode` | `(contestId, problemId, displayId, language, sourceCode) => Promise<string>` | 提交代码，返回 submissionId。**纯透传**，但 `problemId`（真实 pid）与 `displayId`（比赛内题号 "A"）必须都传 —— 各 OJ 认的不是同一个标识，见 `bridge/submission.bridge.md` |
 | `SubmissionService.pollJudgement` | `(submissionId) => Promise<JudgementResult>` | 查询一次评测结果（轮询节奏由 submissionStore 编排） |
 | `SubmissionService.listContestSubmissions` | `(query: SubmissionListQuery) => Promise<SubmissionPage>` | 本人提交历史（分页；onlyMine 后端强制） |
 | `SubmissionService.getSubmissionDetail` | `(submissionId) => Promise<SubmissionDetail>` | 提交详情（含源代码 / CE 错误信息） |

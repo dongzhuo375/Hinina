@@ -20,7 +20,7 @@
   - `async fn load_contest_meta(&self, contest_id) -> AppResult<Contest>`（私有） — 比赛元信息：内存 → 磁盘 → 网络，命中即回填上游缓存；**只缓存成功结果**，Provider 错误（含 401/403）原样上抛
   - `async fn get_rank(&self, contest_id, query: &RankQuery) -> AppResult<ContestRankPage>` — 获取比赛排行榜（分页），经 registry 调 `ContestProvider::get_contest_rank`。**不做缓存**：HOJ 内榜每次实时计算（`doc/HOJ/HOJ-Contest-Rank-API.md` §4），缓存反而会给出过期名次；轮询节奏由前端控制（≥10s 且加抖动错峰、后台暂停）
   - `async fn load_contest_with_problems(&self, contest_id, password) -> AppResult<ContestBundle>` — 一次性获取比赛详情（走元信息缓存）+ 题目列表（**每次实时**）+ 自动选中（阶段 7 单比赛模式入口）
-  - `async fn list_announcements(&self, contest_id, current_page: i64, limit: i64) -> AppResult<AnnouncementPage>` — 获取比赛公告（分页），经 registry 调 `ContestProvider::list_announcements`。**不做缓存**：公告可能包含裁判组临场发布的规则变更，必须每次拉取最新数据
+  - `async fn list_announcements(&self, contest_id, current_page: i64, limit: i64) -> AppResult<AnnouncementPage>` — 获取比赛公告（分页），经 registry 调 `ContestProvider::list_announcements`。**不做缓存**：公告可能包含裁判组临场发布的规则变更，必须每次拉取最新数据。每次拉取都会与上次结果比对，**出现新公告 ID 时发布 `ContestEvent::AnnouncementsPublished { contest_id, new_ids }`**（红点提醒属状态变更，由 `main.rs` 的事件桥转发到前端；**首次拉取只建基线不发事件** —— 没有基线可比，发了等于给每位选手一开机就亮红点）
   - `fn get_read_announcement_ids(&self, contest_id, uid) -> AppResult<Vec<String>>` — 读取某用户在某比赛下已读的公告 ID 列表。文件不存在视为「从未读过」；文件损坏只 `warn!` 并降级为空列表 —— 已读状态是纯 UI 便利特性，任何情况下都不应阻断公告展示
   - `fn mark_announcements_read(&self, contest_id, uid, ids: &[String]) -> AppResult<()>` — 标记公告为已读：与既有记录合并去重（保留首次出现顺序）后落盘；旧状态损坏时从空列表重建
   - `fn read_state_path(contest_id, uid) -> AppResult<String>`（私有） — 构造已读状态文件路径 `announcements_read/{cid}_{uid}.json`。cid / uid 来自会话与前端入参，**必须拒绝路径分隔符**（空串、`/`、`\`、`:`、`..` 均报 `AppError::Io`），防止写出存储根目录之外的文件
@@ -49,7 +49,7 @@
 - **load_contest_meta(contest_id)**：内存缓存命中 → 直接返回；否则磁盘缓存（`read` 按 `fetchedAt` 判 TTL）命中 → 回填内存并返回；仍未命中 → `ContestProvider::get_contest()`（失败 `e.context("获取比赛详情失败")`）→ **成功才**回写内存 + 磁盘
 - **get_rank(contest_id, query)**：`registry.current_contest()` → `ContestProvider::get_contest_rank()` → 失败先 `warn!` 再 `e.context("获取比赛榜单失败")` 上抛（**变体原样穿透**）；成功直接透传 `ContestRankPage`（records 前置副本的去重与真实人数推导由前端处理，Service 不加工）
 - **load_contest_with_problems(id, password)**：`load_contest_meta()` 获取详情（命中缓存时零请求）→（私有赛校验密码）→ `list_contest_problems()` 获取题目（**每次实时**，失败 `e.context("获取比赛题目列表失败")`）→ `select_contest()` 自动选中 → 返回 `ContestBundle { contest, problems }`
-- **list_announcements(contest_id, page, limit)**：`registry.current_contest()` → `ContestProvider::list_announcements()` → 失败先 `warn!` 再 `e.context("获取比赛公告")` 上抛（**变体原样穿透**）；成功直接透传 `AnnouncementPage`，不缓存
+- **list_announcements(contest_id, page, limit)**：`registry.current_contest()` → `ContestProvider::list_announcements()` → 失败先 `warn!` 再 `e.context("获取比赛公告")` 上抛（**变体原样穿透**）；成功先 `publish_new_announcements(contest_id, &page)` 再透传 `AnnouncementPage`，不缓存
 - **get_read_announcement_ids(cid, uid)**：`read_state_path()` 校验并拼路径 → `storage.read_to_string()` 失败（不存在/读取错误）按未读返回空列表 → JSON 解析失败 `warn!` 后降级空列表
 - **mark_announcements_read(cid, uid, ids)**：读既有已读列表（损坏时为空）→ 合并去重（保留首次出现顺序）→ `serde_json::to_string_pretty` 序列化（失败归 `AppError::Serialization`）→ `storage.write_string()` 落盘（失败 `e.context("写入公告已读状态失败")`）
 
@@ -57,6 +57,7 @@
 - **错误处理约定：用 `context()` 而不是重新包装**。向上传播 Provider 错误一律 `e.context("环节名")`（保留变体、仍补环节名、`warn!` 日志保留），**禁止** `AppError::Contest(format!("…: {}", e))` —— 那会把 401 改写成 `Contest` 变体，而变体是前端 `isAuthError` 分流与 `stores/sessionGuard.ts` 会话失效兜底的**唯一依据**（见 `core/error.md` 与 `doc/Architecture.md`「错误变体是分流依据，后端不得改写」）。改写后的现场表现：token 过期时榜单静默 stale、提交只弹一条错误文案、选手不被带回登录页，反复重试全部失败。
 - **`get_rank` 是全场最高频的认证调用**（前端每 10s 轮询一次），因此它的变体穿透最关键：一旦改写，会话失效兜底链路等于整场失效。`list_contests`（登录页匿名简报）与 `load_contest_with_problems`（进场链路，外壳 `loadContest` 走的就是它）同样必须保留 `Auth` 变体，前端才能区分「连不上」与「凭证无效」。
 - **公告不缓存**：与比赛列表（TTL 缓存）不同，公告可能包含裁判组临场发布的规则变更（澄清、封榜时间调整），拿到过期公告的代价远高于一次额外请求，故每次拉取最新数据，刷新节奏由前端控制。
+- **新公告检测（`announcement_baseline: Arc<RwLock<HashMap<contest_id, Vec<String>>>>` + `publish_new_announcements`）**：公告是外部状态（裁判组在服务端发布），客户端唯一能感知的方式仍是拉取，但「有新公告」这件事必须走事件而不是让各视图各自比对列表 —— 红点提醒属状态变更，按项目约定归 EventBus（查询走 Service、状态变更走 EventBus）。三条不变量：① **首次拉取只建基线不发事件**（没有基线可比，发了等于给每位选手一开机就亮红点）；② **基线按比赛隔离**（同一进程内先看 1011 再看 1012 是常态，只留一份会让切回旧比赛时把既有公告误判成新公告 —— 红点误报）；③ **失败时保留旧基线**（拉取失败不推进基线，否则失败期间发布的公告会被永久漏报）。锁中毒（持有者 panic）时跳过检测而不让公告查询失败 —— 公告本身已经拿到了，只是红点提醒失效。事件由 `main.rs` 的 `install_announcement_event_bridge` 转发到前端 `announcements-published`。
 - **比赛元信息缓存（内存 + 磁盘，TTL 120s）**：题目总览页每 30s±5s 轮询 `load_configured_contest`，其中 `get_contest`（标题/时间窗/封榜设置/allow_end_submit）几乎不变、`list_contest_problems`（含 ac/total）才需要新鲜 —— 只缓存前者可把该轮询的请求量减半，且**不牺牲任何计数新鲜度**。磁盘层带 `fetchedAt`，重启后继续计时（不会「重启即永久命中」）；`refresh()` 同时清两层，保证「强制刷新」拿到的是服务端真值。**缓存键带 OJ 维度**（`{oj}/{cid}`）：跨 OJ 同 cid 在结构上不可能互相命中，因此构造时订阅 `OJSwitched` 只是让当前会话回到干净状态 —— 内存段同步清、**磁盘段延迟清**（`subscribe_deferred`，I/O 不阻塞 `switch_oj`）。**错误永不入缓存**：首次 401 不得写缓存，否则会话恢复后仍返回旧错误。
 - **已读状态永远不阻断公告展示**：读取路径上「文件不存在」「读取失败」「JSON 损坏」三种情况全部降级为空列表（损坏时 `warn!` 留痕），只有路径非法（分隔符注入）才报错 —— 已读标记是纯 UI 便利特性，不值得为它牺牲公告可达性。写入路径的合并去重保证多次标记幂等。
 - **文件名净化是安全边界**：`{cid}_{uid}.json` 的两个组成部分分别来自前端入参与会话文件，`read_state_path` 拒绝空串、`/`、`\`、`:` 与 `..`，防止构造出存储根目录之外的写入路径。
@@ -71,3 +72,5 @@
 **比赛元信息缓存（内存 + 磁盘）**：二次 `load_contest_with_problems` 不再触达 `get_contest`（`meta_call_count` 为 1）而 `list_contest_problems` 仍每次实时（`problems_call_count` 为 2）；新实例共用同一临时目录时元信息命中磁盘缓存（`meta_call_count` 为 0，模拟重启）；不同 `contest_id` 互不命中（按比赛隔离）；`refresh` 后必须重新请求（两层同时清）；首次 401 不入缓存（恢复后 `meta_call_count` 为 2，且变体保持 `Auth`）。
 
 **公告已读状态（客户端本地特性）**：写入-读取往返且多次标记合并去重（保留首次出现顺序）、损坏文件降级为空列表而不报错、路径含分隔符（`/`、`\`、`..` 等）被拒绝（`AppError::Io`）。
+
+**新公告检测（红点提醒的事件源）**：首次拉取只建基线不发事件、第二次多一条公告时**只发一次**且载荷只带新增 ID、列表不变时重复拉取不再发事件、基线按比赛隔离（只看过 1011 时首次看 1012 不误报）、拉取失败保留旧基线（恢复后仍能报出失败期间新增的公告）。Stub 的 `announcements` 可中途覆盖（`set_announcements`）以模拟裁判组发布；`make_service_with_bus` 额外交出 `EventBus` 供 `collect_contest_events` 断言事件契约。

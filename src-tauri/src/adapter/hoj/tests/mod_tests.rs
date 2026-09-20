@@ -467,7 +467,7 @@ fn announcement_list_fixture_parses_and_maps() {
 #[test]
 fn announcement_null_content_and_times_degrade_to_defaults() {
     // 按文档构造，未经真实联调校正 —— P57 待联调清单
-    // 第二条公告 content / updateTime / uid 均为 null：去 null 后落默认值而不是解析失败
+    // 第二条公告 content / gmtModified / uid 均为 null：去 null 后落默认值而不是解析失败
     let resp: ApiResponse<types::PageResult<AnnouncementVO>> =
         HOJAdapter::parse_hoj_json(ANNOUNCEMENT_LIST, "http://oj/api/get-contest-announcement")
             .expect("公告夹具应能解析");
@@ -476,7 +476,7 @@ fn announcement_null_content_and_times_degrade_to_defaults() {
     assert_eq!(second.id, 9002);
     let a = HOJAdapter::into_announcement(second);
     assert_eq!(a.content, "", "content 为 null 应回退空串");
-    assert_eq!(a.updated_at, 0, "updateTime 为 null 应回退 0");
+    assert_eq!(a.updated_at, 0, "gmtModified 为 null 应回退 0");
 
     // 反向锁定：不去 null 直接解析必然失败（strip_nulls 不可省）
     assert!(
@@ -511,7 +511,7 @@ fn contest_submissions_fixture_parses_and_maps() {
     assert_eq!(r1.length, 256);
     assert_eq!(r1.submit_time, HOJAdapter::parse_time("2026-09-15T10:00:00"));
 
-    // 第二条：status=13 → PartiallyAccepted（P41：不再折算 AC），null 数值全部落 0
+    // 第二条：status=8 → PartiallyAccepted（不再折算 AC），null 数值全部落 0
     let r2 = &records[1];
     assert!(
         matches!(r2.status, JudgementStatus::PartiallyAccepted),
@@ -610,7 +610,7 @@ fn submission_detail_maps_full_entity() {
             "submission": {
                 "submitId": 12345, "pid": 1061, "displayPid": "HOJ-1061",
                 "uid": "uuid-alice", "username": "alice",
-                "submitTime": "2026-09-15T10:00:00", "status": 2,
+                "submitTime": "2026-09-15T10:00:00", "status": -2,
                 "errorMessage": "error: expected ';' before '}' token",
                 "time": null, "memory": null, "score": null,
                 "length": 256, "language": "C++",
@@ -665,11 +665,11 @@ fn submission_detail_null_code_degrades_to_empty_string() {
 
 #[test]
 fn judgement_projection_pending_passthrough_with_zeroed_metrics() {
-    // 状态码 0（等待评测）：透传 Pending 而非折叠为 Running，与
+    // 状态码 5（Pending，等待评测）：透传 Pending 而非折叠为 Running，与
     // get_submission_detail 展示一致；评测未开始，指标清零
     // （线上响应中的 null 由 parse_hoj_json 的 strip_nulls 去除，此处直接省略字段等价）
     let d: types::SubmissionDetail =
-        serde_json::from_str(r#"{ "submitId": 1, "status": 0 }"#).expect("解析失败");
+        serde_json::from_str(r#"{ "submitId": 1, "status": 5 }"#).expect("解析失败");
     let result = HOJAdapter::into_judgement_result(&d);
     assert!(matches!(result.status, JudgementStatus::Pending));
     assert_eq!(result.score, 0.0);
@@ -678,10 +678,20 @@ fn judgement_projection_pending_passthrough_with_zeroed_metrics() {
 }
 
 #[test]
-fn judgement_projection_running_passthrough() {
-    // 状态码 1（Judging）：透传 Running，轮询继续
+fn judgement_projection_submitting_is_non_terminal() {
+    // 状态码 9（Submitting）：判题机尚未接手，必须按非终态继续轮询
     let d: types::SubmissionDetail =
-        serde_json::from_str(r#"{ "submitId": 1, "status": 1 }"#).expect("解析失败");
+        serde_json::from_str(r#"{ "submitId": 1, "status": 9 }"#).expect("解析失败");
+    let result = HOJAdapter::into_judgement_result(&d);
+    assert!(matches!(result.status, JudgementStatus::Pending));
+    assert!(result.status.is_terminal() == false);
+}
+
+#[test]
+fn judgement_projection_running_passthrough() {
+    // 状态码 7（Judging）：透传 Running，轮询继续
+    let d: types::SubmissionDetail =
+        serde_json::from_str(r#"{ "submitId": 1, "status": 7 }"#).expect("解析失败");
     let result = HOJAdapter::into_judgement_result(&d);
     assert!(matches!(result.status, JudgementStatus::Running));
     assert_eq!(result.time_ms, 0);
@@ -690,15 +700,44 @@ fn judgement_projection_running_passthrough() {
 
 #[test]
 fn judgement_projection_terminal_carries_metrics() {
-    // 终态（5=AC）：携带 score/time/memory
+    // 终态（0=AC）：携带 score/time/memory
     let d: types::SubmissionDetail =
-        serde_json::from_str(r#"{ "submitId": 1, "status": 5, "time": 15, "memory": 2048, "score": 100.0 }"#)
+        serde_json::from_str(r#"{ "submitId": 1, "status": 0, "time": 15, "memory": 2048, "score": 100.0 }"#)
             .expect("解析失败");
     let result = HOJAdapter::into_judgement_result(&d);
     assert!(matches!(result.status, JudgementStatus::Accepted));
     assert_eq!(result.score, 100.0);
     assert_eq!(result.time_ms, 15);
     assert_eq!(result.memory_kb, 2048);
+}
+
+#[test]
+fn judgement_projection_carries_error_message() {
+    // 编译错误：轮询通道必须带上错误信息，否则选手只能看到「Compile Error」四个字
+    let d: types::SubmissionDetail = serde_json::from_str(
+        r#"{ "submitId": 1, "status": -2, "errorMessage": "main.cpp:3:5: error: 'x' was not declared" }"#,
+    )
+    .expect("解析失败");
+    let result = HOJAdapter::into_judgement_result(&d);
+    assert!(matches!(result.status, JudgementStatus::CompilationError));
+    assert!(result
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("was not declared"));
+}
+
+#[test]
+fn judgement_projection_filters_placeholder_error_message() {
+    // 实测：HOJ 对「非 CE/SE/SF」的状态一律回填占位文案。不过滤的话，
+    // 每一份 AC 提交的控制台条都会冒出一条假的错误信息
+    let d: types::SubmissionDetail = serde_json::from_str(
+        r#"{ "submitId": 1, "status": 0, "errorMessage": "The error message does not support viewing." }"#,
+    )
+    .expect("解析失败");
+    let result = HOJAdapter::into_judgement_result(&d);
+    assert!(matches!(result.status, JudgementStatus::Accepted));
+    assert_eq!(result.error_message, None);
 }
 
 // ── ContestVO.oiRankScoreType → Contest 实体 ──

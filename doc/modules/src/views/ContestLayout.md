@@ -44,6 +44,7 @@ onUnmounted → announcementStore.stopLive()
 - 外壳拉取与子视图兜底拉取（各视图 `ensureContest`）可能同时发生，统一经
   `contestStore.whenLoaded()` 的模块级 in-flight Promise 去重收敛为一次 IPC（P59）。
 - **公告轮询归外壳而非公告页**：未读红点徽标在所有页面可见，轮询必须与工作台同生命
-  周期；公告页自身只负责进入时 `markAllRead`。
+  周期；公告页自身只声明 `isWatching`（「用户正在看」），标记已读由 `store.load` 在
+  该标记为真且页面可见时统一完成（详见 `stores/announcementStore.md`）。
 - 设置页也放在外壳内（子路由），切换时不丢失顶栏/活动栏/状态条。
 - 分层约束：View 只 import store 与组件，不触 `@/bridge` / `@/services`（本组件仅 store）。

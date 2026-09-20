@@ -18,6 +18,9 @@ use hinina_lib::core::context::AppContext;
 /// 工作区落盘事件的前端通道名（与 `src/bridge/workspace.bridge.ts` 的监听一致）。
 const WORKSPACE_SAVED_EVENT: &str = "workspace-saved";
 
+/// 新公告事件的前端通道名（与 `src/bridge/announcement.bridge.ts` 的监听一致）。
+const ANNOUNCEMENTS_PUBLISHED_EVENT: &str = "announcements-published";
+
 /// 把工作区落盘事件桥接到 webview。
 ///
 /// 前端「已自动备份」指示必须反映**磁盘真值**，而后台 auto-save 由 Rust 触发、
@@ -58,6 +61,42 @@ fn install_workspace_event_bridge(app: &tauri::AppHandle) {
         .subscribe(EventCategory::Workspace, handler);
 }
 
+/// 把「检测到新公告」事件桥接到 webview。
+///
+/// 公告红点必须**由事件驱动**：前端虽仍按 60s 节拍拉取公告，但「有新公告」
+/// 这一状态变更走 EventBus（项目约定：查询走 Service、状态变更走 EventBus），
+/// 由本桥转发后前端即时点亮红点，而不是等下一次列表 diff。
+///
+/// 只转发 `AnnouncementsPublished`；`ListLoaded` / `Selected` 等前端是发起方，无需回环。
+fn install_announcement_event_bridge(app: &tauri::AppHandle) {
+    use std::sync::Arc;
+
+    use tauri::{Emitter, Manager};
+
+    use hinina_lib::core::event::app_event::{AppEvent, ContestEvent};
+    use hinina_lib::core::event::event_bus::EventHandler;
+    use hinina_lib::core::event::event_category::EventCategory;
+
+    let ctx = app.state::<AppContext>();
+    let handle = app.clone();
+
+    let handler: EventHandler = Arc::new(move |event: &AppEvent| {
+        let AppEvent::Contest(ContestEvent::AnnouncementsPublished {
+            contest_id,
+            new_ids,
+        }) = event
+        else {
+            return;
+        };
+        let payload = serde_json::json!({ "contestId": contest_id, "newIds": new_ids });
+        if let Err(e) = handle.emit(ANNOUNCEMENTS_PUBLISHED_EVENT, payload) {
+            tracing::warn!(error = %e, "新公告事件下发前端失败");
+        }
+    });
+
+    ctx.event_bus.subscribe(EventCategory::Contest, handler);
+}
+
 fn main() {
     // 运行时初始化，阻塞式
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
@@ -73,6 +112,7 @@ fn main() {
         .manage(ctx)
         .setup(|app| {
             install_workspace_event_bridge(app.handle());
+            install_announcement_event_bridge(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -28,7 +28,7 @@
 ```
 route.path 前缀匹配 → activeKey → 对应 router-link 高亮 + 左缘 3px 紫色指示条
 announcementStore.unreadCount > 0 且不在公告页 → 公告图标角红点
-  （轮询由外壳 ContestLayout 编排，红点在全部页面保持鲜活；进入公告页 markAllRead 后消失）
+  （轮询由外壳 ContestLayout 编排，红点在全部页面保持鲜活；公告页可见时列表被标记已读，红点随之消失）
 ```
 
 设计要点：

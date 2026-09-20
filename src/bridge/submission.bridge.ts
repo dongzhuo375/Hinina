@@ -7,14 +7,30 @@ import type {
 } from '@/types/submission'
 import { ipcInvoke } from '@/bridge'
 
-/** 提交代码，返回 submissionId */
+/**
+ * 提交代码，返回 submissionId。
+ *
+ * `problemId` 与 `displayId` 是同一道题的两个标识，必须都传：
+ * - `problemId`：题目真实 ID（工作区隔离、状态查询的键）；
+ * - `displayId`：比赛内展示题号（如 "A"）。
+ *
+ * HOJ 的提交接口收的是**展示题号**：传数字 pid 会让服务端查不到 contest_problem
+ * 而抛 NPE，返回 HTTP 500（实测）。Hydro 则收真实 ID —— 由 Adapter 各取所需。
+ */
 export async function submitCode(
   contestId: string,
   problemId: string,
+  displayId: string,
   language: string,
   sourceCode: string,
 ): Promise<string> {
-  return ipcInvoke<string>('submit_code', { contestId, problemId, language, sourceCode })
+  return ipcInvoke<string>('submit_code', {
+    contestId,
+    problemId,
+    displayId,
+    language,
+    sourceCode,
+  })
 }
 
 /** 获取评测结果 */

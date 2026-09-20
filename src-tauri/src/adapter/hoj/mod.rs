@@ -356,7 +356,7 @@ impl HOJAdapter {
             length: d.length.max(0) as u64,
             language: d.language,
             code: d.code.unwrap_or_default(),
-            error_message: d.error_message,
+            error_message: types::normalize_error_message(d.error_message),
             judger: d.judger,
             oi_rank_score: d.oi_rank_score,
         }
@@ -364,16 +364,19 @@ impl HOJAdapter {
 
     /// 提交详情 DTO → 轮询投影（`get_judgement` 用，纯函数便于测试）。
     ///
-    /// 非终态原样透传 `map_status` 结果（0→Pending、1→Running），指标清零；
-    /// 终态携带 score/time/memory。
+    /// 非终态原样透传 `map_status` 结果，指标清零；终态携带 score/time/memory。
+    /// 错误信息在两条路径都带上：CE/SE/SF 的错误是选手判断「为什么挂了」的唯一线索，
+    /// 而轮询正是选手唯一的自动感知通道（占位文案已由 normalize_error_message 过滤）。
     fn into_judgement_result(d: &types::SubmissionDetail) -> JudgementResult {
         let status = map_status(d.status);
+        let error_message = types::normalize_error_message(d.error_message.clone());
         if !types::is_terminal_status(d.status) {
             return JudgementResult {
                 status,
                 score: 0.0,
                 time_ms: 0,
                 memory_kb: 0,
+                error_message,
             };
         }
         JudgementResult {
@@ -381,6 +384,7 @@ impl HOJAdapter {
             score: d.score.unwrap_or(0.0),
             time_ms: d.time as u64,
             memory_kb: d.memory as u64,
+            error_message,
         }
     }
 
@@ -904,7 +908,10 @@ impl ProblemProvider for HOJAdapter {
         let url = self.api_url("/get-user-problem-status");
         let body = UserProblemStatusDTO {
             pid_list: problem_ids.to_vec(),
-            is_contest_problem_list: false,
+            // 必须是 true：false 时服务端只统计「非比赛提交」，比赛内的提交一律不计，
+            // 结果是选手明明 AC 了却显示「未提交」（实测 1012：false→-10，true→0）。
+            // 本 Provider 只在比赛上下文使用，故恒为 true。
+            is_contest_problem_list: true,
             cid: Self::parse_cid(contest_id)?,
             gid: None,
             contains_end: false,
@@ -919,9 +926,13 @@ impl ProblemProvider for HOJAdapter {
             AppError::Problem(format!("HOJ user problem status 失败: {}", msg))
         })?;
 
+        // 服务端回的是 HOJ 原始评测状态码（-10/-1/0/…），先取值再归一到 0/1/2 契约
         let statuses = raw
             .into_iter()
-            .map(|(pid, value)| (pid, types::coerce_problem_status(&value)))
+            .map(|(pid, value)| {
+                let code = types::extract_problem_status_code(&value);
+                (pid, code.map(types::normalize_problem_status).unwrap_or(0))
+            })
             .collect();
 
         debug!(contest_id = contest_id, "HOJ 用户题目状态已获取");
@@ -937,6 +948,7 @@ impl SubmissionProvider for HOJAdapter {
         &self,
         contest_id: &str,
         problem_id: &str,
+        display_id: &str,
         language: &str,
         source_code: &str,
     ) -> AppResult<String> {
@@ -945,8 +957,12 @@ impl SubmissionProvider for HOJAdapter {
         self.require_token()?;
 
         let cid: i64 = Self::parse_cid(contest_id)?;
+        // 比赛提交的 pid 必须是**比赛内展示题号**（"A"）：服务端用它查
+        // contest_problem.display_id，查不到会 NPE → HTTP 500。display_id 缺失时
+        // 才退回 problem_id（非比赛场景两者同源）。
+        let pid = types::submit_pid(problem_id, display_id);
         let body = SubmitRequest {
-            pid: problem_id.to_string(),
+            pid,
             language: language.to_string(),
             code: source_code.to_string(),
             cid,

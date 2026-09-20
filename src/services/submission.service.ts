@@ -13,14 +13,18 @@ import * as submissionBridge from '@/bridge/submission.bridge'
 export class SubmissionService {
   /**
    * 提交代码，返回 submissionId。
+   *
+   * `problemId`（真实 ID）与 `displayId`（比赛内题号）必须都传 ——
+   * 各 OJ 认的不是同一个标识，详见 `bridge/submission.bridge.submitCode`。
    */
   async submitCode(
     contestId: string,
     problemId: string,
+    displayId: string,
     language: string,
     sourceCode: string,
   ): Promise<string> {
-    return submissionBridge.submitCode(contestId, problemId, language, sourceCode)
+    return submissionBridge.submitCode(contestId, problemId, displayId, language, sourceCode)
   }
 
   /**

@@ -243,9 +243,17 @@ async function handleSubmit() {
   const contestId = contestStore.contest?.id
   const problem = problemStore.currentProblem
   if (!contestId || !problem || submissionStore.isSubmitting) return
+  // displayId 取路由参数（比赛内题号 "A"）—— HOJ 提交接口认的是它而不是数字 pid
+  const displayId = String(route.params.displayId ?? '')
   try {
     // 轮询由 store 在提交成功后自动启动（终态或超时停止），此处不重复实现
-    await submissionStore.submitCode(contestId, problem.id, workspaceStore.language, workspaceStore.code)
+    await submissionStore.submitCode(
+      contestId,
+      problem.id,
+      displayId,
+      workspaceStore.language,
+      workspaceStore.code,
+    )
   } catch {
     // 失败原因已由 store 写入 submissionStore.error，EditorConsoleBar 负责展示
   }

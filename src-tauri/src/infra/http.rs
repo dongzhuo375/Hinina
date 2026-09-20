@@ -16,8 +16,10 @@ use crate::core::error::AppResult;
 /// （HOJ 的 JWT 走 `Authorization` 头、Hydro 走 Cookie 会话、有的 OJ 还要
 /// CSRF 令牌）—— 认证方式是 Adapter 层概念，infra 不做任何假设。
 ///
-/// **两组变体，按「是否需要读非 2xx 的响应体」选**：
-/// - `*_with_headers`：非 2xx 直接映射为 `AppError`（401 → `Auth`），响应体丢弃；
+/// **两组变体，按「是否需要自己读非 2xx 的响应体」选**：
+/// - `*_with_headers`：非 2xx 直接映射为 `AppError`（401 → `Auth`），
+///   **并把响应体摘录附进错误信息**（见 `read_error_excerpt`）—— 排查「服务端到底
+///   说了什么」全靠它；
 /// - `*_raw`：任意状态码都返回 `(status, headers, body)`，**不做状态码映射** ——
 ///   供把错误信息放在响应体里的 OJ 使用（Hydro 的 `{"error":{…}}` 是用户可见
 ///   文案的唯一来源），代价是调用方需自行映射 401 → `Auth`。
@@ -49,6 +51,51 @@ fn status_error(url: &str, status: reqwest::StatusCode) -> crate::core::error::A
     if status == reqwest::StatusCode::UNAUTHORIZED {
         return crate::core::error::AppError::Auth(msg);
     }
+    crate::core::error::AppError::Network(msg)
+}
+
+/// 错误响应体摘录的最大字符数。
+const ERROR_BODY_EXCERPT_LIMIT: usize = 300;
+
+/// 读取非 2xx 响应的响应体，压成单行并截断，供错误信息附带。
+///
+/// **存在理由**：许多 OJ 把「为什么失败」放在响应体里（HOJ 的 500 会带
+/// `{"status":500,"msg":"…"}`，Hydro 带 `{"error":{…}}`）。非 raw 变体此前直接丢弃
+/// 响应体，调用方只能拿到一句 `HTTP 500 Internal Server Error` —— 实测排查 HOJ
+/// 提交失败时，日志里十条一模一样的「HTTP 500」，完全看不出服务端说了什么。
+///
+/// 读取失败（连接中断等）降级为空串：错误信息本身不该因为「读错误信息失败」而丢失。
+async fn read_error_excerpt(response: reqwest::Response) -> String {
+    let Ok(text) = response.text().await else {
+        return String::new();
+    };
+    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.chars().count() <= ERROR_BODY_EXCERPT_LIMIT {
+        return one_line;
+    }
+    let truncated: String = one_line.chars().take(ERROR_BODY_EXCERPT_LIMIT).collect();
+    format!("{}…", truncated)
+}
+
+/// 带响应体摘录的状态码错误。
+///
+/// **401 不附带响应体**：该变体是前端 `sessionGuard` 的判据，且服务端在 401 响应里
+/// 可能回显请求凭证 —— 认证失败的原因由 HTTP 语义本身说明，无需正文。
+fn status_error_with_body(
+    url: &str,
+    status: reqwest::StatusCode,
+    excerpt: &str,
+) -> crate::core::error::AppError {
+    if status == reqwest::StatusCode::UNAUTHORIZED || excerpt.is_empty() {
+        return status_error(url, status);
+    }
+    let msg = format!(
+        "HTTP {} {}: {} | {}",
+        status.as_u16(),
+        status.canonical_reason().unwrap_or(""),
+        url,
+        excerpt
+    );
     crate::core::error::AppError::Network(msg)
 }
 
@@ -167,7 +214,7 @@ impl HttpClient {
     ///
     /// `headers` 语义同 [`HttpClient::get_text_with_headers`]。
     /// POST 为非幂等方法，不执行自动重试。
-    /// 对 4xx/5xx 错误直接返回 `AppError::Network`（含状态码）。
+    /// 对 4xx/5xx 错误直接返回 `AppError::Network`（含状态码与响应体摘录）。
     pub async fn post_text_with_headers<B: Serialize>(
         &self,
         url: &str,
@@ -179,7 +226,9 @@ impl HttpClient {
             crate::core::error::AppError::Network(format!("POST 请求失败 {}: {}", url, e))
         })?;
         if !response.status().is_success() {
-            return Err(status_error(url, response.status()));
+            let status = response.status();
+            let excerpt = read_error_excerpt(response).await;
+            return Err(status_error_with_body(url, status, &excerpt));
         }
         let response_headers = response.headers().clone();
         let text = response.text().await.map_err(|e| {
@@ -240,7 +289,10 @@ impl HttpClient {
                     let status = response.status();
                     match classify_status(status, attempt, allow_error) {
                         StatusDecision::Accept => return Ok(response),
-                        StatusDecision::Fail => return Err(status_error(url, status)),
+                        StatusDecision::Fail => {
+                            let excerpt = read_error_excerpt(response).await;
+                            return Err(status_error_with_body(url, status, &excerpt));
+                        }
                         StatusDecision::Retry => {
                             let delay = retry_delay(attempt);
                             tokio::time::sleep(delay).await;

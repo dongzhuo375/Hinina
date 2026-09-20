@@ -346,6 +346,13 @@ GET /api/get-contest-announcement?cid={cid}&limit={limit}&currentPage={currentPa
 - **认证要求**：需要认证
 - **响应数据**：分页的 `AnnouncementVO` 列表
 
+> **实测字段名**：时间字段是 **`gmtCreate` / `gmtModified`**（不是 `createTime` / `updateTime`）——
+> 按后者解析会让公告时间恒为 0（界面显示 1970）。实测响应示例：
+> `{"id":12,"title":"…","content":"…","uid":"…","username":"Drazzilb","status":0,"gmtCreate":"2026-09-19T12:42:05.000+0000","gmtModified":"…"}`
+>
+> 该接口**不做服务端缓存**，但客户端发现「有新公告」仍需自行比对 ID 基线（Hinina 在
+> `ContestService::list_announcements` 内维护按比赛隔离的基线，出现新 ID 时发布 `ContestEvent::AnnouncementsPublished`）。
+
 ---
 
 ## 4. 题目
@@ -479,7 +486,15 @@ POST /api/get-user-problem-status
 }
 ```
 
-- **响应数据**：`HashMap<Long, Object>` — key 为 pid，value 为状态对象（0=未提交，1=已AC，2=尝试过）
+- **响应数据**：`HashMap<Long, Object>` — key 为 pid（**题目真实 ID**，如 `1000`），value 为 `{ "status": <Constants.Judge 码>, "score": … }`
+
+> **两处实测要点（Hinina 侧已按此实现）**：
+> - **`isContestProblemList` 必须与查询场景一致**：比赛内查询必须是 `true`。传 `false` 时服务端只统计「非比赛提交」，
+>   比赛内的提交一律不计 —— 实测比赛 `1012` 本人已 AC 该题，`false` 返回 `{"1000":{"status":-10}}`（未提交，错），
+>   `true` 返回 `{"1000":{"status":0}}`（Accepted，对）。
+> - **`status` 是第 7 节的评测状态码，不是 0/1/2 三态**（`-10` = Not Submitted、`0` = Accepted、`-1` = WA…）。
+>   客户端需自行归一为展示用的三态。
+> - `pidList` 收的是**题目真实 ID**（`["1000"]`），传比赛内展示题号（`["A"]`）会得到 `400 Failed to parse parameter format!`。
 
 ### 4.4 获取所有题目标签
 
@@ -534,7 +549,7 @@ POST /api/submit-problem-judge
 
 ```json
 {
-  "pid": "HOJ-1001",     // 必填，题目展示ID
+  "pid": "A",            // 必填，比赛内展示题号（非比赛提交则为题目展示ID，如 "HOJ-1001"）
   "language": "C++",     // 必填，编程语言
   "code": "#include...", // 必填，代码内容
   "cid": 0,              // 必填，比赛ID（非比赛提交填 0）
@@ -543,6 +558,17 @@ POST /api/submit-problem-judge
   "isRemote": false      // 是否远程评测
 }
 ```
+
+> **`pid` 的语义随 `cid` 变化（实测踩坑点）**：
+> - `cid != 0`（比赛提交）→ `pid` 必须是**比赛内展示题号**（`"A"`）。服务端 `BeforeDispatchInitManager.initContestSubmission`
+>   拿它查 `contest_problem.display_id`，查不到会直接 `contestProblem.getId()` **NPE → HTTP 500**
+>   （实测传数字 pid `"1000"` 必 500，且服务端不留任何记录）。
+> - `cid == 0`（非比赛提交）→ `pid` 是题目展示 ID（`"HOJ-1001"`），走 `initCommonSubmission` 按 `problem_id` 查。
+>
+> 因此客户端必须同时持有题目的**真实 ID** 与**比赛内展示题号**两个标识（Hinina 的 `submit_code` 同时收 `problemId` 与 `displayId`）。
+>
+> 另注：`get-contest-problem-details` 返回的 `problemId` 字段在比赛题目上实测为占位串 `"[NULL]"`，
+> 不可当作提交用的 pid。
 
 - **响应数据**：`Judge` 对象（提交记录，核心字段如下）
 
@@ -809,30 +835,43 @@ GET /api/languages?all={all}
 
 ## 7. 评测状态码
 
-| 状态码 | 含义 | 缩写 |
-|--------|------|------|
-| 0 | Pending（等待中） | Pending |
-| 1 | Judging（评判中） | Judging |
-| 2 | Compile Error（编译错误） | CE |
-| 3 | Presentation Error（格式错误） | PE |
-| 4 | Wrong Answer（答案错误） | WA |
-| 5 | Accepted（通过） | AC |
-| 6 | Time Limit Exceeded（时间超限） | TLE |
-| 7 | Memory Limit Exceeded（内存超限） | MLE |
-| 8 | Output Limit Exceeded（输出超限） | OLE |
-| 9 | Runtime Error（运行错误） | RE |
-| 10 | System Error（系统错误） | SE |
-| 11 | Remote Judge Error（远程评测错误） | RJE |
-| 12 | Submitted Failed（提交失败） | SF |
-| 13 | Partially Accepted（部分通过，IO 题目） | PA |
-| 14 | Submit Frequent Limit Exceeded（提交过于频繁） | FREQ |
-| 15 | Unknown Error（未知错误） | UE |
+> 码表出自 HOJ `Constants.Judge`（`hoj-springboot/JudgeServer/src/main/java/top/hcode/hoj/util/Constants.java`）。
+> **注意取值域含负数，不是「0 起顺排」** —— 本节曾按「0 = Pending」整表写错，导致所有 AC 提交被显示为 Pending
+> 并无限轮询（实测：提交 `1166` 服务端 `status:0` + `time:2ms`/`memory:532KB` 是 AC）。
+
+| 状态码 | 含义 | 缩写 | 终态 |
+|--------|------|------|------|
+| -10 | Not Submitted（尚未提交过该题） | NS | ✅ |
+| -4 | Cancelled（提交被取消） | CANC | ✅ |
+| -3 | Presentation Error（格式错误） | PE | ✅ |
+| -2 | Compile Error（编译错误） | CE | ✅ |
+| -1 | Wrong Answer（答案错误） | WA | ✅ |
+| 0 | Accepted（通过） | AC | ✅ |
+| 1 | Time Limit Exceeded（时间超限） | TLE | ✅ |
+| 2 | Memory Limit Exceeded（内存超限） | MLE | ✅ |
+| 3 | Runtime Error（运行错误） | RE | ✅ |
+| 4 | System Error（系统错误） | SE | ✅ |
+| 5 | Pending（等待评测） | Pending | ❌ 需轮询 |
+| 6 | Compiling（编译中） | Compiling | ❌ 需轮询 |
+| 7 | Judging（评判中） | Judging | ❌ 需轮询 |
+| 8 | Partial Accepted（部分通过，IO 题目） | PA | ✅ |
+| 9 | Submitting（提交中，判题机尚未接手） | Submitting | ❌ 需轮询 |
+| 10 | Submitted Failed（提交失败） | SF | ✅ |
+| 15 | No Status（无状态） | — | ✅ |
 
 **分类：**
-- **终态**：CE(2), PE(3), WA(4), AC(5), TLE(6), MLE(7), OLE(8), RE(9), SE(10), RJE(11), SF(12), PA(13), FREQ(14), UE(15)
-- **非终态（需轮询）**：Pending(0), Judging(1)
+- **非终态（需轮询）**：`5 Pending` / `6 Compiling` / `7 Judging` / `9 Submitting`
+- **终态**：其余全部（含各类失败与 `15 No Status`）
 
-> **Hinina 实现要点**：提交后拿到 submitId，批量查询 `check-submissions-status` 直到非 0/1 状态。轮询建议间隔 1-2 秒。
+> **Hinina 实现要点**：
+> - `adapter/hoj/types.rs::map_status` 是本表的唯一映射点，`is_terminal_status` 的非终态集合为 `{5, 6, 7, 9}`；
+>   两张表必须等价（有测试逐码锁定）。前端 `utils/submission.ts` 的 `STATUS_META` / `STATUS_OPTIONS` /
+>   `NON_TERMINAL_STATUSES` 与 `types/submission.ts` 的 `JudgementStatus` 同源。
+> - **`-10` / `0` / 其余** 也是 `get-user-problem-status` 的返回语义（服务端回的是本表的码，而非 0/1/2 三态），
+>   Hinina 侧归一到前端契约 `0=未提交 / 1=已AC / 2=尝试过`。
+> - **错误信息占位文案**：`get-submission-detail` 对「非 CE/SE/SF」的状态一律把 `errorMessage` 覆写成
+>   `The error message does not support viewing.`（HOJ `JudgeManager.getSubmissionInfo`），
+>   Hinina 侧必须过滤，否则每份 AC 代码的详情页都会弹出一块红色「错误信息」面板。
 
 ---
 

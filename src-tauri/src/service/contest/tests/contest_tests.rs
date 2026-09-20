@@ -53,6 +53,11 @@ struct StubContestProvider {
     calls: AtomicUsize,
     meta_calls: AtomicUsize,
     problems_calls: AtomicUsize,
+    /// `list_announcements` 返回的公告集合。
+    ///
+    /// 可变是为了测试「新公告检测」：同一场比赛连续拉取两次、第二次多一条公告，
+    /// 服务必须只在那一次发布 `AnnouncementsPublished`。
+    announcements: RwLock<Vec<Announcement>>,
 }
 
 impl StubContestProvider {
@@ -62,11 +67,28 @@ impl StubContestProvider {
             calls: AtomicUsize::new(0),
             meta_calls: AtomicUsize::new(0),
             problems_calls: AtomicUsize::new(0),
+            announcements: RwLock::new(sample_announcement_page().records),
         }
     }
 
     fn set_mode(&self, mode: StubMode) {
         *self.mode.write().unwrap() = mode;
+    }
+
+    /// 覆盖公告集合（模拟裁判组新发布公告）。
+    fn set_announcements(&self, ids: &[&str]) {
+        let records = ids
+            .iter()
+            .map(|id| Announcement {
+                id: (*id).to_string(),
+                title: format!("公告 {}", id),
+                content: "<p>正文</p>".to_string(),
+                author: "admin".to_string(),
+                created_at: 1_700_000_000,
+                updated_at: 1_700_000_000,
+            })
+            .collect();
+        *self.announcements.write().unwrap() = records;
     }
 
     fn current_mode(&self) -> StubMode {
@@ -205,7 +227,16 @@ impl ContestProvider for StubContestProvider {
         _limit: i64,
     ) -> AppResult<AnnouncementPage> {
         match self.current_mode() {
-            StubMode::Ok => Ok(sample_announcement_page()),
+            StubMode::Ok => {
+                let records = self.announcements.read().unwrap().clone();
+                Ok(AnnouncementPage {
+                    total: records.len() as i64,
+                    size: 50,
+                    current: 1,
+                    pages: 1,
+                    records,
+                })
+            }
             m => Err(m.into_err("stub list_announcements")),
         }
     }
@@ -213,14 +244,20 @@ impl ContestProvider for StubContestProvider {
 
 /// 构造基于独立临时目录的 ContestService；返回服务、Stub 句柄与目录。
 fn make_service(mode: StubMode) -> (ContestService, Arc<StubContestProvider>, std::path::PathBuf) {
+    make_service_in(unique_temp_dir("contest"), mode)
+}
+
+/// 独立临时目录（每次调用一个，避免并行测试相互干扰）。
+fn unique_temp_dir(tag: &str) -> std::path::PathBuf {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "hinina-test-contest-{}-{}",
+        "hinina-test-{}-{}-{}",
+        tag,
         std::process::id(),
         SEQ.fetch_add(1, Ordering::SeqCst)
     ));
     let _ = std::fs::remove_dir_all(&dir);
-    make_service_in(dir, mode)
+    dir
 }
 
 /// 构造基于**指定目录**的 ContestService —— 磁盘缓存跨实例用例需共用同一目录。
@@ -228,6 +265,31 @@ fn make_service_in(
     dir: std::path::PathBuf,
     mode: StubMode,
 ) -> (ContestService, Arc<StubContestProvider>, std::path::PathBuf) {
+    let (service, provider, _bus, dir) = build_service_in(dir, mode);
+    (service, provider, dir)
+}
+
+/// 同 `make_service`，但把 EventBus 也交出来（断言事件发布契约）。
+fn make_service_with_bus(
+    mode: StubMode,
+) -> (
+    ContestService,
+    Arc<StubContestProvider>,
+    Arc<EventBus>,
+    std::path::PathBuf,
+) {
+    build_service_in(unique_temp_dir("contest-events"), mode)
+}
+
+fn build_service_in(
+    dir: std::path::PathBuf,
+    mode: StubMode,
+) -> (
+    ContestService,
+    Arc<StubContestProvider>,
+    Arc<EventBus>,
+    std::path::PathBuf,
+) {
     let provider = Arc::new(StubContestProvider::new(mode));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     registry.register(
@@ -237,12 +299,29 @@ fn make_service_in(
             ..Default::default()
         },
     );
+    let bus = Arc::new(EventBus::new());
     let service = ContestService::new(
         registry,
-        Arc::new(EventBus::new()),
+        Arc::clone(&bus),
         Arc::new(Storage::new(dir.clone())),
     );
-    (service, provider, dir)
+    (service, provider, bus, dir)
+}
+
+/// 订阅 Contest 类事件并收集，供事件契约断言。
+fn collect_contest_events(bus: &Arc<EventBus>) -> Arc<std::sync::Mutex<Vec<ContestEvent>>> {
+    let events: Arc<std::sync::Mutex<Vec<ContestEvent>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = Arc::clone(&events);
+    bus.subscribe(
+        EventCategory::Contest,
+        Arc::new(move |event: &AppEvent| {
+            if let AppEvent::Contest(contest) = event {
+                sink.lock().unwrap().push(contest.clone());
+            }
+        }),
+    );
+    events
 }
 
 // ── 错误变体必须穿透 Service 层 ──
@@ -367,6 +446,104 @@ fn list_announcements_returns_page_on_success() {
     assert_eq!(page.records.len(), 1);
     assert_eq!(page.records[0].id, "9001");
     assert_eq!(page.records[0].author, "admin");
+}
+
+// ── 新公告检测（红点提醒的事件源）──
+//
+// 公告红点必须由事件驱动：前端仍按 60s 节拍拉取，但「有新公告」这一状态变更
+// 走 EventBus，由 main.rs 的事件桥转发到 webview。以下锁定三个不变量。
+
+/// 从收集到的事件里筛出 AnnouncementsPublished
+fn published_ids(events: &Arc<std::sync::Mutex<Vec<ContestEvent>>>) -> Vec<Vec<String>> {
+    events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            ContestEvent::AnnouncementsPublished { new_ids, .. } => Some(new_ids.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn first_announcement_fetch_establishes_baseline_without_event() {
+    // 首次拉取没有基线可比：发事件等于一开机就给每位选手亮红点
+    let (service, _stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
+    let events = collect_contest_events(&bus);
+
+    block_on(service.list_announcements("1011", 1, 50)).expect("首次拉取应成功");
+
+    assert!(
+        published_ids(&events).is_empty(),
+        "首次拉取不应发布新公告事件，实际 {:?}",
+        published_ids(&events)
+    );
+}
+
+#[test]
+fn new_announcement_publishes_event_once() {
+    let (service, stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
+    let events = collect_contest_events(&bus);
+
+    // 建基线
+    block_on(service.list_announcements("1011", 1, 50)).expect("首次拉取应成功");
+
+    // 裁判组发布 9002
+    stub.set_announcements(&["9001", "9002"]);
+    block_on(service.list_announcements("1011", 1, 50)).expect("二次拉取应成功");
+
+    assert_eq!(
+        published_ids(&events),
+        vec![vec!["9002".to_string()]],
+        "应且仅应发布一次新公告事件，且只带新增 ID"
+    );
+
+    // 再拉一次（列表不变）：不得重复发事件，否则红点会被反复点亮
+    block_on(service.list_announcements("1011", 1, 50)).expect("三次拉取应成功");
+    assert_eq!(published_ids(&events).len(), 1, "同一批公告不得重复发事件");
+}
+
+#[test]
+fn announcement_baseline_is_isolated_per_contest() {
+    // 基线按比赛隔离：只看过 1011 的情况下首次看 1012 不应把 1012 的既有公告
+    // 当成「新公告」（同一进程内切换比赛是常态）
+    let (service, stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
+    let events = collect_contest_events(&bus);
+
+    block_on(service.list_announcements("1011", 1, 50)).expect("1011 首次拉取应成功");
+    block_on(service.list_announcements("1012", 1, 50)).expect("1012 首次拉取应成功");
+    assert!(published_ids(&events).is_empty(), "各自首次拉取都不应发事件");
+
+    // 1012 新增一条：只影响 1012
+    stub.set_announcements(&["9001", "9002"]);
+    block_on(service.list_announcements("1012", 1, 50)).expect("1012 二次拉取应成功");
+
+    let published = published_ids(&events);
+    assert_eq!(published.len(), 1, "只有 1012 应发事件");
+    assert_eq!(published[0], vec!["9002".to_string()]);
+}
+
+#[test]
+fn failed_fetch_keeps_baseline_so_next_success_still_reports() {
+    // 拉取失败时不得推进基线：否则失败期间发布的公告会被永久漏报
+    let (service, stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
+    let events = collect_contest_events(&bus);
+
+    block_on(service.list_announcements("1011", 1, 50)).expect("首次拉取应成功");
+
+    stub.set_mode(StubMode::Network);
+    let _ = block_on(service.list_announcements("1011", 1, 50));
+    stub.set_mode(StubMode::Ok);
+
+    stub.set_announcements(&["9001", "9002"]);
+    block_on(service.list_announcements("1011", 1, 50)).expect("恢复后拉取应成功");
+
+    assert_eq!(
+        published_ids(&events),
+        vec![vec!["9002".to_string()]],
+        "失败期间的基线必须保留，恢复后仍应报出新增公告"
+    );
 }
 
 // ── 比赛列表 TTL 缓存语义 ──

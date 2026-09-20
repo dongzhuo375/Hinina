@@ -21,9 +21,9 @@ Hydro 响应 DTO 与全部归一化纯函数。**不含任何网络调用**，�
 - `parse_duration_seconds("1:23:45") -> Option<i64>` — 反解 `formatSeconds` 的输出（榜单单元格只给格式化文本，而 `RankCell` 需要秒数）
 
 ### 评测状态
-- `map_status(i64) -> JudgementStatus` — Hydro 全码表（0 WAITING … 33 HACK_UNSUCCESSFUL）→ 领域变体。**22 FETCHED 折入 `Pending`**（非终态）：它是「评测机已取件、尚未开跑」，若折成 `Unknown` 会让前端轮询在评测开始前就停住。9 CANCELED / 11 HACKED / 30 IGNORED / 32 HACK_SUCCESSFUL / 33 HACK_UNSUCCESSFUL 在 HOJ 值域里无对应变体 → `Unknown`；31 FORMAT_ERROR 取语义最近的 `PresentationError`（缺口 D9）
+- `map_status(i64) -> JudgementStatus` — Hydro 全码表（0 WAITING … 33 HACK_UNSUCCESSFUL）→ 领域变体。**22 FETCHED 折入 `Pending`**（非终态）：它是「评测机已取件、尚未开跑」，若折成 `Unknown` 会让前端轮询在评测开始前就停住。**9 CANCELED 折入 `Cancelled`**（HOJ `-4` 语义精确对应，无文案落差）；11 HACKED / 30 IGNORED / 32 HACK_SUCCESSFUL / 33 HACK_UNSUCCESSFUL 在 HOJ 值域里确实没有对应变体 → `Unknown`；31 FORMAT_ERROR 取语义最近的 `PresentationError`（缺口 D9）
 - `is_terminal_status(i64) -> bool` — 非终态集合 `{0, 20, 21, 22}`
-- `hoj_status_to_hydro(i32) -> Option<i64>` — HOJ 状态码 → Hydro 状态码（评测页「状态筛选」参数翻译）。前端状态下拉的取值域是 **HOJ 码表**，而 Hydro 的 `/record?status=` 收自己的码。返回 `None` 表示 Hydro 没有该语义的状态（PE/RJE/SF/PA/FREQ），调用方据此**明确报错**而不是静默忽略筛选条件
+- `hoj_status_to_hydro(i32) -> Option<i64>` — HOJ 状态码 → Hydro 状态码（评测页「状态筛选」参数翻译）。前端状态下拉的取值域是 **HOJ 码表（含负数，见 `adapter/hoj/types.rs::map_status`）**，而 Hydro 的 `/record?status=` 收自己的码：`5 Pending→0 WAITING`、`6 Compiling→21`、`7 Judging→20`、`9 Submitting→0`、`0 AC→1`、`-1 WA→2`、`1 TLE→3`、`2 MLE→4`、`3 RE→6`、`-2 CE→7`、`-3 PE→31 FORMAT_ERROR`、`4 SE→8`、`-4 Cancelled→9`、`15 No Status→10 ETC`。返回 `None` 表示 Hydro 没有该语义的状态（`-10` Not Submitted / `8` PA），调用方据此**明确报错**而不是静默忽略筛选条件
 
 ### 语言
 - `LANG_TABLE` — Hydro 语言 key ↔ 展示名（HOJ 显示名）的双向静态表（`cc.cc17` ↔ `C++17` 等 29 项）。名字刻意选用前端 `utils/language` 能识别的前缀写法，使 Monaco 高亮、源文件名与 limits 倍率判定照常工作
