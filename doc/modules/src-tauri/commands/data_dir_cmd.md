@@ -17,7 +17,7 @@
 | `DataDirInfo` | VO（`Serialize`，camelCase） | `currentDir` / `defaultDir` / `source` / `restartRequired` |
 | `DataDirChange` | VO（`Serialize`，camelCase） | `targetDir` / `migrateFrom`（可为 null）/ `restartRequired`（恒 true） |
 | `get_data_dir` | `async fn(State<'_, AppContext>) -> AppResult<DataDirInfo>` | 读当前目录 + 指针；`restartRequired` = 指针指向别处或有待迁移来源 |
-| `set_data_dir` | `async fn(State, path: String, migrate: bool) -> AppResult<DataDirChange>` | 校验（`validate_target`）→ 写指针；拒绝「与当前目录相同」 || `reset_data_dir` | `async fn(State, migrate: bool) -> AppResult<DataDirChange>` | 回到默认目录；校验走 `validate_reset`（见下） |
+| `set_data_dir` | `async fn(State, path: String, migrate: bool) -> AppResult<DataDirChange>` | 校验（`validate_target`）→ 写指针；拒绝「与当前目录相同」。**不勾迁移时可改回任何用过的目录** || `reset_data_dir` | `async fn(State, migrate: bool) -> AppResult<DataDirChange>` | 回到默认目录；校验走 `validate_reset`（见下） |
 | `validate_reset` | `pub(crate) fn(&Path, &Path, bool) -> AppResult<()>` | **抽出的校验决策**（命令本体依赖 `State` 无法单测，而判据正是 HIGH 缺陷漏网处） |
 | `pick_data_dir` | `async fn(tauri::AppHandle) -> AppResult<Option<String>>` | 原生目录选择器；取消返回 `None` |
 | `write_target` | 私有 | 组装并写入指针（`data_dir=None` 表示用默认目录） |
@@ -61,7 +61,7 @@ pick_data_dir
 
 ## 设计要点
 
-- **两处校验判据一致（都是「冲突条目」）**：`set_data_dir` 走 `validate_target`、`reset_data_dir` 走 `validate_reset`，两者都只拒绝**迁移会跳过的条目**，而不是「目录非空」。原因相同：我们自己写进去的数据本身就是"非空"，用 `dir_is_empty` 会让「离开过的目录选不回来 / 恢复默认永远失败」，且错误指引是在要求用户删掉自己的数据。详见 `infra/data_dir.md`。
+- **两处校验判据一致，且都按 `migrate` 分档**：`set_data_dir` 走 `validate_target`、`reset_data_dir` 走 `validate_reset`。分档是「**改了能不能改回去**」的关键 —— 不迁移时没有跳过，目标目录里有什么都不影响（用户是在明确选择「用那个目录里原来的数据」）；只有**迁移**时才需要拒绝冲突条目（否则会静默用目标的旧数据）。详见 `infra/data_dir.md`。
 - **不勾迁移时无需校验**：用户只是想切回默认目录，里面有什么就是什么（那是他自己的选择）。
 - **校验决策抽成 `validate_reset` 纯函数**：命令本体依赖 `tauri::State` 无法单测，而上面那条判据正是 HIGH 缺陷漏网的原因 —— 抽出来才有人能锁住它（有 5 条用例，含「真机默认目录不得被拒」的回归测试，且经变异测试确认非空转）。
 - **`pick_data_dir` 用「回调 + oneshot」而不是 `blocking_pick_folder`**：后者会阻塞当前线程，而命令跑在异步运行时上（阻塞工作线程是浪费，某些平台还要求弹窗在主线程）。

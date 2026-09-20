@@ -140,7 +140,7 @@ fn validate_target_accepts_fresh_absolute_dir() {
     let legacy = unique_dir("validate-legacy");
     let target = unique_dir("validate-ok");
 
-    let got = validate_target(&target, &legacy).expect("全新绝对路径应通过");
+    let got = validate_target(&target, &legacy, false).expect("全新绝对路径应通过");
     assert_eq!(got, target);
     assert!(target.is_dir(), "校验顺带创建目录");
 
@@ -151,7 +151,7 @@ fn validate_target_accepts_fresh_absolute_dir() {
 #[test]
 fn validate_target_rejects_relative_path() {
     let legacy = unique_dir("validate-rel-legacy");
-    let err = validate_target(Path::new("relative/dir"), &legacy).expect_err("相对路径应被拒");
+    let err = validate_target(Path::new("relative/dir"), &legacy, false).expect_err("相对路径应被拒");
     assert!(matches!(err, AppError::Config(_)), "应为配置类错误");
     assert!(err.to_string().contains("绝对路径"));
 }
@@ -161,13 +161,13 @@ fn validate_target_rejects_legacy_temp_dir_and_its_children() {
     let legacy = unique_dir("validate-legacy-guard");
 
     // 旧临时目录本身：正是本次要修的问题，必须拒绝
-    let err = validate_target(&legacy, &legacy).expect_err("指向临时目录应被拒");
+    let err = validate_target(&legacy, &legacy, false).expect_err("指向临时目录应被拒");
     assert!(err.to_string().contains("临时目录"), "错误信息应说明原因");
 
     // 其子目录同样拒绝（否则数据又落在会被清理的位置）
     let child = legacy.join("sub");
     std::fs::create_dir_all(&child).unwrap();
-    assert!(validate_target(&child, &legacy).is_err(), "临时目录的子目录也应被拒");
+    assert!(validate_target(&child, &legacy, false).is_err(), "临时目录的子目录也应被拒");
 
     let _ = std::fs::remove_dir_all(&legacy);
 }
@@ -178,7 +178,7 @@ fn validate_target_rejects_file() {
     let dir = unique_dir("validate-file");
     write_file(&dir, "afile", "x");
 
-    let err = validate_target(&dir.join("afile"), &legacy).expect_err("文件应被拒");
+    let err = validate_target(&dir.join("afile"), &legacy, false).expect_err("文件应被拒");
     assert!(err.to_string().contains("不是目录"));
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -186,15 +186,36 @@ fn validate_target_rejects_file() {
 }
 
 #[test]
-fn validate_target_allows_previously_used_dir() {
-    // **回归**：曾经用 `dir_is_empty` 判据，而**我们自己写进去的数据本身就是"非空"**
-    // → 离开过的自定义目录再也选不回来（它必然含 `workspaces/`、`config.json` 等），
-    // 而错误指引「请选择一个空目录」实际是在要求用户**删掉自己的数据**。
+fn validate_target_allows_going_back_to_a_used_dir_without_migrating() {
+    // **回归（「改了改不回去」）**：一个**真正用过**的目录必然含 `config.json`、
+    // `workspaces/` 等 —— 无条件检查冲突会让它**永远改不回去**。
     //
-    // 现实场景：默认 → 自定义 A → 自定义 B → 想回到 A。A 里只有非冲突内容时应当放行。
-    let legacy = unique_dir("validate-revisit-legacy");
-    let dir = unique_dir("validate-revisit");
-    // A 里可能残留的「无害」内容：指针、WebView profile、日志、缓存、无关文件
+    // 现实场景：默认 → A（用过）→ B → 想回到 A 继续用 A 里的数据。
+    // `migrate=false` 时没有迁移、没有跳过，不存在「静默用旧数据」的问题，
+    // 用户是在明确选择「用那个目录里原来的数据」→ 必须放行。
+    let legacy = unique_dir("validate-back-legacy");
+    let dir = unique_dir("validate-back");
+    write_file(&dir, "config.json", r#"{"oj":{"active":"HOJ"}}"#);
+    write_file(&dir, "workspaces/HOJ-1012-1000/main.cpp", "int main(){}");
+    write_file(&dir, "data_dir.json", "{}");
+    write_file(&dir, "EBWebView/Default/Cache/index", "binary");
+    write_file(&dir, "logs/hinina.log", "old");
+
+    assert!(
+        validate_target(&dir, &legacy, false).is_ok(),
+        "不勾迁移时必须能改回用过的目录 —— 否则用户只能删掉自己的数据"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&legacy);
+}
+
+#[test]
+fn validate_target_allows_dir_with_only_non_conflicting_content() {
+    // 只含指针 / WebView profile / 日志 / 缓存 / 无关文件 → 连迁移都放行
+    // （它们不在迁移清单里，或虽在清单里但被跳过无害）
+    let legacy = unique_dir("validate-harmless-legacy");
+    let dir = unique_dir("validate-harmless");
     write_file(&dir, "data_dir.json", "{}");
     write_file(&dir, "EBWebView/Default/Cache/index", "binary");
     write_file(&dir, "logs/hinina.log", "old");
@@ -203,8 +224,8 @@ fn validate_target_allows_previously_used_dir() {
 
     assert!(!dir_is_empty(&dir), "前置条件：目录确实非空");
     assert!(
-        validate_target(&dir, &legacy).is_ok(),
-        "非冲突内容不得阻止选回该目录 —— 否则用户只能删掉自己的东西"
+        validate_target(&dir, &legacy, true).is_ok(),
+        "非冲突内容不得阻止迁移 —— 迁移只创建自己的条目，不会动用户的东西"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -212,21 +233,33 @@ fn validate_target_allows_previously_used_dir() {
 }
 
 #[test]
-fn validate_target_rejects_dir_with_conflicting_entries() {
-    // 真正该拒的情形：目标已有会被迁移**跳过**的条目 → 陈旧数据被静默采用
+fn validate_target_rejects_conflicts_only_when_migrating() {
+    // 真正该拒的唯一情形：**迁移**到已有我们数据的目录 → 会跳过它们 → 静默用旧数据
     let legacy = unique_dir("validate-conflict-legacy");
     let dir = unique_dir("validate-conflict");
     write_file(&dir, "workspaces/old/main.cpp", "old");
     write_file(&dir, "config.json", r#"{"stale":true}"#);
 
-    let err = validate_target(&dir, &legacy).expect_err("有冲突条目应被拒");
+    let err = validate_target(&dir, &legacy, true).expect_err("迁移到有冲突条目的目录应被拒");
     let msg = err.to_string();
     assert!(msg.contains("workspaces"), "错误应点名冲突条目: {}", msg);
     assert!(msg.contains("config.json"), "错误应点名全部冲突条目: {}", msg);
+    // 指引必须给出「改回该目录」的可行路径，而不是诱导删数据
+    assert!(
+        msg.contains("不勾选"),
+        "错误应给出可行出路（不勾迁移以改用该目录的数据）: {}",
+        msg
+    );
     assert!(
         !msg.contains("请选择一个空目录"),
-        "指引不应要求清空目录（那会诱导用户删数据）: {}",
+        "不得要求清空目录（那会诱导用户删数据）: {}",
         msg
+    );
+
+    // 同一个目录，不迁移 → 放行（这就是「改得回去」）
+    assert!(
+        validate_target(&dir, &legacy, false).is_ok(),
+        "同一目录在不迁移时应放行"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -236,7 +269,7 @@ fn validate_target_rejects_dir_with_conflicting_entries() {
 #[test]
 fn validate_target_rejects_empty_string() {
     let legacy = unique_dir("validate-empty-legacy");
-    assert!(validate_target(Path::new(""), &legacy).is_err());
+    assert!(validate_target(Path::new(""), &legacy, false).is_err());
 }
 
 // ── 迁移 ──

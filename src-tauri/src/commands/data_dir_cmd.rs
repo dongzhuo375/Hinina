@@ -72,9 +72,13 @@ pub async fn get_data_dir(ctx: State<'_, AppContext>) -> AppResult<DataDirInfo> 
 ///
 /// 前端 invoke 签名: `set_data_dir`({ path, migrate })
 ///
-/// - 校验目标目录（绝对路径 / 非文件 / **必须为空** / 非临时目录 / 可写）；
+/// - 校验目标目录（`validate_target`：绝对路径 / 非文件 / 非临时目录 / 可写，
+///   **`migrate` 时还要求无冲突条目**）；
 /// - 写入位置指针；`migrate=true` 时同时记下「待迁移来源 = 当前目录」；
 /// - **不在运行中搬运**（见文件头注释），改动重启后生效。
+///
+/// **不勾迁移时可以改回任何用过的目录**：没有迁移就没有跳过，不存在「静默用旧数据」
+/// 的问题 —— 用户是在明确选择「用那个目录里原来的数据」。
 #[tauri::command]
 pub async fn set_data_dir(
     ctx: State<'_, AppContext>,
@@ -84,6 +88,7 @@ pub async fn set_data_dir(
     let target = data_dir::validate_target(
         std::path::Path::new(path.trim()),
         &data_dir::legacy_dir(),
+        migrate,
     )?;
     let current = ctx.storage.base_dir().to_path_buf();
     if target == current {
