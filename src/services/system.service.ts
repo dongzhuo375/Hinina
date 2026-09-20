@@ -1,4 +1,10 @@
-import type { LocalDataUsage, PurgeReport, StorageInfo } from '@/types/system'
+import type {
+  DataDirChange,
+  DataDirInfo,
+  LocalDataUsage,
+  PurgeReport,
+  StorageInfo,
+} from '@/types/system'
 import * as systemBridge from '@/bridge/system.bridge'
 
 /**
@@ -37,6 +43,31 @@ export class SystemService {
    */
   async purgeLocalData(logs: boolean, staleSnapshots: boolean): Promise<PurgeReport> {
     return systemBridge.purgeLocalData(logs, staleSnapshots)
+  }
+
+  /** 读取当前数据目录信息（设置页「数据目录」区块） */
+  async getDataDir(): Promise<DataDirInfo> {
+    return systemBridge.getDataDir()
+  }
+
+  /**
+   * 更改数据目录（**重启后生效**）。
+   *
+   * 只做「校验 + 记下改动」，真正的搬运由下次启动完成 —— 运行中搬运会让新旧目录
+   * 产生写入分叉（见 `infra::data_dir` 模块头注释）。
+   */
+  async setDataDir(path: string, migrate: boolean): Promise<DataDirChange> {
+    return systemBridge.setDataDir(path, migrate)
+  }
+
+  /** 恢复默认数据目录（**重启后生效**） */
+  async resetDataDir(migrate: boolean): Promise<DataDirChange> {
+    return systemBridge.resetDataDir(migrate)
+  }
+
+  /** 弹出原生目录选择器（用户取消返回 null） */
+  async pickDataDir(): Promise<string | null> {
+    return systemBridge.pickDataDir()
   }
 }
 

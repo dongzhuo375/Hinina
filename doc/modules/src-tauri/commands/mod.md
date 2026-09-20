@@ -6,6 +6,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 ## 核心类型/函数
 无（仅模块声明）：
 - `pub mod auth_cmd` — 登录 / 登出 / 会话查询 / 会话校验
+- `pub mod data_dir_cmd` — 数据目录：`get_data_dir` / `set_data_dir` / `reset_data_dir` / `pick_data_dir`（改动重启后生效）
 - `pub mod maintenance_cmd` — 重置客户端（`reset_client`：三层缓存 + 公告基线 + 公告已读状态）与清理本地数据（`local_data_usage` 预览 / `purge_local_data` 删日志内容与过期留档）
 - `pub mod config_cmd` — 配置读取 / 热重载 / 更新 + `get_storage_info`（存储与版本信息）
 - `pub mod contest_cmd` — 比赛列表 / 选中 / 加载配置比赛 / 榜单 / 公告与已读状态
@@ -20,7 +21,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 无外部依赖，仅声明子模块。
 
 ## 被依赖
-- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 36 个 Command）
+- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 40 个 Command）
 
 ## 逻辑流程
 无（仅模块声明）。

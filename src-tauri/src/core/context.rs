@@ -6,6 +6,7 @@ use crate::core::error::AppResult;
 use crate::core::event::event_bus::EventBus;
 use crate::core::provider::oj_id::OjId;
 use crate::core::provider::registry::ProviderRegistry;
+use crate::infra::data_dir::DataDirSource;
 use crate::infra::fs_config_repo::FsConfigRepository;
 use crate::infra::fs_workspace_repo::FsWorkspaceRepository;
 use crate::infra::http::HttpClient;
@@ -32,6 +33,16 @@ pub struct AppContext {
     pub http_client: Arc<HttpClient>,
     pub storage: Arc<Storage>,
     pub logger: Arc<Logger>,
+    /// 默认数据目录（`app_local_data_dir()`）。
+    ///
+    /// 与 `storage.base_dir()` 的区别：后者可能被用户改到别处（`data_dir.json` 指针），
+    /// 而本字段是**位置指针文件所在处**与「恢复默认」的目标，永远不变。
+    pub default_data_dir: PathBuf,
+    /// 当前数据目录的来源（默认 / 用户指定 / 回退临时目录）。
+    ///
+    /// 供 `get_data_dir` 命令如实告诉界面「当前用的是哪个目录、为什么」——
+    /// 回退临时目录时必须让选手看见（数据随时可能被系统清理）。
+    pub data_dir_source: DataDirSource,
     // ── Service 层 ──
     pub theme: Arc<ThemeService<FsConfigRepository>>,
     pub auth: Arc<AuthService>,
@@ -46,14 +57,22 @@ impl AppContext {
     /// # 初始化序列
     ///
     /// 1. Logger — 日志系统
-    /// 2. Storage — 文件系统（base_dir 由调用方传入，通常为 Tauri app_data_dir）
+    /// 2. Storage — 文件系统（`base_dir` 由调用方传入，来自 `infra::data_dir` 的解析结果）
     /// 3. EventBus — 事件总线
     /// 4. ConfigService — 配置管理（通过 FsConfigRepository 持久化）
     /// 5. HttpClient — 网络客户端
     /// 6. ProviderRegistry — OJ 适配器注册中心（默认 HOJ，Provider 在阶段 5 注册）
     /// 7. WorkspaceManager — `None`（WorkspaceManager 实现后补全）
     /// 8. 装配 AppContext
-    pub async fn init(base_dir: PathBuf) -> AppResult<Self> {
+    ///
+    /// `default_data_dir` / `source` 来自 [`crate::infra::data_dir::prepare_startup`]，
+    /// 调用方（`main.rs` 的 `.setup()`）必须在调用本函数**之前**完成一次性数据迁移 ——
+    /// 否则日志句柄会占住旧目录，迁移会失败。
+    pub async fn init(
+        base_dir: PathBuf,
+        default_data_dir: PathBuf,
+        source: DataDirSource,
+    ) -> AppResult<Self> {
         // 1. 初始化日志（stderr + {base_dir}/logs/hinina.log 双路输出）
         let logger = Logger::init(&base_dir);
         tracing::info!("Hinina 启动中... base_dir={}", base_dir.display());
@@ -172,6 +191,8 @@ impl AppContext {
             http_client,
             storage,
             logger: Arc::new(logger),
+            default_data_dir,
+            data_dir_source: source,
             theme,
             auth,
             contest,

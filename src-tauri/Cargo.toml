@@ -6,8 +6,14 @@ description = "OJ 桌面竞赛客户端"
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-fs = "2"
-tauri-plugin-http = "2"
+# 目录选择器（设置页「数据目录」）。
+#
+# 注：本项目**不注册** tauri-plugin-fs / -http —— 所有 I/O 都走 Rust
+# （网络经 infra/http.rs 的 reqwest，文件经 infra/storage.rs），前端也从不 import
+# `@tauri-apps/plugin-*`。此前这两个依赖与对应的 capability 声明一直挂着但从未生效，
+# 还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除。
+# `tauri-plugin-fs` 仍会作为 dialog 的传递依赖出现在依赖树里（dialog 复用了它的
+# `FilePath` 类型），那是正常的。
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13", features = ["json", "cookies"] }
@@ -17,6 +23,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry"] }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
+tauri-plugin-dialog = "2.7.3"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
