@@ -49,6 +49,9 @@ const MIGRATED_ENTRIES: &[&str] = &[
     "cache",
 ];
 
+/// 缓存目录名（[`MIGRATED_ENTRIES`] 的一员，但**不算「冲突条目」**，见下）。
+const CACHE_ENTRY: &str = "cache";
+
 /// 写盘可用性探针的文件名（写成功即立刻删除）。
 const PROBE_FILE: &str = ".hinina-write-probe";
 
@@ -222,6 +225,33 @@ pub fn dir_is_empty(dir: &Path) -> bool {
         // 不存在 = 空；读不了时按「非空」处理（保守：宁可不迁移，也不覆盖）
         Err(e) => e.kind() == std::io::ErrorKind::NotFound,
     }
+}
+
+/// 迁移会**跳过**、且跳过会导致「静默使用陈旧数据」的条目。
+///
+/// = [`MIGRATED_ENTRIES`] 去掉 `cache`：缓存可重建，被跳过只是让新目录从空缓存开始
+/// （TTL 自然填充），不构成陈旧数据问题。**派生而非另列一份**，避免两处漂移。
+pub fn conflicting_entries() -> impl Iterator<Item = &'static str> {
+    MIGRATED_ENTRIES.iter().copied().filter(|e| *e != CACHE_ENTRY)
+}
+
+/// `dir` 中已存在的**冲突条目**（迁移会跳过它们 → 陈旧数据被静默采用）。
+///
+/// 这是「恢复默认 + 迁移」的校验判据。**绝不能用 [`dir_is_empty`]**：默认目录按本模块
+/// 的设计**必然非空** ——
+/// - `data_dir.json`（位置指针**固定**存于默认目录，见 [`pointer_path`]）；
+/// - `EBWebView/`（WebView2 的 profile，每次启动都会重建，见
+///   `prepare_startup_migrates_even_when_default_dir_has_webview_profile` 的回归测试）；
+/// - 可能还有 `logs/`。
+///
+/// 三者都不在迁移清单里、都不冲突，却会让 `dir_is_empty` 恒为 false → 校验永远失败，
+/// 且「清空该目录」的指引是**死循环**：`EBWebView` 运行中被 WebView2 锁住删不掉、
+/// 下次启动又先于设置页重建；删 `data_dir.json` 则自定义目录指针丢失 →
+/// `source` 变回 `default` → 「恢复默认」按钮（仅自定义目录时渲染）直接消失。
+pub fn conflicting_entries_in(dir: &Path) -> Vec<&'static str> {
+    conflicting_entries()
+        .filter(|entry| dir.join(entry).exists())
+        .collect()
 }
 
 /// 路径是否等于 `base` 或位于其内部（Windows 下按大小写不敏感比较）。

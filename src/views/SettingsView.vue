@@ -557,15 +557,18 @@ async function chooseDataDir(): Promise<void> {
 async function confirmDataDir(): Promise<void> {
   const target = pendingDir.value
   if (!target) return
+  // **先取快照**：下面要复位 `migrateData`，若在复位之后再读它，通知文案就会说谎
+  // （曾经如此 —— `else` 分支成了死代码，用户取消勾选后仍看到「并自动迁移现有数据」）
+  const migrate = migrateData.value
   changingDir.value = true
   changeError.value = null
   try {
-    await systemService.setDataDir(target, migrateData.value)
+    await systemService.setDataDir(target, migrate)
     pendingDir.value = null
     // 复位共用状态：下一次操作（无论「更改目录」还是「恢复默认」）都从默认值开始
     migrateData.value = true
     await loadDataDir()
-    changeNotice.value = migrateData.value
+    changeNotice.value = migrate
       ? '已记录，重启后生效并自动迁移现有数据'
       : '已记录，重启后生效（未迁移现有数据）'
     if (changeTimer) clearTimeout(changeTimer)
@@ -582,14 +585,18 @@ async function confirmDataDir(): Promise<void> {
 
 /// 恢复默认数据目录（同样重启后生效）
 async function restoreDefaultDataDir(): Promise<void> {
+  // 同 `confirmDataDir`：先取快照再复位
+  const migrate = migrateData.value
   changingDir.value = true
   changeError.value = null
   try {
-    await systemService.resetDataDir(migrateData.value)
+    await systemService.resetDataDir(migrate)
     pendingDir.value = null
     migrateData.value = true
     await loadDataDir()
-    changeNotice.value = '已记录，重启后回到默认数据目录'
+    changeNotice.value = migrate
+      ? '已记录，重启后回到默认目录并迁移现有数据'
+      : '已记录，重启后回到默认目录（未迁移现有数据）'
     if (changeTimer) clearTimeout(changeTimer)
     changeTimer = setTimeout(() => {
       changeNotice.value = null

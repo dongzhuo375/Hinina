@@ -525,6 +525,83 @@ fn prepare_startup_runs_both_migration_sources_in_one_launch() {
 }
 
 #[test]
+fn conflicting_entries_ignores_files_that_are_always_present_in_default_dir() {
+    // **HIGH 缺陷回归**：默认目录按本模块的设计**必然非空** —— 位置指针
+    // `data_dir.json` 固定存于此处，`EBWebView/` 每次启动都会重建（见
+    // `prepare_startup_migrates_even_when_default_dir_has_webview_profile`），
+    // 还可能有 `logs/`。
+    //
+    // 曾经「恢复默认 + 迁移」用 `dir_is_empty` 校验 → 真机上**永远失败**，
+    // 且指引是死循环（EBWebView 运行中被锁、删指针则按钮消失）。
+    let dir = unique_dir("conflict-realistic");
+    write_file(&dir, "data_dir.json", r#"{"dataDir":"D:\\custom"}"#);
+    write_file(&dir, "EBWebView/Default/Cache/index", "binary");
+    write_file(&dir, "logs/hinina.log", "old log");
+
+    assert!(!dir_is_empty(&dir), "前置条件：这个目录确实非空");
+    assert!(
+        conflicting_entries_in(&dir).is_empty(),
+        "以上三者都不在迁移清单里、都不冲突 —— 不得判为冲突: {:?}",
+        conflicting_entries_in(&dir)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn conflicting_entries_reports_stale_migratable_data() {
+    // 这些才是「迁移会跳过 → 陈旧数据被静默采用」的条目
+    let dir = unique_dir("conflict-stale");
+    write_file(&dir, "data_dir.json", "{}");
+    write_file(&dir, "EBWebView/x", "binary");
+    write_file(&dir, "config.json", r#"{"stale":true}"#);
+    write_file(&dir, "workspaces/old/main.cpp", "old");
+    write_file(&dir, "sessions/HOJ.json", "{}");
+    write_file(&dir, "submissions/HOJ/1.cpp", "old");
+    write_file(&dir, "announcements_read/1_u.json", "{}");
+
+    let conflicts = conflicting_entries_in(&dir);
+    assert_eq!(
+        conflicts,
+        vec![
+            "config.json",
+            "sessions",
+            "workspaces",
+            "submissions",
+            "announcements_read",
+        ],
+        "应逐个报出（顺序与 MIGRATED_ENTRIES 一致），且不含 data_dir.json / EBWebView"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn conflicting_entries_excludes_cache_deliberately() {
+    // `cache` 在迁移清单里（会被搬），但**不算冲突**：缓存可重建，被跳过只是让新目录
+    // 从空缓存开始（TTL 自然填充），不构成「静默使用陈旧数据」。
+    // 故默认目录残留一份旧 cache 不该阻止「恢复默认 + 迁移」。
+    let dir = unique_dir("conflict-cache");
+    write_file(&dir, "cache/problem_statement/1/A.json", "{}");
+
+    assert!(
+        conflicting_entries_in(&dir).is_empty(),
+        "cache 是清单成员但非冲突条目"
+    );
+    // 同时确认它确实在迁移清单里（两处判定不是简单重复）
+    assert!(MIGRATED_ENTRIES.contains(&"cache"));
+    assert!(!conflicting_entries().any(|e| e == "cache"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn conflicting_entries_on_missing_dir_is_empty() {
+    let dir = unique_dir("conflict-missing");
+    assert!(conflicting_entries_in(&dir).is_empty(), "目录不存在 → 无冲突");
+}
+
+#[test]
 fn pointer_write_is_atomic_and_leaves_no_temp_file() {
     // 原子写（temp + rename）：写完不得留下 `.json.tmp` 残片，且内容可读回
     let dir = unique_dir("pointer-atomic");

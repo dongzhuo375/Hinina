@@ -18,7 +18,8 @@
 | `DataDirChange` | VO（`Serialize`，camelCase） | `targetDir` / `migrateFrom`（可为 null）/ `restartRequired`（恒 true） |
 | `get_data_dir` | `async fn(State<'_, AppContext>) -> AppResult<DataDirInfo>` | 读当前目录 + 指针；`restartRequired` = 指针指向别处或有待迁移来源 |
 | `set_data_dir` | `async fn(State, path: String, migrate: bool) -> AppResult<DataDirChange>` | 校验（`validate_target`）→ 写指针；拒绝「与当前目录相同」 |
-| `reset_data_dir` | `async fn(State, migrate: bool) -> AppResult<DataDirChange>` | 回到默认目录；**勾了迁移时要求默认目录为空**（见下） |
+| `reset_data_dir` | `async fn(State, migrate: bool) -> AppResult<DataDirChange>` | 回到默认目录；校验走 `validate_reset`（见下） |
+| `validate_reset` | `pub(crate) fn(&Path, &Path, bool) -> AppResult<()>` | **抽出的校验决策**（命令本体依赖 `State` 无法单测，而判据正是 HIGH 缺陷漏网处） |
 | `pick_data_dir` | `async fn(tauri::AppHandle) -> AppResult<Option<String>>` | 原生目录选择器；取消返回 `None` |
 | `write_target` | 私有 | 组装并写入指针（`data_dir=None` 表示用默认目录） |
 
@@ -61,7 +62,9 @@ pick_data_dir
 
 ## 设计要点
 
-- **`reset_data_dir` 在勾选迁移时要求默认目录为空**：默认目录可能残留用户上次用过的数据（他之前改走过）。迁移对「目标已存在」的条目是**跳过**而非覆盖，于是恢复默认会**静默回退到那些陈旧数据**（当前目录里的新数据被无视）—— 比报错糟糕得多。曾经这里刻意不校验并声称「部分合并是安全的」，那是错的。不勾迁移时无需校验：用户只是想切回默认目录，里面有什么就是什么。
+- **`reset_data_dir` 的迁移校验判据是「冲突条目」而**不是**「目录为空」**：默认目录按本模块设计**必然非空** —— 位置指针 `data_dir.json` 固定存于此处、`EBWebView/` 每次启动都会重建、还可能有 `logs/`。用 `dir_is_empty` 当判据会让本命令**在真机上永远失败**，且给出的「清空该目录」指引是**死循环**：`EBWebView` 运行中被 WebView2 锁住删不掉、下次启动又先于设置页重建；删 `data_dir.json` 则自定义目录指针丢失 → `source` 变回 `default` → 「恢复默认」按钮（仅自定义目录时渲染）直接消失。故只校验 `conflicting_entries_in`（迁移真正会跳过的那些条目），见 `infra/data_dir.md`。
+- **不勾迁移时无需校验**：用户只是想切回默认目录，里面有什么就是什么（那是他自己的选择）。
+- **校验决策抽成 `validate_reset` 纯函数**：命令本体依赖 `tauri::State` 无法单测，而上面那条判据正是 HIGH 缺陷漏网的原因 —— 抽出来才有人能锁住它（有 5 条用例，含「真机默认目录不得被拒」的回归测试，且经变异测试确认非空转）。
 - **`pick_data_dir` 用「回调 + oneshot」而不是 `blocking_pick_folder`**：后者会阻塞当前线程，而命令跑在异步运行时上（阻塞工作线程是浪费，某些平台还要求弹窗在主线程）。
 - **`write_target` 读改写而不是整体覆盖指针**：`legacy_migrated`（临时目录一次性搬家标记）由启动流程管理，设置页改目录不该把它抹掉。
 - **改动恒为 `restartRequired: true`**：不是保守，是事实 —— 本命令不搬运、不切换，界面必须说清「当前仍在使用旧目录」。

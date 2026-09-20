@@ -100,14 +100,54 @@ pub async fn set_data_dir(
     })
 }
 
+/// 「恢复默认数据目录」的校验决策（纯函数，便于单测）。
+///
+/// 抽出来是因为命令本体依赖 `tauri::State`（无法单测），而**校验判据正是 HIGH 缺陷
+/// 漏网的地方** —— 用 `dir_is_empty` 时真机上永远失败。把决策变成可测纯函数，
+/// 才有人能锁住它。
+pub(crate) fn validate_reset(
+    default_dir: &std::path::Path,
+    current: &std::path::Path,
+    migrate: bool,
+) -> AppResult<()> {
+    if !data_dir::dir_is_usable(default_dir) {
+        return Err(AppError::Config(format!(
+            "默认数据目录不可用: {}",
+            default_dir.display()
+        )));
+    }
+    if default_dir == current {
+        return Err(AppError::Config("当前已在默认数据目录".into()));
+    }
+    if migrate {
+        // **判据是「冲突条目」而不是「目录为空」**：默认目录按设计必然含
+        // `data_dir.json`（指针固定存于此）与每次启动重建的 `EBWebView/`，
+        // 用「空目录」当判据会让本命令在真机上永远失败（且指引是死循环）。
+        let conflicts = data_dir::conflicting_entries_in(default_dir);
+        if !conflicts.is_empty() {
+            return Err(AppError::Config(format!(
+                "默认数据目录已有 {}（{}）—— 迁移会跳过它们，界面将回退到那里的陈旧数据。\
+                 请先备份并删除这些条目，或不勾选「迁移现有数据」",
+                conflicts.join(" / "),
+                default_dir.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// 恢复默认数据目录。
 ///
 /// 前端 invoke 签名: `reset_data_dir`({ migrate })
 ///
-/// **勾了迁移时必须要求默认目录为空**：默认目录可能残留用户上次用过的数据
-/// （他之前改走过）。迁移对「目标已存在」的条目是**跳过**而非覆盖，于是恢复默认会
-/// **静默回退到那些陈旧数据**（当前目录里的新数据被无视）—— 这比报错糟糕得多。
-/// 曾经这里刻意不做「必须为空」校验并声称「部分合并是安全的」，那是错的。
+/// **勾了迁移时，若默认目录已有「冲突条目」则拒绝**（[`validate_reset`]）：迁移对
+/// 「目标已存在」的条目是**跳过**而非覆盖，于是恢复默认会**静默回退到那些陈旧数据**
+/// （当前目录里的新数据被无视）—— 这比报错糟糕得多。
+///
+/// **判据刻意不是「目录为空」**：默认目录按设计必然含 `data_dir.json`（位置指针固定存于
+/// 此）与每次启动重建的 `EBWebView/`，用「空目录」当判据会让本命令**在真机上永远失败**，
+/// 且给出的「清空该目录」指引是死循环（`EBWebView` 运行中被锁、删指针则按钮消失）。
+/// 只校验**迁移真正会跳过的那些条目**，恰好就是冲突集合。
 ///
 /// 不勾迁移时无需校验：用户只是想切回默认目录，里面有什么就是什么（那是他自己的选择）。
 #[tauri::command]
@@ -116,23 +156,8 @@ pub async fn reset_data_dir(
     migrate: bool,
 ) -> AppResult<DataDirChange> {
     let default_dir = ctx.default_data_dir.clone();
-    if !data_dir::dir_is_usable(&default_dir) {
-        return Err(AppError::Config(format!(
-            "默认数据目录不可用: {}",
-            default_dir.display()
-        )));
-    }
     let current = ctx.storage.base_dir().to_path_buf();
-    if default_dir == current {
-        return Err(AppError::Config("当前已在默认数据目录".into()));
-    }
-    if migrate && !data_dir::dir_is_empty(&default_dir) {
-        return Err(AppError::Config(format!(
-            "默认数据目录已有内容（{}），迁移会被逐项跳过并导致界面回退到那里的陈旧数据 —— \
-             请先清空该目录，或不勾选「迁移现有数据」",
-            default_dir.display()
-        )));
-    }
+    validate_reset(&default_dir, &current, migrate)?;
 
     info!(target = %default_dir.display(), migrate, "恢复默认数据目录（重启后生效）");
     write_target(&ctx, None, migrate.then(|| current.clone()))?;

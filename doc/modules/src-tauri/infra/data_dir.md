@@ -24,7 +24,9 @@
 | `pointer_path(default_dir)` | `(&Path) -> PathBuf` | 指针文件路径 |
 | `read_pointer` / `write_pointer` | — | 读写指针；**损坏或缺失一律按「未指定」处理**（绝不阻断启动） |
 | `dir_is_usable` | `(&Path) -> bool` | 能创建 + 能写入（探针文件写后即删） |
-| `dir_is_empty` | `(&Path) -> bool` | 不存在或为空（读不了时按「非空」保守处理） |
+| `dir_is_empty` | `(&Path) -> bool` | 不存在或为空（读不了时按「非空」保守处理）。**注意：不可用于默认目录的校验**，见 `conflicting_entries_in` |
+| `conflicting_entries` | `() -> impl Iterator<Item = &'static str>` | [`MIGRATED_ENTRIES`] 去掉 `cache`（派生，避免两处漂移） |
+| `conflicting_entries_in` | `(&Path) -> Vec<&'static str>` | `dir` 中已存在的**冲突条目**（迁移会跳过 → 陈旧数据被静默采用）。「恢复默认 + 迁移」的校验判据 |
 | `validate_target` | `(&Path, legacy) -> AppResult<PathBuf>` | 设置页「更改目录」的校验（见下） |
 | `resolve` | `(default_dir, legacy) -> DataDirPlan` | 解析优先级：指针指定（可用）→ 默认（可用）→ 临时目录（回退 + 告警） |
 | `prepare_startup` | `(default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 启动用：解析 + 一次性迁移 |
@@ -91,6 +93,8 @@ migrate(from, to):
 - **临时目录搬家的三态标记**（`should_attempt_legacy`）：`None` = 从未尝试（默认目录下搬一次）；`Some(true)` = 已成功（**永不重试**，否则用户在新目录里删掉的旧工作区会被搬回来）；`Some(false)` = **试过但失败**（下次启动重试，且**不因用户改目录而放弃** —— 那份数据是真实数据，放弃了就会一直等被系统清理）。
 - **搬迁触发用一次性标记，不用「目标目录为空」**：默认目录里几乎总是有 WebView2 的 `EBWebView/` profile（任何一次启动都会创建），用空目录当门槛等于**对每个老用户都永不迁移** —— 实测踩到，迁移静默不执行。
 - **旧目录只删空目录（非递归）**：`remove_dir_all` 会把「迁移失败的条目」连同 `logs/` 一起删掉 —— 前者是**数据丢失**（用户以为数据搬过去了，实际被删了）。非递归删除只可能在确实什么都不剩时成功，天然安全。
+- **`dir_is_empty` 不能用于默认目录的校验**：默认目录按本模块设计**必然非空** —— `data_dir.json`（位置指针固定存于此）、`EBWebView/`（每次启动重建）、可能还有 `logs/`。三者都不在迁移清单里、都不冲突，却会让 `dir_is_empty` 恒为 false → 「恢复默认 + 迁移」**在真机上永远失败**，且「清空该目录」的指引是死循环（`EBWebView` 运行中被 WebView2 锁住、删指针则「恢复默认」按钮消失）。故校验用 `conflicting_entries_in`（**迁移真正会跳过的那些条目**）。
+- **`conflicting_entries` 派生自 `MIGRATED_ENTRIES` 而非另列一份**：只有 `cache` 被排除 —— 缓存可重建，被跳过只是让新目录从空缓存开始（TTL 自然填充），不构成「静默使用陈旧数据」。派生可避免将来往清单加条目时两处漂移。
 - **迁移清单不含 `logs/`**：日志只服务近期排障，旧日志留在原地无损失；而它是唯一可能被进程占用的目录，搬它容易失败。
 - **目标已存在则跳过而不是覆盖**：重试场景下这是常态（幂等），且绝不会用旧数据盖掉新数据。
 - **逐项容错**：单项失败不影响其余项；失败时**不置位标记**，下次启动重试。
@@ -102,6 +106,7 @@ migrate(from, to):
 `src-tauri/src/infra/tests/data_dir_tests.rs`（全部基于独立临时目录，不触碰真实 `%LOCALAPPDATA%` / `%TEMP%/hinina`）：
 
 - **指针**：往返读写、缺失/损坏降级为默认、未设置字段不落盘（`{}`）、**原子写不留 `.json.tmp` 残片**、**读-改-写不复活已清字段**。
+- **冲突条目**：**真机默认目录（`data_dir.json` + `EBWebView` + `logs`）不得判为冲突**（HIGH 缺陷回归）、陈旧 `config.json`/`workspaces`/… 逐个报出且不误报必然存在的条目、**`cache` 刻意不算冲突**（同时断言它确实在迁移清单里）、目录不存在时无冲突。
 - **可用性**：创建缺失目录且不留探针、拒绝文件路径、`dir_is_empty` 三态。
 - **校验**：接受全新绝对路径；拒绝相对路径、旧临时目录及其子目录、文件、非空目录、空串。
 - **迁移**：按清单顺序搬运且**不含 logs**、目标已存在则跳过不覆盖、只有 logs 时 no-op、搬空后删除旧目录、**绝不删除未迁移的条目**、`move_entry` 对缺失源报错、**失败后不留目标与暂存（使「存在」成为完成的可信信号）**、**上次失败的条目会重试而不是被跳过**、重试前清理陈旧暂存。
