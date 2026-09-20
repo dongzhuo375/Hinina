@@ -2,6 +2,7 @@ pub mod http;
 pub mod storage;
 pub mod cache;
 pub mod logger;
+pub mod data_dir;
 pub mod fs_workspace_repo;
 pub mod fs_config_repo;
 pub mod fs_plugin_repo;

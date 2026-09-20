@@ -187,3 +187,48 @@ fn run_purge_skips_unselected_items() {
 
     assert_eq!(report, PurgeReport::default());
 }
+
+// ── 数据目录：VO 线上形状锁定 ──
+
+use super::super::commands::data_dir_cmd::{DataDirChange, DataDirInfo};
+use crate::infra::data_dir::DataDirSource;
+
+/// `get_data_dir` 返回值的 JSON 形状（前端按 camelCase 键读取）。
+#[test]
+fn data_dir_info_serializes_camel_case() {
+    let info = DataDirInfo {
+        current_dir: r"C:\Users\u\AppData\Local\com.hinina.app".into(),
+        default_dir: r"C:\Users\u\AppData\Local\com.hinina.app".into(),
+        source: DataDirSource::Default,
+        restart_required: false,
+    };
+    let json = serde_json::to_value(&info).expect("序列化失败");
+    assert_eq!(json["currentDir"], r"C:\Users\u\AppData\Local\com.hinina.app");
+    assert_eq!(json["defaultDir"], r"C:\Users\u\AppData\Local\com.hinina.app");
+    assert_eq!(json["restartRequired"], false);
+    // source 是枚举字符串：前端据此区分「默认 / 用户指定 / 回退临时目录」
+    assert_eq!(json["source"], "default");
+}
+
+#[test]
+fn data_dir_source_serializes_all_variants() {
+    // 三种来源都要能被前端区分 —— `fallbackTemp` 是界面必须显眼告警的那一种
+    let to_str = |s: DataDirSource| serde_json::to_value(s).unwrap();
+    assert_eq!(to_str(DataDirSource::Default), "default");
+    assert_eq!(to_str(DataDirSource::Custom), "custom");
+    assert_eq!(to_str(DataDirSource::FallbackTemp), "fallbackTemp");
+}
+
+#[test]
+fn data_dir_change_serializes_camel_case_and_nullable_migrate_from() {
+    let change = DataDirChange {
+        target_dir: r"D:\hinina-data".into(),
+        migrate_from: None,
+        restart_required: true,
+    };
+    let json = serde_json::to_value(&change).expect("序列化失败");
+    assert_eq!(json["targetDir"], r"D:\hinina-data");
+    assert_eq!(json["restartRequired"], true);
+    // 不迁移时为 null（前端据此不显示「将从 X 迁移」）
+    assert!(json["migrateFrom"].is_null());
+}

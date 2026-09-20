@@ -18,7 +18,7 @@ import {
 import { errorMessage } from '@/utils/error'
 import { ojBaseUrlHint, ojSelectOptions } from '@/utils/oj'
 import type { AppConfig, OjInstance } from '@/types/config'
-import type { LocalDataUsage, StorageInfo } from '@/types/system'
+import type { DataDirInfo, LocalDataUsage, StorageInfo } from '@/types/system'
 
 /**
  * 设置页 —— 应用配置（AppConfig）的可视化编辑入口。
@@ -484,6 +484,111 @@ async function purgeLocalData(): Promise<void> {
   }
 }
 
+// ── 数据目录 ──
+//
+// 改动**一律重启后生效**：各 Service 都持有以 base_dir 为根的 Storage、日志还握着
+// 文件句柄，运行中热切等于重建整个 AppContext。故这里只「校验 + 记录 + 提示重启」，
+// 真正的搬运由下次启动完成（见 Rust `infra::data_dir`）。
+//
+// 默认目录是 `%LOCALAPPDATA%/{identifier}`（不随域漫游）。之所以要能改：默认落在
+// 系统盘，选手可能想放到数据盘；而**回退到临时目录**（`source === 'fallbackTemp'`）
+// 意味着数据随时会被系统清理，界面必须显眼告警。
+
+const dataDir = ref<DataDirInfo | null>(null)
+const dataDirFailed = ref(false)
+
+/// 选择器返回的候选路径（等待用户确认时才写指针）
+const pendingDir = ref<string | null>(null)
+/// 是否把现有数据搬到新目录（默认勾选：不迁移会让界面看起来像被重置）
+const migrateData = ref(true)
+const changingDir = ref(false)
+const changeNotice = ref<string | null>(null)
+const changeError = ref<string | null>(null)
+
+let changeTimer: ReturnType<typeof setTimeout> | null = null
+
+/// 数据目录来源的中文说明与配色（回退临时目录必须醒目）
+const dataDirSourceMeta = computed(() => {
+  switch (dataDir.value?.source) {
+    case 'custom':
+      return { text: '用户指定', cls: 'text-[var(--color-primary)]' }
+    case 'fallbackTemp':
+      return { text: '临时目录（数据可能被系统清理）', cls: 'text-rose-600' }
+    default:
+      return { text: '默认位置', cls: 'text-[var(--text-muted)]' }
+  }
+})
+
+async function loadDataDir(): Promise<void> {
+  try {
+    dataDir.value = await systemService.getDataDir()
+    dataDirFailed.value = false
+  } catch {
+    // 非致命：仅该区块降级为「获取失败」，不影响其余分组
+    dataDirFailed.value = true
+  }
+}
+
+/// 打开原生目录选择器；取消则什么都不做（不产生任何状态变更）
+async function chooseDataDir(): Promise<void> {
+  changeError.value = null
+  changeNotice.value = null
+  try {
+    const picked = await systemService.pickDataDir()
+    if (!picked) return
+    pendingDir.value = picked
+    migrateData.value = true
+  } catch (e) {
+    changeError.value = errorMessage(e, '打开目录选择器失败')
+  }
+}
+
+/// 确认更改：写位置指针（不搬运，重启后由启动流程完成）
+async function confirmDataDir(): Promise<void> {
+  const target = pendingDir.value
+  if (!target) return
+  changingDir.value = true
+  changeError.value = null
+  try {
+    await systemService.setDataDir(target, migrateData.value)
+    pendingDir.value = null
+    await loadDataDir()
+    changeNotice.value = migrateData.value
+      ? '已记录，重启后生效并自动迁移现有数据'
+      : '已记录，重启后生效（未迁移现有数据）'
+    if (changeTimer) clearTimeout(changeTimer)
+    changeTimer = setTimeout(() => {
+      changeNotice.value = null
+      changeTimer = null
+    }, 5_000)
+  } catch (e) {
+    changeError.value = errorMessage(e, '更改数据目录失败')
+  } finally {
+    changingDir.value = false
+  }
+}
+
+/// 恢复默认数据目录（同样重启后生效）
+async function restoreDefaultDataDir(): Promise<void> {
+  changingDir.value = true
+  changeError.value = null
+  try {
+    await systemService.resetDataDir(migrateData.value)
+    pendingDir.value = null
+    await loadDataDir()
+    changeNotice.value = '已记录，重启后回到默认数据目录'
+    if (changeTimer) clearTimeout(changeTimer)
+    changeTimer = setTimeout(() => {
+      changeNotice.value = null
+      changeTimer = null
+    }, 5_000)
+  } catch (e) {
+    changeError.value = errorMessage(e, '恢复默认目录失败')
+  } finally {
+    changingDir.value = false
+  }
+}
+
 // ── 布局滑杆 ──
 
 function onSplitInput(event: Event): void {
@@ -507,6 +612,7 @@ onMounted(() => {
   void load()
   void loadStorage()
   void loadUsage()
+  void loadDataDir()
 })
 
 onBeforeUnmount(() => {
@@ -514,6 +620,7 @@ onBeforeUnmount(() => {
   if (copiedTimer) clearTimeout(copiedTimer)
   if (resetTimer) clearTimeout(resetTimer)
   if (purgeTimer) clearTimeout(purgeTimer)
+  if (changeTimer) clearTimeout(changeTimer)
 })
 </script>
 
@@ -1117,6 +1224,155 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                 </div>
+              </div>
+            </section>
+
+            <!-- ── 数据目录 ── -->
+            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
+              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+                <svg
+                  class="h-4 w-4 text-[var(--color-primary)]"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <h2 class="text-sm font-semibold text-[var(--text-primary)]">数据目录</h2>
+              </div>
+
+              <div class="flex flex-col gap-3 px-5 py-4">
+                <p v-if="dataDirFailed" class="text-xs text-rose-600">数据目录信息获取失败</p>
+                <p v-else-if="!dataDir" class="text-xs text-[var(--text-muted)]">正在读取…</p>
+                <template v-else>
+                  <div class="text-xs leading-relaxed text-[var(--text-secondary)]">
+                    <div class="flex items-center gap-2">
+                      <span class="shrink-0 text-[var(--text-muted)]">当前</span>
+                      <span
+                        class="min-w-0 flex-1 truncate font-mono text-[var(--text-primary)]"
+                        :title="dataDir.currentDir"
+                      >
+                        {{ dataDir.currentDir }}
+                      </span>
+                      <span class="shrink-0 font-medium" :class="dataDirSourceMeta.cls">
+                        {{ dataDirSourceMeta.text }}
+                      </span>
+                    </div>
+                    <div
+                      v-if="dataDir.source === 'custom'"
+                      class="mt-1 flex items-center gap-2 text-[var(--text-muted)]"
+                    >
+                      <span class="shrink-0">默认</span>
+                      <span class="min-w-0 flex-1 truncate font-mono" :title="dataDir.defaultDir">
+                        {{ dataDir.defaultDir }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- 回退临时目录必须显眼：这正是本次要消除的状态 -->
+                  <p
+                    v-if="dataDir.source === 'fallbackTemp'"
+                    class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-relaxed text-rose-700"
+                  >
+                    默认数据目录不可用，当前数据存在<strong class="font-semibold">临时目录</strong>中
+                    —— 系统清理临时文件时会连带删除你的代码与提交留档，请尽快更改数据目录。
+                  </p>
+
+                  <!-- 待重启提示：改动已记录但尚未生效，必须说清「现在仍在用旧目录」 -->
+                  <p
+                    v-if="dataDir.restartRequired"
+                    class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700"
+                  >
+                    已记录目录更改，<strong class="font-semibold">重启客户端后生效</strong>；
+                    当前仍在使用上面的目录。
+                  </p>
+
+                  <!-- 选择器已返回候选路径：确认 + 是否迁移 -->
+                  <div
+                    v-if="pendingDir"
+                    class="flex flex-col gap-2 rounded-lg border border-[var(--border-color)] bg-slate-50/70 px-3.5 py-3"
+                  >
+                    <div class="flex items-center gap-2 text-xs">
+                      <span class="shrink-0 text-[var(--text-muted)]">新目录</span>
+                      <span
+                        class="min-w-0 flex-1 truncate font-mono text-[var(--text-primary)]"
+                        :title="pendingDir"
+                      >
+                        {{ pendingDir }}
+                      </span>
+                    </div>
+                    <label class="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
+                      <input
+                        v-model="migrateData"
+                        type="checkbox"
+                        class="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--color-primary)]"
+                      />
+                      <span>
+                        把现有数据迁移到新目录（工作区代码、提交留档、配置、会话）
+                        <span class="text-[var(--text-muted)]">
+                          —— 不勾选则新目录从空开始，旧数据原地保留
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <p class="min-w-0 flex-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                      数据目录决定工作区代码、提交留档、配置与日志的存放位置。
+                      更改后需重启客户端生效。
+                    </p>
+                    <div class="flex shrink-0 items-center gap-2">
+                      <span v-if="changeError" class="text-xs text-rose-600">{{ changeError }}</span>
+                      <span v-else-if="changeNotice" class="text-xs text-amber-600">
+                        {{ changeNotice }}
+                      </span>
+
+                      <template v-if="pendingDir">
+                        <button
+                          type="button"
+                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                          :disabled="changingDir"
+                          @click="pendingDir = null"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-60"
+                          :disabled="changingDir"
+                          @click="confirmDataDir"
+                        >
+                          {{ changingDir ? '记录中…' : '确认更改' }}
+                        </button>
+                      </template>
+                      <template v-else>
+                        <button
+                          v-if="dataDir.source === 'custom'"
+                          type="button"
+                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50 disabled:opacity-60"
+                          :disabled="changingDir"
+                          @click="restoreDefaultDataDir"
+                        >
+                          恢复默认
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-slate-50 disabled:opacity-60"
+                          :disabled="changingDir"
+                          @click="chooseDataDir"
+                        >
+                          更改目录…
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                </template>
               </div>
             </section>
 

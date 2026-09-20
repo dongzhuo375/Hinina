@@ -165,7 +165,8 @@ Hinina/
         │   ├── http.rs                   # HttpClient 封装（超时可注入 with_timeout —— 由 oj.timeout_secs 驱动、重试/UA/Cookie；请求头由调用方以 HeaderMap 注入 —— 认证方式是 Adapter 层概念；只返回原始响应体与响应头，不做反序列化）
         │   ├── storage.rs                # Storage 底层文件工具
         │   ├── cache.rs                  # 缓存原语（TtlCache：TTL + 容量上限，近似 FIFO 淘汰；JsonDiskCache：cache/{ns}/{key}.json，条目带 fetchedAt 跨重启计时、损坏容忍、过期懒删除）
-        │   ├── logger.rs                 # Logger（Tracing 双路输出：stderr + {base_dir}/logs/hinina.log，启动时 >5MB 截断；敏感信息不落日志靠调用点约束——IPC 日志不记参数）
+        │   ├── logger.rs                 # Logger（Tracing 双路输出：stderr + {base_dir}/logs/hinina.log，启动时 >5MB 截断，运行期可截断清空；敏感信息不落日志靠调用点约束——IPC 日志不记参数）
+        │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
         │   ├── fs_plugin_repo.rs         # FsPluginRepository（骨架）
@@ -207,6 +208,7 @@ Hinina/
             ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
             ├── config_cmd.rs             # get_config / reload_config / update_config / get_storage_info（存储目录/日志路径/版本，设置页「关于」）
             ├── maintenance_cmd.rs          # reset_client（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，不重拉）/ local_data_usage（清理前体积预览）/ purge_local_data（不可逆：日志内容 + 过期提交留档）
+            ├── data_dir_cmd.rs           # get_data_dir / set_data_dir / reset_data_dir / pick_data_dir（设置页「数据目录」；改动重启后生效，只写位置指针不搬运）
             ├── theme_cmd.rs              # get_theme / set_theme
             └── tests/
                 └── mod_tests.rs          # Command 层关键路径测试（P40 + 分页默认值/StorageInfo 序列化/uid 回退/空筛选归一）
@@ -318,8 +320,7 @@ src/
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS，码值 = HOJ 真实码表含负数）+ 时间/内存/长度格式化 + findFirstFailedCase
 │   ├── close-guard.ts                    # 关窗守卫（状态机 idle/flushing/allowing + 双层时间上界 flushTimeout/hardTimeout；收尾用 destroy 兜底 close；依赖全注入故可穷尽单测）
-│   ├── settings-access.ts                # 设置入口的隐藏解锁（连点状态栏版本号 5 下；注入式计数状态机 createUnlockGate + 会话级单例 settingsUnlocked/tapVersion；状态不落盘）
-│   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 存储域 1–8 与候选档位 2·4·8；前端各消费方一律取此处常量，Rust sanitize 同域）
+│   ├── settings-access.ts                # 设置入口的隐藏解锁（连点状态栏版本号 5 下；注入式计数状态机 createUnlockGate + 会话级单例 settingsUnlocked/tapVersion；状态不落盘）│   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 存储域 1–8 与候选档位 2·4·8；前端各消费方一律取此处常量，Rust sanitize 同域）
 │   ├── logger.ts                         # 前端日志唯一入口（createLogger 作用域前缀 + debug/info 仅开发环境、warn/error 恒输出；不落盘，持久化日志归 Rust tracing）
 │   ├── error.ts                          # 错误文案收敛唯一出口（errorMessage：Error/字符串取信息，空值与非 Error 载荷回退兜底文案；不依赖 bridge，纯函数）
 │   ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
@@ -359,7 +360,7 @@ src/
 | **领域** | `core/entity` + `core/provider` traits | `src/types/` 类型定义 |
 | **应用** | `service/` 业务编排 | `src/services/` 业务逻辑 |
 | **适配** | `adapter/` OJ 实现 | `src/bridge/` IPC 封装 |
-| **基础设施** | `infra/` http/storage/cache/logger | Vite/Naive UI/TailwindCSS |
+| **基础设施** | `infra/` http/storage/cache/logger/data_dir | Vite/Naive UI/TailwindCSS |
 | **表现** | — | `views/` + `components/` |
 | **状态** | EventBus | `stores/` Pinia |
 | **扩展** | `plugin/`（v0.x 仅预留接口） | — |
@@ -395,6 +396,7 @@ src/
 - **非 2xx 的响应体必须带进错误信息**：`infra/http.rs` 的非 raw 变体在状态码判定失败时读取响应体、压成单行并截断后附进 `AppError`（`HTTP 500 … | {"status":500,"msg":"…"}`）。此前直接丢弃响应体，调用方只拿到一句 `HTTP 500 Internal Server Error`，排障时完全看不出服务端说了什么。**401 例外**：该变体是会话守卫的判据，且服务端可能在 401 响应里回显凭证，故不附带正文
 - **提交源码要本地留档**：`service/submission/snapshot.rs` 在提交成功后把源码落盘到 `submissions/{oj_id}/{submit_id}.{ext}`（扩展名与前端 `sourceFileNameOf` 同源，未知语言回退 `.txt`），详情页在 OJ 未回吐代码时回落到它。理由：OJ 会在比赛隐藏记录 / `codeShare=false` / 赛后回收等情形下不回吐代码，而「我当时交的是什么」属于本地事实；提交**失败**时更彻底 —— 服务端一行记录都没有，没有快照就无从查起。落盘失败只告警，绝不阻断提交
 - **关窗必须落盘，且必须一定能关上**：`utils/close-guard.ts` 用状态机（`idle → flushing → allowing`）+ 双层时间上界（`flushTimeout` 3s / `hardTimeout` 5s）实现，收尾用 `destroy()` 而非再调一次 `close()`。曾经内联在 `main.ts` 的实现用 `flushing` 布尔量表示「落盘在途」，收尾依赖一次可能失败的 `close()`：异常被 `void` 吞掉后 `flushing` 永久为 `true`，此后**每一次**点关闭都命中 `if (flushing) return`，窗口再也关不掉；而在 `close-requested` 回调里再调 `close()` 会重新触发该事件，窗口已处于 closing 状态时可能根本不再投递。两条硬约束：① 任何失败路径都不得让守卫停在 `flushing`；② 落盘结束/超时后必须无条件收尾（`destroy` 失败再退回 `close` 兜底），依赖全注入以便穷尽单测
+- **数据根目录不得落在临时目录，且必须可配**：base_dir 由 `infra::data_dir::prepare_startup` 在 `.setup()` 里解析（`AppContext::init` **必须在它之后**调用 —— init 会打开日志文件，之后旧目录就被占住）。默认 `app_local_data_dir()`（`%LOCALAPPDATA%/{identifier}`，**不随域漫游**：选手代码与提交留档跟着域配置文件漫游既慢又可能泄漏），用户在设置页可改到别处（位置指针 `data_dir.json` **固定放默认目录**，否则「自定义目录在哪」本身就需要指针）。三条硬约束：① **搬迁触发用一次性标记 `legacy_migrated`，不用「目标目录为空」** —— 默认目录里几乎总是有 WebView2 的 `EBWebView/` profile，用空目录当门槛等于**对每个老用户都永不迁移**（实测踩到：数据一直留在会被系统清理的临时目录里）；也不能每次启动都尝试，否则用户在新目录里删掉的旧工作区会被反复搬回来；② **旧目录只删空目录（非递归）** —— `remove_dir_all` 会把「迁移失败的条目」一起删掉，那是数据丢失（用户以为搬过去了，实际被删了）；③ **迁移只在启动时执行**（`Logger::init` 之前），设置页改目录只写指针 + 「待迁移来源」：运行中搬运会让新旧目录产生写入分叉，重启后这段写入就丢了。迁移清单**不含 `logs/`**（只服务近期排障，且是唯一可能被进程占用的目录）；默认与指定目录都不可用时回退临时目录并**强告警**（「能打完比赛」优先于「数据位置绝对干净」）
 - **设置入口默认隐藏，连点状态栏版本号 5 下才出现**：`utils/settings-access.ts` 用注入式计数状态机（`createUnlockGate`，时间源可注入）+ 会话级单例（`settingsUnlocked` / `tapVersion`）实现，`ActivityBar` 以 `v-if` 渲染设置项（不是 CSS 隐藏）。三条约束：① **状态不落盘** —— 解锁是「我现在要调试」的临时意图而非配置，重启后重新隐藏，否则一次误触会永久暴露设置入口；② **间隔超窗从 1 重新计数**（2s 窗口），否则一天里零散点 5 次也能凑满；③ **版本号不给可点击的视觉暗示**（无 `title`、`cursor-default`、hover 无变化），解锁瞬间给一次 3 秒提示 —— 它要防的是误触，不是引导用户去点。动机：设置页里是可改变客户端行为的开关（OJ 地址、轮询节拍、缓存），赛场误触后很难自查（改了服务器地址就再也连不上）
 - **「重置」与「清理本地数据」必须分开，且不可逆动作要先给范围**：`commands::maintenance_cmd` 提供两个动作 —— **重置客户端**清掉一切**可重新从服务端获取**的东西（三层缓存 + 公告基线 + 公告已读标记；安全、可反复点，故只做一次确认），**清理本地数据**删除**不可重建**的本地事实（日志内容、`SNAPSHOT_KEEP_DAYS`=30 天前的提交源码留档；不可逆，故 `local_data_usage` 先给确切条数与体积、用户逐项勾选后再二次确认）。硬约束：① 两者都**不动**工作区代码（`workspaces/`，选手唯一作品本体，且 OJ 只有提交过的版本，未提交的编辑无法找回）、配置、登录会话（清会话等于把选手踢回登录页，换账号有独立的登出路径）；② 重置**兜底清扫 `cache/` 根目录** —— 各 Service 只清自己那部分，清扫根目录才能保证将来新增的 namespace 也被覆盖，否则重置会静默漏掉新缓存；③ 日志用「重开 + 截断」清内容而**不删文件**（追加模式句柄在 Windows 上 `set_len` 会被拒，实测 `Os code 5`；删文件则要等重启才重建，中间这段排障信息就没了）；④ 留档的「过期」按 mtime 判定而不比对服务端列表（后者要网络/分页，还可能因赛制隐藏记录而误判）；⑤ **两个勾选项互不牵连**（日志清理失败只降级为 `logCleared=false` 并继续，不 `?` 冒泡中断留档清理）；⑥ **提示文案与配色都不许失实** —— 补拉失败、日志未清掉都要如实说明并以警告色呈现；⑦ **锁中毒统一 `into_inner` 取回内部数据**（与 `TtlCache` / `provider_registry_impl` 同款约定）：相关容器是 `Option` / `HashMap`，panic 不会让它们结构不一致，而「静默跳过」会让重置留下脏缓存、公告基线则会在中毒后永久不再报新公告
 - **公告红点走事件驱动 + 可见性补拉**：Rust 侧 `ContestService::list_announcements` 按比赛维护公告 ID 基线，出现新 ID 时发布 `ContestEvent::AnnouncementsPublished`（**首次拉取只建基线不发事件**，否则一开机就亮红点；基线按比赛隔离，失败时保留旧基线），`main.rs` 事件桥转发到 `announcements-published`，前端即时刷新。前端轮询仍是拉取的唯一发起方（60s ± 10s），但**窗口重新可见/聚焦时立即补拉一次**（1s 去重）—— 桌面客户端的常态是「切出去看题解再切回来」，只靠节拍意味着切回来最多等 70s 才可能看到红点，被选手直接感知为「红点不出现」。已读语义配套收紧：页面不可见时不标记（切走了 = 没看到），`isWatching`（公告页在屏）时落地的新公告自动标为已读，避免离开页面后冒出假红点

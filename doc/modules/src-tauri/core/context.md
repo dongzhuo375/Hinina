@@ -5,8 +5,12 @@
 
 ## 核心类型/函数
 - **`AppContext`** — 统一应用上下文 struct，持有所有基础设施和 Service 的 `Arc` 引用。
-  字段：`event_bus`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
-- **`AppContext::init(base_dir: PathBuf) -> AppResult<Self>`** — 异步初始化序列：
+  字段：`event_bus`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `default_data_dir: PathBuf`, `data_dir_source: DataDirSource`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
+
+  `default_data_dir` 与 `storage.base_dir()` 的区别：后者可能被用户改到别处（`data_dir.json` 指针），而前者是**位置指针文件所在处**与「恢复默认」的目标，永远不变。`data_dir_source` 供 `get_data_dir` 如实告诉界面「当前用哪个目录、为什么」。
+- **`AppContext::init(base_dir: PathBuf, default_data_dir: PathBuf, source: DataDirSource) -> AppResult<Self>`** — 异步初始化序列：
+
+  `default_data_dir` / `source` 来自 `infra::data_dir::prepare_startup`；调用方（`main.rs` 的 `.setup()`）**必须在调用本函数之前完成一次性数据迁移** —— 否则日志句柄会占住旧目录。
   1. Logger — 日志系统初始化（`Logger::init(&base_dir)` 返回持有日志文件路径的实例，stderr + `{base_dir}/logs/hinina.log` 双路输出；实例挂到 `AppContext.logger` 供设置页「清理本地数据」截断日志）
   2. `create_dir_all` — 确保 base_dir 存在
   3. Storage — 文件系统（base_dir 传入）
@@ -57,7 +61,9 @@
 - `commands::workspace_cmd`
 
 ## 逻辑流程
-`AppContext::init(base_dir)` 按依赖顺序初始化：Logger（双路输出，日志文件落在 base_dir 下，故最先拿到 base_dir）→ Storage → EventBus → ConfigService → HttpClient（超时由配置注入）→ ProviderRegistry（当前 OJ 取 `oj.active`，按 `oj.instances` 的 enabled 实例匹配工厂注册全部内建 OJ，active 未注册回退**首个已注册 OJ**并告警）→ WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ 装配 AppContext。所有 Service 通过 Arc 共享 EventBus、ConfigService、ProviderRegistry 和 Storage（AuthService 用于会话持久化，ContestService 用于公告已读状态，ProblemService 用于 limits 磁盘缓存）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
+`AppContext::init(base_dir, default_data_dir, source)` 按依赖顺序初始化：Logger（双路输出，日志文件落在 base_dir 下，故最先拿到 base_dir）→ Storage → EventBus → ConfigService → HttpClient（超时由配置注入）→ ProviderRegistry（当前 OJ 取 `oj.active`，按 `oj.instances` 的 enabled 实例匹配工厂注册全部内建 OJ，active 未注册回退**首个已注册 OJ**并告警）→ WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ 装配 AppContext。所有 Service 通过 Arc 共享 EventBus、ConfigService、ProviderRegistry 和 Storage（AuthService 用于会话持久化，ContestService 用于公告已读状态，ProblemService 用于 limits 磁盘缓存）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
+
+**base_dir 的来历**：由 `infra::data_dir` 在启动时解析（默认 `app_local_data_dir()`，可被 `data_dir.json` 指针改到别处，都不可用时回退临时目录），并由 `.setup()` 在调用本函数**之前**完成一次性数据迁移。详见 `infra/data_dir.md`。
 
 **按需注册路径**（设置页新建实例后立即切换）：
 ```

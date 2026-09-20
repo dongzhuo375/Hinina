@@ -37,3 +37,28 @@ export interface PurgeReport {
   /// 是否清空了日志内容（文件层不可用时为 false，不算失败）
   logCleared: boolean
 }
+
+/// 数据目录来源，对应 Rust `infra::data_dir::DataDirSource`。
+export type DataDirSource = 'default' | 'custom' | 'fallbackTemp'
+
+/// 当前数据目录信息，对应 Rust `commands::data_dir_cmd::DataDirInfo`。
+export interface DataDirInfo {
+  /// 当前**生效**的数据目录
+  currentDir: string
+  /// 默认数据目录（「恢复默认」的目标）
+  defaultDir: string
+  /// 来源：`fallbackTemp` 表示回退到临时目录（数据随时可能被系统清理，界面必须显眼告警）
+  source: DataDirSource
+  /// 是否有改动待重启生效
+  restartRequired: boolean
+}
+
+/// 数据目录更改结果，对应 Rust `commands::data_dir_cmd::DataDirChange`。
+export interface DataDirChange {
+  /// 重启后将使用的数据目录
+  targetDir: string
+  /// 重启时将从这个目录搬运数据（null = 不迁移）
+  migrateFrom: string | null
+  /// 恒为 true：数据目录改动只能重启生效
+  restartRequired: boolean
+}

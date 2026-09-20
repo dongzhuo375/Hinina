@@ -1,6 +1,8 @@
 // Hinina 入口点
 //
 // 初始化顺序（实际执行在 `AppContext::init`，此处为速查，改动请同步 core/context.md）：
+//   0. 数据目录         — `infra::data_dir::prepare_startup`：解析 base_dir + 一次性迁移
+//                         （**必须最先**，日志一旦打开就会占住旧目录）
 //   1. Logger           — 最先初始化，后续步骤才能记录日志
 //   2. Storage          — 文件系统根目录（base_dir），配置与工作区都依赖它
 //   3. EventBus         — 纯内存事件总线，ConfigService 与各 Service 都要发布事件
@@ -11,9 +13,13 @@
 //   8. Service 层       — theme / auth / contest / problem / submission
 //   9. AppContext       — 装配上述所有
 //  10. Tauri App        — manage(AppContext) + generate_handler! 注册 Command
+//
+// 为什么整个初始化在 `.setup()` 里而不是 `main()`：只有 setup 能拿到 AppHandle，
+// 也就只有那里能解析 `app_local_data_dir()`（数据根目录）。
 
 use hinina_lib::commands;
 use hinina_lib::core::context::AppContext;
+use hinina_lib::infra::data_dir::{self, DataDirPlan, DataDirSource, MigrateOutcome};
 
 /// 工作区落盘事件的前端通道名（与 `src/bridge/workspace.bridge.ts` 的监听一致）。
 const WORKSPACE_SAVED_EVENT: &str = "workspace-saved";
@@ -97,20 +103,91 @@ fn install_announcement_event_bridge(app: &tauri::AppHandle) {
     ctx.event_bus.subscribe(EventCategory::Contest, handler);
 }
 
+/// 汇报数据目录方案与迁移结果（在日志就绪后调用）。
+///
+/// 三件事必须说清楚，因为它们都影响「我的数据到底在哪、会不会丢」：
+/// - **回退到临时目录** → `error` 级告警（数据随时可能被系统清理，这是本次修复要消除的状态）；
+/// - **迁移有失败项** → `error` 级告警并列出条目（下次启动会自动重试）；
+/// - **迁移成功** → `info` 记录去向。
+fn report_data_dir(plan: &DataDirPlan, migration: &MigrateOutcome) {
+    match plan.source {
+        DataDirSource::Default => {
+            tracing::info!(dir = %plan.base_dir.display(), "数据目录（默认）");
+        }
+        DataDirSource::Custom => {
+            tracing::info!(dir = %plan.base_dir.display(), "数据目录（用户指定）");
+        }
+        DataDirSource::FallbackTemp => {
+            tracing::error!(
+                dir = %plan.base_dir.display(),
+                default_dir = %plan.default_dir.display(),
+                "数据目录回退到临时目录：数据随时可能被系统清理！请在设置页更改数据目录"
+            );
+        }
+    }
+
+    if migration.is_noop() {
+        return;
+    }
+    if migration.is_ok() {
+        tracing::info!(
+            moved = ?migration.moved,
+            skipped = ?migration.skipped,
+            legacy_removed = migration.legacy_removed,
+            "数据已迁移到新的数据目录"
+        );
+    } else {
+        // 不阻断启动：数据仍在原处，客户端能正常工作；但必须让用户与排障者看见
+        tracing::error!(
+            moved = ?migration.moved,
+            failed = ?migration.failed,
+            "数据迁移未全部完成（下次启动会自动重试）；失败项仍留在原目录"
+        );
+    }
+}
+
 fn main() {
-    // 运行时初始化，阻塞式
+    // 运行时在 setup 之前建好：AppContext::init 是 async，而 setup 是同步回调。
+    // 在 setup 里 block_on 是安全的 —— 那时事件循环还没跑起来，不存在阻塞它的风险。
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    let ctx = rt.block_on(async {
-        // TODO: 从 Tauri app_data_dir 获取正式路径（阶段 7 实现后完善）
-        let base_dir = std::env::temp_dir().join("hinina");
-        AppContext::init(base_dir)
-            .await
-            .expect("Failed to initialize AppContext")
-    });
 
     tauri::Builder::default()
-        .manage(ctx)
-        .setup(|app| {
+        // 目录选择器（设置页「数据目录」）。本项目此前不注册任何 Tauri 插件
+        // （fs/http 的依赖与 capability 存在但从未注册，全部 I/O 都走 Rust），
+        // 故这里是**第一个真正注册的插件**。
+        .plugin(tauri_plugin_dialog::init())
+        .setup(move |app| {
+            use tauri::Manager;
+
+            // AppContext 必须在这里初始化而不是 main()：只有 setup 能拿到 AppHandle，
+            // 也就只有这里能解析 `app_local_data_dir()`。
+            let default_dir = app
+                .path()
+                .app_local_data_dir()
+                .unwrap_or_else(|e| {
+                    // 拿不到默认目录时退到临时目录，让 resolve 继续走它的回退链
+                    eprintln!("解析 app_local_data_dir 失败，回退临时目录: {e}");
+                    data_dir::legacy_dir()
+                });
+            let legacy = data_dir::legacy_dir();
+
+            // ① 一次性数据迁移必须在 `AppContext::init` **之前**：init 会打开日志文件，
+            //    之后旧目录里的 logs/ 就被占住（虽然迁移清单不含 logs，但把顺序固定下来
+            //    能让「谁在什么时候动文件」保持可推理）。
+            let (plan, migration) = data_dir::prepare_startup(&default_dir, &legacy);
+
+            let ctx = rt
+                .block_on(AppContext::init(
+                    plan.base_dir.clone(),
+                    plan.default_dir.clone(),
+                    plan.source,
+                ))
+                .expect("Failed to initialize AppContext");
+
+            // ② 迁移结果与数据目录来源必须**在日志就绪后**立刻汇报
+            report_data_dir(&plan, &migration);
+
+            app.manage(ctx);
             install_workspace_event_bridge(app.handle());
             install_announcement_event_bridge(app.handle());
             Ok(())
@@ -150,6 +227,10 @@ fn main() {
             commands::maintenance_cmd::reset_client,
             commands::maintenance_cmd::local_data_usage,
             commands::maintenance_cmd::purge_local_data,
+            commands::data_dir_cmd::get_data_dir,
+            commands::data_dir_cmd::set_data_dir,
+            commands::data_dir_cmd::reset_data_dir,
+            commands::data_dir_cmd::pick_data_dir,
             commands::theme_cmd::get_theme,
             commands::theme_cmd::set_theme,
         ])

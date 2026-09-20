@@ -7,6 +7,7 @@
 pub mod auth_cmd;
 pub mod config_cmd;
 pub mod contest_cmd;
+pub mod data_dir_cmd;
 pub mod maintenance_cmd;
 pub mod oj_cmd;
 pub mod problem_cmd;
