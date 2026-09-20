@@ -77,3 +77,44 @@ fn open_log_file_keeps_file_at_exact_limit() {
     assert_eq!(fs::metadata(&log_path).unwrap().len(), MAX_LOG_FILE_BYTES);
     let _ = fs::remove_dir_all(&dir);
 }
+
+// ── 运行期清理（设置页「清理本地数据」） ──
+
+#[test]
+fn truncate_log_file_empties_file_while_append_handle_is_open() {
+    // 真实场景：tracing 文件层持有一个**追加模式**的句柄时清理日志。
+    // 这正是不能用 `set_len` 的原因（追加模式只有 FILE_APPEND_DATA，Windows 拒绝截断），
+    // 故本用例必须真的先打开句柄再清理，否则测不到那条约束。
+    let dir = temp_dir("clear");
+    let log_path = dir.join(LOG_RELATIVE_PATH);
+    fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+    fs::write(&log_path, b"line-1\nline-2\n").unwrap();
+
+    let mut live = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .unwrap();
+    let freed = truncate_log_file(&log_path).expect("持有追加句柄时也应能清理");
+
+    assert_eq!(freed, 14, "应返回被释放的字节数");
+    assert_eq!(fs::metadata(&log_path).unwrap().len(), 0, "文件应被清空");
+
+    // 后续日志必须从 0 开始，而不是在旧长度处写出稀疏文件
+    live.write_all(b"after\n").unwrap();
+    drop(live);
+    assert_eq!(fs::read_to_string(&log_path).unwrap(), "after\n");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn truncate_log_file_on_empty_file_reports_zero() {
+    let dir = temp_dir("clear-empty");
+    let log_path = dir.join(LOG_RELATIVE_PATH);
+    fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+    fs::write(&log_path, b"").unwrap();
+
+    assert_eq!(truncate_log_file(&log_path).expect("空文件清理也应成功"), 0);
+    let _ = fs::remove_dir_all(&dir);
+}

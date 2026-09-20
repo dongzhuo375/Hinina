@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAnnouncementStore } from '@/stores/announcementStore'
+import { settingsUnlocked } from '@/utils/settings-access'
 
 const route = useRoute()
 const announcementStore = useAnnouncementStore()
@@ -118,9 +119,10 @@ function itemClass(key: string): string {
       </router-link>
     </div>
 
-    <!-- 底部：设置 -->
+    <!-- 底部：设置（默认隐藏，连点状态栏版本号 5 下才出现，见 utils/settings-access） -->
     <div class="flex w-full flex-col items-center">
       <router-link
+        v-if="settingsUnlocked"
         :to="{ name: 'Settings' }"
         class="flex h-10 w-10 items-center justify-center rounded-lg transition"
         :class="

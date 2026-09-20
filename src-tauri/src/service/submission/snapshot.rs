@@ -204,6 +204,120 @@ pub fn read_snapshot(
     None
 }
 
+// ── 留档占用统计与过期清理（设置页「清理本地数据」） ──
+//
+// 「过期」的判据是**文件修改时间**早于保留窗口，而不是「服务端已查不到该提交」：
+// 后者要拉服务端提交列表逐一比对（要网络、要分页、还可能因赛制隐藏记录而误判），
+// 而留档的价值本来就随时间衰减，按时间保留既简单又不会误删近期记录。
+
+/// 快照留档的保留窗口（天）：更早的留档视为「过期」，可由设置页清理。
+///
+/// 取值理由：赛后复盘通常在几天内完成，而单条留档只有百字节量级 —— 30 天是
+/// 「基本不会误删还想看的东西」与「不让目录无限累积」之间的折中。
+pub const SNAPSHOT_KEEP_DAYS: u64 = 30;
+
+/// 快照留档占用统计。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SnapshotUsage {
+    /// 留档总条数
+    pub total_count: usize,
+    /// 留档总字节数
+    pub total_bytes: u64,
+    /// 其中「过期」（早于保留窗口）的条数
+    pub stale_count: usize,
+    /// 其中「过期」的字节数
+    pub stale_bytes: u64,
+}
+
+/// 遍历全部留档，返回 `(相对路径, 字节数, 修改时间)`。
+///
+/// 目录结构固定两层（`submissions/{oj_id}/{submit_id}.{ext}`），故不引入递归。
+/// 读不到元数据的条目直接跳过：留档是便利特性，统计失败不该让清理流程报错。
+fn walk_snapshots(storage: &Storage) -> Vec<(String, u64, std::time::SystemTime)> {
+    let mut found = Vec::new();
+    let Ok(oj_dirs) = storage.list(SNAPSHOT_DIR) else {
+        return found;
+    };
+    for oj_dir in oj_dirs {
+        let Ok(files) = storage.list(&oj_dir.to_string_lossy().replace('\\', "/")) else {
+            continue;
+        };
+        for file in files {
+            let relative = file.to_string_lossy().replace('\\', "/");
+            let Ok(meta) = std::fs::metadata(storage.base_dir().join(&relative)) else {
+                continue;
+            };
+            if !meta.is_file() {
+                continue;
+            }
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
+            found.push((relative, meta.len(), modified));
+        }
+    }
+    found
+}
+
+/// 统计留档占用（含过期部分），供清理前的预览展示。
+pub fn inspect_snapshots(storage: &Storage, keep_days: u64) -> SnapshotUsage {
+    let cutoff = stale_cutoff(keep_days);
+    let mut usage = SnapshotUsage::default();
+    for (_, bytes, modified) in walk_snapshots(storage) {
+        usage.total_count += 1;
+        usage.total_bytes += bytes;
+        if modified < cutoff {
+            usage.stale_count += 1;
+            usage.stale_bytes += bytes;
+        }
+    }
+    usage
+}
+
+/// 删除过期留档，返回 `(删除条数, 释放字节数)`。
+///
+/// 删空的 OJ 子目录一并回收（否则清理后只剩一堆空目录）。删除失败逐条忽略并告警：
+/// 清理是尽力而为的维护动作，不该因为一个文件被占用而整体失败。
+pub fn purge_stale_snapshots(storage: &Storage, keep_days: u64) -> (usize, u64) {
+    let cutoff = stale_cutoff(keep_days);
+    let mut removed = 0usize;
+    let mut freed = 0u64;
+
+    for (relative, bytes, modified) in walk_snapshots(storage) {
+        if modified >= cutoff {
+            continue;
+        }
+        match storage.remove(&relative) {
+            Ok(()) => {
+                removed += 1;
+                freed += bytes;
+            }
+            Err(e) => tracing::warn!(path = %relative, error = %e, "删除过期留档失败"),
+        }
+    }
+
+    if removed > 0 {
+        if let Ok(oj_dirs) = storage.list(SNAPSHOT_DIR) {
+            for oj_dir in oj_dirs {
+                let relative = oj_dir.to_string_lossy().replace('\\', "/");
+                // remove 对目录是**非递归**删除：非空时必然失败，正好用来「只回收空目录」
+                if storage.remove(&relative).is_ok() {
+                    tracing::debug!(dir = %relative, "留档子目录已空，已回收");
+                }
+            }
+        }
+        tracing::info!(removed, freed_bytes = freed, keep_days, "已清理过期提交留档");
+    }
+    (removed, freed)
+}
+
+/// 过期判据的截止时刻：`now - keep_days`。
+fn stale_cutoff(keep_days: u64) -> std::time::SystemTime {
+    std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(keep_days * 24 * 60 * 60))
+        .unwrap_or(std::time::UNIX_EPOCH)
+}
+
 #[cfg(test)]
 #[path = "tests/snapshot_tests.rs"]
 mod tests;

@@ -4,7 +4,7 @@
 应用程序入口点。按顺序初始化所有子系统，构造 `AppContext`，启动 Tauri 桌面窗口。
 
 ## 核心类型/函数
-- `fn main()` — 程序入口：创建 Tokio runtime → 阻塞式调用 `AppContext::init()` → 以 `generate_handler!` 注册 33 个 Command → 启动 Tauri App
+- `fn main()` — 程序入口：创建 Tokio runtime → 阻塞式调用 `AppContext::init()` → 以 `generate_handler!` 注册 36 个 Command → 启动 Tauri App
 - `const WORKSPACE_SAVED_EVENT: &str` — 工作区落盘事件的前端通道名（`"workspace-saved"`），与 `src/bridge/workspace.bridge.ts` 的 `listen` 对应
 - `const ANNOUNCEMENTS_PUBLISHED_EVENT: &str` — 新公告事件的前端通道名（`"announcements-published"`），与 `src/bridge/announcement.bridge.ts` 的 `onAnnouncementsPublished` 对应
 - `fn install_workspace_event_bridge(app: &tauri::AppHandle)` — 订阅 `EventCategory::Workspace`，把 `WorkspaceEvent::Saved`（显式保存）与 `AutoSaveTriggered`（auto-save 成功）emit 到 webview（载荷 `{ workspaceId, auto }`）。仅转发这两种「内容确已落盘」的事件；`Loaded` / `Switched` 不转发（前端是发起方，无需回环）
@@ -34,7 +34,7 @@
 3. `tauri::Builder::default().manage(ctx)` 注入 `AppContext` 到 State
 4. `.setup(|app| { install_workspace_event_bridge(app.handle()); install_announcement_event_bridge(app.handle()); Ok(()) })` 装配两个事件桥
    （`app.state::<AppContext>()` 取 EventBus 订阅，`handle.emit("workspace-saved", …)` / `handle.emit("announcements-published", …)` 下发前端）
-5. `.invoke_handler(tauri::generate_handler![...])` 注册全部 33 个 IPC Command
+5. `.invoke_handler(tauri::generate_handler![...])` 注册全部 36 个 IPC Command
    （**不是** `setup` 中手动注册，`commands::register_commands()` 不存在；
    commands/mod.rs 注释亦说明选用 generate_handler 以避免 setup 手动注册的兼容性问题）：
    - `auth_cmd`：login / logout / get_session / validate_session
@@ -44,5 +44,6 @@
    - `submission_cmd`：submit_code / get_judgement / **list_contest_submissions** / **get_submission_detail** / **get_submission_cases**
    - `workspace_cmd`：load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / **set_workspace_language**
    - `config_cmd`：get_config / reload_config / update_config / **get_storage_info**
+   - `maintenance_cmd`：**reset_client**（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，清完不重拉）/ **local_data_usage**（清理前的体积预览）/ **purge_local_data**（不可逆：清日志内容与过期提交留档）
    - `theme_cmd`：get_theme / set_theme
 6. `.run(tauri::generate_context!())` 启动 Tauri 桌面应用

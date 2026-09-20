@@ -55,7 +55,7 @@ impl AppContext {
     /// 8. 装配 AppContext
     pub async fn init(base_dir: PathBuf) -> AppResult<Self> {
         // 1. 初始化日志（stderr + {base_dir}/logs/hinina.log 双路输出）
-        Logger::init(&base_dir);
+        let logger = Logger::init(&base_dir);
         tracing::info!("Hinina 启动中... base_dir={}", base_dir.display());
 
         // 确保 base_dir 存在
@@ -171,7 +171,7 @@ impl AppContext {
             workspace_manager,
             http_client,
             storage,
-            logger: Arc::new(Logger),
+            logger: Arc::new(logger),
             theme,
             auth,
             contest,

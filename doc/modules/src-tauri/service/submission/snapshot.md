@@ -18,15 +18,22 @@
 | `snapshot_path` | `(oj_id, submit_id, language) => AppResult<String>` | 精确路径（含路径字符校验） |
 | `write_snapshot` | `(storage, oj_id, submit_id, language, source_code)` | best-effort 落盘：失败只 `warn`，不向上传播 |
 | `read_snapshot` | `(storage, oj_id, submit_id, language) => Option<String>` | 读取（精确路径未命中时按 `{submit_id}.*` 扫描回退） |
+| `SNAPSHOT_KEEP_DAYS` | `30` | 留档保留窗口（天）：更早的留档视为「过期」，可由设置页清理 |
+| `SnapshotUsage` | struct（`Default` / `PartialEq`） | 占用统计：`total_count` / `total_bytes` / `stale_count` / `stale_bytes` |
+| `inspect_snapshots` | `(storage, keep_days) => SnapshotUsage` | 统计留档占用（含过期部分），供清理前的**预览** |
+| `purge_stale_snapshots` | `(storage, keep_days) => (usize, u64)` | 删除过期留档，返回（删除条数, 释放字节数），并回收删空的 OJ 子目录 |
+| `stale_cutoff` / `walk_snapshots` | 私有 | 过期判据的截止时刻 / 遍历两层目录收集（路径, 字节数, mtime） |
 
 ## 直接依赖
 
 - `core::error::{AppError, AppResult}`
-- `infra::storage::Storage`（`read_to_string` / `write_string` / `list`）
+- `infra::storage::Storage`（`read_to_string` / `write_string` / `list` / `remove` / `base_dir`）
+- `tracing`（`warn` / `debug` / `info`）
 
 ## 被依赖
 
 - `service/submission/mod.rs` — `submit` 成功后落盘；`get_submission_detail` 在 `code` 为空时回落
+- `commands::maintenance_cmd` — `local_data_usage` 调 `inspect_snapshots`、`purge_local_data` 调 `purge_stale_snapshots`
 - `service/submission/tests/snapshot_tests.rs` — 单元测试
 
 ## 逻辑流程
@@ -43,6 +50,12 @@ get_submission_detail
        detail.code 为空？
          └ read_snapshot(...)   // 精确路径 → 未命中则扫 submissions/{oj}/ 找 {submit_id}.*
               命中 → detail.code = 快照内容
+
+清理本地数据（commands::maintenance_cmd）
+  inspect_snapshots(keep_days=30)  → 总条数/字节 + 过期条数/字节（只读，供预览）
+  purge_stale_snapshots(keep_days=30)
+       walk_snapshots 收集 → mtime < now-30d 的逐条 storage.remove
+       删除后扫 submissions/ 直接子项，remove 成功的（= 已空）即为回收的空目录
 ```
 
 ## 设计要点
@@ -53,7 +66,13 @@ get_submission_detail
 - **读取时支持扫描回退**：提交时与查询时的语言写法可能不同（服务端归一、选手改语言），精确路径会落空而快照明明就在那儿，故按 `{submit_id}.*` 扫一遍该 OJ 的快照目录。
 - **路径安全**：`oj_id` / `submit_id` 来自会话与服务端响应，必须拒绝路径分隔符与 `..`（与 `ContestService::read_state_path` 同款防线）。
 - **best-effort**：落盘失败只记 `warn`。快照是便利特性，丢一份快照远比丢一次提交轻。
+- **「过期」按 mtime 判定，不比对服务端列表**：后者要网络、要分页、还可能因赛制隐藏记录而误判；而留档价值本就随时间衰减。窗口 30 天（`SNAPSHOT_KEEP_DAYS`）是「基本不会误删还想看的东西」与「不让目录无限累积」之间的折中。
+- **清理绝不越界**：`purge_stale_snapshots` 只删 `submissions/` 下、mtime 早于窗口的文件，**保留窗口内的一律不动**（这是本功能唯一会丢数据的地方，有专门用例锁定）；删空的 OJ 子目录一并回收（`Storage::remove` 对目录是非递归删除，非空必然失败，正好用来「只回收空目录」）。
+- **统计只读**：`inspect_snapshots` 不改动任何磁盘状态 —— 界面必须能安全地反复预览。
+- **删除失败逐条忽略并告警**：清理是尽力而为的维护动作，不该因为一个文件被占用而整体失败。
 
 ## 测试
 
 `src-tauri/src/service/submission/tests/snapshot_tests.rs` 锁定：扩展名与前端 `sourceFileNameOf` 逐一对齐、部署变体归一、`C#`/`JavaScript` 不被前缀吞并、未知语言回退 `txt`、路径越权拒绝、落盘读取往返、语言变更后扫描回退、跨 OJ 不撞号、非法 `submit_id` 不 panic 且不写出任何文件。
+
+**清理语义**（用 `File::set_times` 伪造 mtime，不引入 `filetime` 依赖）：`inspect_snapshots` 统计跨 OJ 的总量与过期条数、窗口放宽后同一批留档不再过期、统计不改磁盘状态；`purge_stale_snapshots` **保留窗口内留档、只删过期的**、释放字节数与预览一致、清空的 OJ 子目录被回收而仍有留档的保留；从未提交过（目录不存在）时统计全零、清理是 no-op 而非报错。

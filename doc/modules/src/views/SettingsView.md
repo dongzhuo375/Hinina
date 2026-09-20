@@ -4,7 +4,9 @@
 
 ## 职责
 
-应用配置（`AppConfig`）的可视化编辑入口，五个分组卡片：OJ 服务器 / 编辑器 / 布局 / 主题（只读占位）/ 关于（客户端存储信息）；本地草稿编辑 + 逐字段校验 + dirty 判定，保存经 `configService.updateConfig`（读-改-写整体替换）落盘。OJ 分组含「当前 OJ」下拉：**候选 = 已知 OJ 枚举（`utils/oj`）+ 配置里的其它实例 id**（未配置者标注「（未配置）」）—— 选中尚未配置的类型会引导填地址，保存即创建实例并**自动切换**（用户在选下拉时已表达切换意图）；切换本身是显式动作（`@change` → `onSwitchOj`，即时生效并持久化），与「保存」按钮解耦。
+应用配置（`AppConfig`）的可视化编辑入口，六个分组卡片：OJ 服务器 / 编辑器 / 布局 / 主题（只读占位）/ **重置与清理** / 关于（客户端存储信息）；本地草稿编辑 + 逐字段校验 + dirty 判定，保存经 `configService.updateConfig`（读-改-写整体替换）落盘。OJ 分组含「当前 OJ」下拉：**候选 = 已知 OJ 枚举（`utils/oj`）+ 配置里的其它实例 id**（未配置者标注「（未配置）」）—— 选中尚未配置的类型会引导填地址，保存即创建实例并**自动切换**（用户在选下拉时已表达切换意图）；切换本身是显式动作（`@change` → `onSwitchOj`，即时生效并持久化），与「保存」按钮解耦。
+
+> 本页入口默认隐藏：连点底部状态栏版本号 5 下才在活动栏出现设置项（见 `utils/settings-access`）。
 
 ## 核心类型/函数
 
@@ -21,6 +23,12 @@
 | `populate` / `load` | fn | 配置 → 表单回填（`activeOj` / `persistedActive` 取 `oj.active`，`ojInstances` 取 `config.oj.instances` 全量清单，`ojUrl` 取当前选中实例地址——active 未命中时回退第一个启用实例兜底竞态，`contestRef` 取 `oj.contestRef`；tabSize 不在档位内回退 4、语言经 `normalizeLanguageId` 归一）；加载前**先 `configService.invalidate()`** |
 | `save` / `discard` | fn | 保存：`updateConfig(draft => …)` 把校验通过的表单值写入草稿（**`draft.oj.active` 刻意不写** —— active 只由 `switch_oj` 改写，否则新建实例会出现「配置说 A、运行中的 Registry 还是 B」的静默不一致；`ojUrl` 写回当前选中实例的 `baseUrl`，**实例不存在则创建**（`enabled: true`，支撑「从枚举里启用新 OJ」），`ojUrl` 写回当前选中实例的 `baseUrl`——active 不在实例列表会被 Rust validate 拒绝，而下拉候选即实例清单，正常操作不会出现；`contestRef` trim；contestPassword 空串 → null）。成功后基线前移 + 「已保存」提示 3s。放弃：从基线 JSON 恢复表单 |
 | `storage` / `storageFailed` / `loadStorage` | ref/fn | 「关于」区块数据（`systemService.getStorageInfo()`：版本 / 存储目录 / 日志路径）；失败**非致命**，仅该区块降级为「获取失败」 |
+| `resetting` / `resetConfirmOpen` / `resetNotice` / `resetError` | ref | 「重置客户端」状态：重置中 / 二次确认展开 / 结果提示（`{ text, warn }`，3s 回弹）/ 失败原因。**补拉失败时 `warn=true`**，文案改为「已重置，但数据重新拉取失败，请手动刷新」并以琥珀色呈现 —— 不能因为重置本身成功就宣称数据已是最新 |
+| `resetClient` | `async fn` | `systemService.resetClient()` → **立刻补拉**（见逻辑流程）。补拉失败不改变「已重置」结论（重置本身已成功），但**必须如实反映在提示里** |
+| `usage` / `usageFailed` / `loadUsage` | ref/fn | 可清理项的体积预览（`systemService.localDataUsage()`）；进入页面与**每次清理后**各读一次，保证预览不是陈旧的。失败仅该区块降级为「占用信息获取失败」 |
+| `purgeLogs` / `purgeSnapshots` | ref（默认均 `true`） | 两个勾选项：日志内容 / `keepDays` 天前的提交留档。对应后端两个开关参数 |
+| `purging` / `purgeConfirmOpen` / `purgeNotice` / `purgeError` / `purgeLocalData` | ref/fn | 「清理本地数据」状态与动作；两项都没勾时不发请求并提示「请先选择要清理的内容」。**勾了日志但 `logCleared=false` 时提示「日志未清理（文件层不可用或写入失败）」并以琥珀色呈现**（`warn=true`）—— 否则界面只剩「释放 0 B」，用户看不出日志没被动过 |
+| `formatBytes` | `(bytes) => string` | 自适应单位的体积展示（B/KB/MB）。**不复用 `formatCodeLength`**：那是「代码长度」口径恒定按 KB，这里要覆盖字节级留档与 MB 级日志 |
 | `copyText` / `copiedKey` | fn/ref | 关于区块逐项复制（版本/目录/路径），「已复制」2s 回弹；剪贴板不可用静默忽略 |
 | `onSplitInput` / `splitPercent` | fn/computed | 布局滑杆输入（钳位后写回）与百分比文案 |
 | `INPUT` / `INPUT_ERROR` / `inputClass` | 常量/fn | 输入框样式拼接（错误态红框） |
@@ -30,6 +38,7 @@
 - `vue`
 - 组件：`ErrorMessage` / `LoadingSpinner`
 - `@/services/config.service`（`configService` + `normalizeLanguageId`）、`@/services/system.service`（`systemService`）
+- `@/stores/contestStore` / `@/stores/problemStore` / `@/stores/announcementStore`（重置后补拉比赛数据与公告）
 - `@/types/config` / `@/types/system`（仅类型）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/editor`（`EDITOR_TAB_SIZES` / `EDITOR_FONT_SIZE_MIN` / `EDITOR_FONT_SIZE_MAX` —— 编辑器分组的值域唯一权威）
@@ -68,6 +77,26 @@ discard(): Object.assign(form, JSON.parse(baseline))
 主题分组：界面主题下拉 disabled（整机只有浅色，暗色即将上线）；编辑器主题下拉同样 disabled，
 但文案指向「由解题页编辑器设置控制」—— 编辑器主题已可切换（`theme.editorTheme`），
 只是入口在解题页弹层，置灰项不得再宣称「固定浅色」
+
+重置与清理（「重置与清理」分组）：
+  重置客户端：「重置客户端」→ 二次确认（取消 / 确认重置）→ resetClient()
+  ├─ systemService.resetClient() → IPC reset_client（后端三层缓存 + 公告基线 + 公告已读）
+  ├─ contestStore.loadContest()          // 立刻补拉：后端已空，前端 store 仍是旧内存副本
+  ├─ problemStore.invalidateMyStatus()   // 我的题目状态同样被清，标记过期待重拉
+  ├─ announcementStore.refresh()         // 已读集合归零 → 红点复亮（重置应有的表现）
+  └─ 补拉成功 → resetNotice「已重置，数据已重新拉取」（绿，3s）
+     补拉失败 → resetNotice「已重置，但数据重新拉取失败，请手动刷新」（**琥珀**）—— 文案不许失实
+     重置本身失败 → resetError（红）
+
+  清理本地数据（不可逆）：
+  onMounted → loadUsage()  // 体积预览：日志字节数 + 留档总/过期条数与字节
+  勾选（默认全选）→「清理本地数据」→「确认清理（不可恢复）」→ purgeLocalData()
+  ├─ 两项都没勾 → 不发请求，提示「请先选择要清理的内容」
+  ├─ systemService.purgeLocalData(logs, staleSnapshots) → IPC purge_local_data
+  ├─ 重新 loadUsage()  // 预览必须反映真值，否则用户以为没生效
+  └─ 成功 → purgeNotice「已清理：释放 X，删除留档 N 个」4s
+     勾了日志但 logCleared=false → 追加「日志未清理（文件层不可用或写入失败）」并转琥珀色
+     失败 → purgeError
 ```
 
 设计要点：
@@ -96,4 +125,6 @@ discard(): Object.assign(form, JSON.parse(baseline))
   且只读一次配置，见 `doc/problem.md` P74 遗留项）。
 - 存储信息每次挂载实时读取（service 不缓存：版本号构建期固定，但存储目录可能随
   用户数据迁移变化）。
-- 定时器（savedTimer/copiedTimer）onBeforeUnmount 统一清理。
+- **「重置与清理」是维护动作，不是配置**：两个动作的定位刻意分开 —— **重置客户端**清掉一切可重新从服务端获取的东西（三层缓存 + 公告基线 + 公告已读标记），安全、可反复点；**清理本地数据**删除不可重建的本地事实（日志内容、过期提交留档），不可逆。四条硬约定：① **重置只做一次确认、清理必须展示体积并勾选后再确认** —— 把不可逆删除混进「重置」，风险是用户以为自己点的是安全按钮；② **重置后必须补拉**（后端已空但前端 store 仍是旧内存副本，不补拉等于让「重置是否生效」不可验证），但**只补拉可观察差异**（比赛元信息/题目列表/我的状态/公告），不追求全场刷新风暴 —— 榜单/提交历史/题面/limits 与服务端同源且服务端本就不缓存它们，进页面时自然刷新；③ **清理后必须重读体积预览**，否则用户以为没生效；④ **提示文案不许失实** —— 补拉失败要说明「数据重新拉取失败，请手动刷新」，勾了日志却没清掉要说明「日志未清理」，两者都以琥珀色（`warn`）呈现而不是成功绿。
+- 清理**不动**工作区代码、配置、登录会话与公告已读状态：前两者是本地事实（代码还是选手唯一作品本体），会话被清等于把选手踢回登录页（赛场上是事故级体验，换账号有独立的登出路径），已读状态属于「重置」的职责而非「清理」。
+- 定时器（savedTimer/copiedTimer/resetTimer/purgeTimer）onBeforeUnmount 统一清理。

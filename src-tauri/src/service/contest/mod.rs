@@ -262,6 +262,61 @@ impl ContestService {
         self.list_contests(0).await
     }
 
+    /// 清空本服务的全部缓存（比赛列表 + 元信息内存 + 元信息磁盘）。
+    ///
+    /// 供设置页「重置客户端」使用：与 [`ContestService::refresh`] 的区别是
+    /// **清完不重拉**（何时补拉由调用方决定），且不限于当前比赛。
+    ///
+    /// **刻意不清公告基线**（`announcement_baseline`）：它不是缓存，而是「已经告诉过
+    /// 用户哪些公告」的记忆。清掉它会让清空之后新发布的公告在下一次拉取时被当成
+    /// 「首次拉取」而**漏报**（红点不亮）。重置语义下要不要连它一起忘掉，由调用方
+    /// 显式决定（见 [`ContestService::clear_announcement_baseline`]）。
+    pub fn clear_caches(&self) {
+        // 锁中毒统一 `into_inner` 取回内部数据（与 `TtlCache` / `provider_registry_impl`
+        // 同款约定，见 provider_registry_impl.rs 头注释）：容器是 `Option<ContestCache>`，
+        // panic 不会让它结构不一致，而「静默跳过清理」会让重置**留下脏缓存** ——
+        // 那是比重置失败更糟的静默后果。
+        *self.cache.write().unwrap_or_else(|e| e.into_inner()) = None;
+        self.meta_cache.clear();
+        let disk = self.meta_disk.clear_namespace();
+        info!(disk_cleared = disk, "已清空比赛列表与元信息缓存");
+    }
+
+    /// 忘掉公告基线（**仅「重置客户端」用**）。
+    ///
+    /// 与 `clear_caches` 分开是有意的：基线不是缓存，两者语义不同。
+    /// 「清缓存」保留基线（否则清空后新发的公告会漏报）；「重置」则应当连
+    /// 「已告知过哪些公告」一起忘掉 —— 重置后一切皆未见，留着基线没有意义。
+    pub fn clear_announcement_baseline(&self) {
+        // 同 `clear_caches`：锁中毒取回内部数据继续（容器是 HashMap，结构不会不一致）
+        self.announcement_baseline
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        info!("已清空公告基线（重置客户端）");
+    }
+
+    /// 清空全部公告已读状态（`announcements_read/`）。
+    ///
+    /// 仅「重置客户端」用：已读状态是**客户端本地事实**（HOJ 无对应接口），
+    /// 清掉的表现是红点全部复亮 —— 这正是重置应有的语义。
+    /// 返回是否确实删除了目录（不存在时返回 `false`，不算失败）。
+    pub fn clear_announcement_read_state(&self) -> bool {
+        if !self.storage.exists(ANNOUNCEMENTS_READ_DIR) {
+            return false;
+        }
+        match self.storage.remove_all(ANNOUNCEMENTS_READ_DIR) {
+            Ok(()) => {
+                info!("已清空公告已读状态（重置客户端）");
+                true
+            }
+            Err(e) => {
+                warn!(error = %e, "清空公告已读状态失败");
+                false
+            }
+        }
+    }
+
     /// 获取比赛排行榜（分页）。
     ///
     /// **不做缓存**：HOJ 内榜每次实时计算（见 `doc/HOJ/HOJ-Contest-Rank-API.md` §4），
@@ -366,15 +421,13 @@ impl ContestService {
         let current: Vec<String> = page.records.iter().map(|a| a.id.clone()).collect();
 
         let new_ids = {
-            let mut baselines = match self.announcement_baseline.write() {
-                Ok(guard) => guard,
-                // 锁中毒（持有者 panic）不应让公告查询失败：公告本身已经拿到了，
-                // 只是红点提醒失效 —— 降级为不发事件
-                Err(e) => {
-                    warn!(contest_id = contest_id, error = %e, "公告基线锁中毒，跳过新公告检测");
-                    return;
-                }
-            };
+            // 锁中毒统一 `into_inner` 取回内部数据（与 `TtlCache` / `provider_registry_impl`
+            // 同款约定）：基线是 `HashMap<String, Vec<String>>`，panic 不会让它结构不一致，
+            // 而「跳过检测」会让中毒后**永久**不再报新公告 —— 静默失效比按正常路径继续更糟
+            let mut baselines = self
+                .announcement_baseline
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
             match baselines.get(contest_id) {
                 None => {
                     // 首次拉取：只建基线，不发事件

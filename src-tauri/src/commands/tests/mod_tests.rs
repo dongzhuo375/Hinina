@@ -118,3 +118,72 @@ fn blank_problem_display_id_is_treated_as_no_filter() {
     assert_eq!(filter(Some("   ".into())), None);
     assert_eq!(filter(None), None);
 }
+
+// ── 清理本地数据：逐项容错（两个勾选项互不牵连） ──
+//
+// `purge_local_data` 本体依赖 `State`，但其编排已抽成纯函数 `run_purge` ——
+// 「日志清理失败不该连带取消用户已勾选的留档清理」正是这里最需要锁定的行为
+// （曾经用 `?` 冒泡，日志一失败就整个命令报错返回，留档一条都没删）。
+
+use super::super::commands::maintenance_cmd::{run_purge, PurgeReport};
+use crate::core::error::AppError;
+
+/// 日志清理失败时：报告里 `log_cleared=false`，但**留档清理照常执行**。
+#[test]
+fn run_purge_continues_snapshot_cleanup_when_log_clearing_fails() {
+    let report = run_purge(
+        true,
+        true,
+        || Err(AppError::Io("日志文件被占用".into())),
+        || (3, 1_400),
+    );
+
+    assert_eq!(
+        report,
+        PurgeReport {
+            freed_bytes: 1_400,
+            removed_snapshots: 3,
+            log_cleared: false,
+        },
+        "日志失败必须降级为 log_cleared=false，且不得吞掉留档清理的结果"
+    );
+}
+
+/// 日志成功但文件层不可用（`clear_log_file` 返回 `Ok(0)` + `has_log_file=false`）：
+/// 释放 0 字节，且 `log_cleared` 必须如实为 `false`（不能笼统报「已清理」）。
+#[test]
+fn run_purge_reports_log_not_cleared_when_file_layer_unavailable() {
+    let report = run_purge(true, false, || Ok((0, false)), || unreachable!("未勾选留档"));
+
+    assert_eq!(report.log_cleared, false);
+    assert_eq!(report.freed_bytes, 0);
+    assert_eq!(report.removed_snapshots, 0);
+}
+
+/// 两项都勾且都成功：数值如实汇总。
+#[test]
+fn run_purge_sums_both_items_on_success() {
+    let report = run_purge(true, true, || Ok((4_787_700, true)), || (3, 420));
+
+    assert_eq!(
+        report,
+        PurgeReport {
+            freed_bytes: 4_788_120,
+            removed_snapshots: 3,
+            log_cleared: true,
+        }
+    );
+}
+
+/// 未勾选的那一项不得被执行（闭包 panic 即证明没被调用）。
+#[test]
+fn run_purge_skips_unselected_items() {
+    let report = run_purge(
+        false,
+        false,
+        || unreachable!("未勾选日志却调用了清理"),
+        || unreachable!("未勾选留档却调用了清理"),
+    );
+
+    assert_eq!(report, PurgeReport::default());
+}
