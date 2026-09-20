@@ -25,7 +25,7 @@ struct StubProblemProvider {
     calls: Arc<AtomicUsize>,
     /// 需要失败的 displayId（模拟 403「该比赛题目当前不可访问」）
     failing: Vec<String>,
-    /// 为 true 时 `list_problems` / `get_user_problem_status` 也返回 Auth 错误，
+    /// 为 true 时 `get_user_problem_status` 返回 Auth 错误，
     /// 用于断言 Service 层不改写错误变体（见「错误变体穿透」小节）
     fail_all: bool,
 }
@@ -48,13 +48,6 @@ impl ProblemProvider for StubProblemProvider {
             memory_limit: 256,
             languages: Vec::new(),
         })
-    }
-
-    async fn list_problems(&self, _contest_id: &str) -> AppResult<Vec<Problem>> {
-        if self.fail_all {
-            return Err(AppError::Auth("stub: HTTP 401 Unauthorized".into()));
-        }
-        Ok(Vec::new())
     }
 
     async fn get_user_problem_status(
@@ -384,17 +377,6 @@ fn open_problem_preserves_auth_variant() {
         err.user_message().contains("获取题目详情失败"),
         "应补上环节名: {}",
         err.user_message()
-    );
-}
-
-#[test]
-fn list_problems_preserves_auth_variant() {
-    let (service, _dir) = make_failing_service("variant-list");
-    let err = block_on(service.list_problems("1011")).expect_err("应报错");
-    assert!(
-        matches!(err, AppError::Auth(_)),
-        "实际 {:?}",
-        err
     );
 }
 

@@ -206,7 +206,6 @@ fn main() {
             commands::contest_cmd::get_read_announcement_ids,
             commands::contest_cmd::mark_announcements_read,
             commands::problem_cmd::get_problem,
-            commands::problem_cmd::list_problems,
             commands::problem_cmd::get_user_problem_status,
             commands::problem_cmd::get_contest_problem_limits,
             commands::submission_cmd::submit_code,

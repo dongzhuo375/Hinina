@@ -833,42 +833,6 @@ impl ContestProvider for HOJAdapter {
 
 #[async_trait]
 impl ProblemProvider for HOJAdapter {
-    async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<Problem>> {
-        let url = self.api_url(&format!("/get-contest-problem?cid={}", contest_id));
-
-        let api_resp = self
-            .get_json_authed::<ApiResponse<Vec<ContestProblemVO>>>(&url)
-            .await
-            .map_err(|e| e.context("HOJ contest problem list"))?;
-
-        let problem_list = api_resp.into_data().map_err(|msg| {
-            AppError::Problem(format!("HOJ contest problem list 失败: {}", msg))
-        })?;
-
-        let problems: Vec<Problem> = problem_list
-            .into_iter()
-            .map(|p| Problem {
-                id: p.pid.to_string(),
-                title: if p.display_title.is_empty() {
-                    format!("Problem {}", p.display_id)
-                } else {
-                    p.display_title
-                },
-                description: String::new(),
-                input_description: String::new(),
-                output_description: String::new(),
-                samples: Vec::new(),
-                time_limit: 0,
-                memory_limit: 0,
-                // 列表接口不含语言列表，详情接口（get_problem）才提供
-                languages: Vec::new(),
-            })
-            .collect();
-
-        debug!(contest_id = contest_id, count = problems.len(), "HOJ 比赛题目列表已获取");
-        Ok(problems)
-    }
-
     async fn get_problem(
         &self,
         contest_id: &str,

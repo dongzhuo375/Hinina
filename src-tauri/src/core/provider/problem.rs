@@ -11,9 +11,6 @@ pub trait ProblemProvider: Send + Sync {
     /// 获取题目详情（含题面与样例）
     async fn get_problem(&self, contest_id: &str, problem_id: &str) -> AppResult<Problem>;
 
-    /// 获取比赛下所有题目列表
-    async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<Problem>>;
-
     /// 批量获取当前用户对指定题目的提交状态。
     ///
     /// 返回 map 的 key 为题目真实 ID（pid）字符串，value 为 `0=未提交 / 1=已AC / 2=尝试过`；

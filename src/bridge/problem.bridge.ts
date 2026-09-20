@@ -7,11 +7,6 @@ export async function getProblem(contestId: string, problemId: string): Promise<
   return ipcInvoke<Problem>('get_problem', { contestId, problemId })
 }
 
-/** 列出比赛下所有题目 */
-export async function listProblems(contestId: string): Promise<Problem[]> {
-  return ipcInvoke<Problem[]>('list_problems', { contestId })
-}
-
 /**
  * 批量获取当前用户对指定题目的提交状态。
  *

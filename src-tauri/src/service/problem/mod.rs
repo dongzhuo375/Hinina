@@ -137,20 +137,6 @@ impl ProblemService {
         );
     }
 
-    /// 获取比赛下所有题目列表。
-    pub async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<Problem>> {
-        let provider = self.registry.current_problem()?;
-
-        debug!(contest_id = contest_id, "获取题目列表");
-        let problems = provider.list_problems(contest_id).await.map_err(|e| {
-            warn!(contest_id = contest_id, error = %e, "获取题目列表失败");
-            e.context("获取题目列表失败")
-        })?;
-
-        debug!(contest_id = contest_id, count = problems.len(), "题目列表已获取");
-        Ok(problems)
-    }
-
     /// 清空本服务的全部缓存（题面内存 + 题面磁盘 + limits 内存 + limits 磁盘）。
     ///
     /// 供设置页「清空缓存」使用：清完不重拉，下一次打开题目/拉 limits 自然走网络。

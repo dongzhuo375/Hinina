@@ -1031,33 +1031,6 @@ impl ContestProvider for HydroAdapter {
 
 #[async_trait]
 impl ProblemProvider for HydroAdapter {
-    /// 比赛题目列表（摘要形态，与 `ContestProvider::list_contest_problems` 同源）
-    async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<Problem>> {
-        let vo: ContestProblemListVO = self
-            .get_json(&format!("/contest/{}/problems", contest_id), false)
-            .await
-            .map_err(|e| e.context("Hydro 题目列表"))?;
-        let problems: Vec<Problem> = vo
-            .pdict
-            .unwrap_or_default()
-            .values()
-            .map(|pdoc| Problem {
-                id: pdoc.problem_id(),
-                title: pdoc.title.clone().unwrap_or_default(),
-                description: String::new(),
-                input_description: String::new(),
-                output_description: String::new(),
-                samples: Vec::new(),
-                time_limit: 0,
-                memory_limit: 0,
-                // 列表投影不含 config → 语言白名单只能从详情接口取
-                languages: Vec::new(),
-            })
-            .collect();
-        debug!(contest_id = contest_id, count = problems.len(), "Hydro 题目列表已获取");
-        Ok(problems)
-    }
-
     /// 题目详情：字母 displayId → `tdoc.pids` → `GET /p/:pid?tid=`。
     ///
     /// `problem_id` 可能是展示字母（解题页路由参数）或真实 pid（limits 批量拉取），
