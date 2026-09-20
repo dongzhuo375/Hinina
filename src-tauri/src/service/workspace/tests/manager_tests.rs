@@ -4,34 +4,41 @@ use std::sync::Arc;
 use crate::core::event::event_bus::EventBus;
 use crate::infra::fs_workspace_repo::FsWorkspaceRepository;
 use crate::infra::storage::Storage;
+use crate::test_support::{Guarded, TempDir};
 
-fn test_manager(test_name: &str) -> WorkspaceManager {
-    let dir = std::env::temp_dir().join(format!("hinina-test-mgr-{}", test_name));
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+/// 测试用管理器 + 临时目录守卫。
+///
+/// `Guarded` 把目录生命周期绑到管理器上：调用点仍按 `WorkspaceManager` 使用
+/// （`Deref` 转发），目录在用例结束时随 `Drop` 回收。
+fn test_manager(test_name: &str) -> Guarded<WorkspaceManager> {
+    let dir = TempDir::named(&format!("hinina-test-mgr-{}", test_name));
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsWorkspaceRepository::new(storage));
     let event_bus = Arc::new(EventBus::new());
-    WorkspaceManager::new(repo, event_bus)
+    Guarded::new(WorkspaceManager::new(repo, event_bus), dir)
 }
 
-fn test_manager_with_storage(test_name: &str) -> (WorkspaceManager, Arc<Storage>) {
-    let dir = std::env::temp_dir().join(format!("hinina-test-mgr-{}", test_name));
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
-    let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let event_bus = Arc::new(EventBus::new());
-    (WorkspaceManager::new(repo, event_bus), storage)
-}
-
-/// 同上，额外把 EventBus 交给调用方（auto-save 事件断言需要订阅它）。
-fn test_manager_with_bus(test_name: &str) -> (WorkspaceManager, Arc<Storage>, Arc<EventBus>) {
-    let dir = std::env::temp_dir().join(format!("hinina-test-mgr-{}", test_name));
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+fn test_manager_with_storage(test_name: &str) -> (Guarded<WorkspaceManager>, Arc<Storage>) {
+    let dir = TempDir::named(&format!("hinina-test-mgr-{}", test_name));
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
     let event_bus = Arc::new(EventBus::new());
     (
-        WorkspaceManager::new(repo, Arc::clone(&event_bus)),
+        Guarded::new(WorkspaceManager::new(repo, event_bus), dir),
+        storage,
+    )
+}
+
+/// 同上，额外把 EventBus 交给调用方（auto-save 事件断言需要订阅它）。
+fn test_manager_with_bus(
+    test_name: &str,
+) -> (Guarded<WorkspaceManager>, Arc<Storage>, Arc<EventBus>) {
+    let dir = TempDir::named(&format!("hinina-test-mgr-{}", test_name));
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
+    let event_bus = Arc::new(EventBus::new());
+    (
+        Guarded::new(WorkspaceManager::new(repo, Arc::clone(&event_bus)), dir),
         storage,
         event_bus,
     )
@@ -172,9 +179,8 @@ fn get_file_reads_from_memory() {
 
 #[test]
 fn load_recovers_workspace_from_disk() {
-    let dir = std::env::temp_dir().join("hinina-test-mgr-load-recover");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+    let dir = TempDir::named("hinina-test-mgr-load-recover");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo1 = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
     let mgr1 = WorkspaceManager::new(repo1, Arc::new(EventBus::new()));
 
@@ -200,9 +206,8 @@ fn load_recovers_workspace_from_disk() {
 
 #[test]
 fn load_uses_metadata_not_id_parsing() {
-    let dir = std::env::temp_dir().join("hinina-test-mgr-metadata");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+    let dir = TempDir::named("hinina-test-mgr-metadata");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo1 = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
     let mgr1 = WorkspaceManager::new(repo1, Arc::new(EventBus::new()));
 
@@ -444,7 +449,6 @@ async fn auto_save_persists_dirty_workspace_and_publishes_once() {
         "v1"
     );
 
-    let _ = std::fs::remove_dir_all(std::env::temp_dir().join("hinina-test-mgr-autosave-persist"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -453,9 +457,8 @@ async fn auto_save_write_is_serialized_with_explicit_save() {
     // 若 auto-save 的写盘不持锁，旧快照的写会**落在新内容之后** → 磁盘回退到 v1；
     // 而工作区在 save() 完成时已标 clean（rev 检查只能阻止 auto-save 误标 clean，
     // 无法撤销已发生的覆盖）→ 内存 v2 且永不重写 = 最后一次编辑静默永久丢失。
-    let dir = std::env::temp_dir().join("hinina-test-mgr-autosave-serialize");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir.clone()));
+    let dir = TempDir::named("hinina-test-mgr-autosave-serialize");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
     let bus = Arc::new(EventBus::new());
 
@@ -527,16 +530,14 @@ async fn auto_save_write_is_serialized_with_explicit_save() {
     assert_eq!(ws.files.get("main.cpp").map(String::as_str), Some("v2"));
 
     mgr.stop_auto_save();
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[tokio::test]
 async fn auto_save_eventually_persists_newest_content_when_edit_arrives_mid_tick() {
     // tick 期间到来的新改动不得被永久吞掉：无论竞态哪一方先拿到锁，
     // 最终磁盘必须是新内容且工作区干净（不允许「clean 但磁盘落后」的终态）。
-    let dir = std::env::temp_dir().join("hinina-test-mgr-autosave-midtick");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir.clone()));
+    let dir = TempDir::named("hinina-test-mgr-autosave-midtick");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
     let bus = Arc::new(EventBus::new());
     let events = count_auto_save_events(&bus);
@@ -591,14 +592,12 @@ async fn auto_save_eventually_persists_newest_content_when_edit_arrives_mid_tick
         "至少发布一次「已落盘」事件"
     );
 
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[tokio::test]
 async fn auto_save_keeps_dirty_and_silent_when_write_fails() {
-    let dir = std::env::temp_dir().join("hinina-test-mgr-autosave-fail");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir.clone()));
+    let dir = TempDir::named("hinina-test-mgr-autosave-fail");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
     let bus = Arc::new(EventBus::new());
     let events = count_auto_save_events(&bus);
@@ -633,5 +632,4 @@ async fn auto_save_keeps_dirty_and_silent_when_write_fails() {
         "写失败不得发布「已落盘」事件（否则前端会显示已自动备份）"
     );
 
-    let _ = std::fs::remove_dir_all(dir);
 }

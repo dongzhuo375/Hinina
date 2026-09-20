@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::{Guarded, TempDir};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,10 +19,11 @@ impl Default for TestConfig {
     }
 }
 
-fn repo(name: &str) -> FsConfigRepository {
-    let dir = std::env::temp_dir().join(format!("hinina-test-config-{}", name));
-    let _ = std::fs::remove_dir_all(&dir);
-    FsConfigRepository::new(Arc::new(Storage::new(dir)), "config.json")
+/// 测试仓库 + 临时目录守卫（`Drop` 时删除目录，避免临时文件堆积）。
+fn repo(name: &str) -> Guarded<FsConfigRepository> {
+    let dir = TempDir::named(&format!("hinina-test-config-{}", name));
+    let repo = FsConfigRepository::new(Arc::new(Storage::new(dir.to_path_buf())), "config.json");
+    Guarded::new(repo, dir)
 }
 
 #[test]

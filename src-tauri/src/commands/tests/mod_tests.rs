@@ -239,16 +239,13 @@ fn data_dir_change_serializes_camel_case_and_nullable_migrate_from() {
 // 判据用错（`dir_is_empty` 而非「冲突条目」）时，命令会在真机上永远失败。
 
 use super::super::commands::data_dir_cmd::validate_reset;
+use crate::test_support::TempDir;
 
 /// 造独立临时目录（每个用例一个）。
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "hinina-test-reset-{}-{}",
-        tag,
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    dir
+///
+/// 返回守卫：目录随 `Drop` 回收（此前只在开始时清理，长期跑测试会堆积残留）。
+fn temp_dir(tag: &str) -> TempDir {
+    TempDir::unique(&format!("hinina-test-reset-{tag}"))
 }
 
 fn write_at(dir: &std::path::Path, rel: &str, content: &str) {
@@ -265,17 +262,15 @@ fn validate_reset_allows_realistic_default_dir() {
     // 删指针则按钮消失）。
     let default_dir = temp_dir("allow-default");
     let current = temp_dir("allow-current");
-    write_at(&default_dir, "data_dir.json", r#"{"dataDir":"D:\\custom"}"#);
-    write_at(&default_dir, "EBWebView/Default/Cache/index", "binary");
-    write_at(&default_dir, "logs/hinina.log", "old log");
+    write_at(default_dir.path(), "data_dir.json", r#"{"dataDir":"D:\\custom"}"#);
+    write_at(default_dir.path(), "EBWebView/Default/Cache/index", "binary");
+    write_at(default_dir.path(), "logs/hinina.log", "old log");
 
     assert!(
-        validate_reset(&default_dir, &current, true).is_ok(),
+        validate_reset(default_dir.path(), current.path(), true).is_ok(),
         "这些条目都不在迁移清单里，不得阻止「恢复默认 + 迁移」"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&current);
 }
 
 #[test]
@@ -283,11 +278,11 @@ fn validate_reset_rejects_stale_migratable_entries_when_migrating() {
     // 真正该拒的情形：默认目录残留会被迁移**跳过**的陈旧数据
     let default_dir = temp_dir("reject-stale");
     let current = temp_dir("reject-stale-current");
-    write_at(&default_dir, "data_dir.json", "{}");
-    write_at(&default_dir, "EBWebView/x", "binary");
-    write_at(&default_dir, "config.json", r#"{"stale":true}"#);
+    write_at(default_dir.path(), "data_dir.json", "{}");
+    write_at(default_dir.path(), "EBWebView/x", "binary");
+    write_at(default_dir.path(), "config.json", r#"{"stale":true}"#);
 
-    let err = validate_reset(&default_dir, &current, true).expect_err("有陈旧 config.json 应拒绝");
+    let err = validate_reset(default_dir.path(), current.path(), true).expect_err("有陈旧 config.json 应拒绝");
     let msg = err.to_string();
     assert!(msg.contains("config.json"), "错误应点名冲突条目: {}", msg);
     assert!(
@@ -296,8 +291,6 @@ fn validate_reset_rejects_stale_migratable_entries_when_migrating() {
         msg
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&current);
 }
 
 #[test]
@@ -306,15 +299,13 @@ fn validate_reset_allows_stale_cache_only() {
     // 开始（TTL 自然填充），不构成「静默使用陈旧数据」
     let default_dir = temp_dir("allow-cache");
     let current = temp_dir("allow-cache-current");
-    write_at(&default_dir, "cache/problem_statement/1/A.json", "{}");
+    write_at(default_dir.path(), "cache/problem_statement/1/A.json", "{}");
 
     assert!(
-        validate_reset(&default_dir, &current, true).is_ok(),
+        validate_reset(default_dir.path(), current.path(), true).is_ok(),
         "残留旧 cache 不该阻止恢复默认"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&current);
 }
 
 #[test]
@@ -322,24 +313,21 @@ fn validate_reset_skips_conflict_check_when_not_migrating() {
     // 不勾迁移时用户只是想切回默认目录，里面有什么就是什么
     let default_dir = temp_dir("no-migrate");
     let current = temp_dir("no-migrate-current");
-    write_at(&default_dir, "config.json", r#"{"stale":true}"#);
+    write_at(default_dir.path(), "config.json", r#"{"stale":true}"#);
 
     assert!(
-        validate_reset(&default_dir, &current, false).is_ok(),
+        validate_reset(default_dir.path(), current.path(), false).is_ok(),
         "不迁移时无需校验冲突"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&current);
 }
 
 #[test]
 fn validate_reset_rejects_same_dir() {
     let dir = temp_dir("same");
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(dir.path()).unwrap();
 
-    let err = validate_reset(&dir, &dir, false).expect_err("已在默认目录应拒绝");
+    let err = validate_reset(dir.path(), dir.path(), false).expect_err("已在默认目录应拒绝");
     assert!(err.to_string().contains("已在默认数据目录"));
 
-    let _ = std::fs::remove_dir_all(&dir);
 }

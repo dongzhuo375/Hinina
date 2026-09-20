@@ -7,21 +7,25 @@ use crate::core::event::event_bus::EventBus;
 use crate::core::event::event_category::EventCategory;
 use crate::infra::fs_config_repo::FsConfigRepository;
 use crate::infra::storage::Storage;
+use crate::test_support::{Guarded, TempDir};
 
-fn test_config_service(path: &str) -> (ConfigService<FsConfigRepository>, Arc<Storage>) {
-    let dir = std::env::temp_dir().join(format!("hinina-test-cfg-{}", path));
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+fn test_config_service(
+    path: &str,
+) -> (Guarded<ConfigService<FsConfigRepository>>, Arc<Storage>) {
+    let dir = TempDir::named(&format!("hinina-test-cfg-{}", path));
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
     let event_bus = Arc::new(EventBus::new());
-    (ConfigService::new(repo, event_bus), storage)
+    (
+        Guarded::new(ConfigService::new(repo, event_bus), dir),
+        storage,
+    )
 }
 
 #[test]
 fn new_loads_existing_config() {
-    let dir = std::env::temp_dir().join("hinina-test-cfg-existing");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+    let dir = TempDir::named("hinina-test-cfg-existing");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
 
     // save a custom config to disk before creating the service
@@ -53,9 +57,8 @@ fn new_uses_defaults_when_no_config() {
 #[test]
 fn new_normalizes_legacy_config_from_disk() {
     // P55：上一版落盘的 Monaco id 'cpp' / dark / 0.45 在加载路径一次性归一
-    let dir = std::env::temp_dir().join("hinina-test-cfg-legacy-normalize");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+    let dir = TempDir::named("hinina-test-cfg-legacy-normalize");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     storage
         .write_string(
             "config.json",
@@ -78,9 +81,8 @@ fn new_normalizes_legacy_config_from_disk() {
 
 #[test]
 fn update_persists_changes() {
-    let dir = std::env::temp_dir().join("hinina-test-cfg-update-persist");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+    let dir = TempDir::named("hinina-test-cfg-update-persist");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
 
     {
@@ -124,9 +126,8 @@ fn reload_from_disk_overwrites_memory() {
 
 #[test]
 fn reload_publishes_config_reloaded_event() {
-    let dir = std::env::temp_dir().join("hinina-test-cfg-reload-event");
-    let _ = std::fs::remove_dir_all(&dir);
-    let storage = Arc::new(Storage::new(dir));
+    let dir = TempDir::named("hinina-test-cfg-reload-event");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
     let event_bus = Arc::new(EventBus::new());
     let service = ConfigService::new(repo, Arc::clone(&event_bus));

@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::core::entity::config::OjInstance;
+use crate::test_support::{Guarded, TempDir};
 
 fn instance(id: &str, enabled: bool) -> OjInstance {
     OjInstance {
@@ -83,17 +84,17 @@ fn test_registry() -> Arc<dyn ProviderRegistry> {
     ))
 }
 
-fn test_deps(tag: &str) -> crate::adapter::AdapterDeps {
-    let dir = std::env::temp_dir().join(format!("hinina-test-context-{}", tag));
-    let _ = std::fs::remove_dir_all(&dir);
-    crate::adapter::AdapterDeps {
+fn test_deps(tag: &str) -> Guarded<crate::adapter::AdapterDeps> {
+    let dir = TempDir::named(&format!("hinina-test-context-{}", tag));
+    let deps = crate::adapter::AdapterDeps {
         http_client: Arc::new(
             crate::infra::http::HttpClient::with_timeout(std::time::Duration::from_secs(5))
                 .expect("HttpClient 构造失败"),
         ),
         event_bus: Arc::new(EventBus::new()),
-        storage: Arc::new(crate::infra::storage::Storage::new(dir)),
-    }
+        storage: Arc::new(crate::infra::storage::Storage::new(dir.to_path_buf())),
+    };
+    Guarded::new(deps, dir)
 }
 
 #[test]

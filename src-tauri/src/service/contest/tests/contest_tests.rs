@@ -13,6 +13,7 @@ use crate::core::provider::oj_id::OjId;
 use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
+use crate::test_support::TempDir;
 
 /// 在当前线程创建独立 tokio runtime，避免嵌套 runtime panic。
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
@@ -242,31 +243,27 @@ impl ContestProvider for StubContestProvider {
     }
 }
 
-/// 构造基于独立临时目录的 ContestService；返回服务、Stub 句柄与目录。
-fn make_service(mode: StubMode) -> (ContestService, Arc<StubContestProvider>, std::path::PathBuf) {
-    make_service_in(unique_temp_dir("contest"), mode)
+/// 构造基于独立临时目录的 ContestService；返回服务、Stub 句柄与目录守卫。
+///
+/// 第三个元素是 `TempDir` 守卫：调用点已有的 `_dir` 绑定会把它持有到用例结束，
+/// 目录随之在 `Drop` 时回收（此前只在开始时清理，实测单次全量测试留下 700+ 个残留）。
+fn make_service(mode: StubMode) -> (ContestService, Arc<StubContestProvider>, TempDir) {
+    let dir = unique_temp_dir("contest");
+    let (service, provider, _bus) = build_service_in(&dir, mode);
+    (service, provider, dir)
 }
 
 /// 独立临时目录（每次调用一个，避免并行测试相互干扰）。
-fn unique_temp_dir(tag: &str) -> std::path::PathBuf {
-    static SEQ: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "hinina-test-{}-{}-{}",
-        tag,
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::SeqCst)
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    dir
+fn unique_temp_dir(tag: &str) -> TempDir {
+    TempDir::unique(&format!("hinina-test-{tag}"))
 }
 
 /// 构造基于**指定目录**的 ContestService —— 磁盘缓存跨实例用例需共用同一目录。
-fn make_service_in(
-    dir: std::path::PathBuf,
-    mode: StubMode,
-) -> (ContestService, Arc<StubContestProvider>, std::path::PathBuf) {
-    let (service, provider, _bus, dir) = build_service_in(dir, mode);
-    (service, provider, dir)
+///
+/// 目录守卫由调用方持有：跨实例用例要在两次构造之间保住同一个目录。
+fn make_service_in(dir: &TempDir, mode: StubMode) -> (ContestService, Arc<StubContestProvider>) {
+    let (service, provider, _bus) = build_service_in(dir, mode);
+    (service, provider)
 }
 
 /// 同 `make_service`，但把 EventBus 也交出来（断言事件发布契约）。
@@ -276,20 +273,17 @@ fn make_service_with_bus(
     ContestService,
     Arc<StubContestProvider>,
     Arc<EventBus>,
-    std::path::PathBuf,
+    TempDir,
 ) {
-    build_service_in(unique_temp_dir("contest-events"), mode)
+    let dir = unique_temp_dir("contest-events");
+    let (service, provider, bus) = build_service_in(&dir, mode);
+    (service, provider, bus, dir)
 }
 
 fn build_service_in(
-    dir: std::path::PathBuf,
+    dir: &TempDir,
     mode: StubMode,
-) -> (
-    ContestService,
-    Arc<StubContestProvider>,
-    Arc<EventBus>,
-    std::path::PathBuf,
-) {
+) -> (ContestService, Arc<StubContestProvider>, Arc<EventBus>) {
     let provider = Arc::new(StubContestProvider::new(mode));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     registry.register(
@@ -303,9 +297,9 @@ fn build_service_in(
     let service = ContestService::new(
         registry,
         Arc::clone(&bus),
-        Arc::new(Storage::new(dir.clone())),
+        Arc::new(Storage::new(dir.to_path_buf())),
     );
-    (service, provider, bus, dir)
+    (service, provider, bus)
 }
 
 /// 订阅 Contest 类事件并收集，供事件契约断言。
@@ -621,18 +615,17 @@ fn meta_cache_hit_skips_second_get_contest() {
 #[test]
 fn meta_cache_survives_new_service_instance() {
     // 磁盘缓存：新实例（模拟重启）仍能命中，且 TTL 依据落盘的 fetchedAt 继续计时
-    let dir = std::env::temp_dir().join(format!(
+    let dir = TempDir::named(&format!(
         "hinina-test-contest-meta-persist-{}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&dir);
 
-    let (service, stub, dir) = make_service_in(dir, StubMode::Ok);
+    let (service, stub) = make_service_in(&dir, StubMode::Ok);
     block_on(service.load_contest_with_problems("1011", None)).expect("首次加载应成功");
     assert_eq!(stub.meta_call_count(), 1);
     drop(service);
 
-    let (reopened, stub2, _dir) = make_service_in(dir, StubMode::Ok);
+    let (reopened, stub2) = make_service_in(&dir, StubMode::Ok);
     block_on(reopened.load_contest_with_problems("1011", None)).expect("重启后加载应成功");
 
     assert_eq!(stub2.meta_call_count(), 0, "元信息应命中磁盘缓存");
@@ -767,8 +760,7 @@ fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     // 「延迟清理磁盘缓存」安全的前提：键带 OJ 维度 → 跨 OJ 结构上不可能命中
     use crate::core::event::event_bus::EventBus;
 
-    let dir = std::env::temp_dir().join("hinina-test-contest-oj-scope");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-contest-oj-scope");
     let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     for id in ["HOJ", "QDUOJ"] {
@@ -783,7 +775,7 @@ fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     let service = ContestService::new(
         Arc::clone(&registry),
         Arc::new(EventBus::new()),
-        Arc::new(Storage::new(dir.clone())),
+        Arc::new(Storage::new(dir.to_path_buf())),
     );
 
     // HOJ：首拉 + 二次命中
@@ -800,16 +792,13 @@ fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
         2,
         "跨 OJ 不得命中同一键（键缺 OJ 维度会让旧 OJ 的比赛元信息驱动新 OJ 查询）"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn oj_switched_clears_contest_scoped_caches() {
     use crate::core::event::app_event::{AppEvent, SystemEvent};
 
-    let dir = std::env::temp_dir().join("hinina-test-contest-oj-switch");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-contest-oj-switch");
     let bus = Arc::new(EventBus::new());
     let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
@@ -820,7 +809,11 @@ fn oj_switched_clears_contest_scoped_caches() {
             ..Default::default()
         },
     );
-    let service = ContestService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
+    let service = ContestService::new(
+        registry,
+        Arc::clone(&bus),
+        Arc::new(Storage::new(dir.to_path_buf())),
+    );
 
     // 预置三层缓存：列表（内存）+ 元信息（内存 + **磁盘**）。
     // 磁盘条目必须真实落盘 —— 否则「目录不存在」的断言恒真，等于零覆盖
@@ -844,8 +837,6 @@ fn oj_switched_clears_contest_scoped_caches() {
         !dir.join("cache/contest_meta").exists(),
         "磁盘元信息缓存应被延迟清理"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 设置页「清空缓存」（同步清理，不重拉） ──
@@ -889,15 +880,13 @@ fn clear_caches_empties_list_memory_and_disk_caches() {
         calls_before + 1,
         "清空后下一次查询必须回源"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn clear_caches_keeps_announcement_baseline() {
     // 公告基线**不是缓存**，而是「已经告诉过用户哪些公告」的记忆：清掉它会让
     // 清空之后新发布的公告在下一次拉取时被当成「首次拉取」而**漏报**（红点不亮）。
-    let (service, provider, bus, dir) = make_service_with_bus(StubMode::Ok);
+    let (service, provider, bus, _dir) = make_service_with_bus(StubMode::Ok);
     let events = collect_contest_events(&bus);
 
     block_on(service.list_announcements("1012", 1, 20)).expect("首次拉取公告失败");
@@ -917,8 +906,6 @@ fn clear_caches_keeps_announcement_baseline() {
         vec![vec!["9002".to_string()]],
         "清空缓存不得丢掉公告基线（丢掉 = 清空后新增的公告漏报，红点不亮）"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 重置客户端（清缓存 + 忘掉公告基线 + 清已读状态） ──
@@ -928,7 +915,7 @@ fn clear_announcement_baseline_forgets_baseline() {
     // 与上一个用例相反的一侧：**重置**语义下必须忘掉基线 —— 忘掉后下一次拉取
     // 等价于「首次拉取」（静默重建基线，不报新公告）。两条用例成对存在，
     // 才能锁住「clear_caches 保留 / clear_announcement_baseline 清空」这个区别。
-    let (service, provider, bus, dir) = make_service_with_bus(StubMode::Ok);
+    let (service, provider, bus, _dir) = make_service_with_bus(StubMode::Ok);
     let events = collect_contest_events(&bus);
 
     block_on(service.list_announcements("1012", 1, 20)).expect("首次拉取公告失败");
@@ -943,8 +930,6 @@ fn clear_announcement_baseline_forgets_baseline() {
         events.lock().unwrap().is_empty(),
         "基线已忘：下次拉取应重新建基线（等价首次），而不是报新公告"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -979,6 +964,4 @@ fn clear_announcement_read_state_removes_files_and_is_idempotent() {
 
     // 幂等：目录已不在时返回 false（「本就没有」不是失败），不报错
     assert!(!service.clear_announcement_read_state());
-
-    let _ = std::fs::remove_dir_all(&dir);
 }

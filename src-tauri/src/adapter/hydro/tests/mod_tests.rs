@@ -1,9 +1,10 @@
-﻿// Hydro mod.rs 单元测试：响应处置、映射 helper、评测记录投影。
+// Hydro mod.rs 单元测试：响应处置、映射 helper、评测记录投影。
 //
 // 夹具均为按 `doc/Hydro/HYDRO-API.md` 手工构造（无可用联调实例）。
 
 use super::*;
 use crate::core::entity::submission::JudgementStatus;
+use crate::test_support::{Guarded, TempDir};
 
 /// 状态变体的线上名（`JudgementStatus` 未派生 `PartialEq`，且前端依赖序列化名）
 fn status_name(status: &JudgementStatus) -> String {
@@ -542,16 +543,16 @@ fn parse_value_passes_through_success_payload() {
 
 // ── 工厂契约 ──
 
-fn test_deps(tag: &str) -> AdapterDeps {
-    let dir = std::env::temp_dir().join(format!("hinina-test-hydro-{}", tag));
-    let _ = std::fs::remove_dir_all(&dir);
-    AdapterDeps {
+fn test_deps(tag: &str) -> Guarded<AdapterDeps> {
+    let dir = TempDir::named(&format!("hinina-test-hydro-{}", tag));
+    let deps = AdapterDeps {
         http_client: Arc::new(
             HttpClient::with_timeout(Duration::from_secs(5)).expect("HttpClient 构造失败"),
         ),
         event_bus: Arc::new(crate::core::event::event_bus::EventBus::new()),
-        storage: Arc::new(crate::infra::storage::Storage::new(dir)),
-    }
+        storage: Arc::new(crate::infra::storage::Storage::new(dir.to_path_buf())),
+    };
+    Guarded::new(deps, dir)
 }
 
 /// Hydro 身份契约：id 决定会话文件名，且必须与配置实例的 `id` 一致。
