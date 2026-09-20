@@ -11,6 +11,8 @@ use tracing_subscriber::{
     EnvFilter,
 };
 
+use crate::core::error::{AppError, AppResult};
+
 /// 日志文件相对 base_dir 的路径。
 ///
 /// 落盘与展示的唯一事实来源：`get_storage_info` Command 直接引用此常量
@@ -27,7 +29,16 @@ const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
 ///
 /// 双路输出：stderr（开发调试）+ 文件（现场排障，选手机器上没有控制台）。
 /// 支持 debug/release 自适应级别与 RUST_LOG 覆盖。
-pub struct Logger;
+pub struct Logger {
+    /// 日志文件绝对路径（**运行期清理日志**用；文件层不可用时为 `None`）。
+    ///
+    /// 为什么存路径而不是文件句柄：Windows 上 `set_len` 需要 `FILE_WRITE_DATA`，
+    /// 而日志句柄是**追加模式**打开的（只有 `FILE_APPEND_DATA`），截断会被拒
+    /// （实测 `Os code 5, PermissionDenied`）。改用「重开 + 截断」：新句柄带
+    /// `GENERIC_WRITE`，而两个句柄的共享模式都允许对方写入，故互不冲突。
+    /// 这与启动时的截断式轮转是同一手法，行为一致。
+    log_path: Option<std::path::PathBuf>,
+}
 
 /// 多线程共享的日志文件写入器。
 ///
@@ -65,7 +76,9 @@ impl Logger {
     /// - 可通过 `RUST_LOG` 环境变量覆盖（同时作用于两路输出）
     /// - 日志中包含 span 事件的 enter/exit 信息
     /// - 文件层失败（磁盘只读等）时降级为仅 stderr，不阻断启动
-    pub fn init(base_dir: &Path) {
+    ///
+    /// 返回持有文件句柄的实例（供运行期截断日志，见 [`Logger::clear_log_file`]）。
+    pub fn init(base_dir: &Path) -> Self {
         let default_level = if cfg!(debug_assertions) {
             "debug"
         } else {
@@ -99,6 +112,9 @@ impl Logger {
                     .with(stderr_layer)
                     .with(file_layer)
                     .init();
+                Self {
+                    log_path: Some(base_dir.join(LOG_RELATIVE_PATH)),
+                }
             }
             None => {
                 // 文件层不可用：保持旧的单路 stderr 行为
@@ -106,8 +122,32 @@ impl Logger {
                     .with(filter)
                     .with(stderr_layer)
                     .init();
+                Self { log_path: None }
             }
         }
+    }
+
+    /// 清空日志内容，返回释放的字节数（文件层不可用时为 0）。
+    ///
+    /// 「重开 + 截断」而不是用日志句柄 `set_len`：后者在 Windows 上被拒（追加模式
+    /// 只有 `FILE_APPEND_DATA`，没有 `FILE_WRITE_DATA`）。两个句柄的共享模式都允许
+    /// 对方写入，故与 tracing 文件层不冲突；`append` 模式保证后续日志自动从 0 开始，
+    /// 不会写出稀疏文件。
+    ///
+    /// 只清内容、**不删文件**：删了要等重启才会重建，中间这段排障信息就彻底没了。
+    pub fn clear_log_file(&self) -> AppResult<u64> {
+        let Some(path) = &self.log_path else {
+            return Ok(0);
+        };
+        truncate_log_file(path).map_err(|e| AppError::Io(format!("清空日志文件失败: {}", e)))
+    }
+
+    /// 日志文件层是否可用。
+    ///
+    /// 用于区分「清空了日志」与「本来就没有文件层（磁盘只读等）」，让界面能如实
+    /// 说明结果而不是笼统报成功。
+    pub fn has_log_file(&self) -> bool {
+        self.log_path.is_some()
     }
 
     /// 打开日志文件（追加模式）；超过大小上限先截断。失败返回 `None` 由调用方降级。
@@ -137,6 +177,19 @@ impl Logger {
             }
         }
     }
+}
+
+/// 把日志文件截断为 0，返回释放的字节数。
+///
+/// 抽成自由函数是为了可单测：`Logger::init` 会设置**全局** subscriber（每进程只能
+/// 一次，与 `cargo test` 的输出捕获冲突），故截断逻辑必须能脱离 `init` 验证。
+///
+/// 用 `fs::write(path, [])`（`File::create` → truncate）而不是 `File::open` + `set_len`：
+/// 语义等价且与启动时的截断式轮转同源，两处不会漂移。
+fn truncate_log_file(path: &Path) -> io::Result<u64> {
+    let freed = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    fs::write(path, [])?;
+    Ok(freed)
 }
 
 #[cfg(test)]

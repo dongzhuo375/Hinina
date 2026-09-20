@@ -264,12 +264,13 @@ impl ContestService {
 
     /// 清空本服务的全部缓存（比赛列表 + 元信息内存 + 元信息磁盘）。
     ///
-    /// 供设置页「清空缓存」使用：与 [`ContestService::refresh`] 的区别是
+    /// 供设置页「重置客户端」使用：与 [`ContestService::refresh`] 的区别是
     /// **清完不重拉**（何时补拉由调用方决定），且不限于当前比赛。
     ///
     /// **刻意不清公告基线**（`announcement_baseline`）：它不是缓存，而是「已经告诉过
     /// 用户哪些公告」的记忆。清掉它会让清空之后新发布的公告在下一次拉取时被当成
-    /// 「首次拉取」而**漏报**（红点不亮）。
+    /// 「首次拉取」而**漏报**（红点不亮）。重置语义下要不要连它一起忘掉，由调用方
+    /// 显式决定（见 [`ContestService::clear_announcement_baseline`]）。
     pub fn clear_caches(&self) {
         if let Ok(mut cache) = self.cache.write() {
             *cache = None;
@@ -277,6 +278,43 @@ impl ContestService {
         self.meta_cache.clear();
         let disk = self.meta_disk.clear_namespace();
         info!(disk_cleared = disk, "已清空比赛列表与元信息缓存");
+    }
+
+    /// 忘掉公告基线（**仅「重置客户端」用**）。
+    ///
+    /// 与 `clear_caches` 分开是有意的：基线不是缓存，两者语义不同。
+    /// 「清缓存」保留基线（否则清空后新发的公告会漏报）；「重置」则应当连
+    /// 「已告知过哪些公告」一起忘掉 —— 重置后一切皆未见，留着基线没有意义。
+    pub fn clear_announcement_baseline(&self) {
+        match self.announcement_baseline.write() {
+            Ok(mut baselines) => {
+                baselines.clear();
+                info!("已清空公告基线（重置客户端）");
+            }
+            // 锁中毒（持有者 panic）不该让重置失败：基线下次拉取会自动重建
+            Err(e) => warn!(error = %e, "公告基线锁中毒，跳过清空"),
+        }
+    }
+
+    /// 清空全部公告已读状态（`announcements_read/`）。
+    ///
+    /// 仅「重置客户端」用：已读状态是**客户端本地事实**（HOJ 无对应接口），
+    /// 清掉的表现是红点全部复亮 —— 这正是重置应有的语义。
+    /// 返回是否确实删除了目录（不存在时返回 `false`，不算失败）。
+    pub fn clear_announcement_read_state(&self) -> bool {
+        if !self.storage.exists(ANNOUNCEMENTS_READ_DIR) {
+            return false;
+        }
+        match self.storage.remove_all(ANNOUNCEMENTS_READ_DIR) {
+            Ok(()) => {
+                info!("已清空公告已读状态（重置客户端）");
+                true
+            }
+            Err(e) => {
+                warn!(error = %e, "清空公告已读状态失败");
+                false
+            }
+        }
     }
 
     /// 获取比赛排行榜（分页）。

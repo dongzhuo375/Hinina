@@ -6,6 +6,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
 import { resetSessionForOjSwitch } from '@/stores/session'
+import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
@@ -17,7 +18,7 @@ import {
 import { errorMessage } from '@/utils/error'
 import { ojBaseUrlHint, ojSelectOptions } from '@/utils/oj'
 import type { AppConfig, OjInstance } from '@/types/config'
-import type { StorageInfo } from '@/types/system'
+import type { LocalDataUsage, StorageInfo } from '@/types/system'
 
 /**
  * 设置页 —— 应用配置（AppConfig）的可视化编辑入口。
@@ -351,48 +352,117 @@ async function copyText(key: string, text: string): Promise<void> {
   }
 }
 
-// ── 缓存维护 ──
+// ── 重置与清理 ──
 //
-// 入口本身是隐藏的（连点状态栏版本号 5 下才出现设置项），故这一块不需要再叠
-// 额外权限判断 —— 能进到本页的人已经主动表达过意图。但「清空」仍要二次确认：
-// 它会连带后端缓存一起清掉，误触后全场数据要重新拉一遍（赛场上白等几十秒）。
+// 两个动作的定位刻意分开（入口本身是隐藏的：连点状态栏版本号 5 下才出现设置项）：
+// - **重置客户端**：清掉一切可重新从服务端获取的东西。安全、可反复点，故只做一次确认。
+// - **清理本地数据**：删除不可重建的本地事实（日志内容、过期提交留档）。不可逆，
+//   故必须先展示确切范围与体积、由用户勾选、再二次确认。
 
-const clearingCache = ref(false)
-const cacheConfirmOpen = ref(false)
-const cacheNotice = ref<string | null>(null)
-const cacheError = ref<string | null>(null)
+const resetting = ref(false)
+const resetConfirmOpen = ref(false)
+const resetNotice = ref<string | null>(null)
+const resetError = ref<string | null>(null)
 
-let cacheTimer: ReturnType<typeof setTimeout> | null = null
+const usage = ref<LocalDataUsage | null>(null)
+const usageFailed = ref(false)
+const purgeLogs = ref(true)
+const purgeSnapshots = ref(true)
+const purging = ref(false)
+const purgeConfirmOpen = ref(false)
+const purgeNotice = ref<string | null>(null)
+const purgeError = ref<string | null>(null)
 
-/// 清空缓存并立刻补拉当前比赛数据。
+let resetTimer: ReturnType<typeof setTimeout> | null = null
+let purgeTimer: ReturnType<typeof setTimeout> | null = null
+
+/// 文件体积展示（自适应单位）。
 ///
-/// **必须补拉**：后端缓存清空后，前端 store 里的内存副本仍是旧值（本次清理
-/// 刻意不动前端状态，避免把界面清成空白）。不补拉的话用户看到的是「已清空」
-/// 却依旧是旧数据，等于把「清空是否生效」变成不可验证的玄学。
-async function clearCache(): Promise<void> {
-  cacheConfirmOpen.value = false
-  clearingCache.value = true
-  cacheNotice.value = null
-  cacheError.value = null
+/// 不复用 `formatCodeLength`：那是「代码长度」口径，恒定按 KB 展示（源码都是 KB 级）；
+/// 这里要覆盖字节级留档与 MB 级日志，单位必须自适应。
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
+/// 重置客户端，并立刻补拉当前比赛数据。
+///
+/// **必须补拉**：后端缓存清空后，前端 store 里的内存副本仍是旧值（重置刻意不动
+/// 前端状态，避免把界面清成空白）。不补拉的话用户看到的是「已重置」却依旧是旧数据，
+/// 等于把「重置是否生效」变成不可验证的玄学。
+///
+/// 补拉范围只覆盖**可观察的差异**，不追求「全场刷新」：
+/// - 比赛元信息 + 题目列表 → `loadContest`（立刻重拉）
+/// - 我的题目状态 → `invalidateMyStatus`（标记过期，总览页下次可见时重拉）
+/// - 公告列表 + **已读集合** → `refresh`：已读状态已被后端清空，重拉后 readIds
+///   归零，红点随之复亮（这正是重置应有的表现）
+///
+/// 榜单 / 提交历史 / 题面 / limits 的前端副本不补拉：它们与服务端同源，且服务端
+/// 本就不缓存这几项，进入对应页面时自然刷新 —— 重置不该变成一次全场请求风暴。
+async function resetClient(): Promise<void> {
+  resetConfirmOpen.value = false
+  resetting.value = true
+  resetNotice.value = null
+  resetError.value = null
   try {
-    await systemService.clearCache()
+    await systemService.resetClient()
 
-    // 补拉比赛元信息 + 题目列表；失败不改变「已清空」的结论（清空本身已成功），
-    // 只让错误按既有链路（contestStore.error）如实暴露
     await useContestStore().loadContest().catch(() => {})
-    // 「我的题目状态」在后端同样被清：标记过期，由总览页下次可见时重拉
     useProblemStore().invalidateMyStatus()
+    void useAnnouncementStore().refresh()
 
-    cacheNotice.value = '缓存已清空，数据已重新拉取'
-    if (cacheTimer) clearTimeout(cacheTimer)
-    cacheTimer = setTimeout(() => {
-      cacheNotice.value = null
-      cacheTimer = null
+    resetNotice.value = '已重置，数据已重新拉取'
+    if (resetTimer) clearTimeout(resetTimer)
+    resetTimer = setTimeout(() => {
+      resetNotice.value = null
+      resetTimer = null
     }, 3_000)
   } catch (e) {
-    cacheError.value = errorMessage(e, '清空缓存失败')
+    resetError.value = errorMessage(e, '重置失败')
   } finally {
-    clearingCache.value = false
+    resetting.value = false
+  }
+}
+
+/// 读取可清理项的体积（进入设置页与每次清理后各读一次，保证预览不是陈旧的）
+async function loadUsage(): Promise<void> {
+  try {
+    usage.value = await systemService.localDataUsage()
+    usageFailed.value = false
+  } catch {
+    // 非致命：仅该区块降级为「获取失败」，不影响重置客户端
+    usageFailed.value = true
+  }
+}
+
+/// 清理本地数据（不可逆）。两个勾选项都空时不发请求（后端也如实处理为 no-op）。
+async function purgeLocalData(): Promise<void> {
+  if (!purgeLogs.value && !purgeSnapshots.value) {
+    purgeError.value = '请先选择要清理的内容'
+    purgeConfirmOpen.value = false
+    return
+  }
+  purgeConfirmOpen.value = false
+  purging.value = true
+  purgeNotice.value = null
+  purgeError.value = null
+  try {
+    const report = await systemService.purgeLocalData(purgeLogs.value, purgeSnapshots.value)
+    purgeNotice.value = `已清理：释放 ${formatBytes(report.freedBytes)}` +
+      (report.removedSnapshots > 0 ? `，删除留档 ${report.removedSnapshots} 个` : '')
+    // 清理后重读体积：预览必须反映真值，否则用户会以为没生效
+    await loadUsage()
+    if (purgeTimer) clearTimeout(purgeTimer)
+    purgeTimer = setTimeout(() => {
+      purgeNotice.value = null
+      purgeTimer = null
+    }, 4_000)
+  } catch (e) {
+    purgeError.value = errorMessage(e, '清理本地数据失败')
+  } finally {
+    purging.value = false
   }
 }
 
@@ -418,12 +488,14 @@ function inputClass(field: string): string {
 onMounted(() => {
   void load()
   void loadStorage()
+  void loadUsage()
 })
 
 onBeforeUnmount(() => {
   if (savedTimer) clearTimeout(savedTimer)
   if (copiedTimer) clearTimeout(copiedTimer)
-  if (cacheTimer) clearTimeout(cacheTimer)
+  if (resetTimer) clearTimeout(resetTimer)
+  if (purgeTimer) clearTimeout(purgeTimer)
 })
 </script>
 
@@ -860,7 +932,7 @@ onBeforeUnmount(() => {
               </div>
             </section>
 
-            <!-- ── 缓存 ── -->
+            <!-- ── 重置与清理 ── -->
             <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
               <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
                 <svg
@@ -877,48 +949,147 @@ onBeforeUnmount(() => {
                     stroke-linecap="round"
                   />
                 </svg>
-                <h2 class="text-sm font-semibold text-[var(--text-primary)]">缓存</h2>
+                <h2 class="text-sm font-semibold text-[var(--text-primary)]">重置与清理</h2>
               </div>
-              <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-                <p class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-secondary)]">
-                  清空比赛元信息、题面、题目限制与终态提交详情的本地缓存，清完立即重新拉取。
-                  <span class="text-[var(--text-muted)]">
-                    不会删除工作区代码、提交源码快照、公告已读状态与配置。
-                  </span>
-                </p>
 
-                <div class="flex shrink-0 items-center gap-2">
-                  <span v-if="cacheError" class="text-xs text-rose-600">{{ cacheError }}</span>
-                  <span v-else-if="cacheNotice" class="text-xs text-emerald-600">
-                    {{ cacheNotice }}
-                  </span>
+              <div class="divide-y divide-slate-100">
+                <!-- 重置客户端（安全，可反复点） -->
+                <div class="px-5 py-4">
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <p class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+                      <span class="font-medium text-[var(--text-primary)]">重置客户端</span>
+                      —— 清空比赛元信息、题面、题目限制、终态提交详情等本地缓存，并清空公告已读标记，清完立即重新拉取。
+                      <span class="text-[var(--text-muted)]">
+                        不会删除工作区代码、提交源码留档、登录会话与配置。
+                      </span>
+                    </p>
 
-                  <template v-if="cacheConfirmOpen || clearingCache">
-                    <button
-                      v-if="!clearingCache"
-                      type="button"
-                      class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
-                      @click="cacheConfirmOpen = false"
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
-                      :disabled="clearingCache"
-                      @click="clearCache"
-                    >
-                      {{ clearingCache ? '清空中…' : '确认清空' }}
-                    </button>
-                  </template>
-                  <button
-                    v-else
-                    type="button"
-                    class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-slate-50"
-                    @click="cacheConfirmOpen = true"
+                    <div class="flex shrink-0 items-center gap-2">
+                      <span v-if="resetError" class="text-xs text-rose-600">{{ resetError }}</span>
+                      <span v-else-if="resetNotice" class="text-xs text-emerald-600">
+                        {{ resetNotice }}
+                      </span>
+
+                      <template v-if="resetConfirmOpen || resetting">
+                        <button
+                          v-if="!resetting"
+                          type="button"
+                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                          @click="resetConfirmOpen = false"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-60"
+                          :disabled="resetting"
+                          @click="resetClient"
+                        >
+                          {{ resetting ? '重置中…' : '确认重置' }}
+                        </button>
+                      </template>
+                      <button
+                        v-else
+                        type="button"
+                        class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-slate-50"
+                        @click="resetConfirmOpen = true"
+                      >
+                        重置客户端
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 清理本地数据（不可逆：先看范围与体积，再勾选确认） -->
+                <div class="px-5 py-4">
+                  <p class="text-xs leading-relaxed text-[var(--text-secondary)]">
+                    <span class="font-medium text-[var(--text-primary)]">清理本地数据</span>
+                    —— 删除<strong class="font-semibold text-rose-600">不可重建</strong>的本地内容。
+                    日志是排障线索，提交源码留档是 OJ 不回吐代码时的唯一来源，删掉都无法恢复。
+                  </p>
+
+                  <!-- 体积预览：不可逆动作必须让用户看到确切范围 -->
+                  <div
+                    class="mt-3 flex flex-col gap-2 rounded-lg border border-[var(--border-color)] bg-slate-50/70 px-3.5 py-3"
                   >
-                    清空缓存
-                  </button>
+                    <p v-if="usageFailed" class="text-xs text-rose-600">占用信息获取失败</p>
+                    <p v-else-if="!usage" class="text-xs text-[var(--text-muted)]">正在统计占用…</p>
+                    <template v-else>
+                      <label class="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
+                        <input
+                          v-model="purgeLogs"
+                          type="checkbox"
+                          class="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--color-primary)]"
+                        />
+                        <span class="min-w-0">
+                          日志内容
+                          <span class="font-mono text-[var(--text-primary)]">
+                            {{ formatBytes(usage.logBytes) }}
+                          </span>
+                          <span class="text-[var(--text-muted)]">
+                            （只清空内容，保留日志文件本身）
+                          </span>
+                        </span>
+                      </label>
+                      <label class="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
+                        <input
+                          v-model="purgeSnapshots"
+                          type="checkbox"
+                          class="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--color-primary)]"
+                        />
+                        <span class="min-w-0">
+                          {{ usage.keepDays }} 天前的提交源码留档
+                          <span class="font-mono text-[var(--text-primary)]">
+                            {{ usage.snapshotStaleCount }} 个 · {{ formatBytes(usage.snapshotStaleBytes) }}
+                          </span>
+                          <span class="text-[var(--text-muted)]">
+                            （留档共 {{ usage.snapshotTotalCount }} 个 ·
+                            {{ formatBytes(usage.snapshotTotalBytes) }}，近 {{ usage.keepDays }} 天的不受影响）
+                          </span>
+                        </span>
+                      </label>
+                    </template>
+                  </div>
+
+                  <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <p class="min-w-0 flex-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                      此操作<strong class="font-semibold text-rose-600">不可撤销</strong>；
+                      不会删除工作区代码、配置、登录会话与公告已读状态。
+                    </p>
+                    <div class="flex shrink-0 items-center gap-2">
+                      <span v-if="purgeError" class="text-xs text-rose-600">{{ purgeError }}</span>
+                      <span v-else-if="purgeNotice" class="text-xs text-emerald-600">
+                        {{ purgeNotice }}
+                      </span>
+
+                      <template v-if="purgeConfirmOpen || purging">
+                        <button
+                          v-if="!purging"
+                          type="button"
+                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                          @click="purgeConfirmOpen = false"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+                          :disabled="purging"
+                          @click="purgeLocalData"
+                        >
+                          {{ purging ? '清理中…' : '确认清理（不可恢复）' }}
+                        </button>
+                      </template>
+                      <button
+                        v-else
+                        type="button"
+                        class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-slate-50"
+                        @click="purgeConfirmOpen = true"
+                      >
+                        清理本地数据
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>

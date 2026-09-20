@@ -920,3 +920,65 @@ fn clear_caches_keeps_announcement_baseline() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── 重置客户端（清缓存 + 忘掉公告基线 + 清已读状态） ──
+
+#[test]
+fn clear_announcement_baseline_forgets_baseline() {
+    // 与上一个用例相反的一侧：**重置**语义下必须忘掉基线 —— 忘掉后下一次拉取
+    // 等价于「首次拉取」（静默重建基线，不报新公告）。两条用例成对存在，
+    // 才能锁住「clear_caches 保留 / clear_announcement_baseline 清空」这个区别。
+    let (service, provider, bus, dir) = make_service_with_bus(StubMode::Ok);
+    let events = collect_contest_events(&bus);
+
+    block_on(service.list_announcements("1012", 1, 20)).expect("首次拉取公告失败");
+    assert!(events.lock().unwrap().is_empty());
+
+    service.clear_announcement_baseline();
+
+    provider.set_announcements(&["9001", "9002"]);
+    block_on(service.list_announcements("1012", 1, 20)).expect("二次拉取公告失败");
+
+    assert!(
+        events.lock().unwrap().is_empty(),
+        "基线已忘：下次拉取应重新建基线（等价首次），而不是报新公告"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn clear_announcement_read_state_removes_files_and_is_idempotent() {
+    let (service, _provider, dir) = make_service(StubMode::Ok);
+
+    service
+        .mark_announcements_read("1012", "uid-1", &["9001".to_string()])
+        .expect("标记已读失败");
+    assert_eq!(
+        service
+            .get_read_announcement_ids("1012", "uid-1")
+            .expect("读取已读状态失败"),
+        vec!["9001".to_string()],
+        "前置条件：已读状态应已落盘"
+    );
+    assert!(dir.join("announcements_read").exists());
+
+    assert!(
+        service.clear_announcement_read_state(),
+        "目录存在时应报告确实删除了"
+    );
+
+    assert!(
+        service
+            .get_read_announcement_ids("1012", "uid-1")
+            .expect("清空后读取失败")
+            .is_empty(),
+        "已读状态应被清空（表现 = 红点全部复亮）"
+    );
+    assert!(!dir.join("announcements_read").exists());
+
+    // 幂等：目录已不在时返回 false（「本就没有」不是失败），不报错
+    assert!(!service.clear_announcement_read_state());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

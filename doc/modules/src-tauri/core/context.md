@@ -7,7 +7,7 @@
 - **`AppContext`** — 统一应用上下文 struct，持有所有基础设施和 Service 的 `Arc` 引用。
   字段：`event_bus`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
 - **`AppContext::init(base_dir: PathBuf) -> AppResult<Self>`** — 异步初始化序列：
-  1. Logger — 日志系统初始化（`Logger::init(&base_dir)`，stderr + `{base_dir}/logs/hinina.log` 双路输出）
+  1. Logger — 日志系统初始化（`Logger::init(&base_dir)` 返回持有日志文件路径的实例，stderr + `{base_dir}/logs/hinina.log` 双路输出；实例挂到 `AppContext.logger` 供设置页「清理本地数据」截断日志）
   2. `create_dir_all` — 确保 base_dir 存在
   3. Storage — 文件系统（base_dir 传入）
   4. EventBus — 事件总线
