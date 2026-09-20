@@ -104,9 +104,12 @@ pub async fn set_data_dir(
 ///
 /// 前端 invoke 签名: `reset_data_dir`({ migrate })
 ///
-/// 与 [`set_data_dir`] 的区别是**不做「必须为空」校验**：默认目录是客户端自己的地盘，
-/// 可能残留上次用过的数据（用户之前改走过）。此时迁移会跳过已存在的条目而不是覆盖，
-/// 因此「部分合并」是安全的。
+/// **勾了迁移时必须要求默认目录为空**：默认目录可能残留用户上次用过的数据
+/// （他之前改走过）。迁移对「目标已存在」的条目是**跳过**而非覆盖，于是恢复默认会
+/// **静默回退到那些陈旧数据**（当前目录里的新数据被无视）—— 这比报错糟糕得多。
+/// 曾经这里刻意不做「必须为空」校验并声称「部分合并是安全的」，那是错的。
+///
+/// 不勾迁移时无需校验：用户只是想切回默认目录，里面有什么就是什么（那是他自己的选择）。
 #[tauri::command]
 pub async fn reset_data_dir(
     ctx: State<'_, AppContext>,
@@ -122,6 +125,13 @@ pub async fn reset_data_dir(
     let current = ctx.storage.base_dir().to_path_buf();
     if default_dir == current {
         return Err(AppError::Config("当前已在默认数据目录".into()));
+    }
+    if migrate && !data_dir::dir_is_empty(&default_dir) {
+        return Err(AppError::Config(format!(
+            "默认数据目录已有内容（{}），迁移会被逐项跳过并导致界面回退到那里的陈旧数据 —— \
+             请先清空该目录，或不勾选「迁移现有数据」",
+            default_dir.display()
+        )));
     }
 
     info!(target = %default_dir.display(), migrate, "恢复默认数据目录（重启后生效）");

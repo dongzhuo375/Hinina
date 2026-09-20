@@ -18,6 +18,10 @@
 //
 // **搬迁触发用一次性标记，不用「目标目录为空」**：默认目录里几乎总是有 WebView2 的
 // `EBWebView/` profile，用空目录当门槛等于对每个老用户都永不迁移（实测踩到）。
+//
+// **跨卷复制先落暂存名再改名**：直接写目标时中途失败会留下半拷贝，而重试逻辑用
+// 「目标是否存在」判完成 —— 半拷贝会被误判成「已跳过」，失败计数为零，迁移标记被
+// 清除，数据目录永久残缺。
 
 use std::path::{Path, PathBuf};
 
@@ -91,14 +95,19 @@ pub struct DataDirPointer {
     /// 由下次启动完成搬运后清除（见模块头注释）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrate_from: Option<String>,
-    /// **一次性标记**：临时目录的旧数据是否已成功搬家。
+    /// **一次性标记**：临时目录的旧数据搬家结果。
     ///
     /// 为什么需要它而不是「目标目录为空」：默认目录里几乎**总是**有 WebView2 的
     /// `EBWebView/` profile（任何一次启动都会创建），用「空目录」当门槛等于
     /// **对每个老用户都永不迁移** —— 实测踩到，迁移静默不执行。
     ///
     /// 也不能「每次启动都尝试」：用户在新目录里删掉的旧工作区会被反复搬回来。
-    /// 故用一次性标记，且**只在成功时置位**（失败留待下次重试）。
+    ///
+    /// 三态语义（见 `should_attempt_legacy`）：
+    /// - `None`：从未尝试（全新升级场景 → 默认目录下搬一次）
+    /// - `Some(true)`：已成功搬完 → **永不重试**
+    /// - `Some(false)`：**试过但失败** → 下次启动重试，且**不因用户改目录而放弃**
+    ///   （否则那份数据会永远留在会被系统清理的临时目录里）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legacy_migrated: Option<bool>,
 }
@@ -128,6 +137,14 @@ impl MigrateOutcome {
     /// 是否全部成功（无失败项）。
     pub fn is_ok(&self) -> bool {
         self.failed.is_empty()
+    }
+
+    /// 并入另一次迁移的结果（同一启动内可能先搬 `migrate_from` 再搬临时目录）。
+    pub fn merge(&mut self, other: MigrateOutcome) {
+        self.moved.extend(other.moved);
+        self.skipped.extend(other.skipped);
+        self.failed.extend(other.failed);
+        self.legacy_removed |= other.legacy_removed;
     }
 }
 
@@ -160,14 +177,26 @@ pub fn read_pointer(default_dir: &Path) -> DataDirPointer {
 }
 
 /// 写入位置指针（自动创建默认目录）。
+///
+/// **原子写**（temp + rename）：直接 `fs::write` 是 truncate-in-place，写到一半掉电/
+/// 崩溃会留下空文件或半截 JSON。虽然 [`read_pointer`] 对损坏降级为「用默认目录」
+/// 不会崩，但那等于**静默丢掉用户自定义的目录设置**（他下次启动会发现数据「换位置了」）。
+/// 同目录改名是原子的，故读者要么看到旧内容、要么看到新内容。
 pub fn write_pointer(default_dir: &Path, pointer: &DataDirPointer) -> AppResult<()> {
     std::fs::create_dir_all(default_dir)
         .map_err(|e| AppError::Io(format!("创建默认数据目录失败 {}: {}", default_dir.display(), e)))?;
     let json = serde_json::to_string_pretty(pointer)
         .map_err(|e| AppError::Serialization(format!("序列化数据目录指针失败: {}", e)))?;
+
     let path = pointer_path(default_dir);
-    std::fs::write(&path, json)
-        .map_err(|e| AppError::Io(format!("写入数据目录指针失败 {}: {}", path.display(), e)))
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, json)
+        .map_err(|e| AppError::Io(format!("写入数据目录指针失败 {}: {}", temp.display(), e)))?;
+    std::fs::rename(&temp, &path).map_err(|e| {
+        // 改名失败时清掉临时文件，避免下次启动看到 `.json.tmp` 残片
+        let _ = std::fs::remove_file(&temp);
+        AppError::Io(format!("替换数据目录指针失败 {}: {}", path.display(), e))
+    })
 }
 
 /// 目录是否可直接使用（能创建、能写入）。探测文件写成功后立刻删除。
@@ -317,19 +346,22 @@ pub fn resolve(default_dir: &Path, legacy: &Path) -> DataDirPlan {
 
 /// 启动时准备数据目录：解析方案 + 执行一次性迁移。
 ///
-/// 迁移的两个触发条件（见模块头注释）：
-/// 1. **指针带 `migrate_from`**（设置页改目录时勾了「迁移现有数据」）；
-/// 2. **首次从临时目录搬家**：用默认目录、**尚未搬过**（`legacy_migrated` 未置位）、
-///    且旧临时目录存在。
+/// 两个迁移来源**在同一次启动内都可能执行**，故这里**不提前返回**：
+/// ① 指针带 `migrate_from`（设置页改目录时勾了「迁移现有数据」）；
+/// ② 临时目录的旧数据尚未成功搬家（见 [`should_attempt_legacy`]）。
 ///
-/// 条件 2 刻意**不用「目标目录为空」**：默认目录里几乎总是有 WebView2 的
-/// `EBWebView/` profile，用空目录当门槛等于永不迁移（实测踩到）。
+/// 曾经 ① 成功后直接 `return`，导致 ② 被跳过 —— 若旧临时目录的搬家先前失败过，
+/// 用户中途改用自定义目录就会让那份数据**永远滞留**在会被系统清理的位置。
+///
+/// ② 刻意**不用「目标目录为空」**当门槛：默认目录里几乎总是有 WebView2 的
+/// `EBWebView/` profile，用空目录当条件等于永不迁移（实测踩到）。
 ///
 /// 迁移失败**不阻断启动**：调用方继续用解析出的 `base_dir`（数据仍在原处，
 /// 客户端能正常工作），但必须强告警 —— 这正是「回退仍可用」优于「启动失败」的场景。
 pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, MigrateOutcome) {
     let pointer = read_pointer(default_dir);
     let plan = resolve(default_dir, legacy);
+    let mut outcome = MigrateOutcome::default();
 
     // ① 显式要求的迁移（设置页改目录）
     if let Some(from) = pointer
@@ -339,43 +371,71 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
         .map(PathBuf::from)
     {
         if from != plan.base_dir && from.exists() {
-            let outcome = migrate(&from, &plan.base_dir);
+            let step = migrate(&from, &plan.base_dir);
             // 无失败项才清除标记：有失败项时保留，下次启动重试（已搬过去的条目
             // 会因「目标已存在」被跳过，故重试是幂等的，不会重复搬运）
-            if should_clear_pending(&outcome) {
-                clear_migrate_from(default_dir, &pointer);
+            if should_clear_pending(&step) {
+                clear_migrate_from(default_dir);
             }
-            return (plan, outcome);
+            outcome.merge(step);
+        } else {
+            // 来源不存在或与目标相同：标记已无意义，清掉避免每次启动都尝试
+            debug!(from = %from.display(), "待迁移来源不存在或与目标相同，清除标记");
+            clear_migrate_from(default_dir);
         }
-        // 来源不存在或与目标相同：标记已无意义，清掉避免每次启动都尝试
-        debug!(from = %from.display(), "待迁移来源不存在或与目标相同，清除标记");
-        clear_migrate_from(default_dir, &pointer);
     }
 
-    // ② 首次从临时目录搬家（一次性，见 DataDirPointer::legacy_migrated 的注释）
-    if plan.source == DataDirSource::Default
-        && pointer.legacy_migrated != Some(true)
-        && legacy.exists()
-    {
-        let outcome = migrate(legacy, &plan.base_dir);
-        if should_clear_pending(&outcome) {
-            mark_legacy_migrated(default_dir, &pointer);
-        }
-        return (plan, outcome);
+    // ② 临时目录搬家（不提前返回，理由见函数注释）
+    if should_attempt_legacy(&pointer, plan.source, legacy) {
+        let step = migrate(legacy, &plan.base_dir);
+        // 成功 → Some(true)（永不重试）；失败 → Some(false)（**换个目录也继续重试**）
+        mark_legacy_migrated(default_dir, step.is_ok());
+        outcome.merge(step);
     }
 
-    (plan, MigrateOutcome::default())
+    (plan, outcome)
 }
 
-/// 置位「临时目录已搬家」标记（写失败只告警：下次启动会重试迁移，结果幂等）。
-fn mark_legacy_migrated(default_dir: &Path, pointer: &DataDirPointer) {
-    let next = DataDirPointer {
-        legacy_migrated: Some(true),
-        ..pointer.clone()
-    };
-    if let Err(e) = write_pointer(default_dir, &next) {
-        warn!(error = %e, "写入「已搬家」标记失败（下次启动会重试，结果幂等）");
+/// 是否该尝试把临时目录的旧数据搬到当前数据目录。
+///
+/// | `legacy_migrated` | 当前目录来源 | 行为 |
+/// |---|---|---|
+/// | `Some(true)` | 任意 | **永不**（否则用户在新目录里删掉的旧工作区会被搬回来） |
+/// | `Some(false)` | 任意 | **重试** —— 上次试过但失败，欠着这份数据 |
+/// | `None` | 默认 | 搬（全新升级场景） |
+/// | `None` | 自定义 / 回退临时 | 不搬（用户主动选了别处且没要求迁移，尊重其选择） |
+///
+/// `Some(false)` 之所以**不看来源**：它意味着「我们确实尝试过、且失败」，那份数据是
+/// 用户的真实数据；若因为用户中途改了目录就放弃，它会一直留在临时目录里等被系统清理。
+fn should_attempt_legacy(pointer: &DataDirPointer, source: DataDirSource, legacy: &Path) -> bool {
+    if pointer.legacy_migrated == Some(true) || !legacy.exists() {
+        return false;
     }
+    pointer.legacy_migrated == Some(false) || source == DataDirSource::Default
+}
+
+/// 读-改-写位置指针（写失败只告警：下次启动会重试，不影响正确性）。
+///
+/// **必须重新读盘**，不能用启动时读到的内存副本 `..pointer.clone()` 去写：同一次启动里
+/// 可能连续改指针（先清 `migrate_from`、再置 `legacy_migrated`），拿陈旧副本写会把前一步
+/// 刚清掉的字段**复活** —— 测试抓到过：清掉的 `migrate_from` 被后一次写入带回来，
+/// 于是「迁移已完成」的标记永远清不掉。
+fn update_pointer(default_dir: &Path, mutate: impl FnOnce(&mut DataDirPointer)) {
+    let mut pointer = read_pointer(default_dir);
+    mutate(&mut pointer);
+    if let Err(e) = write_pointer(default_dir, &pointer) {
+        warn!(error = %e, "更新数据目录指针失败（下次启动会重试，不影响正确性）");
+    }
+}
+
+/// 记录临时目录搬家的结果。
+///
+/// 成功写 `Some(true)`（一次性标记，永不重试）；失败写 `Some(false)`（下次启动重试，
+/// 且**不因用户改目录而放弃** —— 见 [`should_attempt_legacy`]）。
+fn mark_legacy_migrated(default_dir: &Path, succeeded: bool) {
+    update_pointer(default_dir, |pointer| {
+        pointer.legacy_migrated = Some(succeeded);
+    });
 }
 
 /// 迁移后是否应清除「待迁移来源」标记。
@@ -387,15 +447,11 @@ fn should_clear_pending(outcome: &MigrateOutcome) -> bool {
     outcome.is_ok()
 }
 
-/// 清除指针里的「待迁移来源」字段（写失败只告警：下次启动会重试，不影响正确性）。
-fn clear_migrate_from(default_dir: &Path, pointer: &DataDirPointer) {
-    let next = DataDirPointer {
-        migrate_from: None,
-        ..pointer.clone()
-    };
-    if let Err(e) = write_pointer(default_dir, &next) {
-        warn!(error = %e, "清除待迁移标记失败（下次启动会重试）");
-    }
+/// 清除指针里的「待迁移来源」字段。
+fn clear_migrate_from(default_dir: &Path) {
+    update_pointer(default_dir, |pointer| {
+        pointer.migrate_from = None;
+    });
 }
 
 /// 把 `from` 下 [`MIGRATED_ENTRIES`] 搬到 `to`，返回逐项结果。
@@ -455,16 +511,66 @@ pub fn migrate(from: &Path, to: &Path) -> MigrateOutcome {
     outcome
 }
 
-/// 搬运单个条目：优先 `rename`（同卷零拷贝），失败则递归复制后删除源。
+/// 搬运单个条目：优先 `rename`（同卷零拷贝），失败则**先复制到暂存名再改名**后删除源。
 ///
 /// 跨卷时 `rename` 在 Windows 上返回 `ERROR_NOT_SAME_DEVICE`，必须降级 —— 用户把
 /// 数据目录设到另一个盘是常见需求。
+///
+/// **复制先落到 `{to}.hinina-partial` 再改名**，而不是直接写 `to`：中途失败
+/// （磁盘满 / 文件被锁）会留下半拷贝的目标，而 [`migrate`] 用 `dst.exists()` 判
+/// 「已完成」—— 半拷贝会被误判成「已存在 → 跳过」，于是重试永远不再搬它、
+/// 失败计数为零 → 迁移标记被清除 → **活跃数据目录永久残缺**。
+/// 落到暂存名后改名，使 `to` 的存在性等价于「搬运完整完成」。
 fn move_entry(from: &Path, to: &Path) -> std::io::Result<()> {
+    // 暂存与目标同目录，保证改名是同文件系统内的原子操作
+    let staging = staging_path(to);
+    // 先清掉上次失败可能残留的暂存。**必须在快速路径之前**：`rename` 成功时不会
+    // 走到复制分支，残片就永远留着（并可能被后续启动误当成数据）。
+    remove_any(&staging);
+
     if std::fs::rename(from, to).is_ok() {
         return Ok(());
     }
-    copy_recursive(from, to)?;
+
+    if let Err(e) = copy_recursive(from, &staging) {
+        // 失败必须清掉半拷贝 —— 留着就是下一次的「已存在」
+        remove_any(&staging);
+        return Err(e);
+    }
+    if let Err(e) = std::fs::rename(&staging, to) {
+        remove_any(&staging);
+        return Err(e);
+    }
+
     // 复制成功后删除源；删不掉只告警（数据已安全落到新目录，残留旧文件不影响正确性）
+    remove_source(from);
+    Ok(())
+}
+
+/// 半拷贝暂存路径（与目标同目录）。
+fn staging_path(to: &Path) -> PathBuf {
+    let name = to
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    to.with_file_name(format!("{}.hinina-partial", name))
+}
+
+/// 删除文件或目录（不存在时 no-op；失败只告警 —— 清理失败不该中断迁移流程）。
+fn remove_any(path: &Path) {
+    if path.is_dir() {
+        if let Err(e) = std::fs::remove_dir_all(path) {
+            warn!(path = %path.display(), error = %e, "清理暂存目录失败");
+        }
+    } else if path.exists() {
+        if let Err(e) = std::fs::remove_file(path) {
+            warn!(path = %path.display(), error = %e, "清理暂存文件失败");
+        }
+    }
+}
+
+/// 复制完成后删除源（失败只告警：数据已在新目录，残留旧文件不影响正确性）。
+fn remove_source(from: &Path) {
     if from.is_dir() {
         if let Err(e) = std::fs::remove_dir_all(from) {
             warn!(path = %from.display(), error = %e, "复制完成但旧条目删除失败（数据已在新目录）");
@@ -472,7 +578,6 @@ fn move_entry(from: &Path, to: &Path) -> std::io::Result<()> {
     } else if let Err(e) = std::fs::remove_file(from) {
         warn!(path = %from.display(), error = %e, "复制完成但旧文件删除失败（数据已在新目录）");
     }
-    Ok(())
 }
 
 /// 递归复制文件或目录。

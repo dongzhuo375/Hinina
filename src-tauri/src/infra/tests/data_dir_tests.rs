@@ -45,6 +45,15 @@ fn pointer(data_dir: Option<&Path>, migrate_from: Option<&Path>) -> DataDirPoint
     }
 }
 
+/// 构造带 `legacy_migrated` 的指针（三态语义的用例用它）。
+fn pointer_with_legacy(data_dir: Option<&Path>, legacy_migrated: Option<bool>) -> DataDirPointer {
+    DataDirPointer {
+        data_dir: data_dir.map(|p| p.to_string_lossy().into_owned()),
+        migrate_from: None,
+        legacy_migrated,
+    }
+}
+
 // ── 指针读写 ──
 
 #[test]
@@ -333,14 +342,278 @@ fn migrate_never_deletes_unmigrated_entries() {
 }
 
 #[test]
-fn move_entry_propagates_error_for_missing_source() {
-    // 单项失败以 Err 形式返回，由 migrate 的 match 分支记录并继续 —— 这条锁定
-    // 「失败是可观测的」，而不是被静默吞掉
-    let dir = unique_dir("move-entry");
-    let missing = dir.join("does-not-exist");
-    let dst = dir.join("dst");
+fn existing_target_is_skipped_not_failed() {
+    // 「目标已存在 → 跳过（不覆盖）」是刻意的（重试幂等），**跳过不算失败**。
+    // 注意这与「半拷贝」的区别：修复后 `dst.exists()` 只可能是完整搬运的结果
+    // （复制走暂存名 + 改名），故无需区分「完整」与「半截」。
+    let from = unique_dir("skip-from");
+    let to = unique_dir("skip-to");
+    write_file(&from, "config.json", "{}");
+    write_file(&from, "workspaces/w/main.cpp", "int main(){}");
+    write_file(&to, "workspaces/existing.txt", "already here");
 
-    assert!(move_entry(&missing, &dst).is_err(), "源不存在必须报错");
+    let outcome = migrate(&from, &to);
+
+    assert!(outcome.is_ok(), "跳过不是失败: {:?}", outcome);
+    assert_eq!(outcome.skipped, vec!["workspaces".to_string()]);
+    assert!(outcome.moved.contains(&"config.json".to_string()));
+    assert!(
+        to.join("workspaces/existing.txt").exists(),
+        "目标既有内容不得被覆盖"
+    );
+
+    let _ = std::fs::remove_dir_all(&from);
+    let _ = std::fs::remove_dir_all(&to);
+}
+
+#[test]
+fn mark_legacy_migrated_persists_failure_state_and_survives_pointer_rewrite() {
+    // 缺陷回归（测试抓到）：`mark_legacy_migrated` 曾用启动时读到的**陈旧指针副本**
+    // 写入，会把同一次启动里刚被 `clear_migrate_from` 清掉的字段复活。
+    // 现在改为读-改-写，两处修改必须互不干扰。
+    let dir = unique_dir("pointer-rmw");
+    write_pointer(&dir, &pointer(Some(Path::new(r"D:\custom")), Some(Path::new(r"C:\from"))))
+        .expect("写指针失败");
+
+    // 先清 migrate_from（模拟分支 ① 成功）
+    clear_migrate_from(&dir);
+    // 再写搬家失败标记（模拟分支 ② 失败）
+    mark_legacy_migrated(&dir, false);
+
+    let after = read_pointer(&dir);
+    assert_eq!(after.migrate_from, None, "清掉的字段不得被后一次写入复活");
+    assert_eq!(after.legacy_migrated, Some(false), "失败态必须落盘");
+    assert_eq!(
+        after.data_dir,
+        Some(r"D:\custom".to_string()),
+        "用户指定的目录不得被抹掉"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn should_attempt_legacy_retries_failed_migration_regardless_of_source() {
+    // **MEDIUM 缺陷回归**：临时目录搬家失败后用户改用自定义目录，若不重试，
+    // 那份数据会永远留在会被系统清理的临时目录里。
+    let legacy = unique_dir("attempt-legacy");
+    write_file(&legacy, "config.json", "{}");
+
+    let custom = unique_dir("attempt-custom");
+    let default = unique_dir("attempt-default");
+
+    // 从未尝试 + 自定义目录 → 不搬（尊重用户选择）
+    assert!(!should_attempt_legacy(
+        &pointer(None, None),
+        DataDirSource::Custom,
+        &legacy
+    ));
+    // 从未尝试 + 默认目录 → 搬（全新升级场景）
+    assert!(should_attempt_legacy(
+        &pointer(None, None),
+        DataDirSource::Default,
+        &legacy
+    ));
+    // **试过但失败 + 自定义目录 → 仍要搬**（本缺陷的核心）
+    assert!(should_attempt_legacy(
+        &pointer_with_legacy(None, Some(false)),
+        DataDirSource::Custom,
+        &legacy
+    ));
+    // 已成功 + 任意目录 → 永不重试（否则用户删掉的旧工作区会复活）
+    assert!(!should_attempt_legacy(
+        &pointer_with_legacy(None, Some(true)),
+        DataDirSource::Default,
+        &legacy
+    ));
+    // 旧目录不存在 → 无事可做
+    assert!(!should_attempt_legacy(
+        &pointer(None, None),
+        DataDirSource::Default,
+        &default.join("nope")
+    ));
+
+    let _ = std::fs::remove_dir_all(&legacy);
+    let _ = std::fs::remove_dir_all(&custom);
+    let _ = std::fs::remove_dir_all(&default);
+}
+
+#[test]
+fn prepare_startup_records_failure_so_later_retry_is_not_lost() {
+    // MEDIUM 缺陷的**端到端**部分：失败必须落成 `Some(false)`，且此后即使来源换成
+    // 自定义目录也仍会重试（`should_attempt_legacy` 的端到端体现）。
+    //
+    // 「让迁移真失败」在单测里无法确定性构造（需要文件被别的进程占用），故这里
+    // 直接用 `mark_legacy_migrated(false)` 落到盘上，再验证下一次启动确实重试。
+    let default_dir = unique_dir("retry-e2e-default");
+    let legacy = unique_dir("retry-e2e-legacy");
+    seed_legacy(&legacy);
+    let custom = unique_dir("retry-e2e-custom");
+    std::fs::create_dir_all(&custom).unwrap();
+
+    // 模拟「上次尝试过且失败」+ 用户已改用自定义目录
+    write_pointer(
+        &default_dir,
+        &DataDirPointer {
+            data_dir: Some(custom.to_string_lossy().into_owned()),
+            migrate_from: None,
+            legacy_migrated: Some(false),
+        },
+    )
+    .expect("写指针失败");
+
+    let (plan, outcome) = prepare_startup(&default_dir, &legacy);
+
+    assert_eq!(plan.base_dir, custom);
+    assert!(outcome.is_ok(), "{:?}", outcome);
+    assert!(
+        custom.join("workspaces/HOJ-1012-1000/main.cpp").exists(),
+        "**失败过的旧数据必须被搬到自定义目录** —— 不搬就是 MEDIUM 缺陷（滞留临时目录）"
+    );
+    assert_eq!(
+        read_pointer(&default_dir).legacy_migrated,
+        Some(true),
+        "成功后置位一次性标记"
+    );
+
+    let _ = std::fs::remove_dir_all(&default_dir);
+    let _ = std::fs::remove_dir_all(&legacy);
+    let _ = std::fs::remove_dir_all(&custom);
+}
+
+#[test]
+fn prepare_startup_runs_both_migration_sources_in_one_launch() {
+    // ① 显式迁移与 ② 临时目录搬家**同一次启动内都可能执行** —— 曾经 ① 成功后
+    // 直接 return，② 被跳过（这正是上一个缺陷的成因）。
+    let default_dir = unique_dir("both-default");
+    let source = unique_dir("both-source");
+    let legacy = unique_dir("both-legacy");
+    seed_legacy(&source);
+    seed_legacy(&legacy);
+
+    let target = unique_dir("both-target");
+    std::fs::create_dir_all(&target).unwrap();
+    // 指针：改到 target 并迁移 source；legacy 标记为「试过但失败」
+    write_pointer(
+        &default_dir,
+        &DataDirPointer {
+            data_dir: Some(target.to_string_lossy().into_owned()),
+            migrate_from: Some(source.to_string_lossy().into_owned()),
+            legacy_migrated: Some(false),
+        },
+    )
+    .expect("写指针失败");
+
+    let (plan, outcome) = prepare_startup(&default_dir, &legacy);
+
+    assert_eq!(plan.base_dir, target);
+    assert!(outcome.is_ok(), "两个来源都应成功: {:?}", outcome);
+    assert!(
+        target.join("workspaces/HOJ-1012-1000/main.cpp").exists(),
+        "两个来源的内容都应落到目标目录"
+    );
+    assert_eq!(
+        read_pointer(&default_dir).legacy_migrated,
+        Some(true),
+        "临时目录搬家应在同一次启动内完成"
+    );
+
+    let _ = std::fs::remove_dir_all(&default_dir);
+    let _ = std::fs::remove_dir_all(&source);
+    let _ = std::fs::remove_dir_all(&legacy);
+    let _ = std::fs::remove_dir_all(&target);
+}
+
+#[test]
+fn pointer_write_is_atomic_and_leaves_no_temp_file() {
+    // 原子写（temp + rename）：写完不得留下 `.json.tmp` 残片，且内容可读回
+    let dir = unique_dir("pointer-atomic");
+    write_pointer(&dir, &pointer(Some(Path::new(r"D:\x")), None)).expect("写入失败");
+
+    assert!(pointer_path(&dir).exists());
+    assert!(
+        !pointer_path(&dir).with_extension("json.tmp").exists(),
+        "不得留下临时文件残片"
+    );
+    assert_eq!(
+        read_pointer(&dir).data_dir,
+        Some(r"D:\x".to_string()),
+        "内容应可完整读回"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn failed_move_leaves_nothing_behind_so_retry_actually_retries() {
+    // **HIGH 缺陷回归**：跨卷复制中途失败若留下半拷贝目标，重试逻辑用 `dst.exists()`
+    // 判「已完成」→ 半拷贝被误判成「已跳过」→ 失败计数为零 → 迁移标记被清除 →
+    // 重试自解除，数据目录永久残缺。
+    //
+    // 本用例断言修复所保证的**不变量**：失败后目标与暂存都不存在 —— 于是 `dst.exists()`
+    // 成为「搬运完整完成」的可信信号，下次重试必然重新搬。
+    let dir = unique_dir("move-partial");
+    write_file(&dir, "src/a.txt", "payload");
+    let blocker = dir.join("blocker");
+    write_file(&dir, "blocker", "i am a file");
+    let dst = blocker.join("sub");
+
+    assert!(move_entry(&dir.join("src"), &dst).is_err(), "复制必须失败");
+    assert!(!dst.exists(), "失败后不得留下目标（否则会被当成「已完成」）");
+    assert!(!staging_path(&dst).exists(), "失败后不得留下暂存残片");
+    assert!(dir.join("src/a.txt").exists(), "源必须完好");
+
+    // 换到可用目标重试 → 必须真的搬过去（证明「不会自解除」）
+    let retry_dst = dir.join("retry");
+    move_entry(&dir.join("src"), &retry_dst).expect("重试应成功");
+    assert_eq!(
+        std::fs::read_to_string(retry_dst.join("a.txt")).unwrap(),
+        "payload"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn migrate_retries_entry_that_failed_before_instead_of_skipping() {
+    // 承接上一条：失败项在下次 `migrate` 中必须被**重试**而不是跳过。
+    let from = unique_dir("retry-entry-from");
+    let to = unique_dir("retry-entry-to");
+    write_file(&from, "config.json", "{}");
+
+    // 制造失败：目标父路径是文件
+    let blocker = to.join("blocker");
+    write_file(&to, "blocker", "file");
+    let blocked = blocker.join("sub");
+    assert!(move_entry(&from.join("config.json"), &blocked).is_err());
+
+    // 修好目标后重试：应搬成功，且**不是** skipped
+    let outcome = migrate(&from, &to);
+    assert!(outcome.is_ok(), "{:?}", outcome);
+    assert!(
+        outcome.moved.contains(&"config.json".to_string()),
+        "上次失败的条目必须重试（moved），而不是被跳过: {:?}",
+        outcome
+    );
+    assert!(to.join("config.json").exists());
+
+    let _ = std::fs::remove_dir_all(&from);
+    let _ = std::fs::remove_dir_all(&to);
+}
+
+#[test]
+fn move_entry_cleans_stale_staging_before_retry() {
+    // 上次失败可能残留暂存；重试必须先清掉，否则旧残片会混进这次的结果
+    let dir = unique_dir("move-stale-staging");
+    write_file(&dir, "src/new.txt", "fresh");
+    let dst = dir.join("dst");
+    write_file(&dir, "dst.hinina-partial/old.txt", "stale");
+
+    move_entry(&dir.join("src"), &dst).expect("正常搬运应成功");
+
+    assert!(dst.join("new.txt").exists(), "新内容应就位");
+    assert!(!dst.join("old.txt").exists(), "旧残片不得混入目标");
+    assert!(!staging_path(&dst).exists(), "暂存应已改名，不留残片");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

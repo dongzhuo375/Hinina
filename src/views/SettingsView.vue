@@ -529,6 +529,16 @@ async function loadDataDir(): Promise<void> {
   }
 }
 
+/// 取消候选目录：**必须复位 `migrateData`**。
+///
+/// 它是「更改目录」与「恢复默认」共用的状态。若用户在候选面板里取消了勾选后又取消
+/// 整个流程，`migrateData` 会停在 `false` —— 接着点「恢复默认」就会**静默不迁移**，
+/// 而用户以为自己什么都没改过。故取消即回到默认值。
+function cancelDataDirChoice(): void {
+  pendingDir.value = null
+  migrateData.value = true
+}
+
 /// 打开原生目录选择器；取消则什么都不做（不产生任何状态变更）
 async function chooseDataDir(): Promise<void> {
   changeError.value = null
@@ -552,6 +562,8 @@ async function confirmDataDir(): Promise<void> {
   try {
     await systemService.setDataDir(target, migrateData.value)
     pendingDir.value = null
+    // 复位共用状态：下一次操作（无论「更改目录」还是「恢复默认」）都从默认值开始
+    migrateData.value = true
     await loadDataDir()
     changeNotice.value = migrateData.value
       ? '已记录，重启后生效并自动迁移现有数据'
@@ -575,6 +587,7 @@ async function restoreDefaultDataDir(): Promise<void> {
   try {
     await systemService.resetDataDir(migrateData.value)
     pendingDir.value = null
+    migrateData.value = true
     await loadDataDir()
     changeNotice.value = '已记录，重启后回到默认数据目录'
     if (changeTimer) clearTimeout(changeTimer)
@@ -1338,7 +1351,7 @@ onBeforeUnmount(() => {
                           type="button"
                           class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
                           :disabled="changingDir"
-                          @click="pendingDir = null"
+                          @click="cancelDataDirChoice"
                         >
                           取消
                         </button>
