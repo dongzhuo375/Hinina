@@ -21,7 +21,6 @@
 | `limitsOf` | getter `(displayId) => ProblemLimits \| null` | 取某题 limits；**null = 后端获取失败**，视图应显示占位而非假默认值 |
 | `statusOf` | getter `(problemId) => UserProblemStatus` | 取某题我的状态；未出现在 map 中视为未提交（0） |
 | `openProblem` | `(contestId, problemId) => Promise<void>` | 加载详情并设为当前题目；失败记录 error 并抛出 |
-| `loadProblems` | `(contestId) => Promise<void>` | 加载比赛题目列表；失败记录 error 并抛出 |
 | `loadLimits` | `(contestId, displayIds) => Promise<void>` | 批量加载 limits（后端双层缓存，命中时零网络请求）；**失败不抛出** |
 | `loadMyStatus` | `(contestId, problemIds) => Promise<void>` | 批量加载我的提交状态；**失败不抛出**；成功后清除 `myStatusStale`，失败则置为过期（数据仍是旧的）以便下一周期重试 |
 | `invalidateMyStatus` | `() => void` | 标记我的题目状态已过期（提交终态、轮询超时时由 `submissionStore` 调用）；**只置位不发请求** —— 重拉交给总览页在下次可见刷新时执行，避免在解题页后台凭空多打一次请求 |
@@ -62,7 +61,7 @@ loadMyStatus(contestId, problemIds)
 
 - **loadLimits / loadMyStatus 失败不抛出**：两者只影响卡片上的一行信息或一个角标，
   不应打断整页渲染；与 `openProblem` / `loadProblems`（主数据，失败必须让调用方感知）
-  的抛出策略刻意不同。认证类错误（401/403）已由全局会话守卫（`stores/sessionGuard`）
+  的抛出策略刻意不同。认证类错误（401/403）已由全局会话守卫（`guards/sessionGuard`）
   统一处理，此处只记录日志，不重复应对。
 - **缺失 ≠ 零值**：后端对获取失败的题不产出条目（如 403 私有题），`limitsOf` 返回 null、
   `statusOf` 回退 0，视图用占位符 `—` 表达「未取得」，避免假默认值误导

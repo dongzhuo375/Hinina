@@ -43,7 +43,7 @@ beforeEach(to):
 - **统一入口**：通配路由重定向 /login，由 LoginView 恢复会话并按比赛阶段决定是否进场
   （已登录且比赛进行中 → canEnter 侦听器自动 replace 到 Contest）。
 - 守卫只做「有没有会话」的粗判据；会话是否被服务端撤销由三态校验（赛前预检
-  `utils/session-check`）与全局 401 兜底（`stores/sessionGuard`）负责，导航层不重复实现。
+  `utils/session-check`）与全局 401 兜底（`guards/sessionGuard`）负责，导航层不重复实现。
 - `checkSession` 无论成败都置 `sessionResolved = true`（见 authStore），守卫不会每次
   导航重复发 IPC。
 - 视图全部懒加载：首屏（登录页）不背负 Monaco/榜单等代码体积。

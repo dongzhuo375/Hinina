@@ -6,7 +6,6 @@
 ## 核心类型/函数
 - **`ProblemProvider`** — 题目 Provider trait（`#[async_trait]`），方法：
   - `get_problem(&self, contest_id, problem_id) -> AppResult<Problem>` — 获取题目详情
-  - `list_problems(&self, contest_id) -> AppResult<Vec<Problem>>` — 获取题目列表
   - `get_user_problem_status(&self, contest_id, problem_ids: &[String]) -> AppResult<HashMap<String, i32>>` — 批量获取当前用户对指定题目的提交状态。返回 map 的 key 为题目真实 ID（pid）字符串，value 为 `0=未提交 / 1=已AC / 2=尝试过`；未出现在 map 中的题目视为未提交
 
 ## 直接依赖

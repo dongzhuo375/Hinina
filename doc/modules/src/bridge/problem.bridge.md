@@ -4,14 +4,13 @@
 
 ## 职责
 
-题目相关 Tauri IPC 的薄封装：对 `get_problem` / `list_problems` / `get_user_problem_status` / `get_contest_problem_limits` 四个 Command 做参数透传，不含业务逻辑。
+题目相关 Tauri IPC 的薄封装：对 `get_problem` / `get_user_problem_status` / `get_contest_problem_limits` 三个 Command 做参数透传，不含业务逻辑。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `getProblem` | `(contestId, problemId) => Promise<Problem>` | invoke `get_problem`（后端同时发布 `ProblemEvent::Opened`） |
-| `listProblems` | `(contestId) => Promise<Problem[]>` | invoke `list_problems` |
 | `getUserProblemStatus` | `(contestId, problemIds: string[]) => Promise<Record<pid, UserProblemStatus>>` | invoke `get_user_problem_status`；返回 `{ pid: 0\|1\|2 }`，未出现的 pid 视为未提交 |
 | `getContestProblemLimits` | `(contestId, displayIds: string[]) => Promise<ProblemLimits[]>` | invoke `get_contest_problem_limits`；后端带内存 + 磁盘双层缓存，命中时零网络请求 |
 

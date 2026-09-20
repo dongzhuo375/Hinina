@@ -33,7 +33,7 @@
 ## 被依赖
 
 - `router/index.ts` — `beforeEach` 守卫（`sessionResolved` / `isLoggedIn` / `checkSession`）
-- `stores/sessionGuard.ts` — 认证类 IPC 失败 → `invalidateSession`
+- `guards/sessionGuard.ts` — 认证类 IPC 失败 → `invalidateSession`
 - `views/LoginView.vue`（登录/切换账号/预检）、`views/RankView.vue` / `ProblemSetView.vue`（uid）、`components/layout/TopBar.vue`（用户名/登出）
 - `stores/__tests__/authStore.spec.ts`
 

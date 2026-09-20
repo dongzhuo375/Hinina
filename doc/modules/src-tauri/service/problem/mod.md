@@ -10,7 +10,6 @@
 - 私有函数：`statement_key(contest_id, display_id) -> String` — 题面缓存键 `{contest_id}/{display_id}`（比赛维度隔离，磁盘按比赛分目录；键安全性由 `JsonDiskCache::key_path` 统一把关）
 - **`ProblemService`** — 题目服务
   - `fn new(registry, event_bus, storage) -> Self` — 创建实例（`storage` 用于 limits 与题面磁盘缓存）
-  - `async fn list_problems(&self, contest_id) -> AppResult<Vec<Problem>>` — 获取比赛下所有题目列表（每次从远端获取，无缓存）
   - `async fn open_problem(&self, contest_id, problem_id, cache_enabled: bool) -> AppResult<Problem>` — 获取题目详情并发布 `ProblemEvent::Opened`（含 contest_id 和 problem_id）；`cache_enabled` 来自配置 `oj.cacheProblemStatement`，**无论命中与否都照常发布事件**（WorkspaceManager 依赖它切换工作区）
   - `async fn load_problem_statement(&self, contest_id, problem_id, cache_enabled) -> AppResult<Problem>`（私有） — 题面缓存编排：内存 → 磁盘 → 网络，命中即回填上游；`cache_enabled=false` 时完全直连
   - `async fn get_user_problem_status(&self, contest_id, problem_ids: &[String]) -> AppResult<HashMap<String, i32>>` — 批量查询当前用户提交状态（key=pid，`0=未提交 / 1=已AC / 2=尝试过`，未出现的题视为未提交）；空列表直接返回空 map，不发请求
@@ -34,10 +33,10 @@
 
 ## 被依赖
 - `core::context`（`AppContext` 持有 `Arc<ProblemService>`，装配时注入 `Arc<Storage>`）
-- `commands::problem_cmd`（经 AppContext 转发 `get_problem` / `list_problems` / `get_user_problem_status` / `get_contest_problem_limits`）
+- `commands::problem_cmd`（经 AppContext 转发 `get_problem` / `get_user_problem_status` / `get_contest_problem_limits`）
 
 ## 逻辑流程
-- **list_problems(contest_id)**：直接调 `ProblemProvider::list_problems()` 从远端拉取，不做本地缓存；失败 `warn!` + `e.context("获取题目列表失败")` 上抛（**变体原样穿透**）
+- ~~**list_problems(contest_id)**~~：已删除（P70）—— 该链路零调用方，题目列表实际走 `ContestProvider::list_contest_problems`（返回 `ContestProblem`）；即便被调用也是语义滥用（同一端点却映射成 description 为空、limits 为 0 的 `Problem`）
 - **open_problem(contest_id, problem_id, cache_enabled)**：`load_problem_statement`（内存 → 磁盘 → 网络，命中即回填；`cache_enabled=false` 直连）→ 发布 `ProblemEvent::Opened` → 调用方通过事件驱动 WorkspaceManager 创建或切换工作区。**只缓存成功结果**：Provider 错误原样上抛，不入缓存
 - **get_user_problem_status(contest_id, problem_ids)**：空列表短路 → `registry.current_problem()` → `ProblemProvider::get_user_problem_status()` → 失败 `e.context("获取用户题目状态失败")`，变体不改写
 - **load_problem_limits(contest_id, display_ids)**：
@@ -60,7 +59,7 @@
 ```
 
 ## 设计要点
-- **错误处理约定：用 `context()` 而不是重新包装**。传播 Provider 错误一律 `e.context("环节名")`（保留变体、仍补环节名、`warn!` 日志保留），**禁止** `AppError::Problem(format!("…: {}", e))` —— 变体是前端 `isAuthError` 分流与 `stores/sessionGuard.ts` 会话失效兜底的唯一依据（见 `core/error.md`）。改写成 `Problem` 后，token 过期时选手只会看到「题目错误」文案而不会被带回登录页，反复重试全部失败。
+- **错误处理约定：用 `context()` 而不是重新包装**。传播 Provider 错误一律 `e.context("环节名")`（保留变体、仍补环节名、`warn!` 日志保留），**禁止** `AppError::Problem(format!("…: {}", e))` —— 变体是前端 `isAuthError` 分流与 `guards/sessionGuard.ts` 会话失效兜底的唯一依据（见 `core/error.md`）。改写成 `Problem` 后，token 过期时选手只会看到「题目错误」文案而不会被带回登录页，反复重试全部失败。
 - **`load_problem_limits` 同样遵守**：401/403 原样上抛，既不回退默认值，也不改写成 `Problem` 变体。`fetch_limits` 内部只在 JoinSet 任务 join 失败时自行构造 `AppError::Unknown`（那是本层自己的错误，不存在改写下游变体的问题）。
 - **`get_user_problem_status` 空入参短路**：`problem_ids` 为空时直接返回空 map，不发请求 —— 因此针对它的错误路径测试**必须传非空列表**才能真正走到 Provider。
 - **题面缓存（内存 + 磁盘，TTL 30min，受开关控制）**：题面是「几乎不变但并非永不变化」的公共数据 —— 管理员可能中途修正题面/样例。故 TTL 取 30 分钟（不是永久），并给出配置开关 `oj.cacheProblemStatement`（默认开启）供「要立刻看真值」时关闭；关闭时**不读不写**（连磁盘目录都不创建）。磁盘层带 `fetchedAt`，重启后继续计时；过期文件懒删除。缓存键含 `contest_id`：同一 `display_id` 在不同比赛是不同题目。**只缓存成功结果**，401/403 不入缓存（否则会话失效被缓存掩盖）。limits 仍走自己的双层缓存，两套缓存互不干扰（`limits` 也可从题面实体派生，但保持既有实现避免重复改造）。
@@ -73,6 +72,6 @@
 
 **清空缓存（设置页维护动作）**：`clear_caches` 后题面内存 / 题面磁盘 / limits 内存 / limits 磁盘四处全空、清理本身不发请求、清后再取必须回源；从未产生过磁盘缓存时清空不报错（存在性守卫）。
 
-**错误变体穿透**（3 项）：`open_problem_preserves_auth_variant`（`Auth` 变体保留且消息含「获取题目详情失败」环节名）、`list_problems_preserves_auth_variant`、`get_user_problem_status_preserves_auth_variant`（题目总览的「我的状态」每 30s 轮询一次，变体被改写会让守卫失灵；用例传非空 pid 列表以绕开空入参短路）。
+**错误变体穿透**（3 项）：`open_problem_preserves_auth_variant`（`Auth` 变体保留且消息含「获取题目详情失败」环节名）、`get_user_problem_status_preserves_auth_variant`（题目总览的「我的状态」每 30s 轮询一次，变体被改写会让守卫失灵；用例传非空 pid 列表以绕开空入参短路）。
 
-为支撑这组用例，`StubProblemProvider` 新增 `fail_all: bool` 字段（为 true 时 `list_problems` / `get_user_problem_status` 也返回 `Auth` 错误），并新增 `build_service_with(dir, calls, failing, fail_all)` 构造函数；`build_service` 保持原签名（内部转调 `build_service_with(…, false)`），以免影响既有 limits 测试。`open_problem` 的失败路径复用既有 `failing` 列表机制（Stub 对列表内 displayId 返回 `Auth`，模拟 401 或私有赛未注册）。
+为支撑这组用例，`StubProblemProvider` 新增 `fail_all: bool` 字段（为 true 时 `get_user_problem_status` 返回 `Auth` 错误），并新增 `build_service_with(dir, calls, failing, fail_all)` 构造函数；`build_service` 保持原签名（内部转调 `build_service_with(…, false)`），以免影响既有 limits 测试。`open_problem` 的失败路径复用既有 `failing` 列表机制（Stub 对列表内 displayId 返回 `Auth`，模拟 401 或私有赛未注册）。

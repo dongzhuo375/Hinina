@@ -62,7 +62,7 @@
 - **mark_announcements_read(cid, uid, ids)**：读既有已读列表（损坏时为空）→ 合并去重（保留首次出现顺序）→ `serde_json::to_string_pretty` 序列化（失败归 `AppError::Serialization`）→ `storage.write_string()` 落盘（失败 `e.context("写入公告已读状态失败")`）
 
 ## 设计要点
-- **错误处理约定：用 `context()` 而不是重新包装**。向上传播 Provider 错误一律 `e.context("环节名")`（保留变体、仍补环节名、`warn!` 日志保留），**禁止** `AppError::Contest(format!("…: {}", e))` —— 那会把 401 改写成 `Contest` 变体，而变体是前端 `isAuthError` 分流与 `stores/sessionGuard.ts` 会话失效兜底的**唯一依据**（见 `core/error.md` 与 `doc/Architecture.md`「错误变体是分流依据，后端不得改写」）。改写后的现场表现：token 过期时榜单静默 stale、提交只弹一条错误文案、选手不被带回登录页，反复重试全部失败。
+- **错误处理约定：用 `context()` 而不是重新包装**。向上传播 Provider 错误一律 `e.context("环节名")`（保留变体、仍补环节名、`warn!` 日志保留），**禁止** `AppError::Contest(format!("…: {}", e))` —— 那会把 401 改写成 `Contest` 变体，而变体是前端 `isAuthError` 分流与 `guards/sessionGuard.ts` 会话失效兜底的**唯一依据**（见 `core/error.md` 与 `doc/Architecture.md`「错误变体是分流依据，后端不得改写」）。改写后的现场表现：token 过期时榜单静默 stale、提交只弹一条错误文案、选手不被带回登录页，反复重试全部失败。
 - **`get_rank` 是全场最高频的认证调用**（前端每 10s 轮询一次），因此它的变体穿透最关键：一旦改写，会话失效兜底链路等于整场失效。`list_contests`（登录页匿名简报）与 `load_contest_with_problems`（进场链路，外壳 `loadContest` 走的就是它）同样必须保留 `Auth` 变体，前端才能区分「连不上」与「凭证无效」。
 - **公告不缓存**：与比赛列表（TTL 缓存）不同，公告可能包含裁判组临场发布的规则变更（澄清、封榜时间调整），拿到过期公告的代价远高于一次额外请求，故每次拉取最新数据，刷新节奏由前端控制。
 - **新公告检测（`announcement_baseline: Arc<RwLock<HashMap<contest_id, Vec<String>>>>` + `publish_new_announcements`）**：公告是外部状态（裁判组在服务端发布），客户端唯一能感知的方式仍是拉取，但「有新公告」这件事必须走事件而不是让各视图各自比对列表 —— 红点提醒属状态变更，按项目约定归 EventBus（查询走 Service、状态变更走 EventBus）。三条不变量：① **首次拉取只建基线不发事件**（没有基线可比，发了等于给每位选手一开机就亮红点）；② **基线按比赛隔离**（同一进程内先看 1011 再看 1012 是常态，只留一份会让切回旧比赛时把既有公告误判成新公告 —— 红点误报）；③ **失败时保留旧基线**（拉取失败不推进基线，否则失败期间发布的公告会被永久漏报）。锁中毒（持有者 panic）时跳过检测而不让公告查询失败 —— 公告本身已经拿到了，只是红点提醒失效。事件由 `main.rs` 的 `install_announcement_event_bridge` 转发到前端 `announcements-published`。

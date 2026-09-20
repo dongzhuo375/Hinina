@@ -28,7 +28,7 @@
 设计要点：
 
 - 三态而非布尔是刻意设计：把「服务端明确失效」与「无法判定」分开，是赛前会话预检
-  （`utils/session-check`）与全局 401 兜底（`stores/sessionGuard`）不误伤选手的前提；
+  （`utils/session-check`）与全局 401 兜底（`guards/sessionGuard`）不误伤选手的前提；
   Rust 侧动机详见 `doc/modules/src-tauri/service/auth/mod.md`。
 - `unknown` 的消费契约：authStore.validateSession 保持登录态不变，LoginView 预检只重试
   一次（2–5s），避免重试风暴。
