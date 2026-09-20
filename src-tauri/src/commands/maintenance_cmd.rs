@@ -104,15 +104,53 @@ pub async fn local_data_usage(ctx: State<'_, AppContext>) -> AppResult<LocalData
 }
 
 /// 清理结果。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PurgeReport {
     /// 释放的总字节数
     pub freed_bytes: u64,
     /// 删除的留档条数
     pub removed_snapshots: usize,
-    /// 是否清空了日志内容（文件层不可用时为 false，不算失败）
+    /// 日志内容是否**确实**被清空。
+    ///
+    /// `false` 有三种成因：文件层不可用（磁盘只读）、截断失败、或本次没勾选日志。
+    /// 界面据此如实提示，而不是笼统报「已清理」。
     pub log_cleared: bool,
+}
+
+/// 逐项容错地执行清理（**两个勾选项互不牵连**）。
+///
+/// 抽成纯函数是为了可单测（命令本体依赖 `tauri::State`，测试里拿不到）——
+/// 而「一项失败不该连带取消另一项」正是这里最需要锁定的行为。
+///
+/// 日志清理失败（文件被占用、权限不足）时**降级为 `log_cleared=false` 并继续**，
+/// 而不是 `?` 冒泡中断整个命令：用户勾了留档清理，就该拿到留档清理的结果。
+pub(crate) fn run_purge(
+    logs: bool,
+    stale_snapshots: bool,
+    clear_log: impl FnOnce() -> AppResult<(u64, bool)>,
+    purge_snapshots: impl FnOnce() -> (usize, u64),
+) -> PurgeReport {
+    let mut report = PurgeReport::default();
+
+    if logs {
+        match clear_log() {
+            Ok((freed, cleared)) => {
+                report.freed_bytes += freed;
+                report.log_cleared = cleared;
+                info!(freed_bytes = freed, log_cleared = cleared, "日志内容已清空");
+            }
+            Err(e) => warn!(error = %e, "清空日志内容失败，继续执行其余清理项"),
+        }
+    }
+
+    if stale_snapshots {
+        let (removed, freed) = purge_snapshots();
+        report.removed_snapshots = removed;
+        report.freed_bytes += freed;
+    }
+
+    report
 }
 
 /// 清理本地数据（**不可逆**）。
@@ -123,6 +161,8 @@ pub struct PurgeReport {
 ///   就彻底没了；用「重开 + 截断」而非句柄 `set_len`，原因见 `infra/logger.rs`）
 /// - `staleSnapshots`：删除早于 `SNAPSHOT_KEEP_DAYS` 的提交源码留档
 ///
+/// **逐项容错**：任何一项失败都不影响另一项（见 [`run_purge`]），故本命令只在
+/// 参数层面之外几乎不会失败 —— `log_cleared=false` 如实表示「日志没被清掉」。
 /// 两个开关都关时是 no-op（前端不会这么调，此处仍如实处理）。
 /// **不动**工作区代码、配置、会话与公告已读状态。
 #[tauri::command]
@@ -133,24 +173,18 @@ pub async fn purge_local_data(
 ) -> AppResult<PurgeReport> {
     info!(logs, stale_snapshots, "Command: 清理本地数据");
 
-    let mut report = PurgeReport {
-        freed_bytes: 0,
-        removed_snapshots: 0,
-        log_cleared: false,
-    };
-
-    if logs {
-        let freed = ctx.logger.clear_log_file()?;
-        report.freed_bytes += freed;
-        report.log_cleared = ctx.logger.has_log_file();
-        info!(freed_bytes = freed, "日志内容已清空");
-    }
-
-    if stale_snapshots {
-        let (removed, freed) = snapshot::purge_stale_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS);
-        report.removed_snapshots = removed;
-        report.freed_bytes += freed;
-    }
+    let report = run_purge(
+        logs,
+        stale_snapshots,
+        // 文件层不可用（磁盘只读等）时 clear_log_file 返回 Ok(0)：此时并没有清掉
+        // 任何东西，故用 has_log_file 如实回报「是否真的清了」
+        || {
+            ctx.logger
+                .clear_log_file()
+                .map(|freed| (freed, ctx.logger.has_log_file()))
+        },
+        || snapshot::purge_stale_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS),
+    );
 
     Ok(report)
 }

@@ -71,6 +71,7 @@
 - **文件名净化是安全边界**：`{cid}_{uid}.json` 的两个组成部分分别来自前端入参与会话文件，`read_state_path` 拒绝空串、`/`、`\`、`:` 与 `..`，防止构造出存储根目录之外的写入路径。
 - **`clear_caches` 与 `refresh` 是两件事**：`refresh` 是「我要服务端真值」→ 清两层 + 立即重拉；`clear_caches` 是「把本地缓存腾空」→ 只清不拉（补拉时机归调用方，设置页重置后立刻重拉当前比赛数据）。两者都不动 `announcement_baseline`：它不是缓存而是「已经告诉过用户哪些公告」的记忆，清掉会让清空之后新发布的公告在下次拉取时被当成「首次拉取」而**漏报**（有单测锁定）。
 - **「重置」与「清缓存」对公告基线的处理相反，故分成两个方法**：`clear_caches` **保留**基线，`clear_announcement_baseline` **清空**它。合成一个方法会让其中一种语义出错（保留则重置不彻底；清空则清缓存后漏报新公告），两条用例成对锁定这个区别。
+- **锁中毒统一 `into_inner` 取回内部数据**（与 `TtlCache` / `provider_registry_impl` 同款约定，见 `provider_registry_impl.rs` 头注释）：本文件的 `cache` / `current_contest` / `announcement_baseline` 三处全部如此。相关容器是 `Option` / `HashMap`，panic 不会让它们结构不一致 —— 而「静默跳过」或「降级不发事件」的后果更糟：重置会留下脏缓存，公告基线则会在中毒后**永久**不再报新公告（每次调用都走 Err 分支提前返回）。`clear_announcement_read_state` 是唯一返回 `bool` 的清理方法（返回「是否确实删除了」，目录不存在时为 `false`），那是「本就没有」而非错误。
 
 ## 测试
 `src-tauri/src/service/contest/tests/contest_tests.rs`（由 `mod.rs` 底部 `#[cfg(test)] #[path = "tests/contest_tests.rs"] mod tests;` 引用）以 `StubContestProvider` 锁定错误变体穿透与正常路径。Stub 用 `StubMode::{Ok, Auth, Network}` 让全部五个 trait 方法按同一模式响应（`Auth` 模拟 token 过期，即 HTTP 401 或 HOJ 体内 403「请您先登录」；`Network` 模拟断网），便于逐方法断言变体是否被保留；`mode` 可在测试中途切换（模拟「缓存命中后服务端开始 401」等时序），`calls` 计数用于断言缓存真的省掉了请求。服务经 `ProviderRegistryImpl::new(OjId::new("HOJ"))` + `register(OjId, ProviderSet)`（只挂 contest 能力）注册后构造（`make_service` 基于独立临时目录注入 `Storage`），异步用例各自建 current-thread runtime 避免嵌套 panic。

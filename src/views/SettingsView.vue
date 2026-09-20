@@ -361,7 +361,9 @@ async function copyText(key: string, text: string): Promise<void> {
 
 const resetting = ref(false)
 const resetConfirmOpen = ref(false)
-const resetNotice = ref<string | null>(null)
+/// 重置结果提示。`warn=true` 表示「重置成功但补拉失败」—— 文案与配色都必须如实，
+/// 不能因为重置本身成功就宣称数据已是最新。
+const resetNotice = ref<{ text: string; warn: boolean } | null>(null)
 const resetError = ref<string | null>(null)
 
 const usage = ref<LocalDataUsage | null>(null)
@@ -370,7 +372,8 @@ const purgeLogs = ref(true)
 const purgeSnapshots = ref(true)
 const purging = ref(false)
 const purgeConfirmOpen = ref(false)
-const purgeNotice = ref<string | null>(null)
+/// 清理结果提示。`warn=true` 表示有勾选项实际没被清掉（如日志文件层不可用）
+const purgeNotice = ref<{ text: string; warn: boolean } | null>(null)
 const purgeError = ref<string | null>(null)
 
 let resetTimer: ReturnType<typeof setTimeout> | null = null
@@ -409,11 +412,19 @@ async function resetClient(): Promise<void> {
   try {
     await systemService.resetClient()
 
-    await useContestStore().loadContest().catch(() => {})
+    // 补拉失败必须如实告知：重置本身已成功，但「数据已重新拉取」这句话不能凭空说
+    let refreshed = true
+    await useContestStore()
+      .loadContest()
+      .catch(() => {
+        refreshed = false
+      })
     useProblemStore().invalidateMyStatus()
     void useAnnouncementStore().refresh()
 
-    resetNotice.value = '已重置，数据已重新拉取'
+    resetNotice.value = refreshed
+      ? { text: '已重置，数据已重新拉取', warn: false }
+      : { text: '已重置，但数据重新拉取失败，请手动刷新', warn: true }
     if (resetTimer) clearTimeout(resetTimer)
     resetTimer = setTimeout(() => {
       resetNotice.value = null
@@ -450,8 +461,15 @@ async function purgeLocalData(): Promise<void> {
   purgeError.value = null
   try {
     const report = await systemService.purgeLocalData(purgeLogs.value, purgeSnapshots.value)
-    purgeNotice.value = `已清理：释放 ${formatBytes(report.freedBytes)}` +
-      (report.removedSnapshots > 0 ? `，删除留档 ${report.removedSnapshots} 个` : '')
+
+    const parts = [`释放 ${formatBytes(report.freedBytes)}`]
+    if (report.removedSnapshots > 0) parts.push(`删除留档 ${report.removedSnapshots} 个`)
+    // 勾了日志却没清掉（文件层不可用 / 截断失败）必须如实说明 ——
+    // 否则界面只剩「释放 0 B」，用户看不出日志其实没被动过
+    const logMissed = purgeLogs.value && !report.logCleared
+    if (logMissed) parts.push('日志未清理（文件层不可用或写入失败）')
+
+    purgeNotice.value = { text: `已清理：${parts.join('，')}`, warn: logMissed }
     // 清理后重读体积：预览必须反映真值，否则用户会以为没生效
     await loadUsage()
     if (purgeTimer) clearTimeout(purgeTimer)
@@ -966,8 +984,12 @@ onBeforeUnmount(() => {
 
                     <div class="flex shrink-0 items-center gap-2">
                       <span v-if="resetError" class="text-xs text-rose-600">{{ resetError }}</span>
-                      <span v-else-if="resetNotice" class="text-xs text-emerald-600">
-                        {{ resetNotice }}
+                      <span
+                        v-else-if="resetNotice"
+                        class="text-xs"
+                        :class="resetNotice.warn ? 'text-amber-600' : 'text-emerald-600'"
+                      >
+                        {{ resetNotice.text }}
                       </span>
 
                       <template v-if="resetConfirmOpen || resetting">
@@ -1058,8 +1080,12 @@ onBeforeUnmount(() => {
                     </p>
                     <div class="flex shrink-0 items-center gap-2">
                       <span v-if="purgeError" class="text-xs text-rose-600">{{ purgeError }}</span>
-                      <span v-else-if="purgeNotice" class="text-xs text-emerald-600">
-                        {{ purgeNotice }}
+                      <span
+                        v-else-if="purgeNotice"
+                        class="text-xs"
+                        :class="purgeNotice.warn ? 'text-amber-600' : 'text-emerald-600'"
+                      >
+                        {{ purgeNotice.text }}
                       </span>
 
                       <template v-if="purgeConfirmOpen || purging">
