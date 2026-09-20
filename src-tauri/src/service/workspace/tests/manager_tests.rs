@@ -633,3 +633,25 @@ async fn auto_save_keeps_dirty_and_silent_when_write_fails() {
     );
 
 }
+
+/// auto-save 的启停与间隔是可观测状态，且支持「停掉再启动」（P48）。
+#[tokio::test]
+async fn auto_save_tracks_interval_and_can_be_restarted() {
+    let mgr = test_manager("auto-save-restart");
+    assert_eq!(mgr.auto_save_interval_secs(), None, "初始未运行");
+
+    mgr.start_auto_save(1);
+    assert_eq!(mgr.auto_save_interval_secs(), Some(1));
+
+    // 配置把间隔改了：以新间隔重启，而不是被一次性标记挡住
+    mgr.start_auto_save(2);
+    assert_eq!(mgr.auto_save_interval_secs(), Some(2));
+
+    mgr.stop_auto_save();
+    assert_eq!(mgr.auto_save_interval_secs(), None, "停止后不得残留运行状态");
+
+    // 「关掉再打开」必须能重新启动 —— 旧的一次性 static 标记正是在这里失败
+    mgr.start_auto_save(3);
+    assert_eq!(mgr.auto_save_interval_secs(), Some(3));
+    mgr.stop_auto_save();
+}

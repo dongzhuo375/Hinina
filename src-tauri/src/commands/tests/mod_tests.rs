@@ -2,29 +2,53 @@
 //
 // 测试重点：
 // 1. `workspace_cmd` 中降级路径（通过提取的纯函数验证逻辑）
-// 2. `start_auto_save_if_needed` static AtomicBool 一次性标记行为
+// 2. auto-save 的「按配置同步」判据（P48 / P74 遗留项）
 //
 // （原 `parse_oj_type` 解析测试已随闭集枚举一并移除：OJ 身份改为数据
-//   `OjId`，注册校验在 `ProviderRegistry` 层由 `list_available` 承担。）
+//   `OjId`，注册校验在 `ProviderRegistry` 层由 `list_available` 承担。
+//   原 `auto_save_lazy_start_once` 锁定的是已删除的 static AtomicBool 标记 ——
+//   那条判据本身就是缺陷，改由 `auto_save_action` 的判据表接管。）
 
-/// 测试 `start_auto_save_if_needed` 中 static AtomicBool 懒启动标记。
-/// 验证 swap 一次性语义——首次返回 false（未设置），后续返回 true（已设置）。
+/// auto-save「按配置同步」的判据表（P48 / P74 遗留项）。
+///
+/// 旧实现用一次性 `static AtomicBool` 懒启动：关掉 auto-save 后再打开永不重启，
+/// 间隔也只读首次配置。判据现在是这张表 —— 它是「配置改动能否生效」的全部逻辑，
+/// 因此逐格锁定。
 #[test]
-fn auto_save_lazy_start_once() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+fn auto_save_action_decision_table() {
+    use super::super::commands::workspace_cmd::auto_save_action;
+    use super::super::commands::workspace_cmd::AutoSaveAction;
 
-    let flag = AtomicBool::new(false);
+    // 未运行 + 配置开启 → 启动
+    assert_eq!(auto_save_action(true, 30, None), AutoSaveAction::Start(30));
+    // 未运行 + 配置关闭 → 保持（本就该停）
+    assert_eq!(auto_save_action(false, 30, None), AutoSaveAction::Keep);
+    // 未运行 + 间隔为 0 → 保持（间隔 0 等价于关闭，不得启动忙循环）
+    assert_eq!(auto_save_action(true, 0, None), AutoSaveAction::Keep);
 
-    // 首次：应成功设置
-    let was_set = flag.swap(true, Ordering::SeqCst);
-    assert!(!was_set, "首次调用应返回 false（未设置过）");
+    // 运行中 + 间隔未变 → 保持（避免每次 load_workspace 都重置计时器）
+    assert_eq!(auto_save_action(true, 30, Some(30)), AutoSaveAction::Keep);
+    // 运行中 + 间隔变了 → 以新间隔重启
+    assert_eq!(auto_save_action(true, 60, Some(30)), AutoSaveAction::Start(60));
+    // 运行中 + 配置关闭 → 停止（旧实现在这里再也起不来）
+    assert_eq!(auto_save_action(false, 30, Some(30)), AutoSaveAction::Stop);
+    // 运行中 + 间隔改为 0 → 停止
+    assert_eq!(auto_save_action(true, 0, Some(30)), AutoSaveAction::Stop);
+}
 
-    // 第二次：已被设置
-    let was_set = flag.swap(true, Ordering::SeqCst);
-    assert!(was_set, "第二次调用应返回 true（已设置过）");
+/// 「关掉再打开」必须能重新启动 —— 旧的一次性 static 标记正是在这里失败。
+#[test]
+fn auto_save_action_supports_off_then_on_cycle() {
+    use super::super::commands::workspace_cmd::auto_save_action;
+    use super::super::commands::workspace_cmd::AutoSaveAction;
 
-    // 第三次：仍为 true
-    assert!(flag.load(Ordering::SeqCst));
+    // 开启 → 关闭 → 再开启 的完整循环
+    let mut running = None;
+    assert_eq!(auto_save_action(true, 30, running), AutoSaveAction::Start(30));
+    running = Some(30);
+    assert_eq!(auto_save_action(false, 30, running), AutoSaveAction::Stop);
+    running = None;
+    assert_eq!(auto_save_action(true, 30, running), AutoSaveAction::Start(30));
 }
 
 /// 验证 workspace_cmd 中 WorkspaceManager 为 None 时的降级逻辑。

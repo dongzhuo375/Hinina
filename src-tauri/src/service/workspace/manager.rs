@@ -50,6 +50,12 @@ pub struct WorkspaceManager {
     revision: Arc<AtomicU64>,
     /// 自动保存的 JoinHandle
     auto_save_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// 当前 auto-save 的间隔（秒）；`None` = 未运行。
+    ///
+    /// 单独记一份状态是为了让「按配置同步」成为**幂等**操作：调用方据此判断
+    /// 「要不要重启」，避免每次 `load_workspace` 都重置计时器，也避免「关掉再打开」
+    /// 时无状态可依（旧实现用 `static AtomicBool` 做一次性懒启动，关掉后再也起不来）。
+    auto_save_interval_secs: Mutex<Option<u64>>,
 }
 
 /// 工作区元数据，持久化在 workspace.json 中，避免从 workspace_id 字符串解析字段。
@@ -90,6 +96,7 @@ impl WorkspaceManager {
             current: Arc::new(RwLock::new(None)),
             revision: Arc::new(AtomicU64::new(0)),
             auto_save_handle: Mutex::new(None),
+            auto_save_interval_secs: Mutex::new(None),
         }
     }
 
@@ -431,6 +438,10 @@ impl WorkspaceManager {
 
         let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
         *handle = Some(task);
+        *self
+            .auto_save_interval_secs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(interval_secs);
 
         debug!(interval_secs = interval_secs, "自动保存已启动");
     }
@@ -442,6 +453,23 @@ impl WorkspaceManager {
             task.abort();
             debug!("自动保存已停止");
         }
+        *self
+            .auto_save_interval_secs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// 当前 auto-save 的间隔（秒）；`None` = 未运行。
+    ///
+    /// 供命令层「按配置同步 auto-save」判断是否需要重启：间隔相同则保持不动，
+    /// 免得每次 `load_workspace` 都重置计时器；配置关掉后也有状态可依，
+    /// 再打开时能重新启动（旧实现用一次性 `static AtomicBool`，关掉后再也起不来）。
+    #[must_use]
+    pub fn auto_save_interval_secs(&self) -> Option<u64> {
+        *self
+            .auto_save_interval_secs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// 切换工作区：保存当前 → 加载目标。
