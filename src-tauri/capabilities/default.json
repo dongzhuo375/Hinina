@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "默认权限集：文件读写、网络访问",
+  "description": "默认权限集：窗口控制与目录选择器",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -12,16 +12,6 @@
     "core:window:allow-close",
     "core:window:allow-destroy",
     "core:window:allow-is-maximized",
-    "fs:default",
-    "fs:allow-read",
-    "fs:allow-write",
-    "dialog:allow-open",
-    {
-      "identifier": "http:default",
-      "allow": [
-        { "url": "https://**" },
-        { "url": "http://**" }
-      ]
-    }
+    "dialog:allow-open"
   ]
 }

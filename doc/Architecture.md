@@ -33,7 +33,8 @@ Hinina/
     ├── build.rs                          # Tauri 构建脚本
     ├── icons/                            # 应用图标目录（待填充）
     ├── capabilities/
-    │   └── default.json                  # Tauri 2 默认权限集（文件/网络/窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽）
+    │   └── default.json                  # Tauri 2 默认权限集（窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽 + dialog:allow-open（数据目录选择器））
+    │                                     # 注：**不声明 fs: / http: 授权** —— 本项目不注册 tauri-plugin-fs/-http，所有 I/O 都走 Rust（见「插件与 I/O 边界」）
     └── src/
         ├── main.rs                       # Rust 入口点，9 步初始化序列 + setup 装配两个事件桥：工作区落盘（Saved/AutoSaveTriggered → 前端 workspace-saved）与新公告（ContestEvent::AnnouncementsPublished → 前端 announcements-published）
         ├── lib.rs                        # 库根，公开模块树
@@ -372,6 +373,7 @@ src/
 - **EventBus 原则**：查询与命令走 Service，状态变更走 EventBus。禁止所有逻辑事件化
 - **事件投递分两种模式，按订阅者的性质选**：**同步**（`subscribe`，回调在 `publish` 栈内）只用于纯内存处理；**延迟**（`subscribe_deferred`，专用后台线程执行、`publish` 立即返回）用于磁盘清理等 I/O。使用延迟的前提是**该 handler 不承担正确性职责** —— 正确性必须由结构保证（如缓存键自带作用域），而不是依赖「清理及时」；延迟意味着执行时机不确定、进程退出时可能未执行。理由：`publish` 是同步调用点（`switch_oj`、HTTP 响应处理路径），让发布方为订阅者的 I/O 买单会让响应时间随订阅者数量增长 —— 插件期（第三方 handler）会放大成可用性问题
 - **插件系统**：v0.x 仅预留架构，不实现运行时。插件只能访问 `plugin/api/`，禁止直接调用内部 Service
+- **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。唯一的插件是 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为它的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**新增插件时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求
 - **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
