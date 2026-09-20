@@ -1,15 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-/// Service 层打桩：session.ts 会调用 authService.clearStoredUser；
-/// logout / checkSession 打桩用于断言「OJ 切换不走后端登出、不做会话检查」
+/// Service 层打桩：logout / checkSession 打桩用于断言「OJ 切换不走后端登出、不做会话检查」
 const { authService } = vi.hoisted(() => ({
   authService: {
     login: vi.fn(),
     logout: vi.fn(),
     checkSession: vi.fn(),
     validateSession: vi.fn(),
-    clearStoredUser: vi.fn(),
   },
 }))
 vi.mock('@/services/auth.service', () => ({ authService }))
@@ -99,12 +97,6 @@ describe('resetSessionForOjSwitch — OJ 切换的会话上下文重置', () => 
     expect(problem.myStatusContestId).toBeNull()
 
     expect(useSubmissionStore().submissions).toEqual([])
-  })
-
-  it('清除 localStorage 的旧 OJ 用户缓存', () => {
-    resetSessionForOjSwitch()
-
-    expect(authService.clearStoredUser).toHaveBeenCalledTimes(1)
   })
 
   it('不打后端 logout / checkSession：Registry 已切换，logout 会误删新 OJ 的会话文件', () => {

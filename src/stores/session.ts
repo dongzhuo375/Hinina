@@ -5,7 +5,6 @@ import { useProblemStore } from '@/stores/problemStore'
 import { useRankStore } from '@/stores/rankStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { authService } from '@/services/auth.service'
 
 /**
  * 会话级领域状态清理。
@@ -73,6 +72,4 @@ export function resetSessionForOjSwitch(): void {
   auth.user = null
   auth.error = null
   auth.sessionResolved = false
-
-  authService.clearStoredUser()
 }
