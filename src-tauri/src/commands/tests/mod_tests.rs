@@ -239,6 +239,8 @@ fn data_dir_change_serializes_camel_case_and_nullable_migrate_from() {
 // 判据用错（`dir_is_empty` 而非「冲突条目」）时，命令会在真机上永远失败。
 
 use super::super::commands::data_dir_cmd::validate_reset;
+use super::super::commands::contest_cmd::DEFAULT_RANK_LIMIT;
+use crate::core::entity::rank::RankQuery;
 use crate::test_support::TempDir;
 
 /// 造独立临时目录（每个用例一个）。
@@ -329,5 +331,23 @@ fn validate_reset_rejects_same_dir() {
 
     let err = validate_reset(dir.path(), dir.path(), false).expect_err("已在默认目录应拒绝");
     assert!(err.to_string().contains("已在默认数据目录"));
+}
 
+/// 榜单默认分页大小「三处同值」的锁定（P71）。
+///
+/// 前端 `rank.service.ts` 的 `DEFAULT_RANK_PAGE_SIZE` 是唯一取值点；后端的
+/// `DEFAULT_RANK_LIMIT` 与 `RankQuery::default()` 只服务于「绕过前端直接调命令」。
+/// 这类漂移**没有任何运行时症状**（前端恒显式传参），只能靠用例锁住。
+#[test]
+fn rank_default_page_size_matches_frontend_contract() {
+    assert_eq!(
+        DEFAULT_RANK_LIMIT, 50,
+        "须与 src/services/rank.service.ts 的 DEFAULT_RANK_PAGE_SIZE 同值"
+    );
+    assert_eq!(
+        RankQuery::default().limit,
+        DEFAULT_RANK_LIMIT,
+        "RankQuery::default() 须与命令层默认值同值"
+    );
+    assert_eq!(RankQuery::default().current_page, 1, "默认第 1 页");
 }

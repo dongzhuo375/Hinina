@@ -106,6 +106,10 @@ pub struct RankQuery {
 }
 
 impl Default for RankQuery {
+    /// 防御性默认值：生产路径**始终**由前端 `rank.service.ts` 显式传入
+    /// `currentPage` / `limit`（唯一取值点），此处只服务于「直接构造查询」的
+    /// 调用方（当前仅测试）。与 `DEFAULT_RANK_LIMIT`、前端
+    /// `DEFAULT_RANK_PAGE_SIZE` 必须同值，改动须同步三处锁定用例。
     fn default() -> Self {
         Self {
             current_page: 1,

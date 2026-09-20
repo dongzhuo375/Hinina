@@ -7,8 +7,14 @@ use crate::core::entity::contest::{Contest, ContestBundle};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
 
-/// 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）
-const DEFAULT_RANK_LIMIT: i64 = 50;
+/// 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）。
+///
+/// **唯一取值点在 `src/services/rank.service.ts` 的 `DEFAULT_RANK_PAGE_SIZE`** ——
+/// 前端每次调用都显式传 `limit`，此处的默认值纯粹是「绕过前端直接调命令」时的
+/// 防御。两处必须同值：改动其一须同步另一处与两侧的锁定用例
+/// （本文件的 `rank_default_page_size_matches_frontend_contract`、
+/// `src/services/__tests__/rank.service.spec.ts`）。
+pub(crate) const DEFAULT_RANK_LIMIT: i64 = 50;
 
 /// 公告默认分页大小
 const DEFAULT_ANNOUNCEMENT_LIMIT: i64 = 50;
