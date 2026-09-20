@@ -4,7 +4,9 @@
 
 ## 职责
 
-应用配置（`AppConfig`）的可视化编辑入口，五个分组卡片：OJ 服务器 / 编辑器 / 布局 / 主题（只读占位）/ 关于（客户端存储信息）；本地草稿编辑 + 逐字段校验 + dirty 判定，保存经 `configService.updateConfig`（读-改-写整体替换）落盘。OJ 分组含「当前 OJ」下拉：**候选 = 已知 OJ 枚举（`utils/oj`）+ 配置里的其它实例 id**（未配置者标注「（未配置）」）—— 选中尚未配置的类型会引导填地址，保存即创建实例并**自动切换**（用户在选下拉时已表达切换意图）；切换本身是显式动作（`@change` → `onSwitchOj`，即时生效并持久化），与「保存」按钮解耦。
+应用配置（`AppConfig`）的可视化编辑入口，六个分组卡片：OJ 服务器 / 编辑器 / 布局 / 主题（只读占位）/ **缓存（清空缓存）** / 关于（客户端存储信息）；本地草稿编辑 + 逐字段校验 + dirty 判定，保存经 `configService.updateConfig`（读-改-写整体替换）落盘。OJ 分组含「当前 OJ」下拉：**候选 = 已知 OJ 枚举（`utils/oj`）+ 配置里的其它实例 id**（未配置者标注「（未配置）」）—— 选中尚未配置的类型会引导填地址，保存即创建实例并**自动切换**（用户在选下拉时已表达切换意图）；切换本身是显式动作（`@change` → `onSwitchOj`，即时生效并持久化），与「保存」按钮解耦。
+
+> 本页入口默认隐藏：连点底部状态栏版本号 5 下才在活动栏出现设置项（见 `utils/settings-access`）。
 
 ## 核心类型/函数
 
@@ -21,6 +23,8 @@
 | `populate` / `load` | fn | 配置 → 表单回填（`activeOj` / `persistedActive` 取 `oj.active`，`ojInstances` 取 `config.oj.instances` 全量清单，`ojUrl` 取当前选中实例地址——active 未命中时回退第一个启用实例兜底竞态，`contestRef` 取 `oj.contestRef`；tabSize 不在档位内回退 4、语言经 `normalizeLanguageId` 归一）；加载前**先 `configService.invalidate()`** |
 | `save` / `discard` | fn | 保存：`updateConfig(draft => …)` 把校验通过的表单值写入草稿（**`draft.oj.active` 刻意不写** —— active 只由 `switch_oj` 改写，否则新建实例会出现「配置说 A、运行中的 Registry 还是 B」的静默不一致；`ojUrl` 写回当前选中实例的 `baseUrl`，**实例不存在则创建**（`enabled: true`，支撑「从枚举里启用新 OJ」），`ojUrl` 写回当前选中实例的 `baseUrl`——active 不在实例列表会被 Rust validate 拒绝，而下拉候选即实例清单，正常操作不会出现；`contestRef` trim；contestPassword 空串 → null）。成功后基线前移 + 「已保存」提示 3s。放弃：从基线 JSON 恢复表单 |
 | `storage` / `storageFailed` / `loadStorage` | ref/fn | 「关于」区块数据（`systemService.getStorageInfo()`：版本 / 存储目录 / 日志路径）；失败**非致命**，仅该区块降级为「获取失败」 |
+| `clearingCache` / `cacheConfirmOpen` / `cacheNotice` / `cacheError` | ref | 「缓存」区块状态：清空中 / 二次确认展开 / 成功提示（3s 回弹）/ 失败原因 |
+| `clearCache` | `async fn` | `systemService.clearCache()` → **立刻补拉**（`contestStore.loadContest()` 重拉比赛元信息 + 题目列表，`problemStore.invalidateMyStatus()` 标记我的题目状态过期）。补拉失败不改变「已清空」结论（清空本身已成功），错误按既有链路经 `contestStore.error` 暴露 |
 | `copyText` / `copiedKey` | fn/ref | 关于区块逐项复制（版本/目录/路径），「已复制」2s 回弹；剪贴板不可用静默忽略 |
 | `onSplitInput` / `splitPercent` | fn/computed | 布局滑杆输入（钳位后写回）与百分比文案 |
 | `INPUT` / `INPUT_ERROR` / `inputClass` | 常量/fn | 输入框样式拼接（错误态红框） |
@@ -30,6 +34,7 @@
 - `vue`
 - 组件：`ErrorMessage` / `LoadingSpinner`
 - `@/services/config.service`（`configService` + `normalizeLanguageId`）、`@/services/system.service`（`systemService`）
+- `@/stores/contestStore` / `@/stores/problemStore`（清空缓存后补拉比赛数据）
 - `@/types/config` / `@/types/system`（仅类型）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/editor`（`EDITOR_TAB_SIZES` / `EDITOR_FONT_SIZE_MIN` / `EDITOR_FONT_SIZE_MAX` —— 编辑器分组的值域唯一权威）
@@ -68,6 +73,13 @@ discard(): Object.assign(form, JSON.parse(baseline))
 主题分组：界面主题下拉 disabled（整机只有浅色，暗色即将上线）；编辑器主题下拉同样 disabled，
 但文案指向「由解题页编辑器设置控制」—— 编辑器主题已可切换（`theme.editorTheme`），
 只是入口在解题页弹层，置灰项不得再宣称「固定浅色」
+
+清空缓存（「缓存」分组）：
+  「清空缓存」→ 二次确认展开（取消 / 确认清空）→ clearCache()
+  ├─ systemService.clearCache() → IPC clear_cache（后端三层缓存同步清空）
+  ├─ contestStore.loadContest()   // 立刻补拉：后端已空，前端 store 仍是旧内存副本
+  ├─ problemStore.invalidateMyStatus()  // 我的题目状态同样被清，标记过期待重拉
+  └─ 成功 → cacheNotice「缓存已清空，数据已重新拉取」3s；失败 → cacheError（值保留在表单外，不影响草稿）
 ```
 
 设计要点：
@@ -96,4 +108,12 @@ discard(): Object.assign(form, JSON.parse(baseline))
   且只读一次配置，见 `doc/problem.md` P74 遗留项）。
 - 存储信息每次挂载实时读取（service 不缓存：版本号构建期固定，但存储目录可能随
   用户数据迁移变化）。
-- 定时器（savedTimer/copiedTimer）onBeforeUnmount 统一清理。
+- **「缓存」分组是维护动作，不是配置**：它清的是后端三层缓存（比赛元信息 / 题面 /
+  题目 limits / 终态提交详情），**不动任何本地事实**（工作区代码、提交源码快照、
+  公告已读状态、配置）。两个硬约定：① **必须二次确认** —— 误触后全场数据要重新拉一遍
+  （赛场上白等几十秒），而本页入口本身已经藏得较深，不再叠权限判断；② **清完必须补拉**
+  —— 后端缓存清空后前端 store 里的内存副本仍是旧值（本次清理刻意不动前端状态，避免
+  把界面清成空白），不补拉的话用户看到的是「已清空」却依旧是旧数据，等于让「清空是否
+  生效」不可验证。补拉失败不改变「已清空」的结论（清空本身已成功），错误按既有链路
+  （`contestStore.error`）如实暴露。
+- 定时器（savedTimer/copiedTimer/cacheTimer）onBeforeUnmount 统一清理。

@@ -623,3 +623,66 @@ fn oj_switched_clears_problem_scoped_caches() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── 设置页「清空缓存」（同步清理，不重拉） ──
+
+#[test]
+fn clear_caches_empties_statement_and_limits_caches() {
+    let (service, calls, dir) = make_service("clear-caches", Vec::new());
+
+    // 预置两层（内存 + 磁盘）：题面与 limits。磁盘条目必须真实落盘，
+    // 否则「目录不存在」的断言恒真，等于零覆盖
+    block_on(service.open_problem("1", "A", true)).expect("预置题面失败");
+    block_on(service.load_problem_limits("1", &ids(&["A"]))).expect("预置 limits 失败");
+    let calls_before = call_count(&calls);
+
+    let statement_disk = dir.join("cache").join("problem_statement");
+    let limits_disk = dir.join("cache").join("problem_limits");
+    assert!(statement_disk.exists(), "预置失败：题面磁盘缓存未落盘");
+    assert!(limits_disk.exists(), "预置失败：limits 磁盘缓存未落盘");
+    assert!(!service.statement_cache.is_empty(), "预置失败：题面内存缓存为空");
+    assert!(
+        !service.limits_cache.read().unwrap().is_empty(),
+        "预置失败：limits 内存缓存为空"
+    );
+
+    service.clear_caches();
+
+    assert!(service.statement_cache.is_empty(), "题面内存缓存应被清空");
+    assert!(
+        service.limits_cache.read().unwrap().is_empty(),
+        "limits 内存缓存应被清空"
+    );
+    assert!(
+        !statement_disk.exists(),
+        "题面磁盘缓存应被同步清空（用户点了按钮就该等到真清完）"
+    );
+    assert!(!limits_disk.exists(), "limits 磁盘缓存应被同步清空");
+    assert_eq!(
+        call_count(&calls),
+        calls_before,
+        "清空缓存不得顺带发请求（补拉时机由调用方决定）"
+    );
+
+    // 清完再取必须真的回源 —— 否则「清了但没生效」
+    block_on(service.load_problem_limits("1", &ids(&["A"]))).expect("清空后 limits 失败");
+    assert_eq!(
+        call_count(&calls),
+        calls_before + 1,
+        "清空后下一次查询必须回源"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn clear_caches_without_any_disk_cache_is_not_an_error() {
+    // 从未缓存过（目录不存在）时清空必须正常返回：remove_all 会返回 NotFound，
+    // 不该被当成失败（与 OJSwitched 的存在性守卫同款）
+    let (service, _calls, dir) = make_service("clear-caches-empty", Vec::new());
+
+    assert!(!dir.join("cache").exists(), "前置条件：尚未产生任何磁盘缓存");
+    service.clear_caches();
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

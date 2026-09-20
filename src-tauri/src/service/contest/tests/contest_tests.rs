@@ -847,3 +847,76 @@ fn oj_switched_clears_contest_scoped_caches() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── 设置页「清空缓存」（同步清理，不重拉） ──
+
+#[test]
+fn clear_caches_empties_list_memory_and_disk_caches() {
+    let (service, provider, dir) = make_service(StubMode::Ok);
+
+    // 预置三层：列表（内存）+ 元信息（内存 + **磁盘**）。磁盘条目必须真实落盘
+    // —— 否则「目录不存在」的断言恒真，等于零覆盖
+    *service.cache.write().unwrap() = Some(ContestCache {
+        contests: vec![],
+        fetched_at: Instant::now(),
+    });
+    block_on(service.load_contest_meta("7")).expect("预置元信息失败");
+    assert!(
+        dir.join("cache/contest_meta/HOJ/7.json").exists(),
+        "预置失败：元信息磁盘缓存未落盘"
+    );
+    assert!(!service.meta_cache.is_empty(), "预置失败：元信息内存缓存为空");
+    let calls_before = provider.meta_call_count();
+
+    service.clear_caches();
+
+    assert!(service.cache.read().unwrap().is_none(), "列表缓存应被清空");
+    assert!(service.meta_cache.is_empty(), "元信息内存缓存应被清空");
+    assert!(
+        !dir.join("cache/contest_meta").exists(),
+        "元信息磁盘缓存应被同步清空（用户点了按钮就该等到真清完）"
+    );
+    assert_eq!(
+        provider.meta_call_count(),
+        calls_before,
+        "清空缓存不得顺带发请求（补拉时机由调用方决定）"
+    );
+
+    // 清完再取必须真的回源 —— 否则「清了但没生效」
+    block_on(service.load_contest_meta("7")).expect("清空后重新获取失败");
+    assert_eq!(
+        provider.meta_call_count(),
+        calls_before + 1,
+        "清空后下一次查询必须回源"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn clear_caches_keeps_announcement_baseline() {
+    // 公告基线**不是缓存**，而是「已经告诉过用户哪些公告」的记忆：清掉它会让
+    // 清空之后新发布的公告在下一次拉取时被当成「首次拉取」而**漏报**（红点不亮）。
+    let (service, provider, bus, dir) = make_service_with_bus(StubMode::Ok);
+    let events = collect_contest_events(&bus);
+
+    block_on(service.list_announcements("1012", 1, 20)).expect("首次拉取公告失败");
+    assert!(
+        events.lock().unwrap().is_empty(),
+        "首次拉取只建基线，不该发事件"
+    );
+
+    service.clear_caches();
+
+    // 清空之后裁判组补发了一条公告
+    provider.set_announcements(&["9001", "9002"]);
+    block_on(service.list_announcements("1012", 1, 20)).expect("二次拉取公告失败");
+
+    assert_eq!(
+        published_ids(&events),
+        vec![vec!["9002".to_string()]],
+        "清空缓存不得丢掉公告基线（丢掉 = 清空后新增的公告漏报，红点不亮）"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

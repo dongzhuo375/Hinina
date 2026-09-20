@@ -16,6 +16,7 @@
   - `async fn get_user_problem_status(&self, contest_id, problem_ids: &[String]) -> AppResult<HashMap<String, i32>>` — 批量查询当前用户提交状态（key=pid，`0=未提交 / 1=已AC / 2=尝试过`，未出现的题视为未提交）；空列表直接返回空 map，不发请求
   - `async fn load_problem_limits(&self, contest_id, display_ids: &[String]) -> AppResult<Vec<ProblemLimits>>` — 批量获取题目 limits（时间 ms / 内存 MB），带内存 + 磁盘双层缓存；返回顺序与入参一致，获取失败的题在结果中**缺失**
   - 内部：`fetch_limits()`（分批并发拉详情）、`limits_cache_path()` / `read_limits_cache()` / `write_limits_cache()`
+  - `fn clear_caches(&self)` — 清空本服务的全部缓存（题面内存 + 题面磁盘 + limits 内存 + limits 磁盘），**清完不重拉**（下次打开题目/拉 limits 自然回源）。供设置页「清空缓存」（`commands::cache_cmd::clear_cache`）调用；与 `OJSwitched` 的清理同源同批，区别是**同步执行** —— 用户点了按钮就该等到真清完
 - **字段**：`registry: Arc<dyn ProviderRegistry>`, `event_bus: Arc<EventBus>`, `storage: Arc<Storage>`, `limits_cache: Arc<RwLock<HashMap<{oj}/{contest_id}, HashMap<display_id, ProblemLimits>>>>`, `statement_cache: Arc<TtlCache<String, Problem>>`, `statement_disk: Arc<JsonDiskCache>`（Arc 包装是为了共享进 `OJSwitched` 订阅闭包，闭包不捕获 service/总线，无引用环）。**三层缓存的键都带 OJ 维度**（`{oj}/{cid}/{display_id}`、`{oj}/{cid}`、`cache/problem_limits/{oj}/{cid}.json`）—— 跨 OJ 撞号在结构上不可能，故「切 OJ」的清理只是空间回收：构造时经 `subscribe_oj_switched` 注册两个订阅，**内存段同步清**、**磁盘段延迟清**（`subscribe_deferred`，I/O 不阻塞发布方）；limits 磁盘目录带存在性守卫（与 `clear_namespace` 同款：目录不存在时不清理不告警，避免每次切换都打误导性 warn）
 
 ## 直接依赖
@@ -63,11 +64,14 @@
 - **`load_problem_limits` 同样遵守**：401/403 原样上抛，既不回退默认值，也不改写成 `Problem` 变体。`fetch_limits` 内部只在 JoinSet 任务 join 失败时自行构造 `AppError::Unknown`（那是本层自己的错误，不存在改写下游变体的问题）。
 - **`get_user_problem_status` 空入参短路**：`problem_ids` 为空时直接返回空 map，不发请求 —— 因此针对它的错误路径测试**必须传非空列表**才能真正走到 Provider。
 - **题面缓存（内存 + 磁盘，TTL 30min，受开关控制）**：题面是「几乎不变但并非永不变化」的公共数据 —— 管理员可能中途修正题面/样例。故 TTL 取 30 分钟（不是永久），并给出配置开关 `oj.cacheProblemStatement`（默认开启）供「要立刻看真值」时关闭；关闭时**不读不写**（连磁盘目录都不创建）。磁盘层带 `fetchedAt`，重启后继续计时；过期文件懒删除。缓存键含 `contest_id`：同一 `display_id` 在不同比赛是不同题目。**只缓存成功结果**，401/403 不入缓存（否则会话失效被缓存掩盖）。limits 仍走自己的双层缓存，两套缓存互不干扰（`limits` 也可从题面实体派生，但保持既有实现避免重复改造）。
+- **`clear_caches` 同步清、不清无关目录**：题面磁盘走 `clear_namespace()`（整目录删，含布局标记 —— 下次构造重扫一遍，目录已空是 no-op），limits 磁盘先做存在性守卫再 `remove_all`（从未缓存过 limits 是常见情形，直接删会得到 NotFound 告警）。**只清 `cache/` 下的这两处**：工作区代码、提交源码快照、公告已读状态都不是缓存，删掉不可恢复。
 
 ## 测试
 `src-tauri/src/service/problem/tests/problem_tests.rs` 以桩 Provider + 临时目录锁定：limits 首次全量拉取并落盘、二次调用命中内存缓存零请求、磁盘缓存跨 Service 实例复用、部分失败只返回成功子集、**全部失败上抛错误而非回退假默认值**、损坏缓存文件重新获取、空入参短路不发请求；`get_user_problem_status` 空列表短路与按 pid 映射。
 
 **题面缓存**（5 项）：二次 `open_problem` 命中缓存零请求、开关关闭时每次都请求且**不落盘**、磁盘缓存跨实例复用（模拟重启零请求）、按 `contest_id + display_id` 隔离（同题号不同比赛不互命中）、**错误不入缓存**（连续两次失败各请求一次，变体保持 `Auth`）。
+
+**清空缓存（设置页维护动作）**：`clear_caches` 后题面内存 / 题面磁盘 / limits 内存 / limits 磁盘四处全空、清理本身不发请求、清后再取必须回源；从未产生过磁盘缓存时清空不报错（存在性守卫）。
 
 **错误变体穿透**（3 项）：`open_problem_preserves_auth_variant`（`Auth` 变体保留且消息含「获取题目详情失败」环节名）、`list_problems_preserves_auth_variant`、`get_user_problem_status_preserves_auth_variant`（题目总览的「我的状态」每 30s 轮询一次，变体被改写会让守卫失灵；用例传非空 pid 列表以绕开空入参短路）。
 

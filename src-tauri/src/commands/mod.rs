@@ -5,6 +5,7 @@
 // 避免在 `.setup()` 中手动注册引入的兼容性问题。
 
 pub mod auth_cmd;
+pub mod cache_cmd;
 pub mod config_cmd;
 pub mod contest_cmd;
 pub mod oj_cmd;

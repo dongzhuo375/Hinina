@@ -262,6 +262,23 @@ impl ContestService {
         self.list_contests(0).await
     }
 
+    /// 清空本服务的全部缓存（比赛列表 + 元信息内存 + 元信息磁盘）。
+    ///
+    /// 供设置页「清空缓存」使用：与 [`ContestService::refresh`] 的区别是
+    /// **清完不重拉**（何时补拉由调用方决定），且不限于当前比赛。
+    ///
+    /// **刻意不清公告基线**（`announcement_baseline`）：它不是缓存，而是「已经告诉过
+    /// 用户哪些公告」的记忆。清掉它会让清空之后新发布的公告在下一次拉取时被当成
+    /// 「首次拉取」而**漏报**（红点不亮）。
+    pub fn clear_caches(&self) {
+        if let Ok(mut cache) = self.cache.write() {
+            *cache = None;
+        }
+        self.meta_cache.clear();
+        let disk = self.meta_disk.clear_namespace();
+        info!(disk_cleared = disk, "已清空比赛列表与元信息缓存");
+    }
+
     /// 获取比赛排行榜（分页）。
     ///
     /// **不做缓存**：HOJ 内榜每次实时计算（见 `doc/HOJ/HOJ-Contest-Rank-API.md` §4），

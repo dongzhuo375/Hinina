@@ -206,6 +206,7 @@ Hinina/
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
             ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
             ├── config_cmd.rs             # get_config / reload_config / update_config / get_storage_info（存储目录/日志路径/版本，设置页「关于」）
+            ├── cache_cmd.rs              # clear_cache（设置页「清空缓存」：比赛列表/元信息 + 题面 + 题目 limits + 终态提交详情三层同步清空，不重拉；不动工作区代码/源码快照/公告已读/配置）
             ├── theme_cmd.rs              # get_theme / set_theme
             └── tests/
                 └── mod_tests.rs          # Command 层关键路径测试（P40 + 分页默认值/StorageInfo 序列化/uid 回退/空筛选归一）
@@ -248,8 +249,8 @@ src/
 ├── components/
 │   ├── layout/
 │   │   ├── TopBar.vue                    # 顶栏（拖拽区 + 窗口控制 + 状态徽章 + 倒计时胶囊 + 比赛简介抽屉 + 用户 pill）
-│   │   ├── ActivityBar.vue               # 左侧活动栏（题目/榜单/评测/公告 + 底部设置，router-link 驱动高亮；公告项挂真实未读红点徽标）
-│   │   └── StatusBar.vue                 # 底部状态条（连接状态 + 客户端版本）
+│   │   ├── ActivityBar.vue               # 左侧活动栏（题目/榜单/评测/公告 + 底部设置，router-link 驱动高亮；公告项挂真实未读红点徽标；设置项默认隐藏，连点状态栏版本号 5 下才渲染）
+│   │   └── StatusBar.vue                 # 底部状态条（连接状态 + 客户端版本；版本号同时是设置入口的隐藏解锁点）
 │   ├── contest/
 │   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时，数据源=榜单我的行）
 │   ├── editor/
@@ -317,6 +318,7 @@ src/
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS，码值 = HOJ 真实码表含负数）+ 时间/内存/长度格式化 + findFirstFailedCase
 │   ├── close-guard.ts                    # 关窗守卫（状态机 idle/flushing/allowing + 双层时间上界 flushTimeout/hardTimeout；收尾用 destroy 兜底 close；依赖全注入故可穷尽单测）
+│   ├── settings-access.ts                # 设置入口的隐藏解锁（连点状态栏版本号 5 下；注入式计数状态机 createUnlockGate + 会话级单例 settingsUnlocked/tapVersion；状态不落盘）
 │   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 存储域 1–8 与候选档位 2·4·8；前端各消费方一律取此处常量，Rust sanitize 同域）
 │   ├── logger.ts                         # 前端日志唯一入口（createLogger 作用域前缀 + debug/info 仅开发环境、warn/error 恒输出；不落盘，持久化日志归 Rust tracing）
 │   ├── error.ts                          # 错误文案收敛唯一出口（errorMessage：Error/字符串取信息，空值与非 Error 载荷回退兜底文案；不依赖 bridge，纯函数）
@@ -393,6 +395,7 @@ src/
 - **非 2xx 的响应体必须带进错误信息**：`infra/http.rs` 的非 raw 变体在状态码判定失败时读取响应体、压成单行并截断后附进 `AppError`（`HTTP 500 … | {"status":500,"msg":"…"}`）。此前直接丢弃响应体，调用方只拿到一句 `HTTP 500 Internal Server Error`，排障时完全看不出服务端说了什么。**401 例外**：该变体是会话守卫的判据，且服务端可能在 401 响应里回显凭证，故不附带正文
 - **提交源码要本地留档**：`service/submission/snapshot.rs` 在提交成功后把源码落盘到 `submissions/{oj_id}/{submit_id}.{ext}`（扩展名与前端 `sourceFileNameOf` 同源，未知语言回退 `.txt`），详情页在 OJ 未回吐代码时回落到它。理由：OJ 会在比赛隐藏记录 / `codeShare=false` / 赛后回收等情形下不回吐代码，而「我当时交的是什么」属于本地事实；提交**失败**时更彻底 —— 服务端一行记录都没有，没有快照就无从查起。落盘失败只告警，绝不阻断提交
 - **关窗必须落盘，且必须一定能关上**：`utils/close-guard.ts` 用状态机（`idle → flushing → allowing`）+ 双层时间上界（`flushTimeout` 3s / `hardTimeout` 5s）实现，收尾用 `destroy()` 而非再调一次 `close()`。曾经内联在 `main.ts` 的实现用 `flushing` 布尔量表示「落盘在途」，收尾依赖一次可能失败的 `close()`：异常被 `void` 吞掉后 `flushing` 永久为 `true`，此后**每一次**点关闭都命中 `if (flushing) return`，窗口再也关不掉；而在 `close-requested` 回调里再调 `close()` 会重新触发该事件，窗口已处于 closing 状态时可能根本不再投递。两条硬约束：① 任何失败路径都不得让守卫停在 `flushing`；② 落盘结束/超时后必须无条件收尾（`destroy` 失败再退回 `close` 兜底），依赖全注入以便穷尽单测
+- **设置入口默认隐藏，连点状态栏版本号 5 下才出现**：`utils/settings-access.ts` 用注入式计数状态机（`createUnlockGate`，时间源可注入）+ 会话级单例（`settingsUnlocked` / `tapVersion`）实现，`ActivityBar` 以 `v-if` 渲染设置项（不是 CSS 隐藏）。三条约束：① **状态不落盘** —— 解锁是「我现在要调试」的临时意图而非配置，重启后重新隐藏，否则一次误触会永久暴露设置入口；② **间隔超窗从 1 重新计数**（2s 窗口），否则一天里零散点 5 次也能凑满；③ **版本号不给可点击的视觉暗示**（无 `title`、`cursor-default`、hover 无变化），解锁瞬间给一次 3 秒提示 —— 它要防的是误触，不是引导用户去点。动机：设置页里是可改变客户端行为的开关（OJ 地址、轮询节拍、缓存），赛场误触后很难自查（改了服务器地址就再也连不上）
 - **公告红点走事件驱动 + 可见性补拉**：Rust 侧 `ContestService::list_announcements` 按比赛维护公告 ID 基线，出现新 ID 时发布 `ContestEvent::AnnouncementsPublished`（**首次拉取只建基线不发事件**，否则一开机就亮红点；基线按比赛隔离，失败时保留旧基线），`main.rs` 事件桥转发到 `announcements-published`，前端即时刷新。前端轮询仍是拉取的唯一发起方（60s ± 10s），但**窗口重新可见/聚焦时立即补拉一次**（1s 去重）—— 桌面客户端的常态是「切出去看题解再切回来」，只靠节拍意味着切回来最多等 70s 才可能看到红点，被选手直接感知为「红点不出现」。已读语义配套收紧：页面不可见时不标记（切走了 = 没看到），`isWatching`（公告页在屏）时落地的新公告自动标为已读，避免离开页面后冒出假红点
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询的**节拍与超时唯一归属前端** `submissionStore`（createPoller 驱动，终态判据见 `utils/submission.ts`，deadline 兜底），后端 `get_judgement` 是单次查询、无内层循环 —— 双层轮询会让前端抖动沦为装饰、`stopPolling` 停不掉在途后端循环；View 只表达提交意图
 - **比赛工作台外壳**：`ContestLayout` 承载 TopBar + ActivityBar + `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；窗口拖拽与窗口控制只在 TopBar（登录页由 `App.vue` 提供兜底窗口条）。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
@@ -417,5 +420,5 @@ src/
 - **状态文案以接口返回为准**：评测状态直接用后端 `JudgementStatus` 原词（Accepted / Wrong Answer…），不强行缩写为 AC/WA；`get-user-problem-status` 的 0/1/2 映射为「未作答 / 已通过 / 尝试过」
 - **工作区语言必须落盘**：语言不属于任何代码文件，`update_workspace_file` 带不上它；`workspaceStore.changeLanguage` 乐观更新本地并调用 `set_workspace_language` 立即持久化元数据，否则切题或重启后退回默认语言，会把 Java 代码当 C++ 提交
 - **代码落盘语义 = debounce-to-memory**：编辑器改动经 2s 防抖推送到**后端内存**（`update_workspace_file` 不写盘），磁盘写入只有两条路径 —— 后台 auto-save 周期与显式 `save_workspace`。因此「自动保存间隔」真正决定落盘频率（旧实现的写透让该配置形同虚设），前端状态分两级：`syncPending`（未推内存）/ `isDirty`（未落盘）。三条配套硬约定：① **任何替换内存工作区的操作先落盘旧的**（`create` / `load` / `switch` 共用 `save_current_if_dirty`，前端 `loadWorkspace` 前先 `flushPendingSync`）；② **落盘时机由调用点编排**：切题 / 失焦 / 页面隐藏 / 离开解题页（`ProblemSolveView`）与关窗（`main.ts` 装配 `utils/close-guard`）—— auto-save 周期最长 300 秒，这些时刻只靠周期就会丢改动；③ **auto-save 以修订号判定能否清脏，且取快照与写盘整体在读锁内完成**（读锁与 `save()` / `update_file` 的写锁互斥 → 「旧快照的写」不可能落在「更新的写」之后；写失败或快照后有新改动时保留脏、不发布事件），否则「快照写盘」会被当成新内容已落盘，或旧内容覆盖回退后因工作区已 clean 而永不重写。前端「已自动备份」指示的唯一真相来源是后端 `workspace-saved` 事件（`main.rs` 事件桥下发，仅转发真正落盘的 `Saved` / `AutoSaveTriggered`）
-- **客户端缓存策略**（本轮落地，判据 = 数据可变性分层）：**下次看到之前不会变**的数据 → 缓存（比赛元信息 TTL 120s、题面 TTL 30min，均内存 + 磁盘；终态提交详情/测试点 TTL 2h，**仅内存**）；**只由我自己的动作改变**的数据 → 本地增量 + 失效重取（我的题目状态：提交终态时 `problemStore.invalidateMyStatus()`，总览页按需重拉，不再 30s 整表重拉）；**随时可能被别人改变**的数据 → 只轮询，最多做同查询去抖（榜单用户操作路径 in-flight 合并 + 3s memo；**轮询与手动刷新不走 memo**）。四条硬约定：① **缓存是优化不是正确性依赖** —— 读失败回退网络、写失败只 warn、解析损坏视为未命中；② **只缓存成功结果** —— 401/403 等错误永不入缓存，否则会话失效会被掩盖、`sessionGuard` 拿不到 `Auth` 变体；③ **键必须带作用域**（`{oj}/{contest_id}` / `{oj}/{submit_id}`；题面、limits、比赛元信息、提交详情/测试点的键**一律带 OJ 维度**），**用户域数据不落盘**且登出由 `auth_cmd::logout` 编排 `SubmissionService::clear_user_caches()` 清空；④ **失效路径五条**：TTL、切比赛（键隔离）、**切 OJ**（`OJSwitched` 事件：内存段同步清、**磁盘段延迟清** —— 键已带 OJ 维度，故清理只承担空间回收，不承担正确性）、登出、配置开关（`oj.cacheProblemStatement`）。可观测性：命中走 `debug`（字段 `cache` / 实体 id / `hit`），淘汰与写失败走 `warn`。**明确不做**：榜单名次缓存（实时性即公平性）、评测中状态缓存、公告内容缓存、会话校验缓存、按 URL 的通用 HTTP 响应缓存（会连错误体与按 uid 定制的响应一起缓存）
+- **客户端缓存策略**（本轮落地，判据 = 数据可变性分层）：**下次看到之前不会变**的数据 → 缓存（比赛元信息 TTL 120s、题面 TTL 30min，均内存 + 磁盘；终态提交详情/测试点 TTL 2h，**仅内存**）；**只由我自己的动作改变**的数据 → 本地增量 + 失效重取（我的题目状态：提交终态时 `problemStore.invalidateMyStatus()`，总览页按需重拉，不再 30s 整表重拉）；**随时可能被别人改变**的数据 → 只轮询，最多做同查询去抖（榜单用户操作路径 in-flight 合并 + 3s memo；**轮询与手动刷新不走 memo**）。四条硬约定：① **缓存是优化不是正确性依赖** —— 读失败回退网络、写失败只 warn、解析损坏视为未命中；② **只缓存成功结果** —— 401/403 等错误永不入缓存，否则会话失效会被掩盖、`sessionGuard` 拿不到 `Auth` 变体；③ **键必须带作用域**（`{oj}/{contest_id}` / `{oj}/{submit_id}`；题面、limits、比赛元信息、提交详情/测试点的键**一律带 OJ 维度**），**用户域数据不落盘**且登出由 `auth_cmd::logout` 编排 `SubmissionService::clear_user_caches()` 清空；④ **失效路径六条**：TTL、切比赛（键隔离）、**切 OJ**（`OJSwitched` 事件：内存段同步清、**磁盘段延迟清** —— 键已带 OJ 维度，故清理只承担空间回收，不承担正确性）、登出、配置开关（`oj.cacheProblemStatement`）、**设置页「清空缓存」**（`commands::cache_cmd::clear_cache`：三层**同步**清空、清完不重拉，补拉归调用方 —— 设置页清完立刻重拉当前比赛数据，否则界面会停在前端 store 的旧内存副本上；**刻意不清公告基线**（它不是缓存而是「已经告诉过用户哪些公告」的记忆，清掉会让清空后新发的公告漏报），也不清工作区代码、提交源码快照、公告已读状态与配置）。可观测性：命中走 `debug`（字段 `cache` / 实体 id / `hit`），淘汰与写失败走 `warn`。**明确不做**：榜单名次缓存（实时性即公平性）、评测中状态缓存、公告内容缓存、会话校验缓存、按 URL 的通用 HTTP 响应缓存（会连错误体与按 uid 定制的响应一起缓存）
 - **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）

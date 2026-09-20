@@ -147,6 +147,7 @@ fn main() {
             commands::config_cmd::reload_config,
             commands::config_cmd::update_config,
             commands::config_cmd::get_storage_info,
+            commands::cache_cmd::clear_cache,
             commands::theme_cmd::get_theme,
             commands::theme_cmd::set_theme,
         ])

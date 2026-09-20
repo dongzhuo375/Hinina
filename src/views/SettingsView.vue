@@ -6,6 +6,8 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
 import { resetSessionForOjSwitch } from '@/stores/session'
+import { useContestStore } from '@/stores/contestStore'
+import { useProblemStore } from '@/stores/problemStore'
 import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
 import {
   EDITOR_FONT_SIZE_MAX,
@@ -349,6 +351,51 @@ async function copyText(key: string, text: string): Promise<void> {
   }
 }
 
+// ── 缓存维护 ──
+//
+// 入口本身是隐藏的（连点状态栏版本号 5 下才出现设置项），故这一块不需要再叠
+// 额外权限判断 —— 能进到本页的人已经主动表达过意图。但「清空」仍要二次确认：
+// 它会连带后端缓存一起清掉，误触后全场数据要重新拉一遍（赛场上白等几十秒）。
+
+const clearingCache = ref(false)
+const cacheConfirmOpen = ref(false)
+const cacheNotice = ref<string | null>(null)
+const cacheError = ref<string | null>(null)
+
+let cacheTimer: ReturnType<typeof setTimeout> | null = null
+
+/// 清空缓存并立刻补拉当前比赛数据。
+///
+/// **必须补拉**：后端缓存清空后，前端 store 里的内存副本仍是旧值（本次清理
+/// 刻意不动前端状态，避免把界面清成空白）。不补拉的话用户看到的是「已清空」
+/// 却依旧是旧数据，等于把「清空是否生效」变成不可验证的玄学。
+async function clearCache(): Promise<void> {
+  cacheConfirmOpen.value = false
+  clearingCache.value = true
+  cacheNotice.value = null
+  cacheError.value = null
+  try {
+    await systemService.clearCache()
+
+    // 补拉比赛元信息 + 题目列表；失败不改变「已清空」的结论（清空本身已成功），
+    // 只让错误按既有链路（contestStore.error）如实暴露
+    await useContestStore().loadContest().catch(() => {})
+    // 「我的题目状态」在后端同样被清：标记过期，由总览页下次可见时重拉
+    useProblemStore().invalidateMyStatus()
+
+    cacheNotice.value = '缓存已清空，数据已重新拉取'
+    if (cacheTimer) clearTimeout(cacheTimer)
+    cacheTimer = setTimeout(() => {
+      cacheNotice.value = null
+      cacheTimer = null
+    }, 3_000)
+  } catch (e) {
+    cacheError.value = errorMessage(e, '清空缓存失败')
+  } finally {
+    clearingCache.value = false
+  }
+}
+
 // ── 布局滑杆 ──
 
 function onSplitInput(event: Event): void {
@@ -376,6 +423,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (savedTimer) clearTimeout(savedTimer)
   if (copiedTimer) clearTimeout(copiedTimer)
+  if (cacheTimer) clearTimeout(cacheTimer)
 })
 </script>
 
@@ -809,6 +857,69 @@ onBeforeUnmount(() => {
                 <p class="text-xs text-[var(--text-muted)] sm:col-span-2">
                   界面暗色主题即将上线，当前版本固定浅色；编辑器主题在解题页「编辑器设置」中即时切换
                 </p>
+              </div>
+            </section>
+
+            <!-- ── 缓存 ── -->
+            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
+              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+                <svg
+                  class="h-4 w-4 text-[var(--color-primary)]"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <ellipse cx="12" cy="5" rx="8" ry="3" />
+                  <path
+                    d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <h2 class="text-sm font-semibold text-[var(--text-primary)]">缓存</h2>
+              </div>
+              <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+                <p class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+                  清空比赛元信息、题面、题目限制与终态提交详情的本地缓存，清完立即重新拉取。
+                  <span class="text-[var(--text-muted)]">
+                    不会删除工作区代码、提交源码快照、公告已读状态与配置。
+                  </span>
+                </p>
+
+                <div class="flex shrink-0 items-center gap-2">
+                  <span v-if="cacheError" class="text-xs text-rose-600">{{ cacheError }}</span>
+                  <span v-else-if="cacheNotice" class="text-xs text-emerald-600">
+                    {{ cacheNotice }}
+                  </span>
+
+                  <template v-if="cacheConfirmOpen || clearingCache">
+                    <button
+                      v-if="!clearingCache"
+                      type="button"
+                      class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                      @click="cacheConfirmOpen = false"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+                      :disabled="clearingCache"
+                      @click="clearCache"
+                    >
+                      {{ clearingCache ? '清空中…' : '确认清空' }}
+                    </button>
+                  </template>
+                  <button
+                    v-else
+                    type="button"
+                    class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-slate-50"
+                    @click="cacheConfirmOpen = true"
+                  >
+                    清空缓存
+                  </button>
+                </div>
               </div>
             </section>
 

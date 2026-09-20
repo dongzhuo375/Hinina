@@ -151,6 +151,39 @@ impl ProblemService {
         Ok(problems)
     }
 
+    /// 清空本服务的全部缓存（题面内存 + 题面磁盘 + limits 内存 + limits 磁盘）。
+    ///
+    /// 供设置页「清空缓存」使用：清完不重拉，下一次打开题目/拉 limits 自然走网络。
+    /// 与 `OJSwitched` 的清理同源（同一批缓存），区别只是**同步执行** —— 用户显式
+    /// 点了按钮就该等到真清完再看到「已清空」，而不是投进延迟队列后立即返回。
+    pub fn clear_caches(&self) {
+        if let Ok(mut limits) = self.limits_cache.write() {
+            limits.clear();
+        }
+        self.statement_cache.clear();
+        let statement_disk = self.statement_disk.clear_namespace();
+
+        // 与 subscribe_oj_switched 同款存在性守卫：目录不存在（从未缓存过 limits
+        // 的常见情形）时 remove_all 会返回 NotFound，不该当成失败告警
+        let limits_disk = if self.storage.exists(LIMITS_CACHE_DIR) {
+            match self.storage.remove_all(LIMITS_CACHE_DIR) {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!(error = %e, "清空 limits 磁盘缓存失败");
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        info!(
+            statement_disk_cleared = statement_disk,
+            limits_disk_cleared = limits_disk,
+            "已清空题面与 limits 缓存"
+        );
+    }
+
     /// 打开题目：获取详情 + 发布 `ProblemEvent::Opened`。
     ///
     /// 调用方在收到此事件后应通过 WorkspaceManager 创建或切换工作区。
