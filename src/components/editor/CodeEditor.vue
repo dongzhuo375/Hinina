@@ -307,6 +307,12 @@ defineExpose({ focus })
 </script>
 
 <template>
+  <!--
+    根节点是 flex 项（`flex-1`）：**消费方必须把本组件放进 flex 容器**
+    （自身 `display:flex` + 确定高度，如 `flex h-[520px] flex-col overflow-hidden`）。
+    放在普通块级父容器里时 `flex-1` 不生效、高度退回内容高度，编辑器会塌缩成
+    数像素高（表现为代码一片空白）。见 `QuickSubmitDialog` / `ProblemSolveView` 的用法。
+  -->
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <!-- 工具条（只读模式隐藏：详情页代码查看无语言切换/提交语义） -->
     <div

@@ -87,6 +87,10 @@ onUnmounted: alive = false；stopPoller()；清理 copiedTimer
   平铺制直接一张表。得分列（OI）仅在任一测试点带 score 时出现。
 - 指标条中 `score` / `oiRankScore` 为 null（ACM 题）时整项不渲染，不显示假 0。
 - 源代码卡默认折叠（赛场详情页主要看判定与测试点）；展开后复用 `CodeEditor`
-  readonly 模式（隐藏工具条、禁用编辑与 Ctrl+Enter）。
+  readonly 模式（隐藏工具条、禁用编辑与 Ctrl+Enter）。**展开容器必须自身是 flex 容器**
+  （`flex h-[520px] flex-col overflow-hidden`）：`CodeEditor` 根节点是 `flex-1` 的 flex 项，
+  放在普通块级容器里会塌缩成数像素高，表现为「展开后一片空白」（曾把渲染问题误读成
+  「后端没返回代码」）。`code` 为空（OJ 隐藏代码且无本地快照）时渲染「未取到本次提交的
+  源代码」文案，而不是留一个空编辑器 —— 让「真没代码」与「渲染失败」在界面上可区分。
 - 分层例外说明：本视图直接消费 `submission.service`（一次性只读查询，无共享状态），
   提交/轮询等有状态链路仍走 store。
