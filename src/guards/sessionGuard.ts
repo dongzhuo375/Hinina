@@ -18,6 +18,12 @@ let invalidating = false
  *
  * 依赖倒置：Bridge 层只回调注入的观察者，不感知 store 与 router，
  * 装配关系集中在组合根，避免底层反向依赖上层。
+ *
+ * **为什么在 `guards/` 而不是 `stores/` 或 `services/`**：它既需要 router
+ * （View 层关注点）又需要 authStore，是**跨层装配**而非领域服务 —— 放进
+ * `services/` 会造成 Service → Store 的反向依赖，放进 `stores/` 则名不符实
+ * （没有 `defineStore`，也不是状态容器）。与 `router/`、`utils/` 同属
+ * 「不在 View → Store → Service → Bridge 链上」的横向模块。
  */
 export function installSessionGuard(router: Router): void {
   setIpcErrorObserver((error) => {

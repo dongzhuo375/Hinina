@@ -3,7 +3,7 @@ import { createPinia } from "pinia";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import router from "@/router";
 import App from "@/App.vue";
-import { installSessionGuard } from "@/stores/sessionGuard";
+import { installSessionGuard } from "@/guards/sessionGuard";
 import {
   installWorkspacePersistenceListener,
   useWorkspaceStore,
