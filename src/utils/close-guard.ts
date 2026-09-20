@@ -131,12 +131,23 @@ export function createCloseGuard(options: CloseGuardOptions): CloseGuard {
 
     try {
       // 落盘失败不阻断退出：卡住窗口比丢一次自动备份更糟
-      // （内容仍留在后端内存，且下次编辑会重新落盘）
-      await Promise.race([flush().then(() => undefined, () => undefined), delay(flushTimeoutMs)])
+      // （内容仍留在后端内存，且下次编辑会重新落盘）。
+      // 用 async 包装而不是 `flush().then(_, _)`：后者接不住 **同步抛错**
+      // （如 store 未就绪），异常会冲出 try 块 —— 若 finalize 被跳过，
+      // 状态就永久停在 flushing（本模块要消除的失效模式 1）
+      const safeFlush = async (): Promise<void> => {
+        try {
+          await flush()
+        } catch {
+          // 与异步 rejection 一致：静默放行
+        }
+      }
+      await Promise.race([safeFlush(), delay(flushTimeoutMs)])
     } finally {
       clearTimeoutFn(hardTimer)
+      // 收尾无条件执行：任何离开 try 块的路径（含异常）都不许跳过
+      await finalize()
     }
-    await finalize()
   }
 
   return {

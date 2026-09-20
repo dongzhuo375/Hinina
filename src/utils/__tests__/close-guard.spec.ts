@@ -117,6 +117,20 @@ describe('关窗守卫 — 失效路径（原实现的 bug 现场）', () => {
     expect(guard.handleRequest()).toBe(false)
   })
 
+  it('落盘同步抛错也必须放行关闭（不得卡死在 flushing）', async () => {
+    // 非 async 的 flush 同步 throw 不会变成 rejection，`.then(_, _)` 接不住：
+    // 异常直接冲出 try 块，finally 清掉硬超时后 finalize 永不执行，状态永久停在
+    // flushing —— 每次关窗都被拦截，窗口再也关不上（本模块要消除的失效模式 1）
+    const { guard, destroy } = makeGuard({ flush: () => { throw new Error('store 未就绪') } })
+
+    guard.handleRequest()
+    await settle()
+
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(guard.state()).toBe('allowing')
+    expect(guard.handleRequest()).toBe(false)
+  })
+
   it('destroy 失败时退回常规 close（窗口仍能关上）', async () => {
     const { guard, close, destroy, warn } = makeGuard({ destroy: async () => { throw new Error('permission denied') } })
 
