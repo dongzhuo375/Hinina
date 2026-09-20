@@ -576,8 +576,25 @@ function openProblem() {
               </svg>
             </span>
           </button>
-          <div v-if="codeExpanded" class="h-[520px] border-t border-[var(--border-color)]">
+          <!--
+            外层必须**自身就是 flex 容器**：`CodeEditor` 根节点是 `flex-1` 的 flex 项，
+            在普通块级父容器里 `flex-1` 不生效、高度退回内容高度 —— 实测编辑器塌缩成
+            5px，展开「源代码」只看到一片空白（代码并非未返回，是没被渲染出来）。
+            `overflow-hidden` 兜住 Monaco 首次布局的瞬时溢出（容器 `clientHeight`
+            为 0 时它会回退到 body 高度）。与 `QuickSubmitDialog` 同一写法。
+          -->
+          <div
+            v-if="codeExpanded"
+            class="flex h-[520px] flex-col overflow-hidden border-t border-[var(--border-color)]"
+          >
+            <p
+              v-if="!detail.code"
+              class="px-4 py-6 text-sm text-[var(--text-secondary)]"
+            >
+              未取到本次提交的源代码
+            </p>
             <CodeEditor
+              v-else
               :model-value="detail.code"
               :language="codeLanguage"
               :is-dirty="false"

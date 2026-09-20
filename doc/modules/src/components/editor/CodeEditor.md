@@ -69,6 +69,10 @@ onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补
 
 设计要点：
 
+- **根节点是 flex 项（`flex-1`），消费方必须把它放进 flex 容器**：父级需自身
+  `display:flex` + 确定高度（如 `flex h-[520px] flex-col overflow-hidden`）。
+  放进普通块级父容器时 `flex-1` 不生效、高度退回内容高度，Monaco 会塌缩成数像素高
+  —— 界面表现为「代码一片空白」，而数据其实是好的（提交详情页曾踩此坑，实测 5px）。
 - **备份指示的语义**：`isDirty=true` 显示灰色「编辑中…」，`false` 显示绿色「已自动备份」——
   状态来自 workspaceStore（防抖同步 + 后端 auto-save 落盘后清脏），组件只呈现。
 - 清空代码必须二次确认（气泡内确认/取消）：赛场上误删代码是不可逆事故。
