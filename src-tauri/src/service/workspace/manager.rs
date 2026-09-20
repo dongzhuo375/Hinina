@@ -64,6 +64,11 @@ struct WorkspaceMeta {
     contest_id: String,
     problem_id: String,
     root_path: String,
+    /// 当前代码文件名（权威源，见 `Workspace::active_file`）。
+    /// `#[serde(default)]`：历史 workspace.json 没有该字段，反序列化为 `None`，
+    /// 由加载路径回退到「按语言派生 + 扩展名探测」的老启发式。
+    #[serde(default)]
+    active_file: Option<String>,
     language: String,
     created_at: i64,
     updated_at: i64,
@@ -198,6 +203,7 @@ impl WorkspaceManager {
             problem_id: meta.problem_id,
             root_path: meta.root_path,
             files,
+            active_file: meta.active_file,
             language: meta.language,
             is_dirty: false,
             created_at: meta.created_at,
@@ -306,6 +312,7 @@ impl WorkspaceManager {
             contest_id: ws.contest_id.clone(),
             problem_id: ws.problem_id.clone(),
             root_path: ws.root_path.clone(),
+            active_file: ws.active_file.clone(),
             language: ws.language.clone(),
             created_at: ws.created_at,
             updated_at: ws.updated_at,
@@ -540,8 +547,11 @@ impl WorkspaceManager {
             .as_mut()
             .ok_or_else(|| AppError::Workspace("无当前工作区".into()))?;
 
-        // 更新内存中的文件 + 标记 dirty
+        // 更新内存中的文件 + 标记 dirty。
+        // 同时把该文件记为**当前代码文件**：写入路径的权威源由它承担，
+        // 调用方不必再按语言派生文件名（派生会让语言切换后的写入落到别的文件上）。
         ws.files.insert(file_name.to_string(), content.to_string());
+        ws.active_file = Some(file_name.to_string());
         ws.mark_dirty();
         self.revision.fetch_add(1, Ordering::SeqCst);
 

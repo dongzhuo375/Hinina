@@ -655,3 +655,78 @@ async fn auto_save_tracks_interval_and_can_be_restarted() {
     assert_eq!(mgr.auto_save_interval_secs(), Some(3));
     mgr.stop_auto_save();
 }
+
+/// `activeFile` 是当前代码文件的权威源：`update_file` 写到哪个文件就记哪个（P62）。
+#[test]
+fn update_file_records_active_file() {
+    let mgr = test_manager("active-file-update");
+    mgr.create("contest-af", "problem-af", "/ws").unwrap();
+    assert_eq!(
+        mgr.current().unwrap().active_file,
+        None,
+        "新工作区尚无代码文件"
+    );
+
+    mgr.update_file("main.cpp", "v1").unwrap();
+    assert_eq!(
+        mgr.current().unwrap().active_file.as_deref(),
+        Some("main.cpp")
+    );
+
+    // 语言切换后前端会把代码推到新文件名 —— 权威源必须跟着走，
+    // 否则加载路径又会退回「按语言派生 + 后缀探测」去猜
+    mgr.update_file("Main.java", "v2").unwrap();
+    assert_eq!(
+        mgr.current().unwrap().active_file.as_deref(),
+        Some("Main.java")
+    );
+}
+
+/// `activeFile` 随元数据落盘，并在重新加载后恢复（重启后不必再猜）。
+#[test]
+fn active_file_survives_reload() {
+    let dir = TempDir::named("hinina-test-mgr-active-file-persist");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let mgr1 = WorkspaceManager::new(
+        Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage))),
+        Arc::new(EventBus::new()),
+    );
+
+    let ws_id = mgr1.create("contest-afp", "problem-afp", "/ws").unwrap().id;
+    // 模拟「语言切到 Java 后写入新文件」：两个代码文件并存
+    mgr1.update_file("main.cpp", "// 旧 C++ 代码").unwrap();
+    mgr1.update_file("Main.java", "class Main {}").unwrap();
+    mgr1.save().unwrap();
+
+    let mgr2 = WorkspaceManager::new(
+        Arc::new(FsWorkspaceRepository::new(storage)),
+        Arc::new(EventBus::new()),
+    );
+    let loaded = mgr2.load(&ws_id, "/ws").unwrap();
+
+    assert_eq!(
+        loaded.active_file.as_deref(),
+        Some("Main.java"),
+        "重启后必须仍指向语言切换后的那个文件，而不是按后缀探测碰运气"
+    );
+    assert!(loaded.files.contains_key("main.cpp"), "旧文件仍在（P62 未闭合部分）");
+}
+
+/// 历史 workspace.json 没有 `activeFile` 字段：反序列化为 `None`，不得报错。
+#[test]
+fn legacy_meta_without_active_file_loads_as_none() {
+    let dir = TempDir::named("hinina-test-mgr-active-file-legacy");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
+    let mgr = WorkspaceManager::new(Arc::clone(&repo) as Arc<dyn WorkspaceRepository>, Arc::new(EventBus::new()));
+
+    let ws_id = mgr.create("contest-legacy", "problem-legacy", "/ws").unwrap().id;
+    // 用「旧格式」元数据覆盖：无 active_file 字段（WorkspaceMeta 的线上格式是 snake_case）
+    let legacy = r#"{"contest_id":"contest-legacy","problem_id":"problem-legacy","root_path":"/ws","language":"C++","created_at":1,"updated_at":1}"#;
+    repo.save_file(&ws_id, &std::path::PathBuf::from("workspace.json"), legacy)
+        .unwrap();
+
+    let loaded = mgr.load(&ws_id, "/ws").unwrap();
+    assert_eq!(loaded.active_file, None, "旧元数据应降级为 None 而不是报错");
+    assert_eq!(loaded.language, "C++");
+}

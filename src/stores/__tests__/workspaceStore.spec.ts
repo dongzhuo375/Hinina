@@ -19,6 +19,7 @@ vi.mock('@/services/workspace.service', () => ({ workspaceService }))
 vi.mock('@/services/config.service', () => ({ configService }))
 
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import type { Workspace } from '@/types/workspace'
 
 const CODE = 'int main() { return 0; }'
 
@@ -34,6 +35,7 @@ beforeEach(() => {
     problemId: 'p1',
     rootPath: '',
     files: {},
+    activeFile: null,
     language: 'C++',
     isDirty: false,
     createdAt: 0,
@@ -229,6 +231,7 @@ describe('markPersisted — 后端落盘事件驱动指示器', () => {
       problemId: 'p2',
       rootPath: '',
       files: {},
+      activeFile: null,
       language: 'C++',
       isDirty: false,
       createdAt: 0,
@@ -257,6 +260,7 @@ describe('loadWorkspace — 替换 store 状态前先推送在途改动', () => 
         problemId: 'p1',
         rootPath: '',
         files: { 'main.cpp': CODE },
+        activeFile: 'main.cpp',
         language: 'C++',
         isDirty: false,
         createdAt: 0,
@@ -320,5 +324,106 @@ describe('changeLanguage — 语言即时落盘，不计入未落盘的代码改
 
     expect(workspaceService.setLanguage).not.toHaveBeenCalled()
     expect(workspaceService.updateWorkspaceFile).not.toHaveBeenCalled()
+  })
+})
+
+describe('activeFile — 当前代码文件的权威源（P62）', () => {
+  const loadFixture = (over: Partial<Workspace>): Workspace => ({
+    id: 'ws-1',
+    contestId: '1',
+    problemId: 'p1',
+    rootPath: '',
+    files: {},
+    activeFile: null,
+    language: 'C++',
+    isDirty: false,
+    createdAt: 0,
+    updatedAt: 0,
+    ...over,
+  })
+
+  it('加载以 activeFile 为准，而不是按语言派生', async () => {
+    // 语言说 Java、activeFile 指向 Main.java，而 files 里同时留着旧的 main.cpp：
+    // 若按「语言派生名优先 + 后缀探测」（files 来自 HashMap 序列化、键序不稳定）
+    // 就可能加载出旧 C++ 代码 + Java 元数据的组合 —— 提交即 CE
+    workspaceService.loadWorkspace.mockResolvedValue(
+      loadFixture({
+        language: 'Java',
+        activeFile: 'Main.java',
+        files: { 'main.cpp': '// 旧 C++ 代码', 'Main.java': 'class Main {}' },
+      }),
+    )
+
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    expect(store.activeFile).toBe('Main.java')
+    expect(store.code).toBe('class Main {}')
+    expect(store.language).toBe('Java')
+  })
+
+  it('写入落到 activeFile 上（不再按语言重新派生）', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      loadFixture({ language: 'Java', activeFile: 'Main.java', files: { 'Main.java': 'x' } }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.updateCode('class Main { int i; }')
+    await store.flushPendingSync()
+
+    expect(workspaceService.updateWorkspaceFile).toHaveBeenCalledWith(
+      'Main.java',
+      'class Main { int i; }',
+    )
+  })
+
+  it('历史工作区（无 activeFile）回退到「语言派生名优先」', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      loadFixture({
+        language: 'Python',
+        activeFile: null,
+        files: { 'main.cpp': 'old', 'main.py': 'new' },
+      }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    expect(store.activeFile).toBe('main.py')
+    expect(store.code).toBe('new')
+  })
+
+  it('语言元数据与代码文件扩展名矛盾时以文件为准并告警', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    workspaceService.loadWorkspace.mockResolvedValue(
+      loadFixture({
+        language: 'Java',
+        activeFile: 'main.cpp',
+        files: { 'main.cpp': 'int main() {}' },
+      }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    // 判题端按后缀判定语言与 limits 倍率，故以 main.cpp 为准
+    expect(store.language).toBe('C++')
+    expect(store.activeFile).toBe('main.cpp')
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('切换语言后 activeFile 跟着走，写入锚定新文件', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      loadFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': 'x' } }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.changeLanguage('Python')
+
+    expect(store.activeFile).toBe('main.py')
+    await vi.waitFor(() =>
+      expect(workspaceService.updateWorkspaceFile).toHaveBeenCalledWith('main.py', 'x'),
+    )
   })
 })
