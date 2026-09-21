@@ -10,8 +10,8 @@
 - `serde::{Deserialize, Serialize}`
 
 ## 被依赖
-- `core::event::app_event`（AuthEvent::LoginSuccess 携带 User）
 - `core::provider::auth`（AuthProvider trait 使用 User 作为返回值）
+- `service::auth`（`login` 的返回类型；注意 `CoreEvent::LoggedIn` **只带 `oj_id` 与 `user_id` 字符串**，不携带整个 `User` 实体）
 - `commands::auth_cmd`
 
 ## 逻辑流程

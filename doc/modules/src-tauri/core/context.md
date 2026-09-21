@@ -1,12 +1,13 @@
 # context
 
 ## 职责
-定义统一应用上下文 `AppContext`，在启动时按依赖顺序装配所有基础设施和 7 个 Service 层实例，注入到 Tauri State 中供所有 Command 通过依赖注入使用。
+定义统一应用上下文 `AppContext`，在启动时按依赖顺序装配所有基础设施、Service 层实例、会话仓库与插件宿主，注入到 Tauri State 中供所有 Command 通过依赖注入使用。
 
 ## 核心类型/函数
 - **`AppContext`** — 统一应用上下文 struct，持有所有基础设施和 Service 的 `Arc` 引用。
-  字段：`event_bus`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `default_data_dir: PathBuf`, `data_dir_source: DataDirSource`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
+  字段：`event_bus: Arc<CoreEventBus>`, `session_repo: Arc<dyn SessionRepository>`, `plugin_host: Arc<PluginHost>`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `default_data_dir: PathBuf`, `data_dir_source: DataDirSource`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
 
+  `event_bus` 是**唯一事实通知源**（消费者不在此启动，见 `main.rs`）；`session_repo` 供应用层与适配器层共用（凭证轮换必须当场落盘）；`plugin_host` 只持有总线句柄（消费者同样在 `main.rs` 启动）。
   `default_data_dir` 与 `storage.base_dir()` 的区别：后者可能被用户改到别处（`data_dir.json` 指针），而前者是**位置指针文件所在处**与「恢复默认」的目标，永远不变。`data_dir_source` 供 `get_data_dir` 如实告诉界面「当前用哪个目录、为什么」。
 - **`AppContext::init(base_dir: PathBuf, default_data_dir: PathBuf, source: DataDirSource) -> AppResult<Self>`** — 异步初始化序列：
 
@@ -14,15 +15,17 @@
   1. Logger — 日志系统初始化（`Logger::init(&base_dir)` 返回持有日志文件路径的实例，stderr + `{base_dir}/logs/hinina.log` 双路输出；实例挂到 `AppContext.logger` 供设置页「清理本地数据」截断日志）
   2. `create_dir_all` — 确保 base_dir 存在
   3. Storage — 文件系统（base_dir 传入）
-  4. EventBus — 事件总线
-  5. ConfigService — 通过 `FsConfigRepository` 加载配置（首次启动使用默认值并持久化；加载路径做旧值归一）
-  6. HttpClient — 网络客户端，**超时取自配置 `oj.timeout_secs`**（`HttpClient::with_timeout`，`.max(1)` 防 0 值，不再硬编码 30s）
-  7. ProviderRegistry — 初始当前 OJ 取 `OjId::new(&oj.active)`；随后按配置实例注册全部内建 OJ（工厂数据化，约 8 行 for 循环）：组装 `AdapterDeps`（http / event_bus / storage，仅 infra）→ 遍历 `oj.instances` 中 enabled 的实例并与 `adapter::factories()` 按 id 匹配（无对应适配器 `warn!` 跳过）→ `factory.build(&deps, &instance.base_url)` 得 `ProviderSet` 后 `register`（HOJAdapter 仍经 deps 注入 `Arc<EventBus>`，token 轮换时发布 `AuthEvent::TokenRefreshed`）。注册完成后校验当前 OJ 已注册，未注册（配置手改/拼写错误）`warn!` 并**回退首个已注册 OJ**（不硬编码 HOJ —— HOJ 实例可能被禁用/移除，那是死路；一个都没注册时仅告警，首次查询以 `ProviderNotFound` 如实暴露）
-  8. WorkspaceManager — 通过 `FsWorkspaceRepository` 创建，包装为 `Some(Arc<...>)`
-  9. 装配 5 个 Service：ThemeService → AuthService → ContestService（注入 `Arc<Storage>`，供公告已读状态持久化 `announcements_read/`）→ ProblemService（注入 `Arc<Storage>`，供题目 limits 磁盘缓存 `cache/problem_limits/`）→ SubmissionService
-  10. 装配 AppContext 并返回
+  4. CoreEventBus — 进程内事实总线（`tokio::sync::broadcast` 封装，见 `core/event/core_event_bus.md`）
+  5. SessionRepository — 会话持久化（`FsSessionRepository`；`AuthService` 与 HOJ 适配器的凭证轮换共用，故在 ProviderRegistry 之前构造）
+  6. ConfigService — 通过 `FsConfigRepository` 加载配置（首次启动使用默认值并持久化；加载路径做旧值归一）
+  7. HttpClient — 网络客户端，**超时取自配置 `oj.timeout_secs`**（`HttpClient::with_timeout`，`.max(1)` 防 0 值，不再硬编码 30s）
+  8. ProviderRegistry — 初始当前 OJ 取 `OjId::new(&oj.active)`；随后按配置实例注册全部内建 OJ（工厂数据化，约 8 行 for 循环）：组装 `AdapterDeps`（http_client / event_bus / **session_repo** / storage，仅 infra）→ 遍历 `oj.instances` 中 enabled 的实例并与 `adapter::factories()` 按 id 匹配（无对应适配器 `warn!` 跳过）→ `factory.build(&deps, &instance.base_url)` 得 `ProviderSet` 后 `register`（HOJAdapter 经 deps 注入 `event_bus` 与 `session_repo`：凭证轮换**显式落盘成功后**才发布 `CoreEvent::TokenRotated { oj_id }`，token 不进事件流）。注册完成后校验当前 OJ 已注册，未注册（配置手改/拼写错误）`warn!` 并**回退首个已注册 OJ**（不硬编码 HOJ —— HOJ 实例可能被禁用/移除，那是死路；一个都没注册时仅告警，首次查询以 `ProviderNotFound` 如实暴露）
+  9. WorkspaceManager — 通过 `FsWorkspaceRepository` 创建，包装为 `Some(Arc<...>)`；注入 `Arc<CoreEventBus>`（落盘成功后发布 `WorkspaceSaved`）
+  10. 装配 5 个 Service：ThemeService → AuthService（注入 `session_repo`，**不再注入 storage**）→ ContestService（注入 `Arc<Storage>`，供公告已读状态持久化 `announcements_read/`）→ ProblemService（注入 `Arc<Storage>`，供题目 limits / 题面磁盘缓存）→ SubmissionService
+  11. PluginHost — 只持总线句柄（订阅表由自身管理，消费者由 `main.rs` 启动）
+  12. 装配 AppContext 并返回
 
-- **`AppContext::ensure_oj_registered(oj_id: &str) -> bool`** — **按需注册**某个已配置且启用的 OJ 实例（幂等，返回是否本次新注册）。存在的理由：注册只发生在 `init`，而设置页允许用户从 OJ 枚举里挑一个尚未配置的类型、填地址保存后立即切换 —— 不补注册用户就得重启客户端（`commands/oj_cmd::switch_oj` 在校验前调用它）。判定与注册**与 `init` 同源**：共用 [`enabled_instance`] 与 [`register_instance`]，不能凭空激活未配置的 OJ，否则 `switch_oj` 会绕过配置成为后门
+- **`AppContext::ensure_oj_registered(oj_id: &str) -> bool`** — **按需注册**某个已配置且启用的 OJ 实例（幂等，返回是否本次新注册）。存在的理由：注册只发生在 `init`，而设置页允许用户从 OJ 枚举里挑一个尚未配置的类型、填地址保存后立即切换 —— 不补注册用户就得重启客户端（`commands/oj_cmd::switch_oj` 在校验前调用它）。判定与注册**与 `init` 同源**：共用 [`enabled_instance`] 与 [`register_instance`]，不能凭空激活未配置的 OJ，否则 `switch_oj` 会绕过配置成为后门。此处组装 `AdapterDeps` 同样带 `session_repo`（经 `AppContext.session_repo` 取出）
 - **`enabled_instances(config) -> impl Iterator<Item = &OjInstance>`**（私有）— 已启用的实例；**「启用」条件的唯一来源**（`init` 的全量注册与 `enabled_instance` 的单实例查找都经此，避免两处判定漂移）
 - **`enabled_instance(config, oj_id) -> Option<&OjInstance>`**（私有纯函数）— 从已启用实例里按 id 精确查找
 - **`register_instance(registry, deps, instance) -> bool`**（私有）— 按配置实例经 `adapter::factories()` 匹配工厂、`factory.build(deps, base_url)` 构造 `ProviderSet` 并注册；**`init` 与按需注册共用同一实现**（抽成自由函数而非方法：`init` 执行时 `AppContext` 尚未装配完成）。未知 OJ（无匹配工厂）→ `warn` + `false`，不 panic；重复注册幂等
@@ -30,7 +33,8 @@
 ## 直接依赖
 
 - `adapter::hoj::HOJAdapter` 及 `adapter::{AdapterDeps, factories}`（实例注册循环；未注册 active 的回退目标取自 `list_available()` 首项，不再引用 HOJAdapter::ID）
-- `core::event::event_bus::EventBus`
+- `core::event::core_event_bus::CoreEventBus`（事件总线，唯一事实通知源）
+- `core::repository::session_repo::SessionRepository`
 - `core::provider::registry::ProviderRegistry`
 - `core::provider::oj_id::OjId`
 - `core::entity::config::{AppConfig, OjInstance}`（`ensure_oj_registered` 的实例判定）
@@ -39,8 +43,10 @@
 - `infra::logger::Logger`
 - `infra::storage::Storage`
 - `infra::fs_config_repo::FsConfigRepository`
+- `infra::fs_session_repo::FsSessionRepository`
 - `infra::fs_workspace_repo::FsWorkspaceRepository`
 - `infra::provider_registry_impl::ProviderRegistryImpl`
+- `plugin::host::plugin_host::PluginHost`
 - `service::config::ConfigService`
 - `service::theme::ThemeService`
 - `service::auth::AuthService`
@@ -61,7 +67,9 @@
 - `commands::workspace_cmd`
 
 ## 逻辑流程
-`AppContext::init(base_dir, default_data_dir, source)` 按依赖顺序初始化：Logger（双路输出，日志文件落在 base_dir 下，故最先拿到 base_dir）→ Storage → EventBus → ConfigService → HttpClient（超时由配置注入）→ ProviderRegistry（当前 OJ 取 `oj.active`，按 `oj.instances` 的 enabled 实例匹配工厂注册全部内建 OJ，active 未注册回退**首个已注册 OJ**并告警）→ WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ 装配 AppContext。所有 Service 通过 Arc 共享 EventBus、ConfigService、ProviderRegistry 和 Storage（AuthService 用于会话持久化，ContestService 用于公告已读状态，ProblemService 用于 limits 磁盘缓存）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
+`AppContext::init(base_dir, default_data_dir, source)` 按依赖顺序初始化：Logger（双路输出，日志文件落在 base_dir 下，故最先拿到 base_dir）→ Storage → CoreEventBus → SessionRepository → ConfigService → HttpClient（超时由配置注入）→ ProviderRegistry（当前 OJ 取 `oj.active`，按 `oj.instances` 的 enabled 实例匹配工厂注册全部内建 OJ，active 未注册回退**首个已注册 OJ**并告警）→ WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ PluginHost → 装配 AppContext。所有 Service 通过 Arc 共享 CoreEventBus、ConfigService、ProviderRegistry 和 Storage（ContestService 用于公告已读状态，ProblemService 用于 limits / 题面磁盘缓存）；AuthService 改持 `session_repo` 而非 Storage（会话读写归仓库层）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
+
+**事件消费者不在此启动**：`init` 只创建总线与宿主，三个消费者（前端桥 / 审计 / 插件宿主）由 `main.rs` 的 `spawn_event_consumers` 在 Tauri 运行时内启动 —— `init` 跑在 `rt.block_on` 里，那个运行时在 `setup` 结束时随 `rt` 一起销毁，把长期消费者挂上去等于开机即死。
 
 **base_dir 的来历**：由 `infra::data_dir` 在启动时解析（默认 `app_local_data_dir()`，可被 `data_dir.json` 指针改到别处，都不可用时回退临时目录），并由 `.setup()` 在调用本函数**之前**完成一次性数据迁移。详见 `infra/data_dir.md`。
 
@@ -73,7 +81,9 @@ switch_oj(id) → AppContext::ensure_oj_registered(id)
                   ├─ 无匹配工厂 ────────────────► false + warn
                   └─ 命中 ──► factories().find(id).build(&AdapterDeps, base_url)
                               → registry.register(OjId, ProviderSet) → true
-                → 常规校验（未注册则 ProviderNotFound）→ 切换 → 发布 OJSwitched → 持久化 active
+                → 常规校验（未注册则 ProviderNotFound）→ set_current
+                  → contest/problem/submission 各自 on_oj_switched()（显式清缓存）
+                  → 持久化 oj.active → 发布 CoreEvent::OjSwitched
 ```
 
 ## 测试

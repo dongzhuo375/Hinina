@@ -4,7 +4,7 @@
 题目相关 Tauri Command 模块。提供题目详情获取、题目列表查询、用户题目状态与题目 limits 批量查询，面向前端暴露 IPC 接口。
 
 ## 核心类型/函数
-- `pub async fn get_problem(ctx, contest_id, problem_id) -> AppResult<Problem>` — 获取指定题目详情（调 `ProblemService::open_problem`，同时发布 `ProblemEvent::Opened` 供前端 Workspace 切换）。**题面缓存开关由本层读取**：`ctx.config.get().oj.cache_problem_statement` 作为 `cache_enabled` 参数传入 —— 配置读取归命令层、Service 只接参数（与 `contest_cmd` 传 `cache_ttl_secs` 同款约定）
+- `pub async fn get_problem(ctx, contest_id, problem_id) -> AppResult<Problem>` — 获取指定题目详情（调 `ProblemService::open_problem`，同时发布 `CoreEvent::ProblemOpened` 事实通知，供审计 / 插件 / 前端其他页面感知）。**题面缓存开关由本层读取**：`ctx.config.get().oj.cache_problem_statement` 作为 `cache_enabled` 参数传入 —— 配置读取归命令层、Service 只接参数（与 `contest_cmd` 传 `cache_ttl_secs` 同款约定）
 - `pub async fn get_user_problem_status(ctx, contest_id, problem_ids: Vec<String>) -> AppResult<HashMap<String, i32>>` — 批量获取当前用户提交状态。前端 invoke 签名 `get_user_problem_status`({ contestId, problemIds })；返回 `{ pid: 0|1|2 }`（0=未提交，1=已AC，2=尝试过），未出现的 pid 视为未提交。用于题目卡片状态标记与「解题进度」统计
 - `pub async fn get_contest_problem_limits(ctx, contest_id, display_ids: Vec<String>) -> AppResult<Vec<ProblemLimits>>` — 批量获取题目 limits（时间 ms / 内存 MB）。前端 invoke 签名 `get_contest_problem_limits`({ contestId, displayIds })；比赛题目列表接口不返回 limits，只能按题拉详情，因此服务端做了内存 + 磁盘双层缓存（`cache/problem_limits/{cid}.json`）并限制并发扇出。返回顺序与入参一致，**获取失败的题目不会出现在结果里**（前端应显示占位而非假默认值）
 

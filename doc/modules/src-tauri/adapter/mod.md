@@ -5,16 +5,18 @@ adapter 模块根文件：声明 HOJ、Hydro、QDUOJ、HUSTOJ 四个 OJ 适配�
 
 ## 核心类型/函数
 - `pub mod hoj / hydro / qduoj / hustoj` — OJ 适配器子模块声明（`hydro` 为完整实现，`qduoj` / `hustoj` 仍为骨架）
-- **`AdapterDeps`** — 适配器构造依赖（`http_client: Arc<HttpClient>`, `event_bus: Arc<EventBus>`, `storage: Arc<Storage>`）。**只准 infra 依赖**（硬约束：禁止把 Service 塞进 `AdapterDeps`，与「插件只能访问 `plugin/api`，禁止直接调用内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界就彻底糊掉了）。各适配器按需消费：HOJ 用 http + event_bus（凭证轮换回写），Hydro 只用 http_client
+- **`AdapterDeps`** — 适配器构造依赖（`http_client: Arc<HttpClient>`, `event_bus: Arc<CoreEventBus>`, `session_repo: Arc<dyn SessionRepository>`, `storage: Arc<Storage>`）。**只准 infra 依赖**（硬约束：禁止把 Service 塞进 `AdapterDeps`，与「插件只能访问 `plugin/api`，禁止直接调用内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界就彻底糊掉了）。各适配器按需消费：HOJ 用 http + event_bus + session_repo（凭证轮换当场落盘、落盘成功后发布 `CoreEvent::TokenRotated`），Hydro 只用 http_client。`session_repo` 是**仓库（infra 侧）**而不是 Service：Provider 侧凭证轮换需要的是「会话持久化能力」，而不是认证业务逻辑
 - **`AdapterFactory`** — OJ 适配器工厂 trait（`Send + Sync`）：
   - `id() -> &'static str` — OJ 身份自声明（稳定契约：决定会话文件名 `sessions/{id}.json`，并与 `oj.instances[].id` 匹配）
   - `build(&self, deps: &AdapterDeps, base_url: &str) -> ProviderSet` — 按服务端地址构造该 OJ 的 Provider 能力集合。这个形状（id + 构造 + 配置）即 v1.0 插件 manifest 的雏形 —— 将来把编译期工厂清单换成运行时扫描插件目录，上层（registry / context / Service）不用再改；现在只做编译期清单，不做动态加载。**注意**：`OjInstance.options`（OJ 私有旋钮）目前没有传递通道，适配器拿不到（见 `doc/Hydro/适配新架构的冲突记录.md` §2.4）
 - **`factories() -> Vec<&'static dyn AdapterFactory>`** — 内建 OJ 工厂清单（当前 `[&hoj::FACTORY, &hydro::FACTORY]`）。接入新 OJ：加 `pub mod xxx;` + 此处加一行 `&xxx::FACTORY`
+- **`test_adapter_deps(storage: Arc<Storage>) -> AdapterDeps`**（`pub(crate)`，仅 `cfg(test)`）— 测试用 `AdapterDeps` 构造器。收敛在一处的原因：`AdapterDeps` 每加一个字段，全部适配器测试都要跟着改 —— 分散写会让「改了一处漏一处」变成编译错误之外的隐性成本（且四处默认值可能漂移）。临时目录守卫由调用方持有
 - `#[cfg(test)] #[path = "tests/adapter_tests.rs"] mod tests` — 本层单元测试
 
 ## 直接依赖
-- `core::event::event_bus::EventBus`
+- `core::event::core_event_bus::CoreEventBus`
 - `core::provider::registry::ProviderSet`
+- `core::repository::session_repo::SessionRepository`
 - `infra::http::HttpClient`
 - `infra::storage::Storage`
 - `std::sync::Arc`

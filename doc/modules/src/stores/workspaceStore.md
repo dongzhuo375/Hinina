@@ -10,7 +10,7 @@
 
 ## 核心类型/函数
 
-常量：`CODE_FILE_EXTENSIONS` = `utils/language` 的 `SOURCE_FILE_EXTENSIONS`（探测历史工作区代码文件的后缀清单，**从识别面唯一来源派生**防漂移；新文件名一律经 `sourceFileNameOf` 从语言派生）；`SYNC_DEBOUNCE_MS` = 2000。模块级 `let syncTimer`（防抖句柄，**不进响应式 state**，见 `utils/polling` 的句柄约定）。语言权威值为 **HOJ 显示名**（"C++" 等，见 `utils/language`）。
+常量：`CODE_FILE_EXTENSIONS` = `utils/language` 的 `SOURCE_FILE_EXTENSIONS`（探测历史工作区代码文件的后缀清单，**从识别面唯一来源派生**防漂移；新文件名一律经 `sourceFileNameOf` 从语言派生）；`SYNC_DEBOUNCE_MS` = 2000。模块级 `let syncTimer`（防抖句柄，**不进响应式 state**，见 `utils/polling` 的句柄约定）与 `let lastPersistedRevision = 0`（**最近一次被接受的落盘修订号**，同样是模块级副作用句柄）。语言权威值为 **HOJ 显示名**（"C++" 等，见 `utils/language`）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
@@ -21,10 +21,10 @@
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + `isDirty = true` + `syncPending = true` + `scheduleSync()` |
 | `scheduleSync` | `() => void` | 重置 2s 定时器，到点调用 `flushPendingSync()` |
 | `flushPendingSync` | `() => Promise<boolean>` | 取消防抖窗口并立即把代码按 **`activeFile`**（权威源；回退 `sourceFileNameOf(language)`）推送到后端内存；返回是否成功，失败只 `log.error` 并保留 `syncPending`（调用方不应被一次 IPC 失败阻断）。**推送期间又有新改动时不清 `syncPending`**（本次推送带的是调用时刻的内容；清了会让新内容既不被本次携带、又被下次防抖短路跳过） |
-| `markPersisted` | `(workspaceId?: string) => void` | 后端落盘事件（`workspace-saved`）到达时清 `isDirty`；按 `workspaceId` 过滤过期事件（旧工作区的 `Saved` 可能在新工作区已编辑后才送达）；若期间又有新改动（`syncPending`）则不清 —— 后端在写失败或快照后又有新改动时不发该事件，故清除等价于「最新内容确已在磁盘上」 |
-| `cancelPendingSync` | `() => void` | 取消未触发的防抖同步并清 `syncPending`（登出/切换账号时调用，避免向已失效会话写入代码） |
+| `markPersisted` | `(workspaceId?: string, revision?: number) => void` | 后端落盘事件（`workspace-saved`）到达时清 `isDirty`。三重过滤：① 按 `workspaceId` 过滤过期事件（旧工作区的落盘可能在新工作区已编辑后才送达）；② 按 `revision` **幂等** —— 后端 `revision` 是全局单调计数器，小于等于 `lastPersistedRevision` 的事件一律视为重复或过期而跳过（落盘事实只能被更新的修订号推进，不能被回退），并推进该标量；③ 若期间又有新改动（`syncPending`）则不清 —— 后端在写失败或快照后又有新改动时不发该事件，故清除等价于「最新内容确已在磁盘上」 |
+| `cancelPendingSync` | `() => void` | 取消未触发的防抖同步、清 `syncPending`，并把 `lastPersistedRevision` **归零**（登出/切换账号时调用，避免向已失效会话写入代码；新会话与旧会话的修订号不可比） |
 | `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程 |
-| `installWorkspacePersistenceListener` | `() => void` | 组合根（`main.ts`）安装一次：订阅 `workspace-saved` → `markPersisted()`；订阅失败只降级指示器 |
+| `installWorkspacePersistenceListener` | `() => void` | 组合根（`main.ts`）安装一次：订阅 `workspace-saved` → `markPersisted(payload.workspaceId, payload.revision)`（`revision` 原样透传，幂等过滤在 store 内完成）；订阅失败只降级指示器 |
 
 ## 直接依赖
 
@@ -57,8 +57,11 @@ saveWorkspace()            // 切题（ProblemSolveView.load） / 失焦 / 关�
   → workspaceService.saveWorkspace()   // 后端全量落盘 + 发布 Saved
   → 推送成功才清 isDirty
 
-workspace-saved 事件（后端 Saved / AutoSaveTriggered 经 main.rs 事件桥下发）
-  → markPersisted() → isDirty = false（「已自动备份」= 磁盘真值）
+workspace-saved 事件（后端 CoreEvent::WorkspaceSaved 经 main.rs 前端事件桥下发）
+  → markPersisted(workspaceId, revision)
+       ├─ workspaceId 与当前工作区不符 → 丢弃（过期事件）
+       ├─ revision <= lastPersistedRevision → 丢弃（重复/回退）
+       └─ 否则推进 lastPersistedRevision → isDirty = false（「已自动备份」= 磁盘真值）
 
 changeLanguage(lang)
   → 相同语言直接 return
@@ -82,7 +85,11 @@ changeLanguage(lang)
   而「内存 → 磁盘」之间只有后端内存副本；切题（loadWorkspace 前 save）、失焦、
   页面隐藏、离开解题页、关窗各由对应调用点显式落盘。store 只提供 `flushPendingSync`
   与 `saveWorkspace` 两个原子动作，不自行注册全局监听。
-- **防抖句柄不进 state**：`syncTimer` 是模块级普通变量（与 `utils/polling` 的约定
-  一致），登出时必须先 `cancelPendingSync()` 再 `$reset()`（`$reset` 清不掉已排定的
-  setTimeout 回调，见 `stores/session.md`）。
+- **防抖句柄不进 state**：`syncTimer` 与 `lastPersistedRevision` 都是模块级普通变量
+  （与 `utils/polling` 的约定一致），登出时必须先 `cancelPendingSync()` 再 `$reset()`
+  （`$reset` 清不掉已排定的 setTimeout 回调，也清不掉模块级标量，见 `stores/session.md`）。
+- **`revision` 幂等为什么只需一个标量**：后端 `revision` 是**全局单调计数器**（工作区每次
+  内容改动 +1，见 `service/workspace/manager.md`），因此「同一事件重复送达」与「旧修订号
+  的事件晚于新修订号到达」都能用 `revision <= lastPersistedRevision` 一次判掉；落盘事实
+  只能被更新的修订号推进。切账号后新旧会话的修订号不可比，故在 `cancelPendingSync` 归零。
 - 代码文件按后缀识别而非固定文件名：兼容后端工作区中已存在的任意命名。

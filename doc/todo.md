@@ -29,7 +29,7 @@
 
 > Repository 就绪后，填充核心实体和事件总线逻辑。
 
-- [x] **EventBus 实现** — `core/event/event_bus.rs`：`publish()` / `subscribe()` / `unsubscribe()` 完整逻辑，含 AppEvent::category() 映射、All 通配订阅、锁外回调防死锁。8 项单元测试
+- [x] **EventBus 实现（阶段 3 初版，已于阶段 8 重构）** — `core/event/event_bus.rs`：`publish()` / `subscribe()` / `unsubscribe()`、AppEvent::category() 映射、All 通配订阅、锁外回调防死锁。该实现**已被阶段 8 的 CoreEventBus 取代并删除**
 - [x] **AppError From 转换** — `core/error.rs`：`io::Error` / `reqwest::Error` / `serde_json::Error` — 阶段 1 已提前完成
 - [x] **Workspace 实体完善** — `core/entity/workspace.rs`：`new()` / `touch()` / `mark_dirty()` / `mark_clean()` 方法。5 项单元测试
 
@@ -112,6 +112,22 @@
 ## 阶段 8：后续增强
 
 > MVP 之后按优先级推进。
+
+### 8.1 事件总线深度重构（已完成）
+
+> 主题：把「事实通知」与「必须完成的核心动作」彻底分开。旧 `EventBus` 的同步订阅表 + 延迟线程同时承担了两种语义，导致三处隐式同步依赖。
+
+- [x] **CoreEventBus（tokio broadcast）** — `core/event/{core_event,core_event_bus,consumer}.rs`：单一 broadcast 通道（容量 1024）、`publish` 同步非阻塞、受监督消费者（`Lagged` → resync、`Closed` → 干净退出、panic → 退避重启）。删除旧 `AppEvent` / `EventCategory` / 手写 `EventBus`
+- [x] **SessionStore 显式持久化** — `core/entity/session.rs` + `core/repository/session_repo.rs` + `infra/fs_session_repo.rs`：Provider 凭证轮换**当场显式落盘**（`rotate_token`），此后只发脱敏的 `TokenRotated`；token 不再进入事件流
+- [x] **OJ 切换显式清缓存** — `switch_oj` 调 `contest/problem/submission.on_oj_switched()`，`OjSwitched` 降为纯事实通知（不再有订阅者）
+- [x] **配置热生效显式化** — `update_config` / `reload_config` 显式调 `sync_auto_save_from_context`，`ConfigChanged` 降为纯通知
+- [x] **工作区落盘事件合并** — `WorkspaceSaved{workspace_id,revision,automatic}` 取代 `Saved` / `AutoSaveTriggered`，并删除无消费者的 `Loaded` / `Switched`
+- [x] **事件载荷收敛** — 删除查询结果型与死事件（`ListLoaded` / `CountdownTick` / `CodeChanged` / `WindowClosing`），`LoginSuccess{User}` → `LoggedIn{user_id}`，`Judged{result}` → `SubmissionJudged{status}`
+- [x] **三类消费者** — Tauri 前端桥 / 审计（`infra/audit.rs`）/ PluginHost，共用同一条底层事件流
+- [x] **插件事件边界** — `PluginEvent` + `PluginEventEnvelope`（版本 + 每订阅单调序号）+ `PluginEventAdapter`（白名单 / 裁剪 / 脱敏）+ `PluginHost`（权限、生命周期、`ResyncRequired`、单插件异常隔离）；**不实现运行时**
+- [x] **前端最小适配** — `workspace-saved` 载荷增加 `revision`（幂等过滤）；**全部轮询保留**（事件只做 UI 刷新触发）
+
+### 8.2 待办
 
 - [ ] **QDUOJ Adapter** — `adapter/qduoj/`
 - [ ] **HUSTOJ Adapter** — `adapter/hustoj/`

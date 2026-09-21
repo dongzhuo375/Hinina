@@ -10,7 +10,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 - `pub mod maintenance_cmd` — 重置客户端（`reset_client`：三层缓存 + 公告基线 + 公告已读状态）与清理本地数据（`local_data_usage` 预览 / `purge_local_data` 删日志内容与过期留档）
 - `pub mod config_cmd` — 配置读取 / 热重载 / 更新 + `get_storage_info`（存储与版本信息）
 - `pub mod contest_cmd` — 比赛列表 / 选中 / 加载配置比赛 / 榜单 / 公告与已读状态
-- `pub mod oj_cmd` — 切换当前 OJ（校验已注册 → 切 Registry → 持久化 `oj.active` → 发布 `OJSwitched`）
+- `pub mod oj_cmd` — 切换当前 OJ（补注册 → 校验已注册 → 切 Registry → 显式清三个 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）
 - `pub mod problem_cmd` — 题目详情 / 列表 / 用户题目状态 / 题目限制
 - `pub mod submission_cmd` — 提交 / 评测结果单次查询 / 提交列表 / 详情 / 测试点
 - `pub mod theme_cmd` — 主题读取 / 设置

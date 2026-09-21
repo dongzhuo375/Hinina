@@ -12,8 +12,8 @@
 |------|------|------|
 | `getConfig` | `() => Promise<AppConfig>` | invoke `get_config`，返回完整应用配置（user/oj/editor/theme/layout 五组） |
 | `updateConfig` | `(config: AppConfig) => Promise<void>` | invoke `update_config`，**整体替换**语义（Rust 端持久化到 config.json 并更新内存值）——调用方必须先读当前值再改（由 `config.service.updateConfig` 编排） |
-| `reloadConfig` | `() => Promise<void>` | invoke `reload_config`，触发后端从磁盘重载（发布 ConfigReloaded 事件） |
-| `switchOj` | `(ojId: string) => Promise<void>` | invoke `switch_oj`：后端校验目标 OJ 已注册 → 切换 Registry → 持久化 `oj.active` → 发布 `OJSwitched` 事件；未注册的 OJ 报 ProviderNotFound |
+| `reloadConfig` | `() => Promise<void>` | invoke `reload_config`，触发后端从磁盘重载（发布 `CoreEvent::ConfigChanged`，并显式同步 auto-save 的启停与间隔） |
+| `switchOj` | `(ojId: string) => Promise<void>` | invoke `switch_oj`：后端补注册 → 校验目标 OJ 已注册 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`；未注册的 OJ 报 ProviderNotFound |
 
 ## 直接依赖
 

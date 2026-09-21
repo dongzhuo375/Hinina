@@ -56,9 +56,11 @@ Hinina/
         │   │   ├── announcement.rs       # Announcement + AnnouncementPage（公告实体，时间为 epoch 秒；已读状态是客户端特性，见 service/contest）
         │   │   ├── submission.rs         # JudgementStatus（值域 = HOJ `Constants.Judge` 全表**含负数**；新增 NotSubmitted/-10 与 Cancelled/-4；is_terminal 核心层终态判据，四处对齐）+ JudgementResult（含 error_message，CE/SE/SF 的失败原因随轮询回传）+ SubmissionRecord/Page/Query/Detail + JudgeCase/SubTaskCases/SubmissionCases
         │   │   ├── rank.rs               # 榜单实体：RankCell / ContestRankRow / ContestRankPage / RankQuery / ProblemLimits（ACM 与 OI 两套 VO 在 Adapter 归一到此）
+        │   │   ├── session.rs            # Session 本地会话记录（sessions/{oj_id}.json；schema 与旧版一致，oj_type 经 alias 兼容读取）—— 应用层与适配器共用的持久化契约
         │   │   ├── workspace.rs          # Workspace 核心实体（阶段 3 完善）
         │   │   └── tests/
         │   │       ├── workspace_tests.rs     # Workspace 单元测试
+        │   │       ├── session_tests.rs       # 会话 schema 兼容测试（旧 oj_type 键、缺 user_id 降级、键名锁定）
         │   │       └── config_tests.rs        # normalize_legacy_values 归一化测试（旧默认值才归一，用户自设值不动）
         │   ├── provider/
         │   │   ├── mod.rs
@@ -70,15 +72,18 @@ Hinina/
         │   │   └── registry.rs           # ProviderRegistry trait + ProviderSet（注册侧聚合 Option×4；查询侧按能力 current_xxx()，不提供聚合 current()）
         │   ├── event/
         │   │   ├── mod.rs
-        │   │   ├── app_event.rs          # AppEvent + 6 个子事件枚举 + category() 映射；ContestEvent::AnnouncementsPublished（新公告检测 → 红点事件源）
-        │   │   ├── event_bus.rs          # EventBus（阶段 3 实现：publish/subscribe/unsubscribe）
-        │   │   ├── event_category.rs     # EventCategory 枚举
+        │   │   ├── core_event.rs        # CoreEvent（事实通知载荷：只放 ID / 修订号 / 状态摘要；不含 token、Session、实体、源代码、内部路径）+ kind() 稳定事件名
+        │   │   ├── core_event_bus.rs    # CoreEventBus（tokio::sync::broadcast 极薄封装：publish 同步非阻塞 / subscribe / 容量 1024 / 无消费者只记 debug）
+        │   │   ├── consumer.rs          # spawn_consumer：受监督消费者循环（Lagged→resync、Closed→干净退出、panic→退避重启；Weak 持有总线以免替它续命）
         │   │   └── tests/
-        │   │       └── event_bus_tests.rs     # EventBus 单元测试
+        │   │       ├── core_event_tests.rs      # 载荷约束：事件名稳定、无敏感字段、大载荷缺席
+        │   │       ├── core_event_bus_tests.rs  # 扇出 / 无消费者不失败 / 不阻塞 / Lagged / Closed / 容量钳制
+        │   │       └── consumer_tests.rs        # 启动 resync / Lagged 重同步 / Closed 退出 / panic 重启 / 消费者互不影响
         │   └── repository/
         │       ├── mod.rs
         │       ├── workspace_repo.rs     # WorkspaceRepository trait
         │       ├── config_repo.rs        # ConfigRepository trait
+        │       ├── session_repo.rs       # SessionRepository trait（load / save / remove / rotate_token —— 应用层与适配器共用）
         │       └── plugin_repo.rs        # PluginRepository trait
         ├── service/
         │   ├── mod.rs
@@ -174,6 +179,8 @@ Hinina/
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
+        │   ├── fs_session_repo.rs        # FsSessionRepository：sessions/{oj_id}.json 读写 + rotate_token（Mutex 串行化读-改-写，避免与登出删除交错丢更新）
+        │   ├── audit.rs                  # 审计消费者：只读订阅 CoreEvent 并结构化落日志（三类消费者之一，证明同一条事件流可挂多个互不相干的观察者）
         │   ├── fs_plugin_repo.rs         # FsPluginRepository（骨架）
         │   ├── provider_registry_impl.rs # ProviderRegistryImpl（单表 HashMap<OjId, ProviderSet> + capability() 能力取件帮手）
         │   └── tests/
@@ -182,21 +189,27 @@ Hinina/
         │       ├── logger_tests.rs       # Logger 文件输出测试（落盘/追加/超限截断）
         │       ├── fs_workspace_repo_tests.rs  # FsWorkspaceRepository 单元测试
         │       ├── fs_config_repo_tests.rs     # FsConfigRepository 单元测试
+        │       ├── fs_session_repo_tests.rs    # 会话仓库测试（往返/按 OJ 隔离/轮换只改 token/不存在不复活/损坏报错/并发轮换不丢更新）
+        │       ├── audit_tests.rs        # 审计消费者对全部事件变体安全处理 + 缺席不影响发布方
         │       ├── provider_registry_impl_tests.rs # 注册表查询侧契约（未注册/缺能力→ProviderNotFound、覆盖注册、active 规整）
         │       └── cache_tests.rs        # 缓存原语测试（TTL/容量/复活回归/磁盘往返）
         ├── plugin/
         │   ├── mod.rs
         │   ├── host/
         │   │   ├── mod.rs
-        │   │   ├── manifest.rs           # NEW: PluginManifest + PluginPermission
-        │   │   └── extension.rs          # NEW: ExtensionPoint + 4 个子扩展点
+        │   │   ├── manifest.rs           # PluginManifest + PluginPermission
+        │   │   ├── extension.rs          # ExtensionPoint + 4 个子扩展点
+        │   │   ├── event_adapter.rs      # PluginEventAdapter：CoreEvent → PluginEvent 的**唯一**转换点（白名单 / 字段裁剪脱敏 / 协议版本 / 每订阅单调序号）
+        │   │   └── plugin_host.rs        # PluginHost：插件订阅注册与投递（权限校验须 Notification、锁外投递、Lagged→ResyncRequired、单插件异常隔离）；**不是第二套总线**
         │   ├── api/
         │   │   ├── mod.rs
+        │   │   ├── event.rs              # 插件事件协议：PluginEvent + PluginEventEnvelope{version,sequence,occurredAt,event}（插件侧唯一允许依赖的事件接口）
         │   │   ├── workspace.rs
         │   │   ├── problem.rs
         │   │   ├── contest.rs
         │   │   ├── ui.rs
-        │   │   └── event.rs
+        │   │   └── tests/
+        │   │       └── event_tests.rs     # 协议形状锁定（camelCase + type tag）、协议无敏感字段、协议不含凭证轮换、版本号钉死
         │   ├── permission/
         │   │   └── mod.rs
         │   ├── registry/
@@ -206,12 +219,12 @@ Hinina/
         └── commands/                     # Tauri Command 薄封装
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
-            ├── oj_cmd.rs                 # switch_oj（显式切换：校验已注册 → 切 Registry → 持久化 oj.active → 发布 OJSwitched）
+            ├── oj_cmd.rs                 # switch_oj（显式切换：校验已注册 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 oj.active → 发布 OjSwitched）
             ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest（读 oj.contest_ref，不透明字符串引用）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
             ├── problem_cmd.rs            # get_problem / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
             ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
-            ├── config_cmd.rs             # get_config / reload_config / update_config / get_storage_info（存储目录/日志路径/版本，设置页「关于」）
+            ├── config_cmd.rs             # get_config / reload_config / update_config（落盘后**显式**同步 auto-save 启停与间隔）/ get_storage_info（存储目录/日志路径/版本，设置页「关于」）
             ├── maintenance_cmd.rs          # reset_client（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，不重拉）/ local_data_usage（清理前体积预览）/ purge_local_data（不可逆：日志内容 + 过期提交留档）
             ├── data_dir_cmd.rs           # get_data_dir / set_data_dir / reset_data_dir / pick_data_dir（设置页「数据目录」；改动重启后生效，只写位置指针不搬运）
             ├── theme_cmd.rs              # get_theme / set_theme
@@ -347,15 +360,21 @@ src/
 ┌─────────────────────────────────────────────────────────┐
 │                    Vue3 前端 (src/)                       │
 │  View ──→ Store (Pinia) ──→ Service ──→ Bridge (IPC)     │
+│  真实状态一律经 IPC 查询 / 轮询获取；事件只做 UI 刷新触发    │
 └─────────────────────────┬───────────────────────────────┘
-                          │  Tauri IPC (invoke)
-┌─────────────────────────┴───────────────────────────────┐
+                          │  Tauri IPC (invoke)  ▲ 事件（仅刷新触发）
+┌─────────────────────────┴───────────────────────┴───────┐
 │                   Rust 后端 (src-tauri/)                  │
-│  Service ←── Provider (trait) ←── Adapter (HOJ/Hydro/QDUOJ/…) │
-│     │              │                                     │
-│  Entity        EventBus        Infra (http/storage/…)   │
-│     │              │                                     │
-│  Workspace     AppEvent         Plugin (v0.x 预留)       │
+│  Command / IPC ──→ Service ──→ Provider ←── Adapter      │
+│                      │            │        (HOJ/Hydro/…) │
+│                   Entity      显式完成核心动作             │
+│                      │            │                      │
+│                   Workspace   CoreEventBus               │
+│                               （broadcast 事实通知）       │
+│                                  ├── Tauri 前端桥         │
+│                                  ├── 审计消费者            │
+│                                  └── PluginHost → 插件    │
+│  Infra (http / storage / cache / logger / session)       │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -366,18 +385,24 @@ src/
 | **领域** | `core/entity` + `core/provider` traits | `src/types/` 类型定义 |
 | **应用** | `service/` 业务编排 | `src/services/` 业务逻辑 |
 | **适配** | `adapter/` OJ 实现 | `src/bridge/` IPC 封装 |
-| **基础设施** | `infra/` http/storage/cache/logger/data_dir | Vite/Naive UI/TailwindCSS |
+| **基础设施** | `infra/` http/storage/cache/logger/data_dir/session | Vite/Naive UI/TailwindCSS |
 | **表现** | — | `views/` + `components/` |
-| **状态** | EventBus | `stores/` Pinia |
-| **扩展** | `plugin/`（v0.x 仅预留接口） | — |
+| **状态** | `CoreEventBus`（只发事实，不执行动作） | `stores/` Pinia |
+| **扩展** | `plugin/`（v0.x 仅预留接口 + 事件边界） | — |
 
 ### 关键设计约束
 
 - **Workspace First**：Workspace 是核心领域对象，负责代码存储、自动保存、崩溃恢复、比赛隔离
 - **Provider trait 拆分**：禁止单一巨型 trait，按 Auth/Contest/Problem/Submission 独立定义
-- **EventBus 原则**：查询与命令走 Service，状态变更走 EventBus。禁止所有逻辑事件化
-- **事件投递分两种模式，按订阅者的性质选**：**同步**（`subscribe`，回调在 `publish` 栈内）只用于纯内存处理；**延迟**（`subscribe_deferred`，专用后台线程执行、`publish` 立即返回）用于磁盘清理等 I/O。使用延迟的前提是**该 handler 不承担正确性职责** —— 正确性必须由结构保证（如缓存键自带作用域），而不是依赖「清理及时」；延迟意味着执行时机不确定、进程退出时可能未执行。理由：`publish` 是同步调用点（`switch_oj`、HTTP 响应处理路径），让发布方为订阅者的 I/O 买单会让响应时间随订阅者数量增长 —— 插件期（第三方 handler）会放大成可用性问题
-- **插件系统**：v0.x 仅预留架构，不实现运行时。插件只能访问 `plugin/api/`，禁止直接调用内部 Service
+- **事实通知与核心动作分离（最重要的一条）**：
+  - **Command / Service 执行并保证**核心业务动作完成 —— 工作区落盘、OJ 切换清缓存、配置落盘、会话持久化、登出清理、用户域缓存回收**全部显式完成**，不依赖事件消费者；
+  - **`CoreEventBus` 只发布已经发生的事实**（`WorkspaceSaved` / `OjSwitched` / `ConfigChanged` / `LoggedIn` …），用于解耦异步观察者（前端桥、审计、插件）；
+  - **IPC 查询当前真值**、**前端轮询外部可变状态**（评测状态、榜单、公告、题目总览）—— 事件丢失时靠查询/下一轮轮询恢复；
+  - **PluginHost 只做适配、过滤、脱敏与生命周期**，与内部消费者共用同一条底层事件流，**不建第二套总线**。
+- **`broadcast` 的语义边界（务必读）**：`send()` 成功 ≠ 消费者已处理完成 ≠ 事件可靠送达 ≠ 业务动作执行成功。通道**容量有限**（1024）、**允许丢失**、**不保留历史**（订阅前的事件收不到）。因此：① 没有 receiver 时 `send` 返回 `Err`，只记 `debug`，**绝不是业务失败**；② 消费者启动时与 `Lagged` 后都必须 `resync`（查询当前状态）；③ 业务动作在发布**之前**就已完成的，发布失败不回滚它。
+- **三类消费者、一条事件流**：`Tauri 前端桥`（emit 到 webview，仅刷新触发）、`审计`（只读落日志）、`PluginHost`（→ `PluginEvent`）。内部 Service **不订阅任何事件**（旧实现的同步订阅表与延迟线程已删除 —— 它同时承担「事实通知」与「必须完成的核心动作」两种语义，导致 Token 轮换、OJ 切换、配置热生效三处出现隐式同步依赖）。
+- **事件载荷约束**：只放 ID / 修订号 / 状态摘要。禁止出现 Token、密码、完整 Session、认证头、源代码、内部文件路径、完整领域实体、内部缓存对象、未脱敏用户实体、内部错误栈。大数据由消费者收到事件后经 Service / IPC 查询。
+- **插件系统**：v0.x 仅预留架构，不实现运行时。插件只能访问 `plugin/api/`，禁止直接调用内部 Service；插件事件经 `PluginEventAdapter` 白名单 + 脱敏 + 版本化（`PluginEventEnvelope{version,sequence,occurredAt,event}`）后投递，插件**不得**依赖 `CoreEvent` / 内部 Service / 领域实体 / `broadcast::Receiver`
 - **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。唯一的插件是 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为它的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**新增插件时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **依赖卫生：直接依赖必须被真正引用；不审批依赖的安装脚本**。`package.json` 的 `dependencies` 只放代码里实际 import 的包（曾出现 `approve` / `esbuild` / `vue-demi` 三个零引用的直接依赖 —— 其中 `esbuild` 还与 vite 嵌套的版本重复安装）。另外**刻意不写 `allowScripts`**：它是 npm 11.18 起的脚本审批字段，写上等于允许依赖的 postinstall 在每次安装时执行（供应链面）。实测不审批无影响：`vue-demi` 发布的默认就是 Vue 3 版（`isVue3 = true`，postinstall 只在检测到 Vue 2 时才切换），`esbuild` 的 postinstall 只是 optional platform 包的兜底。代价是 `npm install` 会提示「N packages have install scripts not yet covered by allowScripts」—— **这是预期的**，不要为消除提示而审批
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
@@ -395,10 +420,11 @@ src/
 - **infra 在非 2xx 时丢弃响应体 → 需要读错误包络的 OJ 走 raw 变体**：Hydro 的用户可见错误全在响应体包络里（`{"error":{"name",…}}`，无 message），而非 raw 变体在非 2xx 时只返回状态码 → 适配器改用 **raw 变体**（`get_text_raw` / `post_text_raw`：任意状态码都返回 status + headers + body）。重试策略保持：GET 的 5xx 仍退避重试、**耗尽后返回响应**，4xx 不重试；POST 不重试。代价是 401 不再由 infra 自动映射为 `Auth`，由适配器的 `http_status_error` 承担（判据与 infra 的 `status_error` 逐条对齐）。两条通道共用 `HydroResponse::parse_value` 做协议层判定（错误包络 → 变体、JSON 化登录重定向 → `Auth`）
 - **Hydro 是第二个内建 OJ，也是首个非 HOJ 实现**：HOJ 是 Hydro 的衍生版但自带 REST + JWT 层，**两者是两套协议**（无统一包络、Cookie `sid` 会话、`Accept: application/json` 内容协商、无 `/user/me` 靠 `X-Hydro-Inject` 注入、状态码 0–33、榜单是预渲染单元格矩阵），因此不复用 HOJ 的调用方式，只共享 `core::entity::*` 与 infra。能力边界（无公告接口、JSON 无样例字段、榜单无服务端分页/搜索、记录无提交时间与总数、比赛隐藏本人记录时提交只返回 `tid` 等）在 `doc/Hydro/Hydro-Adapter-设计缺口报告.md`（**本地文档，不入库**）
 - **接入新 OJ = 1 个子目录 + `factories()` 一行 + 一条配置，且可从 UI 自助启用**：设置页的 OJ 下拉候选 = 已知 OJ 枚举（`src/utils/oj.ts`）+ 配置里的其它实例 id；选中尚未配置的类型 → 引导填地址 → 「保存」创建实例 → 后端 `AppContext::ensure_oj_registered` **按需注册**（判定条件与启动注册同源，不能凭空激活未配置的 OJ）→ 自动切换并持久化 `oj.active`，**无需手改 `config.json`、无需重启**。实测接入成本：`adapter/mod.rs` 两行 + 自己的目录，未触碰 core/infra/commands
-- **OJ 身份与配置是数据，不是编译期常量**：`OjId(String)` 取代闭集枚举 `OJType`（接一个新 OJ 不再要求修改 Domain）；会话文件名 = `sessions/{id}.json` 显式契约（内建 id 与历史枚举 Debug 输出一致，`sessions/HOJ.json` 零迁移，有测试锁定；配置实例 id 拒绝路径分隔符与 `..`，`Storage::resolve` 为第二道防线）；`OJSwitched` 事件载荷为可序列化字符串（订阅者：contest/problem/submission 三个 Service 清各自 OJ 域缓存）。失去编译期穷尽检查的替代防线：启动时校验 active 已注册（未注册 warn + **回退首个已注册 OJ**——硬编码回退 HOJ 在 HOJ 被禁用/移除时是死路）、查询未命中返回 `ProviderNotFound`、`adapter/tests` 断言 `factories()` id 唯一且全部可构建
+- **OJ 身份与配置是数据，不是编译期常量**：`OjId(String)` 取代闭集枚举 `OJType`（接一个新 OJ 不再要求修改 Domain）；会话文件名 = `sessions/{id}.json` 显式契约（内建 id 与历史枚举 Debug 输出一致，`sessions/HOJ.json` 零迁移，有测试锁定；配置实例 id 拒绝路径分隔符与 `..`，`Storage::resolve` 为第二道防线）；`OjSwitched` 事件载荷为可序列化字符串（**纯事实通知**：清缓存由 `switch_oj` 命令显式调用三个 Service 的 `on_oj_switched()` 完成）。失去编译期穷尽检查的替代防线：启动时校验 active 已注册（未注册 warn + **回退首个已注册 OJ**——硬编码回退 HOJ 在 HOJ 被禁用/移除时是死路）、查询未命中返回 `ProviderNotFound`、`adapter/tests` 断言 `factories()` id 唯一且全部可构建
 - **注册侧聚合、查询侧按能力**：一个 OJ 的能力集合是 `ProviderSet`（字段 Option×4 —— 保住「新 Adapter 可先只实现部分接口」的扩展路径，缺能力报 `ProviderNotFound` 而非注册失败），组合根对每个 OJ 一次 `register(id, set)`；Service 查询只拿单项能力（`current_contest()?` 等一行转发），**禁止提供返回聚合体的 `current()`** —— 那会让 Service 拿到它不需要的三个能力，接口隔离从接口层面退化成约定层面
-- **`AdapterDeps` 只准 infra 依赖**：适配器工厂构造签名只接收 http_client / event_bus / storage，**禁止把 Service 塞进 `AdapterDeps`**（与「插件只能访问 `plugin/api`、禁止直调内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界彻底糊掉）。`AdapterFactory { id, build }` 的形状即 v1.0 插件 manifest 的雏形：将来把编译期工厂清单换成运行时扫描插件目录，上层（registry / context / Service）不用再改
-- **接入新 OJ = 1 个子目录 + `factories()` 一行 + `oj.instances` 一条配置**：`OjConfig` 按 `OjInstance{ id, baseUrl, enabled, options }` 实例清单组织（`options` 刻意弱类型 Map —— 强类型枚举会让「新 OJ 要改 core」原样复活）；`contest_ref` 是**不透明字符串引用**（HOJ 数字串 / 其它 OJ 任意资源 ID，装得下 Hydro 的 hex ObjectId），空串 = 未配置；旧格式（hojUrl / contestId / lastOjType）经 serde 过渡字段在 `normalize_legacy_values` 一次性迁移、永不写回。OJ 切换走显式 `switch_oj` 命令（校验已注册 → 切 Registry → 持久化 `oj.active` → 发布 `OJSwitched`），**不是 login 的副作用**。切换的后果按端分工：Rust 侧由 `OJSwitched` 订阅者清 OJ 域缓存（contest/problem/submission 三个 Service）；前端在**调用点**重置会话上下文（`resetSessionForOjSwitch`：领域状态清零 + `sessionResolved` 复位 + 回登录页由守卫按新 OJ 会话文件恢复）—— 切换是前端发起的命令，发起方编排后果（与登出同款模式），不引入 Tauri 事件桥；各 OJ 会话文件按 id 隔离，切换保留旧 OJ 登录态（切回免登录），故前端重置不得走 `authStore.logout()`（会误删新 OJ 的会话文件）
+- **`AdapterDeps` 只准 infra 依赖**：适配器工厂构造签名只接收 http_client / event_bus / **session_repo** / storage，**禁止把 Service 塞进 `AdapterDeps`**（与「插件只能访问 `plugin/api`、禁止直调内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界彻底糊掉）。`session_repo` 是**仓库（infra 侧）**而非 Service：Provider 侧凭证轮换必须在拿到新 token 的当场显式落盘（见下一条），因此它需要的是「会话持久化能力」，不是认证业务逻辑。`AdapterFactory { id, build }` 的形状即 v1.0 插件 manifest 的雏形：将来把编译期工厂清单换成运行时扫描插件目录，上层（registry / context / Service）不用再改
+- **凭证轮换必须显式落盘，且 token 绝不进事件流**：HOJ 的 Refresh-Token 协议会在响应头里轮换凭证。旧实现让适配器发布**带真实 token** 的 `TokenRefreshed` 事件、由 `AuthService` 的同步订阅者代劳写盘 —— 既把凭证塞进公共事件流，又把持久性保证挂在事件投递时序上（消费者可能落后、可能不存在）。现在由适配器经 `SessionRepository::rotate_token` 在**当场显式写盘**（`Mutex` 串行化读-改-写，会话不存在返回 `Ok(false)` 不凭空创建），成功后才发布**只带 OJ 标识**的 `TokenRotated`；落盘失败只告警（HTTP 请求本身已成功，不能因落盘失败把它变成错误）
+- **接入新 OJ = 1 个子目录 + `factories()` 一行 + `oj.instances` 一条配置**：`OjConfig` 按 `OjInstance{ id, baseUrl, enabled, options }` 实例清单组织（`options` 刻意弱类型 Map —— 强类型枚举会让「新 OJ 要改 core」原样复活）；`contest_ref` 是**不透明字符串引用**（HOJ 数字串 / 其它 OJ 任意资源 ID，装得下 Hydro 的 hex ObjectId），空串 = 未配置；旧格式（hojUrl / contestId / lastOjType）经 serde 过渡字段在 `normalize_legacy_values` 一次性迁移、永不写回。OJ 切换走显式 `switch_oj` 命令（校验已注册 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 `oj.active` → 发布 `OjSwitched`），**不是 login 的副作用**。切换的后果按端分工：Rust 侧由 `switch_oj` **显式调用** `contest/problem/submission` 三个 Service 的 `on_oj_switched()`（内存段同步清、磁盘段空间回收可后台），返回即已干净 —— 不再依赖 `OjSwitched` 订阅者（那会把切换正确性挂在事件投递时机上）；前端在**调用点**重置会话上下文（`resetSessionForOjSwitch`：领域状态清零 + `sessionResolved` 复位 + 回登录页由守卫按新 OJ 会话文件恢复）—— 切换是前端发起的命令，发起方编排后果（与登出同款模式），不引入 Tauri 事件桥；各 OJ 会话文件按 id 隔离，切换保留旧 OJ 登录态（切回免登录），故前端重置不得走 `authStore.logout()`（会误删新 OJ 的会话文件）
 - **OJ 状态码表必须照抄服务端枚举，不得凭直觉推排**：HOJ 的 `Constants.Judge` 是**含负数**的码表（`-10` Not Submitted / `-4` Cancelled / `-3` PE / `-2` CE / `-1` WA / `0` Accepted / `1` TLE / … / `5` Pending / `6` Compiling / `7` Judging / `8` PA / `9` Submitting / `10` SF / `15` No Status），**不是「0 起顺排」**。曾按「0 开头即排队中」把它整体错位（`0→Pending`、`5→Accepted`、`13→PA`），后果是所有 AC 提交被显示为 Pending 并无限轮询（实测：提交 1166 服务端 `status:0` + `time:2ms`/`memory:532KB` 是 AC，界面却永远转圈），评测页状态筛选选「Accepted」实际筛的是 HOJ 的 Pending。终态判据与之绑定：**非终态 = 5/6/7/9**。`map_status` 与 `is_terminal_status` 两张表必须等价（有测试逐码锁定），前端 `STATUS_META`/`STATUS_OPTIONS`/`NON_TERMINAL_STATUSES` 同源。同一码表还驱动「我的题目状态」（服务端回的是评测码而非 0/1/2 三态，需归一）与 Hydro 的状态筛选翻译
 - **提交接口的题目标识各 OJ 不同，两个都要传**：`SubmissionProvider::submit` 同时收 `problem_id`（题目真实 ID：工作区隔离与状态查询的键）与 `display_id`（比赛内展示题号，如 `"A"`）。HOJ 的 `POST /submit-problem-judge` 收的是**展示题号** —— 服务端拿它查 `contest_problem.display_id`，查不到直接 NPE 返回 **HTTP 500**（实测传数字 pid 必 500，日志里十条一模一样的「HTTP 500」）；Hydro 的 `/p/{id}/submit` 收的则是真实 ID。由 Adapter 各取所需，不要在某一家里「猜」另一家的语义
 - **非 2xx 的响应体必须带进错误信息**：`infra/http.rs` 的非 raw 变体在状态码判定失败时读取响应体、压成单行并截断后附进 `AppError`（`HTTP 500 … | {"status":500,"msg":"…"}`）。此前直接丢弃响应体，调用方只拿到一句 `HTTP 500 Internal Server Error`，排障时完全看不出服务端说了什么。**401 例外**：该变体是会话守卫的判据，且服务端可能在 401 响应里回显凭证，故不附带正文

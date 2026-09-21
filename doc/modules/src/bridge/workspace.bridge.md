@@ -15,7 +15,7 @@
 | `currentWorkspace` | `() => Promise<Workspace \| null>` | invoke `current_workspace`（null = 无活动工作区） |
 | `updateWorkspaceFile` | `(fileName, content) => Promise<void>` | invoke `update_workspace_file`（编辑器防抖同步的落点，**只写后端内存不落盘**） |
 | `setWorkspaceLanguage` | `(language) => Promise<Workspace>` | invoke `set_workspace_language`，返回更新后的 Workspace。**语言不属于任何代码文件，`updateWorkspaceFile` 带不上它**；不单独持久化会导致切题/重启后退回默认语言，从而用错语言提交 |
-| `WorkspaceSavedPayload` | `{ workspaceId: string; auto: boolean }` | 落盘事件载荷（`auto = true` 为后台 auto-save，`false` 为显式保存） |
+| `WorkspaceSavedPayload` | `{ workspaceId: string; revision?: number; auto: boolean }` | 落盘事件载荷（`auto = true` 为后台 auto-save，`false` 为显式保存）。`revision` 是 Rust 侧写盘时的内容修订号，用于**幂等**处理重复 / 过期事件（可选：字段缺失时退化为不去重） |
 | `onWorkspaceSaved` | `(handler) => Promise<UnlistenFn>` | 订阅 `workspace-saved`（`@tauri-apps/api/event` 的 `listen`）：后端在**内容确已落盘**时才发（写失败、或快照后又有新改动时不发），前端据此清「编辑中…」指示 |
 
 ## 直接依赖
@@ -34,9 +34,9 @@
 workspace.service → 各桥接函数 → ipcInvoke(cmd, args)
   → Rust commands::workspace_cmd 对应 Command → WorkspaceManager
 
-后端 WorkspaceEvent::Saved / AutoSaveTriggered
-  → main.rs 的事件桥 emit("workspace-saved", { workspaceId, auto })
-  → onWorkspaceSaved 回调 → workspaceStore.markPersisted()
+后端 `CoreEvent::WorkspaceSaved`（显式保存或 auto-save 完成）
+  → main.rs 的前端事件桥 emit("workspace-saved", { workspaceId, revision, auto })
+  → onWorkspaceSaved 回调 → workspaceStore.markPersisted(workspaceId, revision)
 ```
 
 设计要点：
@@ -47,4 +47,6 @@ workspace.service → 各桥接函数 → ipcInvoke(cmd, args)
 - **`onWorkspaceSaved` 为何打破「桥接只有 ipcInvoke」的惯例**：后台 auto-save 由 Rust
   触发，是唯一非前端发起的落盘路径，前端无法用 invoke 感知；「已自动备份」若没有
   这个信号就只能靠猜（旧实现即为假指示器）。事件名与载荷定义在 `main.rs` 的
-  `WORKSPACE_SAVED_EVENT` 常量，两端需同步修改。
+  `WORKSPACE_SAVED_EVENT` 常量（`forward_to_webview` 组装载荷），两端需同步修改。
+- **事件只驱动 UI 指示，不是状态来源**：真实落盘状态由 `saveWorkspace` 的 IPC 返回值
+  与磁盘真值保证；事件丢失时指示器退化为「编辑中…」直到下次显式保存。
