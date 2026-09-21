@@ -12,7 +12,8 @@ use crate::core::error::{AppError, AppResult};
 /// 优先查找已有工作区（按 contest_id + problem_id 匹配），
 /// 找到则恢复之前保存的代码，否则创建新工作区。
 ///
-/// 首次调用时自动启动 auto-save（修复 P39：确保在 Tauri 的 tokio runtime 上运行）。
+/// 加载前按当前配置同步 auto-save 状态（修复 P39：在 Tauri 的 tokio runtime 上运行；
+/// 修复 P48：不再用一次性 static 标记，配置改动可生效）。
 #[tauri::command]
 pub async fn load_workspace(
     ctx: State<'_, AppContext>,
@@ -25,33 +26,72 @@ pub async fn load_workspace(
         AppError::Workspace("WorkspaceManager 未初始化".into())
     })?;
 
-    // P39: 首次加载工作区时，在 Tauri Command 的 tokio 上下文中懒启动 auto-save
-    start_auto_save_if_needed(&ctx, wm);
+    sync_auto_save_with_config(&ctx.config.get().editor, wm);
 
     wm.find_or_create(&contest_id, &problem_id, "")
 }
 
-/// 首次调用时启动 auto-save，确保在 Tauri 的 tokio runtime 上运行。
-fn start_auto_save_if_needed(
-    ctx: &AppContext,
+/// auto-save 的期望动作（由配置与当前运行状态决定）。
+///
+/// 抽成纯函数是为了让判据可被单测锁定 —— 它是「配置改动能否生效」的全部逻辑，
+/// 而这条链路此前出过两次问题（P39 的 runtime 上下文、P48 的一次性 static 标记）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AutoSaveAction {
+    /// 维持现状（已在按同一间隔运行，或本就该停）
+    Keep,
+    /// 启动/以新间隔重启
+    Start(u64),
+    /// 停止
+    Stop,
+}
+
+/// 判据：`auto_save` 打开且间隔 > 0 → 运行；否则停止。
+///
+/// 已在运行的间隔与目标一致时返回 `Keep`，避免每次 `load_workspace` 都重置计时器。
+pub(crate) fn auto_save_action(
+    auto_save: bool,
+    interval_secs: u64,
+    current_interval: Option<u64>,
+) -> AutoSaveAction {
+    let desired = (auto_save && interval_secs > 0).then_some(interval_secs);
+    match (desired, current_interval) {
+        (None, None) => AutoSaveAction::Keep,
+        (None, Some(_)) => AutoSaveAction::Stop,
+        (Some(target), Some(running)) if target == running => AutoSaveAction::Keep,
+        (Some(target), _) => AutoSaveAction::Start(target),
+    }
+}
+
+/// 按当前配置同步 auto-save 的启停与间隔（**幂等**）。
+///
+/// 调用点两处：`load_workspace`（首次进入解题页）与 `SystemEvent::ConfigReloaded`
+/// （配置变更后立即生效 —— 事件由 `ConfigService::update` / `reload` 发布，见
+/// `service/config/mod.md`；**只靠 `reload_config` 命令是不够的，它在前端无调用方**）。
+///
+/// 必须在 tokio runtime 上下文里调用（`WorkspaceManager::start_auto_save` 内部
+/// 用 `tokio::spawn` 起后台循环）。两个调用点都满足：前者是 Tauri 异步命令；
+/// 后者由组合根的订阅者经 `tauri::async_runtime::spawn` 投递后执行 —— 不依赖
+/// 「发布方一定在 tokio 上下文里」这个隐含前提（见 `main.rs` 的
+/// `install_auto_save_config_sync`）。
+pub fn sync_auto_save_with_config(
+    editor: &crate::core::entity::config::EditorConfig,
     wm: &std::sync::Arc<crate::service::workspace::manager::WorkspaceManager>,
 ) {
-    use std::sync::atomic::Ordering;
-    use std::sync::atomic::AtomicBool;
-    static STARTED: AtomicBool = AtomicBool::new(false);
-
-    if STARTED.swap(true, Ordering::SeqCst) {
-        return; // 已启动
-    }
-
-    let cfg = ctx.config.get().editor;
-    if cfg.auto_save && cfg.auto_save_interval_secs > 0 {
-        let wm = std::sync::Arc::clone(wm);
-        // 此时在 Tauri Command 的 async 上下文中，tokio::spawn 可用
-        tokio::spawn(async move {
-            wm.start_auto_save(cfg.auto_save_interval_secs);
-        });
-        info!(interval_secs = cfg.auto_save_interval_secs, "auto-save 已启动");
+    let action = auto_save_action(
+        editor.auto_save,
+        editor.auto_save_interval_secs,
+        wm.auto_save_interval_secs(),
+    );
+    match action {
+        AutoSaveAction::Keep => {}
+        AutoSaveAction::Start(interval_secs) => {
+            wm.start_auto_save(interval_secs);
+            info!(interval_secs, "auto-save 已按配置启动");
+        }
+        AutoSaveAction::Stop => {
+            wm.stop_auto_save();
+            info!("auto-save 已按配置停止");
+        }
     }
 }
 

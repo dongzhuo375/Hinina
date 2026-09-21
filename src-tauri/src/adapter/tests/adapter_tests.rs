@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::core::event::event_bus::EventBus;
 use crate::infra::http::HttpClient;
 use crate::infra::storage::Storage;
+use crate::test_support::TempDir;
 
 /// 工厂清单的编译期防线（取代闭集枚举的穷尽检查）：
 /// id 唯一、全部可构建、至少提供一个能力。接入新 OJ 后本测试自动覆盖新工厂。
@@ -27,12 +28,11 @@ fn factory_ids_unique_and_buildable() {
 
     // 全部可构建（依赖只来自 infra —— AdapterDeps 不含任何 Service）
     // 且至少提供一个能力（全 None 是注册 bug）
-    let dir = std::env::temp_dir().join("hinina-test-adapter-factory");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-adapter-factory");
     let deps = AdapterDeps {
         http_client: Arc::new(HttpClient::with_timeout(std::time::Duration::from_secs(5)).expect("HttpClient 构造失败")),
         event_bus: Arc::new(EventBus::new()),
-        storage: Arc::new(Storage::new(dir.clone())),
+        storage: Arc::new(Storage::new(dir.to_path_buf())),
     };
 
     for factory in &list {
@@ -44,7 +44,6 @@ fn factory_ids_unique_and_buildable() {
         assert!(capability_count > 0, "{} 至少需提供一个能力（全空 ProviderSet 是注册 bug）", factory.id());
     }
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// HOJ 工厂身份契约：id 决定会话文件名，须与历史枚举 Debug 输出一致。
@@ -64,12 +63,11 @@ fn hoj_factory_id_matches_session_file_contract() {
 /// 齐备在此显式锁定 —— 若工厂漏装某个能力，不该等到运行期 ProviderNotFound。
 #[test]
 fn hoj_factory_provides_all_four_capabilities() {
-    let dir = std::env::temp_dir().join("hinina-test-hoj-factory-capabilities");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-hoj-factory-capabilities");
     let deps = AdapterDeps {
         http_client: Arc::new(HttpClient::with_timeout(std::time::Duration::from_secs(5)).expect("HttpClient 构造失败")),
         event_bus: Arc::new(EventBus::new()),
-        storage: Arc::new(Storage::new(dir.clone())),
+        storage: Arc::new(Storage::new(dir.to_path_buf())),
     };
 
     let set = crate::adapter::hoj::FACTORY.build(&deps, "https://example.com");
@@ -78,5 +76,4 @@ fn hoj_factory_provides_all_four_capabilities() {
     assert!(set.problem.is_some(), "HOJ 缺 Problem 能力");
     assert!(set.submission.is_some(), "HOJ 缺 Submission 能力");
 
-    let _ = std::fs::remove_dir_all(&dir);
 }

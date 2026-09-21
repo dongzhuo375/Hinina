@@ -402,38 +402,14 @@ impl HOJAdapter {
     }
 
     /// 解析 ISO 时间字符串为秒级 UTC 时间戳。
-    /// 格式："2024-01-01T08:00:00" 或 "2024-01-01 08:00:00"
+    ///
+    /// 实现已上提到 `adapter::time`（与 Hydro 共用）：此前这里按**固定 19 字符
+    /// 取位**，恰好把实测格式 `2026-09-21T16:00:00.000+0000` 的 `.000+0000`
+    /// 截断忽略 —— 在本机 UTC 部署下碰巧正确，目标部署时区非 UTC 时会整体偏移
+    /// 且静默无告警（见 doc/problem.md P64 / P30）。共享实现按字段切分，支持
+    /// 毫秒、`Z`、`±HHMM` / `±HH:MM` 与非零填充，并在偏移非零或解析失败时告警。
     fn parse_time(s: &str) -> i64 {
-        if s.len() < 19 {
-            return 0;
-        }
-        let bytes = s.as_bytes();
-        let d = |i: usize| -> i64 {
-            ((bytes[i] as i64) - 48) * 10 + (bytes[i + 1] as i64) - 48
-        };
-        // 使用 chrono 时间计算算法：以 2000-01-01 为纪元基准日
-        let year = d(0) * 100 + d(2);
-        let month = d(5);
-        let day = d(8);
-        let hour = d(11);
-        let minute = d(14);
-        let second = d(17);
-
-        // 计算从 Unix epoch (1970-01-01) 到给定日期的天数
-        let y = year as i64;
-        let m = month as i64;
-        let mut days = (y - 1970) * 365;
-        // 闰年修正
-        days += (y - 1969) / 4 - (y - 1901) / 100 + (y - 1601) / 400;
-        // 月份天数累积（非闰年）
-        static MONTH_DAYS: [i64; 13] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365];
-        days += MONTH_DAYS[m as usize - 1] + day as i64 - 1;
-        // 润年且月份 > 2 时加一天
-        if m > 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) {
-            days += 1;
-        }
-
-        days * 86400 + hour as i64 * 3600 + minute as i64 * 60 + second as i64
+        crate::adapter::time::parse_time(s)
     }
 
     /// 从 HTML 样例中提取纯文本 input/output 对。
@@ -833,42 +809,6 @@ impl ContestProvider for HOJAdapter {
 
 #[async_trait]
 impl ProblemProvider for HOJAdapter {
-    async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<Problem>> {
-        let url = self.api_url(&format!("/get-contest-problem?cid={}", contest_id));
-
-        let api_resp = self
-            .get_json_authed::<ApiResponse<Vec<ContestProblemVO>>>(&url)
-            .await
-            .map_err(|e| e.context("HOJ contest problem list"))?;
-
-        let problem_list = api_resp.into_data().map_err(|msg| {
-            AppError::Problem(format!("HOJ contest problem list 失败: {}", msg))
-        })?;
-
-        let problems: Vec<Problem> = problem_list
-            .into_iter()
-            .map(|p| Problem {
-                id: p.pid.to_string(),
-                title: if p.display_title.is_empty() {
-                    format!("Problem {}", p.display_id)
-                } else {
-                    p.display_title
-                },
-                description: String::new(),
-                input_description: String::new(),
-                output_description: String::new(),
-                samples: Vec::new(),
-                time_limit: 0,
-                memory_limit: 0,
-                // 列表接口不含语言列表，详情接口（get_problem）才提供
-                languages: Vec::new(),
-            })
-            .collect();
-
-        debug!(contest_id = contest_id, count = problems.len(), "HOJ 比赛题目列表已获取");
-        Ok(problems)
-    }
-
     async fn get_problem(
         &self,
         contest_id: &str,

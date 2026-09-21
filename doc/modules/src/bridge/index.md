@@ -51,7 +51,7 @@ ipcInvoke(cmd, args)
 - **日志只记 cmd 与 message，绝不记 args**：`login` 的参数含明文密码（开发手册 5.1
   安全性要求）；有测试直接锁定该约束。
 - **观察者模式解耦**：Bridge 是最底层，不能 import store/router（会形成底层反向依赖
-  上层）；会话守卫由组合根注入，装配关系集中在 `main.ts`（详见 `stores/sessionGuard.md`）。
+  上层）；会话守卫由组合根注入，装配关系集中在 `main.ts`（详见 `guards/sessionGuard.md`）。
 - 变体白名单滞后的降级策略：未知变体 `variant=null` + 保留消息，只失去分流能力，
   不丢错误信息。
 

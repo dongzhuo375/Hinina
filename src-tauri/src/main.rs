@@ -103,6 +103,51 @@ fn install_announcement_event_bridge(app: &tauri::AppHandle) {
     ctx.event_bus.subscribe(EventCategory::Contest, handler);
 }
 
+/// 把「配置已重载」事件接到 auto-save 的启停同步上。
+///
+/// 设置页改「自动保存开关/间隔」原先要重启客户端才生效（旧实现用一次性
+/// `static AtomicBool` 懒启动，关掉后再也起不来，间隔也只读首次配置）。
+/// 现在配置变更即生效：`update_config` 落盘后发布 `SystemEvent::ConfigReloaded`，
+/// 本订阅者按新配置同步 auto-save（判据见 `commands::workspace_cmd::auto_save_action`）。
+///
+/// **为什么放在组合根**：与工作区落盘事件桥同理 —— 事件是应用级关注点，
+/// 且这里才拿得到 `WorkspaceManager` 与配置服务的实例。
+fn install_auto_save_config_sync(app: &tauri::AppHandle) {
+    use std::sync::Arc;
+
+    use tauri::Manager;
+
+    use hinina_lib::commands::workspace_cmd::sync_auto_save_with_config;
+    use hinina_lib::core::event::app_event::{AppEvent, SystemEvent};
+    use hinina_lib::core::event::event_bus::EventHandler;
+    use hinina_lib::core::event::event_category::EventCategory;
+
+    let ctx = app.state::<AppContext>();
+    let event_bus = Arc::clone(&ctx.event_bus);
+    let config = Arc::clone(&ctx.config);
+    let workspace_manager = ctx.workspace_manager.clone();
+
+    let handler: EventHandler = Arc::new(move |event: &AppEvent| {
+        if !matches!(event, AppEvent::System(SystemEvent::ConfigReloaded)) {
+            return;
+        }
+        let Some(wm) = workspace_manager.as_ref() else {
+            return;
+        };
+        // auto-save 的启停需要 tokio 上下文（`start_auto_save` 内部用 `tokio::spawn`），
+        // 故显式投到 Tauri 运行时执行 —— 不依赖「发布方一定在 tokio 上下文里」这个
+        // 隐含前提（发布方目前是 update_config / 主题切换命令，但订阅者的正确性
+        // 不该建立在别人的调用形态上；P39 踩过这个坑）。
+        let editor = config.get().editor;
+        let wm = Arc::clone(wm);
+        tauri::async_runtime::spawn(async move {
+            sync_auto_save_with_config(&editor, &wm);
+        });
+    });
+
+    event_bus.subscribe(EventCategory::System, handler);
+}
+
 /// 汇报数据目录方案与迁移结果（在日志就绪后调用）。
 ///
 /// 三件事必须说清楚，因为它们都影响「我的数据到底在哪、会不会丢」：
@@ -190,6 +235,7 @@ fn main() {
             app.manage(ctx);
             install_workspace_event_bridge(app.handle());
             install_announcement_event_bridge(app.handle());
+            install_auto_save_config_sync(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -206,7 +252,6 @@ fn main() {
             commands::contest_cmd::get_read_announcement_ids,
             commands::contest_cmd::mark_announcements_read,
             commands::problem_cmd::get_problem,
-            commands::problem_cmd::list_problems,
             commands::problem_cmd::get_user_problem_status,
             commands::problem_cmd::get_contest_problem_limits,
             commands::submission_cmd::submit_code,

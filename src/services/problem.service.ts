@@ -14,13 +14,6 @@ export class ProblemService {
   }
 
   /**
-   * 列出比赛下所有题目。
-   */
-  async listProblems(contestId: string): Promise<Problem[]> {
-    return problemBridge.listProblems(contestId)
-  }
-
-  /**
    * 批量获取我的题目提交状态（0=未提交 / 1=已AC / 2=尝试过）。
    *
    * 空列表直接返回空对象，不发无意义的 IPC。

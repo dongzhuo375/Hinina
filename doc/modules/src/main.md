@@ -27,7 +27,7 @@
 
 - `vue`（`createApp`）/ `pinia`（`createPinia`）
 - `@/router` / `@/App.vue`
-- `@/stores/sessionGuard`（`installSessionGuard`）
+- `@/guards/sessionGuard`（`installSessionGuard`）
 - `@/stores/workspaceStore`（`installWorkspacePersistenceListener` / `useWorkspaceStore` —— 关窗落盘握手注入的 `flush`）
 - `@/stores/announcementStore`（`useAnnouncementStore` —— 新公告事件到达即 `refresh()`）
 - `@/bridge/announcement.bridge`（`onAnnouncementsPublished` —— 新公告事件订阅；组合根可直接用 Bridge 层的订阅原语，装配链「Bridge ← 观察者 ← store」不反向）
@@ -66,10 +66,10 @@ createApp → use(pinia) → use(router)
 
 - **依赖倒置的落地点**：`bridge/index.ts` 只回调注入的观察者、不 import store/router；
   sessionGuard 依赖 authStore 与 router。这条「Bridge ← 观察者 ← sessionGuard → store/router」
-  的装配链只能在组合根完成，避免底层反向依赖上层形成循环（详见 `stores/sessionGuard.md`）。
+  的装配链只能在组合根完成，避免底层反向依赖上层形成循环（详见 `guards/sessionGuard.md`）。
 - **关窗落盘为何在组合根**：窗口事件是应用级关注点（不是某个视图的职责），而
   `workspaceStore` 的落盘动作由解题页与组合根共用；放在 `main.ts` 也保证用户停留在
-  登录页/评测页关窗时同样不丢代码（详见 `doc/problem.md` P74）。
+  登录页/评测页关窗时同样不丢代码（相关未处理项见 `doc/problem.md` 的「遗留（归档自已清除的修复记录）」段）。
 - **关窗策略为何不在组合根**：组合根只应回答「用哪个窗口、哪个 store」，不该回答
   「拦截几次、等多久、失败了怎么收尾」。策略一旦内联在此，失败路径就无法被单测穷尽
   —— 上一版正是这么丢掉「窗口关不掉」这条死路的（`utils/close-guard.md`）。

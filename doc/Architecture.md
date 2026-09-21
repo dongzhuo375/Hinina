@@ -20,6 +20,7 @@ Hinina/
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
 │   ├── todo.md                            # 开发路线图（8 阶段执行顺序）
 │   ├── problem.md                         # 已知问题与待决策项（本地 Review 文档，不入库）
+│   ├── 问题验证报告.md                     # 已知问题逐条验证结论 + 修复证据 + 待处理清单（入库；problem.md 是它的本地版）
 │   ├── HOJ/                              # HOJ API 文档（API 总览 / 榜单 / 题目 limits）
 │   ├── Hydro/                            # Hydro 上游 API 文档（HYDRO-API.md，逐路由源码级，入库）
 │   │                                     #   + 适配器设计缺口报告 / 适配新架构的冲突记录（**本地文档，不入库**，见 .gitignore）
@@ -36,8 +37,9 @@ Hinina/
     │   └── default.json                  # Tauri 2 默认权限集（窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽 + dialog:allow-open（数据目录选择器））
     │                                     # 注：**不声明 fs: / http: 授权** —— 本项目不注册 tauri-plugin-fs/-http，所有 I/O 都走 Rust（见「插件与 I/O 边界」）
     └── src/
-        ├── main.rs                       # Rust 入口点，9 步初始化序列 + setup 装配两个事件桥：工作区落盘（Saved/AutoSaveTriggered → 前端 workspace-saved）与新公告（ContestEvent::AnnouncementsPublished → 前端 announcements-published）
+        ├── main.rs                       # Rust 入口点，9 步初始化序列 + setup 装配三个订阅：工作区落盘桥（Saved/AutoSaveTriggered → 前端 workspace-saved）、新公告桥（ContestEvent::AnnouncementsPublished → 前端 announcements-published）、auto-save 配置同步（SystemEvent::ConfigReloaded → 按配置启停 auto-save）
         ├── lib.rs                        # 库根，公开模块树
+        ├── test_support.rs               # 测试专用支撑（cfg(test)）：TempDir（Drop 时删除临时目录）+ Guarded<T>（Deref 转发，把目录生命周期绑到被测对象上）
         ├── core/
         │   ├── mod.rs                    # core 模块声明
         │   ├── context.rs                # AppContext 统一应用上下文
@@ -62,7 +64,7 @@ Hinina/
         │   │   ├── mod.rs
         │   │   ├── auth.rs               # AuthProvider trait
         │   │   ├── contest.rs            # ContestProvider trait（+ list_contest_problems / get_contest_rank / list_announcements）
-        │   │   ├── problem.rs            # ProblemProvider trait（+ get_user_problem_status）
+        │   │   ├── problem.rs            # ProblemProvider trait（get_problem + get_user_problem_status）
         │   │   ├── submission.rs         # SubmissionProvider trait（submit 同时收 problem_id 与 display_id —— 各 OJ 认的不是同一个标识；+ list_contest_submissions / get_submission_detail / get_submission_cases）
         │   │   ├── oj_id.rs             # OjId newtype（OJ 身份 = 数据而非枚举；session_file() 显式会话文件名契约，id 与历史枚举 Debug 输出一致）
         │   │   └── registry.rs           # ProviderRegistry trait + ProviderSet（注册侧聚合 Option×4；查询侧按能力 current_xxx()，不提供聚合 current()）
@@ -111,13 +113,15 @@ Hinina/
         │   └── workspace/
         │       ├── mod.rs
         │       ├── error.rs              # WorkspaceError
-        │       ├── manager.rs            # WorkspaceManager：完整生命周期 + set_language/persist_meta（语言等元数据随保存落盘）；落盘语义=debounce-to-memory（update_file 只写内存，落盘仅经 save() 与 auto-save；替换 current 前先落盘旧的；auto-save 以修订号判定能否清脏）
+        │       ├── manager.rs            # WorkspaceManager：完整生命周期 + set_language/persist_meta（语言与 active_file 等元数据随保存落盘）；落盘语义=debounce-to-memory（update_file 只写内存并记 active_file，落盘仅经 save() 与 auto-save；替换 current 前先落盘旧的；auto-save 以修订号判定能否清脏；auto_save_interval_secs 记录运行状态供「按配置同步」幂等判断）
         │       └── tests/
         │           └── manager_tests.rs  # 工作区生命周期测试（含语言跨实例持久化）
         ├── adapter/
         │   ├── mod.rs                    # AdapterDeps（仅 infra 依赖，禁止塞 Service）+ AdapterFactory{id, build} + factories() 内建清单（接入新 OJ = 新子目录 + 此处一行）
+        │   ├── time.rs                   # 各 Adapter 共用的时间解析：ISO 8601 → 秒级 UTC（毫秒 / Z / ±HHMM / ±HH:MM / 空格分隔 / 非零填充 / 仅日期；解析失败与**非零偏移**均 warn，绝不 panic）
         │   ├── tests/
-        │   │   └── adapter_tests.rs      # 工厂防线测试（id 唯一 + 全部可构建 + 四能力齐备 + HOJ 会话文件名契约）
+        │   │   ├── adapter_tests.rs      # 工厂防线测试（id 唯一 + 全部可构建 + 四能力齐备 + HOJ 会话文件名契约）
+        │   │   └── time_tests.rs         # 时间解析测试（HOJ 实测串 `...16:00:00.000+0000`、非零/半小时偏移、非零填充、仅日期、闰日、畸形输入不 panic）
         │   ├── hoj/
         │   │   ├── mod.rs                # HOJAdapter：ID 常量 + FACTORY 工厂 + 实现 4 个 Provider trait + get/post_json_authed（共用 handle_token_rotation 做 Refresh-Token 轮换）
         │   │   │                         #   + parse_hoj_json（全部响应的唯一解析入口：去 null → 识别体内鉴权失败 → 类型化解析）
@@ -204,7 +208,7 @@ Hinina/
             ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
             ├── oj_cmd.rs                 # switch_oj（显式切换：校验已注册 → 切 Registry → 持久化 oj.active → 发布 OJSwitched）
             ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest（读 oj.contest_ref，不透明字符串引用）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
-            ├── problem_cmd.rs            # get_problem / list_problems / get_user_problem_status / get_contest_problem_limits
+            ├── problem_cmd.rs            # get_problem / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
             ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
             ├── config_cmd.rs             # get_config / reload_config / update_config / get_storage_info（存储目录/日志路径/版本，设置页「关于」）
@@ -272,10 +276,11 @@ src/
 │   └── common/
 │       ├── LoadingSpinner.vue            # 通用加载动画
 │       └── ErrorMessage.vue              # 通用错误提示 + 重试按钮
+├── guards/
+│   └── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配；需 router + authStore，属跨层装配故不落在 stores/ 或 services/
 ├── stores/
 │   ├── authStore.ts                      # 用户认证状态（登录/登出/会话恢复/三态校验 + sessionResolved 守卫标记）
 │   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/榜单/公告/工作区并回收定时器）
-│   ├── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + loadContest 并发去重 + whenLoaded 统一等待入口（P59）+ 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情 + limits 缓存 + 我的题目状态（limitsOf/statusOf 派生读取；myStatusStale 增量失效，提交终态触发重拉）
 │   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页；用户操作路径查询去抖 in-flight 合并 + 3s memo，轮询与手动刷新不走去抖）
@@ -298,7 +303,7 @@ src/
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
 │   ├── auth.bridge.ts                    # login / logout / get_session / validate_session
 │   ├── contest.bridge.ts                 # load_configured_contest / list_contests（匿名，登录页比赛信息）
-│   ├── problem.bridge.ts                 # get_problem / list_problems / getUserProblemStatus / getContestProblemLimits
+│   ├── problem.bridge.ts                 # get_problem / getUserProblemStatus / getContestProblemLimits
 │   ├── rank.bridge.ts                    # get_contest_rank
 │   ├── submission.bridge.ts              # submit_code（contestId + problemId + displayId + language + sourceCode）/ get_judgement / list_contest_submissions / get_submission_detail / get_submission_cases
 │   ├── announcement.bridge.ts            # list_contest_announcements / get_read_announcement_ids / mark_announcements_read + onAnnouncementsPublished（announcements-published 事件订阅）
@@ -376,15 +381,15 @@ src/
 - **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。唯一的插件是 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为它的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**新增插件时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **依赖卫生：直接依赖必须被真正引用；不审批依赖的安装脚本**。`package.json` 的 `dependencies` 只放代码里实际 import 的包（曾出现 `approve` / `esbuild` / `vue-demi` 三个零引用的直接依赖 —— 其中 `esbuild` 还与 vite 嵌套的版本重复安装）。另外**刻意不写 `allowScripts`**：它是 npm 11.18 起的脚本审批字段，写上等于允许依赖的 postinstall 在每次安装时执行（供应链面）。实测不审批无影响：`vue-demi` 发布的默认就是 Vue 3 版（`isVue3 = true`，postinstall 只在检测到 Vue 2 时才切换），`esbuild` 的 postinstall 只是 optional platform 包的兜底。代价是 `npm install` 会提示「N packages have install scripts not yet covered by allowScripts」—— **这是预期的**，不要为消除提示而审批
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
-- **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求
+- **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（当前仅 `sessionGuard`）—— 它需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）
 - **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
 - **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；登录页依据比赛阶段（`utils/contest`）决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入；登出时经 `stores/session.ts` 清空会话级领域状态
-- **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Adapter → `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验，且反复重登可能触发 HOJ 暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。全局兜底由 `stores/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
+- **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Adapter → `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验，且反复重登可能触发 HOJ 暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。全局兜底由 `guards/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
 - **三态契约必须由 Adapter 兑现**：`AuthProvider::validate_session` 的返回值语义是 `Ok(true)` 有效 / `Ok(false)` 服务端**明确**判定失效 / `Err(_)` 无法判定。**绝不可把网络错误折成 `Ok(false)`** —— 那会让 `SessionValidity::Unknown` 分支成为死代码，一次赛前网络抖动就把选手踢回登录页。HOJ 侧的判据抽成纯函数 `session_validity_from_response` 以便测试锁定：仅 `AppError::Auth` 算明确失效，非 200 的其它状态码（400/500）归 `Unknown`，网络/超时/解析失败一律上抛。同理，评测查询（`SubmissionService::get_judgement`，单次查询）**不得吞掉认证错误**：必须原样上抛，否则前端收敛轮询会把 401 当瞬时抖动重试到超时，选手干等五分钟后只收到「评测超时」，守卫也拿不到 Auth 变体
 - **赛前预检错峰**：登录页等待开赛时按 `utils/session-check.ts` 的策略校验会话 —— 距开赛 >10min 每 5min±60s 周期复检，进入 [T-10min, T-3min] 窗口后在剩余区间随机取点做一次性预检，迟到启动则 0–3s 抖动后立即执行，距开赛 ≤30s 不再预检。目的是把全场客户端的校验请求散布开，避免开赛前形成同步尖峰；**进场（T-0 导航）不错峰**，准点进场是公平性要求
 - **IPC 错误归一化**：Rust `AppError` 经 serde 序列化为 `{ Variant: msg }` 对象，`bridge/index.ts` 在唯一出口转换为 `IpcError extends Error`，保证上层 `e instanceof Error` 与 `e.message` 可用；日志不记录调用参数（含明文密码）
 - **错误文案与日志各有一个出口**：面向用户的错误文案统一经 `utils/error.errorMessage(e, '兜底')` 收敛（空 message、非 Error 载荷一律回退兜底文案，杜绝白屏式空白提示），禁止各处再写 `e instanceof Error ? e.message : '…'`；日志统一经 `utils/logger.createLogger('<模块名>')`（`[模块名]` 前缀、`debug`/`info` 仅开发环境、`warn`/`error` 恒输出），禁止散落 `console.*`。前端日志**只进 console 不落盘**（持久化由 Rust `tracing` 负责），且与 bridge 同款安全约束：不记录敏感参数
-- **错误变体是分流依据，后端不得改写**：前端 `isAuthError`（`variant === 'Auth'`）与 `stores/sessionGuard.ts` 的会话失效兜底完全依赖变体。补上下文一律用 `AppError::context()`（保留变体，只在消息前拼环节名），**禁止** `AppError::Network(format!("xx 请求失败: {}", e))` 这类重新包装 —— 它会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」自相矛盾的嵌套消息，把 DTO 问题当断网查，还会让 401 不再触发登出。**Service 层传播 Provider 错误同样适用此约定**（`contest` / `problem` / `submission` / `auth` 全部用 `e.context("…")`）：`get_rank` 是全场最高频的认证调用（每 10s 一次），变体被改写会让 token 过期时榜单静默 stale、提交只弹一条文案、选手永远回不到登录页
+- **错误变体是分流依据，后端不得改写**：前端 `isAuthError`（`variant === 'Auth'`）与 `guards/sessionGuard.ts` 的会话失效兜底完全依赖变体。补上下文一律用 `AppError::context()`（保留变体，只在消息前拼环节名），**禁止** `AppError::Network(format!("xx 请求失败: {}", e))` 这类重新包装 —— 它会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」自相矛盾的嵌套消息，把 DTO 问题当断网查，还会让 401 不再触发登出。**Service 层传播 Provider 错误同样适用此约定**（`contest` / `problem` / `submission` / `auth` 全部用 `e.context("…")`）：`get_rank` 是全场最高频的认证调用（每 10s 一次），变体被改写会让 token 过期时榜单静默 stale、提交只弹一条文案、选手永远回不到登录页
 - **OJ 响应解析归 Adapter，infra 只传字节**：`infra/http.rs` 只返回原始响应体与响应头（含状态码判定与 5xx 退避重试），不做反序列化；**请求头也由调用方以通用 `HeaderMap` 注入** —— 认证方式是 Adapter 层概念（HOJ 的 JWT 走 `Authorization` 头、Hydro 走 Cookie 会话、有的 OJ 还要 CSRF 令牌），infra 不感知任何凭证形态，曾以 `auth_token` 参数 + 硬编码 `Authorization` 头把 HOJ 假设埋进传输层，已修正。HOJ 侧有两个必须处理的协议事实：① 对未设置字段返回 `null` 而非省略（实测 `get-contest-list` 的 `sealRank`/`rankShowName`/`count`/`now` 全为 null），而 serde 的 `#[serde(default)]` **只在字段缺失时生效**，显式 null 会让整个响应解析失败 → 解析前统一 `strip_nulls`（`false`/`0`/`""` 不是 null，必须保留，否则封榜、打星、零分语义会被抹掉）；② 鉴权失败放在**响应体的 status**（HTTP 仍是 200，实测匿名访问 `get-contest-problem` 返回 `{"status":403,"msg":"请您先登录！"}`）→ 必须翻译成 `AppError::Auth`，且 403 要保守判定（仅当消息指向登录/凭证时才算会话失效，否则「私有赛未注册」会把已登录选手误踢回登录页）
 - **HTTP 401 由 infra 映射为 `Auth` 变体**：401 的标准语义就是「未认证」，属 HTTP 通用语义而非 OJ 私有约定，故由 `infra/http.rs` 的 `status_error` 承担；**403 保持 `Network`**（可能是业务性无权访问）。这条映射是会话校验能成立的前提 —— `get_json_authed` 遇到 401 时若仍归为 `Network`，`session_validity_from_response` 会把它当「无法判定」上抛，导致 token 真正过期时反而永不登出。实测 HOJ 两种报法都存在：`get-user-auth-info` 走 HTTP 401，`get-contest-problem` 走 HTTP 200 + 体内 403，两条路径都必须认- **真实响应夹具**：`adapter/hoj/tests/fixtures/contest_list_anon.json` 取自真实接口、仅脱敏自由文本，完整保留键名与 null 分布；配套一条正向测试（真实响应可解析）与一条反向测试（不去 null 必然失败），防止后来者把 `strip_nulls` 当冗余删掉
 - **infra 在非 2xx 时丢弃响应体 → 需要读错误包络的 OJ 走 raw 变体**：Hydro 的用户可见错误全在响应体包络里（`{"error":{"name",…}}`，无 message），而非 raw 变体在非 2xx 时只返回状态码 → 适配器改用 **raw 变体**（`get_text_raw` / `post_text_raw`：任意状态码都返回 status + headers + body）。重试策略保持：GET 的 5xx 仍退避重试、**耗尽后返回响应**，4xx 不重试；POST 不重试。代价是 401 不再由 infra 自动映射为 `Auth`，由适配器的 `http_status_error` 承担（判据与 infra 的 `status_error` 逐条对齐）。两条通道共用 `HydroResponse::parse_value` 做协议层判定（错误包络 → 变体、JSON 化登录重定向 → `Auth`）

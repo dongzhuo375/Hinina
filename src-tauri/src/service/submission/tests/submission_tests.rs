@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::test_support::{Guarded, TempDir};
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -70,15 +72,12 @@ fn running() -> JudgementResult {
 }
 
 /// 每次调用一个独立存储根，避免并行测试相互覆盖快照。
-fn temp_storage() -> Arc<Storage> {
-    static SEQ: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "hinina-submission-service-test-{}-{}",
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::SeqCst)
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    Arc::new(Storage::new(dir))
+///
+/// 返回存储 + 目录守卫：目录活到用例结束、随 `Drop` 回收 —— 此前只在开始时
+/// 清理，实测单次全量测试就会留下 700+ 个 `hinina-submission-service-test-*`。
+fn temp_storage() -> (Arc<Storage>, TempDir) {
+    let dir = TempDir::unique("hinina-submission-service-test");
+    (Arc::new(Storage::new(dir.to_path_buf())), dir)
 }
 
 #[async_trait::async_trait]
@@ -206,7 +205,10 @@ struct StubCounters {
 }
 
 /// 用指定 Stub 构造 SubmissionService，返回服务、计数器与事件总线。
-fn build_service(mode: StubMode) -> (SubmissionService, StubCounters, Arc<EventBus>) {
+///
+/// 服务被 `Guarded` 包裹：方法调用经 `Deref` 原样转发，同时把临时存储根
+/// 的生命周期绑到服务上（服务被 Drop 时目录一起回收）。
+fn build_service(mode: StubMode) -> (Guarded<SubmissionService>, StubCounters, Arc<EventBus>) {
     let counters = StubCounters {
         judgement: Arc::new(AtomicUsize::new(0)),
         detail: Arc::new(AtomicUsize::new(0)),
@@ -227,14 +229,12 @@ fn build_service(mode: StubMode) -> (SubmissionService, StubCounters, Arc<EventB
         },
     );
     let bus = Arc::new(EventBus::new());
-    (
-        SubmissionService::new(registry, Arc::clone(&bus), temp_storage()),
-        counters,
-        bus,
-    )
+    let (storage, dir) = temp_storage();
+    let service = SubmissionService::new(registry, Arc::clone(&bus), storage);
+    (Guarded::new(service, dir), counters, bus)
 }
 
-fn make_service(mode: StubMode) -> (SubmissionService, Arc<AtomicUsize>, Arc<EventBus>) {
+fn make_service(mode: StubMode) -> (Guarded<SubmissionService>, Arc<AtomicUsize>, Arc<EventBus>) {
     let (service, counters, bus) = build_service(mode);
     (service, counters.judgement, bus)
 }
@@ -498,10 +498,11 @@ fn detail_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
             },
         );
     }
+    let (storage, _dir) = temp_storage();
     let service = SubmissionService::new(
         Arc::clone(&registry),
         Arc::new(EventBus::new()),
-        temp_storage(),
+        storage,
     );
 
     block_on(service.get_submission_detail("12345")).expect("HOJ 详情失败");

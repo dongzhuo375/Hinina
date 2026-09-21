@@ -4,7 +4,7 @@
 比赛相关 Tauri Command 模块。提供比赛列表查询、比赛选中、「加载配置比赛」、比赛排行榜查询、比赛公告查询及公告已读状态读写功能，面向前端暴露 IPC 接口。
 
 ## 核心类型/函数
-- 常量：`DEFAULT_RANK_LIMIT: i64 = 50` — 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）
+- 常量：`DEFAULT_RANK_LIMIT: i64 = 50`（`pub(crate)`）— 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）。**唯一取值点在前端 `rank.service.ts` 的 `DEFAULT_RANK_PAGE_SIZE`**，此处是「绕过前端直接调命令」的防御值（P71）；提为 `pub(crate)` 以便用例锁定三处同值
 - 常量：`DEFAULT_ANNOUNCEMENT_LIMIT: i64 = 50` — 公告默认分页大小
 - `pub async fn list_contests(ctx) -> AppResult<Vec<Contest>>` — 获取比赛列表（TTL 从 `oj.cache_ttl_secs` 读取，默认 60 秒）
 - `pub async fn select_contest(ctx, contest_id: String) -> AppResult<()>` — 选中指定比赛，发布 `ContestEvent::Selected`

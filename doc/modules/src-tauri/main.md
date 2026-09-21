@@ -9,6 +9,7 @@
 - `const ANNOUNCEMENTS_PUBLISHED_EVENT: &str` — 新公告事件的前端通道名（`"announcements-published"`），与 `src/bridge/announcement.bridge.ts` 的 `onAnnouncementsPublished` 对应
 - `fn install_workspace_event_bridge(app: &tauri::AppHandle)` — 订阅 `EventCategory::Workspace`，把 `WorkspaceEvent::Saved`（显式保存）与 `AutoSaveTriggered`（auto-save 成功）emit 到 webview（载荷 `{ workspaceId, auto }`）。仅转发这两种「内容确已落盘」的事件；`Loaded` / `Switched` 不转发（前端是发起方，无需回环）
 - `fn install_announcement_event_bridge(app: &tauri::AppHandle)` — 订阅 `EventCategory::Contest`，把 `ContestEvent::AnnouncementsPublished` emit 到 webview（载荷 `{ contestId, newIds }`）。公告红点因此是**事件驱动**的：前端虽仍按 60s 节拍拉取公告（拉取必须有人发起），但「有新公告」这一状态变更走 EventBus，事件到达即点亮红点，不必等下一次列表 diff。`ListLoaded` / `Selected` 不转发（前端是发起方）
+- `fn install_auto_save_config_sync(app: &tauri::AppHandle)` — 订阅 `EventCategory::System` 的 `SystemEvent::ConfigReloaded`，按新配置调 `commands::workspace_cmd::sync_auto_save_with_config` 同步 auto-save 的启停与间隔（P48：设置页改开关/间隔**即时生效，无需重启**；判据 = 纯函数 `auto_save_action`）。事件由 `ConfigService::update` 与 `reload` 两条路径发布。同步动作经 `tauri::async_runtime::spawn` 执行 —— auto-save 的启停需要 tokio 上下文，**不依赖「发布方一定在 tokio 上下文里」这个隐含前提**。放在组合根是因为事件是应用级关注点，且只有这里能同时拿到 EventBus / ConfigService / WorkspaceManager
 
 ## 直接依赖
 - `hinina_lib::commands`
@@ -42,16 +43,17 @@
    4. `report_data_dir(&plan, &migration)` —— **日志就绪后立刻汇报**：回退临时目录走
       `error` 级告警（数据随时会被系统清理）；迁移有失败项也走 `error` 并列出条目
    5. `app.manage(ctx)` 注入 `AppContext` 到 State
-   6. `install_workspace_event_bridge` / `install_announcement_event_bridge`
+   6. `install_workspace_event_bridge` / `install_announcement_event_bridge` /
+      `install_auto_save_config_sync`
       （`app.state::<AppContext>()` 取 EventBus 订阅，`handle.emit("workspace-saved", …)` /
-      `handle.emit("announcements-published", …)` 下发前端）
-4. `.invoke_handler(tauri::generate_handler![...])` 注册全部 40 个 IPC Command
+      `handle.emit("announcements-published", …)` 下发前端；auto-save 同步不回前端，直接调命令层）
+4. `.invoke_handler(tauri::generate_handler![...])` 注册全部 39 个 IPC Command
    （**不是** `setup` 中手动注册，`commands::register_commands()` 不存在；
    commands/mod.rs 注释亦说明选用 generate_handler 以避免 setup 手动注册的兼容性问题）：
    - `auth_cmd`：login / logout / get_session / validate_session
    - `oj_cmd`：**switch_oj**（切换当前 OJ：校验注册 → 持久化 `oj.active` → 发布 `OJSwitched`）
    - `contest_cmd`：list_contests / select_contest / load_configured_contest / **get_contest_rank** / **list_contest_announcements** / **get_read_announcement_ids** / **mark_announcements_read**
-   - `problem_cmd`：get_problem / list_problems / **get_user_problem_status** / **get_contest_problem_limits**
+   - `problem_cmd`：get_problem / **get_user_problem_status** / **get_contest_problem_limits**
    - `submission_cmd`：submit_code / get_judgement / **list_contest_submissions** / **get_submission_detail** / **get_submission_cases**
    - `workspace_cmd`：load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / **set_workspace_language**
    - `config_cmd`：get_config / reload_config / update_config / **get_storage_info**

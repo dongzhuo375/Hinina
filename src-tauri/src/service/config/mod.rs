@@ -57,11 +57,16 @@ impl<R: ConfigRepository> ConfigService<R> {
             .clone()
     }
 
-    /// 通过闭包修改配置，修改后自动保存。
+    /// 通过闭包修改配置，修改后自动保存并发布 `SystemEvent::ConfigReloaded`。
     ///
     /// 先调用 updater 闭包修改内存中的配置，然后持久化到磁盘。
     /// 如果持久化失败，内存中的修改会被保留（保持 UI 响应一致），
-    /// 返回错误供调用方决定是否回滚。
+    /// 返回错误供调用方决定是否回滚 —— **失败时不发布事件**（磁盘与内存已不一致，
+    /// 让订阅者按「新配置已生效」行动会掩盖问题）。
+    ///
+    /// **为什么在这里发布**：`update` 才是生产链路的配置变更入口（`update_config`、
+    /// 主题切换、`switch_oj` 的持久化都走它）；只有 `reload` 发布的话，订阅者永远
+    /// 等不到事件 —— `reload_config` 命令在前端没有调用方（2026-09-21 复核）。
     pub fn update<F>(&self, updater: F) -> AppResult<AppConfig>
     where
         F: FnOnce(&mut AppConfig),
@@ -82,12 +87,15 @@ impl<R: ConfigRepository> ConfigService<R> {
         }
 
         debug!("配置已更新并保存");
+        self.event_bus
+            .publish(&AppEvent::System(SystemEvent::ConfigReloaded));
         Ok(new_config)
     }
 
     /// 强制从磁盘重新加载配置，覆盖内存中的副本。
     ///
-    /// 加载成功后发布 `SystemEvent::ConfigReloaded`，供其他 Service 响应配置变更。
+    /// 加载成功后发布 `SystemEvent::ConfigReloaded`（与 [`Self::update`] 同款语义：
+    /// 任何「配置已变更」的路径都要通知订阅者）。
     pub fn reload(&self) -> AppResult<AppConfig> {
         let new_config = self.repo.load_config::<AppConfig>().map_err(|e| {
             warn!(error = %e, "配置重新加载失败");

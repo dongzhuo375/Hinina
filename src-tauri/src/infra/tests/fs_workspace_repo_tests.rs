@@ -1,10 +1,12 @@
 use super::*;
+use crate::test_support::{Guarded, TempDir};
 use std::path::PathBuf;
 
-fn repo(name: &str) -> FsWorkspaceRepository {
-    let dir = std::env::temp_dir().join(format!("hinina-test-ws-{}", name));
-    let _ = std::fs::remove_dir_all(&dir);
-    FsWorkspaceRepository::new(Arc::new(Storage::new(dir)))
+/// 测试仓库 + 临时目录守卫（`Drop` 时删除目录，避免临时文件堆积）。
+fn repo(name: &str) -> Guarded<FsWorkspaceRepository> {
+    let dir = TempDir::named(&format!("hinina-test-ws-{}", name));
+    let repo = FsWorkspaceRepository::new(Arc::new(Storage::new(dir.to_path_buf())));
+    Guarded::new(repo, dir)
 }
 
 #[test]

@@ -59,7 +59,7 @@ service::{contest,problem,submission,auth}
                             （如 problem::fetch_limits → Unknown）
 commands::*                 原样返回 AppResult，经 serde 序列化为 { Variant: msg }
 前端 bridge/index.ts        parseAppError → IpcError；isAuthError(variant === 'Auth')
-                            → stores/sessionGuard.ts 会话失效兜底 → 登出
+                            → guards/sessionGuard.ts 会话失效兜底 → 登出
 ```
 
 ## 测试

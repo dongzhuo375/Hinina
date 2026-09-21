@@ -38,7 +38,6 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - `ContestProvider::list_contest_problems(id)` — `GET /contest/:tid/problems`；展示字母由 `tdoc.pids` 下标派生（`pdict` 按 docId 键且 JS 数字键会被重排，不能靠键顺序推字母）；`cid` 只能填 0（缺口 D1）
 - `ContestProvider::get_contest_rank(id, query)` — `GET /contest/:tid/scoreboard`，单元格矩阵经 `types::scoreboard_rank_page` 归一。**`RankQuery` 的字段基本被忽略**：Hydro 榜单是整榜算完一次性返回，服务端不接受分页/关键词/打星/赛后提交参数（缺口 D10）
 - `ContestProvider::list_announcements(...)` — **恒返回空页**：Hydro 没有公告接口，其对应能力是**答疑（clarification）**，语义与结构都不同（答疑是「提问 + 裁判回复」的会话，公告是单向广播）。不把答疑伪装成公告 —— 那会让选手把裁判的定向回复误读成全场公告（缺口 D11，后续应在 Provider 层新增答疑能力而不是做有损映射）
-- `ProblemProvider::list_problems(id)` — 与 `list_contest_problems` 同源，返回摘要（无题面/limits/语言）
 - `ProblemProvider::get_problem(contest_id, problem_id)` — `problem_id` 经 `resolve_problem_id` 换算后请求 `GET /p/:pid?tid=`；`pdoc.content`（单块 Markdown）→ `description`，limits 取 `config.timeMin/Max`、`memoryMin/Max`，`config.langs` 经 `types::lang_display` 翻译为 HOJ 显示名
 - `ProblemProvider::get_user_problem_status(contest_id, problem_ids)` — `GET /contest/:tid/problems` 的 `psdict`；入参是**真实 pid** 而 `psdict` 以 **docId** 为键，故先经 `pdict` 反查；未提交的题不出现在返回 map 中
 - `SubmissionProvider::submit(contest_id, problem_id, language, code)` — `POST /p/:pid/submit`（`lang` + `code` + `tid`）；语言经 `types::lang_key` 从显示名反查回 key；**刻意不做字母换算**（万一某题 pid 恰好是单字母，换算会把提交打到另一道题上，这个失败模式不可接受）；响应无 `rid` 时明确报错（比赛隐藏本人记录时服务端返回 `tid`，缺口 D12）

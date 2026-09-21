@@ -2,29 +2,53 @@
 //
 // 测试重点：
 // 1. `workspace_cmd` 中降级路径（通过提取的纯函数验证逻辑）
-// 2. `start_auto_save_if_needed` static AtomicBool 一次性标记行为
+// 2. auto-save 的「按配置同步」判据（P48 / P74 遗留项）
 //
 // （原 `parse_oj_type` 解析测试已随闭集枚举一并移除：OJ 身份改为数据
-//   `OjId`，注册校验在 `ProviderRegistry` 层由 `list_available` 承担。）
+//   `OjId`，注册校验在 `ProviderRegistry` 层由 `list_available` 承担。
+//   原 `auto_save_lazy_start_once` 锁定的是已删除的 static AtomicBool 标记 ——
+//   那条判据本身就是缺陷，改由 `auto_save_action` 的判据表接管。）
 
-/// 测试 `start_auto_save_if_needed` 中 static AtomicBool 懒启动标记。
-/// 验证 swap 一次性语义——首次返回 false（未设置），后续返回 true（已设置）。
+/// auto-save「按配置同步」的判据表（P48 / P74 遗留项）。
+///
+/// 旧实现用一次性 `static AtomicBool` 懒启动：关掉 auto-save 后再打开永不重启，
+/// 间隔也只读首次配置。判据现在是这张表 —— 它是「配置改动能否生效」的全部逻辑，
+/// 因此逐格锁定。
 #[test]
-fn auto_save_lazy_start_once() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+fn auto_save_action_decision_table() {
+    use super::super::commands::workspace_cmd::auto_save_action;
+    use super::super::commands::workspace_cmd::AutoSaveAction;
 
-    let flag = AtomicBool::new(false);
+    // 未运行 + 配置开启 → 启动
+    assert_eq!(auto_save_action(true, 30, None), AutoSaveAction::Start(30));
+    // 未运行 + 配置关闭 → 保持（本就该停）
+    assert_eq!(auto_save_action(false, 30, None), AutoSaveAction::Keep);
+    // 未运行 + 间隔为 0 → 保持（间隔 0 等价于关闭，不得启动忙循环）
+    assert_eq!(auto_save_action(true, 0, None), AutoSaveAction::Keep);
 
-    // 首次：应成功设置
-    let was_set = flag.swap(true, Ordering::SeqCst);
-    assert!(!was_set, "首次调用应返回 false（未设置过）");
+    // 运行中 + 间隔未变 → 保持（避免每次 load_workspace 都重置计时器）
+    assert_eq!(auto_save_action(true, 30, Some(30)), AutoSaveAction::Keep);
+    // 运行中 + 间隔变了 → 以新间隔重启
+    assert_eq!(auto_save_action(true, 60, Some(30)), AutoSaveAction::Start(60));
+    // 运行中 + 配置关闭 → 停止（旧实现在这里再也起不来）
+    assert_eq!(auto_save_action(false, 30, Some(30)), AutoSaveAction::Stop);
+    // 运行中 + 间隔改为 0 → 停止
+    assert_eq!(auto_save_action(true, 0, Some(30)), AutoSaveAction::Stop);
+}
 
-    // 第二次：已被设置
-    let was_set = flag.swap(true, Ordering::SeqCst);
-    assert!(was_set, "第二次调用应返回 true（已设置过）");
+/// 「关掉再打开」必须能重新启动 —— 旧的一次性 static 标记正是在这里失败。
+#[test]
+fn auto_save_action_supports_off_then_on_cycle() {
+    use super::super::commands::workspace_cmd::auto_save_action;
+    use super::super::commands::workspace_cmd::AutoSaveAction;
 
-    // 第三次：仍为 true
-    assert!(flag.load(Ordering::SeqCst));
+    // 开启 → 关闭 → 再开启 的完整循环
+    let mut running = None;
+    assert_eq!(auto_save_action(true, 30, running), AutoSaveAction::Start(30));
+    running = Some(30);
+    assert_eq!(auto_save_action(false, 30, running), AutoSaveAction::Stop);
+    running = None;
+    assert_eq!(auto_save_action(true, 30, running), AutoSaveAction::Start(30));
 }
 
 /// 验证 workspace_cmd 中 WorkspaceManager 为 None 时的降级逻辑。
@@ -239,16 +263,15 @@ fn data_dir_change_serializes_camel_case_and_nullable_migrate_from() {
 // 判据用错（`dir_is_empty` 而非「冲突条目」）时，命令会在真机上永远失败。
 
 use super::super::commands::data_dir_cmd::validate_reset;
+use super::super::commands::contest_cmd::DEFAULT_RANK_LIMIT;
+use crate::core::entity::rank::RankQuery;
+use crate::test_support::TempDir;
 
 /// 造独立临时目录（每个用例一个）。
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "hinina-test-reset-{}-{}",
-        tag,
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    dir
+///
+/// 返回守卫：目录随 `Drop` 回收（此前只在开始时清理，长期跑测试会堆积残留）。
+fn temp_dir(tag: &str) -> TempDir {
+    TempDir::unique(&format!("hinina-test-reset-{tag}"))
 }
 
 fn write_at(dir: &std::path::Path, rel: &str, content: &str) {
@@ -265,17 +288,15 @@ fn validate_reset_allows_realistic_default_dir() {
     // 删指针则按钮消失）。
     let default_dir = temp_dir("allow-default");
     let current = temp_dir("allow-current");
-    write_at(&default_dir, "data_dir.json", r#"{"dataDir":"D:\\custom"}"#);
-    write_at(&default_dir, "EBWebView/Default/Cache/index", "binary");
-    write_at(&default_dir, "logs/hinina.log", "old log");
+    write_at(default_dir.path(), "data_dir.json", r#"{"dataDir":"D:\\custom"}"#);
+    write_at(default_dir.path(), "EBWebView/Default/Cache/index", "binary");
+    write_at(default_dir.path(), "logs/hinina.log", "old log");
 
     assert!(
-        validate_reset(&default_dir, &current, true).is_ok(),
+        validate_reset(default_dir.path(), current.path(), true).is_ok(),
         "这些条目都不在迁移清单里，不得阻止「恢复默认 + 迁移」"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&current);
 }
 
 #[test]
@@ -283,11 +304,11 @@ fn validate_reset_rejects_stale_migratable_entries_when_migrating() {
     // 真正该拒的情形：默认目录残留会被迁移**跳过**的陈旧数据
     let default_dir = temp_dir("reject-stale");
     let current = temp_dir("reject-stale-current");
-    write_at(&default_dir, "data_dir.json", "{}");
-    write_at(&default_dir, "EBWebView/x", "binary");
-    write_at(&default_dir, "config.json", r#"{"stale":true}"#);
+    write_at(default_dir.path(), "data_dir.json", "{}");
+    write_at(default_dir.path(), "EBWebView/x", "binary");
+    write_at(default_dir.path(), "config.json", r#"{"stale":true}"#);
 
-    let err = validate_reset(&default_dir, &current, true).expect_err("有陈旧 config.json 应拒绝");
+    let err = validate_reset(default_dir.path(), current.path(), true).expect_err("有陈旧 config.json 应拒绝");
     let msg = err.to_string();
     assert!(msg.contains("config.json"), "错误应点名冲突条目: {}", msg);
     assert!(
@@ -296,8 +317,6 @@ fn validate_reset_rejects_stale_migratable_entries_when_migrating() {
         msg
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&current);
 }
 
 #[test]
@@ -306,15 +325,13 @@ fn validate_reset_allows_stale_cache_only() {
     // 开始（TTL 自然填充），不构成「静默使用陈旧数据」
     let default_dir = temp_dir("allow-cache");
     let current = temp_dir("allow-cache-current");
-    write_at(&default_dir, "cache/problem_statement/1/A.json", "{}");
+    write_at(default_dir.path(), "cache/problem_statement/1/A.json", "{}");
 
     assert!(
-        validate_reset(&default_dir, &current, true).is_ok(),
+        validate_reset(default_dir.path(), current.path(), true).is_ok(),
         "残留旧 cache 不该阻止恢复默认"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&current);
 }
 
 #[test]
@@ -322,24 +339,39 @@ fn validate_reset_skips_conflict_check_when_not_migrating() {
     // 不勾迁移时用户只是想切回默认目录，里面有什么就是什么
     let default_dir = temp_dir("no-migrate");
     let current = temp_dir("no-migrate-current");
-    write_at(&default_dir, "config.json", r#"{"stale":true}"#);
+    write_at(default_dir.path(), "config.json", r#"{"stale":true}"#);
 
     assert!(
-        validate_reset(&default_dir, &current, false).is_ok(),
+        validate_reset(default_dir.path(), current.path(), false).is_ok(),
         "不迁移时无需校验冲突"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&current);
 }
 
 #[test]
 fn validate_reset_rejects_same_dir() {
     let dir = temp_dir("same");
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(dir.path()).unwrap();
 
-    let err = validate_reset(&dir, &dir, false).expect_err("已在默认目录应拒绝");
+    let err = validate_reset(dir.path(), dir.path(), false).expect_err("已在默认目录应拒绝");
     assert!(err.to_string().contains("已在默认数据目录"));
+}
 
-    let _ = std::fs::remove_dir_all(&dir);
+/// 榜单默认分页大小「三处同值」的锁定（P71）。
+///
+/// 前端 `rank.service.ts` 的 `DEFAULT_RANK_PAGE_SIZE` 是唯一取值点；后端的
+/// `DEFAULT_RANK_LIMIT` 与 `RankQuery::default()` 只服务于「绕过前端直接调命令」。
+/// 这类漂移**没有任何运行时症状**（前端恒显式传参），只能靠用例锁住。
+#[test]
+fn rank_default_page_size_matches_frontend_contract() {
+    assert_eq!(
+        DEFAULT_RANK_LIMIT, 50,
+        "须与 src/services/rank.service.ts 的 DEFAULT_RANK_PAGE_SIZE 同值"
+    );
+    assert_eq!(
+        RankQuery::default().limit,
+        DEFAULT_RANK_LIMIT,
+        "RankQuery::default() 须与命令层默认值同值"
+    );
+    assert_eq!(RankQuery::default().current_page, 1, "默认第 1 页");
 }

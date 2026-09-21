@@ -1,13 +1,17 @@
 use super::*;
+use crate::test_support::{Guarded, TempDir};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-/// 每个用例独立的临时 Storage 根目录（避免磁盘缓存用例相互串扰）
-fn temp_storage(name: &str) -> Arc<Storage> {
-    let dir = std::env::temp_dir().join(format!("hinina-cache-test-{}", name));
-    let _ = std::fs::remove_dir_all(&dir);
-    Arc::new(Storage::new(dir))
+/// 每个用例独立的临时 Storage 根目录（避免磁盘缓存用例相互串扰）。
+///
+/// 返回 `Guarded`：目录活到用例结束、随 `Drop` 回收 —— 此前只在开始时清理，
+/// 长期反复跑测试的机器会持续堆积残留目录。
+fn temp_storage(name: &str) -> Guarded<Arc<Storage>> {
+    let dir = TempDir::named(&format!("hinina-cache-test-{}", name));
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    Guarded::new(storage, dir)
 }
 
 fn ms(value: u64) -> Duration {

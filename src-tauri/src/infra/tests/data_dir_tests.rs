@@ -5,19 +5,14 @@
 
 use super::*;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::test_support::TempDir;
 
 /// 独立临时目录（每次调用一个）。
-fn unique_dir(tag: &str) -> PathBuf {
-    static SEQ: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "hinina-test-datadir-{}-{}-{}",
-        tag,
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::SeqCst)
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    dir
+///
+/// 返回守卫：目录随 `Drop` 回收 —— 此前只在开始时清理，实测单次全量测试会留下
+/// 十几个 `hinina-test-datadir-*` 目录。
+fn unique_dir(tag: &str) -> TempDir {
+    TempDir::unique(&format!("hinina-test-datadir-{tag}"))
 }
 
 /// 在目录下造一个文件（自动建父目录）。
@@ -71,7 +66,6 @@ fn pointer_round_trip() {
     assert!(pointer_path(&dir).exists());
     assert_eq!(pointer_path(&dir), dir.join("data_dir.json"));
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -85,7 +79,6 @@ fn missing_or_corrupt_pointer_degrades_to_default() {
     write_file(&dir, "data_dir.json", "not-json{{{");
     assert_eq!(read_pointer(&dir), DataDirPointer::default());
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -95,7 +88,6 @@ fn pointer_omits_absent_fields() {
     write_pointer(&dir, &DataDirPointer::default()).expect("写入指针失败");
     let raw = std::fs::read_to_string(pointer_path(&dir)).unwrap();
     assert_eq!(raw.trim(), "{}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 目录可用性与空判定 ──
@@ -110,7 +102,6 @@ fn dir_is_usable_creates_missing_dir_and_leaves_no_probe() {
     // 探针文件必须被清掉，否则「空目录」判定会失败
     assert!(dir_is_empty(&dir), "探测后不应留下残留文件");
 
-    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -119,7 +110,6 @@ fn dir_is_usable_rejects_file_path() {
     write_file(&dir, "afile", "x");
     // 目标是文件 → 无法作为目录
     assert!(!dir_is_usable(&dir.join("afile")));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -130,7 +120,6 @@ fn dir_is_empty_distinguishes_missing_empty_and_nonempty() {
     assert!(dir_is_empty(&dir), "空目录");
     write_file(&dir, "x.txt", "1");
     assert!(!dir_is_empty(&dir), "有内容");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 目标目录校验（设置页「更改目录」） ──
@@ -144,8 +133,6 @@ fn validate_target_accepts_fresh_absolute_dir() {
     assert_eq!(got, target);
     assert!(target.is_dir(), "校验顺带创建目录");
 
-    let _ = std::fs::remove_dir_all(&target);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -169,7 +156,6 @@ fn validate_target_rejects_legacy_temp_dir_and_its_children() {
     std::fs::create_dir_all(&child).unwrap();
     assert!(validate_target(&child, &legacy, false).is_err(), "临时目录的子目录也应被拒");
 
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -181,8 +167,6 @@ fn validate_target_rejects_file() {
     let err = validate_target(&dir.join("afile"), &legacy, false).expect_err("文件应被拒");
     assert!(err.to_string().contains("不是目录"));
 
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -206,8 +190,6 @@ fn validate_target_allows_going_back_to_a_used_dir_without_migrating() {
         "不勾迁移时必须能改回用过的目录 —— 否则用户只能删掉自己的数据"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -228,8 +210,6 @@ fn validate_target_allows_dir_with_only_non_conflicting_content() {
         "非冲突内容不得阻止迁移 —— 迁移只创建自己的条目，不会动用户的东西"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -262,8 +242,6 @@ fn validate_target_rejects_conflicts_only_when_migrating() {
         "同一目录在不迁移时应放行"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -306,8 +284,6 @@ fn migrate_moves_listed_entries_and_skips_logs() {
     // logs 不搬：旧日志留在原地，新目录没有 logs
     assert!(!to.join("logs").exists(), "logs 按约定不迁移");
 
-    let _ = std::fs::remove_dir_all(&from);
-    let _ = std::fs::remove_dir_all(&to);
 }
 
 #[test]
@@ -322,8 +298,6 @@ fn migrate_keeps_legacy_dir_when_logs_remain() {
     assert!(!outcome.legacy_removed, "留着 logs 时旧目录无法删除");
     assert!(from.join("logs/hinina.log").exists(), "旧日志原地保留");
 
-    let _ = std::fs::remove_dir_all(&from);
-    let _ = std::fs::remove_dir_all(&to);
 }
 
 #[test]
@@ -339,7 +313,6 @@ fn migrate_removes_legacy_dir_when_nothing_left() {
     assert!(outcome.legacy_removed, "搬空后旧目录应被删除");
     assert!(!from.exists());
 
-    let _ = std::fs::remove_dir_all(&to);
 }
 
 #[test]
@@ -361,8 +334,6 @@ fn migrate_skips_entries_already_present_at_target() {
         "目标既有数据不得被覆盖"
     );
 
-    let _ = std::fs::remove_dir_all(&from);
-    let _ = std::fs::remove_dir_all(&to);
 }
 
 #[test]
@@ -375,8 +346,6 @@ fn migrate_is_noop_when_source_has_nothing_listed() {
 
     assert!(outcome.is_noop(), "只有 logs 时无事可做: {:?}", outcome);
 
-    let _ = std::fs::remove_dir_all(&from);
-    let _ = std::fs::remove_dir_all(&to);
 }
 
 #[test]
@@ -404,8 +373,6 @@ fn migrate_never_deletes_unmigrated_entries() {
     );
     assert!(!outcome.legacy_removed, "有失败项时绝不能删除旧目录");
 
-    let _ = std::fs::remove_dir_all(&from);
-    let _ = std::fs::remove_dir_all(&to);
 }
 
 #[test]
@@ -429,8 +396,6 @@ fn existing_target_is_skipped_not_failed() {
         "目标既有内容不得被覆盖"
     );
 
-    let _ = std::fs::remove_dir_all(&from);
-    let _ = std::fs::remove_dir_all(&to);
 }
 
 #[test]
@@ -456,7 +421,6 @@ fn mark_legacy_migrated_persists_failure_state_and_survives_pointer_rewrite() {
         "用户指定的目录不得被抹掉"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -466,7 +430,7 @@ fn should_attempt_legacy_retries_failed_migration_regardless_of_source() {
     let legacy = unique_dir("attempt-legacy");
     write_file(&legacy, "config.json", "{}");
 
-    let custom = unique_dir("attempt-custom");
+    let _custom = unique_dir("attempt-custom");
     let default = unique_dir("attempt-default");
 
     // 从未尝试 + 自定义目录 → 不搬（尊重用户选择）
@@ -500,9 +464,6 @@ fn should_attempt_legacy_retries_failed_migration_regardless_of_source() {
         &default.join("nope")
     ));
 
-    let _ = std::fs::remove_dir_all(&legacy);
-    let _ = std::fs::remove_dir_all(&custom);
-    let _ = std::fs::remove_dir_all(&default);
 }
 
 #[test]
@@ -543,9 +504,6 @@ fn prepare_startup_records_failure_so_later_retry_is_not_lost() {
         "成功后置位一次性标记"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&legacy);
-    let _ = std::fs::remove_dir_all(&custom);
 }
 
 #[test]
@@ -585,10 +543,6 @@ fn prepare_startup_runs_both_migration_sources_in_one_launch() {
         "临时目录搬家应在同一次启动内完成"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&source);
-    let _ = std::fs::remove_dir_all(&legacy);
-    let _ = std::fs::remove_dir_all(&target);
 }
 
 #[test]
@@ -612,7 +566,6 @@ fn conflicting_entries_ignores_files_that_are_always_present_in_default_dir() {
         conflicting_entries_in(&dir)
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -640,7 +593,6 @@ fn conflicting_entries_reports_stale_migratable_data() {
         "应逐个报出（顺序与 MIGRATED_ENTRIES 一致），且不含 data_dir.json / EBWebView"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -659,7 +611,6 @@ fn conflicting_entries_excludes_cache_deliberately() {
     assert!(MIGRATED_ENTRIES.contains(&"cache"));
     assert!(!conflicting_entries().any(|e| e == "cache"));
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -685,7 +636,6 @@ fn pointer_write_is_atomic_and_leaves_no_temp_file() {
         "内容应可完整读回"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -715,7 +665,6 @@ fn failed_move_leaves_nothing_behind_so_retry_actually_retries() {
         "payload"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -741,8 +690,6 @@ fn migrate_retries_entry_that_failed_before_instead_of_skipping() {
     );
     assert!(to.join("config.json").exists());
 
-    let _ = std::fs::remove_dir_all(&from);
-    let _ = std::fs::remove_dir_all(&to);
 }
 
 #[test]
@@ -759,7 +706,6 @@ fn move_entry_cleans_stale_staging_before_retry() {
     assert!(!dst.join("old.txt").exists(), "旧残片不得混入目标");
     assert!(!staging_path(&dst).exists(), "暂存应已改名，不留残片");
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 启动准备（解析 + 迁移） ──
@@ -776,8 +722,6 @@ fn prepare_startup_uses_default_dir_when_no_pointer() {
     assert_eq!(plan.source, DataDirSource::Default);
     assert!(outcome.is_noop(), "没有旧数据时不该有迁移动作");
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -801,8 +745,6 @@ fn prepare_startup_migrates_legacy_into_empty_default_dir() {
         "成功后应置位一次性标记"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -832,8 +774,6 @@ fn prepare_startup_migrates_even_when_default_dir_has_webview_profile() {
     // WebView 自己的文件不受影响
     assert!(default_dir.join("EBWebView/Default/Cache/index").exists());
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -861,8 +801,6 @@ fn prepare_startup_does_not_migrate_twice() {
         "删掉的工作区不得被搬回来（一次性标记的核心作用）"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 // 注：**「迁移失败时不置位标记」无法用单测确定性构造** —— 需要真实的 I/O 失败
@@ -892,8 +830,6 @@ fn prepare_startup_skips_legacy_entries_that_already_exist_at_target() {
     assert!(default_dir.join("workspaces/HOJ-1012-1000/main.cpp").exists());
     assert_eq!(read_pointer(&default_dir).legacy_migrated, Some(true));
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -936,9 +872,6 @@ fn prepare_startup_does_not_migrate_legacy_when_custom_dir_is_set() {
     assert_eq!(plan.source, DataDirSource::Custom);
     assert!(outcome.is_noop(), "自定义目录 + 无待迁移标记 → 不迁移: {:?}", outcome);
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&custom);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -971,9 +904,6 @@ fn prepare_startup_honours_pending_migration_and_clears_flag() {
     let (_, second) = prepare_startup(&default_dir, &source);
     assert!(second.is_noop(), "第二次启动不该重复搬运: {:?}", second);
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&source);
-    let _ = std::fs::remove_dir_all(&target);
 }
 
 #[test]
@@ -1003,9 +933,6 @@ fn prepare_startup_falls_back_and_still_migrates_when_custom_dir_unusable() {
         "迁移成功 → 清除待迁移标记"
     );
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&source);
-    let _ = std::fs::remove_dir_all(&holder);
 }
 
 #[test]
@@ -1022,8 +949,6 @@ fn resolve_falls_back_to_legacy_when_default_dir_unusable() {
     assert_eq!(plan.base_dir, legacy);
     assert_eq!(plan.default_dir, unusable_default, "仍要报告默认目录（供界面展示）");
 
-    let _ = std::fs::remove_dir_all(&blocker);
-    let _ = std::fs::remove_dir_all(&legacy);
 }
 
 #[test]
@@ -1044,7 +969,4 @@ fn resolve_falls_back_to_default_when_custom_dir_unusable() {
     assert_eq!(plan.source, DataDirSource::Default, "指定目录不可用 → 退回默认");
     assert_eq!(plan.base_dir, default_dir);
 
-    let _ = std::fs::remove_dir_all(&default_dir);
-    let _ = std::fs::remove_dir_all(&legacy);
-    let _ = std::fs::remove_dir_all(&blocker);
 }

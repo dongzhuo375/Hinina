@@ -29,20 +29,6 @@ pub async fn get_problem(
         .await
 }
 
-/// 获取比赛下所有题目列表。
-///
-/// 前端 invoke 签名: `list_problems`({ contestId })
-///
-/// 返回题目摘要列表（不含完整题面描述）。获取详情请用 `get_problem`。
-#[tauri::command]
-pub async fn list_problems(
-    ctx: State<'_, AppContext>,
-    contest_id: String,
-) -> AppResult<Vec<Problem>> {
-    info!(contest_id = %contest_id, "Command: 获取题目列表");
-    ctx.problem.list_problems(&contest_id).await
-}
-
 /// 批量获取当前用户对指定题目的提交状态。
 ///
 /// 前端 invoke 签名: `get_user_problem_status`({ contestId, problemIds })

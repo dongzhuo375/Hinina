@@ -16,7 +16,7 @@ Hydro 响应 DTO 与全部归一化纯函数。**不含任何网络调用**，�
 - `extract_sid(&HeaderMap) -> Option<String>` — 从 `Set-Cookie: sid=<32 位>` 提取会话 ID。登录响应体里**没有** token，这是唯一的取 sid 途径；取第一段 `name=value`，忽略 `Expires`/`Path`/`SameSite` 属性段
 
 ### 时间
-- `parse_time(raw) -> i64` — Hydro 的 ISO 时间串 → UTC 秒。支持 `2026-01-01T01:00:00.000Z` / 空格分隔 / `±HH:MM` 时区偏移；无法解析返回 0（绝不 panic —— 时间解析失败不该让整场比赛数据加载失败）。纯 std 实现（`MONTH_DAYS` 累计 + 闰年修正），不引入时间库
+- `parse_time(raw) -> i64` — 已**上提到 `adapter::time`**（与 HOJ 共用同一份实现），本模块只做再导出以保持调用点与既有测试路径不变；实现细节与失败/偏移告警策略见 `adapter/time.md`
 - `objectid_seconds(id) -> Option<i64>` — 从记录的 `_id`（时间型 ObjectId）反推**提交时刻**。Hydro 的记录投影只有 `judgeAt`（评测完成时刻）而没有提交时间，ObjectId 前 4 字节即创建时刻（Hydro 自身也依赖该性质：跨域查询用 `Time.getObjectID(now - 10周)` 做时间过滤）。判定严格：必须 24 位十六进制且折算结果落在 [2010, 2100)，否则 `None`
 - `parse_duration_seconds("1:23:45") -> Option<i64>` — 反解 `formatSeconds` 的输出（榜单单元格只给格式化文本，而 `RankCell` 需要秒数）
 
@@ -65,7 +65,7 @@ Hydro 响应 DTO 与全部归一化纯函数。**不含任何网络调用**，�
 `tests/types_tests.rs`（夹具在 `tests/fixtures/`，按文档手工构造）：
 - `strip_nulls` 递归与 falsy 保留、`preview` 按字符截断
 - 错误包络 → `Auth`、非包络不误判、登录重定向只认 `/login`、`set-cookie` 解析（含 `xsid` 干扰与缺失头）
-- `parse_time`（毫秒/`Z`/空格/时区偏移/闰日/空串）、`objectid_seconds`（越界与非 ObjectId 一律拒绝）、`parse_duration_seconds`
+- `parse_time`（再导出，用例锁定毫秒/`Z`/空格/时区偏移/闰日/空串）、`objectid_seconds`（越界与非 ObjectId 一律拒绝）、`parse_duration_seconds`
 - `map_status` 全码表（含 `22 → Pending`）、`is_terminal_status` 穷尽、`hoj_status_to_hydro` 映射与拒绝
 - 语言表**双射**校验（展示名唯一，往返恒等）、未知 key 透传、前端可识别的展示名、`display_letter` 边界
 - `coerce_*`、`strip_html`（**保留换行结构**）、`pending_count`（必须锚定 `color:orange`）、`problem_status_code`

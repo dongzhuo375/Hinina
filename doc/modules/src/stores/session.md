@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `clearDomainState` | `() => void` | 重置 contest / problem / submission / rank / announcement / workspace 六个 store；重置工作区前先取消其防抖同步定时器，重置榜单/公告前先停止各自的实时刷新轮询 |
-| `resetSessionForOjSwitch` | `() => void` | OJ 切换的会话上下文重置（调用点：SettingsView 切换成功后）。= `clearDomainState()` + **匿名简报复位**（brief/briefBaseUrl/briefError 清空、briefState 置 idle —— 简报属旧 OJ，且 LoginView 的 canEnter 侦听器会按简报时间窗计算阶段，陈旧值会在新 OJ 有会话时立即自动推进赛场）+ 认证态清零（`user = null` / `error = null` / **`sessionResolved = false`**，下次导航由路由守卫 `checkSession` 按新 OJ 的 `sessions/{id}.json` 自动恢复会话）+ `authService.clearStoredUser()`。**刻意不调用 `authStore.logout()`**：Registry 已切到新 OJ，后端 logout 会拿新 OJ 的无凭证会话打它的登出端点、并误删新 OJ 自己的会话文件；各 OJ 会话文件按 id 隔离，**旧 OJ 登录态保留**（切回免登录） |
+| `resetSessionForOjSwitch` | `() => void` | OJ 切换的会话上下文重置（调用点：SettingsView 切换成功后）。= `clearDomainState()` + **匿名简报复位**（brief/briefBaseUrl/briefError 清空、briefState 置 idle —— 简报属旧 OJ，且 LoginView 的 canEnter 侦听器会按简报时间窗计算阶段，陈旧值会在新 OJ 有会话时立即自动推进赛场）+ 认证态清零（`user = null` / `error = null` / **`sessionResolved = false`**，下次导航由路由守卫 `checkSession` 按新 OJ 的 `sessions/{id}.json` 自动恢复会话）。**刻意不调用 `authStore.logout()`**：Registry 已切到新 OJ，后端 logout 会拿新 OJ 的无凭证会话打它的登出端点、并误删新 OJ 自己的会话文件；各 OJ 会话文件按 id 隔离，**旧 OJ 登录态保留**（切回免登录） |
 
 ## 直接依赖
 
@@ -52,7 +52,6 @@ SettingsView.onSwitchOj()（切换成功分支）
                                              // 简报属旧 OJ，登录页挂载时按新 OJ
                                              // 重拉（canEnter 决策不再被旧时间窗驱动）
       → authStore: user/error 清零 + sessionResolved = false
-      → authService.clearStoredUser()        // localStorage 旧 OJ 用户缓存
   → router.replace({ name: 'Login' })        // 守卫据此 checkSession：新 OJ 有
                                              // 会话则无感续用，否则落在登录表单
                                              // 注意：切换即离开 = 放弃设置页所有

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import type { Workspace } from '@/types/workspace'
 import { workspaceService } from '@/services/workspace.service'
 import { configService } from '@/services/config.service'
-import { normalizeHojLanguage, SOURCE_FILE_EXTENSIONS, sourceFileNameOf } from '@/utils/language'
+import { normalizeHojLanguage, SOURCE_FILE_EXTENSIONS, hojLanguageOfFileName, sourceFileNameOf } from '@/utils/language'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('workspaceStore')
@@ -62,19 +62,39 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.workspace = await workspaceService.loadWorkspace(contestId, problemId)
       // 工作区元数据可能残留历史 Monaco id（'cpp'），统一归一为 HOJ 显示名；
       // 未记录语言时用配置的默认语言，兜底 "C++"
-      this.language = this.workspace.language
+      const metaLanguage = this.workspace.language
         ? normalizeHojLanguage(this.workspace.language)
         : await configService.getDefaultLanguage()
-      this.isDirty = this.workspace.isDirty
-      // 查找代码文件：优先取当前语言派生的文件名，其次按已知代码后缀探测
-      //（兼容历史工作区中已存在的任意命名；后缀清单覆盖 HOJ 常见语言）
+
+      // 当前代码文件以 `activeFile` 为**权威源**（后端已持久化到 workspace.json）。
+      // 回退链只服务于历史工作区（meta 无该字段）：当前语言派生名 → 已知代码后缀探测。
+      //
+      // 为什么不只按语言派生：语言切换后旧文件仍留在 `files` 里，而 `files` 来自
+      // Rust HashMap 的序列化、**键序不稳定** —— 靠「探测第一个匹配后缀」可能加载出
+      // 「旧语言代码 + 新语言元数据」的组合（提交即 CE，高亮也不符）。
       const codeKeys = Object.keys(this.workspace.files)
-      const derivedName = sourceFileNameOf(this.language)
-      const codeFile =
+      const recorded = this.workspace.activeFile
+      const derivedName = sourceFileNameOf(metaLanguage)
+      const activeFile =
+        (recorded && codeKeys.includes(recorded) ? recorded : undefined) ??
         (codeKeys.includes(derivedName) ? derivedName : undefined) ??
-        codeKeys.find((k) => CODE_FILE_EXTENSIONS.some((ext) => k.endsWith(ext)))
-      this.code = codeFile ? this.workspace.files[codeFile] : ''
-      this.activeFile = codeFile ?? derivedName
+        codeKeys.find((k) => CODE_FILE_EXTENSIONS.some((ext) => k.endsWith(ext))) ??
+        derivedName
+
+      this.activeFile = activeFile
+      this.code = this.workspace.files[activeFile] ?? ''
+
+      // 语言与代码文件扩展名矛盾时**以文件为准**：判题端按后缀判定语言与 limits
+      // 倍率，元数据说 Java 而文件是 main.cpp 时按 Java 提交必然 CE。
+      const implied = hojLanguageOfFileName(activeFile)
+      this.language = implied ?? metaLanguage
+      if (implied && normalizeHojLanguage(metaLanguage) !== implied) {
+        log.warn(
+          `工作区语言元数据（${metaLanguage}）与代码文件（${activeFile}）不一致，已以文件为准`,
+        )
+      }
+
+      this.isDirty = this.workspace.isDirty
       this.syncPending = false
     },
 
@@ -127,8 +147,10 @@ export const useWorkspaceStore = defineStore('workspace', {
       }
       if (!this.syncPending) return true
 
-      // 文件名后缀必须与语言严格一致：判题端按后缀判定语言与 limits 倍率
-      const fileName = sourceFileNameOf(this.language)
+      // 文件名以 `activeFile` 为权威源：写入必须落到「代码加载自的那个文件」，
+      // 不能每次重新按语言派生 —— 那会让读写锚定到不同文件（P62）。
+      // 回退仅用于 activeFile 尚未建立的极早时刻。
+      const fileName = this.activeFile ?? sourceFileNameOf(this.language)
       const content = this.code
       try {
         await workspaceService.updateWorkspaceFile(fileName, content)
@@ -173,8 +195,13 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 持久化失败只记录日志、不回滚本地选择：阻断切换比丢失持久化更影响比赛。
      *
      * 语言本身由后端**立即落盘**，因此不计入「未落盘的代码改动」（不置 isDirty）。
-     * 派生文件名随之变化时（如 C++ → Java），把当前代码同步到新文件名，避免代码
-     * 滞留在旧扩展名的文件里（判题端按后缀判语言）。
+     * 派生文件名随之变化时（如 C++ → Java），把 `activeFile` 切到新文件名并把当前
+     * 代码推送过去（后端 `update_file` 会一并把它记为当前文件并持久化）——
+     * 判题端按后缀判语言，代码必须落在与语言一致的扩展名上。
+     *
+     * **已知遗留（P62 未闭合部分）**：旧扩展名的文件不会被删除，工作区里会短暂
+     * 并存两个代码文件；清理旧文件需要「按文件删除」能力与「旧文件非空时提示选手
+     * 确认」的交互，属独立改造，不在本轮。
      */
     changeLanguage(lang: string) {
       if (this.language === lang) return
@@ -184,7 +211,10 @@ export const useWorkspaceStore = defineStore('workspace', {
         log.error('语言持久化失败（切题或重启后可能退回默认语言）:', e)
       })
 
-      if (sourceFileNameOf(lang) !== previousFile) {
+      const nextFile = sourceFileNameOf(lang)
+      if (nextFile !== previousFile) {
+        // 权威源先跟上，再推送 —— 否则 flush 会把代码写回旧文件名
+        this.activeFile = nextFile
         this.syncPending = true
         void this.flushPendingSync()
       }

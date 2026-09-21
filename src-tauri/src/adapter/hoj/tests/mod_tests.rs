@@ -76,7 +76,41 @@ fn parse_time_empty() {
 
 #[test]
 fn parse_time_too_short() {
+    // 残缺到「年-月-日」都不全的输入按无法解析处理（返回 0 + warn）。
+    // 注意：非零填充的完整日期（`2024-1-1 8:00:00`）现在能正确解析 ——
+    // 旧实现按固定字节取位，长度不足 19 一律归 0，这正是 P30 的问题。
     assert_eq!(HOJAdapter::parse_time("2024"), 0);
+}
+
+/// HOJ 实测格式的时间串（夹具 `contest_list_anon.json` 原样串）。
+///
+/// 旧实现按固定 19 字符取位，恰好把 `.000+0000` 截断忽略：UTC 部署下「碰巧
+/// 正确」，一旦目标部署按本地时间序列化就会整体偏移 8 小时且静默无告警。
+/// 这里锁定「带偏移后缀的串与显式 UTC 写法等价」，且非零偏移必须真的被换算。
+#[test]
+fn parse_time_handles_real_fixture_offset_suffix() {
+    assert_eq!(
+        HOJAdapter::parse_time("2026-09-21T16:00:00.000+0000"),
+        HOJAdapter::parse_time("2026-09-21T16:00:00Z")
+    );
+    assert_eq!(
+        HOJAdapter::parse_time("2026-09-21T16:00:00.000+0800"),
+        HOJAdapter::parse_time("2026-09-21T08:00:00Z")
+    );
+    assert_ne!(
+        HOJAdapter::parse_time("2026-09-21T16:00:00.000+0800"),
+        HOJAdapter::parse_time("2026-09-21T16:00:00Z"),
+        "非零偏移必须真的参与换算（旧实现会得到与 UTC 相同的值）"
+    );
+}
+
+/// 非零填充的日期/时刻也能解析（P30 点名的 `2024-1-1 8:00:00`）。
+#[test]
+fn parse_time_accepts_non_padded_fields() {
+    assert_eq!(
+        HOJAdapter::parse_time("2024-1-1 8:00:00"),
+        HOJAdapter::parse_time("2024-01-01T08:00:00")
+    );
 }
 
 // ── parse_samples ──

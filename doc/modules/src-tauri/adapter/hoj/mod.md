@@ -9,7 +9,7 @@ HOJ 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、
 - `HOJAdapter::new(http, base_url, event_bus)` — 构造；`base_url` 自动去尾斜杠
 - `api_url(path)` — 拼接完整 API URL
 - `parse_cid(contest_id) -> AppResult<i64>` — 比赛 ID 解析（HOJ 的 cid 是数字，Hinina 内部统一用字符串传递）。**非法 ID 必须报错而不是回退 0**：HOJ 以 `cid = 0` 表示「非比赛场景」，静默回退会让比赛中的提交落到练习题库——不计入榜单，选手在赛场上无从察觉。`get_contest_rank` / `get_user_problem_status` / `submit` 共用
-- `parse_time(s)` — ISO 时间 → Unix 秒级时间戳（纯 std）
+- `parse_time(s)` — 已**上提到 `adapter::time`**（与 Hydro 共用同一份实现，见 `adapter/time.md`）。此前这里按固定 19 字符取位，把实测格式 `2026-09-21T16:00:00.000+0000` 的偏移后缀截断忽略 —— UTC 部署下碰巧正确，非 UTC 部署会整体偏移且静默（P64 / P30）
 - `parse_samples(html)` — HTML `<input>/<output>` 样例 → `Vec<Sample>`（成对匹配）
 - `extract_tag_contents(html, tag)` / `unescape_html(s)` — HTML 标签提取与实体反转义
 - `extract_refreshed_token(headers)` — HOJ 私有协议：响应头存在 `refresh-token` 时提取新 `authorization` 头作为轮换 token
@@ -35,7 +35,7 @@ HOJ 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、
 - `AuthProvider::validate_session()` — HOJ 无专门的 session 校验接口，改用需认证的 `GET /api/get-user-auth-info` 间接验证。本地无 token 时**不发请求**直接 `Ok(false)`（本地即可判定失效，不是网络问题）；否则 `Self::session_validity_from_response(self.get_json_authed(&url).await)`。**必须走 `get_json_authed` 而不是 raw `http.client()`**：只有前者才提供去 null 解析、体内鉴权失败识别（`auth_failure_from_body`）、token 轮换处理与 5xx 退避重试；直连 raw client 时既不解析响应体（拿不到体内 401/403）、也不处理轮换头，且会把网络异常与「服务端判定失效」混为一谈
 - `ContestProvider::get_contest_rank(contest_id, query)` — `POST /api/get-contest-rank`：组装 `ContestRankDTO`（`current_page.max(1)`、`limit.clamp(1, 200)` 防御性收敛、`force_refresh` 恒 false、空白 keyword 过滤为 None、`concerned_list` 空、`external_cid_list` None），响应经 `ContestRankVO::into_rank_row` 归一为 `ContestRankPage`；records 的前置副本去重交由前端处理
 - `ContestProvider::list_announcements(contest_id, current_page, limit)` — `GET /api/get-contest-announcement?cid=&limit=&currentPage=`（分页参数 `.max(1)` 收敛），响应 `PageResult<AnnouncementVO>` 逐条经 `into_announcement` 归一为 `AnnouncementPage`。**不做缓存**：公告可能含裁判组临场规则变更
-- `ProblemProvider::get_problem(contest_id, problem_id)` — `GET /api/get-contest-problem-details?cid=&displayId=`：响应 `ProblemInfoVO` 经 `into_problem` 映射为 `Problem`，携带服务端返回的 `languages` 允许语言列表（缺失/null 落空列表）；`list_problems` 走列表接口，不含语言列表（`languages` 为空）
+- `ProblemProvider::get_problem(contest_id, problem_id)` — `GET /api/get-contest-problem-details?cid=&displayId=`：响应 `ProblemInfoVO` 经 `into_problem` 映射为 `Problem`，携带服务端返回的 `languages` 允许语言列表（缺失/null 落空列表）
 - `ProblemProvider::get_user_problem_status(contest_id, problem_ids)` — `POST /api/get-user-problem-status`：空列表直接返回空 map（不发无意义请求）；请求体带 **`isContestProblemList = true`**（`false` 时服务端只统计「非比赛提交」，比赛内的提交一律不计 —— 实测 1012：`false → {"1000":{"status":-10}}` 显示未提交，`true → {"1000":{"status":0}}` 已 AC）；响应为 `HashMap<pid, serde_json::Value>`，逐项经 `types::extract_problem_status_code` 取原始码后 `types::normalize_problem_status` 归一为 `0/1/2`
 - `SubmissionProvider::submit(contest_id, problem_id, display_id, language, source_code)` — `POST /api/submit-problem-judge`：`require_token()` 前置断言（给「请先登录」而不是等服务端 401）；请求体 `SubmitRequest { pid, language, code, cid, tid: None, gid: None, isRemote: false }`，其中 **`pid` 取 `display_id`（比赛内展示题号，如 `"A"`）**，缺失时才退回 `problem_id` —— 服务端拿它查 `contest_problem.display_id`，查不到会 `contestProblem.getId()` NPE 返回 HTTP 500（实测传数字 pid 必 500）。响应 `JudgeVO` 的 `submitId` 转字符串返回
 - `SubmissionProvider::list_contest_submissions(query)` — `GET /api/contest-submissions`：固定携带 `beforeContestSubmit=false`（**必传**：赛前提交不计入榜单，混入会误导选手）与 `completeProblemID=true`（让 `displayPid` 返回完整展示 ID）；`onlyMine` 取自 query（Command 层强制 true）；`problemID`（题目展示 ID）与 `status`（HOJ 状态码）为可选筛选，None/空串时不出现在查询串里。响应 `PageResult<JudgeVO>` 逐条经 `into_submission_record` 归一为 `SubmissionPage`
@@ -92,7 +92,7 @@ HOJ 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、
 `AuthService::validate_session` 据此把 `Ok(true)`→`Valid`、`Ok(false)`→清会话 + `SessionExpired` + `Invalid`、`Err(_)`→`Unknown` 并**保留**本地会话。
 
 ## 测试
-`src-tauri/src/adapter/hoj/tests/mod_tests.rs` 锁定：`parse_time` 的 ISO/空格分隔格式、闰年与非法输入（空串/过短返回 0）、`parse_samples` 的成对匹配/HTML 实体/`<br>` 换行/仅 input 无 output 容错、`parse_cid` 接受数字 ID 且**非法 ID 报错而非回退 0**、`parse_hoj_json` 的去 null 与两类解析失败均归 `Serialization`（含 URL 与响应体前缀）、`auth_failure_from_body` 的 401 恒判/403 保守判/业务性 403 不误判/成功与其它状态码放行、`preview` 按字符截断且去首尾空白。
+`src-tauri/src/adapter/hoj/tests/mod_tests.rs` 锁定：`parse_time` 委托给共用实现后的行为（真实夹具串 `...16:00:00.000+0000` 与显式 UTC 等价、**非零偏移必须真的换算**、非零填充可解析、空串/残缺日期返回 0）、`parse_samples` 的成对匹配/HTML 实体/`<br>` 换行/仅 input 无 output 容错、`parse_cid` 接受数字 ID 且**非法 ID 报错而非回退 0**、`parse_hoj_json` 的去 null 与两类解析失败均归 `Serialization`（含 URL 与响应体前缀）、`auth_failure_from_body` 的 401 恒判/403 保守判/业务性 403 不误判/成功与其它状态码放行、`preview` 按字符截断且去首尾空白。
 
 **会话三态判据**（`session_validity_from_response`，5 项 `validity_*` 测试）：`validity_success_is_valid`（体内 200 → `Ok(true)`）、`validity_auth_error_is_definitively_invalid`（HTTP 401 与体内 403「请您先登录！」**两条 `Auth` 来源都**→ `Ok(false)`）、`validity_network_error_propagates_as_unknown_not_invalid`（回归项：网络异常必须上抛且**变体保留为 `Network`**、消息带「HOJ 会话校验」环节名，此前 `Err(_) => Ok(false)` 会让 `SessionValidity::Unknown` 分支对 HOJ 成为死代码）、`validity_serialization_error_propagates_not_invalid`（DTO 与服务端不匹配不代表 token 失效）、`validity_non_success_body_status_is_unknown`（体内 400/500 → `Unknown` 变体）。
 

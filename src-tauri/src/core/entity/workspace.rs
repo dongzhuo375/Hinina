@@ -29,6 +29,17 @@ pub struct Workspace {
     pub root_path: String,
     /// 各文件名 → 文件内容
     pub files: std::collections::HashMap<String, String>,
+    /// **当前代码文件名（权威源）**。
+    ///
+    /// 为什么不从 `language` 派生：语言切换后旧文件仍留在工作区里，靠「按语言派生
+    /// 文件名 + 按扩展名探测」加载会受 `files`（HashMap）键序影响，可能加载出
+    /// 「旧语言的代码 + 新语言元数据」的组合 —— 提交即 CE，且 Monaco 高亮与实际
+    /// 文件不符（见 doc/problem.md P62）。以本字段为准后，加载与写入锚定同一个
+    /// 文件，`language` 只描述它的语言。
+    ///
+    /// `None` = 尚无代码文件（新工作区）或历史工作区未记录（`serde(default)`）。
+    #[serde(default)]
+    pub active_file: Option<String>,
     pub language: String,
     pub is_dirty: bool,
     /// 创建时间（UTC 毫秒级时间戳）
@@ -49,6 +60,7 @@ impl Workspace {
             problem_id,
             root_path,
             files: std::collections::HashMap::new(),
+            active_file: None,
             language: String::new(),
             is_dirty: false,
             created_at: now,

@@ -22,7 +22,8 @@
 
 - `bridge/index.ts`（`ipc` —— IPC 失败单点日志）
 - `services/auth.service.ts`、`services/config.service.ts`
-- `stores/authStore.ts` / `announcementStore.ts` / `problemStore.ts` / `submissionStore.ts` / `workspaceStore.ts` / `sessionGuard.ts`
+- `stores/authStore.ts` / `announcementStore.ts` / `problemStore.ts` / `submissionStore.ts` / `workspaceStore.ts`
+- `guards/sessionGuard.ts`
 - `views/ProblemSolveView.vue` / `SubmissionDetailView.vue`
 - `components/editor/CodeEditor.vue` / `EditorConsoleBar.vue`
 - `components/problem/ProblemStatement.vue` / `QuickSubmitDialog.vue`

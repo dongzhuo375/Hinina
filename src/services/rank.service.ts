@@ -1,7 +1,13 @@
 import type { ContestRankPage, RankQuery } from '@/types/rank'
 import * as rankBridge from '@/bridge/rank.bridge'
 
-/// 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）
+/// 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）。
+///
+/// **这是该默认值的唯一取值点**：`RankService.getRank` 每次调用都显式传 `limit`，
+/// 后端 `DEFAULT_RANK_LIMIT` 与 `RankQuery::default()` 只是「绕过前端直接调命令」
+/// 时的防御值。改动须同步那两处与两侧锁定用例
+/// （`src-tauri/src/commands/contest_cmd.rs` 的
+/// `rank_default_page_size_matches_frontend_contract`、本目录 spec）。
 export const DEFAULT_RANK_PAGE_SIZE = 50
 
 /**

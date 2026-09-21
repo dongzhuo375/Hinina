@@ -50,6 +50,12 @@ pub struct WorkspaceManager {
     revision: Arc<AtomicU64>,
     /// 自动保存的 JoinHandle
     auto_save_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// 当前 auto-save 的间隔（秒）；`None` = 未运行。
+    ///
+    /// 单独记一份状态是为了让「按配置同步」成为**幂等**操作：调用方据此判断
+    /// 「要不要重启」，避免每次 `load_workspace` 都重置计时器，也避免「关掉再打开」
+    /// 时无状态可依（旧实现用 `static AtomicBool` 做一次性懒启动，关掉后再也起不来）。
+    auto_save_interval_secs: Mutex<Option<u64>>,
 }
 
 /// 工作区元数据，持久化在 workspace.json 中，避免从 workspace_id 字符串解析字段。
@@ -58,6 +64,11 @@ struct WorkspaceMeta {
     contest_id: String,
     problem_id: String,
     root_path: String,
+    /// 当前代码文件名（权威源，见 `Workspace::active_file`）。
+    /// `#[serde(default)]`：历史 workspace.json 没有该字段，反序列化为 `None`，
+    /// 由加载路径回退到「按语言派生 + 扩展名探测」的老启发式。
+    #[serde(default)]
+    active_file: Option<String>,
     language: String,
     created_at: i64,
     updated_at: i64,
@@ -90,6 +101,7 @@ impl WorkspaceManager {
             current: Arc::new(RwLock::new(None)),
             revision: Arc::new(AtomicU64::new(0)),
             auto_save_handle: Mutex::new(None),
+            auto_save_interval_secs: Mutex::new(None),
         }
     }
 
@@ -191,6 +203,7 @@ impl WorkspaceManager {
             problem_id: meta.problem_id,
             root_path: meta.root_path,
             files,
+            active_file: meta.active_file,
             language: meta.language,
             is_dirty: false,
             created_at: meta.created_at,
@@ -299,6 +312,7 @@ impl WorkspaceManager {
             contest_id: ws.contest_id.clone(),
             problem_id: ws.problem_id.clone(),
             root_path: ws.root_path.clone(),
+            active_file: ws.active_file.clone(),
             language: ws.language.clone(),
             created_at: ws.created_at,
             updated_at: ws.updated_at,
@@ -325,6 +339,11 @@ impl WorkspaceManager {
     ///
     /// 如果已有自动保存任务运行，则先停止旧的再启动。
     ///
+    /// **「停旧的 → 起新的 → 登记句柄」必须在一把锁内完成**：三者分三次取锁时，
+    /// 并发的两个调用会各自停掉「当时存在的」任务、各自 spawn，随后**后登记者的
+    /// 句柄覆盖先登记者** —— 先起的循环就此成为无人可停的孤儿任务，`stop_auto_save`
+    /// 之后仍在按自己的节拍写盘（表现为「关了自动保存却还在保存」）。
+    ///
     /// 循环语义（配合 `update_file` 只写内存）：
     /// - 脏才写，且**取快照与写盘整体在读锁内完成**（与 `save()` / `update_file`
     ///   的写锁互斥）：只锁住「取快照」会让写盘期间到来的 `save()` 插进本次写盘与
@@ -336,7 +355,12 @@ impl WorkspaceManager {
     /// - 仅当快照之后没有新改动（修订号未变）才 `mark_clean` 并发布
     ///   `WorkspaceEvent::AutoSaveTriggered`；有新改动时保留脏标记，下轮重写。
     pub fn start_auto_save(&self, interval_secs: u64) {
-        self.stop_auto_save();
+        // 锁序固定为 handle → interval（`stop_auto_save` 同序），无死锁面。
+        // 持锁期间只做「abort + spawn + 登记」：spawn 不阻塞，且循环体不取这把锁。
+        let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(previous) = handle.take() {
+            previous.abort();
+        }
 
         // auto-save 通过 Arc 共享 current 与修订号，安全且 Send。
         let repo = Arc::clone(&self.repo);
@@ -429,8 +453,12 @@ impl WorkspaceManager {
             }
         });
 
-        let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
+        // 复用开头那把锁的 guard：`std::sync::Mutex` 不可重入，再次 lock 会自锁。
         *handle = Some(task);
+        *self
+            .auto_save_interval_secs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(interval_secs);
 
         debug!(interval_secs = interval_secs, "自动保存已启动");
     }
@@ -442,6 +470,23 @@ impl WorkspaceManager {
             task.abort();
             debug!("自动保存已停止");
         }
+        *self
+            .auto_save_interval_secs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// 当前 auto-save 的间隔（秒）；`None` = 未运行。
+    ///
+    /// 供命令层「按配置同步 auto-save」判断是否需要重启：间隔相同则保持不动，
+    /// 免得每次 `load_workspace` 都重置计时器；配置关掉后也有状态可依，
+    /// 再打开时能重新启动（旧实现用一次性 `static AtomicBool`，关掉后再也起不来）。
+    #[must_use]
+    pub fn auto_save_interval_secs(&self) -> Option<u64> {
+        *self
+            .auto_save_interval_secs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// 切换工作区：保存当前 → 加载目标。
@@ -512,8 +557,11 @@ impl WorkspaceManager {
             .as_mut()
             .ok_or_else(|| AppError::Workspace("无当前工作区".into()))?;
 
-        // 更新内存中的文件 + 标记 dirty
+        // 更新内存中的文件 + 标记 dirty。
+        // 同时把该文件记为**当前代码文件**：写入路径的权威源由它承担，
+        // 调用方不必再按语言派生文件名（派生会让语言切换后的写入落到别的文件上）。
         ws.files.insert(file_name.to_string(), content.to_string());
+        ws.active_file = Some(file_name.to_string());
         ws.mark_dirty();
         self.revision.fetch_add(1, Ordering::SeqCst);
 

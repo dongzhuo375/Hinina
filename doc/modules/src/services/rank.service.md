@@ -10,11 +10,11 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `DEFAULT_RANK_PAGE_SIZE` | `50` | 默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢） |
+| `DEFAULT_RANK_PAGE_SIZE` | `50` | 默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）。**这是该默认值的唯一取值点**：后端 `DEFAULT_RANK_LIMIT` 与 `RankQuery::default()` 只是「绕过前端直接调命令」时的防御值，三处必须同值（P71），改动须同步两侧锁定用例 |
 | `RankService.getRank` | `(query: Partial<RankQuery> & { contestId: string }) => Promise<ContestRankPage>` | 获取一页榜单；除 contestId 外均可省略 |
 | `rankService` | 单例 | 全局唯一实例 |
 
-默认值补全：`currentPage ?? 1`、`limit ?? 50`、`keyword ?? null`、`removeStar ?? false`、`containsEnd ?? false`（`containsEnd` 仅在比赛 `allowEndSubmit=true` 时才真正生效，HOJ §9.5）。
+默认值补全：`currentPage ?? 1`、`limit ?? DEFAULT_RANK_PAGE_SIZE`、`keyword ?? null`、`removeStar ?? false`、`containsEnd ?? false`（`containsEnd` 仅在比赛 `allowEndSubmit=true` 时才真正生效，HOJ §9.5）。
 
 ## 直接依赖
 

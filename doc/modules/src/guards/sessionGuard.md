@@ -1,10 +1,19 @@
 # sessionGuard（全局会话守卫）
 
-> 源文件：`src/stores/sessionGuard.ts`
+> 源文件：`src/guards/sessionGuard.ts`
 
 ## 职责
 
 把"认证类 IPC 失败"统一解释为会话失效：清理本地会话并回到登录页，避免用户停留在受保护页面反复重试失败。
+
+## 落位说明（为什么在 `guards/`）
+
+它既需要 `router`（View 层关注点）又需要 `authStore`，属**跨层装配**而非领域服务：
+
+- 放进 `services/` 会造成 Service → Store 的反向依赖（其余 service 只依赖 bridge）；
+- 放进 `stores/` 名不符实 —— 没有 `defineStore`，也不是状态容器。
+
+与 `router/`、`utils/` 同属「不在 View → Store → Service → Bridge 链上」的横向模块。
 
 ## 核心类型/函数
 
@@ -43,6 +52,7 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
 
 - **依赖倒置**：Bridge 层只回调注入的观察者，不 import store/router；装配关系集中在组合根，
   避免"底层反向依赖上层"的循环依赖（`authStore → stores/session → 各领域 store` 仍为单向）。
+  本文件自身因此落在 `guards/`（跨层装配），而非 `services/`。
 - **只认 `Auth` 变体**：Rust 端登录失败同样映射为 `AppError::Auth`，故额外要求"本地存在会话"
   才判定失效，密码错误不会被误解释为会话被撤销。
 - **重入保护**：`invalidateSession` 内部会再发一次 `logout` IPC，若它也返回认证错误，

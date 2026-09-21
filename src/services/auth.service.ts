@@ -4,32 +4,30 @@ import { createLogger } from '@/utils/logger'
 
 const log = createLogger('authService')
 
-const STORED_USER_KEY = 'hinina_user'
-
 /**
- * 认证服务 — 管理用户登录、登出与本地会话缓存。
+ * 认证服务 — 管理用户登录、登出与会话校验。
+ *
+ * 刻意**不做**前端持久化：用户信息（含 token）的唯一存放处是后端会话文件，
+ * 前端每次经 `checkSession` / `validateSession` 向后端查询。localStorage 可被
+ * 同源任意脚本读取，把含 token 的用户对象缓存进去是纯暴露面 —— 且该缓存
+ * 没有任何生产消费方（只有测试读过它），属于「只写不读」的死代码。
  */
 export class AuthService {
   /**
-   * 登录并持久化用户信息到 localStorage。
+   * 登录，返回后端会话对应的用户。
    */
   async login(username: string, password: string): Promise<User> {
-    const user = await authBridge.login(username, password)
-    localStorage.setItem(STORED_USER_KEY, JSON.stringify(user))
-    return user
+    return authBridge.login(username, password)
   }
 
   /**
-   * 登出并清除本地缓存。
+   * 登出。
    *
-   * 后端登出失败时仍清理本地缓存：本地状态必须与"已登出"的 UI 语义保持一致。
+   * 后端登出失败时异常向上抛出，由调用方（`authStore.logout`）决定 UI 语义；
+   * 服务层不吞错误，也不维护任何需要在此清理的前端副本。
    */
   async logout(): Promise<void> {
-    try {
-      await authBridge.logout()
-    } finally {
-      localStorage.removeItem(STORED_USER_KEY)
-    }
+    await authBridge.logout()
   }
 
   /**
@@ -37,11 +35,7 @@ export class AuthService {
    */
   async checkSession(): Promise<User | null> {
     try {
-      const user = await authBridge.getSession()
-      if (user) {
-        localStorage.setItem(STORED_USER_KEY, JSON.stringify(user))
-      }
-      return user
+      return await authBridge.getSession()
     } catch {
       return null
     }
@@ -60,30 +54,6 @@ export class AuthService {
       log.error('会话校验调用失败，按无法判定处理:', e)
       return 'unknown'
     }
-  }
-
-  /**
-   * 从 localStorage 读取缓存的用户信息。
-   */
-  getStoredUser(): User | null {
-    const raw = localStorage.getItem(STORED_USER_KEY)
-    if (!raw) return null
-    try {
-      return JSON.parse(raw) as User
-    } catch {
-      localStorage.removeItem(STORED_USER_KEY)
-      return null
-    }
-  }
-
-  /**
-   * 清除 localStorage 中的用户缓存（OJ 切换时调用）。
-   *
-   * 缓存里的用户属于**旧 OJ**，不得残留给新 OJ 的会话上下文；新会话由
-   * `checkSession`（后端 `get_session` 读新 OJ 的会话文件）重建并回写。
-   */
-  clearStoredUser(): void {
-    localStorage.removeItem(STORED_USER_KEY)
   }
 }
 

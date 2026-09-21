@@ -5,7 +5,6 @@ import { createPinia, setActivePinia } from 'pinia'
 const { problemService } = vi.hoisted(() => ({
   problemService: {
     getProblem: vi.fn(),
-    listProblems: vi.fn(),
     getProblemLimits: vi.fn(),
     getUserProblemStatus: vi.fn(),
   },

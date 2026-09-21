@@ -2,17 +2,14 @@
 
 use super::*;
 
-use std::path::PathBuf;
+use crate::test_support::TempDir;
 
-/// 临时目录下建一个独立存储根（每个测试一个，避免相互干扰）
-fn temp_storage(tag: &str) -> (Storage, PathBuf) {
-    let dir = std::env::temp_dir().join(format!(
-        "hinina-snapshot-test-{}-{}",
-        tag,
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    (Storage::new(dir.clone()), dir)
+/// 临时目录下建一个独立存储根（每个测试一个，避免相互干扰）。
+///
+/// 返回守卫：目录随 `Drop` 回收，不再依赖每个用例末尾手工 `remove_dir_all`。
+fn temp_storage(tag: &str) -> (Storage, TempDir) {
+    let dir = TempDir::unique(&format!("hinina-snapshot-test-{tag}"));
+    (Storage::new(dir.to_path_buf()), dir)
 }
 
 // ── source_extension ──
@@ -85,7 +82,7 @@ fn snapshot_path_rejects_path_traversal() {
 
 #[test]
 fn write_then_read_roundtrip() {
-    let (storage, dir) = temp_storage("roundtrip");
+    let (storage, _dir) = temp_storage("roundtrip");
     let code = "int main() { return 0; }";
 
     write_snapshot(&storage, "HOJ", "1166", "C++", code);
@@ -93,14 +90,13 @@ fn write_then_read_roundtrip() {
     let read = read_snapshot(&storage, "HOJ", "1166", "C++");
     assert_eq!(read.as_deref(), Some(code));
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn read_falls_back_to_scan_when_language_changed() {
     // 提交时是 "C++"，查询时详情返回别的写法（服务端归一 / 选手改语言）：
     // 精确路径落空，但快照就在那儿，必须能扫出来
-    let (storage, dir) = temp_storage("fallback");
+    let (storage, _dir) = temp_storage("fallback");
     let code = "#include <bits/stdc++.h>";
 
     write_snapshot(&storage, "HOJ", "1166", "C++", code);
@@ -108,20 +104,18 @@ fn read_falls_back_to_scan_when_language_changed() {
     let read = read_snapshot(&storage, "HOJ", "1166", "C++ 17");
     assert_eq!(read.as_deref(), Some(code));
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn read_returns_none_when_absent() {
-    let (storage, dir) = temp_storage("absent");
+    let (storage, _dir) = temp_storage("absent");
     assert_eq!(read_snapshot(&storage, "HOJ", "999999", "C++"), None);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn snapshots_of_different_ojs_do_not_collide() {
     // submit_id 是各 OJ 自增的资源号，跨 OJ 必然重号
-    let (storage, dir) = temp_storage("oj-dimension");
+    let (storage, _dir) = temp_storage("oj-dimension");
 
     write_snapshot(&storage, "HOJ", "1", "C++", "hoj code");
     write_snapshot(&storage, "Hydro", "1", "C++", "hydro code");
@@ -135,17 +129,15 @@ fn snapshots_of_different_ojs_do_not_collide() {
         Some("hydro code")
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn write_snapshot_failure_does_not_panic() {
     // best-effort 语义：非法 submit_id 只记录告警，不 panic、不阻断提交
-    let (storage, dir) = temp_storage("best-effort");
+    let (storage, _dir) = temp_storage("best-effort");
     write_snapshot(&storage, "HOJ", "../evil", "C++", "code");
     // 未写出任何文件
     assert!(!storage.exists("submissions"));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 占用统计与过期清理（设置页「清理本地数据」） ──
@@ -187,7 +179,6 @@ fn inspect_snapshots_counts_totals_and_stale() {
     // 统计是只读的：不改变磁盘状态
     assert_eq!(inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS).total_count, 3);
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -216,14 +207,12 @@ fn purge_stale_snapshots_keeps_fresh_and_removes_aged() {
 
     assert_eq!(inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS).total_count, 1);
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn inspect_and_purge_are_safe_without_any_snapshot() {
     // 从未提交过（目录不存在）：统计返回全零、清理是 no-op 而不是报错
-    let (storage, dir) = temp_storage("purge-empty");
+    let (storage, _dir) = temp_storage("purge-empty");
     assert_eq!(inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS), SnapshotUsage::default());
     assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
-    let _ = std::fs::remove_dir_all(&dir);
 }

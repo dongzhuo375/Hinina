@@ -8,6 +8,7 @@ use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::problem::ProblemProvider;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
+use crate::test_support::TempDir;
 
 /// 在当前线程创建独立 tokio runtime，避免嵌套 runtime panic。
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
@@ -24,7 +25,7 @@ struct StubProblemProvider {
     calls: Arc<AtomicUsize>,
     /// 需要失败的 displayId（模拟 403「该比赛题目当前不可访问」）
     failing: Vec<String>,
-    /// 为 true 时 `list_problems` / `get_user_problem_status` 也返回 Auth 错误，
+    /// 为 true 时 `get_user_problem_status` 返回 Auth 错误，
     /// 用于断言 Service 层不改写错误变体（见「错误变体穿透」小节）
     fail_all: bool,
 }
@@ -47,13 +48,6 @@ impl ProblemProvider for StubProblemProvider {
             memory_limit: 256,
             languages: Vec::new(),
         })
-    }
-
-    async fn list_problems(&self, _contest_id: &str) -> AppResult<Vec<Problem>> {
-        if self.fail_all {
-            return Err(AppError::Auth("stub: HTTP 401 Unauthorized".into()));
-        }
-        Ok(Vec::new())
     }
 
     async fn get_user_problem_status(
@@ -108,11 +102,10 @@ fn build_service_with(
 fn make_service(
     test_name: &str,
     failing: Vec<String>,
-) -> (ProblemService, Arc<AtomicUsize>, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("hinina-test-problem-{}", test_name));
-    let _ = std::fs::remove_dir_all(&dir);
+) -> (ProblemService, Arc<AtomicUsize>, TempDir) {
+    let dir = TempDir::named(&format!("hinina-test-problem-{}", test_name));
     let calls = Arc::new(AtomicUsize::new(0));
-    let service = build_service(&dir, Arc::clone(&calls), failing);
+    let service = build_service(dir.path(), Arc::clone(&calls), failing);
     (service, calls, dir)
 }
 
@@ -150,12 +143,11 @@ fn limits_first_call_fetches_all_and_persists_to_disk() {
         "limits 应落盘以便重启后复用（路径含 OJ 维度，跨 OJ 不撞号）"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn limits_second_call_hits_memory_cache() {
-    let (service, calls, dir) = make_service("limits-memory", Vec::new());
+    let (service, calls, _dir) = make_service("limits-memory", Vec::new());
     let query = ids(&["A", "B"]);
 
     block_on(service.load_problem_limits("1", &query)).expect("首次失败");
@@ -164,33 +156,30 @@ fn limits_second_call_hits_memory_cache() {
     block_on(service.load_problem_limits("1", &query)).expect("二次失败");
     assert_eq!(call_count(&calls), 2, "内存缓存命中时不应再发请求");
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn limits_disk_cache_survives_new_service_instance() {
-    let dir = std::env::temp_dir().join("hinina-test-problem-limits-disk");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-problem-limits-disk");
 
     // 第一个实例：拉取并落盘
-    let (first, first_calls, _) = make_service("limits-disk", Vec::new());
+    let (first, first_calls, _dir) = make_service("limits-disk", Vec::new());
     block_on(first.load_problem_limits("1", &ids(&["A", "B"]))).expect("首次失败");
     assert_eq!(call_count(&first_calls), 2);
 
     // 第二个实例复用同一目录：应完全命中磁盘缓存（模拟客户端重启）
     let calls = Arc::new(AtomicUsize::new(0));
-    let second = build_service(&dir, Arc::clone(&calls), Vec::new());
+    let second = build_service(dir.path(), Arc::clone(&calls), Vec::new());
 
     let result = block_on(second.load_problem_limits("1", &ids(&["A", "B"]))).expect("重启后失败");
     assert_eq!(call_count(&calls), 0, "重启后应命中磁盘缓存，零请求");
     assert_eq!(result.len(), 2);
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn limits_partial_failure_returns_successful_subset() {
-    let (service, calls, dir) = make_service("limits-partial", vec!["B".to_string()]);
+    let (service, calls, _dir) = make_service("limits-partial", vec!["B".to_string()]);
 
     let result = block_on(service.load_problem_limits("1", &ids(&["A", "B", "C"])))
         .expect("部分失败不应整体报错");
@@ -202,12 +191,11 @@ fn limits_partial_failure_returns_successful_subset() {
         vec!["A", "C"]
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn limits_all_failed_propagates_error_instead_of_defaults() {
-    let (service, _calls, dir) =
+    let (service, _calls, _dir) =
         make_service("limits-all-fail", vec!["A".to_string(), "B".to_string()]);
 
     let error = block_on(service.load_problem_limits("1", &ids(&["A", "B"])))
@@ -220,18 +208,16 @@ fn limits_all_failed_propagates_error_instead_of_defaults() {
         error
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn limits_corrupted_cache_file_is_refetched() {
-    let dir = std::env::temp_dir().join("hinina-test-problem-limits-corrupt");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-problem-limits-corrupt");
 
     let calls = Arc::new(AtomicUsize::new(0));
     // 先构造 service（其构造会做一次性布局清扫并落地标记），**再**写入损坏条目 ——
     // 反过来的话损坏文件会被布局清扫删掉，用例就退化成「缓存缺失」而非「缓存损坏」
-    let service = build_service(&dir, Arc::clone(&calls), Vec::new());
+    let service = build_service(dir.path(), Arc::clone(&calls), Vec::new());
 
     std::fs::create_dir_all(dir.join("cache").join("problem_limits").join("HOJ"))
         .expect("创建缓存目录失败");
@@ -255,49 +241,45 @@ fn limits_corrupted_cache_file_is_refetched() {
         rewritten
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn limits_empty_input_returns_empty_without_request() {
-    let (service, calls, dir) = make_service("limits-empty", Vec::new());
+    let (service, calls, _dir) = make_service("limits-empty", Vec::new());
 
     let result = block_on(service.load_problem_limits("1", &[])).expect("空入参失败");
     assert!(result.is_empty());
     assert_eq!(call_count(&calls), 0);
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 我的题目状态 ──
 
 #[test]
 fn user_problem_status_empty_input_skips_request() {
-    let (service, _calls, dir) = make_service("status-empty", Vec::new());
+    let (service, _calls, _dir) = make_service("status-empty", Vec::new());
 
     let result = block_on(service.get_user_problem_status("1", &[])).expect("空入参失败");
     assert!(result.is_empty());
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn user_problem_status_maps_by_problem_id() {
-    let (service, _calls, dir) = make_service("status-map", Vec::new());
+    let (service, _calls, _dir) = make_service("status-map", Vec::new());
 
     let result = block_on(service.get_user_problem_status("1", &ids(&["1001", "1002"])))
         .expect("获取状态失败");
     assert_eq!(result.get("1001"), Some(&0));
     assert_eq!(result.get("1002"), Some(&0));
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 题面缓存（内存 + 磁盘，受 oj.cacheProblemStatement 开关控制）──
 
 #[test]
 fn statement_cache_hit_skips_second_get_problem() {
-    let (service, calls, dir) = make_service("statement-hit", Vec::new());
+    let (service, calls, _dir) = make_service("statement-hit", Vec::new());
 
     block_on(service.open_problem("1011", "A", true)).expect("首次打开失败");
     assert_eq!(call_count(&calls), 1);
@@ -306,7 +288,6 @@ fn statement_cache_hit_skips_second_get_problem() {
     assert_eq!(call_count(&calls), 1, "题面应命中缓存，不再请求 Provider");
     assert_eq!(problem.id, "pid-A");
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -322,32 +303,29 @@ fn statement_cache_disabled_always_fetches() {
         "关闭缓存时不得落盘（开关关闭 = 不读不写）"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn statement_cache_survives_new_service_instance() {
-    let dir = std::env::temp_dir().join("hinina-test-problem-statement-disk");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-problem-statement-disk");
 
     // 第一个实例：拉取并落盘
-    let first = build_service(&dir, Arc::new(AtomicUsize::new(0)), Vec::new());
+    let first = build_service(dir.path(), Arc::new(AtomicUsize::new(0)), Vec::new());
     block_on(first.open_problem("1011", "A", true)).expect("首次打开失败");
     drop(first);
 
     // 第二个实例复用同一目录：应命中磁盘缓存（模拟客户端重启）
     let calls = Arc::new(AtomicUsize::new(0));
-    let second = build_service(&dir, Arc::clone(&calls), Vec::new());
+    let second = build_service(dir.path(), Arc::clone(&calls), Vec::new());
     block_on(second.open_problem("1011", "A", true)).expect("重启后打开失败");
 
     assert_eq!(call_count(&calls), 0, "重启后应命中题面磁盘缓存，零请求");
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn statement_cache_isolates_contest_and_problem() {
-    let (service, calls, dir) = make_service("statement-isolation", Vec::new());
+    let (service, calls, _dir) = make_service("statement-isolation", Vec::new());
 
     block_on(service.open_problem("1011", "A", true)).expect("打开失败");
     // 同一 displayId、不同比赛 = 不同题目
@@ -357,12 +335,11 @@ fn statement_cache_isolates_contest_and_problem() {
 
     assert_eq!(call_count(&calls), 3, "缓存键必须含比赛与题目两个维度");
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn statement_cache_never_stores_errors() {
-    let (service, calls, dir) = make_service("statement-error", ids(&["A"]));
+    let (service, calls, _dir) = make_service("statement-error", ids(&["A"]));
 
     let first = block_on(service.open_problem("1011", "A", true)).expect_err("应报错");
     let second = block_on(service.open_problem("1011", "A", true)).expect_err("应再次报错");
@@ -371,7 +348,6 @@ fn statement_cache_never_stores_errors() {
     assert!(matches!(second, AppError::Auth(_)), "实际 {:?}", second);
     assert_eq!(call_count(&calls), 2, "错误不得入缓存，重试必须重新请求");
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 错误变体穿透 ──
@@ -381,10 +357,9 @@ fn statement_cache_never_stores_errors() {
 // 「题目错误」文案而不会被带回登录页，反复重试也全部失败。
 
 /// 构造一个所有方法都以 Auth 失败的服务。
-fn make_failing_service(test_name: &str) -> (ProblemService, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("hinina-test-problem-{}", test_name));
-    let _ = std::fs::remove_dir_all(&dir);
-    let service = build_service_with(&dir, Arc::new(AtomicUsize::new(0)), Vec::new(), true);
+fn make_failing_service(test_name: &str) -> (ProblemService, TempDir) {
+    let dir = TempDir::named(&format!("hinina-test-problem-{}", test_name));
+    let service = build_service_with(dir.path(), Arc::new(AtomicUsize::new(0)), Vec::new(), true);
     (service, dir)
 }
 
@@ -402,17 +377,6 @@ fn open_problem_preserves_auth_variant() {
         err.user_message().contains("获取题目详情失败"),
         "应补上环节名: {}",
         err.user_message()
-    );
-}
-
-#[test]
-fn list_problems_preserves_auth_variant() {
-    let (service, _dir) = make_failing_service("variant-list");
-    let err = block_on(service.list_problems("1011")).expect_err("应报错");
-    assert!(
-        matches!(err, AppError::Auth(_)),
-        "实际 {:?}",
-        err
     );
 }
 
@@ -438,8 +402,7 @@ fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     // 跨 OJ 同 cid/pid 在结构上不可能互相命中 —— 不依赖任何清理事件。
     use crate::core::event::event_bus::EventBus;
 
-    let dir = std::env::temp_dir().join("hinina-test-problem-oj-scope");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-problem-oj-scope");
     let calls = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(StubProblemProvider {
         calls: Arc::clone(&calls),
@@ -461,7 +424,7 @@ fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     let service = ProblemService::new(
         Arc::clone(&registry),
         Arc::new(EventBus::new()),
-        Arc::new(Storage::new(dir.clone())),
+        Arc::new(Storage::new(dir.to_path_buf())),
     );
 
     // HOJ：首拉 + 二次命中（内存）
@@ -502,7 +465,7 @@ fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     let service2 = ProblemService::new(
         registry2,
         Arc::new(EventBus::new()),
-        Arc::new(Storage::new(dir.clone())),
+        Arc::new(Storage::new(dir.to_path_buf())),
     );
     block_on(service2.open_problem("1", "A", true)).expect("重启后打开失败");
     assert_eq!(
@@ -511,14 +474,12 @@ fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
         "重启后应命中本 OJ 的磁盘缓存（键含 OJ 维度）"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn limits_disk_cache_key_carries_oj_scope() {
     // limits 的磁盘路径同样带 OJ 维度：`cache/problem_limits/{oj}/{cid}.json`
-    let dir = std::env::temp_dir().join("hinina-test-problem-limits-oj-scope");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-problem-limits-oj-scope");
     let calls = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(StubProblemProvider {
         calls: Arc::clone(&calls),
@@ -538,7 +499,7 @@ fn limits_disk_cache_key_carries_oj_scope() {
     let service = ProblemService::new(
         Arc::clone(&registry),
         Arc::new(EventBus::new()),
-        Arc::new(Storage::new(dir.clone())),
+        Arc::new(Storage::new(dir.to_path_buf())),
     );
 
     block_on(service.load_problem_limits("1", &ids(&["A"]))).expect("HOJ limits 失败");
@@ -560,15 +521,13 @@ fn limits_disk_cache_key_carries_oj_scope() {
         "QDUOJ 的 limits 落在自己的目录下"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn oj_switched_clears_problem_scoped_caches() {
     use crate::core::event::app_event::{AppEvent, SystemEvent};
 
-    let dir = std::env::temp_dir().join("hinina-test-problem-oj-switch");
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = TempDir::named("hinina-test-problem-oj-switch");
     let bus = Arc::new(EventBus::new());
     let calls = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(StubProblemProvider {
@@ -584,7 +543,7 @@ fn oj_switched_clears_problem_scoped_caches() {
             ..Default::default()
         },
     );
-    let service = ProblemService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.clone())));
+    let service = ProblemService::new(registry, Arc::clone(&bus), Arc::new(Storage::new(dir.to_path_buf())));
 
     // 预置内存 + **磁盘**缓存：磁盘条目必须真实落盘 —— 否则「目录不存在」的断言恒真
     block_on(service.open_problem("7", "A", true)).expect("预置题面失败");
@@ -621,7 +580,6 @@ fn oj_switched_clears_problem_scoped_caches() {
         "limits 磁盘缓存应被延迟清理"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── 设置页「清空缓存」（同步清理，不重拉） ──
@@ -672,7 +630,6 @@ fn clear_caches_empties_statement_and_limits_caches() {
         "清空后下一次查询必须回源"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -684,5 +641,4 @@ fn clear_caches_without_any_disk_cache_is_not_an_error() {
     assert!(!dir.join("cache").exists(), "前置条件：尚未产生任何磁盘缓存");
     service.clear_caches();
 
-    let _ = std::fs::remove_dir_all(&dir);
 }

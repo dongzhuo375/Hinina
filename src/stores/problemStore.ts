@@ -10,7 +10,6 @@ const log = createLogger('problemStore')
 export const useProblemStore = defineStore('problem', {
   state: () => ({
     currentProblem: null as Problem | null,
-    problems: [] as Problem[],
     isLoading: false,
     error: null as string | null,
 
@@ -66,20 +65,6 @@ export const useProblemStore = defineStore('problem', {
         this.currentProblem = await problemService.getProblem(contestId, problemId)
       } catch (e) {
         this.error = errorMessage(e, '加载题目失败')
-        throw e
-      } finally {
-        this.isLoading = false
-      }
-    },
-
-    /** 加载比赛下所有题目列表 */
-    async loadProblems(contestId: string) {
-      this.isLoading = true
-      this.error = null
-      try {
-        this.problems = await problemService.listProblems(contestId)
-      } catch (e) {
-        this.error = errorMessage(e, '加载题目列表失败')
         throw e
       } finally {
         this.isLoading = false
