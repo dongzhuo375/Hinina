@@ -294,6 +294,48 @@ describe('markPersisted — 后端落盘事件驱动指示器', () => {
     store.markPersisted('ws-1', 5)
     expect(store.isDirty).toBe(false)
   })
+
+  it('推送返回时落盘事件尚未到达：不提前清脏（等事件到达再清）', async () => {
+    // 锁定补判的方向：必须「水位 ≥ 推送」才清 —— 若误用「推送 ≥ 水位」，
+    // 此处会在磁盘还落后时清脏（假「已自动备份」）
+    workspaceService.updateWorkspaceFile.mockResolvedValue(7)
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    await store.flushPendingSync()
+    expect(store.syncPending).toBe(false)
+
+    // 落盘事件还没到（磁盘仍在旧修订号）：不能清脏
+    expect(store.isDirty).toBe(true)
+
+    store.markPersisted('ws-1', 7)
+    expect(store.isDirty).toBe(false)
+  })
+
+  it('落盘事件在推送在途到达时不卡指示器：flush 返回后补判清脏', async () => {
+    // 推送挂起（模拟 IPC 在途），期间后端 auto-save 已落盘并送达事件
+    let releasePush: (revision: number) => void = () => {}
+    workspaceService.updateWorkspaceFile.mockImplementation(
+      () =>
+        new Promise<number>((resolve) => {
+          releasePush = resolve
+        }),
+    )
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    const flushing = store.flushPendingSync()
+
+    // 事件先于推送返回到达：markPersisted 因 syncPending 推迟清脏（水位已推进）
+    store.markPersisted('ws-1', 7)
+    expect(store.isDirty).toBe(true)
+
+    releasePush(7)
+    await flushing
+
+    // 后端已 clean、后续 auto-save tick 不再发事件 —— 若无补判，
+    // 指示器将卡在「编辑中…」直到下一次编辑或显式保存
+    expect(store.syncPending).toBe(false)
+    expect(store.isDirty).toBe(false)
+  })
 })
 
 describe('loadWorkspace — 替换 store 状态前先推送在途改动', () => {

@@ -46,6 +46,10 @@ pub const PLUGIN_HOST_CONSUMER_NAME: &str = "plugin-host";
 /// [`tokio::sync::mpsc::UnboundedSender`] 已直接实现，供宿主把事件转交给插件线程。
 ///
 /// 实现**不得** panic：投递失败应自行吞掉并记录（宿主也会隔离单个插件的异常）。
+/// 实现应为非阻塞，且**不得同步重入宿主**（如在 `deliver` 内调用
+/// `PluginHost::subscribe` / `unsubscribe`，或经任何路径再次触发投递）：
+/// 宿主虽已在无锁上下文调用本方法（不会死锁），同步重入仍会造成无限递归 ——
+/// 需要响应事件时，把信封转入插件自己的队列，由插件侧事件循环异步处理。
 pub trait PluginEventSink: Send + Sync {
     /// 投递一条事件信封。实现应为非阻塞。
     fn deliver(&self, envelope: &PluginEventEnvelope);
@@ -135,22 +139,41 @@ impl PluginHost {
             });
         }
 
+        // 先做一次重复检查：明确被拒的订阅不必下发通知
+        if self
+            .subscriptions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(&manifest.id)
+        {
+            return Err(PluginHostError::AlreadySubscribed {
+                plugin_id: manifest.id.clone(),
+            });
+        }
+
+        let mut subscription = Subscription {
+            adapter: PluginEventAdapter::new(),
+            sink: Arc::clone(&sink),
+        };
+        // 在**取锁之前**投递初始通知，两个原因缺一不可：
+        // 1. `deliver` 是用户实现（v1.0 运行时接入点）。持锁调用时，实现内回调
+        //    宿主的任何方法（subscribe / unsubscribe / subscriber_count 都取
+        //    同一把不可重入锁）即自死锁 —— 必须与 `dispatch_to_subscribers`
+        //    的「锁内收集、锁外投递」保持同一契约；
+        // 2. 通知必须先于任何经消费者分发的事件到达 sink（否则插件先看到
+        //    seq=2 的事件、再看到 seq=1 的通知，形成假缺口）。dispatch 只能
+        //    经锁看到订阅表，插入前完成投递即保证顺序。
+        let notice = subscription.adapter.resync_notice(0);
+        sink.deliver(&notice);
+
         let mut subs = self.subscriptions.lock().unwrap_or_else(|e| e.into_inner());
+        // 极端并发下同 id 订阅可能已抢先插入：调用方仍收到明确错误；
+        // 落败方多收一条通知是无害的「请先同步」提示
         if subs.contains_key(&manifest.id) {
             return Err(PluginHostError::AlreadySubscribed {
                 plugin_id: manifest.id.clone(),
             });
         }
-        let mut subscription = Subscription {
-            adapter: PluginEventAdapter::new(),
-            sink: Arc::clone(&sink),
-        };
-        // 在锁内投递是有意的（与 `dispatch_to_subscribers` 的「锁外投递」不同）：
-        // 通知必须先于任何经消费者分发的事件到达 sink —— 否则插件会先看到
-        // seq=2 的事件、再看到 seq=1 的通知（假缺口）。`PluginEventSink::deliver`
-        // 契约上非阻塞，持锁投递这一次不会卡住其他插件。
-        let notice = subscription.adapter.resync_notice(0);
-        sink.deliver(&notice);
         subs.insert(manifest.id.clone(), subscription);
         info!(plugin_id = %manifest.id, "插件事件订阅已注册");
         Ok(())

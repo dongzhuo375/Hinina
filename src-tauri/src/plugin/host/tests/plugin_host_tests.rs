@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use super::*;
@@ -352,4 +353,55 @@ fn host_does_not_own_a_second_bus() {
     let _task_ready = host.subscriber_count();
     assert_eq!(host.subscriber_count(), 0);
     // 宿主上没有 `publish` / `emit` 之类的入口：插件只能消费，不能生产核心事件
+}
+
+/// sink 的 `deliver` 内回调宿主方法（此处 `subscriber_count`，取同一把
+/// 不可重入锁）不得死锁：宿主必须在**无锁上下文**调用用户实现。
+/// 死锁表现为订阅线程挂住 —— 用带超时的信道把「挂住」转成测试失败。
+#[test]
+fn reentrant_sink_does_not_deadlock() {
+    struct ReentrantSink {
+        host: Weak<PluginHost>,
+        reentered: Arc<AtomicUsize>,
+    }
+    impl PluginEventSink for ReentrantSink {
+        fn deliver(&self, _envelope: &PluginEventEnvelope) {
+            if let Some(host) = self.host.upgrade() {
+                self.reentered.fetch_add(1, Ordering::SeqCst);
+                // 修复前：subscribe 持锁调用 deliver → 此处对同一把锁再次
+                // lock() → 同线程自死锁
+                let _ = host.subscriber_count();
+            }
+        }
+    }
+
+    let (host, _bus) = host_with_bus();
+    let reentered = Arc::new(AtomicUsize::new(0));
+    let sink = Arc::new(ReentrantSink {
+        host: Arc::downgrade(&host),
+        reentered: Arc::clone(&reentered),
+    });
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let subscriber = Arc::clone(&host);
+    std::thread::spawn(move || {
+        let ok = subscriber
+            .subscribe(
+                &manifest("reentrant", vec![PluginPermission::Notification]),
+                sink,
+            )
+            .is_ok();
+        let _ = tx.send(ok);
+    });
+
+    let ok = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("subscribe 应在超时前完成（死锁会挂住订阅线程）");
+    assert!(ok, "订阅应成功");
+    assert_eq!(
+        reentered.load(Ordering::SeqCst),
+        1,
+        "初始通知应触发一次重入回调"
+    );
+    assert_eq!(host.subscriber_count(), 1);
 }
