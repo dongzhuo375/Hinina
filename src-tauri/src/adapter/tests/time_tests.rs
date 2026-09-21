@@ -63,8 +63,14 @@ fn leap_day_and_epoch_boundary() {
 #[test]
 fn out_of_range_month_is_clamped_not_panicking() {
     // 服务端给畸形月份时不得 panic（曾靠 month.clamp 防住下标越界）
-    assert_eq!(parse_time("2026-13-01T00:00:00Z"), parse_time("2026-12-01T00:00:00Z"));
-    assert_eq!(parse_time("2026-00-01T00:00:00Z"), parse_time("2026-01-01T00:00:00Z"));
+    assert_eq!(
+        parse_time("2026-13-01T00:00:00Z"),
+        parse_time("2026-12-01T00:00:00Z")
+    );
+    assert_eq!(
+        parse_time("2026-00-01T00:00:00Z"),
+        parse_time("2026-01-01T00:00:00Z")
+    );
 }
 
 // ── 失败路径：返回 0 但不 panic ──

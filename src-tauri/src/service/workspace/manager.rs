@@ -462,6 +462,7 @@ impl WorkspaceManager {
 
         debug!(interval_secs = interval_secs, "自动保存已启动");
     }
+
     /// 停止自动保存。
     pub fn stop_auto_save(&self) {
         let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());

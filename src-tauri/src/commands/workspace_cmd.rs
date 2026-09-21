@@ -69,14 +69,20 @@ pub(crate) fn auto_save_action(
 /// `service/config/mod.md`；**只靠 `reload_config` 命令是不够的，它在前端无调用方**）。
 ///
 /// 必须在 tokio runtime 上下文里调用（`WorkspaceManager::start_auto_save` 内部
-/// 用 `tokio::spawn` 起后台循环）。两个调用点都满足：前者是 Tauri 异步命令，
-/// 后者由 `update_config` 命令同步发布事件时在发布方栈内执行。
+/// 用 `tokio::spawn` 起后台循环）。两个调用点都满足：前者是 Tauri 异步命令；
+/// 后者由组合根的订阅者经 `tauri::async_runtime::spawn` 投递后执行 —— 不依赖
+/// 「发布方一定在 tokio 上下文里」这个隐含前提（见 `main.rs` 的
+/// `install_auto_save_config_sync`）。
 pub fn sync_auto_save_with_config(
     editor: &crate::core::entity::config::EditorConfig,
     wm: &std::sync::Arc<crate::service::workspace::manager::WorkspaceManager>,
 ) {
-    match auto_save_action(editor.auto_save, editor.auto_save_interval_secs, wm.auto_save_interval_secs())
-    {
+    let action = auto_save_action(
+        editor.auto_save,
+        editor.auto_save_interval_secs,
+        wm.auto_save_interval_secs(),
+    );
+    match action {
         AutoSaveAction::Keep => {}
         AutoSaveAction::Start(interval_secs) => {
             wm.start_auto_save(interval_secs);
