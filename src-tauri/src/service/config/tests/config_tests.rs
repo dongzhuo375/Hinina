@@ -147,3 +147,65 @@ fn reload_publishes_config_reloaded_event() {
     service.reload().unwrap();
     assert!(*received.lock().unwrap(), "ConfigReloaded event should have been published");
 }
+
+/// `update` 也必须发布 `ConfigReloaded`（2026-09-21 复核发现的生产断链）。
+///
+/// 生产链路的配置变更入口是 `update`（`update_config` 命令、主题切换、`switch_oj`
+/// 的持久化都走它），而 `reload_config` 命令在前端**没有任何调用方**（只有 spec 的
+/// mock）。只在 `reload` 里发布事件，订阅者（auto-save 按配置同步）永远等不到 ——
+/// P48 宣称的「改设置立即生效」就是假的，实际要重开题目才生效。
+#[test]
+fn update_publishes_config_reloaded_event() {
+    let dir = TempDir::named("hinina-test-cfg-update-event");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
+    let event_bus = Arc::new(EventBus::new());
+    let service = ConfigService::new(repo, Arc::clone(&event_bus));
+
+    let received = Arc::new(std::sync::Mutex::new(0usize));
+    let received_clone = Arc::clone(&received);
+    event_bus.subscribe(
+        EventCategory::System,
+        Arc::new(move |event| {
+            if matches!(event, AppEvent::System(SystemEvent::ConfigReloaded)) {
+                *received_clone.lock().unwrap() += 1;
+            }
+        }),
+    );
+
+    service.update(|cfg| cfg.editor.auto_save = false).unwrap();
+    assert_eq!(
+        *received.lock().unwrap(),
+        1,
+        "update 成功后必须发布 ConfigReloaded，否则订阅者永远等不到配置变更"
+    );
+}
+
+/// 落盘失败时**不发布**：磁盘与内存已不一致，让订阅者按「新配置已生效」行动会掩盖问题。
+#[test]
+fn update_failure_does_not_publish_config_reloaded_event() {
+    let dir = TempDir::named("hinina-test-cfg-update-event-fail");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
+    let event_bus = Arc::new(EventBus::new());
+    let service = ConfigService::new(repo, Arc::clone(&event_bus));
+
+    // 构造后 config.json 已存在（构造函数会落盘默认值）：先删掉再占位成目录，
+    // 使后续写入必然失败（确定性，不依赖权限或只读卷）
+    std::fs::remove_file(dir.join("config.json")).unwrap();
+    std::fs::create_dir_all(dir.join("config.json")).unwrap();
+
+    let received = Arc::new(std::sync::Mutex::new(0usize));
+    let received_clone = Arc::clone(&received);
+    event_bus.subscribe(
+        EventCategory::System,
+        Arc::new(move |event| {
+            if matches!(event, AppEvent::System(SystemEvent::ConfigReloaded)) {
+                *received_clone.lock().unwrap() += 1;
+            }
+        }),
+    );
+
+    assert!(service.update(|cfg| cfg.editor.auto_save = false).is_err());
+    assert_eq!(*received.lock().unwrap(), 0, "持久化失败不得发布 ConfigReloaded");
+}

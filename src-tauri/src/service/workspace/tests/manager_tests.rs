@@ -730,3 +730,44 @@ fn legacy_meta_without_active_file_loads_as_none() {
     assert_eq!(loaded.active_file, None, "旧元数据应降级为 None 而不是报错");
     assert_eq!(loaded.language, "C++");
 }
+/// 并发 `start_auto_save` 不得泄漏无法停止的孤儿循环。
+///
+/// 「停旧的 → 起新的 → 登记句柄」分三次取锁时，后登记者会覆盖先登记的句柄 ——
+/// 先起的循环从此无人可停，`stop_auto_save` 之后仍按自己的节拍写盘（表现为
+/// 「关了自动保存却还在保存」）。
+///
+/// 判据：全部并发启动完成后停一次，再把工作区**弄脏**静候两个节拍 —— 只有仍在跑的
+/// 孤儿循环会把它写回干净。注意这是概率性复现（窗口很窄），断言本身才是长期防线。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_start_auto_save_does_not_leak_orphan_tasks() {
+    let dir = TempDir::named("hinina-test-mgr-autosave-race");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
+    let mgr = Arc::new(WorkspaceManager::new(repo, Arc::new(EventBus::new())));
+    mgr.create("c", "p", "/ws").unwrap();
+
+    // std 线程没有 tokio 上下文，显式 enter 后再调（start_auto_save 内部要 tokio::spawn）
+    let rt = tokio::runtime::Handle::current();
+    let mut threads = Vec::new();
+    for _ in 0..8 {
+        let mgr = Arc::clone(&mgr);
+        let rt = rt.clone();
+        threads.push(std::thread::spawn(move || {
+            let _guard = rt.enter();
+            mgr.start_auto_save(1);
+        }));
+    }
+    for t in threads {
+        t.join().unwrap();
+    }
+
+    mgr.stop_auto_save();
+    assert_eq!(mgr.auto_save_interval_secs(), None, "停止后不得残留运行状态");
+
+    mgr.update_file("main.cpp", "after-stop").unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(2_500)).await;
+    assert!(
+        mgr.current().unwrap().is_dirty,
+        "stop_auto_save 之后不得再有任何循环在跑（孤儿任务会把脏标记清掉）"
+    );
+}

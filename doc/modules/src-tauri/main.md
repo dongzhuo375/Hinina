@@ -9,7 +9,7 @@
 - `const ANNOUNCEMENTS_PUBLISHED_EVENT: &str` — 新公告事件的前端通道名（`"announcements-published"`），与 `src/bridge/announcement.bridge.ts` 的 `onAnnouncementsPublished` 对应
 - `fn install_workspace_event_bridge(app: &tauri::AppHandle)` — 订阅 `EventCategory::Workspace`，把 `WorkspaceEvent::Saved`（显式保存）与 `AutoSaveTriggered`（auto-save 成功）emit 到 webview（载荷 `{ workspaceId, auto }`）。仅转发这两种「内容确已落盘」的事件；`Loaded` / `Switched` 不转发（前端是发起方，无需回环）
 - `fn install_announcement_event_bridge(app: &tauri::AppHandle)` — 订阅 `EventCategory::Contest`，把 `ContestEvent::AnnouncementsPublished` emit 到 webview（载荷 `{ contestId, newIds }`）。公告红点因此是**事件驱动**的：前端虽仍按 60s 节拍拉取公告（拉取必须有人发起），但「有新公告」这一状态变更走 EventBus，事件到达即点亮红点，不必等下一次列表 diff。`ListLoaded` / `Selected` 不转发（前端是发起方）
-- `fn install_auto_save_config_sync(app: &tauri::AppHandle)` — 订阅 `EventCategory::System` 的 `SystemEvent::ConfigReloaded`，按新配置调 `commands::workspace_cmd::sync_auto_save_with_config` 同步 auto-save 的启停与间隔（P48：设置页改开关/间隔**即时生效，无需重启**；判据 = 纯函数 `auto_save_action`）。放在组合根是因为事件是应用级关注点，且只有这里能同时拿到 EventBus / ConfigService / WorkspaceManager
+- `fn install_auto_save_config_sync(app: &tauri::AppHandle)` — 订阅 `EventCategory::System` 的 `SystemEvent::ConfigReloaded`，按新配置调 `commands::workspace_cmd::sync_auto_save_with_config` 同步 auto-save 的启停与间隔（P48：设置页改开关/间隔**即时生效，无需重启**；判据 = 纯函数 `auto_save_action`）。事件由 `ConfigService::update` 与 `reload` 两条路径发布。同步动作经 `tauri::async_runtime::spawn` 执行 —— auto-save 的启停需要 tokio 上下文，**不依赖「发布方一定在 tokio 上下文里」这个隐含前提**。放在组合根是因为事件是应用级关注点，且只有这里能同时拿到 EventBus / ConfigService / WorkspaceManager
 
 ## 直接依赖
 - `hinina_lib::commands`

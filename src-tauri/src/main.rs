@@ -134,10 +134,15 @@ fn install_auto_save_config_sync(app: &tauri::AppHandle) {
         let Some(wm) = workspace_manager.as_ref() else {
             return;
         };
-        // 事件在发布方（update_config 命令）的栈内同步执行，处于 tokio 上下文，
-        // `start_auto_save` 内部的 tokio::spawn 可用。
+        // auto-save 的启停需要 tokio 上下文（`start_auto_save` 内部用 `tokio::spawn`），
+        // 故显式投到 Tauri 运行时执行 —— 不依赖「发布方一定在 tokio 上下文里」这个
+        // 隐含前提（发布方目前是 update_config / 主题切换命令，但订阅者的正确性
+        // 不该建立在别人的调用形态上；P39 踩过这个坑）。
         let editor = config.get().editor;
-        sync_auto_save_with_config(&editor, wm);
+        let wm = Arc::clone(wm);
+        tauri::async_runtime::spawn(async move {
+            sync_auto_save_with_config(&editor, &wm);
+        });
     });
 
     event_bus.subscribe(EventCategory::System, handler);

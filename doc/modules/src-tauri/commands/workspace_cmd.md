@@ -36,4 +36,6 @@
   只启动一次，设置页关掉后再也打不开、间隔也只读首次配置。现在由 `auto_save_action` 的判据表决定
   `Keep` / `Start` / `Stop`，并由 `SystemEvent::ConfigReloaded` 订阅触发热生效 ——
   **改开关/间隔无需重启客户端**。
+  **注意事件来源**：`ConfigReloaded` 由 `ConfigService::update` 与 `reload` 两条路径发布；
+  只挂 `reload_config` 命令是不够的（它在前端没有调用方，2026-09-21 复核发现的生产断链）。
 - 落盘失败不影响前端继续编辑：内容仍在后端内存，下一次落盘时机或 auto-save 周期会重写。

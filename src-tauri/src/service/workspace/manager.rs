@@ -339,6 +339,11 @@ impl WorkspaceManager {
     ///
     /// 如果已有自动保存任务运行，则先停止旧的再启动。
     ///
+    /// **「停旧的 → 起新的 → 登记句柄」必须在一把锁内完成**：三者分三次取锁时，
+    /// 并发的两个调用会各自停掉「当时存在的」任务、各自 spawn，随后**后登记者的
+    /// 句柄覆盖先登记者** —— 先起的循环就此成为无人可停的孤儿任务，`stop_auto_save`
+    /// 之后仍在按自己的节拍写盘（表现为「关了自动保存却还在保存」）。
+    ///
     /// 循环语义（配合 `update_file` 只写内存）：
     /// - 脏才写，且**取快照与写盘整体在读锁内完成**（与 `save()` / `update_file`
     ///   的写锁互斥）：只锁住「取快照」会让写盘期间到来的 `save()` 插进本次写盘与
@@ -350,7 +355,12 @@ impl WorkspaceManager {
     /// - 仅当快照之后没有新改动（修订号未变）才 `mark_clean` 并发布
     ///   `WorkspaceEvent::AutoSaveTriggered`；有新改动时保留脏标记，下轮重写。
     pub fn start_auto_save(&self, interval_secs: u64) {
-        self.stop_auto_save();
+        // 锁序固定为 handle → interval（`stop_auto_save` 同序），无死锁面。
+        // 持锁期间只做「abort + spawn + 登记」：spawn 不阻塞，且循环体不取这把锁。
+        let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(previous) = handle.take() {
+            previous.abort();
+        }
 
         // auto-save 通过 Arc 共享 current 与修订号，安全且 Send。
         let repo = Arc::clone(&self.repo);
@@ -443,7 +453,7 @@ impl WorkspaceManager {
             }
         });
 
-        let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
+        // 复用开头那把锁的 guard：`std::sync::Mutex` 不可重入，再次 lock 会自锁。
         *handle = Some(task);
         *self
             .auto_save_interval_secs
@@ -452,7 +462,6 @@ impl WorkspaceManager {
 
         debug!(interval_secs = interval_secs, "自动保存已启动");
     }
-
     /// 停止自动保存。
     pub fn stop_auto_save(&self) {
         let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());

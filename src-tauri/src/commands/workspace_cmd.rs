@@ -65,8 +65,8 @@ pub(crate) fn auto_save_action(
 /// 按当前配置同步 auto-save 的启停与间隔（**幂等**）。
 ///
 /// 调用点两处：`load_workspace`（首次进入解题页）与 `SystemEvent::ConfigReloaded`
-/// （设置页改开关/间隔后立即生效，无需重启客户端 —— 这是 P48 与 P74 遗留项
-/// 「auto-save 开关/间隔不热生效」的共同修复）。
+/// （配置变更后立即生效 —— 事件由 `ConfigService::update` / `reload` 发布，见
+/// `service/config/mod.md`；**只靠 `reload_config` 命令是不够的，它在前端无调用方**）。
 ///
 /// 必须在 tokio runtime 上下文里调用（`WorkspaceManager::start_auto_save` 内部
 /// 用 `tokio::spawn` 起后台循环）。两个调用点都满足：前者是 Tauri 异步命令，
