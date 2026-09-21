@@ -114,6 +114,9 @@ impl PluginHost {
     ///
     /// 权限判据是 manifest 声明了 [`PluginPermission::Notification`] ——
     /// 事件投递是「通知」能力，不能借 `ContestRead` 之类的读取权限顺带获得。
+    ///
+    /// 订阅建立即下发一条 `ResyncRequired { lost: 0 }`：晚于 `start()` 订阅的
+    /// 插件收不到消费者的 `Startup` 通知，没有这条它会以为「没漏任何事件」。
     pub fn subscribe(
         &self,
         manifest: &PluginManifest,
@@ -138,13 +141,17 @@ impl PluginHost {
                 plugin_id: manifest.id.clone(),
             });
         }
-        subs.insert(
-            manifest.id.clone(),
-            Subscription {
-                adapter: PluginEventAdapter::new(),
-                sink,
-            },
-        );
+        let mut subscription = Subscription {
+            adapter: PluginEventAdapter::new(),
+            sink: Arc::clone(&sink),
+        };
+        // 在锁内投递是有意的（与 `dispatch_to_subscribers` 的「锁外投递」不同）：
+        // 通知必须先于任何经消费者分发的事件到达 sink —— 否则插件会先看到
+        // seq=2 的事件、再看到 seq=1 的通知（假缺口）。`PluginEventSink::deliver`
+        // 契约上非阻塞，持锁投递这一次不会卡住其他插件。
+        let notice = subscription.adapter.resync_notice(0);
+        sink.deliver(&notice);
+        subs.insert(manifest.id.clone(), subscription);
         info!(plugin_id = %manifest.id, "插件事件订阅已注册");
         Ok(())
     }
@@ -175,7 +182,8 @@ impl PluginHost {
     /// 启动宿主消费者（从 `CoreEventBus` 取一条 receiver）。
     ///
     /// 与其他消费者共用同一条底层事件流；`Lagged` 时向所有插件下发
-    /// `PluginEvent::ResyncRequired`（订阅建立时也会下发一次，提示插件先同步）。
+    /// `PluginEvent::ResyncRequired`（消费者启动时同样下发一次；晚于启动订阅的
+    /// 插件由 [`PluginHost::subscribe`] 在订阅建立时补发，见其文档）。
     pub fn start(self: &Arc<Self>) -> tokio::task::JoinHandle<ConsumerExit> {
         // 只把订阅表交给消费者闭包（见 `PluginHost` 的引用环说明）
         let dispatch_subs = Arc::clone(&self.subscriptions);

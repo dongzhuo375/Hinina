@@ -1,7 +1,11 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::error::{AppError, AppResult};
+
+/// 原子写的临时文件序号：同进程内保证 tmp 文件名不冲突。
+static ATOMIC_WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 本地文件存储工具。
 ///
@@ -79,6 +83,43 @@ impl Storage {
     /// 写入字符串到文件。自动创建父目录。
     pub fn write_string(&self, relative_path: &str, content: &str) -> AppResult<()> {
         self.write(relative_path, content.as_bytes())
+    }
+
+    /// 原子写入字符串到文件：先写临时文件再 `rename` 覆盖目标。自动创建父目录。
+    ///
+    /// [`Self::write_string`] 是「截断 + 就地写」：进程在写入中途崩溃 / 断电会
+    /// 留下半截文件，下次读取只能当作损坏处理。凭据等「重启后必须可恢复」的
+    /// 数据不能承受这一点。先写 `{path}.{seq}.tmp` 再 rename（同目录同卷，
+    /// Windows 上 `std::fs::rename` 以 `MOVEFILE_REPLACE_EXISTING` 原子替换），
+    /// 崩溃时目标文件要么是旧内容、要么是新内容，不会是半截。
+    ///
+    /// # Errors
+    /// 路径不安全、临时文件写入失败或改名失败时返回 `AppError::Io`。
+    pub fn write_string_atomic(&self, relative_path: &str, content: &str) -> AppResult<()> {
+        let path = self.resolve(relative_path)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                AppError::Io(format!("创建父目录失败 {}: {}", relative_path, e))
+            })?;
+        }
+
+        let seq = ATOMIC_WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
+        let mut tmp = path.clone().into_os_string();
+        tmp.push(format!(".{seq}.tmp"));
+        let tmp_path = PathBuf::from(tmp);
+
+        if let Err(e) = fs::write(&tmp_path, content.as_bytes()) {
+            let _ = fs::remove_file(&tmp_path); // best-effort 清理
+            return Err(AppError::Io(format!(
+                "写入临时文件失败 {}: {}",
+                relative_path, e
+            )));
+        }
+        fs::rename(&tmp_path, &path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path); // best-effort 清理
+            AppError::Io(format!("原子替换文件失败 {}: {}", relative_path, e))
+        })?;
+        Ok(())
     }
 
     /// 检查文件或目录是否存在。

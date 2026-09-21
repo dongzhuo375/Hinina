@@ -541,7 +541,8 @@ impl WorkspaceManager {
 
     // ── 文件操作 ──
 
-    /// 更新当前工作区中的文件内容：**只写内存**，标记 dirty 并递增修订号。
+    /// 更新当前工作区中的文件内容：**只写内存**，标记 dirty 并递增修订号，
+    /// 返回本次内容被赋予的修订号。
     ///
     /// 落盘不是本方法的职责（与 `workspace_cmd::update_workspace_file` 的契约一致）：
     /// 前端 2 秒防抖把编辑器内容推进内存，磁盘写入由 auto-save 周期与显式
@@ -549,8 +550,10 @@ impl WorkspaceManager {
     /// 落盘频率，也避免每个输入停顿都产生一次磁盘写。
     ///
     /// 修订号必须在写锁内递增：它与 auto-save 取快照的读锁构成全序，
-    /// 是「快照写盘后能否标记 clean」的判据。
-    pub fn update_file(&self, file_name: &str, content: &str) -> AppResult<()> {
+    /// 是「快照写盘后能否标记 clean」的判据。返回它是为了让前端能比较
+    /// 「落盘事件的修订号」与「自己最新推送的修订号」—— 落盘落后于推送时
+    /// 不能清除脏标记（磁盘还没追上编辑器）。
+    pub fn update_file(&self, file_name: &str, content: &str) -> AppResult<u64> {
         let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
         let ws = current
             .as_mut()
@@ -562,17 +565,18 @@ impl WorkspaceManager {
         ws.files.insert(file_name.to_string(), content.to_string());
         ws.active_file = Some(file_name.to_string());
         ws.mark_dirty();
-        self.revision.fetch_add(1, Ordering::SeqCst);
+        let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
 
         debug!(
             workspace_id = ws.id,
             file = file_name,
             size = content.len(),
+            revision,
             "文件已更新（内存，等待 auto-save 落盘）"
         );
 
         // auto-save 负责落盘与发布事件，这里不重复发布
-        Ok(())
+        Ok(revision)
     }
 
     /// 获取当前工作区中的文件内容。优先从内存读取，内存未命中时回退到磁盘。

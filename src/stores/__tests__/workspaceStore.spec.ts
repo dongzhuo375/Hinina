@@ -276,6 +276,24 @@ describe('markPersisted — 后端落盘事件驱动指示器', () => {
 
     expect(store.isDirty).toBe(false)
   })
+
+  it('事件修订号落后于已推送内容时不清脏（磁盘尚未追上编辑器）', async () => {
+    // 推送被后端赋为修订号 5（编辑器最新内容在后端内存里是 revision 5）
+    workspaceService.updateWorkspaceFile.mockResolvedValue(5)
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    await store.flushPendingSync()
+    expect(store.syncPending).toBe(false)
+
+    // 后台 auto-save 落盘的是修订号 4 的旧快照（推送 5 之前的内存）：
+    // 磁盘落后于编辑器，不能宣称「已自动备份」
+    store.markPersisted('ws-1', 4)
+    expect(store.isDirty).toBe(true)
+
+    // 落盘追上（修订号 >= 已推送修订号）才清脏
+    store.markPersisted('ws-1', 5)
+    expect(store.isDirty).toBe(false)
+  })
 })
 
 describe('loadWorkspace — 替换 store 状态前先推送在途改动', () => {

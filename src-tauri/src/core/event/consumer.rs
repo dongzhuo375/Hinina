@@ -11,7 +11,7 @@
 //! | `Ok(event)` | 交给 `handle` |
 //! | `Err(Lagged(n))` | 记录丢失数量 → 丢弃不可恢复的旧通知 → 调 `resync()` 重新查询当前状态 → 继续消费 |
 //! | `Err(Closed)` | 记录日志 → 正常退出消费者 task（不是错误） |
-//! | 消费者 panic | 记录日志 → 退避后**重启**（重建 receiver + 重新 `resync`）；超过上限则放弃该消费者 |
+//! | 消费者 panic | 记录日志 → 退避后**重启**（重建 receiver + 重新 `resync`）；存活超过健康阈值的重启不累计，连续超过上限则放弃该消费者 |
 //!
 //! # 为什么消费者失败不能影响核心业务
 //!
@@ -28,7 +28,7 @@
 
 use std::future::Future;
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
@@ -38,10 +38,18 @@ use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
 
 /// 单个消费者连续异常退出的最大重启次数，超过则放弃（记录 `error` 后退出）。
+///
+/// 「连续」的判据是 [`HEALTHY_RUN_THRESHOLD`]：worker 存活超过该阈值后的异常
+/// 不累计（计数归零）—— 罕见但反复触发的 panic（如某种特殊载荷每小时命中一次）
+/// 不应累计成「永久放弃」，只有真正的崩溃循环才应被上限拦住。
 pub const MAX_CONSUMER_RESTARTS: u32 = 5;
 
 /// 重启退避基数（毫秒）：第 n 次重启等待 `n * BASE`，避免异常消费者变成忙循环。
 const RESTART_BACKOFF_BASE_MS: u64 = 200;
+
+/// worker 存活达到该时长即视为「健康运行过」：之后的异常退出不累计到
+/// 连续重启计数上（计数归零）。
+const HEALTHY_RUN_THRESHOLD: Duration = Duration::from_secs(30);
 
 /// 消费者需要重新同步的原因。
 ///
@@ -90,6 +98,22 @@ where
     Fut: Future<Output = ()> + Send + 'static,
     R: Fn(ResyncReason) + Send + Sync + 'static,
 {
+    spawn_consumer_with_grace(bus, name, handle, resync, HEALTHY_RUN_THRESHOLD)
+}
+
+/// 带可注入「健康运行阈值」的 [`spawn_consumer`]（生产走默认阈值，测试注入小阈值）。
+fn spawn_consumer_with_grace<H, Fut, R>(
+    bus: &Arc<CoreEventBus>,
+    name: &'static str,
+    handle: H,
+    resync: R,
+    healthy_run_threshold: Duration,
+) -> tokio::task::JoinHandle<ConsumerExit>
+where
+    H: Fn(CoreEvent) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+    R: Fn(ResyncReason) + Send + Sync + 'static,
+{
     // **同步订阅首个 receiver**：保证「本函数返回时 receiver 已存在」。
     // 否则调用方紧接着发布的事件会在消费者首次被轮询之前丢失 ——
     // current_thread 运行时下这是必然的，生产环境里组合根启动后也可能立刻有事件。
@@ -119,6 +143,7 @@ where
             resync(ResyncReason::Startup);
             info!(consumer = name, restarts, "事件消费者已启动");
 
+            let worker_started_at = Instant::now();
             let worker = {
                 let handle = Arc::clone(&handle);
                 let resync = Arc::clone(&resync);
@@ -133,6 +158,16 @@ where
                     return ConsumerExit::Closed;
                 }
                 Err(join_error) => {
+                    // 存活超过健康阈值的 worker 不算「连续故障」：罕见但反复触发
+                    // 的 panic 不应累计成永久放弃，只有崩溃循环才应被上限拦住。
+                    if worker_started_at.elapsed() >= healthy_run_threshold {
+                        debug!(
+                            consumer = name,
+                            uptime_secs = worker_started_at.elapsed().as_secs(),
+                            "worker 健康运行后异常退出，重启计数归零"
+                        );
+                        restarts = 0;
+                    }
                     restarts += 1;
                     if restarts > MAX_CONSUMER_RESTARTS {
                         error!(

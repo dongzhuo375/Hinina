@@ -134,3 +134,42 @@ fn concurrent_rotations_keep_file_consistent() {
         "最终 token 必须是某次轮换写入的完整值，实际 {final_token}"
     );
 }
+
+/// 轮换与登出删除并发：删除一旦完成，轮换**不得复活**已删除的会话。
+///
+/// 这是 `SessionRepository::rotate_token` 文档承诺的另一半原子性：只锁
+/// rotate-vs-rotate 时，「轮换读到旧会话 → 登出删除文件 → 轮换写回」会把
+/// 已删除的会话复活，下次启动 `get_session` 回注过期登录态。
+#[test]
+fn rotate_cannot_resurrect_session_removed_concurrently() {
+    let dir = TempDir::named("hinina-session-repo-rotate-vs-remove");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let repo = Arc::new(FsSessionRepository::new(storage));
+    let oj = OjId::new("HOJ");
+
+    // 反复「登录 → 并发(轮换 × 删除)」：无共享锁的实现会在 remove 与
+    // rotate 的读-写窗口间把会话写回磁盘，这里必须始终观察到删除生效
+    for round in 0..50 {
+        repo.save(&Session::new("HOJ", "u-1", "alice", "t-1"))
+            .unwrap();
+
+        let rotator = {
+            let repo = Arc::clone(&repo);
+            let oj = oj.clone();
+            std::thread::spawn(move || {
+                for i in 0..10 {
+                    // 会话已被删除时返回 Ok(false)，属正常路径
+                    let _ = repo.rotate_token(&oj, &format!("tok-{round}-{i}"));
+                }
+            })
+        };
+        repo.remove(&oj).unwrap();
+        rotator.join().unwrap();
+
+        assert_eq!(
+            repo.load(&oj).unwrap(),
+            None,
+            "第 {round} 轮：remove 后会话不得被并发轮换复活"
+        );
+    }
+}

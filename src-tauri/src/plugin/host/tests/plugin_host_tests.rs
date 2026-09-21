@@ -128,15 +128,17 @@ fn unsubscribe_is_idempotent_and_stops_delivery() {
         Arc::clone(&sink) as Arc<dyn PluginEventSink>,
     )
     .unwrap();
+    // 订阅建立即下发一条 ResyncRequired（晚于 start() 订阅的插件靠它知道要先同步）
+    assert_eq!(sink.events(), vec![PluginEvent::ResyncRequired { lost: 0 }]);
 
     host.dispatch(&CoreEvent::ConfigChanged);
-    assert_eq!(sink.count(), 1);
+    assert_eq!(sink.count(), 2);
 
     assert!(host.unsubscribe("p1"));
     assert!(!host.unsubscribe("p1"), "重复注销应返回 false");
 
     host.dispatch(&CoreEvent::ThemeChanged);
-    assert_eq!(sink.count(), 1, "注销后不应再收到事件");
+    assert_eq!(sink.count(), 2, "注销后不应再收到事件");
 }
 
 /// 白名单过滤在宿主层同样生效：`TokenRotated` 不投递给任何插件。
@@ -155,7 +157,14 @@ fn host_filters_non_whitelisted_events() {
     });
     host.dispatch(&CoreEvent::ConfigChanged);
 
-    assert_eq!(sink.events(), vec![PluginEvent::ConfigChanged]);
+    // 首条是订阅通知，其后只有白名单内的 ConfigChanged（TokenRotated 被过滤）
+    assert_eq!(
+        sink.events(),
+        vec![
+            PluginEvent::ResyncRequired { lost: 0 },
+            PluginEvent::ConfigChanged
+        ]
+    );
 }
 
 /// 每个插件的序号独立且连续（一个插件的订阅不影响另一个）。
@@ -182,8 +191,9 @@ fn sequences_are_per_subscription() {
         oj_id: "HOJ".into(),
     });
 
-    assert_eq!(a.sequences(), vec![1, 2, 3]);
-    assert_eq!(b.sequences(), vec![1, 2, 3]);
+    // seq=1 是订阅通知，其后是三条事件：序号连续、无跳号
+    assert_eq!(a.sequences(), vec![1, 2, 3, 4]);
+    assert_eq!(b.sequences(), vec![1, 2, 3, 4]);
 }
 
 /// 单个插件的 sink 已关闭 → 不影响其他插件继续收到事件。
@@ -210,7 +220,8 @@ fn failing_sink_does_not_affect_other_plugins() {
     host.dispatch(&CoreEvent::ConfigChanged);
     host.dispatch(&CoreEvent::ThemeChanged);
 
-    assert_eq!(healthy.count(), 2, "健康插件不应受投递失败的插件影响");
+    // 健康插件：订阅通知 + 两条事件
+    assert_eq!(healthy.count(), 3, "健康插件不应受投递失败的插件影响");
 }
 
 /// 端到端：宿主消费者挂在同一条 `CoreEventBus` 上，
@@ -224,11 +235,13 @@ async fn host_consumer_delivers_from_bus() {
         Arc::clone(&sink) as Arc<dyn PluginEventSink>,
     )
     .unwrap();
+    // 订阅建立时宿主先下发一条 ResyncRequired（提示插件先同步一次）
+    assert_eq!(sink.count(), 1);
+    assert_eq!(sink.events()[0], PluginEvent::ResyncRequired { lost: 0 });
 
     let task = host.start();
-    // 订阅建立时宿主会先下发一条 ResyncRequired（提示插件先同步一次）
-    wait_until(|| sink.count() >= 1, "订阅建立后应收到重新同步通知").await;
-    assert_eq!(sink.events()[0], PluginEvent::ResyncRequired { lost: 0 });
+    // 消费者启动的 Startup resync 再下发一次（先于 start() 订阅的插件两条都收）
+    wait_until(|| sink.count() >= 2, "消费者启动后应再次下发同步通知").await;
 
     bus.publish(CoreEvent::SubmissionJudged {
         submission_id: "s-1".into(),
@@ -254,6 +267,45 @@ async fn host_consumer_delivers_from_bus() {
     assert_eq!(exit, ConsumerExit::Closed);
 }
 
+/// 晚于 `start()` 订阅的插件同样收到初始 `ResyncRequired`：
+/// 消费者的 Startup 通知只发一次，后订阅的插件只能靠订阅建立时的补发
+/// 知道「先同步一次当前状态」。
+#[tokio::test]
+async fn subscribe_after_start_receives_initial_notice() {
+    let (host, bus) = host_with_bus();
+
+    // 金丝雀插件先行订阅并等消费者完成 Startup resync（收到第 2 条通知），
+    // 确保「晚订阅」的场景是确定性的 —— 否则 Startup 通知可能晚于订阅到达
+    let canary = Arc::new(RecordingSink::default());
+    host.subscribe(
+        &manifest("canary", vec![PluginPermission::Notification]),
+        Arc::clone(&canary) as Arc<dyn PluginEventSink>,
+    )
+    .unwrap();
+    let task = host.start();
+    wait_until(|| canary.count() >= 2, "消费者启动完成").await;
+
+    let sink = Arc::new(RecordingSink::default());
+    host.subscribe(
+        &manifest("late-comer", vec![PluginPermission::Notification]),
+        Arc::clone(&sink) as Arc<dyn PluginEventSink>,
+    )
+    .unwrap();
+
+    // 订阅即收到通知（同步投递，无需等待）
+    assert_eq!(sink.events(), vec![PluginEvent::ResyncRequired { lost: 0 }]);
+    assert_eq!(sink.sequences(), vec![1], "通知占用 seq=1，后续事件从 2 起");
+
+    // 之后发布的事件正常送达，且序号接在通知之后（无假缺口）
+    bus.publish(CoreEvent::ConfigChanged);
+    wait_until(|| sink.count() >= 2, "订阅后发布的事件应送达").await;
+    assert_eq!(sink.sequences(), vec![1, 2]);
+
+    drop(host);
+    drop(bus);
+    assert_eq!(task.await.unwrap(), ConsumerExit::Closed);
+}
+
 /// 宿主消费者落后（`Lagged`）→ 向所有插件下发 `ResyncRequired { lost }`。
 #[tokio::test]
 async fn lagged_notifies_plugins_to_resync() {
@@ -266,9 +318,9 @@ async fn lagged_notifies_plugins_to_resync() {
     )
     .unwrap();
 
-    // 先启动消费者并让它完成启动通知，再制造落后
+    // 先启动消费者并让它完成启动通知（订阅通知 1 条 + 启动通知 1 条），再制造落后
     let task = host.start();
-    wait_until(|| sink.count() >= 1, "启动通知").await;
+    wait_until(|| sink.count() >= 2, "启动通知").await;
 
     // 塞满容量后立刻密集发布：消费者来不及消费 → Lagged
     for _ in 0..50 {

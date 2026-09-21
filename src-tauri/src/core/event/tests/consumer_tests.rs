@@ -236,3 +236,79 @@ async fn failing_consumer_does_not_affect_others() {
     )
     .await;
 }
+
+/// 存活超过健康阈值的 worker 异常退出**不累计**重启计数：罕见但反复触发的
+/// panic（如某种特殊载荷）不会把消费者拖入 `Exhausted` —— 只有崩溃循环才会。
+#[tokio::test]
+async fn healthy_run_resets_restart_counter() {
+    let bus = Arc::new(CoreEventBus::new());
+    let reasons = Arc::new(Mutex::new(Vec::new()));
+
+    let task = spawn_consumer_with_grace(
+        &bus,
+        "test-healthy-reset",
+        |_event: CoreEvent| async move { panic!("always panic") },
+        recording_resync(&reasons),
+        // 阈值压到 50ms：worker 空闲存活 80ms 后再收到事件即视为「健康运行过」
+        Duration::from_millis(50),
+    );
+
+    let resync_count = || reasons.lock().unwrap_or_else(|e| e.into_inner()).len();
+    // 每轮：发布 → panic → 重启（resync +1）→ 空闲存活超过阈值 → 下一轮
+    for _ in 0..(MAX_CONSUMER_RESTARTS + 2) {
+        bus.publish(CoreEvent::ThemeChanged);
+        let before = resync_count();
+        wait_until(
+            || resync_count() > before || task.is_finished(),
+            "panic 后应触发重启（或放弃）",
+        )
+        .await;
+        assert!(
+            !task.is_finished(),
+            "健康存活后的重启不应累计到放弃阈值"
+        );
+        tokio::time::sleep(Duration::from_millis(80)).await;
+    }
+
+    // 全程重启了 MAX+2 次仍未 Exhausted：计数确实被健康存活归零了
+    assert!(resync_count() >= usize::try_from(MAX_CONSUMER_RESTARTS + 2).unwrap());
+}
+
+/// 真正的崩溃循环（worker 存活不超过健康阈值）仍会被上限拦住：
+/// 连续异常退出超过 [`MAX_CONSUMER_RESTARTS`] 次后放弃该消费者。
+#[tokio::test]
+async fn rapid_crash_loop_exhausts_consumer() {
+    let bus = Arc::new(CoreEventBus::new());
+    let reasons = Arc::new(Mutex::new(Vec::new()));
+
+    let task = spawn_consumer_with_grace(
+        &bus,
+        "test-exhaust",
+        |_event: CoreEvent| async move { panic!("always panic") },
+        recording_resync(&reasons),
+        // 阈值放大到 1 小时：任何快速崩溃都不算「健康运行过」
+        Duration::from_secs(3600),
+    );
+
+    let resync_count = || reasons.lock().unwrap_or_else(|e| e.into_inner()).len();
+    // 逐条发布并等每次重启完成（重启后的 receiver 收不到订阅前的事件，
+    // 不能一次性发布排队）。resync 总数 = 初始 Startup 1 次 + 每次重启 1 次，
+    // 用绝对目标计数，避免「发布后读基线」与 Startup resync 竞争错位。
+    for n in 1..=MAX_CONSUMER_RESTARTS {
+        bus.publish(CoreEvent::ThemeChanged);
+        let target = usize::try_from(n + 1).expect("重启计数不会溢出 usize");
+        wait_until(
+            || resync_count() >= target,
+            "panic 后应触发重启",
+        )
+        .await;
+    }
+
+    // 第 MAX+1 次异常退出：不再重启，消费者被放弃
+    bus.publish(CoreEvent::ThemeChanged);
+    let exit = tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("崩溃循环应在上限内被放弃")
+        .expect("消费者 task 不应 panic");
+    assert_eq!(exit, ConsumerExit::Exhausted);
+}

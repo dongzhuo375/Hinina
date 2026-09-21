@@ -216,8 +216,9 @@ impl HOJAdapter {
     /// 2. 再**显式**把新 token 写回磁盘会话 —— 这是持久性保证，必须当场完成。
     ///    会话不存在（轮换发生在登录落盘之前的极端时序）时 `Ok(false)`，跳过；
     ///    写盘失败只告警：HTTP 请求本身已经成功，不能因为落盘失败把它变成错误；
-    /// 3. 最后才发布 `CoreEvent::TokenRotated`（**只带 OJ 标识**）。
-    ///    它表示「凭证已轮换且已落盘」，不是「请谁来落盘」——
+    /// 3. **只有落盘确实成功（`Ok(true)`）才发布** `CoreEvent::TokenRotated`
+    ///    （**只带 OJ 标识**）。本事件的语义是「凭证已轮换且已落盘」——
+    ///    落盘失败 / 无会话可写时发布会让审计轨迹记录一个未发生的事实。
     ///    token 绝不进入事件流。
     fn handle_token_rotation(&self, headers: &reqwest::header::HeaderMap) {
         let Some(new_token) = extract_refreshed_token(headers) else {
@@ -227,18 +228,21 @@ impl HOJAdapter {
         self.set_token(new_token.clone());
 
         match self.session_repo.rotate_token(&self.oj_id, &new_token) {
-            Ok(true) => debug!(oj_id = %self.oj_id, "轮换后的凭证已回写磁盘会话"),
-            Ok(false) => debug!(oj_id = %self.oj_id, "无磁盘会话，跳过凭证回写"),
+            Ok(true) => {
+                debug!(oj_id = %self.oj_id, "轮换后的凭证已回写磁盘会话");
+                self.event_bus.publish(CoreEvent::TokenRotated {
+                    oj_id: self.oj_id.to_string(),
+                });
+            }
+            Ok(false) => {
+                debug!(oj_id = %self.oj_id, "无磁盘会话，跳过凭证回写与事件发布");
+            }
             Err(e) => warn!(
                 oj_id = %self.oj_id,
                 error = %e,
-                "凭证轮换落盘失败（本次请求已成功；重启后可能回注过期凭证）"
+                "凭证轮换落盘失败（本次请求已成功；重启后可能回注过期凭证，不发布 TokenRotated）"
             ),
         }
-
-        self.event_bus.publish(CoreEvent::TokenRotated {
-            oj_id: self.oj_id.to_string(),
-        });
     }
 
     /// 解析 HOJ 响应体：剔除 `null` 成员 → 识别响应体内的认证失败 → 类型化解析。

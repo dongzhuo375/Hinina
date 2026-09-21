@@ -25,6 +25,15 @@ let syncTimer: ReturnType<typeof setTimeout> | null = null
 /// 登出/切换账号时由 `cancelPendingSync` 归零（新会话与旧会话的修订号不可比）。
 let lastPersistedRevision = 0
 
+/// 最近一次成功推送到后端内存的修订号（模块级副作用句柄，不进响应式系统）。
+///
+/// 与 `lastPersistedRevision` 配对使用：落盘事件的修订号**落后于**它时，
+/// 说明磁盘还没追上编辑器已推送的最新内容（后端内存里有比磁盘新的改动），
+/// 不能清除脏标记 —— 否则指示器会短暂显示「已自动备份」而磁盘落后于编辑器。
+///
+/// 登出/切换账号时同样由 `cancelPendingSync` 归零。
+let lastPushedRevision = 0
+
 /**
  * 工作区 store —— 代码的「内存 → 磁盘」两级状态机。
  *
@@ -162,7 +171,8 @@ export const useWorkspaceStore = defineStore('workspace', {
       const fileName = this.activeFile ?? sourceFileNameOf(this.language)
       const content = this.code
       try {
-        await workspaceService.updateWorkspaceFile(fileName, content)
+        const revision = await workspaceService.updateWorkspaceFile(fileName, content)
+        if (typeof revision === 'number') lastPushedRevision = revision
         if (this.code === content) this.syncPending = false
         return true
       } catch (e) {
@@ -182,6 +192,8 @@ export const useWorkspaceStore = defineStore('workspace', {
      *
      * `revision` 用于**幂等**处理：同一事件重复送达、或旧修订号的事件晚于新修订号
      * 到达时，直接跳过 —— 落盘事实只能被更新的修订号推进，不能被回退。
+     * 此外，事件修订号**落后于最近一次推送**（`lastPushedRevision`）时同样不清脏：
+     * 该落盘快照早于编辑器已推送的最新内容，磁盘还没追上编辑器。
      */
     markPersisted(workspaceId?: string, revision?: number) {
       if (workspaceId && this.workspace && this.workspace.id !== workspaceId) return
@@ -189,6 +201,8 @@ export const useWorkspaceStore = defineStore('workspace', {
       if (revision !== undefined) {
         if (revision <= lastPersistedRevision) return
         lastPersistedRevision = revision
+        // 落盘快照早于最近一次推送：磁盘落后于编辑器，脏标记保持
+        if (revision < lastPushedRevision) return
       }
 
       if (this.syncPending) return // 事件到达后又有新改动：仍需落盘
@@ -204,6 +218,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.syncPending = false
       // 登出/切换账号后修订号不再可比（新会话与旧会话的落盘事实无关）
       lastPersistedRevision = 0
+      lastPushedRevision = 0
     },
 
     /**

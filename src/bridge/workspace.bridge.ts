@@ -18,9 +18,14 @@ export async function currentWorkspace(): Promise<Workspace | null> {
   return ipcInvoke<Workspace | null>('current_workspace')
 }
 
-/** 更新工作区文件内容（前端编辑器同步到后端） */
-export async function updateWorkspaceFile(fileName: string, content: string): Promise<void> {
-  return ipcInvoke<void>('update_workspace_file', { fileName, content })
+/**
+ * 更新工作区文件内容（前端编辑器同步到后端）。
+ *
+ * 返回本次内容被赋予的修订号：用于与落盘事件的修订号比较 ——
+ * 落盘落后于推送时磁盘还没追上编辑器，不能清脏标记。
+ */
+export async function updateWorkspaceFile(fileName: string, content: string): Promise<number> {
+  return ipcInvoke<number>('update_workspace_file', { fileName, content })
 }
 
 /**

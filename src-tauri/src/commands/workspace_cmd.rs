@@ -170,12 +170,15 @@ pub async fn current_workspace(ctx: State<'_, AppContext>) -> AppResult<Option<W
 /// **只更新内存中的文件内容，不落盘**（前端 2 秒防抖的落点）：磁盘写入由
 /// auto-save 周期与显式 `save_workspace`（切题 / 失焦 / 关窗时前端编排）负责，
 /// 「自动保存间隔」因此真正决定落盘频率。
+///
+/// 返回本次内容被赋予的**修订号**：前端据此比较「落盘事件的修订号」与
+/// 「自己最新推送的修订号」，落盘落后于推送时不清脏标记（磁盘还没追上编辑器）。
 #[tauri::command]
 pub async fn update_workspace_file(
     ctx: State<'_, AppContext>,
     file_name: String,
     content: String,
-) -> AppResult<()> {
+) -> AppResult<u64> {
     let wm = ctx
         .workspace_manager
         .as_ref()
