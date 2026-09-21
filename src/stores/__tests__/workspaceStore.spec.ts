@@ -27,6 +27,8 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  // 模块级落盘修订号是副作用句柄（跨用例存活），先归零让每个用例独立
+  useWorkspaceStore().cancelPendingSync()
   workspaceService.updateWorkspaceFile.mockResolvedValue(undefined)
   workspaceService.saveWorkspace.mockResolvedValue(undefined)
   workspaceService.setLanguage.mockResolvedValue({
@@ -243,6 +245,36 @@ describe('markPersisted — 后端落盘事件驱动指示器', () => {
     store.markPersisted('ws-old') // 切题前保存旧工作区的事件迟到
 
     expect(store.isDirty).toBe(true)
+  })
+
+  it('同一落盘事件重复送达时幂等：不会重复生效', () => {
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    store.syncPending = false
+
+    store.markPersisted('ws-1', 3)
+    expect(store.isDirty).toBe(false)
+
+    // 再次送达同一事件（revision 相同）与更旧的 revision：都应被跳过
+    store.updateCode(`${CODE}\n// 又改了`)
+    store.syncPending = false
+    store.markPersisted('ws-1', 3)
+    store.markPersisted('ws-1', 2)
+
+    expect(store.isDirty).toBe(true)
+  })
+
+  it('更新的 revision 仍能正常清除脏标记', () => {
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    store.syncPending = false
+    store.markPersisted('ws-1', 1)
+
+    store.updateCode(`${CODE}\n// 又改了`)
+    store.syncPending = false
+    store.markPersisted('ws-1', 2)
+
+    expect(store.isDirty).toBe(false)
   })
 })
 

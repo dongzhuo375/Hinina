@@ -3,16 +3,19 @@ use std::sync::Arc;
 
 use crate::core::entity::config::{AppConfig, OjInstance};
 use crate::core::error::AppResult;
-use crate::core::event::event_bus::EventBus;
+use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::oj_id::OjId;
 use crate::core::provider::registry::ProviderRegistry;
+use crate::core::repository::session_repo::SessionRepository;
 use crate::infra::data_dir::DataDirSource;
 use crate::infra::fs_config_repo::FsConfigRepository;
+use crate::infra::fs_session_repo::FsSessionRepository;
 use crate::infra::fs_workspace_repo::FsWorkspaceRepository;
 use crate::infra::http::HttpClient;
 use crate::infra::logger::Logger;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 use crate::infra::storage::Storage;
+use crate::plugin::host::plugin_host::PluginHost;
 use crate::service::auth::AuthService;
 use crate::service::config::ConfigService;
 use crate::service::contest::ContestService;
@@ -26,7 +29,12 @@ use crate::service::workspace::manager::WorkspaceManager;
 /// 在 `main.rs` 启动时装配，注入到 Tauri State 中。
 /// 所有 Service 通过 AppContext 获取依赖，避免相互直接引用。
 pub struct AppContext {
-    pub event_bus: Arc<EventBus>,
+    /// 进程内事件总线（唯一事实通知源；消费者由组合根 `main.rs` 启动）
+    pub event_bus: Arc<CoreEventBus>,
+    /// 会话持久化仓库（应用层与适配器层共用）
+    pub session_repo: Arc<dyn SessionRepository>,
+    /// 插件宿主（事件适配 / 权限 / 脱敏 / 生命周期；v0.x 无运行时）
+    pub plugin_host: Arc<PluginHost>,
     pub config: Arc<ConfigService<FsConfigRepository>>,
     pub provider_registry: Arc<dyn ProviderRegistry>,
     pub workspace_manager: Option<Arc<WorkspaceManager>>,
@@ -58,12 +66,15 @@ impl AppContext {
     ///
     /// 1. Logger — 日志系统
     /// 2. Storage — 文件系统（`base_dir` 由调用方传入，来自 `infra::data_dir` 的解析结果）
-    /// 3. EventBus — 事件总线
-    /// 4. ConfigService — 配置管理（通过 FsConfigRepository 持久化）
-    /// 5. HttpClient — 网络客户端
-    /// 6. ProviderRegistry — OJ 适配器注册中心（默认 HOJ，Provider 在阶段 5 注册）
-    /// 7. WorkspaceManager — `None`（WorkspaceManager 实现后补全）
-    /// 8. 装配 AppContext
+    /// 3. CoreEventBus — 事件总线（消费者不在此启动，见 `main.rs`）
+    /// 4. SessionRepository — 会话持久化（应用层与适配器层共用）
+    /// 5. ConfigService — 配置管理（通过 FsConfigRepository 持久化）
+    /// 6. HttpClient — 网络客户端
+    /// 7. ProviderRegistry — OJ 适配器注册中心（默认 HOJ，Provider 在阶段 5 注册）
+    /// 8. WorkspaceManager
+    /// 9. Service 层 — theme / auth / contest / problem / submission
+    /// 10. PluginHost — 插件事件边界（消费者在 `main.rs` 启动）
+    /// 11. 装配 AppContext
     ///
     /// `default_data_dir` / `source` 来自 [`crate::infra::data_dir::prepare_startup`]，
     /// 调用方（`main.rs` 的 `.setup()`）必须在调用本函数**之前**完成一次性数据迁移 ——
@@ -78,34 +89,32 @@ impl AppContext {
         tracing::info!("Hinina 启动中... base_dir={}", base_dir.display());
 
         // 确保 base_dir 存在
-        std::fs::create_dir_all(&base_dir).map_err(|e| {
-            crate::core::error::AppError::Io(format!("创建 base_dir 失败: {}", e))
-        })?;
+        std::fs::create_dir_all(&base_dir)
+            .map_err(|e| crate::core::error::AppError::Io(format!("创建 base_dir 失败: {}", e)))?;
 
         // 2. 初始化文件存储
         let storage = Arc::new(Storage::new(base_dir));
 
         // 3. 创建事件总线
-        let event_bus = Arc::new(EventBus::new());
+        let event_bus = Arc::new(CoreEventBus::new());
 
-        // 4. 加载配置（通过 FsConfigRepository）
-        let config_repo = Arc::new(FsConfigRepository::new(
-            Arc::clone(&storage),
-            "config.json",
-        ));
+        // 4. 会话仓库（AuthService 与 HOJ 适配器的凭证轮换共用）
+        let session_repo: Arc<dyn SessionRepository> =
+            Arc::new(FsSessionRepository::new(Arc::clone(&storage)));
+
+        // 5. 加载配置（通过 FsConfigRepository）
+        let config_repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
         let config = Arc::new(ConfigService::new(config_repo, Arc::clone(&event_bus)));
 
-        // 5. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
+        // 6. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
         let timeout_secs = config.get().oj.timeout_secs;
         let http_client = Arc::new(
             HttpClient::with_timeout(std::time::Duration::from_secs(timeout_secs.max(1))).map_err(
-                |e| {
-                    crate::core::error::AppError::Network(format!("HttpClient 创建失败: {}", e))
-                },
+                |e| crate::core::error::AppError::Network(format!("HttpClient 创建失败: {}", e)),
             )?,
         );
 
-        // 6. 创建 Provider 注册中心 + 按配置实例注册全部内建 OJ（工厂数据化）。
+        // 7. 创建 Provider 注册中心 + 按配置实例注册全部内建 OJ（工厂数据化）。
         //
         // 当前 OJ 取自 `oj.active`；实例清单来自 `oj.instances`（enabled 的才注册），
         // 与工厂按 id 匹配 —— 接一个新 OJ = 配置加一条实例 + 工厂清单加一行。
@@ -117,6 +126,7 @@ impl AppContext {
         let adapter_deps = crate::adapter::AdapterDeps {
             http_client: Arc::clone(&http_client),
             event_bus: Arc::clone(&event_bus),
+            session_repo: Arc::clone(&session_repo),
             storage: Arc::clone(&storage),
         };
         let configured = config.get();
@@ -163,7 +173,7 @@ impl AppContext {
         ));
         let auth = Arc::new(AuthService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
-            Arc::clone(&storage),
+            Arc::clone(&session_repo),
             Arc::clone(&event_bus),
         ));
         let contest = Arc::new(ContestService::new(
@@ -182,9 +192,14 @@ impl AppContext {
             Arc::clone(&storage),
         ));
 
-        // 8. 装配
+        // 8. 插件宿主（只持有总线句柄；消费者由 `main.rs` 启动）
+        let plugin_host = Arc::new(PluginHost::new(Arc::clone(&event_bus)));
+
+        // 9. 装配
         Ok(Self {
             event_bus,
+            session_repo,
+            plugin_host,
             config,
             provider_registry,
             workspace_manager,
@@ -223,6 +238,7 @@ impl AppContext {
         let deps = crate::adapter::AdapterDeps {
             http_client: Arc::clone(&self.http_client),
             event_bus: Arc::clone(&self.event_bus),
+            session_repo: Arc::clone(&self.session_repo),
             storage: Arc::clone(&self.storage),
         };
         let registered = register_instance(self.provider_registry.as_ref(), &deps, instance);
@@ -236,7 +252,11 @@ impl AppContext {
 /// 已启用的 OJ 实例 —— **「启用」条件的唯一来源**：`init` 的全量注册与
 /// [`enabled_instance`] 的单实例查找都经此，避免两处判定漂移。
 fn enabled_instances(config: &AppConfig) -> impl Iterator<Item = &OjInstance> {
-    config.oj.instances.iter().filter(|instance| instance.enabled)
+    config
+        .oj
+        .instances
+        .iter()
+        .filter(|instance| instance.enabled)
 }
 
 /// 从配置里挑出指定 id 的**已启用**实例（纯函数，便于单测锁定判定）。

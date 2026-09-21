@@ -10,8 +10,8 @@ use crate::core::entity::rank::{ContestRankPage, ContestRankRow, RankQuery};
 use crate::core::error::AppError;
 use crate::core::provider::contest::ContestProvider;
 use crate::core::provider::oj_id::OjId;
-use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::registry::ProviderRegistry;
+use crate::core::provider::registry::ProviderSet;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 use crate::test_support::TempDir;
 
@@ -266,13 +266,13 @@ fn make_service_in(dir: &TempDir, mode: StubMode) -> (ContestService, Arc<StubCo
     (service, provider)
 }
 
-/// 同 `make_service`，但把 EventBus 也交出来（断言事件发布契约）。
+/// 同 `make_service`，但把事件总线也交出来（断言事件发布契约）。
 fn make_service_with_bus(
     mode: StubMode,
 ) -> (
     ContestService,
     Arc<StubContestProvider>,
-    Arc<EventBus>,
+    Arc<CoreEventBus>,
     TempDir,
 ) {
     let dir = unique_temp_dir("contest-events");
@@ -283,7 +283,7 @@ fn make_service_with_bus(
 fn build_service_in(
     dir: &TempDir,
     mode: StubMode,
-) -> (ContestService, Arc<StubContestProvider>, Arc<EventBus>) {
+) -> (ContestService, Arc<StubContestProvider>, Arc<CoreEventBus>) {
     let provider = Arc::new(StubContestProvider::new(mode));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     registry.register(
@@ -293,7 +293,7 @@ fn build_service_in(
             ..Default::default()
         },
     );
-    let bus = Arc::new(EventBus::new());
+    let bus = Arc::new(CoreEventBus::new());
     let service = ContestService::new(
         registry,
         Arc::clone(&bus),
@@ -302,20 +302,26 @@ fn build_service_in(
     (service, provider, bus)
 }
 
-/// 订阅 Contest 类事件并收集，供事件契约断言。
-fn collect_contest_events(bus: &Arc<EventBus>) -> Arc<std::sync::Mutex<Vec<ContestEvent>>> {
-    let events: Arc<std::sync::Mutex<Vec<ContestEvent>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
-    let sink = Arc::clone(&events);
-    bus.subscribe(
-        EventCategory::Contest,
-        Arc::new(move |event: &AppEvent| {
-            if let AppEvent::Contest(contest) = event {
-                sink.lock().unwrap().push(contest.clone());
-            }
-        }),
-    );
-    events
+/// 订阅总线（事件断言用）。
+///
+/// 用 receiver 同步取事件（`try_recv`）而不是后台线程收集：被测调用返回时事件
+/// 已在 broadcast 缓冲里，因此**「不该发事件」的负向断言也是确定的** ——
+/// 后台线程收集会让负向断言变成竞态（事件可能只是还没被搬进 Vec）。
+fn subscribe(bus: &Arc<CoreEventBus>) -> tokio::sync::broadcast::Receiver<CoreEvent> {
+    bus.subscribe()
+}
+
+/// 取出当前已缓冲的「新公告」事件载荷（非阻塞）。
+fn drain_new_announcement_ids(
+    rx: &mut tokio::sync::broadcast::Receiver<CoreEvent>,
+) -> Vec<Vec<String>> {
+    let mut out = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        if let CoreEvent::AnnouncementChanged { new_ids, .. } = event {
+            out.push(new_ids);
+        }
+    }
+    out
 }
 
 // ── 错误变体必须穿透 Service 层 ──
@@ -328,8 +334,8 @@ fn collect_contest_events(bus: &Arc<EventBus>) -> Arc<std::sync::Mutex<Vec<Conte
 #[test]
 fn get_rank_preserves_auth_variant() {
     let (service, _stub, _dir) = make_service(StubMode::Auth);
-    let err = block_on(service.get_rank("1011", &RankQuery::default()))
-        .expect_err("token 过期应报错");
+    let err =
+        block_on(service.get_rank("1011", &RankQuery::default())).expect_err("token 过期应报错");
     assert!(
         matches!(err, AppError::Auth(_)),
         "get_rank 必须保留 Auth 变体，否则 401 永远不会触发会话守卫，实际 {:?}",
@@ -345,8 +351,8 @@ fn get_rank_preserves_auth_variant() {
 #[test]
 fn get_rank_preserves_network_variant() {
     let (service, _stub, _dir) = make_service(StubMode::Network);
-    let err = block_on(service.get_rank("1011", &RankQuery::default()))
-        .expect_err("网络异常应报错");
+    let err =
+        block_on(service.get_rank("1011", &RankQuery::default())).expect_err("网络异常应报错");
     assert!(
         matches!(err, AppError::Network(_)),
         "网络异常不应被改写成 Contest 变体，实际 {:?}",
@@ -359,19 +365,15 @@ fn list_contests_preserves_auth_variant() {
     // 登录页匿名简报链路：失败时前端要能区分「连不上」与「凭证无效」
     let (service, _stub, _dir) = make_service(StubMode::Auth);
     let err = block_on(service.list_contests(0)).expect_err("token 过期应报错");
-    assert!(
-        matches!(err, AppError::Auth(_)),
-        "实际 {:?}",
-        err
-    );
+    assert!(matches!(err, AppError::Auth(_)), "实际 {:?}", err);
 }
 
 #[test]
 fn load_contest_with_problems_preserves_auth_variant() {
     // 进场链路：外壳 loadContest 走的就是这个方法
     let (service, _stub, _dir) = make_service(StubMode::Auth);
-    let err = block_on(service.load_contest_with_problems("1011", None))
-        .expect_err("token 过期应报错");
+    let err =
+        block_on(service.load_contest_with_problems("1011", None)).expect_err("token 过期应报错");
     assert!(
         matches!(err, AppError::Auth(_)),
         "进场时 401 必须触发会话守卫，实际 {:?}",
@@ -382,8 +384,7 @@ fn load_contest_with_problems_preserves_auth_variant() {
 #[test]
 fn list_announcements_preserves_auth_variant() {
     let (service, _stub, _dir) = make_service(StubMode::Auth);
-    let err = block_on(service.list_announcements("1011", 1, 50))
-        .expect_err("token 过期应报错");
+    let err = block_on(service.list_announcements("1011", 1, 50)).expect_err("token 过期应报错");
     assert!(
         matches!(err, AppError::Auth(_)),
         "公告拉取失败必须保留 Auth 变体，实际 {:?}",
@@ -399,8 +400,7 @@ fn list_announcements_preserves_auth_variant() {
 #[test]
 fn list_announcements_preserves_network_variant() {
     let (service, _stub, _dir) = make_service(StubMode::Network);
-    let err = block_on(service.list_announcements("1011", 1, 50))
-        .expect_err("网络异常应报错");
+    let err = block_on(service.list_announcements("1011", 1, 50)).expect_err("网络异常应报错");
     assert!(
         matches!(err, AppError::Network(_)),
         "网络异常不应被改写成 Contest 变体，实际 {:?}",
@@ -413,8 +413,7 @@ fn list_announcements_preserves_network_variant() {
 #[test]
 fn get_rank_returns_page_on_success() {
     let (service, _stub, _dir) = make_service(StubMode::Ok);
-    let page =
-        block_on(service.get_rank("1011", &RankQuery::default())).expect("成功路径不应报错");
+    let page = block_on(service.get_rank("1011", &RankQuery::default())).expect("成功路径不应报错");
     assert_eq!(page.records.len(), 1);
     assert_eq!(page.records[0].uid, "u1");
 }
@@ -422,8 +421,8 @@ fn get_rank_returns_page_on_success() {
 #[test]
 fn load_contest_with_problems_returns_bundle_and_selects() {
     let (service, _stub, _dir) = make_service(StubMode::Ok);
-    let bundle = block_on(service.load_contest_with_problems("1011", None))
-        .expect("成功路径不应报错");
+    let bundle =
+        block_on(service.load_contest_with_problems("1011", None)).expect("成功路径不应报错");
     assert_eq!(bundle.contest.id, "1011");
     assert_eq!(bundle.problems.len(), 1);
     assert_eq!(
@@ -445,40 +444,26 @@ fn list_announcements_returns_page_on_success() {
 // ── 新公告检测（红点提醒的事件源）──
 //
 // 公告红点必须由事件驱动：前端仍按 60s 节拍拉取，但「有新公告」这一状态变更
-// 走 EventBus，由 main.rs 的事件桥转发到 webview。以下锁定三个不变量。
-
-/// 从收集到的事件里筛出 AnnouncementsPublished
-fn published_ids(events: &Arc<std::sync::Mutex<Vec<ContestEvent>>>) -> Vec<Vec<String>> {
-    events
-        .lock()
-        .unwrap()
-        .iter()
-        .filter_map(|e| match e {
-            ContestEvent::AnnouncementsPublished { new_ids, .. } => Some(new_ids.clone()),
-            _ => None,
-        })
-        .collect()
-}
+// 走 CoreEventBus，由 main.rs 的事件桥转发到 webview。以下锁定三个不变量。
 
 #[test]
 fn first_announcement_fetch_establishes_baseline_without_event() {
     // 首次拉取没有基线可比：发事件等于一开机就给每位选手亮红点
     let (service, _stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
-    let events = collect_contest_events(&bus);
+    let mut rx = subscribe(&bus);
 
     block_on(service.list_announcements("1011", 1, 50)).expect("首次拉取应成功");
 
     assert!(
-        published_ids(&events).is_empty(),
-        "首次拉取不应发布新公告事件，实际 {:?}",
-        published_ids(&events)
+        drain_new_announcement_ids(&mut rx).is_empty(),
+        "首次拉取不应发布新公告事件"
     );
 }
 
 #[test]
 fn new_announcement_publishes_event_once() {
     let (service, stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
-    let events = collect_contest_events(&bus);
+    let mut rx = subscribe(&bus);
 
     // 建基线
     block_on(service.list_announcements("1011", 1, 50)).expect("首次拉取应成功");
@@ -488,14 +473,17 @@ fn new_announcement_publishes_event_once() {
     block_on(service.list_announcements("1011", 1, 50)).expect("二次拉取应成功");
 
     assert_eq!(
-        published_ids(&events),
+        drain_new_announcement_ids(&mut rx),
         vec![vec!["9002".to_string()]],
         "应且仅应发布一次新公告事件，且只带新增 ID"
     );
 
     // 再拉一次（列表不变）：不得重复发事件，否则红点会被反复点亮
     block_on(service.list_announcements("1011", 1, 50)).expect("三次拉取应成功");
-    assert_eq!(published_ids(&events).len(), 1, "同一批公告不得重复发事件");
+    assert!(
+        drain_new_announcement_ids(&mut rx).is_empty(),
+        "同一批公告不得重复发事件"
+    );
 }
 
 #[test]
@@ -503,17 +491,20 @@ fn announcement_baseline_is_isolated_per_contest() {
     // 基线按比赛隔离：只看过 1011 的情况下首次看 1012 不应把 1012 的既有公告
     // 当成「新公告」（同一进程内切换比赛是常态）
     let (service, stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
-    let events = collect_contest_events(&bus);
+    let mut rx = subscribe(&bus);
 
     block_on(service.list_announcements("1011", 1, 50)).expect("1011 首次拉取应成功");
     block_on(service.list_announcements("1012", 1, 50)).expect("1012 首次拉取应成功");
-    assert!(published_ids(&events).is_empty(), "各自首次拉取都不应发事件");
+    assert!(
+        drain_new_announcement_ids(&mut rx).is_empty(),
+        "各自首次拉取都不应发事件"
+    );
 
     // 1012 新增一条：只影响 1012
     stub.set_announcements(&["9001", "9002"]);
     block_on(service.list_announcements("1012", 1, 50)).expect("1012 二次拉取应成功");
 
-    let published = published_ids(&events);
+    let published = drain_new_announcement_ids(&mut rx);
     assert_eq!(published.len(), 1, "只有 1012 应发事件");
     assert_eq!(published[0], vec!["9002".to_string()]);
 }
@@ -522,7 +513,7 @@ fn announcement_baseline_is_isolated_per_contest() {
 fn failed_fetch_keeps_baseline_so_next_success_still_reports() {
     // 拉取失败时不得推进基线：否则失败期间发布的公告会被永久漏报
     let (service, stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
-    let events = collect_contest_events(&bus);
+    let mut rx = subscribe(&bus);
 
     block_on(service.list_announcements("1011", 1, 50)).expect("首次拉取应成功");
 
@@ -534,7 +525,7 @@ fn failed_fetch_keeps_baseline_so_next_success_still_reports() {
     block_on(service.list_announcements("1011", 1, 50)).expect("恢复后拉取应成功");
 
     assert_eq!(
-        published_ids(&events),
+        drain_new_announcement_ids(&mut rx),
         vec![vec!["9002".to_string()]],
         "失败期间的基线必须保留，恢复后仍应报出新增公告"
     );
@@ -604,7 +595,11 @@ fn meta_cache_hit_skips_second_get_contest() {
     block_on(service.load_contest_with_problems("1011", None)).expect("首次加载应成功");
     block_on(service.load_contest_with_problems("1011", None)).expect("二次加载应成功");
 
-    assert_eq!(stub.meta_call_count(), 1, "元信息应命中缓存，不再请求 Provider");
+    assert_eq!(
+        stub.meta_call_count(),
+        1,
+        "元信息应命中缓存，不再请求 Provider"
+    );
     assert_eq!(
         stub.problems_call_count(),
         2,
@@ -662,13 +657,21 @@ fn meta_cache_never_stores_errors() {
     // 只缓存成功结果：首次 401 不得入缓存，否则会话恢复后仍返回旧错误
     let (service, stub, _dir) = make_service(StubMode::Auth);
 
-    let err = block_on(service.load_contest_with_problems("1011", None))
-        .expect_err("token 过期应报错");
-    assert!(matches!(err, AppError::Auth(_)), "变体必须保留，实际 {:?}", err);
+    let err =
+        block_on(service.load_contest_with_problems("1011", None)).expect_err("token 过期应报错");
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "变体必须保留，实际 {:?}",
+        err
+    );
 
     stub.set_mode(StubMode::Ok);
     block_on(service.load_contest_with_problems("1011", None)).expect("恢复后应成功");
-    assert_eq!(stub.meta_call_count(), 2, "错误不得入缓存，恢复后必须重新请求");
+    assert_eq!(
+        stub.meta_call_count(),
+        2,
+        "错误不得入缓存，恢复后必须重新请求"
+    );
 }
 
 // ── 公告已读状态（客户端本地特性）──
@@ -752,14 +755,11 @@ fn read_state_rejects_path_separators() {
     }
 }
 
-
-// ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
+// ── OJ 切换：OJ 域缓存失效（显式调用，不依赖事件投递）──
 
 #[test]
 fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     // 「延迟清理磁盘缓存」安全的前提：键带 OJ 维度 → 跨 OJ 结构上不可能命中
-    use crate::core::event::event_bus::EventBus;
-
     let dir = TempDir::named("hinina-test-contest-oj-scope");
     let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
@@ -774,7 +774,7 @@ fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     }
     let service = ContestService::new(
         Arc::clone(&registry),
-        Arc::new(EventBus::new()),
+        Arc::new(CoreEventBus::new()),
         Arc::new(Storage::new(dir.to_path_buf())),
     );
 
@@ -794,12 +794,14 @@ fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     );
 }
 
+/// `on_oj_switched()` 显式清理 OJ 域缓存：内存段同步完成、磁盘段同步/后台完成。
+///
+/// 本用例是**同步**上下文（无 tokio runtime），因此走 `on_oj_switched` 的同步兜底分支 ——
+/// 返回即已清完，断言是确定的。异步分支由下一个用例覆盖。
 #[test]
-fn oj_switched_clears_contest_scoped_caches() {
-    use crate::core::event::app_event::{AppEvent, SystemEvent};
-
+fn on_oj_switched_clears_contest_scoped_caches() {
     let dir = TempDir::named("hinina-test-contest-oj-switch");
-    let bus = Arc::new(EventBus::new());
+    let bus = Arc::new(CoreEventBus::new());
     let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
     let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
     registry.register(
@@ -822,20 +824,62 @@ fn oj_switched_clears_contest_scoped_caches() {
         fetched_at: Instant::now(),
     });
     block_on(service.load_contest_meta("7")).expect("预置元信息失败");
-    let disk_entry = dir.join("cache").join("contest_meta").join("HOJ").join("7.json");
+    let disk_entry = dir
+        .join("cache")
+        .join("contest_meta")
+        .join("HOJ")
+        .join("7.json");
     assert!(disk_entry.exists(), "预置失败：元信息磁盘缓存未落盘");
-    assert!(!service.meta_cache.is_empty(), "预置失败：元信息内存缓存为空");
+    assert!(
+        !service.meta_cache.is_empty(),
+        "预置失败：元信息内存缓存为空"
+    );
 
-    bus.publish(&AppEvent::System(SystemEvent::OJSwitched { oj_id: "QDUOJ".into() }));
+    // 显式调用（由 `switch_oj` 命令触发）：**不经过事件投递**
+    service.on_oj_switched();
 
     assert!(service.cache.read().unwrap().is_none(), "列表缓存应被清空");
     assert!(service.meta_cache.is_empty(), "元信息内存缓存应被清空");
-    // 磁盘段是延迟投递（I/O 不阻塞发布方）：等队列排空后再断言。
-    // 删掉 subscribe_deferred 注册后本断言必须失败 —— 这是延迟清理的有效回归覆盖
-    bus.flush_deferred();
     assert!(
         !dir.join("cache/contest_meta").exists(),
-        "磁盘元信息缓存应被延迟清理"
+        "磁盘元信息缓存应被清理（同步上下文下立即完成）"
+    );
+}
+
+/// 有 tokio 上下文时，磁盘段走后台任务（空间回收不阻塞 `switch_oj` 返回）。
+#[tokio::test]
+async fn on_oj_switched_disk_cleanup_runs_on_runtime() {
+    let dir = TempDir::named("hinina-test-contest-oj-switch-async");
+    let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
+    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            contest: Some(Arc::clone(&provider) as Arc<dyn ContestProvider>),
+            ..Default::default()
+        },
+    );
+    let service = ContestService::new(
+        registry,
+        Arc::new(CoreEventBus::new()),
+        Arc::new(Storage::new(dir.to_path_buf())),
+    );
+
+    // 手工预置磁盘缓存（不经过网络）：目录与文件都真实存在
+    let meta_dir = dir.join("cache").join("contest_meta").join("HOJ");
+    std::fs::create_dir_all(&meta_dir).expect("创建缓存目录失败");
+    std::fs::write(meta_dir.join("7.json"), "{}").expect("写入缓存失败");
+
+    service.on_oj_switched();
+
+    // 后台任务完成前目录可能仍在：轮询等待（上限 5 秒）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while dir.join("cache/contest_meta").exists() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        !dir.join("cache/contest_meta").exists(),
+        "后台段应清理磁盘元信息缓存"
     );
 }
 
@@ -856,7 +900,10 @@ fn clear_caches_empties_list_memory_and_disk_caches() {
         dir.join("cache/contest_meta/HOJ/7.json").exists(),
         "预置失败：元信息磁盘缓存未落盘"
     );
-    assert!(!service.meta_cache.is_empty(), "预置失败：元信息内存缓存为空");
+    assert!(
+        !service.meta_cache.is_empty(),
+        "预置失败：元信息内存缓存为空"
+    );
     let calls_before = provider.meta_call_count();
 
     service.clear_caches();
@@ -887,11 +934,11 @@ fn clear_caches_keeps_announcement_baseline() {
     // 公告基线**不是缓存**，而是「已经告诉过用户哪些公告」的记忆：清掉它会让
     // 清空之后新发布的公告在下一次拉取时被当成「首次拉取」而**漏报**（红点不亮）。
     let (service, provider, bus, _dir) = make_service_with_bus(StubMode::Ok);
-    let events = collect_contest_events(&bus);
+    let mut rx = subscribe(&bus);
 
     block_on(service.list_announcements("1012", 1, 20)).expect("首次拉取公告失败");
     assert!(
-        events.lock().unwrap().is_empty(),
+        drain_new_announcement_ids(&mut rx).is_empty(),
         "首次拉取只建基线，不该发事件"
     );
 
@@ -902,7 +949,7 @@ fn clear_caches_keeps_announcement_baseline() {
     block_on(service.list_announcements("1012", 1, 20)).expect("二次拉取公告失败");
 
     assert_eq!(
-        published_ids(&events),
+        drain_new_announcement_ids(&mut rx),
         vec![vec!["9002".to_string()]],
         "清空缓存不得丢掉公告基线（丢掉 = 清空后新增的公告漏报，红点不亮）"
     );
@@ -916,10 +963,10 @@ fn clear_announcement_baseline_forgets_baseline() {
     // 等价于「首次拉取」（静默重建基线，不报新公告）。两条用例成对存在，
     // 才能锁住「clear_caches 保留 / clear_announcement_baseline 清空」这个区别。
     let (service, provider, bus, _dir) = make_service_with_bus(StubMode::Ok);
-    let events = collect_contest_events(&bus);
+    let mut rx = subscribe(&bus);
 
     block_on(service.list_announcements("1012", 1, 20)).expect("首次拉取公告失败");
-    assert!(events.lock().unwrap().is_empty());
+    assert!(drain_new_announcement_ids(&mut rx).is_empty());
 
     service.clear_announcement_baseline();
 
@@ -927,7 +974,7 @@ fn clear_announcement_baseline_forgets_baseline() {
     block_on(service.list_announcements("1012", 1, 20)).expect("二次拉取公告失败");
 
     assert!(
-        events.lock().unwrap().is_empty(),
+        drain_new_announcement_ids(&mut rx).is_empty(),
         "基线已忘：下次拉取应重新建基线（等价首次），而不是报新公告"
     );
 }
@@ -964,4 +1011,40 @@ fn clear_announcement_read_state_removes_files_and_is_idempotent() {
 
     // 幂等：目录已不在时返回 false（「本就没有」不是失败），不报错
     assert!(!service.clear_announcement_read_state());
+}
+
+// ── 事件发布契约（事实通知，不是命令）──
+
+/// `select_contest` 发布 `ContestSelected`（供审计 / 插件 / 前端刷新）。
+#[test]
+fn select_contest_publishes_contest_selected() {
+    let (service, _stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
+    let mut rx = subscribe(&bus);
+
+    service.select_contest("1011").expect("选中比赛失败");
+
+    assert_eq!(
+        rx.try_recv().expect("应发布 ContestSelected"),
+        CoreEvent::ContestSelected {
+            contest_id: "1011".into()
+        }
+    );
+}
+
+/// `list_contests` **不发布任何事件**：比赛列表是查询结果，真实数据由 IPC 返回。
+///
+/// 旧实现发布 `ListLoaded { contests }`（全量克隆 + 伪装成事件），既浪费又制造
+/// 「前端可以靠事件拿列表」的错误预期。本用例是该删除的回归防线。
+#[test]
+fn list_contests_publishes_nothing() {
+    let (service, _stub, bus, _dir) = make_service_with_bus(StubMode::Ok);
+    let mut rx = subscribe(&bus);
+
+    let contests = block_on(service.list_contests(60)).expect("获取比赛列表失败");
+    assert!(!contests.is_empty(), "前置条件：应有比赛数据");
+
+    assert!(
+        rx.try_recv().is_err(),
+        "查询结果不得伪装成事件；真实数据只经 IPC 返回值传递"
+    );
 }

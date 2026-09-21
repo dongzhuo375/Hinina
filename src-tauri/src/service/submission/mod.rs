@@ -25,9 +25,8 @@ use crate::core::entity::submission::{
     SubmissionQuery,
 };
 use crate::core::error::AppResult;
-use crate::core::event::app_event::{AppEvent, SubmissionEvent, SystemEvent};
-use crate::core::event::event_bus::EventBus;
-use crate::core::event::event_category::EventCategory;
+use crate::core::event::core_event::CoreEvent;
+use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::TtlCache;
 use crate::infra::storage::Storage;
@@ -48,7 +47,7 @@ const SUBMISSION_CASES_CAPACITY: usize = 100;
 /// 提交服务。
 pub struct SubmissionService {
     registry: Arc<dyn ProviderRegistry>,
-    event_bus: Arc<EventBus>,
+    event_bus: Arc<CoreEventBus>,
     /// 终态提交详情缓存（**仅内存**：用户域数据不落盘）
     detail_cache: Arc<TtlCache<String, SubmissionDetail>>,
     /// 终态测试点缓存（**仅内存**）
@@ -67,18 +66,21 @@ impl SubmissionService {
     /// 创建 SubmissionService。
     pub fn new(
         registry: Arc<dyn ProviderRegistry>,
-        event_bus: Arc<EventBus>,
+        event_bus: Arc<CoreEventBus>,
         storage: Arc<Storage>,
     ) -> Self {
-        let detail_cache = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY));
-        let cases_cache = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_CASES_CAPACITY));
-        let terminal_marks = Arc::new(TtlCache::new(SUBMISSION_CACHE_TTL, SUBMISSION_DETAIL_CAPACITY));
-        Self::subscribe_oj_switched(
-            Arc::clone(&event_bus),
-            Arc::clone(&detail_cache),
-            Arc::clone(&cases_cache),
-            Arc::clone(&terminal_marks),
-        );
+        let detail_cache = Arc::new(TtlCache::new(
+            SUBMISSION_CACHE_TTL,
+            SUBMISSION_DETAIL_CAPACITY,
+        ));
+        let cases_cache = Arc::new(TtlCache::new(
+            SUBMISSION_CACHE_TTL,
+            SUBMISSION_CASES_CAPACITY,
+        ));
+        let terminal_marks = Arc::new(TtlCache::new(
+            SUBMISSION_CACHE_TTL,
+            SUBMISSION_DETAIL_CAPACITY,
+        ));
         Self {
             registry,
             event_bus,
@@ -89,28 +91,17 @@ impl SubmissionService {
         }
     }
 
-    /// 订阅 `OJSwitched`：清空用户域缓存。
+    /// OJ 切换后的用户域缓存清理（**由 `switch_oj` 命令显式调用**，不订阅事件）。
     ///
     /// 缓存内是**旧 OJ 用户**的提交详情与测试点（含源代码），切换后不得复用
     /// —— 与登出清理同一语义（换 OJ 即换用户上下文）。
-    fn subscribe_oj_switched(
-        event_bus: Arc<EventBus>,
-        detail_cache: Arc<TtlCache<String, SubmissionDetail>>,
-        cases_cache: Arc<TtlCache<String, SubmissionCases>>,
-        terminal_marks: Arc<TtlCache<String, bool>>,
-    ) {
-        event_bus.subscribe(
-            EventCategory::System,
-            Arc::new(move |event: &AppEvent| {
-                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
-                    return;
-                };
-                detail_cache.clear();
-                cases_cache.clear();
-                terminal_marks.clear();
-                info!("OJ 已切换：清空提交详情/测试点缓存（用户域数据不得跨 OJ 复用）");
-            }),
-        );
+    ///
+    /// 为什么显式：`switch_oj` 返回后新 OJ 的查询立刻可能进来，清缓存属于
+    /// 切换正确性的一部分，不能依赖异步投递（消费者可能落后、可能不存在）。
+    /// 三个缓存都在内存里，清理本身是 µs 级，无需后台任务。
+    pub fn on_oj_switched(&self) {
+        self.clear_user_caches();
+        info!("OJ 已切换：清空提交详情/测试点缓存（用户域数据不得跨 OJ 复用）");
     }
 
     /// 清空用户域缓存（登出时由 `auth_cmd::logout` 编排调用）。
@@ -136,7 +127,7 @@ impl SubmissionService {
     /// 提交代码到 OJ。
     ///
     /// 返回 submission_id 供后续轮询使用。
-    /// 发布 `SubmissionEvent::Created`。
+    /// 发布 `CoreEvent::SubmissionCreated`。
     ///
     /// `problem_id` 与 `display_id` 同时下传（各 OJ 认的不是同一个标识，详见
     /// `SubmissionProvider::submit`）；成功后在本地留一份源码快照。
@@ -177,11 +168,9 @@ impl SubmissionService {
             source_code,
         );
 
-        self.event_bus.publish(&AppEvent::Submission(
-            SubmissionEvent::Created {
-                submission_id: submission_id.clone(),
-            },
-        ));
+        self.event_bus.publish(CoreEvent::SubmissionCreated {
+            submission_id: submission_id.clone(),
+        });
 
         Ok(submission_id)
     }
@@ -190,20 +179,17 @@ impl SubmissionService {
     ///
     /// 轮询节拍与总超时由前端 `submissionStore` 的 createPoller 拥有，后端不循环、
     /// 不睡眠、不设 deadline：每次调用只发一次 `provider.get_judgement`。
-    /// 终态发布 `SubmissionEvent::Judged`；非终态（Pending/Compiling/Running）
+    /// 终态发布 `CoreEvent::SubmissionJudged`（状态摘要）；非终态（Pending/Compiling/Running）
     /// 原样透传、不发事件，是否继续轮询由前端决定。
     pub async fn get_judgement(&self, submission_id: &str) -> AppResult<JudgementResult> {
         let provider = self.registry.current_submission()?;
 
         // 错误一律 context() 补环节名、变体穿透（Auth 变体是前端 sessionGuard 的判据）；
         // 瞬时抖动的容忍与重试同样由前端 poller 编排
-        let result = provider
-            .get_judgement(submission_id)
-            .await
-            .map_err(|e| {
-                warn!(submission_id = submission_id, error = %e, "评测查询失败");
-                e.context("评测查询失败")
-            })?;
+        let result = provider.get_judgement(submission_id).await.map_err(|e| {
+            warn!(submission_id = submission_id, error = %e, "评测查询失败");
+            e.context("评测查询失败")
+        })?;
 
         // 非终态判据与原轮询循环一致：Pending/Compiling/Running 三态之外即终态
         if matches!(
@@ -221,12 +207,10 @@ impl SubmissionService {
                 status = ?result.status,
                 "评测完成"
             );
-            self.event_bus.publish(&AppEvent::Submission(
-                SubmissionEvent::Judged {
-                    submission_id: submission_id.to_string(),
-                    result: result.clone(),
-                },
-            ));
+            self.event_bus.publish(CoreEvent::SubmissionJudged {
+                submission_id: submission_id.to_string(),
+                status: result.status.as_str().to_string(),
+            });
         }
 
         Ok(result)
@@ -249,7 +233,11 @@ impl SubmissionService {
                 e.context("获取提交列表失败")
             })?;
 
-        debug!(contest_id = query.contest_id, count = page.records.len(), "提交列表已获取");
+        debug!(
+            contest_id = query.contest_id,
+            count = page.records.len(),
+            "提交列表已获取"
+        );
         Ok(page)
     }
 
@@ -260,7 +248,12 @@ impl SubmissionService {
     pub async fn get_submission_detail(&self, submit_id: &str) -> AppResult<SubmissionDetail> {
         let key = self.cache_key(submit_id);
         if let Some(detail) = self.detail_cache.get(&key) {
-            debug!(cache = "submission_detail", submit_id, hit = true, "命中提交详情缓存");
+            debug!(
+                cache = "submission_detail",
+                submit_id,
+                hit = true,
+                "命中提交详情缓存"
+            );
             return Ok(detail);
         }
 
@@ -306,7 +299,12 @@ impl SubmissionService {
     pub async fn get_submission_cases(&self, submit_id: &str) -> AppResult<SubmissionCases> {
         let key = self.cache_key(submit_id);
         if let Some(cases) = self.cases_cache.get(&key) {
-            debug!(cache = "submission_cases", submit_id, hit = true, "命中测试点缓存");
+            debug!(
+                cache = "submission_cases",
+                submit_id,
+                hit = true,
+                "命中测试点缓存"
+            );
             return Ok(cases);
         }
 

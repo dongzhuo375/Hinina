@@ -2,6 +2,12 @@
 //
 // 会话以 JSON 格式存储在 `sessions/{oj_id}.json`，v0.x 明文存储。
 // v1.0 后考虑引入加密或系统凭据管理器。
+//
+// **持久化职责的归属**（本次重构的关键变更）：
+// 会话落盘是「必须等待结果的核心动作」，因此**只在显式路径上完成** ——
+// 登录时 `AuthService::login` 落盘、Provider 轮换时由适配器经 `SessionRepository`
+// 落盘。旧实现让 Provider 发布带真实 token 的 `TokenRefreshed` 事件、由本服务的
+// 同步订阅者代劳写盘，既把凭证带进事件流，又把持久性保证挂在异步投递上。
 pub mod error;
 
 use std::sync::Arc;
@@ -9,29 +15,14 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
+pub use crate::core::entity::session::Session;
 use crate::core::entity::user::User;
 use crate::core::error::AppResult;
-use crate::core::event::app_event::{AppEvent, AuthEvent};
-use crate::core::event::event_bus::EventBus;
-use crate::core::event::event_category::EventCategory;
+use crate::core::event::core_event::CoreEvent;
+use crate::core::event::core_event_bus::CoreEventBus;
+use crate::core::provider::oj_id::OjId;
 use crate::core::provider::registry::ProviderRegistry;
-use crate::infra::storage::Storage;
-
-/// 会话持久化目录。
-const SESSIONS_DIR: &str = "sessions";
-
-/// 本地会话记录。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
-    /// 用户 ID（UUID），`#[serde(default)]` 兼容升级前不含此字段的旧版 session 文件。
-    #[serde(default)]
-    pub user_id: String,
-    pub username: String,
-    pub token: String,
-    /// 会话归属的 OJ id（旧版文件键名为 `oj_type`，经 alias 兼容读取）
-    #[serde(alias = "oj_type")]
-    pub oj_id: String,
-}
+use crate::core::repository::session_repo::SessionRepository;
 
 /// 会话校验结果（三态），经 IPC 以 snake_case 字符串传递给前端。
 ///
@@ -55,71 +46,34 @@ pub enum SessionValidity {
 /// 通过 ProviderRegistry 获取当前 OJ 的 AuthProvider，
 /// 支持运行时 OJ 切换后自动适配。
 ///
-/// 构造时订阅 `EventCategory::Auth`：Provider 侧发布 `TokenRefreshed` 时
-/// 将新凭证回写磁盘会话，保证重启后 `get_session` 恢复的是最新 token。
-/// 订阅句柄由 EventBus 持有，随 AuthService 生命周期共存（进程级单例，无泄漏风险）。
+/// **不订阅任何事件**：本服务承担的每一项工作（落盘、清理）都必须显式完成，
+/// 不能交给异步消费者。`LoggedIn` / `LoggedOut` / `SessionExpired` 只是
+/// 「这些动作已经做完」的事实通知。
 pub struct AuthService {
     registry: Arc<dyn ProviderRegistry>,
-    storage: Arc<Storage>,
-    event_bus: Arc<EventBus>,
+    session_repo: Arc<dyn SessionRepository>,
+    event_bus: Arc<CoreEventBus>,
 }
 
 impl AuthService {
     /// 创建 AuthService。
     pub fn new(
         registry: Arc<dyn ProviderRegistry>,
-        storage: Arc<Storage>,
-        event_bus: Arc<EventBus>,
+        session_repo: Arc<dyn SessionRepository>,
+        event_bus: Arc<CoreEventBus>,
     ) -> Self {
-        let service = Self {
+        Self {
             registry,
-            storage,
+            session_repo,
             event_bus,
-        };
-        service.subscribe_token_refresh();
-        service
+        }
     }
 
-    /// 订阅 Provider 凭证轮换事件，将新 token 持久化到当前 OJ 的磁盘会话。
+    /// 登录：调用 AuthProvider → 保存会话 → 发布事实通知。
     ///
-    /// 事件回调为同步闭包（EventBus 约定），此处只做文件读写，不阻塞异步运行时。
-    /// 磁盘会话可能尚不存在（轮换发生在登录持久化之前的极端时序），此时跳过回写。
-    fn subscribe_token_refresh(&self) {
-        let storage = Arc::clone(&self.storage);
-        let registry = Arc::clone(&self.registry);
-        self.event_bus.subscribe(
-            EventCategory::Auth,
-            Arc::new(move |event: &AppEvent| {
-                let AppEvent::Auth(AuthEvent::TokenRefreshed { token }) = event else {
-                    return;
-                };
-                let oj_id = registry.current_id();
-                let path = format!("{}/{}", SESSIONS_DIR, oj_id.session_file());
-                let Ok(raw) = storage.read_to_string(&path) else {
-                    return;
-                };
-                let Ok(mut session) = serde_json::from_str::<Session>(&raw) else {
-                    warn!(path = %path, "凭证轮换回写失败：会话文件解析错误");
-                    return;
-                };
-                session.token = token.clone();
-                match serde_json::to_string_pretty(&session) {
-                    Ok(json) => {
-                        if let Err(e) = storage.write_string(&path, &json) {
-                            warn!(error = %e, path = %path, "凭证轮换回写失败：写入会话文件错误");
-                        } else {
-                            debug!(path = %path, "凭证轮换已回写磁盘会话");
-                        }
-                    }
-                    Err(e) => warn!(error = %e, "凭证轮换回写失败：会话序列化错误"),
-                }
-            }),
-        );
-    }
-
-    /// 登录：调用 AuthProvider → 保存会话 → 发布事件。
-    ///
-    /// 登录成功后持久化 session 到 `sessions/{oj_id}.json`。
+    /// 登录成功后**显式**持久化 session 到 `sessions/{oj_id}.json`；
+    /// 落盘失败则整体失败（不发布 `LoggedIn`）—— 会话没落盘就宣告登录成功，
+    /// 会让重启后的客户端拿着不存在的会话工作。
     pub async fn login(&self, username: &str, password: &str) -> AppResult<User> {
         let oj_id = self.registry.current_id();
         let provider = self.registry.current_auth()?;
@@ -132,27 +86,26 @@ impl AuthService {
             e.context("登录失败")
         })?;
 
-        // 持久化会话
-        let session = Session {
-            user_id: user.id.clone(),
-            username: user.username.clone(),
-            token: user.token.clone(),
-            oj_id: oj_id.to_string(),
-        };
-        self.save_session(&session)?;
+        // 持久化会话（显式，落盘成功才算登录完成）
+        let session = Session::new(oj_id.as_str(), &user.id, &user.username, &user.token);
+        self.session_repo.save(&session)?;
 
         info!(username = user.username, "登录成功");
-        self.event_bus
-            .publish(&AppEvent::Auth(AuthEvent::LoginSuccess {
-                user: user.clone(),
-            }));
+        // 只带 OJ 与用户标识：token 与完整 User 实体绝不进入事件流
+        self.event_bus.publish(CoreEvent::LoggedIn {
+            oj_id: oj_id.to_string(),
+            user_id: user.id.clone(),
+        });
 
         Ok(user)
     }
 
-    /// 登出：删除本地会话 → 发布事件。
+    /// 登出：远端登出（非致命）→ 显式删除本地会话 → 发布事实通知。
     ///
     /// 即便远端 logout 失败，也会清除本地会话并发布事件。
+    /// 用户域缓存（含源代码的提交详情/测试点）的清理由命令层显式编排
+    /// （见 `commands::auth_cmd::logout`）—— 同属「必须完成的核心清理」，
+    /// 不交给事件消费者。
     pub async fn logout(&self) -> AppResult<()> {
         let oj_id = self.registry.current_id();
 
@@ -163,46 +116,40 @@ impl AuthService {
             }
         }
 
-        self.clear_session(&oj_id);
+        self.clear_session(&oj_id)?;
 
         info!("已登出");
-        self.event_bus.publish(&AppEvent::Auth(AuthEvent::Logout));
+        self.event_bus.publish(CoreEvent::LoggedOut {
+            oj_id: oj_id.to_string(),
+        });
         Ok(())
     }
 
     /// 从本地文件恢复会话。
     ///
-    /// 返回 `None` 表示无已保存的会话（从未登录或已登出）。
+    /// 返回 `None` 表示无已保存的会话（从未登录、已登出，或文件不可读）。
     ///
     /// 恢复成功时将 token 回注到 Provider，确保重启后认证请求仍携带 Authorization 头。
     pub fn get_session(&self) -> Option<Session> {
         let oj_id = self.registry.current_id();
-        let path = self.session_path(&oj_id);
 
-        if !self.storage.exists(&path) {
-            return None;
-        }
-
-        match self.storage.read_to_string(&path) {
-            Ok(raw) => match serde_json::from_str::<Session>(&raw) {
-                Ok(session) => {
-                    // 将 token 回注到 Provider，保证后续认证接口可用
-                    if let Ok(provider) = self.registry.current_auth() {
-                        provider.restore_token(&session.token);
-                    }
-                    debug!(username = session.username, "会话已恢复");
-                    Some(session)
-                }
-                Err(e) => {
-                    warn!(error = %e, path = %path, "会话文件 JSON 解析失败");
-                    None
-                }
-            },
+        let session = match self.session_repo.load(&oj_id) {
+            Ok(session) => session,
             Err(e) => {
-                warn!(error = %e, path = %path, "会话文件读取失败");
-                None
+                // 仓库层如实报错，应用层降级为「无会话」并留下痕迹 ——
+                // 静默吞掉会让「会话文件损坏」表现为「从未登录」，无从排查
+                warn!(oj_id = %oj_id, error = %e, "会话文件读取失败，按未登录处理");
+                return None;
             }
+        };
+
+        let session = session?;
+        // 将 token 回注到 Provider，保证后续认证接口可用
+        if let Ok(provider) = self.registry.current_auth() {
+            provider.restore_token(&session.token);
         }
+        debug!(username = session.username, "会话已恢复");
+        Some(session)
     }
 
     /// 校验当前会话有效性（三态）。
@@ -236,9 +183,13 @@ impl AuthService {
             Ok(false) => {
                 // 服务端明确判定失效：清除磁盘会话，避免重启后回注过期 token
                 info!("会话已失效，清除本地会话");
-                self.clear_session(&oj_id);
-                self.event_bus
-                    .publish(&AppEvent::Auth(AuthEvent::SessionExpired));
+                if let Err(e) = self.clear_session(&oj_id) {
+                    // 清理失败不改变判定结果：本地会话已不可用，前端必须回登录页
+                    warn!(oj_id = %oj_id, error = %e, "清除失效会话失败");
+                }
+                self.event_bus.publish(CoreEvent::SessionExpired {
+                    oj_id: oj_id.to_string(),
+                });
                 SessionValidity::Invalid
             }
             Err(e) => {
@@ -251,37 +202,9 @@ impl AuthService {
 
     // ── 内部方法 ──
 
-    /// 删除指定 OJ 的本地会话文件（不存在时静默跳过）。
-    fn clear_session(&self, oj_id: &crate::core::provider::oj_id::OjId) {
-        let path = self.session_path(oj_id);
-        if self.storage.exists(&path) {
-            if let Err(e) = self.storage.remove(&path) {
-                warn!(error = %e, path = %path, "清除失效会话文件失败");
-            } else {
-                debug!(path = %path, "失效会话文件已清除");
-            }
-        }
-    }
-
-    /// 保存会话到本地文件。
-    fn save_session(&self, session: &Session) -> AppResult<()> {
-        let path = self.session_path_str(&session.oj_id);
-        // 确保 sessions 目录存在
-        self.storage.create_dir(SESSIONS_DIR)?;
-        let json = serde_json::to_string_pretty(session)?;
-        self.storage.write_string(&path, &json)?;
-        debug!(path = %path, "会话已保存");
-        Ok(())
-    }
-
-    /// 构建会话文件的相对路径。
-    fn session_path_str(&self, oj_id: &str) -> String {
-        format!("{}/{}.json", SESSIONS_DIR, oj_id)
-    }
-
-    /// 同 `session_path_str`，返回 `&str` 借用时需要 Path 的场景。
-    fn session_path(&self, oj_id: &crate::core::provider::oj_id::OjId) -> String {
-        self.session_path_str(oj_id.as_str())
+    /// 删除指定 OJ 的本地会话（不存在时静默成功）。
+    fn clear_session(&self, oj_id: &OjId) -> AppResult<()> {
+        self.session_repo.remove(oj_id)
     }
 }
 

@@ -50,6 +50,39 @@ impl JudgementStatus {
     pub fn is_terminal(&self) -> bool {
         !matches!(self, Self::Pending | Self::Compiling | Self::Running)
     }
+
+    /// 状态的稳定字符串名（与 serde 序列化值一致）。
+    ///
+    /// 供 `CoreEvent::SubmissionJudged` 携带「状态摘要」：事件载荷只放字符串
+    /// 而不是整个 `JudgementResult`（后者含耗时、内存、测试点明细等大字段）。
+    ///
+    /// **必须与序列化输出逐变体一致** —— 由 `as_str_matches_serde_output`
+    /// 单测锁定；前端与插件都按这些确切名称做文案与配色映射。
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotSubmitted => "NotSubmitted",
+            Self::Cancelled => "Cancelled",
+            Self::Pending => "Pending",
+            Self::Compiling => "Compiling",
+            Self::Running => "Running",
+            Self::Accepted => "Accepted",
+            Self::WrongAnswer => "WrongAnswer",
+            Self::TimeLimitExceeded => "TimeLimitExceeded",
+            Self::MemoryLimitExceeded => "MemoryLimitExceeded",
+            Self::RuntimeError => "RuntimeError",
+            Self::CompilationError => "CompilationError",
+            Self::PresentationError => "PresentationError",
+            Self::OutputLimitExceeded => "OutputLimitExceeded",
+            Self::SystemError => "SystemError",
+            Self::RemoteJudgeError => "RemoteJudgeError",
+            Self::SubmitFailed => "SubmitFailed",
+            Self::PartiallyAccepted => "PartiallyAccepted",
+            Self::FrequentLimit => "FrequentLimit",
+            Self::UnknownError => "UnknownError",
+            Self::Unknown => "Unknown",
+        }
+    }
 }
 
 /// 评测结果详情

@@ -22,9 +22,10 @@ pub async fn load_workspace(
 ) -> AppResult<Workspace> {
     info!(contest_id = %contest_id, problem_id = %problem_id, "Command: 加载工作区");
 
-    let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
-        AppError::Workspace("WorkspaceManager 未初始化".into())
-    })?;
+    let wm = ctx
+        .workspace_manager
+        .as_ref()
+        .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
 
     sync_auto_save_with_config(&ctx.config.get().editor, wm);
 
@@ -64,15 +65,15 @@ pub(crate) fn auto_save_action(
 
 /// 按当前配置同步 auto-save 的启停与间隔（**幂等**）。
 ///
-/// 调用点两处：`load_workspace`（首次进入解题页）与 `SystemEvent::ConfigReloaded`
-/// （配置变更后立即生效 —— 事件由 `ConfigService::update` / `reload` 发布，见
-/// `service/config/mod.md`；**只靠 `reload_config` 命令是不够的，它在前端无调用方**）。
+/// 调用点三处：
+/// - `load_workspace`（首次进入解题页）；
+/// - `update_config` / `reload_config`（配置变更后**显式**同步 —— 事件只作通知）；
+/// - 无事件订阅者：配置热生效不再依赖事件投递（旧实现的订阅者还要额外
+///   `tauri::async_runtime::spawn` 才拿得到 tokio 上下文，属把正确性挂在别人的
+///   调用形态上）。
 ///
 /// 必须在 tokio runtime 上下文里调用（`WorkspaceManager::start_auto_save` 内部
-/// 用 `tokio::spawn` 起后台循环）。两个调用点都满足：前者是 Tauri 异步命令；
-/// 后者由组合根的订阅者经 `tauri::async_runtime::spawn` 投递后执行 —— 不依赖
-/// 「发布方一定在 tokio 上下文里」这个隐含前提（见 `main.rs` 的
-/// `install_auto_save_config_sync`）。
+/// 用 `tokio::spawn` 起后台循环）。两个调用点都满足：均为 Tauri 异步命令。
 pub fn sync_auto_save_with_config(
     editor: &crate::core::entity::config::EditorConfig,
     wm: &std::sync::Arc<crate::service::workspace::manager::WorkspaceManager>,
@@ -95,17 +96,32 @@ pub fn sync_auto_save_with_config(
     }
 }
 
+/// 从 [`AppContext`] 取配置与工作区管理器，按当前配置同步 auto-save（幂等）。
+///
+/// 供配置类命令（`update_config` / `reload_config`）显式调用：把
+/// 「判空 + 取 editor 配置」这段样板收敛在一处，避免各命令各写一遍而漂移。
+/// `WorkspaceManager` 未初始化时静默跳过（与 `load_workspace` 的降级一致）。
+pub fn sync_auto_save_from_context(ctx: &AppContext) {
+    let Some(wm) = ctx.workspace_manager.as_ref() else {
+        return;
+    };
+    sync_auto_save_with_config(&ctx.config.get().editor, wm);
+}
+
 /// 持久化当前工作区到磁盘（脏时全量写入文件 + 元数据）。
 ///
 /// 前端 invoke 签名: `save_workspace`
 ///
-/// 未脏时直接返回且不发布事件；成功落盘时发布 `WorkspaceEvent::Saved`
-/// （经 `main.rs` 的事件桥转为前端的 `workspace-saved`，驱动「已自动备份」指示）。
+/// **保存本身是显式同步动作**：本命令返回 `Ok` 即表示内容已落盘（未脏时是无操作）。
+/// 成功落盘时 `WorkspaceManager` 发布 `CoreEvent::WorkspaceSaved`，
+/// 经 `main.rs` 的事件桥转为前端的 `workspace-saved`，驱动「已自动备份」指示 ——
+/// 事件只是通知，保存的成败由本命令的返回值决定。
 #[tauri::command]
 pub async fn save_workspace(ctx: State<'_, AppContext>) -> AppResult<()> {
-    let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
-        AppError::Workspace("WorkspaceManager 未初始化".into())
-    })?;
+    let wm = ctx
+        .workspace_manager
+        .as_ref()
+        .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
 
     wm.save()
 }
@@ -115,7 +131,8 @@ pub async fn save_workspace(ctx: State<'_, AppContext>) -> AppResult<()> {
 /// 前端 invoke 签名: `switch_workspace`({ workspaceId })
 ///
 /// 保存当前工作区 → 加载目标工作区 → 返回新 Workspace。
-/// 发布 `WorkspaceEvent::Switched`。
+/// 旧工作区的落盘由 `WorkspaceManager::switch` **显式**完成（返回即已保存），
+/// 其 `WorkspaceSaved` 事件仅用于前端清脏（按 workspace_id / revision 过滤过期事件）。
 #[tauri::command]
 pub async fn switch_workspace(
     ctx: State<'_, AppContext>,
@@ -123,9 +140,10 @@ pub async fn switch_workspace(
 ) -> AppResult<Workspace> {
     info!(workspace_id = %workspace_id, "Command: 切换工作区");
 
-    let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
-        AppError::Workspace("WorkspaceManager 未初始化".into())
-    })?;
+    let wm = ctx
+        .workspace_manager
+        .as_ref()
+        .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
 
     wm.switch(&workspace_id, "")
 }
@@ -158,9 +176,10 @@ pub async fn update_workspace_file(
     file_name: String,
     content: String,
 ) -> AppResult<()> {
-    let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
-        AppError::Workspace("WorkspaceManager 未初始化".into())
-    })?;
+    let wm = ctx
+        .workspace_manager
+        .as_ref()
+        .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
     wm.update_file(&file_name, &content)
 }
 
@@ -175,8 +194,9 @@ pub async fn set_workspace_language(
     ctx: State<'_, AppContext>,
     language: String,
 ) -> AppResult<Workspace> {
-    let wm = ctx.workspace_manager.as_ref().ok_or_else(|| {
-        AppError::Workspace("WorkspaceManager 未初始化".into())
-    })?;
+    let wm = ctx
+        .workspace_manager
+        .as_ref()
+        .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
     wm.set_language(&language)
 }

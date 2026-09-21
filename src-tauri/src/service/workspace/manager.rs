@@ -8,8 +8,8 @@ use tracing::{debug, info, warn};
 
 use crate::core::entity::workspace::Workspace;
 use crate::core::error::{AppError, AppResult};
-use crate::core::event::app_event::{AppEvent, WorkspaceEvent};
-use crate::core::event::event_bus::EventBus;
+use crate::core::event::core_event::CoreEvent;
+use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::repository::workspace_repo::WorkspaceRepository;
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 /// ```
 pub struct WorkspaceManager {
     repo: Arc<dyn WorkspaceRepository>,
-    event_bus: Arc<EventBus>,
+    event_bus: Arc<CoreEventBus>,
     /// 当前活动工作区（RwLock 内直接持有 Workspace，支持 auto-save 共享和可变访问）
     current: Arc<RwLock<Option<Workspace>>>,
     /// 内容修订号：每次 `update_file` 在**写锁内**递增。
@@ -94,7 +94,7 @@ fn can_mark_clean(
 
 impl WorkspaceManager {
     /// 创建 WorkspaceManager。
-    pub fn new(repo: Arc<dyn WorkspaceRepository>, event_bus: Arc<EventBus>) -> Self {
+    pub fn new(repo: Arc<dyn WorkspaceRepository>, event_bus: Arc<CoreEventBus>) -> Self {
         Self {
             repo,
             event_bus,
@@ -111,7 +111,8 @@ impl WorkspaceManager {
     ///
     /// 替换当前工作区前先落盘旧的（内存是唯一权威副本，见 [`Self::save_current_if_dirty`]）。
     ///
-    /// 发布 `WorkspaceEvent::Loaded`。
+    /// **不发布事件**：工作区的创建由前端经 IPC 发起，返回值即真值；
+    /// 「已创建」不是需要其他观察者知晓的事实（旧实现发布 `Loaded`，无任何消费者）。
     pub fn create(
         &self,
         contest_id: &str,
@@ -141,11 +142,6 @@ impl WorkspaceManager {
             "工作区已创建"
         );
 
-        self.event_bus
-            .publish(&AppEvent::Workspace(WorkspaceEvent::Loaded {
-                workspace_id: ws.id.clone(),
-            }));
-
         Ok(ws)
     }
 
@@ -154,7 +150,7 @@ impl WorkspaceManager {
     /// 替换当前工作区前先落盘旧的（内存是唯一权威副本，见 [`Self::save_current_if_dirty`]）。
     /// 重新加载同一工作区时，这一步同时保证「刚推送到内存的内容」先落盘再被读回。
     ///
-    /// 发布 `WorkspaceEvent::Loaded`。
+    /// **不发布事件**：加载由前端经 IPC 发起，返回值即真值。
     pub fn load(&self, workspace_id: &str, _root_path: &str) -> AppResult<Workspace> {
         if !self.repo.exists(workspace_id) {
             return Err(AppError::Workspace(format!(
@@ -170,7 +166,9 @@ impl WorkspaceManager {
         let file_paths = self.repo.list_files(workspace_id)?;
 
         // 读取元数据
-        let meta_json = self.repo.read_file(workspace_id, &PathBuf::from("workspace.json"))?;
+        let meta_json = self
+            .repo
+            .read_file(workspace_id, &PathBuf::from("workspace.json"))?;
         let meta: WorkspaceMeta = serde_json::from_str(&meta_json)
             .map_err(|e| AppError::Serialization(format!("解析工作区元数据失败: {}", e)))?;
 
@@ -217,11 +215,6 @@ impl WorkspaceManager {
 
         info!(workspace_id = workspace_id, "工作区已加载");
 
-        self.event_bus
-            .publish(&AppEvent::Workspace(WorkspaceEvent::Loaded {
-                workspace_id: workspace_id.to_string(),
-            }));
-
         Ok(ws)
     }
 
@@ -233,7 +226,8 @@ impl WorkspaceManager {
     /// 一个源文件，收益不抵复杂度。
     ///
     /// 持有写锁完成写盘（保存期间不接受 `update_file`），因此不会与编辑器同步竞争；
-    /// 未脏时直接返回且**不发布** `WorkspaceEvent::Saved`。
+    /// 未脏时直接返回且**不发布** `CoreEvent::WorkspaceSaved` —— 该事件等价于
+    /// 「最新内容确已在磁盘上」，不能为一次空操作发布。
     pub fn save(&self) -> AppResult<()> {
         let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
         let ws = match current.as_mut() {
@@ -261,19 +255,21 @@ impl WorkspaceManager {
 
         ws.mark_clean();
 
-        debug!(
-            workspace_id = ws.id,
-            files_saved = saved,
-            "工作区已保存"
-        );
+        debug!(workspace_id = ws.id, files_saved = saved, "工作区已保存");
 
         let ws_id = ws.id.clone();
+        // 修订号必须在**写锁内**取：释放锁之后 `update_file` 可能立刻递增它，
+        // 那样事件会报出比磁盘内容更新的修订号，前端据此清脏 = 假 clean
+        // （最新内容仍在内存，直到下一次编辑才可能落盘）。
+        let revision = self.revision.load(Ordering::SeqCst);
         drop(current);
 
-        self.event_bus
-            .publish(&AppEvent::Workspace(WorkspaceEvent::Saved {
-                workspace_id: ws_id,
-            }));
+        // 显式落盘已完成，此处只发布「确已落盘」的事实
+        self.event_bus.publish(CoreEvent::WorkspaceSaved {
+            workspace_id: ws_id,
+            revision,
+            automatic: false,
+        });
 
         Ok(())
     }
@@ -298,7 +294,11 @@ impl WorkspaceManager {
 
         self.persist_meta(&ws)?;
 
-        debug!(workspace_id = ws.id, language = language, "工作区语言已更新并落盘");
+        debug!(
+            workspace_id = ws.id,
+            language = language,
+            "工作区语言已更新并落盘"
+        );
         Ok(ws)
     }
 
@@ -353,11 +353,14 @@ impl WorkspaceManager {
     /// - 写盘失败保持脏，下一 tick 重试，且**不发布事件** —— 前端「已自动备份」
     ///   必须表示最新内容确已落盘；
     /// - 仅当快照之后没有新改动（修订号未变）才 `mark_clean` 并发布
-    ///   `WorkspaceEvent::AutoSaveTriggered`；有新改动时保留脏标记，下轮重写。
+    ///   `CoreEvent::WorkspaceSaved { automatic: true }`；有新改动时保留脏标记，下轮重写。
     pub fn start_auto_save(&self, interval_secs: u64) {
         // 锁序固定为 handle → interval（`stop_auto_save` 同序），无死锁面。
         // 持锁期间只做「abort + spawn + 登记」：spawn 不阻塞，且循环体不取这把锁。
-        let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
+        let mut handle = self
+            .auto_save_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(previous) = handle.take() {
             previous.abort();
         }
@@ -436,9 +439,11 @@ impl WorkspaceManager {
                 };
 
                 if persisted {
-                    event_bus.publish(&AppEvent::Workspace(WorkspaceEvent::AutoSaveTriggered {
+                    event_bus.publish(CoreEvent::WorkspaceSaved {
                         workspace_id: ws_id.clone(),
-                    }));
+                        revision: snapshot_revision,
+                        automatic: true,
+                    });
                     debug!(
                         workspace_id = ws_id,
                         files_saved = files_saved,
@@ -465,7 +470,10 @@ impl WorkspaceManager {
 
     /// 停止自动保存。
     pub fn stop_auto_save(&self) {
-        let mut handle = self.auto_save_handle.lock().unwrap_or_else(|e| e.into_inner());
+        let mut handle = self
+            .auto_save_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(task) = handle.take() {
             task.abort();
             debug!("自动保存已停止");
@@ -491,24 +499,15 @@ impl WorkspaceManager {
 
     /// 切换工作区：保存当前 → 加载目标。
     ///
-    /// 发布 `WorkspaceEvent::Switched`。
+    /// **不发布事件**：切换由前端经 IPC 发起，返回值即真值；切换前对旧工作区的
+    /// 显式保存本身会发布 `WorkspaceSaved`（前端据此清脏，并按 workspace_id /
+    /// revision 过滤掉不属于当前工作区的过期事件）。
     pub fn switch(&self, workspace_id: &str, root_path: &str) -> AppResult<Workspace> {
-        let from = {
-            let current = self.current.read().unwrap_or_else(|e| e.into_inner());
-            current.as_ref().map(|ws| ws.id.clone())
-        };
-
         // 保存当前工作区（内存是唯一权威副本，替换前必须先落盘）
         self.save_current_if_dirty();
 
         // 加载目标工作区
         let workspace = self.load(workspace_id, root_path)?;
-
-        self.event_bus
-            .publish(&AppEvent::Workspace(WorkspaceEvent::Switched {
-                from: from.unwrap_or_default(),
-                to: workspace_id.to_string(),
-            }));
 
         Ok(workspace)
     }
@@ -610,7 +609,7 @@ impl WorkspaceManager {
     /// - 命中 → 加载已有工作区（恢复之前的代码）
     /// - 未命中 → 创建新工作区
     ///
-    /// 发布 `WorkspaceEvent::Loaded`。
+    /// **不发布事件**：由前端经 IPC 发起，返回值即真值。
     pub fn find_or_create(
         &self,
         contest_id: &str,

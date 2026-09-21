@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::Arc;
 
-use crate::core::event::event_bus::EventBus;
+use crate::core::event::core_event_bus::CoreEventBus;
 use crate::infra::fs_workspace_repo::FsWorkspaceRepository;
 use crate::infra::storage::Storage;
 use crate::test_support::{Guarded, TempDir};
@@ -14,7 +14,7 @@ fn test_manager(test_name: &str) -> Guarded<WorkspaceManager> {
     let dir = TempDir::named(&format!("hinina-test-mgr-{}", test_name));
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsWorkspaceRepository::new(storage));
-    let event_bus = Arc::new(EventBus::new());
+    let event_bus = Arc::new(CoreEventBus::new());
     Guarded::new(WorkspaceManager::new(repo, event_bus), dir)
 }
 
@@ -22,21 +22,21 @@ fn test_manager_with_storage(test_name: &str) -> (Guarded<WorkspaceManager>, Arc
     let dir = TempDir::named(&format!("hinina-test-mgr-{}", test_name));
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let event_bus = Arc::new(EventBus::new());
+    let event_bus = Arc::new(CoreEventBus::new());
     (
         Guarded::new(WorkspaceManager::new(repo, event_bus), dir),
         storage,
     )
 }
 
-/// 同上，额外把 EventBus 交给调用方（auto-save 事件断言需要订阅它）。
+/// 同上，额外把事件总线交给调用方（auto-save / 落盘事件断言需要订阅它）。
 fn test_manager_with_bus(
     test_name: &str,
-) -> (Guarded<WorkspaceManager>, Arc<Storage>, Arc<EventBus>) {
+) -> (Guarded<WorkspaceManager>, Arc<Storage>, Arc<CoreEventBus>) {
     let dir = TempDir::named(&format!("hinina-test-mgr-{}", test_name));
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let event_bus = Arc::new(EventBus::new());
+    let event_bus = Arc::new(CoreEventBus::new());
     (
         Guarded::new(WorkspaceManager::new(repo, Arc::clone(&event_bus)), dir),
         storage,
@@ -142,8 +142,7 @@ fn load_saves_previous_workspace_before_replacing() {
 fn save_marks_workspace_clean() {
     let mgr = test_manager("save-clean");
     mgr.create("contest-3", "problem-C", "/ws").unwrap();
-    mgr.update_file("main.cpp", "#include <cstdio>")
-        .unwrap();
+    mgr.update_file("main.cpp", "#include <cstdio>").unwrap();
 
     let ws = mgr.current().unwrap();
     assert!(ws.is_dirty, "workspace should be dirty after update_file");
@@ -182,7 +181,7 @@ fn load_recovers_workspace_from_disk() {
     let dir = TempDir::named("hinina-test-mgr-load-recover");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo1 = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let mgr1 = WorkspaceManager::new(repo1, Arc::new(EventBus::new()));
+    let mgr1 = WorkspaceManager::new(repo1, Arc::new(CoreEventBus::new()));
 
     let ws = mgr1
         .create("contest-6", "problem-F", "/home/user/oj")
@@ -193,15 +192,12 @@ fn load_recovers_workspace_from_disk() {
 
     // create a second manager sharing the same storage
     let repo2 = Arc::new(FsWorkspaceRepository::new(storage));
-    let mgr2 = WorkspaceManager::new(repo2, Arc::new(EventBus::new()));
+    let mgr2 = WorkspaceManager::new(repo2, Arc::new(CoreEventBus::new()));
 
     let loaded = mgr2.load(&ws_id, "/home/user/oj").unwrap();
     assert_eq!(loaded.contest_id, "contest-6");
     assert_eq!(loaded.problem_id, "problem-F");
-    assert_eq!(
-        loaded.files.get("main.cpp").unwrap(),
-        "// recovered file"
-    );
+    assert_eq!(loaded.files.get("main.cpp").unwrap(), "// recovered file");
 }
 
 #[test]
@@ -209,17 +205,15 @@ fn load_uses_metadata_not_id_parsing() {
     let dir = TempDir::named("hinina-test-mgr-metadata");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo1 = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let mgr1 = WorkspaceManager::new(repo1, Arc::new(EventBus::new()));
+    let mgr1 = WorkspaceManager::new(repo1, Arc::new(CoreEventBus::new()));
 
-    let ws = mgr1
-        .create("contest-2024", "problem-G", "/ws")
-        .unwrap();
+    let ws = mgr1.create("contest-2024", "problem-G", "/ws").unwrap();
     let ws_id = ws.id.clone();
     mgr1.update_file("main.cpp", "// 2024 contest").unwrap();
     mgr1.save().unwrap(); // 内存是唯一权威副本：跨实例恢复前必须落盘
 
     let repo2 = Arc::new(FsWorkspaceRepository::new(storage));
-    let mgr2 = WorkspaceManager::new(repo2, Arc::new(EventBus::new()));
+    let mgr2 = WorkspaceManager::new(repo2, Arc::new(CoreEventBus::new()));
 
     let loaded = mgr2.load(&ws_id, "/ws").unwrap();
 
@@ -236,25 +230,24 @@ fn load_uses_metadata_not_id_parsing() {
 #[test]
 fn destroy_removes_workspace() {
     let (mgr, storage) = test_manager_with_storage("destroy");
-    let ws = mgr
-        .create("contest-7", "problem-H", "/ws")
-        .unwrap();
+    let ws = mgr.create("contest-7", "problem-H", "/ws").unwrap();
     let ws_id = ws.id.clone();
 
     let repo = FsWorkspaceRepository::new(Arc::clone(&storage));
     assert!(repo.exists(&ws_id), "workspace should exist before destroy");
 
     mgr.destroy(&ws_id).unwrap();
-    assert!(!repo.exists(&ws_id), "workspace should not exist after destroy");
+    assert!(
+        !repo.exists(&ws_id),
+        "workspace should not exist after destroy"
+    );
 }
 
 #[test]
 fn switch_saves_current_and_loads_target() {
     let mgr = test_manager("switch");
 
-    let ws1 = mgr
-        .create("contest-8", "problem-I", "/ws")
-        .unwrap();
+    let ws1 = mgr.create("contest-8", "problem-I", "/ws").unwrap();
     let ws1_id = ws1.id.clone();
     mgr.update_file("main.cpp", "// workspace one").unwrap();
 
@@ -272,9 +265,7 @@ fn current_returns_none_when_no_workspace() {
     let mgr = test_manager("current-none");
     assert!(mgr.current().is_none());
 
-    let ws = mgr
-        .create("contest-10", "problem-K", "/ws")
-        .unwrap();
+    let ws = mgr.create("contest-10", "problem-K", "/ws").unwrap();
     assert!(mgr.current().is_some());
 
     mgr.destroy(&ws.id).unwrap();
@@ -300,7 +291,7 @@ fn set_language_persists_across_manager_instances() {
 
     // 换一个 manager 实例，模拟切题后重新加载 / 客户端重启
     let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let mgr2 = WorkspaceManager::new(repo, Arc::new(EventBus::new()));
+    let mgr2 = WorkspaceManager::new(repo, Arc::new(CoreEventBus::new()));
     let loaded = mgr2.load(&ws.id, "/ws").expect("加载工作区失败");
     assert_eq!(loaded.language, "java", "语言必须跨实例持久化");
 }
@@ -311,12 +302,13 @@ fn save_persists_language_metadata() {
     let ws = mgr
         .create("contest-1", "problem-A", "/ws")
         .expect("创建工作区失败");
-    mgr.update_file("Main.java", "class Main {}").expect("写入文件失败");
+    mgr.update_file("Main.java", "class Main {}")
+        .expect("写入文件失败");
     mgr.set_language("java").expect("设置语言失败");
     mgr.save().expect("保存失败");
 
     let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let mgr2 = WorkspaceManager::new(repo, Arc::new(EventBus::new()));
+    let mgr2 = WorkspaceManager::new(repo, Arc::new(CoreEventBus::new()));
     let loaded = mgr2.load(&ws.id, "/ws").expect("加载工作区失败");
     assert_eq!(loaded.language, "java");
     assert_eq!(
@@ -340,8 +332,7 @@ fn set_language_without_current_workspace_errors() {
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
-use crate::core::event::app_event::{AppEvent, WorkspaceEvent};
-use crate::core::event::event_category::EventCategory;
+use crate::core::event::core_event::CoreEvent;
 use crate::core::repository::workspace_repo::WorkspaceRepository;
 
 /// 写盘钩子：在真实写盘前执行（返回 Err 即模拟写失败）
@@ -388,21 +379,26 @@ impl WorkspaceRepository for HookedRepo {
     }
 }
 
-/// 订阅 `AutoSaveTriggered` 并返回计数句柄。
-fn count_auto_save_events(bus: &Arc<EventBus>) -> Arc<AtomicUsize> {
+/// 订阅「工作区已落盘」事件并返回计数句柄。
+///
+/// `WorkspaceSaved` 的 `automatic` 区分显式保存与 auto-save；这里只数 auto-save 的那些
+/// （与旧 `AutoSaveTriggered` 的语义一致）。
+fn count_auto_save_events(bus: &Arc<CoreEventBus>) -> Arc<AtomicUsize> {
     let count = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&count);
-    bus.subscribe(
-        EventCategory::Workspace,
-        Arc::new(move |event: &AppEvent| {
-            if matches!(
-                event,
-                AppEvent::Workspace(WorkspaceEvent::AutoSaveTriggered { .. })
-            ) {
+    let mut rx = bus.subscribe();
+    std::thread::spawn(move || loop {
+        match rx.blocking_recv() {
+            Ok(CoreEvent::WorkspaceSaved {
+                automatic: true, ..
+            }) => {
                 counter.fetch_add(1, AtomicOrdering::SeqCst);
             }
-        }),
-    );
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    });
     count
 }
 
@@ -448,7 +444,6 @@ async fn auto_save_persists_dirty_workspace_and_publishes_once() {
             .unwrap(),
         "v1"
     );
-
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -460,7 +455,7 @@ async fn auto_save_write_is_serialized_with_explicit_save() {
     let dir = TempDir::named("hinina-test-mgr-autosave-serialize");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let bus = Arc::new(EventBus::new());
+    let bus = Arc::new(CoreEventBus::new());
 
     // 钩子：auto-save 写 "v1" 时通知测试并阻塞（模拟被抢占 / 慢盘 / 杀毒扫描）；
     // 写盘完成后再发一次信号，供测试确定性等待「旧写已落盘」
@@ -539,7 +534,7 @@ async fn auto_save_eventually_persists_newest_content_when_edit_arrives_mid_tick
     let dir = TempDir::named("hinina-test-mgr-autosave-midtick");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let bus = Arc::new(EventBus::new());
+    let bus = Arc::new(CoreEventBus::new());
     let events = count_auto_save_events(&bus);
 
     let slot: Arc<std::sync::Mutex<Option<Arc<WorkspaceManager>>>> =
@@ -591,7 +586,6 @@ async fn auto_save_eventually_persists_newest_content_when_edit_arrives_mid_tick
         events.load(AtomicOrdering::SeqCst) >= 1,
         "至少发布一次「已落盘」事件"
     );
-
 }
 
 #[tokio::test]
@@ -599,7 +593,7 @@ async fn auto_save_keeps_dirty_and_silent_when_write_fails() {
     let dir = TempDir::named("hinina-test-mgr-autosave-fail");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let bus = Arc::new(EventBus::new());
+    let bus = Arc::new(CoreEventBus::new());
     let events = count_auto_save_events(&bus);
 
     let on_save: SaveHook = Arc::new(|_id, content| {
@@ -631,7 +625,6 @@ async fn auto_save_keeps_dirty_and_silent_when_write_fails() {
         0,
         "写失败不得发布「已落盘」事件（否则前端会显示已自动备份）"
     );
-
 }
 
 /// auto-save 的启停与间隔是可观测状态，且支持「停掉再启动」（P48）。
@@ -648,7 +641,11 @@ async fn auto_save_tracks_interval_and_can_be_restarted() {
     assert_eq!(mgr.auto_save_interval_secs(), Some(2));
 
     mgr.stop_auto_save();
-    assert_eq!(mgr.auto_save_interval_secs(), None, "停止后不得残留运行状态");
+    assert_eq!(
+        mgr.auto_save_interval_secs(),
+        None,
+        "停止后不得残留运行状态"
+    );
 
     // 「关掉再打开」必须能重新启动 —— 旧的一次性 static 标记正是在这里失败
     mgr.start_auto_save(3);
@@ -689,7 +686,7 @@ fn active_file_survives_reload() {
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let mgr1 = WorkspaceManager::new(
         Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage))),
-        Arc::new(EventBus::new()),
+        Arc::new(CoreEventBus::new()),
     );
 
     let ws_id = mgr1.create("contest-afp", "problem-afp", "/ws").unwrap().id;
@@ -700,7 +697,7 @@ fn active_file_survives_reload() {
 
     let mgr2 = WorkspaceManager::new(
         Arc::new(FsWorkspaceRepository::new(storage)),
-        Arc::new(EventBus::new()),
+        Arc::new(CoreEventBus::new()),
     );
     let loaded = mgr2.load(&ws_id, "/ws").unwrap();
 
@@ -709,7 +706,10 @@ fn active_file_survives_reload() {
         Some("Main.java"),
         "重启后必须仍指向语言切换后的那个文件，而不是按后缀探测碰运气"
     );
-    assert!(loaded.files.contains_key("main.cpp"), "旧文件仍在（P62 未闭合部分）");
+    assert!(
+        loaded.files.contains_key("main.cpp"),
+        "旧文件仍在（P62 未闭合部分）"
+    );
 }
 
 /// 历史 workspace.json 没有 `activeFile` 字段：反序列化为 `None`，不得报错。
@@ -718,9 +718,15 @@ fn legacy_meta_without_active_file_loads_as_none() {
     let dir = TempDir::named("hinina-test-mgr-active-file-legacy");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let mgr = WorkspaceManager::new(Arc::clone(&repo) as Arc<dyn WorkspaceRepository>, Arc::new(EventBus::new()));
+    let mgr = WorkspaceManager::new(
+        Arc::clone(&repo) as Arc<dyn WorkspaceRepository>,
+        Arc::new(CoreEventBus::new()),
+    );
 
-    let ws_id = mgr.create("contest-legacy", "problem-legacy", "/ws").unwrap().id;
+    let ws_id = mgr
+        .create("contest-legacy", "problem-legacy", "/ws")
+        .unwrap()
+        .id;
     // 用「旧格式」元数据覆盖：无 active_file 字段（WorkspaceMeta 的线上格式是 snake_case）
     let legacy = r#"{"contest_id":"contest-legacy","problem_id":"problem-legacy","root_path":"/ws","language":"C++","created_at":1,"updated_at":1}"#;
     repo.save_file(&ws_id, &std::path::PathBuf::from("workspace.json"), legacy)
@@ -743,7 +749,7 @@ async fn concurrent_start_auto_save_does_not_leak_orphan_tasks() {
     let dir = TempDir::named("hinina-test-mgr-autosave-race");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
-    let mgr = Arc::new(WorkspaceManager::new(repo, Arc::new(EventBus::new())));
+    let mgr = Arc::new(WorkspaceManager::new(repo, Arc::new(CoreEventBus::new())));
     mgr.create("c", "p", "/ws").unwrap();
 
     // std 线程没有 tokio 上下文，显式 enter 后再调（start_auto_save 内部要 tokio::spawn）
@@ -762,12 +768,124 @@ async fn concurrent_start_auto_save_does_not_leak_orphan_tasks() {
     }
 
     mgr.stop_auto_save();
-    assert_eq!(mgr.auto_save_interval_secs(), None, "停止后不得残留运行状态");
+    assert_eq!(
+        mgr.auto_save_interval_secs(),
+        None,
+        "停止后不得残留运行状态"
+    );
 
     mgr.update_file("main.cpp", "after-stop").unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(2_500)).await;
     assert!(
         mgr.current().unwrap().is_dirty,
         "stop_auto_save 之后不得再有任何循环在跑（孤儿任务会把脏标记清掉）"
+    );
+}
+
+// ── `WorkspaceSaved` 事件契约（「最新内容确已在磁盘上」）──
+
+/// 显式落盘发布 `WorkspaceSaved { revision, automatic: false }`。
+///
+/// `revision` 让前端能丢弃过期事件（切题前保存旧工作区的事件可能在新工作区
+/// 已加载之后才送达）；`automatic` 区分「手动保存」与「后台自动备份」。
+#[test]
+fn save_publishes_workspace_saved_with_revision() {
+    let (mgr, _storage, bus) = test_manager_with_bus("saved-event");
+    let ws = mgr.create("c", "p", "/ws").expect("创建工作区失败");
+    let mut rx = bus.subscribe();
+
+    mgr.update_file("main.cpp", "v1").expect("写入失败");
+    mgr.save().expect("保存失败");
+
+    assert_eq!(
+        rx.try_recv().expect("落盘成功应发布 WorkspaceSaved"),
+        CoreEvent::WorkspaceSaved {
+            workspace_id: ws.id.clone(),
+            revision: 1,
+            automatic: false,
+        }
+    );
+}
+
+/// 未脏时保存是 no-op：**不得**发布「已落盘」事件（事件等价于磁盘真值声明）。
+#[test]
+fn save_without_changes_publishes_nothing() {
+    let (mgr, _storage, bus) = test_manager_with_bus("saved-event-clean");
+    mgr.create("c", "p", "/ws").expect("创建工作区失败");
+    mgr.update_file("main.cpp", "v1").expect("写入失败");
+    mgr.save().expect("首次保存失败");
+
+    let mut rx = bus.subscribe();
+    mgr.save().expect("二次保存（未脏）应成功");
+
+    assert!(
+        rx.try_recv().is_err(),
+        "未脏的保存是 no-op，不应发布「已落盘」事件"
+    );
+}
+
+/// 落盘失败时**不发布**事件：事件表示「最新内容确已在磁盘上」，
+/// 失败却发事件会让前端显示「已自动备份」而磁盘其实落后。
+#[test]
+fn save_failure_does_not_publish_workspace_saved() {
+    let dir = TempDir::named("hinina-test-mgr-saved-event-fail");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let real_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
+    let bus = Arc::new(CoreEventBus::new());
+
+    // 钩子：内容为 "boom" 时写盘失败（确定性，不依赖权限或只读卷）
+    let on_save: SaveHook = Arc::new(|_ws_id, content| {
+        if content == "boom" {
+            return Err(AppError::Io("模拟磁盘写失败".into()));
+        }
+        Ok(())
+    });
+    let repo = Arc::new(HookedRepo {
+        inner: real_repo,
+        on_save,
+        on_saved: None,
+    });
+    let mgr = WorkspaceManager::new(repo, Arc::clone(&bus));
+    mgr.create("c", "p", "/ws").expect("创建工作区失败");
+    let mut rx = bus.subscribe();
+
+    mgr.update_file("main.cpp", "boom").expect("写入失败");
+    assert!(mgr.save().is_err(), "写盘失败应如实报错");
+    assert!(
+        rx.try_recv().is_err(),
+        "落盘失败不得发布 WorkspaceSaved（前端会误显示「已自动备份」）"
+    );
+}
+
+/// 切换工作区前**显式保存旧工作区**，且事件带的是**旧**工作区 id。
+///
+/// 前端按 workspace_id 过滤过期事件：不带 id 就无从分辨「刚保存的是旧工作区」，
+/// 会误清新工作区的脏标记。
+#[test]
+fn switch_workspace_saves_old_workspace_before_replacing() {
+    let (mgr, _storage, bus) = test_manager_with_bus("switch-saves-old");
+    // create 会把 current 切到新工作区，因此两个都建好后再切回 old
+    let target = mgr.create("c", "p2", "/ws").expect("创建目标工作区失败");
+    let old = mgr.create("c", "p1", "/ws").expect("创建旧工作区失败");
+    mgr.load(&old.id, "/ws").expect("加载旧工作区失败");
+    mgr.update_file("main.cpp", "unsaved-old-content")
+        .expect("写入失败");
+    let mut rx = bus.subscribe();
+
+    mgr.switch(&target.id, "/ws").expect("切换失败");
+
+    assert_eq!(
+        rx.try_recv().expect("切换前应显式保存旧工作区并发布事件"),
+        CoreEvent::WorkspaceSaved {
+            workspace_id: old.id.clone(),
+            revision: 1,
+            automatic: false,
+        },
+        "事件必须指向被保存的**旧**工作区，且 revision 与保存时的内容一致"
+    );
+    assert_eq!(
+        mgr.current().map(|ws| ws.id),
+        Some(target.id),
+        "切换后当前工作区应是目标工作区"
     );
 }

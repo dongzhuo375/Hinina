@@ -13,7 +13,7 @@ use crate::core::error::AppResult;
 /// 前端 invoke 签名: `get_problem`({ contestId, problemId })
 ///
 /// 调用 `ProblemService::open_problem`，获取题目描述/样例/限制等完整信息，
-/// 并发布 `ProblemEvent::Opened` 供前端 Workspace 切换。
+/// 并发布 `CoreEvent::ProblemOpened` 供前端 Workspace 切换。
 /// 题面缓存开关（`oj.cache_problem_statement`）由本层读取后传入 —— 与
 /// `contest_cmd` 传 `cache_ttl_secs` 同款约定：配置读取归命令层，Service 只接参数。
 #[tauri::command]

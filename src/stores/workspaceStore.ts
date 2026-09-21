@@ -16,6 +16,15 @@ const SYNC_DEBOUNCE_MS = 2_000
 /// 防抖句柄：模块级普通变量，不放进响应式 state（见 `utils/polling` 的句柄约定）
 let syncTimer: ReturnType<typeof setTimeout> | null = null
 
+/// 最近一次被接受的落盘修订号（模块级副作用句柄，不进响应式系统）。
+///
+/// 后端 `revision` 是**全局单调计数器**（工作区每次内容改动 +1），因此只需记一个
+/// 标量：小于等于它的落盘事件一律视为重复或过期，幂等跳过 —— 落盘事实只能被
+/// 更新的修订号推进，不能被回退。
+///
+/// 登出/切换账号时由 `cancelPendingSync` 归零（新会话与旧会话的修订号不可比）。
+let lastPersistedRevision = 0
+
 /**
  * 工作区 store —— 代码的「内存 → 磁盘」两级状态机。
  *
@@ -170,9 +179,18 @@ export const useWorkspaceStore = defineStore('workspace', {
      *
      * `workspaceId` 用于过滤过期事件：切题前保存旧工作区会发布 `Saved`，该事件
      * 可能在新工作区已加载（甚至已编辑）之后才送达，按 id 过滤避免误清新工作区的脏标记。
+     *
+     * `revision` 用于**幂等**处理：同一事件重复送达、或旧修订号的事件晚于新修订号
+     * 到达时，直接跳过 —— 落盘事实只能被更新的修订号推进，不能被回退。
      */
-    markPersisted(workspaceId?: string) {
+    markPersisted(workspaceId?: string, revision?: number) {
       if (workspaceId && this.workspace && this.workspace.id !== workspaceId) return
+
+      if (revision !== undefined) {
+        if (revision <= lastPersistedRevision) return
+        lastPersistedRevision = revision
+      }
+
       if (this.syncPending) return // 事件到达后又有新改动：仍需落盘
       this.isDirty = false
     },
@@ -184,6 +202,8 @@ export const useWorkspaceStore = defineStore('workspace', {
         syncTimer = null
       }
       this.syncPending = false
+      // 登出/切换账号后修订号不再可比（新会话与旧会话的落盘事实无关）
+      lastPersistedRevision = 0
     },
 
     /**
@@ -232,7 +252,7 @@ export const useWorkspaceStore = defineStore('workspace', {
 export function installWorkspacePersistenceListener(): void {
   void workspaceService
     .onWorkspaceSaved((payload) => {
-      useWorkspaceStore().markPersisted(payload.workspaceId)
+      useWorkspaceStore().markPersisted(payload.workspaceId, payload.revision)
       log.debug(`工作区已落盘（${payload.auto ? 'auto-save' : '显式保存'}）: ${payload.workspaceId}`)
     })
     .catch((e) => {

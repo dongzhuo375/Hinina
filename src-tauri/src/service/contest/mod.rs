@@ -3,7 +3,7 @@
 // 比赛列表带 TTL 缓存（TTL 来自配置，逐调用可变）；比赛元信息（标题/时间窗/封榜设置）
 // 带固定 TTL 的内存 + 磁盘缓存 —— 题目总览页每 30s 轮询 `load_configured_contest`
 // （元信息 + 题目列表两次请求），缓存元信息可把轮询请求量减半，而 ac/total 仍在
-// 每次轮询实时拉取。切换比赛时发布 ContestEvent::Selected。
+// 每次轮询实时拉取。切换比赛时发布 CoreEvent::ContestSelected（事实通知）。
 // 公告**不缓存**（可能含裁判组临场规则变更）；已读状态是客户端本地特性，
 // 持久化在 `announcements_read/{cid}_{uid}.json`。
 //
@@ -25,9 +25,8 @@ use crate::core::entity::announcement::AnnouncementPage;
 use crate::core::entity::contest::{Contest, ContestBundle};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
-use crate::core::event::app_event::{AppEvent, ContestEvent, SystemEvent};
-use crate::core::event::event_bus::EventBus;
-use crate::core::event::event_category::EventCategory;
+use crate::core::event::core_event::CoreEvent;
+use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::{JsonDiskCache, TtlCache};
 use crate::infra::storage::Storage;
@@ -65,7 +64,7 @@ pub struct ReadAnnouncementState {
 /// 比赛服务。
 pub struct ContestService {
     registry: Arc<dyn ProviderRegistry>,
-    event_bus: Arc<EventBus>,
+    event_bus: Arc<CoreEventBus>,
     storage: Arc<Storage>,
     /// 当前选中的比赛 ID
     current_contest: RwLock<Option<String>>,
@@ -77,7 +76,7 @@ pub struct ContestService {
     meta_disk: Arc<JsonDiskCache>,
     /// 上次拉取到的公告 ID 基线（contest_id → 公告 ID 列表）。
     ///
-    /// 用于检测「新公告」并发布 `ContestEvent::AnnouncementsPublished`。
+    /// 用于检测「新公告」并发布 `CoreEvent::AnnouncementChanged`。
     /// **每个比赛一条基线**：同一进程内可能先看 1011 再看 1012，
     /// 只留一份会让切回旧比赛时把已有公告误判成新公告（红点误报）。
     announcement_baseline: Arc<RwLock<HashMap<String, Vec<String>>>>,
@@ -87,18 +86,15 @@ impl ContestService {
     /// 创建 ContestService。
     pub fn new(
         registry: Arc<dyn ProviderRegistry>,
-        event_bus: Arc<EventBus>,
+        event_bus: Arc<CoreEventBus>,
         storage: Arc<Storage>,
     ) -> Self {
         let cache = Arc::new(RwLock::new(None));
         let meta_cache = Arc::new(TtlCache::new(CONTEST_META_TTL, CONTEST_META_CAPACITY));
-        let meta_disk = Arc::new(JsonDiskCache::new(Arc::clone(&storage), CONTEST_META_NAMESPACE));
-        Self::subscribe_oj_switched(
-            Arc::clone(&event_bus),
-            Arc::clone(&cache),
-            Arc::clone(&meta_cache),
-            Arc::clone(&meta_disk),
-        );
+        let meta_disk = Arc::new(JsonDiskCache::new(
+            Arc::clone(&storage),
+            CONTEST_META_NAMESPACE,
+        ));
         Self {
             registry,
             event_bus,
@@ -111,43 +107,36 @@ impl ContestService {
         }
     }
 
-    /// 订阅 `OJSwitched`：清空全部按 contest_id 键控的缓存。
+    /// OJ 切换后的缓存清理（**由 `switch_oj` 命令显式调用**，不订阅事件）。
     ///
-    /// 缓存键自带 **OJ 维度**（`{oj}/{contest_id}`），因此跨 OJ 撞号在结构上不可能
-    /// —— 「切 OJ」的清理只是空间回收，不承担正确性职责，故磁盘段可延迟执行
-    /// （内存段仍是同步的：它便宜且让当前会话立刻回到干净状态）。
-    fn subscribe_oj_switched(
-        event_bus: Arc<EventBus>,
-        cache: Arc<RwLock<Option<ContestCache>>>,
-        meta_cache: Arc<TtlCache<String, Contest>>,
-        meta_disk: Arc<JsonDiskCache>,
-    ) {
-        // 同步段：纯内存清理（µs 级，发布方（switch_oj）立即回到干净状态）
-        event_bus.subscribe(
-            EventCategory::System,
-            Arc::new(move |event: &AppEvent| {
-                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
-                    return;
-                };
-                if let Ok(mut c) = cache.write() {
-                    *c = None;
-                }
-                meta_cache.clear();
-                info!("OJ 已切换：清空比赛列表与元信息内存缓存");
-            }),
-        );
+    /// 为什么不走事件消费者：`switch_oj` 返回后紧接着就可能有新 OJ 的查询进来，
+    /// 「清缓存」是切换正确性的一部分，不能依赖异步投递的时机（消费者可能落后、
+    /// 可能不存在）。旧实现靠 `EventBus` 的同步投递保证「发布即已清」，
+    /// 那种保证建立在「发布方与订阅者同栈」的隐含前提上 —— 改成 broadcast 后
+    /// 该前提不再成立，故显式化。
+    ///
+    /// 两段语义不同：
+    /// - **内存段（同步）**：便宜且让当前会话立刻回到干净状态；
+    /// - **磁盘段（异步）**：纯空间回收 —— 缓存键自带 **OJ 维度**
+    ///   （`{oj}/{contest_id}`），跨 OJ 撞号在结构上不可能，延迟清理不影响正确性。
+    ///   无 tokio 上下文时（纯同步调用 / 单元测试）退化为同步执行。
+    pub fn on_oj_switched(&self) {
+        if let Ok(mut c) = self.cache.write() {
+            *c = None;
+        }
+        self.meta_cache.clear();
+        info!("OJ 已切换：清空比赛列表与元信息内存缓存");
 
-        // 延迟段：磁盘清理（I/O，仅空间回收 —— 键已带 OJ 维度，延迟不影响正确性）
-        event_bus.subscribe_deferred(
-            EventCategory::System,
-            Arc::new(move |event: &AppEvent| {
-                let AppEvent::System(SystemEvent::OJSwitched { .. }) = event else {
-                    return;
-                };
+        let meta_disk = Arc::clone(&self.meta_disk);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
                 let _ = meta_disk.clear_namespace();
                 debug!("OJ 已切换：清理比赛元信息磁盘缓存");
-            }),
-        );
+            });
+        } else {
+            let _ = meta_disk.clear_namespace();
+            debug!("OJ 已切换：清理比赛元信息磁盘缓存（无 tokio 上下文，同步执行）");
+        }
     }
 
     /// 获取比赛元信息（内存 → 磁盘 → 网络），命中即回填上游缓存。
@@ -159,15 +148,22 @@ impl ContestService {
         let key = format!("{}/{}", self.registry.current_id(), contest_id);
 
         if let Some(contest) = self.meta_cache.get(&key) {
-            debug!(cache = "contest_meta", contest_id = contest_id, hit = true, "命中比赛元信息内存缓存");
+            debug!(
+                cache = "contest_meta",
+                contest_id = contest_id,
+                hit = true,
+                "命中比赛元信息内存缓存"
+            );
             return Ok(contest);
         }
 
-        if let Some(contest) = self
-            .meta_disk
-            .read::<Contest>(&key, CONTEST_META_TTL)
-        {
-            debug!(cache = "contest_meta", contest_id = contest_id, hit = true, "命中比赛元信息磁盘缓存");
+        if let Some(contest) = self.meta_disk.read::<Contest>(&key, CONTEST_META_TTL) {
+            debug!(
+                cache = "contest_meta",
+                contest_id = contest_id,
+                hit = true,
+                "命中比赛元信息磁盘缓存"
+            );
             self.meta_cache.insert(key, contest.clone());
             return Ok(contest);
         }
@@ -217,23 +213,25 @@ impl ContestService {
             });
         }
 
-        self.event_bus
-            .publish(&AppEvent::Contest(ContestEvent::ListLoaded {
-                contests: contests.clone(),
-            }));
-
         Ok(contests)
     }
 
-    /// 选中比赛并发布事件。
+    /// 选中比赛并发布 `CoreEvent::ContestSelected`（事实通知）。
+    ///
+    /// **不再发布 `ListLoaded`**：比赛列表是查询结果，真实数据由 IPC 返回给调用方；
+    /// 把查询结果伪装成事件既浪费一次全量克隆，又制造「前端可能靠事件拿数据」
+    /// 的错误预期（前端必须经 IPC 查询）。
     pub fn select_contest(&self, contest_id: &str) -> AppResult<()> {
-        let mut current = self.current_contest.write().unwrap_or_else(|e| e.into_inner());
+        let mut current = self
+            .current_contest
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         *current = Some(contest_id.to_string());
 
         info!(contest_id = contest_id, "已选中比赛");
-        self.event_bus.publish(&AppEvent::Contest(ContestEvent::Selected {
+        self.event_bus.publish(CoreEvent::ContestSelected {
             contest_id: contest_id.to_string(),
-        }));
+        });
 
         Ok(())
     }
@@ -371,10 +369,13 @@ impl ContestService {
             }
         }
 
-        let problems = provider.list_contest_problems(contest_id).await.map_err(|e| {
-            warn!(error = %e, "获取比赛题目列表失败");
-            e.context("获取比赛题目列表失败")
-        })?;
+        let problems = provider
+            .list_contest_problems(contest_id)
+            .await
+            .map_err(|e| {
+                warn!(error = %e, "获取比赛题目列表失败");
+                e.context("获取比赛题目列表失败")
+            })?;
 
         // 自动选中
         self.select_contest(contest_id)?;
@@ -388,9 +389,12 @@ impl ContestService {
     /// **不做缓存**：公告可能包含裁判组临场发布的规则变更，必须每次拉取最新数据。
     ///
     /// 每次拉取都会与上次结果对比，**出现新公告 ID 时发布
-    /// `ContestEvent::AnnouncementsPublished`** —— 红点提醒属状态变更，
+    /// `CoreEvent::AnnouncementChanged`** —— 红点提醒属状态变更，
     /// 由 `main.rs` 的事件桥转发到 webview，前端据此即时点亮红点。
     /// 首次拉取（该比赛尚无基线）不发事件：没有基线可比，发了等于一开机就亮红点。
+    ///
+    /// **事件只是刷新触发**：公告内容仍由本方法的返回值承载，事件丢失时
+    /// 下一次轮询（前端 60s±10s）会重新发现 —— 轮询不可被事件替代。
     pub async fn list_announcements(
         &self,
         contest_id: &str,
@@ -409,7 +413,11 @@ impl ContestService {
 
         self.publish_new_announcements(contest_id, &page);
 
-        debug!(contest_id = contest_id, count = page.records.len(), "比赛公告已获取");
+        debug!(
+            contest_id = contest_id,
+            count = page.records.len(),
+            "比赛公告已获取"
+        );
         Ok(page)
     }
 
@@ -455,11 +463,10 @@ impl ContestService {
             new_count = new_ids.len(),
             "检测到新比赛公告"
         );
-        self.event_bus
-            .publish(&AppEvent::Contest(ContestEvent::AnnouncementsPublished {
-                contest_id: contest_id.to_string(),
-                new_ids,
-            }));
+        self.event_bus.publish(CoreEvent::AnnouncementChanged {
+            contest_id: contest_id.to_string(),
+            new_ids,
+        });
     }
 
     // ── 公告已读状态（客户端本地特性）──

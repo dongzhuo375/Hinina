@@ -2,8 +2,6 @@ use super::*;
 
 use std::sync::Arc;
 
-use crate::core::event::event_bus::EventBus;
-use crate::infra::http::HttpClient;
 use crate::infra::storage::Storage;
 use crate::test_support::TempDir;
 
@@ -29,11 +27,7 @@ fn factory_ids_unique_and_buildable() {
     // 全部可构建（依赖只来自 infra —— AdapterDeps 不含任何 Service）
     // 且至少提供一个能力（全 None 是注册 bug）
     let dir = TempDir::named("hinina-test-adapter-factory");
-    let deps = AdapterDeps {
-        http_client: Arc::new(HttpClient::with_timeout(std::time::Duration::from_secs(5)).expect("HttpClient 构造失败")),
-        event_bus: Arc::new(EventBus::new()),
-        storage: Arc::new(Storage::new(dir.to_path_buf())),
-    };
+    let deps = test_adapter_deps(Arc::new(Storage::new(dir.to_path_buf())));
 
     for factory in &list {
         let set = factory.build(&deps, "https://example.com");
@@ -41,9 +35,12 @@ fn factory_ids_unique_and_buildable() {
             + set.contest.is_some() as usize
             + set.problem.is_some() as usize
             + set.submission.is_some() as usize;
-        assert!(capability_count > 0, "{} 至少需提供一个能力（全空 ProviderSet 是注册 bug）", factory.id());
+        assert!(
+            capability_count > 0,
+            "{} 至少需提供一个能力（全空 ProviderSet 是注册 bug）",
+            factory.id()
+        );
     }
-
 }
 
 /// HOJ 工厂身份契约：id 决定会话文件名，须与历史枚举 Debug 输出一致。
@@ -64,16 +61,11 @@ fn hoj_factory_id_matches_session_file_contract() {
 #[test]
 fn hoj_factory_provides_all_four_capabilities() {
     let dir = TempDir::named("hinina-test-hoj-factory-capabilities");
-    let deps = AdapterDeps {
-        http_client: Arc::new(HttpClient::with_timeout(std::time::Duration::from_secs(5)).expect("HttpClient 构造失败")),
-        event_bus: Arc::new(EventBus::new()),
-        storage: Arc::new(Storage::new(dir.to_path_buf())),
-    };
+    let deps = test_adapter_deps(Arc::new(Storage::new(dir.to_path_buf())));
 
     let set = crate::adapter::hoj::FACTORY.build(&deps, "https://example.com");
     assert!(set.auth.is_some(), "HOJ 缺 Auth 能力");
     assert!(set.contest.is_some(), "HOJ 缺 Contest 能力");
     assert!(set.problem.is_some(), "HOJ 缺 Problem 能力");
     assert!(set.submission.is_some(), "HOJ 缺 Submission 能力");
-
 }
