@@ -13,7 +13,7 @@
 | `loadWorkspace` | `(contestId, problemId) => Promise<Workspace>` | invoke `load_workspace`（后端 find_or_create：命中恢复代码，未命中新建） |
 | `saveWorkspace` | `() => Promise<void>` | invoke `save_workspace`（全量落盘；成功时后端另发 `workspace-saved`） |
 | `currentWorkspace` | `() => Promise<Workspace \| null>` | invoke `current_workspace`（null = 无活动工作区） |
-| `updateWorkspaceFile` | `(fileName, content) => Promise<void>` | invoke `update_workspace_file`（编辑器防抖同步的落点，**只写后端内存不落盘**） |
+| `updateWorkspaceFile` | `(fileName, content) => Promise<number>` | invoke `update_workspace_file`（编辑器防抖同步的落点，**只写后端内存不落盘**）。返回本次内容被赋予的**修订号**，供 store 记为 `lastPushedRevision` 与落盘事件的修订号比较（落盘落后于推送时磁盘还没追上编辑器） |
 | `setWorkspaceLanguage` | `(language) => Promise<Workspace>` | invoke `set_workspace_language`，返回更新后的 Workspace。**语言不属于任何代码文件，`updateWorkspaceFile` 带不上它**；不单独持久化会导致切题/重启后退回默认语言，从而用错语言提交 |
 | `WorkspaceSavedPayload` | `{ workspaceId: string; revision?: number; auto: boolean }` | 落盘事件载荷（`auto = true` 为后台 auto-save，`false` 为显式保存）。`revision` 是 Rust 侧写盘时的内容修订号，用于**幂等**处理重复 / 过期事件（可选：字段缺失时退化为不去重） |
 | `onWorkspaceSaved` | `(handler) => Promise<UnlistenFn>` | 订阅 `workspace-saved`（`@tauri-apps/api/event` 的 `listen`）：后端在**内容确已落盘**时才发（写失败、或快照后又有新改动时不发），前端据此清「编辑中…」指示 |

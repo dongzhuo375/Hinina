@@ -21,7 +21,7 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换�
   - `fn switch(&self, workspace_id, root_path) -> AppResult<Workspace>` — 切换工作区：先 `save_current_if_dirty()` → `load()` 目标。**不发布事件**：切换由前端经 IPC 发起，返回值即真值；切换前对旧工作区的显式保存本身会发布 `WorkspaceSaved`（前端据此清脏，并按 `workspace_id` / `revision` 过滤掉不属于当前工作区的过期事件）
   - `fn destroy(&self, workspace_id) -> AppResult<()>` — 销毁工作区：删除所有文件 → 若为当前则清空 current
   - `fn recover_all(&self) -> AppResult<Vec<Workspace>>` — 崩溃恢复（当前 stub，返回空 Vec，待 Storage 层补充目录扫描能力）
-  - `fn update_file(&self, file_name, content) -> AppResult<()>` — 更新当前工作区文件：**只写内存** HashMap + **把该文件记为 `active_file`（当前代码文件的权威源）** + mark_dirty + 在写锁内递增修订号（`revision`），**不落盘**（落盘由 `save` / auto-save 负责）。写入路径的权威源由它承担后，调用方不必再按语言派生文件名（派生会让语言切换后的写入落到别的文件上）
+  - `fn update_file(&self, file_name, content) -> AppResult<u64>` — 更新当前工作区文件：**只写内存** HashMap + **把该文件记为 `active_file`（当前代码文件的权威源）** + mark_dirty + 在写锁内递增修订号（`revision`），**不落盘**（落盘由 `save` / auto-save 负责）。**返回本次内容被赋予的修订号**（`fetch_add(1) + 1`），供命令层原样回传前端：前端把它记为 `lastPushedRevision`，用于判断落盘事件是否落后于编辑器已推送的内容（落后则不清脏，避免假「已自动备份」）。写入路径的权威源由它承担后，调用方不必再按语言派生文件名（派生会让语言切换后的写入落到别的文件上）
   - `fn get_file(&self, file_name) -> AppResult<String>` — 获取文件内容：优先内存 HashMap，未命中回退磁盘读取
   - `fn current(&self) -> Option<Workspace>` — 获取当前活动工作区 clone
 - **字段**：`repo: Arc<dyn WorkspaceRepository>`, `event_bus: Arc<CoreEventBus>`, `current: Arc<RwLock<Option<Workspace>>>`, `revision: Arc<AtomicU64>`（内容修订号，auto-save 判据）, `auto_save_handle: Mutex<Option<JoinHandle<()>>>`, `auto_save_interval_secs: Mutex<Option<u64>>`（`None` = 未运行）
