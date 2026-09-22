@@ -72,6 +72,43 @@ fn delete_workspace_removes_all() {
 }
 
 #[test]
+fn delete_file_removes_disk_file() {
+    let r = repo("delete-file");
+    let ws = "ws-del";
+    r.save_file(ws, Path::new("main.cpp"), "// old").unwrap();
+    r.save_file(ws, Path::new("Main.java"), "// keep").unwrap();
+
+    r.delete_file(ws, Path::new("main.cpp")).unwrap();
+
+    assert!(r.read_file(ws, Path::new("main.cpp")).is_err());
+    assert_eq!(r.read_file(ws, Path::new("Main.java")).unwrap(), "// keep");
+}
+
+#[test]
+fn delete_file_missing_is_noop() {
+    // 幂等：清理场景下重复调用不应报错
+    let r = repo("delete-file-missing");
+    let ws = "ws-del-miss";
+    r.save_file(ws, Path::new("Main.java"), "// keep").unwrap();
+
+    r.delete_file(ws, Path::new("ghost.cpp")).unwrap();
+
+    assert_eq!(r.read_file(ws, Path::new("Main.java")).unwrap(), "// keep");
+}
+
+#[test]
+fn delete_file_rejects_path_traversal() {
+    let r = repo("delete-file-traversal");
+    let ws = "ws-del-safe";
+    r.save_file(ws, Path::new("legit.txt"), "ok").unwrap();
+
+    assert!(r.delete_file(ws, Path::new("../escape.txt")).is_err());
+    assert!(r.delete_file(ws, Path::new("a/../b")).is_err());
+    // 合法文件未被波及
+    assert_eq!(r.read_file(ws, Path::new("legit.txt")).unwrap(), "ok");
+}
+
+#[test]
 fn rejects_path_traversal() {
     let r = repo("traversal");
     let ws = "ws-safe";

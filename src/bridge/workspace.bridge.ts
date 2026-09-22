@@ -38,6 +38,17 @@ export async function setWorkspaceLanguage(language: string): Promise<Workspace>
   return ipcInvoke<Workspace>('set_workspace_language', { language })
 }
 
+/**
+ * 删除当前工作区中的文件（P62：旧代码文件清理）。
+ *
+ * 供语言切换后的旧扩展名文件清理使用：编辑器内容已复制到新文件名，
+ * 旧文件删除后 save() 不再全量写出它们。后端守卫拒绝删除当前代码文件
+ * （activeFile）与 workspace.json，调用方无需重复设防。
+ */
+export async function deleteWorkspaceFile(fileName: string): Promise<void> {
+  return ipcInvoke<void>('delete_workspace_file', { fileName })
+}
+
 /** 落盘事件载荷（Rust `main.rs` 的事件桥下发） */
 export interface WorkspaceSavedPayload {
   workspaceId: string

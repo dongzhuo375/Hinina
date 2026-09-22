@@ -16,13 +16,14 @@
 |------|------|------|
 | state | `workspace` / `activeFile` / `code` / `language`（默认 'C++'）/ `isDirty` / `syncPending` | `activeFile` = **当前代码文件名（权威源）**，读写都锚定它；`isDirty` = 有改动尚未落盘；`syncPending` = 有改动尚未推送到后端内存（防抖窗口内） |
 | `currentCode` / `currentLanguage` | getters | 编辑器当前代码与语言 |
-| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测 —— `files` 来自 HashMap 序列化、键序不稳定，只靠探测可能加载出「旧语言代码 + 新语言元数据」）；language 与文件扩展名矛盾时**以文件为准**并 `warn`（判题端按后缀判语言）；恢复 isDirty |
+| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测 —— `files` 来自 HashMap 序列化、键序不稳定，只靠探测可能加载出「旧语言代码 + 新语言元数据」）；language 与文件扩展名矛盾时**以文件为准**并 `warn`（判题端按后缀判语言）；恢复 isDirty；随后 `void purgeStaleCodeFiles()`（历史多文件收敛，P62） |
 | `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；仅当「推送成功 **且** 期间无新改动（`!syncPending`）」才清 `isDirty`（推送失败 → 内容未进后端；期间又落键 → 最新改动连后端内存都还没到，清脏会显示假「已自动备份」） |
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + `isDirty = true` + `syncPending = true` + `scheduleSync()` |
 | `scheduleSync` | `() => void` | 重置 2s 定时器，到点调用 `flushPendingSync()` |
 | `flushPendingSync` | `() => Promise<boolean>` | 取消防抖窗口并立即把代码按 **`activeFile`**（权威源；回退 `sourceFileNameOf(language)`）推送到后端内存；返回是否成功，失败只 `log.error` 并保留 `syncPending`（调用方不应被一次 IPC 失败阻断）。**推送期间又有新改动时不清 `syncPending`**（本次推送带的是调用时刻的内容；清了会让新内容既不被本次携带、又被下次防抖短路跳过）。推送成功后把返回值记为 `lastPushedRevision`，并**补一次清脏判定**：`!syncPending && lastPersistedRevision >= revision` 时清 `isDirty` —— 落盘事件可能在推送在途时已到达（此时 `markPersisted` 因 `syncPending` 推迟清脏），而后端已 clean、后续 auto-save tick 不再发事件，不补判指示器会卡在「编辑中…」。判据方向必须是**水位 ≥ 推送**（磁盘追上编辑器）；反向会在事件未到时提前清脏，即假「已自动备份」 |
 | `markPersisted` | `(workspaceId?: string, revision?: number) => void` | 后端落盘事件（`workspace-saved`）到达时清 `isDirty`。四重过滤：① 按 `workspaceId` 过滤过期事件（旧工作区的落盘可能在新工作区已编辑后才送达）；② 按 `revision` **幂等** —— 后端 `revision` 是全局单调计数器，小于等于 `lastPersistedRevision` 的事件一律视为重复或过期而跳过（落盘事实只能被更新的修订号推进，不能被回退），并推进该标量；③ **`revision < lastPushedRevision` 时不清脏**（该落盘快照早于编辑器已推送的最新内容，磁盘还没追上编辑器）；④ 若期间又有新改动（`syncPending`）则不清 —— 后端在写失败或快照后又有新改动时不发该事件，故清除等价于「最新内容确已在磁盘上」 |
 | `cancelPendingSync` | `() => void` | 取消未触发的防抖同步、清 `syncPending`，并把 `lastPersistedRevision` 与 `lastPushedRevision` **双双归零**（登出/切换账号时调用，避免向已失效会话写入代码；新会话与旧会话的修订号不可比） |
+| `purgeStaleCodeFiles` | `() => Promise<void>` | 清理 ≠ `activeFile` 的代码文件（**单代码文件约束**，P62 已闭合）：语言切换后编辑器内容已复制到新文件名，旧扩展名文件成为过期残留，不清理会一直被后端 `save()` 全量落盘。代码文件判定沿用 `CODE_FILE_EXTENSIONS`，非代码文件不在清理范围；逐个删除、失败仅 `log.error`（下次加载/切换重试）；**每次删除前重查 `activeFile` 与工作区引用**（切换在途时避免误删新 active 文件，后端 `active_file` 守卫为第二道防线） |
 | `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程 |
 | `installWorkspacePersistenceListener` | `() => void` | 组合根（`main.ts`）安装一次：订阅 `workspace-saved` → `markPersisted(payload.workspaceId, payload.revision)`（`revision` 原样透传，幂等过滤在 store 内完成）；订阅失败只降级指示器 |
 
@@ -71,8 +72,14 @@ changeLanguage(lang)
   → this.language = lang                      // 乐观更新：UI 立即生效，不等待 IPC
   → workspaceService.setLanguage(lang)        // 立即持久化到后端 workspace.json
      失败 → 只 log.error 记录（utils/logger 作用域日志），不回滚本地选择
-  → 派生文件名变化时（如 C++ → Java）：syncPending = true + flushPendingSync()
-     （把当前代码同步到新文件名，避免代码滞留在旧扩展名文件里）
+  → 派生文件名变化时（如 C++ → Java）：activeFile = 新派生名 + syncPending = true
+  → flushPendingSync()                        // 把当前代码同步到新文件名
+  → purgeStaleCodeFiles()                     // 内容已复制到新文件名，静默清理旧扩展名文件
+                                             //（同族切换派生名不变也执行，顺带收敛历史遗留）
+
+loadWorkspace(contestId, problemId)
+  → flushPendingSync() → 加载 → activeFile 解析（权威源 + 历史回退链）
+  → void purgeStaleCodeFiles()                // 历史多文件工作区收敛（P62）
 ```
 
 设计要点：
@@ -84,6 +91,12 @@ changeLanguage(lang)
   日志中明示后果（「切题或重启后可能退回默认语言」）便于排查。
 - **changeLanguage 不再标脏**：语言由后端立即落盘，不属于「未落盘的代码改动」；
   旧实现置 `isDirty = true` 会让「编辑中…」在语言切换后一直挂着。
+- **单代码文件约束（P62 已闭合）**：切换语言时编辑器内容复制到新派生文件名，旧扩展名
+  文件由 `purgeStaleCodeFiles` 静默清理（不弹窗、不阻断 —— 内容已复制，常规场景删除
+  无损失；历史分叉旧文件一并清理是项目决策）。清理链在 `flushPendingSync` **之后**：
+  先让后端 `active_file` 切到新文件（守卫开始保护它），再删旧文件；极端时序下清理
+  先于推送到达、误删新文件名也无损 —— 随后的推送会以编辑器内容重建它。`loadWorkspace`
+  的清理让历史多文件工作区在进题时收敛，闭合「旧文件一直被 save() 全量落盘」。
 - **落盘时机由调用点编排，而不是靠后端周期**：auto-save 周期最长 300 秒，
   而「内存 → 磁盘」之间只有后端内存副本；切题（loadWorkspace 前 save）、失焦、
   页面隐藏、离开解题页、关窗各由对应调用点显式落盘。store 只提供 `flushPendingSync`

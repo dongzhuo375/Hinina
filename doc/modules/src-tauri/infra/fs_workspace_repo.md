@@ -12,6 +12,7 @@
 - **`save_file(workspace_id, path, content)`** — 保存工作区文件，自动创建父目录
 - **`read_file(workspace_id, path)`** — 读取工作区文件，不存在时返回 `AppError::Workspace`
 - **`list_files(workspace_id)`** — 递归列出工作区所有文件，不存在返回空列表
+- **`delete_file(workspace_id, path)`** — 删除单个工作区文件（P62 旧代码文件清理）：经 `workspace_relative()` 路径穿越校验后委托 `Storage::remove()`；文件不存在时返回 `Ok(())`（幂等，清理路径可安全重试）
 - **`delete_workspace(workspace_id)`** — 递归删除整个工作区目录
 - **`exists(workspace_id)`** — 检查工作区目录是否存在
 
@@ -31,9 +32,10 @@
 - **save_file / read_file**：通过 `workspace_relative()` 构建 `workspaces/{id}/{file_path}` 格式的相对路径，传入前对 `file_path` 做 `Component::ParentDir` 路径穿越校验，然后委托 Storage 读写。
 - **list_files**：先检查 workspace 根目录是否存在（不存在返回空列表），再通过 `walk_dir()` 递归遍历 `std::fs::read_dir`，用字符串前缀剥离得到业务层可用的相对路径（兼容 Windows `\` 分隔符）。
 - **delete_workspace**：委托 `Storage::remove_all()` 递归删除。
+- **delete_file**：经 `workspace_relative()` 校验后委托 `Storage::remove()`；先查 `Storage::exists()`，不存在直接 `Ok(())`（幂等）。
 - **exists**：委托 `Storage::exists()` 检查目录存在性。
 
-## 测试覆盖（7 项）
+## 测试覆盖（10 项）
 测试代码位于 `tests/fs_workspace_repo_tests.rs`。
 - `save_and_read_file` — 保存与读取往返
 - `read_nonexistent_file_returns_error` — 读取不存在的文件
@@ -42,3 +44,6 @@
 - `exists_detects_workspace` — 存在性检查
 - `delete_workspace_removes_all` — 删除后文件和存在性均清除
 - `rejects_path_traversal` — 拒绝 `..`、`../../`、`a/../b` 等路径穿越
+- `delete_file_removes_disk_file` — 删除单个文件，其余文件不受影响
+- `delete_file_missing_is_noop` — 文件不存在时幂等成功
+- `delete_file_rejects_path_traversal` — 删除路径同样拒绝穿越，合法文件不受波及

@@ -114,6 +114,45 @@ export const useWorkspaceStore = defineStore('workspace', {
 
       this.isDirty = this.workspace.isDirty
       this.syncPending = false
+
+      // 历史多文件工作区收敛（P62）：activeFile 已解析为权威源，
+      // 其余代码文件都是过期残留，静默清理（失败仅记日志，下次加载重试）
+      void this.purgeStaleCodeFiles()
+    },
+
+    /**
+     * 清理 ≠ activeFile 的代码文件（单代码文件约束，P62）。
+     *
+     * 语言切换后编辑器内容已复制到新文件名，旧扩展名文件成为过期残留：
+     * 不清理会一直被 `save()` 全量落盘。代码文件判定沿用
+     * `CODE_FILE_EXTENSIONS`（utils/language 识别面唯一来源），非代码文件
+     * （如未来的笔记文件）不在清理范围。
+     *
+     * 逐个删除、失败仅记日志（下次加载/切换时重试），不阻断调用方主流程。
+     * 每次删除前重查 `activeFile`：切换在途时避免误删新 active 文件
+     * （后端 `active_file` 守卫为第二道防线）。极端时序下（清理先于内容推送
+     * 到达）误删新文件名也无损 —— 随后的推送会以编辑器内容重建它。
+     */
+    async purgeStaleCodeFiles() {
+      const ws = this.workspace
+      const active = this.activeFile
+      if (!ws || !active) return
+
+      const stale = Object.keys(ws.files).filter(
+        (name) =>
+          name !== active && CODE_FILE_EXTENSIONS.some((ext) => name.endsWith(ext)),
+      )
+
+      for (const name of stale) {
+        // 工作区已被切题替换（引用变化）或该文件已成为 active：跳过
+        if (this.workspace !== ws || name === this.activeFile) continue
+        try {
+          await workspaceService.deleteWorkspaceFile(name)
+          if (this.workspace === ws) delete ws.files[name]
+        } catch (e) {
+          log.error(`清理旧代码文件失败（${name}，下次加载/切换时重试）:`, e)
+        }
+      }
     },
 
     /**
@@ -244,9 +283,10 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 代码推送过去（后端 `update_file` 会一并把它记为当前文件并持久化）——
      * 判题端按后缀判语言，代码必须落在与语言一致的扩展名上。
      *
-     * **已知遗留（P62 未闭合部分）**：旧扩展名的文件不会被删除，工作区里会短暂
-     * 并存两个代码文件；清理旧文件需要「按文件删除」能力与「旧文件非空时提示选手
-     * 确认」的交互，属独立改造，不在本轮。
+     * 内容推送完成后**静默清理**旧扩展名文件（P62 已闭合）：编辑器内容已复制到
+     * 新文件名，旧文件删除即无损失；同族切换（派生名不变，如 "C++" → "C++17"）
+     * 也执行清理，顺带收敛历史遗留的多文件工作区。先推送后清理的顺序让后端
+     * `active_file` 先切到新文件，守卫开始保护它，清理不会误伤。
      */
     changeLanguage(lang: string) {
       if (this.language === lang) return
@@ -261,8 +301,9 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 权威源先跟上，再推送 —— 否则 flush 会把代码写回旧文件名
         this.activeFile = nextFile
         this.syncPending = true
-        void this.flushPendingSync()
       }
+      // flush 无在途改动时立即返回（不发起 IPC），清理照常执行
+      void this.flushPendingSync().then(() => this.purgeStaleCodeFiles())
     },
   },
 })

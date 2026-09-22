@@ -602,6 +602,50 @@ impl WorkspaceManager {
             })
     }
 
+    /// 删除当前工作区中的文件（P62：按文件删除能力，供旧代码文件清理使用）。
+    ///
+    /// 守卫：
+    /// - 拒绝删除 `active_file`：它是选手当前代码，清理只针对**过期**文件；
+    /// - 拒绝删除 `workspace.json`：元数据被删会让工作区无法加载。
+    ///
+    /// 顺序刻意为**先删磁盘、成功后再移除内存**：磁盘删除失败时内存保持原样，
+    /// `save()` 仍会写出该文件，内存与磁盘始终一致（反序会出现「内存已无、
+    /// 磁盘残留」的幽灵文件，下次加载时复活）。
+    ///
+    /// 不递增修订号、不置脏：删除是**即时持久化**的操作，没有待落盘的内容；
+    /// 也不发布事件 —— 与 create / load / switch 同一先例（前端发起、返回值即真值）。
+    pub fn delete_file(&self, file_name: &str) -> AppResult<()> {
+        let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
+        let ws = current
+            .as_mut()
+            .ok_or_else(|| AppError::Workspace("无当前工作区".into()))?;
+
+        if ws.active_file.as_deref() == Some(file_name) {
+            return Err(AppError::Workspace(format!(
+                "不能删除当前代码文件: {}（清理只针对过期文件）",
+                file_name
+            )));
+        }
+        if file_name == "workspace.json" {
+            return Err(AppError::Workspace(
+                "不能删除工作区元数据文件 workspace.json".into(),
+            ));
+        }
+
+        // 先磁盘后内存（见方法注释）；文件不存在时 repo 幂等返回 Ok
+        self.repo.delete_file(&ws.id, &PathBuf::from(file_name))?;
+        ws.files.remove(file_name);
+        ws.touch();
+
+        debug!(
+            workspace_id = ws.id,
+            file = file_name,
+            "工作区文件已删除（内存与磁盘）"
+        );
+
+        Ok(())
+    }
+
     /// 获取当前活动工作区。
     pub fn current(&self) -> Option<Workspace> {
         self.current.read().ok()?.clone()

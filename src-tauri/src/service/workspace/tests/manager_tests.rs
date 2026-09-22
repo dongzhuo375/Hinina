@@ -176,6 +176,115 @@ fn get_file_reads_from_memory() {
     assert_eq!(content, code);
 }
 
+// ── delete_file（P62：按文件删除能力）──
+
+#[test]
+fn delete_file_removes_from_memory_and_disk() {
+    // 双文件场景：update_file 会把写入目标记为 active_file，
+    // 因此先写 main.cpp 再写 Main.java，active 切到后者后才能删前者
+    let (mgr, storage) = test_manager_with_storage("delete-file-both");
+    mgr.create("contest-6", "problem-F", "/ws").unwrap();
+    mgr.update_file("main.cpp", "// old cpp").unwrap();
+    mgr.update_file("Main.java", "// new java").unwrap();
+    mgr.save().unwrap();
+
+    mgr.delete_file("main.cpp").unwrap();
+
+    let ws = mgr.current().unwrap();
+    assert!(!ws.files.contains_key("main.cpp"), "内存中应已移除");
+    assert!(ws.files.contains_key("Main.java"), "active 文件不受影响");
+
+    let repo = FsWorkspaceRepository::new(Arc::clone(&storage));
+    assert!(
+        repo.read_file(&ws.id, &std::path::PathBuf::from("main.cpp"))
+            .is_err(),
+        "磁盘上应已删除"
+    );
+    assert_eq!(
+        repo.read_file(&ws.id, &std::path::PathBuf::from("Main.java"))
+            .unwrap(),
+        "// new java"
+    );
+}
+
+#[test]
+fn delete_file_rejects_active_file() {
+    // active_file 是选手当前代码，删除只针对过期文件
+    let mgr = test_manager("delete-file-active");
+    mgr.create("contest-6", "problem-F", "/ws").unwrap();
+    mgr.update_file("main.cpp", "// current").unwrap();
+
+    let result = mgr.delete_file("main.cpp");
+
+    assert!(result.is_err(), "不得删除当前代码文件");
+    let ws = mgr.current().unwrap();
+    assert!(ws.files.contains_key("main.cpp"), "被拒后文件必须保留");
+}
+
+#[test]
+fn delete_file_rejects_workspace_meta() {
+    // 元数据被删会让工作区无法加载，必须显式拒绝
+    let mgr = test_manager("delete-file-meta");
+    mgr.create("contest-6", "problem-F", "/ws").unwrap();
+
+    assert!(mgr.delete_file("workspace.json").is_err());
+}
+
+#[test]
+fn delete_file_rejects_without_current_workspace() {
+    let mgr = test_manager("delete-file-no-current");
+    assert!(mgr.delete_file("main.cpp").is_err());
+}
+
+#[test]
+fn delete_file_missing_everywhere_is_noop() {
+    // 幂等：内存与磁盘均无此文件时成功返回（清理路径可安全重试）
+    let mgr = test_manager("delete-file-noop");
+    mgr.create("contest-6", "problem-F", "/ws").unwrap();
+    mgr.update_file("Main.java", "// keep").unwrap();
+
+    mgr.delete_file("ghost.cpp").unwrap();
+
+    let ws = mgr.current().unwrap();
+    assert!(ws.files.contains_key("Main.java"));
+    assert_eq!(mgr.get_file("Main.java").unwrap(), "// keep");
+}
+
+#[test]
+fn delete_file_disk_only_file_still_removed_from_memory() {
+    // 历史工作区：文件在磁盘上、但本次会话内存里没有（load 前的清理场景兜底）——
+    // 磁盘删除后内存状态保持一致（无幽灵键）
+    let (mgr, storage) = test_manager_with_storage("delete-file-disk-only");
+    let ws = mgr.create("contest-6", "problem-F", "/ws").unwrap();
+    mgr.update_file("main.cpp", "// stale").unwrap();
+    // Main.java 最后写入 → active_file 指向它，main.cpp 才是可清理的过期文件
+    mgr.update_file("Main.java", "// keep").unwrap();
+    mgr.save().unwrap();
+    // 模拟「内存里没有 main.cpp」：直接从 HashMap 移除（磁盘仍在）
+    {
+        let mut current = mgr.current.write().unwrap_or_else(|e| e.into_inner());
+        current
+            .as_mut()
+            .unwrap()
+            .files
+            .remove("main.cpp");
+    }
+
+    mgr.delete_file("main.cpp").unwrap();
+
+    let repo = FsWorkspaceRepository::new(Arc::clone(&storage));
+    assert!(
+        repo.read_file(&ws.id, &std::path::PathBuf::from("main.cpp"))
+            .is_err(),
+        "磁盘上的孤儿文件也应被删除"
+    );
+    assert_eq!(
+        repo.read_file(&ws.id, &std::path::PathBuf::from("Main.java"))
+            .unwrap(),
+        "// keep"
+    );
+}
+
 #[test]
 fn load_recovers_workspace_from_disk() {
     let dir = TempDir::named("hinina-test-mgr-load-recover");
@@ -364,6 +473,10 @@ impl WorkspaceRepository for HookedRepo {
 
     fn list_files(&self, workspace_id: &str) -> AppResult<Vec<std::path::PathBuf>> {
         self.inner.list_files(workspace_id)
+    }
+
+    fn delete_file(&self, workspace_id: &str, path: &Path) -> AppResult<()> {
+        self.inner.delete_file(workspace_id, path)
     }
 
     fn delete_workspace(&self, workspace_id: &str) -> AppResult<()> {

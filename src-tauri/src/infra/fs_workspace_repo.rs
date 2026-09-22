@@ -141,6 +141,36 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         Ok(files)
     }
 
+    fn delete_file(&self, workspace_id: &str, path: &Path) -> AppResult<()> {
+        let rel = self.workspace_relative(workspace_id, path)?;
+        // 幂等：文件不存在视为成功（清理场景下重复调用、内存与磁盘状态
+        // 不一致时的重试都不应报错）
+        if !self.storage.exists(&rel) {
+            debug!(
+                workspace_id = workspace_id,
+                file = %path.display(),
+                "文件不存在，跳过删除"
+            );
+            return Ok(());
+        }
+        let result = self.storage.remove(&rel);
+        if let Err(ref e) = result {
+            warn!(
+                workspace_id = workspace_id,
+                file = %path.display(),
+                error = %e,
+                "工作区文件删除失败"
+            );
+        } else {
+            debug!(
+                workspace_id = workspace_id,
+                file = %path.display(),
+                "删除工作区文件"
+            );
+        }
+        result
+    }
+
     fn delete_workspace(&self, workspace_id: &str) -> AppResult<()> {
         let root = self.workspace_root(workspace_id);
         let result = self.storage.remove_all(&root);

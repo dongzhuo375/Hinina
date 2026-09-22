@@ -203,3 +203,22 @@ pub async fn set_workspace_language(
         .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
     wm.set_language(&language)
 }
+
+/// 删除当前工作区中的文件（P62：旧代码文件清理）。
+///
+/// 前端 invoke 签名: `delete_workspace_file`({ fileName })
+///
+/// 供语言切换后的旧扩展名文件清理使用：编辑器内容已复制到新文件名，
+/// 旧文件删除后 `save()` 不再全量写出它们。后端守卫拒绝删除当前代码文件
+/// （`active_file`）与元数据 `workspace.json`，前端无需重复设防。
+#[tauri::command]
+pub async fn delete_workspace_file(
+    ctx: State<'_, AppContext>,
+    file_name: String,
+) -> AppResult<()> {
+    let wm = ctx
+        .workspace_manager
+        .as_ref()
+        .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
+    wm.delete_file(&file_name)
+}
