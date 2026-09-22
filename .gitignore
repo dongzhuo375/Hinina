@@ -1,6 +1,3 @@
-# 本地 Review 文档，不入库
-doc/problem.md
-
 # 本地设计记录，不入库（Hydro 适配器的缺口报告与冲突记录；协议依据 doc/Hydro/HYDRO-API.md 仍入库）
 doc/Hydro/Hydro-Adapter-设计缺口报告.md
 doc/Hydro/适配新架构的冲突记录.md
