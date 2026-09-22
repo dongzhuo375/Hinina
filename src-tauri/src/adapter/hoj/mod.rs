@@ -2,8 +2,8 @@
 //
 // HOJ (Hydro Online Judge) API 基于 JWT 认证，统一响应格式 {status, msg, data}。
 // Token 在登录响应的 `authorization` 头中返回，后续请求通过该头传递。
-pub mod types;
 pub mod error;
+pub mod types;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -16,18 +16,20 @@ use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::problem::{Problem, Sample};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::entity::submission::{
-    JudgeCase, JudgementResult, SubTaskCases, SubmissionCases, SubmissionDetail,
-    SubmissionPage, SubmissionQuery, SubmissionRecord,
+    JudgeCase, JudgementResult, SubTaskCases, SubmissionCases, SubmissionDetail, SubmissionPage,
+    SubmissionQuery, SubmissionRecord,
 };
 use crate::core::entity::user::User;
 use crate::core::error::{AppError, AppResult};
-use crate::core::event::app_event::{AppEvent, AuthEvent};
-use crate::core::event::event_bus::EventBus;
+use crate::core::event::core_event::CoreEvent;
+use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
 use crate::core::provider::contest::ContestProvider;
+use crate::core::provider::oj_id::OjId;
 use crate::core::provider::problem::ProblemProvider;
 use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::submission::SubmissionProvider;
+use crate::core::repository::session_repo::SessionRepository;
 use crate::infra::http::HttpClient;
 
 use self::types::{
@@ -45,8 +47,16 @@ pub struct HOJAdapter {
     base_url: String,
     /// 当前 JWT token（登录后设置）
     token: RwLock<Option<String>>,
-    /// 事件总线：token 轮换时发布 `AuthEvent::TokenRefreshed`，供 AuthService 回写磁盘会话
-    event_bus: Arc<EventBus>,
+    /// 本适配器的 OJ 身份（会话文件名与事件载荷都用它）
+    oj_id: OjId,
+    /// 事件总线：token 轮换**落盘成功后**发布 `CoreEvent::TokenRotated`（脱敏事实通知）
+    event_bus: Arc<CoreEventBus>,
+    /// 会话仓库：轮换时**显式**把新 token 写回磁盘
+    ///
+    /// 为什么适配器自己落盘：轮换发生在 HTTP 响应处理的当场，新 token 只在这一次
+    /// 响应里出现过；把它交给应用层的事件订阅者去写盘，等于把持久性保证挂在
+    /// 异步投递上（消费者可能落后、可能不存在），而且要把真实凭证塞进事件流。
+    session_repo: Arc<dyn SessionRepository>,
 }
 
 impl HOJAdapter {
@@ -57,14 +67,22 @@ impl HOJAdapter {
     /// 创建 HOJAdapter。
     ///
     /// `base_url` 不含尾部 `/api`，如 `https://hoj.dongzhuo.top`。
-    pub fn new(http: Arc<HttpClient>, base_url: String, event_bus: Arc<EventBus>) -> Self {
+    pub fn new(
+        http: Arc<HttpClient>,
+        base_url: String,
+        oj_id: OjId,
+        event_bus: Arc<CoreEventBus>,
+        session_repo: Arc<dyn SessionRepository>,
+    ) -> Self {
         // 去掉尾部斜杠以统一拼接
         let base_url = base_url.trim_end_matches('/').to_string();
         Self {
             http,
             base_url,
             token: RwLock::new(None),
+            oj_id,
             event_bus,
+            session_repo,
         }
     }
 
@@ -191,15 +209,39 @@ impl HOJAdapter {
         Ok(())
     }
 
-    /// 解析响应头中的 HOJ 私有轮换协议：更新内存 token 并发布事件供 AuthService 回写磁盘会话。
+    /// 解析响应头中的 HOJ 私有轮换协议：更新内存 token → **显式落盘** → 发布脱敏通知。
+    ///
+    /// 顺序有意，且每一步都不能省：
+    /// 1. 先更新内存 token（后续请求立刻用新凭证）；
+    /// 2. 再**显式**把新 token 写回磁盘会话 —— 这是持久性保证，必须当场完成。
+    ///    会话不存在（轮换发生在登录落盘之前的极端时序）时 `Ok(false)`，跳过；
+    ///    写盘失败只告警：HTTP 请求本身已经成功，不能因为落盘失败把它变成错误；
+    /// 3. **只有落盘确实成功（`Ok(true)`）才发布** `CoreEvent::TokenRotated`
+    ///    （**只带 OJ 标识**）。本事件的语义是「凭证已轮换且已落盘」——
+    ///    落盘失败 / 无会话可写时发布会让审计轨迹记录一个未发生的事实。
+    ///    token 绝不进入事件流。
     fn handle_token_rotation(&self, headers: &reqwest::header::HeaderMap) {
-        if let Some(new_token) = extract_refreshed_token(headers) {
-            debug!("HOJ token 已轮换，更新本地缓存并发布事件");
-            self.set_token(new_token.clone());
-            // 通知 AuthService 将新 token 回写磁盘会话，避免重启后回注过期凭证
-            self.event_bus.publish(&AppEvent::Auth(AuthEvent::TokenRefreshed {
-                token: new_token,
-            }));
+        let Some(new_token) = extract_refreshed_token(headers) else {
+            return;
+        };
+        debug!("HOJ token 已轮换，更新内存凭证并显式落盘");
+        self.set_token(new_token.clone());
+
+        match self.session_repo.rotate_token(&self.oj_id, &new_token) {
+            Ok(true) => {
+                debug!(oj_id = %self.oj_id, "轮换后的凭证已回写磁盘会话");
+                self.event_bus.publish(CoreEvent::TokenRotated {
+                    oj_id: self.oj_id.to_string(),
+                });
+            }
+            Ok(false) => {
+                debug!(oj_id = %self.oj_id, "无磁盘会话，跳过凭证回写与事件发布");
+            }
+            Err(e) => warn!(
+                oj_id = %self.oj_id,
+                error = %e,
+                "凭证轮换落盘失败（本次请求已成功；重启后可能回注过期凭证，不发布 TokenRotated）"
+            ),
         }
     }
 
@@ -479,9 +521,13 @@ fn extract_tag_contents(html: &str, tag: &str) -> Vec<String> {
     while let Some(start) = remaining.find(&open_marker) {
         let after_tag = &remaining[start + open_marker.len()..];
         // 跳过标签属性直到 '>'
-        let Some(close_bracket) = after_tag.find('>') else { break };
+        let Some(close_bracket) = after_tag.find('>') else {
+            break;
+        };
         let after_open = &after_tag[close_bracket + 1..];
-        let Some(end) = after_open.find(&close_marker) else { break };
+        let Some(end) = after_open.find(&close_marker) else {
+            break;
+        };
         let content = &after_open[..end];
         result.push(unescape_html(content.trim()));
         remaining = &after_open[end + close_marker.len()..];
@@ -524,7 +570,9 @@ impl crate::adapter::AdapterFactory for HojFactory {
         let adapter = Arc::new(HOJAdapter::new(
             Arc::clone(&deps.http_client),
             base_url.to_string(),
+            OjId::new(Self.id()),
             Arc::clone(&deps.event_bus),
+            Arc::clone(&deps.session_repo),
         ));
         ProviderSet::full(
             Arc::clone(&adapter) as Arc<dyn AuthProvider>,
@@ -614,13 +662,7 @@ impl AuthProvider for HOJAdapter {
 
         // 忽略远端响应（可能失败），以清除 token 为主
         let headers = Self::auth_headers(token.as_deref());
-        let _ = self
-            .http
-            .client()
-            .get(&url)
-            .headers(headers)
-            .send()
-            .await;
+        let _ = self.http.client().get(&url).headers(headers).send().await;
 
         self.clear_token();
         info!("HOJ 已登出");
@@ -667,15 +709,11 @@ impl ContestProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ contest list"))?;
 
-        let page = api_resp.into_data().map_err(|msg| {
-            AppError::Contest(format!("HOJ contest list 失败: {}", msg))
-        })?;
+        let page = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Contest(format!("HOJ contest list 失败: {}", msg)))?;
 
-        let contests: Vec<Contest> = page
-            .records
-            .into_iter()
-            .map(Self::into_contest)
-            .collect();
+        let contests: Vec<Contest> = page.records.into_iter().map(Self::into_contest).collect();
 
         debug!(count = contests.len(), "HOJ 比赛列表已获取");
         Ok(contests)
@@ -689,9 +727,9 @@ impl ContestProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ contest info"))?;
 
-        let c = api_resp.into_data().map_err(|msg| {
-            AppError::Contest(format!("HOJ contest info 失败: {}", msg))
-        })?;
+        let c = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Contest(format!("HOJ contest info 失败: {}", msg)))?;
 
         Ok(Self::into_contest(c))
     }
@@ -704,9 +742,9 @@ impl ContestProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ contest problem list"))?;
 
-        let problem_list = api_resp.into_data().map_err(|msg| {
-            AppError::Contest(format!("HOJ contest problem list 失败: {}", msg))
-        })?;
+        let problem_list = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Contest(format!("HOJ contest problem list 失败: {}", msg)))?;
 
         let problems: Vec<ContestProblem> = problem_list
             .into_iter()
@@ -758,7 +796,11 @@ impl ContestProvider for HOJAdapter {
 
         // 注意：records 可能含服务端前置的「当前用户/关注用户」副本，
         // 去重与真实参赛人数推导由前端按 uid 处理（见 ContestRankPage 文档注释）
-        let records = page.records.into_iter().map(ContestRankVO::into_rank_row).collect();
+        let records = page
+            .records
+            .into_iter()
+            .map(ContestRankVO::into_rank_row)
+            .collect();
 
         debug!(contest_id = contest_id, "HOJ 比赛榜单已获取");
         Ok(ContestRankPage {
@@ -793,7 +835,11 @@ impl ContestProvider for HOJAdapter {
             .into_data()
             .map_err(|msg| AppError::Contest(format!("HOJ contest announcement 失败: {}", msg)))?;
 
-        let records = page.records.into_iter().map(Self::into_announcement).collect();
+        let records = page
+            .records
+            .into_iter()
+            .map(Self::into_announcement)
+            .collect();
         debug!(contest_id = contest_id, "HOJ 比赛公告已获取");
         Ok(AnnouncementPage {
             records,
@@ -809,11 +855,7 @@ impl ContestProvider for HOJAdapter {
 
 #[async_trait]
 impl ProblemProvider for HOJAdapter {
-    async fn get_problem(
-        &self,
-        contest_id: &str,
-        problem_id: &str,
-    ) -> AppResult<Problem> {
+    async fn get_problem(&self, contest_id: &str, problem_id: &str) -> AppResult<Problem> {
         // problem_id 在比赛中对应 displayId（如 "A", "B"）
         let url = self.api_url(&format!(
             "/get-contest-problem-details?cid={}&displayId={}",
@@ -825,13 +867,18 @@ impl ProblemProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ problem detail"))?;
 
-        let info = api_resp.into_data().map_err(|msg| {
-            AppError::Problem(format!("HOJ problem detail 失败: {}", msg))
-        })?;
+        let info = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Problem(format!("HOJ problem detail 失败: {}", msg)))?;
 
         let problem = Self::into_problem(info);
 
-        debug!(contest_id = contest_id, problem_id = problem_id, title = problem.title, "HOJ 题目详情已获取");
+        debug!(
+            contest_id = contest_id,
+            problem_id = problem_id,
+            title = problem.title,
+            "HOJ 题目详情已获取"
+        );
         Ok(problem)
     }
 
@@ -862,9 +909,9 @@ impl ProblemProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ user problem status"))?;
 
-        let raw = api_resp.into_data().map_err(|msg| {
-            AppError::Problem(format!("HOJ user problem status 失败: {}", msg))
-        })?;
+        let raw = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Problem(format!("HOJ user problem status 失败: {}", msg)))?;
 
         // 服务端回的是 HOJ 原始评测状态码（-10/-1/0/…），先取值再归一到 0/1/2 契约
         let statuses = raw
@@ -911,7 +958,12 @@ impl SubmissionProvider for HOJAdapter {
             is_remote: false,
         };
 
-        info!(contest_id = contest_id, problem_id = problem_id, language = language, "HOJ 提交代码");
+        info!(
+            contest_id = contest_id,
+            problem_id = problem_id,
+            language = language,
+            "HOJ 提交代码"
+        );
 
         // 走统一的 POST 封装：原始响应体 → 去 null 解析 → token 轮换。
         // 此前这里自带一份轮换逻辑，与 get/post_json_authed 的实现容易漂移
@@ -931,7 +983,10 @@ impl SubmissionProvider for HOJAdapter {
     }
 
     async fn get_judgement(&self, submission_id: &str) -> AppResult<JudgementResult> {
-        let url = self.api_url(&format!("/get-submission-detail?submitId={}", submission_id));
+        let url = self.api_url(&format!(
+            "/get-submission-detail?submitId={}",
+            submission_id
+        ));
 
         // 走统一 GET 封装：带上 token（若已登录）、处理轮换、去 null 解析。
         // 此前固定传 None：评测详情在需要认证的部署上会直接 401，
@@ -943,9 +998,9 @@ impl SubmissionProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ judgement"))?;
 
-        let info = api_resp.into_data().map_err(|msg| {
-            AppError::Submission(format!("HOJ 评测查询失败: {}", msg))
-        })?;
+        let info = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Submission(format!("HOJ 评测查询失败: {}", msg)))?;
 
         let detail = &info.submission;
 
@@ -965,10 +1020,7 @@ impl SubmissionProvider for HOJAdapter {
         Ok(result)
     }
 
-    async fn list_contest_submissions(
-        &self,
-        query: &SubmissionQuery,
-    ) -> AppResult<SubmissionPage> {
+    async fn list_contest_submissions(&self, query: &SubmissionQuery) -> AppResult<SubmissionPage> {
         let cid = Self::parse_cid(&query.contest_id)?;
 
         // beforeContestSubmit=false 必传：赛前提交不计入榜单，混入会误导选手；
@@ -981,7 +1033,11 @@ impl SubmissionProvider for HOJAdapter {
             query.current_page.max(1),
             query.only_mine
         );
-        if let Some(display_id) = query.problem_display_id.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(display_id) = query
+            .problem_display_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+        {
             url.push_str(&format!("&problemID={}", display_id));
         }
         if let Some(status) = query.status {
@@ -994,11 +1050,15 @@ impl SubmissionProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ contest submissions"))?;
 
-        let page = api_resp
-            .into_data()
-            .map_err(|msg| AppError::Submission(format!("HOJ contest submissions 失败: {}", msg)))?;
+        let page = api_resp.into_data().map_err(|msg| {
+            AppError::Submission(format!("HOJ contest submissions 失败: {}", msg))
+        })?;
 
-        let records = page.records.into_iter().map(Self::into_submission_record).collect();
+        let records = page
+            .records
+            .into_iter()
+            .map(Self::into_submission_record)
+            .collect();
         debug!(contest_id = query.contest_id, "HOJ 比赛提交列表已获取");
         Ok(SubmissionPage {
             records,

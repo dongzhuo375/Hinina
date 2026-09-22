@@ -4,9 +4,9 @@
 HOJ 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、`SubmissionProvider` 四个 trait；并提供工厂 `HojFactory`（静态单例 `FACTORY`，`adapter::factories()` 清单成员）供组合根按配置实例构造。
 
 ## 核心类型/函数
-- `HOJAdapter` — 封装 `Arc<HttpClient>` + `base_url` + `RwLock<Option<String>>`（JWT token）+ `Arc<EventBus>`（凭证轮换事件发布）
+- `HOJAdapter` — 封装 `Arc<HttpClient>` + `base_url` + `RwLock<Option<String>>`（JWT token）+ `Arc<CoreEventBus>`（凭证轮换的脱敏事实通知）+ `Arc<dyn SessionRepository>`（轮换时**显式**回写磁盘会话）
 - `HOJAdapter::ID`（关联常量 `"HOJ"`）— HOJ 的 OJ 身份标识（会话文件名 = `sessions/{ID}.json`，值须与历史枚举 Debug 输出一致以兼容既有会话文件）
-- `HOJAdapter::new(http, base_url, event_bus)` — 构造；`base_url` 自动去尾斜杠
+- `HOJAdapter::new(http, base_url, oj_id, event_bus, session_repo)` — 构造；`base_url` 自动去尾斜杠
 - `api_url(path)` — 拼接完整 API URL
 - `parse_cid(contest_id) -> AppResult<i64>` — 比赛 ID 解析（HOJ 的 cid 是数字，Hinina 内部统一用字符串传递）。**非法 ID 必须报错而不是回退 0**：HOJ 以 `cid = 0` 表示「非比赛场景」，静默回退会让比赛中的提交落到练习题库——不计入榜单，选手在赛场上无从察觉。`get_contest_rank` / `get_user_problem_status` / `submit` 共用
 - `parse_time(s)` — 已**上提到 `adapter::time`**（与 Hydro 共用同一份实现，见 `adapter/time.md`）。此前这里按固定 19 字符取位，把实测格式 `2026-09-21T16:00:00.000+0000` 的偏移后缀截断忽略 —— UTC 部署下碰巧正确，非 UTC 部署会整体偏移且静默（P64 / P30）
@@ -24,7 +24,7 @@ HOJ 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、
   - `Ok(resp)` 但体内非 200（400 参数错误 / 500 服务端异常等）→ `Err(AppError::Unknown("HOJ 会话校验返回非成功状态 status={n}"))`：既不是成功也不是鉴权失败，**无法据此断定会话状态**，按「无法判定」上抛而不是清会话
   - `Err(AppError::Auth(msg))` → `Ok(false)`：服务端明确判定失效。**两条来源都要认** —— ① HTTP 401（infra `status_error` 映射为 `Auth`）；② HTTP 200 + 体内 `status=401`/`403`+登录提示（`parse_hoj_json` 的 `auth_failure_from_body` 映射为 `Auth`）。实测 HOJ 两种报法都存在，漏掉任一条都会让真过期的 token 永不登出
   - 其它 `Err(e)` → `Err(e.context("HOJ 会话校验"))`：网络异常、超时、5xx、响应解析失败一律属「无法判定」，**变体保留**后由 `AuthService` 映射为 `SessionValidity::Unknown` 并保留本地会话
-- `handle_token_rotation(headers)` — GET/POST/submit 共用的轮换逻辑：检测到新 token 时更新内存缓存并发布 `AuthEvent::TokenRefreshed`
+- `handle_token_rotation(headers)` — GET/POST/submit 共用的轮换逻辑，顺序有意且每一步都不能省：① 先更新内存 token（后续请求立刻用新凭证）；② 再经 `session_repo.rotate_token(&oj_id, &new_token)` **显式**把新 token 写回磁盘会话（持久性保证，必须当场完成）；③ **仅在落盘成功（`Ok(true)`）后**才发布 `CoreEvent::TokenRotated { oj_id }`（**只带 OJ 标识**）—— `Ok(false)`（无磁盘会话，轮换发生在登录落盘之前的极端时序）与 `Err`（写盘失败）都**不发布**：本事件的语义是「已轮换且已落盘」，未落盘却发布等于让审计轨迹记录一件没发生的事。两条未发布路径只记日志（写盘失败 `warn`）—— HTTP 请求本身已成功，不能因落盘失败把它变成错误
 - `into_contest(ContestVO) -> Contest` — 映射 helper，比赛列表与比赛详情共用，避免两处映射漂移；`seal_rank_time` 为空串或无法解析时视为未设置（`None`）；`oi_rank_score_type` 直接透传（OI 榜单计分规则 "Recent"/"Highest"，非 OI 赛为 `None`）
 - `into_announcement(AnnouncementVO) -> Announcement` — 公告映射：id 转字符串、`username` → `author`、时间经 `parse_time` 转秒级时间戳、`content` 为 null 时回退空串
 - `into_problem(ProblemInfoVO) -> Problem` — 题目详情映射：id 转字符串、null 描述字段回退空串、`examples` 经 `parse_samples` 拆样例、**`languages`（允许提交语言显示名列表）原样携带**（前端语言选择器的权威来源，不得丢弃）
@@ -50,20 +50,22 @@ HOJ 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、
 - **鉴权失败在响应体里**：HOJ 的鉴权失败不走 HTTP 状态码（实测匿名访问 `get-contest-problem` 返回 HTTP 200 + `{"status":403,"msg":"请您先登录！"}`）。若不在 `parse_hoj_json` 里识别，各调用点会把它包成 Contest / Problem / Submission 变体，而前端 `sessionGuard` 是依据 `variant === 'Auth'` 判定会话失效的 —— token 过期时选手只会看到一堆「比赛数据错误」，永远不会被带回登录页。判定保守：`status == 401` 一律视为会话问题；`status == 403` 仅当消息含「登录 / 登陆 / token / 认证 / 未授权」时才算，否则保留为业务错误（私有赛未注册、需要密码），避免把无权访问误判成会话失效而踢人。
 - **三态契约：网络异常绝不可折成 `Ok(false)`**：`AuthProvider::validate_session` 的返回值语义是 `Ok(true)` 有效 / `Ok(false)` 服务端**明确**判定失效 / `Err(_)` 无法判定。`Ok(false)` 会让 `AuthService` 清磁盘会话 + 发布 `SessionExpired` → 前端 `invalidateSession` → 登出踢回登录页；因此把网络抖动、超时、5xx、解析失败折成 `Ok(false)` 的代价是**赛前一次断网就把选手踢回登录页**，而反复重登还可能触发 HOJ 的暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）—— 恰好是本项目要防的场景。反之，若把真正的 401 当成「无法判定」上抛，则 token 过期后永不登出，选手被卡在比赛页反复失败。两个方向都不能错，故判据抽成纯函数 `session_validity_from_response` 并由单元测试锁定（见「测试」）。
 - **错误变体绝不被改写**：补上下文一律用 `AppError::context()`（保留变体），禁止 `AppError::Network(format!("xx 请求失败: {}", e))` 这类重新包装 —— 它会把反序列化失败、认证失败一律改写成「网络错误」，现场看到「网络错误: … 序列化错误: …」自相矛盾的嵌套消息，把 DTO 问题当断网查，还会让 401 不再触发登出。
-- **token 轮换**：HOJ 服务端在 token 到期前返回 `Refresh-Token: true` + 新 `Authorization` 头。轮换语义为 HOJ 私有协议，由本模块的 `extract_refreshed_token()` 解析（infra 层仅透传原始响应头）；`get_json_authed` / `post_json_authed` 共用 `handle_token_rotation()`，submit 也走 `post_json_authed`（此前自带一份内联轮换，与共用实现容易漂移）—— 检测到轮换时更新本地 token，并发布 `AuthEvent::TokenRefreshed` 事件，由 AuthService 订阅回写磁盘会话，避免重启后回注过期凭证。
+- **token 轮换**：HOJ 服务端在 token 到期前返回 `Refresh-Token: true` + 新 `Authorization` 头。轮换语义为 HOJ 私有协议，由本模块的 `extract_refreshed_token()` 解析（infra 层仅透传原始响应头）；`get_json_authed` / `post_json_authed` 共用 `handle_token_rotation()`，submit 也走 `post_json_authed`（此前自带一份内联轮换，与共用实现容易漂移）—— 检测到轮换时更新本地 token、**显式**经 `SessionRepository::rotate_token` 回写磁盘会话（避免重启后回注过期凭证），**落盘成功后**才发布 `CoreEvent::TokenRotated`（只带 OJ 标识，**token 绝不进入事件流**）。为什么由适配器自己落盘：轮换发生在 HTTP 响应处理的当场，新 token 只在这一次响应里出现过；把它交给应用层的事件订阅者去写盘，等于把持久性保证挂在异步投递上（消费者可能落后、可能不存在），而且要把真实凭证塞进事件流。
 - **榜单请求 DTO 约定**：`force_refresh` 恒为 false —— 非比赛创建者/超管传 true 会被服务端忽略，封榜状态应由 `Contest::seal_rank` + `seal_rank_time` 自行判断（HOJ-Contest-Rank-API.md §9.3）。
 - **token 回注**：`restore_token(token)` 供 `AuthService::get_session()` 在应用重启后回注会话 token。
 
 ## 直接依赖
 - `infra::http::HttpClient` — 网络请求
-- `core::event::event_bus::EventBus` — 凭证轮换事件发布
+- `core::event::core_event::CoreEvent` — 凭证轮换的脱敏事实通知（`TokenRotated { oj_id }`）
+- `core::event::core_event_bus::CoreEventBus` — 事件发布
+- `core::repository::session_repo::SessionRepository` — 轮换后的凭证**显式**回写磁盘会话
 - `adapter::hoj::types` — DTO 类型 + 状态码映射 + 榜单/题目状态归一函数
 - `core::entity::*` — 领域实体（含 `announcement::{Announcement, AnnouncementPage}`、`rank::{ContestRankPage, RankQuery}`、`submission::{SubmissionRecord, SubmissionPage, SubmissionQuery, SubmissionDetail, SubmissionCases, JudgeCase, SubTaskCases, ...}`）
 - `core::error::{AppError, AppResult}` — 统一错误
 - `serde_json::Value` — 会话校验只关心 `ApiResponse` 的 `status`，不解析 `data`
 
 ## 被依赖
-- `core::context.rs` — AppContext::init() 经 `HojFactory::build` 构造 `ProviderSet` 注册到 ProviderRegistry（active 未注册时的回退目标也用 `HOJAdapter::ID`）
+- `core::context.rs` — AppContext::init() 经 `HojFactory::build` 构造 `ProviderSet` 注册到 ProviderRegistry（active 未注册时的回退目标取自 `list_available()` 首项，不再引用 `HOJAdapter::ID`）
 - `adapter::factories()` — 工厂清单引用 `hoj::FACTORY`
 
 ## 逻辑流程

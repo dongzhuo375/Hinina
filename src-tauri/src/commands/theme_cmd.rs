@@ -20,12 +20,9 @@ pub async fn get_theme(ctx: State<'_, AppContext>) -> AppResult<ThemeConfig> {
 /// 前端 invoke 签名: `set_theme`({ themeName })
 ///
 /// 支持 "light" / "dark"，自动匹配 Monaco Editor 主题（vs / vs-dark）。
-/// 发布 `SystemEvent::ThemeChanged` 通知前端所有组件更新样式。
+/// 发布 `CoreEvent::ThemeChanged` 通知其他观察者（前端主题由 IPC 返回值直接应用）。
 #[tauri::command]
-pub async fn set_theme(
-    ctx: State<'_, AppContext>,
-    theme_name: String,
-) -> AppResult<()> {
+pub async fn set_theme(ctx: State<'_, AppContext>, theme_name: String) -> AppResult<()> {
     info!(theme = %theme_name, "Command: 切换主题");
     ctx.theme.set_theme(&theme_name)
 }

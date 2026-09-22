@@ -15,7 +15,7 @@
 | `SettingsForm` | interface | 表单草稿；**数字字段保留原始字符串**——输入中间态（空串/半截数字）不应被强转成 NaN 写回，只有校验通过的值才进入保存载荷 |
 | `form` | `reactive<SettingsForm>` | activeOj / ojUrl / contestRef / contestPassword / timeoutSecs / pollIntervalSecs / pollTimeoutSecs / cacheTtlSecs / cacheProblemStatement / fontSize / tabSize / defaultLanguage / autoSave / autoSaveIntervalSecs / splitRatio。`activeOj` = 当前 OJ 实例 id（下拉选择），`ojUrl` = 当前选中实例的服务端地址（保存时写回该实例 baseUrl），`contestRef` = 比赛引用（不透明字符串：HOJ 数字 ID / 其它 OJ 资源引用；空 = 未配置） |
 | `ojInstances` / `ojOptions` / `persistedActive` / `switchError` / `switchNotice` | ref/computed | 实例清单（populate 时从 `config.oj.instances` 刷新，保存后也用写回结果同步）/ 下拉候选（`ojSelectOptions`：**已知枚举在前**（含未配置者）+ 枚举外实例追加；禁用者标注「（已禁用）」且不可选）/ 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）/ 切换错误（rose，独立于保存错误）/ **切换引导**（amber：未配置的 OJ 提示「填地址后保存将自动创建并切换」；与错误**并存**渲染 —— 两者语义独立，如「实例已保存但切换未成功」） |
-| `onSwitchOj` | `() => Promise<void>` | 切换当前 OJ（显式命令：即时生效 + 持久化 `oj.active` + 发布 `OJSwitched`，经 `configService.switchOj`）；成功后 `form.ojUrl` **跟随新实例地址**（否则表单里仍是旧实例地址，「保存」会把它写进新实例的 `baseUrl` —— 数据损坏；切换前未保存的地址编辑随之丢弃，用户已切换编辑对象）+ `resetSessionForOjSwitch()` 重置会话上下文（旧 OJ 的用户/比赛/题面/提交全部失效，解题页拿旧 `contest.id` 向新 OJ 提交是真实风险）+ `router.replace({ name: 'Login' })`（守卫按新 OJ 会话文件恢复：登录过则无感续用，否则落在登录表单）；失败时回滚 `form.activeOj` 到 `persistedActive` 并写 `switchError` |
+| `onSwitchOj` | `() => Promise<void>` | 切换当前 OJ（显式命令：即时生效 + 持久化 `oj.active` + 发布 `CoreEvent::OjSwitched`，经 `configService.switchOj`）；成功后 `form.ojUrl` **跟随新实例地址**（否则表单里仍是旧实例地址，「保存」会把它写进新实例的 `baseUrl` —— 数据损坏；切换前未保存的地址编辑随之丢弃，用户已切换编辑对象）+ `resetSessionForOjSwitch()` 重置会话上下文（旧 OJ 的用户/比赛/题面/提交全部失效，解题页拿旧 `contest.id` 向新 OJ 提交是真实风险）+ `router.replace({ name: 'Login' })`（守卫按新 OJ 会话文件恢复：登录过则无感续用，否则落在登录表单）；失败时回滚 `form.activeOj` 到 `persistedActive` 并写 `switchError` |
 | `baseline` / `snapshot` / `dirty` | ref/fn/computed | 基线 = 上次加载/保存成功时的表单 JSON 序列化；dirty 判定与「放弃更改」共用同一快照 |
 | `parseIntStrict` | `(raw) => number \| null` | 严格非负整数解析：正则 `^\d+$` 拒绝空串/小数/负号/科学计数法等 `Number()` 会宽容接受的形式 |
 | `intError` / `errors` / `isValid` / `canSave` | computed | 逐字段错误映射（ojUrl 须 `http(s)://` 前缀；contestRef 为自由格式字符串，空串 = 未配置，合法不校验；各整数字段带值域：超时 1–120、轮询间隔 1–30、轮询总超时 30–3600、缓存 TTL 0–600、字号 8–32、自动保存间隔 5–300）；canSave = dirty && valid && !saving |
@@ -129,16 +129,16 @@ discard(): Object.assign(form, JSON.parse(baseline))
   关闭后每次打开题目都请求服务端（题面被管理员中途修正时可临时关闭）。表单为布尔字段，
   不参与 `intError` 校验（无值域）。
 - **OJ 切换与保存解耦**：「当前 OJ」下拉是显式切换动作（即时生效 + 持久化 `oj.active` +
-  发布 `OJSwitched`），保存仍负责地址/比赛引用等其余字段（保存也写 `draft.oj.active`，
-  两处写入同源同值）。切换失败回滚下拉到已持久化值，避免 UI 停留在一个未生效的 OJ；
+  发布 `CoreEvent::OjSwitched`），保存仍负责地址/比赛引用等其余字段（保存也写
+  `draft.oj.active`，两处写入同源同值）。切换失败回滚下拉到已持久化值，避免 UI 停留在一个未生效的 OJ；
   候选 = 配置文件 `oj.instances` 清单。
 - ojUrl 修改后需重启客户端生效、contestRef 保存后下次进入赛场生效（HOJ 为数字 ID，
   其它 OJ 为资源引用；留空 = 不自动加载）——提示文案明示生效时机。
 - **自动保存开关的文案随落盘语义更新**：定时落盘是「代码从后端内存写到磁盘」的唯一周期
   路径，关闭后只剩切题 / 失焦 / 关窗三处显式落盘（`ProblemSolveView` 与 `main.ts` 编排），
   故提示文案写明这一后果。开关与间隔的改动**即时生效，无需重启**（P48 修复：后端
-  `sync_auto_save_with_config` 由 `SystemEvent::ConfigReloaded` 订阅触发，判据见
-  `commands/workspace_cmd.md`）。
+  `update_config` / `reload_config` 在配置落盘成功后**显式**调用
+  `sync_auto_save_from_context`，判据见 `commands/workspace_cmd.md`）。
 - 存储信息每次挂载实时读取（service 不缓存：版本号构建期固定，但存储目录可能随
   用户数据迁移变化）。
 - **「重置与清理」是维护动作，不是配置**：两个动作的定位刻意分开 —— **重置客户端**清掉一切可重新从服务端获取的东西（三层缓存 + 公告基线 + 公告已读标记），安全、可反复点；**清理本地数据**删除不可重建的本地事实（日志内容、过期提交留档），不可逆。四条硬约定：① **重置只做一次确认、清理必须展示体积并勾选后再确认** —— 把不可逆删除混进「重置」，风险是用户以为自己点的是安全按钮；② **重置后必须补拉**（后端已空但前端 store 仍是旧内存副本，不补拉等于让「重置是否生效」不可验证），但**只补拉可观察差异**（比赛元信息/题目列表/我的状态/公告），不追求全场刷新风暴 —— 榜单/提交历史/题面/limits 与服务端同源且服务端本就不缓存它们，进页面时自然刷新；③ **清理后必须重读体积预览**，否则用户以为没生效；④ **提示文案不许失实** —— 补拉失败要说明「数据重新拉取失败，请手动刷新」，勾了日志却没清掉要说明「日志未清理」，两者都以琥珀色（`warn`）呈现而不是成功绿。

@@ -1,9 +1,11 @@
-pub mod http;
-pub mod storage;
+pub mod audit;
 pub mod cache;
-pub mod logger;
 pub mod data_dir;
-pub mod fs_workspace_repo;
 pub mod fs_config_repo;
 pub mod fs_plugin_repo;
+pub mod fs_session_repo;
+pub mod fs_workspace_repo;
+pub mod http;
+pub mod logger;
 pub mod provider_registry_impl;
+pub mod storage;

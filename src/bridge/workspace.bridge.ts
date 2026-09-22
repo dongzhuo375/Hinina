@@ -18,9 +18,14 @@ export async function currentWorkspace(): Promise<Workspace | null> {
   return ipcInvoke<Workspace | null>('current_workspace')
 }
 
-/** 更新工作区文件内容（前端编辑器同步到后端） */
-export async function updateWorkspaceFile(fileName: string, content: string): Promise<void> {
-  return ipcInvoke<void>('update_workspace_file', { fileName, content })
+/**
+ * 更新工作区文件内容（前端编辑器同步到后端）。
+ *
+ * 返回本次内容被赋予的修订号：用于与落盘事件的修订号比较 ——
+ * 落盘落后于推送时磁盘还没追上编辑器，不能清脏标记。
+ */
+export async function updateWorkspaceFile(fileName: string, content: string): Promise<number> {
+  return ipcInvoke<number>('update_workspace_file', { fileName, content })
 }
 
 /**
@@ -36,6 +41,8 @@ export async function setWorkspaceLanguage(language: string): Promise<Workspace>
 /** 落盘事件载荷（Rust `main.rs` 的事件桥下发） */
 export interface WorkspaceSavedPayload {
   workspaceId: string
+  /** 内容修订号（Rust 侧写盘时的修订号）；用于幂等处理重复/过期事件 */
+  revision?: number
   /** true = 后台 auto-save，false = 显式 `save_workspace` */
   auto: boolean
 }
@@ -45,6 +52,9 @@ export interface WorkspaceSavedPayload {
  *
  * 后台 auto-save 由 Rust 触发，前端无从感知；只有收到本事件才表示**最新内容
  * 确已落盘**（后端在写失败或快照之后又有新改动时不发）。返回取消订阅函数。
+ *
+ * **本事件只驱动 UI 指示，不是真实状态来源**：真实落盘状态由 `saveWorkspace`
+ * 的 IPC 返回值与磁盘真值保证；事件丢失时指示器退化为「编辑中…」直到下次显式保存。
  */
 export async function onWorkspaceSaved(
   handler: (payload: WorkspaceSavedPayload) => void,

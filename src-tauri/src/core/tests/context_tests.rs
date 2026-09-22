@@ -64,7 +64,10 @@ fn enabled_instance_handles_empty_instance_list() {
 fn default_config_has_exactly_one_enabled_hoj_instance() {
     // 默认配置是「开箱即用 HOJ」：按需注册与启动注册都以它为唯一来源
     let config = AppConfig::default();
-    assert_eq!(enabled_instance(&config, "HOJ").map(|i| i.id.as_str()), Some("HOJ"));
+    assert_eq!(
+        enabled_instance(&config, "HOJ").map(|i| i.id.as_str()),
+        Some("HOJ")
+    );
     assert_eq!(
         config.oj.instances.iter().filter(|i| i.enabled).count(),
         1,
@@ -79,21 +82,13 @@ fn default_config_has_exactly_one_enabled_hoj_instance() {
 // 锁定共享实现的行为。
 
 fn test_registry() -> Arc<dyn ProviderRegistry> {
-    Arc::new(crate::infra::provider_registry_impl::ProviderRegistryImpl::new(
-        OjId::new("HOJ"),
-    ))
+    Arc::new(crate::infra::provider_registry_impl::ProviderRegistryImpl::new(OjId::new("HOJ")))
 }
 
 fn test_deps(tag: &str) -> Guarded<crate::adapter::AdapterDeps> {
     let dir = TempDir::named(&format!("hinina-test-context-{}", tag));
-    let deps = crate::adapter::AdapterDeps {
-        http_client: Arc::new(
-            crate::infra::http::HttpClient::with_timeout(std::time::Duration::from_secs(5))
-                .expect("HttpClient 构造失败"),
-        ),
-        event_bus: Arc::new(EventBus::new()),
-        storage: Arc::new(crate::infra::storage::Storage::new(dir.to_path_buf())),
-    };
+    let storage = Arc::new(crate::infra::storage::Storage::new(dir.to_path_buf()));
+    let deps = crate::adapter::test_adapter_deps(storage);
     Guarded::new(deps, dir)
 }
 
@@ -118,8 +113,15 @@ fn register_instance_skips_unknown_oj_without_panicking() {
     let registry = test_registry();
     let deps = test_deps("register-unknown");
 
-    assert!(!register_instance(registry.as_ref(), &deps, &instance("NotAnOj", true)));
-    assert!(registry.list_available().is_empty(), "未知 OJ 不应注册任何东西");
+    assert!(!register_instance(
+        registry.as_ref(),
+        &deps,
+        &instance("NotAnOj", true)
+    ));
+    assert!(
+        registry.list_available().is_empty(),
+        "未知 OJ 不应注册任何东西"
+    );
 }
 
 #[test]
@@ -140,6 +142,10 @@ fn register_instance_matches_factory_by_exact_id() {
     let registry = test_registry();
     let deps = test_deps("register-case");
 
-    assert!(!register_instance(registry.as_ref(), &deps, &instance("hoj", true)));
+    assert!(!register_instance(
+        registry.as_ref(),
+        &deps,
+        &instance("hoj", true)
+    ));
     assert!(registry.list_available().is_empty());
 }

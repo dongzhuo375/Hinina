@@ -351,7 +351,7 @@ GET /api/get-contest-announcement?cid={cid}&limit={limit}&currentPage={currentPa
 > `{"id":12,"title":"…","content":"…","uid":"…","username":"Drazzilb","status":0,"gmtCreate":"2026-09-19T12:42:05.000+0000","gmtModified":"…"}`
 >
 > 该接口**不做服务端缓存**，但客户端发现「有新公告」仍需自行比对 ID 基线（Hinina 在
-> `ContestService::list_announcements` 内维护按比赛隔离的基线，出现新 ID 时发布 `ContestEvent::AnnouncementsPublished`）。
+> `ContestService::list_announcements` 内维护按比赛隔离的基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`）。
 
 ---
 

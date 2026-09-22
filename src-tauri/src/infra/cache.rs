@@ -218,14 +218,23 @@ impl JsonDiskCache {
         };
 
         if now_unix().saturating_sub(entry.fetched_at) >= ttl.as_secs() as i64 {
-            debug!(namespace = self.namespace, key = key, "磁盘缓存已过期，删除后按未命中处理");
+            debug!(
+                namespace = self.namespace,
+                key = key,
+                "磁盘缓存已过期，删除后按未命中处理"
+            );
             if let Err(e) = self.storage.remove(&path) {
                 warn!(namespace = self.namespace, path = %path, error = %e, "过期磁盘缓存删除失败");
             }
             return None;
         }
 
-        debug!(namespace = self.namespace, key = key, hit = true, "磁盘缓存命中");
+        debug!(
+            namespace = self.namespace,
+            key = key,
+            hit = true,
+            "磁盘缓存命中"
+        );
         Some(entry.value)
     }
 
@@ -243,9 +252,9 @@ impl JsonDiskCache {
         // 后续启动不再清扫（构造时只清扫、不建目录，见 purge_legacy_layout_if_needed）
         let marker = format!("{}/{}", self.namespace, LAYOUT_MARKER_FILE);
         if !self.storage.exists(&marker) {
-            if let Err(e) =
-                self.storage
-                    .write_string(&marker, &CACHE_LAYOUT_VERSION.to_string())
+            if let Err(e) = self
+                .storage
+                .write_string(&marker, &CACHE_LAYOUT_VERSION.to_string())
             {
                 warn!(namespace = self.namespace, error = %e, "写入缓存布局标记失败");
             }
@@ -261,7 +270,9 @@ impl JsonDiskCache {
                     warn!(namespace = self.namespace, key = key, error = %e, "写入磁盘缓存失败");
                 }
             }
-            Err(e) => warn!(namespace = self.namespace, key = key, error = %e, "磁盘缓存序列化失败"),
+            Err(e) => {
+                warn!(namespace = self.namespace, key = key, error = %e, "磁盘缓存序列化失败")
+            }
         }
     }
 
@@ -276,7 +287,7 @@ impl JsonDiskCache {
     /// 删除整个 namespace 目录（登出 / 换比赛等场景的粗粒度失效）。
     ///
     /// 调用方需自行判断是否可延迟：**键自带作用域**（如 `{oj}/{cid}`）时，
-    /// 清理只承担空间回收，可放到 `EventBus::subscribe_deferred` 的延迟段执行；
+    /// 清理只承担空间回收，可放到 `on_oj_switched` 的后台段执行；
     /// 若清理是正确性依赖，则必须同步完成。
     pub fn clear_namespace(&self) -> bool {
         if !self.storage.exists(self.namespace) {
@@ -300,7 +311,11 @@ impl JsonDiskCache {
     /// 必须把该维度编进键，而不是依赖「切换时清理」—— 清理可能延迟或失败。
     fn key_path(&self, key: &str) -> Option<String> {
         if key.is_empty() || key.starts_with('/') || key.starts_with('\\') || key.contains("..") {
-            warn!(namespace = self.namespace, key = key, "非法缓存键，跳过磁盘缓存");
+            warn!(
+                namespace = self.namespace,
+                key = key,
+                "非法缓存键，跳过磁盘缓存"
+            );
             return None;
         }
         Some(format!("{}/{}.json", self.namespace, key))

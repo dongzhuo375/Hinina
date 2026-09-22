@@ -4,7 +4,7 @@
 
 ## 职责
 
-比赛公告列表、本地已读状态与**新公告事件**的 Tauri IPC 薄封装。已读状态是客户端特性（HOJ 无已读概念），由 Rust 端按「比赛 + 用户」持久化到本地文件；新公告事件由 Rust 侧比对公告基线后发布（`ContestEvent::AnnouncementsPublished`），经 `src-tauri/src/main.rs` 的事件桥转发到 `announcements-published` 通道。
+比赛公告列表、本地已读状态与**新公告事件**的 Tauri IPC 薄封装。已读状态是客户端特性（HOJ 无已读概念），由 Rust 端按「比赛 + 用户」持久化到本地文件；新公告事件由 Rust 侧比对公告基线后发布（`CoreEvent::AnnouncementChanged`），经 `src-tauri/src/main.rs` 的前端事件桥转发到 `announcements-published` 通道。
 
 ## 核心类型/函数
 
@@ -40,8 +40,8 @@
 
 事件类（**由前端拉取触发，Rust 侧不自行轮询**）：
   list_contest_announcements → ContestService 与上次基线比对 → 出现新 ID
-    → EventBus 发 ContestEvent::AnnouncementsPublished
-    → src-tauri/src/main.rs 事件桥 emit('announcements-published', { contestId, newIds })
+    → 发布 CoreEvent::AnnouncementChanged { contest_id, new_ids }
+    → src-tauri/src/main.rs 的前端事件桥 emit('announcements-published', { contestId, newIds })
     → onAnnouncementsPublished：载荷校验 → handler({ contestId, newIds: newIds ?? [] })
     → main.ts 判 contestId 是否当前比赛 → announcementStore.refresh()
 ```

@@ -50,11 +50,14 @@ pub async fn get_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 ///
 /// 前端 invoke 签名: `reload_config`
 ///
-/// 发布 `SystemEvent::ConfigReloaded`，各 Service 可通过监听此事件热更新参数。
+/// 落盘/内存更新完成后**显式**按新配置同步 auto-save 的启停与间隔，
+/// 并发布 `CoreEvent::ConfigChanged` 作为纯通知。
 #[tauri::command]
 pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
     info!("Command: 重新加载配置");
-    ctx.config.reload()
+    let config = ctx.config.reload()?;
+    crate::commands::workspace_cmd::sync_auto_save_from_context(&ctx);
+    Ok(config)
 }
 
 /// 更新配置并持久化。
@@ -64,12 +67,16 @@ pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 /// 持久化前做后端兜底校验（config.json 可被手改，前端不是唯一防线）：
 /// 先 `validate()` 拒绝不可钳制项（服务器地址非法），再 `sanitize()`
 /// 把越界字段钳制到与前端 SettingsView 一致的取值域。
-/// 配置字段按需热生效（如主题切换需额外调用 `theme:set` 发布事件）。
+///
+/// **配置变更后的必要动作在此显式完成**：`ConfigService::update` 落盘成功后，
+/// 本命令立即按新配置同步 auto-save 的启停与间隔 —— 不依赖事件消费者。
+/// 旧实现把这件事挂在 `ConfigReloaded` 事件的订阅者上（订阅者内部还要
+/// `tauri::async_runtime::spawn` 才拿得到 tokio 上下文），消费者一旦落后或缺失，
+/// 设置页改了开关却不生效，且无从察觉。
+///
+/// 主题字段的切换效果由前端本地应用（`set_theme` 另有命令）；此处不做额外广播。
 #[tauri::command]
-pub async fn update_config(
-    ctx: State<'_, AppContext>,
-    config: AppConfig,
-) -> AppResult<()> {
+pub async fn update_config(ctx: State<'_, AppContext>, config: AppConfig) -> AppResult<()> {
     info!("Command: 更新配置");
     let mut config = config;
     config.validate().map_err(AppError::Config)?;
@@ -79,5 +86,8 @@ pub async fn update_config(
     ctx.config.update(|cfg| {
         *cfg = config;
     })?;
+
+    // 显式同步（幂等）：间隔未变时不重启计时器，关掉后也能停
+    crate::commands::workspace_cmd::sync_auto_save_from_context(&ctx);
     Ok(())
 }

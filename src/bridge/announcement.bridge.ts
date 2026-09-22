@@ -7,7 +7,7 @@ import { ipcInvoke } from '@/bridge'
  * 公告 Bridge — 比赛公告列表、本地已读状态与新公告事件的 IPC 薄封装。
  *
  * 已读状态是客户端特性（HOJ 无已读概念），由 Rust 端按 比赛+用户 持久化到本地文件。
- * 新公告事件由 Rust 侧比对基线后发布（`ContestEvent::AnnouncementsPublished`），
+ * 新公告事件由 Rust 侧比对基线后发布（`CoreEvent::AnnouncementChanged`），
  * 经 `src-tauri/src/main.rs` 的事件桥转发到 `announcements-published` 通道。
  */
 
@@ -49,6 +49,9 @@ export async function markAnnouncementsRead(contestId: string, ids: string[]): P
  *
  * 返回取消订阅函数；调用方（组合根）应保留并在必要时调用，避免重复注册。
  * 事件只在 Rust 侧确认出现**新 ID** 时下发 —— 首次拉取不发，故订阅方不必自己去重。
+ *
+ * 事件只是**刷新触发**：真实公告内容始终由 `listContestAnnouncements` 经 IPC 查询，
+ * 事件丢失时下一次轮询（60s±10s）会补齐。
  */
 export async function onAnnouncementsPublished(
   handler: (payload: AnnouncementsPublishedPayload) => void,

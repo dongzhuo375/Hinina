@@ -1,7 +1,24 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::error::{AppError, AppResult};
+
+/// 原子写的临时文件序号：同进程内保证 tmp 文件名不冲突。
+static ATOMIC_WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// 文件名是否为 `target` 的原子写临时残片（`{target}.{数字}.tmp`）。
+fn is_atomic_tmp(target: &str, name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".tmp") else {
+        return false;
+    };
+    let Some(rest) = stem.strip_prefix(target) else {
+        return false;
+    };
+    // rest 形如 `.{seq}`：以 `.` 起头且其后全为数字（空串不匹配）
+    rest.len() > 1 && rest.starts_with('.') && rest[1..].bytes().all(|b| b.is_ascii_digit())
+}
 
 /// 本地文件存储工具。
 ///
@@ -79,6 +96,77 @@ impl Storage {
     /// 写入字符串到文件。自动创建父目录。
     pub fn write_string(&self, relative_path: &str, content: &str) -> AppResult<()> {
         self.write(relative_path, content.as_bytes())
+    }
+
+    /// 原子写入字符串到文件：先写临时文件、fsync 后 `rename` 覆盖目标。自动创建父目录。
+    ///
+    /// [`Self::write_string`] 是「截断 + 就地写」：进程在写入中途崩溃会留下半截
+    /// 文件，下次读取只能当作损坏处理。凭据等「重启后必须可恢复」的数据不能
+    /// 承受这一点。本方法先写 `{path}.{seq}.tmp` 并 `sync_all`，再 rename
+    /// （同目录同卷，Windows 上 `std::fs::rename` 以 `MOVEFILE_REPLACE_EXISTING`
+    /// 原子替换）：
+    ///
+    /// - **进程崩溃**：rename 是原子替换，目标要么是旧内容、要么是新内容；
+    /// - **掉电**：数据已 fsync，但 rename 的目录项未额外 fsync（Windows 上需
+    ///   `FILE_FLAG_BACKUP_SEMANTICS` 打开目录句柄，此处不做）—— 日志型文件
+    ///   系统上最坏回退为**旧的完整文件**，同样不会出现半截。
+    ///
+    /// 每次写入前先清理同目标的临时残片（崩溃落在「写完临时文件」与「rename」
+    /// 之间时会永久残留，rename 成功路径不会经过清理分支）—— 与
+    /// `data_dir::move_entry` 清暂存同一模式。并发对**同一路径**的原子写可能
+    /// 互相清掉对方的在途临时文件（表现为其中一方收到 Io 错误，不会损坏数据）；
+    /// 需要并发安全时由调用方自行串行化（如 `FsSessionRepository` 的变更锁）。
+    ///
+    /// # Errors
+    /// 路径不安全、临时文件写入/刷盘失败或改名失败时返回 `AppError::Io`。
+    pub fn write_string_atomic(&self, relative_path: &str, content: &str) -> AppResult<()> {
+        let path = self.resolve(relative_path)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                AppError::Io(format!("创建父目录失败 {}: {}", relative_path, e))
+            })?;
+        }
+        self.remove_stale_temps(&path);
+
+        let seq = ATOMIC_WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
+        let mut tmp = path.clone().into_os_string();
+        tmp.push(format!(".{seq}.tmp"));
+        let tmp_path = PathBuf::from(tmp);
+
+        let write_tmp = |e: std::io::Error| {
+            let _ = fs::remove_file(&tmp_path); // best-effort 清理
+            AppError::Io(format!("写入临时文件失败 {}: {}", relative_path, e))
+        };
+        let mut file = fs::File::create(&tmp_path).map_err(write_tmp)?;
+        file.write_all(content.as_bytes()).map_err(write_tmp)?;
+        // fsync 后再改名：保证 rename 生效时数据已在盘上（掉电语义见方法文档）
+        file.sync_all().map_err(write_tmp)?;
+        drop(file); // Windows 上 rename 前须先关闭句柄
+        fs::rename(&tmp_path, &path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path); // best-effort 清理
+            AppError::Io(format!("原子替换文件失败 {}: {}", relative_path, e))
+        })?;
+        Ok(())
+    }
+
+    /// 删除 `target` 同前缀的原子写临时残片（`{target}.{数字}.tmp`）。
+    ///
+    /// 只认本模块的命名约定，不误伤其他文件；单个删除失败只跳过
+    /// （清理失败不该让写入本身失败）。
+    fn remove_stale_temps(&self, target: &Path) {
+        let Some(dir) = target.parent() else { return };
+        let Some(prefix) = target.file_name().and_then(|n| n.to_str()) else {
+            return;
+        };
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if is_atomic_tmp(prefix, &name) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
     }
 
     /// 检查文件或目录是否存在。

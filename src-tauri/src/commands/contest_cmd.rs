@@ -35,12 +35,10 @@ pub async fn list_contests(ctx: State<'_, AppContext>) -> AppResult<Vec<Contest>
 ///
 /// 前端 invoke 签名: `select_contest`({ contestId })
 ///
-/// 选中后发布 `ContestEvent::Selected`，前端其他组件可监听此事件切换题目列表等。
+/// 选中后发布 `CoreEvent::ContestSelected`（事实通知，供审计/插件/前端刷新）；
+/// 真实数据（题目列表等）仍由调用方经 IPC 查询获得。
 #[tauri::command]
-pub async fn select_contest(
-    ctx: State<'_, AppContext>,
-    contest_id: String,
-) -> AppResult<()> {
+pub async fn select_contest(ctx: State<'_, AppContext>, contest_id: String) -> AppResult<()> {
     info!(contest_id = %contest_id, "Command: 选中比赛");
     ctx.contest.select_contest(&contest_id)
 }
@@ -54,9 +52,7 @@ pub async fn select_contest(
 /// 空串返回错误提示用户配置。
 /// 返回 `ContestBundle`（`{ contest, problems }`），前端据此渲染题目侧边栏。
 #[tauri::command]
-pub async fn load_configured_contest(
-    ctx: State<'_, AppContext>,
-) -> AppResult<ContestBundle> {
+pub async fn load_configured_contest(ctx: State<'_, AppContext>) -> AppResult<ContestBundle> {
     let contest_ref = ctx.config.get().oj.contest_ref.trim().to_string();
     if contest_ref.is_empty() {
         return Err(AppError::Contest(
@@ -122,7 +118,9 @@ pub async fn list_contest_announcements(
     let limit = limit.unwrap_or(DEFAULT_ANNOUNCEMENT_LIMIT).max(1);
 
     info!(contest_id = %contest_id, page = page, limit = limit, "Command: 获取比赛公告");
-    ctx.contest.list_announcements(&contest_id, page, limit).await
+    ctx.contest
+        .list_announcements(&contest_id, page, limit)
+        .await
 }
 
 /// 从当前会话解析公告已读状态使用的 uid。

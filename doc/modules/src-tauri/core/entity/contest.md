@@ -17,13 +17,13 @@
 - `serde::{Deserialize, Serialize}`
 
 ## 被依赖
-- `core::event::app_event`（ContestEvent::ListLoaded 携带 Vec<Contest>）
 - `core::provider::contest`（ContestProvider trait 使用 Contest）
 - `adapter::hoj`（`into_contest` 把 ContestVO 映射为 Contest，含榜单相关新字段与 `oi_rank_score_type`；`cid` 由数字转字符串）
 - `adapter::hydro`（`map_contest_problems` 如实携带 Hydro 的 hex ObjectId 作为 `cid`）
 - `service::contest`（`load_contest_with_problems` 返回 ContestBundle）
 - `commands::contest_cmd`（`load_configured_contest` 返回 ContestBundle）
 - 前端 `src/types/contest.ts`（camelCase 跨端契约；`rankShowName` / `sealRank` 等驱动榜单渲染）
+- 注：事件载荷**不携带本实体** —— `CoreEvent::ContestSelected` / `AnnouncementChanged` 只带 `contest_id`（大载荷经 IPC 查询，见 `core/event/core_event.md`）
 
 ## 逻辑流程
 无（纯类型定义）。

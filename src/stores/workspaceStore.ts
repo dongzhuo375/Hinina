@@ -16,6 +16,24 @@ const SYNC_DEBOUNCE_MS = 2_000
 /// 防抖句柄：模块级普通变量，不放进响应式 state（见 `utils/polling` 的句柄约定）
 let syncTimer: ReturnType<typeof setTimeout> | null = null
 
+/// 最近一次被接受的落盘修订号（模块级副作用句柄，不进响应式系统）。
+///
+/// 后端 `revision` 是**全局单调计数器**（工作区每次内容改动 +1），因此只需记一个
+/// 标量：小于等于它的落盘事件一律视为重复或过期，幂等跳过 —— 落盘事实只能被
+/// 更新的修订号推进，不能被回退。
+///
+/// 登出/切换账号时由 `cancelPendingSync` 归零（新会话与旧会话的修订号不可比）。
+let lastPersistedRevision = 0
+
+/// 最近一次成功推送到后端内存的修订号（模块级副作用句柄，不进响应式系统）。
+///
+/// 与 `lastPersistedRevision` 配对使用：落盘事件的修订号**落后于**它时，
+/// 说明磁盘还没追上编辑器已推送的最新内容（后端内存里有比磁盘新的改动），
+/// 不能清除脏标记 —— 否则指示器会短暂显示「已自动备份」而磁盘落后于编辑器。
+///
+/// 登出/切换账号时同样由 `cancelPendingSync` 归零。
+let lastPushedRevision = 0
+
 /**
  * 工作区 store —— 代码的「内存 → 磁盘」两级状态机。
  *
@@ -153,8 +171,17 @@ export const useWorkspaceStore = defineStore('workspace', {
       const fileName = this.activeFile ?? sourceFileNameOf(this.language)
       const content = this.code
       try {
-        await workspaceService.updateWorkspaceFile(fileName, content)
+        const revision = await workspaceService.updateWorkspaceFile(fileName, content)
+        if (typeof revision === 'number') lastPushedRevision = revision
         if (this.code === content) this.syncPending = false
+        // 落盘事件可能在推送在途时已到达：markPersisted 因 syncPending 推迟清脏，
+        // 而后端已 clean、后续 auto-save tick 不再发事件，指示器会卡在「编辑中…」。
+        // 此处补判 —— 落盘水位追上本次推送的修订号，说明磁盘确已包含编辑器内容。
+        // 注意方向：必须水位 ≥ 推送（磁盘追上编辑器）；推送 ≥ 水位时磁盘还落后，
+        // 提前清脏就是假「已自动备份」。
+        if (!this.syncPending && typeof revision === 'number' && lastPersistedRevision >= revision) {
+          this.isDirty = false
+        }
         return true
       } catch (e) {
         log.error('代码同步失败（内容仍留在编辑器，稍后重试）:', e)
@@ -170,9 +197,24 @@ export const useWorkspaceStore = defineStore('workspace', {
      *
      * `workspaceId` 用于过滤过期事件：切题前保存旧工作区会发布 `Saved`，该事件
      * 可能在新工作区已加载（甚至已编辑）之后才送达，按 id 过滤避免误清新工作区的脏标记。
+     *
+     * `revision` 用于**幂等**处理：同一事件重复送达、或旧修订号的事件晚于新修订号
+     * 到达时，直接跳过 —— 落盘事实只能被更新的修订号推进，不能被回退。
+     * 此外，事件修订号**落后于最近一次推送**（`lastPushedRevision`）时同样不清脏：
+     * 该落盘快照早于编辑器已推送的最新内容，磁盘还没追上编辑器。
+     * 事件在推送在途到达（`syncPending` 推迟清脏）的场景由 `flushPendingSync`
+     * 在推送返回后按「水位 ≥ 推送」补判，避免指示器卡住。
      */
-    markPersisted(workspaceId?: string) {
+    markPersisted(workspaceId?: string, revision?: number) {
       if (workspaceId && this.workspace && this.workspace.id !== workspaceId) return
+
+      if (revision !== undefined) {
+        if (revision <= lastPersistedRevision) return
+        lastPersistedRevision = revision
+        // 落盘快照早于最近一次推送：磁盘落后于编辑器，脏标记保持
+        if (revision < lastPushedRevision) return
+      }
+
       if (this.syncPending) return // 事件到达后又有新改动：仍需落盘
       this.isDirty = false
     },
@@ -184,6 +226,9 @@ export const useWorkspaceStore = defineStore('workspace', {
         syncTimer = null
       }
       this.syncPending = false
+      // 登出/切换账号后修订号不再可比（新会话与旧会话的落盘事实无关）
+      lastPersistedRevision = 0
+      lastPushedRevision = 0
     },
 
     /**
@@ -232,7 +277,7 @@ export const useWorkspaceStore = defineStore('workspace', {
 export function installWorkspacePersistenceListener(): void {
   void workspaceService
     .onWorkspaceSaved((payload) => {
-      useWorkspaceStore().markPersisted(payload.workspaceId)
+      useWorkspaceStore().markPersisted(payload.workspaceId, payload.revision)
       log.debug(`工作区已落盘（${payload.auto ? 'auto-save' : '显式保存'}）: ${payload.workspaceId}`)
     })
     .catch((e) => {

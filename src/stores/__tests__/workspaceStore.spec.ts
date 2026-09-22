@@ -27,6 +27,8 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  // 模块级落盘修订号是副作用句柄（跨用例存活），先归零让每个用例独立
+  useWorkspaceStore().cancelPendingSync()
   workspaceService.updateWorkspaceFile.mockResolvedValue(undefined)
   workspaceService.saveWorkspace.mockResolvedValue(undefined)
   workspaceService.setLanguage.mockResolvedValue({
@@ -243,6 +245,96 @@ describe('markPersisted — 后端落盘事件驱动指示器', () => {
     store.markPersisted('ws-old') // 切题前保存旧工作区的事件迟到
 
     expect(store.isDirty).toBe(true)
+  })
+
+  it('同一落盘事件重复送达时幂等：不会重复生效', () => {
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    store.syncPending = false
+
+    store.markPersisted('ws-1', 3)
+    expect(store.isDirty).toBe(false)
+
+    // 再次送达同一事件（revision 相同）与更旧的 revision：都应被跳过
+    store.updateCode(`${CODE}\n// 又改了`)
+    store.syncPending = false
+    store.markPersisted('ws-1', 3)
+    store.markPersisted('ws-1', 2)
+
+    expect(store.isDirty).toBe(true)
+  })
+
+  it('更新的 revision 仍能正常清除脏标记', () => {
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    store.syncPending = false
+    store.markPersisted('ws-1', 1)
+
+    store.updateCode(`${CODE}\n// 又改了`)
+    store.syncPending = false
+    store.markPersisted('ws-1', 2)
+
+    expect(store.isDirty).toBe(false)
+  })
+
+  it('事件修订号落后于已推送内容时不清脏（磁盘尚未追上编辑器）', async () => {
+    // 推送被后端赋为修订号 5（编辑器最新内容在后端内存里是 revision 5）
+    workspaceService.updateWorkspaceFile.mockResolvedValue(5)
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    await store.flushPendingSync()
+    expect(store.syncPending).toBe(false)
+
+    // 后台 auto-save 落盘的是修订号 4 的旧快照（推送 5 之前的内存）：
+    // 磁盘落后于编辑器，不能宣称「已自动备份」
+    store.markPersisted('ws-1', 4)
+    expect(store.isDirty).toBe(true)
+
+    // 落盘追上（修订号 >= 已推送修订号）才清脏
+    store.markPersisted('ws-1', 5)
+    expect(store.isDirty).toBe(false)
+  })
+
+  it('推送返回时落盘事件尚未到达：不提前清脏（等事件到达再清）', async () => {
+    // 锁定补判的方向：必须「水位 ≥ 推送」才清 —— 若误用「推送 ≥ 水位」，
+    // 此处会在磁盘还落后时清脏（假「已自动备份」）
+    workspaceService.updateWorkspaceFile.mockResolvedValue(7)
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    await store.flushPendingSync()
+    expect(store.syncPending).toBe(false)
+
+    // 落盘事件还没到（磁盘仍在旧修订号）：不能清脏
+    expect(store.isDirty).toBe(true)
+
+    store.markPersisted('ws-1', 7)
+    expect(store.isDirty).toBe(false)
+  })
+
+  it('落盘事件在推送在途到达时不卡指示器：flush 返回后补判清脏', async () => {
+    // 推送挂起（模拟 IPC 在途），期间后端 auto-save 已落盘并送达事件
+    let releasePush: (revision: number) => void = () => {}
+    workspaceService.updateWorkspaceFile.mockImplementation(
+      () =>
+        new Promise<number>((resolve) => {
+          releasePush = resolve
+        }),
+    )
+    const store = useWorkspaceStore()
+    store.updateCode(CODE)
+    const flushing = store.flushPendingSync()
+
+    // 事件先于推送返回到达：markPersisted 因 syncPending 推迟清脏（水位已推进）
+    store.markPersisted('ws-1', 7)
+    expect(store.isDirty).toBe(true)
+
+    releasePush(7)
+    await flushing
+
+    // 后端已 clean、后续 auto-save tick 不再发事件 —— 若无补判，
+    // 指示器将卡在「编辑中…」直到下一次编辑或显式保存
+    expect(store.syncPending).toBe(false)
+    expect(store.isDirty).toBe(false)
   })
 })
 

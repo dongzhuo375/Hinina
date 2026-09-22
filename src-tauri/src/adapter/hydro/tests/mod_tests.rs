@@ -83,7 +83,9 @@ fn json_login_redirect_maps_to_auth() {
 
 #[test]
 fn success_with_unexpected_shape_reports_serialization() {
-    let err = response(200, "{\"pdoc\": 1}").into_json::<ProblemDetailVO>().unwrap_err();
+    let err = response(200, "{\"pdoc\": 1}")
+        .into_json::<ProblemDetailVO>()
+        .unwrap_err();
     assert!(matches!(err, AppError::Serialization(_)));
 }
 
@@ -329,13 +331,8 @@ fn into_submission_record_keeps_score_for_oi() {
     let vo: RecordListVO = serde_json::from_value(fixture("record_list")).unwrap();
     let pdict = vo.pdict.clone().unwrap_or_default();
     let udict = vo.udict.clone().unwrap_or_default();
-    let record = HydroAdapter::into_submission_record(
-        &vo.rdocs.unwrap()[0],
-        &pdict,
-        &udict,
-        &[],
-        false,
-    );
+    let record =
+        HydroAdapter::into_submission_record(&vo.rdocs.unwrap()[0], &pdict, &udict, &[], false);
     assert_eq!(record.score, Some(100.0));
     assert_eq!(record.display_id, "", "无顺序表时展示字母留空");
 }
@@ -343,11 +340,8 @@ fn into_submission_record_keeps_score_for_oi() {
 #[test]
 fn into_submission_detail_maps_code_and_compiler_text() {
     let vo: RecordDetailVO = serde_json::from_value(fixture("record_detail")).unwrap();
-    let detail = HydroAdapter::into_submission_detail(
-        &vo.rdoc.unwrap(),
-        vo.udoc.as_ref(),
-        vo.pdoc.as_ref(),
-    );
+    let detail =
+        HydroAdapter::into_submission_detail(&vo.rdoc.unwrap(), vo.udoc.as_ref(), vo.pdoc.as_ref());
     assert_eq!(detail.submit_id, "6530f0c1a1b2c3d4e5f60718");
     assert_eq!(detail.pid, "1000");
     assert_eq!(detail.display_pid, "P1000");
@@ -499,7 +493,10 @@ fn url_joins_without_double_slash() {
     let http = Arc::new(HttpClient::new().expect("HttpClient 应可构造"));
     let adapter = HydroAdapter::new(http, "https://hydro.ac/".to_string());
     assert_eq!(adapter.url("/login"), "https://hydro.ac/login");
-    assert_eq!(adapter.url("/p/P1000?tid=abc"), "https://hydro.ac/p/P1000?tid=abc");
+    assert_eq!(
+        adapter.url("/p/P1000?tid=abc"),
+        "https://hydro.ac/p/P1000?tid=abc"
+    );
 }
 
 // ── 共用解析入口（GET / POST 两条通道共用） ──
@@ -526,7 +523,11 @@ fn parse_value_reports_non_json_body_as_serialization() {
     let err = HydroResponse::parse_value("<html>oops</html>", "https://hydro.ac/x").unwrap_err();
     match err {
         AppError::Serialization(msg) => {
-            assert!(msg.contains("不是合法 JSON"), "应指明是 JSON 解析问题: {}", msg);
+            assert!(
+                msg.contains("不是合法 JSON"),
+                "应指明是 JSON 解析问题: {}",
+                msg
+            );
         }
         other => panic!("应为 Serialization，实际 {:?}", other),
     }
@@ -545,13 +546,9 @@ fn parse_value_passes_through_success_payload() {
 
 fn test_deps(tag: &str) -> Guarded<AdapterDeps> {
     let dir = TempDir::named(&format!("hinina-test-hydro-{}", tag));
-    let deps = AdapterDeps {
-        http_client: Arc::new(
-            HttpClient::with_timeout(Duration::from_secs(5)).expect("HttpClient 构造失败"),
-        ),
-        event_bus: Arc::new(crate::core::event::event_bus::EventBus::new()),
-        storage: Arc::new(crate::infra::storage::Storage::new(dir.to_path_buf())),
-    };
+    let deps = crate::adapter::test_adapter_deps(Arc::new(crate::infra::storage::Storage::new(
+        dir.to_path_buf(),
+    )));
     Guarded::new(deps, dir)
 }
 

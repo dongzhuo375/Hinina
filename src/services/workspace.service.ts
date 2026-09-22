@@ -28,8 +28,10 @@ export class WorkspaceService {
 
   /**
    * 更新工作区文件内容（前端编辑器同步到后端）。
+   *
+   * 返回本次内容被赋予的修订号（与落盘事件的修订号同源）。
    */
-  async updateWorkspaceFile(fileName: string, content: string): Promise<void> {
+  async updateWorkspaceFile(fileName: string, content: string): Promise<number> {
     return workspaceBridge.updateWorkspaceFile(fileName, content)
   }
 

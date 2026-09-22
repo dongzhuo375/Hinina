@@ -10,7 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `getProblem` | `(contestId, problemId) => Promise<Problem>` | invoke `get_problem`（后端同时发布 `ProblemEvent::Opened`） |
+| `getProblem` | `(contestId, problemId) => Promise<Problem>` | invoke `get_problem`（后端同时发布 `CoreEvent::ProblemOpened` 事实通知） |
 | `getUserProblemStatus` | `(contestId, problemIds: string[]) => Promise<Record<pid, UserProblemStatus>>` | invoke `get_user_problem_status`；返回 `{ pid: 0\|1\|2 }`，未出现的 pid 视为未提交 |
 | `getContestProblemLimits` | `(contestId, displayIds: string[]) => Promise<ProblemLimits[]>` | invoke `get_contest_problem_limits`；后端带内存 + 磁盘双层缓存，命中时零网络请求 |
 

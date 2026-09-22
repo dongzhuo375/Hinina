@@ -3,17 +3,18 @@ use super::*;
 use crate::test_support::{Guarded, TempDir};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::core::entity::submission::{
     JudgeCase, JudgementResult, JudgementStatus, SubmissionCases, SubmissionDetail, SubmissionPage,
     SubmissionQuery, SubmissionRecord,
 };
 use crate::core::error::AppError;
-use crate::core::event::event_category::EventCategory;
+use crate::core::event::core_event::CoreEvent;
+use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::oj_id::OjId;
-use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::registry::ProviderRegistry;
+use crate::core::provider::registry::ProviderSet;
 use crate::core::provider::submission::SubmissionProvider;
 use crate::infra::provider_registry_impl::ProviderRegistryImpl;
 
@@ -208,7 +209,7 @@ struct StubCounters {
 ///
 /// 服务被 `Guarded` 包裹：方法调用经 `Deref` 原样转发，同时把临时存储根
 /// 的生命周期绑到服务上（服务被 Drop 时目录一起回收）。
-fn build_service(mode: StubMode) -> (Guarded<SubmissionService>, StubCounters, Arc<EventBus>) {
+fn build_service(mode: StubMode) -> (Guarded<SubmissionService>, StubCounters, Arc<CoreEventBus>) {
     let counters = StubCounters {
         judgement: Arc::new(AtomicUsize::new(0)),
         detail: Arc::new(AtomicUsize::new(0)),
@@ -228,30 +229,40 @@ fn build_service(mode: StubMode) -> (Guarded<SubmissionService>, StubCounters, A
             ..Default::default()
         },
     );
-    let bus = Arc::new(EventBus::new());
+    let bus = Arc::new(CoreEventBus::new());
     let (storage, dir) = temp_storage();
     let service = SubmissionService::new(registry, Arc::clone(&bus), storage);
     (Guarded::new(service, dir), counters, bus)
 }
 
-fn make_service(mode: StubMode) -> (Guarded<SubmissionService>, Arc<AtomicUsize>, Arc<EventBus>) {
+fn make_service(
+    mode: StubMode,
+) -> (
+    Guarded<SubmissionService>,
+    Arc<AtomicUsize>,
+    Arc<CoreEventBus>,
+) {
     let (service, counters, bus) = build_service(mode);
     (service, counters.judgement, bus)
 }
 
-/// 订阅 Submission 类事件并收集，供事件契约断言。
-fn collect_submission_events(bus: &Arc<EventBus>) -> Arc<Mutex<Vec<SubmissionEvent>>> {
-    let events: Arc<Mutex<Vec<SubmissionEvent>>> = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&events);
-    bus.subscribe(
-        EventCategory::Submission,
-        Arc::new(move |event: &AppEvent| {
-            if let AppEvent::Submission(sub) = event {
-                sink.lock().unwrap().push(sub.clone());
-            }
-        }),
-    );
-    events
+/// 订阅总线（事件断言用；`try_recv` 同步取，负向断言因此也是确定的）。
+fn subscribe(bus: &Arc<CoreEventBus>) -> tokio::sync::broadcast::Receiver<CoreEvent> {
+    bus.subscribe()
+}
+
+/// 取出当前已缓冲的提交相关事件（非阻塞）。
+fn drain_submission_events(rx: &mut tokio::sync::broadcast::Receiver<CoreEvent>) -> Vec<CoreEvent> {
+    let mut out = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        if matches!(
+            event,
+            CoreEvent::SubmissionCreated { .. } | CoreEvent::SubmissionJudged { .. }
+        ) {
+            out.push(event);
+        }
+    }
+    out
 }
 
 // ── 错误变体必须穿透 Service 层 ──
@@ -307,7 +318,11 @@ fn get_judgement_returns_result_passthrough() {
     assert_eq!(result.score, 100.0);
     assert_eq!(result.time_ms, 15);
     assert_eq!(result.memory_kb, 2048);
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "单次查询只调 Provider 一次");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "单次查询只调 Provider 一次"
+    );
 }
 
 #[test]
@@ -341,14 +356,17 @@ fn get_judgement_preserves_network_variant() {
 #[test]
 fn get_judgement_publishes_judged_on_terminal_status() {
     let (service, _calls, bus) = make_service(StubMode::Ok);
-    let events = collect_submission_events(&bus);
-    let _ = block_on(service.get_judgement("submit-1")).expect("应成功");
-    let events = events.lock().unwrap();
-    assert_eq!(events.len(), 1, "终态应发布一条事件，实际 {:?}", *events);
-    assert!(
-        matches!(&events[0], SubmissionEvent::Judged { submission_id, .. } if submission_id == "submit-1"),
-        "应为 Judged 且携带 submission_id，实际 {:?}",
-        events[0]
+    let mut rx = subscribe(&bus);
+    let result = block_on(service.get_judgement("submit-1")).expect("应成功");
+    let events = drain_submission_events(&mut rx);
+    assert_eq!(events.len(), 1, "终态应发布一条事件，实际 {events:?}");
+    assert_eq!(
+        events[0],
+        CoreEvent::SubmissionJudged {
+            submission_id: "submit-1".into(),
+            status: result.status.as_str().to_string(),
+        },
+        "载荷只带状态摘要（不带耗时/内存/测试点明细）"
     );
 }
 
@@ -356,7 +374,7 @@ fn get_judgement_publishes_judged_on_terminal_status() {
 fn get_judgement_publishes_nothing_on_non_terminal_status() {
     // 非终态（Running）原样透传、不发事件：是否继续轮询由前端决定
     let (service, _calls, bus) = make_service(StubMode::AlwaysRunning);
-    let events = collect_submission_events(&bus);
+    let mut rx = subscribe(&bus);
     let result = block_on(service.get_judgement("submit-1")).expect("非终态也应成功返回");
     assert!(
         matches!(result.status, JudgementStatus::Running),
@@ -364,7 +382,7 @@ fn get_judgement_publishes_nothing_on_non_terminal_status() {
         result.status
     );
     assert!(
-        events.lock().unwrap().is_empty(),
+        drain_submission_events(&mut rx).is_empty(),
         "非终态不应发布任何事件"
     );
 }
@@ -385,8 +403,8 @@ fn sample_query() -> SubmissionQuery {
 #[test]
 fn list_contest_submissions_preserves_auth_variant() {
     let (service, _calls, _bus) = make_service(StubMode::Auth);
-    let err = block_on(service.list_contest_submissions(&sample_query()))
-        .expect_err("token 过期应报错");
+    let err =
+        block_on(service.list_contest_submissions(&sample_query())).expect_err("token 过期应报错");
     assert!(
         matches!(err, AppError::Auth(_)),
         "提交列表是认证调用，401 必须触发会话守卫，实际 {:?}",
@@ -411,11 +429,7 @@ fn list_contest_submissions_returns_page_on_success() {
 fn get_submission_detail_preserves_auth_variant() {
     let (service, _calls, _bus) = make_service(StubMode::Auth);
     let err = block_on(service.get_submission_detail("12345")).expect_err("token 过期应报错");
-    assert!(
-        matches!(err, AppError::Auth(_)),
-        "实际 {:?}",
-        err
-    );
+    assert!(matches!(err, AppError::Auth(_)), "实际 {:?}", err);
     assert!(
         err.user_message().contains("获取提交详情失败"),
         "应补上环节名: {}",
@@ -436,11 +450,7 @@ fn get_submission_detail_returns_entity_on_success() {
 fn get_submission_cases_preserves_auth_variant() {
     let (service, _calls, _bus) = make_service(StubMode::Auth);
     let err = block_on(service.get_submission_cases("12345")).expect_err("token 过期应报错");
-    assert!(
-        matches!(err, AppError::Auth(_)),
-        "实际 {:?}",
-        err
-    );
+    assert!(matches!(err, AppError::Auth(_)), "实际 {:?}", err);
     assert!(
         err.user_message().contains("获取测试点结果失败"),
         "应补上环节名: {}",
@@ -501,14 +511,18 @@ fn detail_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     let (storage, _dir) = temp_storage();
     let service = SubmissionService::new(
         Arc::clone(&registry),
-        Arc::new(EventBus::new()),
+        Arc::new(CoreEventBus::new()),
         storage,
     );
 
     block_on(service.get_submission_detail("12345")).expect("HOJ 详情失败");
     assert_eq!(counters.detail.load(Ordering::SeqCst), 1);
     block_on(service.get_submission_detail("12345")).expect("HOJ 详情二次失败");
-    assert_eq!(counters.detail.load(Ordering::SeqCst), 1, "同一 OJ 应命中缓存");
+    assert_eq!(
+        counters.detail.load(Ordering::SeqCst),
+        1,
+        "同一 OJ 应命中缓存"
+    );
 
     // 切 OJ：同一 submit_id 必须重新请求（不得命中上一个 OJ 的详情缓存）
     registry.set_current(OjId::new("QDUOJ"));
@@ -638,4 +652,45 @@ fn clear_user_caches_empties_terminal_caches() {
     assert_eq!(counters.detail.load(Ordering::SeqCst), 2);
     // 终态标记同时被清：测试点缓存需重新建立上下文，故此处仍是 2 次
     assert_eq!(counters.cases.load(Ordering::SeqCst), 2);
+}
+
+/// `on_oj_switched()` 显式清用户域缓存（与登出同一语义：换 OJ 即换用户上下文）。
+///
+/// 旧实现靠订阅 `OJSwitched` 事件清理，正确性依赖事件投递时序；现在由
+/// `switch_oj` 命令显式调用，返回即已清完。
+#[test]
+fn on_oj_switched_clears_user_scoped_caches() {
+    let (service, counters, _bus) = build_service(StubMode::Ok);
+
+    block_on(service.get_submission_detail("12345")).expect("详情应成功");
+    block_on(service.get_submission_cases("12345")).expect("测试点应成功");
+    assert_eq!(counters.detail.load(Ordering::SeqCst), 1);
+    assert_eq!(counters.cases.load(Ordering::SeqCst), 1);
+
+    service.on_oj_switched();
+
+    // 返回即已清完：后续查询必然重新请求（旧 OJ 用户的提交内容不得复用）
+    block_on(service.get_submission_detail("12345")).expect("切 OJ 后应重新拉取详情");
+    assert_eq!(counters.detail.load(Ordering::SeqCst), 2);
+}
+
+/// `submit` 发布 `SubmissionCreated`（事实通知），且载荷只带 submission_id。
+#[test]
+fn submit_publishes_submission_created() {
+    let (service, _calls, bus) = build_service(StubMode::Ok);
+    let mut rx = subscribe(&bus);
+
+    let submission_id =
+        block_on(service.submit("1011", "p-1", "A", "C++", "int main(){}")).expect("提交应成功");
+
+    let events = drain_submission_events(&mut rx);
+    assert_eq!(
+        events,
+        vec![CoreEvent::SubmissionCreated {
+            submission_id: submission_id.clone(),
+        }],
+        "应发布且仅发布一条 Created 事件"
+    );
+    // 源代码绝不进入事件流
+    assert!(!format!("{events:?}").contains("int main"));
 }

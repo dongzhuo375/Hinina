@@ -19,7 +19,7 @@ const DEFAULT_SUBMISSION_LIMIT: i64 = 20;
 /// （详见 `core::provider::submission::SubmissionProvider::submit`）。
 ///
 /// 返回 `submissionId` 字符串，前端可用 `get_judgement` 轮询结果。
-/// 发布 `SubmissionEvent::Created`。
+/// 发布 `CoreEvent::SubmissionCreated`。
 #[tauri::command]
 pub async fn submit_code(
     ctx: State<'_, AppContext>,
@@ -37,7 +37,13 @@ pub async fn submit_code(
         "Command: 提交代码"
     );
     ctx.submission
-        .submit(&contest_id, &problem_id, &display_id, &language, &source_code)
+        .submit(
+            &contest_id,
+            &problem_id,
+            &display_id,
+            &language,
+            &source_code,
+        )
         .await
 }
 
@@ -48,7 +54,7 @@ pub async fn submit_code(
 /// 轮询节拍 / 总超时 / 终态停止全部由前端 submissionStore 编排
 /// （createPoller，抖动 ±20% 封顶 500ms）；`oj.poll_interval_secs` /
 /// `poll_timeout_secs` 由前端经 get_config 消费，本命令不再读取。
-/// 终态发布 `SubmissionEvent::Judged`；非终态原样透传、不发事件。
+/// 终态发布 `CoreEvent::SubmissionJudged`（状态摘要）；非终态原样透传、不发事件。
 #[tauri::command]
 pub async fn get_judgement(
     ctx: State<'_, AppContext>,

@@ -32,11 +32,13 @@ installCloseFlushGuard();
 app.mount("#app");
 
 /**
- * 新公告通知：Rust 侧比对公告基线后发布 `ContestEvent::AnnouncementsPublished`，
- * 经 `main.rs` 的事件桥转发到此通道。
+ * 新公告通知：Rust 侧比对公告基线后发布 `CoreEvent::AnnouncementChanged`，
+ * 经 `src-tauri/src/main.rs` 的事件桥转发到此通道。
  *
  * 公告轮询仍在前端按 60s 节拍跑（拉取本身必须有人发起），但「有新公告」这一
- * 状态变更走 EventBus —— 事件到达即刷新列表，红点随即点亮，不必等下一个周期。
+ * 状态变更走事件总线 —— 事件到达即刷新列表，红点随即点亮，不必等下一个周期。
+ *
+ * **事件只是刷新触发，不是状态来源**：事件丢失时红点退化为下一轮轮询发现。
  */
 function installAnnouncementListener(): void {
   void onAnnouncementsPublished(({ contestId }) => {
