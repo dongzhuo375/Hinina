@@ -255,6 +255,7 @@ fn main() {
             commands::workspace_cmd::current_workspace,
             commands::workspace_cmd::update_workspace_file,
             commands::workspace_cmd::set_workspace_language,
+            commands::workspace_cmd::delete_workspace_file,
             commands::config_cmd::get_config,
             commands::config_cmd::reload_config,
             commands::config_cmd::update_config,

@@ -10,6 +10,7 @@
 - `pub async fn current_workspace(ctx) -> AppResult<Option<Workspace>>` — 获取当前活动工作区（`None` = 无）；WorkspaceManager 未初始化时也返回 `Ok(None)` 而非错误
 - `pub async fn update_workspace_file(ctx, file_name, content) -> AppResult<u64>` — 前端 Monaco 编辑器内容同步到后端（2s 防抖推送的落点）。**只写内存不落盘**：磁盘写入由 auto-save 与显式 `save_workspace` 负责，这样「自动保存间隔」才真正决定落盘频率。**返回本次内容被赋予的修订号**（`WorkspaceManager::update_file` 的返回值原样透传）：前端记为 `lastPushedRevision`，用于与落盘事件的修订号比较 —— 落盘落后于推送时磁盘还没追上编辑器，不能清脏标记
 - `pub async fn set_workspace_language(ctx, language) -> AppResult<Workspace>` — 设置当前工作区语言并**立即落盘**。前端 invoke 签名 `set_workspace_language`({ language })。动机：语言不属于任何代码文件，`update_workspace_file` 带不上它；若不单独持久化，切题或重启后会退回默认语言——选手的 Java 代码会被当作 C++ 提交，属于赛场上最难排查的静默故障
+- `pub async fn delete_workspace_file(ctx, file_name) -> AppResult<()>` — 删除当前工作区中的文件（P62：旧代码文件清理）。前端 invoke 签名 `delete_workspace_file`({ fileName })。供语言切换后的旧扩展名文件清理使用：编辑器内容已复制到新文件名，旧文件删除后 `save()` 不再全量写出它们。后端守卫拒绝删除当前代码文件（`active_file`）与元数据 `workspace.json`，前端无需重复设防
 - `pub fn auto_save_action(auto_save, interval_secs, current_interval) -> AutoSaveAction` — **纯函数判据**：`Keep` / `Start(秒)` / `Stop`。已在运行的间隔与目标一致时 `Keep`（避免每次加载都重置计时器），间隔变了才重启，配置关闭或间隔为 0 则 `Stop`。抽成纯函数是为了让「配置改动能否生效」这条链路可被单测逐格锁定
 - `pub fn sync_auto_save_with_config(editor, wm)` — 按当前配置**幂等**地同步 auto-save 的启停与间隔。必须在 tokio runtime 上下文里调用（`start_auto_save` 内部用 `tokio::spawn`）
 - `pub fn sync_auto_save_from_context(ctx: &AppContext)` — 从 `AppContext` 取配置与工作区管理器，转调 `sync_auto_save_with_config`。供配置类命令（`update_config` / `reload_config`）**显式**调用：把「判空 + 取 editor 配置」这段样板收敛在一处，避免各命令各写一遍而漂移；`WorkspaceManager` 未初始化时静默跳过（与 `load_workspace` 的降级一致）
@@ -22,12 +23,12 @@
 
 ## 被依赖
 - `src-tauri/src/commands/mod.rs`（通过 `pub mod workspace_cmd` 声明）
-- `src-tauri/src/main.rs`（`generate_handler!` 注册全部六个 command）
+- `src-tauri/src/main.rs`（`generate_handler!` 注册全部七个 command）
 
 ## 逻辑流程
 1. 进入解题页 → `load_workspace`（find_or_create 恢复/新建 + 按配置同步 auto-save）
 2. 编辑过程中前端 2s 防抖推送 `update_workspace_file`（**只进后端内存**）；落盘由两条路径负责：后台 auto-save 周期、前端在切题/失焦/离开页面/关窗时编排的 `save_workspace`
-3. 切换语言 → `set_workspace_language` → `WorkspaceManager::set_language`（更新内存 + 立即持久化 `workspace.json` 元数据）
+3. 切换语言 → `set_workspace_language` → `WorkspaceManager::set_language`（更新内存 + 立即持久化 `workspace.json` 元数据）；前端随后对旧扩展名文件逐个调 `delete_workspace_file` 清理（P62：单代码文件约束）
 4. 切题 → `switch_workspace` 或再次 `load_workspace`（两者替换当前工作区前都会先落盘旧的）
 5. 各 command 从 `ctx.workspace_manager`（`Option<Arc<WorkspaceManager>>`）取管理器，未初始化时返回 `AppError::Workspace`（`current_workspace` 例外，返回 `Ok(None)`）
 

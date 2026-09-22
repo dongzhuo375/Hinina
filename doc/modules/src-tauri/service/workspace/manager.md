@@ -23,6 +23,7 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换�
   - `fn recover_all(&self) -> AppResult<Vec<Workspace>>` — 崩溃恢复（当前 stub，返回空 Vec，待 Storage 层补充目录扫描能力）
   - `fn update_file(&self, file_name, content) -> AppResult<u64>` — 更新当前工作区文件：**只写内存** HashMap + **把该文件记为 `active_file`（当前代码文件的权威源）** + mark_dirty + 在写锁内递增修订号（`revision`），**不落盘**（落盘由 `save` / auto-save 负责）。**返回本次内容被赋予的修订号**（`fetch_add(1) + 1`），供命令层原样回传前端：前端把它记为 `lastPushedRevision`，用于判断落盘事件是否落后于编辑器已推送的内容（落后则不清脏，避免假「已自动备份」）。写入路径的权威源由它承担后，调用方不必再按语言派生文件名（派生会让语言切换后的写入落到别的文件上）
   - `fn get_file(&self, file_name) -> AppResult<String>` — 获取文件内容：优先内存 HashMap，未命中回退磁盘读取
+  - `fn delete_file(&self, file_name) -> AppResult<()>` — 删除当前工作区中的文件（P62：按文件删除能力，供旧代码文件清理）。**守卫**（比较一律经 `guard_equivalent` 归一 —— 小写化 + 剥离尾随点/空格：Windows 把 "Workspace.json" / "MAIN.JAVA" 等变体名解析到同一文件，精确字符串比较会被绕过）：拒绝删除 `active_file`（选手当前代码，清理只针对过期文件）与 `workspace.json`（元数据被删会让工作区无法加载）。**顺序刻意为先删磁盘、成功后再移除内存**：磁盘删除失败时内存保持原样、`save()` 仍会写出该文件，内存与磁盘始终一致（反序会出现「内存已无、磁盘残留」的幽灵文件，下次加载时复活）。不递增修订号、不置脏（删除是即时持久化操作，无待落盘内容）、不发布事件（与 create / load / switch 同一先例：前端发起、返回值即真值）；无当前工作区时报 `AppError::Workspace`
   - `fn current(&self) -> Option<Workspace>` — 获取当前活动工作区 clone
 - **字段**：`repo: Arc<dyn WorkspaceRepository>`, `event_bus: Arc<CoreEventBus>`, `current: Arc<RwLock<Option<Workspace>>>`, `revision: Arc<AtomicU64>`（内容修订号，auto-save 判据）, `auto_save_handle: Mutex<Option<JoinHandle<()>>>`, `auto_save_interval_secs: Mutex<Option<u64>>`（`None` = 未运行）
 - **`WorkspaceMeta`**（内部 struct） — 持久化在 `workspace.json` 中的元数据（contest_id, problem_id, root_path, language, created_at, updated_at）
@@ -43,7 +44,7 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换�
 
 ## 被依赖
 - `core::context`（`AppContext` 持有 `Option<Arc<WorkspaceManager>>`）
-- `commands::workspace_cmd`（六个 Command 经 `ctx.workspace_manager` 调用生命周期与文件方法）
+- `commands::workspace_cmd`（七个 Command 经 `ctx.workspace_manager` 调用生命周期与文件方法）
 
 ## 逻辑流程
 Workspace 生命周期状态机：
@@ -63,4 +64,4 @@ Workspace 生命周期状态机：
 **`revision` 为什么在写锁内取**：释放锁之后 `update_file` 可能立刻递增它，那样事件会报出比磁盘内容更新的修订号，前端据此清脏 = 假 clean（最新内容仍在内存，直到下一次编辑才可能落盘）。auto-save 侧同理：修订号与快照必须在同一读锁作用域内取得，否则「取快照 → 取修订号」之间到来的改动会让修订号偏新，写盘的是旧内容却误判为可 clean。
 
 ## 测试
-`src-tauri/src/service/workspace/tests/manager_tests.rs` 锁定：create 设为当前、`update_file` **不落盘**（`save` 才落盘）且**记录 `active_file`**、`save` 落盘并清脏、create / load 替换当前前先落盘旧工作区、get_file 内存优先、load 从磁盘恢复且**用元数据而非解析 workspace_id**、**`active_file` 跨实例恢复**（重启后仍指向语言切换后的那个文件）与**历史元数据无该字段时降级为 None**、destroy/switch/current 语义，语言持久化三契约——`set_language` 跨 Manager 实例存活、`save` 一并持久化语言元数据、无当前工作区时 `set_language` 报错，auto-save 五契约——落盘并发布一次事件、**写盘与显式 `save()` 全序**（`HookedRepo` 的写前钩子阻塞 auto-save 的写盘，另一线程完成 `update_file` + `save()`，放行后磁盘必须仍是新内容：修复前该用例失败于 `left: "v1"`）、tick 期间到来的改动最终必须落盘且不留「clean 但磁盘落后」终态、**写盘失败保留脏且静默**、**间隔可观测且支持「停掉再启动」**、**并发 `start_auto_save` 不泄漏孤儿循环**（修复前 4/4 失败：孤儿循环会在 `stop_auto_save` 之后把脏标记清掉）；另有 `can_mark_clean_*` 逐条钉死清脏判据（同一工作区 + 修订号未变；集成测试无法确定性覆盖该判据的削弱 —— 写盘持读锁使「快照之后到来改动」的窗口不可注入，跨线程注入则胜负不定）。
+`src-tauri/src/service/workspace/tests/manager_tests.rs` 锁定：create 设为当前、`update_file` **不落盘**（`save` 才落盘）且**记录 `active_file`**、`save` 落盘并清脏、create / load 替换当前前先落盘旧工作区、get_file 内存优先、load 从磁盘恢复且**用元数据而非解析 workspace_id**、**`active_file` 跨实例恢复**（重启后仍指向语言切换后的那个文件）与**历史元数据无该字段时降级为 None**、destroy/switch/current 语义，语言持久化三契约——`set_language` 跨 Manager 实例存活、`save` 一并持久化语言元数据、无当前工作区时 `set_language` 报错，auto-save 五契约——落盘并发布一次事件、**写盘与显式 `save()` 全序**（`HookedRepo` 的写前钩子阻塞 auto-save 的写盘，另一线程完成 `update_file` + `save()`，放行后磁盘必须仍是新内容：修复前该用例失败于 `left: "v1"`）、tick 期间到来的改动最终必须落盘且不留「clean 但磁盘落后」终态、**写盘失败保留脏且静默**、**间隔可观测且支持「停掉再启动」**、**并发 `start_auto_save` 不泄漏孤儿循环**（修复前 4/4 失败：孤儿循环会在 `stop_auto_save` 之后把脏标记清掉）；`delete_file` 九契约——内存与磁盘一并移除且 active 文件不受影响、拒绝删除 active 文件、拒绝删除 `workspace.json`、**守卫按 Windows 等价类比较（大小写变体 / 尾随点与空格变体均不得绕过，另有 `guard_equivalent_*` 纯函数单测钉死归一规则）**、**ADS 变体名（`workspace.json::$DATA`）端到端拒绝（等价类守卫拦不住，由仓库层 Win32 非法字符校验收口）**、无当前工作区报错、内存与磁盘均无此文件时幂等成功、磁盘孤儿文件（内存无磁盘有）同样被删除；另有 `can_mark_clean_*` 逐条钉死清脏判据（同一工作区 + 修订号未变；集成测试无法确定性覆盖该判据的削弱 —— 写盘持读锁使「快照之后到来改动」的窗口不可注入，跨线程注入则胜负不定）。

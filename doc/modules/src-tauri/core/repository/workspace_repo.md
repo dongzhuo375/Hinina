@@ -8,6 +8,7 @@
   - `save_file(&self, workspace_id, path, content) -> AppResult<()>` — 保存文件
   - `read_file(&self, workspace_id, path) -> AppResult<String>` — 读取文件
   - `list_files(&self, workspace_id) -> AppResult<Vec<PathBuf>>` — 列出文件
+  - `delete_file(&self, workspace_id, path) -> AppResult<()>` — 删除单个文件（文件不存在时为无操作，幂等；P62 旧代码文件清理）
   - `delete_workspace(&self, workspace_id) -> AppResult<()>` — 删除工作区
   - `exists(&self, workspace_id) -> bool` — 检查是否存在
 

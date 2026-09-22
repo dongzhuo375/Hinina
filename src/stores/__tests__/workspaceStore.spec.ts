@@ -9,6 +9,7 @@ const { workspaceService, configService } = vi.hoisted(() => ({
     currentWorkspace: vi.fn(),
     updateWorkspaceFile: vi.fn(),
     setLanguage: vi.fn(),
+    deleteWorkspaceFile: vi.fn(),
     onWorkspaceSaved: vi.fn(),
   },
   configService: {
@@ -23,6 +24,21 @@ import type { Workspace } from '@/types/workspace'
 
 const CODE = 'int main() { return 0; }'
 
+/// 工作区加载夹具（activeFile / purge 两组用例共用）
+const wsFixture = (over: Partial<Workspace>): Workspace => ({
+  id: 'ws-1',
+  contestId: '1',
+  problemId: 'p1',
+  rootPath: '',
+  files: {},
+  activeFile: null,
+  language: 'C++',
+  isDirty: false,
+  createdAt: 0,
+  updatedAt: 0,
+  ...over,
+})
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
@@ -31,6 +47,7 @@ beforeEach(() => {
   useWorkspaceStore().cancelPendingSync()
   workspaceService.updateWorkspaceFile.mockResolvedValue(undefined)
   workspaceService.saveWorkspace.mockResolvedValue(undefined)
+  workspaceService.deleteWorkspaceFile.mockResolvedValue(undefined)
   workspaceService.setLanguage.mockResolvedValue({
     id: 'ws-1',
     contestId: '1',
@@ -420,26 +437,12 @@ describe('changeLanguage — 语言即时落盘，不计入未落盘的代码改
 })
 
 describe('activeFile — 当前代码文件的权威源（P62）', () => {
-  const loadFixture = (over: Partial<Workspace>): Workspace => ({
-    id: 'ws-1',
-    contestId: '1',
-    problemId: 'p1',
-    rootPath: '',
-    files: {},
-    activeFile: null,
-    language: 'C++',
-    isDirty: false,
-    createdAt: 0,
-    updatedAt: 0,
-    ...over,
-  })
-
   it('加载以 activeFile 为准，而不是按语言派生', async () => {
     // 语言说 Java、activeFile 指向 Main.java，而 files 里同时留着旧的 main.cpp：
     // 若按「语言派生名优先 + 后缀探测」（files 来自 HashMap 序列化、键序不稳定）
     // 就可能加载出旧 C++ 代码 + Java 元数据的组合 —— 提交即 CE
     workspaceService.loadWorkspace.mockResolvedValue(
-      loadFixture({
+      wsFixture({
         language: 'Java',
         activeFile: 'Main.java',
         files: { 'main.cpp': '// 旧 C++ 代码', 'Main.java': 'class Main {}' },
@@ -456,7 +459,7 @@ describe('activeFile — 当前代码文件的权威源（P62）', () => {
 
   it('写入落到 activeFile 上（不再按语言重新派生）', async () => {
     workspaceService.loadWorkspace.mockResolvedValue(
-      loadFixture({ language: 'Java', activeFile: 'Main.java', files: { 'Main.java': 'x' } }),
+      wsFixture({ language: 'Java', activeFile: 'Main.java', files: { 'Main.java': 'x' } }),
     )
     const store = useWorkspaceStore()
     await store.loadWorkspace('1', 'p1')
@@ -472,7 +475,7 @@ describe('activeFile — 当前代码文件的权威源（P62）', () => {
 
   it('历史工作区（无 activeFile）回退到「语言派生名优先」', async () => {
     workspaceService.loadWorkspace.mockResolvedValue(
-      loadFixture({
+      wsFixture({
         language: 'Python',
         activeFile: null,
         files: { 'main.cpp': 'old', 'main.py': 'new' },
@@ -488,7 +491,7 @@ describe('activeFile — 当前代码文件的权威源（P62）', () => {
   it('语言元数据与代码文件扩展名矛盾时以文件为准并告警', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     workspaceService.loadWorkspace.mockResolvedValue(
-      loadFixture({
+      wsFixture({
         language: 'Java',
         activeFile: 'main.cpp',
         files: { 'main.cpp': 'int main() {}' },
@@ -506,7 +509,7 @@ describe('activeFile — 当前代码文件的权威源（P62）', () => {
 
   it('切换语言后 activeFile 跟着走，写入锚定新文件', async () => {
     workspaceService.loadWorkspace.mockResolvedValue(
-      loadFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': 'x' } }),
+      wsFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': 'x' } }),
     )
     const store = useWorkspaceStore()
     await store.loadWorkspace('1', 'p1')
@@ -517,5 +520,170 @@ describe('activeFile — 当前代码文件的权威源（P62）', () => {
     await vi.waitFor(() =>
       expect(workspaceService.updateWorkspaceFile).toHaveBeenCalledWith('main.py', 'x'),
     )
+  })
+})
+
+describe('purgeStaleCodeFiles — 单代码文件约束（P62 清理）', () => {
+  it('加载后清理 ≠ activeFile 的代码文件（历史多文件收敛），非代码文件保留', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({
+        language: 'Java',
+        activeFile: 'Main.java',
+        files: { 'main.cpp': '// 旧 C++', 'Main.java': '// keep', 'notes.txt': 'keep me' },
+      }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    await vi.waitFor(() =>
+      expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledWith('main.cpp'),
+    )
+    expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledTimes(1)
+    // 本地 files 同步移除；非代码文件（notes.txt）不在清理范围
+    expect(store.workspace?.files['main.cpp']).toBeUndefined()
+    expect(store.workspace?.files['notes.txt']).toBe('keep me')
+  })
+
+  it('切换语言后清理旧扩展名文件（内容已复制到新文件名）', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': CODE } }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.changeLanguage('Java')
+
+    // 内容先推进新文件名（后端 active_file 守卫随之保护它），随后清理旧文件
+    expect(store.activeFile).toBe('Main.java')
+    await vi.waitFor(() =>
+      expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledWith('main.cpp'),
+    )
+    expect(store.workspace?.files['main.cpp']).toBeUndefined()
+  })
+
+  it('同族切换（派生名不变）也执行清理，收敛历史遗留', async () => {
+    const store = useWorkspaceStore()
+    // 直接构造状态（不经 loadWorkspace，避免加载路径的清理先行消费掉旧文件）
+    store.workspace = wsFixture({
+      language: 'C++',
+      activeFile: 'main.cpp',
+      files: { 'main.cpp': CODE, 'Main.java': '// 历史遗留' },
+    })
+    store.activeFile = 'main.cpp'
+    store.language = 'C++'
+    store.code = CODE
+
+    // "C++17 (GCC 13.2)" 与 "C++" 同族，派生文件名不变
+    store.changeLanguage('C++17 (GCC 13.2)')
+
+    await vi.waitFor(() =>
+      expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledWith('Main.java'),
+    )
+    expect(store.activeFile).toBe('main.cpp')
+  })
+
+  it('清理失败仅记日志，其余文件继续处理（下次加载/切换重试）', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({
+        language: 'Java',
+        activeFile: 'Main.java',
+        files: { 'main.cpp': 'a', 'main.go': 'b', 'Main.java': 'c' },
+      }),
+    )
+    workspaceService.deleteWorkspaceFile.mockRejectedValueOnce(new Error('ipc down'))
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    await vi.waitFor(() =>
+      expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledTimes(2),
+    )
+    // 失败的 main.cpp 保留在本地 files（供下次重试），成功的 main.go 已移除
+    expect(store.workspace?.files['main.cpp']).toBe('a')
+    expect(store.workspace?.files['main.go']).toBeUndefined()
+  })
+
+  it('切换语言：先落盘再清理（save 先于 delete，关闭崩溃恢复窗口）', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': CODE } }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.changeLanguage('Java')
+
+    await vi.waitFor(() =>
+      expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledWith('main.cpp'),
+    )
+    // 顺序：新文件内容与元数据（active_file=新名）确已落盘后才能删旧文件
+    const saveOrder = workspaceService.saveWorkspace.mock.invocationCallOrder[0]
+    const deleteOrder = workspaceService.deleteWorkspaceFile.mock.invocationCallOrder[0]
+    expect(saveOrder).toBeLessThan(deleteOrder)
+  })
+
+  it('推送失败时中止清理链：旧文件保留作崩溃恢复副本（不 save 不 delete）', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': CODE } }),
+    )
+    workspaceService.updateWorkspaceFile.mockRejectedValueOnce(new Error('ipc down'))
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.changeLanguage('Java')
+
+    await vi.waitFor(() =>
+      expect(workspaceService.updateWorkspaceFile).toHaveBeenCalledWith('Main.java', CODE),
+    )
+    await new Promise((res) => setTimeout(res, 0))
+    expect(workspaceService.saveWorkspace).not.toHaveBeenCalled()
+    expect(workspaceService.deleteWorkspaceFile).not.toHaveBeenCalled()
+    // 内容仍在编辑器，syncPending 保留供防抖重试
+    expect(store.syncPending).toBe(true)
+    expect(store.code).toBe(CODE)
+  })
+
+  it('落盘失败时中止清理：旧文件保留，下次加载/切换重试', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': CODE } }),
+    )
+    workspaceService.saveWorkspace.mockRejectedValueOnce(new Error('disk full'))
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.changeLanguage('Java')
+
+    await vi.waitFor(() => expect(workspaceService.saveWorkspace).toHaveBeenCalled())
+    await new Promise((res) => setTimeout(res, 0))
+    expect(workspaceService.deleteWorkspaceFile).not.toHaveBeenCalled()
+  })
+
+  it('清理前重查 activeFile：切换在途时不误删新 active 文件', async () => {
+    // 用挂起的第一个删除调用卡住清理循环，期间把 activeFile 切到清单中的
+    // 另一个文件 —— 该文件必须被跳过（后端 active_file 守卫为第二道防线）
+    let resolveFirst!: () => void
+    workspaceService.deleteWorkspaceFile.mockImplementation(
+      () => new Promise<void>((res) => (resolveFirst = res)),
+    )
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({
+        language: 'Java',
+        activeFile: 'Main.java',
+        files: { 'main.go': 'b', 'main.cpp': 'a', 'Main.java': 'c' },
+      }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    // 清理已开始并卡在第一个文件（main.go）上
+    await vi.waitFor(() =>
+      expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledWith('main.go'),
+    )
+    // 切换在途：main.cpp 成为新 active 文件
+    store.activeFile = 'main.cpp'
+    resolveFirst()
+
+    await vi.waitFor(() => expect(store.workspace?.files['main.go']).toBeUndefined())
+    // main.cpp 已是 active：被跳过、未发起删除、本地保留
+    expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledTimes(1)
+    expect(store.workspace?.files['main.cpp']).toBe('a')
   })
 })

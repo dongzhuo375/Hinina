@@ -92,6 +92,18 @@ fn can_mark_clean(
     ws_id == current_id && snapshot_revision == current_revision
 }
 
+/// 守卫比较用的文件名等价类归一：小写化 + 剥离全部尾随点与空格。
+///
+/// Windows（NTFS/Win32）把 "Workspace.json"、"workspace.json." 与
+/// "workspace.json" 解析到**同一文件**；`delete_file` 的守卫若用精确字符串
+/// 比较，变体名即可绕过守卫删除受保护文件（元数据被删则工作区无法加载；
+/// 当前代码文件被删则落盘前的崩溃窗口内丢代码）。归一**只用于守卫比较**，
+/// 不改变存储的文件名本身；非 Windows 平台上归一只会让守卫更严（变体名
+/// 一并拒绝），不会放宽。
+fn guard_equivalent(name: &str) -> String {
+    name.trim_end_matches(['.', ' ']).to_lowercase()
+}
+
 impl WorkspaceManager {
     /// 创建 WorkspaceManager。
     pub fn new(repo: Arc<dyn WorkspaceRepository>, event_bus: Arc<CoreEventBus>) -> Self {
@@ -600,6 +612,54 @@ impl WorkspaceManager {
                     ws.id, file_name, e
                 ))
             })
+    }
+
+    /// 删除当前工作区中的文件（P62：按文件删除能力，供旧代码文件清理使用）。
+    ///
+    /// 守卫（比较一律经 [`guard_equivalent`] 归一 —— Windows 把大小写变体与
+    /// 尾随点/空格解析到同一文件，精确比较会被 "Workspace.json" / "MAIN.JAVA"
+    /// 等变体名绕过）：
+    /// - 拒绝删除 `active_file`：它是选手当前代码，清理只针对**过期**文件；
+    /// - 拒绝删除 `workspace.json`：元数据被删会让工作区无法加载。
+    ///
+    /// 顺序刻意为**先删磁盘、成功后再移除内存**：磁盘删除失败时内存保持原样，
+    /// `save()` 仍会写出该文件，内存与磁盘始终一致（反序会出现「内存已无、
+    /// 磁盘残留」的幽灵文件，下次加载时复活）。
+    ///
+    /// 不递增修订号、不置脏：删除是**即时持久化**的操作，没有待落盘的内容；
+    /// 也不发布事件 —— 与 create / load / switch 同一先例（前端发起、返回值即真值）。
+    pub fn delete_file(&self, file_name: &str) -> AppResult<()> {
+        let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
+        let ws = current
+            .as_mut()
+            .ok_or_else(|| AppError::Workspace("无当前工作区".into()))?;
+
+        let normalized = guard_equivalent(file_name);
+        let active_normalized = ws.active_file.as_deref().map(guard_equivalent);
+        if active_normalized.as_deref() == Some(normalized.as_str()) {
+            return Err(AppError::Workspace(format!(
+                "不能删除当前代码文件: {}（清理只针对过期文件）",
+                file_name
+            )));
+        }
+        if normalized == "workspace.json" {
+            return Err(AppError::Workspace(
+                "不能删除工作区元数据文件 workspace.json".into(),
+            ));
+        }
+
+        // 先磁盘后内存（见方法注释）；文件不存在时 repo 幂等返回 Ok
+        self.repo.delete_file(&ws.id, &PathBuf::from(file_name))?;
+        ws.files.remove(file_name);
+        ws.touch();
+
+        debug!(
+            workspace_id = ws.id,
+            file = file_name,
+            "工作区文件已删除（内存与磁盘）"
+        );
+
+        Ok(())
     }
 
     /// 获取当前活动工作区。

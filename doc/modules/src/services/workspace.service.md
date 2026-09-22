@@ -15,12 +15,13 @@
 | `WorkspaceService.currentWorkspace` | `() => Promise<Workspace \| null>` | 获取当前活跃工作区（可能为 null） |
 | `WorkspaceService.updateWorkspaceFile` | `(fileName, content) => Promise<number>` | 同步编辑器代码到后端；返回本次内容被赋予的**修订号**（与落盘事件的修订号同源，store 据此判断磁盘是否追上编辑器） |
 | `WorkspaceService.setLanguage` | `(language) => Promise<Workspace>` | 设置语言（后端**立即持久化元数据**并返回更新后的 Workspace） |
+| `WorkspaceService.deleteWorkspaceFile` | `(fileName) => Promise<void>` | 删除当前工作区中的文件（P62：旧代码文件清理；后端守卫拒绝删除 activeFile 与 workspace.json） |
 | `WorkspaceService.onWorkspaceSaved` | `(handler) => Promise<() => void>` | 订阅后端落盘事件（显式保存 / 后台 auto-save 成功），返回取消订阅函数 |
 | `workspaceService` | 单例 | 全局唯一实例 |
 
 ## 直接依赖
 
-- `@/bridge/workspace.bridge`（六个桥接函数/订阅）
+- `@/bridge/workspace.bridge`（七个桥接函数/订阅）
 - `@/types/workspace`（仅类型）
 - `@/types/workspace`（仅类型）
 
