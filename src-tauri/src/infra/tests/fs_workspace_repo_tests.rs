@@ -109,6 +109,37 @@ fn delete_file_rejects_path_traversal() {
 }
 
 #[test]
+fn rejects_non_normal_path_components() {
+    // delete_file 是破坏性原语：组件白名单必须强于「只拒 ..」——
+    // 绝对路径（根目录组件）、前导 `.`、空路径全部拒绝
+    let r = repo("non-normal");
+    let ws = "ws-safe2";
+    r.save_file(ws, Path::new("legit.txt"), "ok").unwrap();
+
+    assert!(r.save_file(ws, Path::new("/etc/passwd"), "bad").is_err());
+    assert!(r.read_file(ws, Path::new("/etc/passwd")).is_err());
+    assert!(r.delete_file(ws, Path::new("/etc/passwd")).is_err());
+    assert!(r.delete_file(ws, Path::new("./legit.txt")).is_err());
+    assert!(r.delete_file(ws, Path::new(".")).is_err());
+    assert!(r.delete_file(ws, Path::new("")).is_err());
+    // 合法文件不受影响
+    assert_eq!(r.read_file(ws, Path::new("legit.txt")).unwrap(), "ok");
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_drive_letter_paths() {
+    // Windows 盘符前缀（Prefix + RootDir 组件）必须拒绝
+    let r = repo("drive-letter");
+    let ws = "ws-safe3";
+    r.save_file(ws, Path::new("legit.txt"), "ok").unwrap();
+
+    assert!(r.delete_file(ws, Path::new("C:/Windows/system32/config")).is_err());
+    assert!(r.save_file(ws, Path::new("C:/evil.txt"), "bad").is_err());
+    assert_eq!(r.read_file(ws, Path::new("legit.txt")).unwrap(), "ok");
+}
+
+#[test]
 fn rejects_path_traversal() {
     let r = repo("traversal");
     let ws = "ws-safe";

@@ -74,7 +74,10 @@ changeLanguage(lang)
      失败 → 只 log.error 记录（utils/logger 作用域日志），不回滚本地选择
   → 派生文件名变化时（如 C++ → Java）：activeFile = 新派生名 + syncPending = true
   → flushPendingSync()                        // 把当前代码同步到新文件名
-  → purgeStaleCodeFiles()                     // 内容已复制到新文件名，静默清理旧扩展名文件
+     失败（pushed=false）→ 中止整条链：旧文件保留作崩溃恢复副本，下次重试
+  → saveWorkspace()                           // 新文件内容 + 元数据（active_file=新名）落盘
+     失败 → 中止清理（同上）
+  → purgeStaleCodeFiles()                     // 磁盘确有新副本后，静默清理旧扩展名文件
                                              //（同族切换派生名不变也执行，顺带收敛历史遗留）
 
 loadWorkspace(contestId, problemId)
@@ -93,10 +96,14 @@ loadWorkspace(contestId, problemId)
   旧实现置 `isDirty = true` 会让「编辑中…」在语言切换后一直挂着。
 - **单代码文件约束（P62 已闭合）**：切换语言时编辑器内容复制到新派生文件名，旧扩展名
   文件由 `purgeStaleCodeFiles` 静默清理（不弹窗、不阻断 —— 内容已复制，常规场景删除
-  无损失；历史分叉旧文件一并清理是项目决策）。清理链在 `flushPendingSync` **之后**：
-  先让后端 `active_file` 切到新文件（守卫开始保护它），再删旧文件；极端时序下清理
-  先于推送到达、误删新文件名也无损 —— 随后的推送会以编辑器内容重建它。`loadWorkspace`
-  的清理让历史多文件工作区在进题时收敛，闭合「旧文件一直被 save() 全量落盘」。
+  无损失；历史分叉旧文件一并清理是项目决策）。**清理链为 flush → save → purge**：
+  purge 删除的旧文件是磁盘上唯一的崩溃恢复副本，必须等新文件内容与元数据
+  （active_file=新名，顺带修正 `set_language` 落盘的旧名 meta）确已落盘后才删 ——
+  否则 auto-save 间隔内（默认 30s，最长 300s 或可关闭）崩溃会丢代码；推送失败
+  （flush 返回 false，`saveWorkspace` 同款检查）或落盘失败时中止清理，旧文件保留，
+  下次加载/切换时重试。`loadWorkspace` 的清理无需先落盘 —— 加载时 active 文件的
+  磁盘副本本来就在，删的是其他文件，不影响崩溃恢复。极端时序下清理先于推送到达、
+  误删新文件名也无损 —— 随后的推送会以编辑器内容重建它。
 - **落盘时机由调用点编排，而不是靠后端周期**：auto-save 周期最长 300 秒，
   而「内存 → 磁盘」之间只有后端内存副本；切题（loadWorkspace 前 save）、失焦、
   页面隐藏、离开解题页、关窗各由对应调用点显式落盘。store 只提供 `flushPendingSync`

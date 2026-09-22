@@ -17,6 +17,24 @@ pub struct FsWorkspaceRepository {
     storage: Arc<Storage>,
 }
 
+/// 词法规范化：解析路径中的 `.` 与 `..`（不触文件系统、不解析符号链接）。
+///
+/// 供 `workspace_relative` 的前缀校验做纵深防御：输入已过组件白名单时是
+/// 恒等变换，但保证「拼接结果以工作区根为前缀」这道闸对任何输入都成立。
+fn lexically_normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
 impl FsWorkspaceRepository {
     pub fn new(storage: Arc<Storage>) -> Self {
         Self { storage }
@@ -33,20 +51,36 @@ impl FsWorkspaceRepository {
         Ok(())
     }
 
-    /// 构建 workspace 内文件的相对路径，并对 `file_path` 做路径穿越校验。
+    /// 构建工作区内文件的相对路径，并对 `file_path` 做路径安全校验。
+    ///
+    /// 防护分两层（`delete_file` 是破坏性原语，校验强度必须覆盖它）：
+    /// 1. **组件白名单**：只接受 `Component::Normal` —— `..`、前导 `.`、
+    ///    绝对路径（根目录 / Windows 盘符前缀）全部拒绝。黑名单式只拒
+    ///    `ParentDir` 会放过 `C:`、`/` 等组件。
+    /// 2. **拼接后规范化 + 前缀校验**：词法解析 `.`/`..` 后验证结果仍以
+    ///    工作区根目录为前缀（组件级比较，非字符串前缀）。输入已过白名单
+    ///    时这是恒等变换，作为纵深防御保留，兜底未来常量或校验的回归。
     fn workspace_relative(&self, workspace_id: &str, file_path: &Path) -> AppResult<String> {
         Self::validate_workspace_id(workspace_id)?;
+        if file_path.as_os_str().is_empty() {
+            return Err(AppError::Workspace("文件路径为空".into()));
+        }
         for component in file_path.components() {
-            if matches!(component, Component::ParentDir) {
+            if !matches!(component, Component::Normal(_)) {
                 return Err(AppError::Workspace(format!(
-                    "文件路径包含非法字符: {}",
+                    "文件路径包含非法组件: {}（仅允许普通文件名/目录名）",
                     file_path.display()
                 )));
             }
         }
-        let relative = Path::new(WORKSPACES_DIR)
-            .join(workspace_id)
-            .join(file_path);
+        let root = Path::new(WORKSPACES_DIR).join(workspace_id);
+        let relative = lexically_normalize(&root.join(file_path));
+        if !relative.starts_with(&root) {
+            return Err(AppError::Workspace(format!(
+                "文件路径越界: {}",
+                file_path.display()
+            )));
+        }
         Ok(relative.to_string_lossy().into_owned())
     }
 

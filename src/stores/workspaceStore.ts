@@ -283,10 +283,13 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 代码推送过去（后端 `update_file` 会一并把它记为当前文件并持久化）——
      * 判题端按后缀判语言，代码必须落在与语言一致的扩展名上。
      *
-     * 内容推送完成后**静默清理**旧扩展名文件（P62 已闭合）：编辑器内容已复制到
-     * 新文件名，旧文件删除即无损失；同族切换（派生名不变，如 "C++" → "C++17"）
-     * 也执行清理，顺带收敛历史遗留的多文件工作区。先推送后清理的顺序让后端
-     * `active_file` 先切到新文件，守卫开始保护它，清理不会误伤。
+     * 内容推送完成后**先落盘再静默清理**旧扩展名文件（P62 已闭合）：purge 删除的
+     * 旧文件是磁盘上唯一的崩溃恢复副本，必须等新文件内容与元数据（active_file
+     * = 新名，顺带修正 set_language 落盘的旧名 meta）确已落盘后才删 —— 否则
+     * auto-save 间隔内（默认 30s，最长 300s 或可关闭）崩溃会丢代码。推送失败
+     * （flush 返回 false）或落盘失败时**中止清理**，旧文件保留作恢复副本，下次
+     * 加载/切换时重试。同族切换（派生名不变，如 "C++" → "C++17"）也走同一条
+     * 链，顺带收敛历史遗留的多文件工作区。
      */
     changeLanguage(lang: string) {
       if (this.language === lang) return
@@ -302,8 +305,19 @@ export const useWorkspaceStore = defineStore('workspace', {
         this.activeFile = nextFile
         this.syncPending = true
       }
-      // flush 无在途改动时立即返回（不发起 IPC），清理照常执行
-      void this.flushPendingSync().then(() => this.purgeStaleCodeFiles())
+      // 先落盘再清理：purge 删的旧文件是磁盘上唯一的崩溃恢复副本，必须等新
+      // 文件内容与元数据确已落盘后才删。推送失败（pushed=false，saveWorkspace
+      // 同款检查、此处不得丢弃）或落盘失败时中止整条链，旧文件保留。
+      void this.flushPendingSync().then(async (pushed) => {
+        if (!pushed) return
+        try {
+          await this.saveWorkspace()
+        } catch (e) {
+          log.error('切换语言后落盘失败（旧文件保留作崩溃恢复副本）:', e)
+          return
+        }
+        await this.purgeStaleCodeFiles()
+      })
     },
   },
 })

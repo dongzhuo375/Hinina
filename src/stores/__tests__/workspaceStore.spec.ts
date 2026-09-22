@@ -602,6 +602,60 @@ describe('purgeStaleCodeFiles — 单代码文件约束（P62 清理）', () => 
     expect(store.workspace?.files['main.go']).toBeUndefined()
   })
 
+  it('切换语言：先落盘再清理（save 先于 delete，关闭崩溃恢复窗口）', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': CODE } }),
+    )
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.changeLanguage('Java')
+
+    await vi.waitFor(() =>
+      expect(workspaceService.deleteWorkspaceFile).toHaveBeenCalledWith('main.cpp'),
+    )
+    // 顺序：新文件内容与元数据（active_file=新名）确已落盘后才能删旧文件
+    const saveOrder = workspaceService.saveWorkspace.mock.invocationCallOrder[0]
+    const deleteOrder = workspaceService.deleteWorkspaceFile.mock.invocationCallOrder[0]
+    expect(saveOrder).toBeLessThan(deleteOrder)
+  })
+
+  it('推送失败时中止清理链：旧文件保留作崩溃恢复副本（不 save 不 delete）', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': CODE } }),
+    )
+    workspaceService.updateWorkspaceFile.mockRejectedValueOnce(new Error('ipc down'))
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.changeLanguage('Java')
+
+    await vi.waitFor(() =>
+      expect(workspaceService.updateWorkspaceFile).toHaveBeenCalledWith('Main.java', CODE),
+    )
+    await new Promise((res) => setTimeout(res, 0))
+    expect(workspaceService.saveWorkspace).not.toHaveBeenCalled()
+    expect(workspaceService.deleteWorkspaceFile).not.toHaveBeenCalled()
+    // 内容仍在编辑器，syncPending 保留供防抖重试
+    expect(store.syncPending).toBe(true)
+    expect(store.code).toBe(CODE)
+  })
+
+  it('落盘失败时中止清理：旧文件保留，下次加载/切换重试', async () => {
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ language: 'C++', activeFile: 'main.cpp', files: { 'main.cpp': CODE } }),
+    )
+    workspaceService.saveWorkspace.mockRejectedValueOnce(new Error('disk full'))
+    const store = useWorkspaceStore()
+    await store.loadWorkspace('1', 'p1')
+
+    store.changeLanguage('Java')
+
+    await vi.waitFor(() => expect(workspaceService.saveWorkspace).toHaveBeenCalled())
+    await new Promise((res) => setTimeout(res, 0))
+    expect(workspaceService.deleteWorkspaceFile).not.toHaveBeenCalled()
+  })
+
   it('清理前重查 activeFile：切换在途时不误删新 active 文件', async () => {
     // 用挂起的第一个删除调用卡住清理循环，期间把 activeFile 切到清单中的
     // 另一个文件 —— 该文件必须被跳过（后端 active_file 守卫为第二道防线）
