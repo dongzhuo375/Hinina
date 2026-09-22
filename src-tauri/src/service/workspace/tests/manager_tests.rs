@@ -231,6 +231,51 @@ fn delete_file_rejects_workspace_meta() {
 }
 
 #[test]
+fn guard_equivalent_normalizes_windows_name_variants() {
+    // Windows 把大小写变体与尾随点/空格解析到同一文件，守卫比较必须归一
+    assert_eq!(guard_equivalent("Workspace.json"), "workspace.json");
+    assert_eq!(guard_equivalent("workspace.json."), "workspace.json");
+    assert_eq!(guard_equivalent("workspace.json. . "), "workspace.json");
+    assert_eq!(guard_equivalent("MAIN.JAVA"), "main.java");
+    assert_eq!(guard_equivalent("Main.java "), "main.java");
+    assert_eq!(guard_equivalent("main.cpp"), "main.cpp");
+}
+
+#[test]
+fn delete_file_guards_reject_windows_name_variants() {
+    // 精确比较会被变体名绕过（本机实测：Workspace.json / workspace.json.
+    // 都命中 workspace.json，删除变体名会删掉原件）—— 守卫必须按等价类比较
+    let mgr = test_manager("delete-file-variants");
+    mgr.create("contest-6", "problem-F", "/ws").unwrap();
+    mgr.update_file("Main.java", "// active").unwrap();
+
+    assert!(
+        mgr.delete_file("Workspace.json").is_err(),
+        "大小写变体不得绕过元数据守卫"
+    );
+    assert!(
+        mgr.delete_file("workspace.json.").is_err(),
+        "尾随点变体不得绕过元数据守卫"
+    );
+    assert!(
+        mgr.delete_file("workspace.json. ").is_err(),
+        "尾随点+空格变体不得绕过元数据守卫"
+    );
+    assert!(
+        mgr.delete_file("MAIN.JAVA").is_err(),
+        "大小写变体不得绕过 active 守卫"
+    );
+    assert!(
+        mgr.delete_file("Main.java.").is_err(),
+        "尾随点变体不得绕过 active 守卫"
+    );
+
+    // 受保护文件原样保留
+    let ws = mgr.current().unwrap();
+    assert!(ws.files.contains_key("Main.java"));
+}
+
+#[test]
 fn delete_file_rejects_without_current_workspace() {
     let mgr = test_manager("delete-file-no-current");
     assert!(mgr.delete_file("main.cpp").is_err());

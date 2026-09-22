@@ -92,6 +92,18 @@ fn can_mark_clean(
     ws_id == current_id && snapshot_revision == current_revision
 }
 
+/// 守卫比较用的文件名等价类归一：小写化 + 剥离全部尾随点与空格。
+///
+/// Windows（NTFS/Win32）把 "Workspace.json"、"workspace.json." 与
+/// "workspace.json" 解析到**同一文件**；`delete_file` 的守卫若用精确字符串
+/// 比较，变体名即可绕过守卫删除受保护文件（元数据被删则工作区无法加载；
+/// 当前代码文件被删则落盘前的崩溃窗口内丢代码）。归一**只用于守卫比较**，
+/// 不改变存储的文件名本身；非 Windows 平台上归一只会让守卫更严（变体名
+/// 一并拒绝），不会放宽。
+fn guard_equivalent(name: &str) -> String {
+    name.trim_end_matches(['.', ' ']).to_lowercase()
+}
+
 impl WorkspaceManager {
     /// 创建 WorkspaceManager。
     pub fn new(repo: Arc<dyn WorkspaceRepository>, event_bus: Arc<CoreEventBus>) -> Self {
@@ -604,7 +616,9 @@ impl WorkspaceManager {
 
     /// 删除当前工作区中的文件（P62：按文件删除能力，供旧代码文件清理使用）。
     ///
-    /// 守卫：
+    /// 守卫（比较一律经 [`guard_equivalent`] 归一 —— Windows 把大小写变体与
+    /// 尾随点/空格解析到同一文件，精确比较会被 "Workspace.json" / "MAIN.JAVA"
+    /// 等变体名绕过）：
     /// - 拒绝删除 `active_file`：它是选手当前代码，清理只针对**过期**文件；
     /// - 拒绝删除 `workspace.json`：元数据被删会让工作区无法加载。
     ///
@@ -620,13 +634,15 @@ impl WorkspaceManager {
             .as_mut()
             .ok_or_else(|| AppError::Workspace("无当前工作区".into()))?;
 
-        if ws.active_file.as_deref() == Some(file_name) {
+        let normalized = guard_equivalent(file_name);
+        let active_normalized = ws.active_file.as_deref().map(guard_equivalent);
+        if active_normalized.as_deref() == Some(normalized.as_str()) {
             return Err(AppError::Workspace(format!(
                 "不能删除当前代码文件: {}（清理只针对过期文件）",
                 file_name
             )));
         }
-        if file_name == "workspace.json" {
+        if normalized == "workspace.json" {
             return Err(AppError::Workspace(
                 "不能删除工作区元数据文件 workspace.json".into(),
             ));
