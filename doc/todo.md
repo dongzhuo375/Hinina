@@ -40,7 +40,7 @@
 > 按依赖顺序实现，每个 Service 完成后对应 Command 也可同步填充。
 
 ### 4.1 ConfigService
-- [x] **ConfigService** — `service/config/mod.rs`：加载/保存/监听配置变更，发布 SystemEvent::ConfigReloaded
+- [x] **ConfigService** — `service/config/mod.rs`：加载/保存/监听配置变更，发布配置变更事件（阶段 8 事件总线重构后为 `CoreEvent::ConfigChanged`；当时为 `SystemEvent::ConfigReloaded`）
 
 ### 4.2 AuthService
 - [x] **AuthService** — `service/auth/mod.rs`：登录流程编排、会话持久化、登出清理
@@ -58,7 +58,7 @@
 - [x] **SubmissionService** — `service/submission/mod.rs`：提交代码、评测结果轮询、超时处理
 
 ### 4.7 ThemeService
-- [x] **ThemeService** — `service/theme/mod.rs`：主题切换、配色方案管理，发布 SystemEvent::ThemeChanged
+- [x] **ThemeService** — `service/theme/mod.rs`：主题切换、配色方案管理，发布主题变更事件（阶段 8 事件总线重构后为 `CoreEvent::ThemeChanged`；当时为 `SystemEvent::ThemeChanged`）
 
 ---
 
