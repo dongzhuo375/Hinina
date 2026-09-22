@@ -276,6 +276,31 @@ fn delete_file_guards_reject_windows_name_variants() {
 }
 
 #[test]
+fn delete_file_rejects_ads_names_end_to_end() {
+    // ADS 变体（workspace.json::$DATA = 文件本身的默认数据流）能绕过 manager
+    // 的等价类守卫（"workspace.json::$data" ≠ "workspace.json"），由仓库层的
+    // Win32 非法字符校验收口 —— 评审实测复现的完整链路，端到端锁定
+    let (mgr, storage) = test_manager_with_storage("delete-file-ads");
+    mgr.create("contest-6", "problem-F", "/ws").unwrap();
+    mgr.update_file("Main.java", "// active").unwrap();
+    mgr.save().unwrap();
+
+    assert!(mgr.delete_file("workspace.json::$DATA").is_err());
+    assert!(mgr.delete_file("Main.java::$DATA").is_err());
+
+    // 受保护文件在内存与磁盘上均原样保留
+    let ws = mgr.current().unwrap();
+    assert!(ws.files.contains_key("Main.java"));
+    let repo = FsWorkspaceRepository::new(Arc::clone(&storage));
+    assert_eq!(
+        repo.read_file(&ws.id, &std::path::PathBuf::from("Main.java"))
+            .unwrap(),
+        "// active"
+    );
+    assert!(mgr.load(&ws.id, "/ws").is_ok(), "元数据未被删除，工作区仍可加载");
+}
+
+#[test]
 fn delete_file_rejects_without_current_workspace() {
     let mgr = test_manager("delete-file-no-current");
     assert!(mgr.delete_file("main.cpp").is_err());

@@ -140,6 +140,41 @@ fn rejects_drive_letter_paths() {
 }
 
 #[test]
+fn rejects_ads_device_and_trailing_variant_paths() {
+    // NTFS ADS：workspace.json::$DATA 是文件本身的默认数据流，fs::remove_file
+    // 会删掉真正的 workspace.json —— manager 守卫的等价类比较拦不住
+    // （"workspace.json::$data" ≠ "workspace.json"），必须在仓库层收口。
+    // 读写删三原语同时生效，顺带堵住 save_file("workspace.json:evil") 造 ADS。
+    let r = repo("ads-device");
+    let ws = "ws-safe4";
+    r.save_file(ws, Path::new("legit.txt"), "ok").unwrap();
+
+    // ADS 删除绕过（评审实测复现的链路）
+    assert!(r.delete_file(ws, Path::new("workspace.json::$DATA")).is_err());
+    assert!(r.delete_file(ws, Path::new("Main.java::$DATA")).is_err());
+    // ADS 写路径
+    assert!(r.save_file(ws, Path::new("workspace.json:evil"), "bad").is_err());
+    // 其余 Win32 非法字符
+    assert!(r.save_file(ws, Path::new("a<b.txt"), "bad").is_err());
+    assert!(r.save_file(ws, Path::new("a>b.txt"), "bad").is_err());
+    assert!(r.save_file(ws, Path::new("a\"b.txt"), "bad").is_err());
+    assert!(r.save_file(ws, Path::new("a|b.txt"), "bad").is_err());
+    assert!(r.save_file(ws, Path::new("a?b.txt"), "bad").is_err());
+    assert!(r.save_file(ws, Path::new("a*b.txt"), "bad").is_err());
+    // 保留设备名（含带扩展名变体：Win32 按第一个点前的词干解析）
+    assert!(r.delete_file(ws, Path::new("CON")).is_err());
+    assert!(r.delete_file(ws, Path::new("NUL.txt")).is_err());
+    assert!(r.save_file(ws, Path::new("COM1"), "bad").is_err());
+    assert!(r.save_file(ws, Path::new("aux.js"), "bad").is_err());
+    // 尾随点/空格（Windows 等价类，堵住 save_file("workspace.json.") 写路径）
+    assert!(r.save_file(ws, Path::new("workspace.json."), "bad").is_err());
+    assert!(r.save_file(ws, Path::new("main.cpp "), "bad").is_err());
+    assert!(r.delete_file(ws, Path::new("legit.txt.")).is_err());
+    // 合法文件不受影响
+    assert_eq!(r.read_file(ws, Path::new("legit.txt")).unwrap(), "ok");
+}
+
+#[test]
 fn rejects_path_traversal() {
     let r = repo("traversal");
     let ws = "ws-safe";

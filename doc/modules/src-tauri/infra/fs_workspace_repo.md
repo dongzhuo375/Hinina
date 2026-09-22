@@ -7,7 +7,9 @@
 - **`FsWorkspaceRepository`** — 文件系统工作区仓库 struct，持有 `Arc<Storage>`
 - **`FsWorkspaceRepository::new(storage: Arc<Storage>)`** — 构造函数
 - **`workspace_root(workspace_id)`** — 构建 workspace 根目录相对路径 `workspaces/{id}`
-- **`workspace_relative(workspace_id, file_path)`** — 构建文件相对路径并做**两层路径安全校验**（`delete_file` 是破坏性原语，校验强度必须覆盖它）：① **组件白名单** —— 只接受 `Component::Normal`，`..`、前导 `.`、绝对路径（根目录 / Windows 盘符前缀）与空路径全部拒绝（黑名单式只拒 `ParentDir` 会放过 `C:`、`/` 等组件）；② **拼接后词法规范化（`lexically_normalize`）+ 前缀校验** —— 验证结果仍以工作区根目录为前缀（组件级比较，非字符串前缀），输入已过白名单时是恒等变换，作为纵深防御兜底未来回归
+- **`workspace_relative(workspace_id, file_path)`** — 构建文件相对路径并做**三层路径安全校验**（`delete_file` 是破坏性原语，校验强度必须覆盖它）：① **组件白名单** —— 只接受 `Component::Normal`，`..`、前导 `.`、绝对路径（根目录 / Windows 盘符前缀）与空路径全部拒绝（黑名单式只拒 `ParentDir` 会放过 `C:`、`/` 等组件）；② **组件内容校验**（`validate_win32_component`）—— Win32 非法字符（`< > : " | ? *` 与控制字符，其中 `:` 是 NTFS ADS 分隔符：`workspace.json::$DATA` 即文件本身，`fs::remove_file` 会删掉真正的 workspace.json）、保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9，按第一个点前的词干判定）、尾随点/空格（Windows 等价类，堵住 `save_file("workspace.json.")` 变体写路径）全部拒绝，读写删三原语同时生效；③ **拼接后词法规范化（`lexically_normalize`）+ 前缀校验** —— 验证结果仍以工作区根目录为前缀（组件级比较，非字符串前缀），输入已过白名单时是恒等变换，作为纵深防御兜底未来回归
+- **`validate_win32_component(component)`** — Win32 文件名组件内容校验（非法字符 / 设备名 / 尾随点空格三类拒绝）
+- **`is_reserved_device_name(component)`** — 保留设备名判定（大小写不敏感，按第一个点前的词干）
 - **`lexically_normalize(path)`** — 模块级纯函数：词法解析路径中的 `.` 与 `..`（不触文件系统、不解析符号链接）
 - **`walk_dir(dir, prefix, files)`** — 递归遍历目录，收集所有文件相对路径
 - **`save_file(workspace_id, path, content)`** — 保存工作区文件，自动创建父目录
@@ -36,7 +38,7 @@
 - **delete_file**：经 `workspace_relative()` 校验后委托 `Storage::remove()`；先查 `Storage::exists()`，不存在直接 `Ok(())`（幂等）。
 - **exists**：委托 `Storage::exists()` 检查目录存在性。
 
-## 测试覆盖（12 项）
+## 测试覆盖（13 项）
 测试代码位于 `tests/fs_workspace_repo_tests.rs`。
 - `save_and_read_file` — 保存与读取往返
 - `read_nonexistent_file_returns_error` — 读取不存在的文件
@@ -50,3 +52,4 @@
 - `delete_file_rejects_path_traversal` — 删除路径同样拒绝穿越，合法文件不受波及
 - `rejects_non_normal_path_components` — 组件白名单：绝对路径、前导 `.`、空路径全部拒绝（读写删三个原语一致）
 - `rejects_drive_letter_paths`（仅 Windows）— 盘符前缀路径拒绝
+- `rejects_ads_device_and_trailing_variant_paths` — ADS（`workspace.json::$DATA`）、其余 Win32 非法字符、保留设备名（含扩展名变体）、尾随点/空格全部拒绝，读写删三原语一致
