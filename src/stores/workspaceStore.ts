@@ -105,21 +105,23 @@ export const useWorkspaceStore = defineStore('workspace', {
         if (gen !== loadGeneration) return
 
         // 单飞：等前一次加载 IPC 落定再发起本次；轮到本 turn 时已非最新代际
-        // 则跳过 IPC，不产生多余的后端工作区切换
-        const turn = loadQueue.then(async () => {
-          if (gen !== loadGeneration) return
-          this.workspace = await workspaceService.loadWorkspace(contestId, problemId)
+        // 则跳过 IPC（返回 null），不产生多余的后端工作区切换
+        const turn = loadQueue.then(async (): Promise<Workspace | null> => {
+          if (gen !== loadGeneration) return null
+          return await workspaceService.loadWorkspace(contestId, problemId)
         })
         // 队列吞错：单次加载失败不阻塞后续切题（错误经 turn 向本调用方传播）
         loadQueue = turn.then(
           () => undefined,
           () => undefined,
         )
-        await turn
-        // IPC 在途期间又有更新的切题：迟到结果作废，不覆盖 store 状态
-        //（turn 被跳过时 workspace 为 null —— gen 判据已覆盖，此处兜类型收窄）
-        const ws = this.workspace
+        // IPC 在途期间又有更新的切题：迟到结果作废，不覆盖 store 状态。
+        // 结果经 turn 返回、此处一次性原子应用 —— 轮次内直接写 this.workspace
+        // 会留下「workspace 已是新题、code 还是旧题」的失配对，后续加载失败时
+        // 无法自愈（PR21-8 评审二轮）
+        const ws = await turn
         if (gen !== loadGeneration || !ws) return
+        this.workspace = ws
 
         // 工作区元数据可能残留历史 Monaco id（'cpp'），统一归一为 HOJ 显示名；
         // 未记录语言时用配置的默认语言，兜底 "C++"
@@ -161,10 +163,19 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 历史多文件工作区收敛（P62）：activeFile 已解析为权威源，
         // 其余代码文件都是过期残留，静默清理（失败仅记日志，下次加载重试）
         void this.purgeStaleCodeFiles()
-      } finally {
-        // 只有最新一次加载负责解锁：并发在途时先完成者不得提前解除保护
-        // （否则最新加载的 IPC 仍在飞，只读锁与输入守卫全部提前失效）
-        if (gen === loadGeneration) this.isLoadingWorkspace = false
+
+        // 仅成功路径解锁：失败路径保持锁定（见 catch）—— 评审二轮
+        this.isLoadingWorkspace = false
+      } catch (e) {
+        // 最新一次加载失败：单飞队列下更早的过期加载可能已在后端完成切换（其
+        // 结果被代际检查丢弃），此刻后端 current 与 store 是否一致不可知 ——
+        // 保持加载锁，杜绝解锁后的防抖推送把 store 代码写进后端实际工作区
+        //（跨工作区写入）。编辑器只读 + 视图层错误提示（含重试），下次加载
+        // 成功即解锁
+        if (gen === loadGeneration) {
+          log.error('工作区加载失败，编辑器保持锁定直至下次加载成功:', e)
+        }
+        throw e
       }
     },
 
