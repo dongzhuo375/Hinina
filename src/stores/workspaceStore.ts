@@ -59,6 +59,8 @@ export const useWorkspaceStore = defineStore('workspace', {
     isDirty: false,
     /// 有改动尚未推送到后端内存（防抖窗口内）
     syncPending: false,
+    /// 工作区加载进行中（loadWorkspace 在途）：期间编辑器只读、输入拒收（PR21-8）
+    isLoadingWorkspace: false,
   }),
 
   getters: {
@@ -75,49 +77,59 @@ export const useWorkspaceStore = defineStore('workspace', {
       // 本方法整体替换 code / language / workspace：在途的未推送改动必须先推送，
       // 否则加载结果会覆盖 store.code，随后防抖回调再把**旧内容**推给后端 ——
       // 「敲键 → 切视图 → 立刻切回」会因此静默丢掉最后一次编辑
-      await this.flushPendingSync()
-
-      this.workspace = await workspaceService.loadWorkspace(contestId, problemId)
-      // 工作区元数据可能残留历史 Monaco id（'cpp'），统一归一为 HOJ 显示名；
-      // 未记录语言时用配置的默认语言，兜底 "C++"
-      const metaLanguage = this.workspace.language
-        ? normalizeHojLanguage(this.workspace.language)
-        : await configService.getDefaultLanguage()
-
-      // 当前代码文件以 `activeFile` 为**权威源**（后端已持久化到 workspace.json）。
-      // 回退链只服务于历史工作区（meta 无该字段）：当前语言派生名 → 已知代码后缀探测。
       //
-      // 为什么不只按语言派生：语言切换后旧文件仍留在 `files` 里，而 `files` 来自
-      // Rust HashMap 的序列化、**键序不稳定** —— 靠「探测第一个匹配后缀」可能加载出
-      // 「旧语言代码 + 新语言元数据」的组合（提交即 CE，高亮也不符）。
-      const codeKeys = Object.keys(this.workspace.files)
-      const recorded = this.workspace.activeFile
-      const derivedName = sourceFileNameOf(metaLanguage)
-      const activeFile =
-        (recorded && codeKeys.includes(recorded) ? recorded : undefined) ??
-        (codeKeys.includes(derivedName) ? derivedName : undefined) ??
-        codeKeys.find((k) => CODE_FILE_EXTENSIONS.some((ext) => k.endsWith(ext))) ??
-        derivedName
+      // 加载在途期间拒收一切输入（PR21-8）：慢加载窗口内编辑器仍显示旧题代码，
+      // 此时的敲键属于旧题上下文，随加载结果被覆盖是预期行为；但「保留用户输入」
+      // 更坏 —— 会把旧题文本推到新工作区文件名下。正解是编辑器只读（CodeEditor
+      // locked）+ store 拒收（updateCode / changeLanguage 守卫）双保险
+      this.isLoadingWorkspace = true
+      try {
+        await this.flushPendingSync()
 
-      this.activeFile = activeFile
-      this.code = this.workspace.files[activeFile] ?? ''
+        this.workspace = await workspaceService.loadWorkspace(contestId, problemId)
+        // 工作区元数据可能残留历史 Monaco id（'cpp'），统一归一为 HOJ 显示名；
+        // 未记录语言时用配置的默认语言，兜底 "C++"
+        const metaLanguage = this.workspace.language
+          ? normalizeHojLanguage(this.workspace.language)
+          : await configService.getDefaultLanguage()
 
-      // 语言与代码文件扩展名矛盾时**以文件为准**：判题端按后缀判定语言与 limits
-      // 倍率，元数据说 Java 而文件是 main.cpp 时按 Java 提交必然 CE。
-      const implied = hojLanguageOfFileName(activeFile)
-      this.language = implied ?? metaLanguage
-      if (implied && normalizeHojLanguage(metaLanguage) !== implied) {
-        log.warn(
-          `工作区语言元数据（${metaLanguage}）与代码文件（${activeFile}）不一致，已以文件为准`,
-        )
+        // 当前代码文件以 `activeFile` 为**权威源**（后端已持久化到 workspace.json）。
+        // 回退链只服务于历史工作区（meta 无该字段）：当前语言派生名 → 已知代码后缀探测。
+        //
+        // 为什么不只按语言派生：语言切换后旧文件仍留在 `files` 里，而 `files` 来自
+        // Rust HashMap 的序列化、**键序不稳定** —— 靠「探测第一个匹配后缀」可能加载出
+        // 「旧语言代码 + 新语言元数据」的组合（提交即 CE，高亮也不符）。
+        const codeKeys = Object.keys(this.workspace.files)
+        const recorded = this.workspace.activeFile
+        const derivedName = sourceFileNameOf(metaLanguage)
+        const activeFile =
+          (recorded && codeKeys.includes(recorded) ? recorded : undefined) ??
+          (codeKeys.includes(derivedName) ? derivedName : undefined) ??
+          codeKeys.find((k) => CODE_FILE_EXTENSIONS.some((ext) => k.endsWith(ext))) ??
+          derivedName
+
+        this.activeFile = activeFile
+        this.code = this.workspace.files[activeFile] ?? ''
+
+        // 语言与代码文件扩展名矛盾时**以文件为准**：判题端按后缀判定语言与 limits
+        // 倍率，元数据说 Java 而文件是 main.cpp 时按 Java 提交必然 CE。
+        const implied = hojLanguageOfFileName(activeFile)
+        this.language = implied ?? metaLanguage
+        if (implied && normalizeHojLanguage(metaLanguage) !== implied) {
+          log.warn(
+            `工作区语言元数据（${metaLanguage}）与代码文件（${activeFile}）不一致，已以文件为准`,
+          )
+        }
+
+        this.isDirty = this.workspace.isDirty
+        this.syncPending = false
+
+        // 历史多文件工作区收敛（P62）：activeFile 已解析为权威源，
+        // 其余代码文件都是过期残留，静默清理（失败仅记日志，下次加载重试）
+        void this.purgeStaleCodeFiles()
+      } finally {
+        this.isLoadingWorkspace = false
       }
-
-      this.isDirty = this.workspace.isDirty
-      this.syncPending = false
-
-      // 历史多文件工作区收敛（P62）：activeFile 已解析为权威源，
-      // 其余代码文件都是过期残留，静默清理（失败仅记日志，下次加载重试）
-      void this.purgeStaleCodeFiles()
     },
 
     /**
@@ -172,6 +184,13 @@ export const useWorkspaceStore = defineStore('workspace', {
 
     /** 更新编辑器内代码（标记脏状态 + 防抖推送到后端内存） */
     updateCode(code: string) {
+      // 加载在途时拒收（PR21-8）：Monaco 只读是第一道防线，此处兜住工具条
+      // 清空/上传等绕过键盘的程序化路径 —— 加载结果即将整体替换 code，中途
+      // 接受的输入必被覆盖，且旧题内容绝不能经防抖写进新工作区文件
+      if (this.isLoadingWorkspace) {
+        log.debug('工作区加载中，忽略编辑输入')
+        return
+      }
       this.code = code
       this.isDirty = true
       this.syncPending = true
@@ -293,6 +312,12 @@ export const useWorkspaceStore = defineStore('workspace', {
      */
     changeLanguage(lang: string) {
       if (this.language === lang) return
+      // 加载在途时拒收（PR21-8 同源）：此时切换语言会把旧题代码经 flush 推到
+      // 新派生文件名下 —— 后端若已切到新工作区，就是跨工作区的内容错配
+      if (this.isLoadingWorkspace) {
+        log.debug('工作区加载中，忽略语言切换')
+        return
+      }
       const previousFile = sourceFileNameOf(this.language)
       this.language = lang
       workspaceService.setLanguage(lang).catch((e) => {

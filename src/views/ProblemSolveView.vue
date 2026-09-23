@@ -300,6 +300,7 @@ async function handleSubmit() {
           :language="workspaceStore.language"
           :languages="problemStore.currentProblem?.languages ?? []"
           :is-dirty="workspaceStore.isDirty"
+          :locked="workspaceStore.isLoadingWorkspace"
           @update:model-value="workspaceStore.updateCode"
           @update:language="workspaceStore.changeLanguage"
           @cursor="cursor = $event"

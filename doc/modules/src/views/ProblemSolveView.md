@@ -54,7 +54,8 @@ load(id):
   2. ensureContestId()                           // contest 未加载则兜底拉取
   3. contestStore.problems 按 displayId 找 ContestProblem（找不到 → localError）
   4. workspaceStore.loadWorkspace(contestId, cp.problemId)   // 工作区按题目真实 ID(pid) 隔离
-     （内部先 flushPendingSync：加载会整体替换 code，不先推送就会丢最后一次编辑）
+     （内部先 flushPendingSync：加载会整体替换 code，不先推送就会丢最后一次编辑；
+       加载在途 isLoadingWorkspace=true → CodeEditor :locked 只读 + store 拒收输入，PR21-8）
   5. problemStore.openProblem(contestId, id)                 // 题面详情按比赛内展示题号查询
   5.5 允许语言归位：题目 languages 非空时
       changeLanguage(resolveAllowedLanguage(当前语言, languages) ?? languages[0])

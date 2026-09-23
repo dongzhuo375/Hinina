@@ -388,6 +388,93 @@ describe('loadWorkspace — 替换 store 状态前先推送在途改动', () => 
   })
 })
 
+describe('loadWorkspace — 加载在途拒收输入（PR21-8）', () => {
+  /// 慢加载夹具：loadWorkspace 挂起直到手动放行，模拟 IPC 往返窗口。
+  /// `called` 在 mock 真正被调用（IPC 发起）时 resolve —— loadWorkspace 内部先
+  /// await flushPendingSync（数个微任务跳数），测试须等 `called` 后再放行
+  function deferLoad() {
+    let resolveLoad!: (ws: Workspace) => void
+    let markCalled!: () => void
+    const called = new Promise<void>((r) => {
+      markCalled = r
+    })
+    workspaceService.loadWorkspace.mockImplementation(() => {
+      markCalled()
+      return new Promise<Workspace>((res) => {
+        resolveLoad = res
+      })
+    })
+    return {
+      called,
+      release(ws: Workspace) {
+        resolveLoad(ws)
+      },
+    }
+  }
+
+  it('加载在途时 isLoadingWorkspace 为 true，完成后复位', async () => {
+    const load = deferLoad()
+    const store = useWorkspaceStore()
+    const loading = store.loadWorkspace('1', 'p1')
+    await load.called
+
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    load.release(wsFixture({ files: { 'main.cpp': CODE }, activeFile: 'main.cpp' }))
+    await loading
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
+
+  it('加载失败也复位（finally，不留死锁的只读编辑器）', async () => {
+    workspaceService.loadWorkspace.mockRejectedValue(new Error('IPC 故障'))
+    const store = useWorkspaceStore()
+
+    await expect(store.loadWorkspace('1', 'p1')).rejects.toThrow('IPC 故障')
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
+
+  it('加载在途时 updateCode 拒收：旧题敲键不进 store、不排定推送', async () => {
+    vi.useFakeTimers()
+    try {
+      const load = deferLoad()
+      const store = useWorkspaceStore()
+      const loading = store.loadWorkspace('1', 'p1')
+      await load.called
+
+      store.updateCode('hack = old problem edit')
+      expect(store.code).toBe('')
+      expect(store.syncPending).toBe(false)
+      expect(store.isDirty).toBe(false)
+
+      load.release(wsFixture({ files: { 'main.cpp': CODE }, activeFile: 'main.cpp' }))
+      await loading
+
+      // 加载结果正常落地；防抖窗口推进后也无任何推送（中途输入从未进 store）
+      expect(store.code).toBe(CODE)
+      vi.advanceTimersByTime(5_000)
+      await vi.runOnlyPendingTimersAsync()
+      expect(workspaceService.updateWorkspaceFile).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('加载在途时 changeLanguage 拒收：不发 setLanguage、不触发文件名迁移链', async () => {
+    const load = deferLoad()
+    const store = useWorkspaceStore()
+    const loading = store.loadWorkspace('1', 'p1')
+    await load.called
+
+    store.changeLanguage('Java')
+    expect(store.language).toBe('C++')
+    expect(workspaceService.setLanguage).not.toHaveBeenCalled()
+
+    load.release(wsFixture({ files: { 'main.cpp': CODE }, activeFile: 'main.cpp' }))
+    await loading
+    expect(store.language).toBe('C++')
+  })
+})
+
 describe('cancelPendingSync — 登出丢弃在途改动', () => {
   it('取消后时间推进不再推送（不向已失效会话写代码）', async () => {
     vi.useFakeTimers()

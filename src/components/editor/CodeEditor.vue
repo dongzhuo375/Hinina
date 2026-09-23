@@ -35,6 +35,9 @@ const props = defineProps<{
   isDirty: boolean
   /// 只读模式（提交详情页代码查看）：隐藏工具条、禁用编辑与提交快捷键
   readonly?: boolean
+  /// 加载锁定（切题加载期间，PR21-8）：Monaco 只读但**工具条保留** —— 与 readonly
+  /// 的「隐藏工具条」语义不同；随加载完成自动解锁，解锁时以 modelValue 回写自愈
+  locked?: boolean
   /// 本题允许的提交语言（来自题目详情 languages）；空/缺省回退内置默认列表
   languages?: string[]
 }>()
@@ -116,7 +119,7 @@ onMounted(async () => {
     tabSize: prefs.tabSize,
     wordWrap: 'on',
     padding: { top: 12, bottom: 12 },
-    readOnly: props.readonly === true,
+    readOnly: props.readonly === true || props.locked === true,
     // 只读查看无需行内建议/高亮干扰
     renderLineHighlight: props.readonly ? 'none' : 'line',
   })
@@ -153,6 +156,25 @@ watch(
     const model = editor.value?.getModel()
     if (model) {
       monaco.editor.setModelLanguage(model, monacoIdOf(lang))
+    }
+  },
+)
+
+// 只读状态响应式跟随：readonly（详情页）创建后不变，locked（解题页加载）随加载翻转。
+// 解锁时以 props.modelValue 回写：locked 置位到 Monaco updateOptions 生效之间有一个
+// 渲染 tick 的窗口，漏进 Monaco 的输入会被 store 守卫拒收（store.code 不变、prop
+// 不变、modelValue watcher 不触发），不回写则分歧残留；加载成功时该回写与 modelValue
+// watcher 的 setValue 幂等重合（值已一致，直接跳过）
+watch(
+  () => props.readonly === true || props.locked === true,
+  (ro) => {
+    const ed = editor.value
+    if (!ed) return
+    ed.updateOptions({ readOnly: ro })
+    if (!ro && ed.getValue() !== props.modelValue) {
+      suppressChangeEmit = true
+      ed.setValue(props.modelValue)
+      suppressChangeEmit = false
     }
   },
 )
