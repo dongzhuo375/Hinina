@@ -16,7 +16,7 @@
 |------|------|------|
 | state | `workspace` / `activeFile` / `code` / `language`（默认 'C++'）/ `isDirty` / `syncPending` / `isLoadingWorkspace` | `activeFile` = **当前代码文件名（权威源）**，读写都锚定它；`isDirty` = 有改动尚未落盘；`syncPending` = 有改动尚未推送到后端内存（防抖窗口内）；`isLoadingWorkspace` = 工作区加载在途（PR21-8：期间编辑器只读、输入拒收，ProblemSolveView 绑定为 CodeEditor 的 `locked`） |
 | `currentCode` / `currentLanguage` | getters | 编辑器当前代码与语言 |
-| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **`const gen = ++loadGeneration` + 置位 `isLoadingWorkspace`** → **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ **flush 后代际检查**（已有更新切题则本次作废，不发 IPC）→ **加载 IPC 经 `loadQueue` 单飞**（等前一次落定再发起；轮到时已非最新代际则跳过 IPC 返回 null —— `load_workspace` 是 async 命令，并发乱序完成会让后端 current 停在旧工作区而 store 已切新工作区，解锁后的防抖推送就会把新题代码写进旧工作区目录）→ **IPC 后代际检查 + 原子应用**（迟到结果作废；结果经 turn 返回后一次性写入 store，轮次内直接写 `this.workspace` 会留下「workspace 已是新题、code 还是旧题」的失配对）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测 —— `files` 来自 HashMap 序列化、键序不稳定，只靠探测可能加载出「旧语言代码 + 新语言元数据」）；language 与文件扩展名矛盾时**以文件为准**并 `warn`（判题端按后缀判语言）；恢复 isDirty；随后 `void purgeStaleCodeFiles()`（历史多文件收敛，P62）。**仅成功路径解锁**：失败保持锁定（闩锁，见设计要点）。**加载在途拒收一切输入（PR21-8）**：慢加载窗口内编辑器仍显示旧题代码，中途敲键属旧题上下文，随加载结果被覆盖是预期；「保留用户输入」更坏（旧题文本经防抖推到新工作区文件名下，跨工作区错配），正解是编辑器只读（CodeEditor `locked`）+ store 拒收（`updateCode` / `changeLanguage` 守卫）双保险 |
+| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **`const gen = ++loadGeneration` + 置位 `isLoadingWorkspace`** → **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ **flush 后代际检查**（已有更新切题则本次作废，不发 IPC）→ **加载 IPC 经 `loadQueue` 单飞**（等前一次落定再发起；轮到时已非最新代际则跳过 IPC 返回 null —— `load_workspace` 是 async 命令，并发乱序完成会让后端 current 停在旧工作区而 store 已切新工作区，解锁后的防抖推送就会把新题代码写进旧工作区目录）→ **IPC 后代际检查 + 原子应用**（迟到结果作废；结果经 turn 返回后一次性写入 store，轮次内直接写 `this.workspace` 会留下「workspace 已是新题、code 还是旧题」的失配对；**元数据语言解析在 language 为空 —— 新建工作区恒如此，Rust 端 `String::new()` —— 时走 `getDefaultLanguage`，配置缓存冷时是真实 IPC，必须先于任何 store 写入完成并在其后复查代际，否则 await 期间被取代会应用过期字段并提前解锁，apply 块因此真正原子，评审三轮**）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测 —— `files` 来自 HashMap 序列化、键序不稳定，只靠探测可能加载出「旧语言代码 + 新语言元数据」）；language 与文件扩展名矛盾时**以文件为准**并 `warn`（判题端按后缀判语言）；恢复 isDirty；随后 `void purgeStaleCodeFiles()`（历史多文件收敛，P62）。**仅成功路径解锁**：失败保持锁定（闩锁，见设计要点）。**加载在途拒收一切输入（PR21-8）**：慢加载窗口内编辑器仍显示旧题代码，中途敲键属旧题上下文，随加载结果被覆盖是预期；「保留用户输入」更坏（旧题文本经防抖推到新工作区文件名下，跨工作区错配），正解是编辑器只读（CodeEditor `locked`）+ store 拒收（`updateCode` / `changeLanguage` 守卫）双保险 |
 | `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；仅当「推送成功 **且** 期间无新改动（`!syncPending`）」才清 `isDirty`（推送失败 → 内容未进后端；期间又落键 → 最新改动连后端内存都还没到，清脏会显示假「已自动备份」） |
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + `isDirty = true` + `syncPending = true` + `scheduleSync()`；**`isLoadingWorkspace` 时拒收**（PR21-8：Monaco 只读是第一道防线，此处兜住工具条清空/上传等绕过键盘的程序化路径） |
 | `scheduleSync` | `() => void` | 重置 2s 定时器，到点调用 `flushPendingSync()` |
@@ -84,10 +84,11 @@ loadWorkspace(contestId, problemId)
   → gen = ++loadGeneration + isLoadingWorkspace = true
   → flushPendingSync() → 代际检查（过期则作废，不发 IPC）
   → loadQueue 单飞发起加载 IPC（过期 turn 跳过 IPC 返回 null）
-  → 代际检查 + 原子应用（迟到结果作废，一次性写入 store）
+  → 代际检查 + 原子应用（迟到结果作废，一次性写入 store；
+    language 为空时 getDefaultLanguage 属 apply 前置解析，其后复查代际）
   → activeFile 解析（权威源 + 历史回退链）
   → void purgeStaleCodeFiles()                // 历史多文件工作区收敛（P62）
-  → 仅成功路径复位 isLoadingWorkspace（失败保持锁定，见设计要点）
+  → 仅成功路径复位 isLoadingWorkspace（带代际守卫；失败 catch 显式重置为 true）
 ```
 
 设计要点：
@@ -103,6 +104,11 @@ loadWorkspace(contestId, problemId)
   保持锁定 + 视图层错误提示（含重试），下次加载成功即解锁。**原子应用（评审二轮）**：
   加载结果经 turn 返回后代际检查通过才一次性写入 store，轮次内直接写 `this.workspace`
   会留下「workspace 已是新题、code 还是旧题」的失配对，后续加载失败时无法自愈。
+  **apply 块的原子性以「无 await」为准（评审三轮）**：元数据语言解析（language 为空时
+  走 `getDefaultLanguage`，新建工作区恒如此、配置缓存冷时是真实 IPC）是 apply 路径上
+  唯一的 await，必须先于任何 store 写入完成并在其后复查代际 —— 否则该 await 期间被
+  新加载取代的过期加载会应用过期字段并无条件解锁，击穿失败闩锁。解锁同样带代际守卫、
+  失败 catch 显式重置标志为 true（而非仅「不清除」），均为防御性加固。
   加载期间的失焦/页面隐藏落盘（`flushToDisk`）无需守卫：两个守卫保证 `syncPending`
   在加载期间不可能置位，flush 空转、后端 `save_workspace` 对 clean 工作区是无操作。
 - **并发切题的代际 + 单飞（PR21-8 评审加固）**：快速切题 A→B→C 时 B、C 两次加载并发

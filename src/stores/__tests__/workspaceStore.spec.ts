@@ -571,6 +571,53 @@ describe('loadWorkspace — 加载在途拒收输入（PR21-8）', () => {
     expect(store.code).toBe('')
   })
 
+  it('apply 阶段的 await 期间被新加载取代：过期加载不应用字段、不解锁、不击穿闩锁', async () => {
+    // 新建工作区 language 为空（Rust 端 String::new()）→ 走 getDefaultLanguage
+    // 分支（配置缓存冷时是真实 IPC）—— apply 块在此 await 期间可被取代
+    let resolveLang!: (v: string) => void
+    configService.getDefaultLanguage.mockImplementation(
+      () =>
+        new Promise<string>((res) => {
+          resolveLang = res
+        }),
+    )
+    const loadResolvers: Array<(ws: Workspace) => void> = []
+    workspaceService.loadWorkspace.mockImplementation(
+      () =>
+        new Promise<Workspace>((res) => {
+          loadResolvers.push(res)
+        }),
+    )
+    const store = useWorkspaceStore()
+    const loadB = store.loadWorkspace('1', 'pB')
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1))
+
+    // B 的 IPC 先落定（此刻 B 仍是最新代际），进入 apply 阶段挂在 getDefaultLanguage 上
+    loadResolvers[0](
+      wsFixture({ files: { 'main.cpp': 'B-code' }, activeFile: 'main.cpp', language: '' }),
+    )
+    await vi.waitFor(() => expect(configService.getDefaultLanguage).toHaveBeenCalled())
+
+    // B 挂在语言解析上，此刻发起 C（gen++）—— C 的 IPC 排在 B 的 turn 之后
+    const loadC = store.loadWorkspace('1', 'pC')
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(2))
+
+    // B 的语言解析返回时已被 C 取代：不得应用任何字段、不得解锁
+    resolveLang('C++')
+    await loadB
+    expect(store.workspace).toBeNull()
+    expect(store.code).toBe('')
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    // C 完成：正常应用并解锁
+    loadResolvers[1](
+      wsFixture({ files: { 'main.cpp': 'C-code' }, activeFile: 'main.cpp' }),
+    )
+    await loadC
+    expect(store.code).toBe('C-code')
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
+
   it('flush 期间已有更新的切题发起：过期加载不再发起 IPC', async () => {
     const flushResolvers: Array<(v: unknown) => void> = []
     workspaceService.updateWorkspaceFile.mockImplementation(

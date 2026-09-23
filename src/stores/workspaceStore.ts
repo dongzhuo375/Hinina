@@ -121,13 +121,17 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 无法自愈（PR21-8 评审二轮）
         const ws = await turn
         if (gen !== loadGeneration || !ws) return
-        this.workspace = ws
 
-        // 工作区元数据可能残留历史 Monaco id（'cpp'），统一归一为 HOJ 显示名；
-        // 未记录语言时用配置的默认语言，兜底 "C++"
+        // 元数据语言解析在 language 为空（新建工作区恒如此，Rust 端
+        // `language: String::new()`）时走 getDefaultLanguage —— 配置缓存冷时是
+        // 真实 IPC。必须先于任何 store 写入完成：await 期间被新加载取代则整体
+        // 放弃，不留半套字段（apply 块因此真正原子，评审三轮）
         const metaLanguage = ws.language
           ? normalizeHojLanguage(ws.language)
           : await configService.getDefaultLanguage()
+        if (gen !== loadGeneration) return
+
+        this.workspace = ws
 
         // 当前代码文件以 `activeFile` 为**权威源**（后端已持久化到 workspace.json）。
         // 回退链只服务于历史工作区（meta 无该字段）：当前语言派生名 → 已知代码后缀探测。
@@ -164,15 +168,18 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 其余代码文件都是过期残留，静默清理（失败仅记日志，下次加载重试）
         void this.purgeStaleCodeFiles()
 
-        // 仅成功路径解锁：失败路径保持锁定（见 catch）—— 评审二轮
-        this.isLoadingWorkspace = false
+        // 仅成功路径解锁，且带代际守卫（评审三轮）：apply 块此后再无 await，
+        // 守卫属防御性加固 —— 防未来引入其他 await 后过期加载提前解锁、
+        // 击穿失败闩锁
+        if (gen === loadGeneration) this.isLoadingWorkspace = false
       } catch (e) {
         // 最新一次加载失败：单飞队列下更早的过期加载可能已在后端完成切换（其
         // 结果被代际检查丢弃），此刻后端 current 与 store 是否一致不可知 ——
         // 保持加载锁，杜绝解锁后的防抖推送把 store 代码写进后端实际工作区
-        //（跨工作区写入）。编辑器只读 + 视图层错误提示（含重试），下次加载
-        // 成功即解锁
+        //（跨工作区写入）。显式重置标志（而非仅「不清除」）：防御任何路径上
+        // 的提前解锁。编辑器只读 + 视图层错误提示（含重试），下次加载成功即解锁
         if (gen === loadGeneration) {
+          this.isLoadingWorkspace = true
           log.error('工作区加载失败，编辑器保持锁定直至下次加载成功:', e)
         }
         throw e
