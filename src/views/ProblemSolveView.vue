@@ -240,6 +240,10 @@ const editorPrefs = ref<EditorPrefs | null>(null)
 const currentProblemId = computed(() => problemStore.currentProblem?.id ?? null)
 
 async function handleSubmit() {
+  // 加载编排未完成时拒绝提交（isLoadingPage 覆盖 loadWorkspace 与 openProblem
+  // 全程）：此间隙 workspaceStore.code 已是新题代码而 problemStore.currentProblem
+  // 仍是旧题，放行会把新题代码提交到旧题题号下（PR21-8 评审）
+  if (isLoadingPage) return
   const contestId = contestStore.contest?.id
   const problem = problemStore.currentProblem
   if (!contestId || !problem || submissionStore.isSubmitting) return

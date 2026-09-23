@@ -19,7 +19,7 @@
 | `splitRatio` | ref | 初始值经 `configService.getSplitRatio()` 从配置读取（P55 消费落地；异步到达时若用户已拖拽则不覆盖） |
 | `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例钳制 0.3–0.7，拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
 | `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.updateConfig` 写回配置（下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
-| `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, displayId, workspaceStore.language, workspaceStore.code)`，其中 `displayId` 取路由参数（比赛内题号 "A"）—— **HOJ 提交接口认的是它而不是数字 pid**；轮询由 store 自动启动 |
+| `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, displayId, workspaceStore.language, workspaceStore.code)`，其中 `displayId` 取路由参数（比赛内题号 "A"）—— **HOJ 提交接口认的是它而不是数字 pid**；轮询由 store 自动启动。**`isLoadingPage` 时直接拒绝**（PR21-8 评审：加载编排覆盖 loadWorkspace 与 openProblem 全程，此间隙 `workspaceStore.code` 已是新题代码而 `problemStore.currentProblem` 仍是旧题，放行会把新题代码提交到旧题题号下） |
 | `cursor` | ref | Monaco 光标位置（CodeEditor emit → 本视图 → EditorConsoleBar prop，单向数据流） |
 | `flushToDisk` | `(reason: string) => Promise<void>` | `workspaceStore.saveWorkspace()`（内部先推送在途改动再落盘）；带 `flushingToDisk` 去重，失败只 `log.error` 不打断使用 |
 | `onVisibilityChange` / `onWindowBlur` | `() => void` | 页面隐藏（`visibilitychange` → hidden）与窗口失焦（`blur`）时落盘；`onMounted` 注册、`onBeforeUnmount` 注销并**再落盘一次**（离开解题页） |

@@ -10,13 +10,13 @@
 
 ## 核心类型/函数
 
-常量：`CODE_FILE_EXTENSIONS` = `utils/language` 的 `SOURCE_FILE_EXTENSIONS`（探测历史工作区代码文件的后缀清单，**从识别面唯一来源派生**防漂移；新文件名一律经 `sourceFileNameOf` 从语言派生）；`SYNC_DEBOUNCE_MS` = 2000。模块级副作用句柄（**不进响应式 state**，见 `utils/polling` 的句柄约定）：`let syncTimer`（防抖句柄）、`let lastPersistedRevision = 0`（**最近一次被接受的落盘修订号** —— 落盘水位）、`let lastPushedRevision = 0`（**最近一次推送给后端内存的修订号**）。语言权威值为 **HOJ 显示名**（"C++" 等，见 `utils/language`）。
+常量：`CODE_FILE_EXTENSIONS` = `utils/language` 的 `SOURCE_FILE_EXTENSIONS`（探测历史工作区代码文件的后缀清单，**从识别面唯一来源派生**防漂移；新文件名一律经 `sourceFileNameOf` 从语言派生）；`SYNC_DEBOUNCE_MS` = 2000。模块级副作用句柄（**不进响应式 state**，见 `utils/polling` 的句柄约定）：`let syncTimer`（防抖句柄）、`let lastPersistedRevision = 0`（**最近一次被接受的落盘修订号** —— 落盘水位）、`let lastPushedRevision = 0`（**最近一次推送给后端内存的修订号**）、`let loadGeneration = 0`（**加载代际计数器** —— 并发 `loadWorkspace` 只认最新一次）、`let loadQueue`（**加载 IPC 单飞队列** —— 保证后端 `find_or_create` 完成顺序与发起顺序一致）。语言权威值为 **HOJ 显示名**（"C++" 等，见 `utils/language`）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | state | `workspace` / `activeFile` / `code` / `language`（默认 'C++'）/ `isDirty` / `syncPending` / `isLoadingWorkspace` | `activeFile` = **当前代码文件名（权威源）**，读写都锚定它；`isDirty` = 有改动尚未落盘；`syncPending` = 有改动尚未推送到后端内存（防抖窗口内）；`isLoadingWorkspace` = 工作区加载在途（PR21-8：期间编辑器只读、输入拒收，ProblemSolveView 绑定为 CodeEditor 的 `locked`） |
 | `currentCode` / `currentLanguage` | getters | 编辑器当前代码与语言 |
-| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **置位 `isLoadingWorkspace`（try/finally 复位，加载失败也解锁）** → **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测 —— `files` 来自 HashMap 序列化、键序不稳定，只靠探测可能加载出「旧语言代码 + 新语言元数据」）；language 与文件扩展名矛盾时**以文件为准**并 `warn`（判题端按后缀判语言）；恢复 isDirty；随后 `void purgeStaleCodeFiles()`（历史多文件收敛，P62）。**加载在途拒收一切输入（PR21-8）**：慢加载窗口内编辑器仍显示旧题代码，中途敲键属旧题上下文，随加载结果被覆盖是预期；「保留用户输入」更坏（旧题文本经防抖推到新工作区文件名下，跨工作区错配），正解是编辑器只读（CodeEditor `locked`）+ store 拒收（`updateCode` / `changeLanguage` 守卫）双保险 |
+| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **`const gen = ++loadGeneration` + 置位 `isLoadingWorkspace`（try/finally 中仅 `gen === loadGeneration` 才复位 —— 并发在途时先完成者不得提前解锁）** → **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ **flush 后代际检查**（已有更新切题则本次作废，不发 IPC）→ **加载 IPC 经 `loadQueue` 单飞**（等前一次落定再发起；轮到时已非最新代际则跳过 IPC —— `load_workspace` 是 async 命令，并发乱序完成会让后端 current 停在旧工作区而 store 已切新工作区，解锁后的防抖推送就会把新题代码写进旧工作区目录）→ **IPC 后代际检查**（迟到结果作废，不覆盖 store）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测 —— `files` 来自 HashMap 序列化、键序不稳定，只靠探测可能加载出「旧语言代码 + 新语言元数据」）；language 与文件扩展名矛盾时**以文件为准**并 `warn`（判题端按后缀判语言）；恢复 isDirty；随后 `void purgeStaleCodeFiles()`（历史多文件收敛，P62）。**加载在途拒收一切输入（PR21-8）**：慢加载窗口内编辑器仍显示旧题代码，中途敲键属旧题上下文，随加载结果被覆盖是预期；「保留用户输入」更坏（旧题文本经防抖推到新工作区文件名下，跨工作区错配），正解是编辑器只读（CodeEditor `locked`）+ store 拒收（`updateCode` / `changeLanguage` 守卫）双保险 |
 | `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；仅当「推送成功 **且** 期间无新改动（`!syncPending`）」才清 `isDirty`（推送失败 → 内容未进后端；期间又落键 → 最新改动连后端内存都还没到，清脏会显示假「已自动备份」） |
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + `isDirty = true` + `syncPending = true` + `scheduleSync()`；**`isLoadingWorkspace` 时拒收**（PR21-8：Monaco 只读是第一道防线，此处兜住工具条清空/上传等绕过键盘的程序化路径） |
 | `scheduleSync` | `() => void` | 重置 2s 定时器，到点调用 `flushPendingSync()` |
@@ -81,8 +81,11 @@ changeLanguage(lang)
                                              //（同族切换派生名不变也执行，顺带收敛历史遗留）
 
 loadWorkspace(contestId, problemId)
-  → isLoadingWorkspace = true                // try/finally 复位（加载失败也解锁）
-  → flushPendingSync() → 加载 → activeFile 解析（权威源 + 历史回退链）
+  → gen = ++loadGeneration + isLoadingWorkspace = true
+  → flushPendingSync() → 代际检查（过期则作废，不发 IPC）
+  → loadQueue 单飞发起加载 IPC → 代际检查（迟到结果作废，不覆盖 store）
+  → activeFile 解析（权威源 + 历史回退链）
+  → finally: 仅 gen === loadGeneration 才复位 isLoadingWorkspace
   → void purgeStaleCodeFiles()                // 历史多文件工作区收敛（P62）
 ```
 
@@ -96,6 +99,16 @@ loadWorkspace(contestId, problemId)
   下）。`isLoadingWorkspace` 由 try/finally 复位，加载失败不会留下死锁的只读编辑器。
   加载期间的失焦/页面隐藏落盘（`flushToDisk`）无需守卫：两个守卫保证 `syncPending`
   在加载期间不可能置位，flush 空转、后端 `save_workspace` 对 clean 工作区是无操作。
+- **并发切题的代际 + 单飞（PR21-8 评审加固）**：快速切题 A→B→C 时 B、C 两次加载并发
+  在途。**代际计数器** `loadGeneration`：B 先完成不得复位加载锁（否则 C 的 IPC 仍在飞，
+  三层防线提前全部失效）、迟到结果不得覆盖 store（两处代际检查：flush 后、IPC 后）；
+  **单飞队列** `loadQueue`：`load_workspace` 是 async 命令，并发 `find_or_create` 乱序
+  完成会让后端 current 停在旧工作区而 store 已切新工作区 —— 解锁后的防抖推送就会把
+  新题代码写进旧工作区目录；串行化保证后端切换顺序与发起顺序一致，轮到时已过期的
+  turn 直接跳过 IPC（不产生多余的后端切换），队列吞错（单次失败不阻塞后续切题，错误
+  经 turn 向调用方传播）。加载锁横跨整个并发窗口还带来一个推论：锁期间 `syncPending`
+  不可能置位，因此所有 flush 都空转，不存在「flush 携带旧题内容写到已切换的后端」的
+  窗口 —— 携带内容的只有第一次 flush，它必然落在任何加载 IPC 之前（后端还在旧工作区）。
 - **changeLanguage 为什么乐观更新且不回滚**：语言不属于任何代码文件，防抖同步
   （updateWorkspaceFile）带不上它，必须走独立的 `set_workspace_language` 立即落盘——
   否则切题/重启后退回默认语言，Java 代码被当 C++ 提交。持久化失败时**阻断切换比

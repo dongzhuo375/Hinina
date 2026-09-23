@@ -473,6 +473,89 @@ describe('loadWorkspace — 加载在途拒收输入（PR21-8）', () => {
     await loading
     expect(store.language).toBe('C++')
   })
+
+  it('并发加载：先完成者不解锁、迟到结果不覆盖 store（代际检查）', async () => {
+    const resolvers: Array<(ws: Workspace) => void> = []
+    workspaceService.loadWorkspace.mockImplementation(
+      () =>
+        new Promise<Workspace>((res) => {
+          resolvers.push(res)
+        }),
+    )
+    const store = useWorkspaceStore()
+    const loadB = store.loadWorkspace('1', 'pB')
+    // 等 B 的 IPC 真正在途后再发起 C：C 的 turn 排队等 B 落定（单飞队列）
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1))
+    const loadC = store.loadWorkspace('1', 'pC')
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    // B 先完成：不得复位加载锁（C 的 IPC 仍在飞），迟到结果不得覆盖 store
+    resolvers[0](wsFixture({ files: { 'main.cpp': 'B-code' }, activeFile: 'main.cpp' }))
+    await loadB
+    expect(store.isLoadingWorkspace).toBe(true)
+    expect(store.code).toBe('')
+
+    // C 完成：解锁并应用 C 的结果
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(2))
+    resolvers[1](wsFixture({ files: { 'main.cpp': 'C-code' }, activeFile: 'main.cpp' }))
+    await loadC
+    expect(store.isLoadingWorkspace).toBe(false)
+    expect(store.code).toBe('C-code')
+  })
+
+  it('并发加载：最新一次失败时解锁并向上抛错，先完成者不复位也不覆盖', async () => {
+    const resolvers: Array<(ws: Workspace) => void> = []
+    const rejectors: Array<(e: unknown) => void> = []
+    workspaceService.loadWorkspace.mockImplementation(
+      () =>
+        new Promise<Workspace>((res, rej) => {
+          resolvers.push(res)
+          rejectors.push(rej)
+        }),
+    )
+    const store = useWorkspaceStore()
+    const loadB = store.loadWorkspace('1', 'pB')
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1))
+    const loadC = store.loadWorkspace('1', 'pC')
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    resolvers[0](wsFixture({ files: { 'main.cpp': 'B-code' }, activeFile: 'main.cpp' }))
+    await loadB
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(2))
+    rejectors[1](new Error('IPC 故障'))
+    await expect(loadC).rejects.toThrow('IPC 故障')
+    expect(store.isLoadingWorkspace).toBe(false)
+    expect(store.code).toBe('')
+  })
+
+  it('flush 期间已有更新的切题发起：过期加载不再发起 IPC', async () => {
+    const flushResolvers: Array<(v: unknown) => void> = []
+    workspaceService.updateWorkspaceFile.mockImplementation(
+      () =>
+        new Promise((res) => {
+          flushResolvers.push(res)
+        }),
+    )
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ files: { 'main.cpp': 'C-code' }, activeFile: 'main.cpp' }),
+    )
+    const store = useWorkspaceStore()
+    store.updateCode('pending edit') // syncPending = true，两次 flush 一并挂起
+    const loadB = store.loadWorkspace('1', 'pB')
+    const loadC = store.loadWorkspace('1', 'pC')
+    await vi.waitFor(() => expect(workspaceService.updateWorkspaceFile).toHaveBeenCalledTimes(2))
+
+    flushResolvers.forEach((r) => r(undefined))
+    await loadB
+    await loadC
+    // B 在 flush 后已过期：不发 IPC（由最新加载负责）；只有 C 的加载 IPC 落地
+    expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1)
+    expect(workspaceService.loadWorkspace).toHaveBeenCalledWith('1', 'pC')
+    expect(store.code).toBe('C-code')
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
 })
 
 describe('cancelPendingSync — 登出丢弃在途改动', () => {
