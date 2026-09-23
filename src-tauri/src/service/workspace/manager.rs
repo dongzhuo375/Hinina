@@ -541,16 +541,6 @@ impl WorkspaceManager {
         Ok(())
     }
 
-    /// 崩溃恢复：启动时扫描所有已有的工作区文件并恢复。
-    ///
-    /// 当前实现为 stub —— WorkspaceRepository 没有 list_all_workspaces 方法。
-    /// 恢复功能将在 Storage 层补充目录扫描能力后完善。
-    pub fn recover_all(&self) -> AppResult<Vec<Workspace>> {
-        debug!("崩溃恢复：当前阶段为 stub");
-        // TODO: 需要 Storage::list_dirs() 或 WorkspaceRepository::list_workspaces()
-        Ok(Vec::new())
-    }
-
     // ── 文件操作 ──
 
     /// 更新当前工作区中的文件内容：**只写内存**，标记 dirty 并递增修订号，

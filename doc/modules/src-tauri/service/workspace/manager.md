@@ -1,9 +1,11 @@
 # manager
 
 ## 职责
-Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换、保存、自动保存、销毁以及崩溃恢复，是工作区服务的核心组件。
+Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换、保存、自动保存、销毁，是工作区服务的核心组件。
 
 **落盘语义（debounce-to-memory）**：内存副本是唯一权威源 —— `update_file` 只写内存并标脏，磁盘写入只有两条路径：显式 `save()`（前端在切题 / 失焦 / 关窗时编排）与后台 auto-save 周期。因此「自动保存间隔」真正决定落盘频率，且**任何替换 `current` 的操作都必须先把旧工作区落盘**（`save_current_if_dirty`）。
+
+**崩溃恢复语义（刻意不做启动时全量恢复，2026-09-23 裁决）**：崩溃后代码已在磁盘上（auto-save 周期 + 切题/失焦/关窗显式 `save`），恢复走**惰性路径**——选手重新点开题目时由 `find_or_create` 按 contest + problem 匹配加载。不实现启动时全量扫描恢复（原 `recover_all` stub 已删除，删除前即无任何调用者）：全量加载所有工作区浪费内存，比赛场景下按题导航本就是选手的自然路径，启动提示「哪些题有未保存内容」属于锦上添花而非正确性需求。
 
 ## 核心类型/函数
 - **`WorkspaceManager`** — 工作区管理器
@@ -20,7 +22,6 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换�
   - `fn stop_auto_save(&self) -> ()` — 停止自动保存：take 出 `auto_save_handle` 中的 JoinHandle 并 abort
   - `fn switch(&self, workspace_id, root_path) -> AppResult<Workspace>` — 切换工作区：先 `save_current_if_dirty()` → `load()` 目标。**不发布事件**：切换由前端经 IPC 发起，返回值即真值；切换前对旧工作区的显式保存本身会发布 `WorkspaceSaved`（前端据此清脏，并按 `workspace_id` / `revision` 过滤掉不属于当前工作区的过期事件）
   - `fn destroy(&self, workspace_id) -> AppResult<()>` — 销毁工作区：删除所有文件 → 若为当前则清空 current
-  - `fn recover_all(&self) -> AppResult<Vec<Workspace>>` — 崩溃恢复（当前 stub，返回空 Vec，待 Storage 层补充目录扫描能力）
   - `fn update_file(&self, file_name, content) -> AppResult<u64>` — 更新当前工作区文件：**只写内存** HashMap + **把该文件记为 `active_file`（当前代码文件的权威源）** + mark_dirty + 在写锁内递增修订号（`revision`），**不落盘**（落盘由 `save` / auto-save 负责）。**返回本次内容被赋予的修订号**（`fetch_add(1) + 1`），供命令层原样回传前端：前端把它记为 `lastPushedRevision`，用于判断落盘事件是否落后于编辑器已推送的内容（落后则不清脏，避免假「已自动备份」）。写入路径的权威源由它承担后，调用方不必再按语言派生文件名（派生会让语言切换后的写入落到别的文件上）
   - `fn get_file(&self, file_name) -> AppResult<String>` — 获取文件内容：优先内存 HashMap，未命中回退磁盘读取
   - `fn delete_file(&self, file_name) -> AppResult<()>` — 删除当前工作区中的文件（P62：按文件删除能力，供旧代码文件清理）。**守卫**（比较一律经 `guard_equivalent` 归一 —— 小写化 + 剥离尾随点/空格：Windows 把 "Workspace.json" / "MAIN.JAVA" 等变体名解析到同一文件，精确字符串比较会被绕过）：拒绝删除 `active_file`（选手当前代码，清理只针对过期文件）与 `workspace.json`（元数据被删会让工作区无法加载）。**顺序刻意为先删磁盘、成功后再移除内存**：磁盘删除失败时内存保持原样、`save()` 仍会写出该文件，内存与磁盘始终一致（反序会出现「内存已无、磁盘残留」的幽灵文件，下次加载时复活）。不递增修订号、不置脏（删除是即时持久化操作，无待落盘内容）、不发布事件（与 create / load / switch 同一先例：前端发起、返回值即真值）；无当前工作区时报 `AppError::Workspace`
