@@ -34,6 +34,20 @@ let lastPersistedRevision = 0
 /// 登出/切换账号时同样由 `cancelPendingSync` 归零。
 let lastPushedRevision = 0
 
+/// 加载代际计数器：并发 `loadWorkspace` 只认最新一次（模块级副作用句柄）。
+///
+/// 快速切题 A→B→C 时 B、C 两次加载并发在途：B 先完成不得复位加载锁（否则
+/// C 的 IPC 仍在飞，只读锁与输入守卫全部提前失效），也不得把 B 的迟到结果
+/// 覆盖进 store。
+let loadGeneration = 0
+
+/// 加载 IPC 单飞队列：保证后端 `find_or_create` 的完成顺序与发起顺序一致。
+///
+/// `load_workspace` 是 async 命令，并发在途时乱序完成会让后端 current 停在
+/// 旧工作区而 store 已切到新工作区 —— 解锁后的防抖推送就会把新题代码写进
+/// 旧工作区目录（跨工作区错配）。串行化后，迟到结果由代际检查丢弃。
+let loadQueue: Promise<unknown> = Promise.resolve()
+
 /**
  * 工作区 store —— 代码的「内存 → 磁盘」两级状态机。
  *
@@ -59,6 +73,8 @@ export const useWorkspaceStore = defineStore('workspace', {
     isDirty: false,
     /// 有改动尚未推送到后端内存（防抖窗口内）
     syncPending: false,
+    /// 工作区加载进行中（loadWorkspace 在途）：期间编辑器只读、输入拒收（PR21-8）
+    isLoadingWorkspace: false,
   }),
 
   getters: {
@@ -75,49 +91,99 @@ export const useWorkspaceStore = defineStore('workspace', {
       // 本方法整体替换 code / language / workspace：在途的未推送改动必须先推送，
       // 否则加载结果会覆盖 store.code，随后防抖回调再把**旧内容**推给后端 ——
       // 「敲键 → 切视图 → 立刻切回」会因此静默丢掉最后一次编辑
-      await this.flushPendingSync()
-
-      this.workspace = await workspaceService.loadWorkspace(contestId, problemId)
-      // 工作区元数据可能残留历史 Monaco id（'cpp'），统一归一为 HOJ 显示名；
-      // 未记录语言时用配置的默认语言，兜底 "C++"
-      const metaLanguage = this.workspace.language
-        ? normalizeHojLanguage(this.workspace.language)
-        : await configService.getDefaultLanguage()
-
-      // 当前代码文件以 `activeFile` 为**权威源**（后端已持久化到 workspace.json）。
-      // 回退链只服务于历史工作区（meta 无该字段）：当前语言派生名 → 已知代码后缀探测。
       //
-      // 为什么不只按语言派生：语言切换后旧文件仍留在 `files` 里，而 `files` 来自
-      // Rust HashMap 的序列化、**键序不稳定** —— 靠「探测第一个匹配后缀」可能加载出
-      // 「旧语言代码 + 新语言元数据」的组合（提交即 CE，高亮也不符）。
-      const codeKeys = Object.keys(this.workspace.files)
-      const recorded = this.workspace.activeFile
-      const derivedName = sourceFileNameOf(metaLanguage)
-      const activeFile =
-        (recorded && codeKeys.includes(recorded) ? recorded : undefined) ??
-        (codeKeys.includes(derivedName) ? derivedName : undefined) ??
-        codeKeys.find((k) => CODE_FILE_EXTENSIONS.some((ext) => k.endsWith(ext))) ??
-        derivedName
+      // 加载在途期间拒收一切输入（PR21-8）：慢加载窗口内编辑器仍显示旧题代码，
+      // 此时的敲键属于旧题上下文，随加载结果被覆盖是预期行为；但「保留用户输入」
+      // 更坏 —— 会把旧题文本推到新工作区文件名下。正解是编辑器只读（CodeEditor
+      // locked）+ store 拒收（updateCode / changeLanguage 守卫）双保险
+      const gen = ++loadGeneration
+      this.isLoadingWorkspace = true
+      try {
+        await this.flushPendingSync()
+        // flush 期间已有更新的切题发起：本次加载作废 —— IPC 由更新的加载发起，
+        // 加载锁保持（复位由最新一次加载的 finally 负责）
+        if (gen !== loadGeneration) return
 
-      this.activeFile = activeFile
-      this.code = this.workspace.files[activeFile] ?? ''
-
-      // 语言与代码文件扩展名矛盾时**以文件为准**：判题端按后缀判定语言与 limits
-      // 倍率，元数据说 Java 而文件是 main.cpp 时按 Java 提交必然 CE。
-      const implied = hojLanguageOfFileName(activeFile)
-      this.language = implied ?? metaLanguage
-      if (implied && normalizeHojLanguage(metaLanguage) !== implied) {
-        log.warn(
-          `工作区语言元数据（${metaLanguage}）与代码文件（${activeFile}）不一致，已以文件为准`,
+        // 单飞：等前一次加载 IPC 落定再发起本次；轮到本 turn 时已非最新代际
+        // 则跳过 IPC（返回 null），不产生多余的后端工作区切换
+        const turn = loadQueue.then(async (): Promise<Workspace | null> => {
+          if (gen !== loadGeneration) return null
+          return await workspaceService.loadWorkspace(contestId, problemId)
+        })
+        // 队列吞错：单次加载失败不阻塞后续切题（错误经 turn 向本调用方传播）
+        loadQueue = turn.then(
+          () => undefined,
+          () => undefined,
         )
+        // IPC 在途期间又有更新的切题：迟到结果作废，不覆盖 store 状态。
+        // 结果经 turn 返回、此处一次性原子应用 —— 轮次内直接写 this.workspace
+        // 会留下「workspace 已是新题、code 还是旧题」的失配对，后续加载失败时
+        // 无法自愈（PR21-8 评审二轮）
+        const ws = await turn
+        if (gen !== loadGeneration || !ws) return
+
+        // 元数据语言解析在 language 为空（新建工作区恒如此，Rust 端
+        // `language: String::new()`）时走 getDefaultLanguage —— 配置缓存冷时是
+        // 真实 IPC。必须先于任何 store 写入完成：await 期间被新加载取代则整体
+        // 放弃，不留半套字段（apply 块因此真正原子，评审三轮）
+        const metaLanguage = ws.language
+          ? normalizeHojLanguage(ws.language)
+          : await configService.getDefaultLanguage()
+        if (gen !== loadGeneration) return
+
+        this.workspace = ws
+
+        // 当前代码文件以 `activeFile` 为**权威源**（后端已持久化到 workspace.json）。
+        // 回退链只服务于历史工作区（meta 无该字段）：当前语言派生名 → 已知代码后缀探测。
+        //
+        // 为什么不只按语言派生：语言切换后旧文件仍留在 `files` 里，而 `files` 来自
+        // Rust HashMap 的序列化、**键序不稳定** —— 靠「探测第一个匹配后缀」可能加载出
+        // 「旧语言代码 + 新语言元数据」的组合（提交即 CE，高亮也不符）。
+        const codeKeys = Object.keys(ws.files)
+        const recorded = ws.activeFile
+        const derivedName = sourceFileNameOf(metaLanguage)
+        const activeFile =
+          (recorded && codeKeys.includes(recorded) ? recorded : undefined) ??
+          (codeKeys.includes(derivedName) ? derivedName : undefined) ??
+          codeKeys.find((k) => CODE_FILE_EXTENSIONS.some((ext) => k.endsWith(ext))) ??
+          derivedName
+
+        this.activeFile = activeFile
+        this.code = ws.files[activeFile] ?? ''
+
+        // 语言与代码文件扩展名矛盾时**以文件为准**：判题端按后缀判定语言与 limits
+        // 倍率，元数据说 Java 而文件是 main.cpp 时按 Java 提交必然 CE。
+        const implied = hojLanguageOfFileName(activeFile)
+        this.language = implied ?? metaLanguage
+        if (implied && normalizeHojLanguage(metaLanguage) !== implied) {
+          log.warn(
+            `工作区语言元数据（${metaLanguage}）与代码文件（${activeFile}）不一致，已以文件为准`,
+          )
+        }
+
+        this.isDirty = ws.isDirty
+        this.syncPending = false
+
+        // 历史多文件工作区收敛（P62）：activeFile 已解析为权威源，
+        // 其余代码文件都是过期残留，静默清理（失败仅记日志，下次加载重试）
+        void this.purgeStaleCodeFiles()
+
+        // 仅成功路径解锁，且带代际守卫（评审三轮）：apply 块此后再无 await，
+        // 守卫属防御性加固 —— 防未来引入其他 await 后过期加载提前解锁、
+        // 击穿失败闩锁
+        if (gen === loadGeneration) this.isLoadingWorkspace = false
+      } catch (e) {
+        // 最新一次加载失败：单飞队列下更早的过期加载可能已在后端完成切换（其
+        // 结果被代际检查丢弃），此刻后端 current 与 store 是否一致不可知 ——
+        // 保持加载锁，杜绝解锁后的防抖推送把 store 代码写进后端实际工作区
+        //（跨工作区写入）。显式重置标志（而非仅「不清除」）：防御任何路径上
+        // 的提前解锁。编辑器只读 + 视图层错误提示（含重试），下次加载成功即解锁
+        if (gen === loadGeneration) {
+          this.isLoadingWorkspace = true
+          log.error('工作区加载失败，编辑器保持锁定直至下次加载成功:', e)
+        }
+        throw e
       }
-
-      this.isDirty = this.workspace.isDirty
-      this.syncPending = false
-
-      // 历史多文件工作区收敛（P62）：activeFile 已解析为权威源，
-      // 其余代码文件都是过期残留，静默清理（失败仅记日志，下次加载重试）
-      void this.purgeStaleCodeFiles()
     },
 
     /**
@@ -172,6 +238,13 @@ export const useWorkspaceStore = defineStore('workspace', {
 
     /** 更新编辑器内代码（标记脏状态 + 防抖推送到后端内存） */
     updateCode(code: string) {
+      // 加载在途时拒收（PR21-8）：Monaco 只读是第一道防线，此处兜住工具条
+      // 清空/上传等绕过键盘的程序化路径 —— 加载结果即将整体替换 code，中途
+      // 接受的输入必被覆盖，且旧题内容绝不能经防抖写进新工作区文件
+      if (this.isLoadingWorkspace) {
+        log.debug('工作区加载中，忽略编辑输入')
+        return
+      }
       this.code = code
       this.isDirty = true
       this.syncPending = true
@@ -293,6 +366,12 @@ export const useWorkspaceStore = defineStore('workspace', {
      */
     changeLanguage(lang: string) {
       if (this.language === lang) return
+      // 加载在途时拒收（PR21-8 同源）：此时切换语言会把旧题代码经 flush 推到
+      // 新派生文件名下 —— 后端若已切到新工作区，就是跨工作区的内容错配
+      if (this.isLoadingWorkspace) {
+        log.debug('工作区加载中，忽略语言切换')
+        return
+      }
       const previousFile = sourceFileNameOf(this.language)
       this.language = lang
       workspaceService.setLanguage(lang).catch((e) => {

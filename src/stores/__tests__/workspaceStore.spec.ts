@@ -388,6 +388,264 @@ describe('loadWorkspace — 替换 store 状态前先推送在途改动', () => 
   })
 })
 
+describe('loadWorkspace — 加载在途拒收输入（PR21-8）', () => {
+  /// 慢加载夹具：loadWorkspace 挂起直到手动放行，模拟 IPC 往返窗口。
+  /// `called` 在 mock 真正被调用（IPC 发起）时 resolve —— loadWorkspace 内部先
+  /// await flushPendingSync（数个微任务跳数），测试须等 `called` 后再放行
+  function deferLoad() {
+    let resolveLoad!: (ws: Workspace) => void
+    let markCalled!: () => void
+    const called = new Promise<void>((r) => {
+      markCalled = r
+    })
+    workspaceService.loadWorkspace.mockImplementation(() => {
+      markCalled()
+      return new Promise<Workspace>((res) => {
+        resolveLoad = res
+      })
+    })
+    return {
+      called,
+      release(ws: Workspace) {
+        resolveLoad(ws)
+      },
+    }
+  }
+
+  it('加载在途时 isLoadingWorkspace 为 true，完成后复位', async () => {
+    const load = deferLoad()
+    const store = useWorkspaceStore()
+    const loading = store.loadWorkspace('1', 'p1')
+    await load.called
+
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    load.release(wsFixture({ files: { 'main.cpp': CODE }, activeFile: 'main.cpp' }))
+    await loading
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
+
+  it('加载失败保持锁定（后端一致性不可知，防跨工作区写入），下次成功才解锁', async () => {
+    workspaceService.loadWorkspace.mockRejectedValue(new Error('IPC 故障'))
+    const store = useWorkspaceStore()
+
+    await expect(store.loadWorkspace('1', 'p1')).rejects.toThrow('IPC 故障')
+    // 闩锁：单飞队列下更早的过期加载可能已在后端完成切换，此刻后端 current 与
+    // store 是否一致不可知 —— 解锁后的防抖推送会把 store 代码写进后端实际工作区
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    // 下次加载成功即解锁
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ files: { 'main.cpp': CODE }, activeFile: 'main.cpp' }),
+    )
+    await store.loadWorkspace('1', 'p1')
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
+
+  it('加载在途时 updateCode 拒收：旧题敲键不进 store、不排定推送', async () => {
+    vi.useFakeTimers()
+    try {
+      const load = deferLoad()
+      const store = useWorkspaceStore()
+      const loading = store.loadWorkspace('1', 'p1')
+      await load.called
+
+      store.updateCode('hack = old problem edit')
+      expect(store.code).toBe('')
+      expect(store.syncPending).toBe(false)
+      expect(store.isDirty).toBe(false)
+
+      load.release(wsFixture({ files: { 'main.cpp': CODE }, activeFile: 'main.cpp' }))
+      await loading
+
+      // 加载结果正常落地；防抖窗口推进后也无任何推送（中途输入从未进 store）
+      expect(store.code).toBe(CODE)
+      vi.advanceTimersByTime(5_000)
+      await vi.runOnlyPendingTimersAsync()
+      expect(workspaceService.updateWorkspaceFile).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('加载在途时 changeLanguage 拒收：不发 setLanguage、不触发文件名迁移链', async () => {
+    const load = deferLoad()
+    const store = useWorkspaceStore()
+    const loading = store.loadWorkspace('1', 'p1')
+    await load.called
+
+    store.changeLanguage('Java')
+    expect(store.language).toBe('C++')
+    expect(workspaceService.setLanguage).not.toHaveBeenCalled()
+
+    load.release(wsFixture({ files: { 'main.cpp': CODE }, activeFile: 'main.cpp' }))
+    await loading
+    expect(store.language).toBe('C++')
+  })
+
+  it('并发加载：先完成者不解锁、迟到结果不覆盖 store（代际检查）', async () => {
+    const resolvers: Array<(ws: Workspace) => void> = []
+    workspaceService.loadWorkspace.mockImplementation(
+      () =>
+        new Promise<Workspace>((res) => {
+          resolvers.push(res)
+        }),
+    )
+    const store = useWorkspaceStore()
+    const loadB = store.loadWorkspace('1', 'pB')
+    // 等 B 的 IPC 真正在途后再发起 C：C 的 turn 排队等 B 落定（单飞队列）
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1))
+    const loadC = store.loadWorkspace('1', 'pC')
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    // B 先完成：不得复位加载锁（C 的 IPC 仍在飞），迟到结果不得覆盖 store
+    resolvers[0](wsFixture({ files: { 'main.cpp': 'B-code' }, activeFile: 'main.cpp' }))
+    await loadB
+    expect(store.isLoadingWorkspace).toBe(true)
+    expect(store.code).toBe('')
+    // 原子应用：迟到结果在轮次内不触碰 workspace，不留下失配对
+    expect(store.workspace).toBeNull()
+
+    // C 完成：解锁并应用 C 的结果
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(2))
+    resolvers[1](wsFixture({ files: { 'main.cpp': 'C-code' }, activeFile: 'main.cpp' }))
+    await loadC
+    expect(store.isLoadingWorkspace).toBe(false)
+    expect(store.code).toBe('C-code')
+  })
+
+  it('并发加载：最新一次失败时保持锁定并向上抛错，先完成者不复位也不覆盖', async () => {
+    const resolvers: Array<(ws: Workspace) => void> = []
+    const rejectors: Array<(e: unknown) => void> = []
+    workspaceService.loadWorkspace.mockImplementation(
+      () =>
+        new Promise<Workspace>((res, rej) => {
+          resolvers.push(res)
+          rejectors.push(rej)
+        }),
+    )
+    const store = useWorkspaceStore()
+    const loadB = store.loadWorkspace('1', 'pB')
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1))
+    const loadC = store.loadWorkspace('1', 'pC')
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    resolvers[0](wsFixture({ files: { 'main.cpp': 'B-code' }, activeFile: 'main.cpp' }))
+    await loadB
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(2))
+    rejectors[1](new Error('IPC 故障'))
+    await expect(loadC).rejects.toThrow('IPC 故障')
+    // 失败闩锁：后端 current 与 store 一致性不可知，保持锁定防跨工作区写入
+    expect(store.isLoadingWorkspace).toBe(true)
+    expect(store.code).toBe('')
+  })
+
+  it('并发加载：B 迟到结果不写入 workspace，C 失败后无失配对且保持锁定', async () => {
+    const resolvers: Array<(ws: Workspace) => void> = []
+    const rejectors: Array<(e: unknown) => void> = []
+    workspaceService.loadWorkspace.mockImplementation(
+      () =>
+        new Promise<Workspace>((res, rej) => {
+          resolvers.push(res)
+          rejectors.push(rej)
+        }),
+    )
+    const store = useWorkspaceStore()
+    const loadB = store.loadWorkspace('1', 'pB')
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1))
+    const loadC = store.loadWorkspace('1', 'pC')
+
+    resolvers[0](wsFixture({ files: { 'main.cpp': 'B-code' }, activeFile: 'main.cpp' }))
+    await loadB
+    // 原子应用：B 的迟到结果不进入 store（workspace 与 code 保持一致配对）
+    expect(store.workspace).toBeNull()
+    expect(store.code).toBe('')
+
+    rejectors[1](new Error('IPC 故障'))
+    await expect(loadC).rejects.toThrow('IPC 故障')
+    // 失败闩锁 + 无失配对：解锁后的防抖推送（跨工作区写入）不可能发生
+    expect(store.isLoadingWorkspace).toBe(true)
+    expect(store.workspace).toBeNull()
+    expect(store.code).toBe('')
+  })
+
+  it('apply 阶段的 await 期间被新加载取代：过期加载不应用字段、不解锁、不击穿闩锁', async () => {
+    // 新建工作区 language 为空（Rust 端 String::new()）→ 走 getDefaultLanguage
+    // 分支（配置缓存冷时是真实 IPC）—— apply 块在此 await 期间可被取代
+    let resolveLang!: (v: string) => void
+    configService.getDefaultLanguage.mockImplementation(
+      () =>
+        new Promise<string>((res) => {
+          resolveLang = res
+        }),
+    )
+    const loadResolvers: Array<(ws: Workspace) => void> = []
+    workspaceService.loadWorkspace.mockImplementation(
+      () =>
+        new Promise<Workspace>((res) => {
+          loadResolvers.push(res)
+        }),
+    )
+    const store = useWorkspaceStore()
+    const loadB = store.loadWorkspace('1', 'pB')
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1))
+
+    // B 的 IPC 先落定（此刻 B 仍是最新代际），进入 apply 阶段挂在 getDefaultLanguage 上
+    loadResolvers[0](
+      wsFixture({ files: { 'main.cpp': 'B-code' }, activeFile: 'main.cpp', language: '' }),
+    )
+    await vi.waitFor(() => expect(configService.getDefaultLanguage).toHaveBeenCalled())
+
+    // B 挂在语言解析上，此刻发起 C（gen++）—— C 的 IPC 排在 B 的 turn 之后
+    const loadC = store.loadWorkspace('1', 'pC')
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(2))
+
+    // B 的语言解析返回时已被 C 取代：不得应用任何字段、不得解锁
+    resolveLang('C++')
+    await loadB
+    expect(store.workspace).toBeNull()
+    expect(store.code).toBe('')
+    expect(store.isLoadingWorkspace).toBe(true)
+
+    // C 完成：正常应用并解锁
+    loadResolvers[1](
+      wsFixture({ files: { 'main.cpp': 'C-code' }, activeFile: 'main.cpp' }),
+    )
+    await loadC
+    expect(store.code).toBe('C-code')
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
+
+  it('flush 期间已有更新的切题发起：过期加载不再发起 IPC', async () => {
+    const flushResolvers: Array<(v: unknown) => void> = []
+    workspaceService.updateWorkspaceFile.mockImplementation(
+      () =>
+        new Promise((res) => {
+          flushResolvers.push(res)
+        }),
+    )
+    workspaceService.loadWorkspace.mockResolvedValue(
+      wsFixture({ files: { 'main.cpp': 'C-code' }, activeFile: 'main.cpp' }),
+    )
+    const store = useWorkspaceStore()
+    store.updateCode('pending edit') // syncPending = true，两次 flush 一并挂起
+    const loadB = store.loadWorkspace('1', 'pB')
+    const loadC = store.loadWorkspace('1', 'pC')
+    await vi.waitFor(() => expect(workspaceService.updateWorkspaceFile).toHaveBeenCalledTimes(2))
+
+    flushResolvers.forEach((r) => r(undefined))
+    await loadB
+    await loadC
+    // B 在 flush 后已过期：不发 IPC（由最新加载负责）；只有 C 的加载 IPC 落地
+    expect(workspaceService.loadWorkspace).toHaveBeenCalledTimes(1)
+    expect(workspaceService.loadWorkspace).toHaveBeenCalledWith('1', 'pC')
+    expect(store.code).toBe('C-code')
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
+})
+
 describe('cancelPendingSync — 登出丢弃在途改动', () => {
   it('取消后时间推进不再推送（不向已失效会话写代码）', async () => {
     vi.useFakeTimers()

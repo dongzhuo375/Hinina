@@ -39,6 +39,11 @@ const viewError = computed(() => localError.value ?? problemStore.error)
 let loadToken = 0
 /// 加载进行中标记：?focus=1 的 query 监听据此让位给 load 完成后的统一消费
 let isLoadingPage = false
+/// 最近一次 openProblem 成功且为最新加载的比赛内题号 —— currentProblem 与它的
+/// 配对凭证。openProblem 失败时 problemStore 不清空（currentProblem 仍是旧题），
+/// 而 workspaceStore.code 已是新题：提交前必须校验配对，否则新题代码会提交到
+/// 旧题题号下（PR21-8 评审二轮）
+let loadedProblemDisplayId: string | null = null
 
 async function ensureContestId(): Promise<string> {
   if (!contestStore.contest) {
@@ -78,6 +83,7 @@ async function load(id: string) {
     if (token !== loadToken) return
     await problemStore.openProblem(contestId, id)
     if (token !== loadToken) return
+    loadedProblemDisplayId = id
 
     // 允许语言归位（与 QuickSubmitDialog 同款语义）：工作区/配置默认存的是规范名
     //（"C++"），服务端按题列表可能是部署变体（"C++17 (GCC 13.2)"）或不含当前语言族。
@@ -240,17 +246,24 @@ const editorPrefs = ref<EditorPrefs | null>(null)
 const currentProblemId = computed(() => problemStore.currentProblem?.id ?? null)
 
 async function handleSubmit() {
+  // 加载编排未完成时拒绝提交（isLoadingPage 覆盖 loadWorkspace 与 openProblem
+  // 全程）：此间隙 workspaceStore.code 已是新题代码而 problemStore.currentProblem
+  // 仍是旧题，放行会把新题代码提交到旧题题号下（PR21-8 评审）
+  if (isLoadingPage) return
   const contestId = contestStore.contest?.id
   const problem = problemStore.currentProblem
   if (!contestId || !problem || submissionStore.isSubmitting) return
-  // displayId 取路由参数（比赛内题号 "A"）—— HOJ 提交接口认的是它而不是数字 pid
-  const displayId = String(route.params.displayId ?? '')
+  // currentProblem 必须与路由 displayId 配对：openProblem 失败时 problemStore
+  // 不清空（currentProblem 仍是旧题），而 code 已是新题 —— 无需并发，一次失败
+  // 的切换就会造成错配（PR21-8 评审二轮）
+  if (loadedProblemDisplayId !== displayId.value) return
   try {
     // 轮询由 store 在提交成功后自动启动（终态或超时停止），此处不重复实现
+    // displayId 取路由参数（比赛内题号 "A"）—— HOJ 提交接口认的是它而不是数字 pid
     await submissionStore.submitCode(
       contestId,
       problem.id,
-      displayId,
+      displayId.value,
       workspaceStore.language,
       workspaceStore.code,
     )
@@ -300,6 +313,7 @@ async function handleSubmit() {
           :language="workspaceStore.language"
           :languages="problemStore.currentProblem?.languages ?? []"
           :is-dirty="workspaceStore.isDirty"
+          :locked="workspaceStore.isLoadingWorkspace"
           @update:model-value="workspaceStore.updateCode"
           @update:language="workspaceStore.changeLanguage"
           @cursor="cursor = $event"

@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-**props**：`modelValue: string`（代码）、`language: string`（**HOJ 显示名**，Monaco id 经 `utils/language.monacoIdOf` 派生）、`languages?: string[]`（本题允许的提交语言列表，来自题目详情；空则回退内置默认）、`isDirty: boolean`（驱动备份指示）、`readonly?: boolean`（只读模式：隐藏工具条、禁用编辑与 Ctrl+Enter 提交快捷键，供提交详情页代码查看复用）。
+**props**：`modelValue: string`（代码）、`language: string`（**HOJ 显示名**，Monaco id 经 `utils/language.monacoIdOf` 派生）、`languages?: string[]`（本题允许的提交语言列表，来自题目详情；空则回退内置默认）、`isDirty: boolean`（驱动备份指示）、`readonly?: boolean`（只读模式：隐藏工具条、禁用编辑与 Ctrl+Enter 提交快捷键，供提交详情页代码查看复用）、`locked?: boolean`（**加载锁定**，PR21-8：Monaco 只读但**工具条保留** —— 与 readonly 的「隐藏工具条」语义分立；随加载完成自动解锁，解锁时以 modelValue 回写自愈）。
 **emits**：`update:modelValue`、`update:language`、`submit`、`cursor: [{ line, column }]`、`prefs-change: [EditorPrefs]`（挂载读配置后 + 每次弹层改动后上报，供父级同步状态行等派生展示）。
 **expose**：`focus()` —— 供 `?focus=1` 快捷提交联动程序化聚焦；Monaco 未就绪时静默降级为 no-op，不抛错不阻塞。
 
@@ -31,7 +31,7 @@
 | `prefsError` | ref | 落盘失败提示，透传给 `EditorSettingsPopover` 的 `error`（成功路径不展示任何状态文案） |
 | `editorSurfaceClass` | computed | 容器底色跟随主题（`vs-dark` → `#1e1e1e`，否则白）：Monaco 实例创建前与尺寸重算瞬间不露白底。**编辑器背景本身由 Monaco 主题绘制** —— `styles/global.css` 刻意不再用 `!important` 覆写 `.margin` / `.monaco-editor-background`，否则 vs-dark 只换字色、底色仍被钉在浅色 |
 
-编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configService.getEditorPrefs()` 读取**（读取失败服务内部回退 14 / 4 / 'vs'）、JetBrains Mono 字体栈、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 readonly prop（只读时行高亮关闭）。
+编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configService.getEditorPrefs()` 读取**（读取失败服务内部回退 14 / 4 / 'vs'）、JetBrains Mono 字体栈、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 `readonly || locked`（只读时行高亮关闭；locked 响应式 —— watcher 经 `updateOptions` 翻转，解锁时 `getValue() !== modelValue` 则按 modelValue 回写，抑制 change 回流）。
 
 ## 直接依赖
 
@@ -60,6 +60,8 @@ onMounted → nextTick → applyLoadedPrefs(await configService.getEditorPrefs()
 
 watch props.modelValue → 与编辑器值不同才 setValue（抑制 change 回流）
 watch props.language → monaco.editor.setModelLanguage
+watch readonly/locked → editor.updateOptions({ readOnly })；解锁时 getValue ≠ modelValue
+                       → setValue（抑制回流，锁定窗口漏进输入的自愈回写）
 语言下拉选择 → emit update:language（父级走 workspaceStore.changeLanguage：
                本地乐观更新 + set_workspace_language 立即持久化）
 EditorSettingsPopover change/reset → handlePrefsChange → applyPrefs（即时生效）
@@ -69,6 +71,12 @@ onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补
 
 设计要点：
 
+- **locked 与 readonly 语义分立**：`readonly` 是终态只读（详情页查看，隐藏工具条、不注册
+  提交快捷键）；`locked` 是瞬态锁定（切题加载期间，PR21-8），工具条保留、解锁即恢复。
+  locked 置位到 Monaco `updateOptions` 生效之间有一个渲染 tick 窗口，漏进 Monaco 的输入
+  会被 workspaceStore 的守卫拒收（store.code 不变 → prop 不变 → modelValue watcher 不
+  触发），解锁时按 modelValue 回写自愈，保证「Monaco === store」不变式；加载成功时该
+  回写与 modelValue watcher 的 setValue 幂等重合（值已一致，直接跳过）。
 - **根节点是 flex 项（`flex-1`），消费方必须把它放进 flex 容器**：父级需自身
   `display:flex` + 确定高度（如 `flex h-[520px] flex-col overflow-hidden`）。
   放进普通块级父容器时 `flex-1` 不生效、高度退回内容高度，Monaco 会塌缩成数像素高
