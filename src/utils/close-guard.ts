@@ -18,7 +18,7 @@
  *
  * 本实现的状态机：
  * ```
- *  idle ──handleRequest()──▶ flushing ──落盘完成/超时──▶ allowing ──▶ destroy()
+ *   idle ──handleRequest()──▶ flushing ──落盘（有界多轮）/超时──▶ allowing ──▶ destroy()
  *    ▲                          │
  *    └──── 直接放行（返回 false）─┘  ← allowing 状态下再来的请求
  * ```
@@ -26,6 +26,13 @@
  * - `flushing` 收到请求：**仍然拦截**（返回 `true`）但不重复落盘 —— 不耐烦的双击
  *   不该中断在途落盘（等于零超时丢数据）；
  * - `allowing` 收到请求：放行（返回 `false`）。
+ *
+ * 落盘是**有界多轮**的（PR21-7）：单轮「捕获内容 → 写盘」期间到达的落键不在本轮
+ * 落盘内，而 destroy 后应用即退、不存在「下一次落盘」—— 每轮完成后经
+ * `shouldReflush` 复查在途改动，有新落键（或上一轮落盘失败留下脏标记）则再来
+ * 一轮，静默或轮数用尽才收尾。超时轮不重试（后端无响应时重试只会推迟关窗）；
+ * 硬超时覆盖整个循环，「一定能关上」不因多轮而弱化。残余窗口只剩最后一轮
+ * 「复查通过 → destroy」之间的毫秒级在途段（有限协议无法归零）。
  *
  * 收尾用 `destroy()` 而不是再调一次 `close()`：落盘已经完成，我们**不需要**再走
  * 一遍 close-requested 往返，而那个往返正是失效模式 2。`destroy()` 直接销毁窗口，
@@ -43,6 +50,9 @@ export const DEFAULT_FLUSH_TIMEOUT_MS = 3_000
 /** 硬超时（毫秒）：从拦截那一刻起算，到点无论如何都强制销毁窗口 */
 export const DEFAULT_HARD_TIMEOUT_MS = 5_000
 
+/** 最大落盘轮数：复查恒真的病态场景下兜底（硬超时仍是绝对上界） */
+export const DEFAULT_MAX_FLUSH_ROUNDS = 3
+
 /** 守卫状态 */
 type CloseGuardState = 'idle' | 'flushing' | 'allowing'
 
@@ -55,6 +65,13 @@ export interface CloseGuardOptions {
   destroy: () => Promise<unknown>
   flushTimeoutMs?: number
   hardTimeoutMs?: number
+  /**
+   * 一轮落盘完成后复查（PR21-7）：返回 `true` 再做一轮，把「关窗握手窗口内
+   * 到达的改动」也纳入落盘。不注入则保持单轮（既有调用方契约不变）。
+   */
+  shouldReflush?: () => boolean
+  /** 最大落盘轮数（≥1，默认 3）：复查恒真的病态场景下兜底 */
+  maxFlushRounds?: number
   /** 告警出口（默认 `console.error`；测试可注入以断言降级路径） */
   onWarn?: (message: string, error?: unknown) => void
   setTimeoutFn?: (handler: () => void, ms: number) => ReturnType<typeof setTimeout>
@@ -87,10 +104,15 @@ export function createCloseGuard(options: CloseGuardOptions): CloseGuard {
     destroy,
     flushTimeoutMs = DEFAULT_FLUSH_TIMEOUT_MS,
     hardTimeoutMs = DEFAULT_HARD_TIMEOUT_MS,
+    shouldReflush,
+    maxFlushRounds = DEFAULT_MAX_FLUSH_ROUNDS,
     onWarn = (message: string, error?: unknown) => console.error(message, error),
     setTimeoutFn = (handler, ms) => setTimeout(handler, ms),
     clearTimeoutFn = (handle) => clearTimeout(handle),
   } = options
+
+  // 轮数下限 1：配 0 会变成「从不落盘」，对关窗守卫是无意义配置
+  const maxRounds = Math.max(1, maxFlushRounds)
 
   let currentState: CloseGuardState = 'idle'
 
@@ -122,7 +144,8 @@ export function createCloseGuard(options: CloseGuardOptions): CloseGuard {
   }
 
   const runFlush = async (): Promise<void> => {
-    // 绝对上界：落盘 Promise 永不 settle 时也要能关上窗口
+    // 绝对上界：落盘 Promise 永不 settle 时也要能关上窗口。
+    // 覆盖整个多轮循环 —— 多轮不弱化「一定能关上」的保证
     const hardTimer = setTimeoutFn(() => {
       if (currentState !== 'flushing') return
       onWarn('关窗落盘超过硬超时，强制关闭窗口')
@@ -131,7 +154,8 @@ export function createCloseGuard(options: CloseGuardOptions): CloseGuard {
 
     try {
       // 落盘失败不阻断退出：卡住窗口比丢一次自动备份更糟
-      // （内容仍留在后端内存，且下次编辑会重新落盘）。
+      // （内容仍留在编辑器与后端内存；失败轮经 shouldReflush 复查后
+      // 还有有界重试，见下方循环）。
       // 用 async 包装而不是 `flush().then(_, _)`：后者接不住 **同步抛错**
       // （如 store 未就绪），异常会冲出 try 块 —— 若 finalize 被跳过，
       // 状态就永久停在 flushing（本模块要消除的失效模式 1）
@@ -142,7 +166,24 @@ export function createCloseGuard(options: CloseGuardOptions): CloseGuard {
           // 与异步 rejection 一致：静默放行
         }
       }
-      await Promise.race([safeFlush(), delay(flushTimeoutMs)])
+
+      // 有界多轮落盘（PR21-7）：单轮「捕获内容 → 写盘」期间到达的落键不在
+      // 本轮落盘内，而 destroy 后应用即退、不存在「下一次落盘」—— 每轮完成
+      // 后经 shouldReflush 复查在途改动，有则再来一轮，静默或轮数用尽才收尾。
+      // 轮数上限兜住「复查恒真」的病态场景；硬超时兜住一切
+      for (let round = 1; round <= maxRounds; round += 1) {
+        // 先到者胜：本轮落盘完成（'flushed'）或 flushTimeout 到点（'timeout'）
+        const outcome = await Promise.race([
+          safeFlush().then(() => 'flushed' as const),
+          delay(flushTimeoutMs).then(() => 'timeout' as const),
+        ])
+        // 硬超时已收尾（状态离开 flushing）→ 不得再起下一轮或重复销毁
+        if (currentState !== 'flushing') break
+        // 超时轮不重试：后端无响应时再来一轮只会推迟关窗，收尾交给 finally
+        if (outcome === 'timeout') break
+        // 静默（无新改动）或未注入复查 → 单轮行为，与既有契约一致
+        if (!shouldReflush?.()) break
+      }
     } finally {
       clearTimeoutFn(hardTimer)
       // 收尾无条件执行：任何离开 try 块的路径（含异常）都不许跳过
