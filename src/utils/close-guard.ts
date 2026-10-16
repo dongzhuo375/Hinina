@@ -38,10 +38,14 @@
  * 一遍 close-requested 往返，而那个往返正是失效模式 2。`destroy()` 直接销毁窗口，
  * 不会被本守卫再次拦截。`destroy()` 失败时才退回 `close()` 兜底。
  *
- * 双层时间上界保证「无论如何都能关上」：
- * - `flushTimeoutMs`：落盘最多等这么久，超时即进入收尾；
- * - `hardTimeoutMs`：从拦截那一刻起算的绝对上界，到点无论处于什么状态都强制收尾
- *   （兜住「落盘 Promise 永不 settle」与「收尾本身卡住」两种极端）。
+ * 时间上界保证「无论如何都能关上」：
+ * - `flushTimeoutMs`：单轮落盘最多等这么久，超时即进入收尾；
+ * - `hardTimeoutMs`：**落盘阶段**的绝对上界（从拦截那一刻起算），到点强制进入
+ *   收尾（兜住「落盘 Promise 永不 settle」）；
+ * - 收尾自带看门狗（`flushTimeoutMs`，从收尾开始起算）：`destroy()` 悬挂
+ *   （不 settle 也不抛错）时再给一次常规 `close()` 兜底 —— 与「destroy 失败
+ *   退回 close」对称：那条路处理抛错，这条处理悬挂。`close()` 也悬挂是终极
+ *   极限（JS 无法强制关窗），但此时状态已是 `allowing`，系统级关闭仍可用。
  */
 
 /** 落盘等待上限（毫秒）：超时即放行关闭，避免 IPC 无响应时窗口关不掉 */
@@ -125,10 +129,22 @@ export function createCloseGuard(options: CloseGuardOptions): CloseGuard {
    * 收尾：进入 `allowing` 并销毁窗口。
    *
    * 幂等 —— 落盘完成与硬超时可能同时到达，只有第一个生效。
+   *
+   * 自带看门狗（`flushTimeoutMs`）：`destroy()` 悬挂（不 settle 也不抛错）时
+   * 再给一次常规 `close()` 兜底 —— 与下方「destroy 失败退回 close」对称：
+   * 那条路处理 rejection，这条处理悬挂。硬超时定时器在进入收尾前已被清除，
+   * 收尾阶段由本看门狗负责。`close()` 也悬挂是终极极限（JS 无法强制关窗），
+   * 此时状态已是 `allowing`，系统级关闭仍可用。
    */
   const finalize = async (): Promise<void> => {
     if (currentState === 'allowing') return
     currentState = 'allowing'
+    const watchdog = setTimeoutFn(() => {
+      onWarn('销毁窗口超时，尝试常规关闭兜底')
+      void close().catch((closeError) => {
+        onWarn('常规关闭兜底失败（窗口可能仍处于打开状态）:', closeError)
+      })
+    }, flushTimeoutMs)
     try {
       await destroy()
     } catch (destroyError) {
@@ -140,6 +156,8 @@ export function createCloseGuard(options: CloseGuardOptions): CloseGuard {
       } catch (closeError) {
         onWarn('关闭窗口失败（窗口可能仍处于打开状态）:', closeError)
       }
+    } finally {
+      clearTimeoutFn(watchdog)
     }
   }
 
@@ -185,6 +203,8 @@ export function createCloseGuard(options: CloseGuardOptions): CloseGuard {
         if (!shouldReflush?.()) break
       }
     } finally {
+      // 硬超时只覆盖落盘循环（flushing 阶段）：收尾阶段由 finalize 自带的
+      // 看门狗兜底（destroy 悬挂 → close 兜底），故先清再收尾是安全的
       clearTimeoutFn(hardTimer)
       // 收尾无条件执行：任何离开 try 块的路径（含异常）都不许跳过
       await finalize()

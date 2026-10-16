@@ -4,14 +4,14 @@
 
 ## 职责
 
-关窗前的落盘握手：拦截 `close-requested`，把在途编辑落盘后再关闭窗口，并**保证任何失败路径下窗口最终一定能关上**。状态机与双层时间上界收敛在此，`main.ts` 只做装配（注入真实窗口操作）。
+关窗前的落盘握手：拦截 `close-requested`，把在途编辑落盘后再关闭窗口，并**保证任何失败路径下窗口最终一定能关上**。状态机、时间上界与收尾看门狗收敛在此，`main.ts` 只做装配（注入真实窗口操作）。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `DEFAULT_FLUSH_TIMEOUT_MS` | `3000` | 单轮落盘等待上限：超时即放行关闭 |
-| `DEFAULT_HARD_TIMEOUT_MS` | `5000` | 硬超时：从拦截那一刻起算的绝对上界，覆盖整个多轮循环 |
+| `DEFAULT_FLUSH_TIMEOUT_MS` | `3000` | 单轮落盘与收尾看门狗的等待上限：落盘超时即进入收尾；`destroy()` 悬挂超时则 `close()` 兜底 |
+| `DEFAULT_HARD_TIMEOUT_MS` | `5000` | 硬超时：**落盘阶段**从拦截那一刻起算的绝对上界，覆盖整个多轮循环 |
 | `DEFAULT_MAX_FLUSH_ROUNDS` | `3` | 最大落盘轮数：复查恒真的病态场景下兜底（硬超时仍是绝对上界） |
 | `CloseGuardState` | `'idle' \| 'flushing' \| 'allowing'` | 守卫状态 |
 | `CloseGuardOptions` | interface | `flush` / `close` / `destroy` / `flushTimeoutMs?` / `hardTimeoutMs?` / `shouldReflush?` / `maxFlushRounds?` / `onWarn?` / `setTimeoutFn?` / `clearTimeoutFn?` |
@@ -50,21 +50,23 @@ runFlush():
     状态已离开 flushing（硬超时已收尾）→ break
     outcome == timeout → break      // 超时轮不重试：后端无响应时重试只会推迟关窗
     !shouldReflush?.() → break      // 静默（无新改动）或未注入复查 → 单轮契约
-  清 hardTimeout
+  清 hardTimeout                    // 硬超时只覆盖落盘阶段，收尾由看门狗负责
   await finalize()
 
 finalize():                        // 幂等
   已是 allowing → return
   allowing = true
+  起看门狗（flushTimeout）：destroy 悬挂 → onWarn + close() 兜底
   await destroy()                  // 落盘已完成，不需要再走一遍 close-requested 往返
   失败 → onWarn + await close() 兜底
+  finally 清看门狗
 ```
 
 ## 设计要点
 
 - **失效模式 1（原实现「窗口无法关闭」的直接原因）**：原实现内联在 `main.ts`，用 `flushing` 布尔量表示「落盘在途」，收尾调用 `getCurrentWindow().close()`。若该调用抛错而异常被 `void` 吞掉，`flushing` 就永久停在 `true` —— 此后**每一次**点关闭都命中 `if (flushing) return`，且已在 `preventDefault()` 之后，窗口再也关不掉。本实现用状态机取代布尔量：任何路径都不得停在 `flushing`。
 - **失效模式 2（收尾依赖二次 close-requested）**：在 `close-requested` 回调里再调 `close()` 会重新触发该事件，靠标志放行；窗口此时已处于 closing 状态，事件可能根本不投递，关闭请求被静默丢弃。故收尾用 `destroy()`（绕过 `close-requested`），`destroy` 不可用（权限缺失 / 平台差异）时才退回 `close()` —— 此时状态已是 `allowing`，二次事件会被放行。
-- **双层时间上界**：`flushTimeoutMs` 保证单轮落盘不无限等待；`hardTimeoutMs` 是从拦截起算的绝对上界，覆盖整个多轮循环，兜住「落盘 Promise 永不 settle」与「收尾本身卡住」两种极端。`finalize` 幂等，两条路径同时到达不会重复销毁。
+- **时间上界与收尾看门狗**：`flushTimeoutMs` 保证单轮落盘不无限等待；`hardTimeoutMs` 是**落盘阶段**从拦截起算的绝对上界，覆盖整个多轮循环，兜住「落盘 Promise 永不 settle」。收尾阶段由 `finalize` 自带看门狗（`flushTimeoutMs`，从收尾开始起算）兜住「`destroy()` 悬挂」——到点再给一次常规 `close()` 兜底，与「destroy 失败退回 close」对称（那条路处理抛错，这条处理悬挂）；硬超时定时器在进入收尾前清除是安全的，正因为看门狗接管了收尾阶段。`close()` 也悬挂是终极极限（JS 无法强制关窗），但状态已是 `allowing`，系统级关闭仍可用。`finalize` 幂等，两条路径同时到达不会重复销毁。
 - **有界多轮重刷（PR21-7，2026-10-16 闭合）**：单轮「捕获内容 → 写盘」期间到达的落键不在本轮落盘内，而 destroy 后应用即退、不存在「下一次落盘」—— 每轮完成后经 `shouldReflush` 复查，有在途改动（或上一轮落盘失败留下脏标记）则再来一轮，静默或轮数用尽才收尾。超时轮不重试（后端无响应时重试只会推迟关窗）；硬超时已收尾后，在途轮完成也不得再起下一轮（状态检查）。残余窗口只剩最后一轮「复查通过 → destroy」之间的毫秒级在途段 —— 有限协议无法归零，归零需握手期间锁输入（复用 PR21-8 机制），属后续可选项。
 - **重复请求仍拦截**：`flushing` 期间点第二次关闭返回 `true`（拦截）但不重复落盘 —— 不耐烦的双击不该中断在途落盘（等于零超时丢数据）。
 - **依赖全注入**：不需要真实窗口即可穷尽测试「落盘成功 / 落盘抛错 / 落盘永不 settle / destroy 失败 / 两者都失败 / 重复点击 / 多轮重刷」等路径，这些正是原实现出问题的地方。
@@ -72,6 +74,6 @@ finalize():                        // 幂等
 
 ## 测试
 
-`src/utils/__tests__/close-guard.spec.ts` 锁定：落盘完成后销毁窗口、`allowing` 后放行、在途重复请求不重复落盘、落盘抛错仍放行、落盘永不 settle 由 `flushTimeoutMs` 兜底、`destroy` 失败退回 `close`、两者都失败后状态仍是 `allowing`（不再永久卡死）、硬超时是绝对上界、正常路径不重复销毁、`flushTimeoutMs` 控制放行时刻；有界重刷六契约 —— 一轮后有在途改动则再来一轮且静默后才销毁、未注入 `shouldReflush` 保持单轮、复查恒真时最多 `maxFlushRounds` 轮、失败轮经复查获得有界重试、超时轮不重刷、多轮期间硬超时仍是绝对上界且收尾后不得再起下一轮。
+`src/utils/__tests__/close-guard.spec.ts` 锁定：落盘完成后销毁窗口、`allowing` 后放行、在途重复请求不重复落盘、落盘抛错仍放行、落盘永不 settle 由 `flushTimeoutMs` 兜底、`destroy` 失败退回 `close`、两者都失败后状态仍是 `allowing`（不再永久卡死）、硬超时是绝对上界、正常路径不重复销毁、`flushTimeoutMs` 控制放行时刻；有界重刷八契约 —— 一轮后有在途改动则再来一轮且静默后才销毁、未注入 `shouldReflush` 保持单轮、复查恒真时最多 `maxFlushRounds` 轮、`maxFlushRounds=0` 钳制为 1、失败轮经复查获得有界重试、超时轮不重刷、成功轮后接超时轮直接收尾、多轮期间硬超时仍是绝对上界且收尾后不得再起下一轮；收尾看门狗两契约 —— `destroy` 悬挂时按 `flushTimeout` 兜底常规 `close`、`destroy` 正常完成时看门狗被清除不重复关闭。
 
 > 测试辅助函数 `makeGuard` 会把覆写的依赖**包成 spy 后再注入** —— 直接把 overrides 展开进 `createCloseGuard` 会让断言的是未被使用的默认 spy（测试永远看到 0 次调用），这是本轮踩过的坑。

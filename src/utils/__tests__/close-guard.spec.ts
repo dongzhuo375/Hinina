@@ -252,6 +252,43 @@ describe('关窗守卫 — 有界重刷（PR21-7）', () => {
     expect(destroy).toHaveBeenCalledTimes(1)
   })
 
+  it('maxFlushRounds=0 钳制为 1：至少落盘一轮', async () => {
+    // 配 0 会变成「从不落盘」，对关窗守卫是无意义配置，必须钳到 1
+    const { guard, flush, destroy } = makeGuard({ shouldReflush: () => true, maxFlushRounds: 0 })
+
+    guard.handleRequest()
+    await settle()
+
+    expect(flush).toHaveBeenCalledTimes(1)
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('成功轮后接超时轮：超时即收尾，不重刷也不重试', async () => {
+    // 多轮路径的超时分支：第一轮完成、复查为真起第二轮，第二轮超时 →
+    // 直接收尾（超时轮不重刷），不得起第三轮
+    vi.useFakeTimers()
+    let calls = 0
+    const shouldReflush = vi.fn(() => true)
+    const { guard, flush, destroy } = makeGuard({
+      flush: () => {
+        calls += 1
+        // 第一轮立即完成；第二轮永不 settle
+        return calls === 1 ? Promise.resolve() : new Promise(() => {})
+      },
+      shouldReflush,
+      flushTimeoutMs: 500,
+      hardTimeoutMs: 10_000,
+    })
+
+    guard.handleRequest()
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(flush).toHaveBeenCalledTimes(2)
+    expect(shouldReflush).toHaveBeenCalledTimes(1) // 只在第一轮后复查过
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(guard.state()).toBe('allowing')
+  })
+
   it('失败轮（flush 抛错）经复查获得有界重试', async () => {
     // store 侧语义：推送成功但 save_workspace 抛错 → isDirty 保持真 → 复查为真；
     // 第二轮成功后静默收尾
@@ -316,5 +353,40 @@ describe('关窗守卫 — 有界重刷（PR21-7）', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     expect(flush).toHaveBeenCalledTimes(2)
     expect(destroy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('关窗守卫 — 收尾看门狗', () => {
+  it('destroy 悬挂时按 flushTimeout 兜底常规 close', async () => {
+    // 硬超时定时器在进入收尾前已被清除，收尾阶段由 finalize 自带看门狗负责：
+    // destroy() 不 settle 也不抛错时，到点再给一次常规 close（allowing 状态下
+    // close-requested 会被放行，不会再次拦截）
+    vi.useFakeTimers()
+    const never = deferred<void>()
+    const { guard, close, destroy, warn } = makeGuard({ destroy: () => never.promise })
+
+    guard.handleRequest()
+    // 落盘立即完成 → 进入收尾，destroy 已被调用但悬挂
+    await vi.advanceTimersByTimeAsync(0)
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(close).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(3_000) // 看门狗到点（收尾起算 flushTimeout）
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith('销毁窗口超时，尝试常规关闭兜底')
+  })
+
+  it('destroy 正常完成时看门狗被清除（不重复关闭）', async () => {
+    // flushTimeoutMs 同时是看门狗时长：配短以便在真实定时器下观察「未触发」
+    const { guard, close, destroy } = makeGuard({ flushTimeoutMs: 50 })
+
+    guard.handleRequest()
+    await settle()
+    // 等过看门狗时长：destroy 已正常完成并清掉看门狗，close 不得被调用
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(close).not.toHaveBeenCalled()
   })
 })
