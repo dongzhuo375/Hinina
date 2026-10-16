@@ -135,8 +135,9 @@ discard(): Object.assign(form, JSON.parse(baseline))
 - ojUrl 修改后需重启客户端生效、contestRef 保存后下次进入赛场生效（HOJ 为数字 ID，
   其它 OJ 为资源引用；留空 = 不自动加载）——提示文案明示生效时机。
 - **自动保存开关的文案随落盘语义更新**：定时落盘是「代码从后端内存写到磁盘」的唯一周期
-  路径，关闭后只剩切题 / 失焦 / 关窗三处显式落盘（`ProblemSolveView` 与 `main.ts` 编排），
-  故提示文案写明这一后果。开关与间隔的改动**即时生效，无需重启**（P48 修复：后端
+  路径，关闭后只剩切题 / 失焦 / 离开解题页 / 关窗四处显式落盘（`ProblemSolveView` 与
+  `main.ts` 编排；2026-10-16 复核补全「离开解题页」——`ProblemSolveView` 卸载钩子同样
+  落盘，原文案漏计），故提示文案写明这一后果。开关与间隔的改动**即时生效，无需重启**（P48 修复：后端
   `update_config` / `reload_config` 在配置落盘成功后**显式**调用
   `sync_auto_save_from_context`，判据见 `commands/workspace_cmd.md`）。
 - 存储信息每次挂载实时读取（service 不缓存：版本号构建期固定，但存储目录可能随

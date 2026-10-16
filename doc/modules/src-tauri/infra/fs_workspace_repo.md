@@ -1,7 +1,7 @@
 # fs_workspace_repo
 
 ## 职责
-`WorkspaceRepository` trait 的文件系统实现，负责工作区代码的持久化存储（文件读写、递归列表、删除、存在性检查）。所有方法已完整实现并通过单元测试，基于 `Storage` 底层文件操作能力。
+`WorkspaceRepository` trait 的文件系统实现，负责工作区代码的持久化存储（文件读写、递归列表、删除、存在性检查）。所有方法已完整实现并通过单元测试，基于 `Storage` 底层文件操作能力。写入走 `Storage::write_string_atomic`（临时文件 + fsync + rename 原子替换）：工作区文件是选手唯一作品本体，写盘中途崩溃/掉电不得留下半截文件（半截源文件会被静默读入，半截 `workspace.json` 会让整个工作区加载失败）。
 
 ## 核心类型/函数
 - **`FsWorkspaceRepository`** — 文件系统工作区仓库 struct，持有 `Arc<Storage>`
@@ -11,8 +11,9 @@
 - **`validate_win32_component(component)`** — Win32 文件名组件内容校验（非法字符 / 设备名 / 尾随点空格三类拒绝）
 - **`is_reserved_device_name(component)`** — 保留设备名判定（大小写不敏感，按第一个点前的词干）
 - **`lexically_normalize(path)`** — 模块级纯函数：词法解析路径中的 `.` 与 `..`（不触文件系统、不解析符号链接）
+- **`is_atomic_write_temp(name)`** — 模块级纯函数：文件名是否为原子写临时残片（`{任意目标名}.{数字}.tmp`，命名约定同 `Storage::write_string_atomic`）。崩溃落在「写完临时文件」与 rename 之间会残留该形态的文件，`list_files` 据此排除，防止残片被 `load` 读进内存、又被 `save` 全量写回固化成正式文件；非约定命名（如 `main.cpp.tmp`）不误伤，与 `Storage::remove_stale_temps` 同款「只认约定」语义
 - **`walk_dir(dir, prefix, files)`** — 递归遍历目录，收集所有文件相对路径
-- **`save_file(workspace_id, path, content)`** — 保存工作区文件，自动创建父目录
+- **`save_file(workspace_id, path, content)`** — 保存工作区文件（**原子写**：临时文件 + fsync + rename 替换），自动创建父目录。同路径并发写由调用方串行化：`WorkspaceManager` 的锁序已保证 `save` / auto-save 写盘互斥；`set_language` 与 `save` 的元数据写理论上存在毫秒级交叠窗口，原子写把它从「内容交错损坏」降级为「其中一方收到 Io 错误、可重试」
 - **`read_file(workspace_id, path)`** — 读取工作区文件，不存在时返回 `AppError::Workspace`
 - **`list_files(workspace_id)`** — 递归列出工作区所有文件，不存在返回空列表
 - **`delete_file(workspace_id, path)`** — 删除单个工作区文件（P62 旧代码文件清理）：经 `workspace_relative()` 路径穿越校验后委托 `Storage::remove()`；文件不存在时返回 `Ok(())`（幂等，清理路径可安全重试）
@@ -32,15 +33,17 @@
 ## 逻辑流程
 目录结构为 `{storage.base_dir}/workspaces/{workspace_id}/...`。构造函数接收 `Arc<Storage>` 作为底层存储。
 
-- **save_file / read_file / delete_file**：通过 `workspace_relative()` 构建 `workspaces/{id}/{file_path}` 格式的相对路径，传入前对 `file_path` 做组件白名单 + 规范化前缀校验（见核心类型/函数），然后委托 Storage 读写删。
-- **list_files**：先检查 workspace 根目录是否存在（不存在返回空列表），再通过 `walk_dir()` 递归遍历 `std::fs::read_dir`，用字符串前缀剥离得到业务层可用的相对路径（兼容 Windows `\` 分隔符）。
+- **save_file / read_file / delete_file**：通过 `workspace_relative()` 构建 `workspaces/{id}/{file_path}` 格式的相对路径，传入前对 `file_path` 做组件白名单 + 规范化前缀校验（见核心类型/函数），然后委托 Storage 读写删。save_file 走 `write_string_atomic`：磁盘上要么是旧完整内容、要么是新完整内容，崩溃不留半截。
+- **list_files**：先检查 workspace 根目录是否存在（不存在返回空列表），再通过 `walk_dir()` 递归遍历 `std::fs::read_dir`，用字符串前缀剥离得到业务层可用的相对路径（兼容 Windows `\` 分隔符）；遍历结果过滤 `workspace.json` 与原子写临时残片（`is_atomic_write_temp`）后返回。
 - **delete_workspace**：委托 `Storage::remove_all()` 递归删除。
 - **delete_file**：经 `workspace_relative()` 校验后委托 `Storage::remove()`；先查 `Storage::exists()`，不存在直接 `Ok(())`（幂等）。
 - **exists**：委托 `Storage::exists()` 检查目录存在性。
 
-## 测试覆盖（13 项）
+## 测试覆盖（20 项，Windows 下含盘符用例）
 测试代码位于 `tests/fs_workspace_repo_tests.rs`。
 - `save_and_read_file` — 保存与读取往返
+- `save_file_leaves_no_tmp_artifact` — 原子写落盘后不残留 `{target}.{数字}.tmp`
+- `list_files_excludes_atomic_write_temp_artifacts` — 崩溃残片（约定命名）被 `list_files` 排除，非约定命名的 `.tmp` 文件不误伤
 - `read_nonexistent_file_returns_error` — 读取不存在的文件
 - `list_files_after_save` — 递归列出含子目录的文件
 - `list_files_nonexistent_workspace_returns_empty` — 不存在的工作区返回空列表
@@ -53,3 +56,4 @@
 - `rejects_non_normal_path_components` — 组件白名单：绝对路径、前导 `.`、空路径全部拒绝（读写删三个原语一致）
 - `rejects_drive_letter_paths`（仅 Windows）— 盘符前缀路径拒绝
 - `rejects_ads_device_and_trailing_variant_paths` — ADS（`workspace.json::$DATA`）、其余 Win32 非法字符、保留设备名（含扩展名变体）、尾随点/空格全部拒绝，读写删三原语一致
+- `validate_workspace_id_rejects_slash` / `validate_workspace_id_rejects_dotdot` / `validate_workspace_id_rejects_empty` / `validate_workspace_id_rejects_non_ascii` / `validate_workspace_id_accepts_valid` — workspace_id 合法性边界（`/`、`..`、空、非 ASCII 拒绝；合法形态通过）

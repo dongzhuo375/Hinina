@@ -168,7 +168,7 @@ pub async fn current_workspace(ctx: State<'_, AppContext>) -> AppResult<Option<W
 /// 前端 invoke 签名: `update_workspace_file`({ fileName, content })
 ///
 /// **只更新内存中的文件内容，不落盘**（前端 2 秒防抖的落点）：磁盘写入由
-/// auto-save 周期与显式 `save_workspace`（切题 / 失焦 / 关窗时前端编排）负责，
+/// auto-save 周期与显式 `save_workspace`（切题 / 失焦 / 离开解题页 / 关窗时前端编排）负责，
 /// 「自动保存间隔」因此真正决定落盘频率。
 ///
 /// 返回本次内容被赋予的**修订号**：前端据此比较「落盘事件的修订号」与

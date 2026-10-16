@@ -53,8 +53,8 @@ let loadQueue: Promise<unknown> = Promise.resolve()
  *
  * 落盘语义（debounce-to-memory）：编辑器改动先经 2 秒防抖推送到后端**内存**
  * （`update_workspace_file` 不写盘），磁盘写入由后端 auto-save 周期与显式
- * `save_workspace` 负责；后者由前端在**切题 / 失焦 / 关窗**时编排 —— 这三处
- * 是内存副本可能被替换或进程可能退出的时刻。因此：
+ * `save_workspace` 负责；后者由前端在**切题 / 失焦 / 离开解题页 / 关窗**时编排 ——
+ * 这四处是内存副本可能被替换或进程可能退出的时刻。因此：
  * - `syncPending`：有改动尚未推送到后端内存（防抖窗口内）
  * - `isDirty`：有改动尚未落盘（磁盘真值落后于编辑器）—— 驱动「编辑中…/已自动备份」
  *
@@ -222,7 +222,7 @@ export const useWorkspaceStore = defineStore('workspace', {
     },
 
     /**
-     * 保存当前工作区到磁盘（切题 / 失焦 / 关窗 / 手动保存的入口）。
+     * 保存当前工作区到磁盘（切题 / 失焦 / 离开解题页 / 关窗 / 手动保存的入口）。
      *
      * 顺序有意：**先把在途改动推进后端内存，再落盘** —— 反了会把旧内容写进磁盘。
      */

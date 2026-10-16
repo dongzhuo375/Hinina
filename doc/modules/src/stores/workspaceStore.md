@@ -4,7 +4,7 @@
 
 ## 职责
 
-持有当前工作区（代码、语言、脏标记、活动文件），编排编辑器与 Rust 后端之间的代码同步（2s 防抖推送**内存**）、语言切换（乐观更新 + 立即持久化）与**落盘时机**（切题 / 失焦 / 关窗由本 store 与调用点协作）。
+持有当前工作区（代码、语言、脏标记、活动文件），编排编辑器与 Rust 后端之间的代码同步（2s 防抖推送**内存**）、语言切换（乐观更新 + 立即持久化）与**落盘时机**（切题 / 失焦 / 离开解题页 / 关窗由本 store 与调用点协作）。
 
 落盘语义（debounce-to-memory）：防抖只把代码推给后端内存，磁盘写入由后端 auto-save 与显式 `save_workspace` 负责。状态因此分两级：`syncPending`（未推送到后端内存）、`isDirty`（未落盘，驱动「编辑中…/已自动备份」）。
 
@@ -17,7 +17,7 @@
 | state | `workspace` / `activeFile` / `code` / `language`（默认 'C++'）/ `isDirty` / `syncPending` / `isLoadingWorkspace` | `activeFile` = **当前代码文件名（权威源）**，读写都锚定它；`isDirty` = 有改动尚未落盘；`syncPending` = 有改动尚未推送到后端内存（防抖窗口内）；`isLoadingWorkspace` = 工作区加载在途（PR21-8：期间编辑器只读、输入拒收，ProblemSolveView 绑定为 CodeEditor 的 `locked`） |
 | `currentCode` / `currentLanguage` | getters | 编辑器当前代码与语言 |
 | `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **`const gen = ++loadGeneration` + 置位 `isLoadingWorkspace`** → **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ **flush 后代际检查**（已有更新切题则本次作废，不发 IPC）→ **加载 IPC 经 `loadQueue` 单飞**（等前一次落定再发起；轮到时已非最新代际则跳过 IPC 返回 null —— `load_workspace` 是 async 命令，并发乱序完成会让后端 current 停在旧工作区而 store 已切新工作区，解锁后的防抖推送就会把新题代码写进旧工作区目录）→ **IPC 后代际检查 + 原子应用**（迟到结果作废；结果经 turn 返回后一次性写入 store，轮次内直接写 `this.workspace` 会留下「workspace 已是新题、code 还是旧题」的失配对；**元数据语言解析在 language 为空 —— 新建工作区恒如此，Rust 端 `String::new()` —— 时走 `getDefaultLanguage`，配置缓存冷时是真实 IPC，必须先于任何 store 写入完成并在其后复查代际，否则 await 期间被取代会应用过期字段并提前解锁，apply 块因此真正原子，评审三轮**）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测 —— `files` 来自 HashMap 序列化、键序不稳定，只靠探测可能加载出「旧语言代码 + 新语言元数据」）；language 与文件扩展名矛盾时**以文件为准**并 `warn`（判题端按后缀判语言）；恢复 isDirty；随后 `void purgeStaleCodeFiles()`（历史多文件收敛，P62）。**仅成功路径解锁**：失败保持锁定（闩锁，见设计要点）。**加载在途拒收一切输入（PR21-8）**：慢加载窗口内编辑器仍显示旧题代码，中途敲键属旧题上下文，随加载结果被覆盖是预期；「保留用户输入」更坏（旧题文本经防抖推到新工作区文件名下，跨工作区错配），正解是编辑器只读（CodeEditor `locked`）+ store 拒收（`updateCode` / `changeLanguage` 守卫）双保险 |
-| `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；仅当「推送成功 **且** 期间无新改动（`!syncPending`）」才清 `isDirty`（推送失败 → 内容未进后端；期间又落键 → 最新改动连后端内存都还没到，清脏会显示假「已自动备份」） |
+| `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 离开解题页 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；仅当「推送成功 **且** 期间无新改动（`!syncPending`）」才清 `isDirty`（推送失败 → 内容未进后端；期间又落键 → 最新改动连后端内存都还没到，清脏会显示假「已自动备份」） |
 | `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + `isDirty = true` + `syncPending = true` + `scheduleSync()`；**`isLoadingWorkspace` 时拒收**（PR21-8：Monaco 只读是第一道防线，此处兜住工具条清空/上传等绕过键盘的程序化路径） |
 | `scheduleSync` | `() => void` | 重置 2s 定时器，到点调用 `flushPendingSync()` |
 | `flushPendingSync` | `() => Promise<boolean>` | 取消防抖窗口并立即把代码按 **`activeFile`**（权威源；回退 `sourceFileNameOf(language)`）推送到后端内存；返回是否成功，失败只 `log.error` 并保留 `syncPending`（调用方不应被一次 IPC 失败阻断）。**推送期间又有新改动时不清 `syncPending`**（本次推送带的是调用时刻的内容；清了会让新内容既不被本次携带、又被下次防抖短路跳过）。推送成功后把返回值记为 `lastPushedRevision`，并**补一次清脏判定**：`!syncPending && lastPersistedRevision >= revision` 时清 `isDirty` —— 落盘事件可能在推送在途时已到达（此时 `markPersisted` 因 `syncPending` 推迟清脏），而后端已 clean、后续 auto-save tick 不再发事件，不补判指示器会卡在「编辑中…」。判据方向必须是**水位 ≥ 推送**（磁盘追上编辑器）；反向会在事件未到时提前清脏，即假「已自动备份」 |
