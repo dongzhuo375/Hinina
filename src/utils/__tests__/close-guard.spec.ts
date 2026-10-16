@@ -16,6 +16,8 @@ interface Overrides {
   flush?: () => Promise<unknown>
   close?: () => Promise<unknown>
   destroy?: () => Promise<unknown>
+  shouldReflush?: () => boolean
+  maxFlushRounds?: number
   flushTimeoutMs?: number
   hardTimeoutMs?: number
 }
@@ -45,6 +47,8 @@ function makeGuard(overrides: Overrides = {}): Harness {
     close,
     destroy,
     onWarn: warn,
+    shouldReflush: overrides.shouldReflush,
+    maxFlushRounds: overrides.maxFlushRounds,
     flushTimeoutMs: overrides.flushTimeoutMs,
     hardTimeoutMs: overrides.hardTimeoutMs,
   })
@@ -207,5 +211,182 @@ describe('关窗守卫 — 时间上界', () => {
 
     await vi.advanceTimersByTimeAsync(1)
     expect(destroy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('关窗守卫 — 有界重刷（PR21-7）', () => {
+  it('一轮完成后仍有在途改动 → 再做一轮，静默后才销毁', async () => {
+    // 单轮「捕获内容 → 写盘」期间到达的落键不在本轮落盘内；
+    // 复查发现仍有在途改动 → 第二轮把它带上，第二轮后静默才收尾
+    const shouldReflush = vi.fn()
+      .mockReturnValueOnce(true) // 第一轮后：仍有在途改动
+      .mockReturnValueOnce(false) // 第二轮后：静默
+    const { guard, flush, destroy } = makeGuard({ shouldReflush })
+
+    guard.handleRequest()
+    await settle()
+
+    expect(flush).toHaveBeenCalledTimes(2)
+    expect(shouldReflush).toHaveBeenCalledTimes(2)
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(guard.state()).toBe('allowing')
+  })
+
+  it('未注入 shouldReflush 时保持单轮（既有调用方契约不变）', async () => {
+    const { guard, flush, destroy } = makeGuard()
+
+    guard.handleRequest()
+    await settle()
+
+    expect(flush).toHaveBeenCalledTimes(1)
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('复查恒真时最多 maxFlushRounds 轮后收尾（病态场景有界）', async () => {
+    const { guard, flush, destroy } = makeGuard({ shouldReflush: () => true, maxFlushRounds: 3 })
+
+    guard.handleRequest()
+    await settle()
+
+    expect(flush).toHaveBeenCalledTimes(3)
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('maxFlushRounds=0 钳制为 1：至少落盘一轮', async () => {
+    // 配 0 会变成「从不落盘」，对关窗守卫是无意义配置，必须钳到 1
+    const { guard, flush, destroy } = makeGuard({ shouldReflush: () => true, maxFlushRounds: 0 })
+
+    guard.handleRequest()
+    await settle()
+
+    expect(flush).toHaveBeenCalledTimes(1)
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('成功轮后接超时轮：超时即收尾，不重刷也不重试', async () => {
+    // 多轮路径的超时分支：第一轮完成、复查为真起第二轮，第二轮超时 →
+    // 直接收尾（超时轮不重刷），不得起第三轮
+    vi.useFakeTimers()
+    let calls = 0
+    const shouldReflush = vi.fn(() => true)
+    const { guard, flush, destroy } = makeGuard({
+      flush: () => {
+        calls += 1
+        // 第一轮立即完成；第二轮永不 settle
+        return calls === 1 ? Promise.resolve() : new Promise(() => {})
+      },
+      shouldReflush,
+      flushTimeoutMs: 500,
+      hardTimeoutMs: 10_000,
+    })
+
+    guard.handleRequest()
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(flush).toHaveBeenCalledTimes(2)
+    expect(shouldReflush).toHaveBeenCalledTimes(1) // 只在第一轮后复查过
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(guard.state()).toBe('allowing')
+  })
+
+  it('失败轮（flush 抛错）经复查获得有界重试', async () => {
+    // store 侧语义：推送成功但 save_workspace 抛错 → isDirty 保持真 → 复查为真；
+    // 第二轮成功后静默收尾
+    let calls = 0
+    const shouldReflush = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false)
+    const { guard, flush, destroy } = makeGuard({
+      flush: async () => {
+        calls += 1
+        if (calls === 1) throw new Error('IPC 抖动')
+      },
+      shouldReflush,
+    })
+
+    guard.handleRequest()
+    await settle()
+
+    expect(flush).toHaveBeenCalledTimes(2)
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('超时轮不重刷：到点即收尾', async () => {
+    // 后端无响应时重试只会推迟关窗 —— 超时轮直接交给 finally 收尾
+    vi.useFakeTimers()
+    const never = deferred<void>()
+    const shouldReflush = vi.fn(() => true)
+    const { guard, flush, destroy } = makeGuard({ flush: () => never.promise, shouldReflush })
+
+    guard.handleRequest()
+    await vi.advanceTimersByTimeAsync(3_000)
+
+    expect(flush).toHaveBeenCalledTimes(1)
+    expect(shouldReflush).not.toHaveBeenCalled()
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('多轮期间硬超时仍是绝对上界，且收尾后不得再起下一轮', async () => {
+    // 复查恒真 + 慢落盘：循环不得突破硬超时，到点强制销毁；
+    // 已收尾（状态离开 flushing）后，在途轮完成也不得再起第三轮或重复销毁
+    vi.useFakeTimers()
+    let calls = 0
+    const { guard, flush, destroy } = makeGuard({
+      flush: () => {
+        calls += 1
+        // 第一轮 100ms 完成 → 复查为真起第二轮；第二轮 2s 才完成，硬超时 1s 先到
+        return new Promise((resolve) => setTimeout(resolve, calls === 1 ? 100 : 2_000))
+      },
+      shouldReflush: () => true,
+      flushTimeoutMs: 10_000,
+      hardTimeoutMs: 1_000,
+    })
+
+    guard.handleRequest()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(flush).toHaveBeenCalledTimes(2)
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(guard.state()).toBe('allowing')
+
+    // 推进到第二轮落盘完成：状态已离开 flushing，循环必须就此打住
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(flush).toHaveBeenCalledTimes(2)
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('关窗守卫 — 收尾看门狗', () => {
+  it('destroy 悬挂时按 flushTimeout 兜底常规 close', async () => {
+    // 硬超时定时器在进入收尾前已被清除，收尾阶段由 finalize 自带看门狗负责：
+    // destroy() 不 settle 也不抛错时，到点再给一次常规 close（allowing 状态下
+    // close-requested 会被放行，不会再次拦截）
+    vi.useFakeTimers()
+    const never = deferred<void>()
+    const { guard, close, destroy, warn } = makeGuard({ destroy: () => never.promise })
+
+    guard.handleRequest()
+    // 落盘立即完成 → 进入收尾，destroy 已被调用但悬挂
+    await vi.advanceTimersByTimeAsync(0)
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(close).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(3_000) // 看门狗到点（收尾起算 flushTimeout）
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith('销毁窗口超时，尝试常规关闭兜底')
+  })
+
+  it('destroy 正常完成时看门狗被清除（不重复关闭）', async () => {
+    // flushTimeoutMs 同时是看门狗时长：配短以便在真实定时器下观察「未触发」
+    const { guard, close, destroy } = makeGuard({ flushTimeoutMs: 50 })
+
+    guard.handleRequest()
+    await settle()
+    // 等过看门狗时长：destroy 已正常完成并清掉看门狗，close 不得被调用
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(close).not.toHaveBeenCalled()
   })
 })

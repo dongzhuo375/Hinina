@@ -61,6 +61,13 @@ function installCloseFlushGuard(): void {
   const appWindow = getCurrentWindow();
   const guard = createCloseGuard({
     flush: () => useWorkspaceStore().saveWorkspace(),
+    // PR21-7：每轮落盘完成后复查在途改动 —— 关窗握手窗口内到达的落键也纳入落盘。
+    // syncPending = 防抖窗口内的新键；isDirty = 推送成功但 save_workspace 失败的轮
+    //（给瞬时故障一次有界重试）。两者皆空 = 静默，立即收尾
+    shouldReflush: () => {
+      const store = useWorkspaceStore();
+      return store.syncPending || store.isDirty;
+    },
     close: () => appWindow.close(),
     // 收尾用 destroy：落盘已完成，不需要再走一遍 close-requested 往返
     //（那个往返正是原实现「窗口关不掉」的失效点）
