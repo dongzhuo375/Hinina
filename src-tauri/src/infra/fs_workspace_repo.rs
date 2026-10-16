@@ -17,6 +17,26 @@ pub struct FsWorkspaceRepository {
     storage: Arc<Storage>,
 }
 
+/// 文件名是否为原子写临时残片（`{任意目标名}.{数字}.tmp`，命名约定见
+/// `Storage::write_string_atomic`）。
+///
+/// 崩溃落在「写完临时文件」与 `rename` 之间时，残片会按该命名约定永久留在磁盘上。
+/// `list_files` 必须把它们排除：否则残片会被 `load` 当作用户文件读进内存，
+/// 又被 `save` 的全量写回固化为正式文件（永久垃圾）。误伤面：用户文件恰好
+/// 形如 `xxx.42.tmp` —— 前端只按语言派生源文件名，不存在该形态；与
+/// `Storage::remove_stale_temps` 同款「只认约定、非约定不误伤」的语义。
+fn is_atomic_write_temp(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".tmp") else {
+        return false;
+    };
+    // stem 形如 `{target}.{seq}`：最后一个 `.` 之后为非空纯数字
+    let Some(dot) = stem.rfind('.') else {
+        return false;
+    };
+    let seq = &stem[dot + 1..];
+    !seq.is_empty() && seq.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// 词法规范化：解析路径中的 `.` 与 `..`（不触文件系统、不解析符号链接）。
 ///
 /// 供 `workspace_relative` 的前缀校验做纵深防御：输入已过组件白名单时是
@@ -172,9 +192,20 @@ impl FsWorkspaceRepository {
 }
 
 impl WorkspaceRepository for FsWorkspaceRepository {
+    /// 原子写：临时文件 + fsync + rename 替换（见 [`Storage::write_string_atomic`]）。
+    ///
+    /// 工作区文件是选手唯一作品本体，`workspace.json` 损坏会让整个工作区无法
+    /// 加载 —— 截断 + 就地写在写盘中途崩溃/掉电会留下半截文件（源文件被静默
+    /// 读入残缺内容，元数据则直接解析失败），原子替换保证磁盘上要么是旧完整
+    /// 内容、要么是新完整内容。
+    ///
+    /// 同路径并发写由调用方串行化：`WorkspaceManager` 的锁序已保证 `save` /
+    /// auto-save 的写盘互斥；`set_language` 与 `save` 的元数据写理论上存在
+    /// 毫秒级交叠窗口，原子写把它从「内容交错损坏」降级为「其中一方收到
+    /// Io 错误、可重试」。
     fn save_file(&self, workspace_id: &str, path: &Path, content: &str) -> AppResult<()> {
         let rel = self.workspace_relative(workspace_id, path)?;
-        let result = self.storage.write_string(&rel, content);
+        let result = self.storage.write_string_atomic(&rel, content);
         if let Err(ref e) = result {
             warn!(
                 workspace_id = workspace_id,
@@ -222,8 +253,15 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         let root_abs = self.storage.base_dir().join(&root);
         let mut files = Vec::new();
         Self::walk_dir(&root_abs, &root_abs, &mut files)?;
-        // 过滤内部元数据文件，避免暴露给调用方
-        files.retain(|p| p != &PathBuf::from("workspace.json"));
+        // 过滤内部元数据文件与原子写临时残片，避免暴露给调用方：
+        // 残片若被 load 读进内存，会被 save 的全量写回固化成正式文件
+        files.retain(|p| {
+            p != &PathBuf::from("workspace.json")
+                && !p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(is_atomic_write_temp)
+        });
         debug!(
             workspace_id = workspace_id,
             count = files.len(),

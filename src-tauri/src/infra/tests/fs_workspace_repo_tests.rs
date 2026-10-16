@@ -24,6 +24,42 @@ fn save_and_read_file() {
 }
 
 #[test]
+fn save_file_leaves_no_tmp_artifact() {
+    // 原子写（临时文件 + rename）落盘后不得残留 `{target}.{数字}.tmp`：
+    // 正常路径根本不产生，崩溃残片由下次同目标写入清理
+    let r = repo("atomic-no-tmp");
+    let ws = "ws-atomic";
+    r.save_file(ws, Path::new("main.cpp"), "// code").unwrap();
+
+    let files = r.list_files(ws).unwrap();
+    assert_eq!(files, vec![PathBuf::from("main.cpp")]);
+}
+
+#[test]
+fn list_files_excludes_atomic_write_temp_artifacts() {
+    // 崩溃落在「写完临时文件」与 rename 之间会残留约定命名的残片；
+    // list_files 必须排除，否则残片被 load 读进内存、又被 save 全量写回固化。
+    // 非约定命名的 .tmp 文件不得误伤（与 Storage::remove_stale_temps 同款语义）
+    let r = repo("atomic-stale");
+    let ws = "ws-stale";
+    r.save_file(ws, Path::new("main.cpp"), "// code").unwrap();
+    r.save_file(ws, Path::new("main.cpp.41.tmp"), "stale").unwrap();
+    r.save_file(ws, Path::new("notes.tmp"), "keep-me").unwrap();
+    r.save_file(ws, Path::new("main.cpp.tmp"), "not-ours").unwrap();
+
+    let mut files = r.list_files(ws).unwrap();
+    files.sort();
+    assert_eq!(
+        files,
+        vec![
+            PathBuf::from("main.cpp"),
+            PathBuf::from("main.cpp.tmp"),
+            PathBuf::from("notes.tmp"),
+        ]
+    );
+}
+
+#[test]
 fn read_nonexistent_file_returns_error() {
     let r = repo("no-file");
     let result = r.read_file("no-such-ws", Path::new("x.cpp"));
