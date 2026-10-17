@@ -158,13 +158,13 @@ function openProblem(problem: ContestProblem) {
       <!-- 子头横幅：标题 + 元信息 + 实时统计卡 -->
       <section
         v-if="contest"
-        class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-4 shadow-xs"
+        class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-4"
       >
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
+            <h2 class="text-xl font-semibold tracking-wide text-[var(--text-primary)]">
               {{ contest.title }} 题目总览
-              <span class="text-lg font-normal text-[var(--text-muted)]">/ Problemset</span>
+              <span class="font-mono text-xs font-normal tracking-[0.2em] text-[var(--text-muted)]">/ PROBLEMSET</span>
             </h2>
             <p class="mt-1 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
               <span>共 {{ problems.length }} 道题目</span>
@@ -182,7 +182,7 @@ function openProblem(problem: ContestProblem) {
         <!-- 比赛未开始：HOJ 此时通常不放题，给明确提示而非错误页 -->
         <div v-if="showUpcoming" class="flex flex-col items-center justify-center gap-3 py-24 text-center">
           <div
-            class="flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 text-[var(--color-warning)]"
+            class="flex h-14 w-14 items-center justify-center rounded-[4px] border border-[#e0d2b4] bg-[#f5efe3] text-[#8c6a43]"
           >
             <svg class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
               <path
@@ -204,7 +204,7 @@ function openProblem(problem: ContestProblem) {
           class="flex flex-col items-center justify-center gap-3 py-24 text-center"
         >
           <div
-            class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-muted)]"
+            class="flex h-14 w-14 items-center justify-center rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-muted)]"
           >
             <svg class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
               <path
@@ -219,7 +219,7 @@ function openProblem(problem: ContestProblem) {
             本场比赛尚未发布题目，或题目列表获取失败。
           </p>
           <button
-            class="rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm text-white transition-colors hover:bg-[var(--color-primary-hover)]"
+            class="rounded-[3px] bg-[var(--color-primary)] px-4 py-1.5 text-sm text-[#f7f6f1] transition-colors duration-200 ease-out hover:bg-[var(--color-primary-hover)]"
             @click="retry"
           >
             刷新
