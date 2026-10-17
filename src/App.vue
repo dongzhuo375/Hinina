@@ -7,16 +7,16 @@
         <header
           v-if="showGlobalTitleBar"
           data-tauri-drag-region
-          class="flex h-10 shrink-0 select-none items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-card)] px-4"
+          class="entry-titlebar flex h-10 shrink-0 select-none items-center justify-between px-4"
         >
           <div data-tauri-drag-region class="flex items-center gap-2.5">
             <div
               data-tauri-drag-region
-              class="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-tr from-[#5631e0] to-[#7c5cff] text-xs font-bold text-white"
+              class="flex h-6 w-6 items-center justify-center bg-[#2e3033] text-xs font-bold text-[#f7f6f1]"
             >
               H
             </div>
-            <span data-tauri-drag-region class="text-sm font-bold tracking-tight text-[var(--text-primary)]">Hinina</span>
+            <span data-tauri-drag-region class="text-xs font-semibold tracking-[0.12em] text-[#68706f]">Hinina</span>
           </div>
           <div class="flex items-center gap-1">
             <button
@@ -94,3 +94,12 @@ const themeOverrides: GlobalThemeOverrides = {
   },
 }
 </script>
+
+<style scoped>
+.entry-titlebar {
+  background: #f7f6f1;
+  --text-muted: #68706f;
+  --text-primary: #2e3033;
+  --bg-sidebar: #eae9e2;
+}
+</style>
