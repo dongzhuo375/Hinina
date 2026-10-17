@@ -52,6 +52,12 @@ describe('contest route access', () => {
     useContestStore().contest = { ...schedule, status: 1 }
     expect((await openAt(1_500)).currentRoute.value.name).toBe('Login')
   })
+  it('uses the current brief when the cached authenticated contest has a different ID', async () => {
+    const contest = useContestStore()
+    contest.contest = { ...schedule, id: 'old', status: 1 }
+    contest.brief = { ...schedule, id: 'current', status: 0 }
+    expect((await openAt(1_500)).currentRoute.value.name).toBe('ProblemSolve')
+  })
   it('keeps the session guard intact', async () => {
     useAuthStore().user = null
     expect((await openAt(1_500)).currentRoute.value.name).toBe('Login')

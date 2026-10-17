@@ -34,6 +34,11 @@ const guidance = computed(() => {
       return '赛程信息连接后显示'
   }
 })
+
+const timerLabel = computed(() => {
+  if (props.phase === 'none') return guidance.value
+  return `${heading.value}：${segments.value.map((part) => `${part.value}${part.label}`).join(' ')}`
+})
 </script>
 
 <template>
@@ -47,7 +52,7 @@ const guidance = computed(() => {
       v-else
       role="timer"
       aria-live="off"
-      :aria-label="`${heading}：${segments.map((part) => `${part.value}${part.label}`).join(' ')}`"
+      :aria-label="timerLabel"
       class="grid grid-cols-[minmax(0,1fr)_12px_minmax(0,1fr)_12px_minmax(0,1fr)_12px_minmax(0,1fr)] items-start gap-x-1 sm:gap-x-2"
     >
       <template v-for="(segment, index) in segments" :key="segment.key">

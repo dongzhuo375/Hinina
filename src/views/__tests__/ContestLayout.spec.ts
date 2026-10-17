@@ -56,6 +56,7 @@ describe('contest exit lifecycle', () => {
     expect(mocks.startLive).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(2_000)
     expect(host.querySelector('[role="alert"]')!.textContent).toContain('比赛已结束')
+    expect(host.querySelector('[role="alert"]')!.parentElement?.classList.contains('top-12')).toBe(true)
     expect(host.querySelector('[inert]')).not.toBeNull()
     expect(mocks.stopLive).toHaveBeenCalledOnce()
     expect(mocks.replace).not.toHaveBeenCalled()
@@ -76,6 +77,15 @@ describe('contest exit lifecycle', () => {
     await render({ ...schedule, startTime: 1_500, endTime: 2_000 })
     expect(mocks.replace).toHaveBeenCalledExactlyOnceWith({ name: 'Login' })
     expect(mocks.startLive).not.toHaveBeenCalled()
+  })
+
+  it('uses the current brief instead of an ended contest cached under another ID', async () => {
+    const store = await render({ ...schedule, id: 'old', status: 1 })
+    store.brief = { ...schedule, id: 'current', status: 0 }
+    await nextTick()
+
+    expect(host.querySelector('[role="alert"]')).toBeNull()
+    expect(mocks.replace).not.toHaveBeenCalled()
   })
 
   it('cancels pending exit and clock timers when leaving', async () => {

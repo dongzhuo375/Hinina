@@ -8,7 +8,7 @@ import EventTitle from '@/components/login/EventTitle.vue'
 import LoginForm from '@/components/login/LoginForm.vue'
 import { briefRetryDelayMs } from '@/utils/brief-retry'
 import { renderMarkdown } from '@/utils/markdown'
-import { getContestPhase } from '@/utils/contest'
+import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import { planNextPrecheck, planRetryDelayMs } from '@/utils/session-check'
 import type { PrecheckReason } from '@/utils/session-check'
 
@@ -40,9 +40,7 @@ let timer: ReturnType<typeof setInterval> | null = null
 let disposed = false
 
 /// 比赛阶段（判据集中在 utils/contest，与顶部栏共用）
-const schedule = computed(() =>
-  contestStore.contest?.id === brief.value?.id ? contestStore.contest : brief.value,
-)
+const schedule = computed(() => getAuthoritativeSchedule(contestStore.contest, brief.value))
 const contestPhase = computed(() => getContestPhase(schedule.value, now.value))
 
 const eventTitle = computed(() => brief.value?.title || 'Hinina 竞赛')
@@ -75,6 +73,12 @@ const renderedBrief = computed(() =>
 /// 加载比赛简报；失败重试由连接状态侦听器统一调度。
 function loadBrief() {
   void contestStore.loadBrief()
+}
+
+function retryBrief() {
+  clearBriefRetry()
+  briefRetryCount = 0
+  loadBrief()
 }
 
 /// 登录表单提交。
@@ -270,6 +274,14 @@ onUnmounted(() => {
         <p v-if="connState === 'failed' && briefError" class="mt-1 max-w-md break-words text-[13px] leading-5 text-[#a33b2a]" :title="briefError">
           {{ briefError }}
         </p>
+        <button
+          v-if="connState === 'failed'"
+          type="button"
+          class="mt-2 text-[13px] font-medium text-[#6b7280] underline decoration-[#9ca3af] underline-offset-4 transition-colors hover:text-[#8c6a43] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8c6a43]"
+          @click="retryBrief"
+        >
+          重试连接
+        </button>
       </div>
     </footer>
   </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getContestPhase, hasContestStarted } from '@/utils/contest'
+import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import type { Contest } from '@/types/contest'
 
 /// 构造比赛实体：仅时间/状态字段有意义，其余取占位值
@@ -51,11 +51,24 @@ describe('getContestPhase', () => {
   })
 })
 
-describe('hasContestStarted', () => {
-  it('仅进行中/已结束算已开始 —— 决定已登录用户能否进入赛场', () => {
-    expect(hasContestStarted('running')).toBe(true)
-    expect(hasContestStarted('ended')).toBe(true)
-    expect(hasContestStarted('upcoming')).toBe(false)
-    expect(hasContestStarted('none')).toBe(false)
+describe('getAuthoritativeSchedule', () => {
+  it('同一比赛优先使用认证数据', () => {
+    const contest = makeContest({ title: '认证数据' })
+    const brief = makeContest({ title: '匿名简报' })
+    expect(getAuthoritativeSchedule(contest, brief)).toBe(contest)
+  })
+
+  it('比赛 ID 不同时采用简报中的当前赛程', () => {
+    const staleContest = makeContest({ id: 'old', status: 1 })
+    const currentBrief = makeContest({ id: 'current', status: 0 })
+    expect(getAuthoritativeSchedule(staleContest, currentBrief)).toBe(currentBrief)
+  })
+
+  it('只有一份赛程数据时采用现有数据', () => {
+    const contest = makeContest()
+    const brief = makeContest({ id: 'current' })
+    expect(getAuthoritativeSchedule(null, brief)).toBe(brief)
+    expect(getAuthoritativeSchedule(contest, null)).toBe(contest)
+    expect(getAuthoritativeSchedule(null, null)).toBeNull()
   })
 })

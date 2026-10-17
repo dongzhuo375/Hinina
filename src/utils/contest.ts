@@ -10,6 +10,19 @@ import type { Contest } from '@/types/contest'
 export type ContestPhase = 'none' | 'upcoming' | 'running' | 'ended'
 
 /**
+ * 选择登录页、路由守卫与比赛外壳共同使用的权威赛程。
+ * 认证比赛仅在与匿名简报属于同一场比赛时优先；否则以简报反映服务端当前赛程。
+ */
+export function getAuthoritativeSchedule(
+  contest: Contest | null | undefined,
+  brief: Contest | null | undefined,
+): Contest | null {
+  if (!contest) return brief ?? null
+  if (!brief) return contest
+  return contest.id === brief.id ? contest : brief
+}
+
+/**
  * 由比赛实体与当前时间推导比赛阶段（纯函数，登录页与顶部栏共用，避免判据分散）。
  *
  * 服务端 `status`（-1=未开始，0=进行中，1=已结束）是列表接口的快照，可能过期，
@@ -24,9 +37,4 @@ export function getContestPhase(
   if (contest.status === 1 || nowSecs >= contest.endTime) return 'ended'
   if (nowSecs >= contest.startTime) return 'running'
   return 'upcoming'
-}
-
-/** 比赛是否已开始（进行中或已结束）—— 决定已登录用户能否进入赛场 */
-export function hasContestStarted(phase: ContestPhase): boolean {
-  return phase === 'running' || phase === 'ended'
 }

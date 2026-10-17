@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
-import { getContestPhase } from '@/utils/contest'
+import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 
 /// 路由元信息类型声明，避免 `to.meta.*` 退化为 any
 declare module 'vue-router' {
@@ -108,7 +108,7 @@ router.beforeEach(async (to) => {
     const contest = useContestStore()
     if (!contest.brief) await contest.loadBrief()
     if (!auth.isLoggedIn) return { name: 'Login', replace: true }
-    const schedule = contest.contest?.id === contest.brief?.id ? contest.contest : contest.brief
+    const schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
     if (getContestPhase(schedule, Math.floor(Date.now() / 1000)) !== 'running') {
       return { name: 'Login', replace: true }
     }

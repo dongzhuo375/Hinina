@@ -142,6 +142,24 @@ describe('login entry lifecycle', () => {
     expect(mocks.contestService.loadContestBrief).toHaveBeenCalledTimes(4)
   })
 
+  it('offers manual connection retry and restarts the automatic retry cycle', async () => {
+    mocks.contestService.loadContestBrief.mockRejectedValue(new Error('网络异常'))
+    await render().mount()
+    expect(host.textContent).toContain('重试连接')
+
+    const retryButton = [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === '重试连接')!
+    retryButton.click()
+    await settle()
+    expect(mocks.contestService.loadContestBrief).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(mocks.contestService.loadContestBrief).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(mocks.contestService.loadContestBrief).toHaveBeenCalledTimes(3)
+    expect(host.textContent).not.toContain('直接进入赛场')
+  })
+
   it('cancels brief retry on unmount', async () => {
     mocks.contestService.loadContestBrief.mockRejectedValue(new Error('网络异常'))
     await render().mount()
@@ -159,6 +177,22 @@ describe('login entry lifecycle', () => {
     await state.mount()
     expect(host.textContent).toContain('比赛已结束')
     expect(mocks.replace).not.toHaveBeenCalled()
+  })
+
+  it('enters the current running brief instead of a cached ended contest with another ID', async () => {
+    mocks.contestService.loadContestBrief.mockResolvedValue({
+      status: 'ok',
+      contest: { ...schedule, id: 'current', title: '新比赛', startTime: 900, status: 0 },
+      baseUrl: 'https://oj.example',
+    })
+    const state = render()
+    state.auth.user = user
+    state.auth.sessionResolved = true
+    state.contest.contest = { ...schedule, id: 'old', status: 1 }
+
+    await state.mount()
+
+    expect(mocks.replace).toHaveBeenCalledExactlyOnceWith({ name: 'Contest' })
   })
 
   it('preserves pre-start validation and does not schedule its retry after leaving the page', async () => {
