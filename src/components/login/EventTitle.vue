@@ -14,7 +14,7 @@ defineProps<{
     </p>
 
     <div class="flex flex-wrap items-end gap-x-5 gap-y-2">
-      <h1 id="event-title" class="max-w-full text-[clamp(2rem,4.1vw,3.8rem)] font-bold leading-[1.16] tracking-[0.035em] text-[#2e3033]">
+      <h1 id="event-title" class="max-w-full break-words text-[clamp(2rem,4.1vw,3.8rem)] font-bold leading-[1.16] tracking-[0.035em] text-[#2e3033]">
         {{ title }}
       </h1>
       <span class="mb-1 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[#5f7a6a]">

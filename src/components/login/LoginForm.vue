@@ -211,8 +211,10 @@ const accountStatus = computed(() => {
 
 .login-submit {
   clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  color: #fff;
 }
 
+.login-submit:disabled { opacity: 0.75; }
 .login-submit:hover { box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.07); }
 .login-submit:focus-visible { clip-path: none; }
 

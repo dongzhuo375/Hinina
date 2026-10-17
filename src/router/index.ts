@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
+import { useContestStore } from '@/stores/contestStore'
+import { getContestPhase } from '@/utils/contest'
 
 /// 路由元信息类型声明，避免 `to.meta.*` 退化为 any
 declare module 'vue-router' {
@@ -98,7 +100,20 @@ router.beforeEach(async (to) => {
 
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
   if (!requiresAuth) return true
-  return auth.isLoggedIn ? true : { name: 'Login', replace: true }
+  if (!auth.isLoggedIn) return { name: 'Login', replace: true }
+
+  // 首次进入工作台（含深链）先确认赛程；赛前/赛后在入口等待。
+  // 工作台内切换页面由外壳的时钟处理，避免结束弹窗期间打断其退出流程。
+  if (!router.currentRoute.value.matched.some((r) => r.name === 'Contest')) {
+    const contest = useContestStore()
+    if (!contest.brief) await contest.loadBrief()
+    if (!auth.isLoggedIn) return { name: 'Login', replace: true }
+    const schedule = contest.contest?.id === contest.brief?.id ? contest.contest : contest.brief
+    if (getContestPhase(schedule, Math.floor(Date.now() / 1000)) !== 'running') {
+      return { name: 'Login', replace: true }
+    }
+  }
+  return true
 })
 
 export default router

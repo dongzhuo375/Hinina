@@ -40,10 +40,10 @@ let timer: ReturnType<typeof setInterval> | null = null
 let disposed = false
 
 /// 比赛阶段（判据集中在 utils/contest，与顶部栏共用）
-const contestPhase = computed(() => getContestPhase(
+const schedule = computed(() =>
   contestStore.contest?.id === brief.value?.id ? contestStore.contest : brief.value,
-  now.value,
-))
+)
+const contestPhase = computed(() => getContestPhase(schedule.value, now.value))
 
 const eventTitle = computed(() => brief.value?.title || 'Hinina 竞赛')
 
@@ -182,7 +182,7 @@ function reschedulePrecheck() {
   clearPrecheck()
   precheckRetried = false
 
-  const startSecs = brief.value?.startTime
+  const startSecs = schedule.value?.startTime
   if (!auth.isLoggedIn || contestPhase.value !== 'upcoming' || !startSecs) return
   const plan = planNextPrecheck(Date.now(), startSecs * 1000)
   if (!plan) return
@@ -254,8 +254,8 @@ onUnmounted(() => {
         <Countdown
           class="event-clock"
           :phase="contestPhase"
-          :start-time="brief?.startTime ?? null"
-          :end-time="brief?.endTime ?? null"
+          :start-time="schedule?.startTime ?? null"
+          :end-time="schedule?.endTime ?? null"
           :now="now"
           :is-logged-in="auth.isLoggedIn"
         />
@@ -360,6 +360,11 @@ onUnmounted(() => {
   height: 36%;
   clip-path: polygon(0 0, 100% 100%, 48% 100%);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.1));
+}
+
+@media (min-width: 801px) and (max-height: 760px) {
+  .login-main { padding-top: 24px; padding-bottom: 24px; }
+  .entry-column { padding-top: 20px; }
 }
 
 @media (max-width: 800px) {
