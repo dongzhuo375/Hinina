@@ -37,7 +37,7 @@ const accountStatus = computed(() => {
   <section class="login-card-wrap w-full max-w-[470px]" aria-label="参赛账号验证">
     <div class="login-card relative px-7 py-8 sm:px-10 sm:py-10">
       <header class="mb-8">
-        <p class="font-mono text-[9px] font-semibold uppercase tracking-[0.25em] text-[#8c6a43]">
+        <p class="font-sans text-[10px] font-semibold uppercase tracking-[1px] text-[#8c6a43]">
           Hinina <span class="mx-1 text-[#b5bbb7]">/</span> Secure entry
         </p>
         <h2 class="mt-3 text-2xl font-semibold tracking-[0.025em] text-[#2e3033]">
@@ -55,37 +55,37 @@ const accountStatus = computed(() => {
             </svg>
           </span>
           <div class="min-w-0 flex-1">
-            <p class="font-mono text-[9px] uppercase tracking-[0.18em] text-[#858d89]">Current account</p>
+            <p class="font-sans text-[10px] uppercase tracking-[1px] text-[#6b7280]">Current account</p>
             <p class="mt-1 truncate text-sm font-semibold text-[#2e3033]" :title="accountName ?? undefined">
               {{ accountName }}
             </p>
           </div>
-          <span class="mt-1 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5f7a6a]">
+          <span class="mt-1 flex items-center gap-1.5 font-sans text-[10px] uppercase tracking-[1px] text-[#5f7a6a]">
             <span class="h-1.5 w-1.5 bg-[#5f7a6a]"></span> Ready
           </span>
         </div>
 
-        <p role="status" class="min-h-[52px] py-5 text-sm leading-6 text-[#68706f]">
+        <p role="status" class="min-h-[52px] py-5 text-sm leading-6 text-[#6b7280]">
           {{ accountStatus }}
         </p>
 
         <button
           type="button"
-          class="w-full border border-[#aeb6b2] px-4 py-3 text-xs font-semibold tracking-[0.08em] text-[#49504d] transition-colors hover:border-[#8c6a43] hover:text-[#8c6a43] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-[#8c6a43] disabled:cursor-wait disabled:opacity-60"
+          class="w-full border border-[#aeb6b2] px-4 py-3 text-[13px] font-semibold tracking-[0.08em] text-[#49504d] transition-colors hover:border-[#8c6a43] hover:text-[#8c6a43] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-[#8c6a43] disabled:cursor-wait disabled:opacity-60"
           :disabled="isSigningOut"
           @click="emit('switchAccount')"
         >
           {{ isSigningOut ? '正在安全退出…' : '切换参赛账号' }}
         </button>
-        <p v-if="authError" role="alert" class="mt-4 text-xs leading-5 text-[#a33b2a]">
+        <p v-if="authError" role="alert" class="mt-4 text-[13px] leading-5 text-[#a33b2a]">
           {{ authError }}
         </p>
       </div>
 
       <form v-else class="space-y-6" :aria-busy="isSubmitting" @submit.prevent="emit('submit')">
         <div>
-          <label for="contest-username" class="mb-2 block text-[11px] font-semibold tracking-[0.12em] text-[#68706f]">
-            参赛账号 <span class="ml-1 font-mono font-normal text-[#a0a6a3]">/ TEAM ID</span>
+          <label for="contest-username" class="mb-2 block text-[13px] font-semibold tracking-[0.08em] text-[#6b7280]">
+            参赛账号 <span class="ml-1 font-sans text-[10px] font-normal tracking-[1px] text-[#6b7280]">/ TEAM ID</span>
           </label>
           <div class="login-field flex items-center gap-3">
             <svg class="h-[18px] w-[18px] shrink-0 text-[#55615d]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -98,7 +98,7 @@ const accountStatus = computed(() => {
               type="text"
               autocomplete="username"
               placeholder="请输入参赛账号"
-              class="min-w-0 flex-1 bg-transparent py-3 text-sm text-[#2e3033] placeholder:text-[#a4aaa7] focus:outline-none"
+              class="min-w-0 flex-1 bg-transparent py-3 text-sm text-[#2e3033] placeholder:text-[#6b7280] focus:outline-none"
               :disabled="isSubmitting"
               :aria-invalid="authError ? true : undefined"
               :aria-describedby="authError ? 'login-error' : undefined"
@@ -108,8 +108,8 @@ const accountStatus = computed(() => {
         </div>
 
         <div>
-          <label for="contest-password" class="mb-2 block text-[11px] font-semibold tracking-[0.12em] text-[#68706f]">
-            参赛密码 <span class="ml-1 font-mono font-normal text-[#a0a6a3]">/ CONTEST PIN</span>
+          <label for="contest-password" class="mb-2 block text-[13px] font-semibold tracking-[0.08em] text-[#6b7280]">
+            参赛密码 <span class="ml-1 font-sans text-[10px] font-normal tracking-[1px] text-[#6b7280]">/ CONTEST PIN</span>
           </label>
           <div class="login-field flex items-center gap-3">
             <svg class="h-[18px] w-[18px] shrink-0 text-[#55615d]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -122,7 +122,7 @@ const accountStatus = computed(() => {
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"
               placeholder="请输入比赛认证密码"
-              class="min-w-0 flex-1 bg-transparent py-3 font-mono text-sm tracking-[0.12em] text-[#2e3033] placeholder:font-sans placeholder:tracking-normal placeholder:text-[#a4aaa7] focus:outline-none"
+              class="min-w-0 flex-1 bg-transparent py-3 font-mono text-sm tracking-[0.12em] text-[#2e3033] placeholder:font-sans placeholder:tracking-normal placeholder:text-[#6b7280] focus:outline-none"
               :disabled="isSubmitting"
               :aria-invalid="authError ? true : undefined"
               :aria-describedby="authError ? 'login-error' : undefined"
@@ -148,7 +148,7 @@ const accountStatus = computed(() => {
           </div>
         </div>
 
-        <p v-if="authError" id="login-error" role="alert" class="-mt-2 text-xs leading-5 text-[#a33b2a]">
+        <p v-if="authError" id="login-error" role="alert" class="-mt-2 text-[13px] leading-5 text-[#a33b2a]">
           {{ authError }}
         </p>
 
@@ -169,7 +169,7 @@ const accountStatus = computed(() => {
       <div class="mt-7">
         <button
           type="button"
-          class="group flex w-full items-center justify-between py-1 text-xs text-[#79817e] transition-colors hover:text-[#8c6a43] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8c6a43]"
+          class="group flex w-full items-center justify-between py-1 text-[13px] text-[#6b7280] transition-colors hover:text-[#8c6a43] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8c6a43]"
           :aria-expanded="briefVisible"
           aria-controls="contest-brief"
           @click="emit('toggleBrief')"
@@ -179,7 +179,7 @@ const accountStatus = computed(() => {
             <path stroke-linecap="square" d="m6 9 6 6 6-6" />
           </svg>
         </button>
-        <div v-if="briefVisible" id="contest-brief" class="mt-3 max-h-48 overflow-y-auto border-l border-[#8c6a43]/50 pl-4 text-xs leading-6 text-[#68706f]">
+        <div v-if="briefVisible" id="contest-brief" class="mt-3 max-h-48 overflow-y-auto border-l border-[#8c6a43]/50 pl-4 text-[13px] leading-6 text-[#6b7280]">
           <div v-if="briefHtml" class="prose prose-sm max-w-none" v-html="briefHtml"></div>
           <p v-else>暂无比赛简介</p>
         </div>

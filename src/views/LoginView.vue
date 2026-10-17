@@ -250,10 +250,10 @@ onUnmounted(() => {
 
     <footer class="login-footer relative z-10 mx-auto flex w-full max-w-[1600px] flex-wrap items-end justify-end gap-4">
       <div class="min-w-0 text-right" role="status" aria-live="polite">
-        <div class="flex flex-wrap items-center justify-end gap-x-5 gap-y-2 text-[11px] text-[#68706f]">
+        <div class="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-[13px] text-[#6b7280]">
           <span class="flex items-center gap-2">
             <span
-              class="h-1.5 w-1.5 rounded-full"
+              class="h-1 w-1 rounded-full"
               :class="connState === 'connected' ? 'bg-[#5f7a6a]' : connState === 'failed' ? 'bg-[#a33b2a]' : 'bg-[#8c6a43]'"
               aria-hidden="true"
             ></span>
@@ -265,9 +265,9 @@ onUnmounted(() => {
               : '等待连接比赛服务器'
             }}
           </span>
-          <span class="font-mono text-[10px] tracking-wide">Hinina v{{ version }}</span>
+          <span class="font-sans text-[9px] tracking-[1px]">Hinina v{{ version }}</span>
         </div>
-        <p v-if="connState === 'failed' && briefError" class="mt-2 max-w-md break-words text-[10px] leading-5 text-[#a33b2a]" :title="briefError">
+        <p v-if="connState === 'failed' && briefError" class="mt-1 max-w-md break-words text-[13px] leading-5 text-[#a33b2a]" :title="briefError">
           {{ briefError }}
         </p>
       </div>
@@ -279,8 +279,7 @@ onUnmounted(() => {
 .login-page {
   display: flex;
   flex-direction: column;
-  font-family: Inter, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'JetBrains Mono', Consolas, monospace;
+  font-family: var(--font-sans);
 }
 
 .login-main {

@@ -53,26 +53,31 @@ const guidance = computed(() => {
       <template v-for="(segment, index) in segments" :key="segment.key">
         <div class="min-w-0 text-center">
           <span
-            class="block whitespace-nowrap font-mono text-[clamp(2.4rem,6.6vw,5.5rem)] font-medium leading-none tabular-nums tracking-[-0.075em] transition-colors duration-200"
+            class="countdown-value block whitespace-nowrap font-mono text-[clamp(2.4rem,6.6vw,5.5rem)] font-medium leading-none tabular-nums tracking-[-0.075em] transition-colors duration-200"
             :class="clock.urgent ? 'text-[#a33b2a]' : 'text-[#2e3033]'"
             aria-hidden="true"
           >
             {{ segment.value }}
           </span>
-          <span class="mt-5 block font-mono text-xs tracking-[0.22em] text-[#68706f]" aria-hidden="true">
+          <span class="mt-5 block font-sans text-[13px] leading-4 tracking-[1px] text-[#6b7280]" aria-hidden="true">
             {{ segment.label }}
           </span>
-          <span class="mt-3 inline-block h-px w-5 bg-[#7d8582]" aria-hidden="true"></span>
+          <span class="mt-[14px] inline-block h-px w-5 bg-[#7d8582]" aria-hidden="true"></span>
         </div>
         <span v-if="index < 3" class="mt-9 text-center font-mono text-sm font-light leading-none text-[#b5bbb7]" aria-hidden="true">/</span>
       </template>
     </div>
 
-    <p class="mt-7 text-xs tracking-[0.025em] text-[#6b7280]">{{ guidance }}</p>
+    <p class="mt-7 text-[13px] tracking-[0.025em] text-[#6b7280]">{{ guidance }}</p>
   </section>
 </template>
 
 <style scoped>
+.countdown-value {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "zero" 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   span { transition: none; }
 }
