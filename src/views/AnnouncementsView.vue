@@ -10,6 +10,7 @@ import {
 } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { configService } from '@/services/config.service'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
@@ -168,49 +169,39 @@ onUnmounted(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
-    <!-- 头部：标题 + 统计 + 刷新 -->
-    <div class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-4">
-      <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
-        <div class="min-w-0">
-          <div class="flex min-w-0 items-center space-x-3">
-            <h1 class="truncate text-lg font-semibold tracking-wide text-[var(--text-primary)]">
-              {{ headerTitle }}
-            </h1>
-            <span class="shrink-0 font-mono text-[10px] tracking-[0.25em] text-[var(--text-muted)]">/ ANNOUNCEMENTS</span>
-          </div>
-          <p class="mt-1 text-xs text-[var(--text-secondary)]">
-            共 {{ announcementStore.total }} 条公告
-            <span v-if="announcementStore.unreadCount > 0" class="text-[#a33b2a]">
-              · 未读 {{ announcementStore.unreadCount }} 条
-            </span>
-          </p>
-        </div>
-        <button
-          type="button"
-          class="flex shrink-0 items-center gap-1.5 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:border-[#8c6a43] hover:text-[#8c6a43] disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="announcementStore.isLoading"
-          title="刷新公告"
-          @click="onRefresh"
+    <!-- 页首：编辑版式 + 统计/刷新（右侧 slot） -->
+    <PageHeader en="ANNOUNCEMENTS" :title="headerTitle">
+      <p class="text-xs text-[var(--text-secondary)]">
+        共 {{ announcementStore.total }} 条公告
+        <span v-if="announcementStore.unreadCount > 0" class="text-[#a33b2a]">
+          · 未读 {{ announcementStore.unreadCount }} 条
+        </span>
+      </p>
+      <button
+        type="button"
+        class="flex shrink-0 items-center gap-1.5 px-2 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:text-[#8c6a43] disabled:cursor-not-allowed disabled:opacity-50"
+        :disabled="announcementStore.isLoading"
+        title="刷新公告"
+        @click="onRefresh"
+      >
+        <svg
+          class="h-4 w-4"
+          :class="{ 'animate-spin': announcementStore.isLoading }"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
         >
-          <svg
-            class="h-4 w-4"
-            :class="{ 'animate-spin': announcementStore.isLoading }"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-          <span>刷新</span>
-        </button>
-      </div>
-    </div>
+          <path
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <span>刷新</span>
+      </button>
+    </PageHeader>
 
     <!-- 公告卡片流 -->
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-5">
@@ -259,7 +250,7 @@ onUnmounted(() => {
           <article
             v-for="a in announcementStore.announcements"
             :key="a.id"
-            class="rounded-[4px] border bg-[var(--bg-card)] p-5 transition-colors duration-200 ease-out hover:border-[#c9c5b6] hover:shadow-[var(--shadow-raised)]"
+            class="border bg-[var(--bg-card)] p-5 transition-colors duration-200 ease-out hover:border-[#c9c5b6] hover:shadow-[var(--shadow-raised)]"
             :class="
               announcementStore.isUnread(a.id)
                 ? 'border-[#8c6a43]/40 ring-1 ring-[#8c6a43]/15'

@@ -648,10 +648,11 @@ onBeforeUnmount(() => {
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
     <div class="min-h-0 flex-1 overflow-y-auto">
       <div class="mx-auto w-full max-w-3xl px-6 pb-6 pt-6">
-        <!-- 页头 -->
-        <header class="mb-5">
-          <h1 class="text-lg font-semibold tracking-wide text-[var(--text-primary)]">设置</h1>
-          <p class="mt-0.5 text-xs text-[var(--text-muted)]">
+        <!-- 页头：与全局一致的编辑版式 -->
+        <header class="mb-6 border-b border-[var(--border-color)] pb-4">
+          <p class="font-mono text-[10px] tracking-[0.35em] text-[#8c6a43]">SETTINGS</p>
+          <h1 class="mt-1.5 text-xl font-semibold tracking-wide text-[var(--text-primary)]">设置</h1>
+          <p class="mt-1.5 text-xs text-[var(--text-muted)]">
             配置保存在本地客户端，仅影响当前设备
           </p>
         </header>
@@ -662,8 +663,8 @@ onBeforeUnmount(() => {
         <template v-else>
           <div class="flex flex-col gap-4">
             <!-- ── OJ 服务器 ── -->
-            <section class="rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
+            <section class="border-t-2 border-[#2e3033] bg-[var(--bg-card)] px-5 pb-5 pt-4">
+              <div class="flex items-center gap-2 pb-3">
                 <svg
                   class="h-4 w-4 text-[#8c6a43]"
                   fill="none"
@@ -678,7 +679,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">OJ 服务器</h2>
               </div>
-              <div class="grid grid-cols-1 gap-x-4 gap-y-4 px-5 py-4 sm:grid-cols-2">
+              <div class="grid grid-cols-1 gap-x-4 gap-y-4 pt-1 sm:grid-cols-2">
                 <label class="block">
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     当前 OJ
@@ -867,8 +868,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 编辑器 ── -->
-            <section class="rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
+            <section class="border-t-2 border-[#2e3033] bg-[var(--bg-card)] px-5 pb-5 pt-4">
+              <div class="flex items-center gap-2 pb-3">
                 <svg
                   class="h-4 w-4 text-[#8c6a43]"
                   fill="none"
@@ -888,7 +889,7 @@ onBeforeUnmount(() => {
                   解题页编辑器设置可即时调整，此处改动对新打开的解题页生效
                 </span>
               </div>
-              <div class="grid grid-cols-1 gap-x-4 gap-y-4 px-5 py-4 sm:grid-cols-2">
+              <div class="grid grid-cols-1 gap-x-4 gap-y-4 pt-1 sm:grid-cols-2">
                 <label class="block">
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     字号
@@ -990,8 +991,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 布局 ── -->
-            <section class="rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
+            <section class="border-t-2 border-[#2e3033] bg-[var(--bg-card)] px-5 pb-5 pt-4">
+              <div class="flex items-center gap-2 pb-3">
                 <svg
                   class="h-4 w-4 text-[#8c6a43]"
                   fill="none"
@@ -1005,7 +1006,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">布局</h2>
               </div>
-              <div class="px-5 py-4">
+              <div class="py-4 first:pt-1">
                 <div class="mb-2 flex items-center justify-between">
                   <span class="text-xs font-medium text-[var(--text-secondary)]">
                     解题页分栏比例
@@ -1036,8 +1037,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 主题 ── -->
-            <section class="rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
+            <section class="border-t-2 border-[#2e3033] bg-[var(--bg-card)] px-5 pb-5 pt-4">
+              <div class="flex items-center gap-2 pb-3">
                 <svg
                   class="h-4 w-4 text-[#8c6a43]"
                   fill="none"
@@ -1054,7 +1055,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">主题</h2>
               </div>
-              <div class="grid grid-cols-1 gap-x-4 gap-y-4 px-5 py-4 sm:grid-cols-2">
+              <div class="grid grid-cols-1 gap-x-4 gap-y-4 pt-1 sm:grid-cols-2">
                 <label class="block">
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     界面主题
@@ -1078,8 +1079,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 重置与清理 ── -->
-            <section class="rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
+            <section class="border-t-2 border-[#2e3033] bg-[var(--bg-card)] px-5 pb-5 pt-4">
+              <div class="flex items-center gap-2 pb-3">
                 <svg
                   class="h-4 w-4 text-[#8c6a43]"
                   fill="none"
@@ -1099,7 +1100,7 @@ onBeforeUnmount(() => {
 
               <div class="divide-y divide-[var(--border-color)]">
                 <!-- 重置客户端（安全，可反复点） -->
-                <div class="px-5 py-4">
+                <div class="py-4 first:pt-1">
                   <div class="flex flex-wrap items-start justify-between gap-3">
                     <p class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-secondary)]">
                       <span class="font-medium text-[var(--text-primary)]">重置客户端</span>
@@ -1150,7 +1151,7 @@ onBeforeUnmount(() => {
                 </div>
 
                 <!-- 清理本地数据（不可逆：先看范围与体积，再勾选确认） -->
-                <div class="px-5 py-4">
+                <div class="py-4 first:pt-1">
                   <p class="text-xs leading-relaxed text-[var(--text-secondary)]">
                     <span class="font-medium text-[var(--text-primary)]">清理本地数据</span>
                     —— 删除<strong class="font-semibold text-[#a33b2a]">不可重建</strong>的本地内容。
@@ -1248,8 +1249,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 数据目录 ── -->
-            <section class="rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
+            <section class="border-t-2 border-[#2e3033] bg-[var(--bg-card)] px-5 pb-5 pt-4">
+              <div class="flex items-center gap-2 pb-3">
                 <svg
                   class="h-4 w-4 text-[#8c6a43]"
                   fill="none"
@@ -1267,7 +1268,7 @@ onBeforeUnmount(() => {
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">数据目录</h2>
               </div>
 
-              <div class="flex flex-col gap-3 px-5 py-4">
+              <div class="flex flex-col gap-3 pt-1">
                 <p v-if="dataDirFailed" class="text-xs text-[#a33b2a]">数据目录信息获取失败</p>
                 <p v-else-if="!dataDir" class="text-xs text-[var(--text-muted)]">正在读取…</p>
                 <template v-else>
@@ -1397,8 +1398,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 关于 ── -->
-            <section class="rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
+            <section class="border-t-2 border-[#2e3033] bg-[var(--bg-card)] px-5 pb-5 pt-4">
+              <div class="flex items-center gap-2 pb-3">
                 <svg
                   class="h-4 w-4 text-[#8c6a43]"
                   fill="none"
@@ -1412,7 +1413,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">关于</h2>
               </div>
-              <dl class="divide-y divide-[var(--border-color)] px-5">
+              <dl class="divide-y divide-[var(--border-color)]">
                 <template v-if="storage">
                   <div class="flex items-center gap-3 py-3">
                     <dt class="w-24 shrink-0 text-xs font-medium text-[var(--text-secondary)]">
