@@ -54,13 +54,14 @@ const pill = computed(() => {
 
 <template>
   <article
-    class="group flex min-h-[175px] flex-col justify-between rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)] p-5 transition-all duration-200 ease-out hover:border-[#c9c5b6] hover:shadow-[var(--shadow-raised)]"
+    class="group flex min-h-[168px] flex-col justify-between border border-[var(--border-color)] bg-[var(--bg-card)] px-5 py-4 transition-all duration-200 ease-out hover:border-[#c9c5b6] hover:shadow-[var(--shadow-raised)]"
   >
+    <!-- 上区：气球色字块 + 标题/限制 + 状态 -->
     <div class="flex items-start justify-between gap-3">
-      <div class="flex min-w-0 items-start space-x-3.5">
-        <!-- 字母徽章：40px 方块，底色优先用 HOJ 气球色 -->
+      <div class="flex min-w-0 items-start gap-3.5">
+        <!-- 字母字块：48px 方角，底色优先用 HOJ 气球色 -->
         <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[3px] font-mono text-lg font-bold text-white"
+          class="flex h-12 w-12 shrink-0 items-center justify-center rounded-[2px] font-mono text-xl font-bold text-white"
           :style="{ backgroundColor: badgeColor }"
         >
           {{ problem.displayId }}
@@ -68,35 +69,26 @@ const pill = computed(() => {
         <!-- min-w-0：三列窄卡片下允许标题块收缩换行，而不是撑破卡片 -->
         <div class="min-w-0">
           <h3
-            class="cursor-pointer text-base font-semibold tracking-tight text-[var(--text-primary)] transition-colors duration-200 ease-out group-hover:text-[#8c6a43]"
+            class="cursor-pointer text-[15px] font-semibold leading-6 tracking-tight text-[var(--text-primary)] transition-colors duration-200 ease-out group-hover:text-[#8c6a43]"
             @click="emit('open')"
           >
             {{ title }}
           </h3>
-          <div class="mt-1 space-y-1 font-mono">
-            <div class="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
-              <span>Limits:</span>
-              <span v-if="limits">{{ formatLimitsSummary(limits) }}</span>
-              <!-- limits 未到达：加载中显示脉冲骨架，失败定格为 —，不编造默认值 -->
-              <span
-                v-else-if="problemStore.isLimitsLoading"
-                class="h-3 w-20 animate-pulse bg-[var(--bg-sidebar)]"
-              ></span>
-              <span v-else>—</span>
-            </div>
-            <div class="flex items-center gap-1 text-xs font-medium text-[#5f7a6a]">
-              <span>{{ problem.ac }} / {{ problem.total }}</span>
-              <span class="font-sans text-[var(--text-muted)]">通过</span>
-            </div>
-          </div>
+          <p class="mt-1 font-mono text-[10px] tracking-[0.15em] text-[var(--text-muted)]">
+            LIMITS
+            <span v-if="limits" class="ml-1 tracking-normal text-[var(--text-secondary)]">{{ formatLimitsSummary(limits) }}</span>
+            <!-- limits 未到达：加载中显示脉冲骨架，失败定格为 —，不编造默认值 -->
+            <span
+              v-else-if="problemStore.isLimitsLoading"
+              class="ml-1 inline-block h-2.5 w-16 animate-pulse bg-[var(--bg-sidebar)] align-middle"
+            ></span>
+            <span v-else class="ml-1 tracking-normal text-[var(--text-secondary)]">—</span>
+          </p>
         </div>
       </div>
 
-      <!-- 右上状态 pill：已通过（竹青）/ 尝试过（木色）/ 未作答（灰） -->
-      <div
-        v-if="pill.kind === 'ac'"
-        class="flex shrink-0 items-center space-x-1 rounded-[3px] border border-[#c2cfc4] bg-[#edf1ec] px-2.5 py-1 font-mono text-xs font-medium text-[#4a6153]"
-      >
+      <!-- 右上状态：已通过（竹青）/ 尝试过（木色）/ 未作答（灰），纯文字层级无 pill 框 -->
+      <div v-if="pill.kind === 'ac'" class="flex shrink-0 items-center gap-1 font-mono text-[11px] font-medium text-[#4a6153]">
         <svg class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
           <path
             clip-rule="evenodd"
@@ -106,25 +98,25 @@ const pill = computed(() => {
         </svg>
         <span>{{ pill.text }}</span>
       </div>
-      <div
-        v-else-if="pill.kind === 'attempted'"
-        class="flex shrink-0 items-center space-x-1.5 rounded-[3px] border border-[#e0d2b4] bg-[#f5efe3] px-2.5 py-1 font-mono text-xs font-medium text-[#8c6a43]"
-      >
+      <div v-else-if="pill.kind === 'attempted'" class="flex shrink-0 items-center gap-1.5 font-mono text-[11px] font-medium text-[#8c6a43]">
         <span class="h-1.5 w-1.5 animate-ping rounded-full bg-[#8c6a43]"></span>
         <span>{{ pill.text }}</span>
       </div>
-      <span
-        v-else
-        class="shrink-0 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-body)] px-2.5 py-1 font-mono text-xs font-medium text-[var(--text-muted)]"
-      >
-        {{ pill.text }}
-      </span>
+      <span v-else class="shrink-0 font-mono text-[11px] text-[var(--text-muted)]">{{ pill.text }}</span>
     </div>
 
-    <div class="mt-4 flex flex-col justify-end">
-      <div class="flex justify-end pb-2">
+    <!-- 中区：通过数据（仪器行） -->
+    <div class="mt-3 flex items-baseline gap-2 border-t border-[var(--border-color)] pt-3 font-mono">
+      <span class="text-[9px] tracking-[0.25em] text-[var(--text-muted)]">SOLVED</span>
+      <span class="tabular-nums text-sm font-semibold text-[#5f7a6a]">{{ problem.ac }}</span>
+      <span class="tabular-nums text-[11px] text-[var(--text-muted)]">/ {{ problem.total }}</span>
+    </div>
+
+    <!-- 下区：操作行（发丝线分隔） -->
+    <div class="mt-3 flex items-center justify-between border-t border-[var(--border-color)] pt-2.5">
+      <div class="flex items-center gap-4">
         <button
-          class="flex cursor-pointer items-center gap-1 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-secondary)]"
+          class="flex cursor-pointer items-center gap-1 text-xs font-medium text-[var(--text-muted)] transition-colors duration-200 ease-out hover:text-[#8c6a43]"
           @click="quickSubmitOpen = true"
         >
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -137,8 +129,6 @@ const pill = computed(() => {
           </svg>
           <span>快捷提交</span>
         </button>
-      </div>
-      <div class="flex items-center justify-between border-t border-[var(--border-color)] pt-2.5">
         <!-- 评测记录：跳到评测页并携带题目筛选（?problem=displayId 自动过滤本题） -->
         <router-link
           :to="{ name: 'Submissions', query: { problem: problem.displayId } }"
@@ -154,13 +144,13 @@ const pill = computed(() => {
           </svg>
           <span>评测记录</span>
         </router-link>
-        <button
-          class="flex items-center gap-1 rounded-[3px] bg-[#2e3033] px-3.5 py-1.5 text-xs font-medium text-[#f7f6f1] transition-colors duration-200 ease-out hover:bg-[#232527]"
-          @click="emit('open')"
-        >
-          <span>查看题目 →</span>
-        </button>
       </div>
+      <button
+        class="flex items-center gap-1 rounded-[2px] bg-[#2e3033] px-3.5 py-1.5 text-xs font-medium text-[#f7f6f1] transition-colors duration-200 ease-out hover:bg-[#232527]"
+        @click="emit('open')"
+      >
+        <span>查看题目 →</span>
+      </button>
     </div>
 
     <!-- 快捷提交弹窗：v-if 保证同一时刻至多挂载一个实例 -->

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import ProblemCard from '@/components/problem/ProblemCard.vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
@@ -155,28 +156,15 @@ function openProblem(problem: ContestProblem) {
       :retry="retry"
     />
     <template v-else>
-      <!-- 子头横幅：标题 + 元信息 + 实时统计卡 -->
-      <section
+      <!-- 页首：编辑版式（英文 micro-label + 主标题 + 元信息），右侧统计卡 -->
+      <PageHeader
         v-if="contest"
-        class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-4"
+        en="PROBLEMSET"
+        :title="`${contest.title} 题目总览`"
+        :meta="`共 ${problems.length} 道题目 · ${formatLabel} · 点击题目卡片查看详情与提交`"
       >
-        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 class="text-xl font-semibold tracking-wide text-[var(--text-primary)]">
-              {{ contest.title }} 题目总览
-              <span class="font-mono text-xs font-normal tracking-[0.2em] text-[var(--text-muted)]">/ PROBLEMSET</span>
-            </h2>
-            <p class="mt-1 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-              <span>共 {{ problems.length }} 道题目</span>
-              <span>·</span>
-              <span>{{ formatLabel }}</span>
-              <span>·</span>
-              <span>点击题目卡片查看详情与提交</span>
-            </p>
-          </div>
-          <ContestStatsBar />
-        </div>
-      </section>
+        <ContestStatsBar />
+      </PageHeader>
 
       <div class="flex-1 overflow-y-auto p-6">
         <!-- 比赛未开始：HOJ 此时通常不放题，给明确提示而非错误页 -->
