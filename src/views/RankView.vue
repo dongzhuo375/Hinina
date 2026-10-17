@@ -4,6 +4,7 @@ import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import RankToolbar from '@/components/rank/RankToolbar.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import ScoreboardTable from '@/components/rank/ScoreboardTable.vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
@@ -193,19 +194,11 @@ watch(isEnded, (ended) => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
-    <!-- 头部：标题 + 统计卡 + 工具条 -->
-    <div
-      class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-5 pb-2.5 pt-3.5"
-    >
-      <div class="mb-2.5 flex items-center justify-between gap-4">
-        <div class="flex min-w-0 items-center space-x-3">
-          <h1 class="truncate text-lg font-semibold tracking-wide text-[var(--text-primary)]">
-            {{ contest?.title ?? '比赛' }} 实时榜单
-          </h1>
-          <span class="shrink-0 font-mono text-xs text-[var(--text-muted)]">/ Live Scoreboard</span>
-        </div>
-        <ContestStatsBar />
-      </div>
+    <!-- 页首：编辑版式 + 统计卡；工具条独立成条 -->
+    <PageHeader en="LIVE SCOREBOARD" :title="`${contest?.title ?? '比赛'} 实时榜单`">
+      <ContestStatsBar />
+    </PageHeader>
+    <div class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-2.5">
       <RankToolbar />
     </div>
 

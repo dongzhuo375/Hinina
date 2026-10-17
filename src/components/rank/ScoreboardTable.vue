@@ -236,19 +236,19 @@ function oiCells(row: ContestRankRow): OiCellView[] {
           class="border-b border-[var(--border-color)] bg-[var(--bg-body)] text-[var(--text-secondary)] select-none"
         >
           <th
-            class="sticky left-0 z-10 w-16 min-w-[64px] bg-[var(--bg-body)] px-3 py-2.5 text-center font-semibold"
+            class="sticky left-0 z-10 w-16 min-w-[64px] bg-[var(--bg-body)] px-3 py-2.5 text-center font-mono text-[10px] font-semibold tracking-[0.2em]"
           >
             排名
           </th>
           <th
-            class="sticky left-16 z-10 min-w-[220px] bg-[var(--bg-body)] px-4 py-2.5 font-semibold shadow-[1px_0_0_var(--border-color)]"
+            class="sticky left-16 z-10 min-w-[220px] bg-[var(--bg-body)] px-4 py-2.5 font-mono text-[10px] font-semibold tracking-[0.2em] shadow-[1px_0_0_var(--border-color)]"
           >
             选手 / 团队
           </th>
-          <th class="w-16 px-2 py-2.5 text-center font-semibold text-[var(--text-primary)]">
+          <th class="w-16 px-2 py-2.5 text-center font-mono text-[10px] font-semibold tracking-[0.2em] text-[var(--text-primary)]">
             {{ isAcm ? '解题' : '得分' }}
           </th>
-          <th class="w-20 px-2 py-2.5 text-center font-semibold text-[var(--text-primary)]">
+          <th class="w-20 px-2 py-2.5 text-center font-mono text-[10px] font-semibold tracking-[0.2em] text-[var(--text-primary)]">
             {{ isAcm ? '总用时' : '总耗时' }}
           </th>
           <th
@@ -301,7 +301,7 @@ function oiCells(row: ContestRankRow): OiCellView[] {
               </span>
               <span
                 v-else
-                class="font-mono text-xs font-bold"
+                class="font-mono text-sm font-semibold tabular-nums"
                 :class="item.row.rank === -1 ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'"
                 :title="item.row.rank === -1 ? '打星队伍，不参与排名' : undefined"
               >

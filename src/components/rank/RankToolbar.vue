@@ -114,7 +114,7 @@ const oiScoreTypeText = computed<string | null>(() => {
 
 <template>
   <div
-    class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--border-color)] pt-2"
+    class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2"
   >
     <div class="flex flex-wrap items-center space-x-3">
       <div class="relative">
