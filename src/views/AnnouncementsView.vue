@@ -173,21 +173,21 @@ onUnmounted(() => {
       <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
           <div class="flex min-w-0 items-center space-x-3">
-            <h1 class="truncate text-lg font-bold tracking-tight text-[var(--text-primary)]">
+            <h1 class="truncate text-lg font-semibold tracking-wide text-[var(--text-primary)]">
               {{ headerTitle }}
             </h1>
-            <span class="shrink-0 font-mono text-xs text-[var(--text-muted)]">/ Announcements</span>
+            <span class="shrink-0 font-mono text-[10px] tracking-[0.25em] text-[var(--text-muted)]">/ ANNOUNCEMENTS</span>
           </div>
           <p class="mt-1 text-xs text-[var(--text-secondary)]">
             共 {{ announcementStore.total }} 条公告
-            <span v-if="announcementStore.unreadCount > 0" class="text-[var(--color-primary)]">
+            <span v-if="announcementStore.unreadCount > 0" class="text-[#a33b2a]">
               · 未读 {{ announcementStore.unreadCount }} 条
             </span>
           </p>
         </div>
         <button
           type="button"
-          class="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-sm transition-colors hover:bg-slate-50 hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          class="flex shrink-0 items-center gap-1.5 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:border-[#8c6a43] hover:text-[#8c6a43] disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="announcementStore.isLoading"
           title="刷新公告"
           @click="onRefresh"
@@ -237,7 +237,7 @@ onUnmounted(() => {
           class="flex flex-col items-center justify-center gap-3 py-24 text-center"
         >
           <svg
-            class="h-12 w-12 text-slate-300"
+            class="h-12 w-12 text-[var(--text-muted)]"
             fill="none"
             stroke="currentColor"
             stroke-width="1.5"
@@ -259,10 +259,10 @@ onUnmounted(() => {
           <article
             v-for="a in announcementStore.announcements"
             :key="a.id"
-            class="rounded-xl border bg-white p-5 shadow-sm transition-colors hover:border-slate-300"
+            class="rounded-[4px] border bg-[var(--bg-card)] p-5 transition-colors duration-200 ease-out hover:border-[#c9c5b6] hover:shadow-[var(--shadow-raised)]"
             :class="
               announcementStore.isUnread(a.id)
-                ? 'border-[var(--color-primary)]/35 ring-1 ring-[var(--color-primary)]/15'
+                ? 'border-[#8c6a43]/40 ring-1 ring-[#8c6a43]/15'
                 : 'border-[var(--border-color)]'
             "
           >
@@ -270,17 +270,17 @@ onUnmounted(() => {
             <div class="flex items-start gap-2">
               <span
                 v-if="announcementStore.isUnread(a.id)"
-                class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--color-primary)]"
+                class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#a33b2a]"
                 title="未读"
               ></span>
-              <h2 class="min-w-0 flex-1 text-[15px] font-bold leading-6 text-slate-900">
+              <h2 class="min-w-0 flex-1 text-[15px] font-semibold leading-6 text-[var(--text-primary)]">
                 {{ a.title }}
               </h2>
             </div>
 
             <!-- 元信息行 -->
             <p
-              class="mt-1.5 text-xs text-slate-500"
+              class="mt-1.5 text-xs text-[var(--text-muted)]"
               :class="{ 'pl-4': announcementStore.isUnread(a.id) }"
             >
               发布者 {{ a.author }} · {{ formatTime(a.createdAt) }}
@@ -302,7 +302,7 @@ onUnmounted(() => {
             <div v-if="overflowIds.has(a.id)" class="mt-1 flex justify-center">
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded px-3 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-[var(--color-primary)]"
+                class="inline-flex items-center gap-1 rounded-[3px] px-3 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:bg-[var(--bg-sidebar)] hover:text-[#8c6a43]"
                 @click="toggleExpand(a.id)"
               >
                 <span>{{ expandedIds.has(a.id) ? '收起' : '展开全部' }}</span>
@@ -331,7 +331,7 @@ onUnmounted(() => {
 .prose {
   font-size: 13px;
   line-height: 1.7;
-  color: #475569;
+  color: var(--text-secondary);
 }
 .prose :deep(p) {
   margin: 0 0 0.75rem;
@@ -353,14 +353,14 @@ onUnmounted(() => {
   margin-bottom: 0.25rem;
 }
 .prose :deep(strong) {
-  color: #0f172a;
+  color: var(--text-primary);
   font-weight: 600;
 }
 .prose :deep(h1),
 .prose :deep(h2),
 .prose :deep(h3),
 .prose :deep(h4) {
-  color: #0f172a;
+  color: var(--text-primary);
   font-weight: 600;
   margin: 0.75rem 0 0.5rem;
 }
@@ -374,11 +374,11 @@ onUnmounted(() => {
 .prose :deep(code) {
   font-family: var(--font-mono);
   font-size: 0.875em;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 4px;
+  background: #efede5;
+  border: 1px solid #e2e0d6;
+  border-radius: 3px;
   padding: 0.1rem 0.35rem;
-  color: #334155;
+  color: #2e3033;
 }
 .prose :deep(pre code) {
   background: transparent;
@@ -395,13 +395,13 @@ onUnmounted(() => {
 }
 .prose :deep(th),
 .prose :deep(td) {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e2e0d6;
   padding: 0.25rem 0.5rem;
 }
 .prose :deep(blockquote) {
-  border-left: 3px solid #e2e8f0;
+  border-left: 2px solid #8c6a43;
   padding-left: 0.75rem;
-  color: #64748b;
+  color: var(--text-secondary);
   margin: 0 0 0.75rem;
 }
 </style>
