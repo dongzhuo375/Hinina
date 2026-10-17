@@ -78,12 +78,12 @@ function contestElapsed(record: SubmissionRecord): string {
 
 /// tone → pill 样式类（与 utils/submission 的语义色调一一对应）
 const TONE_CLASSES: Record<StatusTone, string> = {
-  ac: 'border-emerald-200 bg-emerald-50 text-emerald-600',
-  wa: 'border-rose-200 bg-rose-50 text-rose-600',
-  tle: 'border-amber-200 bg-amber-50 text-amber-600',
-  pending: 'border-cyan-200 bg-cyan-50 text-cyan-600',
-  system: 'border-slate-200 bg-slate-100 text-slate-600',
-  neutral: 'border-slate-200 bg-slate-100 text-slate-500',
+  ac: 'border-[#c2cfc4] bg-[#edf1ec] text-[#4a6153]',
+  wa: 'border-[#e2c2b8] bg-[#f8ece8] text-[#a33b2a]',
+  tle: 'border-[#e0d2b4] bg-[#f5efe3] text-[#8c6a43]',
+  pending: 'border-[#e0d2b4] bg-[#f5efe3] text-[#8c6a43]',
+  system: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
+  neutral: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-muted)]',
 }
 
 function toneClasses(tone: StatusTone): string {
@@ -266,10 +266,10 @@ onUnmounted(() => {
     <div class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-5 pb-3 pt-4">
       <div class="mb-3 flex items-center justify-between gap-4">
         <div class="flex min-w-0 items-center space-x-3">
-          <h1 class="truncate text-lg font-bold tracking-tight text-[var(--text-primary)]">
+          <h1 class="truncate text-lg font-semibold tracking-wide text-[var(--text-primary)]">
             {{ contest?.title ?? '比赛' }} 评测状态
           </h1>
-          <span class="shrink-0 font-mono text-xs text-[var(--text-muted)]">/ Submissions</span>
+          <span class="shrink-0 font-mono text-[10px] tracking-[0.25em] text-[var(--text-muted)]">/ SUBMISSIONS</span>
         </div>
       </div>
 
@@ -278,7 +278,7 @@ onUnmounted(() => {
         <div class="flex flex-wrap items-center gap-2">
           <div class="relative">
             <select
-              class="cursor-pointer appearance-none rounded-lg border border-[var(--border-color)] bg-white py-1.5 pl-3 pr-8 text-xs font-medium text-[var(--text-primary)] shadow-xs transition-colors hover:bg-slate-50 focus:border-[var(--color-primary)] focus:outline-none"
+              class="cursor-pointer appearance-none rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] py-1.5 pl-3 pr-8 text-xs font-medium text-[var(--text-primary)] transition-colors duration-200 ease-out hover:bg-[var(--bg-sidebar)] focus:border-[#8c6a43] focus:outline-none"
               :value="history.problemFilter ?? ''"
               @change="onProblemFilterChange"
             >
@@ -301,7 +301,7 @@ onUnmounted(() => {
 
           <div class="relative">
             <select
-              class="cursor-pointer appearance-none rounded-lg border border-[var(--border-color)] bg-white py-1.5 pl-3 pr-8 text-xs font-medium text-[var(--text-primary)] shadow-xs transition-colors hover:bg-slate-50 focus:border-[var(--color-primary)] focus:outline-none"
+              class="cursor-pointer appearance-none rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] py-1.5 pl-3 pr-8 text-xs font-medium text-[var(--text-primary)] transition-colors duration-200 ease-out hover:bg-[var(--bg-sidebar)] focus:border-[#8c6a43] focus:outline-none"
               :value="statusSelectValue"
               @change="onStatusFilterChange"
             >
@@ -342,7 +342,7 @@ onUnmounted(() => {
               type="text"
               placeholder="搜索提交编号 / 题目…"
               title="在当前页内过滤（运行编号 / 题目）"
-              class="w-52 rounded-lg border border-[var(--border-color)] bg-white py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] shadow-xs transition-colors placeholder:text-[var(--text-muted)] hover:bg-slate-50 focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+              class="w-52 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] transition-colors duration-200 ease-out placeholder:text-[var(--text-muted)] hover:bg-[var(--bg-sidebar)] focus:border-[#8c6a43] focus:outline-none"
             />
           </div>
         </div>
@@ -350,7 +350,7 @@ onUnmounted(() => {
         <button
           type="button"
           title="刷新列表"
-          class="flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-slate-50 px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] shadow-xs transition-colors hover:bg-slate-100 active:bg-slate-200"
+          class="flex items-center gap-1.5 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-body)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors duration-200 ease-out hover:border-[#8c6a43] hover:text-[#8c6a43]"
           @click="refresh"
         >
           <svg
@@ -379,7 +379,7 @@ onUnmounted(() => {
       <!-- 轮询/刷新失败但仍有旧数据：顶部错误条，不清空表格 -->
       <div
         v-if="history.error && history.records.length > 0"
-        class="flex shrink-0 items-center gap-2 rounded-lg border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-rose-700"
+        class="flex shrink-0 items-center gap-2 rounded-[3px] border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-[#a33b2a]"
       >
         <svg
           class="h-3.5 w-3.5 shrink-0"
@@ -398,7 +398,7 @@ onUnmounted(() => {
         <span class="min-w-0 flex-1 truncate">刷新失败：{{ history.error }}（已保留上一次数据）</span>
         <button
           type="button"
-          class="shrink-0 rounded-md border border-[var(--color-wa-border)] bg-white px-2 py-0.5 font-medium transition-colors hover:bg-rose-50"
+          class="shrink-0 rounded-[3px] border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2 py-0.5 font-medium transition-colors duration-200 ease-out hover:bg-[#f8ece8]"
           @click="retry"
         >
           立即重试
@@ -406,7 +406,7 @@ onUnmounted(() => {
       </div>
 
       <div
-        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-white shadow-sm"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]"
       >
         <LoadingSpinner v-if="isBootstrapping" message="正在加载提交记录…" class="m-auto" />
 
@@ -424,7 +424,7 @@ onUnmounted(() => {
             class="flex flex-1 flex-col items-center justify-center gap-3 p-12 text-center"
           >
             <div
-              class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--bg-body)] text-[var(--text-muted)]"
+              class="flex h-14 w-14 items-center justify-center rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-body)] text-[var(--text-muted)]"
             >
               <svg
                 class="h-7 w-7"
@@ -451,7 +451,7 @@ onUnmounted(() => {
             <button
               v-if="history.problemFilter"
               type="button"
-              class="rounded-md border border-[var(--border-color)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+              class="rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:bg-[var(--bg-sidebar)]"
               @click="clearProblemFilter"
             >
               清除题目筛选
@@ -470,7 +470,7 @@ onUnmounted(() => {
           <table v-else class="w-full border-collapse text-left">
             <thead>
               <tr
-                class="border-b border-[var(--border-color)] bg-slate-50/80 font-mono text-[11px] tracking-wider text-[var(--text-secondary)] uppercase"
+                class="border-b border-[var(--border-color)] bg-[var(--bg-body)] font-mono text-[10px] tracking-[0.2em] text-[var(--text-muted)] uppercase"
               >
                 <th class="px-4 py-3 font-semibold">运行编号</th>
                 <th class="px-4 py-3 font-semibold">提交时间</th>
@@ -487,7 +487,7 @@ onUnmounted(() => {
               <tr
                 v-for="record in visibleRecords"
                 :key="record.submitId"
-                class="transition-colors hover:bg-slate-50/70"
+                class="transition-colors duration-200 ease-out hover:bg-[var(--bg-body)]"
               >
                 <td class="px-4 py-3 font-mono text-xs font-semibold tabular-nums">
                   #{{ record.submitId }}
@@ -508,15 +508,15 @@ onUnmounted(() => {
                   >
                     <!-- 字母徽章：底色用 HOJ 气球色，未配置/未匹配时回退石板灰 -->
                     <span
-                      class="flex h-5 w-5 shrink-0 items-center justify-center rounded font-mono text-[11px] font-bold"
-                      :class="badgeColorOf(record) ? 'text-white' : 'bg-slate-100 text-slate-600'"
+                      class="flex h-5 w-5 shrink-0 items-center justify-center rounded-[2px] font-mono text-[11px] font-bold"
+                      :class="badgeColorOf(record) ? 'text-white' : 'bg-[var(--bg-sidebar)] text-[var(--text-secondary)]'"
                       :style="
                         badgeColorOf(record) ? { backgroundColor: badgeColorOf(record) } : undefined
                       "
                     >
                       {{ record.displayId || '·' }}
                     </span>
-                    <span class="font-medium hover:text-[var(--color-primary)]">
+                    <span class="font-medium transition-colors duration-200 ease-out hover:text-[#8c6a43]">
                       {{ record.title }}
                     </span>
                   </div>
@@ -526,7 +526,7 @@ onUnmounted(() => {
                 </td>
                 <td class="px-4 py-3">
                   <span
-                    class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold shadow-xs"
+                    class="inline-flex items-center gap-1.5 rounded-[3px] border px-2.5 py-1 text-xs font-semibold"
                     :class="toneClasses(statusTone(record.status))"
                   >
                     <svg
@@ -562,7 +562,7 @@ onUnmounted(() => {
                 <td class="px-4 py-3 text-center">
                   <button
                     type="button"
-                    class="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-primary)] transition-colors hover:text-[var(--color-primary-hover)]"
+                    class="inline-flex items-center gap-1 text-xs font-medium text-[#8c6a43] transition-colors duration-200 ease-out hover:underline"
                     @click="openDetail(record)"
                   >
                     <svg
@@ -605,7 +605,7 @@ onUnmounted(() => {
             <div v-if="history.pages > 1" class="flex items-center gap-1 text-xs">
               <button
                 type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded-[3px] border border-[var(--border-color)] px-2 py-1 transition-colors duration-200 ease-out enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="history.current <= 1 || history.isLoading"
                 @click="goToPage(history.current - 1)"
               >
@@ -619,11 +619,11 @@ onUnmounted(() => {
                 <button
                   v-else
                   type="button"
-                  class="min-w-7 rounded-md border px-2 py-1 font-mono transition-colors disabled:opacity-60"
+                  class="min-w-7 rounded-[3px] border px-2 py-1 font-mono tabular-nums transition-colors duration-200 ease-out disabled:opacity-60"
                   :class="
                     item === history.current
                       ? 'border-[var(--color-primary)] bg-[var(--color-primary)] font-semibold text-white'
-                      : 'border-[var(--border-color)] enabled:hover:bg-slate-50'
+                      : 'border-[var(--border-color)] enabled:hover:bg-[var(--bg-sidebar)]'
                   "
                   :disabled="history.isLoading"
                   @click="goToPage(item)"
@@ -633,7 +633,7 @@ onUnmounted(() => {
               </template>
               <button
                 type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded-[3px] border border-[var(--border-color)] px-2 py-1 transition-colors duration-200 ease-out enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="history.current >= history.pages || history.isLoading"
                 @click="goToPage(history.current + 1)"
               >
