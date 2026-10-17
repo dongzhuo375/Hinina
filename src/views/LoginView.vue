@@ -47,37 +47,6 @@ const contestPhase = computed(() => getContestPhase(schedule.value, now.value))
 
 const eventTitle = computed(() => brief.value?.title || 'Hinina 竞赛')
 
-/// 比赛阶段徽章文案
-const phaseLabel = computed(() => {
-  const format = brief.value?.contestType === 1 ? 'OI 赛制' : 'ACM / ICPC 赛制'
-  switch (contestPhase.value) {
-    case 'upcoming':
-      return `${format} · 即将开始`
-    case 'running':
-      return `${format} · 比赛进行中`
-    case 'ended':
-      return `${format} · 比赛已结束`
-    default:
-      return format
-  }
-})
-
-/// 比赛阶段副标题文案（已登录时给出会话侧的引导语）
-const phaseDesc = computed(() => {
-  switch (contestPhase.value) {
-    case 'upcoming':
-      return auth.isLoggedIn
-        ? '完成签到后安心等待，开赛时客户端会自动带你进入赛场。'
-        : '使用组委会分发的参赛账号登录。开赛前可在此等待，客户端会在开赛时自动进入赛场。'
-    case 'running':
-      return auth.isLoggedIn ? '比赛正在进行，正在为你打开工作台。' : '比赛已经开始，登录后即可进入赛场。'
-    case 'ended':
-      return '本场比赛已经结束。'
-    default:
-      return '连接比赛平台后，这里会显示赛事名称与开赛时间。'
-  }
-})
-
 // ── 会话状态与进入赛场决策 ──
 
 /// 只有比赛进行中才自动进入工作台；已结束的比赛保持在登录入口。
@@ -244,13 +213,12 @@ onUnmounted(() => {
   <div class="login-page relative isolate h-full overflow-y-auto bg-[#f7f6f1] text-[#2e3033]">
     <div class="login-geometry pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
       <span class="geometry-axis"></span>
-      <span class="geometry-horizon"></span>
       <span class="geometry-plane"></span>
     </div>
 
     <main class="login-main relative z-10 mx-auto grid w-full max-w-[1600px] gap-12">
       <div class="event-column flex min-w-0 flex-col">
-        <EventTitle :title="eventTitle" :phase-label="phaseLabel" :description="phaseDesc" />
+        <EventTitle :title="eventTitle" />
         <Countdown
           class="event-clock"
           :phase="contestPhase"
@@ -280,8 +248,7 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <footer class="login-footer relative z-10 mx-auto flex w-full max-w-[1600px] flex-wrap items-end justify-between gap-4">
-      <p class="font-mono text-[10px] uppercase tracking-[0.2em] text-[#68706f]">Hinina / Competition workspace</p>
+    <footer class="login-footer relative z-10 mx-auto flex w-full max-w-[1600px] flex-wrap items-end justify-end gap-4">
       <div class="min-w-0 text-right" role="status" aria-live="polite">
         <div class="flex flex-wrap items-center justify-end gap-x-5 gap-y-2 text-[11px] text-[#68706f]">
           <span class="flex items-center gap-2">
@@ -324,7 +291,7 @@ onUnmounted(() => {
 }
 
 .event-clock {
-  margin-top: clamp(70px, 13vh, 150px);
+  margin-top: clamp(110px, 18vh, 180px);
 }
 
 .entry-column {
@@ -339,17 +306,8 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 5.7%;
-  border-left: 1px solid rgba(108, 122, 118, 0.18);
-}
-
-.geometry-horizon {
-  position: absolute;
-  top: 70%;
-  left: 0;
-  width: 47%;
-  height: 1px;
-  background: linear-gradient(to right, rgba(108, 122, 118, 0.2), transparent);
+  left: 4.5%;
+  border-left: 1px solid rgba(108, 122, 118, 0.12);
 }
 
 .geometry-plane {
@@ -357,7 +315,7 @@ onUnmounted(() => {
   bottom: 0;
   left: 0;
   width: 55%;
-  height: 36%;
+  height: 22%;
   clip-path: polygon(0 0, 100% 100%, 48% 100%);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.1));
 }
@@ -373,7 +331,7 @@ onUnmounted(() => {
     padding: 32px 24px;
   }
 
-  .event-clock { margin-top: 44px; }
+  .event-clock { margin-top: 72px; }
   .entry-column { padding-top: 0; }
   .login-footer { padding: 18px 24px; }
 }
