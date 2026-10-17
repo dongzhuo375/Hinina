@@ -324,6 +324,10 @@ onUnmounted(() => {
   .entry-column { padding-top: 20px; }
 }
 
+@media (min-width: 801px) and (min-height: 801px) {
+  .event-clock { margin-top: max(clamp(110px, 18vh, 180px), calc(50vh - 256px)); }
+}
+
 @media (max-width: 800px) {
   .login-main {
     grid-template-columns: minmax(0, 1fr);
