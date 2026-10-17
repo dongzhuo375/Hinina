@@ -68,7 +68,7 @@ const guidance = computed(() => {
       </template>
     </div>
 
-    <p class="mt-7 text-xs tracking-[0.025em] text-[#68706f]">{{ guidance }}</p>
+    <p class="mt-7 text-xs tracking-[0.025em] text-[#6b7280]">{{ guidance }}</p>
   </section>
 </template>
 

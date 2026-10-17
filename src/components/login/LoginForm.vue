@@ -154,7 +154,7 @@ const accountStatus = computed(() => {
 
         <button
           type="submit"
-          class="login-submit group relative flex min-h-[54px] w-full items-center justify-center gap-3 overflow-hidden bg-[#2e3033] px-5 text-sm font-semibold tracking-[0.1em] text-white transition-colors hover:bg-[#3a3d3f] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#8c6a43] disabled:cursor-not-allowed disabled:opacity-55"
+          class="login-submit group relative flex min-h-[54px] w-full items-center justify-center gap-3 overflow-hidden bg-[#2e3033] px-5 text-sm font-semibold tracking-[0.1em] text-white transition-colors hover:bg-[#3a3d3f] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#8c6a43] disabled:cursor-not-allowed"
           :disabled="loginDisabled"
           :aria-busy="isSubmitting"
         >
@@ -166,7 +166,7 @@ const accountStatus = computed(() => {
         </button>
       </form>
 
-      <div class="mt-7 border-t border-[#b9bfbc]/70 pt-4">
+      <div class="mt-7">
         <button
           type="button"
           class="group flex w-full items-center justify-between py-1 text-xs text-[#79817e] transition-colors hover:text-[#8c6a43] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8c6a43]"
@@ -189,13 +189,9 @@ const accountStatus = computed(() => {
 </template>
 
 <style scoped>
-.login-card-wrap {
-  filter: drop-shadow(0 24px 48px rgba(46, 48, 51, 0.11));
-}
-
 .login-card {
   clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px);
-  background: rgba(126, 135, 130, 0.42);
+  background: #e5e7eb;
   backdrop-filter: blur(14px);
 }
 
@@ -203,8 +199,7 @@ const accountStatus = computed(() => {
   position: absolute;
   inset: 1px;
   clip-path: polygon(17.5px 0, calc(100% - 17.5px) 0, 100% 17.5px, 100% calc(100% - 17.5px), calc(100% - 17.5px) 100%, 17.5px 100%, 0 calc(100% - 17.5px), 0 17.5px);
-  background: linear-gradient(145deg, #fbfaf6, #f5f4ee);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  background: rgba(247, 246, 241, 0.96);
   content: '';
   z-index: -1;
 }
@@ -214,7 +209,6 @@ const accountStatus = computed(() => {
   color: #fff;
 }
 
-.login-submit:disabled { opacity: 0.75; }
 .login-submit:hover { box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.07); }
 .login-submit:focus-visible { clip-path: none; }
 
