@@ -63,7 +63,7 @@ describe('contest exit lifecycle', () => {
     expect(mocks.startLive).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(2_000)
     expect(host.querySelector('[role="alert"]')!.textContent).toContain('比赛已结束')
-    expect(host.querySelector('[role="alert"]')!.parentElement?.classList.contains('top-12')).toBe(true)
+    expect(host.querySelector('[role="alert"]')!.parentElement?.classList.contains('top-16')).toBe(true)
     expect(host.querySelector('[inert]')).not.toBeNull()
     expect(mocks.stopLive).toHaveBeenCalledOnce()
     expect(mocks.replace).not.toHaveBeenCalled()
