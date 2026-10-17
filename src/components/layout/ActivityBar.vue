@@ -24,11 +24,11 @@ const showAnnouncementDot = computed(
   () => announcementStore.unreadCount > 0 && activeKey.value !== 'announcements',
 )
 
-/// 导航项样式：激活=浅紫底 + 紫色文字，悬停=中性浅底
+/// 导航项样式：激活=炭黑文字 + 左侧炭黑指示条，悬停=暖灰浅底
 function itemClass(key: string): string {
   return activeKey.value === key
-    ? 'relative flex h-12 w-12 flex-col items-center justify-center rounded-xl border border-[#ede9fe] bg-[#f5f3ff] text-[#6845f5] shadow-sm transition'
-    : 'relative flex h-12 w-12 flex-col items-center justify-center rounded-xl text-[var(--text-secondary)] transition hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]'
+    ? 'relative flex h-12 w-12 flex-col items-center justify-center rounded-[3px] bg-[var(--bg-sidebar)] text-[#2e3033] transition-colors duration-200 ease-out'
+    : 'relative flex h-12 w-12 flex-col items-center justify-center rounded-[3px] text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]'
 }
 </script>
 
@@ -48,10 +48,10 @@ function itemClass(key: string): string {
           ></path>
         </svg>
         <span class="scale-90 text-[10px] font-semibold">题目</span>
-        <!-- 激活指示条：贴活动栏左缘的 3px 紫条 -->
+        <!-- 激活指示条：贴活动栏左缘的 2px 炭黑条 -->
         <span
           v-if="activeKey === 'problems'"
-          class="absolute -left-2 bottom-3 top-3 w-[3px] rounded-r bg-[var(--color-primary)]"
+          class="absolute -left-2 bottom-3 top-3 w-[2px] bg-[#2e3033]"
         ></span>
       </router-link>
 
@@ -67,7 +67,7 @@ function itemClass(key: string): string {
         <span class="scale-90 text-[10px] font-semibold">榜单</span>
         <span
           v-if="activeKey === 'rank'"
-          class="absolute -left-2 bottom-3 top-3 w-[3px] rounded-r bg-[var(--color-primary)]"
+          class="absolute -left-2 bottom-3 top-3 w-[2px] bg-[#2e3033]"
         ></span>
       </router-link>
 
@@ -87,7 +87,7 @@ function itemClass(key: string): string {
         <span class="scale-90 text-[10px] font-semibold">评测</span>
         <span
           v-if="activeKey === 'submissions'"
-          class="absolute -left-2 bottom-3 top-3 w-[3px] rounded-r bg-[var(--color-primary)]"
+          class="absolute -left-2 bottom-3 top-3 w-[2px] bg-[#2e3033]"
         ></span>
       </router-link>
 
@@ -108,13 +108,13 @@ function itemClass(key: string): string {
           </svg>
           <span
             v-if="showAnnouncementDot"
-            class="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white"
+            class="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-[#a33b2a] ring-2 ring-[var(--bg-card)]"
           ></span>
         </span>
         <span class="scale-90 text-[10px] font-semibold">公告</span>
         <span
           v-if="activeKey === 'announcements'"
-          class="absolute -left-2 bottom-3 top-3 w-[3px] rounded-r bg-[var(--color-primary)]"
+          class="absolute -left-2 bottom-3 top-3 w-[2px] bg-[#2e3033]"
         ></span>
       </router-link>
     </div>
@@ -124,10 +124,10 @@ function itemClass(key: string): string {
       <router-link
         v-if="settingsUnlocked"
         :to="{ name: 'Settings' }"
-        class="flex h-10 w-10 items-center justify-center rounded-lg transition"
+        class="flex h-10 w-10 items-center justify-center rounded-[3px] transition-colors duration-200 ease-out"
         :class="
           activeKey === 'settings'
-            ? 'bg-[#f5f3ff] text-[#6845f5]'
+            ? 'bg-[var(--bg-sidebar)] text-[#2e3033]'
             : 'text-[var(--text-muted)] hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]'
         "
         title="环境设置"

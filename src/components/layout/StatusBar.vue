@@ -42,8 +42,8 @@ onUnmounted(() => {
   >
     <div class="flex items-center gap-1.5 text-xs">
       <span
-        class="h-2 w-2 rounded-full"
-        :class="connected ? 'animate-pulse bg-[#22c55e]' : 'bg-[var(--color-error)]'"
+        class="h-1.5 w-1.5 rounded-full"
+        :class="connected ? 'animate-pulse bg-[#5f7a6a]' : 'bg-[var(--color-error)]'"
       ></span>
       <span
         class="font-medium"
@@ -54,7 +54,7 @@ onUnmounted(() => {
     </div>
 
     <div class="flex items-center gap-2">
-      <span v-if="unlockedHint" class="font-mono text-[10px] text-[var(--color-primary)]">
+      <span v-if="unlockedHint" class="font-mono text-[10px] text-[#8c6a43]">
         设置已解锁
       </span>
       <!--
