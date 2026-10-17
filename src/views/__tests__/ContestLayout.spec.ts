@@ -7,9 +7,15 @@ import { useContestStore } from '@/stores/contestStore'
 import type { Contest } from '@/types/contest'
 import ContestLayout from '@/views/ContestLayout.vue'
 
-const mocks = vi.hoisted(() => ({ replace: vi.fn(), startLive: vi.fn(), stopLive: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  replace: vi.fn(),
+  startLive: vi.fn(),
+  stopLive: vi.fn(),
+  loadConfiguredContest: vi.fn(),
+}))
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.replace }) }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => mocks }))
+vi.mock('@/services/contest.service', () => ({ contestService: { loadConfiguredContest: mocks.loadConfiguredContest } }))
 vi.mock('@/components/layout/TopBar.vue', () => ({ default: { template: '<header />' } }))
 vi.mock('@/components/layout/StatusBar.vue', () => ({ default: { template: '<footer />' } }))
 vi.mock('@/components/layout/ActivityBar.vue', () => ({ default: { template: '<aside />' } }))
@@ -23,11 +29,12 @@ const schedule: Contest = {
 let app: App | undefined
 let host: HTMLDivElement
 
-async function render(contest: Contest = schedule) {
+async function render(contest: Contest = schedule, brief?: Contest) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const store = useContestStore()
   store.contest = { ...contest }
+  if (brief) store.brief = { ...brief }
   app = createApp(ContestLayout)
   app.use(pinia)
   app.component('RouterView', { template: '<div>contest content</div>' })
@@ -86,6 +93,22 @@ describe('contest exit lifecycle', () => {
 
     expect(host.querySelector('[role="alert"]')).toBeNull()
     expect(mocks.replace).not.toHaveBeenCalled()
+  })
+
+  it('refreshes authenticated contest data when the brief points to a new contest', async () => {
+    const refreshed = { ...schedule, id: 'current', title: '新比赛', status: 0 }
+    mocks.loadConfiguredContest.mockResolvedValue({ contest: refreshed, problems: [] })
+
+    const store = await render(
+      { ...schedule, id: 'old', title: '旧比赛', status: 1 },
+      { ...schedule, id: 'current', title: '新比赛', status: 0 },
+    )
+    await Promise.resolve()
+    await nextTick()
+
+    expect(mocks.loadConfiguredContest).toHaveBeenCalledOnce()
+    expect(store.contest).toEqual(refreshed)
+    expect(mocks.startLive).toHaveBeenCalledExactlyOnceWith('current', expect.any(Function))
   })
 
   it('cancels pending exit and clock timers when leaving', async () => {

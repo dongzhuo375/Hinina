@@ -40,6 +40,18 @@ async function bootstrap(): Promise<void> {
   try {
     // whenLoaded 复用在途请求（P59 统一入口），子视图先触发加载时也走同一条链路
     await contestStore.whenLoaded()
+    if (disposed) return
+
+    // 登录页简报可能已经切换到下一场比赛，而 contest 仍保留上一场的缓存。
+    // 此时 whenLoaded 会因 contest 非空直接返回，必须主动刷新认证数据，
+    // 否则题目、榜单、提交和公告都会继续绑定旧比赛。
+    if (
+      contestStore.contest?.id &&
+      contestStore.brief?.id &&
+      contestStore.contest.id !== contestStore.brief.id
+    ) {
+      await contestStore.loadContest()
+    }
   } catch {
     // 失败原因已由 store 写入 error，StatusBar 与各视图负责兜底展示
     return
