@@ -25,7 +25,7 @@ const guidance = computed(() => {
     case 'upcoming':
       return props.isLoggedIn
         ? '已登录 · 开赛后自动进入'
-        : '登录后等待开赛'
+        : '距离比赛开始还有'
     case 'running':
       return props.isLoggedIn ? '正在进入赛场' : '比赛进行中 · 登录后即可进入'
     case 'ended':
@@ -68,7 +68,14 @@ const guidance = computed(() => {
       </template>
     </div>
 
-    <p class="mt-7 text-[13px] tracking-[0.025em] text-[#6b7280]">{{ guidance }}</p>
+    <p
+      :class="[
+        'text-[13px] tracking-[0.025em] text-[#6b7280]',
+        props.phase === 'upcoming' && !props.isLoggedIn ? 'mt-12' : 'mt-7',
+      ]"
+    >
+      {{ guidance }}
+    </p>
   </section>
 </template>
 

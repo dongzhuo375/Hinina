@@ -29,7 +29,7 @@ const accountStatus = computed(() => {
   if (props.phase === 'upcoming') return '账号已就绪，开赛后将自动进入赛场'
   if (props.phase === 'running') return '比赛正在进行，正在打开赛场…'
   if (props.phase === 'ended') return '比赛已结束，你已返回入口页面'
-  return '账号已登录，正在确认比赛信息'
+  return '账号已登录'
 })
 </script>
 
@@ -37,10 +37,7 @@ const accountStatus = computed(() => {
   <section class="login-card-wrap w-full max-w-[470px]" aria-label="参赛账号验证">
     <div class="login-card relative px-7 py-8 sm:px-10 sm:py-10">
       <header class="mb-8">
-        <p class="font-sans text-[10px] font-semibold uppercase tracking-[1px] text-[#8c6a43]">
-          Hinina <span class="mx-1 text-[#b5bbb7]">/</span> Secure entry
-        </p>
-        <h2 class="mt-3 text-2xl font-semibold tracking-[0.025em] text-[#2e3033]">
+        <h2 class="text-2xl font-semibold tracking-[0.025em] text-[#2e3033]">
           {{ isLoggedIn ? '账号已验证' : '探索竞赛之旅' }}
         </h2>
         <span class="mt-4 block h-[2px] w-12 bg-[#2e3033]"></span>
@@ -75,7 +72,7 @@ const accountStatus = computed(() => {
           :disabled="isSigningOut"
           @click="emit('switchAccount')"
         >
-          {{ isSigningOut ? '正在安全退出…' : '切换参赛账号' }}
+          {{ isSigningOut ? '正在退出…' : '切换参赛账号' }}
         </button>
         <p v-if="authError" role="alert" class="mt-4 text-[13px] leading-5 text-[#a33b2a]">
           {{ authError }}
@@ -84,9 +81,6 @@ const accountStatus = computed(() => {
 
       <form v-else class="space-y-6" :aria-busy="isSubmitting" @submit.prevent="emit('submit')">
         <div>
-          <label for="contest-username" class="mb-2 block text-[13px] font-semibold tracking-[0.08em] text-[#6b7280]">
-            参赛账号 <span class="ml-1 font-sans text-[10px] font-normal tracking-[1px] text-[#6b7280]">/ TEAM ID</span>
-          </label>
           <div class="login-field flex items-center gap-3">
             <svg class="h-[18px] w-[18px] shrink-0 text-[#55615d]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
               <path stroke-linecap="square" stroke-linejoin="miter" d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -94,6 +88,7 @@ const accountStatus = computed(() => {
             </svg>
             <input
               id="contest-username"
+              aria-label="参赛账号"
               v-model="username"
               type="text"
               autocomplete="username"
@@ -108,9 +103,6 @@ const accountStatus = computed(() => {
         </div>
 
         <div>
-          <label for="contest-password" class="mb-2 block text-[13px] font-semibold tracking-[0.08em] text-[#6b7280]">
-            参赛密码 <span class="ml-1 font-sans text-[10px] font-normal tracking-[1px] text-[#6b7280]">/ CONTEST PIN</span>
-          </label>
           <div class="login-field flex items-center gap-3">
             <svg class="h-[18px] w-[18px] shrink-0 text-[#55615d]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
               <rect height="11" rx="1" width="18" x="3" y="11" />
@@ -118,6 +110,7 @@ const accountStatus = computed(() => {
             </svg>
             <input
               id="contest-password"
+              aria-label="参赛密码"
               v-model="password"
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"
