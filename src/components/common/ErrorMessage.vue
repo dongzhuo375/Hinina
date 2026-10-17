@@ -9,7 +9,7 @@ defineProps<{ message: string; retry?: () => void }>()
     <p class="text-sm text-[var(--text-secondary)] max-w-md">{{ message }}</p>
     <button
       v-if="retry"
-      class="rounded-md bg-[var(--color-primary)] px-4 py-1.5 text-sm text-white hover:bg-[var(--color-primary-hover)] transition-colors"
+      class="rounded-[3px] bg-[var(--color-primary)] px-4 py-1.5 text-sm text-[#f7f6f1] transition-colors duration-200 ease-out hover:bg-[var(--color-primary-hover)]"
       @click="retry"
     >
       重试
