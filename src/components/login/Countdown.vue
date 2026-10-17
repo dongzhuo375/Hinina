@@ -64,7 +64,7 @@ const guidance = computed(() => {
           </span>
           <span class="mt-[14px] inline-block h-px w-5 bg-[#7d8582]" aria-hidden="true"></span>
         </div>
-        <span v-if="index < 3" class="mt-9 text-center font-mono text-sm font-light leading-none text-[#b5bbb7]" aria-hidden="true">/</span>
+        <span v-if="index < 3" class="mt-9 text-center font-mono text-sm font-normal leading-none text-[#b5bbb7]" aria-hidden="true">/</span>
       </template>
     </div>
 
