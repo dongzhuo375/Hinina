@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import type { ContestProblem } from '@/types/contest'
@@ -262,17 +263,9 @@ onUnmounted(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
-    <!-- 头部：标题 + 筛选工具条 -->
-    <div class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-5 pb-3 pt-4">
-      <div class="mb-3 flex items-center justify-between gap-4">
-        <div class="flex min-w-0 items-center space-x-3">
-          <h1 class="truncate text-lg font-semibold tracking-wide text-[var(--text-primary)]">
-            {{ contest?.title ?? '比赛' }} 评测状态
-          </h1>
-          <span class="shrink-0 font-mono text-[10px] tracking-[0.25em] text-[var(--text-muted)]">/ SUBMISSIONS</span>
-        </div>
-      </div>
-
+    <!-- 页首：编辑版式；筛选工具条独立成条 -->
+    <PageHeader en="SUBMISSIONS" :title="`${contest?.title ?? '比赛'} 评测状态`" />
+    <div class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-2.5">
       <!-- 筛选工具条：题目 / 状态 / 搜索 / 刷新 -->
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2">

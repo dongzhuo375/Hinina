@@ -68,6 +68,20 @@ function toneClasses(tone: StatusTone): string {
   return TONE_CLASSES[tone] ?? TONE_CLASSES.neutral
 }
 
+/// tone → 纯文字色（判定横幅的大号判定词用，不带底色/边框）
+const TONE_TEXT: Record<StatusTone, string> = {
+  ac: 'text-[#4a6153]',
+  wa: 'text-[#a33b2a]',
+  tle: 'text-[#8c6a43]',
+  pending: 'text-[#8c6a43]',
+  system: 'text-[var(--text-secondary)]',
+  neutral: 'text-[var(--text-muted)]',
+}
+
+function toneText(tone: StatusTone): string {
+  return TONE_TEXT[tone] ?? TONE_TEXT.neutral
+}
+
 /// 详情 pid 匹配到当前比赛题目时可跳解题页；匹配不到（如赛后换配置）只显示 displayPid
 const matchedProblem = computed(() => {
   const pid = detail.value?.pid
@@ -252,33 +266,40 @@ function openProblem() {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
-    <!-- 顶栏：返回 + 标题 + 评测中指示 -->
+    <!-- 页首：SUBMISSION 微标 + 编号大标题，右侧评测中指示与返回 -->
     <div
-      class="flex shrink-0 items-center gap-3 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-5 py-3"
+      class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 pb-4 pt-5"
     >
-      <button
-        type="button"
-        class="flex items-center gap-1.5 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-body)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:border-[#8c6a43] hover:text-[#8c6a43]"
-        @click="goBack"
-      >
-        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <span>返回评测列表</span>
-      </button>
-      <h1 class="min-w-0 truncate text-base font-bold tracking-tight text-[var(--text-primary)]">
-        提交 <span class="font-mono">#{{ submitId }}</span>
-      </h1>
-      <span
-        v-if="judging"
-        class="flex shrink-0 items-center gap-1.5 rounded-[3px] border border-[#e0d2b4] bg-[#f5efe3] px-2.5 py-1 text-xs font-medium text-[#8c6a43]"
-      >
-        <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-          <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-        </svg>
-        <span>评测中，自动刷新…</span>
-      </span>
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div class="min-w-0">
+          <p class="font-mono text-[10px] tracking-[0.35em] text-[#8c6a43]">SUBMISSION</p>
+          <h1 class="mt-1.5 truncate text-xl font-semibold tracking-wide text-[var(--text-primary)]">
+            提交 <span class="font-mono tabular-nums">#{{ submitId }}</span>
+          </h1>
+        </div>
+        <div class="flex shrink-0 items-center gap-4">
+          <span
+            v-if="judging"
+            class="flex items-center gap-1.5 font-mono text-[11px] font-medium text-[#8c6a43]"
+          >
+            <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
+              <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
+            </svg>
+            <span>评测中，自动刷新…</span>
+          </span>
+          <button
+            type="button"
+            class="flex items-center gap-1.5 px-1 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:text-[#8c6a43]"
+            @click="goBack"
+          >
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>返回评测列表</span>
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -296,13 +317,12 @@ function openProblem() {
           class="rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)] p-5"
         >
           <div class="flex flex-wrap items-center gap-4">
-            <span
-              class="inline-flex items-center gap-2 rounded-[3px] border px-4 py-2 text-base font-bold"
-              :class="[toneClasses(statusTone(detail.status)), judging ? 'animate-pulse' : '']"
-            >
+            <!-- 判定词：display 级大字 + 语义色，不带 pill 框 -->
+            <div class="flex items-center gap-2.5" :class="judging ? 'animate-pulse' : ''">
               <svg
                 v-if="judging"
                 class="h-4 w-4 animate-spin"
+                :class="toneText(statusTone(detail.status))"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2.5"
@@ -312,8 +332,13 @@ function openProblem() {
                 <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
                 <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
               </svg>
-              <span>{{ statusLabel(detail.status) }}</span>
-            </span>
+              <span
+                class="text-2xl font-semibold tracking-wide"
+                :class="toneText(statusTone(detail.status))"
+              >
+                {{ statusLabel(detail.status) }}
+              </span>
+            </div>
 
             <!-- 指标条：等宽数字，逐项分隔 -->
             <div
