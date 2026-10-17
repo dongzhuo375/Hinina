@@ -26,9 +26,10 @@
   --color-pending-border: #fde68a; /* 待评测 amber 边框 */
 
   --radius: 8px;
-  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  --font-sans: "Inter", "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+  --font: var(--font-sans);
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Mono", Consolas, monospace;
 
   --bg-body: #f8fafc;
   --bg-card: #ffffff;
