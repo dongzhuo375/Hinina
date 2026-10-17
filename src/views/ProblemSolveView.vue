@@ -274,13 +274,13 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50">
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
     <ProblemTabStrip />
 
     <div ref="splitContainer" class="flex min-h-0 flex-1 overflow-hidden">
       <!-- 左栏：题面（48%，可拖拽调整） -->
       <section
-        class="flex min-w-0 flex-col overflow-hidden bg-white"
+        class="flex min-w-0 flex-col overflow-hidden bg-[var(--bg-card)]"
         :style="{ width: `${splitRatio * 100}%` }"
       >
         <div v-if="viewError" class="flex flex-1 flex-col justify-center">
@@ -301,12 +301,12 @@ async function handleSubmit() {
 
       <!-- 拖拽条 -->
       <div
-        class="w-px shrink-0 cursor-col-resize bg-slate-200 transition-colors hover:bg-[var(--color-primary)]"
+        class="w-px shrink-0 cursor-col-resize bg-[var(--border-color)] transition-colors duration-200 ease-out hover:bg-[#8c6a43]"
         @mousedown="startDrag"
       ></div>
 
       <!-- 右栏：代码编辑器 + 控制台条（52%） -->
-      <section class="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-50">
+      <section class="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
         <CodeEditor
           ref="codeEditor"
           :model-value="workspaceStore.code"

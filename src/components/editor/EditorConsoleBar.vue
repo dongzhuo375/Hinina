@@ -159,10 +159,10 @@ const SERVER_TONE_MAP: Record<StatusTone, Tone> = {
 }
 
 const TONE_STYLES: Record<Tone, { fg: string; bg: string; border: string }> = {
-  success: { fg: 'var(--color-success)', bg: '#f0fdf4', border: '#bbf7d0' },
-  error: { fg: 'var(--color-error)', bg: '#fff1f2', border: '#fecdd3' },
-  warning: { fg: 'var(--color-warning)', bg: '#fffbeb', border: '#fde68a' },
-  pending: { fg: 'var(--color-pending)', bg: '#ecfeff', border: '#a5f3fc' },
+  success: { fg: 'var(--color-success)', bg: '#edf1ec', border: '#c2cfc4' },
+  error: { fg: 'var(--color-error)', bg: '#f8ece8', border: '#e2c2b8' },
+  warning: { fg: 'var(--color-warning)', bg: '#f5efe3', border: '#e0d2b4' },
+  pending: { fg: 'var(--color-pending)', bg: '#f5efe3', border: '#e0d2b4' },
   muted: { fg: 'var(--text-secondary)', bg: 'var(--bg-sidebar)', border: 'var(--border-color)' },
 }
 
@@ -221,7 +221,7 @@ function goDetail(submitId: string) {
 
 <template>
   <div
-    class="z-30 flex shrink-0 select-none flex-col gap-3 border-t border-slate-200 bg-white px-5 py-3 shadow-sm"
+    class="z-30 flex shrink-0 select-none flex-col gap-3 border-t border-[var(--border-color)] bg-[var(--bg-card)] px-5 py-3"
   >
     <div class="flex items-center justify-between gap-4">
       <!-- 左：最新评测记录 pill（优先服务端最新记录，其次本会话提交；均无则留空） -->
@@ -229,7 +229,7 @@ function goDetail(submitId: string) {
         <!-- 服务端最新记录：#123 WA (Test 4 · 2.01s)，点击进提交详情 -->
         <div
           v-if="serverPill"
-          class="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 font-mono text-[11px] font-semibold whitespace-nowrap transition-colors hover:brightness-[0.97]"
+          class="flex cursor-pointer items-center gap-2 rounded-[3px] border px-3 py-1 font-mono text-[11px] font-semibold whitespace-nowrap transition-colors duration-200 ease-out hover:brightness-[0.97]"
           :style="{ color: serverToneStyle.fg, backgroundColor: serverToneStyle.bg, borderColor: serverToneStyle.border }"
           title="点击查看提交详情"
           @click="goDetail(serverPill.submitId)"
@@ -281,7 +281,7 @@ function goDetail(submitId: string) {
         <!-- 本会话提交（服务端摘要未到达时的回退） -->
         <div
           v-else-if="latest"
-          class="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 font-mono text-[11px] font-semibold whitespace-nowrap transition-colors hover:brightness-[0.97]"
+          class="flex cursor-pointer items-center gap-2 rounded-[3px] border px-3 py-1 font-mono text-[11px] font-semibold whitespace-nowrap transition-colors duration-200 ease-out hover:brightness-[0.97]"
           :style="{ color: toneStyle.fg, backgroundColor: toneStyle.bg, borderColor: toneStyle.border }"
           title="点击查看提交详情"
           @click="goDetail(latest.id)"
@@ -347,17 +347,17 @@ function goDetail(submitId: string) {
         <button
           type="button"
           title="查看当前题目的历史提交记录"
-          class="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-medium whitespace-nowrap text-slate-700 shadow-sm transition-all duration-150 hover:bg-slate-100 active:scale-[0.98]"
+          class="flex items-center gap-1.5 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-body)] px-3.5 py-1.5 text-xs font-medium whitespace-nowrap text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:border-[#8c6a43] hover:text-[#8c6a43]"
           @click="goSubmissions"
         >
-          <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           <span>提交记录{{ totalCount > 0 ? ` (${totalCount})` : '' }}</span>
         </button>
         <button
           type="button"
-          class="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-1.5 text-[13px] font-semibold whitespace-nowrap text-white shadow-sm transition-all duration-150 hover:bg-emerald-700 hover:shadow active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          class="flex items-center gap-2 rounded-[3px] bg-[#2e3033] px-5 py-1.5 text-[13px] font-semibold whitespace-nowrap text-[#f7f6f1] transition-colors duration-200 ease-out hover:bg-[#232527] disabled:cursor-not-allowed disabled:opacity-60"
           :disabled="submissionStore.isSubmitting"
           @click="$emit('submit')"
         >
@@ -385,13 +385,13 @@ function goDetail(submitId: string) {
          未关 insertSpaces，缩进恒为空格，宽度取编辑器当前 tabSize（弹层可调，
          经 CodeEditor 上报后由父级转发，不写死） -->
     <div
-      class="flex items-center justify-between border-t border-slate-100 pt-2 font-mono text-[11px] text-slate-400 select-none"
+      class="flex items-center justify-between border-t border-[var(--border-color)] pt-2 font-mono text-[11px] tabular-nums text-[var(--text-muted)] select-none"
     >
       <div class="flex items-center gap-2.5 whitespace-nowrap">
         <span>Ln {{ cursor?.line ?? 1 }}, Col {{ cursor?.column ?? 1 }}</span>
-        <span class="text-slate-300">|</span>
+        <span class="text-[var(--border-color)]">|</span>
         <span>UTF-8</span>
-        <span class="text-slate-300">|</span>
+        <span class="text-[var(--border-color)]">|</span>
         <span>Spaces: {{ tabSize }}</span>
       </div>
       <div class="flex items-center gap-1 whitespace-nowrap">

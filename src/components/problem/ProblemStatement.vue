@@ -117,48 +117,48 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-card)]">
     <!-- 元信息头部 -->
-    <div class="shrink-0 border-b border-slate-200 bg-slate-50/80 px-5 py-4">
-      <h1 class="text-lg font-bold tracking-tight text-slate-900">
+    <div class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-body)] px-5 py-4">
+      <h1 class="text-lg font-semibold tracking-wide text-[var(--text-primary)]">
         {{ displayId }}. {{ problem.title }}
       </h1>
-      <div class="mt-2.5 flex flex-wrap items-center gap-3.5 font-mono text-xs text-slate-500">
+      <div class="mt-2.5 flex flex-wrap items-center gap-3.5 font-mono text-xs text-[var(--text-secondary)]">
         <span class="flex items-center gap-1.5">
-          <svg class="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <svg class="h-3.5 w-3.5 text-[var(--text-muted)]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          时间限制: <span class="font-medium text-slate-700">{{ timeText }}</span>
+          时间限制: <span class="font-medium tabular-nums text-[var(--text-primary)]">{{ timeText }}</span>
         </span>
-        <span class="text-slate-300">•</span>
+        <span class="text-[var(--border-color)]">•</span>
         <span class="flex items-center gap-1.5">
-          <svg class="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <svg class="h-3.5 w-3.5 text-[var(--text-muted)]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          空间限制: <span class="font-medium text-slate-700">{{ memoryText }}</span>
+          空间限制: <span class="font-medium tabular-nums text-[var(--text-primary)]">{{ memoryText }}</span>
         </span>
-        <span class="text-slate-300">•</span>
+        <span class="text-[var(--border-color)]">•</span>
         <span class="flex items-center gap-1.5">
-          <svg class="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <svg class="h-3.5 w-3.5 text-[var(--text-muted)]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          通过率: <span class="font-medium text-slate-700">{{ acText }}</span>
+          通过率: <span class="font-medium tabular-nums text-[var(--text-primary)]">{{ acText }}</span>
         </span>
       </div>
       <!-- 语言倍率说明：limits 是 C/C++ 基准，当前语言 ×2 时明确标注（HOJ-Problem-Limits-API.md §5） -->
-      <p v-if="isDouble && shownLimits" class="mt-1.5 pl-5 text-[11px] text-slate-400">
+      <p v-if="isDouble && shownLimits" class="mt-1.5 pl-5 text-[11px] text-[var(--text-muted)]">
         题面限制为 C/C++ 基准（{{ baseTimeText }} / {{ baseMemoryText }}），当前语言
         {{ languageLabel }} 判题时时间与内存 ×2
       </p>
     </div>
 
     <!-- 分节滚动正文 -->
-    <div class="flex-1 space-y-6 overflow-y-auto bg-white p-5 text-slate-800">
+    <div class="flex-1 space-y-6 overflow-y-auto bg-[var(--bg-card)] p-5 text-[var(--text-primary)]">
       <!-- 题目描述 -->
       <section class="space-y-2">
         <div class="flex items-center space-x-2">
-          <span class="h-4 w-1.5 rounded-full bg-[var(--color-primary)]"></span>
-          <h2 class="text-[15px] font-semibold text-slate-900">题目描述 (Problem Description)</h2>
+          <span class="h-4 w-[2px] bg-[#8c6a43]"></span>
+          <h2 class="text-[15px] font-semibold text-[var(--text-primary)]">题目描述 (Problem Description)</h2>
         </div>
         <div class="prose pl-3.5" v-html="renderedDescription"></div>
       </section>
@@ -166,8 +166,8 @@ onUnmounted(() => {
       <!-- 输入格式 -->
       <section class="space-y-2">
         <div class="flex items-center space-x-2">
-          <span class="h-4 w-1.5 rounded-full bg-[var(--color-primary)]"></span>
-          <h2 class="text-[15px] font-semibold text-slate-900">输入格式 (Input Format)</h2>
+          <span class="h-4 w-[2px] bg-[#8c6a43]"></span>
+          <h2 class="text-[15px] font-semibold text-[var(--text-primary)]">输入格式 (Input Format)</h2>
         </div>
         <div class="prose pl-3.5" v-html="renderedInput"></div>
       </section>
@@ -175,8 +175,8 @@ onUnmounted(() => {
       <!-- 输出格式 -->
       <section class="space-y-2">
         <div class="flex items-center space-x-2">
-          <span class="h-4 w-1.5 rounded-full bg-[var(--color-primary)]"></span>
-          <h2 class="text-[15px] font-semibold text-slate-900">输出格式 (Output Format)</h2>
+          <span class="h-4 w-[2px] bg-[#8c6a43]"></span>
+          <h2 class="text-[15px] font-semibold text-[var(--text-primary)]">输出格式 (Output Format)</h2>
         </div>
         <div class="prose pl-3.5" v-html="renderedOutput"></div>
       </section>
@@ -184,22 +184,22 @@ onUnmounted(() => {
       <!-- 样例数据 -->
       <section v-if="samples.length > 0" class="space-y-3">
         <div class="flex items-center space-x-2">
-          <span class="h-4 w-1.5 rounded-full bg-[var(--color-primary)]"></span>
-          <h2 class="text-[15px] font-semibold text-slate-900">样例数据 (Sample Testcases)</h2>
+          <span class="h-4 w-[2px] bg-[#8c6a43]"></span>
+          <h2 class="text-[15px] font-semibold text-[var(--text-primary)]">样例数据 (Sample Testcases)</h2>
         </div>
         <div
           v-for="(sample, i) in samples"
           :key="i"
-          class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+          class="overflow-hidden rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]"
         >
-          <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
-            <span class="font-mono text-[11px] font-semibold text-slate-800">
+          <div class="flex items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-body)] px-3 py-1.5">
+            <span class="font-mono text-[11px] font-semibold text-[var(--text-primary)]">
               样例 {{ i + 1 }} (Sample #{{ i + 1 }})
             </span>
             <button
               type="button"
-              class="flex items-center gap-1 font-mono text-[11px] transition-colors"
-              :class="copiedIndex === i ? 'text-emerald-600' : 'text-slate-500 hover:text-[var(--color-primary)]'"
+              class="flex items-center gap-1 font-mono text-[11px] transition-colors duration-200 ease-out"
+              :class="copiedIndex === i ? 'text-[#5f7a6a]' : 'text-[var(--text-secondary)] hover:text-[#8c6a43]'"
               @click="copySampleInput(i, sample.input)"
             >
               <svg v-if="copiedIndex !== i" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -211,13 +211,13 @@ onUnmounted(() => {
               <span>{{ copiedIndex === i ? '已复制' : '复制输入' }}</span>
             </button>
           </div>
-          <div class="grid grid-cols-1 divide-y divide-slate-200 md:grid-cols-2 md:divide-x md:divide-y-0">
-            <div class="bg-slate-50/50 p-3">
-              <div class="mb-1 font-mono text-[11px] text-slate-400">输入 (Input):</div>
+          <div class="grid grid-cols-1 divide-y divide-[var(--border-color)] md:grid-cols-2 md:divide-x md:divide-y-0">
+            <div class="bg-[var(--bg-body)] p-3">
+              <div class="mb-1 font-mono text-[11px] text-[var(--text-muted)]">输入 (Input):</div>
               <pre class="sample-pre sample-input">{{ sample.input }}</pre>
             </div>
-            <div class="bg-white p-3">
-              <div class="mb-1 font-mono text-[11px] text-slate-400">输出 (Output):</div>
+            <div class="bg-[var(--bg-card)] p-3">
+              <div class="mb-1 font-mono text-[11px] text-[var(--text-muted)]">输出 (Output):</div>
               <pre class="sample-pre sample-output">{{ sample.output }}</pre>
             </div>
           </div>
@@ -233,7 +233,7 @@ onUnmounted(() => {
 .prose {
   font-size: 13px;
   line-height: 1.7;
-  color: #475569;
+  color: var(--text-secondary);
 }
 .prose :deep(p) {
   margin: 0 0 0.75rem;
@@ -255,7 +255,7 @@ onUnmounted(() => {
   margin-bottom: 0.25rem;
 }
 .prose :deep(strong) {
-  color: #0f172a;
+  color: var(--text-primary);
   font-weight: 600;
 }
 .prose :deep(pre) {
@@ -268,11 +268,11 @@ onUnmounted(() => {
 .prose :deep(code) {
   font-family: var(--font-mono);
   font-size: 0.875em;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 4px;
+  background: #efede5;
+  border: 1px solid #e2e0d6;
+  border-radius: 3px;
   padding: 0.1rem 0.35rem;
-  color: #334155;
+  color: #2e3033;
 }
 .prose :deep(pre code) {
   background: transparent;
@@ -289,7 +289,7 @@ onUnmounted(() => {
 }
 .prose :deep(th),
 .prose :deep(td) {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e2e0d6;
   padding: 0.25rem 0.5rem;
 }
 
@@ -303,16 +303,16 @@ onUnmounted(() => {
   margin: 0;
 }
 .sample-input {
-  color: #1e293b;
+  color: #2e3033;
 }
 .sample-input::selection {
-  background: #f3e8ff;
+  background: #ece4d4;
 }
 .sample-output {
-  color: #059669;
+  color: #5f7a6a;
   font-weight: 600;
 }
 .sample-output::selection {
-  background: #d1fae5;
+  background: #dfe7e0;
 }
 </style>

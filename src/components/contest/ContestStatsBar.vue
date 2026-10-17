@@ -42,12 +42,12 @@ const penaltyText = computed(() => {
 
 <template>
   <div
-    class="flex shrink-0 items-center gap-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)] px-4 py-2"
+    class="flex shrink-0 items-center gap-4 rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-body)] px-4 py-2"
     :title="rank.lastUpdated ? `榜单更新于 ${new Date(rank.lastUpdated).toLocaleTimeString('zh-CN', { hour12: false })}` : '榜单数据尚未加载'"
   >
     <div class="px-2 text-center">
-      <span class="block text-[11px] font-medium text-[var(--text-secondary)]">解题进度</span>
-      <span class="font-mono text-base font-bold text-[var(--color-success)]">
+      <span class="block text-[10px] font-medium tracking-[0.15em] text-[var(--text-muted)]">解题进度</span>
+      <span class="font-mono text-base font-semibold tabular-nums text-[#5f7a6a]">
         {{ solvedText.value }}
         <span class="text-xs font-normal text-[var(--text-muted)]">{{ solvedText.unit }}</span>
       </span>
@@ -56,8 +56,8 @@ const penaltyText = computed(() => {
     <div class="h-6 w-px bg-[var(--border-color)]"></div>
 
     <div class="px-2 text-center">
-      <span class="block text-[11px] font-medium text-[var(--text-secondary)]">实时排名</span>
-      <span class="font-mono text-base font-bold text-[var(--text-primary)]">
+      <span class="block text-[10px] font-medium tracking-[0.15em] text-[var(--text-muted)]">实时排名</span>
+      <span class="font-mono text-base font-semibold tabular-nums text-[var(--text-primary)]">
         {{ rankText.value }}
         <span class="text-xs font-normal text-[var(--text-muted)]">{{ rankText.unit }}</span>
       </span>
@@ -66,8 +66,8 @@ const penaltyText = computed(() => {
     <div class="h-6 w-px bg-[var(--border-color)]"></div>
 
     <div class="px-2 text-center">
-      <span class="block text-[11px] font-medium text-[var(--text-secondary)]">{{ penaltyText.label }}</span>
-      <span class="font-mono text-base font-bold text-[var(--text-primary)]">{{ penaltyText.value }}</span>
+      <span class="block text-[10px] font-medium tracking-[0.15em] text-[var(--text-muted)]">{{ penaltyText.label }}</span>
+      <span class="font-mono text-base font-semibold tabular-nums text-[var(--text-primary)]">{{ penaltyText.value }}</span>
     </div>
   </div>
 </template>

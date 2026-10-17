@@ -17,6 +17,47 @@ import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 
 const log = createLogger('CodeEditor')
 
+// ── Hinina 定制浅色 Monaco 主题 ──
+// 暖纸底 + 炭黑正文 + 木色系选区，与新界面色板一致。
+// 配置侧仍存 'vs'（值域与 Rust sanitize 对齐），仅渲染时映射为本主题。
+const HININA_LIGHT_THEME = 'hinina-light'
+let hininaThemeDefined = false
+
+function ensureHininaTheme(): void {
+  if (hininaThemeDefined) return
+  monaco.editor.defineTheme(HININA_LIGHT_THEME, {
+    base: 'vs',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#FBFAF6',
+      'editorGutter.background': '#FBFAF6',
+      'editor.lineHighlightBackground': '#F3F1E9',
+      'editorLineNumber.foreground': '#B4B0A2',
+      'editorLineNumber.activeForeground': '#2E3033',
+      'editorCursor.foreground': '#2E3033',
+      'editor.selectionBackground': '#E9E3D3',
+      'editor.inactiveSelectionBackground': '#F0ECE0',
+      'editorIndentGuide.background1': '#E7E4D9',
+      'editorIndentGuide.activeBackground1': '#C9C4B2',
+      'editorWidget.background': '#FFFFFF',
+      'editorWidget.border': '#E2E0D6',
+      'editorSuggestWidget.selectedBackground': '#EFEDE5',
+      'scrollbarSlider.background': '#2E303322',
+      'scrollbarSlider.hoverBackground': '#2E303333',
+      'scrollbarSlider.activeBackground': '#2E303344',
+    },
+  })
+  hininaThemeDefined = true
+}
+
+/// 配置主题 id → Monaco 实际主题名：'vs' 映射为 Hinina 定制浅色，其余原样
+function monacoThemeOf(themeId: string): string {
+  return themeId === 'vs' ? HININA_LIGHT_THEME : themeId
+}
+
+ensureHininaTheme()
+
 self.MonacoEnvironment = {
   getWorker(_: string, label: string) {
     if (label === 'json') return new jsonWorker()
@@ -109,7 +150,7 @@ onMounted(async () => {
   const ed = monaco.editor.create(editorContainer.value, {
     value: props.modelValue,
     language: monacoIdOf(props.language),
-    theme: prefs.editorTheme,
+    theme: monacoThemeOf(prefs.editorTheme),
     fontSize: prefs.fontSize,
     fontFamily: 'JetBrains Mono, Cascadia Code, Consolas, monospace',
     minimap: { enabled: false },
@@ -247,7 +288,7 @@ const prefsError = ref<string | null>(null)
 /// 编辑器容器底色跟随主题：Monaco 实例创建前与尺寸重算的瞬间不露白底
 /// （背景本身由 Monaco 主题绘制，此处只是同色兜底）
 const editorSurfaceClass = computed(() =>
-  prefs.editorTheme === 'vs-dark' ? 'bg-[#1e1e1e]' : 'bg-white',
+  prefs.editorTheme === 'vs-dark' ? 'bg-[#1e1e1e]' : 'bg-[#fbfaf6]',
 )
 
 /// 用户已改动过的偏好字段。挂载读配置到达前动过的字段以用户值为准，落盘也只写这些
@@ -292,7 +333,7 @@ function touchedPatch(): Partial<EditorPrefs> {
 function applyPrefs() {
   if (!editor.value) return
   editor.value.updateOptions({ fontSize: prefs.fontSize, tabSize: prefs.tabSize })
-  monaco.editor.setTheme(prefs.editorTheme)
+  monaco.editor.setTheme(monacoThemeOf(prefs.editorTheme))
 }
 
 /// 恢复默认值：与手动改动同一条链路（即时生效 + 落盘），不是只改本地内存
@@ -339,18 +380,18 @@ defineExpose({ focus })
     <!-- 工具条（只读模式隐藏：详情页代码查看无语言切换/提交语义） -->
     <div
       v-if="!readonly"
-      class="flex h-10 shrink-0 items-center justify-between border-b border-slate-200 bg-slate-100 px-4 select-none"
+      class="flex h-10 shrink-0 items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-sidebar)] px-4 select-none"
     >
       <!-- 左：语言选择 -->
       <div class="relative">
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1 font-mono text-[11px] font-semibold text-slate-800 shadow-sm transition-colors hover:border-[var(--color-primary)]"
+          class="flex items-center gap-1.5 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1 font-mono text-[11px] font-semibold text-[var(--text-primary)] transition-colors duration-200 ease-out hover:border-[#8c6a43]"
           @click="langMenuOpen = !langMenuOpen"
         >
-          <span class="font-bold text-[var(--color-primary)]">{{ language }}</span>
+          <span class="font-bold text-[#8c6a43]">{{ language }}</span>
           <svg
-            class="h-3.5 w-3.5 text-slate-400 transition-transform"
+            class="h-3.5 w-3.5 text-[var(--text-muted)] transition-transform duration-200 ease-out"
             :class="{ 'rotate-180': langMenuOpen }"
             fill="none"
             stroke="currentColor"
@@ -363,17 +404,17 @@ defineExpose({ focus })
         <template v-if="langMenuOpen">
           <div class="fixed inset-0 z-40" @click="langMenuOpen = false"></div>
           <div
-            class="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+            class="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] py-1 shadow-[var(--shadow-float)]"
           >
             <button
               v-for="lang in availableLanguages"
               :key="lang"
               type="button"
-              class="flex w-full items-center justify-between px-3 py-1.5 text-left font-mono text-[11px] transition-colors"
+              class="flex w-full items-center justify-between px-3 py-1.5 text-left font-mono text-[11px] transition-colors duration-200 ease-out"
               :class="
                 lang === language
-                  ? 'bg-[#f5f3ff] font-semibold text-[#6845f5]'
-                  : 'text-slate-700 hover:bg-slate-50'
+                  ? 'bg-[var(--bg-sidebar)] font-semibold text-[#2e3033]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-sidebar)]'
               "
               @click="selectLanguage(lang)"
             >
@@ -399,7 +440,7 @@ defineExpose({ focus })
           <button
             type="button"
             title="清空代码"
-            class="flex h-7 w-7 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors duration-150 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+            class="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:border-[#e2c2b8] hover:bg-[#f8ece8] hover:text-[#a33b2a]"
             @click="confirmClearOpen = !confirmClearOpen"
           >
             <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -410,21 +451,21 @@ defineExpose({ focus })
           <template v-if="confirmClearOpen">
             <div class="fixed inset-0 z-40" @click="confirmClearOpen = false"></div>
             <div
-              class="absolute right-0 top-full z-50 mt-1.5 w-52 rounded-lg border border-slate-200 bg-white p-3 shadow-xl"
+              class="absolute right-0 top-full z-50 mt-1.5 w-52 rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)] p-3 shadow-[var(--shadow-float)]"
             >
-              <p class="text-xs font-medium text-slate-700">清空编辑器内全部代码？</p>
-              <p class="mt-0.5 text-[11px] text-slate-400">此操作会覆盖当前工作区代码</p>
+              <p class="text-xs font-medium text-[var(--text-primary)]">清空编辑器内全部代码？</p>
+              <p class="mt-0.5 text-[11px] text-[var(--text-muted)]">此操作会覆盖当前工作区代码</p>
               <div class="mt-2.5 flex justify-end gap-2">
                 <button
                   type="button"
-                  class="rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 transition hover:bg-slate-100"
+                  class="rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-body)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:bg-[var(--bg-sidebar)]"
                   @click="confirmClearOpen = false"
                 >
                   取消
                 </button>
                 <button
                   type="button"
-                  class="rounded bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-rose-700"
+                  class="rounded-[3px] bg-[#a33b2a] px-2.5 py-1 text-[11px] font-semibold text-white transition-colors duration-200 ease-out hover:bg-[#8c3223]"
                   @click="confirmClear"
                 >
                   确认清空
@@ -437,7 +478,7 @@ defineExpose({ focus })
         <button
           type="button"
           title="上传代码"
-          class="flex h-7 w-7 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors duration-150 hover:border-[var(--color-primary)] hover:bg-slate-50 hover:text-[var(--color-primary)]"
+          class="flex h-7 w-7 items-center justify-center rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:border-[#8c6a43] hover:text-[#8c6a43]"
           @click="pickFile"
         >
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -461,12 +502,12 @@ defineExpose({ focus })
           @reset="resetPrefs"
         />
 
-        <div class="h-3.5 w-px bg-slate-300"></div>
+        <div class="h-3.5 w-px bg-[var(--border-color)]"></div>
 
-        <!-- 自动备份指示：dirty=编辑中（灰）/ 已落盘=已自动备份（绿） -->
+        <!-- 自动备份指示：dirty=编辑中（灰）/ 已落盘=已自动备份（竹青） -->
         <span
           class="flex items-center gap-1.5 pl-1 font-mono text-[11px] font-medium"
-          :class="isDirty ? 'text-slate-400' : 'text-emerald-600'"
+          :class="isDirty ? 'text-[var(--text-muted)]' : 'text-[#5f7a6a]'"
         >
           <svg v-if="isDirty" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-linecap="round" stroke-linejoin="round" />
