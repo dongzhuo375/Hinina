@@ -38,25 +38,25 @@ const phaseBadge = computed(() => {
     case 'running':
       return {
         label: '进行中',
-        pill: 'border-[#c2cfc4] bg-[#edf1ec] text-[#4a6153]',
+        text: 'text-[#4a6153]',
         dot: 'bg-[#5f7a6a] animate-pulse',
       }
     case 'upcoming':
       return {
         label: '未开始',
-        pill: 'border-[#e0d2b4] bg-[#f5efe3] text-[#8c6a43]',
+        text: 'text-[#8c6a43]',
         dot: 'bg-[#8c6a43]',
       }
     case 'ended':
       return {
         label: '已结束',
-        pill: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
+        text: 'text-[var(--text-muted)]',
         dot: 'bg-[var(--text-muted)]',
       }
     default:
       return {
         label: '未加载',
-        pill: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
+        text: 'text-[var(--text-muted)]',
         dot: 'bg-[var(--text-muted)]',
       }
   }
@@ -138,52 +138,64 @@ function close() {
 <template>
   <header
     data-tauri-drag-region
-    class="relative z-50 flex h-14 shrink-0 select-none items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-card)] px-5"
+    class="relative z-50 flex h-16 shrink-0 select-none items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6"
   >
-    <!-- 左侧：Logo + 比赛状态徽章 + 标题 -->
-    <div data-tauri-drag-region class="flex min-w-0 items-center gap-3">
+    <!-- 左区：品牌堆叠（字标 + 赛事/状态行） -->
+    <div data-tauri-drag-region class="flex min-w-0 items-center gap-3.5">
       <div
         data-tauri-drag-region
-        class="flex h-7 w-7 shrink-0 items-center justify-center bg-[#2e3033] text-xs font-semibold text-[#f7f6f1]"
+        class="flex h-8 w-8 shrink-0 items-center justify-center bg-[#2e3033] text-xs font-semibold text-[#f7f6f1]"
       >
         H
       </div>
-      <span data-tauri-drag-region class="shrink-0 text-sm font-semibold tracking-[0.12em] text-[var(--text-primary)]">
-        Hinina
-      </span>
-      <div class="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]"></div>
-      <span
-        class="inline-flex shrink-0 items-center gap-1.5 rounded-[3px] border px-2 py-0.5 text-[10px] font-medium tracking-[0.15em]"
-        :class="phaseBadge.pill"
-      >
-        <span class="h-1.5 w-1.5 rounded-full" :class="phaseBadge.dot"></span>
-        {{ phaseBadge.label }}
-      </span>
-      <h1
-        v-if="contest"
-        class="truncate text-sm font-medium text-[var(--text-primary)]"
-        :title="contest.title"
-      >
-        {{ contest.title }}
-      </h1>
+      <div data-tauri-drag-region class="min-w-0">
+        <div data-tauri-drag-region class="flex items-baseline gap-2.5">
+          <span data-tauri-drag-region class="text-sm font-semibold tracking-[0.15em] text-[var(--text-primary)]">
+            Hinina
+          </span>
+          <span data-tauri-drag-region class="hidden font-mono text-[9px] tracking-[0.3em] text-[var(--text-muted)] md:inline">
+            ARENA CLIENT
+          </span>
+        </div>
+        <div data-tauri-drag-region class="mt-1 flex min-w-0 items-center gap-2">
+          <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="phaseBadge.dot"></span>
+          <span class="shrink-0 font-mono text-[9px] tracking-[0.3em]" :class="phaseBadge.text">
+            {{ phaseBadge.label }}
+          </span>
+          <span v-if="contest" class="h-2.5 w-px shrink-0 bg-[var(--border-color)]"></span>
+          <h1
+            v-if="contest"
+            class="truncate text-xs text-[var(--text-secondary)]"
+            :title="contest.title"
+          >
+            {{ contest.title }}
+          </h1>
+        </div>
+      </div>
     </div>
 
-    <!-- 中间：剩余时间（精密仪表）+ 细进度轨 -->
+    <!-- 中区：剩余时间仪表集群（大号等宽字 + 刻度轨） -->
     <div data-tauri-drag-region class="hidden flex-col items-center justify-center px-4 lg:flex">
-      <div data-tauri-drag-region class="flex items-baseline gap-2 font-mono">
-        <span class="text-[9px] tracking-[0.25em] text-[var(--text-muted)]">REMAINING</span>
-        <span class="tabular-nums text-base font-semibold tracking-wider text-[var(--text-primary)]">
+      <span data-tauri-drag-region class="font-mono text-[9px] tracking-[0.35em] text-[var(--text-muted)]">
+        REMAINING
+      </span>
+      <div data-tauri-drag-region class="mt-1 flex items-baseline gap-2 font-mono">
+        <span class="tabular-nums text-[22px] font-semibold leading-none tracking-wider text-[var(--text-primary)]">
           {{ timing ? formatHMS(timing.remaining) : '--:--:--' }}
         </span>
         <span class="tabular-nums text-[10px] text-[var(--text-muted)]">
           / {{ timing ? formatHMS(timing.total) : '--:--:--' }}
         </span>
       </div>
-      <div
-        data-tauri-drag-region
-        class="mt-1.5 h-px w-56 bg-[var(--border-color)]"
-      >
-        <div class="h-full bg-[#2e3033] transition-[width] duration-500 ease-out" :style="{ width: `${progressPercent}%` }"></div>
+      <div data-tauri-drag-region class="relative mt-2 h-[3px] w-64">
+        <div class="absolute inset-x-0 top-0 h-px bg-[var(--border-color)]"></div>
+        <div
+          class="absolute left-0 top-0 h-px bg-[#2e3033] transition-[width] duration-500 ease-out"
+          :style="{ width: `${progressPercent}%` }"
+        ></div>
+        <span class="absolute top-0 h-[3px] w-px bg-[var(--border-color)]" style="left: 25%"></span>
+        <span class="absolute top-0 h-[3px] w-px bg-[var(--border-color)]" style="left: 50%"></span>
+        <span class="absolute top-0 h-[3px] w-px bg-[var(--border-color)]" style="left: 75%"></span>
       </div>
     </div>
 
@@ -191,7 +203,7 @@ function close() {
     <div class="flex shrink-0 items-center gap-2.5">
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:border-[#8c6a43] hover:text-[#8c6a43]"
+        class="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:text-[#8c6a43]"
         @click="toggleBrief"
       >
         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -208,7 +220,7 @@ function close() {
       <div class="relative">
         <button
           type="button"
-          class="flex items-center gap-2 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1 text-xs transition-colors duration-200 ease-out hover:border-[#8c6a43]"
+          class="flex items-center gap-2 rounded-[3px] px-2 py-1 text-xs transition-colors duration-200 ease-out hover:bg-[var(--bg-sidebar)]"
           @click="userMenuOpen = !userMenuOpen"
         >
           <span
@@ -297,7 +309,7 @@ function close() {
     <template v-if="briefOpen">
       <div class="fixed inset-0 z-40" @click="briefOpen = false"></div>
       <div
-        class="absolute right-5 top-full z-50 mt-2 max-h-[70vh] w-[440px] overflow-y-auto rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-[var(--shadow-float)]"
+        class="absolute right-6 top-full z-50 mt-2 max-h-[70vh] w-[440px] overflow-y-auto rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-[var(--shadow-float)]"
       >
         <div class="mb-4 flex items-center justify-between border-b border-[var(--border-color)] pb-3">
           <h2 class="text-[10px] font-medium tracking-[0.25em] text-[var(--text-muted)]">比赛简介</h2>

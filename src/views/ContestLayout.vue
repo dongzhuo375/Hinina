@@ -89,7 +89,7 @@ onUnmounted(() => {
       </main>
     </div>
     <StatusBar />
-    <div v-if="phase === 'ended'" class="absolute inset-x-0 bottom-0 top-12 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
+    <div v-if="phase === 'ended'" class="absolute inset-x-0 bottom-0 top-16 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
       <div role="alert" class="max-w-sm border border-[#b9bfbc] bg-[#f7f6f1] px-12 py-10 text-center shadow-[0_24px_64px_rgba(46,48,51,0.08)]">
         <p class="font-mono text-[10px] tracking-[0.25em] text-[#8c6a43]">CONTEST CLOSED</p>
         <h1 class="mt-4 text-2xl font-semibold tracking-wide text-[#2e3033]">比赛已结束</h1>

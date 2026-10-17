@@ -24,11 +24,12 @@ const showAnnouncementDot = computed(
   () => announcementStore.unreadCount > 0 && activeKey.value !== 'announcements',
 )
 
-/// 导航项样式：激活=炭黑文字 + 左侧炭黑指示条，悬停=暖灰浅底
+/// 导航项样式：激活=炭黑文字 + 左缘 2px 炭黑指示条，无底色块；
+/// 非激活=弱灰，悬停仅加深文字 —— 栏体保持留白，层级全靠指示条与字色
 function itemClass(key: string): string {
   return activeKey.value === key
-    ? 'relative flex h-12 w-12 flex-col items-center justify-center rounded-[3px] bg-[var(--bg-sidebar)] text-[#2e3033] transition-colors duration-200 ease-out'
-    : 'relative flex h-12 w-12 flex-col items-center justify-center rounded-[3px] text-[var(--text-secondary)] transition-colors duration-200 ease-out hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]'
+    ? 'relative flex h-14 w-full flex-col items-center justify-center gap-1 text-[#2e3033] transition-colors duration-200 ease-out'
+    : 'relative flex h-14 w-full flex-col items-center justify-center gap-1 text-[var(--text-muted)] transition-colors duration-200 ease-out hover:text-[var(--text-primary)]'
 }
 </script>
 
@@ -37,7 +38,7 @@ function itemClass(key: string): string {
     class="flex w-16 shrink-0 flex-col items-center justify-between border-r border-[var(--border-color)] bg-[var(--bg-card)] py-3"
   >
     <!-- 主导航：题目 / 榜单 / 评测 / 公告 -->
-    <div class="flex w-full flex-col items-center gap-3">
+    <div class="flex w-full flex-col items-center">
       <router-link :to="{ name: 'ProblemSet' }" :class="itemClass('problems')" title="题目列表 (Problemset)">
         <svg class="mb-0.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -47,11 +48,11 @@ function itemClass(key: string): string {
             stroke-width="2"
           ></path>
         </svg>
-        <span class="scale-90 text-[10px] font-semibold">题目</span>
+        <span class="text-[9px] font-medium tracking-[0.1em]">题目</span>
         <!-- 激活指示条：贴活动栏左缘的 2px 炭黑条 -->
         <span
           v-if="activeKey === 'problems'"
-          class="absolute -left-2 bottom-3 top-3 w-[2px] bg-[#2e3033]"
+          class="absolute bottom-3 left-0 top-3 w-[2px] bg-[#2e3033]"
         ></span>
       </router-link>
 
@@ -64,10 +65,10 @@ function itemClass(key: string): string {
             stroke-width="2"
           ></path>
         </svg>
-        <span class="scale-90 text-[10px] font-semibold">榜单</span>
+        <span class="text-[9px] font-medium tracking-[0.1em]">榜单</span>
         <span
           v-if="activeKey === 'rank'"
-          class="absolute -left-2 bottom-3 top-3 w-[2px] bg-[#2e3033]"
+          class="absolute bottom-3 left-0 top-3 w-[2px] bg-[#2e3033]"
         ></span>
       </router-link>
 
@@ -84,10 +85,10 @@ function itemClass(key: string): string {
             stroke-width="2"
           ></path>
         </svg>
-        <span class="scale-90 text-[10px] font-semibold">评测</span>
+        <span class="text-[9px] font-medium tracking-[0.1em]">评测</span>
         <span
           v-if="activeKey === 'submissions'"
-          class="absolute -left-2 bottom-3 top-3 w-[2px] bg-[#2e3033]"
+          class="absolute bottom-3 left-0 top-3 w-[2px] bg-[#2e3033]"
         ></span>
       </router-link>
 
@@ -111,10 +112,10 @@ function itemClass(key: string): string {
             class="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-[#a33b2a] ring-2 ring-[var(--bg-card)]"
           ></span>
         </span>
-        <span class="scale-90 text-[10px] font-semibold">公告</span>
+        <span class="text-[9px] font-medium tracking-[0.1em]">公告</span>
         <span
           v-if="activeKey === 'announcements'"
-          class="absolute -left-2 bottom-3 top-3 w-[2px] bg-[#2e3033]"
+          class="absolute bottom-3 left-0 top-3 w-[2px] bg-[#2e3033]"
         ></span>
       </router-link>
     </div>
@@ -124,11 +125,11 @@ function itemClass(key: string): string {
       <router-link
         v-if="settingsUnlocked"
         :to="{ name: 'Settings' }"
-        class="flex h-10 w-10 items-center justify-center rounded-[3px] transition-colors duration-200 ease-out"
+        class="relative flex h-12 w-full items-center justify-center transition-colors duration-200 ease-out"
         :class="
           activeKey === 'settings'
-            ? 'bg-[var(--bg-sidebar)] text-[#2e3033]'
-            : 'text-[var(--text-muted)] hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]'
+            ? 'text-[#2e3033]'
+            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
         "
         title="环境设置"
       >
