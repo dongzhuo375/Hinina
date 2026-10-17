@@ -1,7 +1,7 @@
 <template>
   <n-config-provider :theme="null" :theme-overrides="themeOverrides">
     <n-dialog-provider>
-      <div class="flex h-screen w-screen flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)] shadow-2xl">
+      <div class="flex h-screen w-screen flex-col overflow-hidden rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-body)] shadow-[var(--shadow-float)]">
         <!-- 兜底窗口控制条：比赛外壳自带 TopBar（含窗口控制），
              外壳之外的路由（当前只有登录页）由此处提供拖拽区与窗口按钮 -->
         <header
@@ -80,17 +80,18 @@ function close() {
   appWindow.close()
 }
 
-/// Naive UI 主题覆盖（CSS 变量驱动的暗色适配）
+/// Naive UI 主题覆盖（对齐新色板：炭黑主色 / 竹青 / 木色 / 朱红）
 const themeOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: '#7C5CFF',
-    primaryColorHover: '#6845F5',
-    primaryColorPressed: '#5631E0',
-    primaryColorSuppl: '#7C5CFF',
-    infoColor: '#2563EB',
-    successColor: '#22C55E',
-    warningColor: '#F59E0B',
-    errorColor: '#EF4444',
+    primaryColor: '#2E3033',
+    primaryColorHover: '#232527',
+    primaryColorPressed: '#17191B',
+    primaryColorSuppl: '#2E3033',
+    infoColor: '#68706F',
+    successColor: '#5F7A6A',
+    warningColor: '#8C6A43',
+    errorColor: '#A33B2A',
+    borderRadius: '4px',
   },
 }
 </script>

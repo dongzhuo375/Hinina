@@ -1,43 +1,53 @@
 @import "tailwindcss";
 
 :root {
-  --color-primary: #7c5cff;
-  --color-primary-hover: #6845f5;
-  --color-primary-pressed: #5631e0;
+  /* ── 主色板：精密仪器的冷静 ──
+     炭黑为主操作色，木色为聚焦/强调，竹青为正常态，朱红为警示 */
+  --color-primary: #2e3033;
+  --color-primary-hover: #232527;
+  --color-primary-pressed: #17191b;
 
-  --color-info: #2563eb;
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
-  --color-pending: #00c7be;
+  --color-accent: #8c6a43; /* 木色点缀：聚焦线、强调、链接 */
+  --color-info: #68706f;
+  --color-success: #5f7a6a; /* 竹青 */
+  --color-warning: #8c6a43; /* 木色 */
+  --color-error: #a33b2a; /* 朱红 */
+  --color-pending: #8c6a43;
 
   /* ── 榜单 / 工作台状态色（浅色）──
-     榜单格与行级状态：一血、AC/WA 格、封榜冻结格、打星/女生行、待评测 */
-  --color-first-ac: #047857; /* 一血格背景（配白字） */
-  --color-ac-bg: #ecfdf5; /* AC 格背景 */
-  --color-ac-border: #a7f3d0; /* AC 格边框 */
-  --color-wa-bg: #fff1f2; /* WA / 未通过格背景 */
-  --color-wa-border: #fecdd3; /* WA / 未通过格边框 */
-  --color-frozen-bg: #f1f5f9; /* 封榜 try 格背景（冻结提交，赛后才揭晓） */
-  --color-frozen-border: #cbd5e1; /* 封榜 try 格边框 */
-  --color-star-row-bg: #f8fafc; /* 打星队（不计排名）整行背景 */
-  --color-girls-row-bg: #fdf2f8; /* 女生队整行背景 */
-  --color-pending-bg: #fffbeb; /* 待评测 amber 背景 */
-  --color-pending-border: #fde68a; /* 待评测 amber 边框 */
+     榜单格与行级状态：一血、AC/WA 格、封榜冻结格、打星/女生行、待评测。
+     语义不变，色值统一收敛到新色板的低饱和暖灰体系 */
+  --color-first-ac: #5f7a6a; /* 一血格背景（配白字） */
+  --color-ac-bg: #edf1ec; /* AC 格背景 */
+  --color-ac-border: #c2cfc4; /* AC 格边框 */
+  --color-wa-bg: #f8ece8; /* WA / 未通过格背景 */
+  --color-wa-border: #e2c2b8; /* WA / 未通过格边框 */
+  --color-frozen-bg: #f0efea; /* 封榜 try 格背景（冻结提交，赛后才揭晓） */
+  --color-frozen-border: #d6d3c8; /* 封榜 try 格边框 */
+  --color-star-row-bg: #f3f2ed; /* 打星队（不计排名）整行背景 */
+  --color-girls-row-bg: #f5efe6; /* 女生队整行背景 */
+  --color-pending-bg: #f5efe3; /* 待评测背景 */
+  --color-pending-border: #e0d2b4; /* 待评测边框 */
 
-  --radius: 8px;
+  /* 几何利落：全站圆角收敛到 4px 以内 */
+  --radius: 4px;
   --font-sans: "Inter", "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei UI",
     "Microsoft YaHei", sans-serif;
   --font: var(--font-sans);
   --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Mono", Consolas, monospace;
 
-  --bg-body: #f8fafc;
+  --bg-body: #f7f6f1;
   --bg-card: #ffffff;
-  --bg-sidebar: #f1f5f9;
-  --text-primary: #0f172a;
-  --text-secondary: #64748b;
-  --text-muted: #94a3b8;
-  --border-color: #e2e8f0;
+  --bg-sidebar: #efede5;
+  --text-primary: #2e3033;
+  --text-secondary: #68706f;
+  --text-muted: #9a9f9b;
+  --border-color: #e2e0d6;
+
+  /* 层级靠漫反射阴影与 1px 高光建立，不用装饰线 */
+  --shadow-raised: 0 2px 8px rgba(46, 48, 51, 0.05);
+  --shadow-float: 0 24px 64px rgba(46, 48, 51, 0.08);
+  --motion: 200ms ease-out;
 
   font-family: var(--font);
   color: var(--text-primary);
@@ -86,7 +96,18 @@ body {
 /* Selection */
 ::selection {
   background: var(--color-primary);
-  color: white;
+  color: #f7f6f1;
+}
+
+/* 动效克制：服从系统减弱动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Monaco editor overrides
