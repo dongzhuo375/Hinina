@@ -114,7 +114,7 @@ const oiScoreTypeText = computed<string | null>(() => {
 
 <template>
   <div
-    class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-slate-100 pt-2"
+    class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--border-color)] pt-2"
   >
     <div class="flex flex-wrap items-center space-x-3">
       <div class="relative">
@@ -123,7 +123,7 @@ const oiScoreTypeText = computed<string | null>(() => {
           type="text"
           placeholder="搜索队伍 / 学校…"
           title="服务端仅按「学校」或「榜单显示名」匹配；除非榜单显示名规则设为 username，否则搜用户名不会有结果"
-          class="w-64 rounded-lg border border-[var(--border-color)] bg-[var(--bg-body)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all focus:border-[var(--color-primary)] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+          class="w-64 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-body)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-colors duration-200 ease-out focus:border-[#8c6a43] focus:bg-[var(--bg-card)] focus:outline-none"
         />
         <svg
           class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[var(--text-muted)]"
@@ -142,17 +142,17 @@ const oiScoreTypeText = computed<string | null>(() => {
       </div>
 
       <div
-        class="flex items-center rounded-lg border border-slate-200/80 bg-slate-100 p-0.5 text-xs"
+        class="flex items-center rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-sidebar)] p-0.5 text-xs"
       >
         <button
           v-for="group in GROUPS"
           :key="group.value"
           type="button"
-          class="rounded-md px-3 py-1 transition-colors"
+          class="rounded-[2px] px-3 py-1 transition-colors duration-200 ease-out"
           :class="
             rankStore.groupFilter === group.value
-              ? 'bg-white font-medium text-slate-800 shadow-xs'
-              : 'text-slate-500 hover:text-slate-800'
+              ? 'bg-[var(--bg-card)] font-medium text-[#2e3033]'
+              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           "
           :aria-pressed="rankStore.groupFilter === group.value"
           @click="selectGroup(group.value)"
@@ -162,10 +162,10 @@ const oiScoreTypeText = computed<string | null>(() => {
       </div>
     </div>
 
-    <div class="flex select-none flex-wrap items-center space-x-3 text-xs text-slate-500">
+    <div class="flex select-none flex-wrap items-center space-x-3 text-xs text-[var(--text-muted)]">
       <span
         v-if="oiScoreTypeText"
-        class="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600"
+        class="rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-body)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]"
         title="OI 计分规则由比赛属性决定（服务端只读）：最高分 = 取每题最高分；最近提交 = 取最后一次提交的得分"
       >
         {{ oiScoreTypeText }}

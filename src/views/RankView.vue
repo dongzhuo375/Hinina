@@ -199,7 +199,7 @@ watch(isEnded, (ended) => {
     >
       <div class="mb-2.5 flex items-center justify-between gap-4">
         <div class="flex min-w-0 items-center space-x-3">
-          <h1 class="truncate text-lg font-bold tracking-tight text-[var(--text-primary)]">
+          <h1 class="truncate text-lg font-semibold tracking-wide text-[var(--text-primary)]">
             {{ contest?.title ?? '比赛' }} 实时榜单
           </h1>
           <span class="shrink-0 font-mono text-xs text-[var(--text-muted)]">/ Live Scoreboard</span>
@@ -213,7 +213,7 @@ watch(isEnded, (ended) => {
       <!-- 封榜提示：只信 contest 字段（文档 §9.3），封榜期间通过状态对普通用户不可见 -->
       <div
         v-if="isSealed"
-        class="flex shrink-0 items-center gap-2 rounded-lg border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-amber-800"
+        class="flex shrink-0 items-center gap-2 rounded-[3px] border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[#8c6a43]"
       >
         <svg
           class="h-3.5 w-3.5 shrink-0"
@@ -227,13 +227,13 @@ watch(isEnded, (ended) => {
           <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke-linecap="round" />
         </svg>
         <span class="font-medium">榜单已封榜，仅显示尝试次数</span>
-        <span class="text-amber-700/80">封榜时段内的提交结果将在赛后统一揭晓</span>
+        <span class="text-[#8c6a43]/80">封榜时段内的提交结果将在赛后统一揭晓</span>
       </div>
 
       <!-- 轮询失败但仍有旧数据：顶部一条不打断阅读的错误条，绝不清空榜单 -->
       <div
         v-if="rankStore.error && rankStore.hasData"
-        class="flex shrink-0 items-center gap-2 rounded-lg border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-rose-700"
+        class="flex shrink-0 items-center gap-2 rounded-[3px] border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-[#a33b2a]"
       >
         <svg
           class="h-3.5 w-3.5 shrink-0"
@@ -254,7 +254,7 @@ watch(isEnded, (ended) => {
         </span>
         <button
           type="button"
-          class="shrink-0 rounded-md border border-[var(--color-wa-border)] bg-white px-2 py-0.5 font-medium transition-colors hover:bg-rose-50"
+          class="shrink-0 rounded-[3px] border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2 py-0.5 font-medium transition-colors duration-200 ease-out hover:bg-[#f8ece8]"
           @click="retry"
         >
           立即重试
@@ -264,7 +264,7 @@ watch(isEnded, (ended) => {
       <!-- 全量快照模式状态行：打星/女生为客户端跨页筛选，展示快照规模与手动刷新入口 -->
       <div
         v-if="isFullFilterActive"
-        class="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500"
+        class="flex shrink-0 flex-wrap items-center gap-2 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-body)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
       >
         <svg
           class="h-3.5 w-3.5 shrink-0"
@@ -293,7 +293,7 @@ watch(isEnded, (ended) => {
         <span v-else>客户端筛选（等待快照）</span>
         <button
           type="button"
-          class="ml-auto shrink-0 rounded-md border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-600 transition-colors enabled:hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          class="ml-auto shrink-0 rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-card)] px-2 py-0.5 font-medium text-[var(--text-secondary)] transition-colors duration-200 ease-out enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="rankStore.isLoading"
           @click="manualRefresh"
         >
@@ -302,7 +302,7 @@ watch(isEnded, (ended) => {
       </div>
 
       <div
-        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-white shadow-sm"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]"
       >
         <LoadingSpinner v-if="isBootstrapping" message="正在加载榜单…" class="m-auto" />
 
@@ -338,8 +338,8 @@ watch(isEnded, (ended) => {
                 isEnded
                   ? 'bg-[var(--text-muted)]'
                   : rankStore.isLive && !rankStore.isFullMode
-                    ? 'animate-pulse bg-emerald-500'
-                    : 'bg-amber-400'
+                    ? 'animate-pulse bg-[#5f7a6a]'
+                    : 'bg-[#8c6a43]'
               "
             ></span>
             <span class="font-medium">{{ liveText }}</span>
@@ -353,7 +353,7 @@ watch(isEnded, (ended) => {
             <div class="flex items-center gap-1">
               <button
                 type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded-[3px] border border-[var(--border-color)] px-2 py-1 transition-colors duration-200 ease-out enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="rankStore.current <= 1 || rankStore.isLoading"
                 @click="goToPage(rankStore.current - 1)"
               >
@@ -367,11 +367,11 @@ watch(isEnded, (ended) => {
                 <button
                   v-else
                   type="button"
-                  class="min-w-7 rounded-md border px-2 py-1 font-mono transition-colors disabled:opacity-60"
+                  class="min-w-7 rounded-[3px] border px-2 py-1 font-mono tabular-nums transition-colors duration-200 ease-out disabled:opacity-60"
                   :class="
                     item === rankStore.current
                       ? 'border-[var(--color-primary)] bg-[var(--color-primary)] font-semibold text-white'
-                      : 'border-[var(--border-color)] enabled:hover:bg-slate-50'
+                      : 'border-[var(--border-color)] enabled:hover:bg-[var(--bg-sidebar)]'
                   "
                   :disabled="rankStore.isLoading"
                   @click="goToPage(item)"
@@ -381,7 +381,7 @@ watch(isEnded, (ended) => {
               </template>
               <button
                 type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded-[3px] border border-[var(--border-color)] px-2 py-1 transition-colors duration-200 ease-out enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="rankStore.current >= rankStore.pages || rankStore.isLoading"
                 @click="goToPage(rankStore.current + 1)"
               >
