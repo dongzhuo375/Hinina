@@ -129,6 +129,27 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
     }
   })
 
+  it('轮询超时把本地条目收敛为终态 Unknown，解除控制台条的永久遮蔽', async () => {
+    // 超时前条目停在 Pending（非终态）；若停止轮询后仍停留，EditorConsoleBar 的
+    // serverPill 遮蔽逻辑会无限期隐藏服务端摘要里已到的终态结果，左 pill 卡死转圈
+    vi.useFakeTimers()
+    try {
+      submissionService.submitCode.mockResolvedValue('s1')
+      submissionService.pollJudgement.mockResolvedValue(makeResult('Pending'))
+      const store = useSubmissionStore()
+
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      expect(store.submissions[0].status).toBe('Pending')
+
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(store.submissions[0].status).toBe('Unknown')
+      // 重复提交保护随轮询停止一并释放
+      expect(store.pendingSubmissions).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('评测结果回填耗时与内存（memory 不得缺失）', async () => {
     vi.useFakeTimers()
     try {

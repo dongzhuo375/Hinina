@@ -91,6 +91,22 @@ describe('editor submission feedback', () => {
     expect(host.textContent).not.toContain('#old')
   })
 
+  it('shows the server verdict once the local entry times out to Unknown instead of masking it forever', async () => {
+    await mount()
+    expect(host.textContent).toContain('#old')
+    const store = useSubmissionStore()
+    // 复刻轮询超时后的 store 状态：pollOnce 把本地条目收敛为终态 Unknown，
+    // 服务端稍后出结果 —— 摘要重拉带回同一提交的终态记录
+    mocks.listContestSubmissions.mockResolvedValue(
+      page({ ...oldRecord, submitId: 'new', status: 'Accepted', timeMs: 30 }),
+    )
+    store.submissions.push({ id: 'new', problemId: 'p1', status: 'Unknown', submittedAt: '2026-10-18T06:00:00Z' })
+    await settle()
+    // 终态 Unknown 不再触发「本地非终态」遮蔽，服务端终态结果接管左 pill
+    expect(host.textContent).toContain('#new AC')
+    expect(host.textContent).not.toContain('Unknown')
+  })
+
   it('ignores a late summary response after switching problems', async () => {
     let resolveOld!: (value: SubmissionPage) => void
     mocks.listContestSubmissions.mockImplementationOnce(() => new Promise<SubmissionPage>((done) => { resolveOld = done }))

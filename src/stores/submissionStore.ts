@@ -244,6 +244,12 @@ export const useSubmissionStore = defineStore('submission', {
         // 状态」标记为过期，让总览页重拉一次 —— 否则 AC/尝试过 pill 与解题进度会一直
         // 停留在错误值，直到用户进入某题或下次提交。开场判题积压时超过 5 分钟是现实场景。
         useProblemStore().invalidateMyStatus()
+        // 本地条目同步收敛为终态型 Unknown：若任其停留在 Pending（非终态），
+        // EditorConsoleBar 的 serverPill 遮蔽逻辑会无限期隐藏服务端摘要里
+        // 已到的终态结果，左 pill 永远卡在「Pending」转圈；置为 Unknown 后
+        // 组件的终态侦听还会重拉一次摘要，让服务端结果接管展示。
+        const entry = this.submissions.find((s) => s.id === submissionId)
+        if (entry && !isTerminalStatus(entry.status)) entry.status = 'Unknown'
         this.stopPolling(submissionId)
         return
       }
