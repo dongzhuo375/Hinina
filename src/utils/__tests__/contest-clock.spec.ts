@@ -2,20 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { getClockSegments, getContestClock } from '@/utils/contest-clock'
 
 describe('getContestClock', () => {
-  it('counts down to the scheduled start and marks the final 24 hours as urgent', () => {
-    expect(getContestClock('upcoming', 100_000, 200_000, 100_000 - 86_401)).toMatchObject({
+  it('counts down to the scheduled start and marks the final 15 seconds as urgent', () => {
+    expect(getContestClock('upcoming', 100_000, 200_000, 100_000 - 16)).toMatchObject({
       kind: 'countdown',
-      seconds: 86_401,
+      seconds: 16,
       urgent: false,
     })
-    expect(getContestClock('upcoming', 100_000, 200_000, 100_000 - 86_400)).toMatchObject({
+    expect(getContestClock('upcoming', 100_000, 200_000, 100_000 - 15)).toMatchObject({
       kind: 'countdown',
-      seconds: 86_400,
-      urgent: false,
+      seconds: 15,
+      urgent: true,
     })
-    expect(getContestClock('upcoming', 100_000, 200_000, 100_000 - 86_399)).toMatchObject({
+    expect(getContestClock('upcoming', 100_000, 200_000, 100_000 - 14)).toMatchObject({
       kind: 'countdown',
-      seconds: 86_399,
+      seconds: 14,
       urgent: true,
     })
   })
