@@ -4,7 +4,7 @@
 
 ## 职责
 
-本人提交历史列表页（`onlyMine` 由后端强制）：题目/状态服务端筛选 + 当前页客户端搜索、分页表格（状态 pill / 耗时 / 内存 / 代码长度）、评测中记录的 5s±1s 视图自有轮询（收敛即停），并作为 `?problem=displayId` 深链的落地页（题目卡片「评测记录」、解题页「提交记录 (n)」均携带该 query 跳入）。
+本人提交历史列表页（`onlyMine` 由后端强制）：顶部 `PageHeading`（编号 `03` / `SUBMISSION ARCHIVE`，描述为记录数）；题目/状态服务端筛选 + 当前页客户端搜索、分页表格（状态 pill / 耗时 / 内存 / 代码长度）、评测中记录的 5s±1s 视图自有轮询（收敛即停），并作为 `?problem=displayId` 深链的落地页（题目行「评测记录」、解题页「提交记录 (n)」均携带该 query 跳入）。
 
 ## 核心类型/函数
 
@@ -29,7 +29,7 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- 组件：`ErrorMessage` / `LoadingSpinner`
+- 组件：`PageHeading`（页头，编号 `03` / `SUBMISSION ARCHIVE`）/ `ErrorMessage` / `LoadingSpinner`
 - stores：`contestStore`（比赛标题 / startTime / 题目列表）、`submissionStore`（history 数据源）
 - `@/types/contest` / `@/types/submission`（仅类型）
 - `@/utils/submission`（`STATUS_OPTIONS` / `formatClock` / `formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `statusLabel` / `statusTone` + `StatusTone` 类型）
@@ -72,3 +72,8 @@ onUnmounted → alive = false；stopPoller()
 - 评测中的行耗时/内存显示 `-`（服务端尚未回填），状态 pill 带旋转圈。
 - 字母徽章底色用 HOJ 气球色（`problemByDisplayId` 匹配），未配置/未匹配回退石板灰。
 - 空态区分两种：无提交（带题目筛选时提供「清除题目筛选」按钮）与搜索无匹配。
+- **配色与可访问性随赛场主题收敛**（PR #36）：`TONE_CLASSES` 由 Tailwind 语义色
+  （`emerald/rose/amber/cyan/slate-*`）改为主题变量（`--color-ac-*` / `--color-wa-*` /
+  `--color-pending-*` / `--border-color` / `--bg-sidebar`），表格容器由卡片改为
+  `border-y` + `--bg-card`，圆角统一 `rounded-sm`、去掉阴影；三个筛选控件补 `aria-label`
+  （下拉与搜索框只有占位符时读屏无法说明用途）。

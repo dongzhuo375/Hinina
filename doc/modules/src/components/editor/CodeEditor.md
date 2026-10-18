@@ -4,7 +4,7 @@
 
 ## 职责
 
-封装 Monaco Editor（浅色 `vs` 主题）：代码双向绑定、语言下拉切换、Ctrl+Enter 提交快捷键、清空（二次确认）/ 上传（原生 input）工具条、自动备份指示与光标位置上报，并向父级暴露 `focus()`。
+封装 Monaco Editor（浅色 `vs` 主题）：代码双向绑定、**浮层化语言下拉**（Teleport 到工作台外壳 + fixed 定位 + 动态最大高度/上下翻转）、Ctrl+Enter 提交快捷键、清空（二次确认）/ 上传（原生 input）工具条、自动备份指示与光标位置上报，并向父级暴露 `focus()`。
 
 ## 核心类型/函数
 
@@ -18,6 +18,11 @@
 | `editor: shallowRef<IStandaloneCodeEditor>` | Monaco 实例用 **shallowRef**：编辑器实例巨大且自带内部状态，深层响应式代理既昂贵又可能破坏其内部引用 |
 | `availableLanguages` | computed | 语言下拉候选：**服务端列表存在时原样呈现、不补入当前语言**（列表外语言可见可选只会换来被拒的提交；归位由 ProblemSolveView 加载后统一做）；仅列表未提供（未加载/未返回）时回退 `DEFAULT_LANGUAGES` 并补入当前语言保持可见 |
 | `suppressChangeEmit` | 外部改写代码（切题加载/清空/上传）时 `setValue` 会触发 change 事件，此标志抑制回流，避免把程序化写入误标为「用户编辑（dirty）」 |
+| `langTrigger` / `langMenu` | `ref<HTMLButtonElement>` / `ref<HTMLDivElement>` | 语言按钮与语言菜单元素引用（定位基准 / 打开后聚焦当前项） |
+| `langMenuTarget` | `shallowRef<HTMLElement \| null>` | 菜单的 Teleport 目标：`langTrigger.closest('.contest-theme') ?? document.body` —— 避开编辑器容器的 `overflow` 与快捷提交卡片的裁切，同时继承赛场主题变量 |
+| `langMenuStyle` | `ref<Record<string, string>>` | 计算出的 fixed 定位样式 |
+| `positionLangMenu` | `() => void` | 定位算法：`margin = 12`、`gap = 4`；`below = innerHeight - rect.bottom - gap - margin`、`above = rect.top - gap - margin`；`opensBelow = below >= Math.min(320, above)`；`width = min(max(192, rect.width), innerWidth - margin * 2)`；`left` 夹在 `[margin, innerWidth - width - margin]`；`maxHeight = max(0, min(320, opensBelow ? below : above))`；输出 `top` 或 `bottom`。挂 `window resize` 重定位（onUnmounted 摘除） |
+| `toggleLangMenu` | `async () => void` | 切换开合；打开时设 Teleport 目标 → 定位 → `await nextTick()` → 聚焦菜单内 `[aria-current="true"]` 的当前语言按钮 |
 | `handleKeydown` | window 级监听 Ctrl/Cmd+Enter → emit submit；onUnmounted 移除 |
 | `handleFileChange` | 原生 `input[type=file]` + `file.text()` 读取上传代码（**不引入 Tauri dialog 插件**）；读后立即重置 `input.value` 允许连续选同一文件；**按扩展名自动识别语言**（`hojLanguageOfFileName` → `resolveAllowedLanguage` 按语言族解析为允许列表中的服务端原名，"Python3" 等变体也能命中），无命中不切换（切到不允许的语言只会换来一次提交失败） |
 | `prefs` | `reactive<EditorPrefs>` | 当前偏好（字号 / Tab 宽度 / 主题）：挂载时经 `applyLoadedPrefs` 并入配置值，弹层改动就地更新（**不重读配置**，避免与在途写入打架） |
@@ -29,9 +34,12 @@
 | `resetPrefs` | `fn` | 恢复默认值（`utils/editor` 常量）：与手动改动同一条链路（即时生效 + 落盘），不是只改本地内存 |
 | `persistPrefs` | `async fn` | `configService.updateEditorPrefs(touchedPatch())` —— **只写用户改过的字段**（部分写语义；载荷为空则直接返回）；失败置 `prefsError`（「保存失败，设置仅本次会话生效」）但**不回滚已应用的值** |
 | `prefsError` | ref | 落盘失败提示，透传给 `EditorSettingsPopover` 的 `error`（成功路径不展示任何状态文案） |
-| `editorSurfaceClass` | computed | 容器底色跟随主题（`vs-dark` → `#1e1e1e`，否则白）：Monaco 实例创建前与尺寸重算瞬间不露白底。**编辑器背景本身由 Monaco 主题绘制** —— `styles/global.css` 刻意不再用 `!important` 覆写 `.margin` / `.monaco-editor-background`，否则 vs-dark 只换字色、底色仍被钉在浅色 |
+| `editorSurfaceClass` | computed | 容器底色跟随主题（`vs-dark` → `#1e1e1e`，否则 `var(--bg-card)`）：Monaco 实例创建前与尺寸重算瞬间不露白底。**编辑器背景本身由 Monaco 主题绘制** —— `styles/global.css` 刻意不再用 `!important` 覆写 `.margin` / `.monaco-editor-background`，否则 vs-dark 只换字色、底色仍被钉在浅色 |
+| 清空确认面板 | 模板 | `v-focus-scope="() => { confirmClearOpen = false }"` + `role="dialog" aria-label="确认清空代码"`：键盘用户 Esc 可取消，焦点不会逃出面板 |
 
-编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configService.getEditorPrefs()` 读取**（读取失败服务内部回退 14 / 4 / 'vs'）、JetBrains Mono 字体栈、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 `readonly || locked`（只读时行高亮关闭；locked 响应式 —— watcher 经 `updateOptions` 翻转，解锁时 `getValue() !== modelValue` 则按 modelValue 回写，抑制 change 回流）。
+编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configService.getEditorPrefs()` 读取**（读取失败服务内部回退 14 / 4 / 'vs'）、JetBrains Mono 字体栈（`"JetBrains Mono Variable", "JetBrains Mono", "Noto Sans SC Variable", "Cascadia Code", Consolas, monospace`）、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 `readonly || locked`（只读时行高亮关闭；locked 响应式 —— watcher 经 `updateOptions` 翻转，解锁时 `getValue() !== modelValue` 则按 modelValue 回写，抑制 change 回流）。
+
+工具条容器为 `editor-toolbar flex min-h-12 flex-wrap gap-y-2`：允许换行，窄分栏下语言按钮与设置入口不会被挤出可视区。
 
 ## 直接依赖
 
@@ -41,6 +49,7 @@
 - `@/services/config.service`（编辑器偏好读写 + `EditorPrefs` 类型）
 - `@/utils/language`（语言值域/文件名识别）
 - `@/utils/editor`（偏好默认值）
+- `@/utils/focus-scope`（`vFocusScope` —— 语言菜单与清空确认面板的焦点陷阱 / Esc 关闭）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖
@@ -64,6 +73,9 @@ watch readonly/locked → editor.updateOptions({ readOnly })；解锁时 getValu
                        → setValue（抑制回流，锁定窗口漏进输入的自愈回写）
 语言下拉选择 → emit update:language（父级走 workspaceStore.changeLanguage：
                本地乐观更新 + set_workspace_language 立即持久化）
+语言菜单（浮层）→ toggleLangMenu：Teleport 到 .contest-theme|body → fixed 定位（可上下翻转、
+               最大高度 ≤320px）→ nextTick 聚焦当前语言项；v-focus-scope 接管 Tab/Esc；
+               window resize → positionLangMenu 重定位
 EditorSettingsPopover change/reset → handlePrefsChange → applyPrefs（即时生效）
                 → emit prefs-change → 400ms debounce → configService.updateEditorPrefs(touchedPatch())
 onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补一次落盘
@@ -91,6 +103,14 @@ onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补
   落盘失败不回滚，只提示「仅本次会话生效」。
 - **在途改动不丢**：卸载时若 debounce 未到期，补一次落盘 —— 调完字号立刻切题/离页
   不该丢设置。
+- **语言菜单必须浮层化**（PR #36）：HOJ 的语言列表可能很长（十几项），原来 `absolute`
+  挂在按钮下方的菜单会被编辑器容器的 `overflow-hidden` 与快捷提交卡片的裁切吃掉，
+  表现为「菜单看不见 / 滚不动 / 选不到后面的语言」。现改为 **Teleport 到 `.contest-theme`
+  外壳 + `position: fixed` + 动态 `maxHeight`（≤320px）与上下翻转**：空间不足时向上展开，
+  空间足够时向下展开，超出部分由 `overflow-y-auto overscroll-contain` 滚动承接；
+  `window resize` 时重定位（分栏拖拽/窗口缩放后菜单不会错位）。
+  菜单语义为 `role="dialog"` + 触发按钮 `aria-expanded` + 当前项 `aria-current="true"`，
+  打开即聚焦当前语言，键盘可直接操作。
 - **落盘是部分写**：只有用户改过的字段（`touched`）进入载荷，未触碰字段保持磁盘原值。
   整块覆盖会在「挂载读配置的 IPC 往返期间用户改了任一设置」或「读取失败走兜底值」时，
   把存量的 `fontSize: 20` / `editorTheme: vs-dark` 静默抹成默认值（配置可被设置页或

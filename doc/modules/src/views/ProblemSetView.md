@@ -4,7 +4,7 @@
 
 ## 职责
 
-比赛题目卡片网格页：首屏用比赛题目列表（ac/total）立即渲染，limits / 我的提交状态 / 榜单统计作为补充数据渐进到达；30s±5s 轮询刷新，并处理「比赛未开始」「加载失败」「空列表」三种兜底态。
+比赛题目总览页：顶部 `PageHeading`（编号 `01` / `PROBLEM COLLECTION`，描述为赛制与题目数，右侧插槽放 `ContestStatsBar`），主体是**紧凑目录行列表**（`ProblemCard` 逐行）；首屏用比赛题目列表（ac/total）立即渲染，limits / 我的提交状态 / 榜单统计作为补充数据渐进到达；30s±5s 轮询刷新，并处理「比赛未开始」「加载失败」「空列表」三种兜底态。
 
 ## 核心类型/函数
 
@@ -22,7 +22,7 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- 组件：`ContestStatsBar` / `ErrorMessage` / `LoadingSpinner` / `ProblemCard`
+- 组件：`PageHeading`（页头，编号 `01` / `PROBLEM COLLECTION`）/ `ContestStatsBar`（页头右侧插槽）/ `ErrorMessage` / `LoadingSpinner` / `ProblemCard`（目录行）
 - stores：`authStore`（uid）/ `contestStore` / `problemStore` / `rankStore`
 - `@/types/contest`（仅类型）
 - `@/utils/contest`（`getContestPhase`）、`@/utils/polling`（`createPoller` + `Poller` 类型）
@@ -49,8 +49,11 @@ onUnmounted → stopPolling()（回收模块级句柄）
 
 设计要点：
 
-- **首屏不等补充数据**：卡片先用比赛题目列表自带的 ac/total 渲染，limits/状态/榜单到达后
+- **首屏不等补充数据**：题目行先用比赛题目列表自带的 ac/total 渲染，limits/状态/榜单到达后
   响应式补齐（ProblemCard 对缺失值显示骨架或 `—`）；三个补充请求各自吞错，缺失即缺失。
+- **卡片网格改紧凑目录**（PR #36）：一屏可见题数从 6–9 提到 12+，且题号/气球色/通过比
+  在固定列上对齐可比对；空态与列表容器改用赛场主题变量，页头统一由 `PageHeading` 承担
+  （`:deep(.page-heading)` 限宽 1500px + gutter 居中，≤1100px 收窄）。
 - **全屏兜底只在无数据时出现**：`showLoading`/`showError` 都要求 `problems.length === 0`——
   已渲染出卡片后，轮询的瞬时失败不应把整页打回错误态/加载态。
 - **未开始 ≠ 错误**：`phase === 'upcoming'` 且拿不到题目时显示「比赛尚未开始」提示

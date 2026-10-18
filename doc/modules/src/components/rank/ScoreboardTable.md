@@ -18,7 +18,7 @@
 | `MY_ROW_EDGE` / `COLUMN_EDGE` / `MY_ROW_COLUMN_EDGE` | 常量 | 「我的行」紫色下划线与选手列右竖线，全部用**单元格内阴影**实现 |
 | `rankLabel` / `isPodium` | fn | `rank === -1` 打星显示 `*`（ICPC 习惯）；我的行加 `#` 前缀；前 3 名琥珀色圆形徽章 |
 | `solvedText` / `totalTimeText` | fn | 解题列：ACM=AC 题数，OI=总得分（null → `—`）；总用时列见下 |
-| `BALLOON_FALLBACK` / `balloonColor` | fn | 题目未配色（color 空串）时按列序号循环取 10 色回退，保证列头永远可辨 |
+| `BALLOON_FALLBACK` / `balloonColor` | fn | 题目未配色（color 空串）时按列序号循环取 10 色回退（**低饱和大地色系**，与赛场主题一致），保证列头永远可辨 |
 | `OI_BOX` / `oiCellView` / `oiCellsByUid` / `oiCells` | — | OI 档位 → 配色映射 + 按行预计算的单元格视图（见设计要点） |
 
 ## 直接依赖
@@ -63,3 +63,8 @@ OI 分支：oiCellsByUid 按行预计算 resolveOiRankCell(cell, timeInfo[displa
 - `oiCellsByUid` 按行预计算：模板里逐格调函数会在每次重渲染时重复构造对象（每行 N 题），
   computed 缓存后只在数据变化时重算。
 - 表头高度 ResizeObserver 实测（见上）；空榜单显示「当前筛选条件下没有榜单记录」整行占位。
+- 配色随赛场主题收敛（PR #36）：`OI_BOX` 与 `stickyTint` / 表头底色全部改用主题变量
+  （`--color-success` / `--color-warning` / `--color-error` / `--bg-card` / `--bg-sidebar`），
+  前 3 名徽章由琥珀色圆角胶囊改为 `--color-pending-*` 方角标签，字号统一 `text-xs`、
+  去掉 `shadow-xs`；**气球色回退调色板整体换成低饱和大地色系**（原高饱和色与中性主题冲突）。
+  逻辑与不变量（粘性底、内阴影分隔线、OI 独立判档、预计算）均未变。

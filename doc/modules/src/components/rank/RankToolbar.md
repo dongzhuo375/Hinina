@@ -10,7 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `input` | ref | 搜索框**本地态**，与 `rankStore.keyword`（服务端已生效关键词）解耦，防抖后才提交 |
+| `input` | ref | 搜索框**本地态**，与 `rankStore.keyword`（服务端已生效关键词）解耦，防抖后才提交；输入框带 `aria-label="搜索队伍"` |
 | `watch(input)` | — | 300ms 防抖 → trim → 与已生效关键词相同则跳过 → `rankStore.setKeyword`（失败静默，原因已由 store 写入 error，RankView 统一展示；全量快照模式下 store 内部携带关键词重拉快照） |
 | `GROUPS` | 常量数组 | 四个分组的 value/label（`RankGroupFilter`） |
 | `selectGroup(filter)` | fn | `rankStore.setGroupFilter`：official 触发服务端重新请求（removeStar）；star/female 进入 store 的**全量快照模式**（跨页拉取后客户端过滤，见 `rankStore.md`） |
@@ -47,5 +47,8 @@ OI 比赛（contestType===1）且返回 oiRankScoreType → 图例左侧渲染�
   `resolveRankCell` 也不会产出该档位——列一个表格里永远不会出现的色块只会误导选手
   （设计稿里有，实现按数据能力收敛）。
 - 图例 = 表格里真实出现的样子：色块直接取单元格同一套 CSS 变量，保证「图例所见即表格所得」。
+- 配色与圆角随赛场主题收敛（PR #36）：容器/按钮/输入框全部改用 `--border-color` /
+  `--bg-sidebar` / `--bg-card` / `--text-secondary` 变量，`rounded-lg → rounded-sm`、
+  `shadow-xs` 去掉；图例文字由 `text-[11px]` 统一到 `text-xs`。
 - 搜索框 title 提示服务端匹配范围（只按学校或榜单显示名，HOJ §9.4），管理选手预期。
 - 防抖定时器 onBeforeUnmount 清理；组件只经 store，不触 service/bridge。
