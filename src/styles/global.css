@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+@import "@fontsource-variable/noto-sans-sc";
 
 :root {
   --color-primary: #7c5cff;
@@ -26,10 +29,10 @@
   --color-pending-border: #fde68a; /* 待评测 amber 边框 */
 
   --radius: 8px;
-  --font-sans: "Inter", "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei UI",
+  --font-sans: "Inter Variable", "Inter", "Source Han Sans SC", "Noto Sans SC Variable", "Noto Sans SC", "Microsoft YaHei UI",
     "Microsoft YaHei", sans-serif;
   --font: var(--font-sans);
-  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Mono", Consolas, monospace;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Source Han Sans SC", "Noto Sans SC Variable", "Noto Sans SC", "Cascadia Mono", Consolas, monospace;
 
   --bg-body: #f8fafc;
   --bg-card: #ffffff;
@@ -66,6 +69,7 @@ body {
 
 /* 数字/倒计时使用等宽数字，避免跳动 */
 .tabular-nums {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 

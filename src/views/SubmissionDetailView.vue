@@ -271,7 +271,7 @@ function openProblem() {
       </h1>
       <span
         v-if="judging"
-        class="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-2.5 py-1 text-xs font-medium text-[var(--color-info)]"
+        class="flex shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-2.5 py-1 text-xs font-medium text-[var(--color-info)]"
       >
         <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
@@ -297,7 +297,7 @@ function openProblem() {
         >
           <div class="flex flex-wrap items-center gap-4">
             <span
-              class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-base font-bold shadow-none"
+              class="inline-flex items-center gap-2 rounded-sm border px-4 py-2 text-base font-bold shadow-none"
               :class="[toneClasses(statusTone(detail.status)), judging ? '' : '']"
             >
               <svg
@@ -320,35 +320,35 @@ function openProblem() {
               class="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-xs tabular-nums"
             >
               <div class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">耗时</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">耗时</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">
                   {{ judging ? '-' : `${detail.timeMs} ms` }}
                 </span>
               </div>
               <div class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">内存</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">内存</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">
                   {{ judging ? '-' : formatMemoryKb(detail.memoryKb) }}
                 </span>
               </div>
               <div v-if="detail.score !== null" class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">得分</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">得分</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">{{ detail.score }}</span>
               </div>
               <div v-if="detail.oiRankScore !== null" class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">榜单计分</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">榜单计分</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">
                   {{ detail.oiRankScore }}
                 </span>
               </div>
               <div class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">代码长度</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">代码长度</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">
                   {{ formatCodeLength(detail.length) }}
                 </span>
               </div>
               <div class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">语言</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">语言</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">{{ detail.language }}</span>
               </div>
             </div>
@@ -404,7 +404,7 @@ function openProblem() {
             </div>
             <button
               type="button"
-              class="flex items-center gap-1.5 rounded-md border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-error)] transition-colors hover:bg-[var(--color-wa-bg)]"
+              class="flex items-center gap-1.5 rounded-md border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2.5 py-1 text-xs font-medium text-[var(--color-error)] transition-colors hover:bg-[var(--color-wa-bg)]"
               @click="copyErrorMessage"
             >
               <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -427,13 +427,13 @@ function openProblem() {
               <h2 class="text-sm font-bold text-[var(--text-primary)]">测试点明细</h2>
               <span
                 v-if="caseList.length > 0"
-                class="rounded-full border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-[var(--text-secondary)]"
+                class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2.5 py-0.5 font-mono text-xs font-medium tabular-nums text-[var(--text-secondary)]"
               >
                 {{ acCaseCount }}/{{ caseList.length }} 通过
               </span>
               <span
                 v-if="modeBadge"
-                class="rounded-full border border-purple-200 bg-purple-50 px-2.5 py-0.5 font-mono text-[11px] font-medium text-purple-600"
+                class="rounded-sm border border-purple-200 bg-purple-50 px-2.5 py-0.5 font-mono text-xs font-medium text-purple-600"
               >
                 {{ modeBadge }}
               </span>
@@ -475,13 +475,13 @@ function openProblem() {
                 <span class="font-mono text-xs font-semibold text-[var(--text-primary)]">
                   子任务 #{{ group.groupNum }}
                 </span>
-                <span class="font-mono text-[11px] tabular-nums text-[var(--text-secondary)]">
+                <span class="font-mono text-xs tabular-nums text-[var(--text-secondary)]">
                   {{ groupPassed(group.cases) }}/{{ group.cases.length }} 通过
                 </span>
               </div>
               <table class="w-full border-collapse text-left">
                 <thead>
-                  <tr class="border-b border-[var(--border-color)] font-mono text-[10px] tracking-wider text-[var(--text-muted)] uppercase">
+                  <tr class="border-b border-[var(--border-color)] font-mono text-xs tracking-wider text-[var(--text-muted)] uppercase">
                     <th class="px-3.5 py-1.5 font-semibold">#</th>
                     <th class="px-3.5 py-1.5 font-semibold">结果</th>
                     <th class="px-3.5 py-1.5 text-right font-semibold">耗时</th>
@@ -494,7 +494,7 @@ function openProblem() {
                     <td class="px-3.5 py-2 font-mono tabular-nums text-[var(--text-secondary)]">{{ c.seq }}</td>
                     <td class="px-3.5 py-2">
                       <span
-                        class="inline-flex rounded-full border px-2 py-0.5 font-mono text-[11px] font-semibold"
+                        class="inline-flex rounded-sm border px-2 py-0.5 font-mono text-xs font-semibold"
                         :class="toneClasses(statusTone(c.status))"
                       >
                         {{ statusAbbr(c.status) }}
@@ -514,7 +514,7 @@ function openProblem() {
           <!-- 平铺测试点表 -->
           <table v-else class="w-full border-collapse text-left">
             <thead>
-              <tr class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/80 font-mono text-[10px] tracking-wider text-[var(--text-muted)] uppercase">
+              <tr class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/80 font-mono text-xs tracking-wider text-[var(--text-muted)] uppercase">
                 <th class="px-4 py-2 font-semibold">#</th>
                 <th class="px-4 py-2 font-semibold">结果</th>
                 <th class="px-4 py-2 text-right font-semibold">耗时</th>
@@ -527,7 +527,7 @@ function openProblem() {
                 <td class="px-4 py-2 font-mono tabular-nums text-[var(--text-secondary)]">{{ c.seq }}</td>
                 <td class="px-4 py-2">
                   <span
-                    class="inline-flex rounded-full border px-2 py-0.5 font-mono text-[11px] font-semibold"
+                    class="inline-flex rounded-sm border px-2 py-0.5 font-mono text-xs font-semibold"
                     :class="toneClasses(statusTone(c.status))"
                   >
                     {{ statusAbbr(c.status) }}
@@ -553,11 +553,11 @@ function openProblem() {
             <div class="flex items-center gap-2.5">
               <h2 class="text-sm font-bold text-[var(--text-primary)]">源代码</h2>
               <span
-                class="rounded-full border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2.5 py-0.5 font-mono text-[11px] font-medium text-[var(--text-secondary)]"
+                class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2.5 py-0.5 font-mono text-xs font-medium text-[var(--text-secondary)]"
               >
                 {{ detail.language }}
               </span>
-              <span class="font-mono text-[11px] tabular-nums text-[var(--text-muted)]">
+              <span class="font-mono text-xs tabular-nums text-[var(--text-muted)]">
                 {{ formatCodeLength(detail.length) }}
               </span>
             </div>

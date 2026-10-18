@@ -12,6 +12,8 @@ export const vFocusScope: ObjectDirective<HTMLElement, () => void> = {
     el.tabIndex = -1
     const focus = () => (candidates()[0] ?? el).focus()
     const keydown = (event: KeyboardEvent) => {
+      // Monaco and nested popovers own their handled keystrokes (notably Tab indentation).
+      if (event.defaultPrevented) return
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()

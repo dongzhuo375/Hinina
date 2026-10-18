@@ -22,7 +22,7 @@ const SKIN: Record<RankCellKind, { box: string; top: string; bottom: string }> =
   'first-ac': {
     box: 'bg-[var(--color-first-ac)] shadow-none',
     top: 'text-white',
-    bottom: 'text-[var(--color-success)]',
+    bottom: 'text-white/85',
   },
   ac: {
     box: 'border border-[var(--color-ac-border)] bg-[var(--color-ac-bg)]',
@@ -87,17 +87,17 @@ const hint = computed(() => {
 <template>
   <div
     v-if="resolved.kind === 'none'"
-    class="text-center font-sans text-[11px] text-[var(--text-muted)]"
+    class="text-center font-sans text-xs text-[var(--text-muted)]"
     :title="hint"
   >
     -
   </div>
   <div v-else class="rounded p-1" :class="skin.box" :title="hint">
-    <div class="font-mono text-[11px] font-bold leading-tight" :class="skin.top">
+    <div class="font-mono text-xs font-bold leading-tight" :class="skin.top">
       {{ lines.top }}
     </div>
     <div
-      class="flex items-center justify-center gap-0.5 font-sans text-[10px] font-medium leading-tight"
+      class="flex items-center justify-center gap-0.5 font-mono text-xs font-medium leading-tight"
       :class="skin.bottom"
     >
       <span>{{ lines.bottom }}</span>

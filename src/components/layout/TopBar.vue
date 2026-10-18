@@ -14,6 +14,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const contestStore = useContestStore()
 const appWindow = getCurrentWindow()
+defineProps<{ navigationDisabled?: boolean }>()
 
 /// 当前时间戳（秒），每秒刷新驱动倒计时与比赛阶段跃迁
 const now = ref(Math.floor(Date.now() / 1000))
@@ -40,13 +41,13 @@ const phaseBadge = computed(() => {
     case 'running':
       return {
         label: '进行中',
-        pill: 'border-[#a7f3d0] bg-[#ecfdf5] text-[#047857]',
+        pill: 'border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
         dot: 'bg-[var(--color-success)]',
       }
     case 'upcoming':
       return {
         label: '未开始',
-        pill: 'border-[#fde68a] bg-[#fffbeb] text-[#b45309]',
+        pill: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
         dot: 'bg-[var(--color-warning)]',
       }
     case 'ended':
@@ -168,7 +169,7 @@ function close() {
         </div>
       </div>
     </div>
-    <div class="navigation-deck">
+    <div class="navigation-deck" :inert="navigationDisabled">
       <ActivityBar />
       <div class="race-instrument" aria-label="比赛计时">
         <span class="phase-label"><span class="h-1 w-1 rounded-full" :class="phaseBadge.dot"></span>{{ phaseBadge.label }}</span>
@@ -197,23 +198,23 @@ function close() {
 .window-bar { height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 16px 0 24px; user-select: none; }
 .window-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand-monogram { display: grid; place-items: center; width: 23px; height: 23px; background: var(--text-primary); color: var(--bg-body); font-size: 12px; font-weight: 700; flex-shrink: 0; }
-.brand-word { font-size: 11px; letter-spacing: .12em; font-weight: 600; }
+.brand-word { font-size: 12px; letter-spacing: .12em; font-weight: 600; }
 .brand-divider { height: 12px; width: 1px; background: var(--border-color); margin: 0 8px; flex-shrink: 0; }
-.window-event { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.window-event { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .window-actions, .window-controls { display: flex; align-items: center; flex-shrink: 0; gap: 5px; }
 .window-controls { margin-left: 10px; }
 .window-controls button { width: 32px; height: 30px; display: grid; place-items: center; color: var(--text-secondary); }
 .window-controls button:hover { background: var(--bg-sidebar); }
 .window-controls .window-close:hover { background: #a33b2a; color: white; }
 .window-controls svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; }
-.account-button { display: flex; align-items: center; gap: 8px; font-size: 11px; padding: 4px 10px; }
+.account-button { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 10px; }
 .account-initial { font-family: var(--font-mono); color: #8c6a43; }
 .navigation-deck { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 36px; border-bottom: 1px solid var(--border-color); }
 .race-instrument { position: relative; display: flex; align-items: center; gap: 12px; height: 48px; flex-shrink: 0; }
-.phase-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); margin-right: 12px; }
-.clock-caption { font-size: 10px; color: var(--text-muted); }
+.phase-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); margin-right: 12px; }
+.clock-caption { font-size: 12px; color: var(--text-muted); }
 .clock-value { font: 22px var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -.05em; }
-.clock-total { font: 10px var(--font-mono); color: var(--text-muted); }
+.clock-total { font: 12px var(--font-mono); color: var(--text-muted); }
 .clock-track { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--border-color); }
 .clock-track div { height: 100%; background: #8c6a43; }
 @media (max-width: 1100px) { .navigation-deck { padding: 0 24px; gap: 16px; } .clock-total { display: none; } .phase-label { margin-right: 0; } }

@@ -55,7 +55,7 @@ function go(displayId: string) {
       <!-- 当前题下划线指示条 -->
       <span
         v-if="p.displayId === currentDisplayId"
-        class="absolute inset-x-2 -bottom-[5px] h-0.5 rounded-full bg-[var(--color-primary)]"
+        class="absolute inset-x-2 -bottom-[5px] h-0.5 rounded-sm bg-[var(--color-primary)]"
       ></span>
     </button>
     <span v-if="problems.length === 0" class="px-2 text-xs text-[var(--text-muted)]">题目列表未加载</span>

@@ -40,7 +40,7 @@ onUnmounted(() => {
   <footer
     class="flex shrink-0 select-none items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-body)] px-6 py-1.5"
   >
-    <div class="flex items-center gap-1.5 text-[11px]">
+    <div class="flex items-center gap-1.5 text-xs">
       <span
         class="h-1 w-1 rounded-full"
         :class="connected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-error)]'"
@@ -54,7 +54,7 @@ onUnmounted(() => {
     </div>
 
     <div class="flex items-center gap-2">
-      <span v-if="unlockedHint" class="font-mono text-[10px] text-[var(--color-primary)]">
+      <span v-if="unlockedHint" class="font-mono text-xs text-[var(--color-primary)]">
         设置已解锁
       </span>
       <!--
@@ -64,7 +64,7 @@ onUnmounted(() => {
       -->
       <button
         type="button"
-        class="cursor-default font-mono text-[10px] text-[var(--text-muted)]"
+        class="cursor-default font-mono text-xs text-[var(--text-muted)]"
         @click="onVersionClick"
       >
         Hinina v{{ version }}

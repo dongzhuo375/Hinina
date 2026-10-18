@@ -218,7 +218,7 @@ watch(isEnded, (ended) => {
           <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke-linecap="round" />
         </svg>
         <span class="font-medium">榜单已封榜，仅显示尝试次数</span>
-        <span class="text-[var(--color-warning)]/80">封榜时段内的提交结果将在赛后统一揭晓</span>
+        <span class="text-[var(--text-secondary)]">封榜时段内的提交结果将在赛后统一揭晓</span>
       </div>
 
       <!-- 轮询失败但仍有旧数据：顶部一条不打断阅读的错误条，绝不清空榜单 -->
@@ -272,7 +272,7 @@ watch(isEnded, (ended) => {
           />
         </svg>
         <span v-if="rankStore.isFullMode" class="min-w-0">
-          客户端筛选 · 已加载 {{ rankStore.fullLoadedRows }} 行
+          客户端筛选 · 已加载 <span class="font-mono">{{ rankStore.fullLoadedRows }}</span> 行
           <template v-if="rankStore.fullFetchState === 'truncated'">
             （已达 2000 行上限，结果可能不完整）
           </template>

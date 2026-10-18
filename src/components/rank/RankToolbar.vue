@@ -166,14 +166,14 @@ const oiScoreTypeText = computed<string | null>(() => {
     <div class="flex select-none flex-wrap items-center space-x-3 text-xs text-[var(--text-secondary)]">
       <span
         v-if="oiScoreTypeText"
-        class="rounded-md border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]"
+        class="rounded-md border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]"
         title="OI 计分规则由比赛属性决定（服务端只读）：最高分 = 取每题最高分；最近提交 = 取最后一次提交的得分"
       >
         {{ oiScoreTypeText }}
       </span>
       <div v-for="item in legend" :key="item.label" class="flex items-center space-x-1.5">
         <span class="inline-block h-2.5 w-2.5 rounded" :class="item.swatch"></span>
-        <span class="text-[11px]">{{ item.label }}</span>
+        <span class="text-xs">{{ item.label }}</span>
       </div>
     </div>
   </div>

@@ -264,7 +264,7 @@ onUnmounted(() => {
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
     <PageHeading title="我的提交" index="03" subtitle="SUBMISSION ARCHIVE">
-      <template #description>每一次尝试，都有迹可循。<span class="ml-3 font-mono">{{ history.total }} RECORDS</span></template>
+      <template #description>当前比赛提交记录<span class="ml-3 font-mono">{{ history.total }} RECORDS</span></template>
     </PageHeading>
     <div class="shrink-0 px-8 pb-4">
       <!-- 筛选工具条：题目 / 状态 / 搜索 / 刷新 -->
@@ -403,7 +403,7 @@ onUnmounted(() => {
       </div>
 
       <div
-        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] shadow-none"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-[var(--border-color)] bg-[var(--bg-card)]"
       >
         <LoadingSpinner v-if="isBootstrapping" message="正在加载提交记录…" class="m-auto" />
 
@@ -467,7 +467,7 @@ onUnmounted(() => {
           <table v-else class="w-full border-collapse text-left">
             <thead>
               <tr
-                class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/80 font-mono text-[11px] tracking-wider text-[var(--text-secondary)] uppercase"
+                class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/80 font-mono text-xs tracking-wider text-[var(--text-secondary)] uppercase"
               >
                 <th class="px-4 py-3 font-semibold">运行编号</th>
                 <th class="px-4 py-3 font-semibold">提交时间</th>
@@ -490,10 +490,10 @@ onUnmounted(() => {
                   #{{ record.submitId }}
                 </td>
                 <td
-                  class="px-4 py-3 font-mono text-[11px] tabular-nums text-[var(--text-secondary)]"
+                  class="px-4 py-3 font-mono text-xs tabular-nums text-[var(--text-secondary)]"
                 >
                   <div>{{ formatClock(record.submitTime) }}</div>
-                  <div class="text-[10px] text-[var(--text-muted)]">
+                  <div class="text-xs text-[var(--text-muted)]">
                     赛时 {{ contestElapsed(record) }}
                   </div>
                 </td>
@@ -505,7 +505,7 @@ onUnmounted(() => {
                   >
                     <!-- 字母徽章：底色用 HOJ 气球色，未配置/未匹配时回退石板灰 -->
                     <span
-                      class="flex h-5 w-5 shrink-0 items-center justify-center rounded font-mono text-[11px] font-bold"
+                      class="flex h-5 w-5 shrink-0 items-center justify-center rounded font-mono text-xs font-bold"
                       :class="badgeColorOf(record) ? 'text-white' : 'bg-[var(--bg-sidebar)] text-[var(--text-secondary)]'"
                       :style="
                         badgeColorOf(record) ? { backgroundColor: badgeColorOf(record) } : undefined
@@ -518,12 +518,12 @@ onUnmounted(() => {
                     </span>
                   </div>
                 </td>
-                <td class="px-4 py-3 text-[11px] text-[var(--text-secondary)]">
+                <td class="px-4 py-3 text-xs text-[var(--text-secondary)]">
                   {{ record.language }}
                 </td>
                 <td class="px-4 py-3">
                   <span
-                    class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold shadow-none"
+                    class="inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-xs font-semibold shadow-none"
                     :class="toneClasses(statusTone(record.status))"
                   >
                     <svg
@@ -542,17 +542,17 @@ onUnmounted(() => {
                   </span>
                 </td>
                 <td
-                  class="px-4 py-3 text-right font-mono text-[11px] tabular-nums text-[var(--text-secondary)]"
+                  class="px-4 py-3 text-right font-mono text-xs tabular-nums text-[var(--text-secondary)]"
                 >
                   {{ isJudging(record.status) ? '-' : `${record.timeMs} ms` }}
                 </td>
                 <td
-                  class="px-4 py-3 text-right font-mono text-[11px] tabular-nums text-[var(--text-secondary)]"
+                  class="px-4 py-3 text-right font-mono text-xs tabular-nums text-[var(--text-secondary)]"
                 >
                   {{ isJudging(record.status) ? '-' : formatMemoryKb(record.memoryKb) }}
                 </td>
                 <td
-                  class="px-4 py-3 text-right font-mono text-[11px] tabular-nums text-[var(--text-secondary)]"
+                  class="px-4 py-3 text-right font-mono text-xs tabular-nums text-[var(--text-secondary)]"
                 >
                   {{ formatCodeLength(record.length) }}
                 </td>

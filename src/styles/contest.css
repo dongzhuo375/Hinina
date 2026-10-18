@@ -3,8 +3,8 @@
   --bg-card: #fffefa;
   --bg-sidebar: #eeede6;
   --text-primary: #2e3033;
-  --text-secondary: #626963;
-  --text-muted: #737970;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
   --border-color: #ddded4;
   --color-primary: #2e3033;
   --color-primary-hover: #454844;
@@ -42,7 +42,7 @@
 .contest-theme :where(button:disabled) { cursor: not-allowed; }
 .contest-theme ::selection { background: #8c6a43; color: white; }
 .contest-theme .eyebrow {
-  font: 10px var(--font-mono);
+  font: 12px var(--font-mono);
   letter-spacing: .2em;
   text-transform: uppercase;
   color: var(--text-muted);

@@ -18,7 +18,7 @@ const quickSubmitOpen = ref(false)
 
 /// 徽章回退调色板（取自设计稿 A–F 六卡配色）：HOJ 气球色可能为空串（组织者未配置），
 /// 此时按题号序号循环取色 —— 同一题号恒定同色，轮询刷新时徽章不会跳变
-const FALLBACK_PALETTE = ['#dc2626', '#00c853', '#2563eb', '#9333ea', '#f59e0b', '#0891b2']
+const FALLBACK_PALETTE = ['#8c6a43', '#5f7a6a', '#7d7378', '#6c7565', '#9c8562', '#526b69']
 
 /** 题号序号：字母题号（A/B/C…）映射 0/1/2…，纯数字题号按数值，其余回退 0 */
 function displayIdOrdinal(displayId: string): number {
@@ -47,7 +47,7 @@ const pill = computed(() => {
     const text = rankAc && cell?.acTime != null ? `AC ${formatRankTime(cell.acTime)}` : '已通过'
     return { kind: 'ac' as const, text }
   }
-  if (status === 2) return { kind: 'attempted' as const, text: '尝试过' }
+  if (status === 2) return { kind: 'attempted' as const, text: '未通过' }
   return { kind: 'none' as const, text: '未作答' }
 })
 </script>
@@ -75,21 +75,22 @@ const pill = computed(() => {
   </article>
 </template>
 <style scoped>
-.problem-row { display: grid; grid-template-columns: 70px minmax(160px, 1fr) 110px 110px auto; align-items: center; gap: 24px; min-height: 108px; border-top: 1px solid var(--border-color); transition: background 200ms ease-out; }
+.problem-row { display: grid; grid-template-columns: 48px minmax(180px, 1fr) 96px 100px auto; align-items: center; gap: 20px; min-height: 72px; padding: 10px 0; border-top: 1px solid var(--border-color); transition: background 200ms ease-out; }
 .problem-row:hover { background: #ffffff70; }
-.problem-ordinal { position: relative; align-self: stretch; font: 38px var(--font-mono); text-align: left; padding-left: 10px; }
-.balloon-line { position: absolute; bottom: 24px; left: 12px; width: 20px; height: 2px; opacity: .65; }
-.problem-title { font-size: 16px; font-weight: 600; text-align: left; overflow-wrap: anywhere; line-height: 1.5; }
+.problem-ordinal { position: relative; align-self: stretch; font: 30px var(--font-mono); text-align: left; padding-left: 8px; }
+.balloon-line { position: absolute; bottom: 2px; left: 9px; width: 18px; height: 2px; opacity: .65; }
+.problem-description { min-width: 0; }
+.problem-title { font-size: 15px; font-weight: 600; text-align: left; overflow-wrap: anywhere; line-height: 1.4; }
 .problem-title:hover { color: #8c6a43; }
-.problem-limits { margin-top: 8px; font: 11px var(--font-mono); color: var(--text-muted); }
-.problem-ratio { display: flex; flex-direction: column; gap: 8px; font: 15px var(--font-mono); }
-.problem-ratio .eyebrow { font-family: var(--font-sans); font-size: 10px; letter-spacing: .06em; }
-.problem-state { display: flex; align-items: center; gap: 8px; font: 11px var(--font-mono); color: var(--text-muted); }
+.problem-limits { margin-top: 4px; font: 12px/1.4 var(--font-mono); color: var(--text-muted); }
+.problem-ratio { display: flex; flex-direction: column; gap: 2px; font: 14px/1.5 var(--font-mono); font-variant-numeric: tabular-nums; }
+.problem-ratio .eyebrow { font-family: var(--font-sans); font-size: 12px; letter-spacing: .03em; }
+.problem-state { display: flex; align-items: center; gap: 6px; font: 12px var(--font-mono); color: var(--text-muted); white-space: nowrap; }
 .problem-state.ac { color: var(--color-success); }
 .problem-state.attempted { color: var(--color-warning); }
-.problem-actions { display: flex; align-items: center; gap: 8px; }
-.problem-open { display: flex; align-items: center; gap: 16px; padding: 8px 10px; font-size: 12px; font-weight: 600; }
+.problem-actions { display: flex; align-items: center; gap: 4px; }
+.problem-open { display: flex; align-items: center; gap: 10px; padding: 8px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .problem-open:hover { color: #8c6a43; }
-@media (max-width: 1100px) { .problem-row { grid-template-columns: 56px minmax(130px, 1fr) 85px 85px auto; gap: 14px; } .problem-actions { gap: 0; } .problem-actions .action-quiet { padding: 8px 6px; font-size: 11px; } }
+@media (max-width: 1100px) { .problem-row { grid-template-columns: 44px minmax(130px, 1fr) 85px 95px auto; gap: 12px; } .problem-actions { gap: 0; } .problem-actions .action-quiet { padding: 8px 6px; } }
 @media (max-width: 800px) { .problem-row { grid-template-columns: 48px 1fr 90px; padding: 16px 0; } .problem-actions { grid-column: 2 / -1; } .problem-state { grid-column: 2; } .balloon-line { bottom: 0; } }
 </style>

@@ -146,7 +146,7 @@ onUnmounted(() => {
         </span>
       </div>
       <!-- 语言倍率说明：limits 是 C/C++ 基准，当前语言 ×2 时明确标注（HOJ-Problem-Limits-API.md §5） -->
-      <p v-if="isDouble && shownLimits" class="mt-1.5 pl-5 text-[11px] text-[var(--text-muted)]">
+      <p v-if="isDouble && shownLimits" class="mt-1.5 pl-5 text-xs text-[var(--text-muted)]">
         题面限制为 C/C++ 基准（{{ baseTimeText }} / {{ baseMemoryText }}），当前语言
         {{ languageLabel }} 判题时时间与内存 ×2
       </p>
@@ -193,12 +193,12 @@ onUnmounted(() => {
           class="overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] shadow-none"
         >
           <div class="flex items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-1.5">
-            <span class="font-mono text-[11px] font-semibold text-[var(--text-primary)]">
+            <span class="font-mono text-xs font-semibold text-[var(--text-primary)]">
               样例 {{ i + 1 }} (Sample #{{ i + 1 }})
             </span>
             <button
               type="button"
-              class="flex items-center gap-1 font-mono text-[11px] transition-colors"
+              class="flex items-center gap-1 font-mono text-xs transition-colors"
               :class="copiedIndex === i ? 'text-[var(--color-success)]' : 'text-[var(--text-secondary)] hover:text-[var(--color-primary)]'"
               @click="copySampleInput(i, sample.input)"
             >
@@ -213,11 +213,11 @@ onUnmounted(() => {
           </div>
           <div class="grid grid-cols-1 divide-y divide-[var(--border-color)] md:grid-cols-2 md:divide-x md:divide-y-0">
             <div class="bg-[var(--bg-sidebar)]/50 p-3">
-              <div class="mb-1 font-mono text-[11px] text-[var(--text-muted)]">输入 (Input):</div>
+              <div class="mb-1 font-mono text-xs text-[var(--text-muted)]">输入 (Input):</div>
               <pre class="sample-pre sample-input">{{ sample.input }}</pre>
             </div>
             <div class="bg-[var(--bg-card)] p-3">
-              <div class="mb-1 font-mono text-[11px] text-[var(--text-muted)]">输出 (Output):</div>
+              <div class="mb-1 font-mono text-xs text-[var(--text-muted)]">输出 (Output):</div>
               <pre class="sample-pre sample-output">{{ sample.output }}</pre>
             </div>
           </div>
@@ -296,23 +296,23 @@ onUnmounted(() => {
 /* 样例 I/O：等宽小字，横向滚动，选区色区分输入/输出 */
 .sample-pre {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   overflow-x: auto;
   white-space: pre;
   margin: 0;
 }
 .sample-input {
-  color: #1e293b;
+  color: var(--text-primary);
 }
 .sample-input::selection {
-  background: #f3e8ff;
+  background: var(--color-pending-bg);
 }
 .sample-output {
-  color: #059669;
+  color: var(--color-success);
   font-weight: 600;
 }
 .sample-output::selection {
-  background: #d1fae5;
+  background: var(--color-ac-bg);
 }
 </style>

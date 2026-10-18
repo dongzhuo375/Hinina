@@ -68,7 +68,7 @@ const TONE_CLASSES: Record<StatusTone, string> = {
   ac: 'border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
   wa: 'border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-[var(--color-error)]',
   tle: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
-  pending: 'border-cyan-200 bg-cyan-50 text-cyan-600',
+  pending: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
   system: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
   neutral: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
 }
@@ -304,7 +304,7 @@ function goDetail() {
             <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           <p class="text-xs font-medium text-[var(--color-primary)]">松开以导入代码文件</p>
-          <p class="font-mono text-[11px] text-[var(--text-muted)]">.cpp / .c / .java / .py / .go / .rs 等源代码文件，≤ 256 KB</p>
+          <p class="font-mono text-xs text-[var(--text-muted)]">.cpp / .c / .java / .py / .go / .rs 等源代码文件，≤ 256 KB</p>
         </div>
       </div>
 
@@ -321,7 +321,7 @@ function goDetail() {
             </svg>
             <span>选择代码文件</span>
           </button>
-          <span class="text-[11px] text-[var(--text-muted)]">
+          <span class="text-xs text-[var(--text-muted)]">
             也可直接把文件拖入编辑器区域 · Ctrl + Enter 提交
           </span>
           <input
@@ -342,7 +342,7 @@ function goDetail() {
           class="flex flex-wrap items-center gap-3 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)]/70 px-3.5 py-2.5"
         >
           <template v-if="!entryTerminal">
-            <svg class="h-4 w-4 animate-spin text-cyan-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+            <svg class="h-4 w-4 animate-spin text-[var(--color-warning)]" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
               <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
             </svg>
@@ -352,7 +352,7 @@ function goDetail() {
           </template>
           <template v-else>
             <span
-              class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold"
+              class="inline-flex items-center rounded-sm border px-2.5 py-1 text-xs font-semibold"
               :class="TONE_CLASSES[statusTone(entry.status)]"
             >
               {{ statusLabel(entry.status) }}

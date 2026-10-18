@@ -159,10 +159,10 @@ const SERVER_TONE_MAP: Record<StatusTone, Tone> = {
 }
 
 const TONE_STYLES: Record<Tone, { fg: string; bg: string; border: string }> = {
-  success: { fg: 'var(--color-success)', bg: '#f0fdf4', border: '#bbf7d0' },
-  error: { fg: 'var(--color-error)', bg: '#fff1f2', border: '#fecdd3' },
-  warning: { fg: 'var(--color-warning)', bg: '#fffbeb', border: '#fde68a' },
-  pending: { fg: 'var(--color-pending)', bg: '#ecfeff', border: '#a5f3fc' },
+  success: { fg: 'var(--color-success)', bg: 'var(--color-ac-bg)', border: 'var(--color-ac-border)' },
+  error: { fg: 'var(--color-error)', bg: 'var(--color-wa-bg)', border: 'var(--color-wa-border)' },
+  warning: { fg: 'var(--color-warning)', bg: 'var(--color-pending-bg)', border: 'var(--color-pending-border)' },
+  pending: { fg: 'var(--color-pending)', bg: 'var(--color-pending-bg)', border: 'var(--color-pending-border)' },
   muted: { fg: 'var(--text-secondary)', bg: 'var(--bg-sidebar)', border: 'var(--border-color)' },
 }
 
@@ -229,7 +229,7 @@ function goDetail(submitId: string) {
         <!-- 服务端最新记录：#123 WA (Test 4 · 2.01s)，点击进提交详情 -->
         <div
           v-if="serverPill"
-          class="flex cursor-pointer items-center gap-2 rounded-sm border px-3 py-1 font-mono text-[11px] font-semibold whitespace-nowrap transition-colors hover:brightness-[0.97]"
+          class="flex cursor-pointer items-center gap-2 rounded-sm border px-3 py-1 font-mono text-xs font-semibold whitespace-nowrap transition-colors hover:brightness-[0.97]"
           :style="{ color: serverToneStyle.fg, backgroundColor: serverToneStyle.bg, borderColor: serverToneStyle.border }"
           title="点击查看提交详情"
           role="button" tabindex="0" @keydown.enter="goDetail(serverPill.submitId)" @keydown.space.prevent="goDetail(serverPill.submitId)"
@@ -277,12 +277,12 @@ function goDetail(submitId: string) {
             <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
           </svg>
           <span>最新记录: #{{ serverPill.submitId }} {{ serverPill.abbr }}</span>
-          <span v-if="serverPill.detail" class="font-mono opacity-70">({{ serverPill.detail }})</span>
+          <span v-if="serverPill.detail" class="font-mono">({{ serverPill.detail }})</span>
         </div>
         <!-- 本会话提交（服务端摘要未到达时的回退） -->
         <div
           v-else-if="latest"
-          class="flex cursor-pointer items-center gap-2 rounded-sm border px-3 py-1 font-mono text-[11px] font-semibold whitespace-nowrap transition-colors hover:brightness-[0.97]"
+          class="flex cursor-pointer items-center gap-2 rounded-sm border px-3 py-1 font-mono text-xs font-semibold whitespace-nowrap transition-colors hover:brightness-[0.97]"
           :style="{ color: toneStyle.fg, backgroundColor: toneStyle.bg, borderColor: toneStyle.border }"
           title="点击查看提交详情"
           role="button" tabindex="0" @keydown.enter="goDetail(latest.id)" @keydown.space.prevent="goDetail(latest.id)"
@@ -324,7 +324,7 @@ function goDetail(submitId: string) {
             <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
           </svg>
           <span>最新记录: #{{ latest.id }} {{ statusLabel(latest.status) }}</span>
-          <span v-if="timeLabel" class="font-mono opacity-70">({{ timeLabel }})</span>
+          <span v-if="timeLabel" class="font-mono">({{ timeLabel }})</span>
         </div>
         <!-- 本地提交的失败原因（CE 编译错误等，轮询回填；完整内容在详情页） -->
         <span
@@ -355,7 +355,7 @@ function goDetail(submitId: string) {
           <svg class="h-4 w-4 text-[var(--text-secondary)]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          <span>提交记录{{ totalCount > 0 ? ` (${totalCount})` : '' }}</span>
+          <span>提交记录<span v-if="totalCount > 0" class="font-mono"> ({{ totalCount }})</span></span>
         </button>
         <button
           type="button"
@@ -387,7 +387,7 @@ function goDetail(submitId: string) {
          未关 insertSpaces，缩进恒为空格，宽度取编辑器当前 tabSize（弹层可调，
          经 CodeEditor 上报后由父级转发，不写死） -->
     <div
-      class="flex items-center justify-between border-t border-[var(--border-color)] pt-2 font-mono text-[11px] text-[var(--text-muted)] select-none"
+      class="flex items-center justify-between border-t border-[var(--border-color)] pt-2 font-mono text-xs text-[var(--text-muted)] select-none"
     >
       <div class="flex items-center gap-2.5 whitespace-nowrap">
         <span>Ln {{ cursor?.line ?? 1 }}, Col {{ cursor?.column ?? 1 }}</span>

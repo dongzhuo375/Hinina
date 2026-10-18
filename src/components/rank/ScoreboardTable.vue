@@ -159,16 +159,16 @@ function totalTimeText(row: ContestRankRow): string {
 
 /// 气球色回退调色板：HOJ 允许题目未配色（`color` 为空串），按列序号取色保证列头永远可辨
 const BALLOON_FALLBACK: readonly string[] = [
-  '#e11d48',
-  '#10b981',
-  '#2563eb',
-  '#9333ea',
-  '#f59e0b',
-  '#0891b2',
-  '#db2777',
-  '#65a30d',
-  '#7c3aed',
-  '#ea580c',
+  '#8c6a43',
+  '#5f7a6a',
+  '#7d7378',
+  '#6c7565',
+  '#9c8562',
+  '#526b69',
+  '#876b69',
+  '#68745e',
+  '#6b6470',
+  '#82745e',
 ]
 
 function balloonColor(index: number, color: string): string {
@@ -236,12 +236,12 @@ function oiCells(row: ContestRankRow): OiCellView[] {
           class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/95 text-[var(--text-secondary)] backdrop-blur-sm select-none"
         >
           <th
-            class="sticky left-0 z-10 w-16 min-w-[64px] bg-[#f8fafc] px-3 py-2.5 text-center font-semibold"
+            class="sticky left-0 z-10 w-16 min-w-[64px] bg-[var(--bg-sidebar)] px-3 py-2.5 text-center font-semibold"
           >
             排名
           </th>
           <th
-            class="sticky left-16 z-10 min-w-[220px] bg-[#f8fafc] px-4 py-2.5 font-semibold shadow-[1px_0_0_var(--border-color)]"
+            class="sticky left-16 z-10 min-w-[220px] bg-[var(--bg-sidebar)] px-4 py-2.5 font-semibold shadow-[1px_0_0_var(--border-color)]"
           >
             选手 / 团队
           </th>
@@ -258,13 +258,13 @@ function oiCells(row: ContestRankRow): OiCellView[] {
           >
             <div class="flex flex-col items-center">
               <span
-                class="flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold text-white shadow-none"
+                class="flex h-6 w-6 items-center justify-center rounded-md font-mono text-xs font-bold text-white shadow-none"
                 :style="{ backgroundColor: balloonColor(index, problem.color) }"
                 :title="problem.displayTitle"
               >
                 {{ problem.displayId }}
               </span>
-              <span class="mt-0.5 font-mono text-[10px] font-normal text-[var(--text-muted)]">
+              <span class="mt-0.5 font-mono text-xs font-normal text-[var(--text-muted)]">
                 {{ problem.ac }}/{{ problem.total }}
               </span>
             </div>
@@ -288,14 +288,14 @@ function oiCells(row: ContestRankRow): OiCellView[] {
             <div class="inline-flex items-center justify-center gap-1">
               <span
                 v-if="item.isMe"
-                class="rounded bg-[var(--color-primary)] px-1 font-sans text-[9px] font-bold leading-4 text-white"
+                class="rounded bg-[var(--color-primary)] px-1 font-sans text-xs font-bold leading-4 text-white"
                 title="我的队伍"
               >
                 我
               </span>
               <span
                 v-if="isPodium(item.row)"
-                class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] font-sans text-xs font-bold text-[var(--color-warning)] shadow-none"
+                class="inline-flex h-6 w-6 items-center justify-center rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] font-mono text-xs font-bold text-[var(--color-warning)] shadow-none"
               >
                 {{ rankLabel(item) }}
               </span>
@@ -320,7 +320,7 @@ function oiCells(row: ContestRankRow): OiCellView[] {
               </span>
               <template v-if="item.row.school">
                 <span class="text-[var(--text-muted)]">·</span>
-                <span class="font-mono text-xs text-[var(--text-secondary)]">{{ item.row.school }}</span>
+                <span class="text-xs text-[var(--text-secondary)]">{{ item.row.school }}</span>
               </template>
             </div>
           </td>
@@ -356,12 +356,12 @@ function oiCells(row: ContestRankRow): OiCellView[] {
               :class="plainCellClass(item)"
             >
               <div v-if="cellView.box" class="rounded p-1" :class="cellView.box" :title="cellView.hint">
-                <div class="font-mono text-[11px] font-bold leading-tight">{{ cellView.score }}</div>
-                <div class="font-sans text-[10px] leading-tight opacity-80">
+                <div class="font-mono text-xs font-bold leading-tight">{{ cellView.score }}</div>
+                <div class="font-mono text-xs leading-tight">
                   {{ cellView.time || '未 AC' }}
                 </div>
               </div>
-              <div v-else class="font-sans text-[11px] text-[var(--text-muted)]" :title="cellView.hint">
+              <div v-else class="font-mono text-xs text-[var(--text-muted)]" :title="cellView.hint">
                 {{ cellView.score }}
               </div>
             </td>
