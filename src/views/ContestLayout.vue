@@ -84,7 +84,18 @@ onUnmounted(() => {
     <TopBar />
     <div class="flex min-h-0 flex-1 overflow-hidden" :inert="phase === 'ended' || phase === 'upcoming'">
       <ActivityBar />
-      <main class="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <main class="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <!-- 背景几何：登录页正交切割的延伸。极淡轴线与三角切面只出现在
+             页边距与卡片间隙（卡片自带实底色会自然遮住线条），
+             营造「空间被切割」的构成感；视图根容器已去底色配合透出 -->
+        <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+          <span class="absolute bottom-0 left-[4.5%] top-0 w-px bg-[#2e3033]/[0.05]"></span>
+          <span class="absolute right-0 top-[18%] h-px w-[32%] bg-[#2e3033]/[0.04]"></span>
+          <span
+            class="absolute bottom-0 right-0 h-[24%] w-[26%] bg-gradient-to-tl from-[#2e3033]/[0.035] to-transparent"
+            style="clip-path: polygon(100% 0, 100% 100%, 0 100%)"
+          ></span>
+        </div>
         <router-view />
       </main>
     </div>

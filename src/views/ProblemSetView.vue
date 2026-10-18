@@ -147,7 +147,7 @@ function openProblem(problem: ContestProblem) {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <LoadingSpinner v-if="showLoading" class="flex-1" message="正在加载比赛数据…" />
     <ErrorMessage
       v-else-if="showError"

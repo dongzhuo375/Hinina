@@ -19,7 +19,7 @@ defineProps<{
     <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
       <div class="min-w-0">
         <p class="font-mono text-[10px] tracking-[0.35em] text-[#8c6a43]">{{ en }}</p>
-        <h1 class="mt-1.5 truncate text-xl font-semibold tracking-wide text-[var(--text-primary)]">
+        <h1 class="mt-1.5 truncate text-2xl font-semibold tracking-wide text-[var(--text-primary)]">
           {{ title }}
         </h1>
         <p v-if="meta" class="mt-1.5 text-xs text-[var(--text-secondary)]">{{ meta }}</p>

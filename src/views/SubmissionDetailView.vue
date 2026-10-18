@@ -265,7 +265,7 @@ function openProblem() {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <!-- 页首：SUBMISSION 微标 + 编号大标题，右侧评测中指示与返回 -->
     <div
       class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 pb-4 pt-5"

@@ -193,7 +193,7 @@ watch(isEnded, (ended) => {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <!-- 页首：编辑版式 + 统计卡；工具条独立成条 -->
     <PageHeader en="LIVE SCOREBOARD" :title="`${contest?.title ?? '比赛'} 实时榜单`">
       <ContestStatsBar />

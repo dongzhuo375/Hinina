@@ -645,7 +645,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div class="min-h-0 flex-1 overflow-y-auto">
       <div class="mx-auto w-full max-w-3xl px-6 pb-6 pt-6">
         <!-- 页头：与全局一致的编辑版式 -->
