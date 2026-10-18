@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import PageHeading from '@/components/common/PageHeading.vue'
 import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -155,30 +156,11 @@ function openProblem(problem: ContestProblem) {
       :retry="retry"
     />
     <template v-else>
-      <!-- 子头横幅：标题 + 元信息 + 实时统计卡 -->
-      <section
-        v-if="contest"
-        class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-4 shadow-xs"
-      >
-        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
-              {{ contest.title }} 题目总览
-              <span class="text-lg font-normal text-[var(--text-muted)]">/ Problemset</span>
-            </h2>
-            <p class="mt-1 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-              <span>共 {{ problems.length }} 道题目</span>
-              <span>·</span>
-              <span>{{ formatLabel }}</span>
-              <span>·</span>
-              <span>点击题目卡片查看详情与提交</span>
-            </p>
-          </div>
-          <ContestStatsBar />
-        </div>
-      </section>
-
-      <div class="flex-1 overflow-y-auto p-6">
+      <PageHeading v-if="contest" :title="contest.title" index="01" subtitle="PROBLEM COLLECTION">
+        <template #description>题目总览 <span class="mx-3 text-[var(--border-color)]">/</span> {{ problems.length }} 道题目 · {{ formatLabel }}</template>
+        <ContestStatsBar />
+      </PageHeading>
+      <div class="problem-directory flex-1 overflow-y-auto">
         <!-- 比赛未开始：HOJ 此时通常不放题，给明确提示而非错误页 -->
         <div v-if="showUpcoming" class="flex flex-col items-center justify-center gap-3 py-24 text-center">
           <div
@@ -227,7 +209,7 @@ function openProblem(problem: ContestProblem) {
         </div>
 
         <!-- 题目卡片网格：桌面端一行三卡（lg 起），窄窗口逐级降为两列/单列；三列时收窄间距保持卡片呼吸感 -->
-        <div v-else class="mx-auto grid max-w-7xl grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:gap-6">
+        <div v-else class="mx-auto max-w-[1500px] border-b border-[var(--border-color)]">
           <ProblemCard
             v-for="problem in problems"
             :key="problem.displayId"
@@ -239,3 +221,8 @@ function openProblem(problem: ContestProblem) {
     </template>
   </div>
 </template>
+
+<style scoped>
+.problem-directory { padding: 8px 36px 40px; }
+@media (max-width: 1100px) { .problem-directory { padding: 8px 24px 24px; } }
+</style>
