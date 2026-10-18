@@ -346,7 +346,7 @@ async function handleSubmit() {
 </template>
 
 <style scoped>
-.solve-workspace { padding: 0 24px 16px; }
+.solve-workspace { padding: 0 clamp(24px, 1.875vw, 48px) clamp(16px, 1.25vw, 32px); }
 .split-handle { position: relative; width: 9px; flex-shrink: 0; cursor: col-resize; background: var(--bg-body); }
 .split-handle::after { content: ''; position: absolute; width: 1px; top: 0; bottom: 0; left: 4px; background: var(--border-color); transition: background 200ms; }
 .split-handle:hover::after, .split-handle:focus-visible::after { background: #8c6a43; }

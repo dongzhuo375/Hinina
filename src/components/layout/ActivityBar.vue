@@ -46,8 +46,8 @@ const links = [
 </template>
 <style scoped>
 .contest-navigation { display: flex; align-items: stretch; gap: 30px; min-width: 0; overflow-x: auto; }
-.navigation-link { position: relative; display: flex; align-items: center; gap: 9px; min-height: 48px; white-space: nowrap; font-size: 13px; color: var(--text-secondary); border-bottom: 2px solid transparent; }
-.navigation-number { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.navigation-link { position: relative; display: flex; align-items: center; gap: 9px; min-height: calc(48px + var(--ui-step) * 4); white-space: nowrap; font-size: calc(13px + var(--ui-step)); color: var(--text-secondary); border-bottom: 2px solid transparent; }
+.navigation-number { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); }
 .navigation-link:hover { color: #8c6a43; }
 .navigation-link.active { color: var(--text-primary); border-bottom-color: var(--text-primary); font-weight: 600; }
 .unread-mark { width: 5px; height: 5px; background: var(--color-error); border-radius: 50%; }

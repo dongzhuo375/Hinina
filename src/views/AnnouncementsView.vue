@@ -169,12 +169,12 @@ onUnmounted(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
-    <PageHeading title="赛事公告" index="04" subtitle="BULLETIN BOARD">
+    <PageHeading class="announcement-heading" title="赛事公告" index="04" subtitle="BULLETIN BOARD">
       <template #description>共 <span class="font-mono">{{ announcementStore.total }}</span> 条公告<span v-if="announcementStore.unreadCount > 0"> · 未读 <span class="font-mono">{{ announcementStore.unreadCount }}</span> 条</span></template>
       <button class="action-quiet" :disabled="announcementStore.isLoading" @click="onRefresh">{{ announcementStore.isLoading ? '刷新中…' : '刷新公告 ↻' }}</button>
     </PageHeading>
     <!-- 公告卡片流 -->
-    <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-6">
+    <div class="announcement-scroller flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div class="mx-auto w-full max-w-5xl">
         <ErrorMessage
           v-if="isContestFailed && contestStore.error"
@@ -288,17 +288,20 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.announcement-heading { width: 100%; max-width: calc(1024px + var(--page-gutter) * 2); margin-inline: auto; }
+.announcement-scroller { padding: 24px var(--page-gutter); }
 .announcement-list { border: 1px solid var(--border-color); border-top: 0; padding: 0 32px 24px; background: var(--bg-card); }
 .announcement-entry { display: grid; grid-template-columns: 160px minmax(0, 1fr); column-gap: 32px; padding: 32px 0; border-top: 1px solid var(--border-color); }
 .announcement-title { grid-column: 2; grid-row: 1; margin-bottom: 16px; }
-.announcement-title h2 { font-size: 20px; font-weight: 600; line-height: 1.5; }
+.announcement-title h2 { font-size: var(--text-xl); font-weight: 600; line-height: 1.5; }
 .announcement-meta { grid-column: 1; grid-row: 1 / 4; padding: 4px 20px 0 0; line-height: 2; white-space: pre-line; }
 .announcement-body, .announcement-expand { grid-column: 2; }
 @media (max-width: 1100px) { .announcement-entry { grid-template-columns: 140px minmax(0, 1fr); gap: 16px 24px; } }
 
 /* 公告正文排版：与题面 .prose 同风格（内容来自 renderMarkdown 出口，已消毒） */
 .prose {
-  font-size: 14px;
+  font-size: var(--reading-size);
+  max-width: 48em;
   line-height: 1.85;
   color: var(--text-secondary);
 }
@@ -337,12 +340,12 @@ onUnmounted(() => {
   background: var(--bg-sidebar);
   border-radius: var(--radius);
   padding: 0.75rem 1rem;
-  font-size: 0.875rem;
+  font-size: max(12px, 0.9em);
   overflow-x: auto;
 }
 .prose :deep(code) {
   font-family: var(--font-mono);
-  font-size: 0.875em;
+  font-size: max(12px, 0.9em);
   background: var(--bg-sidebar);
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -353,6 +356,7 @@ onUnmounted(() => {
   background: transparent;
   border: none;
   padding: 0;
+  font-size: inherit;
 }
 .prose :deep(img) {
   max-width: 100%;

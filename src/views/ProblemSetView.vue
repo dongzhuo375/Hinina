@@ -223,6 +223,7 @@ function openProblem(problem: ContestProblem) {
 </template>
 
 <style scoped>
-.problem-directory { padding: 8px 36px 40px; }
+:deep(.page-heading) { width: 100%; max-width: calc(1500px + var(--page-gutter) * 2); margin-inline: auto; }
+.problem-directory { padding: 8px var(--page-gutter) 40px; }
 @media (max-width: 1100px) { .problem-directory { padding: 8px 24px 24px; } }
 </style>
