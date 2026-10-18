@@ -280,7 +280,7 @@ async function handleSubmit() {
     <div ref="splitContainer" class="flex min-h-0 flex-1 overflow-hidden">
       <!-- 左栏：题面（48%，可拖拽调整） -->
       <section
-        class="flex min-w-0 flex-col overflow-hidden bg-[var(--bg-card)]"
+        class="flex min-w-0 flex-col overflow-hidden"
         :style="{ width: `${splitRatio * 100}%` }"
       >
         <div v-if="viewError" class="flex flex-1 flex-col justify-center">
@@ -306,7 +306,7 @@ async function handleSubmit() {
       ></div>
 
       <!-- 右栏：代码编辑器 + 控制台条（52%） -->
-      <section class="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
+      <section class="flex min-w-0 flex-1 flex-col overflow-hidden">
         <CodeEditor
           ref="codeEditor"
           :model-value="workspaceStore.code"

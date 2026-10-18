@@ -117,13 +117,20 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-card)]">
-    <!-- 元信息头部：题号 micro-label + 标题 + 仪器数据行 -->
-    <div class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-body)] px-6 py-5">
-      <p class="font-mono text-[10px] tracking-[0.35em] text-[#8c6a43]">PROBLEM {{ displayId }}</p>
-      <h1 class="mt-1.5 text-lg font-semibold tracking-wide text-[var(--text-primary)]">
-        {{ problem.title }}
-      </h1>
+  <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <!-- 元信息头部：题号微标 + 标题 + 仪器数据行；右侧巨型题号水印作视觉锚点 -->
+    <div class="relative shrink-0 overflow-hidden border-b border-[var(--border-color)] px-6 py-5">
+      <span
+        class="pointer-events-none absolute -top-3 right-5 select-none font-mono text-[104px] font-bold leading-none text-[#2e3033]/[0.06]"
+        aria-hidden="true"
+      >
+        {{ displayId }}
+      </span>
+      <div class="relative">
+        <p class="font-mono text-[10px] tracking-[0.35em] text-[#8c6a43]">PROBLEM {{ displayId }}</p>
+        <h1 class="mt-1.5 text-lg font-semibold tracking-wide text-[var(--text-primary)]">
+          {{ problem.title }}
+        </h1>
       <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 font-mono text-xs text-[var(--text-secondary)]">
         <span class="flex items-baseline gap-1.5">
           <span class="text-[9px] tracking-[0.25em] text-[var(--text-muted)]">TIME</span>
@@ -145,10 +152,11 @@ onUnmounted(() => {
         题面限制为 C/C++ 基准（{{ baseTimeText }} / {{ baseMemoryText }}），当前语言
         {{ languageLabel }} 判题时时间与内存 ×2
       </p>
+      </div>
     </div>
 
     <!-- 分节滚动正文：编号章节 + 发丝线，正文限宽保证阅读度量 -->
-    <div class="flex-1 space-y-10 overflow-y-auto bg-[var(--bg-card)] px-6 py-6 text-[var(--text-primary)]">
+    <div class="flex-1 space-y-10 overflow-y-auto px-6 py-6 text-[var(--text-primary)]">
       <!-- 题目描述 -->
       <section>
         <div class="flex items-baseline gap-3">
