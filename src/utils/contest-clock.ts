@@ -14,6 +14,14 @@ export interface ClockSegment {
 
 const DAY_SECONDS = 24 * 60 * 60
 
+/**
+ * 开赛前多少秒内登录页倒计时数字转为朱红色（urgent 判据）。
+ *
+ * 曾为「最后 24 小时全程标红」—— 一整天的告警色没有警示价值，反而让登录页
+ * 长期处于紧张态；收敛到开赛前 15 秒，变色即「马上进场」。
+ */
+const URGENT_WITHIN_SECONDS = 15
+
 /** Build the login-page clock from the same phase/time contract used by the contest shell. */
 export function getContestClock(
   phase: ContestPhase,
@@ -23,7 +31,7 @@ export function getContestClock(
 ): ContestClock {
   if (phase === 'upcoming' && startTime !== null) {
     const seconds = Math.max(0, startTime - now)
-    return { kind: 'countdown', seconds, urgent: seconds < DAY_SECONDS }
+    return { kind: 'countdown', seconds, urgent: seconds <= URGENT_WITHIN_SECONDS }
   }
 
   if (phase === 'running' && startTime !== null && endTime !== null) {

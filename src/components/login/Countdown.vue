@@ -86,6 +86,7 @@ const timerLabel = computed(() => {
 
 <style scoped>
 .countdown-value {
+  font-family: var(--login-font-mono);
   font-variant-numeric: tabular-nums slashed-zero;
   font-feature-settings: "zero" 1;
 }

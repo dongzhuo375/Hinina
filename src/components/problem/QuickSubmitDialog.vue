@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vFocusScope } from '@/utils/focus-scope'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import CodeEditor from '@/components/editor/CodeEditor.vue'
@@ -64,12 +65,12 @@ const fileError = ref<string | null>(null)
 
 /// tone → pill 样式类（与评测页/详情页同一套语义色）
 const TONE_CLASSES: Record<StatusTone, string> = {
-  ac: 'border-emerald-200 bg-emerald-50 text-emerald-600',
-  wa: 'border-rose-200 bg-rose-50 text-rose-600',
-  tle: 'border-amber-200 bg-amber-50 text-amber-600',
-  pending: 'border-cyan-200 bg-cyan-50 text-cyan-600',
-  system: 'border-slate-200 bg-slate-100 text-slate-600',
-  neutral: 'border-slate-200 bg-slate-100 text-slate-500',
+  ac: 'border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
+  wa: 'border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-[var(--color-error)]',
+  tle: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
+  pending: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
+  system: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
+  neutral: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
 }
 
 // ── Esc 关闭 ──
@@ -171,8 +172,15 @@ function onDrop(e: DragEvent) {
 // ── 提交与结果跟踪（结果轮询由 submissionStore 内部负责，此处只观察条目状态） ──
 
 const submittedId = ref<string | null>(null)
+const preparingSubmission = ref(false)
+const pendingSubmission = computed(() => submissionStore.pendingFor(
+  contestStore.contest?.id ?? '', props.problem.problemId, props.problem.displayId,
+  language.value, code.value,
+))
+const submitting = computed(() => preparingSubmission.value || submissionStore.isSubmitting)
 
 const entry = computed(() => {
+  if (pendingSubmission.value) return pendingSubmission.value
   const id = submittedId.value
   if (!id) return null
   return submissionStore.submissions.find((s) => s.id === id) ?? null
@@ -181,26 +189,27 @@ const entry = computed(() => {
 const entryTerminal = computed(() => (entry.value ? isTerminalStatus(entry.value.status) : false))
 
 async function doSubmit() {
-  if (submissionStore.isSubmitting) return
+  if (submitting.value || pendingSubmission.value) return
   submitError.value = null
   if (!code.value.trim()) {
     submitError.value = '代码不能为空'
     return
   }
-  let contestId = contestStore.contest?.id
-  if (!contestId) {
-    try {
-      await contestStore.whenLoaded()
-      contestId = contestStore.contest?.id
-    } catch {
-      // 失败原因已写入 contestStore.error
-    }
-  }
-  if (!contestId) {
-    submitError.value = contestStore.error ?? '比赛数据未就绪，无法提交'
-    return
-  }
+  preparingSubmission.value = true
   try {
+    let contestId = contestStore.contest?.id
+    if (!contestId) {
+      try {
+        await contestStore.whenLoaded()
+        contestId = contestStore.contest?.id
+      } catch {
+        // 失败原因已写入 contestStore.error
+      }
+    }
+    if (!contestId) {
+      submitError.value = contestStore.error ?? '比赛数据未就绪，无法提交'
+      return
+    }
     submittedId.value = await submissionStore.submitCode(
       contestId,
       props.problem.problemId,
@@ -210,12 +219,14 @@ async function doSubmit() {
     )
   } catch {
     submitError.value = submissionStore.error ?? '提交失败'
+  } finally {
+    preparingSubmission.value = false
   }
 }
 
 function goDetail() {
-  if (!submittedId.value) return
-  router.push({ name: 'SubmissionDetail', params: { submitId: submittedId.value } })
+  if (!entry.value) return
+  router.push({ name: 'SubmissionDetail', params: { submitId: entry.value.id } })
 }
 </script>
 
@@ -225,7 +236,8 @@ function goDetail() {
     @click.self="emit('close')"
   >
     <div
-      class="flex max-h-[92vh] w-[760px] max-w-full flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-white shadow-2xl"
+      v-focus-scope="() => emit('close')" role="dialog" aria-modal="true" aria-label="快捷提交"
+      class="surface-overlay flex max-h-[92vh] w-[760px] max-w-full flex-col overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl"
     >
       <!-- 头部 -->
       <div
@@ -237,31 +249,10 @@ function goDetail() {
           {{ problem.displayTitle || `Problem ${problem.displayId}` }}
         </h2>
         <div class="flex shrink-0 items-center gap-3">
-          <!-- 语言选择 -->
-          <div class="relative">
-            <select
-              v-model="language"
-              class="cursor-pointer appearance-none rounded-lg border border-[var(--border-color)] bg-white py-1.5 pl-3 pr-8 font-mono text-xs font-medium text-[var(--text-primary)] shadow-xs transition-colors hover:bg-slate-50 focus:border-[var(--color-primary)] focus:outline-none"
-            >
-              <option v-for="lang in allowedLanguages" :key="lang" :value="lang">
-                {{ lang }}
-              </option>
-            </select>
-            <svg
-              class="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </div>
           <button
             type="button"
-            title="关闭"
-            class="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-slate-100 hover:text-[var(--text-primary)]"
+            aria-label="关闭快捷提交" title="关闭"
+            class="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]"
             @click="emit('close')"
           >
             <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -293,7 +284,7 @@ function goDetail() {
         <!-- 拖放高亮层：拖拽进入后接管 drop，避免 Monaco 吞掉文件拖放事件 -->
         <div
           v-if="dragging"
-          class="pointer-events-auto absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[var(--color-primary)] bg-[#f5f3ff]/90"
+          class="pointer-events-auto absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 border-2 border-dashed border-[var(--color-primary)] bg-[var(--bg-sidebar)]/90"
           @dragover="onDragOver"
           @drop="onDrop"
         >
@@ -301,7 +292,7 @@ function goDetail() {
             <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           <p class="text-xs font-medium text-[var(--color-primary)]">松开以导入代码文件</p>
-          <p class="font-mono text-[11px] text-[var(--text-muted)]">.cpp / .c / .java / .py / .go / .rs 等源代码文件，≤ 256 KB</p>
+          <p class="font-mono text-xs text-[var(--text-muted)]">.cpp / .c / .java / .py / .go / .rs 等源代码文件，≤ 256 KB</p>
         </div>
       </div>
 
@@ -310,7 +301,7 @@ function goDetail() {
         <div class="flex items-center justify-between gap-3">
           <button
             type="button"
-            class="flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-slate-50 px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-xs transition-colors hover:bg-slate-100"
+            class="flex items-center gap-1.5 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-none transition-colors hover:bg-[var(--bg-sidebar)]"
             @click="pickFile"
           >
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -318,7 +309,7 @@ function goDetail() {
             </svg>
             <span>选择代码文件</span>
           </button>
-          <span class="text-[11px] text-[var(--text-muted)]">
+          <span class="text-xs text-[var(--text-muted)]">
             也可直接把文件拖入编辑器区域 · Ctrl + Enter 提交
           </span>
           <input
@@ -330,26 +321,28 @@ function goDetail() {
           />
         </div>
 
-        <p v-if="fileError" class="text-xs font-medium text-rose-600">{{ fileError }}</p>
-        <p v-if="submitError" class="text-xs font-medium text-rose-600">{{ submitError }}</p>
+        <p v-if="fileError" class="text-xs font-medium text-[var(--color-error)]">{{ fileError }}</p>
+        <p v-if="submitError" role="alert" class="text-xs font-medium text-[var(--color-error)]">{{ submitError }}</p>
+        <p v-if="submitting" role="status" aria-live="polite" class="text-xs text-[var(--text-secondary)]">正在提交代码，请稍候…</p>
 
         <!-- 提交后的评测状态行 -->
         <div
           v-if="entry"
-          class="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border-color)] bg-slate-50/70 px-3.5 py-2.5"
+          role="status" aria-live="polite"
+          class="flex flex-wrap items-center gap-3 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)]/70 px-3.5 py-2.5"
         >
           <template v-if="!entryTerminal">
-            <svg class="h-4 w-4 animate-spin text-cyan-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+            <svg class="h-4 w-4 animate-spin text-[var(--color-warning)]" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
               <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
             </svg>
             <span class="text-xs font-medium text-[var(--text-secondary)]">
-              评测中…（#{{ entry.id }}，结果将自动更新）
+              已提交 #{{ entry.id }}，评测中…（结果将自动更新）
             </span>
           </template>
           <template v-else>
             <span
-              class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold"
+              class="inline-flex items-center rounded-sm border px-2.5 py-1 text-xs font-semibold"
               :class="TONE_CLASSES[statusTone(entry.status)]"
             >
               {{ statusLabel(entry.status) }}
@@ -370,7 +363,7 @@ function goDetail() {
             </button>
             <button
               type="button"
-              class="ml-auto rounded-lg border border-[var(--border-color)] bg-white px-3.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-xs transition-colors hover:bg-slate-50"
+              class="ml-auto rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-none transition-colors hover:bg-[var(--bg-sidebar)]"
               @click="emit('close')"
             >
               关闭
@@ -381,19 +374,20 @@ function goDetail() {
         <div class="flex items-center justify-end gap-2 pt-0.5">
           <button
             type="button"
-            class="rounded-lg border border-[var(--border-color)] bg-white px-4 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-xs transition-colors hover:bg-slate-50"
+            class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-none transition-colors hover:bg-[var(--bg-sidebar)]"
             @click="emit('close')"
           >
             取消
           </button>
           <button
             type="button"
-            class="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-1.5 text-[13px] font-semibold whitespace-nowrap text-white shadow-sm transition-all duration-150 hover:bg-emerald-700 hover:shadow active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="submissionStore.isSubmitting"
+            class="flex items-center gap-2 rounded-sm bg-[var(--color-success)] px-5 py-1.5 text-[13px] font-semibold whitespace-nowrap text-white shadow-none transition-all duration-150 hover:bg-[var(--color-success)] hover:shadow  disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="submitting || !!pendingSubmission"
+            :aria-busy="submitting || !!pendingSubmission"
             @click="doSubmit"
           >
             <svg
-              v-if="submissionStore.isSubmitting"
+              v-if="submitting || pendingSubmission"
               class="h-4 w-4 animate-spin"
               fill="none"
               stroke="currentColor"
@@ -404,8 +398,8 @@ function goDetail() {
               <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
               <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
             </svg>
-            <span>{{ submissionStore.isSubmitting ? '提交中…' : '提交代码' }}</span>
-            <svg v-if="!submissionStore.isSubmitting" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <span>{{ submitting ? '提交中…' : pendingSubmission ? '评测中…' : '提交代码' }}</span>
+            <svg v-if="!submitting && !pendingSubmission" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 12L3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12zm0 0h7.5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>

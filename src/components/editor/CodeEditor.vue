@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vFocusScope } from '@/utils/focus-scope'
 import { ref, reactive, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
 import * as monaco from 'monaco-editor'
 import EditorSettingsPopover from '@/components/editor/EditorSettingsPopover.vue'
@@ -111,7 +112,7 @@ onMounted(async () => {
     language: monacoIdOf(props.language),
     theme: prefs.editorTheme,
     fontSize: prefs.fontSize,
-    fontFamily: 'JetBrains Mono, Cascadia Code, Consolas, monospace',
+    fontFamily: '"JetBrains Mono Variable", "JetBrains Mono", "Noto Sans SC Variable", "Cascadia Code", Consolas, monospace',
     minimap: { enabled: false },
     lineNumbers: 'on',
     scrollBeyondLastLine: false,
@@ -182,6 +183,40 @@ watch(
 // ── 语言下拉 ──
 
 const langMenuOpen = ref(false)
+const langTrigger = ref<HTMLButtonElement>()
+const langMenu = ref<HTMLDivElement>()
+const langMenuTarget = shallowRef<HTMLElement | null>(null)
+const langMenuStyle = ref<Record<string, string>>({})
+
+function positionLangMenu() {
+  if (!langMenuOpen.value || !langTrigger.value) return
+  const rect = langTrigger.value.getBoundingClientRect()
+  const margin = 12
+  const gap = 4
+  const below = window.innerHeight - rect.bottom - gap - margin
+  const above = rect.top - gap - margin
+  const opensBelow = below >= Math.min(320, above)
+  const width = Math.min(Math.max(192, rect.width), window.innerWidth - margin * 2)
+  langMenuStyle.value = {
+    left: `${Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin))}px`,
+    width: `${width}px`,
+    maxHeight: `${Math.max(0, Math.min(320, opensBelow ? below : above))}px`,
+    ...(opensBelow ? { top: `${rect.bottom + gap}px` } : { bottom: `${window.innerHeight - rect.top + gap}px` }),
+  }
+}
+
+async function toggleLangMenu() {
+  langMenuOpen.value = !langMenuOpen.value
+  if (!langMenuOpen.value) return
+  // 挂到工作台外壳，避开编辑器 overflow 和快捷提交玻璃卡片的裁切，同时继承主题。
+  langMenuTarget.value = langTrigger.value?.closest<HTMLElement>('.contest-theme') ?? document.body
+  positionLangMenu()
+  await nextTick()
+  langMenu.value?.querySelector<HTMLButtonElement>('[aria-current="true"]')?.focus()
+}
+
+onMounted(() => window.addEventListener('resize', positionLangMenu))
+onUnmounted(() => window.removeEventListener('resize', positionLangMenu))
 
 function selectLanguage(value: string) {
   langMenuOpen.value = false
@@ -247,7 +282,7 @@ const prefsError = ref<string | null>(null)
 /// 编辑器容器底色跟随主题：Monaco 实例创建前与尺寸重算的瞬间不露白底
 /// （背景本身由 Monaco 主题绘制，此处只是同色兜底）
 const editorSurfaceClass = computed(() =>
-  prefs.editorTheme === 'vs-dark' ? 'bg-[#1e1e1e]' : 'bg-white',
+  prefs.editorTheme === 'vs-dark' ? 'bg-[#1e1e1e]' : 'bg-[var(--bg-card)]',
 )
 
 /// 用户已改动过的偏好字段。挂载读配置到达前动过的字段以用户值为准，落盘也只写这些
@@ -339,18 +374,22 @@ defineExpose({ focus })
     <!-- 工具条（只读模式隐藏：详情页代码查看无语言切换/提交语义） -->
     <div
       v-if="!readonly"
-      class="flex h-10 shrink-0 items-center justify-between border-b border-slate-200 bg-slate-100 px-4 select-none"
+      class="editor-toolbar flex min-h-12 shrink-0 items-center flex-wrap gap-y-2 justify-between border-b border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-2 select-none"
     >
       <!-- 左：语言选择 -->
       <div class="relative">
         <button
+          ref="langTrigger"
           type="button"
-          class="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1 font-mono text-[11px] font-semibold text-slate-800 shadow-sm transition-colors hover:border-[var(--color-primary)]"
-          @click="langMenuOpen = !langMenuOpen"
+          aria-label="提交语言"
+          aria-haspopup="dialog"
+          :aria-expanded="langMenuOpen"
+          class="flex items-center gap-1.5 rounded border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1 font-mono text-xs font-semibold text-[var(--text-primary)] shadow-none transition-colors hover:border-[var(--color-primary)]"
+          @click="toggleLangMenu"
         >
           <span class="font-bold text-[var(--color-primary)]">{{ language }}</span>
           <svg
-            class="h-3.5 w-3.5 text-slate-400 transition-transform"
+            class="h-3.5 w-3.5 text-[var(--text-muted)] transition-transform"
             :class="{ 'rotate-180': langMenuOpen }"
             fill="none"
             stroke="currentColor"
@@ -360,27 +399,31 @@ defineExpose({ focus })
             <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <template v-if="langMenuOpen">
-          <div class="fixed inset-0 z-40" @click="langMenuOpen = false"></div>
+        <Teleport v-if="langMenuOpen && langMenuTarget" :to="langMenuTarget">
+          <div class="fixed inset-0 z-[100]" @click="langMenuOpen = false"></div>
           <div
-            class="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+            ref="langMenu"
+            v-focus-scope="() => { langMenuOpen = false }" role="dialog" aria-label="选择语言"
+            :style="langMenuStyle"
+            class="fixed z-[101] overflow-y-auto overscroll-contain rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] py-1 shadow-lg"
           >
             <button
               v-for="lang in availableLanguages"
               :key="lang"
               type="button"
-              class="flex w-full items-center justify-between px-3 py-1.5 text-left font-mono text-[11px] transition-colors"
+              :aria-current="lang === language ? 'true' : undefined"
+              class="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left font-mono text-xs break-words transition-colors"
               :class="
                 lang === language
-                  ? 'bg-[#f5f3ff] font-semibold text-[#6845f5]'
-                  : 'text-slate-700 hover:bg-slate-50'
+                  ? 'bg-[var(--bg-sidebar)] font-semibold text-[var(--color-primary)]'
+                  : 'text-[var(--text-primary)] hover:bg-[var(--bg-sidebar)]'
               "
               @click="selectLanguage(lang)"
             >
               {{ lang }}
               <svg
                 v-if="lang === language"
-                class="h-3 w-3"
+                class="h-3 w-3 shrink-0"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2.5"
@@ -390,7 +433,7 @@ defineExpose({ focus })
               </svg>
             </button>
           </div>
-        </template>
+        </Teleport>
       </div>
 
       <!-- 右：清空 / 上传 / 设置 + 备份指示 -->
@@ -398,8 +441,8 @@ defineExpose({ focus })
         <div class="relative">
           <button
             type="button"
-            title="清空代码"
-            class="flex h-7 w-7 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors duration-150 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+            aria-label="清空代码" title="清空代码"
+            class="flex h-7 w-7 items-center justify-center rounded border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-secondary)] shadow-none transition-colors duration-150 hover:border-[var(--color-wa-border)] hover:bg-[var(--color-wa-bg)] hover:text-[var(--color-error)]"
             @click="confirmClearOpen = !confirmClearOpen"
           >
             <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -410,21 +453,22 @@ defineExpose({ focus })
           <template v-if="confirmClearOpen">
             <div class="fixed inset-0 z-40" @click="confirmClearOpen = false"></div>
             <div
-              class="absolute right-0 top-full z-50 mt-1.5 w-52 rounded-lg border border-slate-200 bg-white p-3 shadow-xl"
+              v-focus-scope="() => { confirmClearOpen = false }" role="dialog" aria-label="确认清空代码"
+              class="absolute right-0 top-full z-50 mt-1.5 w-52 rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] p-3 shadow-xl"
             >
-              <p class="text-xs font-medium text-slate-700">清空编辑器内全部代码？</p>
-              <p class="mt-0.5 text-[11px] text-slate-400">此操作会覆盖当前工作区代码</p>
+              <p class="text-xs font-medium text-[var(--text-primary)]">清空编辑器内全部代码？</p>
+              <p class="mt-0.5 text-xs text-[var(--text-muted)]">此操作会覆盖当前工作区代码</p>
               <div class="mt-2.5 flex justify-end gap-2">
                 <button
                   type="button"
-                  class="rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 transition hover:bg-slate-100"
+                  class="rounded border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-sidebar)]"
                   @click="confirmClearOpen = false"
                 >
                   取消
                 </button>
                 <button
                   type="button"
-                  class="rounded bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-rose-700"
+                  class="rounded bg-[var(--color-error)] px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-[var(--color-error)]"
                   @click="confirmClear"
                 >
                   确认清空
@@ -436,8 +480,8 @@ defineExpose({ focus })
 
         <button
           type="button"
-          title="上传代码"
-          class="flex h-7 w-7 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors duration-150 hover:border-[var(--color-primary)] hover:bg-slate-50 hover:text-[var(--color-primary)]"
+          aria-label="上传代码" title="上传代码"
+          class="flex h-7 w-7 items-center justify-center rounded border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-secondary)] shadow-none transition-colors duration-150 hover:border-[var(--color-primary)] hover:bg-[var(--bg-sidebar)] hover:text-[var(--color-primary)]"
           @click="pickFile"
         >
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -461,12 +505,12 @@ defineExpose({ focus })
           @reset="resetPrefs"
         />
 
-        <div class="h-3.5 w-px bg-slate-300"></div>
+        <div class="h-3.5 w-px bg-[var(--bg-sidebar)]"></div>
 
         <!-- 自动备份指示：dirty=编辑中（灰）/ 已落盘=已自动备份（绿） -->
         <span
-          class="flex items-center gap-1.5 pl-1 font-mono text-[11px] font-medium"
-          :class="isDirty ? 'text-slate-400' : 'text-emerald-600'"
+          class="flex items-center gap-1.5 pl-1 font-mono text-xs font-medium"
+          :class="isDirty ? 'text-[var(--text-muted)]' : 'text-[var(--color-success)]'"
         >
           <svg v-if="isDirty" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-linecap="round" stroke-linejoin="round" />

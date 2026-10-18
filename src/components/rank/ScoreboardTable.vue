@@ -85,19 +85,19 @@ function rowTint(row: ContestRankRow): string {
  * `position: sticky` 的 td 会被单独提升绘制，行背景（画在 tr 上）不跟着它横向移动，
  * 右侧题目格滚动时会从它底下透出来。因此按行类型补一层实底色。
  *
- * 行 hover 同理：tr 的 `hover:bg-slate-50/80` 不会作用到被提升绘制的粘性 td，
+ * 行 hover 同理：tr 的 `hover:bg-[var(--bg-sidebar)]/80` 不会作用到被提升绘制的粘性 td，
  * 需要用 `group-hover` 在单元格上补一层等价的实底色，否则悬停时前两列会「不跟着变色」。
  */
 function stickyTint({ row, isMe }: BodyRow): string {
-  if (isMe) return 'bg-slate-50'
-  const hover = 'group-hover:bg-slate-50'
+  if (isMe) return 'bg-[var(--bg-sidebar)]'
+  const hover = 'group-hover:bg-[var(--bg-sidebar)]'
   switch (resolveRowKind(row)) {
     case 'star':
       return `bg-[var(--color-star-row-bg)] ${hover}`
     case 'female':
       return `bg-[var(--color-girls-row-bg)] ${hover}`
     default:
-      return `bg-white ${hover}`
+      return `bg-[var(--bg-card)] ${hover}`
   }
 }
 
@@ -159,16 +159,16 @@ function totalTimeText(row: ContestRankRow): string {
 
 /// 气球色回退调色板：HOJ 允许题目未配色（`color` 为空串），按列序号取色保证列头永远可辨
 const BALLOON_FALLBACK: readonly string[] = [
-  '#e11d48',
-  '#10b981',
-  '#2563eb',
-  '#9333ea',
-  '#f59e0b',
-  '#0891b2',
-  '#db2777',
-  '#65a30d',
-  '#7c3aed',
-  '#ea580c',
+  '#8c6a43',
+  '#5f7a6a',
+  '#7d7378',
+  '#6c7565',
+  '#9c8562',
+  '#526b69',
+  '#876b69',
+  '#68745e',
+  '#6b6470',
+  '#82745e',
 ]
 
 function balloonColor(index: number, color: string): string {
@@ -185,10 +185,10 @@ interface OiCellView {
 
 /// 档位 → 配色。判档与文本由 `utils/rank.resolveOiRankCell` 给出（纯函数、有测试），组件只管样式
 const OI_BOX: Record<OiCellKind, string> = {
-  full: 'border border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-emerald-700',
+  full: 'border border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
   partial:
-    'border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-amber-700',
-  zero: 'border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-rose-600',
+    'border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
+  zero: 'border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-[var(--color-error)]',
   none: '',
 }
 
@@ -231,17 +231,17 @@ function oiCells(row: ContestRankRow): OiCellView[] {
 <template>
   <div class="relative min-h-0 flex-1 overflow-auto">
     <table class="w-full border-collapse text-left text-xs">
-      <thead ref="headRef" class="sticky top-0 z-30 shadow-xs">
+      <thead ref="headRef" class="sticky top-0 z-30 shadow-none">
         <tr
-          class="border-b border-[var(--border-color)] bg-slate-50/95 text-[var(--text-secondary)] backdrop-blur-sm select-none"
+          class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/95 text-[var(--text-secondary)] backdrop-blur-sm select-none"
         >
           <th
-            class="sticky left-0 z-10 w-16 min-w-[64px] bg-[#f8fafc] px-3 py-2.5 text-center font-semibold"
+            class="sticky left-0 z-10 w-16 min-w-[64px] bg-[var(--bg-sidebar)] px-3 py-2.5 text-center font-semibold"
           >
             排名
           </th>
           <th
-            class="sticky left-16 z-10 min-w-[220px] bg-[#f8fafc] px-4 py-2.5 font-semibold shadow-[1px_0_0_var(--border-color)]"
+            class="sticky left-16 z-10 min-w-[220px] bg-[var(--bg-sidebar)] px-4 py-2.5 font-semibold shadow-[1px_0_0_var(--border-color)]"
           >
             选手 / 团队
           </th>
@@ -258,13 +258,13 @@ function oiCells(row: ContestRankRow): OiCellView[] {
           >
             <div class="flex flex-col items-center">
               <span
-                class="flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold text-white shadow-xs"
+                class="flex h-6 w-6 items-center justify-center rounded-md font-mono text-xs font-bold text-white shadow-none"
                 :style="{ backgroundColor: balloonColor(index, problem.color) }"
                 :title="problem.displayTitle"
               >
                 {{ problem.displayId }}
               </span>
-              <span class="mt-0.5 font-mono text-[10px] font-normal text-[var(--text-muted)]">
+              <span class="mt-0.5 font-mono text-xs font-normal text-[var(--text-muted)]">
                 {{ problem.ac }}/{{ problem.total }}
               </span>
             </div>
@@ -272,15 +272,15 @@ function oiCells(row: ContestRankRow): OiCellView[] {
         </tr>
       </thead>
 
-      <tbody class="divide-y divide-slate-100 font-mono">
+      <tbody class="divide-y divide-[var(--border-color)] font-mono">
         <tr
           v-for="item in bodyRows"
           :key="`${item.isMe ? 'me' : 'row'}-${item.row.uid}`"
           class="group transition-colors"
           :class="
             item.isMe
-              ? 'sticky z-20 bg-slate-50'
-              : `${rowTint(item.row)} hover:bg-slate-50/80`
+              ? 'sticky z-20 bg-[var(--bg-sidebar)]'
+              : `${rowTint(item.row)} hover:bg-[var(--bg-sidebar)]/80`
           "
           :style="item.isMe ? { top: `${headHeight}px` } : undefined"
         >
@@ -288,21 +288,21 @@ function oiCells(row: ContestRankRow): OiCellView[] {
             <div class="inline-flex items-center justify-center gap-1">
               <span
                 v-if="item.isMe"
-                class="rounded bg-[var(--color-primary)] px-1 font-sans text-[9px] font-bold leading-4 text-white"
+                class="rounded bg-[var(--color-primary)] px-1 font-sans text-xs font-bold leading-4 text-white"
                 title="我的队伍"
               >
                 我
               </span>
               <span
                 v-if="isPodium(item.row)"
-                class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-300 bg-amber-100 font-sans text-xs font-bold text-amber-800 shadow-xs"
+                class="inline-flex h-6 w-6 items-center justify-center rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] font-mono text-xs font-bold text-[var(--color-warning)] shadow-none"
               >
                 {{ rankLabel(item) }}
               </span>
               <span
                 v-else
                 class="font-mono text-xs font-bold"
-                :class="item.row.rank === -1 ? 'text-[var(--text-muted)]' : 'text-slate-700'"
+                :class="item.row.rank === -1 ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'"
                 :title="item.row.rank === -1 ? '打星队伍，不参与排名' : undefined"
               >
                 {{ rankLabel(item) }}
@@ -314,25 +314,25 @@ function oiCells(row: ContestRankRow): OiCellView[] {
             <div class="flex items-center space-x-2">
               <span
                 class="font-bold"
-                :class="item.isMe ? 'text-[var(--color-primary)]' : 'text-slate-900'"
+                :class="item.isMe ? 'text-[var(--color-primary)]' : 'text-[var(--text-primary)]'"
               >
                 {{ resolveDisplayName(item.row, rankShowName) }}
               </span>
               <template v-if="item.row.school">
-                <span class="text-slate-300">·</span>
-                <span class="font-mono text-xs text-slate-500">{{ item.row.school }}</span>
+                <span class="text-[var(--text-muted)]">·</span>
+                <span class="text-xs text-[var(--text-secondary)]">{{ item.row.school }}</span>
               </template>
             </div>
           </td>
 
           <td
             class="px-2 py-2.5 text-center text-sm font-bold"
-            :class="[isAcm ? 'text-emerald-600' : 'text-slate-700', plainCellClass(item)]"
+            :class="[isAcm ? 'text-[var(--color-success)]' : 'text-[var(--text-primary)]', plainCellClass(item)]"
           >
             {{ solvedText(item.row) }}
           </td>
           <td
-            class="px-2 py-2.5 text-center font-medium text-slate-600"
+            class="px-2 py-2.5 text-center font-medium text-[var(--text-secondary)]"
             :class="plainCellClass(item)"
           >
             {{ totalTimeText(item.row) }}
@@ -356,12 +356,12 @@ function oiCells(row: ContestRankRow): OiCellView[] {
               :class="plainCellClass(item)"
             >
               <div v-if="cellView.box" class="rounded p-1" :class="cellView.box" :title="cellView.hint">
-                <div class="font-mono text-[11px] font-bold leading-tight">{{ cellView.score }}</div>
-                <div class="font-sans text-[10px] leading-tight opacity-80">
+                <div class="font-mono text-xs font-bold leading-tight">{{ cellView.score }}</div>
+                <div class="font-mono text-xs leading-tight">
                   {{ cellView.time || '未 AC' }}
                 </div>
               </div>
-              <div v-else class="font-sans text-[11px] text-slate-300" :title="cellView.hint">
+              <div v-else class="font-mono text-xs text-[var(--text-muted)]" :title="cellView.hint">
                 {{ cellView.score }}
               </div>
             </td>

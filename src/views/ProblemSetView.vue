@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import PageHeading from '@/components/common/PageHeading.vue'
 import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -155,34 +156,15 @@ function openProblem(problem: ContestProblem) {
       :retry="retry"
     />
     <template v-else>
-      <!-- 子头横幅：标题 + 元信息 + 实时统计卡 -->
-      <section
-        v-if="contest"
-        class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-4 shadow-xs"
-      >
-        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
-              {{ contest.title }} 题目总览
-              <span class="text-lg font-normal text-[var(--text-muted)]">/ Problemset</span>
-            </h2>
-            <p class="mt-1 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-              <span>共 {{ problems.length }} 道题目</span>
-              <span>·</span>
-              <span>{{ formatLabel }}</span>
-              <span>·</span>
-              <span>点击题目卡片查看详情与提交</span>
-            </p>
-          </div>
-          <ContestStatsBar />
-        </div>
-      </section>
-
-      <div class="flex-1 overflow-y-auto p-6">
+      <PageHeading v-if="contest" :title="contest.title" index="01" subtitle="PROBLEM COLLECTION">
+        <template #description>题目总览 <span class="mx-3 text-[var(--text-muted)]">/</span> <span class="font-mono">{{ problems.length }}</span> 道题目 · {{ formatLabel }}</template>
+        <ContestStatsBar />
+      </PageHeading>
+      <div class="problem-directory flex-1 overflow-y-auto">
         <!-- 比赛未开始：HOJ 此时通常不放题，给明确提示而非错误页 -->
         <div v-if="showUpcoming" class="flex flex-col items-center justify-center gap-3 py-24 text-center">
           <div
-            class="flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 text-[var(--color-warning)]"
+            class="flex h-14 w-14 items-center justify-center rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]"
           >
             <svg class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
               <path
@@ -194,7 +176,7 @@ function openProblem(problem: ContestProblem) {
           </div>
           <h2 class="text-lg font-bold tracking-tight text-[var(--text-primary)]">比赛尚未开始</h2>
           <p class="max-w-sm text-sm leading-relaxed text-[var(--text-secondary)]">
-            计划开始时间：{{ startTimeText }}。题目列表将在开赛后自动出现，页面每 30 秒左右自动刷新。
+            计划开始时间：<span class="font-mono">{{ startTimeText }}</span>。题目列表将在开赛后自动出现，页面每 <span class="font-mono">30</span> 秒左右自动刷新。
           </p>
         </div>
 
@@ -204,7 +186,7 @@ function openProblem(problem: ContestProblem) {
           class="flex flex-col items-center justify-center gap-3 py-24 text-center"
         >
           <div
-            class="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-muted)]"
+            class="flex h-14 w-14 items-center justify-center rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-muted)]"
           >
             <svg class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
               <path
@@ -226,8 +208,8 @@ function openProblem(problem: ContestProblem) {
           </button>
         </div>
 
-        <!-- 题目卡片网格：桌面端一行三卡（lg 起），窄窗口逐级降为两列/单列；三列时收窄间距保持卡片呼吸感 -->
-        <div v-else class="mx-auto grid max-w-7xl grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:gap-6">
+        <!-- 紧凑题目目录：保留题目限制、提交统计、个人状态与三个常用操作。 -->
+        <div v-else class="mx-auto max-w-[1500px] border-b border-[var(--border-color)]">
           <ProblemCard
             v-for="problem in problems"
             :key="problem.displayId"
@@ -239,3 +221,9 @@ function openProblem(problem: ContestProblem) {
     </template>
   </div>
 </template>
+
+<style scoped>
+:deep(.page-heading) { width: 100%; max-width: calc(1500px + var(--page-gutter) * 2); margin-inline: auto; }
+.problem-directory { padding: 8px var(--page-gutter) 40px; }
+@media (max-width: 1100px) { .problem-directory { padding: 8px 24px 24px; } }
+</style>

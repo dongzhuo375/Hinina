@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeading from '@/components/common/PageHeading.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
@@ -513,7 +514,7 @@ const dataDirSourceMeta = computed(() => {
     case 'custom':
       return { text: '用户指定', cls: 'text-[var(--color-primary)]' }
     case 'fallbackTemp':
-      return { text: '临时目录（数据可能被系统清理）', cls: 'text-rose-600' }
+      return { text: '临时目录（数据可能被系统清理）', cls: 'text-[var(--color-error)]' }
     default:
       return { text: '默认位置', cls: 'text-[var(--text-muted)]' }
   }
@@ -609,6 +610,12 @@ async function restoreDefaultDataDir(): Promise<void> {
   }
 }
 
+function scrollToSection(index: number) {
+  const target = document.getElementById(`settings-${index}`)
+  target?.scrollIntoView({ block: 'start' })
+  target?.focus({ preventScroll: true })
+}
+
 // ── 布局滑杆 ──
 
 function onSplitInput(event: Event): void {
@@ -621,8 +628,8 @@ const splitPercent = computed(() => Math.round(form.splitRatio * 100))
 // ── 样式常量 ──
 
 const INPUT =
-  'w-full rounded-lg border border-[var(--border-color)] bg-white px-3 py-2 text-sm text-[var(--text-primary)] transition-colors placeholder-[var(--text-muted)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-[var(--text-muted)]'
-const INPUT_ERROR = 'border-rose-400 focus:border-rose-400 focus:ring-rose-400'
+  'w-full rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] transition-colors placeholder-[var(--text-muted)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:bg-[var(--bg-sidebar)] disabled:text-[var(--text-muted)]'
+const INPUT_ERROR = 'border-[var(--color-wa-border)] focus:border-[var(--color-wa-border)] focus:ring-[var(--color-error)]'
 
 function inputClass(field: string): string {
   return errors.value[field] ? `${INPUT} ${INPUT_ERROR}` : INPUT
@@ -647,23 +654,22 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <div class="mx-auto w-full max-w-3xl px-6 pb-6 pt-6">
-        <!-- 页头 -->
-        <header class="mb-5">
-          <h1 class="text-lg font-bold tracking-tight text-[var(--text-primary)]">设置</h1>
-          <p class="mt-0.5 text-xs text-[var(--text-muted)]">
-            配置保存在本地客户端，仅影响当前设备
-          </p>
-        </header>
-
+      <div class="settings-page mx-auto w-full max-w-[1250px] px-8 pb-8">
+        <PageHeading title="环境设置" index="05" subtitle="PREFERENCES">
+          <template #description>配置保存在本地客户端，仅影响当前设备</template>
+        </PageHeading>
+        <nav v-if="!loading && !loadError" class="settings-index" aria-label="设置分组">
+          <a v-for="(label, index) in ['OJ 服务器', '编辑器', '布局', '主题', '重置与清理', '数据目录', '关于']" :key="label"
+            :href="`#settings-${index}`" @click.prevent="scrollToSection(index)"><span>{{ String(index + 1).padStart(2, '0') }}</span>{{ label }}</a>
+        </nav>
         <LoadingSpinner v-if="loading" message="正在加载配置…" />
         <ErrorMessage v-else-if="loadError" :message="loadError" :retry="load" />
 
         <template v-else>
-          <div class="flex flex-col gap-4">
+          <div class="settings-sections flex flex-col gap-8">
             <!-- ── OJ 服务器 ── -->
-            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
-              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+            <section id="settings-0" tabindex="-1" class="settings-section">
+              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
                 <svg
                   class="h-4 w-4 text-[var(--color-primary)]"
                   fill="none"
@@ -693,12 +699,12 @@ onBeforeUnmount(() => {
                       {{ o.id }}{{ o.disabled ? '（已禁用）' : o.configured ? '' : '（未配置）' }}
                     </option>
                   </select>
-                  <span v-if="switchError" class="mt-1 block text-xs text-rose-600">
+                  <span v-if="switchError" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ switchError }}
                   </span>
                   <!-- 引导/安抚提示与错误**并存**：两者语义独立（如「实例已保存但切换未成功」
                        既是错误也需要安抚），用 v-else-if 会让提示永不可见 -->
-                  <span v-if="switchNotice" class="mt-1 block text-xs text-amber-600">
+                  <span v-if="switchNotice" class="mt-1 block text-xs text-[var(--color-warning)]">
                     {{ switchNotice }}
                   </span>
                   <span
@@ -720,7 +726,7 @@ onBeforeUnmount(() => {
                     :placeholder="ojBaseUrlHint(form.activeOj)"
                     :class="inputClass('ojUrl')"
                   />
-                  <span v-if="errors.ojUrl" class="mt-1 block text-xs text-rose-600">
+                  <span v-if="errors.ojUrl" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ errors.ojUrl }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
@@ -770,7 +776,7 @@ onBeforeUnmount(() => {
                     spellcheck="false"
                     :class="inputClass('timeoutSecs')"
                   />
-                  <span v-if="errors.timeoutSecs" class="mt-1 block text-xs text-rose-600">
+                  <span v-if="errors.timeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ errors.timeoutSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
@@ -789,7 +795,7 @@ onBeforeUnmount(() => {
                     spellcheck="false"
                     :class="inputClass('pollIntervalSecs')"
                   />
-                  <span v-if="errors.pollIntervalSecs" class="mt-1 block text-xs text-rose-600">
+                  <span v-if="errors.pollIntervalSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ errors.pollIntervalSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
@@ -808,7 +814,7 @@ onBeforeUnmount(() => {
                     spellcheck="false"
                     :class="inputClass('pollTimeoutSecs')"
                   />
-                  <span v-if="errors.pollTimeoutSecs" class="mt-1 block text-xs text-rose-600">
+                  <span v-if="errors.pollTimeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ errors.pollTimeoutSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
@@ -827,7 +833,7 @@ onBeforeUnmount(() => {
                     spellcheck="false"
                     :class="inputClass('cacheTtlSecs')"
                   />
-                  <span v-if="errors.cacheTtlSecs" class="mt-1 block text-xs text-rose-600">
+                  <span v-if="errors.cacheTtlSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ errors.cacheTtlSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
@@ -844,14 +850,14 @@ onBeforeUnmount(() => {
                       type="button"
                       role="switch"
                       :aria-checked="form.cacheProblemStatement"
-                      class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+                      class="settings-switch relative h-6 w-11 shrink-0 transition-colors"
                       :class="
-                        form.cacheProblemStatement ? 'bg-[var(--color-primary)]' : 'bg-slate-300'
+                        form.cacheProblemStatement ? 'bg-[var(--color-primary)]' : 'bg-[var(--bg-sidebar)]'
                       "
                       @click="form.cacheProblemStatement = !form.cacheProblemStatement"
                     >
                       <span
-                        class="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                        class="settings-switch-knob absolute top-0.5 left-0.5 h-5 w-5 rounded-sm bg-[var(--bg-card)] transition-transform"
                         :class="form.cacheProblemStatement ? 'translate-x-5' : ''"
                       ></span>
                     </button>
@@ -867,8 +873,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 编辑器 ── -->
-            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
-              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+            <section id="settings-1" tabindex="-1" class="settings-section">
+              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
                 <svg
                   class="h-4 w-4 text-[var(--color-primary)]"
                   fill="none"
@@ -900,7 +906,7 @@ onBeforeUnmount(() => {
                     spellcheck="false"
                     :class="inputClass('fontSize')"
                   />
-                  <span v-if="errors.fontSize" class="mt-1 block text-xs text-rose-600">
+                  <span v-if="errors.fontSize" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ errors.fontSize }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">8–32</span>
@@ -943,12 +949,12 @@ onBeforeUnmount(() => {
                       type="button"
                       role="switch"
                       :aria-checked="form.autoSave"
-                      class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
-                      :class="form.autoSave ? 'bg-[var(--color-primary)]' : 'bg-slate-300'"
+                      class="settings-switch relative h-6 w-11 shrink-0 transition-colors"
+                      :class="form.autoSave ? 'bg-[var(--color-primary)]' : 'bg-[var(--bg-sidebar)]'"
                       @click="form.autoSave = !form.autoSave"
                     >
                       <span
-                        class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                        class="settings-switch-knob absolute left-0.5 top-0.5 h-5 w-5 rounded-sm bg-[var(--bg-card)] transition-transform"
                         :class="form.autoSave ? 'translate-x-5' : ''"
                       ></span>
                     </button>
@@ -980,7 +986,7 @@ onBeforeUnmount(() => {
                   />
                   <span
                     v-if="errors.autoSaveIntervalSecs"
-                    class="mt-1 block text-xs text-rose-600"
+                    class="mt-1 block text-xs text-[var(--color-error)]"
                   >
                     {{ errors.autoSaveIntervalSecs }}
                   </span>
@@ -990,8 +996,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 布局 ── -->
-            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
-              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+            <section id="settings-2" tabindex="-1" class="settings-section">
+              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
                 <svg
                   class="h-4 w-4 text-[var(--color-primary)]"
                   fill="none"
@@ -1024,7 +1030,7 @@ onBeforeUnmount(() => {
                   @input="onSplitInput"
                 />
                 <div
-                  class="mt-1 flex justify-between font-mono text-[10px] text-[var(--text-muted)]"
+                  class="mt-1 flex justify-between font-mono text-xs text-[var(--text-muted)]"
                 >
                   <span>30%</span>
                   <span>70%</span>
@@ -1036,8 +1042,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 主题 ── -->
-            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
-              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+            <section id="settings-3" tabindex="-1" class="settings-section">
+              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
                 <svg
                   class="h-4 w-4 text-[var(--color-primary)]"
                   fill="none"
@@ -1078,8 +1084,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 重置与清理 ── -->
-            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
-              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+            <section id="settings-4" tabindex="-1" class="settings-section">
+              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
                 <svg
                   class="h-4 w-4 text-[var(--color-primary)]"
                   fill="none"
@@ -1097,7 +1103,7 @@ onBeforeUnmount(() => {
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">重置与清理</h2>
               </div>
 
-              <div class="divide-y divide-slate-100">
+              <div class="divide-y divide-[var(--border-color)]">
                 <!-- 重置客户端（安全，可反复点） -->
                 <div class="px-5 py-4">
                   <div class="flex flex-wrap items-start justify-between gap-3">
@@ -1110,11 +1116,11 @@ onBeforeUnmount(() => {
                     </p>
 
                     <div class="flex shrink-0 items-center gap-2">
-                      <span v-if="resetError" class="text-xs text-rose-600">{{ resetError }}</span>
+                      <span v-if="resetError" class="text-xs text-[var(--color-error)]">{{ resetError }}</span>
                       <span
                         v-else-if="resetNotice"
                         class="text-xs"
-                        :class="resetNotice.warn ? 'text-amber-600' : 'text-emerald-600'"
+                        :class="resetNotice.warn ? 'text-[var(--color-warning)]' : 'text-[var(--color-success)]'"
                       >
                         {{ resetNotice.text }}
                       </span>
@@ -1123,14 +1129,14 @@ onBeforeUnmount(() => {
                         <button
                           v-if="!resetting"
                           type="button"
-                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
                           @click="resetConfirmOpen = false"
                         >
                           取消
                         </button>
                         <button
                           type="button"
-                          class="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-60"
+                          class="rounded-sm bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-60"
                           :disabled="resetting"
                           @click="resetClient"
                         >
@@ -1140,7 +1146,7 @@ onBeforeUnmount(() => {
                       <button
                         v-else
                         type="button"
-                        class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-slate-50"
+                        class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-sidebar)]"
                         @click="resetConfirmOpen = true"
                       >
                         重置客户端
@@ -1153,15 +1159,15 @@ onBeforeUnmount(() => {
                 <div class="px-5 py-4">
                   <p class="text-xs leading-relaxed text-[var(--text-secondary)]">
                     <span class="font-medium text-[var(--text-primary)]">清理本地数据</span>
-                    —— 删除<strong class="font-semibold text-rose-600">不可重建</strong>的本地内容。
+                    —— 删除<strong class="font-semibold text-[var(--color-error)]">不可重建</strong>的本地内容。
                     日志是排障线索，提交源码留档是 OJ 不回吐代码时的唯一来源，删掉都无法恢复。
                   </p>
 
                   <!-- 体积预览：不可逆动作必须让用户看到确切范围 -->
                   <div
-                    class="mt-3 flex flex-col gap-2 rounded-lg border border-[var(--border-color)] bg-slate-50/70 px-3.5 py-3"
+                    class="mt-3 flex flex-col gap-2 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)]/70 px-3.5 py-3"
                   >
-                    <p v-if="usageFailed" class="text-xs text-rose-600">占用信息获取失败</p>
+                    <p v-if="usageFailed" class="text-xs text-[var(--color-error)]">占用信息获取失败</p>
                     <p v-else-if="!usage" class="text-xs text-[var(--text-muted)]">正在统计占用…</p>
                     <template v-else>
                       <label class="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
@@ -1201,16 +1207,16 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <p class="min-w-0 flex-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
-                      此操作<strong class="font-semibold text-rose-600">不可撤销</strong>；
+                    <p class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                      此操作<strong class="font-semibold text-[var(--color-error)]">不可撤销</strong>；
                       不会删除工作区代码、配置、登录会话与公告已读状态。
                     </p>
                     <div class="flex shrink-0 items-center gap-2">
-                      <span v-if="purgeError" class="text-xs text-rose-600">{{ purgeError }}</span>
+                      <span v-if="purgeError" class="text-xs text-[var(--color-error)]">{{ purgeError }}</span>
                       <span
                         v-else-if="purgeNotice"
                         class="text-xs"
-                        :class="purgeNotice.warn ? 'text-amber-600' : 'text-emerald-600'"
+                        :class="purgeNotice.warn ? 'text-[var(--color-warning)]' : 'text-[var(--color-success)]'"
                       >
                         {{ purgeNotice.text }}
                       </span>
@@ -1219,14 +1225,14 @@ onBeforeUnmount(() => {
                         <button
                           v-if="!purging"
                           type="button"
-                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
                           @click="purgeConfirmOpen = false"
                         >
                           取消
                         </button>
                         <button
                           type="button"
-                          class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+                          class="rounded-sm bg-[var(--color-error)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-error)] disabled:opacity-60"
                           :disabled="purging"
                           @click="purgeLocalData"
                         >
@@ -1236,7 +1242,7 @@ onBeforeUnmount(() => {
                       <button
                         v-else
                         type="button"
-                        class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-slate-50"
+                        class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-sidebar)]"
                         @click="purgeConfirmOpen = true"
                       >
                         清理本地数据
@@ -1248,8 +1254,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 数据目录 ── -->
-            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
-              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+            <section id="settings-5" tabindex="-1" class="settings-section">
+              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
                 <svg
                   class="h-4 w-4 text-[var(--color-primary)]"
                   fill="none"
@@ -1268,7 +1274,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex flex-col gap-3 px-5 py-4">
-                <p v-if="dataDirFailed" class="text-xs text-rose-600">数据目录信息获取失败</p>
+                <p v-if="dataDirFailed" class="text-xs text-[var(--color-error)]">数据目录信息获取失败</p>
                 <p v-else-if="!dataDir" class="text-xs text-[var(--text-muted)]">正在读取…</p>
                 <template v-else>
                   <div class="text-xs leading-relaxed text-[var(--text-secondary)]">
@@ -1298,7 +1304,7 @@ onBeforeUnmount(() => {
                   <!-- 回退临时目录必须显眼：这正是本次要消除的状态 -->
                   <p
                     v-if="dataDir.source === 'fallbackTemp'"
-                    class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-relaxed text-rose-700"
+                    class="rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
                   >
                     默认数据目录不可用，当前数据存在<strong class="font-semibold">临时目录</strong>中
                     —— 系统清理临时文件时会连带删除你的代码与提交留档，请尽快更改数据目录。
@@ -1307,7 +1313,7 @@ onBeforeUnmount(() => {
                   <!-- 待重启提示：改动已记录但尚未生效，必须说清「现在仍在用旧目录」 -->
                   <p
                     v-if="dataDir.restartRequired"
-                    class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700"
+                    class="rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-warning)]"
                   >
                     已记录目录更改，<strong class="font-semibold">重启客户端后生效</strong>；
                     当前仍在使用上面的目录。
@@ -1316,7 +1322,7 @@ onBeforeUnmount(() => {
                   <!-- 选择器已返回候选路径：确认 + 是否迁移 -->
                   <div
                     v-if="pendingDir"
-                    class="flex flex-col gap-2 rounded-lg border border-[var(--border-color)] bg-slate-50/70 px-3.5 py-3"
+                    class="flex flex-col gap-2 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)]/70 px-3.5 py-3"
                   >
                     <div class="flex items-center gap-2 text-xs">
                       <span class="shrink-0 text-[var(--text-muted)]">新目录</span>
@@ -1343,20 +1349,20 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="flex flex-wrap items-center justify-between gap-3">
-                    <p class="min-w-0 flex-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                    <p class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-muted)]">
                       数据目录决定工作区代码、提交留档、配置与日志的存放位置。
                       更改后需重启客户端生效。
                     </p>
                     <div class="flex shrink-0 items-center gap-2">
-                      <span v-if="changeError" class="text-xs text-rose-600">{{ changeError }}</span>
-                      <span v-else-if="changeNotice" class="text-xs text-amber-600">
+                      <span v-if="changeError" class="text-xs text-[var(--color-error)]">{{ changeError }}</span>
+                      <span v-else-if="changeNotice" class="text-xs text-[var(--color-warning)]">
                         {{ changeNotice }}
                       </span>
 
                       <template v-if="pendingDir">
                         <button
                           type="button"
-                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
                           :disabled="changingDir"
                           @click="cancelDataDirChoice"
                         >
@@ -1364,7 +1370,7 @@ onBeforeUnmount(() => {
                         </button>
                         <button
                           type="button"
-                          class="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-60"
+                          class="rounded-sm bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-60"
                           :disabled="changingDir"
                           @click="confirmDataDir"
                         >
@@ -1375,7 +1381,7 @@ onBeforeUnmount(() => {
                         <button
                           v-if="dataDir.source === 'custom'"
                           type="button"
-                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-slate-50 disabled:opacity-60"
+                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)] disabled:opacity-60"
                           :disabled="changingDir"
                           @click="restoreDefaultDataDir"
                         >
@@ -1383,7 +1389,7 @@ onBeforeUnmount(() => {
                         </button>
                         <button
                           type="button"
-                          class="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-slate-50 disabled:opacity-60"
+                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-sidebar)] disabled:opacity-60"
                           :disabled="changingDir"
                           @click="chooseDataDir"
                         >
@@ -1397,8 +1403,8 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- ── 关于 ── -->
-            <section class="rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
-              <div class="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+            <section id="settings-6" tabindex="-1" class="settings-section">
+              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
                 <svg
                   class="h-4 w-4 text-[var(--color-primary)]"
                   fill="none"
@@ -1412,7 +1418,7 @@ onBeforeUnmount(() => {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">关于</h2>
               </div>
-              <dl class="divide-y divide-slate-100 px-5">
+              <dl class="divide-y divide-[var(--border-color)] px-5">
                 <template v-if="storage">
                   <div class="flex items-center gap-3 py-3">
                     <dt class="w-24 shrink-0 text-xs font-medium text-[var(--text-secondary)]">
@@ -1425,7 +1431,7 @@ onBeforeUnmount(() => {
                     </dd>
                     <button
                       type="button"
-                      class="shrink-0 rounded-md border border-[var(--border-color)] px-2 py-0.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                      class="shrink-0 rounded-md border border-[var(--border-color)] px-2 py-0.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
                       @click="copyText('version', storage.version)"
                     >
                       {{ copiedKey === 'version' ? '已复制' : '复制' }}
@@ -1443,7 +1449,7 @@ onBeforeUnmount(() => {
                     </dd>
                     <button
                       type="button"
-                      class="shrink-0 rounded-md border border-[var(--border-color)] px-2 py-0.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                      class="shrink-0 rounded-md border border-[var(--border-color)] px-2 py-0.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
                       @click="copyText('baseDir', storage.baseDir)"
                     >
                       {{ copiedKey === 'baseDir' ? '已复制' : '复制' }}
@@ -1461,7 +1467,7 @@ onBeforeUnmount(() => {
                     </dd>
                     <button
                       type="button"
-                      class="shrink-0 rounded-md border border-[var(--border-color)] px-2 py-0.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-slate-50"
+                      class="shrink-0 rounded-md border border-[var(--border-color)] px-2 py-0.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
                       @click="copyText('logPath', storage.logPath)"
                     >
                       {{ copiedKey === 'logPath' ? '已复制' : '复制' }}
@@ -1474,7 +1480,7 @@ onBeforeUnmount(() => {
                   </dt>
                   <dd
                     class="flex-1 text-xs"
-                    :class="storageFailed ? 'text-rose-600' : 'text-[var(--text-muted)]'"
+                    :class="storageFailed ? 'text-[var(--color-error)]' : 'text-[var(--text-muted)]'"
                   >
                     {{ storageFailed ? '获取失败' : '正在获取…' }}
                   </dd>
@@ -1485,11 +1491,11 @@ onBeforeUnmount(() => {
 
           <!-- 底部粘性操作栏 -->
           <div
-            class="sticky bottom-0 z-10 mt-4 rounded-xl border border-[var(--border-color)] bg-white/95 px-4 py-3 shadow-lg backdrop-blur"
+            class="sticky bottom-0 z-10 mt-4 rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)]/95 px-4 py-3 shadow-lg backdrop-blur"
           >
             <div
               v-if="saveError"
-              class="mb-2 rounded-lg border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-rose-700"
+              class="mb-2 rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-[var(--color-error)]"
             >
               保存失败：{{ saveError }}
             </div>
@@ -1497,7 +1503,7 @@ onBeforeUnmount(() => {
               <div class="min-w-0 text-xs">
                 <span
                   v-if="showSaved"
-                  class="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-700"
+                  class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] px-2.5 py-1 font-medium text-[var(--color-success)]"
                 >
                   <svg
                     class="h-3 w-3"
@@ -1511,16 +1517,16 @@ onBeforeUnmount(() => {
                   </svg>
                   已保存
                 </span>
-                <span v-else-if="dirty && !isValid" class="text-rose-600">
+                <span v-else-if="dirty && !isValid" class="text-[var(--color-error)]">
                   存在校验错误，请修正后再保存
                 </span>
-                <span v-else-if="dirty" class="text-amber-600">有未保存的更改</span>
+                <span v-else-if="dirty" class="text-[var(--color-warning)]">有未保存的更改</span>
                 <span v-else class="text-[var(--text-muted)]">所有更改已保存</span>
               </div>
               <div class="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
-                  class="rounded-lg border border-[var(--border-color)] bg-white px-4 py-1.5 text-sm text-[var(--text-secondary)] transition-colors enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-1.5 text-sm text-[var(--text-secondary)] transition-colors enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
                   :disabled="!dirty || saving"
                   @click="discard"
                 >
@@ -1528,7 +1534,7 @@ onBeforeUnmount(() => {
                 </button>
                 <button
                   type="button"
-                  class="rounded-lg bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-white transition-colors enabled:hover:bg-[var(--color-primary-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+                  class="rounded-sm bg-[var(--color-primary)] px-4 py-1.5 text-sm font-medium text-white transition-colors enabled:hover:bg-[var(--color-primary-hover)] disabled:cursor-not-allowed disabled:opacity-40"
                   :disabled="!canSave"
                   @click="save"
                 >
@@ -1542,3 +1548,23 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.settings-page { position: relative; }
+.settings-page :deep(.page-heading) { padding-left: 0; padding-right: 0; }
+.settings-switch { border-radius: 2px; }
+.settings-switch-knob { box-shadow: 0 1px 3px #2e303326; }
+.settings-index { position: sticky; top: 24px; float: left; display: flex; flex-direction: column; gap: 6px; width: 175px; padding-top: 16px; }
+.settings-index a { display: flex; gap: 16px; padding: 11px 0; color: var(--text-secondary); font-size: 12px; }
+.settings-index a:hover { color: #8c6a43; }
+.settings-index span { font: 12px var(--font-mono); color: var(--text-muted); }
+.settings-sections { margin-left: 205px; }
+.settings-section { scroll-margin-top: 24px; border-top: 1px solid var(--border-color); }
+.settings-section > div:first-child { border: 0; padding: 20px 0 8px; }
+.settings-section > div:first-child svg { display: none; }
+.settings-section h2 { font-size: 18px; font-weight: 600; }
+.settings-section > div:not(:first-child) { padding-left: 0; padding-right: 0; }
+.settings-section :is(input:not([type=range]):not([type=checkbox]), select) { border-radius: 0; border-width: 0 0 1px; background: transparent; padding-left: 0; }
+.settings-section input[inputmode="numeric"] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) { .settings-index { width: 140px; } .settings-sections { margin-left: 165px; } }
+</style>

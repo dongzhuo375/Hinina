@@ -29,8 +29,9 @@ function go(displayId: string) {
 
 <template>
   <div
-    class="no-scrollbar flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 bg-white px-3 select-none"
+    class="no-scrollbar flex h-12 shrink-0 items-center gap-1 overflow-x-auto border-b border-[var(--border-color)] bg-[var(--bg-body)] px-3 select-none"
   >
+    <router-link :to="{ name: 'ProblemSet' }" class="action-quiet mr-3 shrink-0" aria-label="返回题目总览">← 总览</router-link>
     <button
       v-for="p in problems"
       :key="p.displayId"
@@ -39,9 +40,10 @@ function go(displayId: string) {
       class="relative flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 font-mono text-xs font-semibold transition-colors"
       :class="
         p.displayId === currentDisplayId
-          ? 'bg-[#f5f3ff] text-[#6845f5]'
-          : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+          ? 'bg-[var(--bg-sidebar)] text-[var(--color-primary)]'
+          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]'
       "
+      :aria-current="p.displayId === currentDisplayId ? 'page' : undefined"
       @click="go(p.displayId)"
     >
       <span
@@ -53,10 +55,10 @@ function go(displayId: string) {
       <!-- 当前题下划线指示条 -->
       <span
         v-if="p.displayId === currentDisplayId"
-        class="absolute inset-x-2 -bottom-[5px] h-0.5 rounded-full bg-[var(--color-primary)]"
+        class="absolute inset-x-2 -bottom-[5px] h-0.5 rounded-sm bg-[var(--color-primary)]"
       ></span>
     </button>
-    <span v-if="problems.length === 0" class="px-2 text-xs text-slate-400">题目列表未加载</span>
+    <span v-if="problems.length === 0" class="px-2 text-xs text-[var(--text-muted)]">题目列表未加载</span>
   </div>
 </template>
 

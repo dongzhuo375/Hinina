@@ -1,7 +1,7 @@
 <template>
-  <n-config-provider :theme="null" :theme-overrides="themeOverrides">
+  <n-config-provider :theme="null" :theme-overrides="showGlobalTitleBar ? themeOverrides : contestThemeOverrides">
     <n-dialog-provider>
-      <div class="flex h-screen w-screen flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)] shadow-2xl">
+      <div :class="{ 'contest-theme': !showGlobalTitleBar }" class="flex h-screen w-screen flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)] shadow-2xl">
         <!-- 兜底窗口控制条：比赛外壳自带 TopBar（含窗口控制），
              外壳之外的路由（当前只有登录页）由此处提供拖拽区与窗口按钮 -->
         <header
@@ -81,6 +81,16 @@ function close() {
 }
 
 /// Naive UI 主题覆盖（CSS 变量驱动的暗色适配）
+const contestThemeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: '#2e3033', primaryColorHover: '#454844', primaryColorPressed: '#1e211f', primaryColorSuppl: '#2e3033',
+    infoColor: '#5b736d', successColor: '#50705c', warningColor: '#8c6a43', errorColor: '#a33b2a',
+    bodyColor: '#f7f6f1', modalColor: '#fffefa', popoverColor: '#fffefa', cardColor: '#fffefa',
+    textColorBase: '#2e3033', textColor1: '#2e3033', textColor2: '#4b5563', textColor3: '#6b7280', borderColor: '#ddded4', borderRadius: '3px',
+    fontFamily: 'var(--font-sans)',
+  },
+}
+
 const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#7C5CFF',

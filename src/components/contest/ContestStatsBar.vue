@@ -42,32 +42,32 @@ const penaltyText = computed(() => {
 
 <template>
   <div
-    class="flex shrink-0 items-center gap-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)] px-4 py-2"
+    class="contest-stats flex shrink-0 items-center gap-4 py-2"
     :title="rank.lastUpdated ? `榜单更新于 ${new Date(rank.lastUpdated).toLocaleTimeString('zh-CN', { hour12: false })}` : '榜单数据尚未加载'"
   >
-    <div class="px-2 text-center">
-      <span class="block text-[11px] font-medium text-[var(--text-secondary)]">解题进度</span>
-      <span class="font-mono text-base font-bold text-[var(--color-success)]">
+    <div class="px-2 text-left">
+      <span class="block text-xs font-medium text-[var(--text-secondary)]">解题进度</span>
+      <span class="font-mono text-2xl font-medium text-[var(--color-success)]">
         {{ solvedText.value }}
         <span class="text-xs font-normal text-[var(--text-muted)]">{{ solvedText.unit }}</span>
       </span>
     </div>
 
-    <div class="h-6 w-px bg-[var(--border-color)]"></div>
+    <div class="h-9 w-px bg-[var(--border-color)]"></div>
 
-    <div class="px-2 text-center">
-      <span class="block text-[11px] font-medium text-[var(--text-secondary)]">实时排名</span>
-      <span class="font-mono text-base font-bold text-[var(--text-primary)]">
+    <div class="px-2 text-left">
+      <span class="block text-xs font-medium text-[var(--text-secondary)]">实时排名</span>
+      <span class="font-mono text-2xl font-medium text-[var(--text-primary)]">
         {{ rankText.value }}
         <span class="text-xs font-normal text-[var(--text-muted)]">{{ rankText.unit }}</span>
       </span>
     </div>
 
-    <div class="h-6 w-px bg-[var(--border-color)]"></div>
+    <div class="h-9 w-px bg-[var(--border-color)]"></div>
 
-    <div class="px-2 text-center">
-      <span class="block text-[11px] font-medium text-[var(--text-secondary)]">{{ penaltyText.label }}</span>
-      <span class="font-mono text-base font-bold text-[var(--text-primary)]">{{ penaltyText.value }}</span>
+    <div class="px-2 text-left">
+      <span class="block text-xs font-medium text-[var(--text-secondary)]">{{ penaltyText.label }}</span>
+      <span class="font-mono text-2xl font-medium text-[var(--text-primary)]">{{ penaltyText.value }}</span>
     </div>
   </div>
 </template>

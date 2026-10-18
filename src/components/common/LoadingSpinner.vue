@@ -4,8 +4,8 @@ defineProps<{ message?: string }>()
 </script>
 
 <template>
-  <div class="flex flex-col items-center justify-center gap-3 py-12">
-    <div class="h-8 w-8 animate-spin rounded-full border-3 border-[var(--color-primary)] border-t-transparent" />
+  <div role="status" class="flex flex-col items-center justify-center gap-4 py-12">
+    <div aria-hidden="true" class="h-6 w-6 animate-spin rounded-full border border-[var(--border-color)] border-t-[var(--color-primary)]" />
     <span v-if="message" class="text-sm text-[var(--text-secondary)]">{{ message }}</span>
   </div>
 </template>

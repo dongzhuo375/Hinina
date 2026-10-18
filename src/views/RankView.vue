@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import PageHeading from '@/components/common/PageHeading.vue'
 import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -193,27 +194,17 @@ watch(isEnded, (ended) => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
-    <!-- 头部：标题 + 统计卡 + 工具条 -->
-    <div
-      class="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-5 pb-2.5 pt-3.5"
-    >
-      <div class="mb-2.5 flex items-center justify-between gap-4">
-        <div class="flex min-w-0 items-center space-x-3">
-          <h1 class="truncate text-lg font-bold tracking-tight text-[var(--text-primary)]">
-            {{ contest?.title ?? '比赛' }} 实时榜单
-          </h1>
-          <span class="shrink-0 font-mono text-xs text-[var(--text-muted)]">/ Live Scoreboard</span>
-        </div>
-        <ContestStatsBar />
-      </div>
-      <RankToolbar />
-    </div>
+    <PageHeading title="实时榜单" index="02" subtitle="LIVE SCOREBOARD">
+      <template #description>{{ contest?.title ?? '比赛' }}</template>
+      <ContestStatsBar />
+    </PageHeading>
+    <div class="shrink-0 px-8 pb-4"><RankToolbar /></div>
 
-    <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-4 py-3">
+    <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-8 pb-6">
       <!-- 封榜提示：只信 contest 字段（文档 §9.3），封榜期间通过状态对普通用户不可见 -->
       <div
         v-if="isSealed"
-        class="flex shrink-0 items-center gap-2 rounded-lg border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-amber-800"
+        class="flex shrink-0 items-center gap-2 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[var(--color-warning)]"
       >
         <svg
           class="h-3.5 w-3.5 shrink-0"
@@ -227,13 +218,13 @@ watch(isEnded, (ended) => {
           <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke-linecap="round" />
         </svg>
         <span class="font-medium">榜单已封榜，仅显示尝试次数</span>
-        <span class="text-amber-700/80">封榜时段内的提交结果将在赛后统一揭晓</span>
+        <span class="text-[var(--text-secondary)]">封榜时段内的提交结果将在赛后统一揭晓</span>
       </div>
 
       <!-- 轮询失败但仍有旧数据：顶部一条不打断阅读的错误条，绝不清空榜单 -->
       <div
         v-if="rankStore.error && rankStore.hasData"
-        class="flex shrink-0 items-center gap-2 rounded-lg border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-rose-700"
+        class="flex shrink-0 items-center gap-2 rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-[var(--color-error)]"
       >
         <svg
           class="h-3.5 w-3.5 shrink-0"
@@ -254,7 +245,7 @@ watch(isEnded, (ended) => {
         </span>
         <button
           type="button"
-          class="shrink-0 rounded-md border border-[var(--color-wa-border)] bg-white px-2 py-0.5 font-medium transition-colors hover:bg-rose-50"
+          class="shrink-0 rounded-md border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2 py-0.5 font-medium transition-colors hover:bg-[var(--color-wa-bg)]"
           @click="retry"
         >
           立即重试
@@ -264,7 +255,7 @@ watch(isEnded, (ended) => {
       <!-- 全量快照模式状态行：打星/女生为客户端跨页筛选，展示快照规模与手动刷新入口 -->
       <div
         v-if="isFullFilterActive"
-        class="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500"
+        class="flex shrink-0 flex-wrap items-center gap-2 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
       >
         <svg
           class="h-3.5 w-3.5 shrink-0"
@@ -281,7 +272,7 @@ watch(isEnded, (ended) => {
           />
         </svg>
         <span v-if="rankStore.isFullMode" class="min-w-0">
-          客户端筛选 · 已加载 {{ rankStore.fullLoadedRows }} 行
+          客户端筛选 · 已加载 <span class="font-mono">{{ rankStore.fullLoadedRows }}</span> 行
           <template v-if="rankStore.fullFetchState === 'truncated'">
             （已达 2000 行上限，结果可能不完整）
           </template>
@@ -293,7 +284,7 @@ watch(isEnded, (ended) => {
         <span v-else>客户端筛选（等待快照）</span>
         <button
           type="button"
-          class="ml-auto shrink-0 rounded-md border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-600 transition-colors enabled:hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          class="ml-auto shrink-0 rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] px-2 py-0.5 font-medium text-[var(--text-secondary)] transition-colors enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="rankStore.isLoading"
           @click="manualRefresh"
         >
@@ -302,7 +293,7 @@ watch(isEnded, (ended) => {
       </div>
 
       <div
-        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-white shadow-sm"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-[var(--border-color)] bg-[var(--bg-card)]"
       >
         <LoadingSpinner v-if="isBootstrapping" message="正在加载榜单…" class="m-auto" />
 
@@ -338,8 +329,8 @@ watch(isEnded, (ended) => {
                 isEnded
                   ? 'bg-[var(--text-muted)]'
                   : rankStore.isLive && !rankStore.isFullMode
-                    ? 'animate-pulse bg-emerald-500'
-                    : 'bg-amber-400'
+                    ? 'bg-[var(--color-success)]'
+                    : 'bg-[var(--color-warning)]'
               "
             ></span>
             <span class="font-medium">{{ liveText }}</span>
@@ -353,7 +344,7 @@ watch(isEnded, (ended) => {
             <div class="flex items-center gap-1">
               <button
                 type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="rankStore.current <= 1 || rankStore.isLoading"
                 @click="goToPage(rankStore.current - 1)"
               >
@@ -371,7 +362,7 @@ watch(isEnded, (ended) => {
                   :class="
                     item === rankStore.current
                       ? 'border-[var(--color-primary)] bg-[var(--color-primary)] font-semibold text-white'
-                      : 'border-[var(--border-color)] enabled:hover:bg-slate-50'
+                      : 'border-[var(--border-color)] enabled:hover:bg-[var(--bg-sidebar)]'
                   "
                   :disabled="rankStore.isLoading"
                   @click="goToPage(item)"
@@ -381,7 +372,7 @@ watch(isEnded, (ended) => {
               </template>
               <button
                 type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="rankStore.current >= rankStore.pages || rankStore.isLoading"
                 @click="goToPage(rankStore.current + 1)"
               >

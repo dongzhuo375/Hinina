@@ -56,12 +56,12 @@ const judging = computed(() => (detail.value ? isJudging(detail.value.status) : 
 
 /// tone → pill 样式类（与评测页同一套语义色）
 const TONE_CLASSES: Record<StatusTone, string> = {
-  ac: 'border-emerald-200 bg-emerald-50 text-emerald-600',
-  wa: 'border-rose-200 bg-rose-50 text-rose-600',
-  tle: 'border-amber-200 bg-amber-50 text-amber-600',
-  pending: 'border-cyan-200 bg-cyan-50 text-cyan-600',
-  system: 'border-slate-200 bg-slate-100 text-slate-600',
-  neutral: 'border-slate-200 bg-slate-100 text-slate-500',
+  ac: 'border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
+  wa: 'border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-[var(--color-error)]',
+  tle: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
+  pending: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-info)]',
+  system: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
+  neutral: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
 }
 
 function toneClasses(tone: StatusTone): string {
@@ -251,14 +251,14 @@ function openProblem() {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
+  <div class="submission-detail flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
     <!-- 顶栏：返回 + 标题 + 评测中指示 -->
     <div
-      class="flex shrink-0 items-center gap-3 border-b border-[var(--border-color)] bg-[var(--bg-card)] px-5 py-3"
+      class="flex shrink-0 items-center gap-3 border-b border-[var(--border-color)] bg-[var(--bg-body)] px-8 py-5"
     >
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-slate-50 px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-xs transition-colors hover:bg-slate-100 hover:text-[var(--text-primary)]"
+        class="flex items-center gap-1.5 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-none transition-colors hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]"
         @click="goBack"
       >
         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -271,7 +271,7 @@ function openProblem() {
       </h1>
       <span
         v-if="judging"
-        class="flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-medium text-cyan-600"
+        class="flex shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-2.5 py-1 text-xs font-medium text-[var(--color-info)]"
       >
         <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
@@ -281,7 +281,7 @@ function openProblem() {
       </span>
     </div>
 
-    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+    <div class="min-h-0 flex-1 overflow-y-auto px-8 pb-8">
       <LoadingSpinner v-if="isLoading && !detail" message="正在加载提交详情…" />
 
       <ErrorMessage
@@ -290,15 +290,15 @@ function openProblem() {
         :retry="retry"
       />
 
-      <div v-else-if="detail" class="mx-auto flex max-w-5xl flex-col gap-4">
+      <div v-else-if="detail" class="mx-auto flex max-w-[1400px] flex-col gap-6">
         <!-- 判定横幅卡：大状态 pill + 指标条 + 元信息 -->
         <section
-          class="rounded-xl border border-[var(--border-color)] bg-white p-5 shadow-sm"
+          class="result-summary border-y border-[var(--border-color)] bg-[var(--bg-card)] p-7"
         >
           <div class="flex flex-wrap items-center gap-4">
             <span
-              class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-base font-bold shadow-xs"
-              :class="[toneClasses(statusTone(detail.status)), judging ? 'animate-pulse' : '']"
+              class="inline-flex items-center gap-2 rounded-sm border px-4 py-2 text-base font-bold shadow-none"
+              :class="[toneClasses(statusTone(detail.status)), judging ? '' : '']"
             >
               <svg
                 v-if="judging"
@@ -320,35 +320,35 @@ function openProblem() {
               class="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-xs tabular-nums"
             >
               <div class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">耗时</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">耗时</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">
                   {{ judging ? '-' : `${detail.timeMs} ms` }}
                 </span>
               </div>
               <div class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">内存</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">内存</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">
                   {{ judging ? '-' : formatMemoryKb(detail.memoryKb) }}
                 </span>
               </div>
               <div v-if="detail.score !== null" class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">得分</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">得分</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">{{ detail.score }}</span>
               </div>
               <div v-if="detail.oiRankScore !== null" class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">榜单计分</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">榜单计分</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">
                   {{ detail.oiRankScore }}
                 </span>
               </div>
               <div class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">代码长度</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">代码长度</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">
                   {{ formatCodeLength(detail.length) }}
                 </span>
               </div>
               <div class="flex items-baseline gap-1.5">
-                <span class="font-sans text-[11px] text-[var(--text-muted)]">语言</span>
+                <span class="font-sans text-xs text-[var(--text-muted)]">语言</span>
                 <span class="text-sm font-semibold text-[var(--text-primary)]">{{ detail.language }}</span>
               </div>
             </div>
@@ -356,7 +356,7 @@ function openProblem() {
 
           <!-- 元信息行 -->
           <div
-            class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-100 pt-3.5 text-xs text-[var(--text-secondary)]"
+            class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border-color)] pt-3.5 text-xs text-[var(--text-secondary)]"
           >
             <div class="flex items-center gap-1.5">
               <span class="text-[var(--text-muted)]">题目</span>
@@ -393,10 +393,10 @@ function openProblem() {
         <!-- CE / 错误信息面板 -->
         <section
           v-if="detail.errorMessage"
-          class="rounded-xl border border-rose-200 bg-rose-50/60 shadow-sm"
+          class="rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)]/60 shadow-none"
         >
-          <div class="flex items-center justify-between gap-3 border-b border-rose-200/70 px-4 py-2.5">
-            <div class="flex items-center gap-2 text-xs font-semibold text-rose-700">
+          <div class="flex items-center justify-between gap-3 border-b border-[var(--color-wa-border)]/70 px-4 py-2.5">
+            <div class="flex items-center gap-2 text-xs font-semibold text-[var(--color-error)]">
               <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
@@ -404,7 +404,7 @@ function openProblem() {
             </div>
             <button
               type="button"
-              class="flex items-center gap-1.5 rounded-md border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-medium text-rose-600 transition-colors hover:bg-rose-50"
+              class="flex items-center gap-1.5 rounded-md border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2.5 py-1 text-xs font-medium text-[var(--color-error)] transition-colors hover:bg-[var(--color-wa-bg)]"
               @click="copyErrorMessage"
             >
               <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -414,12 +414,12 @@ function openProblem() {
             </button>
           </div>
           <pre
-            class="max-h-72 overflow-auto px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-rose-800"
+            class="max-h-72 overflow-auto px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-[var(--color-error)]"
           >{{ detail.errorMessage }}</pre>
         </section>
 
         <!-- 测试点明细 -->
-        <section class="overflow-hidden rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
+        <section class="overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] shadow-none">
           <div
             class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-color)] px-4 py-2.5"
           >
@@ -427,13 +427,13 @@ function openProblem() {
               <h2 class="text-sm font-bold text-[var(--text-primary)]">测试点明细</h2>
               <span
                 v-if="caseList.length > 0"
-                class="rounded-full border border-[var(--border-color)] bg-slate-50 px-2.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-[var(--text-secondary)]"
+                class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2.5 py-0.5 font-mono text-xs font-medium tabular-nums text-[var(--text-secondary)]"
               >
                 {{ acCaseCount }}/{{ caseList.length }} 通过
               </span>
               <span
                 v-if="modeBadge"
-                class="rounded-full border border-purple-200 bg-purple-50 px-2.5 py-0.5 font-mono text-[11px] font-medium text-purple-600"
+                class="rounded-sm border border-purple-200 bg-purple-50 px-2.5 py-0.5 font-mono text-xs font-medium text-purple-600"
               >
                 {{ modeBadge }}
               </span>
@@ -445,7 +445,7 @@ function openProblem() {
             <div
               v-for="n in 4"
               :key="n"
-              class="h-8 animate-pulse rounded-lg bg-slate-100"
+              class="h-8 rounded-sm bg-[var(--bg-sidebar)]"
               :style="{ opacity: 1 - n * 0.18 }"
             ></div>
             <p class="pt-1 text-center text-xs text-[var(--text-muted)]">评测进行中，测试点结果将自动刷新…</p>
@@ -467,21 +467,21 @@ function openProblem() {
             <div
               v-for="group in cases?.subTasks ?? []"
               :key="group.groupNum"
-              class="overflow-hidden rounded-lg border border-[var(--border-color)]"
+              class="overflow-hidden rounded-sm border border-[var(--border-color)]"
             >
               <div
-                class="flex items-center justify-between gap-2 border-b border-[var(--border-color)] bg-slate-50/80 px-3.5 py-2"
+                class="flex items-center justify-between gap-2 border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/80 px-3.5 py-2"
               >
                 <span class="font-mono text-xs font-semibold text-[var(--text-primary)]">
                   子任务 #{{ group.groupNum }}
                 </span>
-                <span class="font-mono text-[11px] tabular-nums text-[var(--text-secondary)]">
+                <span class="font-mono text-xs tabular-nums text-[var(--text-secondary)]">
                   {{ groupPassed(group.cases) }}/{{ group.cases.length }} 通过
                 </span>
               </div>
               <table class="w-full border-collapse text-left">
                 <thead>
-                  <tr class="border-b border-[var(--border-color)] font-mono text-[10px] tracking-wider text-[var(--text-muted)] uppercase">
+                  <tr class="border-b border-[var(--border-color)] font-mono text-xs tracking-wider text-[var(--text-muted)] uppercase">
                     <th class="px-3.5 py-1.5 font-semibold">#</th>
                     <th class="px-3.5 py-1.5 font-semibold">结果</th>
                     <th class="px-3.5 py-1.5 text-right font-semibold">耗时</th>
@@ -489,12 +489,12 @@ function openProblem() {
                     <th v-if="showScoreColumn" class="px-3.5 py-1.5 text-right font-semibold">得分</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100 text-xs">
+                <tbody class="divide-y divide-[var(--border-color)] text-xs">
                   <tr v-for="c in group.cases" :key="c.caseId">
                     <td class="px-3.5 py-2 font-mono tabular-nums text-[var(--text-secondary)]">{{ c.seq }}</td>
                     <td class="px-3.5 py-2">
                       <span
-                        class="inline-flex rounded-full border px-2 py-0.5 font-mono text-[11px] font-semibold"
+                        class="inline-flex rounded-sm border px-2 py-0.5 font-mono text-xs font-semibold"
                         :class="toneClasses(statusTone(c.status))"
                       >
                         {{ statusAbbr(c.status) }}
@@ -514,7 +514,7 @@ function openProblem() {
           <!-- 平铺测试点表 -->
           <table v-else class="w-full border-collapse text-left">
             <thead>
-              <tr class="border-b border-[var(--border-color)] bg-slate-50/80 font-mono text-[10px] tracking-wider text-[var(--text-muted)] uppercase">
+              <tr class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/80 font-mono text-xs tracking-wider text-[var(--text-muted)] uppercase">
                 <th class="px-4 py-2 font-semibold">#</th>
                 <th class="px-4 py-2 font-semibold">结果</th>
                 <th class="px-4 py-2 text-right font-semibold">耗时</th>
@@ -522,12 +522,12 @@ function openProblem() {
                 <th v-if="showScoreColumn" class="px-4 py-2 text-right font-semibold">得分</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-100 text-xs">
-              <tr v-for="c in caseList" :key="c.caseId" class="transition-colors hover:bg-slate-50/70">
+            <tbody class="divide-y divide-[var(--border-color)] text-xs">
+              <tr v-for="c in caseList" :key="c.caseId" class="transition-colors hover:bg-[var(--bg-sidebar)]/70">
                 <td class="px-4 py-2 font-mono tabular-nums text-[var(--text-secondary)]">{{ c.seq }}</td>
                 <td class="px-4 py-2">
                   <span
-                    class="inline-flex rounded-full border px-2 py-0.5 font-mono text-[11px] font-semibold"
+                    class="inline-flex rounded-sm border px-2 py-0.5 font-mono text-xs font-semibold"
                     :class="toneClasses(statusTone(c.status))"
                   >
                     {{ statusAbbr(c.status) }}
@@ -544,20 +544,20 @@ function openProblem() {
         </section>
 
         <!-- 源代码（默认折叠） -->
-        <section class="overflow-hidden rounded-xl border border-[var(--border-color)] bg-white shadow-sm">
+        <section class="overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] shadow-none">
           <button
             type="button"
-            class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50/70"
+            class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--bg-sidebar)]/70"
             @click="codeExpanded = !codeExpanded"
           >
             <div class="flex items-center gap-2.5">
               <h2 class="text-sm font-bold text-[var(--text-primary)]">源代码</h2>
               <span
-                class="rounded-full border border-[var(--border-color)] bg-slate-50 px-2.5 py-0.5 font-mono text-[11px] font-medium text-[var(--text-secondary)]"
+                class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-2.5 py-0.5 font-mono text-xs font-medium text-[var(--text-secondary)]"
               >
                 {{ detail.language }}
               </span>
-              <span class="font-mono text-[11px] tabular-nums text-[var(--text-muted)]">
+              <span class="font-mono text-xs tabular-nums text-[var(--text-muted)]">
                 {{ formatCodeLength(detail.length) }}
               </span>
             </div>
@@ -606,3 +606,10 @@ function openProblem() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.result-summary > div:first-child { justify-content: space-between; padding-bottom: 20px; }
+.result-summary > div:first-child > span { padding: 0; border: 0; border-radius: 0; font-size: 30px; background: transparent; }
+.result-summary > div:first-child > div { font-size: 14px; gap: 24px; }
+.submission-detail section { border-radius: 0; }
+</style>

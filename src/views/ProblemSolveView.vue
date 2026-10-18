@@ -208,6 +208,12 @@ function persistSplitRatio() {
     })
 }
 
+function adjustSplit(delta: number) {
+  userAdjustedSplit = true
+  splitRatio.value = Math.min(0.7, Math.max(0.3, splitRatio.value + delta))
+  persistSplitRatio()
+}
+
 function startDrag(e: MouseEvent) {
   e.preventDefault()
   const container = splitContainer.value
@@ -244,6 +250,10 @@ const cursor = ref<{ line: number; column: number } | null>(null)
 const editorPrefs = ref<EditorPrefs | null>(null)
 
 const currentProblemId = computed(() => problemStore.currentProblem?.id ?? null)
+const pendingSubmission = computed(() => submissionStore.pendingFor(
+  contestStore.contest?.id ?? '', currentProblemId.value ?? '', displayId.value,
+  workspaceStore.language, workspaceStore.code,
+))
 
 async function handleSubmit() {
   // 加载编排未完成时拒绝提交（isLoadingPage 覆盖 loadWorkspace 与 openProblem
@@ -252,7 +262,7 @@ async function handleSubmit() {
   if (isLoadingPage) return
   const contestId = contestStore.contest?.id
   const problem = problemStore.currentProblem
-  if (!contestId || !problem || submissionStore.isSubmitting) return
+  if (!contestId || !problem || submissionStore.isSubmitting || pendingSubmission.value) return
   // currentProblem 必须与路由 displayId 配对：openProblem 失败时 problemStore
   // 不清空（currentProblem 仍是旧题），而 code 已是新题 —— 无需并发，一次失败
   // 的切换就会造成错配（PR21-8 评审二轮）
@@ -274,13 +284,13 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50">
+  <div class="solve-workspace flex min-h-0 flex-1 flex-col overflow-hidden">
     <ProblemTabStrip />
 
     <div ref="splitContainer" class="flex min-h-0 flex-1 overflow-hidden">
       <!-- 左栏：题面（48%，可拖拽调整） -->
       <section
-        class="flex min-w-0 flex-col overflow-hidden bg-white"
+        class="flex min-w-0 flex-col overflow-hidden bg-[var(--bg-card)]"
         :style="{ width: `${splitRatio * 100}%` }"
       >
         <div v-if="viewError" class="flex flex-1 flex-col justify-center">
@@ -301,12 +311,15 @@ async function handleSubmit() {
 
       <!-- 拖拽条 -->
       <div
-        class="w-px shrink-0 cursor-col-resize bg-slate-200 transition-colors hover:bg-[var(--color-primary)]"
+        class="split-handle"
+        role="separator" tabindex="0" aria-label="调整题面宽度" aria-orientation="vertical"
+        :aria-valuenow="Math.round(splitRatio * 100)" :aria-valuemin="30" :aria-valuemax="70"
+        @keydown.left.prevent="adjustSplit(-0.02)" @keydown.right.prevent="adjustSplit(0.02)"
         @mousedown="startDrag"
       ></div>
 
       <!-- 右栏：代码编辑器 + 控制台条（52%） -->
-      <section class="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-50">
+      <section class="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
         <CodeEditor
           ref="codeEditor"
           :model-value="workspaceStore.code"
@@ -323,6 +336,7 @@ async function handleSubmit() {
         <EditorConsoleBar
           :cursor="cursor"
           :problem-id="currentProblemId"
+          :pending-submission-id="pendingSubmission?.id ?? null"
           :tab-size="editorPrefs?.tabSize ?? DEFAULT_EDITOR_TAB_SIZE"
           @submit="handleSubmit"
         />
@@ -330,3 +344,11 @@ async function handleSubmit() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.solve-workspace { padding: 0 clamp(24px, 1.875vw, 48px) clamp(16px, 1.25vw, 32px); }
+.split-handle { position: relative; width: 9px; flex-shrink: 0; cursor: col-resize; background: var(--bg-body); }
+.split-handle::after { content: ''; position: absolute; width: 1px; top: 0; bottom: 0; left: 4px; background: var(--border-color); transition: background 200ms; }
+.split-handle:hover::after, .split-handle:focus-visible::after { background: #8c6a43; }
+.split-handle:focus-visible { outline: 2px solid #8c6a43; outline-offset: -2px; }
+</style>

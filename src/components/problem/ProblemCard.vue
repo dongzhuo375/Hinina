@@ -18,7 +18,7 @@ const quickSubmitOpen = ref(false)
 
 /// 徽章回退调色板（取自设计稿 A–F 六卡配色）：HOJ 气球色可能为空串（组织者未配置），
 /// 此时按题号序号循环取色 —— 同一题号恒定同色，轮询刷新时徽章不会跳变
-const FALLBACK_PALETTE = ['#dc2626', '#00c853', '#2563eb', '#9333ea', '#f59e0b', '#0891b2']
+const FALLBACK_PALETTE = ['#8c6a43', '#5f7a6a', '#7d7378', '#6c7565', '#9c8562', '#526b69']
 
 /** 题号序号：字母题号（A/B/C…）映射 0/1/2…，纯数字题号按数值，其余回退 0 */
 function displayIdOrdinal(displayId: string): number {
@@ -47,123 +47,50 @@ const pill = computed(() => {
     const text = rankAc && cell?.acTime != null ? `AC ${formatRankTime(cell.acTime)}` : '已通过'
     return { kind: 'ac' as const, text }
   }
-  if (status === 2) return { kind: 'attempted' as const, text: '尝试过' }
+  if (status === 2) return { kind: 'attempted' as const, text: '未通过' }
   return { kind: 'none' as const, text: '未作答' }
 })
 </script>
 
 <template>
-  <article
-    class="group flex min-h-[175px] flex-col justify-between rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-sm transition-all duration-200 hover:border-slate-300 hover:shadow-md"
-  >
-    <div class="flex items-start justify-between gap-3">
-      <div class="flex min-w-0 items-start space-x-3.5">
-        <!-- 字母徽章：40px 圆角方块，底色优先用 HOJ 气球色 -->
-        <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-mono text-lg font-bold text-white shadow-xs"
-          :style="{ backgroundColor: badgeColor }"
-        >
-          {{ problem.displayId }}
-        </div>
-        <!-- min-w-0：三列窄卡片下允许标题块收缩换行，而不是撑破卡片 -->
-        <div class="min-w-0">
-          <h3
-            class="cursor-pointer text-base font-bold tracking-tight text-[var(--text-primary)] transition group-hover:text-[var(--color-primary)]"
-            @click="emit('open')"
-          >
-            {{ title }}
-          </h3>
-          <div class="mt-1 space-y-1 font-mono">
-            <div class="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
-              <span>Limits:</span>
-              <span v-if="limits">{{ formatLimitsSummary(limits) }}</span>
-              <!-- limits 未到达：加载中显示脉冲骨架，失败定格为 —，不编造默认值 -->
-              <span
-                v-else-if="problemStore.isLimitsLoading"
-                class="h-3 w-20 animate-pulse rounded bg-slate-200"
-              ></span>
-              <span v-else>—</span>
-            </div>
-            <div class="flex items-center gap-1 text-xs font-medium text-emerald-600">
-              <span>{{ problem.ac }} / {{ problem.total }}</span>
-              <span class="font-sans text-[var(--text-muted)]">通过</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 右上状态 pill：已通过（绿）/ 尝试过（amber）/ 未作答（灰） -->
-      <div
-        v-if="pill.kind === 'ac'"
-        class="flex shrink-0 items-center space-x-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-medium text-emerald-600"
-      >
-        <svg class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
-          <path
-            clip-rule="evenodd"
-            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-            fill-rule="evenodd"
-          ></path>
-        </svg>
-        <span>{{ pill.text }}</span>
-      </div>
-      <div
-        v-else-if="pill.kind === 'attempted'"
-        class="flex shrink-0 items-center space-x-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-mono text-xs font-medium text-amber-600"
-      >
-        <span class="h-1.5 w-1.5 animate-ping rounded-full bg-amber-500"></span>
-        <span>{{ pill.text }}</span>
-      </div>
-      <span
-        v-else
-        class="shrink-0 rounded-full border border-[var(--border-color)] bg-[var(--bg-body)] px-2.5 py-1 font-mono text-xs font-medium text-[var(--text-muted)]"
-      >
-        {{ pill.text }}
-      </span>
+  <article class="problem-row">
+    <button class="problem-ordinal" :aria-label="`打开题目 ${problem.displayId}`" @click="emit('open')">
+      <span>{{ problem.displayId }}</span><span class="balloon-line" :style="{ backgroundColor: badgeColor }" aria-hidden="true"></span>
+    </button>
+    <div class="problem-description">
+      <button class="problem-title" @click="emit('open')">{{ title }}</button>
+      <p class="problem-limits">
+        <span v-if="limits">{{ formatLimitsSummary(limits) }}</span>
+        <span v-else>{{ problemStore.isLimitsLoading ? '正在读取限制…' : '限制 —' }}</span>
+      </p>
     </div>
-
-    <div class="mt-4 flex flex-col justify-end">
-      <div class="flex justify-end pb-2">
-        <button
-          class="flex cursor-pointer items-center gap-1 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-secondary)]"
-          @click="quickSubmitOpen = true"
-        >
-          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-            ></path>
-          </svg>
-          <span>快捷提交</span>
-        </button>
-      </div>
-      <div class="flex items-center justify-between border-t border-slate-100 pt-2.5">
-        <!-- 评测记录：跳到评测页并携带题目筛选（?problem=displayId 自动过滤本题） -->
-        <router-link
-          :to="{ name: 'Submissions', query: { problem: problem.displayId } }"
-          class="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-secondary)]"
-        >
-          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-            ></path>
-          </svg>
-          <span>评测记录</span>
-        </router-link>
-        <button
-          class="flex items-center gap-1 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-xs transition hover:bg-emerald-700"
-          @click="emit('open')"
-        >
-          <span>查看题目 →</span>
-        </button>
-      </div>
+    <div class="problem-ratio"><span>{{ problem.ac }} <span class="text-[var(--text-muted)]">/ {{ problem.total }}</span></span><span class="eyebrow">通过 / 提交</span></div>
+    <span class="problem-state" :class="pill.kind"><span aria-hidden="true">{{ pill.kind === 'ac' ? '✓' : pill.kind === 'attempted' ? '·' : '—' }}</span>{{ pill.text }}</span>
+    <div class="problem-actions">
+      <router-link :to="{ name: 'Submissions', query: { problem: problem.displayId } }" class="action-quiet">评测记录</router-link>
+      <button class="action-quiet" @click="quickSubmitOpen = true">快捷提交</button>
+      <button class="problem-open" :aria-label="`查看题目 ${problem.displayId}`" @click="emit('open')">查看题目 <span aria-hidden="true">↗</span></button>
     </div>
-
-    <!-- 快捷提交弹窗：v-if 保证同一时刻至多挂载一个实例 -->
     <QuickSubmitDialog v-if="quickSubmitOpen" :problem="problem" @close="quickSubmitOpen = false" />
   </article>
 </template>
+<style scoped>
+.problem-row { display: grid; grid-template-columns: 48px minmax(180px, 1fr) 96px 100px auto; align-items: center; gap: calc(20px + var(--ui-step) * 4); min-height: calc(72px + var(--ui-step) * 4); padding: 10px 0; border-top: 1px solid var(--border-color); transition: background 200ms ease-out; }
+.problem-row:hover { background: #ffffff70; }
+.problem-ordinal { position: relative; align-self: stretch; font: calc(30px + var(--ui-step) * 3) var(--font-mono); text-align: left; padding-left: 8px; }
+.balloon-line { position: absolute; bottom: 2px; left: 9px; width: 18px; height: 2px; opacity: .65; }
+.problem-description { min-width: 0; }
+.problem-title { font-size: calc(15px + var(--ui-step)); font-weight: 600; text-align: left; overflow-wrap: anywhere; line-height: 1.4; }
+.problem-title:hover { color: #8c6a43; }
+.problem-limits { margin-top: 4px; font: var(--text-xs)/1.4 var(--font-mono); color: var(--text-muted); }
+.problem-ratio { display: flex; flex-direction: column; gap: 2px; font: var(--text-sm)/1.5 var(--font-mono); font-variant-numeric: tabular-nums; }
+.problem-ratio .eyebrow { font-family: var(--font-sans); font-size: var(--text-xs); letter-spacing: .03em; }
+.problem-state { display: flex; align-items: center; gap: 6px; font: var(--text-xs) var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+.problem-state.ac { color: var(--color-success); }
+.problem-state.attempted { color: var(--color-warning); }
+.problem-actions { display: flex; align-items: center; gap: 4px; }
+.problem-open { display: flex; align-items: center; gap: 10px; padding: 8px; font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
+.problem-open:hover { color: #8c6a43; }
+@media (max-width: 1100px) { .problem-row { grid-template-columns: 44px minmax(130px, 1fr) 85px 95px auto; gap: 12px; } .problem-actions { gap: 0; } .problem-actions .action-quiet { padding: 8px 6px; } }
+@media (max-width: 800px) { .problem-row { grid-template-columns: 48px 1fr 90px; padding: 16px 0; } .problem-actions { grid-column: 2 / -1; } .problem-state { grid-column: 2; } .balloon-line { bottom: 0; } }
+</style>
