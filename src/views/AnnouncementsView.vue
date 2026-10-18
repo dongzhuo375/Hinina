@@ -250,11 +250,11 @@ onUnmounted(() => {
           <article
             v-for="a in announcementStore.announcements"
             :key="a.id"
-            class="border bg-[var(--bg-card)] p-5 transition-colors duration-200 ease-out hover:border-[#c9c5b6] hover:shadow-[var(--shadow-raised)]"
+            class="border-t bg-transparent p-5 transition-colors duration-200 ease-out hover:bg-[var(--bg-card)]"
             :class="
               announcementStore.isUnread(a.id)
-                ? 'border-[#8c6a43]/40 ring-1 ring-[#8c6a43]/15'
-                : 'border-[var(--border-color)]'
+                ? 'border-t-[var(--border-color)] border-l-2 border-l-[#8c6a43]'
+                : 'border-t-[var(--border-color)]'
             "
           >
             <!-- 标题行：未读圆点 + 标题 -->

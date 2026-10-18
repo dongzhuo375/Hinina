@@ -97,7 +97,7 @@ function stickyTint({ row, isMe }: BodyRow): string {
     case 'female':
       return `bg-[var(--color-girls-row-bg)] ${hover}`
     default:
-      return `bg-[var(--bg-card)] ${hover}`
+      return `bg-[var(--bg-body)] ${hover}`
   }
 }
 

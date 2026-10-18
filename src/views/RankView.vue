@@ -295,7 +295,7 @@ watch(isEnded, (ended) => {
       </div>
 
       <div
-        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden border-t-2 border-[#2e3033]"
       >
         <LoadingSpinner v-if="isBootstrapping" message="正在加载榜单…" class="m-auto" />
 

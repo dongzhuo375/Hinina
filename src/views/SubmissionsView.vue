@@ -399,7 +399,7 @@ onUnmounted(() => {
       </div>
 
       <div
-        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[4px] border border-[var(--border-color)] bg-[var(--bg-card)]"
+        class="flex min-h-0 flex-1 flex-col overflow-hidden border-t-2 border-[#2e3033]"
       >
         <LoadingSpinner v-if="isBootstrapping" message="正在加载提交记录…" class="m-auto" />
 
@@ -463,7 +463,7 @@ onUnmounted(() => {
           <table v-else class="w-full border-collapse text-left">
             <thead>
               <tr
-                class="border-b border-[var(--border-color)] bg-[var(--bg-body)] font-mono text-[10px] tracking-[0.2em] text-[var(--text-muted)] uppercase"
+                class="border-b border-[var(--border-color)] font-mono text-[10px] tracking-[0.2em] text-[var(--text-muted)] uppercase"
               >
                 <th class="px-4 py-3 font-semibold">运行编号</th>
                 <th class="px-4 py-3 font-semibold">提交时间</th>
