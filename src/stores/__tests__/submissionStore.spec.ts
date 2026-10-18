@@ -235,6 +235,113 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
   })
 })
 
+describe('重复提交保护', () => {
+  it('同一帧多次触发时同步上锁，只发送一个请求', async () => {
+    let resolve!: (id: string) => void
+    submissionService.submitCode.mockImplementationOnce(() => new Promise<string>((done) => { resolve = done }))
+    const store = useSubmissionStore()
+    try {
+      const first = store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      expect(store.isSubmitting).toBe(true)
+      await expect(store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')).rejects.toThrow('正在提交')
+      expect(submissionService.submitCode).toHaveBeenCalledTimes(1)
+      expect(store.error).toBeNull()
+      resolve('s1')
+      await first
+      expect(store.isSubmitting).toBe(false)
+    } finally {
+      store.stopAllPolling()
+    }
+  })
+
+  it('请求返回后，相同内容在评测期间复用编号，修改代码或语言仍能提交', async () => {
+    const store = useSubmissionStore()
+    submissionService.submitCode.mockResolvedValueOnce('s1').mockResolvedValueOnce('s2').mockResolvedValueOnce('s3')
+    try {
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      expect(store.pendingFor(CONTEST_ID, 'p1', 'A', 'cpp', 'code')?.id).toBe('s1')
+      expect(await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')).toBe('s1')
+      await store.startPolling('s1')
+      expect(await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')).toBe('s1')
+      expect(submissionService.submitCode).toHaveBeenCalledTimes(1)
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'changed code')
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'python', 'code')
+      expect(submissionService.submitCode).toHaveBeenCalledTimes(3)
+      expect(store.submissions).toHaveLength(3)
+    } finally {
+      store.stopAllPolling()
+    }
+  })
+
+  it('轮询初始化尚未完成时也能识别已受理的提交', async () => {
+    let resolve!: (schedule: typeof SCHEDULE) => void
+    configService.getPollSchedule.mockImplementationOnce(() => new Promise<typeof SCHEDULE>((done) => { resolve = done }))
+    submissionService.submitCode.mockResolvedValue('s1')
+    const store = useSubmissionStore()
+    try {
+      const first = store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      await Promise.resolve()
+      expect(store.pendingFor(CONTEST_ID, 'p1', 'A', 'cpp', 'code')?.id).toBe('s1')
+      expect(await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')).toBe('s1')
+      expect(submissionService.submitCode).toHaveBeenCalledTimes(1)
+      resolve(SCHEDULE)
+      await first
+    } finally {
+      store.stopAllPolling()
+    }
+  })
+
+  it('终态后释放保护，允许再次提交', async () => {
+    submissionService.submitCode.mockResolvedValueOnce('s1').mockResolvedValueOnce('s2')
+    submissionService.pollJudgement.mockResolvedValue(makeResult('WrongAnswer'))
+    const store = useSubmissionStore()
+    try {
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      await store.pollOnce('s1')
+      expect(store.pendingSubmissions).toEqual([])
+      expect(store.pendingFor(CONTEST_ID, 'p1', 'A', 'cpp', 'code')).toBeNull()
+      expect(await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')).toBe('s2')
+      expect(submissionService.submitCode).toHaveBeenCalledTimes(2)
+    } finally {
+      store.stopAllPolling()
+    }
+  })
+
+  it('超时或会话清理后释放保护，不永久禁用提交', async () => {
+    vi.useFakeTimers()
+    const store = useSubmissionStore()
+    submissionService.submitCode.mockResolvedValueOnce('s1').mockResolvedValueOnce('s2')
+    submissionService.pollJudgement.mockResolvedValue(makeResult('Pending'))
+    try {
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(store.pendingSubmissions).toEqual([])
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      store.stopAllPolling()
+      expect(store.pendingSubmissions).toEqual([])
+    } finally {
+      store.stopAllPolling()
+      vi.useRealTimers()
+    }
+  })
+
+  it('提交请求失败时恢复按钮并允许重试', async () => {
+    submissionService.submitCode.mockRejectedValueOnce(new Error('网络异常')).mockResolvedValueOnce('s1')
+    const store = useSubmissionStore()
+    try {
+      await expect(store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')).rejects.toThrow('网络异常')
+      expect(store.isSubmitting).toBe(false)
+      expect(store.error).toBe('网络异常')
+      expect(store.pendingSubmissions).toEqual([])
+      await store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+      expect(submissionService.submitCode).toHaveBeenCalledTimes(2)
+      expect(store.error).toBeNull()
+    } finally {
+      store.stopAllPolling()
+    }
+  })
+})
+
 describe('提交历史（评测页数据源）', () => {
   it('fetchHistory 透传分页与筛选参数并写入状态', async () => {
     submissionService.listContestSubmissions.mockResolvedValue(makePage([makeRecord()], 42, 2))

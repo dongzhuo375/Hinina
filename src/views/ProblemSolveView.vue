@@ -250,6 +250,10 @@ const cursor = ref<{ line: number; column: number } | null>(null)
 const editorPrefs = ref<EditorPrefs | null>(null)
 
 const currentProblemId = computed(() => problemStore.currentProblem?.id ?? null)
+const pendingSubmission = computed(() => submissionStore.pendingFor(
+  contestStore.contest?.id ?? '', currentProblemId.value ?? '', displayId.value,
+  workspaceStore.language, workspaceStore.code,
+))
 
 async function handleSubmit() {
   // 加载编排未完成时拒绝提交（isLoadingPage 覆盖 loadWorkspace 与 openProblem
@@ -258,7 +262,7 @@ async function handleSubmit() {
   if (isLoadingPage) return
   const contestId = contestStore.contest?.id
   const problem = problemStore.currentProblem
-  if (!contestId || !problem || submissionStore.isSubmitting) return
+  if (!contestId || !problem || submissionStore.isSubmitting || pendingSubmission.value) return
   // currentProblem 必须与路由 displayId 配对：openProblem 失败时 problemStore
   // 不清空（currentProblem 仍是旧题），而 code 已是新题 —— 无需并发，一次失败
   // 的切换就会造成错配（PR21-8 评审二轮）
@@ -332,6 +336,7 @@ async function handleSubmit() {
         <EditorConsoleBar
           :cursor="cursor"
           :problem-id="currentProblemId"
+          :pending-submission-id="pendingSubmission?.id ?? null"
           :tab-size="editorPrefs?.tabSize ?? DEFAULT_EDITOR_TAB_SIZE"
           @submit="handleSubmit"
         />

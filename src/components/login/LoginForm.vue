@@ -38,7 +38,7 @@ const accountStatus = computed(() => {
     <div class="login-card relative px-7 py-8 sm:px-10 sm:py-10">
       <header class="mb-8">
         <h2 class="text-2xl font-semibold tracking-[0.025em] text-[#2e3033]">
-          {{ isLoggedIn ? '账号已验证' : '探索竞赛之旅' }}
+          {{ isLoggedIn ? '账号已验证' : '登录参赛系统' }}
         </h2>
         <span class="mt-4 block h-[2px] w-12 bg-[#2e3033]"></span>
       </header>

@@ -23,6 +23,16 @@ interface SubmissionEntry {
   errorMessage?: string | null
 }
 
+/** 仅在评测期间保留提交内容，跨提交入口拦截同一份代码的重复发送。 */
+interface PendingSubmission {
+  id: string
+  contestId: string
+  problemId: string
+  displayId: string
+  language: string
+  sourceCode: string
+}
+
 /** 单条提交的轮询上下文：Poller 句柄 + 总超时截止时刻 + 连续失败计数 */
 interface PollContext {
   poller: Poller
@@ -74,6 +84,7 @@ export const useSubmissionStore = defineStore('submission', {
   state: () => ({
     /// 本会话内发起的提交（编辑器控制台条「最新记录」的本地数据源之一）
     submissions: [] as SubmissionEntry[],
+    pendingSubmissions: [] as PendingSubmission[],
     isSubmitting: false,
     error: null as string | null,
 
@@ -98,6 +109,16 @@ export const useSubmissionStore = defineStore('submission', {
   }),
 
   getters: {
+    pendingFor: (state) => {
+      return (contestId: string, problemId: string, displayId: string, language: string, sourceCode: string): SubmissionEntry | null => {
+        const pending = state.pendingSubmissions.find((s) => s.contestId === contestId
+          && s.problemId === problemId && s.displayId === displayId
+          && s.language === language && s.sourceCode === sourceCode)
+        if (!pending) return null
+        return state.submissions.find((s) => s.id === pending.id && !isTerminalStatus(s.status)) ?? null
+      }
+    },
+
     /** 指定题目在本会话内的最新一条提交（无则 null） */
     latestLocalFor: (state) => {
       return (problemId: string): SubmissionEntry | null => {
@@ -118,6 +139,10 @@ export const useSubmissionStore = defineStore('submission', {
       language: string,
       sourceCode: string,
     ): Promise<string> {
+      const pending = this.pendingFor(contestId, problemId, displayId, language, sourceCode)
+      if (pending) return pending.id
+      // Store 层同步上锁：鼠标、快捷键和快捷提交即使同一帧触发，也只能发出一个请求。
+      if (this.isSubmitting) throw new Error('代码正在提交，请稍候')
       this.isSubmitting = true
       this.error = null
       let submissionId: string
@@ -135,13 +160,15 @@ export const useSubmissionStore = defineStore('submission', {
           status: 'Pending',
           submittedAt: new Date().toISOString(),
         })
+        this.pendingSubmissions.push({ id: submissionId, contestId, problemId, displayId, language, sourceCode })
       } catch (e) {
         this.error = errorMessage(e, '提交失败')
         throw e
       } finally {
         this.isSubmitting = false
       }
-      // 提交已成功，轮询启动与提交结果解耦（轮询参数读取失败也有兜底值）
+      // 提交已成功，轮询启动与提交结果解耦（轮询参数读取失败也有兜底值）。
+      // pendingSubmissions 已同步写入，初始化轮询期间仍会拦截重复发送。
       await this.startPolling(submissionId)
       return submissionId
     },
@@ -169,7 +196,9 @@ export const useSubmissionStore = defineStore('submission', {
      * 幂等 —— 重复调用会先停掉该提交已有的轮询器，避免并发轮询。
      */
     async startPolling(submissionId: string) {
-      this.stopPolling(submissionId)
+      // 重启轮询只替换定时器，保留该提交的重复发送保护。
+      pollContexts.get(submissionId)?.poller.stop()
+      pollContexts.delete(submissionId)
       const { intervalMs, timeoutMs } = await configService.getPollSchedule()
       // 读取配置期间会话可能已被清理（登出/切换账号），此时不再注册轮询器
       if (!this.submissions.some((s) => s.id === submissionId)) return
@@ -237,6 +266,7 @@ export const useSubmissionStore = defineStore('submission', {
 
     /** 停止指定提交的轮询 */
     stopPolling(submissionId: string) {
+      this.pendingSubmissions = this.pendingSubmissions.filter((s) => s.id !== submissionId)
       const ctx = pollContexts.get(submissionId)
       if (ctx) {
         ctx.poller.stop()
@@ -246,6 +276,7 @@ export const useSubmissionStore = defineStore('submission', {
 
     /** 停止全部轮询（登出/切换账号时调用，防止定时器脱离会话继续请求） */
     stopAllPolling() {
+      this.pendingSubmissions = []
       pollContexts.forEach((ctx) => ctx.poller.stop())
       pollContexts.clear()
     },

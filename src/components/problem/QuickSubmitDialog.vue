@@ -172,8 +172,15 @@ function onDrop(e: DragEvent) {
 // ── 提交与结果跟踪（结果轮询由 submissionStore 内部负责，此处只观察条目状态） ──
 
 const submittedId = ref<string | null>(null)
+const preparingSubmission = ref(false)
+const pendingSubmission = computed(() => submissionStore.pendingFor(
+  contestStore.contest?.id ?? '', props.problem.problemId, props.problem.displayId,
+  language.value, code.value,
+))
+const submitting = computed(() => preparingSubmission.value || submissionStore.isSubmitting)
 
 const entry = computed(() => {
+  if (pendingSubmission.value) return pendingSubmission.value
   const id = submittedId.value
   if (!id) return null
   return submissionStore.submissions.find((s) => s.id === id) ?? null
@@ -182,26 +189,27 @@ const entry = computed(() => {
 const entryTerminal = computed(() => (entry.value ? isTerminalStatus(entry.value.status) : false))
 
 async function doSubmit() {
-  if (submissionStore.isSubmitting) return
+  if (submitting.value || pendingSubmission.value) return
   submitError.value = null
   if (!code.value.trim()) {
     submitError.value = '代码不能为空'
     return
   }
-  let contestId = contestStore.contest?.id
-  if (!contestId) {
-    try {
-      await contestStore.whenLoaded()
-      contestId = contestStore.contest?.id
-    } catch {
-      // 失败原因已写入 contestStore.error
-    }
-  }
-  if (!contestId) {
-    submitError.value = contestStore.error ?? '比赛数据未就绪，无法提交'
-    return
-  }
+  preparingSubmission.value = true
   try {
+    let contestId = contestStore.contest?.id
+    if (!contestId) {
+      try {
+        await contestStore.whenLoaded()
+        contestId = contestStore.contest?.id
+      } catch {
+        // 失败原因已写入 contestStore.error
+      }
+    }
+    if (!contestId) {
+      submitError.value = contestStore.error ?? '比赛数据未就绪，无法提交'
+      return
+    }
     submittedId.value = await submissionStore.submitCode(
       contestId,
       props.problem.problemId,
@@ -211,12 +219,14 @@ async function doSubmit() {
     )
   } catch {
     submitError.value = submissionStore.error ?? '提交失败'
+  } finally {
+    preparingSubmission.value = false
   }
 }
 
 function goDetail() {
-  if (!submittedId.value) return
-  router.push({ name: 'SubmissionDetail', params: { submitId: submittedId.value } })
+  if (!entry.value) return
+  router.push({ name: 'SubmissionDetail', params: { submitId: entry.value.id } })
 }
 </script>
 
@@ -334,11 +344,13 @@ function goDetail() {
         </div>
 
         <p v-if="fileError" class="text-xs font-medium text-[var(--color-error)]">{{ fileError }}</p>
-        <p v-if="submitError" class="text-xs font-medium text-[var(--color-error)]">{{ submitError }}</p>
+        <p v-if="submitError" role="alert" class="text-xs font-medium text-[var(--color-error)]">{{ submitError }}</p>
+        <p v-if="submitting" role="status" aria-live="polite" class="text-xs text-[var(--text-secondary)]">正在提交代码，请稍候…</p>
 
         <!-- 提交后的评测状态行 -->
         <div
           v-if="entry"
+          role="status" aria-live="polite"
           class="flex flex-wrap items-center gap-3 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)]/70 px-3.5 py-2.5"
         >
           <template v-if="!entryTerminal">
@@ -347,7 +359,7 @@ function goDetail() {
               <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
             </svg>
             <span class="text-xs font-medium text-[var(--text-secondary)]">
-              评测中…（#{{ entry.id }}，结果将自动更新）
+              已提交 #{{ entry.id }}，评测中…（结果将自动更新）
             </span>
           </template>
           <template v-else>
@@ -392,11 +404,12 @@ function goDetail() {
           <button
             type="button"
             class="flex items-center gap-2 rounded-sm bg-[var(--color-success)] px-5 py-1.5 text-[13px] font-semibold whitespace-nowrap text-white shadow-none transition-all duration-150 hover:bg-[var(--color-success)] hover:shadow  disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="submissionStore.isSubmitting"
+            :disabled="submitting || !!pendingSubmission"
+            :aria-busy="submitting || !!pendingSubmission"
             @click="doSubmit"
           >
             <svg
-              v-if="submissionStore.isSubmitting"
+              v-if="submitting || pendingSubmission"
               class="h-4 w-4 animate-spin"
               fill="none"
               stroke="currentColor"
@@ -407,8 +420,8 @@ function goDetail() {
               <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
               <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
             </svg>
-            <span>{{ submissionStore.isSubmitting ? '提交中…' : '提交代码' }}</span>
-            <svg v-if="!submissionStore.isSubmitting" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <span>{{ submitting ? '提交中…' : pendingSubmission ? '评测中…' : '提交代码' }}</span>
+            <svg v-if="!submitting && !pendingSubmission" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 12L3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12zm0 0h7.5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>

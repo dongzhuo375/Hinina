@@ -22,8 +22,9 @@ const props = withDefaults(
     /// 编辑器当前 Tab 宽度（缩进状态行展示；由 CodeEditor 经父级转发，
     /// 解题页弹层可改，故不能按常量写死）
     tabSize?: number
+    pendingSubmissionId?: string | null
   }>(),
-  { tabSize: DEFAULT_EDITOR_TAB_SIZE },
+  { tabSize: DEFAULT_EDITOR_TAB_SIZE, pendingSubmissionId: null },
 )
 
 defineEmits<{
@@ -67,12 +68,15 @@ const summary = ref<{ latest: SubmissionRecord | null; total: number } | null>(n
 /// 失败记录的测试点提示（如 "Test 4 · 2.01s"）；每条提交只拉一次测试点明细
 const failedCaseHint = ref<string | null>(null)
 let hintSubmitId: string | null = null
+let summaryVersion = 0
 
 async function refreshSummary() {
+  const version = ++summaryVersion
   const contestId = contestStore.contest?.id
   if (!contestId || !displayId.value) return
   try {
-    summary.value = await submissionStore.fetchProblemSummary(contestId, displayId.value)
+    const result = await submissionStore.fetchProblemSummary(contestId, displayId.value)
+    if (version === summaryVersion) summary.value = result
   } catch (e) {
     // 摘要失败不影响解题：回退本地会话记录 pill，仅记录日志
     log.warn('获取题目提交摘要失败:', e)
@@ -118,7 +122,7 @@ watch(
       const result = await submissionService.getSubmissionCases(record.submitId)
       // 子任务制下平铺 cases 常为空，helper 会展开 subTasks 查找，避免提示静默消失
       const first = findFirstFailedCase(result)
-      if (first) failedCaseHint.value = `Test ${first.seq} · ${formatMsToSeconds(first.timeMs)}`
+      if (first && hintSubmitId === record.submitId) failedCaseHint.value = `Test ${first.seq} · ${formatMsToSeconds(first.timeMs)}`
     } catch (e) {
       // 测试点不可得时回退记录自身耗时（下方 serverPill 兜底）
       log.warn('获取测试点明细失败:', e)
@@ -180,11 +184,16 @@ const timeLabel = computed(() => {
   return typeof t === 'number' && t > 0 ? `${t} ms` : ''
 })
 
-/// 服务端最新记录 pill（优先于本地会话记录展示）：
+/// 服务端最新记录 pill（本地新提交尚未同步到摘要时，优先展示本地反馈）：
 /// `#123 WA (Test 4 · 2.01s)`；测试点不可得时回退 `#123 WA (1.20s)`
 const serverPill = computed(() => {
   const record = summary.value?.latest
   if (!record) return null
+  // 本次提交立即接管反馈；旧摘要或同一提交的旧状态不能遮住本地轮询结果。
+  const local = latest.value
+  if (local && (!isTerminalStatus(local.status)
+    || (record.submitId !== local.id && Date.parse(local.submittedAt) >= record.submitTime * 1000)
+    || (record.submitId === local.id && !isTerminalStatus(record.status)))) return null
   const semantic = statusTone(record.status)
   let detail = ''
   if (failedCaseHint.value && hintSubmitId === record.submitId) {
@@ -223,8 +232,12 @@ function goDetail(submitId: string) {
   <div
     class="editor-console z-30 flex shrink-0 select-none flex-col gap-3 border-t border-[var(--border-color)] bg-[var(--bg-card)] px-5 py-3 shadow-none"
   >
+    <p v-if="submissionStore.isSubmitting || pendingSubmissionId" role="status" aria-live="polite" class="text-xs text-[var(--text-secondary)]">
+      <template v-if="submissionStore.isSubmitting">正在提交代码，请稍候…</template>
+      <template v-else>已提交 <span class="font-mono">#{{ pendingSubmissionId }}</span>，评测结果将自动更新。</template>
+    </p>
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <!-- 左：最新评测记录 pill（优先服务端最新记录，其次本会话提交；均无则留空） -->
+      <!-- 左：最新评测记录（本次提交即时显示，摘要追上后补充测试点信息） -->
       <div class="flex min-w-0 items-center gap-3">
         <!-- 服务端最新记录：#123 WA (Test 4 · 2.01s)，点击进提交详情 -->
         <div
@@ -360,11 +373,12 @@ function goDetail(submitId: string) {
         <button
           type="button"
           class="flex items-center gap-2 rounded-sm bg-[var(--color-primary)] px-5 py-1.5 text-[13px] font-semibold whitespace-nowrap text-white shadow-none transition-all duration-150 hover:bg-[var(--color-primary-hover)] hover:shadow  disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="submissionStore.isSubmitting"
+          :disabled="submissionStore.isSubmitting || !!pendingSubmissionId"
+          :aria-busy="submissionStore.isSubmitting || !!pendingSubmissionId"
           @click="$emit('submit')"
         >
           <svg
-            v-if="submissionStore.isSubmitting"
+            v-if="submissionStore.isSubmitting || pendingSubmissionId"
             class="h-4 w-4 animate-spin"
             fill="none"
             stroke="currentColor"
@@ -374,8 +388,8 @@ function goDetail(submitId: string) {
             <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
             <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
           </svg>
-          <span class="tracking-wide">{{ submissionStore.isSubmitting ? '提交中…' : '提交代码' }}</span>
-          <svg v-if="!submissionStore.isSubmitting" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <span class="tracking-wide">{{ submissionStore.isSubmitting ? '提交中…' : pendingSubmissionId ? '评测中…' : '提交代码' }}</span>
+          <svg v-if="!submissionStore.isSubmitting && !pendingSubmissionId" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M6 12L3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12zm0 0h7.5" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
