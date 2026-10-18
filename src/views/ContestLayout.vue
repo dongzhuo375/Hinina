@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import TopBar from '@/components/layout/TopBar.vue'
-import ActivityBar from '@/components/layout/ActivityBar.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
@@ -80,11 +79,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="relative flex h-full flex-col overflow-hidden bg-[var(--bg-body)]">
+  <div class="contest-theme relative flex h-full flex-col overflow-hidden bg-[var(--bg-body)]">
     <TopBar />
     <div class="flex min-h-0 flex-1 overflow-hidden" :inert="phase === 'ended' || phase === 'upcoming'">
-      <ActivityBar />
-      <main class="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <main class="workspace-main flex min-w-0 flex-1 flex-col overflow-hidden">
         <router-view />
       </main>
     </div>

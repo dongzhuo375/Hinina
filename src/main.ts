@@ -12,6 +12,7 @@ import { useAnnouncementStore } from "@/stores/announcementStore";
 import { onAnnouncementsPublished } from "@/bridge/announcement.bridge";
 import { createCloseGuard } from "@/utils/close-guard";
 import "@/styles/global.css";
+import "@/styles/contest.css";
 // KaTeX 样式与字体（题面/公告的 LaTeX 公式渲染）。字体由 katex 包本地打包，
 // 不经 CDN —— 符合离线客户端约束；全局引入使所有 renderMarkdown 消费方一致生效。
 import "katex/dist/katex.min.css";

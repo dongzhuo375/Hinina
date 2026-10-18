@@ -6,6 +6,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { getContestPhase } from '@/utils/contest'
 import { renderMarkdown } from '@/utils/markdown'
+import ActivityBar from '@/components/layout/ActivityBar.vue'
+import { vFocusScope } from '@/utils/focus-scope'
 import { configService } from '@/services/config.service'
 
 const router = useRouter()
@@ -39,13 +41,13 @@ const phaseBadge = computed(() => {
       return {
         label: '进行中',
         pill: 'border-[#a7f3d0] bg-[#ecfdf5] text-[#047857]',
-        dot: 'bg-[#22c55e] animate-pulse',
+        dot: 'bg-[var(--color-success)]',
       }
     case 'upcoming':
       return {
         label: '未开始',
         pill: 'border-[#fde68a] bg-[#fffbeb] text-[#b45309]',
-        dot: 'bg-[#f59e0b]',
+        dot: 'bg-[var(--color-warning)]',
       }
     case 'ended':
       return {
@@ -136,191 +138,84 @@ function close() {
 </script>
 
 <template>
-  <header
-    data-tauri-drag-region
-    class="relative z-50 flex h-12 shrink-0 select-none items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-card)] px-4"
-  >
-    <!-- 左侧：Logo + 比赛状态徽章 + 标题 -->
-    <div data-tauri-drag-region class="flex min-w-0 items-center gap-2.5">
-      <div
-        data-tauri-drag-region
-        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-tr from-[#5631e0] to-[#7c5cff] text-sm font-bold text-white shadow-sm"
-      >
-        H
+  <header class="contest-header">
+    <div class="window-bar" data-tauri-drag-region>
+      <div class="window-brand" data-tauri-drag-region>
+        <span class="brand-monogram" data-tauri-drag-region>H</span>
+        <span class="brand-word" data-tauri-drag-region>Hinina</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span v-if="contest" class="window-event" :title="contest.title" data-tauri-drag-region>{{ contest.title }}</span>
       </div>
-      <span data-tauri-drag-region class="shrink-0 text-base font-bold tracking-tight text-[var(--text-primary)]">
-        Hinina
-      </span>
-      <div class="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]"></div>
-      <span
-        class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium"
-        :class="phaseBadge.pill"
-      >
-        <span class="h-1.5 w-1.5 rounded-full" :class="phaseBadge.dot"></span>
-        {{ phaseBadge.label }}
-      </span>
-      <h1
-        v-if="contest"
-        class="truncate text-sm font-bold text-[var(--text-primary)]"
-        :title="contest.title"
-      >
-        {{ contest.title }}
-      </h1>
-    </div>
-
-    <!-- 中间：剩余时间胶囊 + 进度条 -->
-    <div data-tauri-drag-region class="hidden flex-col items-center justify-center px-4 lg:flex">
-      <div data-tauri-drag-region class="flex items-center gap-2 font-mono text-xs">
-        <span class="text-[var(--text-secondary)]">剩余时间:</span>
-        <span
-          class="tabular-nums rounded border border-[var(--border-color)] bg-[var(--bg-body)] px-2 py-0.5 text-sm font-bold tracking-wider text-[var(--text-primary)]"
-        >
-          {{ timing ? formatHMS(timing.remaining) : '--:--:--' }}
-        </span>
-        <span class="tabular-nums text-[11px] text-[var(--text-muted)]">
-          / {{ timing ? formatHMS(timing.total) : '--:--:--' }}
-        </span>
-      </div>
-      <div
-        data-tauri-drag-region
-        class="mt-1 h-1 w-48 overflow-hidden rounded-full border border-[var(--border-color)] bg-[var(--bg-sidebar)]"
-      >
-        <div class="h-full rounded-full bg-[#fbbf24]" :style="{ width: `${progressPercent}%` }"></div>
-      </div>
-    </div>
-
-    <!-- 右侧：比赛简介 + 用户 + 窗口控制（可交互元素一律不带 drag region） -->
-    <div class="flex shrink-0 items-center gap-3">
-      <button
-        type="button"
-        class="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] shadow-sm transition hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]"
-        @click="toggleBrief"
-      >
-        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-          ></path>
-        </svg>
-        比赛简介
-      </button>
-
-      <div class="relative">
-        <button
-          type="button"
-          class="flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-body)] px-2.5 py-1 text-xs transition hover:bg-[var(--bg-sidebar)]"
-          @click="userMenuOpen = !userMenuOpen"
-        >
-          <span
-            class="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-primary)] text-[10px] font-bold text-white"
-          >
-            {{ userInitial }}
-          </span>
-          <span class="max-w-[120px] truncate font-mono font-medium text-[var(--text-primary)]">
-            {{ auth.username }}
-          </span>
-          <svg
-            class="h-3 w-3 text-[var(--text-muted)] transition-transform"
-            :class="{ 'rotate-180': userMenuOpen }"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            viewBox="0 0 24 24"
-          >
-            <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"></path>
-          </svg>
-        </button>
-
-        <!-- 用户下拉菜单 -->
-        <template v-if="userMenuOpen">
-          <div class="fixed inset-0 z-40" @click="userMenuOpen = false"></div>
-          <div
-            class="absolute right-0 top-full z-50 mt-2 w-40 overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] py-1 shadow-xl"
-          >
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-60"
-              :class="isLoggingOut ? 'text-[var(--text-muted)]' : 'text-[var(--color-error)]'"
-              :disabled="isLoggingOut"
-              @click="handleLogout"
-            >
-              <svg class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke-linecap="round" stroke-linejoin="round"></path>
-                <path d="M16 17l5-5-5-5" stroke-linecap="round" stroke-linejoin="round"></path>
-                <path d="M21 12H9" stroke-linecap="round" stroke-linejoin="round"></path>
-              </svg>
-              {{ isLoggingOut ? '登出中…' : '登出' }}
-            </button>
-          </div>
-        </template>
-      </div>
-
-      <!-- 窗口控制 -->
-      <div class="flex items-center gap-1 border-l border-[var(--border-color)] pl-2">
-        <button
-          type="button"
-          aria-label="最小化"
-          title="最小化"
-          class="flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] transition hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]"
-          @click="minimize"
-        >
-          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path d="M20 12H4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
-          </svg>
-        </button>
-        <button
-          type="button"
-          aria-label="最大化"
-          title="最大化"
-          class="flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] transition hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]"
-          @click="toggleMaximize"
-        >
-          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <rect height="16" rx="2" stroke-width="2" width="16" x="4" y="4"></rect>
-          </svg>
-        </button>
-        <button
-          type="button"
-          aria-label="关闭窗口"
-          title="关闭"
-          class="flex h-7 w-7 items-center justify-center rounded text-[var(--text-muted)] transition hover:bg-[#e81123] hover:text-white"
-          @click="close"
-        >
-          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
-          </svg>
-        </button>
-      </div>
-    </div>
-
-    <!-- 比赛简介弹层 -->
-    <template v-if="briefOpen">
-      <div class="fixed inset-0 z-40" @click="briefOpen = false"></div>
-      <div
-        class="absolute right-4 top-full z-50 mt-2 max-h-[70vh] w-[440px] overflow-y-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-xl"
-      >
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-sm font-bold text-[var(--text-primary)]">比赛简介</h2>
-          <button
-            type="button"
-            aria-label="关闭简介"
-            class="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] transition hover:bg-[var(--bg-sidebar)] hover:text-[var(--text-primary)]"
-            @click="briefOpen = false"
-          >
-            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path>
-            </svg>
+      <div class="window-actions">
+        <button class="action-quiet" :aria-expanded="briefOpen" @click="toggleBrief">比赛简介</button>
+        <div class="relative">
+          <button class="account-button" :aria-expanded="userMenuOpen" @click="userMenuOpen = !userMenuOpen">
+            <span class="account-initial">{{ userInitial }}</span>
+            <span class="max-w-[120px] truncate">{{ auth.username }}</span><span aria-hidden="true">⌄</span>
           </button>
+          <template v-if="userMenuOpen">
+            <div class="fixed inset-0 z-40" @click="userMenuOpen = false"></div>
+            <div v-focus-scope="() => { userMenuOpen = false }" role="dialog" aria-label="账号操作"
+              class="surface-overlay absolute right-0 top-full z-50 mt-2 w-44 p-2">
+              <button class="action-quiet w-full text-left" :disabled="isLoggingOut" @click="handleLogout">{{ isLoggingOut ? '登出中…' : '登出' }}</button>
+            </div>
+          </template>
         </div>
-        <div
-          v-if="briefHtml"
-          class="prose prose-sm max-w-none text-xs leading-relaxed text-[var(--text-secondary)]"
-          v-html="briefHtml"
-        ></div>
-        <p v-else class="text-xs text-[var(--text-muted)]">暂无比赛简介</p>
+        <div class="window-controls">
+          <button aria-label="最小化" @click="minimize"><svg viewBox="0 0 16 16"><path d="M3 8h10" /></svg></button>
+          <button aria-label="最大化" @click="toggleMaximize"><svg viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1" /></svg></button>
+          <button aria-label="关闭窗口" class="window-close" @click="close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8" /></svg></button>
+        </div>
       </div>
+    </div>
+    <div class="navigation-deck">
+      <ActivityBar />
+      <div class="race-instrument" aria-label="比赛计时">
+        <span class="phase-label"><span class="h-1 w-1 rounded-full" :class="phaseBadge.dot"></span>{{ phaseBadge.label }}</span>
+        <span class="clock-caption">剩余</span>
+        <span class="clock-value">{{ timing ? formatHMS(timing.remaining) : '--:--:--' }}</span>
+        <span class="clock-total">/ {{ timing ? formatHMS(timing.total) : '--:--:--' }}</span>
+        <div class="clock-track" aria-hidden="true"><div :style="{ width: `${progressPercent}%` }"></div></div>
+      </div>
+    </div>
+    <template v-if="briefOpen">
+      <div class="fixed inset-0 z-40 bg-[#2e3033]/15" @click="briefOpen = false"></div>
+      <section v-focus-scope="() => { briefOpen = false }" role="dialog" aria-modal="true" aria-labelledby="brief-title"
+        class="surface-overlay absolute right-6 top-12 z-50 max-h-[75vh] w-[480px] max-w-[calc(100vw-48px)] overflow-y-auto p-8">
+        <div class="mb-6 flex items-start justify-between gap-4">
+          <div><p class="eyebrow mb-3">CONTEST / INFORMATION</p><h2 id="brief-title" class="text-xl font-semibold">比赛简介</h2></div>
+          <button class="action-quiet" aria-label="关闭简介" @click="briefOpen = false">关闭 ×</button>
+        </div>
+        <div v-if="briefHtml" class="reading-body" v-html="briefHtml"></div>
+        <p v-else class="text-sm text-[var(--text-muted)]">暂无比赛简介</p>
+      </section>
     </template>
   </header>
 </template>
+<style scoped>
+.contest-header { position: relative; z-index: 50; flex-shrink: 0; background: var(--bg-body); }
+.window-bar { height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 16px 0 24px; user-select: none; }
+.window-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand-monogram { display: grid; place-items: center; width: 23px; height: 23px; background: var(--text-primary); color: var(--bg-body); font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.brand-word { font-size: 11px; letter-spacing: .12em; font-weight: 600; }
+.brand-divider { height: 12px; width: 1px; background: var(--border-color); margin: 0 8px; flex-shrink: 0; }
+.window-event { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.window-actions, .window-controls { display: flex; align-items: center; flex-shrink: 0; gap: 5px; }
+.window-controls { margin-left: 10px; }
+.window-controls button { width: 32px; height: 30px; display: grid; place-items: center; color: var(--text-secondary); }
+.window-controls button:hover { background: var(--bg-sidebar); }
+.window-controls .window-close:hover { background: #a33b2a; color: white; }
+.window-controls svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.account-button { display: flex; align-items: center; gap: 8px; font-size: 11px; padding: 4px 10px; }
+.account-initial { font-family: var(--font-mono); color: #8c6a43; }
+.navigation-deck { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 36px; border-bottom: 1px solid var(--border-color); }
+.race-instrument { position: relative; display: flex; align-items: center; gap: 12px; height: 48px; flex-shrink: 0; }
+.phase-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); margin-right: 12px; }
+.clock-caption { font-size: 10px; color: var(--text-muted); }
+.clock-value { font: 22px var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -.05em; }
+.clock-total { font: 10px var(--font-mono); color: var(--text-muted); }
+.clock-track { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--border-color); }
+.clock-track div { height: 100%; background: #8c6a43; }
+@media (max-width: 1100px) { .navigation-deck { padding: 0 24px; gap: 16px; } .clock-total { display: none; } .phase-label { margin-right: 0; } }
+@media (max-width: 850px) { .clock-caption, .brand-divider, .window-event { display: none; } .navigation-deck { gap: 12px; } .race-instrument { gap: 8px; } }
+</style>

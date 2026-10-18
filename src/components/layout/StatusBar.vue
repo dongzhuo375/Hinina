@@ -38,12 +38,12 @@ onUnmounted(() => {
 
 <template>
   <footer
-    class="flex shrink-0 select-none items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-card)] px-6 py-2"
+    class="flex shrink-0 select-none items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-body)] px-6 py-1.5"
   >
-    <div class="flex items-center gap-1.5 text-xs">
+    <div class="flex items-center gap-1.5 text-[11px]">
       <span
-        class="h-2 w-2 rounded-full"
-        :class="connected ? 'animate-pulse bg-[#22c55e]' : 'bg-[var(--color-error)]'"
+        class="h-1 w-1 rounded-full"
+        :class="connected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-error)]'"
       ></span>
       <span
         class="font-medium"
