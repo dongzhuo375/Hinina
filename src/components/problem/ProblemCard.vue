@@ -54,14 +54,14 @@ const pill = computed(() => {
 
 <template>
   <article
-    class="group flex min-h-[168px] flex-col justify-between border border-[var(--border-color)] bg-[var(--bg-card)] px-5 py-4 transition-all duration-200 ease-out hover:border-[#c9c5b6] hover:shadow-[var(--shadow-raised)]"
+    class="group flex min-h-[168px] flex-col justify-between border-t border-[var(--border-color)] px-5 py-4 transition-colors duration-200 ease-out hover:bg-[var(--bg-card)]"
   >
     <!-- 上区：气球色字块 + 标题/限制 + 状态 -->
     <div class="flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-start gap-3.5">
-        <!-- 字母字块：48px 方角，底色优先用 HOJ 气球色 -->
+        <!-- 字母字块：56px 方角，底色优先用 HOJ 气球色 -->
         <div
-          class="flex h-12 w-12 shrink-0 items-center justify-center rounded-[2px] font-mono text-xl font-bold text-white"
+          class="flex h-14 w-14 shrink-0 items-center justify-center rounded-[2px] font-mono text-2xl font-bold text-white"
           :style="{ backgroundColor: badgeColor }"
         >
           {{ problem.displayId }}
