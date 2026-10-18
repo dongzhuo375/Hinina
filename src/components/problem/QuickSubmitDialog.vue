@@ -249,28 +249,6 @@ function goDetail() {
           {{ problem.displayTitle || `Problem ${problem.displayId}` }}
         </h2>
         <div class="flex shrink-0 items-center gap-3">
-          <!-- 语言选择 -->
-          <div class="relative">
-            <select
-              aria-label="提交语言"
-              v-model="language"
-              class="cursor-pointer appearance-none rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] py-1.5 pl-3 pr-8 font-mono text-xs font-medium text-[var(--text-primary)] shadow-none transition-colors hover:bg-[var(--bg-sidebar)] focus:border-[var(--color-primary)] focus:outline-none"
-            >
-              <option v-for="lang in allowedLanguages" :key="lang" :value="lang">
-                {{ lang }}
-              </option>
-            </select>
-            <svg
-              class="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </div>
           <button
             type="button"
             aria-label="关闭快捷提交" title="关闭"

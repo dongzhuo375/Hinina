@@ -183,6 +183,40 @@ watch(
 // ── 语言下拉 ──
 
 const langMenuOpen = ref(false)
+const langTrigger = ref<HTMLButtonElement>()
+const langMenu = ref<HTMLDivElement>()
+const langMenuTarget = shallowRef<HTMLElement | null>(null)
+const langMenuStyle = ref<Record<string, string>>({})
+
+function positionLangMenu() {
+  if (!langMenuOpen.value || !langTrigger.value) return
+  const rect = langTrigger.value.getBoundingClientRect()
+  const margin = 12
+  const gap = 4
+  const below = window.innerHeight - rect.bottom - gap - margin
+  const above = rect.top - gap - margin
+  const opensBelow = below >= Math.min(320, above)
+  const width = Math.min(Math.max(192, rect.width), window.innerWidth - margin * 2)
+  langMenuStyle.value = {
+    left: `${Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin))}px`,
+    width: `${width}px`,
+    maxHeight: `${Math.max(0, Math.min(320, opensBelow ? below : above))}px`,
+    ...(opensBelow ? { top: `${rect.bottom + gap}px` } : { bottom: `${window.innerHeight - rect.top + gap}px` }),
+  }
+}
+
+async function toggleLangMenu() {
+  langMenuOpen.value = !langMenuOpen.value
+  if (!langMenuOpen.value) return
+  // 挂到工作台外壳，避开编辑器 overflow 和快捷提交玻璃卡片的裁切，同时继承主题。
+  langMenuTarget.value = langTrigger.value?.closest<HTMLElement>('.contest-theme') ?? document.body
+  positionLangMenu()
+  await nextTick()
+  langMenu.value?.querySelector<HTMLButtonElement>('[aria-current="true"]')?.focus()
+}
+
+onMounted(() => window.addEventListener('resize', positionLangMenu))
+onUnmounted(() => window.removeEventListener('resize', positionLangMenu))
 
 function selectLanguage(value: string) {
   langMenuOpen.value = false
@@ -345,9 +379,13 @@ defineExpose({ focus })
       <!-- 左：语言选择 -->
       <div class="relative">
         <button
+          ref="langTrigger"
           type="button"
+          aria-label="提交语言"
+          aria-haspopup="dialog"
+          :aria-expanded="langMenuOpen"
           class="flex items-center gap-1.5 rounded border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1 font-mono text-xs font-semibold text-[var(--text-primary)] shadow-none transition-colors hover:border-[var(--color-primary)]"
-          @click="langMenuOpen = !langMenuOpen"
+          @click="toggleLangMenu"
         >
           <span class="font-bold text-[var(--color-primary)]">{{ language }}</span>
           <svg
@@ -361,17 +399,20 @@ defineExpose({ focus })
             <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <template v-if="langMenuOpen">
-          <div class="fixed inset-0 z-40" @click="langMenuOpen = false"></div>
+        <Teleport v-if="langMenuOpen && langMenuTarget" :to="langMenuTarget">
+          <div class="fixed inset-0 z-[100]" @click="langMenuOpen = false"></div>
           <div
+            ref="langMenu"
             v-focus-scope="() => { langMenuOpen = false }" role="dialog" aria-label="选择语言"
-            class="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] py-1 shadow-lg"
+            :style="langMenuStyle"
+            class="fixed z-[101] overflow-y-auto overscroll-contain rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] py-1 shadow-lg"
           >
             <button
               v-for="lang in availableLanguages"
               :key="lang"
               type="button"
-              class="flex w-full items-center justify-between px-3 py-1.5 text-left font-mono text-xs transition-colors"
+              :aria-current="lang === language ? 'true' : undefined"
+              class="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left font-mono text-xs break-words transition-colors"
               :class="
                 lang === language
                   ? 'bg-[var(--bg-sidebar)] font-semibold text-[var(--color-primary)]'
@@ -382,7 +423,7 @@ defineExpose({ focus })
               {{ lang }}
               <svg
                 v-if="lang === language"
-                class="h-3 w-3"
+                class="h-3 w-3 shrink-0"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2.5"
@@ -392,7 +433,7 @@ defineExpose({ focus })
               </svg>
             </button>
           </div>
-        </template>
+        </Teleport>
       </div>
 
       <!-- 右：清空 / 上传 / 设置 + 备份指示 -->
