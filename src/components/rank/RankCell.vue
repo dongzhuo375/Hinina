@@ -20,29 +20,29 @@ const resolved = computed(() => resolveRankCell(props.cell))
  */
 const SKIN: Record<RankCellKind, { box: string; top: string; bottom: string }> = {
   'first-ac': {
-    box: 'bg-[var(--color-first-ac)] shadow-xs',
+    box: 'bg-[var(--color-first-ac)] shadow-none',
     top: 'text-white',
-    bottom: 'text-emerald-100',
+    bottom: 'text-[var(--color-success)]',
   },
   ac: {
     box: 'border border-[var(--color-ac-border)] bg-[var(--color-ac-bg)]',
-    top: 'text-emerald-700',
-    bottom: 'text-emerald-600',
+    top: 'text-[var(--color-success)]',
+    bottom: 'text-[var(--color-success)]',
   },
   'after-ac': {
     box: 'border border-[var(--color-ac-border)] bg-[var(--color-ac-bg)]',
-    top: 'text-emerald-700',
-    bottom: 'text-emerald-600',
+    top: 'text-[var(--color-success)]',
+    bottom: 'text-[var(--color-success)]',
   },
   sealed: {
     box: 'border border-[var(--color-frozen-border)] bg-[var(--color-frozen-bg)]',
-    top: 'text-slate-600',
-    bottom: 'text-slate-500',
+    top: 'text-[var(--text-secondary)]',
+    bottom: 'text-[var(--text-secondary)]',
   },
   wa: {
     box: 'border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)]',
-    top: 'text-rose-600',
-    bottom: 'text-rose-500',
+    top: 'text-[var(--color-error)]',
+    bottom: 'text-[var(--color-error)]',
   },
   none: { box: '', top: '', bottom: '' },
 }
@@ -87,7 +87,7 @@ const hint = computed(() => {
 <template>
   <div
     v-if="resolved.kind === 'none'"
-    class="text-center font-sans text-[11px] text-slate-300"
+    class="text-center font-sans text-[11px] text-[var(--text-muted)]"
     :title="hint"
   >
     -
