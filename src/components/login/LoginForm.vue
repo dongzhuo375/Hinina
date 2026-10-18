@@ -37,7 +37,7 @@ const accountStatus = computed(() => {
   <section class="login-card-wrap w-full max-w-[470px]" aria-label="参赛账号验证">
     <div class="login-card relative px-7 py-8 sm:px-10 sm:py-10">
       <header class="mb-8">
-        <h2 class="text-2xl font-semibold tracking-[0.025em] text-[#2e3033]">
+        <h2 class="login-title text-2xl font-semibold tracking-[0.04em] text-[#2e3033]">
           {{ isLoggedIn ? '账号已验证' : '登录参赛系统' }}
         </h2>
         <span class="mt-4 block h-[2px] w-12 bg-[#2e3033]"></span>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import '@fontsource-variable/noto-serif-sc/wght.css'
+import '@fontsource-variable/roboto-mono/wght.css'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
@@ -291,7 +293,27 @@ onUnmounted(() => {
 .login-page {
   display: flex;
   flex-direction: column;
-  font-family: var(--font-sans);
+  --login-font-body: "Inter Variable", "Inter", "Noto Sans SC Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --login-font-title: "Noto Serif SC Variable", "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  --login-font-mono: "Roboto Mono Variable", "Roboto Mono", "Space Mono", monospace;
+  font-family: var(--login-font-body);
+  font-synthesis: none;
+}
+
+/* 登录页拥有独立字体系统，避免工作台全局字体调整改变入口页的文化气质。 */
+:global(.login-page .font-sans) { font-family: var(--login-font-body); }
+:global(.login-page .font-mono) { font-family: var(--login-font-mono); }
+:global(.login-page .login-title) {
+  font-family: var(--login-font-title);
+  font-weight: 600;
+  font-synthesis: none;
+}
+
+/* 登录页文本选中态与木色交互强调保持一致，覆盖浏览器默认的紫色高亮。 */
+:global(.login-page::selection),
+:global(.login-page ::selection) {
+  background: #8c6a43;
+  color: #ffffff;
 }
 
 .login-main {
