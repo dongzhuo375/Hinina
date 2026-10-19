@@ -654,15 +654,21 @@ function updateActiveSection(): void {
   const scroller = scrollerRef.value
   if (!scroller) return
   const scrollerTop = scroller.getBoundingClientRect().top
-  // 内容不足一屏时末尾分组永远到不了判定线：滚到底即视为落在最后一个分组
-  const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
+  // 「滚到底」只在页面真的可滚动时成立 —— 视口足够高、无需滚动时
+  // scrollHeight ≈ clientHeight，atBottom 恒真会把首屏误判成最后一个分组
+  const scrollable = scroller.scrollHeight > scroller.clientHeight + 2
+  const atBottom =
+    scrollable && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
 
   if (spyLockTarget !== null) {
     const target = document.getElementById(`settings-${spyLockTarget}`)
-    // scroll-margin-top: 24px —— 平滑滚动的终点是「目标顶边 = 容器顶 + 24」；
-    // 目标在末尾时改为等「滚到底」作为到位信号
-    const settled =
-      atBottom || (target !== null && Math.abs(target.getBoundingClientRect().top - scrollerTop - 24) <= 2)
+    // scroll-margin-top: 24px —— 平滑滚动的终点是「目标顶边 = 容器顶 + 24」。
+    // atBottom 只对「目标是最后一个分组」算到位信号：从底部回点上方分组时，
+    // 起滚瞬间仍处于底部，若把 atBottom 当作任意目标的到位信号，锁会提前
+    // 释放、高亮随回滚扫过所有中间分组（即本要消除的闪烁）
+    const docked =
+      target !== null && Math.abs(target.getBoundingClientRect().top - scrollerTop - 24) <= 2
+    const settled = docked || (atBottom && spyLockTarget === SECTION_LABELS.length - 1)
     if (!settled) return
     releaseSpyLock()
   }

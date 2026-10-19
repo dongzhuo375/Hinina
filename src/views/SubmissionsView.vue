@@ -471,7 +471,7 @@ onUnmounted(() => {
             <table class="w-full border-collapse text-left">
               <thead class="sticky top-0 z-10">
                 <tr
-                  class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)] font-mono text-xs tracking-wider text-[var(--text-secondary)] uppercase"
+                  class="bg-[var(--bg-sidebar)] font-mono text-xs tracking-wider text-[var(--text-secondary)] uppercase"
                 >
                 <th class="px-4 py-3 font-semibold">运行编号</th>
                 <th class="px-4 py-3 font-semibold">提交时间</th>
@@ -618,3 +618,15 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/*
+ * border-collapse: collapse 下，tr 的 border 属于表格合并边框模型，
+ * Chromium（WebView2 同引擎）不会让它跟着 sticky 表头一起绘制 ——
+ * 滚动后表头下边框消失。改用单元格内阴影（与 ScoreboardTable 的
+ * MY_ROW_EDGE 同一规避手法），线画在 th 自身上，始终可见。
+ */
+thead.sticky th {
+  box-shadow: inset 0 -1px 0 var(--border-color);
+}
+</style>

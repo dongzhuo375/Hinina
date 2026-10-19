@@ -33,7 +33,9 @@
 ```
 点击「上一页/下一页」→ 边界判定（current <= 1 / current >= pages）或 loading → disabled 不触发
                       否则 emit('go', current ± 1)
-点击页码 item        → loading 时禁用；否则 emit('go', item)（父级 store 内部对同页点击自判 no-op）
+点击页码 item        → loading 时禁用；否则 emit('go', item)。注意：store 只做边界
+                      校验（1..pages），**同页点击会重新拉取当前页**（setHistoryPage 无
+                      同页短路，行为与抽取前的旧分页器一致，可当作手动刷新用）
 ```
 
 设计要点：

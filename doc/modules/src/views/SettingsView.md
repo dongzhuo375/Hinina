@@ -39,8 +39,8 @@
 | `INPUT` / `INPUT_ERROR` / `inputClass` | 常量/fn | 输入框样式拼接（错误态红框） |
 | `SECTION_LABELS` | 常量 | 左侧索引导航的七个分组标签，与 `settings-{i}` section 的顺序/数量一一对应 |
 | `activeSection` / `scrollerRef` / `SPY_OFFSET_PX` | ref/常量 | scroll-spy 状态：当前分组下标、页面纵向滚动容器引用、判定线偏移（容器顶部下移 96px） |
-| `updateActiveSection` | fn | 滚动事件驱动（`@scroll.passive`）：取最后一个顶边越过判定线的分组为当前项；**滚到底直接落在最后一个分组**（内容不足一屏时末尾分组永远到不了判定线）；`watch(loading)` 在 sections 渲染完成后（`nextTick`）再校正一次 |
-| `spyLockTarget` / `releaseSpyLock` | 模块级变量/fn | 点击导航后的 scroll-spy 锁定：平滑滚动途经中间分组时高亮不跳动（否则导航文字闪烁）；到位信号 = 目标顶边抵达 scroll-margin 停靠点 ±2px 或滚到底，1s 超时兜底（滚动被用户打断时释放） |
+| `updateActiveSection` | fn | 滚动事件驱动（`@scroll.passive`）：取最后一个顶边越过判定线的分组为当前项；**滚到底直接落在最后一个分组**（内容不足一屏时末尾分组永远到不了判定线；`atBottom` 判定带 `scrollable` 前置，页面无需滚动时首屏不会误判成末组）；`watch(loading)` 在 sections 渲染完成后（`nextTick`）再校正一次 |
+| `spyLockTarget` / `releaseSpyLock` | 模块级变量/fn | 点击导航后的 scroll-spy 锁定：平滑滚动途经中间分组时高亮不跳动（否则导航文字闪烁）；到位信号 = 目标顶边抵达 scroll-margin 停靠点 ±2px，**仅当目标是最后一个分组时**「滚到底」也算到位（否则从底部回点上方分组时锁会被起滚瞬间的 atBottom 提前释放，闪烁复现），1s 超时兜底（滚动被用户打断时释放） |
 | `scrollToSection` | `(index) => void` | 点击导航：立即锁定 `activeSection` 并上 spy 锁，`scrollIntoView({ behavior: 'smooth' })` + `focus({ preventScroll: true })` |
 
 ## 直接依赖
