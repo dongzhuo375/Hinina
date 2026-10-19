@@ -162,7 +162,7 @@ pub fn factories() -> Vec<&'static dyn AdapterFactory> { vec![&hoj::FACTORY, &hy
 
 ### 落地时要同步的文档
 
-`开发手册.md` §4.2 的「OJ 类型与注册」描述、`Architecture.md` 的「关键设计约束」；`doc/problem.md` 的问题 11（「OJType 缺少 Custom 变体」）可以标掉 —— 解法不是加变体，是取消闭集。
+`开发手册.md` §4.2 的「OJ 类型与注册」描述、`Architecture.md` 的「关键设计约束」；`doc/problem.md` 的问题 11（「OJType 缺少 Custom 变体」）可以标掉 —— 解法不是加变体，是取消闭集。（该文档已于 2026-09-22 由 `doc/未解决问题清单.md` 替代并删除；问题 11 已随 #20 取消闭集而消解，清单中不再收录。）
 
 ## 改造后适配器要不要改
 
@@ -183,7 +183,7 @@ pub fn factories() -> Vec<&'static dyn AdapterFactory> { vec![&hoj::FACTORY, &hy
 | `service/auth/mod.rs:95/138/282` | `format!("{:?}", oj_type)` | `OjId::session_file()` |
 | 4 个 Service 的 18 处 `current_oj()` | 取 OJ → 取能力 | `registry.current()?.contest` |
 
-`doc/problem.md` 的问题 11（「OJType 缺少 Custom 变体」）也可以借这次标掉 —— 解法不是加变体，是取消闭集。
+`doc/problem.md` 的问题 11（「OJType 缺少 Custom 变体」）也可以借这次标掉 —— 解法不是加变体，是取消闭集（该文档已删除，结论见上）。
 
 ## 不建议做的
 

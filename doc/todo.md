@@ -92,19 +92,22 @@
 > 后端 5 个核心功能闭环打通后，开始前端开发。
 
 - [x] **项目初始化** — Vite + Vue3 + TypeScript + TailwindCSS + Naive UI + Monaco Editor
-- [x] **Bridge 层** — `src/bridge/`：封装 Tauri IPC invoke 调用（auth, contest, problem, submission, workspace, config）
-- [x] **Service 层** — `src/services/`：auth / contest / problem / submission / workspace 业务逻辑
-- [x] **Store 层** — `src/stores/`：Pinia 状态管理（auth, contest, problem, submission, workspace）
-- [x] **登录页** — `views/LoginView.vue`
-- [x] **比赛页** — `views/ContestView.vue`（单比赛模式，三栏布局：题目列表 + 题面 + 编辑器/提交面板）
-- [x] **题目阅读器** — `components/problem/ProblemStatement.vue`（分栏布局：题面 + 样例）
-- [x] **代码编辑器** — `components/editor/CodeEditor.vue`（Monaco Editor + 语言切换 + 提交按钮）
+- [x] **Bridge 层** — `src/bridge/`：封装 Tauri IPC invoke 调用（auth / contest / problem / rank / submission / announcement / workspace / config / system）
+- [x] **Service 层** — `src/services/`：auth / config / contest / problem / rank / submission / announcement / system / workspace 业务逻辑
+- [x] **Store 层** — `src/stores/`：Pinia 状态管理（auth / contest / problem / rank / submission / announcement / workspace + 会话级清理 `session.ts`）
+- [x] **登录页** — `views/LoginView.vue`（左栏 `components/login/LoginForm.vue` ｜ 右栏 `EventTitle.vue` + `Countdown.vue`；会话恢复、按比赛阶段决策进场、匿名简报有界重试、赛前会话错峰预检。PR #35 按设计稿重构）
+- [x] **比赛工作台外壳** — `views/ContestLayout.vue`（TopBar + `<router-view>` + StatusBar；各功能页是**平级子路由**而非单页三栏，自 #14 起取代早期的 `views/ContestView.vue`）+ `components/layout/{TopBar,ActivityBar,StatusBar}.vue`（PR #36：TopBar 改两行式并把导航条内嵌其中，外壳承担赛程闸门与跨场缓存刷新）
+- [x] **题目总览** — `views/ProblemSetView.vue`（统计卡 + 题目列表，limits 渐进填充，30s±5s 轮询；PR #36 由卡片网格改为紧凑目录行）+ `components/problem/ProblemCard.vue`
+- [x] **题目阅读器** — `components/problem/ProblemStatement.vue`（分栏布局：题面 + 样例；容器查询驱动排版）
+- [x] **代码编辑器** — `components/editor/CodeEditor.vue`（Monaco Editor + 语言切换 + 提交按钮；PR #36 语言菜单改 Teleport 浮层）
 - [x] **编辑器设置弹层** — `components/editor/EditorSettingsPopover.vue`（字号 / Tab 宽度 / 编辑器主题 `vs`·`vs-dark`，即时生效 + debounce 落盘；值域唯一来源 `utils/editor.ts`，Rust `EditorConfig::sanitize` 兜底收敛）
-- [x] **提交结果面板** — `components/submission/SubmissionPanel.vue`
+- [x] **提交反馈与快捷提交** — `components/editor/EditorConsoleBar.vue`（最新记录 pill + 失败原因首行）+ `components/problem/QuickSubmitDialog.vue`（题目行内快捷提交）。两者自 #14 工作台重构起取代了早期的 `components/submission/SubmissionPanel.vue`（该文件与 `views/ContestView.vue` 均已删除）；PR #36 补上提交即时反馈与重复发送三层防护
 - [x] **Rust 后端补齐** — OjConfig 增加 contest_id、Contest 实体扩展、load_configured_contest 命令、WorkspaceManager find_or_create（P36）、auto-save Tauri runtime（P39）
 - [x] **评测页** — `views/SubmissionsView.vue`（筛选工具条 + 提交表格 + 分页；onlyMine 后端强制；`?problem=` 自动预筛）+ `views/SubmissionDetailView.vue`（判定横幅 + 测试点明细/子任务 + 只读代码）
+- [x] **榜单页** — `views/RankView.vue` + `components/rank/{RankToolbar,ScoreboardTable,RankCell}.vue` + `components/contest/ContestStatsBar.vue`（ACM/OI 分流、封榜提示、打星/女生全量快照模式）
 - [x] **公告页** — `views/AnnouncementsView.vue`（卡片 feed + 长文折叠）+ 客户端已读状态（Rust 文件持久化，ActivityBar 未读红点）
-- [x] **设置页** — `views/SettingsView.vue`（OJ / 编辑器 / 布局 / 主题置灰 / 关于 五分组，P55 配置值域统一与消费落地）
+- [x] **设置页** — `views/SettingsView.vue`（OJ / 编辑器 / 布局 / 主题置灰 / **数据目录** / **重置与清理** / 关于 七个分组，P55 配置值域统一与消费落地）
+- [x] **赛场视觉体系** — `styles/contest.css`（`.contest-theme` 令牌 + `--ui-step` 响应式密度）+ `components/common/PageHeading.vue`（01–05 编号页头）+ `utils/focus-scope.ts`（弹层焦点作用域指令）+ 5 个 `@fontsource-variable/*` 本地打包字体（PR #36）
 - [x] **客户端缓存优化** — `infra/cache.rs` 落地 `TtlCache` + `JsonDiskCache` 原语；比赛元信息（TTL 120s，内存+磁盘）、题面（TTL 30min，内存+磁盘，`oj.cacheProblemStatement` 开关）、终态提交详情/测试点（TTL 2h，仅内存 + 登出清理）；前端 `myStatus` 增量失效 + 榜单用户操作路径去抖 memo。判据与失效路径见 `doc/Architecture.md`「客户端缓存策略」
 
 ---
