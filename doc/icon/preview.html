@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Hinina 图标预览</title>
+<style>
+  :root {
+    --bg: #F7F6F1;
+    --ink: #2E3033;
+    --wood: #8C6A43;
+    --line: rgba(46, 48, 51, 0.10);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Inter", "Noto Sans SC", "PingFang SC", sans-serif;
+    padding: 64px 72px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+  .sub {
+    margin-top: 8px;
+    font-size: 11px;
+    letter-spacing: 0.35em;
+    color: rgba(46, 48, 51, 0.55);
+    font-family: "JetBrains Mono", monospace;
+  }
+  .rule { border: none; border-top: 1px solid var(--line); margin: 40px 0; }
+  h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.25em;
+    color: rgba(46, 48, 51, 0.6);
+    margin-bottom: 24px;
+  }
+  .row { display: flex; align-items: flex-end; gap: 40px; flex-wrap: wrap; }
+  .cell { text-align: center; }
+  .cell img { display: block; }
+  .cell .label {
+    margin-top: 10px;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: rgba(46, 48, 51, 0.45);
+    font-family: "JetBrains Mono", monospace;
+  }
+  .mask img { border-radius: 22.5%; }
+  .dark-surface {
+    background: #1F2124;
+    padding: 32px;
+    display: inline-block;
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 64px 64px;
+    padding: 32px;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+
+<h1>HININA</h1>
+<div class="sub">APP ICON · XCPC DESKTOP CLIENT</div>
+
+<hr class="rule">
+
+<h2>深色母版 · 直角（原始出血）</h2>
+<div class="row">
+  <div class="cell"><img src="icon.svg" width="256" height="256"><div class="label">256</div></div>
+  <div class="cell"><img src="icon.svg" width="128" height="128"><div class="label">128</div></div>
+  <div class="cell"><img src="icon.svg" width="64" height="64"><div class="label">64</div></div>
+  <div class="cell"><img src="icon-small.svg" width="48" height="48"><div class="label">48</div></div>
+  <div class="cell"><img src="icon-small.svg" width="32" height="32"><div class="label">32</div></div>
+  <div class="cell"><img src="icon-small.svg" width="16" height="16"><div class="label">16</div></div>
+</div>
+
+<hr class="rule">
+
+<h2>系统蒙版模拟（macOS / Windows 圆角 22.5%）</h2>
+<div class="row mask">
+  <div class="cell"><img src="icon.svg" width="256" height="256"><div class="label">256</div></div>
+  <div class="cell"><img src="icon.svg" width="128" height="128"><div class="label">128</div></div>
+  <div class="cell"><img src="icon-small.svg" width="64" height="64"><div class="label">64</div></div>
+  <div class="cell"><img src="icon-small.svg" width="32" height="32"><div class="label">32</div></div>
+</div>
+
+<hr class="rule">
+
+<h2>浅色变体</h2>
+<div class="row">
+  <div class="cell"><div class="dark-surface"><img src="icon-light.svg" width="256" height="256"></div><div class="label">256 ON DARK</div></div>
+  <div class="cell"><div class="dark-surface"><img src="icon-light.svg" width="128" height="128"></div><div class="label">128 ON DARK</div></div>
+</div>
+
+<hr class="rule">
+
+<h2>单色字标（currentColor · 托盘 / 菜单）</h2>
+<div class="row">
+  <!-- currentColor 不跨越 <img> 边界，此处内联 SVG 以演示配色 -->
+  <div class="cell">
+    <div class="grid-bg">
+      <svg width="128" height="128" viewBox="0 0 1024 1024" style="color:#2E3033" fill="currentColor">
+        <rect x="288" y="272" width="120" height="480"/><polygon points="632,272 688,272 752,336 752,752 632,752"/><rect x="408" y="476" width="224" height="72"/>
+      </svg>
+    </div>
+    <div class="label">INK</div>
+  </div>
+  <div class="cell">
+    <div class="dark-surface">
+      <svg width="128" height="128" viewBox="0 0 1024 1024" style="color:#F7F6F1" fill="currentColor">
+        <rect x="288" y="272" width="120" height="480"/><polygon points="632,272 688,272 752,336 752,752 632,752"/><rect x="408" y="476" width="224" height="72"/>
+      </svg>
+    </div>
+    <div class="label">PAPER</div>
+  </div>
+  <div class="cell">
+    <div class="dark-surface">
+      <svg width="128" height="128" viewBox="0 0 1024 1024" style="color:#8C6A43" fill="currentColor">
+        <rect x="288" y="272" width="120" height="480"/><polygon points="632,272 688,272 752,336 752,752 632,752"/><rect x="408" y="476" width="224" height="72"/>
+      </svg>
+    </div>
+    <div class="label">WOOD</div>
+  </div>
+</div>
+
+</body>
+</html>

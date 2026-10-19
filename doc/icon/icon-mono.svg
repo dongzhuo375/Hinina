@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Hinina 应用图标 · 单色字标（透明底，currentColor） -->
+  <!-- 适用于系统托盘 / 菜单 / 水印等单色场景，颜色由使用方指定 -->
+  <g fill="currentColor">
+    <rect x="288" y="272" width="120" height="480"/>
+    <polygon points="632,272 688,272 752,336 752,752 632,752"/>
+    <rect x="408" y="476" width="224" height="72"/>
+  </g>
+</svg>

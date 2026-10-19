@@ -142,7 +142,12 @@ function close() {
   <header class="contest-header">
     <div class="window-bar" data-tauri-drag-region>
       <div class="window-brand" data-tauri-drag-region>
-        <span class="brand-monogram" data-tauri-drag-region>H</span>
+        <svg class="brand-monogram" viewBox="0 0 64 64" aria-hidden="true">
+          <rect width="64" height="64" fill="#2E3033" />
+          <rect x="16" y="16" width="9" height="32" fill="#F7F6F1" />
+          <polygon points="39,16 42,16 48,22 48,48 39,48" fill="#F7F6F1" />
+          <rect x="25" y="29" width="14" height="6" fill="#8C6A43" />
+        </svg>
         <span class="brand-word" data-tauri-drag-region>Hinina</span>
         <span class="brand-divider" aria-hidden="true"></span>
         <span v-if="contest" class="window-event" :title="contest.title" data-tauri-drag-region>{{ contest.title }}</span>
@@ -197,7 +202,8 @@ function close() {
 .contest-header { position: relative; z-index: 50; flex-shrink: 0; background: var(--bg-body); }
 .window-bar { height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 16px 0 24px; user-select: none; }
 .window-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand-monogram { display: grid; place-items: center; width: 23px; height: 23px; background: var(--text-primary); color: var(--bg-body); font-size: 12px; font-weight: 700; flex-shrink: 0; }
+/* pointer-events: none —— 让点击/双击穿透到带 data-tauri-drag-region 的父容器，否则 SVG 子元素会拦截拖拽与双击最大化 */
+.brand-monogram { width: 23px; height: 23px; flex-shrink: 0; pointer-events: none; }
 .brand-word { font-size: 12px; letter-spacing: .12em; font-weight: 600; }
 .brand-divider { height: 12px; width: 1px; background: var(--border-color); margin: 0 8px; flex-shrink: 0; }
 .window-event { font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
