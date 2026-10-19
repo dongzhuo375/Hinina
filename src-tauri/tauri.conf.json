@@ -26,5 +26,28 @@
     "security": {
       "csp": null
     }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "dongzhuo375",
+    "copyright": "Copyright © 2026 dongzhuo375",
+    "category": "DeveloperTool",
+    "shortDescription": "XCPC 桌面竞赛客户端",
+    "longDescription": "Hinina 是面向 ACM/ICPC 与 XCPC 场景的 OJ 桌面竞赛客户端，提供比赛、题目、提交与工作区管理的一体化竞赛体验。",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

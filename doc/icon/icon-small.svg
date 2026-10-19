@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Hinina 应用图标 · 小尺寸优化版（16–64px 使用） -->
+  <!-- 字干加粗、切角加大，保证 16px 下仍可辨认 -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#35383C"/>
+      <stop offset="1" stop-color="#2B2D30"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" fill="url(#tile)"/>
+
+  <g fill="#F7F6F1">
+    <rect x="16" y="16" width="9" height="32"/>
+    <polygon points="39,16 42,16 48,22 48,48 39,48"/>
+  </g>
+  <rect x="25" y="29" width="14" height="6" fill="#8C6A43"/>
+</svg>

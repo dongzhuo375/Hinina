@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Hinina 应用图标 · 浅色变体（1024×1024） -->
+  <!-- 适用于浅色任务栏 / 文档站点 / 印刷品 -->
+  <rect width="1024" height="1024" fill="#F7F6F1"/>
+  <!-- 边缘细微分界，避免融入浅色背景 -->
+  <rect x="1.5" y="1.5" width="1021" height="1021" fill="none" stroke="#2E3033" stroke-opacity="0.08" stroke-width="3"/>
+
+  <!-- H 字标：炭黑 #2E3033 -->
+  <g fill="#2E3033">
+    <rect x="288" y="272" width="120" height="480"/>
+    <polygon points="632,272 688,272 752,336 752,752 632,752"/>
+  </g>
+
+  <!-- 横梁：木色 #8C6A43 -->
+  <rect x="408" y="476" width="224" height="72" fill="#8C6A43"/>
+</svg>

@@ -26,13 +26,14 @@ Hinina/
 │   │                                     #   + 适配器设计缺口报告 / 适配新架构的冲突记录（**本地文档，不入库**，见 .gitignore）
 │   ├── 接入新OJ的改动清单与改造建议.md     # 接入新 OJ 曾要改 5 个既有文件的根因分析与改造建议（改造 1–4 已由 #20 落地，保留为决策记录）
 │   ├── screen/                           # 界面设计稿（login / problem_set / problem_solve / rank / submissios / notice，各含 DESIGN.md + code.html + screen.png）
+│   ├── icon/                             # 应用图标设计稿（DESIGN.md + SVG 母版/浅色/单色/小尺寸变体 + preview.html/.png + PNG 导出 16–1024）
 │   ├── modules/                          # 模块文档（与 src/ 与 src-tauri/src/ 的文件树一一对应）
 │   │   └── README.md                     # 模块文档索引（格式约定与维护规则）
 └── src-tauri/
     ├── Cargo.toml                        # Rust 项目清单（依赖、版本、feature flags）
-    ├── tauri.conf.json                   # Tauri 2 配置文件
+    ├── tauri.conf.json                   # Tauri 2 配置文件（含 bundle：NSIS 打包目标、publisher/版权/描述、图标清单）
     ├── build.rs                          # Tauri 构建脚本
-    ├── icons/                            # 应用图标目录（待填充）
+    ├── icons/                            # 应用图标（源图 doc/icon/，tauri icon 生成 + 小尺寸优化版替换；icon.ico 为母版/小尺寸混合多帧）
     ├── capabilities/
     │   └── default.json                  # Tauri 2 默认权限集（窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽 + dialog:allow-open（数据目录选择器））
     │                                     # 注：**不声明 fs: / http: 授权** —— 本项目不注册 tauri-plugin-fs/-http，所有 I/O 都走 Rust（见「插件与 I/O 边界」）

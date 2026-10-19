@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Hinina 应用图标 · 深色母版（1024×1024） -->
+  <!-- 设计语言：几何 / 光影 / 克制 —— H 字标 + 45° 切角 + 木色横梁 -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#35383C"/>
+      <stop offset="1" stop-color="#2B2D30"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 哑光炭黑底（#2E3033 系，极微弱纵向光影） -->
+  <rect width="1024" height="1024" fill="url(#tile)"/>
+  <!-- 顶部 1px 级边缘高光，建立悬浮层级 -->
+  <rect x="0" y="0" width="1024" height="3" fill="#FFFFFF" opacity="0.08"/>
+
+  <!-- H 字标：米白 #F7F6F1，正交矩形模块 -->
+  <g fill="#F7F6F1">
+    <!-- 左干 -->
+    <rect x="288" y="272" width="120" height="480"/>
+    <!-- 右干：顶部 45° 微妙切角（64px 对角） -->
+    <polygon points="632,272 688,272 752,336 752,752 632,752"/>
+  </g>
+
+  <!-- 横梁：木色 #8C6A43，较字干更细，呼应输入框聚焦延展线 -->
+  <rect x="408" y="476" width="224" height="72" fill="#8C6A43"/>
+</svg>
