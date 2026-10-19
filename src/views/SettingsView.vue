@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PageHeading from '@/components/common/PageHeading.vue'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -610,11 +610,97 @@ async function restoreDefaultDataDir(): Promise<void> {
   }
 }
 
+// ── 分组导航 scroll-spy ──
+// 左侧索引导航与 sections 的顺序/数量一一对应；滚动时以「最后一个顶边越过
+// 判定线的分组」为当前项，点击导航立即锁定高亮，平滑滚动结束后由滚动事件校正。
+
+const SECTION_LABELS: readonly string[] = [
+  'OJ 服务器',
+  '编辑器',
+  '布局',
+  '主题',
+  '重置与清理',
+  '数据目录',
+  '关于',
+]
+
+const activeSection = ref(0)
+/// 页面纵向滚动容器（sections 渲染在其中）；scroll-spy 的判定基准
+const scrollerRef = ref<HTMLElement | null>(null)
+
+/// 判定线 = 滚动容器顶部下移 96px：分组标题进入这条线以上即视为「当前分组」
+const SPY_OFFSET_PX = 96
+
+/**
+ * 点击导航后的 scroll-spy 锁定。
+ *
+ * 平滑滚动会途经中间各分组，若每个滚动帧都实时校正高亮，导航文字会在途中
+ * 分组间来回跳动（闪烁）。点击时锁定到目标分组，滚动到位（目标顶边抵达
+ * scroll-margin 停靠点 ±2px）后才把高亮交还给滚动驱动；超时兜底释放，
+ * 防止滚动被打断（用户中途反拖滚轮）时锁死。
+ */
+let spyLockTarget: number | null = null
+let spyLockTimer: ReturnType<typeof setTimeout> | null = null
+
+function releaseSpyLock(): void {
+  spyLockTarget = null
+  if (spyLockTimer) {
+    clearTimeout(spyLockTimer)
+    spyLockTimer = null
+  }
+}
+
+function updateActiveSection(): void {
+  const scroller = scrollerRef.value
+  if (!scroller) return
+  const scrollerTop = scroller.getBoundingClientRect().top
+  // 「滚到底」只在页面真的可滚动时成立 —— 视口足够高、无需滚动时
+  // scrollHeight ≈ clientHeight，atBottom 恒真会把首屏误判成最后一个分组
+  const scrollable = scroller.scrollHeight > scroller.clientHeight + 2
+  const atBottom =
+    scrollable && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
+
+  if (spyLockTarget !== null) {
+    const target = document.getElementById(`settings-${spyLockTarget}`)
+    // scroll-margin-top: 24px —— 平滑滚动的终点是「目标顶边 = 容器顶 + 24」。
+    // atBottom 只对「目标是最后一个分组」算到位信号：从底部回点上方分组时，
+    // 起滚瞬间仍处于底部，若把 atBottom 当作任意目标的到位信号，锁会提前
+    // 释放、高亮随回滚扫过所有中间分组（即本要消除的闪烁）
+    const docked =
+      target !== null && Math.abs(target.getBoundingClientRect().top - scrollerTop - 24) <= 2
+    const settled = docked || (atBottom && spyLockTarget === SECTION_LABELS.length - 1)
+    if (!settled) return
+    releaseSpyLock()
+  }
+
+  if (atBottom) {
+    activeSection.value = SECTION_LABELS.length - 1
+    return
+  }
+
+  const anchorTop = scrollerTop + SPY_OFFSET_PX
+  let current = 0
+  for (let i = 0; i < SECTION_LABELS.length; i++) {
+    const el = document.getElementById(`settings-${i}`)
+    if (el && el.getBoundingClientRect().top <= anchorTop) current = i
+  }
+  activeSection.value = current
+}
+
 function scrollToSection(index: number) {
+  activeSection.value = index
+  spyLockTarget = index
+  if (spyLockTimer) clearTimeout(spyLockTimer)
+  spyLockTimer = setTimeout(releaseSpyLock, 1_000)
   const target = document.getElementById(`settings-${index}`)
-  target?.scrollIntoView({ block: 'start' })
+  target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   target?.focus({ preventScroll: true })
 }
+
+/// sections 仅在配置加载成功后渲染，渲染完成后再做一次高亮校正
+watch(loading, (isLoading) => {
+  if (!isLoading) void nextTick(updateActiveSection)
+})
 
 // ── 布局滑杆 ──
 
@@ -643,6 +729,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  releaseSpyLock()
   if (savedTimer) clearTimeout(savedTimer)
   if (copiedTimer) clearTimeout(copiedTimer)
   if (resetTimer) clearTimeout(resetTimer)
@@ -653,14 +740,20 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
-    <div class="min-h-0 flex-1 overflow-y-auto">
+    <div ref="scrollerRef" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="updateActiveSection">
       <div class="settings-page mx-auto w-full max-w-[1250px] px-8 pb-8">
         <PageHeading title="环境设置" index="05" subtitle="PREFERENCES">
           <template #description>配置保存在本地客户端，仅影响当前设备</template>
         </PageHeading>
         <nav v-if="!loading && !loadError" class="settings-index" aria-label="设置分组">
-          <a v-for="(label, index) in ['OJ 服务器', '编辑器', '布局', '主题', '重置与清理', '数据目录', '关于']" :key="label"
-            :href="`#settings-${index}`" @click.prevent="scrollToSection(index)"><span>{{ String(index + 1).padStart(2, '0') }}</span>{{ label }}</a>
+          <a
+            v-for="(label, index) in SECTION_LABELS"
+            :key="label"
+            :href="`#settings-${index}`"
+            :class="{ active: activeSection === index }"
+            :aria-current="activeSection === index ? 'true' : undefined"
+            @click.prevent="scrollToSection(index)"
+          ><span>{{ String(index + 1).padStart(2, '0') }}</span>{{ label }}</a>
         </nav>
         <LoadingSpinner v-if="loading" message="正在加载配置…" />
         <ErrorMessage v-else-if="loadError" :message="loadError" :retry="load" />
@@ -1555,9 +1648,14 @@ onBeforeUnmount(() => {
 .settings-switch { border-radius: 2px; }
 .settings-switch-knob { box-shadow: 0 1px 3px #2e303326; }
 .settings-index { position: sticky; top: 24px; float: left; display: flex; flex-direction: column; gap: 6px; width: 175px; padding-top: 16px; }
-.settings-index a { display: flex; gap: 16px; padding: 11px 0; color: var(--text-secondary); font-size: 12px; }
+.settings-index a { position: relative; display: flex; gap: 16px; padding: 11px 0 11px 14px; color: var(--text-secondary); font-size: 12px; transition: color 150ms; }
+.settings-index a::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 2px; border-radius: 1px; background: transparent; transition: background 150ms; }
 .settings-index a:hover { color: #8c6a43; }
+/* 当前分组：棕色高亮 + 左侧指示条（与全站 hover 棕 #8c6a43 一致） */
+.settings-index a.active { color: #8c6a43; font-weight: 600; }
+.settings-index a.active::before { background: #8c6a43; }
 .settings-index span { font: 12px var(--font-mono); color: var(--text-muted); }
+.settings-index a.active span { color: #8c6a43; }
 .settings-sections { margin-left: 205px; }
 .settings-section { scroll-margin-top: 24px; border-top: 1px solid var(--border-color); }
 .settings-section > div:first-child { border: 0; padding: 20px 0 8px; }

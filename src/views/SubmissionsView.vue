@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PageHeading from '@/components/common/PageHeading.vue'
+import PagePager from '@/components/common/PagePager.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
@@ -371,8 +372,9 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 表格主体 -->
-    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
+    <!-- 表格主体：纵向滚动由卡片内部的表格区承担，外层不再开滚动条，
+         否则 flex-1 min-h-0 的卡片会收缩并把多余行裁掉（无滚动条可看） -->
+    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 py-3">
       <!-- 轮询/刷新失败但仍有旧数据：顶部错误条，不清空表格 -->
       <div
         v-if="history.error && history.records.length > 0"
@@ -464,11 +466,13 @@ onUnmounted(() => {
             <p class="text-xs text-[var(--text-muted)]">搜索仅作用于本页记录，试试更换关键词或翻页</p>
           </div>
 
-          <table v-else class="w-full border-collapse text-left">
-            <thead>
-              <tr
-                class="border-b border-[var(--border-color)] bg-[var(--bg-sidebar)]/80 font-mono text-xs tracking-wider text-[var(--text-secondary)] uppercase"
-              >
+          <!-- 表格滚动区：行数超出卡片高度时在这里滚动，底栏分页保持可见 -->
+          <div v-else class="min-h-0 flex-1 overflow-auto">
+            <table class="w-full border-collapse text-left">
+              <thead class="sticky top-0 z-10">
+                <tr
+                  class="bg-[var(--bg-sidebar)] font-mono text-xs tracking-wider text-[var(--text-secondary)] uppercase"
+                >
                 <th class="px-4 py-3 font-semibold">运行编号</th>
                 <th class="px-4 py-3 font-semibold">提交时间</th>
                 <th class="px-4 py-3 font-semibold">题目</th>
@@ -582,12 +586,13 @@ onUnmounted(() => {
                 </td>
               </tr>
             </tbody>
-          </table>
+            </table>
+          </div>
 
           <!-- 底栏：总数 + 分页 -->
           <div
             v-if="history.records.length > 0"
-            class="mt-auto flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-color)] px-4 py-2.5"
+            class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-color)] px-4 py-2.5"
           >
             <div class="text-xs font-medium text-[var(--text-secondary)]">
               共
@@ -599,47 +604,29 @@ onUnmounted(() => {
                 · 本页匹配 {{ visibleRecords.length }} 条
               </span>
             </div>
-            <div v-if="history.pages > 1" class="flex items-center gap-1 text-xs">
-              <button
-                type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
-                :disabled="history.current <= 1 || history.isLoading"
-                @click="goToPage(history.current - 1)"
-              >
-                上一页
-              </button>
-              <template
-                v-for="(item, index) in pageItems"
-                :key="item === '…' ? `gap-${index}` : item"
-              >
-                <span v-if="item === '…'" class="px-1 text-[var(--text-muted)]">…</span>
-                <button
-                  v-else
-                  type="button"
-                  class="min-w-7 rounded-md border px-2 py-1 font-mono transition-colors disabled:opacity-60"
-                  :class="
-                    item === history.current
-                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)] font-semibold text-white'
-                      : 'border-[var(--border-color)] enabled:hover:bg-[var(--bg-sidebar)]'
-                  "
-                  :disabled="history.isLoading"
-                  @click="goToPage(item)"
-                >
-                  {{ item }}
-                </button>
-              </template>
-              <button
-                type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
-                :disabled="history.current >= history.pages || history.isLoading"
-                @click="goToPage(history.current + 1)"
-              >
-                下一页
-              </button>
-            </div>
+            <PagePager
+              v-if="history.pages > 1"
+              :current="history.current"
+              :pages="history.pages"
+              :items="pageItems"
+              :loading="history.isLoading"
+              @go="goToPage"
+            />
           </div>
         </template>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/*
+ * border-collapse: collapse 下，tr 的 border 属于表格合并边框模型，
+ * Chromium（WebView2 同引擎）不会让它跟着 sticky 表头一起绘制 ——
+ * 滚动后表头下边框消失。改用单元格内阴影（与 ScoreboardTable 的
+ * MY_ROW_EDGE 同一规避手法），线画在 th 自身上，始终可见。
+ */
+thead.sticky th {
+  box-shadow: inset 0 -1px 0 var(--border-color);
+}
+</style>
