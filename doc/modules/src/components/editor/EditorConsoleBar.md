@@ -4,11 +4,11 @@
 
 ## 职责
 
-编辑器下方状态区：最新评测记录 pill（**服务端最新记录优先，本会话提交回退**，点击进提交详情）、**本会话提交的失败原因首行**（CE 编译错误等）、失败记录的首个非 AC 测试点提示、提交失败信息、「提交记录 (n)」入口（携带本题筛选跳评测页）与「提交代码」按钮、光标位置 / 编码 / 缩进状态行。
+编辑器下方状态区：**提交即时反馈**（请求前即显示「正在提交代码，请稍候…」，受理后显示「已提交 #id，评测结果将自动更新。」）、最新评测记录 pill（**本会话新提交优先，旧摘要不得遮蔽**，点击进提交详情）、**本会话提交的失败原因首行**（CE 编译错误等）、失败记录的首个非 AC 测试点提示、提交失败信息、「提交记录 (n)」入口（携带本题筛选跳评测页）与「提交代码」按钮、光标位置 / 编码 / 缩进状态行。
 
 ## 核心类型/函数
 
-**props**：`cursor: { line, column } | null`（Monaco 光标，由 CodeEditor 经父级转发；null = 尚未产生光标事件）、`problemId: string | null`（当前题 pid，用于筛「本题最新一条」）、`tabSize?: number`（编辑器当前 Tab 宽度，默认 `utils/editor.DEFAULT_EDITOR_TAB_SIZE`；解题页弹层可改，故不写死）。
+**props**：`cursor: { line, column } | null`（Monaco 光标，由 CodeEditor 经父级转发；null = 尚未产生光标事件）、`problemId: string | null`（当前题 pid，用于筛「本题最新一条」）、`tabSize?: number`（编辑器当前 Tab 宽度，默认 `utils/editor.DEFAULT_EDITOR_TAB_SIZE`；解题页弹层可改，故不写死）、`pendingSubmissionId?: string | null`（默认 `null`；父级传 `pendingSubmission?.id` —— 本会话同内容提交在评测期间，按钮保持「评测中…」锁与反馈文案）。
 **emits**：`submit: []`。
 
 | 名称 | 签名 | 用途 |
@@ -16,12 +16,13 @@
 | `displayId` | computed | 当前路由的比赛内展示题号（`route.params.displayId`，解题页 `/contest/problem/:displayId`），摘要查询与 `?problem=` 深链的参数 |
 | `latest` | computed | 从 `submissionStore.submissions`（只存本会话提交）尾部倒序找本题最新一条；服务端摘要未到达时的**回退数据源** |
 | `summary` | `ref<{ latest: SubmissionRecord \| null; total: number } \| null>` | 服务端题目提交摘要，经 `submissionStore.fetchProblemSummary(contestId, displayId)`（limit=1 取最新一条 + total 计数）；独立于评测页 history state |
+| `summaryVersion` | `let number` | 摘要请求版本号：`refreshSummary` 里 `const version = ++summaryVersion`，返回后仅当 `version === summaryVersion` 才写入 —— **丢弃切题后迟到的旧响应** |
 | `refreshSummary` | fn | 拉取摘要；失败仅 `log.warn` 记录（`utils/logger` 作用域日志）——**摘要失败不影响解题**，回退本地会话 pill |
-| `failedCaseHint` / `hintSubmitId` | ref/普通变量 | 失败记录的测试点提示（如 `Test 4 · 2.01s`）；经 `findFirstFailedCase` 定位首个非 AC 测试点（**子任务制感知**：平铺 `cases` 为空时展开 `subTasks` 查找）；`hintSubmitId` 去重保证**每条提交只拉一次**测试点明细 |
-| `serverPill` | computed | 服务端 pill 组装：`最新记录: #123 WA (Test 4 · 2.01s)`；测试点不可得时回退记录自身耗时（wa/tle 用 `formatMsToSeconds` 秒口径，其余 `N ms`） |
+| `failedCaseHint` / `hintSubmitId` | ref/普通变量 | 失败记录的测试点提示（如 `Test 4 · 2.01s`）；经 `findFirstFailedCase` 定位首个非 AC 测试点（**子任务制感知**：平铺 `cases` 为空时展开 `subTasks` 查找）；`hintSubmitId` 去重保证**每条提交只拉一次**测试点明细，且写入前校验 `hintSubmitId === record.submitId` 防迟到覆盖 |
+| `serverPill` | computed | 服务端 pill 组装：`最新记录: #123 WA (Test 4 · 2.01s)`；测试点不可得时回退记录自身耗时（wa/tle 用 `formatMsToSeconds` 秒口径，其余 `N ms`）。**带遮蔽守卫**：本会话存在同题提交且（本地条目未到终态 ‖ 本地提交时间晚于服务端记录 ‖ 同一提交但服务端记录仍非终态）时返回 `null`，让本地 pill 接管 |
 | `SERVER_TONE_MAP` | 常量 | `StatusTone`（utils/submission 语义色）→ 控制台条既有 `Tone` |
 | `toneOf(status)` | `(JudgementStatus) => Tone` | 本地 pill 配色：AC=success；TLE/MLE=warning；Pending/Compiling/Running=pending（旋转圈）；Unknown=muted；WA/RE/CE=error |
-| `TONE_STYLES` / `toneStyle` / `serverToneStyle` | — | Tone → global.css 语义色变量（fg/bg/border） |
+| `TONE_STYLES` / `toneStyle` / `serverToneStyle` | — | Tone → CSS 变量（`--color-ac-bg` / `--color-wa-bg` / `--color-pending-bg` / `--color-*-border` 等） |
 | `statusLabel(status)` | 组件私有 fn | 本地 pill 文案：驼峰拆空格 `WrongAnswer → Wrong Answer`，**不缩写**——原词与判题语义一一对应（服务端 pill 则用 `statusAbbr` 紧凑缩写） |
 | `failureDetail` | computed | 本会话最新提交的 `errorMessage` **首个非空行**（`\n` 切分后 trim 非空的第一行）；无错误为 null。渲染为 pill 旁等宽截断 span（`title` 悬浮全文，`max-w-[420px] truncate`）—— 完整多行编译错误在提交详情页。**没有它，选手在解题页只看到「Compile Error」四个字**，必须点进详情页才知道错在哪 |
 | `timeLabel` | computed | 本地条目轮询回填的耗时（`entry.time`，ms）；未到终态无值不显示 |
@@ -29,6 +30,8 @@
 | `goSubmissions` / `goDetail` | fn | 跳 `Submissions`（携带 `?problem=displayId`）/ `SubmissionDetail` |
 
 状态行：`UTF-8`（工作区文件由 Rust 后端以 UTF-8 落盘）、`Spaces: {{ tabSize }}`（Monaco 未关 insertSpaces，缩进恒为空格；宽度取编辑器当前 tabSize，由 CodeEditor 经父级转发，弹层可改故不写死）、`Ctrl + Enter 快捷提交` 快捷键提示。
+
+顶部即时反馈行（`<p v-if="submissionStore.isSubmitting || pendingSubmissionId" role="status" aria-live="polite">`）：提交中显示「正在提交代码，请稍候…」，否则显示「已提交 #{{ pendingSubmissionId }}，评测结果将自动更新。」—— 覆盖「点了提交但界面毫无反应」的窗口期（IPC 往返 + 工作区/比赛数据兜底加载都可能耗时）。
 
 ## 直接依赖
 
@@ -42,7 +45,7 @@
 
 ## 被依赖
 
-- `views/ProblemSolveView.vue` — 右栏编辑器下方（`:cursor` + `:problem-id` + `:tab-size`，submit 事件与 CodeEditor 共用同一 `handleSubmit`）
+- `views/ProblemSolveView.vue` — 右栏编辑器下方（`:cursor` + `:problem-id` + `:tab-size` + `:pending-submission-id="pendingSubmission?.id ?? null"`，submit 事件与 CodeEditor 共用同一 `handleSubmit`）
 
 ## 逻辑流程
 
@@ -52,6 +55,7 @@
   watch [displayId, problemId]（切题/Tab 切换）→ 清空 summary/failedCaseHint 后重拉
   watch latest.status 到达终态              → refreshSummary()
       // 覆盖「快捷提交/本页提交收敛 → pill 换成服务端最新记录」的链路
+  // 每次重拉经 summaryVersion 版本号，只有最后一次发起的响应会被写入
 
 watch summary.latest（服务端最新记录变化）:
   同一 submitId 已拉过测试点 → 跳过（hintSubmitId 去重）
@@ -61,27 +65,41 @@ watch summary.latest（服务端最新记录变化）:
       展开 subTasks）→ failedCaseHint = `Test {seq} · {formatMsToSeconds(timeMs)}`
     → 失败 → log.warn 记录，pill 回退记录自身耗时
 
-pill 优先级：serverPill（#id + statusAbbr + 测试点/耗时）
+pill 优先级：serverPill（#id + statusAbbr + 测试点/耗时，**经遮蔽守卫**）
            > latest（本会话提交，原词文案 + ms 耗时）
            > 留空（不显示假数据）
-点击 pill → SubmissionDetail；「提交记录 (n)」→ Submissions?problem=displayId
+点击 pill → SubmissionDetail（pill 带 role="button" / tabindex="0" / Enter 与 Space 键可达）；
+「提交记录 (n)」→ Submissions?problem=displayId
 failureDetail 非空 → pill 旁等宽截断展示失败原因首行（title 悬浮全文）
 submissionStore.error 非空 → 紧随其后截断展示（提交失败 / 轮询连续失败提示；title 悬浮全文）
-提交按钮：isSubmitting 时禁用 + 「提交中…」旋转圈，点击 emit submit
+提交按钮：`isSubmitting || pendingSubmissionId` 时禁用 + 「提交中…」/「评测中…」旋转圈，
+         `:aria-busy` 同步；点击 emit submit
 ```
 
 设计要点：
 
-- **服务端摘要优先、本地会话回退**：摘要在途/拉取失败时展示本会话提交记录，
-  两者皆无则留空——显示过期数据比留空更危险。本地提交到达终态后主动刷新摘要，
-  使 pill 平滑切换到服务端口径（含失败测试点提示）。
+- **服务端摘要优先、本地会话回退，且本地新提交不得被旧摘要遮蔽**：`serverPill` 的三条遮蔽
+  判据精确表达「本会话新提交在途时，服务端摘要（可能仍是旧记录，或同一提交的旧快照）
+  不许占用 pill」—— 否则选手刚点完提交，pill 还显示上一次的 WA，看起来像「提交没生效」。
+  本地提交到达终态后主动刷新摘要，pill 平滑切换到服务端口径（含失败测试点提示）。
+- **`summaryVersion` 丢弃迟到响应**：切题后旧题的摘要请求可能晚到，直接写入会把新题的
+  摘要覆盖成旧题数据；版本号守卫让最后一次发起的请求胜出。
 - **失败测试点提示每条提交只拉一次**：`hintSubmitId` 去重，避免摘要反复刷新时
   重复打测试点接口；测试点不可得时回退记录自身耗时，pill 不留空洞。
 - **子任务制感知（L1）**：subtask 判题下平铺 `cases` 常为空（明细在
   `subTasks[].cases`），`findFirstFailedCase`（utils/submission 纯函数）先查平铺、
   为空再按 groupNum/seq 展开子任务，避免「Test N」提示静默消失。
 - **失败原因首行就地可见**：`JudgementResult.errorMessage` 由轮询回填到本会话条目，控制台条取首行做条内提示 —— CE 的编译错误是选手改代码的唯一依据，只显示「Compile Error」等于把定位成本推给选手（点进详情页才发现第几行错了）。首行截断 + `title` 全文是「条内空间有限、完整内容在详情页」的折中。
+- **提交按钮由父级传入的 `pendingSubmissionId` 与 store 的 `isSubmitting` 共同上锁**：
+  两把锁覆盖不同窗口 —— 前者管「已受理但还在评测」（同内容重复提交），后者管
+  「请求在途」；只在其中一处上锁都会留出可重复发送的缝隙（见 `stores/submissionStore.md`）。
 - 摘要查询走 `submissionStore.fetchProblemSummary`（独立于评测页 history，不干扰
   其列表/筛选）；测试点明细是组件级一次性只读查询，直接消费 submission.service。
-- 色彩语义与 global.css 变量对齐，与榜单/题目卡片/评测页的状态色体系一致
+- 色彩语义取主题 CSS 变量，与榜单/题目行/评测页的状态色体系一致
   （`StatusTone` → 控制台条 `Tone` 经 `SERVER_TONE_MAP` 桥接）。
+- **pill 键盘可达**（`role="button"` + `tabindex="0"` + Enter/Space）：它是进详情页的
+  唯一入口之一，只能鼠标点会让纯键盘用户走不通。
+
+## 测试
+
+`src/components/editor/__tests__/EditorConsoleBar.spec.ts`（jsdom + Pinia，mock `vue-router` 与 `submission.service`）锁定三条不变量：① 提交即反馈 —— 按钮禁用且 `[role=status]` 含「正在提交」，受理后显示「评测中」与 `#new` 且**不再显示旧的 `#old`**，转 WA 后按钮解锁并显示 `#new Wrong Answer`；② 本地轮询超时收敛为 `Unknown` 后，服务端终态结果接管（显示 `#new AC`，既不永久遮蔽也不残留 Unknown）；③ 切题后忽略迟到的旧摘要响应（`summaryVersion` 守卫，仍显示 `#current`）。

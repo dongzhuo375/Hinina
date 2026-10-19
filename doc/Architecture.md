@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-09-19 | 分支：`main`
+> 最后更新：2026-10-18 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -14,7 +14,8 @@ Hinina/
 ├── LICENSE                               # MIT 开源许可证
 ├── .git/                                 # Git 版本控制目录（不入库）
 ├── .github/
-│   └── copilot-instructions.md           # Copilot CLI 指令（架构速查、开发约定）
+│   ├── copilot-instructions.md           # Copilot CLI 指令（架构速查、开发约定）
+│   └── pr-assets/                        # PR 评审用的匿名演示截图（pr-36/：login、problemset、workspace-maximized）
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
@@ -25,8 +26,8 @@ Hinina/
 │   │                                     #   + 适配器设计缺口报告 / 适配新架构的冲突记录（**本地文档，不入库**，见 .gitignore）
 │   ├── 接入新OJ的改动清单与改造建议.md     # 接入新 OJ 曾要改 5 个既有文件的根因分析与改造建议（改造 1–4 已由 #20 落地，保留为决策记录）
 │   ├── screen/                           # 界面设计稿（login / problem_set / problem_solve / rank / submissios / notice，各含 DESIGN.md + code.html + screen.png）
-│   └── modules/
-│       └── README.md                     # 模块文档索引（格式约定与维护规则）
+│   ├── modules/                          # 模块文档（与 src/ 与 src-tauri/src/ 的文件树一一对应）
+│   │   └── README.md                     # 模块文档索引（格式约定与维护规则）
 └── src-tauri/
     ├── Cargo.toml                        # Rust 项目清单（依赖、版本、feature flags）
     ├── tauri.conf.json                   # Tauri 2 配置文件
@@ -249,45 +250,56 @@ Hinina/
 
 ```
 src/
-├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配 + 工作区落盘事件订阅 + 新公告事件订阅 + 关窗前落盘握手（装配 utils/close-guard）+ KaTeX 公式样式全局引入，字体本地打包不经 CDN）
-├── App.vue                               # 根组件（n-config-provider + n-dialog-provider）
+├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配 + 工作区落盘事件订阅 + 新公告事件订阅 + 关窗前落盘握手（装配 utils/close-guard）+ KaTeX 公式样式全局引入 + styles/contest.css 赛场主题引入，字体本地打包不经 CDN）
+├── App.vue                               # 根组件（n-config-provider + n-dialog-provider；按路由分区切换主题：比赛外壳内挂 .contest-theme 并用赛场 themeOverrides，入口页用紫系 themeOverrides）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
-│   └── index.ts                          # Vue Router（/login + /contest 嵌套子树：problems / problem/:displayId / rank / submissions / submissions/:submitId / announcements / settings）+ requiresAuth 认证守卫
+│   ├── index.ts                          # Vue Router（/login + /contest 嵌套子树：problems / problem/:displayId / rank / submissions / submissions/:submitId / announcements / settings）+ requiresAuth 认证守卫 + **赛程阶段闸门**（首次进入工作台/深链时按权威赛程判 `running`，赛前赛后退回登录页）
+│   └── __tests__/
+│       └── contest-access.spec.ts        # 阶段访问策略与既有会话守卫（赛前/赛后深链拦截、开赛左边界放行、认证 status=1 优先、跨场取简报、简报缺失补拉）
 ├── views/
-│   ├── LoginView.vue                     # 登录页（左右分栏：登录表单/已登录身份块 + 几何 SVG 氛围区/比赛简介/倒计时）
-│   │                                     #   已登录且比赛未开始时留在本页等待，倒计时归零自动进入赛场
-│   ├── ContestLayout.vue                 # 比赛工作台外壳：TopBar + ActivityBar + <router-view> + StatusBar；比赛就绪后启动公告轮询（红点全页面鲜活）
-│   ├── ProblemSetView.vue                # 题目总览（统计条 + 卡片网格，limits 渐进填充，30s±5s 轮询；我的状态改为增量失效后按需重拉）
-│   ├── ProblemSolveView.vue              # 解题页（题面分节 ｜ 编辑器 + 控制台条，可拖拽分栏；splitRatio 读配置 + 拖拽回写；切题/失焦/页面隐藏/离开页面时落盘工作区）
-│   ├── RankView.vue                      # 实时榜单（工具条 + 表格 + 分页，10s±2s 轮询、后台暂停、结束即停；打星/女生队全量快照模式）
-│   ├── SubmissionsView.vue               # 评测页（筛选工具条 + 全场提交表格 + 分页，onlyMine 后端强制；?problem= 自动预筛；非终态行 5s±1s 温和刷新）
-│   ├── SubmissionDetailView.vue          # 提交详情页（判定横幅 + CE 面板 + 测试点表格/子任务分组 + Monaco 只读代码区，评测中轮询至终态）
-│   ├── AnnouncementsView.vue             # 公告页（浅色卡片 feed：长文折叠 + 未读圆点，进入即全部已读）
-│   └── SettingsView.vue                  # 设置页（OJ（当前 OJ 下拉=显式 switch_oj + 实例地址 + 比赛 ID/引用）/编辑器/布局/主题置灰/关于 五分组，读改写 AppConfig + 生效性提示）
+│   ├── LoginView.vue                     # 登录页（左侧 LoginForm ｜ 右侧 EventTitle + Countdown；会话恢复、按阶段决策进场（仅 running 自动进入）、匿名简报有界重试、赛前会话错峰预检、页脚连接状态）
+│   ├── ContestLayout.vue                 # 比赛工作台外壳：TopBar（内嵌导航）+ <router-view> + StatusBar；跨场缓存刷新（contest.id ≠ brief.id → 重拉）、公告轮询、**赛程闸门**（upcoming 立即回登录页 / ended 叠加结束覆盖层并 2s 后返回）
+│   ├── ProblemSetView.vue                # 题目总览（PageHeading 01 + 统计卡；紧凑目录行列表，limits 渐进填充，30s±5s 轮询；我的状态改为增量失效后按需重拉）
+│   ├── ProblemSolveView.vue              # 解题页（题面分节 ｜ 编辑器 + 控制台条，可拖拽/方向键调分栏；切题/失焦/页面隐藏/离开页面时落盘；提交三重门控）
+│   ├── RankView.vue                      # 实时榜单（PageHeading 02 + 工具条 + 表格 + 分页，10s±2s 轮询、后台暂停、结束即停；打星/女生队全量快照模式）
+│   ├── SubmissionsView.vue               # 评测页（PageHeading 03 + 筛选工具条 + 全场提交表格 + 分页，onlyMine 后端强制；?problem= 自动预筛；非终态行 5s±1s 温和刷新）
+│   ├── SubmissionDetailView.vue          # 提交详情页（自有顶栏 + 判定横幅 + CE 面板 + 测试点表格/子任务分组 + Monaco 只读代码区，评测中轮询至终态）
+│   ├── AnnouncementsView.vue             # 公告页（PageHeading 04 + 卡片 feed：Grid 两列版式 + 长文折叠 + 未读圆点，进入即全部已读）
+│   ├── SettingsView.vue                  # 设置页（PageHeading 05；OJ（当前 OJ 下拉=显式 switch_oj + 实例地址 + 比赛 ID/引用）/编辑器/布局/主题置灰/数据目录/重置与清理/关于 分组，读改写 AppConfig + 生效性提示）
+│   └── __tests__/                        # ContestLayout.spec.ts（赛程闸门与退出延迟）/ LoginView.spec.ts（入口生命周期：自动进场、简报重试、预检）
 ├── components/
 │   ├── layout/
-│   │   ├── TopBar.vue                    # 顶栏（拖拽区 + 窗口控制 + 状态徽章 + 倒计时胶囊 + 比赛简介抽屉 + 用户 pill）
-│   │   ├── ActivityBar.vue               # 左侧活动栏（题目/榜单/评测/公告 + 底部设置，router-link 驱动高亮；公告项挂真实未读红点徽标；设置项默认隐藏，连点状态栏版本号 5 下才渲染）
+│   │   ├── TopBar.vue                    # 顶栏（**两行式**：40px 窗口条=品牌 + 比赛标题 + 简介浮层 + 账号菜单 + 窗口控制；导航行=内嵌 ActivityBar + 阶段徽章 + 剩余时间 + 进度条；`:navigation-disabled` 驱动导航区 :inert）
+│   │   ├── ActivityBar.vue               # 赛场**横向**导航条（内嵌于 TopBar；题目/榜单/评测/公告 + 编号 01–04 + 末尾「环境设置」（默认隐藏，连点状态栏版本号 5 下才渲染）；公告项挂真实未读红点徽标）
 │   │   └── StatusBar.vue                 # 底部状态条（连接状态 + 客户端版本；版本号同时是设置入口的隐藏解锁点）
 │   ├── contest/
-│   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时，数据源=榜单我的行）
+│   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时或 OI 总得分，数据源=榜单我的行；无卡片外框，渲染在 PageHeading 的右侧插槽）
+│   ├── login/                            # 登录页专用组件（PR #35 拆分）
+│   │   ├── LoginForm.vue                 # 登录卡片（未登录=账号/密码表单 + 密码显隐 + 提交；已登录=账号欢迎态 + 切换账号；底部比赛简介折叠面板。纯受控组件，业务在 LoginView）
+│   │   ├── Countdown.vue                 # 赛程时钟（距开赛四段倒计时 / 赛内已用时 / 「比赛已结束」大字；urgent 时数字转朱红；role=timer + aria-label 拼串）
+│   │   └── EventTitle.vue                # 比赛事件标题（<h1> 衬线字体 + 细分隔线，字号 clamp 响应式）
 │   ├── editor/
-│   │   ├── CodeEditor.vue                # Monaco Editor 封装（语言工具条（候选=题目允许语言列表）+ 自动备份指示 + focus()；readonly 模式供详情页复用；字号/Tab/主题读配置，弹层改动即时生效 + debounce 落盘）
-│   │   ├── EditorSettingsPopover.vue     # 编辑器设置弹层（字号 8–32 滑杆 / Tab 宽度 2/4/8 / 编辑器主题 vs·vs-dark / 恢复默认；受控组件，应用与落盘由 CodeEditor 承担）
-│   │   └── EditorConsoleBar.vue          # 编辑器底部控制台条（最新记录 pill=服务端真实最新提交+首个失败测试点 / 提交记录 (n) 入口 / 提交代码 / 光标与缩进状态行）
+│   │   ├── CodeEditor.vue                # Monaco Editor 封装（语言工具条（候选=题目允许语言列表；菜单 Teleport 到赛场外壳 + fixed 定位 + 上下翻转/可滚动）+ 自动备份指示 + focus()；readonly 模式供详情页复用；字号/Tab/主题读配置，弹层改动即时生效 + debounce 落盘）
+│   │   ├── EditorSettingsPopover.vue     # 编辑器设置弹层（字号 8–32 滑杆 / Tab 宽度 2/4/8 / 编辑器主题 vs·vs-dark / 恢复默认；受控组件 + v-focus-scope，应用与落盘由 CodeEditor 承担）
+│   │   ├── EditorConsoleBar.vue          # 编辑器底部控制台条（提交即时反馈行 + 最新记录 pill=本地新提交优先（遮蔽旧摘要）/ 提交记录 (n) 入口 / 提交代码（评测中锁）/ 光标与缩进状态行）
+│   │   └── __tests__/
+│   │       └── EditorConsoleBar.spec.ts  # 即时反馈、本地 pill 不被旧摘要遮蔽、切题丢弃迟到摘要响应
 │   ├── problem/
-│   │   ├── ProblemCard.vue               # 题目卡片（字母徽章取 HOJ 气球色、limits、通过数、我的状态 AC 优先、评测记录带 ?problem= 跳转、快捷提交弹窗入口）
-│   │   ├── QuickSubmitDialog.vue         # 快捷提交对话框（语言下拉 + Monaco + 拖拽/选择 .cpp/.c/.java/.py ≤256KB 扩展名识别语言 + 提交与内联评测结果）
-│   │   ├── ProblemTabStrip.vue           # 题目快速切换条（A/B/C… chips，标记已 AC / 已尝试）
-│   │   └── ProblemStatement.vue          # 题面分节展示（描述/输入/输出/样例+复制/提示，Markdown 渲染 + 相对图片 URL 改写）
+│   │   ├── ProblemCard.vue               # 题目**行**（题号 + 气球色线、标题与 limits、通过/提交比、我的状态（AC 优先取两源并集）、评测记录带 ?problem= 跳转、快捷提交弹窗入口）
+│   │   ├── QuickSubmitDialog.vue         # 快捷提交对话框（语言由 CodeEditor 自带菜单承担 + Monaco + 拖拽/选择 .cpp/.c/.java/.py ≤256KB 扩展名识别语言 + 提交与内联评测结果；重复发送三层防护）
+│   │   ├── ProblemTabStrip.vue           # 题目快速切换条（「← 总览」返回入口 + A/B/C… chips，标记已 AC / 已尝试）
+│   │   ├── ProblemStatement.vue          # 题面分节展示（描述/输入/输出/样例+复制，Markdown 渲染 + 相对图片 URL 改写；容器查询 cqi 驱动排版、48em 行宽封顶）
+│   │   └── __tests__/
+│   │       └── QuickSubmitDialog.spec.ts # 提交重复防护（鼠标+Ctrl+Enter 只发一次、等待比赛数据前即上锁）、错误提示与解锁
 │   ├── rank/
 │   │   ├── RankToolbar.vue               # 榜单工具条（服务端 keyword 搜索 300ms 防抖 + 分组 tab + 赛制图例 + OI 计分规则徽章）
 │   │   ├── ScoreboardTable.vue           # 榜单表格（粘性表头/我的行/前两列，ACM 与 OI 分流渲染）
 │   │   └── RankCell.vue                  # ACM 单元格（一血/通过/未通过/封榜/赛后提交/未作答）
 │   └── common/
-│       ├── LoadingSpinner.vue            # 通用加载动画
-│       └── ErrorMessage.vue              # 通用错误提示 + 重试按钮
+│       ├── PageHeading.vue               # 赛场通用页头（编号/副标题眉标 + 主标题 + description 插槽 + 右侧操作插槽；样式取自 styles/contest.css）
+│       ├── LoadingSpinner.vue            # 通用加载动画（role=status）
+│       └── ErrorMessage.vue              # 通用错误提示（role=alert）+ 重试按钮
 ├── guards/
 │   └── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配；需 router + authStore，属跨层装配故不落在 stores/ 或 services/
 ├── stores/
@@ -296,10 +308,10 @@ src/
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + loadContest 并发去重 + whenLoaded 统一等待入口（P59）+ 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情 + limits 缓存 + 我的题目状态（limitsOf/statusOf 派生读取；myStatusStale 增量失效，提交终态触发重拉）
 │   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页；用户操作路径查询去抖 in-flight 合并 + 3s memo，轮询与手动刷新不走去抖）
-│   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收；终态时触发 problemStore.invalidateMyStatus）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
+│   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收；终态时触发 problemStore.invalidateMyStatus）+ **重复发送防护**（pendingFor 按「比赛+题目+展示题号+语言+源码」五元组去重，评测期间复用编号；isSubmitting 同步上锁）+ **轮询超时把条目收敛为终态 Unknown**（让服务端结果接管展示）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
 │   ├── announcementStore.ts              # 公告列表 + 客户端已读状态（unreadCount 红点数据源、markAllRead 乐观更新+失败回滚+不可见不标记、isWatching 语义、60s±10s 轮询、窗口重新可见/聚焦即时补拉（去重 1s））
 │   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（两级状态机：syncPending=未推送内存 / isDirty=未落盘；语言权威值=HOJ 显示名，切换即时持久化；源文件名经 utils/language 派生；落盘事件订阅安装器）
-│   └── __tests__/                        # authStore / contestStore / rankStore / submissionStore / announcementStore / workspaceStore .spec.ts（会话状态机、加载去重与 whenLoaded、榜单去重/轮询/全量模式、评测收敛轮询、公告未读语义、工作区落盘状态机与 flush 顺序）
+│   └── __tests__/                        # authStore / contestStore / problemStore / rankStore / submissionStore / announcementStore / session / workspaceStore .spec.ts（会话状态机、加载去重与 whenLoaded、我的题目状态失效、榜单去重/轮询/全量模式、评测收敛轮询与重复提交防护、公告未读语义、会话级清理、工作区落盘状态机与 flush 顺序）
 ├── services/
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
 │   ├── config.service.ts                 # 配置读写唯一入口（进程内缓存 + 兜底）+ updateConfig 读改写 + 派生参数（OJ 基址、轮询调度、编辑器偏好、默认语言归一、分栏比例）
@@ -310,7 +322,7 @@ src/
 │   ├── announcement.service.ts           # 公告列表 + 已读集合组装（markRead 返回后端合并后的权威集合）
 │   ├── system.service.ts                 # 客户端存储信息（存储目录/日志路径/版本，设置页「关于」）
 │   ├── workspace.service.ts              # 工作区创建/保存/恢复/语言持久化 + 落盘事件订阅（onWorkspaceSaved）
-│   └── __tests__/                        # auth.service / config.service .spec.ts（本地缓存清理与三态归一契约、配置缓存/派生兜底/updateConfig 读改写）
+│   └── __tests__/                        # auth.service / config.service / rank.service .spec.ts（本地缓存清理与三态归一契约、配置缓存/派生兜底/updateConfig 读改写、榜单查询参数编排）
 ├── bridge/
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
 │   ├── auth.bridge.ts                    # login / logout / get_session / validate_session
@@ -335,10 +347,15 @@ src/
 │   └── config.ts                         # AppConfig 及其子配置（含 oj.cacheProblemStatement 题面缓存开关）
 ├── utils/
 │   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白；剥离只为安全，表现性标记保真渲染）+ 相对图片 URL 改写为 HOJ 绝对地址
-│   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / hasContestStarted，登录页与顶部栏共用）
+│   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / **getAuthoritativeSchedule**（认证赛程与匿名简报跨场时以简报为准），登录页、路由守卫与顶部栏共用；原 hasContestStarted 已删除）
+│   ├── contest-clock.ts                  # 登录页时钟模型纯函数（getContestClock：阶段→countdown/elapsed/ended/unavailable + urgent；getClockSegments：天/时/分/秒定宽两段；urgent = 开赛前 15 秒内）
+│   ├── brief-retry.ts                    # 匿名简报失败后的有界指数退避延迟（2s/4s/8s，用尽返回 null）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS，码值 = HOJ 真实码表含负数）+ 时间/内存/长度格式化 + findFirstFailedCase
 │   ├── close-guard.ts                    # 关窗守卫（状态机 idle/flushing/allowing + 时间上界 flushTimeout/hardTimeout + 收尾看门狗（destroy 悬挂时 close 兜底）+ 有界多轮重刷 shouldReflush/maxFlushRounds：每轮落盘后复查在途改动，握手窗口内到达的落键也纳入落盘；收尾用 destroy 兜底 close；依赖全注入故可穷尽单测）
-│   ├── settings-access.ts                # 设置入口的隐藏解锁（连点状态栏版本号 5 下；注入式计数状态机 createUnlockGate + 会话级单例 settingsUnlocked/tapVersion；状态不落盘）│   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 存储域 1–8 与候选档位 2·4·8；前端各消费方一律取此处常量，Rust sanitize 同域）
+│   ├── settings-access.ts                # 设置入口的隐藏解锁（连点状态栏版本号 5 下；注入式计数状态机 createUnlockGate + 会话级单例 settingsUnlocked/tapVersion；状态不落盘）
+│   ├── focus-scope.ts                    # vFocusScope 指令（弹层焦点作用域：打开即聚焦首个可见控件 + Tab 循环陷阱 + Esc 关闭 + 卸载归还焦点；defaultPrevented 短路以不吞 Monaco 的 Tab 缩进）
+│   ├── session-check.ts                  # 赛前会话预检的错峰调度策略（窗口内随机取点 / 周期复检 ±60s 抖动 / 迟到启动抖动 / 临近开赛不再预检）
+│   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 存储域 1–8 与候选档位 2·4·8；前端各消费方一律取此处常量，Rust sanitize 同域）
 │   ├── logger.ts                         # 前端日志唯一入口（createLogger 作用域前缀 + debug/info 仅开发环境、warn/error 恒输出；不落盘，持久化日志归 Rust tracing）
 │   ├── error.ts                          # 错误文案收敛唯一出口（errorMessage：Error/字符串取信息，空值与非 Error 载荷回退兜底文案；不依赖 bridge，纯函数）
 │   ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
@@ -346,9 +363,10 @@ src/
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
 │   ├── oj.ts                             # OJ 类型域唯一权威（OJ_TYPES 已知类型枚举 / ojSelectOptions 下拉候选组装：枚举在前含未配置者 + 枚举外实例追加 / ojBaseUrlHint 地址占位）
-│   └── __tests__/                        # contest / submission / session-check / polling / rank / limits / markdown / markdown-dom / editor / logger / error / oj / close-guard .spec.ts（阶段判据、终态穷尽映射、预检调度边界、轮询节奏、榜单映射与口径、limits 换算、渲染契约、jsdom 消毒激活态的生产链路契约、编辑器偏好值域、日志级别分流与作用域前缀、错误文案收敛、OJ 候选取值域与顺序、关窗守卫状态机、双层时间上界与有界多轮重刷）
+│   └── __tests__/                        # brief-retry / close-guard / contest / contest-clock / editor / error / focus-scope / language / limits / logger / markdown / markdown-dom / oj / polling / rank / session-check / settings-access / submission .spec.ts（退避延迟表、关窗守卫状态机与有界多轮重刷、阶段判据与权威赛程、时钟模型与 urgent 阈值、编辑器偏好值域、错误文案收敛、弹层焦点陷阱与归还、语言映射、limits 换算、日志级别分流与作用域前缀、渲染契约、jsdom 消毒激活态的生产链路契约、OJ 候选取值域与顺序、预检调度边界、轮询节奏、榜单映射与口径、设置解锁计数状态机、终态穷尽映射与双层时间上界）
 └── styles/
-    └── global.css                        # TailwindCSS + CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题 + KaTeX 公式全局样式（块级公式横向滚动防裁切，题面/公告/简介共用）；**不覆写 Monaco 背景**（编辑器底色由 theme.editorTheme 自绘，否则 vs-dark 只换字色）
+    ├── global.css                        # TailwindCSS + 字体栈（Inter / JetBrains Mono / Noto Sans SC，经 @fontsource-variable 本地打包）+ CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题 + KaTeX 公式全局样式（块级公式横向滚动防裁切，题面/公告/简介共用）；**不覆写 Monaco 背景**（编辑器底色由 theme.editorTheme 自绘，否则 vs-dark 只换字色）
+    └── contest.css                       # 赛场主题（PR #36）：在 `.contest-theme` 作用域重写整套令牌（中性灰/木色主色/低饱和语义色/`--radius: 3px`/响应式密度 `--ui-step` 与派生字号），并提供通用类（`.eyebrow`/`.action-primary`/`.action-quiet`/`.page-heading`/`.page-title`/`.workspace-main`/`.data-page`/`.reading-body`/`.surface-overlay`、表格与 `:focus-visible`/`::selection` 统一样式、≤1100px 与 prefers-reduced-motion 媒体查询）
 ```
 
 ---
@@ -407,7 +425,7 @@ src/
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（当前仅 `sessionGuard`）—— 它需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）
 - **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
-- **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；登录页依据比赛阶段（`utils/contest`）决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入；登出时经 `stores/session.ts` 清空会话级领域状态
+- **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；**首次进入工作台（含深链）还要过赛程阶段闸门** —— 按 `getAuthoritativeSchedule`（认证比赛与匿名简报 ID 不同即视为换场，以简报为准）判阶段，非 `running` 一律退回登录页等待（已在 Contest 子树内时跳过闸门，避免结束瞬间的页面切换打断退出流程）；登录页依据同一阶段判据决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入，**已结束不进场**（`canEnter = isLoggedIn && phase === 'running'`）；登出时经 `stores/session.ts` 清空会话级领域状态
 - **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Adapter → `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验，且反复重登可能触发 HOJ 暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。全局兜底由 `guards/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
 - **三态契约必须由 Adapter 兑现**：`AuthProvider::validate_session` 的返回值语义是 `Ok(true)` 有效 / `Ok(false)` 服务端**明确**判定失效 / `Err(_)` 无法判定。**绝不可把网络错误折成 `Ok(false)`** —— 那会让 `SessionValidity::Unknown` 分支成为死代码，一次赛前网络抖动就把选手踢回登录页。HOJ 侧的判据抽成纯函数 `session_validity_from_response` 以便测试锁定：仅 `AppError::Auth` 算明确失效，非 200 的其它状态码（400/500）归 `Unknown`，网络/超时/解析失败一律上抛。同理，评测查询（`SubmissionService::get_judgement`，单次查询）**不得吞掉认证错误**：必须原样上抛，否则前端收敛轮询会把 401 当瞬时抖动重试到超时，选手干等五分钟后只收到「评测超时」，守卫也拿不到 Auth 变体
 - **赛前预检错峰**：登录页等待开赛时按 `utils/session-check.ts` 的策略校验会话 —— 距开赛 >10min 每 5min±60s 周期复检，进入 [T-10min, T-3min] 窗口后在剩余区间随机取点做一次性预检，迟到启动则 0–3s 抖动后立即执行，距开赛 ≤30s 不再预检。目的是把全场客户端的校验请求散布开，避免开赛前形成同步尖峰；**进场（T-0 导航）不错峰**，准点进场是公平性要求
@@ -434,7 +452,7 @@ src/
 - **「重置」与「清理本地数据」必须分开，且不可逆动作要先给范围**：`commands::maintenance_cmd` 提供两个动作 —— **重置客户端**清掉一切**可重新从服务端获取**的东西（三层缓存 + 公告基线 + 公告已读标记；安全、可反复点，故只做一次确认），**清理本地数据**删除**不可重建**的本地事实（日志内容、`SNAPSHOT_KEEP_DAYS`=30 天前的提交源码留档；不可逆，故 `local_data_usage` 先给确切条数与体积、用户逐项勾选后再二次确认）。硬约束：① 两者都**不动**工作区代码（`workspaces/`，选手唯一作品本体，且 OJ 只有提交过的版本，未提交的编辑无法找回）、配置、登录会话（清会话等于把选手踢回登录页，换账号有独立的登出路径）；② 重置**兜底清扫 `cache/` 根目录** —— 各 Service 只清自己那部分，清扫根目录才能保证将来新增的 namespace 也被覆盖，否则重置会静默漏掉新缓存；③ 日志用「重开 + 截断」清内容而**不删文件**（追加模式句柄在 Windows 上 `set_len` 会被拒，实测 `Os code 5`；删文件则要等重启才重建，中间这段排障信息就没了）；④ 留档的「过期」按 mtime 判定而不比对服务端列表（后者要网络/分页，还可能因赛制隐藏记录而误判）；⑤ **两个勾选项互不牵连**（日志清理失败只降级为 `logCleared=false` 并继续，不 `?` 冒泡中断留档清理）；⑥ **提示文案与配色都不许失实** —— 补拉失败、日志未清掉都要如实说明并以警告色呈现；⑦ **锁中毒统一 `into_inner` 取回内部数据**（与 `TtlCache` / `provider_registry_impl` 同款约定）：相关容器是 `Option` / `HashMap`，panic 不会让它们结构不一致，而「静默跳过」会让重置留下脏缓存、公告基线则会在中毒后永久不再报新公告
 - **公告红点走事件驱动 + 可见性补拉**：Rust 侧 `ContestService::list_announcements` 按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`（**首次拉取只建基线不发事件**，否则一开机就亮红点；基线按比赛隔离，失败时保留旧基线），`main.rs` 的前端事件桥转发到 `announcements-published`，前端即时刷新。**事件只是刷新触发**：公告正文始终由 `list_contest_announcements` 经 IPC 查询，事件丢失时下一轮轮询即可恢复。前端轮询仍是拉取的唯一发起方（60s ± 10s），但**窗口重新可见/聚焦时立即补拉一次**（1s 去重）—— 桌面客户端的常态是「切出去看题解再切回来」，只靠节拍意味着切回来最多等 70s 才可能看到红点，被选手直接感知为「红点不出现」。已读语义配套收紧：页面不可见时不标记（切走了 = 没看到），`isWatching`（公告页在屏）时落地的新公告自动标为已读，避免离开页面后冒出假红点
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询的**节拍与超时唯一归属前端** `submissionStore`（createPoller 驱动，终态判据见 `utils/submission.ts`，deadline 兜底），后端 `get_judgement` 是单次查询、无内层循环 —— 双层轮询会让前端抖动沦为装饰、`stopPolling` 停不掉在途后端循环；View 只表达提交意图
-- **比赛工作台外壳**：`ContestLayout` 承载 TopBar + ActivityBar + `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；窗口拖拽与窗口控制只在 TopBar（登录页由 `App.vue` 提供兜底窗口条）。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
+- **比赛工作台外壳**：`ContestLayout` 承载 TopBar（**导航条 ActivityBar 内嵌于其第二行**）+ `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；窗口拖拽与窗口控制只在 TopBar（登录页由 `App.vue` 提供兜底窗口条）。外壳同时承担**赛程闸门**：`upcoming` 立即回登录页，`ended` 叠加结束覆盖层（`inert` + 导航禁用）并在 2 秒后返回登录页 —— 延迟窗口留给离页落盘，不打断正在进行的保存。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
 - **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：
 
   | 场景 | 节奏 | hidden 暂停 | 停止判据 | 归属 |
@@ -457,4 +475,9 @@ src/
 - **工作区语言必须落盘**：语言不属于任何代码文件，`update_workspace_file` 带不上它；`workspaceStore.changeLanguage` 乐观更新本地并调用 `set_workspace_language` 立即持久化元数据，否则切题或重启后退回默认语言，会把 Java 代码当 C++ 提交
 - **代码落盘语义 = debounce-to-memory**：编辑器改动经 2s 防抖推送到**后端内存**（`update_workspace_file` 不写盘），磁盘写入只有两条路径 —— 后台 auto-save 周期与显式 `save_workspace`。因此「自动保存间隔」真正决定落盘频率（旧实现的写透让该配置形同虚设），前端状态分两级：`syncPending`（未推内存）/ `isDirty`（未落盘）。三条配套硬约定：① **任何替换内存工作区的操作先落盘旧的**（`create` / `load` / `switch` 共用 `save_current_if_dirty`，前端 `loadWorkspace` 前先 `flushPendingSync`）；② **落盘时机由调用点编排**：切题 / 失焦 / 页面隐藏 / 离开解题页（`ProblemSolveView`）与关窗（`main.ts` 装配 `utils/close-guard`）—— auto-save 周期最长 300 秒，这些时刻只靠周期就会丢改动；③ **auto-save 以修订号判定能否清脏，且取快照与写盘整体在读锁内完成**（读锁与 `save()` / `update_file` 的写锁互斥 → 「旧快照的写」不可能落在「更新的写」之后；写失败或快照后有新改动时保留脏、不发布事件），否则「快照写盘」会被当成新内容已落盘，或旧内容覆盖回退后因工作区已 clean 而永不重写。前端「已自动备份」指示的唯一真相来源是后端 `CoreEvent::WorkspaceSaved` 事件（`main.rs` 事件桥下发，**只在写盘成功且快照后无新改动时才发**；载荷带 `workspaceId` / `revision` / `auto`），store 侧用**两个修订号水位**决定能否清脏：`lastPersistedRevision`（磁盘水位，由落盘事件推进）与 `lastPushedRevision`（编辑器水位，由 `update_workspace_file` 的返回值推进）—— 仅当**磁盘水位 ≥ 编辑器水位**且无在途推送（`!syncPending`）时才清脏；只看磁盘水位会在事件早到时假「已自动备份」，只看编辑器水位会在事件永不到达时把指示器卡在「编辑中…」（`flushPendingSync` 返回后补一次判定收口该窗口）
 - **客户端缓存策略**（本轮落地，判据 = 数据可变性分层）：**下次看到之前不会变**的数据 → 缓存（比赛元信息 TTL 120s、题面 TTL 30min，均内存 + 磁盘；终态提交详情/测试点 TTL 2h，**仅内存**）；**只由我自己的动作改变**的数据 → 本地增量 + 失效重取（我的题目状态：提交终态时 `problemStore.invalidateMyStatus()`，总览页按需重拉，不再 30s 整表重拉）；**随时可能被别人改变**的数据 → 只轮询，最多做同查询去抖（榜单用户操作路径 in-flight 合并 + 3s memo；**轮询与手动刷新不走 memo**）。四条硬约定：① **缓存是优化不是正确性依赖** —— 读失败回退网络、写失败只 warn、解析损坏视为未命中；② **只缓存成功结果** —— 401/403 等错误永不入缓存，否则会话失效会被掩盖、`sessionGuard` 拿不到 `Auth` 变体；③ **键必须带作用域**（`{oj}/{contest_id}` / `{oj}/{submit_id}`；题面、limits、比赛元信息、提交详情/测试点的键**一律带 OJ 维度**），**用户域数据不落盘**且登出由 `auth_cmd::logout` 编排 `SubmissionService::clear_user_caches()` 清空；④ **失效路径六条**：TTL、切比赛（键隔离）、**切 OJ**（`switch_oj` 命令**显式**调三个 Service 的 `on_oj_switched()`：内存段同步清、磁盘段后台清 —— 键已带 OJ 维度，故清理只承担空间回收，不承担正确性；`OjSwitched` 事件只是通知）、登出、配置开关（`oj.cacheProblemStatement`）、**设置页「重置客户端」**（`commands::maintenance_cmd::reset_client`：三层缓存**同步**清空 + 忘掉公告基线 + 清公告已读标记 + 兜底清扫 `cache/` 根目录（覆盖将来新增的 namespace）；清完不重拉，补拉归调用方 —— 设置页重置后立刻重拉当前比赛数据，否则界面会停在前端 store 的旧内存副本上）。**与「清缓存」的关键区别**：清缓存保留公告基线（否则清空后新发的公告漏报），**重置则忘掉它**（重置后一切皆未见，留着没有意义）—— 两者是两个方法、两条用例成对锁定。重置与清理都**不动**工作区代码、提交源码留档、配置与登录会话。可观测性：命中走 `debug`（字段 `cache` / 实体 id / `hit`），淘汰与写失败走 `warn`。**明确不做**：榜单名次缓存（实时性即公平性）、评测中状态缓存、公告内容缓存、会话校验缓存、按 URL 的通用 HTTP 响应缓存（会连错误体与按 uid 定制的响应一起缓存）
-- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG），不为此新增 npm 依赖；客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）
+- **提交不得重复发送，且必须立刻有反馈**（PR #36）：提交入口有三处（解题页按钮 / Ctrl+Enter / 题目行的快捷提交弹窗），任一处连点、或两处同帧触发，都会产生重复提交。防护是**三层**且缺一都会漏：① 组件级守卫（`isSubmitting || pendingSubmission`，同帧多入口）；② **先锁再等数据**（`preparingSubmission` 在 `whenLoaded()` 之前置位 —— 等待比赛数据可能耗时数秒，这段窗口内 store 的锁还没上，只靠 store 会被连点钻空子）；③ store 级 `pendingFor` 按「比赛 + 题目 pid + 展示题号 + 语言 + 源码」五元组去重（评测终结前复用同一编号，不发新请求）+ `isSubmitting` 在 await 前同步上锁。配套两条：**保护随终态自动释放**（`pendingFor` 额外校验条目非终态，改代码/换语言即产生新 payload 可再提交，按钮不会永久禁用），**重启轮询不得清保护**（`startPolling` 用裸 `poller.stop() + delete` 而非 `stopPolling`，否则「提交返回 → 读轮询配置」之间的几毫秒会变成可重复发送的窗口）。反馈同样不能省：请求前即显示「正在提交代码，请稍候…」，受理后显示「已提交 #id，评测结果将自动更新。」（`role="status"`），`EditorConsoleBar` 的 `serverPill` 还要**遮蔽旧摘要**（本会话新提交在途时不让服务端旧记录占用 pill，否则看起来像「提交没生效」）
+- **轮询超时要把本地条目收敛为终态 `Unknown`**：超时后若条目仍停在 `Pending`（非终态），`EditorConsoleBar` 的遮蔽逻辑会**无限期**隐藏服务端已到的终态摘要，pill 永远转圈。置 `Unknown`（`isTerminalStatus` 视为终态）后组件会再重拉一次摘要，让服务端结果接管
+- **弹层一律经 `utils/focus-scope` 的 `vFocusScope` 指令获得键盘可访问性**：打开即聚焦首个可见控件、Tab 在作用域内循环、Esc 关闭、卸载把焦点归还给打开者。三条硬约定：① **`defaultPrevented` 必须短路** —— Monaco 用 Tab 做缩进，无条件拦截会让编辑器里按 Tab 变成跳焦点；② 可见性用 `getClientRects().length > 0` 判断（覆盖 `v-if` / `hidden` / 被父级裁切），而非 CSS 类名；③ 清理函数存 `WeakMap`，元素反复创建销毁不残留监听器。当前消费方：编辑器语言菜单与清空确认、编辑器设置弹层、快捷提交对话框、TopBar 的简介浮层与账号菜单
+- **语言菜单必须浮层化**：HOJ 的语言列表可能十几项，`absolute` 挂在按钮下方会被编辑器容器的 `overflow-hidden` 与快捷提交卡片的裁切吃掉（表现为菜单看不见 / 滚不动 / 选不到后面的语言）。`CodeEditor` 改为 **Teleport 到 `.contest-theme` 外壳 + `position: fixed` + 动态 `maxHeight`（≤320px）与上下翻转**，超出部分 `overflow-y-auto overscroll-contain` 滚动承接，`window resize` 重定位（分栏拖拽后不会错位）
+- **赛场视觉是一套独立令牌，入口页保持自己的气质**（PR #36）：`styles/contest.css` 在 `.contest-theme` 作用域下重写整套 CSS 变量（中性灰底 `#f7f6f1` / 近黑主色 `#2e3033` / 木色强调 `#8c6a43` / 低饱和语义色 / `--radius: 3px`）与通用类，并由 `App.vue` 按路由**同一判据**切换「CSS 变量」与「Naive UI `themeOverrides`」两套主题（比赛外壳内用赛场中性色，入口页用紫系）—— 两套主题若各自切换就会漂移。**响应式密度**由 `--ui-step = clamp(0px, min((100vw - 1280px)/320, (100vh - 800px)/140), 2px)` 统一驱动字号与间距：按可用**宽高共同**放大，最大化窗口下不会「字小得像没适配」。主视图页头统一由 `components/common/PageHeading.vue` 承担（编号 `01`–`05` 眉标 + 主标题 + 描述/操作插槽，样式外置到 contest.css），避免五个页面各自拼标题导致版式漂移；题面与公告正文用容器查询单位 `cqi` + `48em` 行宽封顶，分栏拖窄后字号跟随左栏宽度而不是视口
+- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG）。**字体例外且只走本地打包**：正文字体经 `@fontsource-variable/inter` / `jetbrains-mono` / `noto-sans-sc`（`global.css` 顶部 `@import`），登录页标题与等宽另用 `noto-serif-sc` / `roboto-mono`（`LoginView.vue` 局部引入）—— 全部随构建打进 dist，**不经 CDN**，离线可用；图标与状态符号仍是内联 SVG，不新增图标字体依赖。客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）

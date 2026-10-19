@@ -4,7 +4,7 @@
 
 ## 职责
 
-比赛公告卡片流页面：Markdown 正文渲染（相对图片 URL 改写为 OJ 绝对地址）、未读圆点与高亮边框、长文折叠/展开（仅对实际溢出的卡片显示切换按钮）、**在页面可见期间把列表标记为已读**（由 `isWatching` 声明「用户正在看」，标记动作归 store）；轮询不在本视图 —— 由外壳 `ContestLayout` 统一持有，保证 ActivityBar 红点在全部页面鲜活。
+比赛公告卡片流页面：顶部 `PageHeading`（编号 `04` / `BULLETIN BOARD`，标题固定「赛事公告」，描述为「共 N 条 · 未读 M 条」，右侧插槽放「刷新公告」）；Markdown 正文渲染（相对图片 URL 改写为 OJ 绝对地址）、未读圆点与高亮边框、长文折叠/展开（仅对实际溢出的卡片显示切换按钮）、**在页面可见期间把列表标记为已读**（由 `isWatching` 声明「用户正在看」，标记动作归 store）；轮询不在本视图 —— 由外壳 `ContestLayout` 统一持有，保证导航未读红点在全部页面鲜活。
 
 ## 核心类型/函数
 
@@ -13,7 +13,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `baseUrl` | ref | OJ 基址（`configService.getOjBaseUrl()`，失败回退空串），供 `renderMarkdown` 把正文中的相对图片 URL 改写为绝对地址 |
-| `headerTitle` | computed | `{比赛标题} 赛事公告` |
+| `headerTitle` | computed | `{比赛标题} 赛事公告` —— **PR #36 起模板不再使用**（页头标题固定为「赛事公告」），保留为遗留项 |
 | `isContestFailed` / `isBootstrapping` / `isAnnouncementFailed` / `isEmpty` | computed | 四态分流：比赛加载彻底失败（整页 ErrorMessage）→ 首次加载 spinner → 公告失败且**无旧数据**（有旧数据时保留列表，错误交给下一轮轮询自愈）→ 空态 |
 | `renderedContents` | computed | 公告 id → 正文 HTML 的 Map 缓存：内容或基址变化才重渲染，避免模板里反复调 `renderMarkdown`（出口已消毒，`v-html` 安全） |
 | `formatTime` | `(epochSecs) => string` | createdAt（epoch 秒，与 Contest.startTime 同口径）→ zh-CN 本地化；非正值显示 `—` |
@@ -27,7 +27,7 @@
 ## 直接依赖
 
 - `vue`
-- 组件：`ErrorMessage` / `LoadingSpinner`
+- 组件：`PageHeading`（页头，编号 `04` / `BULLETIN BOARD`）/ `ErrorMessage` / `LoadingSpinner`
 - `@/services/config.service`（`getOjBaseUrl`）
 - stores：`announcementStore`（列表/已读/未读数）、`contestStore`（`whenLoaded` + 标题）
 - `@/utils/markdown`（`renderMarkdown`）
@@ -72,5 +72,10 @@ onUnmounted:
   视图侧调用会与 store 内部的标记逻辑并存，两条路径的判据（`isWatching`/页面可见性）
   迟早漂移，而漂移的后果是红点被吞（选手永远错过公告）。
 - 正文样式 scoped `.prose` 与题面同风格；`renderMarkdown` 出口消毒是 `v-html` 的安全前提。
+- **卡片流改语义化 Grid 布局**（PR #36）：`announcement-*` 系列 scoped 类取代 Tailwind 类堆叠，
+  卡片为两列 Grid（左 160px 元信息、右正文，≤1100px 收窄 140px）——公告标题/时间/正文
+  在宽屏上形成稳定的阅读栏；正文 `font-size: var(--reading-size)`、`line-height: 1.85`、
+  `max-width: 48em`，与题面同一阅读口径（长文公告在宽屏上不再横跨整页）。
+  未读态去掉 `ring`，仅保留主色边框 + 圆点，避免与焦点环混淆。
 - 有旧数据时公告加载失败不打断阅读（列表保留，错误由下一轮外壳轮询自愈），
   只有「一条公告都没有」才整块换 ErrorMessage。

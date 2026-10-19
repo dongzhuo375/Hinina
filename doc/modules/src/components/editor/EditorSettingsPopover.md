@@ -13,13 +13,14 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `open` | `ref<boolean>` | 弹层开合；点击面板外遮罩（`fixed inset-0 z-40`）或右上关闭按钮收起 |
+| `open` | `ref<boolean>` | 弹层开合；点击面板外遮罩（`fixed inset-0 z-40`）或右上关闭按钮收起；面板挂 `v-focus-scope="() => { open = false }"` + `role="dialog" aria-label="编辑器设置"`（Esc 关闭、Tab 循环） |
 | `tabSizeOptions` | computed | Tab 档位：`EDITOR_TAB_SIZES` ∪ `{当前值}`（升序）。存储域 1–8 宽于候选集，非候选值（手改配置的 6）必须仍有一枚呈选中态，否则用户以为设置丢了 |
 | `onFontSizeInput` | `(e: Event) => void` | `input[type=range]` 的 value 是字符串，转数字校验后上抛 `change`（值未变不上抛） |
 
 ## 直接依赖
 
 - `vue`
+- `@/utils/focus-scope`（`vFocusScope` —— 面板焦点陷阱与 Esc 关闭）
 - `@/utils/editor`（`EDITOR_THEMES` / `EDITOR_TAB_SIZES` / `EDITOR_FONT_SIZE_MIN` / `EDITOR_FONT_SIZE_MAX`）
 
 ## 被依赖
@@ -49,4 +50,6 @@ footer：仅落盘失败时出现错误文案（成功路径不打扰），右�
   选项说明改挂 `title` 悬浮提示。
 - **Tab 档位对非候选值容错**：`tabSizeOptions = 候选 ∪ {当前值}`。把钳位收紧到候选集
   （6 → 4）是另一种做法，但那是静默改写用户配置；这里选择「呈现真实值」。
-- 图标内联 SVG；配色沿用工具条既有 slate + `--color-primary` 体系。
+- 图标内联 SVG；配色沿用赛场主题变量（`--border-color` / `--bg-card` / `--color-error`）与 `--color-primary` 体系，圆角统一 `rounded-sm`。
+- **键盘可访问**：面板为 `role="dialog"`，打开即焦点入内、Tab 循环、Esc 关闭并归还焦点；
+  触发按钮与关闭按钮均带 `aria-label`（图标按钮不能只有图形）。

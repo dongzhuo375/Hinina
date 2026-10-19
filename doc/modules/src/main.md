@@ -4,7 +4,7 @@
 
 ## 职责
 
-前端应用入口与组合根：创建 Vue 应用，装配 Pinia 与 Router，注入四个全局观察者/握手（会话守卫、工作区落盘事件、新公告事件、关窗落盘握手），挂载到 `#app`。所有「底层不感知上层」的装配关系集中在此 —— 入口自身不含业务逻辑。
+前端应用入口与组合根：创建 Vue 应用，装配 Pinia 与 Router，注入四个全局观察者/握手（会话守卫、工作区落盘事件、新公告事件、关窗落盘握手），引入全局与赛场两套样式，挂载到 `#app`。所有「底层不感知上层」的装配关系集中在此 —— 入口自身不含业务逻辑。
 
 ## 核心类型/函数
 
@@ -17,7 +17,8 @@
 | `installWorkspacePersistenceListener()` | **组合根注入**：订阅后端 `workspace-saved`（显式保存 / 后台 auto-save 成功）→ `workspaceStore.markPersisted()`，驱动「已自动备份」指示；订阅失败只降级指示器 |
 | `installAnnouncementListener()` | **组合根注入**：订阅 `onAnnouncementsPublished`（Rust 比对公告基线后发布的新公告事件）→ 事件的 `contestId` 与 store 当前 `contestId` 一致时调 `announcementStore.refresh()`，红点随即点亮，不必等下一个 60s 轮询周期。**只认当前比赛**：切比赛瞬间可能有在途事件（旧比赛的新公告），误刷新会把旧比赛的公告拉进当前列表；订阅失败只 `console.error` 记录，红点退化为轮询发现（功能降级而非失效） |
 | `installCloseFlushGuard()` | **组合根注入**：把真实窗口操作注入 `createCloseGuard({ flush, shouldReflush, close, destroy })`（`flush` = `workspaceStore.saveWorkspace()`；`shouldReflush` = `syncPending \|\| isDirty`，PR21-7：每轮落盘完成后复查在途改动，把关窗握手窗口内到达的落键也纳入落盘），`onCloseRequested` 里 `guard.handleRequest()` 返回 `true` 才 `event.preventDefault()`。状态机、双层时间上界（落盘 3s / 硬超时 5s）与有界多轮重刷全部收敛在 `utils/close-guard`，此处**只做装配**；收尾用 `destroy()` 而非 `close()` —— 落盘已完成，不需要再走一遍 `close-requested` 往返（那个往返正是原内联实现「窗口关不掉」的失效点）。**本函数不再持有任何 `proceedClose` 布尔量**：布尔量在 `close()` 抛错时会被永久卡在 `true`，此后每次点关闭都命中拦截，窗口再也关不掉（详见 `utils/close-guard.md` 失效模式分析） |
-| `import '@/styles/global.css'` | 全局样式（CSS 变量主题、榜单状态色等） |
+| `import '@/styles/global.css'` | 全局样式（CSS 变量主题、字体栈、榜单状态色等） |
+| `import '@/styles/contest.css'` | 赛场主题样式（`.contest-theme` 作用域下的令牌重写 + 通用类：页头/表格/正文/浮层/响应式密度 `--ui-step`）；在 global.css 之后导入，保证赛场令牌覆盖 `:root` 同名变量 |
 | `import 'katex/dist/katex.min.css'` | KaTeX 公式样式与字体（题面/公告/简介的 LaTeX 公式）；字体由 katex 包本地打包、不经 CDN，符合离线客户端约束 |
 | `app.mount('#app')` | 挂载 |
 
@@ -34,6 +35,7 @@
 - `@/utils/close-guard`（`createCloseGuard` —— 关窗守卫状态机与时间上界，见 `utils/close-guard.md`）
 - `@tauri-apps/api/window`（`getCurrentWindow().onCloseRequested` / `close` / `destroy`，权限 `core:window:allow-close` 与 `core:window:allow-destroy` 已在 capabilities）
 - `@/styles/global.css`
+- `@/styles/contest.css`（赛场主题令牌与通用类；作用域仍靠 `.contest-theme` 类名限定）
 - `katex/dist/katex.min.css`（公式渲染的消费前提，与 `utils/markdown.ts` 的 KaTeX 输出配套）
 
 ## 被依赖

@@ -4,7 +4,7 @@
 
 ## 职责
 
-榜单页编排层：引导链（比赛 → 榜单首页 → 开启轮询）、封榜提示、错误分流（有旧数据则非阻断）、全量快照模式状态行（打星/女生客户端筛选）、页码窗口折叠、每秒时钟驱动「更新于 x 秒前」与阶段/封榜跃迁；表格渲染委托 `ScoreboardTable`，筛选委托 `RankToolbar`。
+榜单页编排层：顶部 `PageHeading`（编号 `02` / `LIVE SCOREBOARD`，描述为比赛标题，右侧插槽放 `ContestStatsBar`）与工具条；引导链（比赛 → 榜单首页 → 开启轮询）、封榜提示、错误分流（有旧数据则非阻断）、全量快照模式状态行（打星/女生客户端筛选）、页码窗口折叠、每秒时钟驱动「更新于 x 秒前」与阶段/封榜跃迁；表格渲染委托 `ScoreboardTable`，筛选委托 `RankToolbar`。
 
 ## 核心类型/函数
 
@@ -28,7 +28,7 @@
 ## 直接依赖
 
 - `vue`
-- 组件：`ContestStatsBar` / `ErrorMessage` / `LoadingSpinner` / `RankToolbar` / `ScoreboardTable`
+- 组件：`PageHeading`（页头，编号 `02` / `LIVE SCOREBOARD`）/ `ContestStatsBar`（页头右侧插槽）/ `ErrorMessage` / `LoadingSpinner` / `RankToolbar` / `ScoreboardTable`
 - stores：`authStore`（uid）/ `contestStore` / `rankStore`
 - `@/utils/contest`（`getContestPhase`）
 
@@ -80,3 +80,8 @@ loading →「正在拉取全量榜单…」；error →「拉取失败，当前
   无需感知模式差异）；视图负责的是自动轮询暂停后的可解释性——状态行（快照规模/
   截断/失败 + 手动刷新入口）、`liveText`、底栏计数与呼吸灯都切换到全量口径。
 - 每秒时钟同时驱动三件事（更新时间文案、阶段跃迁、封榜判定），单一时间源避免漂移。
+- **提示条与表格容器改用赛场主题变量**（PR #36）：封榜提示、非阻断错误条、全量快照状态行
+  统一 `rounded-sm` + `--color-pending-*` / `--color-wa-*` / `--bg-sidebar` 配色，
+  表格容器由「带边框圆角阴影的卡片」改为 `border-y` + `--bg-card`（页头已提供视觉分隔，
+  再套一层卡片就是双层边框）；呼吸灯去掉 `animate-pulse` 改用主题色 —— 常驻动画
+  在赛场上是干扰，颜色本身已足够表达状态。

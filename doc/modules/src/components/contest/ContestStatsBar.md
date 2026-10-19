@@ -26,8 +26,8 @@
 
 ## 被依赖
 
-- `views/RankView.vue` — 榜单页顶部统计条
-- `views/ProblemSetView.vue` — 题目总览顶部统计条（两视图共用同一组件与同一份 rankStore 数据）
+- `views/RankView.vue` — 榜单页页头（`PageHeading` 默认插槽）
+- `views/ProblemSetView.vue` — 题目总览页头（`PageHeading` 默认插槽；两视图共用同一组件与同一份 rankStore 数据）
 
 ## 逻辑流程
 
@@ -44,6 +44,10 @@ contestStore ──contestType/problems.length──▶ 赛制分支与分母
   OI totalScore === null        → `—`
 根节点 title：lastUpdated 有值 → 「榜单更新于 hh:mm:ss」，否则「榜单数据尚未加载」
 ```
+
+布局（PR #36 改版）：根节点 `.contest-stats flex py-2`，三格左对齐、以竖分隔线隔开，
+数值 `text-2xl`、标题 `text-xs`；**不再自带卡片边框/圆角/内边距** —— 它现在渲染在
+`PageHeading` 的默认插槽里，边框与外层留白由页头统一承担（避免「卡中卡」）。
 
 设计要点：
 
