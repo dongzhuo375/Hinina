@@ -142,7 +142,7 @@ function close() {
   <header class="contest-header">
     <div class="window-bar" data-tauri-drag-region>
       <div class="window-brand" data-tauri-drag-region>
-        <svg class="brand-monogram" viewBox="0 0 64 64" aria-hidden="true" data-tauri-drag-region>
+        <svg class="brand-monogram" viewBox="0 0 64 64" aria-hidden="true">
           <rect width="64" height="64" fill="#2E3033" />
           <rect x="16" y="16" width="9" height="32" fill="#F7F6F1" />
           <polygon points="39,16 42,16 48,22 48,48 39,48" fill="#F7F6F1" />
