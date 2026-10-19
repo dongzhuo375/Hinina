@@ -38,6 +38,7 @@
 | `icon-light.svg` | 浅色变体，浅色任务栏 / 文档站 / 印刷 |
 | `icon-mono.svg` | 单色字标（透明底，`currentColor`），系统托盘 / 菜单 / 水印 |
 | `icon-small.svg` | 小尺寸优化版（16–64px），字干加粗、切角加大 |
+| `icon-small-64.png` | 小尺寸优化版 64px 渲染（16/32/48 导出的缩放源） |
 | `icon-1024.png` … `icon-16.png` | PNG 导出（1024/512/256/128/64/32/16） |
 | `preview.html` / `preview.png` | 全变体 × 全尺寸预览（含系统蒙版模拟） |
 
@@ -49,7 +50,7 @@
 
 ## 接入 Tauri
 
-`src-tauri/icons/` 目前待填充。接入时以 `icon-1024.png` 为源执行：
+`src-tauri/icons/` 已按本规范填充：以 `icon-1024.png` 为源执行 `tauri icon` 生成全格式后，32px 及以下 PNG 替换为 `icon-small.svg` 的渲染，`icon.ico` 为手工构建的六帧混合（≥64px 用母版、≤48px 用小尺寸版，避免 Pillow ICO 保存产生重复帧）。重新生成时执行：
 
 ```bash
 npm run tauri icon path/to/icon-1024.png
