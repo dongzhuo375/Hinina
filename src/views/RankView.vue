@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import PageHeading from '@/components/common/PageHeading.vue'
+import PagePager from '@/components/common/PagePager.vue'
 import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -341,44 +342,13 @@ watch(isEnded, (ended) => {
 
           <div v-if="rankStore.pages > 1" class="flex items-center gap-2 text-xs">
             <span class="font-mono text-[var(--text-muted)]">{{ totalLabel }}</span>
-            <div class="flex items-center gap-1">
-              <button
-                type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
-                :disabled="rankStore.current <= 1 || rankStore.isLoading"
-                @click="goToPage(rankStore.current - 1)"
-              >
-                上一页
-              </button>
-              <template
-                v-for="(item, index) in pageItems"
-                :key="item === '…' ? `gap-${index}` : item"
-              >
-                <span v-if="item === '…'" class="px-1 text-[var(--text-muted)]">…</span>
-                <button
-                  v-else
-                  type="button"
-                  class="min-w-7 rounded-md border px-2 py-1 font-mono transition-colors disabled:opacity-60"
-                  :class="
-                    item === rankStore.current
-                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)] font-semibold text-white'
-                      : 'border-[var(--border-color)] enabled:hover:bg-[var(--bg-sidebar)]'
-                  "
-                  :disabled="rankStore.isLoading"
-                  @click="goToPage(item)"
-                >
-                  {{ item }}
-                </button>
-              </template>
-              <button
-                type="button"
-                class="rounded-md border border-[var(--border-color)] px-2 py-1 transition-colors enabled:hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-40"
-                :disabled="rankStore.current >= rankStore.pages || rankStore.isLoading"
-                @click="goToPage(rankStore.current + 1)"
-              >
-                下一页
-              </button>
-            </div>
+            <PagePager
+              :current="rankStore.current"
+              :pages="rankStore.pages"
+              :items="pageItems"
+              :loading="rankStore.isLoading"
+              @go="goToPage"
+            />
           </div>
         </div>
       </div>

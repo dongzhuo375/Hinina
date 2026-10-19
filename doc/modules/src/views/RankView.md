@@ -21,14 +21,14 @@
 | `updatedText` / `liveText` | computed | 「更新于 x 秒/分/小时前」；刷新状态文案三分支：已结束 →「比赛已结束，停止刷新」，全量快照模式 →「全量快照 · 手动刷新」，否则「实时刷新中 / 未开启」（底栏呼吸灯同步：`isLive && !isFullMode` 才绿色脉冲，否则琥珀） |
 | `isFullFilterActive` | computed | 是否处于打星/女生的客户端筛选（**含快照尚未就位**的拉取中/失败态，比 `rankStore.isFullMode` 宽） |
 | `totalLabel` | computed | 底栏「共 N 队」：全量模式显示筛选后行数（`fullFilteredRows.length`，标注「筛选后」），常规模式显示修正后的真实参与人数 |
-| `pageItems` | computed | 页码窗口：首尾页 + 当前页 ±1，其余折叠 `…`（≤7 页全量展示） |
+| `pageItems` | computed | 页码窗口：首尾页 + 当前页 ±1，其余折叠 `…`（≤7 页全量展示；渲染由 `PagePager` 承担） |
 | `ensureContest` | `() => Promise<void>` | 子视图 onMounted 先于外壳触发，直达本页时这里才是实际发起方；统一走 `contestStore.whenLoaded()`（P59：复用在途请求，原 100ms sleep 轮询写法已删除） |
 | `bootstrap` / `retry` / `manualRefresh` / `goToPage` | — | 引导链 / 错误条与致命错误重试（全量筛选态下错误来自快照拉取，重试走 `rankStore.refresh()` 重拉快照）/ 手动刷新按钮（`refresh` 内部按模式分流且吞异常）/ 翻页（失败静默，旧数据保留；全量模式为纯客户端切片） |
 
 ## 直接依赖
 
 - `vue`
-- 组件：`PageHeading`（页头，编号 `02` / `LIVE SCOREBOARD`）/ `ContestStatsBar`（页头右侧插槽）/ `ErrorMessage` / `LoadingSpinner` / `RankToolbar` / `ScoreboardTable`
+- 组件：`PageHeading`（页头，编号 `02` / `LIVE SCOREBOARD`）/ `ContestStatsBar`（页头右侧插槽）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner` / `RankToolbar` / `ScoreboardTable`
 - stores：`authStore`（uid）/ `contestStore` / `rankStore`
 - `@/utils/contest`（`getContestPhase`）
 

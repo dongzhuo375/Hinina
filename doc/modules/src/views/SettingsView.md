@@ -37,6 +37,11 @@
 | `copyText` / `copiedKey` | fn/ref | 关于区块逐项复制（版本/目录/路径），「已复制」2s 回弹；剪贴板不可用静默忽略 |
 | `onSplitInput` / `splitPercent` | fn/computed | 布局滑杆输入（钳位后写回）与百分比文案 |
 | `INPUT` / `INPUT_ERROR` / `inputClass` | 常量/fn | 输入框样式拼接（错误态红框） |
+| `SECTION_LABELS` | 常量 | 左侧索引导航的七个分组标签，与 `settings-{i}` section 的顺序/数量一一对应 |
+| `activeSection` / `scrollerRef` / `SPY_OFFSET_PX` | ref/常量 | scroll-spy 状态：当前分组下标、页面纵向滚动容器引用、判定线偏移（容器顶部下移 96px） |
+| `updateActiveSection` | fn | 滚动事件驱动（`@scroll.passive`）：取最后一个顶边越过判定线的分组为当前项；**滚到底直接落在最后一个分组**（内容不足一屏时末尾分组永远到不了判定线）；`watch(loading)` 在 sections 渲染完成后（`nextTick`）再校正一次 |
+| `spyLockTarget` / `releaseSpyLock` | 模块级变量/fn | 点击导航后的 scroll-spy 锁定：平滑滚动途经中间分组时高亮不跳动（否则导航文字闪烁）；到位信号 = 目标顶边抵达 scroll-margin 停靠点 ±2px 或滚到底，1s 超时兜底（滚动被用户打断时释放） |
+| `scrollToSection` | `(index) => void` | 点击导航：立即锁定 `activeSection` 并上 spy 锁，`scrollIntoView({ behavior: 'smooth' })` + `focus({ preventScroll: true })` |
 
 ## 直接依赖
 
@@ -144,6 +149,14 @@ discard(): Object.assign(form, JSON.parse(baseline))
   用户数据迁移变化）。
 - **「重置与清理」是维护动作，不是配置**：两个动作的定位刻意分开 —— **重置客户端**清掉一切可重新从服务端获取的东西（三层缓存 + 公告基线 + 公告已读标记），安全、可反复点；**清理本地数据**删除不可重建的本地事实（日志内容、过期提交留档），不可逆。四条硬约定：① **重置只做一次确认、清理必须展示体积并勾选后再确认** —— 把不可逆删除混进「重置」，风险是用户以为自己点的是安全按钮；② **重置后必须补拉**（后端已空但前端 store 仍是旧内存副本，不补拉等于让「重置是否生效」不可验证），但**只补拉可观察差异**（比赛元信息/题目列表/我的状态/公告），不追求全场刷新风暴 —— 榜单/提交历史/题面/limits 与服务端同源且服务端本就不缓存它们，进页面时自然刷新；③ **清理后必须重读体积预览**，否则用户以为没生效；④ **提示文案不许失实** —— 补拉失败要说明「数据重新拉取失败，请手动刷新」，勾了日志却没清掉要说明「日志未清理」，两者都以琥珀色（`warn`）呈现而不是成功绿。
 - 清理**不动**工作区代码、配置、登录会话与公告已读状态：前两者是本地事实（代码还是选手唯一作品本体），会话被清等于把选手踢回登录页（赛场上是事故级体验，换账号有独立的登出路径），已读状态属于「重置」的职责而非「清理」。
+- **左侧索引导航 scroll-spy 棕色高亮**：当前分组对应的导航项以棕色 `#8c6a43`
+  （与全站 hover 棕一致）+ 左侧 2px 指示条 + `aria-current` 高亮。判定不走
+  IntersectionObserver，而是滚动事件里比较各 section 顶边与「容器顶部 + 96px」
+  判定线 —— 分组高度悬殊（「关于」极矮、「OJ 服务器」极高）时 observer 阈值难调，
+  线性扫描 7 个分组的成本可忽略且行为可预测。**点击导航必须上锁**（`spyLockTarget`）：
+  平滑滚动会途经中间各分组，每帧实时校正会让高亮在途中分组间跳动（导航文字闪烁）；
+  锁定期间只认「目标到位」（顶边抵达 scroll-margin 停靠点 ±2px，或容器滚到底），
+  1s 超时兜底释放，防止用户中途反拖滚轮把锁卡死。
 - 定时器（savedTimer/copiedTimer/resetTimer/purgeTimer/changeTimer）onBeforeUnmount 统一清理。
 - **视觉随赛场主题收敛**（PR #36）：硬编码 `slate/emerald/rose/amber/blue/purple-*`
   全部换成主题变量（`--text-*` / `--bg-*` / `--border-color` / `--color-*`），

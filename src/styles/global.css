@@ -73,18 +73,25 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Scrollbar */
+/* Scrollbar：隐形化与半透明 —— 像「光线」一样若隐若现。
+   默认极淡灰（#2e3033 @ 0.15），悬停才加深到 0.3；轨道完全透明；
+   几何上保持极简：2px 极小圆角，不用大圆角胶囊 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--text-muted);
-  border-radius: 3px;
-  opacity: 0.5;
+  background: rgba(46, 48, 51, 0.15);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(46, 48, 51, 0.3);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Selection */

@@ -19,7 +19,7 @@
 | `contestElapsed` | `(record) => string` | 赛时相对时间 = `submitTime − contest.startTime`（同为 epoch 秒），经 `formatDurationHms` 格式化；赛前提交钳制 `--:--:--` |
 | `TONE_CLASSES` / `toneClasses` | — | `StatusTone` → pill 样式类（ac 绿 / wa 红 / tle 琥珀 / pending 青 / system·neutral 灰） |
 | `isBootstrapping` / `isFatalError` / `fatalMessage` | computed | 首次加载（无记录）才铺满 spinner；致命错误 =（history.error 且无记录）或（contestStore.error 且无 contest） |
-| `pageItems` | computed | 页码窗口折叠：首尾页 + 当前页 ±1，其余 `…`（与榜单页同一算法） |
+| `pageItems` | computed | 页码窗口折叠：首尾页 + 当前页 ±1，其余 `…`（与榜单页同一算法；渲染由 `PagePager` 承担） |
 | `bootstrap` / `retry` | — | 引导链 / 错误条与致命错误重试（无 contest 时重走 bootstrap） |
 | `onProblemFilterChange` / `onStatusFilterChange` | — | 下拉变更 → `setHistoryProblemFilter` / `setHistoryStatusFilter`（store 内部回到第 1 页） |
 | `refresh` / `goToPage` / `clearProblemFilter` | — | 重拉当前页 / 翻页（`setHistoryPage`）/ 清除题目筛选 |
@@ -29,7 +29,7 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- 组件：`PageHeading`（页头，编号 `03` / `SUBMISSION ARCHIVE`）/ `ErrorMessage` / `LoadingSpinner`
+- 组件：`PageHeading`（页头，编号 `03` / `SUBMISSION ARCHIVE`）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner`
 - stores：`contestStore`（比赛标题 / startTime / 题目列表）、`submissionStore`（history 数据源）
 - `@/types/contest` / `@/types/submission`（仅类型）
 - `@/utils/submission`（`STATUS_OPTIONS` / `formatClock` / `formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `statusLabel` / `statusTone` + `StatusTone` 类型）
@@ -69,6 +69,10 @@ onUnmounted → alive = false；stopPoller()
 - **错误分流与榜单页一致**：有旧数据 → 顶部非阻断错误条（「已保留上一次数据」+ 立即重试），
   绝不清空表格；一条数据都没有 → 整块 ErrorMessage。所有 store 调用 catch 后静默，
   失败原因统一由 `history.error` / `contestStore.error` 承载。
+- **纵向滚动由卡片内部的表格区承担**（`min-h-0 flex-1 overflow-auto` 包裹 table，
+  表头 `sticky top-0`，分页底栏 `shrink-0` 常驻）。曾经由外层容器开 `overflow-y-auto`，
+  但 `flex-1 min-h-0` 的卡片会收缩到可视高度、多出的行被卡片 `overflow-hidden`
+  直接裁剪且全页没有任何滚动条 —— 条目一多就被「看不见地」截断。
 - 评测中的行耗时/内存显示 `-`（服务端尚未回填），状态 pill 带旋转圈。
 - 字母徽章底色用 HOJ 气球色（`problemByDisplayId` 匹配），未配置/未匹配回退石板灰。
 - 空态区分两种：无提交（带题目筛选时提供「清除题目筛选」按钮）与搜索无匹配。

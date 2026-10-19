@@ -298,6 +298,7 @@ src/
 │   │   └── RankCell.vue                  # ACM 单元格（一血/通过/未通过/封榜/赛后提交/未作答）
 │   └── common/
 │       ├── PageHeading.vue               # 赛场通用页头（编号/副标题眉标 + 主标题 + description 插槽 + 右侧操作插槽；样式取自 styles/contest.css）
+│       ├── PagePager.vue                 # 极简分页器（评测页/榜单页共用：无边框无底色，当前页加粗 + 木色极细下划线，上下页纯文字悬停转黑）
 │       ├── LoadingSpinner.vue            # 通用加载动画（role=status）
 │       └── ErrorMessage.vue              # 通用错误提示（role=alert）+ 重试按钮
 ├── guards/
