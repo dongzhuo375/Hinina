@@ -506,3 +506,5 @@ AppContext注入通用core/access到Auth/Contest/Config与Registry，登录/登�
 rquickjs std/futures提供Promise和引擎中断；每插件独立线程、16MiB、activate10秒/事件30秒，使用Tauri持久Tokio handle。stop先撤销调用与订阅，reload等待旧worker退出；退出不阻塞工作区落盘。定期Resync默认60秒，范围10..3600秒，提示可合并，非历史重放。
 
 前端新增plugin.bridge/service/Store与PluginNotifications，dev助手经完整层次调用。无完整管理UI、插件市场、WASM或气球插件。详见[插件文档](modules/src-tauri/plugin/README.md)和[开发教程](modules/src-tauri/plugin/tutorial.md)。
+
+后续管理设计见[最小实现复盘与管理演进](插件系统最小实现复盘与管理演进.md)：保持现有分层，先补宿主配置持久写入、目录盘点与诊断，再接管理页；持久启用意图与worker运行状态分别表达，不增加第二套业务总线。此处仅链接演进建议，未新增生产架构。
