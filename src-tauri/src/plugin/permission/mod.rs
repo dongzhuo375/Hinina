@@ -72,7 +72,7 @@ impl PluginEventSubscription {
             Self::ContestSelected | Self::AnnouncementChanged | Self::ProblemOpened => {
                 Some(PluginPermission::ContestRead)
             }
-            // 工作区 API/权限未定义，Host 暂不投递 WorkspaceSaved。
+            // 工作区仅开放无路径/内容的元数据通知，不代表具有工作区读写能力。
             _ => None,
         }
     }

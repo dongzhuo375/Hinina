@@ -35,8 +35,20 @@ impl PluginEventAdapter {
     /// 白名单外的事件返回 `None`，且**不消耗序号** —— 否则插件会看到
     /// 「序号跳号但没收到任何事件」的假缺口。
     pub fn adapt(&mut self, event: &CoreEvent) -> Option<PluginEventEnvelope> {
-        let plugin_event = to_plugin_event(event)?;
-        Some(self.wrap(plugin_event))
+        self.adapt_if(event, |_| true)
+    }
+
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability stable
+    /// 白名单投影后按宿主授权/订阅过滤，再分配序号，避免过滤造成假缺口。
+    pub fn adapt_if(
+        &mut self,
+        event: &CoreEvent,
+        allowed: impl FnOnce(&PluginEvent) -> bool,
+    ) -> Option<PluginEventEnvelope> {
+        let projected = to_plugin_event(event)?;
+        allowed(&projected).then(|| self.wrap(projected))
     }
 
     /// 生成一条协议级重新同步通知（`PluginHost` 在 `Lagged` / 订阅建立时下发）。

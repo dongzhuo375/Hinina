@@ -69,7 +69,11 @@ fn spawn_event_consumers(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         spawn_frontend_event_bridge(Arc::clone(&bus), handle);
         spawn_audit_consumer(&bus);
-        plugin_host.start();
+        if let Err(error) = plugin_host.start() {
+            tracing::warn!(plugin_id="", plugin_version="", runtime="js", event="",
+                operation="host.start", permission="", request_id="", error=%error,
+                "插件宿主消费者未启动");
+        }
         tracing::info!("事件消费者已启动（前端桥 / 审计 / 插件宿主）");
     });
 }
