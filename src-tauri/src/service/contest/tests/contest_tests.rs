@@ -1,5 +1,21 @@
 use super::*;
 
+#[test]
+fn reselect_same_contest_keeps_scope_but_aba_and_oj_switch_revoke_it() {
+    let (service, _provider, _dir) = make_service(StubMode::Ok);
+    let access = Arc::new(crate::core::access::AccessRevision::default());
+    let service = service.with_access(access.clone());
+    service.select_contest("a").unwrap();
+    let snapshot = access.snapshot().unwrap();
+    service.select_contest("a").unwrap();
+    assert!(!snapshot.cancellation.is_cancelled());
+    service.select_contest("b").unwrap();
+    service.select_contest("a").unwrap();
+    assert!(snapshot.cancellation.is_cancelled());
+    service.on_oj_switched();
+    assert!(service.current_contest_id().is_none());
+}
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};

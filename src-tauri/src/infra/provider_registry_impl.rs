@@ -10,6 +10,8 @@ use crate::core::provider::registry::{ProviderRegistry, ProviderSet};
 /// 单表 `HashMap<OjId, ProviderSet>`（取代旧的 4 个能力分表）：
 /// 注册哪些 OJ 是运行期数据，接入新 OJ 不需要修改本文件。
 pub struct ProviderRegistryImpl {
+    access: Arc<crate::core::access::AccessRevision>,
+    endpoints: RwLock<HashMap<OjId, String>>,
     providers: RwLock<HashMap<OjId, ProviderSet>>,
     current: RwLock<OjId>,
 }
@@ -17,9 +19,17 @@ pub struct ProviderRegistryImpl {
 impl ProviderRegistryImpl {
     pub fn new(default_oj: OjId) -> Self {
         Self {
+            access: Arc::default(),
+            endpoints: RwLock::default(),
             providers: RwLock::new(HashMap::new()),
             current: RwLock::new(default_oj),
         }
+    }
+
+    /// Bind the shared fence before registering providers.
+    pub fn with_access(mut self, access: Arc<crate::core::access::AccessRevision>) -> Self {
+        self.access = access;
+        self
     }
 
     /// 按能力取当前 OJ 的 Provider（私有帮手，四个 current_xxx 共用）。
@@ -32,10 +42,7 @@ impl ProviderRegistryImpl {
         T: ?Sized,
     {
         let id = self.current_id();
-        let guard = self
-            .providers
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = self.providers.read().unwrap_or_else(|e| e.into_inner());
         let set = guard
             .get(&id)
             .ok_or_else(|| AppError::ProviderNotFound(format!("OJ {} 未注册", id)))?;
@@ -47,6 +54,7 @@ impl ProviderRegistryImpl {
 
 impl ProviderRegistry for ProviderRegistryImpl {
     fn register(&self, oj_id: OjId, set: ProviderSet) {
+        let _transition = self.access.begin();
         let mut map = self.providers.write().unwrap_or_else(|e| e.into_inner());
         map.insert(oj_id, set);
     }
@@ -55,15 +63,21 @@ impl ProviderRegistry for ProviderRegistryImpl {
         self.capability(|set| &set.auth)
     }
 
-    fn current_contest(&self) -> AppResult<Arc<dyn crate::core::provider::contest::ContestProvider>> {
+    fn current_contest(
+        &self,
+    ) -> AppResult<Arc<dyn crate::core::provider::contest::ContestProvider>> {
         self.capability(|set| &set.contest)
     }
 
-    fn current_problem(&self) -> AppResult<Arc<dyn crate::core::provider::problem::ProblemProvider>> {
+    fn current_problem(
+        &self,
+    ) -> AppResult<Arc<dyn crate::core::provider::problem::ProblemProvider>> {
         self.capability(|set| &set.problem)
     }
 
-    fn current_submission(&self) -> AppResult<Arc<dyn crate::core::provider::submission::SubmissionProvider>> {
+    fn current_submission(
+        &self,
+    ) -> AppResult<Arc<dyn crate::core::provider::submission::SubmissionProvider>> {
         self.capability(|set| &set.submission)
     }
 
@@ -77,7 +91,26 @@ impl ProviderRegistry for ProviderRegistryImpl {
 
     fn set_current(&self, oj_id: OjId) {
         let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
-        *current = oj_id;
+        if *current != oj_id {
+            let _transition = self.access.begin();
+            *current = oj_id;
+        }
+    }
+
+    fn set_instance_endpoint(&self, id: OjId, endpoint: String) {
+        let _transition = self.access.begin();
+        self.endpoints
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, endpoint);
+    }
+
+    fn current_endpoint(&self) -> Option<String> {
+        self.endpoints
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&self.current_id())
+            .cloned()
     }
 
     fn list_available(&self) -> Vec<OjId> {

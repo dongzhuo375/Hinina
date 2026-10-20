@@ -1,5 +1,40 @@
 use super::*;
 
+#[tokio::test]
+async fn plugin_identity_revocation_survives_session_delete_failure() {
+    struct FailingDelete(Arc<dyn SessionRepository>);
+    impl SessionRepository for FailingDelete {
+        fn load(&self, oj: &OjId) -> AppResult<Option<Session>> {
+            self.0.load(oj)
+        }
+        fn save(&self, session: &Session) -> AppResult<()> {
+            self.0.save(session)
+        }
+        fn remove(&self, _: &OjId) -> AppResult<()> {
+            Err(AppError::Io("fixture failure".into()))
+        }
+        fn rotate_token(&self, oj: &OjId, token: &str) -> AppResult<bool> {
+            self.0.rotate_token(oj, token)
+        }
+    }
+    let (service, bus, repo, _dir) = make_service("identity-revocation");
+    let oj = service.registry.current_id();
+    repo.save(&Session::new(oj.as_str(), "uid", "alice", "private"))
+        .unwrap();
+    let service = AuthService::new(
+        service.registry.clone(),
+        Arc::new(FailingDelete(repo.clone())),
+        bus,
+    );
+    assert_eq!(
+        service.identity_metadata().unwrap(),
+        Some(("uid".into(), "alice".into()))
+    );
+    assert!(service.logout().await.is_err());
+    assert!(repo.load(&oj).unwrap().is_some());
+    assert_eq!(service.identity_metadata().unwrap(), None);
+}
+
 use std::sync::Arc;
 
 use crate::core::error::AppError;

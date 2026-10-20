@@ -98,3 +98,7 @@
 **清空缓存（设置页维护动作）**：`clear_caches` 后列表内存 / 元信息内存 / 元信息磁盘三层全空、清理本身不发任何请求、清后再查必须回源；`clear_caches` 保留公告基线（清空后新发的公告仍能被报出 —— 丢基线则漏报）。
 
 **重置客户端**：`clear_announcement_baseline` 后下次拉取重新建基线（等价「首次拉取」，不报新公告 —— 与上一条成对，锁定「清缓存保留 / 重置忘掉」的区别）；`clear_announcement_read_state` 删净已读状态文件（表现 = 红点复亮）、目录不存在时返回 `false` 且不报错（幂等）。
+
+## 只读接口与作用域
+
+read_metadata只查远端元信息，不选择比赛、不走持久缓存。select_contest只有ID实际改变才更新共享revision；反复刷新同一比赛不撤销。on_oj_switched显式撤销并清空current_contest，避免跨OJ复用比赛上下文。

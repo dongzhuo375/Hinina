@@ -63,6 +63,7 @@ pub struct ReadAnnouncementState {
 
 /// 比赛服务。
 pub struct ContestService {
+    access: Arc<crate::core::access::AccessRevision>,
     registry: Arc<dyn ProviderRegistry>,
     event_bus: Arc<CoreEventBus>,
     storage: Arc<Storage>,
@@ -96,6 +97,7 @@ impl ContestService {
             CONTEST_META_NAMESPACE,
         ));
         Self {
+            access: Arc::default(),
             registry,
             event_bus,
             meta_cache,
@@ -105,6 +107,12 @@ impl ContestService {
             cache,
             announcement_baseline: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Bind the application's explicit access revision fence at assembly time.
+    pub fn with_access(mut self, access: Arc<crate::core::access::AccessRevision>) -> Self {
+        self.access = access;
+        self
     }
 
     /// OJ 切换后的缓存清理（**由 `switch_oj` 命令显式调用**，不订阅事件）。
@@ -121,6 +129,11 @@ impl ContestService {
     ///   （`{oj}/{contest_id}`），跨 OJ 撞号在结构上不可能，延迟清理不影响正确性。
     ///   无 tokio 上下文时（纯同步调用 / 单元测试）退化为同步执行。
     pub fn on_oj_switched(&self) {
+        let _transition = self.access.begin();
+        *self
+            .current_contest
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = None;
         if let Ok(mut c) = self.cache.write() {
             *c = None;
         }
@@ -179,6 +192,14 @@ impl ContestService {
         Ok(contest)
     }
 
+    /// Read-only remote metadata; never selects a contest or reads the disk cache.
+    pub async fn read_metadata(&self, contest_id: &str) -> AppResult<Contest> {
+        self.registry
+            .current_contest()?
+            .get_contest(contest_id)
+            .await
+    }
+
     /// 获取比赛列表，优先使用缓存（TTL 由 Config 控制）。
     ///
     /// 默认 TTL 为 60 秒，如果缓存未过期则直接返回。
@@ -226,7 +247,10 @@ impl ContestService {
             .current_contest
             .write()
             .unwrap_or_else(|e| e.into_inner());
-        *current = Some(contest_id.to_string());
+        if current.as_deref() != Some(contest_id) {
+            let _transition = self.access.begin();
+            *current = Some(contest_id.to_string());
+        }
 
         info!(contest_id = contest_id, "已选中比赛");
         self.event_bus.publish(CoreEvent::ContestSelected {

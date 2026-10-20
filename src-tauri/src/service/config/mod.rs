@@ -13,6 +13,7 @@ use crate::core::repository::config_repo::ConfigRepository;
 /// 泛型 `R` 为底层持久化实现，当前为 `FsConfigRepository`，
 /// 未来可替换为其他存储后端。
 pub struct ConfigService<R: ConfigRepository> {
+    access: Arc<crate::core::access::AccessRevision>,
     repo: Arc<R>,
     event_bus: Arc<CoreEventBus>,
     /// 当前内存中的配置副本
@@ -43,10 +44,17 @@ impl<R: ConfigRepository> ConfigService<R> {
         };
 
         Self {
+            access: Arc::default(),
             repo,
             event_bus,
             config: RwLock::new(config),
         }
+    }
+
+    /// Bind the application's explicit access revision fence at assembly time.
+    pub fn with_access(mut self, access: Arc<crate::core::access::AccessRevision>) -> Self {
+        self.access = access;
+        self
     }
 
     /// 获取当前配置的不可变副本。
@@ -77,7 +85,11 @@ impl<R: ConfigRepository> ConfigService<R> {
     {
         let new_config = {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
+            let before = serde_json::to_value(&cfg.oj).ok();
+            // Fence before publishing effective connection changes, even if save fails.
             updater(&mut cfg);
+            let _transition =
+                (before != serde_json::to_value(&cfg.oj).ok()).then(|| self.access.begin());
             cfg.clone()
         };
 
@@ -107,6 +119,7 @@ impl<R: ConfigRepository> ConfigService<R> {
 
         {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
+            let _transition = self.access.begin();
             *cfg = new_config.clone();
         }
 

@@ -1,0 +1,5 @@
+# AccessRevision
+
+通用访问revision，不依赖plugin或事件总线。begin撤销旧CancellationToken，转换期间snapshot=None，RAII结束后签发新token；嵌套和并发转换均等待最后一个完成。revision防止切走再切回的ABA。
+
+由组合根共享注入AuthService、ContestService、ConfigService、ProviderRegistryImpl。所有会改变有效身份/连接/比赛的显式入口更新revision；消费者只负责提示刷新，不承担安全撤销。

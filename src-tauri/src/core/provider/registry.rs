@@ -68,6 +68,13 @@ pub trait ProviderRegistry: Send + Sync {
     /// 切换当前 OJ
     fn set_current(&self, oj_id: OjId);
 
+    /// Actual endpoint used when constructing the provider (not a mutable config value).
+    fn current_endpoint(&self) -> Option<String> {
+        None
+    }
+    /// Composition-root metadata; unavailable registries fail closed for scoped clients.
+    fn set_instance_endpoint(&self, _id: OjId, _endpoint: String) {}
+
     /// 列出所有已注册的 OJ
     fn list_available(&self) -> Vec<OjId>;
 }

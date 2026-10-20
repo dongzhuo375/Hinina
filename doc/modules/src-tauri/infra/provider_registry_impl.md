@@ -32,3 +32,7 @@
 
 ## 测试
 `src-tauri/src/infra/tests/provider_registry_impl_tests.rs`（由 `provider_registry_impl.rs` 底部 `#[cfg(test)] #[path = "tests/provider_registry_impl_tests.rs"] mod tests;` 引用）锁定查询侧契约：未注册时四种能力均 `ProviderNotFound` 且列表为空、部分实现（`ProviderSet::default`）是合法注册但缺能力报 `ProviderNotFound`、切换到未注册 OJ 同样 `ProviderNotFound`、同 id 二次注册覆盖与 `list_available` 反映注册、`current_id` / `set_current` 往返与 `OjId` 身份规整（trim）。
+
+## 访问作用域
+
+with_access注入通用revision；实际set_current变化和register/endpoint更新显式撤销旧读者。current_endpoint返回构造Provider时的真实地址，不能从后改配置猜测连接身份。

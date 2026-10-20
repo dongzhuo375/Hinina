@@ -1,4 +1,24 @@
 use super::*;
+
+#[test]
+fn connection_changes_revoke_scope_even_when_persistence_fails() {
+    let dir = TempDir::unique("config-access-fail");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let repo = Arc::new(FsConfigRepository::new(storage, "config.json"));
+    let access = Arc::new(crate::core::access::AccessRevision::default());
+    let service =
+        ConfigService::new(repo, Arc::new(CoreEventBus::new())).with_access(access.clone());
+    let before = access.snapshot().unwrap();
+    service.update(|cfg| cfg.editor.font_size += 1).unwrap();
+    assert!(!before.cancellation.is_cancelled());
+    std::fs::remove_file(dir.join("config.json")).unwrap();
+    std::fs::create_dir(dir.join("config.json")).unwrap();
+    assert!(service
+        .update(|cfg| cfg.oj.active = "different".into())
+        .is_err());
+    assert!(before.cancellation.is_cancelled());
+    assert_ne!(before.revision, access.snapshot().unwrap().revision);
+}
 use std::sync::Arc;
 
 use crate::core::entity::config::AppConfig;

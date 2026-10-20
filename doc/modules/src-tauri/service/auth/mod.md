@@ -50,3 +50,7 @@
 测试文件现**显式** `use crate::core::error::AppError;`：`mod.rs` 已不再直接引用 `AppError`，故 `use super::*` 不再把它带进作用域（`StubAuthProvider::validate_session` 的 `NetworkErr` 分支需要构造 `AppError::Network`）。
 
 `StubAuthProvider` 以 `StubOutcome::{Valid, Invalid, NetworkErr}` 预设校验结果，对应的三态测试证明 **Service 侧映射一直是正确的** —— `validate_session` 三态失效的 bug 不在本模块，而在 HOJ adapter 此前把网络异常折成 `Ok(false)`、永不返回 `Err`，使 `Unknown` 分支对 HOJ 成为死代码（修复见 `adapter/hoj/mod.md`）。这组用例因此是「Service 契约」的回归护栏，与 adapter 侧的 `validity_*` 用例互补，两者都不可省。
+
+## 插件安全身份读路径
+
+identity_metadata仅返回内部稳定ID/用户名，不调用get_session或恢复Token。with_access绑定通用revision，登录/登出/失效清理显式撤销在途读。已撤销身份在会话删除失败后仍不可用于插件查询；登录中或失败/取消时不重用旧磁盘身份，成功持久化后才恢复可见性。

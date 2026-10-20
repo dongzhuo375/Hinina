@@ -217,3 +217,11 @@ pub struct SubmissionCases {
 #[cfg(test)]
 #[path = "tests/submission_tests.rs"]
 mod tests;
+
+/// Read-only native pagination evidence. Unknown totals stay unknown.
+#[derive(Debug, Clone)]
+pub struct SubmissionHistoryPage {
+    pub records: Vec<SubmissionRecord>,
+    pub total: Option<u64>,
+    pub has_more: bool,
+}
