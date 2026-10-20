@@ -1,4 +1,4 @@
-/** Plugin API 1 declarations only. No executable SDK or JS runtime is shipped. */
+/** Plugin API 2 for the embedded QuickJS host. Bundle TypeScript offline to one ES module. */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type PluginPermission = 'events.subscribe' | 'submission.read' | 'contest.read' | 'identity.read' | 'storage.read' | 'storage.write' | 'network.request' | 'notification'
 export type PluginQueryContext = string
@@ -14,15 +14,13 @@ export interface PluginSubmission {
 export interface PluginSubmissionQuery {
   contestId: string
   problemId?: string | null
-  page: number
-  pageSize: number
+  cursor?: string | null
+  limit: number
 }
 export interface PluginSubmissionPage {
   records: PluginSubmission[]
-  page: number
-  pageSize: number
-  total: number
-  hasMore: boolean
+  total: number | null
+  nextCursor: string | null
 }
 export interface PluginContest { contestId: string; title: string; startsAt: number; endsAt: number }
 export interface PluginIdentity { ojId: string; userKey: string }
@@ -65,52 +63,55 @@ export interface PluginManifest {
   id: string
   name: string
   version: string
-  manifestVersion: 1
+  manifestVersion: 2
   runtime: 'js'
   entry: string
-  apiVersion: 1
+  apiVersion: 2
   description?: string
   author?: string
   minAppVersion?: string | null
   permissions: PluginPermission[]
   events: PluginEventName[]
-  network?: { allowHosts: string[]; httpsOnly: true; maxBodyBytes: number; timeoutMs: number }
+  network?: { allowOrigins: string[]; maxBodyBytes: number; timeoutMs: number }
   contributes?: []
   configSchema?: Record<string, never>
 }
 
 /** @plugin-api
- * @since 1.0
+ * @since 2.0
  * @stability stable
- * All methods are future contracts, with host-bound grants and safe Promise rejection.
+ * All calls use host-bound grants and stable Promise rejection objects.
  */
 export interface Hinina {
   /** @plugin-api
-   * @since 1.0
+   * @since 2.0
    * @permission none
    * @stability stable
    * @async
    */
-  currentContext(): Promise<PluginQueryContext>
+  context: {
+    /** @plugin-api @since 2.0 @permission none @stability stable @async */
+    current(): Promise<PluginQueryContext>
+  }
   events: {
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission events.subscribe
      * @stability stable
      * Handlers execute serially. Returns the listener's unsubscribe function.
      */
-    on<K extends PluginEventName>(event: K, handler: (envelope: PluginEventEnvelope<PluginEventMap[K]>) => void | Promise<void>): () => void
+    on<K extends PluginEventName>(event: K, handler: (event: PluginEventMap[K], envelope: PluginEventEnvelope<PluginEventMap[K]>) => void | Promise<void>): () => void
   }
   submission: {
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission submission.read
      * @stability stable
      * @async
      */
     get(context: PluginQueryContext, contestId: string, submissionId: string): Promise<PluginSubmission | null>
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission submission.read
      * @stability stable
      * @async
@@ -119,14 +120,14 @@ export interface Hinina {
   }
   contest: {
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission contest.read
      * @stability stable
      * @async
      */
     current(context: PluginQueryContext): Promise<PluginContest | null>
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission contest.read
      * @stability stable
      * @async
@@ -135,7 +136,7 @@ export interface Hinina {
   }
   identity: {
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission identity.read
      * @stability stable
      * @async
@@ -144,28 +145,28 @@ export interface Hinina {
   }
   storage: {
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission storage.read
      * @stability stable
      * @async
      */
     get(key: string): Promise<PluginStorageValue>
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission storage.write
      * @stability stable
      * @async
      */
     set(key: string, value: JsonValue): Promise<void>
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission storage.write
      * @stability stable
      * @async
      */
     delete(key: string): Promise<void>
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission storage.read storage.write
      * @stability stable
      * @async
@@ -174,7 +175,7 @@ export interface Hinina {
   }
   http: {
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission network.request
      * @stability stable
      * @async
@@ -183,28 +184,28 @@ export interface Hinina {
   }
   notification: {
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission notification
      * @stability stable
      * @async
      */
     info(message: string): Promise<void>
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission notification
      * @stability stable
      * @async
      */
     success(message: string): Promise<void>
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission notification
      * @stability stable
      * @async
      */
     warn(message: string): Promise<void>
     /** @plugin-api
-     * @since 1.0
+     * @since 2.0
      * @permission notification
      * @stability stable
      * @async
@@ -212,3 +213,6 @@ export interface Hinina {
     error(message: string): Promise<void>
   }
 }
+
+/** @plugin-entry @runtime js @api-version 2 */
+export type PluginActivate = (hinina: Hinina, config: Readonly<JsonValue>) => Promise<void>

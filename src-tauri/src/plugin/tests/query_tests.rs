@@ -122,3 +122,45 @@ async fn repeated_metadata_lookup_releases_unused_continuations() {
             .is_some());
     }
 }
+
+#[tokio::test]
+async fn transition_during_scope_snapshot_cannot_return_a_revoked_token() {
+    struct RevokeDuringSnapshot {
+        source: Source,
+        access: Arc<AccessRevision>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl crate::plugin::query::QuerySource for RevokeDuringSnapshot {
+        fn scope(&self) -> PluginResult<crate::plugin::query::QueryScope> {
+            if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                drop(self.access.begin());
+            }
+            crate::plugin::query::QuerySource::scope(&self.source)
+        }
+        async fn contest(&self, _: &str) -> PluginResult<crate::core::entity::contest::Contest> {
+            Err(PluginError::Unavailable)
+        }
+        async fn history(&self, _: &str, _: u32) -> PluginResult<SubmissionHistoryPage> {
+            Err(PluginError::Unavailable)
+        }
+    }
+    let access = Arc::new(AccessRevision::default());
+    let m = manifest("test.race");
+    let source = Arc::new(RevokeDuringSnapshot {
+        source: Source::default(),
+        access: access.clone(),
+        calls: Default::default(),
+    });
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source,
+        access,
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    assert!(matches!(
+        q.check(&context),
+        Err(PluginError::ContextExpired)
+    ));
+}

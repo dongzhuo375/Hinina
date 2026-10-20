@@ -32,6 +32,18 @@ installCloseFlushGuard();
 
 app.mount("#app");
 
+// Developer console helper follows Store → Service → Bridge; absent from release builds.
+if (import.meta.env.DEV) {
+  void import('@/stores/pluginStore').then(({ usePluginStore }) => {
+    const store = usePluginStore()
+    Object.defineProperty(window, 'hininaPlugins', { value: Object.freeze({
+      list: () => store.list(), start: (id: string) => store.start(id),
+      stop: (id: string) => store.stop(id), reload: (id: string) => store.reload(id),
+      resync: (id: string) => store.resync(id),
+    }) })
+  })
+}
+
 /**
  * 新公告通知：Rust 侧比对公告基线后发布 `CoreEvent::AnnouncementChanged`，
  * 经 `src-tauri/src/main.rs` 的事件桥转发到此通道。

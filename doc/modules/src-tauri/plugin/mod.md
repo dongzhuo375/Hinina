@@ -1,3 +1,3 @@
-# 插件层
+# plugin 模块
 
-模块为 host/api/permission/registry/runtime；core 不依赖插件清单。外围插件必须经 Plugin API 与独立事件协议，网络和文件执行实现属于 Rust Infra。当前边界/契约完成，执行器尚未实现。详见 [总览](README.md)。
+见[总览](README.md)。依赖方向为JS Runtime → 安全API Adapter → 只读Service/专用Infra；Core/Service不依赖plugin。PluginHost仅消费唯一CoreEventBus，Manager持有独立worker控制器。

@@ -1,0 +1,11 @@
+{
+  "plugins": {
+    "com.example.development": {
+      "enabled": true,
+      "permissions": ["events.subscribe", "storage.read", "storage.write"],
+      "network": [],
+      "resyncIntervalSecs": 60,
+      "options": {}
+    }
+  }
+}

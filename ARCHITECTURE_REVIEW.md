@@ -94,3 +94,15 @@ SubmissionService 已有 get_submission_detail、list_contest_submissions、get_
 优先使用 rquickjs 0.14 的 std/futures（不启用 full/dyn-load/custom allocator）、reqwest 独立客户端、semver、atomicwrites、fs4、governor、uuid/sha2、成熟 IP/CIDR 类型。先在当前 Windows/MSVC 实测 Promise、不可捕获的中断和内存上限；不以 trait 测试代替引擎测试。不创建新 Tokio runtime。
 
 保留原有未提交 Cargo.toml 标记、AGENTS.md、截图和缓存指南。仅对本轮文件格式化，逐层运行测试，最终同步实际能力和限制。
+
+## 10. 本轮实现结果与设计取舍
+
+基础层由AccessRevision RAII fence负责，显式注入变更入口，既处理ABA和并发转换，也在配置保存失败/会话删除失败时保守撤销旧读取。实际endpoint来自Provider注册元数据而非可变配置。插件只读Service方法与原核心业务分开，不读取源代码。
+
+协议采用Manifest/API v2和事件v2：精确origin替代hostname，opaque cursor替代按页号猜测完整性。Hydro可空total并继续到真实空页，保留native页剩余记录；跨页无快照保证。get仅扫描本人元数据，超预算报错而非假装不存在。
+
+复杂机制复用rquickjs、reqwest/url、fs4、atomicwrites、governor、semver、sha2/uuid、ipnet/ip_network。Manager只保留启动/运行/停止/失败，无市场、暂停/恢复、复杂生命周期或第二个Tokio运行时。独立worker沿用Tauri持久runtime的handle，AppContext不持JS值。
+
+JSON数据/代码/宿主审批分开；默认无插件执行。网络不复用OJ会话、代理或跳转，验证所有DNS结果后固定连接；内网/HTTP需额外宿主审批。通用Resync默认60秒，配置10..3600秒；业务幂等和恢复仍由插件负责。
+
+文件与接入说明见doc/modules/src-tauri/plugin/validation.md。没有新增气球插件，也未把首次AC或派发/重试规则放进核心。当前范围不含真实OJ/气球服务线上联调、跨OS构建或OS进程沙箱；进程内引擎依赖native实现正确性，已发送HTTP/原子文件写不能回滚。

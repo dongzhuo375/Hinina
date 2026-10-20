@@ -181,7 +181,7 @@ Hinina/
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
         │   ├── fs_session_repo.rs        # FsSessionRepository：sessions/{oj_id}.json 读写；save / remove / rotate_token 共用 `mutation_lock` 串行化（消除「轮换读到旧会话 → 登出删除 → 轮换写回」复活已删除会话的窗口），写入走 `write_string_atomic`（load 不取锁以免内部调用自死锁）
         │   ├── audit.rs                  # 审计消费者：只读订阅 CoreEvent 并结构化落日志（三类消费者之一，证明同一条事件流可挂多个互不相干的观察者）
-        │   ├── fs_plugin_repo.rs         # FsPluginRepository（返回 Unsupported，不扫描/读取）
+        │   ├── fs_plugin_repo.rs         # FsPluginRepository（宿主审批、目录/入口校验与有限读取）
         │   ├── provider_registry_impl.rs # ProviderRegistryImpl（单表 HashMap<OjId, ProviderSet> + capability() 能力取件帮手）
         │   └── tests/
         │       ├── storage_tests.rs      # Storage 单元测试
@@ -195,6 +195,9 @@ Hinina/
         │       └── cache_tests.rs        # 缓存原语测试（TTL/容量/复活回归/磁盘往返）
         ├── plugin/
         │   ├── mod.rs
+        │   ├── query.rs               # 当前作用域、本人只读投影、有界游标
+        │   ├── execution_api.rs       # 权限包装、专用I/O装配与有限JSON桥
+        │   ├── manager.rs             # 独立worker、启停/重载、通用Resync
         │   ├── host/
         │   │   ├── mod.rs
         │   │   ├── manifest.rs           # PluginManifest + PluginPermission + 订阅/网络策略与纯清单校验
@@ -211,7 +214,7 @@ Hinina/
         │   │   ├── submission.rs         # 本人提交分页/详情契约，无源码
         │   │   ├── identity.rs           # 稳定不透明身份投影
         │   │   ├── storage.rs            # 私有 JSON/CAS 契约及边界检查
-        │   │   ├── http.rs               # 受控请求/响应契约，无网络执行器
+        │   │   ├── http.rs               # 受控请求/响应与宿主网络批准类型
         │   │   ├── notification.rs       # 纯文本通知契约
         │   │   ├── error.rs              # 插件安全错误白名单
         │   │   ├── ui.rs
@@ -222,8 +225,9 @@ Hinina/
         │   ├── registry/
         │   │   └── mod.rs                # PluginRepository 端口（从 core 移入）
         │   └── runtime/
-        │       └── mod.rs                # !Send 异步引擎/Runtime Bridge 契约，无 JS
+        │       └── mod.rs                # !Send Runtime/Bridge + quickjs.rs/bootstrap.js 真实执行器
         └── commands/                     # Tauri Command 薄封装
+            ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
             ├── oj_cmd.rs                 # switch_oj（显式切换：校验已注册 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 oj.active → 发布 OjSwitched）
@@ -427,7 +431,7 @@ src/
 - **`broadcast` 的语义边界（务必读）**：`send()` 成功 ≠ 消费者已处理完成 ≠ 事件可靠送达 ≠ 业务动作执行成功。通道**容量有限**（1024）、**允许丢失**、**不保留历史**（订阅前的事件收不到）。因此：① 没有 receiver 时 `send` 返回 `Err`，只记 `debug`，**绝不是业务失败**；② 消费者启动时与 `Lagged` 后都必须 `resync`（查询当前状态）；③ 业务动作在发布**之前**就已完成的，发布失败不回滚它。
 - **三类消费者、一条事件流**：`Tauri 前端桥`（emit 到 webview，仅刷新触发）、`审计`（只读落日志）、`PluginHost`（→ `PluginEvent`）。内部 Service **不订阅任何事件**（旧实现的同步订阅表与延迟线程已删除 —— 它同时承担「事实通知」与「必须完成的核心动作」两种语义，导致 Token 轮换、OJ 切换、配置热生效三处出现隐式同步依赖）。
 - **事件载荷约束**：只放 ID / 修订号 / 状态摘要。禁止出现 Token、密码、完整 Session、认证头、源代码、内部文件路径、完整领域实体、内部缓存对象、未脱敏用户实体、内部错误栈。大数据由消费者收到事件后经 Service / IPC 查询。
-- **插件系统**：v0.x 仅预留架构，不实现运行时。插件只能访问 `plugin/api/`，禁止直接调用内部 Service；插件事件经 `PluginEventAdapter` 白名单 + 脱敏 + 版本化（`PluginEventEnvelope{version,sequence,occurredAt,event}`）后投递，插件**不得**依赖 `CoreEvent` / 内部 Service / 领域实体 / `broadcast::Receiver`
+- **插件系统**：当前提供最小可运行的外围JS宿主（QuickJS），不含业务插件。插件只能访问 `plugin/api/`，禁止直接调用内部 Service；插件事件经 `PluginEventAdapter` 白名单 + 脱敏 + 版本化（`PluginEventEnvelope{version,sequence,occurredAt,event}`）后投递，插件**不得**依赖 `CoreEvent` / 内部 Service / 领域实体 / `broadcast::Receiver`
 - **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。唯一的插件是 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为它的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**新增插件时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **依赖卫生：直接依赖必须被真正引用；不审批依赖的安装脚本**。`package.json` 的 `dependencies` 只放代码里实际 import 的包（曾出现 `approve` / `esbuild` / `vue-demi` 三个零引用的直接依赖 —— 其中 `esbuild` 还与 vite 嵌套的版本重复安装）。另外**刻意不写 `allowScripts`**：它是 npm 11.18 起的脚本审批字段，写上等于允许依赖的 postinstall 在每次安装时执行（供应链面）。实测不审批无影响：`vue-demi` 发布的默认就是 Vue 3 版（`isVue3 = true`，postinstall 只在检测到 Vue 2 时才切换），`esbuild` 的 postinstall 只是 optional platform 包的兜底。代价是 `npm install` 会提示「N packages have install scripts not yet covered by allowScripts」—— **这是预期的**，不要为消除提示而审批
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
@@ -491,12 +495,14 @@ src/
 - **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG）。**字体例外且只走本地打包**：正文字体经 `@fontsource-variable/inter` / `jetbrains-mono` / `noto-sans-sc`（`global.css` 顶部 `@import`），登录页标题与等宽另用 `noto-serif-sc` / `roboto-mono`（`LoginView.vue` 局部引入）—— 全部随构建打进 dist，**不经 CDN**，离线可用；图标与状态符号仍是内联 SVG，不新增图标字体依赖。客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）
 
 
-### 插件接口施工（2026-10）
+### 插件宿主施工（2026-10）
 
-真实基线审计见 [ARCHITECTURE_REVIEW](../ARCHITECTURE_REVIEW.md)。当前 Manifest/API 版本 1、事件协议版本 2（点分 type，字段 camelCase），不兼容尚未投入使用的旧清单/事件格式。Host 使用 PluginGrant 而不是从 Manifest 自动授权；events.subscribe 和 notification 分离，提交/比赛载荷还按领域读取权限过滤。过滤发生在分配 sequence 之前。
+真实基线见[审计](../ARCHITECTURE_REVIEW.md)。Manifest/API v2，事件协议v2。PluginRepository属于plugin/registry，FsPluginRepository负责宿主配置与有限代码加载。PluginHost保留唯一CoreEventBus消费者与128有界队列；Manager才管理worker，不创建第二套业务事件底座。
 
-每插件的 mpsc 有界队列是 CoreEventBus 的输出接入点，不能发布业务事实。临界区只有宿主管理的 try_send，无用户 callback/await/I/O，因此可以原子注册、保持序号顺序和注销后不再入队。队列满或关闭时移除订阅；Runtime 重新接入先 Resync。Host.start 只允许启动一次，消费者继续复用 core 的监督机制。
+AppContext注入通用core/access到Auth/Contest/Config与Registry，登录/登出/会话失效、比赛/OJ切换、连接变化显式撤销作用域，不能依赖事件。PluginQueryContext绑定实际Provider地址和稳定用户，旧请求、旧游标与旧授权失效；查询仅本人元数据、不读源码。Hydro历史不使用假定页大小判断末尾，API提供不透明游标及可空total。
 
-PluginRepository 属于 plugin/registry，infra 占位返回 Unsupported，不再让 core 引用插件清单。Plugin API 只提供独立 DTO/trait/安全错误，查询必须绑定宿主签发上下文（切 OJ/账号/比赛/授权后失效）；没有 Service Adapter、网络/存储执行器或 Runtime 自动装配。AppContext 的核心 Service 注入与前端 View → Store → Service → Bridge 流程保持原样。
+专用Infra新增plugin_storage（fs4+atomicwrites，JSON/CAS/配额）、plugin_http（独立reqwest、精确origin、DNS/IP固定、无代理/跳转/重试）、plugin_notification（纯文本Tauri输出）。数据在plugin-data，代码在plugins或管理员codeRoot，审批在plugins.json。默认未启用任何插件。
 
-参考 [插件文档入口](modules/src-tauri/plugin/README.md) 查看已实现/预留/后续能力矩阵、SDK 声明及安全要求。不要把接口存在当作可运行插件的证明。
+rquickjs std/futures提供Promise和引擎中断；每插件独立线程、16MiB、activate10秒/事件30秒，使用Tauri持久Tokio handle。stop先撤销调用与订阅，reload等待旧worker退出；退出不阻塞工作区落盘。定期Resync默认60秒，范围10..3600秒，提示可合并，非历史重放。
+
+前端新增plugin.bridge/service/Store与PluginNotifications，dev助手经完整层次调用。无完整管理UI、插件市场、WASM或气球插件。详见[插件文档](modules/src-tauri/plugin/README.md)和[开发教程](modules/src-tauri/plugin/tutorial.md)。

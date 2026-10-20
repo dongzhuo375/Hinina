@@ -1,46 +1,31 @@
-# Hinina 插件接口与事件边界
+# Hinina 外围 JavaScript 插件宿主
 
-当前交付是接口预留，不支持安装或运行 JS 插件。真实基线见 [架构审计](../../../../ARCHITECTURE_REVIEW.md)。
+本轮提供可运行的最小宿主，Manifest **2**、Plugin API **2**、事件协议 **2**。不包含气球插件、首次 AC 判断、外部服务的重试业务或完整管理界面。
 
-| 状态 | 能力 |
+| 层 | 实现 |
 |---|---|
-| 已实现 | Manifest 纯验证、版本化事件/安全投影、宿主授予权限、白名单与订阅过滤、有界队列、Resync、安全错误映射 |
-| 仅契约 | 提交/比赛/身份查询、存储/CAS、HTTP、通知、Runtime/Runtime Bridge、仓库端口 |
-| 未实现 | JS/TS 执行、目录发现/入口读取、授权 UI、API Adapter、上下文签发/失效、私有持久化、网络安全执行器、通知前端出口 |
-| 远期草案 | 工作区读写、UI/编辑器扩展、WASM |
-
-没有 plugins/balloon-first-ac 实现，没有 PluginManager、多阶段生命周期或第二套业务总线。本轮不新增引擎依赖。
-
-## 模块与数据流
+| core/service | 显式 AccessRevision；只读身份、比赛和本人提交历史；不读取源码 |
+| plugin/api/permission | 独立 DTO、错误白名单、宿主授权快照 |
+| plugin/query/execution_api | 作用域签发、游标分页、权限校验、有限 JSON 桥 |
+| infra | 文件仓库、atomicwrites + fs4 JSON/CAS、reqwest 网络、纯文本通知 |
+| plugin/runtime | rquickjs 0.14；独立引擎、Promise、中断、内存和时间限制 |
+| plugin/manager | 启动、停止、重载、状态、手动/定期 Resync |
+| commands/frontend | 开发命令与 dev 控制台助手、文本通知出口 |
 
 ```mermaid
 flowchart LR
   Service --> Bus[CoreEventBus / broadcast]
-  Bus --> Frontend[前端刷新桥]
+  Bus --> Frontend[前端事实桥]
   Bus --> Audit[审计]
-  Bus --> Host[PluginHost]
-  Host --> Filter[声明 + 宿主授予权限过滤]
-  Filter --> Adapter[PluginEventAdapter]
-  Adapter --> Queue[每插件有界队列 128]
-  Queue -.-> Runtime[未来 Plugin Runtime]
-  Runtime -.-> API[Plugin API]
-  API -.-> Wrapper[未来授权 Adapter]
-  Wrapper -.-> Service
-  Wrapper -.-> Infra[专用 Infra]
+  Bus --> Host[PluginHost / 白名单与权限]
+  Host --> Queue[每插件有界队列 128]
+  Queue --> Runtime[独立 QuickJS worker]
+  Runtime --> API[有限 Plugin API / JSON 桥]
+  API --> Query[作用域与安全投影]
+  Query --> Service
+  API --> Infra[插件专用存储 / HTTP / 文本通知]
 ```
 
-main.rs 在 Tokio 上下文启动 Host 消费者；start 不发现或加载插件。Host 只调用非阻塞 try_send；队列满/关闭注销单个订阅，其他订阅和业务发布方继续运行。接收端取到 None 后，未来 worker 应释放 Runtime；不能继续用旧缓存执行副作用。授权变化由宿主显式注销、使旧上下文失效，再使用新授权接入。
+Host 不执行用户回调、不建立第二套业务总线。Manager 才拥有生命周期；AppContext 只持有 Send 控制器，JS 值留在 worker。worker 使用持续存在的 Tauri Tokio handle，不使用启动临时运行时。
 
-## 开发入口
-
-- [Manifest 规范](host/manifest.md)：清单字段、权限、网络策略、版本语义。
-- [事件协议和 Resync](api/event.md)、[Host 接入](host/plugin_host.md)。
-- [Plugin API](api/mod.md)、[安全模型与日志](security.md)。
-- [Runtime 与生命周期](runtime/mod.md)、[仓库端口](registry/mod.md)。
-- [插件开发教程](tutorial.md)、[TypeScript 声明](sdk/hinina.d.ts)。声明是规范草案的可检查表达，不是已发布 SDK。
-
-Rust 模块/公共类型/公共方法使用 @plugin-module / @plugin-api、@since、@permission（有能力要求时）、@stability 和安全投影的 @security 标注。事件 API/示例使用对应 JSDoc。编译期 Rust 模块可见性不是恶意原生插件的沙箱，本轮目标是未来仅注入有限能力的 JS 环境。
-
-## 验证与后续
-
-每层相关测试通过后再推进，最终结果见 [验证记录](validation.md)。后续按 API Adapter → 专用 Infra → 引擎验证 → 简单加载/停止 → 业务集成推进；不因为预留 trait 就声称安全执行已经完成。
+从[开发教程](tutorial.md)开始。另见 [Manifest](host/manifest.md)、[API](api/mod.md)、[事件与 Resync](api/event.md)、[安全模型](security.md)、[Runtime](runtime/mod.md)、[验证记录](validation.md)。[真实代码审计](../../../../ARCHITECTURE_REVIEW.md)保留上一轮和本轮基线。

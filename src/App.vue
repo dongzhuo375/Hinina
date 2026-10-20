@@ -1,6 +1,7 @@
 <template>
   <n-config-provider :theme="null" :theme-overrides="showGlobalTitleBar ? themeOverrides : contestThemeOverrides">
     <n-dialog-provider>
+      <PluginNotifications />
       <div :class="{ 'contest-theme': !showGlobalTitleBar }" class="flex h-screen w-screen flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-body)] shadow-2xl">
         <!-- 兜底窗口控制条：比赛外壳自带 TopBar（含窗口控制），
              外壳之外的路由（当前只有登录页）由此处提供拖拽区与窗口按钮 -->
@@ -58,6 +59,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import PluginNotifications from '@/components/PluginNotifications.vue'
 import { useRoute } from 'vue-router'
 import { NConfigProvider, NDialogProvider } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
