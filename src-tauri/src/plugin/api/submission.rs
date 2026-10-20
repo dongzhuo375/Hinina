@@ -1,6 +1,6 @@
 //! @plugin-module
 //! @layer plugin/api
-//! @version 1
+//! @version 2
 //! @stability stable
 //! 只读提交投影。所有查询强制本人，禁止源码、评测点和原始响应。
 
@@ -41,8 +41,8 @@ pub struct PluginSubmission {
 pub struct PluginSubmissionQuery {
     pub contest_id: String,
     pub problem_id: Option<String>,
-    pub page: u32,
-    pub page_size: u32,
+    pub cursor: Option<String>,
+    pub limit: u32,
 }
 
 impl PluginSubmissionQuery {
@@ -50,13 +50,16 @@ impl PluginSubmissionQuery {
     /// @since 1.0
     /// @permission submission.read
     /// @stability stable
-    /// 非空 ID <= 256 UTF-8 字节，page 从 1 开始，pageSize 1..=100。
+    /// 非空 ID <= 256 UTF-8 字节，cursor 为宿主签发，limit 1..=100。
     /// # Failure
     /// InvalidInput 或 LimitExceeded；不发起查询。
     pub fn validate(&self) -> PluginResult<()> {
         if self.contest_id.trim().is_empty()
             || self.contest_id.len() > 256
-            || self.page == 0
+            || self
+                .cursor
+                .as_ref()
+                .is_some_and(|s| s.len() > 128 || s.is_empty())
             || self
                 .problem_id
                 .as_ref()
@@ -64,7 +67,7 @@ impl PluginSubmissionQuery {
         {
             return Err(PluginError::InvalidInput);
         }
-        if !(1..=MAX_SUBMISSION_PAGE_SIZE).contains(&self.page_size) {
+        if !(1..=MAX_SUBMISSION_PAGE_SIZE).contains(&self.limit) {
             return Err(PluginError::LimitExceeded);
         }
         Ok(())
@@ -75,15 +78,13 @@ impl PluginSubmissionQuery {
 /// @since 1.0
 /// @permission submission.read
 /// @stability stable
-/// 单页结果不保证历史完整性或跨页快照一致性；按 submittedAt/id 稳定排序。
+/// 单页结果不保证历史完整性或跨页快照一致性；保留服务端页顺序，跨页需去重。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginSubmissionPage {
     pub records: Vec<PluginSubmission>,
-    pub page: u32,
-    pub page_size: u32,
-    pub total: u64,
-    pub has_more: bool,
+    pub total: Option<u64>,
+    pub next_cursor: Option<String>,
 }
 
 /// @plugin-api

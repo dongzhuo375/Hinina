@@ -7,5 +7,8 @@ pub mod fs_session_repo;
 pub mod fs_workspace_repo;
 pub mod http;
 pub mod logger;
+pub mod plugin_http;
+pub mod plugin_notification;
+pub mod plugin_storage;
 pub mod provider_registry_impl;
 pub mod storage;

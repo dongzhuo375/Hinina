@@ -1,6 +1,6 @@
 //! @plugin-module
 //! @layer plugin/host
-//! @version 1
+//! @version 2
 //! @stability stable
 //!
 //! 插件清单的纯数据契约与验证；不读取入口文件，不授予权限。
@@ -96,12 +96,11 @@ impl PluginEventSubscription {
 /// @since 1.0
 /// @permission network.request
 /// @stability stable
-/// 未来网络执行器的上限声明；本类型验证不执行 DNS 或 HTTP。
+/// 网络执行上限声明；本类型验证不执行 DNS 或 HTTP。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PluginNetworkPolicy {
-    pub allow_hosts: Vec<String>,
-    pub https_only: bool,
+    pub allow_origins: Vec<String>,
     pub max_body_bytes: u32,
     pub timeout_ms: u32,
 }
@@ -109,8 +108,7 @@ pub struct PluginNetworkPolicy {
 impl Default for PluginNetworkPolicy {
     fn default() -> Self {
         Self {
-            allow_hosts: vec![],
-            https_only: true,
+            allow_origins: vec![],
             max_body_bytes: 65_536,
             timeout_ms: 5_000,
         }
@@ -170,7 +168,7 @@ impl PluginManifest {
     /// @plugin-api
     /// @since 1.0
     /// @stability stable
-    /// 验证纯清单；入口存在性/符号链接边界由未来加载器验证。
+    /// 验证纯清单；入口存在性/符号链接边界由 FsPluginRepository 验证。
     /// # Failure
     /// 返回 ManifestError，不加载代码或授予能力。
     pub fn validate(&self) -> Result<(), ManifestError> {
@@ -199,10 +197,10 @@ impl PluginManifest {
         {
             return Err(ManifestError("minAppVersion"));
         }
-        if self.manifest_version != 1 {
+        if self.manifest_version != 2 {
             return Err(ManifestError("manifestVersion"));
         }
-        if self.api_version != 1 {
+        if self.api_version != 2 {
             return Err(ManifestError("apiVersion"));
         }
         if self.runtime != "js" {
@@ -231,21 +229,20 @@ impl PluginManifest {
         {
             return Err(ManifestError("events"));
         }
-        if !self.network.https_only
-            || !(1..=65_536).contains(&self.network.max_body_bytes)
+        if !(1..=65_536).contains(&self.network.max_body_bytes)
             || !(1..=5_000).contains(&self.network.timeout_ms)
-            || self.network.allow_hosts.len() > 32
-            || self.network.allow_hosts.iter().any(|h| !valid_host(h))
+            || self.network.allow_origins.len() > 32
+            || self.network.allow_origins.iter().any(|h| !valid_origin(h))
             || self
                 .network
-                .allow_hosts
+                .allow_origins
                 .iter()
                 .collect::<HashSet<_>>()
                 .len()
-                != self.network.allow_hosts.len()
+                != self.network.allow_origins.len()
             || (self.permissions.contains(&PluginPermission::NetworkRequest)
-                && self.network.allow_hosts.is_empty())
-            || (!self.network.allow_hosts.is_empty()
+                && self.network.allow_origins.is_empty())
+            || (!self.network.allow_origins.is_empty()
                 && !self.permissions.contains(&PluginPermission::NetworkRequest))
         {
             return Err(ManifestError("network"));
@@ -260,48 +257,26 @@ impl PluginManifest {
     }
 }
 
-fn valid_host(host: &str) -> bool {
-    host.len() <= 253
-        && host.contains('.')
-        && !host.ends_with(".localhost")
-        && !host.ends_with(".local")
-        && host.parse::<std::net::IpAddr>().is_err()
-        && host.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= 63
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        })
+/// @plugin-api
+/// @since 2.0
+/// @stability stable
+/// Exact normalized HTTP(S) origin, never a path, credentials, wildcard or query.
+pub fn valid_origin(origin: &str) -> bool {
+    url::Url::parse(origin).is_ok_and(|url| {
+        matches!(url.scheme(), "https" | "http")
+            && url.host_str().is_some_and(|h| !h.contains('*'))
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.path() == "/"
+            && url.query().is_none()
+            && url.fragment().is_none()
+            && url.origin().ascii_serialization() == origin
+            && origin.len() <= 512
+    })
 }
 
-// SemVer 2.0 grammar without numeric conversion/overflow or a new dependency.
 fn valid_version(version: &str) -> bool {
-    if version.len() > 128 {
-        return false;
-    }
-    let (release, build) = version
-        .split_once('+')
-        .map_or((version, None), |(a, b)| (a, Some(b)));
-    let (core, pre) = release
-        .split_once('-')
-        .map_or((release, None), |(a, b)| (a, Some(b)));
-    let number = |s: &str| {
-        !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && (s == "0" || !s.starts_with('0'))
-    };
-    let ids = |s: &str, prerelease: bool| {
-        s.split('.').all(|id| {
-            !id.is_empty()
-                && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
-                && (!prerelease || !id.bytes().all(|b| b.is_ascii_digit()) || number(id))
-        })
-    };
-    core.split('.').count() == 3
-        && core.split('.').all(number)
-        && pre.is_none_or(|s| ids(s, true))
-        && build.is_none_or(|s| ids(s, false))
+    version.len() <= 128 && semver::Version::parse(version).is_ok()
 }
 
 #[cfg(test)]

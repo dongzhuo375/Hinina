@@ -5,7 +5,7 @@ use std::time::Duration;
 
 fn grant(id: &str, approved: &[PluginPermission]) -> PluginGrant {
     let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
-        "id":id,"name":"Demo","version":"1.0.0","manifestVersion":1,"apiVersion":1,
+        "id":id,"name":"Demo","version":"1.0.0","manifestVersion":2,"apiVersion":2,
         "runtime":"js","entry":"index.js",
         "permissions":["events.subscribe","submission.read","contest.read","notification"],
         "events":["submission.judged","system.config_changed","system.theme_changed"]
@@ -71,7 +71,10 @@ fn subscription_and_payload_permissions_filter_before_sequence_assignment() {
     host.dispatch(&CoreEvent::ConfigChanged);
     let next = rx.try_recv().unwrap();
     assert_eq!(next.sequence, 2);
-    assert_eq!(next.event, PluginEvent::ConfigChanged);
+    assert_eq!(next.event, PluginEvent::ResyncRequired { lost: 0 });
+    let config = rx.try_recv().unwrap();
+    assert_eq!(config.sequence, 3);
+    assert_eq!(config.event, PluginEvent::ConfigChanged);
     assert!(rx.try_recv().is_err());
 }
 

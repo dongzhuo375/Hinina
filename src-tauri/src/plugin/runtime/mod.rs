@@ -1,8 +1,8 @@
 //! @plugin-module
 //! @layer plugin/runtime
-//! @version 1
+//! @version 2
 //! @stability experimental
-//! 引擎接入契约，尚无 JS 执行器。Runtime 不要求 Send，未来可由专属线程或
+//! 引擎接入契约，QuickJsRuntime 由专属线程持有。Runtime 不要求 Send，可由专属线程或
 //! Tokio LocalSet 持有。async Promise 不等于安全中断：引擎必须另有执行/内存限制。
 
 use crate::plugin::api::event::PluginEventEnvelope;
@@ -10,6 +10,7 @@ use crate::plugin::api::{PluginApi, PluginResult};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+pub mod quickjs;
 
 /// @plugin-api
 /// @since 1.0
@@ -34,7 +35,13 @@ pub trait PluginRuntime {
     /// @stability experimental
     /// 加载源码并注册 handler；队列在 Host 注册时已含初始 Resync，activate 完成后
     /// worker 才消费该通知。失败由调用方注销订阅并调用 shutdown。
-    async fn activate(&mut self, source: &str, api: Arc<dyn PluginApi>) -> PluginResult<()>;
+    async fn activate(
+        &mut self,
+        source: &str,
+        api: Arc<dyn PluginApi>,
+        config: &serde_json::Value,
+        allowed_events: Vec<String>,
+    ) -> PluginResult<()>;
     /// @plugin-api
     /// @since 1.0
     /// @stability experimental

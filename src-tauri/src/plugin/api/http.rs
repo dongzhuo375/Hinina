@@ -1,8 +1,8 @@
 //! @plugin-module
 //! @layer plugin/api
-//! @version 1
+//! @version 2
 //! @stability stable
-//! 网络 DTO 与纯体积检查。URL/DNS/重定向/内网隔离是未来执行器责任，尚未实现。
+//! 网络 DTO、形状检查与宿主审批数据。执行器位于 infra/plugin_http。
 use super::{PluginError, PluginQueryContext, PluginResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -115,8 +115,8 @@ pub struct PluginHttpResponse {
 /// @since 1.0
 /// @permission network.request
 /// @stability stable
-/// 实现必须验证上下文和授予权限、独立无 Cookie 客户端、HTTPS:443、allowHosts、
-/// DNS/连接 IP 全局可路由，禁重定向/代理，每插件 60 次/分钟；不自动重试。
+/// 实现必须验证上下文和授予权限、独立无 Cookie 客户端、精确 origin 与宿主批准的地址范围、
+/// 全部 DNS/连接 IP 必须通过策略，禁重定向/代理，每插件 60 次/分钟；不自动重试。
 #[async_trait]
 pub trait PluginHttpApi: Send + Sync {
     /// @plugin-api
@@ -129,4 +129,37 @@ pub trait PluginHttpApi: Send + Sync {
         context: &PluginQueryContext,
         request: PluginHttpRequest,
     ) -> PluginResult<PluginHttpResponse>;
+}
+
+/// @plugin-api
+/// @since 2.0
+/// @permission host-only
+/// @stability stable
+/// An origin and optional private address ranges explicitly approved outside plugin code.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NetworkApproval {
+    pub origin: String,
+    #[serde(default)]
+    pub allow_http: bool,
+    #[serde(default)]
+    pub private_cidrs: Vec<String>,
+}
+impl NetworkApproval {
+    /// @plugin-api
+    /// @since 2.0
+    /// @stability stable
+    pub fn validate(&self) -> PluginResult<()> {
+        if !crate::plugin::host::manifest::valid_origin(&self.origin)
+            || (self.origin.starts_with("http:") && !self.allow_http)
+            || self.private_cidrs.len() > 32
+            || self
+                .private_cidrs
+                .iter()
+                .any(|s| s.parse::<ipnet::IpNet>().is_err())
+        {
+            return Err(PluginError::InvalidInput);
+        }
+        Ok(())
+    }
 }

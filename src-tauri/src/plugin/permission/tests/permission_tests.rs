@@ -3,7 +3,7 @@ use super::*;
 fn manifest() -> PluginManifest {
     serde_json::from_value(serde_json::json!({
         "id":"com.example.demo", "name":"Demo", "version":"1.0.0",
-        "manifestVersion":1, "apiVersion":1, "runtime":"js", "entry":"index.js",
+        "manifestVersion":2, "apiVersion":2, "runtime":"js", "entry":"index.js",
         "permissions":["events.subscribe", "submission.read"], "events":["submission.judged"]
     }))
     .unwrap()

@@ -97,3 +97,7 @@ switch_oj(id) → AppContext::ensure_oj_registered(id)
 
 
 插件接口施工：AppContext 仍只装配 PluginHost 的事件边界；没有注入插件查询 Adapter、存储/HTTP 执行器或 JS 引擎。Host.start 防重复启动由组合根处理。
+
+## 外围插件宿主装配
+
+AppContext新增通用access和Send的plugin_manager控制器；共享revision注入Auth/Contest/Config/Registry。Manager绑定只读ServiceQueries与PluginHost。main.rs注入Tauri文本通知并在持久Tauri运行时autostart；引擎只在独立线程构建，退出同步cancel_all，不阻塞工作区关窗。

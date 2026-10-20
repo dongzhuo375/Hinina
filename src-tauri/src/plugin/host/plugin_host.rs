@@ -5,7 +5,7 @@
 //!
 //! CoreEventBus 的单一插件消费者，仅向每插件有界队列非阻塞入队。
 //! 不调用插件代码；队列是交付出口，不是第二套业务事件总线。
-//! 队列满或关闭即注销，重新接入先 Resync。没有 JS 执行器或 Manager 状态机。
+//! 队列满或关闭即注销，重新接入先 Resync。JS 执行与启停由 PluginManager 独立管理。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -175,6 +175,26 @@ impl PluginHost {
     }
 
     /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Coalesces generic reconciliation prompts while delivery is already buffered.
+    pub fn request_resync(&self, id: &str) -> bool {
+        let mut subs = self.subscriptions.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(sub) = subs.get_mut(id) else {
+            return false;
+        };
+        if sub.sink.sender.capacity() == sub.sink.sender.max_capacity() {
+            let envelope = sub.adapter.resync_notice(0);
+            if !enqueue(id, sub, envelope) {
+                subs.remove(id);
+                return false;
+            }
+        }
+        true
+    }
+
+    /// @plugin-api
     /// @since 1.0
     /// @stability stable
     /// 必须在 Tokio 上下文中调用，每个 Host 仅启动一次。
@@ -220,6 +240,20 @@ fn dispatch_to_subscribers(subs: &SubscriptionTable, event: &CoreEvent) {
         .retain(|id, sub| {
             if sub.sink.sender.is_closed() {
                 return false;
+            }
+            if matches!(
+                event,
+                CoreEvent::OjSwitched { .. }
+                    | CoreEvent::LoggedIn { .. }
+                    | CoreEvent::LoggedOut { .. }
+                    | CoreEvent::SessionExpired { .. }
+                    | CoreEvent::ContestSelected { .. }
+            ) {
+                // Prompt reconciliation even when the plugin did not request the domain event.
+                let notice = sub.adapter.resync_notice(0);
+                if !enqueue(id, sub, notice) {
+                    return false;
+                }
             }
             let allowed = &sub.allowed;
             let envelope = sub

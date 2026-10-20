@@ -1,5 +1,3 @@
-# 插件宿主模块
+# plugin/host
 
-导出 manifest（纯验证）、event_adapter（白名单安全投影）、plugin_host（授予权限与有界交付）、api_error（安全错误映射）。extension 仅保留远期 UI 类型草案，不可通过非空 Manifest contributes 激活。
-
-当前不扫描目录、不创建 JS 引擎、不执行插件。参见 [总览](../README.md)。
+纯清单校验、独立错误映射、事件适配和有界交付。运行时生命周期在plugin/manager，文件在Infra。参见[Manifest](manifest.md)、[PluginHost](plugin_host.md)、[总览](../README.md)。

@@ -15,6 +15,7 @@ pub mod submission_cmd;
 pub mod theme_cmd;
 pub mod workspace_cmd;
 
+pub mod plugin_cmd;
 #[cfg(test)]
 #[path = "tests/mod_tests.rs"]
 mod tests;

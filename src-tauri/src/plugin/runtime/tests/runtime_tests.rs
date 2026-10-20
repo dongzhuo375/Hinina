@@ -10,7 +10,13 @@ struct LocalRuntime {
 
 #[async_trait(?Send)]
 impl PluginRuntime for LocalRuntime {
-    async fn activate(&mut self, _source: &str, _api: Arc<dyn PluginApi>) -> PluginResult<()> {
+    async fn activate(
+        &mut self,
+        _source: &str,
+        _api: Arc<dyn PluginApi>,
+        _config: &serde_json::Value,
+        _allowed: Vec<String>,
+    ) -> PluginResult<()> {
         Ok(())
     }
     async fn deliver_event(&mut self, _event: &PluginEventEnvelope) -> PluginResult<()> {

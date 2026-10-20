@@ -33,14 +33,14 @@ fn list_supports_resync_without_unbounded_history_queries() {
     let mut query = submission::PluginSubmissionQuery {
         contest_id: "c1".into(),
         problem_id: None,
-        page: 1,
-        page_size: 100,
+        cursor: None,
+        limit: 100,
     };
     query.validate().unwrap();
-    query.page_size = 101;
+    query.limit = 101;
     assert_eq!(query.validate(), Err(PluginError::LimitExceeded));
-    query.page_size = 100;
-    query.page = 0;
+    query.limit = 100;
+    query.cursor = Some(String::new());
     assert_eq!(query.validate(), Err(PluginError::InvalidInput));
     assert!(serde_json::from_value::<submission::PluginSubmissionQuery>(
         json!({"contestId":"c1","problemId":null,"page":1,"pageSize":20,"onlyMine":false})
