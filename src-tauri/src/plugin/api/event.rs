@@ -1,3 +1,8 @@
+//! @plugin-module
+//! @layer plugin/api
+//! @version 2
+//! @stability stable
+//!
 //! 插件事件协议 —— 插件侧**唯一**允许依赖的事件接口。
 //!
 //! # 边界（硬约束）
@@ -26,7 +31,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// 任何**破坏性**变更（删除变体、改字段语义、改必填性）都必须自增，
 /// 插件据 `envelope.version` 决定是否继续处理。
-pub const PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 1;
+/// @plugin-api
+/// @since 1.0
+/// @stability stable
+pub const PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 2;
 
 /// 插件可见的事件。
 ///
@@ -40,41 +48,47 @@ pub const PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 1;
 ///
 /// Token、密码、完整 Session、认证头、源代码、内部文件路径、内部缓存对象、
 /// 未脱敏的用户实体、内部错误栈、内部实现细节。
+/// @plugin-api
+/// @since 1.0
+/// @stability stable
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    tag = "type",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
+#[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum PluginEvent {
     /// 当前 OJ 已切换。
+    #[serde(rename = "system.oj_switched")]
     OjSwitched { oj_id: String },
 
     /// 已选中比赛。
+    #[serde(rename = "contest.selected")]
     ContestSelected { contest_id: String },
 
     /// 检测到新公告（只给数量，不给正文 —— 正文经插件 API 按权限查询）。
+    #[serde(rename = "announcement.changed")]
     AnnouncementChanged {
         contest_id: String,
         new_count: usize,
     },
 
     /// 已打开题目（不含题面内容）。
+    #[serde(rename = "problem.opened")]
     ProblemOpened {
         contest_id: String,
         problem_id: String,
     },
 
     /// 提交已创建。
+    #[serde(rename = "submission.created")]
     SubmissionCreated { submission_id: String },
 
     /// 评测到达终态（状态摘要，不含评测明细）。
+    #[serde(rename = "submission.judged")]
     SubmissionJudged {
         submission_id: String,
         status: String,
     },
 
     /// 工作区内容已落盘（不含文件内容，工作区路径也不暴露）。
+    #[serde(rename = "workspace.saved")]
     WorkspaceSaved {
         workspace_id: String,
         revision: u64,
@@ -82,18 +96,23 @@ pub enum PluginEvent {
     },
 
     /// 配置已变更并落盘（不含具体配置项 —— 配置内容经插件 API 按权限查询）。
+    #[serde(rename = "system.config_changed")]
     ConfigChanged,
 
     /// 主题已切换。
+    #[serde(rename = "system.theme_changed")]
     ThemeChanged,
 
     /// 用户已登录（只给 OJ 标识；用户身份经插件 API 查询，避免协议层外泄标识）。
+    #[serde(rename = "session.logged_in")]
     SessionLoggedIn { oj_id: String },
 
     /// 用户已登出。
+    #[serde(rename = "session.logged_out")]
     SessionLoggedOut { oj_id: String },
 
     /// 会话已失效。
+    #[serde(rename = "session.expired")]
     SessionExpired { oj_id: String },
 
     /// **协议级通知**：插件错过了 `lost` 条事件，必须重新查询当前状态。
@@ -101,10 +120,39 @@ pub enum PluginEvent {
     /// 由 `PluginHost` 在底层消费者 `Lagged` 时下发（也用于插件刚订阅时告知
     /// 「请先同步一次当前状态」）。插件收到后应调用插件 API 拉取真值，
     /// 而不是假设事件会自动补发。
+    #[serde(rename = "resync.required")]
     ResyncRequired { lost: u64 },
 }
 
+impl PluginEvent {
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability stable
+    /// 返回协议稳定的 Manifest 订阅名。
+    pub fn subscription(&self) -> crate::plugin::host::manifest::PluginEventSubscription {
+        use crate::plugin::host::manifest::PluginEventSubscription as Name;
+        match self {
+            Self::OjSwitched { .. } => Name::OjSwitched,
+            Self::ContestSelected { .. } => Name::ContestSelected,
+            Self::AnnouncementChanged { .. } => Name::AnnouncementChanged,
+            Self::ProblemOpened { .. } => Name::ProblemOpened,
+            Self::SubmissionCreated { .. } => Name::SubmissionCreated,
+            Self::SubmissionJudged { .. } => Name::SubmissionJudged,
+            Self::WorkspaceSaved { .. } => Name::WorkspaceSaved,
+            Self::ConfigChanged => Name::ConfigChanged,
+            Self::ThemeChanged => Name::ThemeChanged,
+            Self::SessionLoggedIn { .. } => Name::SessionLoggedIn,
+            Self::SessionLoggedOut { .. } => Name::SessionLoggedOut,
+            Self::SessionExpired { .. } => Name::SessionExpired,
+            Self::ResyncRequired { .. } => Name::ResyncRequired,
+        }
+    }
+}
+
 /// 插件事件信封 —— 版本、序号与发生时间随事件一起下发。
+/// @plugin-api
+/// @since 1.0
+/// @stability stable
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginEventEnvelope {
@@ -115,7 +163,7 @@ pub struct PluginEventEnvelope {
     /// 插件可据此**自行检测缺口**（序号不连续 → 主动重新同步），
     /// 与 `ResyncRequired` 互为补充：前者是插件侧的兜底，后者是宿主侧的主动通知。
     pub sequence: u64,
-    /// 事件发生时间（UTC 毫秒时间戳）
+    /// 适配时间（UTC 毫秒）；不用于提交时间排序或业务事实时间推断。
     pub occurred_at: i64,
     /// 事件本体
     pub event: PluginEvent,

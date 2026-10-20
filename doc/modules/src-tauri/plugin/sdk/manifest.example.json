@@ -1,0 +1,19 @@
+{
+  "id": "com.example.balloon-first-ac",
+  "name": "首次 AC 气球派发（接口示例）",
+  "version": "1.0.0",
+  "manifestVersion": 1,
+  "runtime": "js",
+  "entry": "index.js",
+  "apiVersion": 1,
+  "permissions": ["events.subscribe", "contest.read", "submission.read", "identity.read", "storage.read", "storage.write", "network.request", "notification"],
+  "events": ["submission.judged", "resync.required"],
+  "network": {
+    "allowHosts": ["balloon.example.com"],
+    "httpsOnly": true,
+    "maxBodyBytes": 65536,
+    "timeoutMs": 5000
+  },
+  "contributes": [],
+  "configSchema": {}
+}

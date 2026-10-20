@@ -1,16 +1,7 @@
-# mod
+# 插件仓库端口
 
-## 职责
-插件注册与发现模块，负责扫描并注册已安装的插件及其扩展点。v0.x 为预留接口。
+PluginRepository 从 core/repository 移入 plugin/registry，消除 core 对插件 Manifest 的反向依赖。scan_plugins 返回清单列表，load_plugin_code 接收已选清单，plugin_dir_exists 返回 PluginResult<bool>。
 
-## 核心类型/函数
-- 无（v1.0 待实现）
+当前只有 trait，FsPluginRepository 的全部方法返回 Unsupported，没有目录扫描、JS 读取或注册管理。AppContext 不装配这个占位仓库。
 
-## 直接依赖
-- 无
-
-## 被依赖
-- `plugin/mod.rs` — 通过 `pub mod registry` 声明子模块
-
-## 逻辑流程
-无（TODO 占位，v1.0 实现）
+后续文件实现归 infra：限制根目录、校验清单和入口存在性/canonical 边界（符号链接/Windows junction）、拒绝重复 ID、有限读取（建议源码上限 1 MiB）。单插件无效时诊断后跳过，不能阻止核心应用启动。目录服务故障返回安全错误，不能以空列表假装成功。当前无 PluginManager，也没有第二套事件注册中心。

@@ -84,8 +84,7 @@ Hinina/
         │       ├── mod.rs
         │       ├── workspace_repo.rs     # WorkspaceRepository trait
         │       ├── config_repo.rs        # ConfigRepository trait
-        │       ├── session_repo.rs       # SessionRepository trait（load / save / remove / rotate_token —— 应用层与适配器共用）
-        │       └── plugin_repo.rs        # PluginRepository trait
+        │       └── session_repo.rs       # SessionRepository trait（load / save / remove / rotate_token —— 应用层与适配器共用）
         ├── service/
         │   ├── mod.rs
         │   ├── config/
@@ -182,7 +181,7 @@ Hinina/
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
         │   ├── fs_session_repo.rs        # FsSessionRepository：sessions/{oj_id}.json 读写；save / remove / rotate_token 共用 `mutation_lock` 串行化（消除「轮换读到旧会话 → 登出删除 → 轮换写回」复活已删除会话的窗口），写入走 `write_string_atomic`（load 不取锁以免内部调用自死锁）
         │   ├── audit.rs                  # 审计消费者：只读订阅 CoreEvent 并结构化落日志（三类消费者之一，证明同一条事件流可挂多个互不相干的观察者）
-        │   ├── fs_plugin_repo.rs         # FsPluginRepository（骨架）
+        │   ├── fs_plugin_repo.rs         # FsPluginRepository（返回 Unsupported，不扫描/读取）
         │   ├── provider_registry_impl.rs # ProviderRegistryImpl（单表 HashMap<OjId, ProviderSet> + capability() 能力取件帮手）
         │   └── tests/
         │       ├── storage_tests.rs      # Storage 单元测试
@@ -198,25 +197,32 @@ Hinina/
         │   ├── mod.rs
         │   ├── host/
         │   │   ├── mod.rs
-        │   │   ├── manifest.rs           # PluginManifest + PluginPermission
+        │   │   ├── manifest.rs           # PluginManifest + PluginPermission + 订阅/网络策略与纯清单校验
         │   │   ├── extension.rs          # ExtensionPoint + 4 个子扩展点
+        │   │   ├── api_error.rs          # 内部 AppError → 安全 PluginError
         │   │   ├── event_adapter.rs      # PluginEventAdapter：CoreEvent → PluginEvent 的**唯一**转换点（白名单 / 字段裁剪脱敏 / 协议版本 / 每订阅单调序号）
-        │   │   └── plugin_host.rs        # PluginHost：插件订阅注册与投递（权限校验须 Notification、**一律锁外投递**、订阅即下发初始 ResyncRequired、Lagged→ResyncRequired、单插件异常隔离）；**不是第二套总线**
+        │   │   └── plugin_host.rs        # PluginHost：授权 + 声明过滤、有界队列 128、try_send、满/关闭注销、初始/Lagged Resync、防重复启动
         │   ├── api/
         │   │   ├── mod.rs
         │   │   ├── event.rs              # 插件事件协议：PluginEvent + PluginEventEnvelope{version,sequence,occurredAt,event}（插件侧唯一允许依赖的事件接口）
         │   │   ├── workspace.rs
         │   │   ├── problem.rs
-        │   │   ├── contest.rs
+        │   │   ├── contest.rs            # 比赛只读安全投影与 trait
+        │   │   ├── submission.rs         # 本人提交分页/详情契约，无源码
+        │   │   ├── identity.rs           # 稳定不透明身份投影
+        │   │   ├── storage.rs            # 私有 JSON/CAS 契约及边界检查
+        │   │   ├── http.rs               # 受控请求/响应契约，无网络执行器
+        │   │   ├── notification.rs       # 纯文本通知契约
+        │   │   ├── error.rs              # 插件安全错误白名单
         │   │   ├── ui.rs
         │   │   └── tests/
         │   │       └── event_tests.rs     # 协议形状锁定（camelCase + type tag）、协议无敏感字段、协议不含凭证轮换、版本号钉死
         │   ├── permission/
-        │   │   └── mod.rs
+        │   │   └── mod.rs                # PluginGrant：声明与宿主批准分离
         │   ├── registry/
-        │   │   └── mod.rs
+        │   │   └── mod.rs                # PluginRepository 端口（从 core 移入）
         │   └── runtime/
-        │       └── mod.rs
+        │       └── mod.rs                # !Send 异步引擎/Runtime Bridge 契约，无 JS
         └── commands/                     # Tauri Command 薄封装
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
@@ -407,7 +413,7 @@ src/
 | **基础设施** | `infra/` http/storage/cache/logger/data_dir/session | Vite/Naive UI/TailwindCSS |
 | **表现** | — | `views/` + `components/` |
 | **状态** | `CoreEventBus`（只发事实，不执行动作） | `stores/` Pinia |
-| **扩展** | `plugin/`（v0.x 仅预留接口 + 事件边界） | — |
+| **扩展** | `plugin/`（v0.x 版本化接口 + 有界事件边界；无 JS 执行器） | — |
 
 ### 关键设计约束
 
@@ -417,7 +423,7 @@ src/
   - **Command / Service 执行并保证**核心业务动作完成 —— 工作区落盘、OJ 切换清缓存、配置落盘、会话持久化、登出清理、用户域缓存回收**全部显式完成**，不依赖事件消费者；
   - **`CoreEventBus` 只发布已经发生的事实**（`WorkspaceSaved` / `OjSwitched` / `ConfigChanged` / `LoggedIn` …），用于解耦异步观察者（前端桥、审计、插件）；
   - **IPC 查询当前真值**、**前端轮询外部可变状态**（评测状态、榜单、公告、题目总览）—— 事件丢失时靠查询/下一轮轮询恢复；
-  - **PluginHost 只做适配、过滤、脱敏与生命周期**，与内部消费者共用同一条底层事件流，**不建第二套总线**。
+  - **PluginHost 只做适配、过滤、脱敏与订阅管理**，与内部消费者共用同一条底层事件流，**不建第二套总线**。
 - **`broadcast` 的语义边界（务必读）**：`send()` 成功 ≠ 消费者已处理完成 ≠ 事件可靠送达 ≠ 业务动作执行成功。通道**容量有限**（1024）、**允许丢失**、**不保留历史**（订阅前的事件收不到）。因此：① 没有 receiver 时 `send` 返回 `Err`，只记 `debug`，**绝不是业务失败**；② 消费者启动时与 `Lagged` 后都必须 `resync`（查询当前状态）；③ 业务动作在发布**之前**就已完成的，发布失败不回滚它。
 - **三类消费者、一条事件流**：`Tauri 前端桥`（emit 到 webview，仅刷新触发）、`审计`（只读落日志）、`PluginHost`（→ `PluginEvent`）。内部 Service **不订阅任何事件**（旧实现的同步订阅表与延迟线程已删除 —— 它同时承担「事实通知」与「必须完成的核心动作」两种语义，导致 Token 轮换、OJ 切换、配置热生效三处出现隐式同步依赖）。
 - **事件载荷约束**：只放 ID / 修订号 / 状态摘要。禁止出现 Token、密码、完整 Session、认证头、源代码、内部文件路径、完整领域实体、内部缓存对象、未脱敏用户实体、内部错误栈。大数据由消费者收到事件后经 Service / IPC 查询。
@@ -483,3 +489,14 @@ src/
 - **语言菜单必须浮层化**：HOJ 的语言列表可能十几项，`absolute` 挂在按钮下方会被编辑器容器的 `overflow-hidden` 与快捷提交卡片的裁切吃掉（表现为菜单看不见 / 滚不动 / 选不到后面的语言）。`CodeEditor` 改为 **Teleport 到 `.contest-theme` 外壳 + `position: fixed` + 动态 `maxHeight`（≤320px）与上下翻转**，超出部分 `overflow-y-auto overscroll-contain` 滚动承接，`window resize` 重定位（分栏拖拽后不会错位）
 - **赛场视觉是一套独立令牌，入口页保持自己的气质**（PR #36）：`styles/contest.css` 在 `.contest-theme` 作用域下重写整套 CSS 变量（中性灰底 `#f7f6f1` / 近黑主色 `#2e3033` / 木色强调 `#8c6a43` / 低饱和语义色 / `--radius: 3px`）与通用类，并由 `App.vue` 按路由**同一判据**切换「CSS 变量」与「Naive UI `themeOverrides`」两套主题（比赛外壳内用赛场中性色，入口页用紫系）—— 两套主题若各自切换就会漂移。**响应式密度**由 `--ui-step = clamp(0px, min((100vw - 1280px)/320, (100vh - 800px)/140), 2px)` 统一驱动字号与间距：按可用**宽高共同**放大，最大化窗口下不会「字小得像没适配」。主视图页头统一由 `components/common/PageHeading.vue` 承担（编号 `01`–`05` 眉标 + 主标题 + 描述/操作插槽，样式外置到 contest.css），避免五个页面各自拼标题导致版式漂移；题面与公告正文用容器查询单位 `cqi` + `48em` 行宽封顶，分栏拖窄后字号跟随左栏宽度而不是视口
 - **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG）。**字体例外且只走本地打包**：正文字体经 `@fontsource-variable/inter` / `jetbrains-mono` / `noto-sans-sc`（`global.css` 顶部 `@import`），登录页标题与等宽另用 `noto-serif-sc` / `roboto-mono`（`LoginView.vue` 局部引入）—— 全部随构建打进 dist，**不经 CDN**，离线可用；图标与状态符号仍是内联 SVG，不新增图标字体依赖。客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）
+
+
+### 插件接口施工（2026-10）
+
+真实基线审计见 [ARCHITECTURE_REVIEW](../ARCHITECTURE_REVIEW.md)。当前 Manifest/API 版本 1、事件协议版本 2（点分 type，字段 camelCase），不兼容尚未投入使用的旧清单/事件格式。Host 使用 PluginGrant 而不是从 Manifest 自动授权；events.subscribe 和 notification 分离，提交/比赛载荷还按领域读取权限过滤。过滤发生在分配 sequence 之前。
+
+每插件的 mpsc 有界队列是 CoreEventBus 的输出接入点，不能发布业务事实。临界区只有宿主管理的 try_send，无用户 callback/await/I/O，因此可以原子注册、保持序号顺序和注销后不再入队。队列满或关闭时移除订阅；Runtime 重新接入先 Resync。Host.start 只允许启动一次，消费者继续复用 core 的监督机制。
+
+PluginRepository 属于 plugin/registry，infra 占位返回 Unsupported，不再让 core 引用插件清单。Plugin API 只提供独立 DTO/trait/安全错误，查询必须绑定宿主签发上下文（切 OJ/账号/比赛/授权后失效）；没有 Service Adapter、网络/存储执行器或 Runtime 自动装配。AppContext 的核心 Service 注入与前端 View → Store → Service → Bridge 流程保持原样。
+
+参考 [插件文档入口](modules/src-tauri/plugin/README.md) 查看已实现/预留/后续能力矩阵、SDK 声明及安全要求。不要把接口存在当作可运行插件的证明。
