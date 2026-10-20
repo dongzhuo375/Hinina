@@ -1,3 +1,4 @@
+pub mod api_error;
 pub mod event_adapter;
 pub mod extension;
 pub mod manifest;
