@@ -50,3 +50,7 @@ pub trait PluginRuntime {
 #[cfg(test)]
 #[path = "tests/runtime_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/engine_tests.rs"]
+mod engine_tests;

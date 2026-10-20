@@ -82,3 +82,15 @@ SubmissionService 已有 get_submission_detail、list_contest_submissions、get_
 5. 文档/验收：能力状态表、声明、教程、后续引擎验证清单；逐层测试，最终全量 Rust/前端测试、build、rustfmt、clippy。
 
 审计基线：`cargo test --offline --manifest-path src-tauri/Cargo.toml --lib plugin::` 21/21 通过；`npm run build` 通过。现有告警：FsPluginRepository.storage 未读，Vite 大资源包。完整运行时/存储/HTTP/气球集成测试不属于本轮验收。
+
+## 9. 可运行宿主增量施工（2026-10-20）
+
+基准 main `2cef9a1`，分支 `feat/plugin-runtime`。本轮目标为真实 JS 开发宿主，不编写气球业务插件。先核对代码，再按访问作用域、查询 Adapter、专用 I/O、Runtime、装配与开发入口施工。
+
+已确认：上一轮仅事件边界可执行；API/Runtime/仓库都是端口。AuthService.get_session 有恢复 Token 的副作用，不能成为插件身份查询入口。ContestService.load_contest_with_problems 会自动选赛，插件查询应另设只读方法。only_mine 目前由 Command 强制。Hydro 的提交列表使用假定 100 条推导尾页/总数，不能作为插件历史完整性证据。提交事件无作用域，仍只用作刷新提示。
+
+采用 API/Manifest v2：游标分页、未知精确总数可空、确切网络 origin 与宿主额外批准地址范围；事件协议保持 v2。不支持旧接口自动降级或旧清单静默扩权。默认无插件启用，授权配置在代码目录外，业务数据与源码分开。
+
+优先使用 rquickjs 0.14 的 std/futures（不启用 full/dyn-load/custom allocator）、reqwest 独立客户端、semver、atomicwrites、fs4、governor、uuid/sha2、成熟 IP/CIDR 类型。先在当前 Windows/MSVC 实测 Promise、不可捕获的中断和内存上限；不以 trait 测试代替引擎测试。不创建新 Tokio runtime。
+
+保留原有未提交 Cargo.toml 标记、AGENTS.md、截图和缓存指南。仅对本轮文件格式化，逐层运行测试，最终同步实际能力和限制。
