@@ -297,6 +297,13 @@ struct StubAuthProvider {
 #[async_trait::async_trait]
 impl AuthProvider for StubAuthProvider {
     async fn login(&self, username: &str, _password: &str) -> AppResult<User> {
+        match self.outcome {
+            StubOutcome::Invalid => {
+                return Err(AppError::Auth("fixture credentials rejected".into()))
+            }
+            StubOutcome::NetworkErr => return Err(AppError::Network("fixture offline".into())),
+            StubOutcome::Valid => {}
+        }
         Ok(User {
             id: "u1".into(),
             username: username.into(),
@@ -321,6 +328,35 @@ impl AuthProvider for StubAuthProvider {
             *slot = Some(token.to_string());
         }
     }
+}
+
+#[tokio::test]
+async fn failed_login_preserves_the_previous_identity_and_revocation_state() {
+    for outcome in [StubOutcome::Invalid, StubOutcome::NetworkErr] {
+        let (service, _bus, repo, _dir, _) = make_stub_service("failed-login-identity", outcome);
+        repo.save(&sample_session("old-token")).unwrap();
+        assert!(service.login("different-user", "bad").await.is_err());
+        assert_eq!(
+            service.identity_metadata().unwrap(),
+            Some(("u1".into(), "tester".into()))
+        );
+        assert!(service.revoked_identities.lock().unwrap().is_empty());
+        service
+            .revoked_identities
+            .lock()
+            .unwrap()
+            .insert(service.registry.current_id());
+        assert!(service.login("different-user", "bad").await.is_err());
+        assert_eq!(service.identity_metadata().unwrap(), None);
+    }
+    let (service, _bus, repo, _dir) = make_service("missing-provider-identity");
+    repo.save(&sample_session("old-token")).unwrap();
+    assert!(service.login("different-user", "bad").await.is_err());
+    assert_eq!(
+        service.identity_metadata().unwrap(),
+        Some(("u1".into(), "tester".into()))
+    );
+    assert!(service.revoked_identities.lock().unwrap().is_empty());
 }
 
 /// 构造带 Stub AuthProvider 的服务与 token 回注记录槽。

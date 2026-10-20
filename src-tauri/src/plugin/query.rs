@@ -21,13 +21,38 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
+    num::NonZeroU32,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tokio_util::sync::CancellationToken;
+
+/// Host-private OJ request budget. Counts each actual provider dispatch, including
+/// every native page scanned by submission.get; exhausted callers never queue.
+pub(crate) struct QueryBudget {
+    rate: DefaultDirectRateLimiter,
+    concurrent: tokio::sync::Semaphore,
+}
+impl QueryBudget {
+    pub(crate) fn new(per_minute: u32, concurrent: usize) -> Self {
+        Self {
+            rate: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(per_minute).unwrap())),
+            concurrent: tokio::sync::Semaphore::new(concurrent),
+        }
+    }
+    fn acquire(&self) -> PluginResult<tokio::sync::SemaphorePermit<'_>> {
+        let permit = self
+            .concurrent
+            .try_acquire()
+            .map_err(|_| PluginError::LimitExceeded)?;
+        self.rate.check().map_err(|_| PluginError::LimitExceeded)?;
+        Ok(permit)
+    }
+}
 
 /// @plugin-api
 /// @since 2.0
@@ -153,6 +178,8 @@ pub struct ScopedQueries {
     source: Arc<dyn QuerySource>,
     access: Arc<AccessRevision>,
     state: Mutex<State>,
+    budget: QueryBudget,
+    shared_budget: Arc<QueryBudget>,
 }
 impl ScopedQueries {
     /// @plugin-api
@@ -171,7 +198,39 @@ impl ScopedQueries {
             access,
             stopped,
             state: Mutex::default(),
+            budget: QueryBudget::new(60, 2),
+            shared_budget: Arc::new(QueryBudget::new(120, 4)),
         }
+    }
+    pub(crate) fn with_shared_budget(mut self, budget: Arc<QueryBudget>) -> Self {
+        self.shared_budget = budget;
+        self
+    }
+    async fn scope(&self) -> PluginResult<QueryScope> {
+        // identity_metadata reads the session repository. Never execute that I/O
+        // on the Tokio executor, including checks before/after remote requests.
+        let source = self.source.clone();
+        tokio::task::spawn_blocking(move || source.scope())
+            .await
+            .map_err(|_| PluginError::Unavailable)?
+    }
+    async fn remote<T>(
+        &self,
+        handle: &PluginQueryContext,
+        operation: impl std::future::Future<Output = PluginResult<T>>,
+    ) -> PluginResult<T> {
+        let cancellation = self.check(handle).await?;
+        let _local = self.budget.acquire()?;
+        let _shared = self.shared_budget.acquire()?;
+        let result = tokio::select! { biased;
+            _ = self.stopped.cancelled() => return Err(PluginError::ContextExpired),
+            _ = cancellation.cancelled() => return Err(PluginError::ContextExpired),
+            result = tokio::time::timeout(Duration::from_secs(5), operation) => {
+                result.unwrap_or(Err(PluginError::Timeout))
+            },
+        };
+        self.check(handle).await?;
+        result
     }
     /// @plugin-api
     /// @since 2.0
@@ -186,7 +245,7 @@ impl ScopedQueries {
     /// @since 2.0
     /// @stability stable
     /// Checks scope before dispatch and returns its cancellation fence.
-    pub fn check(&self, handle: &PluginQueryContext) -> PluginResult<CancellationToken> {
+    pub async fn check(&self, handle: &PluginQueryContext) -> PluginResult<CancellationToken> {
         if self.stopped.is_cancelled() {
             return Err(PluginError::ContextExpired);
         }
@@ -201,16 +260,17 @@ impl ScopedQueries {
         let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
         if context.created.elapsed() > Duration::from_secs(300)
             || snapshot.revision != context.revision
-            || self.source.scope().map_err(|_| PluginError::ContextExpired)? != context.scope
+            || self.scope().await.map_err(|_| PluginError::ContextExpired)? != context.scope
             // Check after scope(): a transition may revoke the token during the snapshot.
             || context.cancellation.is_cancelled()
+            || self.stopped.is_cancelled()
         {
             return Err(PluginError::ContextExpired);
         }
         Ok(context.cancellation)
     }
-    fn context(&self, handle: &PluginQueryContext) -> PluginResult<Context> {
-        self.check(handle)?;
+    async fn context(&self, handle: &PluginQueryContext) -> PluginResult<Context> {
+        self.check(handle).await?;
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -228,8 +288,8 @@ impl ScopedQueries {
             return Err(PluginError::ContextExpired);
         }
         let snapshot = self.access.snapshot().ok_or(PluginError::Unavailable)?;
-        let scope = self.source.scope()?;
-        if snapshot.cancellation.is_cancelled() {
+        let scope = self.scope().await?;
+        if snapshot.cancellation.is_cancelled() || self.stopped.is_cancelled() {
             return Err(PluginError::ContextExpired);
         }
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -260,7 +320,7 @@ impl ScopedQueries {
         handle: &PluginQueryContext,
     ) -> PluginResult<Option<PluginIdentity>> {
         self.require(PluginPermission::IdentityRead)?;
-        let context = self.context(handle)?;
+        let context = self.context(handle).await?;
         Ok(context.scope.user.map(|(id, _)| {
             let key =
                 serde_json::to_vec(&(&context.scope.oj, &context.scope.endpoint, id)).unwrap();
@@ -280,20 +340,14 @@ impl ScopedQueries {
         id: Option<&str>,
     ) -> PluginResult<Option<PluginContest>> {
         self.require(PluginPermission::ContestRead)?;
-        let context = self.context(handle)?;
+        let context = self.context(handle).await?;
         let Some(contest) = context.scope.contest else {
             return Ok(None);
         };
         if id.is_some_and(|id| id != contest) {
             return Ok(None);
         }
-        let cancellation = self.check(handle)?;
-        let result = tokio::select! { biased;
-            _ = self.stopped.cancelled() => return Err(PluginError::ContextExpired),
-            _ = cancellation.cancelled() => return Err(PluginError::ContextExpired),
-            result = self.source.contest(&contest) => result,
-        };
-        self.check(handle)?;
+        let result = self.remote(handle, self.source.contest(&contest)).await;
         let result = result.and_then(|c| {
             if c.id == contest {
                 Ok(c)
@@ -322,7 +376,7 @@ impl ScopedQueries {
     ) -> PluginResult<PluginSubmissionPage> {
         self.require(PluginPermission::SubmissionRead)?;
         query.validate()?;
-        let context = self.context(handle)?;
+        let context = self.context(handle).await?;
         let (_, username) = context.scope.user.ok_or(PluginError::Unauthenticated)?;
         if context.scope.contest.as_deref() != Some(&query.contest_id) {
             return Err(PluginError::ContextExpired);
@@ -358,14 +412,12 @@ impl ScopedQueries {
             if cursor.native_page > 10_000 {
                 return Err(PluginError::LimitExceeded);
             }
-            let cancellation = self.check(handle)?;
-            let result = tokio::select! { biased;
-                _ = self.stopped.cancelled() => return Err(PluginError::ContextExpired),
-                _ = cancellation.cancelled() => return Err(PluginError::ContextExpired),
-                result = self.source.history(&query.contest_id, cursor.native_page) => result,
-            };
-            self.check(handle)?;
-            let page = result?;
+            let page = self
+                .remote(
+                    handle,
+                    self.source.history(&query.contest_id, cursor.native_page),
+                )
+                .await?;
             if page.records.len() > 1000 || page.records.iter().any(|r| r.username != username) {
                 return Err(PluginError::ProviderError);
             }
@@ -422,7 +474,7 @@ impl ScopedQueries {
                 .cursors
                 .remove(&id);
         }
-        self.check(handle)?;
+        self.check(handle).await?;
         Ok(PluginSubmissionPage {
             records,
             total: cursor.total,
@@ -450,7 +502,19 @@ impl ScopedQueries {
             limit: 100,
         };
         for _ in 0..100 {
-            let page = self.list(handle, query.clone()).await?;
+            let page = match self.list(handle, query.clone()).await {
+                Ok(page) => page,
+                Err(error) => {
+                    if let Some(cursor) = &query.cursor {
+                        self.state
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .cursors
+                            .remove(cursor);
+                    }
+                    return Err(error);
+                }
+            };
             if let Some(record) = page.records.into_iter().find(|r| r.submission_id == id) {
                 if let Some(cursor) = page.next_cursor {
                     self.state

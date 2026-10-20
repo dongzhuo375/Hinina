@@ -4,6 +4,7 @@ use api::{PluginError, PluginResult};
 use async_trait::async_trait;
 use host::manifest::{PluginManifest, PluginPermission};
 use query::{QueryScope, QuerySource, ScopedQueries};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub struct Source {
@@ -11,6 +12,9 @@ pub struct Source {
     pub scope_error: Mutex<Option<PluginError>>,
     pub pages: Mutex<Vec<SubmissionHistoryPage>>,
     pub delay: bool,
+    pub pending: bool,
+    pub contest_calls: AtomicUsize,
+    pub history_calls: AtomicUsize,
 }
 impl Default for Source {
     fn default() -> Self {
@@ -24,6 +28,9 @@ impl Default for Source {
             scope_error: Mutex::new(None),
             pages: Mutex::new(vec![]),
             delay: false,
+            pending: false,
+            contest_calls: AtomicUsize::new(0),
+            history_calls: AtomicUsize::new(0),
         }
     }
 }
@@ -36,12 +43,23 @@ impl QuerySource for Source {
         Ok(self.scope.lock().unwrap().clone())
     }
     async fn contest(&self, _: &str) -> PluginResult<Contest> {
+        self.contest_calls.fetch_add(1, Ordering::SeqCst);
+        if self.pending {
+            std::future::pending::<()>().await;
+        }
+        if self.delay {
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        }
         serde_json::from_value(
             serde_json::json!({"id":"contest","title":"Fixture","startTime":1,"endTime":2}),
         )
         .map_err(|_| PluginError::ProviderError)
     }
     async fn history(&self, _: &str, page: u32) -> PluginResult<SubmissionHistoryPage> {
+        self.history_calls.fetch_add(1, Ordering::SeqCst);
+        if self.pending {
+            std::future::pending::<()>().await;
+        }
         if self.delay {
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         }

@@ -10,7 +10,7 @@ use super::{
         manifest::PluginPermission,
         plugin_host::{PluginHost, PluginHostError},
     },
-    query::{QuerySource, ScopedQueries},
+    query::{QueryBudget, QuerySource, ScopedQueries},
     runtime::quickjs::QuickJsRuntime,
 };
 use crate::plugin::registry::PluginRepository;
@@ -23,7 +23,7 @@ use crate::{
 };
 use serde::Serialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
@@ -57,9 +57,10 @@ pub struct PluginManager {
     source: Arc<dyn QuerySource>,
     access: Arc<AccessRevision>,
     workers: Mutex<BTreeMap<String, Worker>>,
-    statuses: Mutex<BTreeMap<String, PluginStatus>>,
+    statuses: Mutex<VecDeque<PluginStatus>>,
     operation: tokio::sync::Mutex<()>,
     output: Mutex<Option<Arc<dyn NotificationOutput>>>,
+    query_budget: Arc<QueryBudget>,
 }
 impl PluginManager {
     /// @plugin-api
@@ -81,6 +82,7 @@ impl PluginManager {
             statuses: Mutex::default(),
             operation: Default::default(),
             output: Mutex::default(),
+            query_budget: Arc::new(QueryBudget::new(120, 4)),
         }
     }
     /// @plugin-api
@@ -96,11 +98,14 @@ impl PluginManager {
     /// @stability stable
     pub fn list(&self) -> PluginResult<Vec<PluginStatus>> {
         let config = FsPluginRepository::new(self.base.clone()).configuration()?;
-        let mut statuses = self
-            .statuses
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let mut statuses = {
+            let mut history = self.statuses.lock().unwrap_or_else(|e| e.into_inner());
+            history.retain(|status| config.plugins.contains_key(&status.id));
+            history
+                .iter()
+                .map(|status| (status.id.clone(), status.clone()))
+                .collect::<BTreeMap<_, _>>()
+        };
         for (id, _) in config.plugins {
             statuses.entry(id.clone()).or_insert(PluginStatus {
                 id,
@@ -135,18 +140,27 @@ impl PluginManager {
     }
     async fn start_inner(&self, id: &str) -> PluginResult<()> {
         self.start_worker(id).await.inspect_err(|error| {
-            self.statuses
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(
-                    id.into(),
-                    PluginStatus {
-                        id: id.into(),
-                        state: "failed",
-                        error: Some(error.clone()),
-                    },
-                );
+            // PluginError only contains stable, redacted diagnostics. Loading may fail
+            // before a worker exists, so worker.exit alone cannot report these failures.
+            tracing::warn!(plugin_id = if id.len() <= 128 { id } else { "<invalid>" },
+                runtime = "js", operation = "worker.start", error = ?error,
+                "Plugin start failed");
+            if id.len() <= 128 {
+                self.remember_status(PluginStatus {
+                    id: id.into(),
+                    state: "failed",
+                    error: Some(error.clone()),
+                });
+            }
         })
+    }
+    fn remember_status(&self, status: PluginStatus) {
+        let mut history = self.statuses.lock().unwrap_or_else(|e| e.into_inner());
+        history.retain(|old| old.id != status.id);
+        if history.len() == 128 {
+            history.pop_front();
+        }
+        history.push_back(status);
     }
     async fn start_worker(&self, id: &str) -> PluginResult<()> {
         if self
@@ -175,12 +189,15 @@ impl PluginManager {
             .clone()
             .ok_or(PluginError::Unavailable)?;
         let stop = CancellationToken::new();
-        let authority = Arc::new(ScopedQueries::new(
-            loaded.grant.clone(),
-            self.source.clone(),
-            self.access.clone(),
-            stop.clone(),
-        ));
+        let authority = Arc::new(
+            ScopedQueries::new(
+                loaded.grant.clone(),
+                self.source.clone(),
+                self.access.clone(),
+                stop.clone(),
+            )
+            .with_shared_budget(self.query_budget.clone()),
+        );
         let storage = JsonPluginStorage::new(self.base.join("plugin-data"), authority.clone());
         let http = PluginHttp::new(authority.clone(), loaded.approval.network.clone())?;
         let api: Arc<dyn PluginApi> = Arc::new(ExecutionApi::new(authority, storage, http, output));
@@ -333,17 +350,13 @@ impl PluginManager {
             .remove(id)
         {
             let _ = worker.thread.join();
-            self.statuses
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(
-                    id.into(),
-                    worker
-                        .status
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .clone(),
-                );
+            self.remember_status(
+                worker
+                    .status
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
+            );
         }
         Ok(())
     }
@@ -407,3 +420,7 @@ impl Drop for PluginManager {
         self.cancel_all();
     }
 }
+
+#[cfg(test)]
+#[path = "tests/manager_history_tests.rs"]
+mod history_tests;

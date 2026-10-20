@@ -294,3 +294,23 @@ fn resync_queue_overflow_also_disconnects_only_the_full_subscription() {
     ));
     assert_eq!(host.subscriber_count(), 1);
 }
+
+#[test]
+fn explicit_resync_follows_buffered_business_events_and_reports_closed_or_full_queue() {
+    let (host, _bus) = host();
+    let id = "com.example.resync";
+    let mut rx = host.subscribe(&full_grant(id)).unwrap();
+    rx.try_recv().unwrap();
+    host.dispatch(&CoreEvent::ConfigChanged);
+    assert!(host.request_resync(id));
+    assert_eq!(rx.try_recv().unwrap().event, PluginEvent::ConfigChanged);
+    let notice = rx.try_recv().unwrap();
+    assert_eq!(notice.event, PluginEvent::ResyncRequired { lost: 0 });
+    assert_eq!(notice.sequence, 3);
+    drop(rx);
+    assert!(!host.request_resync(id));
+    assert_eq!(host.subscriber_count(), 0);
+    let _full = host.subscribe_with_capacity(&full_grant(id), 1).unwrap();
+    assert!(!host.request_resync(id));
+    assert_eq!(host.subscriber_count(), 0);
+}

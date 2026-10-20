@@ -90,10 +90,6 @@ impl AuthService {
     pub async fn login(&self, username: &str, password: &str) -> AppResult<User> {
         let _transition = self.access.begin();
         let oj_id = self.registry.current_id();
-        self.revoked_identities
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(oj_id.clone());
         let provider = self.registry.current_auth()?;
 
         info!(username = username, oj = %oj_id, "尝试登录");
@@ -104,6 +100,13 @@ impl AuthService {
             e.context("登录失败")
         })?;
 
+        // AccessRevision blocks plugin reads during the attempt. Provider lookup or
+        // authentication failure must preserve the previous revocation state. Once
+        // the provider accepts new credentials, hide old disk identity until save succeeds.
+        self.revoked_identities
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(oj_id.clone());
         // 持久化会话（显式，落盘成功才算登录完成）
         let session = Session::new(oj_id.as_str(), &user.id, &user.username, &user.token);
         self.session_repo.save(&session)?;

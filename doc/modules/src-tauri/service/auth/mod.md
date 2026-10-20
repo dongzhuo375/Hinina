@@ -53,4 +53,6 @@
 
 ## 插件安全身份读路径
 
-identity_metadata仅返回内部稳定ID/用户名，不调用get_session或恢复Token。with_access绑定通用revision，登录/登出/失效清理显式撤销在途读。已撤销身份在会话删除失败后仍不可用于插件查询；登录中或失败/取消时不重用旧磁盘身份，成功持久化后才恢复可见性。
+identity_metadata仅返回内部稳定ID/用户名，不调用get_session或恢复Token。插件 scope 读取由 ScopedQueries 通过 `spawn_blocking` 调用，避免在 Tokio 执行线程同步读取会话文件。with_access绑定通用revision，登录/登出/失效清理显式撤销在途读。
+
+登录进行中由 AccessRevision 禁止新插件查询；取得 Provider 失败或远端认证失败/取消，不修改既有 revoked_identities 状态，原来可用的旧身份可供新上下文使用，原已撤销的身份仍被拒绝。Provider 成功接纳新凭据后才标记撤销，持久化成功再恢复可见性；此时若落盘失败则继续拒绝旧磁盘身份，防止新凭据与旧身份混用。登出或失效清理即使删除会话文件失败，也保留身份撤销状态。

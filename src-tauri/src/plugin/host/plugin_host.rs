@@ -178,18 +178,16 @@ impl PluginHost {
     /// @since 2.0
     /// @permission host-only
     /// @stability stable
-    /// Coalesces generic reconciliation prompts while delivery is already buffered.
+    /// Success means a reconciliation prompt was enqueued, even after business events.
     pub fn request_resync(&self, id: &str) -> bool {
         let mut subs = self.subscriptions.lock().unwrap_or_else(|e| e.into_inner());
         let Some(sub) = subs.get_mut(id) else {
             return false;
         };
-        if sub.sink.sender.capacity() == sub.sink.sender.max_capacity() {
-            let envelope = sub.adapter.resync_notice(0);
-            if !enqueue(id, sub, envelope) {
-                subs.remove(id);
-                return false;
-            }
+        let envelope = sub.adapter.resync_notice(0);
+        if !enqueue(id, sub, envelope) {
+            subs.remove(id);
+            return false;
         }
         true
     }

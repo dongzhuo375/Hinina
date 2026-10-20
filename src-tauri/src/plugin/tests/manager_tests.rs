@@ -202,6 +202,52 @@ async fn failed_explicit_start_retains_diagnostics() {
     assert_eq!(statuses[0].error, Some(PluginError::Unavailable));
 }
 
+#[tokio::test]
+async fn failure_before_worker_spawn_emits_only_redacted_diagnostics() {
+    use std::io::Write;
+    use tracing::instrument::WithSubscriber;
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("plugin-start-log-private-path");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("plugins.json"), "private malformed configuration").unwrap();
+    let manager = PluginManager::new(
+        dir.to_path_buf(),
+        Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+        Arc::new(Source::default()),
+        Arc::default(),
+    );
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let writer = Capture(buffer.clone());
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    assert_eq!(
+        manager
+            .start("test.diagnostic")
+            .with_subscriber(subscriber)
+            .await,
+        Err(PluginError::InvalidInput)
+    );
+    let log = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+    assert!(log.contains("worker.start"));
+    assert!(log.contains("test.diagnostic"));
+    assert!(log.contains("InvalidInput"));
+    assert!(!log.contains("private malformed configuration"));
+    assert!(!log.contains("plugin-start-log-private-path"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_js_queries_cas_notifications_events_reload_and_isolated_failure() {
     let dir = crate::test_support::TempDir::unique("plugin-manager");

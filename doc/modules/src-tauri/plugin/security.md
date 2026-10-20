@@ -6,6 +6,8 @@ JS只取得冻结的hinina API；不暴露AppContext、Service、Provider、Core
 
 采用成熟实现处理复杂边界：rquickjs限制执行、semver验证版本、reqwest/url负责协议与TLS、ipnet/ip_network处理地址、governor限流、fs4锁和atomicwrites持久化。没有网络任意代理/跳转/重试、Cookie或凭证注入。
 
+只读 OJ 查询同样受资源预算约束，不能借宿主凭据无限访问 Provider：单次激活60次/分钟且并发2，Manager 全部插件合计120次/分钟且并发4；令牌桶允许相应初始突发，共享预算跨重载保留。按每个实际 Provider 请求计费，分页扫描不能只按一次 JS 调用计费；单请求5秒超时，超限立即拒绝。会话身份文件读取通过阻塞线程池执行，前后继续验证作用域撤销。
+
 这是进程内脚本隔离，依赖引擎和Rust/native依赖正确性，不是独立OS进程沙箱；native内存安全缺陷或进程崩溃仍可能影响应用。代码/授权/数据目录由本机管理员维护，不向恶意本地管理员提供隔离承诺。
 
 日志字段统一 plugin_id/plugin_version/runtime/event/operation/permission/request_id；API debug日志仅记操作、成功与请求ID，worker记录状态。禁止记录token/password/authorization/source_code、完整请求/响应体、绝对路径、用户隐私或JS错误栈。普通Service日志沿用原项目策略，插件不接收这些日志。

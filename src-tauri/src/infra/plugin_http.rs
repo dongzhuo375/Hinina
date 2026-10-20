@@ -99,7 +99,7 @@ impl PluginHttp {
     ) -> PluginResult<PluginHttpResponse> {
         self.authority.require(PluginPermission::NetworkRequest)?;
         request.validate_shape()?;
-        let scope = self.authority.check(context)?;
+        let scope = self.authority.check(context).await?;
         if self.limiter.check().is_err() {
             return Err(PluginError::LimitExceeded);
         }
@@ -216,7 +216,7 @@ impl PluginHttp {
                 .header("content-type", "application/json")
                 .body(bytes);
         }
-        self.authority.check(context)?;
+        self.authority.check(context).await?;
         let mut response = builder.send().await.map_err(|e| {
             if e.is_timeout() {
                 PluginError::Timeout
@@ -259,7 +259,7 @@ impl PluginHttp {
             }
             body.extend_from_slice(&chunk);
         }
-        self.authority.check(context)?;
+        self.authority.check(context).await?;
         Ok(PluginHttpResponse {
             ok: (200..300).contains(&status),
             status,

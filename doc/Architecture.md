@@ -503,9 +503,11 @@ AppContext注入通用core/access到Auth/Contest/Config与Registry，登录/登�
 
 专用Infra新增plugin_storage（fs4+atomicwrites，JSON/CAS/配额）、plugin_http（独立reqwest、精确origin、DNS/IP固定、无代理/跳转/重试）、plugin_notification（纯文本Tauri输出）。数据在plugin-data，代码在plugins或管理员codeRoot，审批在plugins.json。默认未启用任何插件。
 
-rquickjs std/futures提供Promise和引擎中断；每插件独立线程、16MiB、activate10秒/事件30秒，使用Tauri持久Tokio handle。stop先撤销调用与订阅，reload等待旧worker退出；退出不阻塞工作区落盘。定期Resync默认60秒，范围10..3600秒，提示可合并，非历史重放。
+rquickjs std/futures提供Promise和引擎中断；每插件独立线程、16MiB、activate10秒/事件30秒，使用Tauri持久Tokio handle。stop先撤销调用与订阅，reload等待旧worker退出；退出不阻塞工作区落盘。定期Resync默认60秒，范围10..3600秒，每次成功代表实际入队，满/关闭即注销并报告不可用，非历史重放。
 
 事件订阅与插件激活分离：仅实际获批 events.subscribe 才建立队列并接收 Resync，其他合法插件仍可运行。Manager 列表通过 Result 暴露配置损坏/验证错误，启动和重载启动阶段的失败保留安全诊断。已有查询句柄的 scope 读取失败视为 ContextExpired，读取后的取消检查继续防护并发作用域切换。
+
+Provider 只读查询每次激活60次/分钟、并发2，Manager 合计120次/分钟、并发4（允许相应初始突发），共享预算跨重载保留；逐个实际请求计费，含 submission.get 每一历史页，单请求5秒超时。scope 校验为异步，会话文件读取在阻塞线程池执行。Manager 历史诊断最多128项，列表清除移出配置的记录，worker 创建前失败也记录稳定安全错误。登录失败保留此前身份撤销状态，Provider 接纳新凭据后才撤销旧磁盘身份直到成功落盘。
 
 前端新增plugin.bridge/service/Store与PluginNotifications，dev助手经完整层次调用。无完整管理UI、插件市场、WASM或气球插件。详见[插件文档](modules/src-tauri/plugin/README.md)和[开发教程](modules/src-tauri/plugin/tutorial.md)。
 
