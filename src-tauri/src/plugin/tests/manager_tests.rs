@@ -202,3 +202,32 @@ async fn periodic_resync_reconciles_without_new_business_events() {
     .unwrap();
     manager.stop("test.periodic").await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bridge_limits_apply_before_a_batch_of_js_promises_is_polled() {
+    let dir = crate::test_support::TempDir::unique("plugin-bridge-budget");
+    install(
+        &dir,
+        "test.budget",
+        r#"export default async h => {
+      const calls = Array.from({length: 64}, () => h.storage.get('key'));
+      const results = await Promise.allSettled(calls);
+      if (results.filter(r => r.status === 'fulfilled').length !== 16) throw Error('budget');
+      if (results.filter(r => r.status === 'rejected').some(r => r.reason.code !== 'limit_exceeded')) throw Error('error contract');
+      await h.notification.info('budget checked');
+    }"#,
+    );
+    approve(&dir, &["test.budget"]);
+    let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
+    let manager = PluginManager::new(
+        dir.to_path_buf(),
+        host,
+        Arc::new(Source::default()),
+        Arc::default(),
+    );
+    let output = Arc::new(Output::default());
+    manager.set_output(output.clone());
+    manager.start("test.budget").await.unwrap();
+    wait_for(&output, "budget checked").await;
+    manager.stop("test.budget").await.unwrap();
+}

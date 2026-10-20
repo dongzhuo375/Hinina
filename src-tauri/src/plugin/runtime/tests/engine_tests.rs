@@ -1,4 +1,7 @@
-use rquickjs::{function::{Async, Func}, AsyncContext, AsyncRuntime, Module};
+use rquickjs::{
+    function::{Async, Func},
+    AsyncContext, AsyncRuntime, Module,
+};
 use std::time::{Duration, Instant};
 
 #[tokio::test]
@@ -22,9 +25,19 @@ async fn real_engine_module_awaits_rust_future_without_ambient_io() {
 async fn real_engine_interrupts_even_caught_infinite_loop() {
     let runtime = AsyncRuntime::new().unwrap();
     let start = Instant::now();
-    runtime.set_interrupt_handler(Some(Box::new(move || start.elapsed() > Duration::from_millis(30)))).await;
+    runtime
+        .set_interrupt_handler(Some(Box::new(move || {
+            start.elapsed() > Duration::from_millis(30)
+        })))
+        .await;
     let context = AsyncContext::full(&runtime).await.unwrap();
-    context.with(|ctx| assert!(ctx.eval::<(), _>("for (;;) { try { for (;;) {} } catch (_) {} }").is_err())).await;
+    context
+        .with(|ctx| {
+            assert!(ctx
+                .eval::<(), _>("for (;;) { try { for (;;) {} } catch (_) {} }")
+                .is_err())
+        })
+        .await;
     assert!(start.elapsed() < Duration::from_secs(2));
 }
 
@@ -33,5 +46,11 @@ async fn real_engine_enforces_memory_limit() {
     let runtime = AsyncRuntime::new().unwrap();
     runtime.set_memory_limit(2 * 1024 * 1024).await;
     let context = AsyncContext::full(&runtime).await.unwrap();
-    context.with(|ctx| assert!(ctx.eval::<(), _>("globalThis.a = new Array(10000000).fill('x');").is_err())).await;
+    context
+        .with(|ctx| {
+            assert!(ctx
+                .eval::<(), _>("globalThis.a = new Array(10000000).fill('x');")
+                .is_err())
+        })
+        .await;
 }

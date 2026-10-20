@@ -79,9 +79,16 @@ impl QuickJsRuntime {
         self.set_deadline(Duration::from_secs(10));
         let operation = self.context.async_with(async |ctx| {
             let host = Func::from(Async(move |operation: String, input: String| {
-                let api = api.clone(); let stopped = stopped.clone(); let pending = pending.clone();
+                // Acquire before creating the Future: JS may enqueue many calls in one
+                // synchronous turn, before the Rust futures get their first poll.
+                let permit = pending.clone().try_acquire_owned().ok();
+                let arguments = if permit.is_some() && operation.len() <= 64 && input.len() <= 140_000 {
+                    Some((operation, input))
+                } else { None };
+                let api = api.clone(); let stopped = stopped.clone();
                 async move {
-                    let Ok(_permit) = pending.try_acquire() else { return "{\"ok\":false,\"error\":{\"code\":\"limit_exceeded\"}}".to_string(); };
+                    let _permit = permit;
+                    let Some((operation, input)) = arguments else { return "{\"ok\":false,\"error\":{\"code\":\"limit_exceeded\"}}".to_string(); };
                     tokio::select! { biased;
                         _ = stopped.cancelled() => "{\"ok\":false,\"error\":{\"code\":\"context_expired\"}}".to_string(),
                         result = call_json(api.as_ref(), operation, input) => result,
