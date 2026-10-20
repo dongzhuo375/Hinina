@@ -5,7 +5,7 @@ use std::time::Duration;
 use super::*;
 use crate::core::event::core_event_bus::CoreEventBus;
 use crate::plugin::api::event::PluginEvent;
-use crate::plugin::host::extension::ExtensionPoint;
+use crate::plugin::host::manifest::PluginEventSubscription;
 use crate::plugin::host::manifest::PluginManifest;
 
 /// 记录型 sink：把投递到的事件攒起来供断言。
@@ -56,11 +56,31 @@ fn manifest(id: &str, permissions: Vec<PluginPermission>) -> PluginManifest {
         id: id.to_string(),
         name: id.to_string(),
         version: "1.0.0".to_string(),
+        manifest_version: 1,
+        runtime: "js".to_string(),
+        entry: "index.js".to_string(),
+        api_version: 1,
         description: String::new(),
         author: String::new(),
         permissions,
-        extension_points: Vec::<ExtensionPoint>::new(),
-        min_app_version: "0.1.0".to_string(),
+        events: vec![
+            PluginEventSubscription::OjSwitched,
+            PluginEventSubscription::ContestSelected,
+            PluginEventSubscription::AnnouncementChanged,
+            PluginEventSubscription::ProblemOpened,
+            PluginEventSubscription::SubmissionCreated,
+            PluginEventSubscription::SubmissionJudged,
+            PluginEventSubscription::WorkspaceSaved,
+            PluginEventSubscription::ConfigChanged,
+            PluginEventSubscription::ThemeChanged,
+            PluginEventSubscription::SessionLoggedIn,
+            PluginEventSubscription::SessionLoggedOut,
+            PluginEventSubscription::SessionExpired,
+        ],
+        network: Default::default(),
+        contributes: vec![],
+        config_schema: serde_json::json!({}),
+        min_app_version: Some("0.1.0".to_string()),
     }
 }
 
