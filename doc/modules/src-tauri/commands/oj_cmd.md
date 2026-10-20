@@ -37,4 +37,4 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 - **前端状态由调用点直接重置**：切换是前端发起的命令，发起方编排后果（与登出同款模式），**不为 `OjSwitched` 引入 Tauri 事件桥**（`app.emit` + `@tauri-apps/api/event` 监听）。若未来出现非前端发起的切换（如配置热重载改 `oj.active`），再补事件桥把 `OjSwitched` 下发到 webview。
 - **会话文件按 OJ 隔离是特性**：`sessions/{id}.json` 各自独立，切换不清旧 OJ 的登录态 —— 切回旧 OJ 免登录。也因此前端重置**不能走 `authStore.logout()`**（它会让已切换的 Registry 删新 OJ 的会话文件）。
 
-统一AccessTransition覆盖Registry切换与比赛/其他Service清理；switch_scope组合发布与reset，命令外层guard还覆盖持久化，不允许两个内部guard之间出现有效混合作用域。
+统一AccessTransition覆盖Registry切换与比赛/其他Service清理；switch_scope组合发布与reset，且只覆盖这一段有效作用域变更。持久化`oj.active`与发布`OjSwitched`在guard释放之后执行，不再把插件查询挡在写盘/广播期间。

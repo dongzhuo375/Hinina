@@ -41,6 +41,15 @@ it('保留 PluginError 的稳定 code 和权限信息', async () => {
   expect(error.isAuthError).toBe(false)
 })
 
+it('只把 {code, permission?} 形态视为插件错误，其他带 code 的载荷保留真实消息', async () => {
+  const payload = { code: 'custom', message: '真实原因' }
+  invoke.mockRejectedValue(payload)
+  const error = await captureError('other_cmd')
+  expect(error.code).toBeUndefined()
+  expect(error.message).toBe('真实原因')
+  expect(error.raw).toEqual(payload)
+})
+
 describe('ipcInvoke — 错误归一化（Rust AppError ↔ 前端跨端契约）', () => {
   it('AppError 载荷 → IpcError，保留变体与真实原因', async () => {
     const payload = appError('Auth', '登录失败: 用户名或密码错误')

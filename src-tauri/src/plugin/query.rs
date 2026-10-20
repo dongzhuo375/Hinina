@@ -109,10 +109,14 @@ pub struct ServiceQueries {
 impl QuerySource for ServiceQueries {
     fn scope(&self) -> PluginResult<QueryScope> {
         let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
-        let mut cache = self.cached_scope.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((revision, scope)) = cache.as_ref() {
-            if *revision == snapshot.revision && !snapshot.cancellation.is_cancelled() {
-                return Ok(scope.clone());
+        // Only the clone happens under the lock: session/config reads below are I/O and
+        // must not serialize every plugin's scope check.
+        {
+            let cache = self.cached_scope.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((revision, scope)) = cache.as_ref() {
+                if *revision == snapshot.revision && !snapshot.cancellation.is_cancelled() {
+                    return Ok(scope.clone());
+                }
             }
         }
         let oj = self.registry.current_id().to_string();
@@ -142,7 +146,8 @@ impl QuerySource for ServiceQueries {
         if snapshot.cancellation.is_cancelled() {
             return Err(PluginError::ContextExpired);
         }
-        *cache = Some((snapshot.revision, scope.clone()));
+        *self.cached_scope.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((snapshot.revision, scope.clone()));
         Ok(scope)
     }
     async fn contest(&self, id: &str) -> PluginResult<Contest> {

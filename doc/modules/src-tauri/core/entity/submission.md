@@ -34,4 +34,4 @@
 
 > 历史说明：旧版的 `Submission` struct（`id/problem_id/language/source_code/status`）从未被任何调用方使用，属死代码，已随本次提交列表/详情能力重写一并删除。
 
-SubmissionRecord新增宿主私有owner_id: Option<String>，默认兼容旧反序列化但不跨IPC序列化；HOJ取JudgeVO.uid，Hydro取rdoc.uid。插件校验稳定ID；username仅用于显示。
+SubmissionRecord新增宿主私有owner_id: Option<String>，默认兼容旧反序列化但不跨IPC序列化；HOJ取JudgeVO.uid，Hydro取rdoc.uid。插件校验稳定ID；username仅用于显示。`owner_id` 不参与序列化，任何 JSON 缓存往返都会丢失归属证据（测试 `submission_record_never_serializes_host_private_owner` 锁定），因此 `SubmissionHistoryPage` 只能由 Provider 直接构造并立即消费；缺失 owner 的记录在插件侧整页拒绝。

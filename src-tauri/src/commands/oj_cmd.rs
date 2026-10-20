@@ -55,8 +55,9 @@ pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<(
         )));
     }
 
-    let _transition = ctx.access.begin();
-
+    // 栅栏只覆盖「发布新 OJ + 失效旧作用域缓存」这一段：持久化与事件通知不属于
+    // 有效作用域变更，不应把插件查询挡在写盘/广播期间。switch_scope 内部自带
+    // 同一个 guard，因此这里不能再套一层外层 guard。
     // 与 set_current 相邻、中间不夹可失败操作：Registry 一旦切换，缓存必须同步失效。
     // 三个 Service 各自负责自己那批缓存（内存段同步清；磁盘段是空间回收，
     // 缓存键已带 OJ 维度，异步清理不影响正确性）。

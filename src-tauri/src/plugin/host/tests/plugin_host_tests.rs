@@ -339,7 +339,11 @@ fn subscription_and_overflow_logs_never_hold_the_subscription_lock() {
     let subscriber = tracing_subscriber::fmt()
         .with_writer(move || writer.clone())
         .finish();
-    tracing::subscriber::with_default(subscriber, || {
+    let dispatch = tracing::Dispatch::new(subscriber);
+    // `Dispatch::new` registers the dispatcher globally, so callsite interest is evaluated
+    // against a real subscriber instead of the default `NoSubscriber`. Without it a parallel
+    // test can cache `never` for these callsites first and permanently drop this test's events.
+    tracing::dispatcher::with_default(&dispatch, || {
         let _receiver = host
             .subscribe_with_capacity(&full_grant("test.log"), 1)
             .unwrap();

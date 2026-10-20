@@ -48,8 +48,7 @@ const APP_ERROR_VARIANTS: readonly string[] = [
 export class IpcError extends Error {
   /** Stable plugin error code, retained independently of AppError variants. */
   get code(): string | undefined {
-    if (this.raw && typeof this.raw === 'object' && 'code' in this.raw && typeof this.raw.code === 'string') return this.raw.code
-    return undefined
+    return this.raw && typeof this.raw === 'object' && isPluginErrorPayload(this.raw) ? this.raw.code : undefined
   }
   constructor(
     readonly cmd: string,
@@ -68,12 +67,23 @@ export class IpcError extends Error {
   }
 }
 
+/**
+ * 插件错误载荷：`PluginError` 的 serde 形态 `{ code, permission? }`。
+ *
+ * 只有这两个键的载荷才算插件错误 —— 不能把任意带 `code` 字段的对象（将来可能的
+ * 其他 IPC 响应）都当成插件错误，否则 message 会退化成 code 并丢掉真实原因。
+ */
+function isPluginErrorPayload(raw: object): raw is { code: string; permission?: unknown } {
+  if (typeof (raw as { code?: unknown }).code !== 'string') return false
+  return Object.keys(raw).every(key => key === 'code' || key === 'permission')
+}
+
 /** 解析 AppError 载荷 → { 变体名, 消息 }；非 AppError 形态返回 null 变体 */
 function parseAppError(raw: unknown): { variant: AppErrorVariant | null; message: string } {
   if (raw instanceof Error) return { variant: null, message: raw.message }
   if (typeof raw === 'string') return { variant: null, message: raw }
   if (raw && typeof raw === 'object') {
-    if ('code' in raw && typeof raw.code === 'string') return { variant: null, message: raw.code }
+    if (isPluginErrorPayload(raw)) return { variant: null, message: raw.code }
     const entries = Object.entries(raw as Record<string, unknown>)
     // AppError 外部标签形式：{ Variant: message }
     if (entries.length === 1 && typeof entries[0][1] === 'string') {

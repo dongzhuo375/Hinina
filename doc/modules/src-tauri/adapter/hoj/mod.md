@@ -28,7 +28,7 @@ HOJ 适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、
 - `into_contest(ContestVO) -> Contest` — 映射 helper，比赛列表与比赛详情共用，避免两处映射漂移；`seal_rank_time` 为空串或无法解析时视为未设置（`None`）；`oi_rank_score_type` 直接透传（OI 榜单计分规则 "Recent"/"Highest"，非 OI 赛为 `None`）
 - `into_announcement(AnnouncementVO) -> Announcement` — 公告映射：id 转字符串、`username` → `author`、时间经 `parse_time` 转秒级时间戳、`content` 为 null 时回退空串
 - `into_problem(ProblemInfoVO) -> Problem` — 题目详情映射：id 转字符串、null 描述字段回退空串、`examples` 经 `parse_samples` 拆样例、**`languages`（允许提交语言显示名列表）原样携带**（前端语言选择器的权威来源，不得丢弃）
-- `into_submission_record(JudgeVO) -> SubmissionRecord` — 提交列表条目映射：`submit_id`/`pid` 转字符串、状态经 `map_status`、`time`/`memory`/`length` 评测未完成时为 null（去 null 后为 0），负值经 `.max(0)` 钳制后转 `u64`
+- `into_submission_record(JudgeVO) -> SubmissionRecord` — 提交列表条目映射：`owner_id` 取稳定 `uid`（空串 → `None`，绝不回退到展示名），`submit_id`/`pid` 转字符串、状态经 `map_status`、`time`/`memory`/`length` 评测未完成时为 null（去 null 后为 0），负值经 `.max(0)` 钳制后转 `u64`。宿主若未返回 `uid`，记录仍可展示，但插件侧会因缺少归属证据整页拒绝（fail closed）
 - `into_submission_detail(types::SubmissionDetail) -> SubmissionDetail` — 提交详情映射（含 code / errorMessage / judger / oiRankScore）；`code` 为 null（未开分享或权限不足）时回退空串（Service 层随后会尝试回落到本地源码快照），`errorMessage` 经 `normalize_error_message` 过滤掉服务端占位文案（详情面板显示空而不是整页报错）
 - `into_judgement_result(&types::SubmissionDetail) -> JudgementResult`（私有**纯函数**）— `get_judgement` 的轮询投影：状态经 `map_status`，非终态（`is_terminal_status` 为 false）原样透传且 score/time/memory 清零，终态携带完整指标；**两条路径都带上 `normalize_error_message` 后的错误信息**。抽成纯函数便于单测锁定透传契约
 - `into_judge_case(JudgeCaseDTO) -> JudgeCase` — 测试点映射：宽松字段全部落默认值；`status` 缺失按 `-1` 走 `map_status` 归入 `Unknown`

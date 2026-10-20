@@ -28,6 +28,20 @@
 | 22 高价值回归缺失 | 存在，Medium（验证缺口） | 补Hydro所有者、真实双插件预算、公开request成功路径（fake transport）、start超时、慢激活溢出、cursor并发；实际reqwest仍用本地server验证 |
 | 23 validation数量过期 | 存在，与11重复，Low | 改为不固定测试数量，结果以本轮命令输出为准；同步新增回归范围 |
 
+## 复审后续加固（第二轮）
+
+上一轮结论后的 7 项小观察一并处理：
+
+| 项 | 处理 |
+|---|---|
+| HOJ 未返回 `uid` 时 owner 缺失 | 保持 fail closed，不退回展示名；新增夹具用例锁定 `owner_id == None`、插件侧整页 `provider_error`，并在 HOJ 夹具测试中断言 `owner_id == uid` |
+| `switch_oj` 外层 guard 过宽 | 移除命令外层 guard，栅栏只覆盖 `switch_scope`（Registry 发布 + 缓存清理）；持久化与事件发布在 guard 释放后执行 |
+| `parseAppError` 把任意 `{code}` 当插件错误 | 收紧为恰好 `{code, permission?}`；其他对象仍按通用形态解析，新增前端用例锁定真实 message 不被 code 覆盖 |
+| `scope()` 持锁做文件 I/O | 缓存命中只在锁内克隆；会话/配置读取移到锁外，未命中并发计算是幂等的 |
+| `owner_id` 序列化丢失 | 保持 `skip_serializing`（不跨 IPC 暴露归属），在实体、`SubmissionHistoryPage`、插件 API 文档中写明“只能消费 Provider 直接返回的记录”，并加序列化契约测试 |
+| reaper 100ms 轮询 | 改为 100ms 起指数退避、2s 上限，原生调用永不返回也不会形成高频轮询 |
+| 锁检查测试的 tracing 顺序敏感 | 用 `Dispatch::new` 先注册 dispatcher 再 `with_default`，消除 callsite interest 竞态（与 Manager 诊断测试同款做法） |
+
 HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存HttpTransport响应；真实连接、响应体和redirect策略使用本地私有transport夹具。没有为了测试公开任何loopback豁免或IPC策略开关。
 
 验证命令：`cargo test --offline --manifest-path src-tauri/Cargo.toml`、`npm test`、`npm run build`、`npm run plugin:sdk:check`，以及本轮Rust文件的rustfmt检查。最终通过情况以当轮执行输出及交付说明为准。

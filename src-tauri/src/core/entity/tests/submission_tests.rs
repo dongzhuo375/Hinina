@@ -82,3 +82,34 @@ fn as_str_matches_serde_output_for_all_variants() {
     deduped.dedup();
     assert_eq!(deduped.len(), seen.len(), "状态名必须唯一");
 }
+
+/// `owner_id` 是宿主私有的归属证据：既不跨 IPC，也不随 JSON 缓存往返保留。
+///
+/// 这条契约决定插件查询必须直连 Provider；若将来把 `SubmissionHistoryPage`
+/// 写入缓存再读回，owner 会变成 `None`，插件侧会整页拒绝而不是误信展示名。
+#[test]
+fn submission_record_never_serializes_host_private_owner() {
+    let record = SubmissionRecord {
+        owner_id: Some("uid-alice".into()),
+        submit_id: "1".into(),
+        pid: "2".into(),
+        display_pid: "HOJ-2".into(),
+        title: "A + B".into(),
+        display_id: "A".into(),
+        username: "alice".into(),
+        submit_time: 1,
+        status: JudgementStatus::Accepted,
+        time_ms: 0,
+        memory_kb: 0,
+        score: None,
+        length: 0,
+        language: "C++".into(),
+    };
+    let json = serde_json::to_value(&record).expect("序列化失败");
+    assert!(
+        json.get("ownerId").is_none(),
+        "owner_id 不得跨 IPC 暴露：{json}"
+    );
+    let round_tripped: SubmissionRecord = serde_json::from_value(json).expect("反序列化失败");
+    assert_eq!(round_tripped.owner_id, None);
+}

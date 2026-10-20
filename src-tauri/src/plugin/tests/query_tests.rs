@@ -84,6 +84,39 @@ async fn in_flight_change_and_wrong_owner_fail_closed() {
     assert_eq!(q.list(&c, query).await, Err(PluginError::ProviderError));
 }
 #[tokio::test]
+async fn records_without_a_stable_owner_are_rejected_rather_than_trusted() {
+    let source = Arc::new(Source::default());
+    let mut ownerless = record("1");
+    ownerless.owner_id = None;
+    *source.pages.lock().unwrap() = vec![SubmissionHistoryPage {
+        records: vec![ownerless],
+        total: Some(1),
+        has_more: false,
+    }];
+    let m = manifest("test.ownerless");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source,
+        Arc::default(),
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    assert_eq!(
+        q.list(
+            &context,
+            PluginSubmissionQuery {
+                contest_id: "contest".into(),
+                problem_id: None,
+                cursor: None,
+                limit: 100,
+            },
+        )
+        .await,
+        Err(PluginError::ProviderError)
+    );
+}
+
+#[tokio::test]
 async fn permissions_and_context_cursor_bindings_are_checked() {
     let q = ScopedQueries::new(
         grant_without(PluginPermission::SubmissionRead),

@@ -527,3 +527,5 @@ Provider 只读查询每次激活60次/分钟、并发2，Manager 合计120次/�
 后续管理设计见[最小实现复盘与管理演进](插件系统最小实现复盘与管理演进.md)：保持现有分层，先补宿主配置持久写入、目录盘点与诊断，再接管理页；持久启用意图与worker运行状态分别表达，不增加第二套业务总线。此处仅链接演进建议，未新增生产架构。
 
 本轮插件审查修复：提交记录以宿主私有owner_id校验身份；OJ切换由统一guard覆盖Registry与比赛清理。生产scope按revision缓存，cursor原子单次领取。Manager注入仓库与能力工厂，激活后订阅、启动超时撤销并清理；approval独立诊断。存储操作增加限流；HTTP仅对相同origin与新近验证的DNS地址集合复用Client（最多32项）。PluginHost日志移至订阅锁外；脚本与IPC保留稳定错误类别。详见[逐项核实](modules/src-tauri/plugin/review-fixes.md)。
+
+复审后续加固：`switch_oj` 栅栏收缩到 Registry 发布与缓存清理，持久化/事件不再阻塞插件查询；scope 缓存命中只在锁内克隆，文件读取移到锁外；插件 IPC 错误只在恰好 `{code, permission?}` 时识别；`owner_id` 明确为不可序列化的宿主私有证据（缺失即整页拒绝，HOJ 缺 `uid` 亦如此）；超时 worker 回收改为指数退避（100ms→2s）；订阅锁检查测试改用已注册 dispatcher 消除 callsite 竞态。

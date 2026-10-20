@@ -378,6 +378,9 @@ impl PluginManager {
             return;
         };
         tokio::spawn(async move {
+            // A native call that never returns must not turn into a 10 Hz busy loop;
+            // back off to a low, bounded poll rate while keeping the worker tracked.
+            let mut delay = Duration::from_millis(100);
             loop {
                 let worker = {
                     let mut workers = workers.lock().unwrap_or_else(|e| e.into_inner());
@@ -396,7 +399,8 @@ impl PluginManager {
                     let _ = worker.thread.join();
                     return;
                 }
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(2));
             }
         });
     }
