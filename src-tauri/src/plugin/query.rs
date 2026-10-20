@@ -47,8 +47,23 @@ pub struct QueryScope {
 /// Read-only service port; tests can provide a deterministic OJ without live services.
 #[async_trait]
 pub trait QuerySource: Send + Sync {
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Snapshot current effective access without restoring credentials.
     fn scope(&self) -> PluginResult<QueryScope>;
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Read metadata without selecting a contest.
     async fn contest(&self, id: &str) -> PluginResult<Contest>;
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Read one native page of own records with honest continuation evidence.
     async fn history(&self, contest: &str, page: u32) -> PluginResult<SubmissionHistoryPage>;
 }
 
@@ -188,6 +203,7 @@ impl ScopedQueries {
             || snapshot.revision != context.revision
             || context.cancellation.is_cancelled()
             || self.source.scope()? != context.scope
+            || context.cancellation.is_cancelled()
         {
             return Err(PluginError::ContextExpired);
         }
