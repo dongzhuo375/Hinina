@@ -201,8 +201,8 @@ impl ScopedQueries {
         let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
         if context.created.elapsed() > Duration::from_secs(300)
             || snapshot.revision != context.revision
-            || context.cancellation.is_cancelled()
-            || self.source.scope()? != context.scope
+            || self.source.scope().map_err(|_| PluginError::ContextExpired)? != context.scope
+            // Check after scope(): a transition may revoke the token during the snapshot.
             || context.cancellation.is_cancelled()
         {
             return Err(PluginError::ContextExpired);

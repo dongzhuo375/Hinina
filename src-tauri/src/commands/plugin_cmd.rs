@@ -17,7 +17,8 @@ pub async fn plugin_list(ctx: State<'_, AppContext>) -> AppResult<Vec<PluginStat
     let manager = ctx.plugin_manager.clone();
     tokio::task::spawn_blocking(move || manager.list())
         .await
-        .map_err(|_| AppError::Config("Plugin status unavailable".into()))
+        .map_err(|_| AppError::Config("Plugin status unavailable".into()))?
+        .map_err(safe)
 }
 /// Start only a plugin explicitly enabled and approved in the host configuration.
 #[tauri::command]

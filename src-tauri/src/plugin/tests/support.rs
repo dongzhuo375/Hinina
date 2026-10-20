@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct Source {
     pub scope: Mutex<QueryScope>,
+    pub scope_error: Mutex<Option<PluginError>>,
     pub pages: Mutex<Vec<SubmissionHistoryPage>>,
     pub delay: bool,
 }
@@ -20,6 +21,7 @@ impl Default for Source {
                 user: Some(("user-1".into(), "alice".into())),
                 contest: Some("contest".into()),
             }),
+            scope_error: Mutex::new(None),
             pages: Mutex::new(vec![]),
             delay: false,
         }
@@ -28,6 +30,9 @@ impl Default for Source {
 #[async_trait]
 impl QuerySource for Source {
     fn scope(&self) -> PluginResult<QueryScope> {
+        if let Some(error) = self.scope_error.lock().unwrap().clone() {
+            return Err(error);
+        }
         Ok(self.scope.lock().unwrap().clone())
     }
     async fn contest(&self, _: &str) -> PluginResult<Contest> {

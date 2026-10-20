@@ -56,6 +56,14 @@ fn invalid_identity_versions_runtime_and_entry_are_rejected() {
 }
 
 #[test]
+fn empty_events_do_not_require_event_subscription_permission() {
+    let mut value = manifest();
+    value.permissions.clear();
+    value.events.clear();
+    value.validate().unwrap();
+}
+
+#[test]
 fn network_policy_requires_permission_and_public_hostname_shape() {
     let mut value = manifest();
     value.permissions.push(PluginPermission::NetworkRequest);

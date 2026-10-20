@@ -6,7 +6,10 @@
 use super::{
     api::*,
     execution_api::{ExecutionApi, NotificationOutput},
-    host::plugin_host::PluginHost,
+    host::{
+        manifest::PluginPermission,
+        plugin_host::{PluginHost, PluginHostError},
+    },
     query::{QuerySource, ScopedQueries},
     runtime::quickjs::QuickJsRuntime,
 };
@@ -91,20 +94,19 @@ impl PluginManager {
     /// @since 2.0
     /// @permission host-only
     /// @stability stable
-    pub fn list(&self) -> Vec<PluginStatus> {
+    pub fn list(&self) -> PluginResult<Vec<PluginStatus>> {
+        let config = FsPluginRepository::new(self.base.clone()).configuration()?;
         let mut statuses = self
             .statuses
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        if let Ok(config) = FsPluginRepository::new(self.base.clone()).configuration() {
-            for (id, _) in config.plugins {
-                statuses.entry(id.clone()).or_insert(PluginStatus {
-                    id,
-                    state: "stopped",
-                    error: None,
-                });
-            }
+        for (id, _) in config.plugins {
+            statuses.entry(id.clone()).or_insert(PluginStatus {
+                id,
+                state: "stopped",
+                error: None,
+            });
         }
         for (id, worker) in self
             .workers
@@ -121,7 +123,7 @@ impl PluginManager {
                     .clone(),
             );
         }
-        statuses.into_values().collect()
+        Ok(statuses.into_values().collect())
     }
     /// @plugin-api
     /// @since 2.0
@@ -132,6 +134,21 @@ impl PluginManager {
         self.start_inner(id).await
     }
     async fn start_inner(&self, id: &str) -> PluginResult<()> {
+        self.start_worker(id).await.inspect_err(|error| {
+            self.statuses
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    id.into(),
+                    PluginStatus {
+                        id: id.into(),
+                        state: "failed",
+                        error: Some(error.clone()),
+                    },
+                );
+        })
+    }
+    async fn start_worker(&self, id: &str) -> PluginResult<()> {
         if self
             .workers
             .lock()
@@ -167,23 +184,43 @@ impl PluginManager {
         let storage = JsonPluginStorage::new(self.base.join("plugin-data"), authority.clone());
         let http = PluginHttp::new(authority.clone(), loaded.approval.network.clone())?;
         let api: Arc<dyn PluginApi> = Arc::new(ExecutionApi::new(authority, storage, http, output));
-        let mut events = self
-            .host
-            .subscribe(&loaded.grant)
-            .map_err(|_| PluginError::Unavailable)?;
-        let allowed = loaded
+        let mut events = if loaded
             .grant
-            .manifest()
-            .events
-            .iter()
-            .filter(|event| {
-                event
-                    .required_permission()
-                    .is_none_or(|p| loaded.grant.require(p).is_ok())
-            })
-            .map(|e| e.as_str().to_string())
-            .chain(std::iter::once("resync.required".into()))
-            .collect::<Vec<_>>();
+            .require(PluginPermission::EventsSubscribe)
+            .is_ok()
+        {
+            Some(
+                self.host
+                    .subscribe(&loaded.grant)
+                    .map_err(|error| match error {
+                        PluginHostError::PermissionDenied => PluginError::PermissionDenied {
+                            permission: PluginPermission::EventsSubscribe,
+                        },
+                        PluginHostError::AlreadySubscribed | PluginHostError::AlreadyStarted => {
+                            PluginError::Unavailable
+                        }
+                    })?,
+            )
+        } else {
+            None
+        };
+        let allowed = if events.is_some() {
+            loaded
+                .grant
+                .manifest()
+                .events
+                .iter()
+                .filter(|event| {
+                    event
+                        .required_permission()
+                        .is_none_or(|p| loaded.grant.require(p).is_ok())
+                })
+                .map(|e| e.as_str().to_string())
+                .chain(std::iter::once("resync.required".into()))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let status = Arc::new(Mutex::new(PluginStatus {
             id: id.into(),
             state: "starting",
@@ -202,19 +239,23 @@ impl PluginManager {
                 let _ = ready.send(result.clone());
                 if let Err(error) = result { let intentional = cancellation.is_cancelled(); cancellation.cancel(); runtime.shutdown().await; return if intentional { Ok(()) } else { Err(error) }; }
                 worker_status.lock().unwrap_or_else(|e| e.into_inner()).state = "running";
-                let mut periodic = tokio::time::interval(Duration::from_secs(loaded.approval.resync_interval_secs)); periodic.tick().await;
-                periodic.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 let mut outcome = Ok(());
-                loop {
-                    tokio::select! { biased;
-                        _ = cancellation.cancelled() => break,
-                        _ = periodic.tick() => { if !host.request_resync(&id_owned) { outcome = Err(PluginError::Unavailable); break; } },
-                        event = events.recv() => {
-                            if events.is_closed() { outcome = Err(PluginError::Unavailable); break; }
-                            let Some(event) = event else { break; };
-                            if let Err(error) = runtime.deliver(&event).await { outcome = Err(error); break; }
+                if let Some(events) = events.as_mut() {
+                    let mut periodic = tokio::time::interval(Duration::from_secs(loaded.approval.resync_interval_secs)); periodic.tick().await;
+                    periodic.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    loop {
+                        tokio::select! { biased;
+                            _ = cancellation.cancelled() => break,
+                            _ = periodic.tick() => { if !host.request_resync(&id_owned) { outcome = Err(PluginError::Unavailable); break; } },
+                            event = events.recv() => {
+                                if events.is_closed() { outcome = Err(PluginError::Unavailable); break; }
+                                let Some(event) = event else { break; };
+                                if let Err(error) = runtime.deliver(&event).await { outcome = Err(error); break; }
+                            }
                         }
                     }
+                } else {
+                    cancellation.cancelled().await;
                 }
                 let intentional = cancellation.is_cancelled();
                 cancellation.cancel();
@@ -338,19 +379,8 @@ impl PluginManager {
                 .map_err(|_| PluginError::Unavailable)??;
         for (id, approval) in config.plugins {
             if approval.enabled {
-                if let Err(error) = self.start(&id).await {
-                    self.statuses
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(
-                            id.clone(),
-                            PluginStatus {
-                                id,
-                                state: "failed",
-                                error: Some(error),
-                            },
-                        );
-                }
+                // start_inner retains failures for both automatic and explicit starts.
+                let _ = self.start(&id).await;
             }
         }
         Ok(())

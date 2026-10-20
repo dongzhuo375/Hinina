@@ -164,3 +164,56 @@ async fn transition_during_scope_snapshot_cannot_return_a_revoked_token() {
         Err(PluginError::ContextExpired)
     ));
 }
+
+#[tokio::test]
+async fn scope_failure_expires_existing_contexts_but_preserves_new_context_errors() {
+    let source = Arc::new(Source::default());
+    let m = manifest("test.scope-failure");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        Arc::default(),
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    for error in [PluginError::Unavailable, PluginError::ProviderError] {
+        *source.scope_error.lock().unwrap() = Some(error.clone());
+        assert!(matches!(
+            q.check(&context),
+            Err(PluginError::ContextExpired)
+        ));
+        assert_eq!(q.identity(&context).await, Err(PluginError::ContextExpired));
+        assert_eq!(
+            q.contest(&context, None).await,
+            Err(PluginError::ContextExpired)
+        );
+        assert_eq!(q.current_context().await.unwrap_err(), error);
+    }
+}
+
+#[tokio::test]
+async fn scope_failure_during_query_rejects_the_completed_result() {
+    let source = Arc::new(Source {
+        delay: true,
+        ..Default::default()
+    });
+    let m = manifest("test.scope-failure");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        Arc::default(),
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    let query = PluginSubmissionQuery {
+        contest_id: "contest".into(),
+        problem_id: None,
+        cursor: None,
+        limit: 100,
+    };
+    let (result, ()) = tokio::join!(q.list(&context, query), async {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        *source.scope_error.lock().unwrap() = Some(PluginError::Unavailable);
+    });
+    assert_eq!(result, Err(PluginError::ContextExpired));
+}

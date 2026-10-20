@@ -7,6 +7,7 @@ use crate::{
     plugin::{
         api::{notification::PluginNotificationLevel, *},
         execution_api::NotificationOutput,
+        host::manifest::PluginPermission,
         host::plugin_host::PluginHost,
         manager::PluginManager,
     },
@@ -47,6 +48,158 @@ async fn wait_for(output: &Output, message: &str) {
     })
     .await
     .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plugins_without_event_grants_can_start_reload_and_stop() {
+    for declares_events in [false, true] {
+        let dir = crate::test_support::TempDir::unique("plugin-without-events");
+        let id = "test.no-events";
+        install(
+            &dir,
+            id,
+            r#"export default async h => {
+          const context = await h.context.current();
+          if (!(await h.identity.current(context)).userKey) throw Error('identity');
+          for (const event of ['resync.required', 'submission.judged']) {
+            let denied = false;
+            try { h.events.on(event, async () => {}); } catch (_) { denied = true; }
+            if (!denied) throw Error('event grant widened');
+          }
+          await h.notification.info('activated');
+        }"#,
+        );
+        let mut m = manifest(id);
+        let approved = m
+            .permissions
+            .iter()
+            .copied()
+            .filter(|p| *p != PluginPermission::EventsSubscribe)
+            .collect::<Vec<_>>();
+        if !declares_events {
+            m.events.clear();
+            m.permissions = approved.clone();
+        }
+        m.validate().unwrap();
+        std::fs::write(
+            dir.join("plugins").join(id).join("manifest.json"),
+            serde_json::to_vec(&m).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(dir.join("plugins.json"), serde_json::json!({
+            "plugins": {id: {"enabled": true, "permissions": approved, "resyncIntervalSecs": 10}}
+        }).to_string()).unwrap();
+        let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
+        let manager = PluginManager::new(
+            dir.to_path_buf(),
+            host.clone(),
+            Arc::new(Source::default()),
+            Arc::default(),
+        );
+        let output = Arc::new(Output::default());
+        manager.set_output(output.clone());
+        manager.start(id).await.unwrap();
+        wait_for(&output, "activated").await;
+        assert_eq!(host.subscriber_count(), 0);
+        assert_eq!(manager.resync(id), Err(PluginError::Unavailable));
+        manager.reload(id).await.unwrap();
+        assert_eq!(host.subscriber_count(), 0);
+        assert_eq!(output.0.lock().unwrap().len(), 2);
+        manager.stop(id).await.unwrap();
+        let statuses = manager.list().unwrap();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].state, "stopped");
+        assert_eq!(statuses[0].error, None);
+    }
+}
+
+#[test]
+fn list_distinguishes_missing_configuration_from_invalid_configuration() {
+    let dir = crate::test_support::TempDir::unique("plugin-list-errors");
+    let manager = PluginManager::new(
+        dir.to_path_buf(),
+        Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+        Arc::new(Source::default()),
+        Arc::default(),
+    );
+    assert!(manager.list().unwrap().is_empty());
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("plugins.json"), "{broken").unwrap();
+    assert!(matches!(manager.list(), Err(PluginError::InvalidInput)));
+    std::fs::write(
+        dir.join("plugins.json"),
+        serde_json::json!({
+            "plugins": {"test.invalid": {"enabled": true, "resyncIntervalSecs": 1}}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    assert!(matches!(manager.list(), Err(PluginError::LimitExceeded)));
+    approve(&dir, &["test.configured"]);
+    let statuses = manager.list().unwrap();
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0].id, "test.configured");
+    assert_eq!(statuses[0].state, "stopped");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_reload_retains_diagnostics_and_a_later_reload_recovers() {
+    let dir = crate::test_support::TempDir::unique("plugin-reload-errors");
+    let id = "test.reload";
+    install(&dir, id, "export default async () => {};");
+    approve(&dir, &[id]);
+    let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
+    let manager = PluginManager::new(
+        dir.to_path_buf(),
+        host.clone(),
+        Arc::new(Source::default()),
+        Arc::default(),
+    );
+    manager.set_output(Arc::new(Output::default()));
+    manager.start(id).await.unwrap();
+    let mut invalid = manifest(id);
+    invalid.entry = "missing.js".into();
+    std::fs::write(
+        dir.join("plugins").join(id).join("manifest.json"),
+        serde_json::to_vec(&invalid).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manager.reload(id).await, Err(PluginError::NotFound));
+    assert_eq!(host.subscriber_count(), 0);
+    let statuses = manager.list().unwrap();
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0].state, "failed");
+    assert_eq!(statuses[0].error, Some(PluginError::NotFound));
+    assert_eq!(
+        serde_json::to_value(&statuses[0]).unwrap()["error"],
+        serde_json::json!({"code": "not_found"})
+    );
+    install(&dir, id, "export default async () => {};");
+    manager.reload(id).await.unwrap();
+    manager.stop(id).await.unwrap();
+    let statuses = manager.list().unwrap();
+    assert_eq!(statuses[0].state, "stopped");
+    assert_eq!(statuses[0].error, None);
+}
+
+#[tokio::test]
+async fn failed_explicit_start_retains_diagnostics() {
+    let dir = crate::test_support::TempDir::unique("plugin-start-errors");
+    std::fs::create_dir_all(&dir).unwrap();
+    approve(&dir, &["test.missing"]);
+    let manager = PluginManager::new(
+        dir.to_path_buf(),
+        Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+        Arc::new(Source::default()),
+        Arc::default(),
+    );
+    assert_eq!(
+        manager.start("test.missing").await,
+        Err(PluginError::Unavailable)
+    );
+    let statuses = manager.list().unwrap();
+    assert_eq!(statuses[0].state, "failed");
+    assert_eq!(statuses[0].error, Some(PluginError::Unavailable));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -111,7 +264,7 @@ async fn real_js_queries_cas_notifications_events_reload_and_isolated_failure() 
     manager.stop("test.good").await.unwrap();
     manager.stop("test.bad").await.unwrap();
     assert_eq!(host.subscriber_count(), 0);
-    assert!(manager.list().iter().all(|p| p.state != "running"));
+    assert!(manager.list().unwrap().iter().all(|p| p.state != "running"));
     consumer.abort();
 }
 
@@ -158,7 +311,12 @@ async fn stop_cancels_an_activation_waiting_on_a_never_resolved_promise() {
     let pending = manager.clone();
     let start = tokio::spawn(async move { pending.start("test.promise").await });
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        while !manager.list().iter().any(|p| p.state == "starting") {
+        while !manager
+            .list()
+            .unwrap()
+            .iter()
+            .any(|p| p.state == "starting")
+        {
             tokio::task::yield_now().await;
         }
     })
