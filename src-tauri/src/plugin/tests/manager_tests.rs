@@ -217,6 +217,18 @@ async fn failure_before_worker_spawn_emits_only_redacted_diagnostics() {
             Ok(())
         }
     }
+    // tracing 的 callsite Interest 缓存是进程级全局状态：当进程内只注册了一个
+    // Dispatch 时，callsite 首次命中会经「全局默认 dispatcher（NoSubscriber）」
+    // 评估 Interest 并缓存为 never——若并行的其他测试先命中 `start_inner` 里
+    // 同一个 warn! callsite，本测试的事件会被永久跳过（缓冲区为空）。注册第二个
+    // 对 WARN 级别返回 always 的 Dispatch，令 Interest 评估遍历真实注册的
+    // dispatcher（含下方捕获 subscriber），从根上消除该竞态。
+    let _sink_dispatch = tracing::dispatcher::Dispatch::new(
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(std::io::sink)
+            .finish(),
+    );
     let dir = crate::test_support::TempDir::unique("plugin-start-log-private-path");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("plugins.json"), "private malformed configuration").unwrap();
