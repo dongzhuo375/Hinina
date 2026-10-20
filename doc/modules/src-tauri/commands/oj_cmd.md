@@ -36,3 +36,5 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 - **清缓存是显式调用而不是事件订阅**：缓存清理属于「切换正确性的一部分」—— `switch_oj` 返回后新 OJ 的查询立刻可能进来，若清理要等异步事件消费者，就存在「旧 OJ 数据继续服务新 OJ 查询」的脏读窗口。旧实现靠同步投递把这件事做实，但那个保证建立在「发布方与订阅者同栈执行」的隐含前提上 —— 换成 `broadcast` 后该前提不再成立，因此改为显式调用，`OjSwitched` 只用来通知其他观察者。三个 Service 各自负责自己那批缓存（内存段同步清；磁盘段是空间回收，缓存键已带 OJ 维度，异步清理不影响正确性）。
 - **前端状态由调用点直接重置**：切换是前端发起的命令，发起方编排后果（与登出同款模式），**不为 `OjSwitched` 引入 Tauri 事件桥**（`app.emit` + `@tauri-apps/api/event` 监听）。若未来出现非前端发起的切换（如配置热重载改 `oj.active`），再补事件桥把 `OjSwitched` 下发到 webview。
 - **会话文件按 OJ 隔离是特性**：`sessions/{id}.json` 各自独立，切换不清旧 OJ 的登录态 —— 切回旧 OJ 免登录。也因此前端重置**不能走 `authStore.logout()`**（它会让已切换的 Registry 删新 OJ 的会话文件）。
+
+统一AccessTransition覆盖Registry切换与比赛/其他Service清理；switch_scope组合发布与reset，命令外层guard还覆盖持久化，不允许两个内部guard之间出现有效混合作用域。

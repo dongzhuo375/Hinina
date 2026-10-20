@@ -314,3 +314,39 @@ fn explicit_resync_follows_buffered_business_events_and_reports_closed_or_full_q
     assert!(!host.request_resync(id));
     assert_eq!(host.subscriber_count(), 0);
 }
+
+#[test]
+fn subscription_and_overflow_logs_never_hold_the_subscription_lock() {
+    use std::io::Write;
+    #[derive(Clone)]
+    struct LockCheckingWriter(std::sync::Weak<PluginHost>);
+    impl Write for LockCheckingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if let Some(host) = self.0.upgrade() {
+                assert!(
+                    host.subscriptions.try_lock().is_ok(),
+                    "logging inside subscription lock"
+                );
+            }
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let (host, _bus) = host();
+    let writer = LockCheckingWriter(Arc::downgrade(&host));
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        let _receiver = host
+            .subscribe_with_capacity(&full_grant("test.log"), 1)
+            .unwrap();
+        host.dispatch(&CoreEvent::ConfigChanged);
+        let _receiver = host
+            .subscribe_with_capacity(&full_grant("test.log"), 1)
+            .unwrap();
+        assert!(!host.request_resync("test.log"));
+    });
+}

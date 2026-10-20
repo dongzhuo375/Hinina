@@ -118,6 +118,7 @@ impl SubmissionProvider for StubSubmissionProvider {
             StubMode::Ok | StubMode::AlwaysRunning | StubMode::NonTerminalDetail => {
                 Ok(SubmissionPage {
                     records: vec![SubmissionRecord {
+                        owner_id: Some("u1".into()),
                         submit_id: "12345".into(),
                         pid: "1061".into(),
                         display_pid: "HOJ-1061".into(),

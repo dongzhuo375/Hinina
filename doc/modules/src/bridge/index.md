@@ -58,3 +58,5 @@ ipcInvoke(cmd, args)
 ## 测试
 
 `src/bridge/__tests__/index.spec.ts` 锁定：成功路径透传命令与参数、AppError 载荷 → IpcError（保留变体与真实原因）、非认证错误 `isAuthError=false`（守卫不误触发）、未知变体降级 null、字符串/Error/多键对象三种载荷形态、**安全约束「日志只含命令名与消息，绝不包含调用参数（明文密码）」**、观察者收到同一实例/注销后不回调/未注册不影响抛出。
+
+插件命令直接返回稳定{code,permission?}；IpcError.code/raw保留原始类别，message使用code，不再压为AppError::Config；isAuthError仍只识别Auth。

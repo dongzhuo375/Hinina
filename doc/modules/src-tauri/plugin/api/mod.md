@@ -4,7 +4,7 @@
 
 | 能力 | 调用 | 权限 |
 |---|---|---|
-| 上下文 | `context.current()` | 无；启动插件仍需 events.subscribe |
+| 上下文 | `context.current()` | 无；无事件授权也可启动 |
 | 提交 | `submission.get(context, contestId, submissionId)`、`submission.list(context, query)` | submission.read |
 | 比赛 | `contest.current(context)`、`contest.get(context, contestId)` | contest.read |
 | 身份 | `identity.current(context)` | identity.read |
@@ -19,4 +19,4 @@
 
 每次 handler 应重新获取当前 context；遇到 context_expired 停止本次操作，下次 Resync 重查。未登录身份返回 null；提交查询返回 unauthenticated。插件不能指定用户、OJ、Session、权限或真实文件路径。
 
-错误码：permission_denied、invalid_input、context_expired、unauthenticated、not_found、provider_error、limit_exceeded、timeout、unavailable、unsupported。Resource 不可见和不存在的提交均返回 null；扫描预算用尽返回 limit_exceeded，不能当成查无记录。
+错误码：permission_denied、invalid_input、context_expired、unauthenticated、not_found、provider_error、limit_exceeded、timeout、unavailable、unsupported、script_error。脚本语法/运行时异常以 script_error 脱敏，超时仍为 timeout；IPC 开发命令同样保留稳定错误对象。Resource 不可见和不存在的提交均返回 null；扫描预算用尽返回 limit_exceeded，不能当成查无记录。

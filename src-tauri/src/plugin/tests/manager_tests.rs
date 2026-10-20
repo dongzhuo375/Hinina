@@ -9,7 +9,6 @@ use crate::{
         execution_api::NotificationOutput,
         host::manifest::PluginPermission,
         host::plugin_host::PluginHost,
-        manager::PluginManager,
     },
 };
 use std::sync::{Arc, Mutex};
@@ -90,7 +89,7 @@ async fn plugins_without_event_grants_can_start_reload_and_stop() {
             "plugins": {id: {"enabled": true, "permissions": approved, "resyncIntervalSecs": 10}}
         }).to_string()).unwrap();
         let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
-        let manager = PluginManager::new(
+        let manager = make_manager(
             dir.to_path_buf(),
             host.clone(),
             Arc::new(Source::default()),
@@ -116,7 +115,7 @@ async fn plugins_without_event_grants_can_start_reload_and_stop() {
 #[test]
 fn list_distinguishes_missing_configuration_from_invalid_configuration() {
     let dir = crate::test_support::TempDir::unique("plugin-list-errors");
-    let manager = PluginManager::new(
+    let manager = make_manager(
         dir.to_path_buf(),
         Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
         Arc::new(Source::default()),
@@ -134,7 +133,9 @@ fn list_distinguishes_missing_configuration_from_invalid_configuration() {
         .to_string(),
     )
     .unwrap();
-    assert!(matches!(manager.list(), Err(PluginError::LimitExceeded)));
+    let invalid = manager.list().unwrap();
+    assert_eq!(invalid[0].state, "failed");
+    assert_eq!(invalid[0].error, Some(PluginError::LimitExceeded));
     approve(&dir, &["test.configured"]);
     let statuses = manager.list().unwrap();
     assert_eq!(statuses.len(), 1);
@@ -149,7 +150,7 @@ async fn failed_reload_retains_diagnostics_and_a_later_reload_recovers() {
     install(&dir, id, "export default async () => {};");
     approve(&dir, &[id]);
     let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
-    let manager = PluginManager::new(
+    let manager = make_manager(
         dir.to_path_buf(),
         host.clone(),
         Arc::new(Source::default()),
@@ -187,7 +188,7 @@ async fn failed_explicit_start_retains_diagnostics() {
     let dir = crate::test_support::TempDir::unique("plugin-start-errors");
     std::fs::create_dir_all(&dir).unwrap();
     approve(&dir, &["test.missing"]);
-    let manager = PluginManager::new(
+    let manager = make_manager(
         dir.to_path_buf(),
         Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
         Arc::new(Source::default()),
@@ -232,7 +233,7 @@ async fn failure_before_worker_spawn_emits_only_redacted_diagnostics() {
     let dir = crate::test_support::TempDir::unique("plugin-start-log-private-path");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("plugins.json"), "private malformed configuration").unwrap();
-    let manager = PluginManager::new(
+    let manager = make_manager(
         dir.to_path_buf(),
         Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
         Arc::new(Source::default()),
@@ -245,9 +246,17 @@ async fn failure_before_worker_spawn_emits_only_redacted_diagnostics() {
         .with_ansi(false)
         .with_writer(move || writer.clone())
         .finish();
+    let subscriber = tracing::Dispatch::new(subscriber);
     assert_eq!(
         manager
             .start("test.diagnostic")
+            .with_subscriber(subscriber.clone())
+            .await,
+        Err(PluginError::InvalidInput)
+    );
+    assert_eq!(
+        manager
+            .start("test.diagnostic\nFORGED\rENTRY")
             .with_subscriber(subscriber)
             .await,
         Err(PluginError::InvalidInput)
@@ -258,6 +267,8 @@ async fn failure_before_worker_spawn_emits_only_redacted_diagnostics() {
     assert!(log.contains("InvalidInput"));
     assert!(!log.contains("private malformed configuration"));
     assert!(!log.contains("plugin-start-log-private-path"));
+    assert!(!log.contains("test.diagnostic\nFORGED"));
+    assert!(log.contains("test.diagnostic\\nFORGED\\rENTRY"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -300,7 +311,7 @@ async fn real_js_queries_cas_notifications_events_reload_and_isolated_failure() 
     let bus = Arc::new(CoreEventBus::new());
     let host = Arc::new(PluginHost::new(bus.clone()));
     let consumer = host.start().unwrap();
-    let manager = PluginManager::new(
+    let manager = make_manager(
         dir.to_path_buf(),
         host.clone(),
         Arc::new(Source::default()),
@@ -336,7 +347,7 @@ async fn stop_interrupts_synchronous_handler_and_releases_worker() {
     );
     approve(&dir, &["test.loop"]);
     let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
-    let manager = PluginManager::new(
+    let manager = make_manager(
         dir.to_path_buf(),
         host.clone(),
         Arc::new(Source::default()),
@@ -359,7 +370,7 @@ async fn stop_cancels_an_activation_waiting_on_a_never_resolved_promise() {
     );
     approve(&dir, &["test.promise"]);
     let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
-    let manager = Arc::new(PluginManager::new(
+    let manager = Arc::new(make_manager(
         dir.to_path_buf(),
         host.clone(),
         Arc::new(Source::default()),
@@ -391,11 +402,15 @@ async fn periodic_resync_reconciles_without_new_business_events() {
     install(&dir, "test.periodic", "export default async h => { let n=0; h.events.on('resync.required', async()=>{ if (++n === 2) await h.notification.info('periodic'); }); }");
     approve(&dir, &["test.periodic"]);
     let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
-    let manager = PluginManager::new(
+    let manager = make_manager(
         dir.to_path_buf(),
         host,
         Arc::new(Source::default()),
         Arc::default(),
+    )
+    .with_test_timing(
+        std::time::Duration::from_secs(12),
+        std::time::Duration::from_millis(30),
     );
     let output = Arc::new(Output::default());
     manager.set_output(output.clone());
@@ -435,7 +450,7 @@ async fn bridge_limits_apply_before_a_batch_of_js_promises_is_polled() {
     );
     approve(&dir, &["test.budget"]);
     let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
-    let manager = PluginManager::new(
+    let manager = make_manager(
         dir.to_path_buf(),
         host,
         Arc::new(Source::default()),
@@ -446,4 +461,161 @@ async fn bridge_limits_apply_before_a_batch_of_js_promises_is_polled() {
     manager.start("test.budget").await.unwrap();
     wait_for(&output, "budget checked").await;
     manager.stop("test.budget").await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slow_activation_does_not_subscribe_until_it_can_receive_initial_resync() {
+    struct Gate {
+        entered: tokio::sync::Notify,
+        released: (Mutex<bool>, std::sync::Condvar),
+    }
+    impl NotificationOutput for Gate {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            self.entered.notify_one();
+            let (lock, ready) = &self.released;
+            let _guard = ready
+                .wait_while(lock.lock().unwrap(), |released| !*released)
+                .unwrap();
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("plugin-slow-activate");
+    install(&dir, "test.slow", "export default async h => { h.events.on('resync.required',async()=>{}); await h.notification.info('activating'); }");
+    approve(&dir, &["test.slow"]);
+    let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
+    let manager = Arc::new(make_manager(
+        dir.to_path_buf(),
+        host.clone(),
+        Arc::new(Source::default()),
+        Arc::default(),
+    ));
+    let gate = Arc::new(Gate {
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    manager.set_output(gate.clone());
+    let pending = manager.clone();
+    let start = tokio::spawn(async move { pending.start("test.slow").await });
+    gate.entered.notified().await;
+    let subscribers_during_activation = host.subscriber_count();
+    for _ in 0..256 {
+        host.dispatch(&CoreEvent::SubmissionJudged {
+            submission_id: "id".into(),
+            status: "Accepted".into(),
+        });
+    }
+    *gate.released.0.lock().unwrap() = true;
+    gate.released.1.notify_one();
+    start.await.unwrap().unwrap();
+    assert_eq!(subscribers_during_activation, 0);
+    assert_eq!(host.subscriber_count(), 1);
+    assert_eq!(manager.list().unwrap()[0].error, None);
+    manager.stop("test.slow").await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn start_timeout_cancels_and_joins_worker_and_duplicate_start_keeps_history_clean() {
+    let dir = crate::test_support::TempDir::unique("plugin-start-timeout");
+    install(
+        &dir,
+        "test.timeout",
+        "export default async () => { await new Promise(()=>{}); }",
+    );
+    approve(&dir, &["test.timeout"]);
+    let host = Arc::new(PluginHost::new(Arc::new(CoreEventBus::new())));
+    let manager = make_manager(
+        dir.to_path_buf(),
+        host.clone(),
+        Arc::new(Source::default()),
+        Arc::default(),
+    )
+    .with_test_timing(
+        std::time::Duration::from_millis(30),
+        std::time::Duration::from_secs(60),
+    );
+    manager.set_output(Arc::new(Output::default()));
+    assert_eq!(
+        manager.start("test.timeout").await,
+        Err(PluginError::Timeout)
+    );
+    assert_eq!(host.subscriber_count(), 0);
+    let status = manager.list().unwrap();
+    assert_eq!(status[0].state, "failed");
+    assert_eq!(status[0].error, Some(PluginError::Timeout));
+    let manager = manager.with_test_timing(
+        std::time::Duration::from_secs(12),
+        std::time::Duration::from_secs(60),
+    );
+    install(&dir, "test.timeout", "export default async () => {};");
+    manager.start("test.timeout").await.unwrap();
+    assert_eq!(
+        manager.start("test.timeout").await,
+        Err(PluginError::Unavailable)
+    );
+    manager.stop("test.timeout").await.unwrap();
+    let status = manager.list().unwrap();
+    assert_eq!(status[0].state, "stopped");
+    assert_eq!(status[0].error, None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn syntax_and_runtime_errors_are_stable_script_errors() {
+    for script in [
+        "export default !!!",
+        "export default async () => { throw Error('PRIVATE stack/path'); }",
+    ] {
+        let dir = crate::test_support::TempDir::unique("plugin-script-errors");
+        install(&dir, "test.script", script);
+        approve(&dir, &["test.script"]);
+        let manager = make_manager(
+            dir.to_path_buf(),
+            Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+            Arc::new(Source::default()),
+            Arc::default(),
+        );
+        manager.set_output(Arc::new(Output::default()));
+        assert_eq!(
+            manager.start("test.script").await,
+            Err(PluginError::ScriptError)
+        );
+        manager.stop("test.script").await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&manager.list().unwrap()[0]).unwrap()["error"],
+            serde_json::json!({"code":"script_error"})
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_real_plugins_share_the_manager_provider_budget() {
+    use std::sync::atomic::Ordering;
+    let dir = crate::test_support::TempDir::unique("plugins-shared-budget");
+    install(&dir, "test.first", "export default async h => { const c=await h.context.current(); await h.contest.current(c); await h.contest.current(c); }");
+    install(
+        &dir,
+        "test.second",
+        r#"export default async h => {
+      const c=await h.context.current(); await h.contest.current(c);
+      try { await h.contest.current(c); throw Error('shared budget bypassed'); }
+      catch (e) { if (e.code !== 'limit_exceeded') throw e; }
+      await h.notification.info('limited');
+    }"#,
+    );
+    approve(&dir, &["test.first", "test.second"]);
+    let source = Arc::new(Source::default());
+    let manager = make_manager(
+        dir.to_path_buf(),
+        Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+        source.clone(),
+        Arc::default(),
+    )
+    .with_test_query_budget(3);
+    let output = Arc::new(Output::default());
+    manager.set_output(output.clone());
+    manager.start("test.first").await.unwrap();
+    manager.start("test.second").await.unwrap();
+    wait_for(&output, "limited").await;
+    assert_eq!(source.contest_calls.load(Ordering::SeqCst), 3);
+    manager.stop("test.first").await.unwrap();
+    manager.stop("test.second").await.unwrap();
 }

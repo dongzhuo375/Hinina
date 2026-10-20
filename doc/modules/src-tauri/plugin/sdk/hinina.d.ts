@@ -34,7 +34,7 @@ export interface PluginHttpRequest {
 export interface PluginHttpResponse { ok: boolean; status: number; headers: Record<string, string>; body: string }
 export type PluginError =
   | { code: 'permission_denied'; permission: PluginPermission }
-  | { code: 'invalid_input' | 'context_expired' | 'unauthenticated' | 'not_found' | 'provider_error' | 'limit_exceeded' | 'timeout' | 'unavailable' | 'unsupported' }
+  | { code: 'invalid_input' | 'context_expired' | 'unauthenticated' | 'not_found' | 'provider_error' | 'limit_exceeded' | 'timeout' | 'unavailable' | 'unsupported' | 'script_error' }
 export interface PluginEventMap {
   'system.oj_switched': { type: 'system.oj_switched'; ojId: string }
   'contest.selected': { type: 'contest.selected'; contestId: string }

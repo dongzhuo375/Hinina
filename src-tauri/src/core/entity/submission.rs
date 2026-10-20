@@ -106,6 +106,9 @@ pub struct JudgementResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmissionRecord {
+    /// Host-private stable owner identity; display names are never authorization evidence.
+    #[serde(default, skip_serializing)]
+    pub owner_id: Option<String>,
     pub submit_id: String,
     /// 题目真实 ID
     pub pid: String,

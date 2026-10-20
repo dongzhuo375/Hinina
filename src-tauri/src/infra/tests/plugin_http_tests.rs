@@ -81,7 +81,7 @@ async fn pinned_transport_does_not_redirect_and_bounds_response_bytes() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn total_deadline_and_scope_cancellation_bound_stalled_http_reads() {
     use tokio::io::AsyncReadExt;
     for cancel in [false, true] {
@@ -105,18 +105,18 @@ async fn total_deadline_and_scope_cancellation_bound_stalled_http_reads() {
             url: url.to_string(),
             headers: Default::default(),
             body: None,
-            timeout_ms: Some(20),
+            timeout_ms: Some(5000),
         };
         let scope = tokio_util::sync::CancellationToken::new();
         let revoke = scope.clone();
         let operation = api.bounded(
             scope,
-            40,
+            1000,
             api.send_pinned(&context, request, url, vec![address]),
         );
         let (result, ()) = tokio::join!(operation, async {
             if cancel {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
                 revoke.cancel();
             }
         });
@@ -130,4 +130,113 @@ async fn total_deadline_and_scope_cancellation_bound_stalled_http_reads() {
         );
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn public_request_runs_approval_ip_policy_budgets_and_projects_a_successful_response() {
+    use crate::plugin::{permission::PluginGrant, query::ScopedQueries, tests::support::*};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct FixtureTransport(Arc<AtomicUsize>);
+    #[async_trait::async_trait]
+    impl HttpTransport for FixtureTransport {
+        async fn send(
+            &self,
+            authority: &ScopedQueries,
+            context: &PluginQueryContext,
+            request: PluginHttpRequest,
+            url: url::Url,
+            addresses: Vec<SocketAddr>,
+        ) -> PluginResult<PluginHttpResponse> {
+            authority.check(context).await?;
+            assert_eq!(addresses, vec!["8.8.8.8:80".parse().unwrap()]);
+            assert_eq!(url.origin().ascii_serialization(), "http://8.8.8.8");
+            assert_eq!(request.body, Some(serde_json::json!({"value": 1})));
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(PluginHttpResponse {
+                ok: true,
+                status: 200,
+                headers: BTreeMap::new(),
+                body: "fixture response".into(),
+            })
+        }
+    }
+    let mut m = manifest("test.public-http");
+    m.network.allow_origins = vec!["http://8.8.8.8".into()];
+    let authority = Arc::new(ScopedQueries::new(
+        PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        Arc::new(Source::default()),
+        Arc::default(),
+        Default::default(),
+    ));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut api = PluginHttp::new(
+        authority.clone(),
+        vec![NetworkApproval {
+            origin: "http://8.8.8.8".into(),
+            allow_http: true,
+            private_cidrs: vec![],
+        }],
+    )
+    .unwrap();
+    api.transport = Arc::new(FixtureTransport(calls.clone()));
+    let context = authority.current_context().await.unwrap();
+    let request = PluginHttpRequest {
+        method: PluginHttpMethod::Post,
+        url: "http://8.8.8.8/path".into(),
+        headers: BTreeMap::new(),
+        body: Some(serde_json::json!({"value": 1})),
+        timeout_ms: None,
+    };
+    let result = api.request(&context, request.clone()).await.unwrap();
+    assert_eq!(result.status, 200);
+    assert_eq!(result.body, "fixture response");
+    let mut blocked = request;
+    blocked.url = "http://127.0.0.1/path".into();
+    assert!(api.request(&context, blocked).await.is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    authority.stopped.cancel();
+}
+
+#[tokio::test]
+async fn identical_pinned_targets_reuse_a_client() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.unwrap() > 0);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        }
+    });
+    let transport = PinnedTransport {
+        clients: Mutex::default(),
+    };
+    let authority = crate::plugin::tests::support::authority("test.pool");
+    let context = authority.current_context().await.unwrap();
+    let url = url::Url::parse(&format!("http://fixture.example:{}", address.port())).unwrap();
+    for _ in 0..2 {
+        transport
+            .send(
+                &authority,
+                &context,
+                PluginHttpRequest {
+                    method: PluginHttpMethod::Get,
+                    url: url.to_string(),
+                    headers: BTreeMap::new(),
+                    body: None,
+                    timeout_ms: None,
+                },
+                url.clone(),
+                vec![address],
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(transport.clients.lock().unwrap().len(), 1);
+    server.await.unwrap();
 }

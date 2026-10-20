@@ -29,6 +29,20 @@ pub struct PluginApproval {
     #[serde(default = "options")]
     pub options: serde_json::Value,
 }
+impl PluginApproval {
+    pub fn validate(&self) -> PluginResult<()> {
+        if !(10..=3600).contains(&self.resync_interval_secs)
+            || self.options.to_string().len() > 65536
+            || self.network.len() > 32
+        {
+            return Err(PluginError::LimitExceeded);
+        }
+        for network in &self.network {
+            network.validate()?;
+        }
+        Ok(())
+    }
+}
 fn interval() -> u64 {
     60
 }
@@ -46,6 +60,8 @@ pub struct PluginConfiguration {
     pub code_root: Option<PathBuf>,
     #[serde(default)]
     pub plugins: BTreeMap<String, PluginApproval>,
+    #[serde(skip)]
+    pub invalid_plugins: BTreeMap<String, PluginError>,
 }
 /// @plugin-api
 /// @since 2.0

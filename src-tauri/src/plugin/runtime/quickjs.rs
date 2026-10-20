@@ -166,8 +166,11 @@ impl QuickJsRuntime {
         self.runtime.run_gc().await;
     }
 }
-fn engine_error(_: rquickjs::Error) -> PluginError {
-    PluginError::Unavailable
+fn engine_error(error: rquickjs::Error) -> PluginError {
+    match error {
+        rquickjs::Error::Exception => PluginError::ScriptError,
+        _ => PluginError::Unavailable,
+    }
 }
 
 #[async_trait::async_trait(?Send)]

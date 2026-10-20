@@ -55,3 +55,31 @@ fn duplicate_ids_missing_entry_and_old_manifest_are_rejected() {
     .unwrap();
     assert!(repo.load("test.repo").is_err());
 }
+
+#[test]
+fn invalid_unrelated_approvals_do_not_block_loading_a_valid_plugin() {
+    let dir = crate::test_support::TempDir::unique("plugin-approval-isolation");
+    let repo = setup(&dir);
+    std::fs::write(
+        dir.join("plugins.json"),
+        serde_json::json!({"plugins": {
+            "test.repo": {"enabled": true, "permissions": ["events.subscribe"]},
+            "test.bad": {"enabled": true, "resyncIntervalSecs": 1},
+            "test.malformed": {"permissions": ["not-a-permission"]}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let config = repo.configuration().unwrap();
+    assert_eq!(config.plugins.len(), 1);
+    assert_eq!(config.invalid_plugins.len(), 2);
+    repo.load("test.repo").unwrap();
+    assert!(matches!(
+        repo.load("test.bad"),
+        Err(PluginError::LimitExceeded)
+    ));
+    assert!(matches!(
+        repo.load("test.malformed"),
+        Err(PluginError::InvalidInput)
+    ));
+}

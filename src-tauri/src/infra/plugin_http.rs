@@ -10,10 +10,10 @@ use crate::plugin::{
 };
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     net::{IpAddr, SocketAddr},
     num::NonZeroU32,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::sync::Semaphore;
@@ -67,6 +67,7 @@ pub struct PluginHttp {
     approvals: Vec<NetworkApproval>,
     limiter: DefaultDirectRateLimiter,
     concurrent: Semaphore,
+    transport: Arc<dyn HttpTransport>,
 }
 impl PluginHttp {
     /// @plugin-api
@@ -85,6 +86,9 @@ impl PluginHttp {
             approvals,
             limiter: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(60).unwrap())),
             concurrent: Semaphore::new(2),
+            transport: Arc::new(PinnedTransport {
+                clients: Mutex::default(),
+            }),
         })
     }
     /// @plugin-api
@@ -176,9 +180,40 @@ impl PluginHttp {
         }
         self.send_pinned(context, request, url, addresses).await
     }
-    // The production caller has checked every address before reaching this transport.
+    // Private helper for policy-independent transport fixtures.
     async fn send_pinned(
         &self,
+        context: &PluginQueryContext,
+        request: PluginHttpRequest,
+        url: url::Url,
+        addresses: Vec<SocketAddr>,
+    ) -> PluginResult<PluginHttpResponse> {
+        self.transport
+            .send(self.authority.as_ref(), context, request, url, addresses)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+trait HttpTransport: Send + Sync {
+    async fn send(
+        &self,
+        authority: &ScopedQueries,
+        context: &PluginQueryContext,
+        request: PluginHttpRequest,
+        url: url::Url,
+        addresses: Vec<SocketAddr>,
+    ) -> PluginResult<PluginHttpResponse>;
+}
+struct PinnedTransport {
+    clients: Mutex<VecDeque<(String, Vec<SocketAddr>, reqwest::Client)>>,
+}
+#[async_trait::async_trait]
+impl HttpTransport for PinnedTransport {
+    // The production caller has checked every address before reaching this transport.
+    async fn send(
+        &self,
+        authority: &ScopedQueries,
         context: &PluginQueryContext,
         request: PluginHttpRequest,
         url: url::Url,
@@ -189,13 +224,34 @@ impl PluginHttp {
             .ok_or(PluginError::InvalidInput)?
             .trim_start_matches('[')
             .trim_end_matches(']');
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .resolve_to_addrs(host, &addresses)
-            .build()
-            .map_err(|_| PluginError::Unavailable)?;
+        // Reuse only for an identical origin and freshly validated DNS address set.
+        // Never let a pooled connection bypass a changed DNS/IP approval decision.
+        let origin = url.origin().ascii_serialization();
+        let cached = self
+            .clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|(key, pinned, _)| key == &origin && pinned == &addresses)
+            .map(|(_, _, client)| client.clone());
+        let client = match cached {
+            Some(client) => client,
+            None => {
+                let client = reqwest::Client::builder()
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .retry(reqwest::retry::never())
+                    .resolve_to_addrs(host, &addresses)
+                    .build()
+                    .map_err(|_| PluginError::Unavailable)?;
+                let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
+                if clients.len() >= 32 {
+                    clients.pop_front();
+                }
+                clients.push_back((origin, addresses.clone(), client.clone()));
+                client
+            }
+        };
         let method = match request.method {
             PluginHttpMethod::Get => reqwest::Method::GET,
             PluginHttpMethod::Post => reqwest::Method::POST,
@@ -209,14 +265,14 @@ impl PluginHttp {
         }
         if let Some(body) = request.body {
             let bytes = serde_json::to_vec(&body).map_err(|_| PluginError::InvalidInput)?;
-            if bytes.len() > self.authority.grant.manifest().network.max_body_bytes as usize {
+            if bytes.len() > authority.grant.manifest().network.max_body_bytes as usize {
                 return Err(PluginError::LimitExceeded);
             }
             builder = builder
                 .header("content-type", "application/json")
                 .body(bytes);
         }
-        self.authority.check(context).await?;
+        authority.check(context).await?;
         let mut response = builder.send().await.map_err(|e| {
             if e.is_timeout() {
                 PluginError::Timeout
@@ -259,7 +315,7 @@ impl PluginHttp {
             }
             body.extend_from_slice(&chunk);
         }
-        self.authority.check(context).await?;
+        authority.check(context).await?;
         Ok(PluginHttpResponse {
             ok: (200..300).contains(&status),
             status,

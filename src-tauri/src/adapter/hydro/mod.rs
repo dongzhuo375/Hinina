@@ -697,6 +697,7 @@ impl HydroAdapter {
         let uid = rdoc.uid.as_ref().map(types::coerce_id).unwrap_or_default();
         let (time_ms, memory_kb, _score) = rdoc.terminal_metrics();
         SubmissionRecord {
+            owner_id: (!uid.is_empty()).then_some(uid.clone()),
             submit_id: rdoc.record_id(),
             display_pid: pdoc
                 .map(PdocVO::problem_id)

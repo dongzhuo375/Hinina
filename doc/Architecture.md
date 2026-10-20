@@ -42,6 +42,7 @@ Hinina/
         ├── lib.rs                        # 库根，公开模块树
         ├── test_support.rs               # 测试专用支撑（cfg(test)）：TempDir（Drop 时删除临时目录）+ Guarded<T>（Deref 转发，把目录生命周期绑到被测对象上）
         ├── core/
+        │   ├── access.rs                 # AccessRevision / must_use 转换guard
         │   ├── mod.rs                    # core 模块声明
         │   ├── context.rs                # AppContext 统一应用上下文
         │   ├── error.rs                  # AppError 枚举 + user_message() + context()（补环节名但保留变体）+ AppResult<T> + From 转换
@@ -181,6 +182,10 @@ Hinina/
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
         │   ├── fs_session_repo.rs        # FsSessionRepository：sessions/{oj_id}.json 读写；save / remove / rotate_token 共用 `mutation_lock` 串行化（消除「轮换读到旧会话 → 登出删除 → 轮换写回」复活已删除会话的窗口），写入走 `write_string_atomic`（load 不取锁以免内部调用自死锁）
         │   ├── audit.rs                  # 审计消费者：只读订阅 CoreEvent 并结构化落日志（三类消费者之一，证明同一条事件流可挂多个互不相干的观察者）
+        │   ├── plugin_api_factory.rs     # 组合根选择的存储/HTTP能力工厂
+        │   ├── plugin_http.rs            # 固定DNS、连接池、速率/并发/超时
+        │   ├── plugin_storage.rs         # 原子JSON/CAS、配额与操作限流
+        │   ├── plugin_notification.rs    # 纯文本通知
         │   ├── fs_plugin_repo.rs         # FsPluginRepository（宿主审批、目录/入口校验与有限读取）
         │   ├── provider_registry_impl.rs # ProviderRegistryImpl（单表 HashMap<OjId, ProviderSet> + capability() 能力取件帮手）
         │   └── tests/
@@ -224,8 +229,11 @@ Hinina/
         │   │   └── mod.rs                # PluginGrant：声明与宿主批准分离
         │   ├── registry/
         │   │   └── mod.rs                # PluginRepository 端口（从 core 移入）
-        │   └── runtime/
-        │       └── mod.rs                # !Send Runtime/Bridge + quickjs.rs/bootstrap.js 真实执行器
+        │   ├── runtime/
+        │   │   ├── mod.rs                # !Send Runtime/Bridge契约
+        │   │   ├── quickjs.rs            # 真实引擎、Promise、中断与稳定错误
+        │   │   └── bootstrap.js          # 冻结API与私有host桥
+        │   └── tests/                   # query/manager/manager_history与装配支撑
         └── commands/                     # Tauri Command 薄封装
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
@@ -280,6 +288,7 @@ src/
 │   ├── SettingsView.vue                  # 设置页（PageHeading 05；OJ（当前 OJ 下拉=显式 switch_oj + 实例地址 + 比赛 ID/引用）/编辑器/布局/主题置灰/数据目录/重置与清理/关于 分组，读改写 AppConfig + 生效性提示）
 │   └── __tests__/                        # ContestLayout.spec.ts（赛程闸门与退出延迟）/ LoginView.spec.ts（入口生命周期：自动进场、简报重试、预检）
 ├── components/
+│   ├── PluginNotifications.vue           # 插件纯文本通知与订阅清理
 │   ├── layout/
 │   │   ├── TopBar.vue                    # 顶栏（**两行式**：40px 窗口条=品牌 + 比赛标题 + 简介浮层 + 账号菜单 + 窗口控制；导航行=内嵌 ActivityBar + 阶段徽章 + 剩余时间 + 进度条；`:navigation-disabled` 驱动导航区 :inert）
 │   │   ├── ActivityBar.vue               # 赛场**横向**导航条（内嵌于 TopBar；题目/榜单/评测/公告 + 编号 01–04 + 末尾「环境设置」（默认隐藏，连点状态栏版本号 5 下才渲染）；公告项挂真实未读红点徽标）
@@ -315,6 +324,7 @@ src/
 ├── guards/
 │   └── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配；需 router + authStore，属跨层装配故不落在 stores/ 或 services/
 ├── stores/
+│   ├── pluginStore.ts                    # 插件状态、短时通知与控制
 │   ├── authStore.ts                      # 用户认证状态（登录/登出/会话恢复/三态校验 + sessionResolved 守卫标记）
 │   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/榜单/公告/工作区并回收定时器）
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + loadContest 并发去重 + whenLoaded 统一等待入口（P59）+ 登录页匿名比赛简报状态（brief*）
@@ -325,6 +335,7 @@ src/
 │   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（两级状态机：syncPending=未推送内存 / isDirty=未落盘；语言权威值=HOJ 显示名，切换即时持久化；源文件名经 utils/language 派生；落盘事件订阅安装器）
 │   └── __tests__/                        # authStore / contestStore / problemStore / rankStore / submissionStore / announcementStore / session / workspaceStore .spec.ts（会话状态机、加载去重与 whenLoaded、我的题目状态失效、榜单去重/轮询/全量模式、评测收敛轮询与重复提交防护、公告未读语义、会话级清理、工作区落盘状态机与 flush 顺序）
 ├── services/
+│   ├── plugin.service.ts                 # 插件前端服务入口
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
 │   ├── config.service.ts                 # 配置读写唯一入口（进程内缓存 + 兜底）+ updateConfig 读改写 + 派生参数（OJ 基址、轮询调度、编辑器偏好、默认语言归一、分栏比例）
 │   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
@@ -336,6 +347,7 @@ src/
 │   ├── workspace.service.ts              # 工作区创建/保存/恢复/语言持久化 + 落盘事件订阅（onWorkspaceSaved）
 │   └── __tests__/                        # auth.service / config.service / rank.service .spec.ts（本地缓存清理与三态归一契约、配置缓存/派生兜底/updateConfig 读改写、榜单查询参数编排）
 ├── bridge/
+│   ├── plugin.bridge.ts                  # 插件控制IPC与通知事件
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
 │   ├── auth.bridge.ts                    # login / logout / get_session / validate_session
 │   ├── contest.bridge.ts                 # load_configured_contest / list_contests（匿名，登录页比赛信息）
@@ -348,6 +360,7 @@ src/
 │   ├── config.bridge.ts                  # get_config / update_config / reload_config
 │   └── __tests__/                        # index.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数）
 ├── types/
+│   ├── plugin.ts                         # 插件状态、错误与通知DTO
 │   ├── user.ts                           # User 实体 + SessionValidity（valid/invalid/unknown 三态）
 │   ├── contest.ts                        # Contest（+ oiRankScoreType OI 计分规则）+ ContestProblem 实体
 │   ├── problem.ts                        # Problem（+ languages 本题允许提交语言）+ Sample 实体
@@ -512,3 +525,5 @@ Provider 只读查询每次激活60次/分钟、并发2，Manager 合计120次/�
 前端新增plugin.bridge/service/Store与PluginNotifications，dev助手经完整层次调用。无完整管理UI、插件市场、WASM或气球插件。详见[插件文档](modules/src-tauri/plugin/README.md)和[开发教程](modules/src-tauri/plugin/tutorial.md)。
 
 后续管理设计见[最小实现复盘与管理演进](插件系统最小实现复盘与管理演进.md)：保持现有分层，先补宿主配置持久写入、目录盘点与诊断，再接管理页；持久启用意图与worker运行状态分别表达，不增加第二套业务总线。此处仅链接演进建议，未新增生产架构。
+
+本轮插件审查修复：提交记录以宿主私有owner_id校验身份；OJ切换由统一guard覆盖Registry与比赛清理。生产scope按revision缓存，cursor原子单次领取。Manager注入仓库与能力工厂，激活后订阅、启动超时撤销并清理；approval独立诊断。存储操作增加限流；HTTP仅对相同origin与新近验证的DNS地址集合复用Client（最多32项）。PluginHost日志移至订阅锁外；脚本与IPC保留稳定错误类别。详见[逐项核实](modules/src-tauri/plugin/review-fixes.md)。

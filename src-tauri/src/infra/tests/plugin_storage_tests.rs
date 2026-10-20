@@ -71,3 +71,31 @@ async fn total_quota_is_enforced_without_overwriting_existing_data() {
         PluginStorageValue::Missing
     );
 }
+
+#[tokio::test]
+async fn storage_operation_budget_rejects_reads_writes_deletes_and_cas_before_io() {
+    let dir = crate::test_support::TempDir::unique("plugin-storage-budget");
+    let storage = JsonPluginStorage::new(dir.to_path_buf(), authority("test.budget"));
+    let shared = Arc::new(RateLimiter::direct(Quota::per_minute(
+        NonZeroU32::new(1).unwrap(),
+    )));
+    let storage = storage.with_shared_budget(shared);
+    storage.set("key", Value::Bool(true)).await.unwrap();
+    let original = std::fs::read(storage.directory.join("storage.json")).unwrap();
+    assert_eq!(
+        storage.set("key", Value::Null).await,
+        Err(PluginError::LimitExceeded)
+    );
+    assert_eq!(storage.delete("key").await, Err(PluginError::LimitExceeded));
+    assert_eq!(storage.get("key").await, Err(PluginError::LimitExceeded));
+    assert_eq!(
+        storage
+            .compare_and_set("key", PluginStorageValue::Missing, Value::Null)
+            .await,
+        Err(PluginError::LimitExceeded)
+    );
+    assert_eq!(
+        std::fs::read(storage.directory.join("storage.json")).unwrap(),
+        original
+    );
+}

@@ -90,6 +90,7 @@ pub fn authority(id: &str) -> Arc<ScopedQueries> {
 }
 pub fn record(id: &str) -> SubmissionRecord {
     SubmissionRecord {
+        owner_id: Some("user-1".into()),
         submit_id: id.into(),
         pid: "problem".into(),
         display_pid: "1000".into(),
@@ -116,4 +117,23 @@ pub fn grant_without(permission: PluginPermission) -> permission::PluginGrant {
             .collect::<Vec<_>>(),
     )
     .unwrap()
+}
+
+pub fn make_manager(
+    base: std::path::PathBuf,
+    host: Arc<host::plugin_host::PluginHost>,
+    source: Arc<dyn QuerySource>,
+    access: Arc<crate::core::access::AccessRevision>,
+) -> manager::PluginManager {
+    manager::PluginManager::new(
+        Arc::new(crate::infra::fs_plugin_repo::FsPluginRepository::new(
+            base.clone(),
+        )),
+        Arc::new(crate::infra::plugin_api_factory::FsPluginApiFactory::new(
+            base.join("plugin-data"),
+        )),
+        host,
+        source,
+        access,
+    )
 }

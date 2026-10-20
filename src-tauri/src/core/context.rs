@@ -214,9 +214,16 @@ impl AppContext {
             submission: submission.clone(),
             registry: provider_registry.clone(),
             config: config.clone(),
+            access: access.clone(),
+            cached_scope: Default::default(),
         });
         let plugin_manager = Arc::new(crate::plugin::manager::PluginManager::new(
-            storage.base_dir().clone(),
+            Arc::new(crate::infra::fs_plugin_repo::FsPluginRepository::new(
+                storage.base_dir().clone(),
+            )),
+            Arc::new(crate::infra::plugin_api_factory::FsPluginApiFactory::new(
+                storage.base_dir().join("plugin-data"),
+            )),
             plugin_host.clone(),
             queries,
             access.clone(),

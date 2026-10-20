@@ -33,3 +33,5 @@
 `src-tauri/src/core/entity/tests/submission_tests.rs`（由 `submission.rs` 底部 `#[cfg(test)] #[path = "tests/submission_tests.rs"] mod tests;` 引用）以**穷尽表**锁定全部 20 个变体的终态性（新增状态时表必须同步，否则非终态集合漂移会让评测中的提交被缓存、界面停在「评测中」），并单独断言非终态集合恰好是 `Pending` / `Compiling` / `Running`；另以 `as_str_matches_serde_output_for_all_variants` 逐变体比对 `as_str()` 与 serde 序列化输出 —— 事件载荷的状态字符串必须与前端 / 插件看到的确切名称一致，否则文案与配色映射会静默失配。
 
 > 历史说明：旧版的 `Submission` struct（`id/problem_id/language/source_code/status`）从未被任何调用方使用，属死代码，已随本次提交列表/详情能力重写一并删除。
+
+SubmissionRecord新增宿主私有owner_id: Option<String>，默认兼容旧反序列化但不跨IPC序列化；HOJ取JudgeVO.uid，Hydro取rdoc.uid。插件校验稳定ID；username仅用于显示。

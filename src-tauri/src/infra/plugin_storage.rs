@@ -10,12 +10,14 @@ use crate::plugin::{
 };
 use atomicwrites::{AllowOverwrite, AtomicFile};
 use fs4::FileExt;
+use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
     io::{Read, Write},
+    num::NonZeroU32,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -35,6 +37,9 @@ pub const MAX_STORAGE_BYTES: usize = 1024 * 1024;
 pub struct JsonPluginStorage {
     directory: PathBuf,
     authority: Arc<ScopedQueries>,
+    operations: DefaultDirectRateLimiter,
+    shared: Option<Arc<DefaultDirectRateLimiter>>,
+    concurrent: Arc<tokio::sync::Semaphore>,
 }
 impl JsonPluginStorage {
     /// @plugin-api
@@ -49,15 +54,35 @@ impl JsonPluginStorage {
         Self {
             directory: data_root.join(namespace),
             authority,
+            operations: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(60).unwrap())),
+            shared: None,
+            concurrent: Arc::new(tokio::sync::Semaphore::new(16)),
         }
+    }
+    pub fn with_shared_budget(mut self, budget: Arc<DefaultDirectRateLimiter>) -> Self {
+        self.shared = Some(budget);
+        self
     }
     async fn transaction<T: Send + 'static>(
         &self,
         edit: impl FnOnce(&mut BTreeMap<String, Value>) -> PluginResult<(T, bool)> + Send + 'static,
     ) -> PluginResult<T> {
+        let permit = self
+            .concurrent
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| PluginError::LimitExceeded)?;
+        self.operations
+            .check()
+            .map_err(|_| PluginError::LimitExceeded)?;
+        if let Some(shared) = &self.shared {
+            shared.check().map_err(|_| PluginError::LimitExceeded)?;
+        }
         let directory = self.directory.clone();
         let stopped = self.authority.stopped.clone();
         tokio::task::spawn_blocking(move || {
+            // Keep capacity reserved even if the waiting JS future is dropped.
+            let _permit = permit;
             let unavailable = |_| PluginError::Unavailable;
             std::fs::create_dir_all(&directory).map_err(unavailable)?;
             let lock = OpenOptions::new()

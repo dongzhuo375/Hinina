@@ -36,23 +36,38 @@ impl PluginRepository for FsPluginRepository {
     /// @stability stable
     fn configuration(&self) -> PluginResult<PluginConfiguration> {
         let path = self.base.join("plugins.json");
-        let config: PluginConfiguration = match read(&path, 65536) {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct RawConfiguration {
+            code_root: Option<PathBuf>,
+            #[serde(default)]
+            plugins: std::collections::BTreeMap<String, serde_json::Value>,
+        }
+        let raw: RawConfiguration = match read(&path, 65536) {
             Err(PluginError::NotFound) => return Ok(PluginConfiguration::default()),
             result => serde_json::from_slice(&result?).map_err(|_| PluginError::InvalidInput)?,
         };
-        if config.plugins.len() > 128 || config.code_root.as_ref().is_some_and(|p| !p.is_absolute())
-        {
+        if raw.plugins.len() > 128 || raw.code_root.as_ref().is_some_and(|p| !p.is_absolute()) {
             return Err(PluginError::InvalidInput);
         }
-        for approval in config.plugins.values() {
-            if !(10..=3600).contains(&approval.resync_interval_secs)
-                || approval.options.to_string().len() > 65536
-                || approval.network.len() > 32
-            {
-                return Err(PluginError::LimitExceeded);
-            }
-            for network in &approval.network {
-                network.validate()?;
+        let mut config = PluginConfiguration {
+            code_root: raw.code_root,
+            ..Default::default()
+        };
+        for (id, value) in raw.plugins {
+            let approval = serde_json::from_value::<PluginApproval>(value)
+                .map_err(|_| PluginError::InvalidInput)
+                .and_then(|approval| {
+                    approval.validate()?;
+                    Ok(approval)
+                });
+            match approval {
+                Ok(approval) => {
+                    config.plugins.insert(id, approval);
+                }
+                Err(error) => {
+                    config.invalid_plugins.insert(id, error);
+                }
             }
         }
         Ok(config)
@@ -63,6 +78,9 @@ impl PluginRepository for FsPluginRepository {
     /// @stability stable
     fn load(&self, id: &str) -> PluginResult<LoadedPlugin> {
         let config = self.configuration()?;
+        if let Some(error) = config.invalid_plugins.get(id) {
+            return Err(error.clone());
+        }
         let approval = config
             .plugins
             .get(id)

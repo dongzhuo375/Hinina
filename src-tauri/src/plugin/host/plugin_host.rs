@@ -139,6 +139,7 @@ impl PluginHost {
                 sink: PluginEventSink { sender },
             },
         );
+        drop(subs);
         info!(plugin_id=%manifest.id, plugin_version=%manifest.version, runtime="js",
             event="resync.required", operation="subscribe", permission="events.subscribe", request_id="",
             "插件事件订阅已注册");
@@ -180,13 +181,16 @@ impl PluginHost {
     /// @stability stable
     /// Success means a reconciliation prompt was enqueued, even after business events.
     pub fn request_resync(&self, id: &str) -> bool {
+        let mut failures = Vec::new();
         let mut subs = self.subscriptions.lock().unwrap_or_else(|e| e.into_inner());
         let Some(sub) = subs.get_mut(id) else {
             return false;
         };
         let envelope = sub.adapter.resync_notice(0);
-        if !enqueue(id, sub, envelope) {
+        if !enqueue(id, sub, envelope, &mut failures) {
             subs.remove(id);
+            drop(subs);
+            log_failures(failures);
             return false;
         }
         true
@@ -225,7 +229,7 @@ impl PluginHost {
     }
 
     #[cfg(test)]
-    fn dispatch(&self, event: &CoreEvent) {
+    pub(crate) fn dispatch(&self, event: &CoreEvent) {
         dispatch_to_subscribers(&self.subscriptions, event);
     }
 }
@@ -233,6 +237,7 @@ impl PluginHost {
 // 临界区内只有宿主管理的 try_send，没有用户回调、await 或 I/O。
 // 入队和移除共用此锁，保证序号按入队顺序且 unsubscribe 返回后不再投递。
 fn dispatch_to_subscribers(subs: &SubscriptionTable, event: &CoreEvent) {
+    let mut failures = Vec::new();
     subs.lock()
         .unwrap_or_else(|e| e.into_inner())
         .retain(|id, sub| {
@@ -249,7 +254,7 @@ fn dispatch_to_subscribers(subs: &SubscriptionTable, event: &CoreEvent) {
             ) {
                 // Prompt reconciliation even when the plugin did not request the domain event.
                 let notice = sub.adapter.resync_notice(0);
-                if !enqueue(id, sub, notice) {
+                if !enqueue(id, sub, notice, &mut failures) {
                     return false;
                 }
             }
@@ -257,29 +262,53 @@ fn dispatch_to_subscribers(subs: &SubscriptionTable, event: &CoreEvent) {
             let envelope = sub
                 .adapter
                 .adapt_if(event, |e| allowed.contains(&e.subscription()));
-            envelope.is_none_or(|envelope| enqueue(id, sub, envelope))
+            envelope.is_none_or(|envelope| enqueue(id, sub, envelope, &mut failures))
         });
+    log_failures(failures);
 }
 
 fn notify_resync(subs: &SubscriptionTable, lost: u64) {
+    let mut failures = Vec::new();
     subs.lock()
         .unwrap_or_else(|e| e.into_inner())
         .retain(|id, sub| {
             let envelope = sub.adapter.resync_notice(lost);
-            enqueue(id, sub, envelope)
+            enqueue(id, sub, envelope, &mut failures)
         });
+    log_failures(failures);
 }
 
-fn enqueue(id: &str, sub: &Subscription, envelope: PluginEventEnvelope) -> bool {
+struct QueueFailure {
+    id: String,
+    version: String,
+    event: &'static str,
+    reason: &'static str,
+}
+fn log_failures(failures: Vec<QueueFailure>) {
+    for failure in failures {
+        warn!(plugin_id=?failure.id,plugin_version=%failure.version,runtime="js",event=failure.event,
+            operation="queue.close",permission="events.subscribe",request_id="",reason=failure.reason,
+            "插件队列不可用，注销订阅；重新接入必须 Resync");
+    }
+}
+fn enqueue(
+    id: &str,
+    sub: &Subscription,
+    envelope: PluginEventEnvelope,
+    failures: &mut Vec<QueueFailure>,
+) -> bool {
     let event = envelope.event.subscription();
     if let Err(error) = sub.sink.sender.try_send(envelope) {
         let reason = match error {
             mpsc::error::TrySendError::Full(_) => "full",
             mpsc::error::TrySendError::Closed(_) => "closed",
         };
-        warn!(plugin_id=id, plugin_version=%sub.version, runtime="js", event=event.as_str(),
-            operation="queue.close", permission="events.subscribe", request_id="", reason,
-            "插件队列不可用，注销订阅；重新接入必须 Resync");
+        failures.push(QueueFailure {
+            id: id.into(),
+            version: sub.version.clone(),
+            event: event.as_str(),
+            reason,
+        });
         return false;
     }
     true

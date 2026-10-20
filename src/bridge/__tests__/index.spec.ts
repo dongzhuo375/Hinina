@@ -31,6 +31,16 @@ describe('ipcInvoke — 成功路径', () => {
   })
 })
 
+it('保留 PluginError 的稳定 code 和权限信息', async () => {
+  const payload = { code: 'permission_denied', permission: 'events.subscribe' }
+  invoke.mockRejectedValue(payload)
+  const error = await captureError('plugin_start')
+  expect(error.code).toBe('permission_denied')
+  expect(error.message).toBe('permission_denied')
+  expect(error.raw).toEqual(payload)
+  expect(error.isAuthError).toBe(false)
+})
+
 describe('ipcInvoke — 错误归一化（Rust AppError ↔ 前端跨端契约）', () => {
   it('AppError 载荷 → IpcError，保留变体与真实原因', async () => {
     const payload = appError('Auth', '登录失败: 用户名或密码错误')

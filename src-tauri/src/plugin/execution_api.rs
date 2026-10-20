@@ -14,6 +14,16 @@ use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde_json::{json, Value};
 use std::{num::NonZeroU32, sync::Arc};
 
+/// Host capability factory, injected by the composition root. Managers never construct I/O.
+pub trait PluginApiFactory: Send + Sync {
+    fn create(
+        &self,
+        queries: Arc<ScopedQueries>,
+        approval: &super::registry::PluginApproval,
+        output: Arc<dyn NotificationOutput>,
+    ) -> PluginResult<Arc<dyn PluginApi>>;
+}
+
 /// @plugin-api
 /// @since 2.0
 /// @permission notification
@@ -238,6 +248,7 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
         }
     };
     if let Some((plugin_id, plugin_version)) = api.audit_identity() {
+        let logged_operation = operation.chars().take(64).collect::<String>();
         let permission = match operation.split('.').next().unwrap_or("") {
             "submission" => "submission.read",
             "contest" => "contest.read",
@@ -253,7 +264,7 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
             "notification" => "notification",
             _ => "none",
         };
-        tracing::debug!(plugin_id, plugin_version, runtime="js",event="",operation=%operation,permission,
+        tracing::debug!(plugin_id=?plugin_id, plugin_version=?plugin_version, runtime="js",event="",operation=?logged_operation,permission,
             request_id=%uuid::Uuid::new_v4(),success=result.is_ok(),"Plugin API completed");
     }
     match result {

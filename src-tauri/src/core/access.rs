@@ -42,6 +42,7 @@ impl AccessRevision {
 }
 
 /// Drop completes a transition even when its future is cancelled or returns an error.
+#[must_use = "hold the transition guard until all related access changes are complete"]
 pub struct AccessTransition(Arc<AccessRevision>);
 impl Drop for AccessTransition {
     fn drop(&mut self) {

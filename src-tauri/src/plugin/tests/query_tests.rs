@@ -74,7 +74,7 @@ async fn in_flight_change_and_wrong_owner_fail_closed() {
     });
     assert_eq!(result, Err(PluginError::ContextExpired));
     let mut wrong = record("1");
-    wrong.username = "bob".into();
+    wrong.owner_id = Some("other-user".into());
     *source.pages.lock().unwrap() = vec![SubmissionHistoryPage {
         records: vec![wrong],
         total: Some(1),
@@ -301,7 +301,7 @@ async fn concurrent_queries_fail_fast_and_release_capacity_after_completion() {
     assert_eq!(source.contest_calls.load(Ordering::SeqCst), 3);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn provider_timeout_releases_permits_for_other_activations() {
     use crate::plugin::query::QueryBudget;
     use std::sync::atomic::Ordering;
@@ -381,4 +381,170 @@ async fn per_plugin_budget_limits_one_activation_without_exhausting_other_plugin
     let other = queries_with_budget(Arc::new(Source::default()), budget);
     let context = other.current_context().await.unwrap();
     other.contest(&context, None).await.unwrap();
+}
+
+#[tokio::test]
+async fn current_context_reports_expiration_throughout_a_transition() {
+    let access = Arc::new(AccessRevision::default());
+    let m = manifest("test.transition");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        Arc::new(Source::default()),
+        access.clone(),
+        Default::default(),
+    );
+    let old = q.current_context().await.unwrap();
+    let transition = access.begin();
+    assert_eq!(q.current_context().await, Err(PluginError::ContextExpired));
+    assert!(matches!(
+        q.check(&old).await,
+        Err(PluginError::ContextExpired)
+    ));
+    drop(transition);
+    q.current_context().await.unwrap();
+    assert!(matches!(
+        q.check(&old).await,
+        Err(PluginError::ContextExpired)
+    ));
+}
+
+#[tokio::test]
+async fn concurrent_cursor_reuse_has_only_one_winner() {
+    let source = Arc::new(Source {
+        delay: true,
+        ..Default::default()
+    });
+    *source.pages.lock().unwrap() = vec![SubmissionHistoryPage {
+        records: vec![record("1"), record("2"), record("3")],
+        total: None,
+        has_more: false,
+    }];
+    let m = manifest("test.cursor");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source,
+        Arc::default(),
+        Default::default(),
+    );
+    let c = q.current_context().await.unwrap();
+    let mut query = PluginSubmissionQuery {
+        contest_id: "contest".into(),
+        problem_id: None,
+        cursor: None,
+        limit: 1,
+    };
+    query.cursor = q.list(&c, query.clone()).await.unwrap().next_cursor;
+    let (a, b) = tokio::join!(q.list(&c, query.clone()), q.list(&c, query));
+    let results = [a, b];
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|r| **r == Err(PluginError::ContextExpired))
+            .count(),
+        1
+    );
+    let winner = results.into_iter().find_map(Result::ok).unwrap();
+    assert_eq!(winner.records[0].submission_id, "2");
+}
+
+#[tokio::test]
+async fn production_scope_reads_session_once_per_revision_and_refreshes_after_revocation() {
+    use crate::{
+        core::{
+            entity::session::Session,
+            error::AppResult,
+            event::core_event_bus::CoreEventBus,
+            provider::{oj_id::OjId, registry::ProviderRegistry},
+            repository::session_repo::SessionRepository,
+        },
+        infra::{
+            fs_config_repo::FsConfigRepository, provider_registry_impl::ProviderRegistryImpl,
+            storage::Storage,
+        },
+        plugin::query::ServiceQueries,
+        service::{
+            auth::AuthService, config::ConfigService, contest::ContestService,
+            submission::SubmissionService,
+        },
+    };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    };
+    struct Sessions(AtomicUsize);
+    impl SessionRepository for Sessions {
+        fn load(&self, _: &OjId) -> AppResult<Option<Session>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(Session::new("HOJ", "user-1", "alice", "private")))
+        }
+        fn save(&self, _: &Session) -> AppResult<()> {
+            unreachable!()
+        }
+        fn remove(&self, _: &OjId) -> AppResult<()> {
+            Ok(())
+        }
+        fn rotate_token(&self, _: &OjId, _: &str) -> AppResult<bool> {
+            unreachable!()
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("scope-cache");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let bus = Arc::new(CoreEventBus::new());
+    let access = Arc::new(AccessRevision::default());
+    let registry =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")).with_access(access.clone()));
+    let config = Arc::new(
+        ConfigService::new(
+            Arc::new(FsConfigRepository::new(storage.clone(), "config.json")),
+            bus.clone(),
+        )
+        .with_access(access.clone()),
+    );
+    let endpoint = config
+        .get()
+        .oj
+        .instances
+        .into_iter()
+        .find(|i| i.id == "HOJ")
+        .unwrap()
+        .base_url;
+    registry.set_instance_endpoint(OjId::new("HOJ"), endpoint);
+    let sessions = Arc::new(Sessions(AtomicUsize::new(0)));
+    let auth = Arc::new(
+        AuthService::new(registry.clone(), sessions.clone(), bus.clone())
+            .with_access(access.clone()),
+    );
+    let source = Arc::new(ServiceQueries {
+        auth: auth.clone(),
+        contest: Arc::new(
+            ContestService::new(registry.clone(), bus.clone(), storage.clone())
+                .with_access(access.clone()),
+        ),
+        submission: Arc::new(SubmissionService::new(registry.clone(), bus, storage)),
+        registry,
+        config,
+        access: access.clone(),
+        cached_scope: Mutex::default(),
+    });
+    let m = manifest("test.cached");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source,
+        access,
+        Default::default(),
+    );
+    let c = q.current_context().await.unwrap();
+    for _ in 0..20 {
+        assert!(q.identity(&c).await.unwrap().is_some());
+    }
+    assert_eq!(sessions.0.load(Ordering::SeqCst), 1);
+    auth.logout().await.unwrap();
+    assert!(matches!(
+        q.check(&c).await,
+        Err(PluginError::ContextExpired)
+    ));
+    let fresh = q.current_context().await.unwrap();
+    assert!(q.identity(&fresh).await.unwrap().is_none());
+    assert_eq!(sessions.0.load(Ordering::SeqCst), 1);
 }

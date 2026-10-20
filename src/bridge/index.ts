@@ -46,6 +46,11 @@ const APP_ERROR_VARIANTS: readonly string[] = [
  * 因此在唯一的 IPC 出口归一化为 `Error`，并保留变体与原始载荷便于分流与排查。
  */
 export class IpcError extends Error {
+  /** Stable plugin error code, retained independently of AppError variants. */
+  get code(): string | undefined {
+    if (this.raw && typeof this.raw === 'object' && 'code' in this.raw && typeof this.raw.code === 'string') return this.raw.code
+    return undefined
+  }
   constructor(
     readonly cmd: string,
     message: string,
@@ -68,6 +73,7 @@ function parseAppError(raw: unknown): { variant: AppErrorVariant | null; message
   if (raw instanceof Error) return { variant: null, message: raw.message }
   if (typeof raw === 'string') return { variant: null, message: raw }
   if (raw && typeof raw === 'object') {
+    if ('code' in raw && typeof raw.code === 'string') return { variant: null, message: raw.code }
     const entries = Object.entries(raw as Record<string, unknown>)
     // AppError 外部标签形式：{ Variant: message }
     if (entries.length === 1 && typeof entries[0][1] === 'string') {

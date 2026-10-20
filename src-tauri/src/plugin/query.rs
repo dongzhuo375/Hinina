@@ -102,10 +102,19 @@ pub struct ServiceQueries {
     pub submission: Arc<SubmissionService>,
     pub registry: Arc<dyn ProviderRegistry>,
     pub config: Arc<ConfigService<FsConfigRepository>>,
+    pub access: Arc<AccessRevision>,
+    pub cached_scope: Mutex<Option<(u64, QueryScope)>>,
 }
 #[async_trait]
 impl QuerySource for ServiceQueries {
     fn scope(&self) -> PluginResult<QueryScope> {
+        let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
+        let mut cache = self.cached_scope.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((revision, scope)) = cache.as_ref() {
+            if *revision == snapshot.revision && !snapshot.cancellation.is_cancelled() {
+                return Ok(scope.clone());
+            }
+        }
         let oj = self.registry.current_id().to_string();
         let endpoint = self
             .registry
@@ -121,7 +130,7 @@ impl QuerySource for ServiceQueries {
         {
             return Err(PluginError::Unavailable);
         }
-        Ok(QueryScope {
+        let scope = QueryScope {
             oj,
             endpoint,
             user: self
@@ -129,7 +138,12 @@ impl QuerySource for ServiceQueries {
                 .identity_metadata()
                 .map_err(|_| PluginError::Unavailable)?,
             contest: self.contest.current_contest_id(),
-        })
+        };
+        if snapshot.cancellation.is_cancelled() {
+            return Err(PluginError::ContextExpired);
+        }
+        *cache = Some((snapshot.revision, scope.clone()));
+        Ok(scope)
     }
     async fn contest(&self, id: &str) -> PluginResult<Contest> {
         self.contest
@@ -287,7 +301,7 @@ impl ScopedQueries {
         if self.stopped.is_cancelled() {
             return Err(PluginError::ContextExpired);
         }
-        let snapshot = self.access.snapshot().ok_or(PluginError::Unavailable)?;
+        let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
         let scope = self.scope().await?;
         if snapshot.cancellation.is_cancelled() || self.stopped.is_cancelled() {
             return Err(PluginError::ContextExpired);
@@ -377,12 +391,12 @@ impl ScopedQueries {
         self.require(PluginPermission::SubmissionRead)?;
         query.validate()?;
         let context = self.context(handle).await?;
-        let (_, username) = context.scope.user.ok_or(PluginError::Unauthenticated)?;
+        let (owner, _) = context.scope.user.ok_or(PluginError::Unauthenticated)?;
         if context.scope.contest.as_deref() != Some(&query.contest_id) {
             return Err(PluginError::ContextExpired);
         }
         let mut cursor = if let Some(id) = &query.cursor {
-            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let c = state
                 .cursors
                 .get(id)
@@ -396,7 +410,11 @@ impl ScopedQueries {
             {
                 return Err(PluginError::ContextExpired);
             }
-            c
+            // Consume under the same lock as validation: concurrent reuse cannot clone it twice.
+            state
+                .cursors
+                .remove(id)
+                .ok_or(PluginError::ContextExpired)?
         } else {
             Cursor {
                 context: handle.host_id().into(),
@@ -418,7 +436,12 @@ impl ScopedQueries {
                     self.source.history(&query.contest_id, cursor.native_page),
                 )
                 .await?;
-            if page.records.len() > 1000 || page.records.iter().any(|r| r.username != username) {
+            if page.records.len() > 1000
+                || page
+                    .records
+                    .iter()
+                    .any(|r| r.owner_id.as_deref() != Some(owner.as_str()))
+            {
                 return Err(PluginError::ProviderError);
             }
             cursor.native_page += 1;
@@ -467,13 +490,6 @@ impl ScopedQueries {
         } else {
             None
         };
-        if let Some(id) = query.cursor {
-            self.state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .cursors
-                .remove(&id);
-        }
         self.check(handle).await?;
         Ok(PluginSubmissionPage {
             records,
