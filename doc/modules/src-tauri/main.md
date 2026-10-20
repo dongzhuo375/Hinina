@@ -81,3 +81,6 @@
    - `data_dir_cmd`：**get_data_dir** / **set_data_dir** / **reset_data_dir** / **pick_data_dir**（设置页「数据目录」：改动重启后生效，见 `commands/data_dir_cmd.md`）
    - `theme_cmd`：get_theme / set_theme
 6. `.run(tauri::generate_context!())` 启动 Tauri 桌面应用
+
+
+插件宿主 start() 只启动一个消费者并拒绝重复启动，main 记录失败诊断；不扫描清单、不加载 JS。API Adapter/Runtime/文件仓库尚未装配。

@@ -1,16 +1,5 @@
 # workspace
 
-## 职责
-提供 `hinina.workspace.read()` / `write()` 安全入口，供插件访问工作区文件。v0.x 为预留接口。
+工作区读写为远期草案，未定义可调用 API 或授权权限。元数据事件不代表工作区读写能力。
 
-## 核心类型/函数
-- 无（v1.0 待实现）
-
-## 直接依赖
-- 无
-
-## 被依赖
-- `plugin/api/mod.rs` — 通过 `pub mod workspace` 声明子模块
-
-## 逻辑流程
-无（TODO 占位，v1.0 实现）
+完整权限、字段和错误见 [Plugin API 规范](mod.md)。

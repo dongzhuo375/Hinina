@@ -94,3 +94,6 @@ switch_oj(id) → AppContext::ensure_oj_registered(id)
 **注册路径**（`register_instance`，用真实注册表 + 真实工厂）：已知 OJ 注册后出现在 `list_available()`、未知 OJ → `false` 且不注册任何东西（不 panic）、**重复注册幂等**（不产生重复项）、工厂按 id **精确匹配**（`hoj` 不是 `HOJ`）。这组用例的价值在于锁定「启动注册与按需注册共用同一实现」—— 若两处各自实现而漂移，会退化成「重启后能用、切换时不能用」这类最难排查的不一致。
 
 `ensure_oj_registered` 本身需要完整 `AppContext`（http / 事件总线 / 存储 / 注册表），构造代价大于收益；其正确性由「只调 `enabled_instance` + `register_instance`」这条结构约束 + 上两组用例保证。
+
+
+插件接口施工：AppContext 仍只装配 PluginHost 的事件边界；没有注入插件查询 Adapter、存储/HTTP 执行器或 JS 引擎。Host.start 防重复启动由组合根处理。

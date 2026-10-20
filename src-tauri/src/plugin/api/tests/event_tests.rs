@@ -84,6 +84,9 @@ fn protocol_payload_contains_no_sensitive_fields() {
     ];
 
     for event in events {
+        let name = event.subscription();
+        assert_eq!(serde_json::to_value(name).unwrap(), name.as_str());
+        assert_eq!(serde_json::to_value(&event).unwrap()["type"], name.as_str());
         let json = serde_json::to_string(&event).unwrap();
         let lower = json.to_lowercase();
         for needle in FORBIDDEN {

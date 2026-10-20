@@ -88,7 +88,10 @@ impl PluginHttpRequest {
             }
         }
         if let Some(body) = &self.body {
-            super::storage::validate_value(body)?;
+            let bytes = serde_json::to_vec(body).map_err(|_| PluginError::InvalidInput)?;
+            if bytes.len() > MAX_HTTP_BODY_BYTES {
+                return Err(PluginError::LimitExceeded);
+            }
         }
         Ok(())
     }

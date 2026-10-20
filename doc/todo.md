@@ -127,7 +127,7 @@
 - [x] **工作区落盘事件合并** — `WorkspaceSaved{workspace_id,revision,automatic}` 取代 `Saved` / `AutoSaveTriggered`，并删除无消费者的 `Loaded` / `Switched`
 - [x] **事件载荷收敛** — 删除查询结果型与死事件（`ListLoaded` / `CountdownTick` / `CodeChanged` / `WindowClosing`），`LoginSuccess{User}` → `LoggedIn{user_id}`，`Judged{result}` → `SubmissionJudged{status}`
 - [x] **三类消费者** — Tauri 前端桥 / 审计（`infra/audit.rs`）/ PluginHost，共用同一条底层事件流
-- [x] **插件事件边界** — `PluginEvent` + `PluginEventEnvelope`（版本 + 每订阅单调序号）+ `PluginEventAdapter`（白名单 / 裁剪 / 脱敏）+ `PluginHost`（权限、生命周期、`ResyncRequired`、单插件异常隔离）；**不实现运行时**
+- [x] **插件事件边界** — `PluginEvent` + `PluginEventEnvelope`（版本 + 每订阅单调序号）+ `PluginEventAdapter`（白名单 / 裁剪 / 脱敏）+ `PluginHost`（授权与订阅管理、`ResyncRequired`；后续接口施工以有界队列落实隔离）；**不实现运行时**
 - [x] **前端最小适配** — `workspace-saved` 载荷增加 `revision`（幂等过滤）；**全部轮询保留**（事件只做 UI 刷新触发）
 
 ### 8.2 待办
@@ -135,5 +135,14 @@
 - [ ] **QDUOJ Adapter** — `adapter/qduoj/`
 - [ ] **HUSTOJ Adapter** — `adapter/hustoj/`
 - [ ] **ProviderRegistry 完善** — 支持多 OJ 动态注册与切换
-- [ ] **Plugin 运行时** — v1.0 JS 插件运行时，v2.0 WASM 运行时
+- [x] **Plugin 真实代码审计** — 根目录 ARCHITECTURE_REVIEW.md；先审计后分层施工
+- [x] **Plugin 协议/Manifest** — 清单/API v1、事件协议 v2、点分名、未知字段/权限/事件拒绝、入口纯路径检查
+- [x] **Plugin API 契约** — 安全只读投影、分页、私有 JSON/CAS、HTTP、纯文本通知 trait/边界，独立安全错误；无执行器
+- [x] **Plugin 授权/事件边界** — PluginGrant、每插件有界队列 128、权限/订阅过滤、初始/Lagged Resync、满/关闭注销、防重复启动
+- [x] **Plugin 分层与接入端口** — 仓库移至 plugin/registry、占位 Unsupported；Runtime/Bridge trait，不要求引擎 Send
+- [x] **Plugin 文档与声明** — modules/src-tauri/plugin/README.md、Manifest/API/事件/安全/Runtime/教程及 TypeScript 声明
+- [ ] **Plugin API Adapter** — 上下文签发/失效、强制本人查询、Service 安全投影；不可凭终态事件 ID 直接派发
+- [ ] **Plugin 专用 Infra** — 私有持久化/原子 CAS/配额；无 Cookie 网络客户端、DNS/连接地址校验、HTTPS 白名单、超时限流；纯文本通知出口
+- [ ] **Plugin Runtime/加载** — 先验证 rquickjs/Boa/deno_core，再实现执行中断、内存限制、Promise、串行 handlers、加载/停止；不自动承诺 WASM
+- [ ] **Plugin 业务集成验证** — 后续插件自行实现首次 AC/恢复/幂等，补 Mock HTTP/重启/超时测试；本轮无气球插件
 - [ ] **CI/CD 流水线** — GitHub Actions：构建 → 测试 → 打包 → Release

@@ -85,6 +85,9 @@ fn http_shape_rejects_header_injection_transport_controls_and_limits() {
     request.headers.clear();
     request.timeout_ms = Some(5001);
     assert_eq!(request.validate_shape(), Err(PluginError::LimitExceeded));
+    request.timeout_ms = Some(5000);
+    request.body = Some(json!("x".repeat(http::MAX_HTTP_BODY_BYTES)));
+    assert_eq!(request.validate_shape(), Err(PluginError::LimitExceeded));
     let encoded = json!({"method":"POST","url":"https://example.com","body":null,"timeoutMs":null,"proxy":"http://127.0.0.1"});
     assert!(serde_json::from_value::<http::PluginHttpRequest>(encoded).is_err());
 }

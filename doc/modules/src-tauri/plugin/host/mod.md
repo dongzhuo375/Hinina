@@ -1,16 +1,5 @@
-# mod
+# 插件宿主模块
 
-## 职责
-插件宿主（Host）子模块的入口，声明并公开四个子模块：`manifest`（manifest 与权限模型）、`extension`（扩展点契约）、`event_adapter`（`CoreEvent` → `PluginEvent` 的唯一转换点）、`plugin_host`（`PluginHost`：订阅生命周期、权限校验、投递与引用环约束）。
+导出 manifest（纯验证）、event_adapter（白名单安全投影）、plugin_host（授予权限与有界交付）、api_error（安全错误映射）。extension 仅保留远期 UI 类型草案，不可通过非空 Manifest contributes 激活。
 
-## 核心类型/函数
-- 无（仅模块声明）
-
-## 直接依赖
-- 无
-
-## 被依赖
-- `plugin/mod.rs` — 通过 `pub mod host` 声明子模块
-
-## 逻辑流程
-无（仅模块声明）
+当前不扫描目录、不创建 JS 引擎、不执行插件。参见 [总览](../README.md)。

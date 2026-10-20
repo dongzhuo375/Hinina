@@ -1,3 +1,8 @@
+//! @plugin-module
+//! @layer plugin/host
+//! @version 1
+//! @stability stable
+//!
 //! `CoreEvent` → `PluginEvent` 适配器 —— 插件事件边界的**唯一**转换点。
 //!
 //! 职责（`PluginHost` 只负责驱动它，不重复实现其中任何一项）：
@@ -18,6 +23,9 @@ use crate::plugin::api::event::{PluginEvent, PluginEventEnvelope, PLUGIN_EVENT_P
 /// 单插件订阅的事件适配器。
 ///
 /// 每个插件一个实例：序号是**每订阅**的连续计数，插件侧据此检测缺口。
+/// @plugin-api
+/// @since 1.0
+/// @stability stable
 #[derive(Debug, Default)]
 pub struct PluginEventAdapter {
     sequence: u64,
@@ -26,6 +34,9 @@ pub struct PluginEventAdapter {
 impl PluginEventAdapter {
     /// 创建适配器（序号从 0 起，首个事件为 1）。
     #[must_use]
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability stable
     pub fn new() -> Self {
         Self { sequence: 0 }
     }
@@ -34,6 +45,9 @@ impl PluginEventAdapter {
     ///
     /// 白名单外的事件返回 `None`，且**不消耗序号** —— 否则插件会看到
     /// 「序号跳号但没收到任何事件」的假缺口。
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability stable
     pub fn adapt(&mut self, event: &CoreEvent) -> Option<PluginEventEnvelope> {
         self.adapt_if(event, |_| true)
     }
@@ -52,12 +66,18 @@ impl PluginEventAdapter {
     }
 
     /// 生成一条协议级重新同步通知（`PluginHost` 在 `Lagged` / 订阅建立时下发）。
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability stable
     pub fn resync_notice(&mut self, lost: u64) -> PluginEventEnvelope {
         self.wrap(PluginEvent::ResyncRequired { lost })
     }
 
     /// 当前序号（已下发的最后一条）。
     #[must_use]
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability stable
     pub fn sequence(&self) -> u64 {
         self.sequence
     }

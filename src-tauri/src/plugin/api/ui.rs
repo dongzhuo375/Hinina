@@ -1,2 +1,5 @@
-// 侧边栏、命令面板等 UI 扩展入口
-// TODO: v1.0 实现
+//! @plugin-module
+//! @layer plugin/api
+//! @version 1
+//! @stability experimental
+//! UI 扩展为远期草案，本轮不定义或授予可执行能力。

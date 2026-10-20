@@ -136,3 +136,14 @@ fn versions_missing_entry_and_network_limits_are_checked() {
         assert_eq!(value.validate(), Err(ManifestError("network")));
     }
 }
+
+#[test]
+fn documented_manifest_matches_the_implemented_contract() {
+    let example = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../doc/modules/src-tauri/plugin/sdk/manifest.example.json"
+    ));
+    let manifest: PluginManifest = serde_json::from_str(example).unwrap();
+    manifest.validate().unwrap();
+    assert_eq!(manifest.id, "com.example.balloon-first-ac");
+}

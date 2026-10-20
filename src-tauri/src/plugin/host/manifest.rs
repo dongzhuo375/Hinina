@@ -68,6 +68,30 @@ pub enum PluginEventSubscription {
     ResyncRequired,
 }
 
+impl PluginEventSubscription {
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability stable
+    /// 稳定日志和订阅名称，与序列化名称一致。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OjSwitched => "system.oj_switched",
+            Self::ContestSelected => "contest.selected",
+            Self::AnnouncementChanged => "announcement.changed",
+            Self::ProblemOpened => "problem.opened",
+            Self::SubmissionCreated => "submission.created",
+            Self::SubmissionJudged => "submission.judged",
+            Self::WorkspaceSaved => "workspace.saved",
+            Self::ConfigChanged => "system.config_changed",
+            Self::ThemeChanged => "system.theme_changed",
+            Self::SessionLoggedIn => "session.logged_in",
+            Self::SessionLoggedOut => "session.logged_out",
+            Self::SessionExpired => "session.expired",
+            Self::ResyncRequired => "resync.required",
+        }
+    }
+}
+
 /// @plugin-api
 /// @since 1.0
 /// @permission network.request
@@ -276,8 +300,8 @@ fn valid_version(version: &str) -> bool {
     };
     core.split('.').count() == 3
         && core.split('.').all(number)
-        && pre.map_or(true, |s| ids(s, true))
-        && build.map_or(true, |s| ids(s, false))
+        && pre.is_none_or(|s| ids(s, true))
+        && build.is_none_or(|s| ids(s, false))
 }
 
 #[cfg(test)]

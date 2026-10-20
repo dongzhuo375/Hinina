@@ -1,3 +1,8 @@
+//! @plugin-module
+//! @layer plugin/api
+//! @version 2
+//! @stability stable
+//!
 //! 插件事件协议 —— 插件侧**唯一**允许依赖的事件接口。
 //!
 //! # 边界（硬约束）
@@ -26,6 +31,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// 任何**破坏性**变更（删除变体、改字段语义、改必填性）都必须自增，
 /// 插件据 `envelope.version` 决定是否继续处理。
+/// @plugin-api
+/// @since 1.0
+/// @stability stable
 pub const PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 2;
 
 /// 插件可见的事件。
@@ -40,6 +48,9 @@ pub const PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 2;
 ///
 /// Token、密码、完整 Session、认证头、源代码、内部文件路径、内部缓存对象、
 /// 未脱敏的用户实体、内部错误栈、内部实现细节。
+/// @plugin-api
+/// @since 1.0
+/// @stability stable
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum PluginEvent {
@@ -139,6 +150,9 @@ impl PluginEvent {
 }
 
 /// 插件事件信封 —— 版本、序号与发生时间随事件一起下发。
+/// @plugin-api
+/// @since 1.0
+/// @stability stable
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginEventEnvelope {
