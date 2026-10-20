@@ -1,32 +1,43 @@
-use std::sync::Arc;
+//! @plugin-module
+//! @layer infra
+//! @version 1
+//! @stability experimental
+//! ????????????? Unsupported?????????? panic?
 
-use crate::core::error::AppResult;
-use crate::core::repository::plugin_repo::PluginRepository;
-use crate::infra::storage::Storage;
+use crate::plugin::api::{PluginError, PluginResult};
 use crate::plugin::host::manifest::PluginManifest;
+use crate::plugin::registry::PluginRepository;
 
-/// PluginRepository 的文件系统实现
-pub struct FsPluginRepository {
-    storage: Arc<Storage>,
-}
+/// @plugin-api
+/// @since 1.0
+/// @stability experimental
+/// ????????????? AppContext???? Storage ??????
+#[derive(Default)]
+pub struct FsPluginRepository;
 
 impl FsPluginRepository {
-    pub fn new(storage: Arc<Storage>) -> Self {
-        Self { storage }
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability experimental
+    /// ????????? I/O?
+    #[must_use]
+    pub fn new() -> Self {
+        Self
     }
 }
 
 impl PluginRepository for FsPluginRepository {
-    fn scan_plugins(&self) -> AppResult<Vec<PluginManifest>> {
-        todo!("FsPluginRepository::scan_plugins()")
+    fn scan_plugins(&self) -> PluginResult<Vec<PluginManifest>> {
+        Err(PluginError::Unsupported)
     }
-
-    fn load_plugin_code(&self, plugin_id: &str) -> AppResult<String> {
-        let _ = plugin_id;
-        todo!("FsPluginRepository::load_plugin_code()")
+    fn load_plugin_code(&self, _manifest: &PluginManifest) -> PluginResult<String> {
+        Err(PluginError::Unsupported)
     }
-
-    fn plugin_dir_exists(&self) -> bool {
-        todo!("FsPluginRepository::plugin_dir_exists()")
+    fn plugin_dir_exists(&self) -> PluginResult<bool> {
+        Err(PluginError::Unsupported)
     }
 }
+
+#[cfg(test)]
+#[path = "tests/fs_plugin_repo_tests.rs"]
+mod tests;

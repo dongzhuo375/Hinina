@@ -41,6 +41,14 @@ impl PluginQueryContext {
     pub fn from_host_id(id: String) -> Self {
         Self(id)
     }
+
+    /// @plugin-api
+    /// @since 1.0
+    /// @stability stable
+    /// 供宿主查验签发记录；句柄不能作为授权或身份信息。
+    pub fn host_id(&self) -> &str {
+        &self.0
+    }
 }
 
 /// @plugin-api
