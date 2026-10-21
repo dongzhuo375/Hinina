@@ -505,10 +505,25 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
         atomic::{AtomicUsize, Ordering},
         Mutex,
     };
-    struct Sessions(AtomicUsize);
+    struct Sessions {
+        loads: AtomicUsize,
+        block: Mutex<
+            Option<(
+                tokio::sync::oneshot::Sender<()>,
+                std::sync::mpsc::Receiver<()>,
+            )>,
+        >,
+    }
     impl SessionRepository for Sessions {
         fn load(&self, _: &OjId) -> AppResult<Option<Session>> {
-            self.0.fetch_add(1, Ordering::SeqCst);
+            self.loads.fetch_add(1, Ordering::SeqCst);
+            let block = self.block.lock().unwrap().take();
+            if let Some((reached, release)) = block {
+                reached.send(()).unwrap();
+                release
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+            }
             Ok(Some(Session::new("HOJ", "user-1", "alice", "private")))
         }
         fn save(&self, _: &Session) -> AppResult<()> {
@@ -540,7 +555,10 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
         .unwrap()
         .base_url;
     registry.set_instance_endpoint(OjId::new("HOJ"), endpoint);
-    let sessions = Arc::new(Sessions(AtomicUsize::new(0)));
+    let sessions = Arc::new(Sessions {
+        loads: AtomicUsize::new(0),
+        block: Mutex::default(),
+    });
     let auth = Arc::new(AuthService::new(
         registry.clone(),
         sessions.clone(),
@@ -564,15 +582,55 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
     let m = manifest("test.cached");
     let q = ScopedQueries::new(
         crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
-        source,
-        access,
+        source.clone(),
+        access.clone(),
         Default::default(),
     );
     let c = q.current_context().await.unwrap();
     for _ in 0..20 {
         assert!(q.identity(&c).await.unwrap().is_some());
     }
-    assert_eq!(sessions.0.load(Ordering::SeqCst), 1);
+    assert_eq!(sessions.loads.load(Ordering::SeqCst), 1);
+    // Force an old cache miss to finish after a new revision's reader. The new
+    // reader must not wait for the old session I/O or receive the old snapshot.
+    use crate::plugin::query::QuerySource;
+    let mut stale = source.cached_scope.lock().unwrap().clone().unwrap();
+    drop(access.begin());
+    let (reached, waiting) = tokio::sync::oneshot::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
+    *sessions.block.lock().unwrap() = Some((reached, blocked));
+    let old_reader = {
+        let source = source.clone();
+        tokio::task::spawn_blocking(move || source.scope())
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(2), waiting)
+        .await
+        .unwrap()
+        .unwrap();
+    drop(access.begin());
+    let new_reader = {
+        let source = source.clone();
+        tokio::task::spawn_blocking(move || source.scope())
+    };
+    let current = tokio::time::timeout(std::time::Duration::from_secs(2), new_reader)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    release.send(()).unwrap();
+    assert!(matches!(
+        old_reader.await.unwrap(),
+        Err(PluginError::ContextExpired)
+    ));
+    assert!(source.scope().unwrap() == current);
+    assert_eq!(sessions.loads.load(Ordering::SeqCst), 3);
+    // Simulate the numeric ABA after u64 wrap: a revoked token must never hit
+    // even when its revision is numerically equal to the current revision.
+    stale.0.revision = access.snapshot().unwrap().revision;
+    stale.1.user = Some(("stale-owner".into(), "stale-name".into()));
+    *source.cached_scope.lock().unwrap() = Some(stale);
+    assert!(source.scope().unwrap() == current);
+    assert_eq!(sessions.loads.load(Ordering::SeqCst), 4);
     auth.logout().await.unwrap();
     assert!(matches!(
         q.check(&c).await,
@@ -580,5 +638,69 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
     ));
     let fresh = q.current_context().await.unwrap();
     assert!(q.identity(&fresh).await.unwrap().is_none());
-    assert_eq!(sessions.0.load(Ordering::SeqCst), 1);
+    assert_eq!(sessions.loads.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn cursor_memory_budget_is_shared_and_released_when_continuations_are_consumed() {
+    let source = Arc::new(Source::default());
+    let mut large = record("2");
+    large.display_id = "x".repeat(850_000);
+    *source.pages.lock().unwrap() = vec![SubmissionHistoryPage {
+        records: vec![record("1"), large],
+        total: None,
+        has_more: false,
+    }];
+    let m = manifest("test.cursor-bytes");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        Arc::default(),
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    let query = PluginSubmissionQuery {
+        contest_id: "contest".into(),
+        problem_id: None,
+        cursor: None,
+        limit: 1,
+    };
+    let mut continuations = Vec::new();
+    for _ in 0..4 {
+        continuations.push(
+            q.list(&context, query.clone())
+                .await
+                .unwrap()
+                .next_cursor
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        q.list(&context, query.clone()).await,
+        Err(PluginError::LimitExceeded)
+    );
+    let remainder = q
+        .list(
+            &context,
+            PluginSubmissionQuery {
+                cursor: continuations.pop(),
+                ..query.clone()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(remainder.records[0].submission_id, "2");
+    assert!(remainder.next_cursor.is_none());
+    assert!(q
+        .list(&context, query.clone())
+        .await
+        .unwrap()
+        .next_cursor
+        .is_some());
+    // A single oversized native projection is rejected before retaining it.
+    source.pages.lock().unwrap()[0].records[1].display_id = "x".repeat(1024 * 1024);
+    assert_eq!(
+        q.list(&context, query).await,
+        Err(PluginError::LimitExceeded)
+    );
 }

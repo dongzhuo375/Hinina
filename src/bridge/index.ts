@@ -37,6 +37,20 @@ const APP_ERROR_VARIANTS: readonly string[] = [
   'Unknown',
 ]
 
+const PLUGIN_ERROR_MESSAGES: Record<string, string> = {
+  permission_denied: '插件缺少所需权限',
+  invalid_input: '插件输入或配置无效',
+  context_expired: '插件查询上下文已失效，请重试',
+  unauthenticated: '插件查询需要登录',
+  not_found: '插件资源不存在',
+  provider_error: '插件 OJ 查询失败',
+  limit_exceeded: '插件调用超过资源限制',
+  timeout: '插件操作超时',
+  unavailable: '插件能力暂不可用',
+  script_error: '插件脚本执行失败',
+  unsupported: '插件能力尚未支持',
+}
+
 /**
  * IPC 调用失败时抛出的统一错误类型。
  *
@@ -84,7 +98,10 @@ function parseAppError(raw: unknown): { variant: AppErrorVariant | null; message
   if (raw instanceof Error) return { variant: null, message: raw.message }
   if (typeof raw === 'string') return { variant: null, message: raw }
   if (raw && typeof raw === 'object') {
-    if (isPluginErrorPayload(raw)) return { variant: null, message: raw.code }
+    if (isPluginErrorPayload(raw)) {
+      const message = Object.hasOwn(PLUGIN_ERROR_MESSAGES, raw.code) ? PLUGIN_ERROR_MESSAGES[raw.code] : '插件操作失败'
+      return { variant: null, message }
+    }
     const entries = Object.entries(raw as Record<string, unknown>)
     // AppError 外部标签形式：{ Variant: message }
     if (entries.length === 1 && typeof entries[0][1] === 'string') {

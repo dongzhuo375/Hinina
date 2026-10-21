@@ -57,6 +57,21 @@ impl PluginGrant {
     pub fn manifest(&self) -> &PluginManifest {
         &self.manifest
     }
+    /// One allowlist for both engine registration and host delivery, including control resync.
+    pub(crate) fn allowed_events(&self) -> impl Iterator<Item = PluginEventSubscription> + '_ {
+        self.manifest
+            .events
+            .iter()
+            .copied()
+            .filter(|event| *event != PluginEventSubscription::ResyncRequired)
+            .filter(|event| {
+                event
+                    .required_permission()
+                    .is_none_or(|p| self.require(p).is_ok())
+            })
+            .chain(std::iter::once(PluginEventSubscription::ResyncRequired))
+            .filter(|_| self.require(PluginPermission::EventsSubscribe).is_ok())
+    }
 }
 
 impl PluginEventSubscription {

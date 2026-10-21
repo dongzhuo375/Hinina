@@ -5,7 +5,9 @@
 //! Host-bound capability assembly and finite JSON bridge; no internal entity is serialized.
 use super::{
     api::{contest::*, http::*, identity::*, notification::*, storage::*, submission::*, *},
+    bounded_json,
     host::manifest::PluginPermission,
+    limits::MAX_BRIDGE_RESPONSE_BYTES,
     query::ScopedQueries,
 };
 use crate::infra::{plugin_http::PluginHttp, plugin_storage::JsonPluginStorage};
@@ -168,6 +170,8 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> PluginResult<T> {
     serde_json::from_value(value).map_err(|_| PluginError::InvalidInput)
 }
 fn encode<T: serde::Serialize>(value: T) -> PluginResult<Value> {
+    // Bound the DTO before duplicating its strings into a serde_json::Value.
+    bounded_json::encoded_len(&value, MAX_BRIDGE_RESPONSE_BYTES)?;
     serde_json::to_value(value).map_err(|_| PluginError::Unavailable)
 }
 async fn dispatch(api: &dyn PluginApi, operation: &str, args: Value) -> PluginResult<Value> {
@@ -247,6 +251,7 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
             Err(_) => Err(PluginError::InvalidInput),
         }
     };
+    let (response, success) = encode_response(result);
     if let Some((plugin_id, plugin_version)) = api.audit_identity() {
         let logged_operation = operation.chars().take(64).collect::<String>();
         let permission = match operation.split('.').next().unwrap_or("") {
@@ -256,6 +261,8 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
             "storage" => {
                 if operation == "storage.get" {
                     "storage.read"
+                } else if operation == "storage.compareAndSet" {
+                    "storage.read storage.write"
                 } else {
                     "storage.write"
                 }
@@ -265,11 +272,23 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
             _ => "none",
         };
         tracing::debug!(plugin_id=?plugin_id, plugin_version=?plugin_version, runtime="js",event="",operation=?logged_operation,permission,
-            request_id=%uuid::Uuid::new_v4(),success=result.is_ok(),"Plugin API completed");
+            request_id=%uuid::Uuid::new_v4(),success,"Plugin API completed");
     }
-    match result {
+    response
+}
+
+fn encode_response(result: PluginResult<Value>) -> (String, bool) {
+    let success = result.is_ok();
+    let value = match result {
         Ok(value) => json!({"ok":true,"value":value}),
         Err(error) => json!({"ok":false,"error":error}),
+    };
+    match bounded_json::to_string(&value, MAX_BRIDGE_RESPONSE_BYTES) {
+        Ok(response) => (response, success),
+        Err(error) => (json!({"ok":false,"error":error}).to_string(), false),
     }
-    .to_string()
 }
+
+#[cfg(test)]
+#[path = "tests/execution_api_tests.rs"]
+mod tests;

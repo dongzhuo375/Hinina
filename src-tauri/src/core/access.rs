@@ -36,7 +36,7 @@ impl AccessRevision {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         state.cancellation.cancel();
         state.changing += 1;
-        state.revision += 1;
+        state.revision = state.revision.wrapping_add(1);
         AccessTransition(self.clone())
     }
 }
@@ -48,7 +48,7 @@ impl Drop for AccessTransition {
     fn drop(&mut self) {
         let mut state = self.0 .0.lock().unwrap_or_else(|e| e.into_inner());
         state.changing -= 1;
-        state.revision += 1;
+        state.revision = state.revision.wrapping_add(1);
         if state.changing == 0 {
             state.cancellation = CancellationToken::new();
         }

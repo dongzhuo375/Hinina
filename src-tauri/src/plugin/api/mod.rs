@@ -62,7 +62,8 @@ pub trait ContextApi: Send + Sync {
     /// @since 1.0
     /// @permission none
     /// @stability stable
-    /// 签发绑定当前 OJ/用户/比赛/授权代次的句柄。失败为 Unavailable。
+    /// 签发绑定当前 OJ/用户/比赛/授权代次的句柄。切换中返回 ContextExpired；
+    /// 初次 scope 读取的其他失败保留来源错误。
     async fn current_context(&self) -> PluginResult<PluginQueryContext>;
 }
 

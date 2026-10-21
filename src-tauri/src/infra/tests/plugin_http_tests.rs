@@ -75,7 +75,7 @@ async fn pinned_transport_does_not_redirect_and_bounds_response_bytes() {
         });
         let api=PluginHttp::new(crate::plugin::tests::support::authority("test.http"),vec![]).unwrap();let c=api.authority.current_context().await.unwrap();
         let url=url::Url::parse(&format!("http://fixture.example:{}",address.port())).unwrap();
-        let request=PluginHttpRequest { method:PluginHttpMethod::Get,url:url.to_string(),headers:Default::default(),body:None,timeout_ms:Some(100) };
+        let request=PluginHttpRequest { method:PluginHttpMethod::Get,url:url.to_string(),headers:Default::default(),body:None,timeout_ms:Some(5000) };
         let result=api.send_pinned(&c,request,url,vec![address]).await.map(|r| { assert!(!r.headers.contains_key("set-cookie"));r.status });
         assert_eq!(result,expected);server.await.unwrap();
     }
@@ -249,4 +249,145 @@ async fn identical_pinned_targets_reuse_a_client() {
     }
     assert_eq!(transport.clients.lock().unwrap().len(), 1);
     server.await.unwrap();
+}
+
+struct BudgetResolver {
+    stall: std::sync::atomic::AtomicBool,
+    started: tokio::sync::Notify,
+}
+#[async_trait::async_trait]
+impl Resolver for BudgetResolver {
+    async fn resolve(&self, _: &str, port: u16) -> std::io::Result<Vec<SocketAddr>> {
+        if self.stall.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.started.notify_one();
+            std::future::pending::<()>().await;
+        }
+        Ok(vec![SocketAddr::new("8.8.8.8".parse().unwrap(), port)])
+    }
+}
+struct BudgetTransport;
+#[async_trait::async_trait]
+impl HttpTransport for BudgetTransport {
+    async fn send(
+        &self,
+        authority: &ScopedQueries,
+        context: &PluginQueryContext,
+        _: PluginHttpRequest,
+        _: url::Url,
+        _: Vec<SocketAddr>,
+    ) -> PluginResult<PluginHttpResponse> {
+        authority.check(context).await?;
+        Ok(PluginHttpResponse {
+            ok: true,
+            status: 200,
+            headers: BTreeMap::new(),
+            body: String::new(),
+        })
+    }
+}
+fn budget_fixture(
+    stall: bool,
+) -> (
+    Arc<PluginHttp>,
+    Arc<crate::core::access::AccessRevision>,
+    Arc<BudgetResolver>,
+) {
+    use crate::plugin::{permission::PluginGrant, tests::support::*};
+    let access = Arc::new(crate::core::access::AccessRevision::default());
+    let m = manifest("test.http-budget");
+    let authority = Arc::new(ScopedQueries::new(
+        PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        Arc::new(Source::default()),
+        access.clone(),
+        Default::default(),
+    ));
+    let mut api = PluginHttp::new(
+        authority,
+        vec![NetworkApproval {
+            origin: "https://example.com".into(),
+            allow_http: false,
+            private_cidrs: vec![],
+        }],
+    )
+    .unwrap();
+    // An hour-long refill makes assertions independent of wall-clock scheduling.
+    api.limiter = RateLimiter::direct(
+        Quota::with_period(Duration::from_secs(3600))
+            .unwrap()
+            .allow_burst(NonZeroU32::new(2).unwrap()),
+    );
+    let resolver = Arc::new(BudgetResolver {
+        stall: stall.into(),
+        started: tokio::sync::Notify::new(),
+    });
+    api.resolver = resolver.clone();
+    api.transport = Arc::new(BudgetTransport);
+    (Arc::new(api), access, resolver)
+}
+fn budget_request() -> PluginHttpRequest {
+    PluginHttpRequest {
+        method: PluginHttpMethod::Get,
+        url: "https://example.com".into(),
+        headers: BTreeMap::new(),
+        body: None,
+        timeout_ms: None,
+    }
+}
+
+#[tokio::test]
+async fn concurrency_rejections_do_not_consume_http_rate_tokens() {
+    let (api, _, _) = budget_fixture(false);
+    let context = api.authority.current_context().await.unwrap();
+    let permits = api.concurrent.try_acquire_many(2).unwrap();
+    for _ in 0..5 {
+        assert_eq!(
+            api.request(&context, budget_request()).await,
+            Err(PluginError::LimitExceeded)
+        );
+    }
+    drop(permits);
+    for _ in 0..2 {
+        assert_eq!(
+            api.request(&context, budget_request())
+                .await
+                .unwrap()
+                .status,
+            200
+        );
+    }
+    assert_eq!(
+        api.request(&context, budget_request()).await,
+        Err(PluginError::LimitExceeded)
+    );
+    assert_eq!(api.concurrent.available_permits(), 2);
+}
+
+#[tokio::test]
+async fn dropping_or_revoking_an_http_request_releases_its_concurrency_permit() {
+    for abort in [true, false] {
+        let (api, access, resolver) = budget_fixture(true);
+        let context = api.authority.current_context().await.unwrap();
+        let operation = {
+            let api = api.clone();
+            tokio::spawn(async move { api.request(&context, budget_request()).await })
+        };
+        tokio::time::timeout(Duration::from_secs(2), resolver.started.notified())
+            .await
+            .unwrap();
+        assert_eq!(api.concurrent.available_permits(), 1);
+        if abort {
+            operation.abort();
+            assert!(operation.await.unwrap_err().is_cancelled());
+        } else {
+            drop(access.begin());
+            assert_eq!(operation.await.unwrap(), Err(PluginError::ContextExpired));
+        }
+        assert_eq!(api.concurrent.available_permits(), 2);
+        let fresh = api.authority.current_context().await.unwrap();
+        assert_eq!(
+            api.request(&fresh, budget_request()).await.unwrap().status,
+            200
+        );
+        assert_eq!(api.concurrent.available_permits(), 2);
+    }
 }

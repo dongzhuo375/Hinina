@@ -4,6 +4,8 @@
 
 由组合根共享注入AuthService、ContestService、ConfigService、ProviderRegistryImpl。所有会改变有效身份/连接/比赛的显式入口更新revision；消费者只负责提示刷新，不承担安全撤销。
 
-AccessTransition标记#[must_use]，guard应覆盖全部关联状态变更。switch_oj外层guard覆盖Registry、比赛清理与持久化，switch_scope组合发布与reset，禁止新OJ与旧比赛的有效快照。
+AccessTransition标记#[must_use]，guard应覆盖全部关联状态变更。switch_scope统一覆盖Registry发布与比赛清理，禁止新OJ与旧比赛的有效快照；命令的配置持久化和事实通知在该组合guard释放后执行，避免磁盘窗口延长查询暂停。
 
 四个负责身份/配置/比赛/Provider变更的生产组件在new中强制传入共享Arc<AccessRevision>，遗漏参数由编译器拒绝；没有私有默认栅栏。
+
+revision使用wrapping_add避免u64回绕panic；真正撤销同时依赖每代CancellationToken，scope缓存命中也验证缓存令牌未撤销，不能仅比较数字。测试覆盖临界回绕及真实ContestService/Registry组合切换的中间态。

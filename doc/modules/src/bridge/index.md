@@ -59,6 +59,8 @@ ipcInvoke(cmd, args)
 
 `src/bridge/__tests__/index.spec.ts` 锁定：成功路径透传命令与参数、AppError 载荷 → IpcError（保留变体与真实原因）、非认证错误 `isAuthError=false`（守卫不误触发）、未知变体降级 null、字符串/Error/多键对象三种载荷形态、**安全约束「日志只含命令名与消息，绝不包含调用参数（明文密码）」**、观察者收到同一实例/注销后不回调/未注册不影响抛出。
 
-插件命令直接返回稳定{code,permission?}；IpcError.code/raw保留原始类别，message使用code，不再压为AppError::Config；isAuthError仍只识别Auth。只有恰好包含`code`与可选`permission`的载荷才按插件错误处理，其他带`code`字段的对象仍按通用对象解析（保留message/JSON），避免把未来IPC响应误判为插件错误。
+插件命令直接返回稳定{code,permission?}；IpcError.code/raw保留原始类别，message按code映射中文说明，未知code显示“插件操作失败”，不再压为AppError::Config；isAuthError仍只识别Auth。只有恰好包含`code`与可选`permission`的载荷才按插件错误处理，其他带`code`字段的对象仍按通用对象解析（保留message/JSON），避免把未来IPC响应误判为插件错误。
 
 PluginError形态识别继续只接受code和可选permission，且permission存在时必须为字符串。Rust测试穷尽所有错误变体并锁定序列化字段集合；未来增加字段必须同时更新两端契约，避免静默降级。
+
+消息映射只接受自身键，constructor/__proto__等未知code也走兜底。

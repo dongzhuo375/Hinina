@@ -84,7 +84,10 @@ impl<R: ConfigRepository> ConfigService<R> {
         let new_config = {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
             let before = serde_json::to_value(&cfg.oj).ok();
-            // Fence before publishing effective connection changes, even if save fails.
+            // The write guard hides these edits from scope readers until cancellation is
+            // published below. Cached readers can only see the previous scope during the
+            // updater; they are revoked before any reader can observe the new config.
+            // Keep unrelated editor changes from invalidating plugin contexts.
             updater(&mut cfg);
             let _transition =
                 (before != serde_json::to_value(&cfg.oj).ok()).then(|| self.access.begin());

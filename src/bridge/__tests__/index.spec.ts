@@ -47,9 +47,16 @@ it('保留 PluginError 的稳定 code 和权限信息', async () => {
   invoke.mockRejectedValue(payload)
   const error = await captureError('plugin_start')
   expect(error.code).toBe('permission_denied')
-  expect(error.message).toBe('permission_denied')
+  expect(error.message).toBe('插件缺少所需权限')
   expect(error.raw).toEqual(payload)
   expect(error.isAuthError).toBe(false)
+})
+
+it.each(['future_plugin_error', 'constructor', '__proto__'])('uses a readable fallback for unknown plugin code %s', async code => {
+  invoke.mockRejectedValue({ code })
+  const error = await captureError('plugin_start')
+  expect(error.code).toBe(code)
+  expect(error.message).toBe('插件操作失败')
 })
 
 it('只把 {code, permission?} 形态视为插件错误，其他带 code 的载荷保留真实消息', async () => {

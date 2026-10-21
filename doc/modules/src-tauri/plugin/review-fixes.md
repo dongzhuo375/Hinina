@@ -1,6 +1,6 @@
-# 插件审查：23项核实与修复
+# 插件审查：逐轮核实与修复
 
-逐项基于 aa293fa 核对。严重性按实际影响评估；优化建议不等同于已发生的数据泄漏。测试均使用本地夹具或可注入端口，没有访问真实 OJ 账户。
+首轮下表23项基于aa293fa核对；第二轮加固交付于6af3202；PR #41 MEDIUM跟进基于6af3202，交付于cac8106；本次LOW收尾基于cac8106。各节记录对应轮次的处理，后续节更新此前结论。严重性按实际影响评估；优化建议不等同于已发生的数据泄漏。测试均使用本地夹具或可注入端口，没有访问真实 OJ 账户。
 
 | 项 | 判定与严重性 | 修复/验证 |
 |---|---|---|
@@ -44,7 +44,7 @@
 
 ## PR #41 MEDIUM 跟进（基线 6af3202）
 
-本轮按确认范围处理 M-1 至 M-8，只纳入直接相关 LOW。未 await 的调用采用文档强制 await 契约，不增加 drain、拒绝跟踪器或后台调度。
+该轮按确认范围处理 M-1 至 M-8，只纳入直接相关 LOW。未 await 的调用采用文档强制 await 契约，当时未增加drain、拒绝跟踪器或后台调度；后续LOW轮追加有界拒绝诊断，仍不驱动后台调度。
 
 | 项 | 核实与处理 |
 |---|---|
@@ -58,6 +58,32 @@
 | M-8 文件树缺漏 | 确认；补scripts、插件infra/API测试和host/runtime/permission测试目录；同步新增诊断模块和前端Service测试 |
 
 域名校验不替代运行时DNS/IP限制；正常未配置插件和初次未创建存储不记录故障。未await仍是不受支持用法，不声称运行时已自动执行或拒绝。
+
+## PR #41 LOW收尾（基线cac8106）
+
+补齐报告剩余LOW以及验证新发现3项；仅建议/无现患的条目明确记录取舍。
+
+| 项 | 核实与处理 |
+|---|---|
+| atomic_write丢失IO粒度 | 存在；分别记录atomic_replace/write_callback阶段与ErrorKind，直接测试两支，禁止源错误正文 |
+| invalid ID无直接回归 | 验证缺口；覆盖空值、控制字符、超长ID和host占位，确认秘密不落日志 |
+| 重复stop生成多个reaper | 存在但安全收敛；worker锁内标记reaping，每代只启动一个任务，重复stop后仍最终回收并保存timeout |
+| F3分配错误混入unavailable | 存在；QuickJS Allocation映射limit_exceeded，脚本Exception保留script_error |
+| F4游离Promise拒绝静默 | 存在；仅跟踪引擎已观察到的拒绝，最多256个身份摘要，执行窗口结束脱敏汇总；同窗口补handler移除。不增加drain，未await仍不受支持 |
+| F5桥响应无大小上限 | 存在；DTO与最终JSON包络均流式计数，含包络1MiB，超限为limit_exceeded且审计失败 |
+| F6期限散落 | 存在；limits集中激活/事件/停止期限，启动期限由激活加2秒宽限推导 |
+| Manager/query L1–L5 | 注明ready边界fail closed；allowlist归PluginGrant共用；identity序列化unwrap改expect；native投影页1MiB/所有保留余项4MiB；CAS审计标记读写两权限 |
+| T1停止超时验证 | 前轮已覆盖失败状态/同ID禁止重启/退出历史；本轮增加重复stop单reaper断言 |
+| Infra L1/L2 | remote_addr注明发送后纵深核查；并发许可先于速率令牌且移入有界future；测试并发拒绝不扣令牌及丢弃/撤销后释放 |
+| Infra L3数值回绕 | 存在理论溢出；wrapping_add与取消令牌共同保护，scope缓存也验证缓存令牌未撤销；测试临界回绕和数值相同的撤销缓存 |
+| Infra L4配置栅栏位置 | 原实现安全：写锁阻止新配置可见，释放前已撤销；补注释解释锁与缓存读的先后，无需改变无关编辑器配置不撤销的语义 |
+| Infra L5实体排列 | SubmissionHistoryPage移至测试模块之前，宿主私有owner契约保留 |
+| 前端L1/L2 | permission类型已于前轮覆盖；错误message映射中文，code/raw保留，未知code及原型键走兜底 |
+| 前端L3/L4 | 构建脚本检查Node≥20.6并提示产物复制为index.js；教程同步；commands模块恢复字母序 |
+| 文档LOW | 此文逐节标记基线；ARCHITECTURE_REVIEW §1–8标记历史/被§9–10取代；Architecture记录插件Infra授权依赖例外及新模块 |
+| 并发验证缺口 | 生产scope旧IO阻塞、新revision先完成、旧结果拒绝；真实ContestService与Registry经switch_scope组合切换的并发断言 |
+
+本轮回归均为离线夹具；HTTP本地成功传输的真实时钟窗口放宽为5秒，总截止测试仍用虚拟时间。资源字节预算限制JSON表示，不声称等同宿主RSS硬上限。
 
 HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存HttpTransport响应；真实连接、响应体和redirect策略使用本地私有transport夹具。没有为了测试公开任何loopback豁免或IPC策略开关。
 

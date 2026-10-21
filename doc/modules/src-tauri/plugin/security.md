@@ -15,3 +15,5 @@ JS只取得冻结的hinina API；不暴露AppContext、Service、Provider、Core
 未完成的业务由插件负责：历史完整性与跨页变化处理、首次AC规则、幂等键、可恢复失败状态、外部重试与服务端去重。本地CAS不能提供远端exactly-once。
 
 基础设施诊断统一记录安全操作名、IO ErrorKind、serde分类或HTTP错误类别，禁止源错误字符串/URL/路径/配置和通知正文。非法plugin_id替换占位符。四个访问变更组件强制构造注入共享栅栏；所有origin必须为域名，IP字面量在清单阶段即拒绝。
+
+桥响应含包络最多1MiB，单native投影页最多1MiB，保留游标余项合计4MiB；这些是JSON字节预算，仍需与引擎16MiB及并发/条数上限共同约束，并非OS进程内存沙箱。引擎分配失败返回limit_exceeded。拒绝跟踪仅保留有界身份摘要并输出计数，不访问或格式化JS reason；所有宿主Promise仍必须await或加入入口返回链。

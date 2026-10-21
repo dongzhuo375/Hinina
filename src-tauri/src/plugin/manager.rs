@@ -10,6 +10,7 @@ use super::{
         manifest::PluginPermission,
         plugin_host::{PluginHost, PluginHostError},
     },
+    limits::{START_TIMEOUT, STOP_TIMEOUT},
     query::{QueryBudget, QuerySource, ScopedQueries},
     runtime::quickjs::QuickJsRuntime,
 };
@@ -38,6 +39,7 @@ struct Worker {
     stop: CancellationToken,
     thread: std::thread::JoinHandle<()>,
     status: Arc<Mutex<PluginStatus>>,
+    reaping: bool,
 }
 
 /// @plugin-api
@@ -102,8 +104,8 @@ impl PluginManager {
             operation: Default::default(),
             output: Mutex::default(),
             query_budget: Arc::new(QueryBudget::new(120, 4)),
-            start_timeout: Duration::from_secs(12),
-            stop_timeout: Duration::from_secs(5),
+            start_timeout: START_TIMEOUT,
+            stop_timeout: STOP_TIMEOUT,
             resync_interval_override: None,
         }
     }
@@ -225,11 +227,16 @@ impl PluginManager {
         let workers = self.workers.clone();
         let statuses = self.statuses.clone();
         let id = id.to_owned();
-        let expected = workers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&id)
-            .map(|w| w.status.clone());
+        let expected = {
+            let mut workers = workers.lock().unwrap_or_else(|e| e.into_inner());
+            workers.get_mut(&id).and_then(|worker| {
+                if worker.reaping {
+                    return None;
+                }
+                worker.reaping = true;
+                Some(worker.status.clone())
+            })
+        };
         let Some(expected) = expected else {
             return;
         };
@@ -307,23 +314,11 @@ impl PluginManager {
             .grant
             .require(PluginPermission::EventsSubscribe)
             .is_ok();
-        let allowed = if subscribe {
-            loaded
-                .grant
-                .manifest()
-                .events
-                .iter()
-                .filter(|event| {
-                    event
-                        .required_permission()
-                        .is_none_or(|p| loaded.grant.require(p).is_ok())
-                })
-                .map(|e| e.as_str().to_string())
-                .chain(std::iter::once("resync.required".into()))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
+        let allowed = loaded
+            .grant
+            .allowed_events()
+            .map(|event| event.as_str().to_owned())
+            .collect::<Vec<_>>();
         let status = Arc::new(Mutex::new(PluginStatus {
             id: id.into(),
             state: "starting",
@@ -404,6 +399,7 @@ impl PluginManager {
             .insert(
                 id.into(),
                 Worker {
+                    reaping: false,
                     stop,
                     thread,
                     status,
@@ -412,6 +408,8 @@ impl PluginManager {
         match tokio::time::timeout(self.start_timeout, started).await {
             Ok(result) => result.map_err(|_| PluginError::Unavailable)?,
             Err(_) => {
+                // Fail closed at the ready/deadline boundary: even a just-completed activation
+                // is revoked if the caller did not observe readiness before its deadline.
                 if let Some(worker) = self
                     .workers
                     .lock()

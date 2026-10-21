@@ -153,8 +153,8 @@ impl JsonPluginStorage {
                 }
                 AtomicFile::new(&path, AllowOverwrite)
                     .write(|file| file.write_all(&bytes))
-                    .map_err(|_| {
-                        diagnostics::failure(Some(&plugin_id), "storage.commit", "atomic_write");
+                    .map_err(|error| {
+                        diagnostics::atomic_write(Some(&plugin_id), &error);
                         PluginError::Unavailable
                     })?;
             }

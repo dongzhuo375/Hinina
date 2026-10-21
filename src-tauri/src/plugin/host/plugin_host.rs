@@ -120,16 +120,7 @@ impl PluginHost {
         let mut adapter = PluginEventAdapter::new();
         // 新队列容量至少 1，接收端仍在本栈中；初始 try_send 必定成功。
         let _ = sender.try_send(adapter.resync_notice(0));
-        let allowed = manifest
-            .events
-            .iter()
-            .copied()
-            .filter(|event| {
-                event
-                    .required_permission()
-                    .is_none_or(|p| grant.require(p).is_ok())
-            })
-            .collect();
+        let allowed = grant.allowed_events().collect();
         subs.insert(
             manifest.id.clone(),
             Subscription {

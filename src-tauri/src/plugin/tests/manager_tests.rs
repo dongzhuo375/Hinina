@@ -257,6 +257,13 @@ async fn failure_before_worker_spawn_emits_only_redacted_diagnostics() {
     assert_eq!(
         manager
             .start("test.diagnostic\nFORGED\rENTRY")
+            .with_subscriber(subscriber.clone())
+            .await,
+        Err(PluginError::InvalidInput)
+    );
+    assert_eq!(
+        manager
+            .start(&"a".repeat(129))
             .with_subscriber(subscriber)
             .await,
         Err(PluginError::InvalidInput)
@@ -269,6 +276,8 @@ async fn failure_before_worker_spawn_emits_only_redacted_diagnostics() {
     assert!(!log.contains("plugin-start-log-private-path"));
     assert!(!log.contains("test.diagnostic\nFORGED"));
     assert!(log.contains("test.diagnostic\\nFORGED\\rENTRY"));
+    assert!(log.contains("<invalid>"));
+    assert!(!log.contains(&"a".repeat(129)));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

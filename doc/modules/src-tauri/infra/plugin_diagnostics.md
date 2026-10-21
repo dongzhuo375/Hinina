@@ -5,3 +5,5 @@ plugin_diagnostics 为文件仓库、存储、HTTP、通知与能力工厂提供
 禁止格式化源错误或输出URL、路径、HTTP头、请求/响应体、通知正文、源码、配置原文。插件侧仍返回原有稳定 PluginError。存储的 spawn_blocking 继承调用方 dispatcher，保证失败日志可捕获；正常缺失 plugins.json 和未创建的 storage.json 不告警。
 
 回归测试覆盖损坏配置、损坏存储和带敏感内容的 I/O/HTTP 错误，断言阶段、类别可见且原始秘密不出现在日志中。
+
+atomicwrites失败区分atomic_replace（内部替换）与write_callback（写回调），两支均保留底层io::ErrorKind，仍不输出错误正文。直接回归覆盖两支以及空ID、控制字符ID、超长ID的<invalid>占位和无ID的<host>占位。

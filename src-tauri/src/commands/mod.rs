@@ -10,12 +10,12 @@ pub mod contest_cmd;
 pub mod data_dir_cmd;
 pub mod maintenance_cmd;
 pub mod oj_cmd;
+pub mod plugin_cmd;
 pub mod problem_cmd;
 pub mod submission_cmd;
 pub mod theme_cmd;
 pub mod workspace_cmd;
 
-pub mod plugin_cmd;
 #[cfg(test)]
 #[path = "tests/mod_tests.rs"]
 mod tests;

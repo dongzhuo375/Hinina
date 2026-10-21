@@ -4,8 +4,10 @@
 //! @stability stable
 //!
 pub mod api;
+pub(crate) mod bounded_json;
 pub mod execution_api;
 pub mod host;
+pub(crate) mod limits;
 pub mod manager;
 pub mod permission;
 pub mod query;

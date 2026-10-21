@@ -35,6 +35,45 @@ fn capture() -> (Arc<Mutex<Vec<u8>>>, tracing::Dispatch, tracing::Dispatch) {
     (bytes, dispatch, sink)
 }
 
+#[test]
+fn invalid_ids_are_replaced_and_atomic_failures_keep_safe_io_categories() {
+    let (bytes, dispatch, _sink) = capture();
+    tracing::dispatcher::with_default(&dispatch, || {
+        for id in ["", "INJECT\nWARN secret", &"a".repeat(129)] {
+            failure(Some(id), "fixture.invalid_id", "invalid");
+        }
+        failure(None, "fixture.host", "fixture");
+        atomic_write(
+            Some("test.atomic"),
+            &atomicwrites::Error::Internal(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "private filesystem path",
+            )),
+        );
+        atomic_write(
+            Some("test.atomic"),
+            &atomicwrites::Error::User(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "private storage content",
+            )),
+        );
+    });
+    let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+    assert_eq!(log.matches("<invalid>").count(), 3);
+    for expected in [
+        "<host>",
+        "PermissionDenied",
+        "WriteZero",
+        "atomic_replace",
+        "write_callback",
+    ] {
+        assert!(log.contains(expected), "missing: {expected}");
+    }
+    for secret in ["INJECT", "secret", "private filesystem", "private storage"] {
+        assert!(!log.contains(secret));
+    }
+}
+
 #[tokio::test]
 async fn repository_and_storage_failures_are_actionable_and_redacted() {
     use crate::{

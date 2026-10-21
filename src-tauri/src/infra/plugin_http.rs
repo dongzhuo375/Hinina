@@ -128,18 +128,21 @@ impl PluginHttp {
         self.authority.require(PluginPermission::NetworkRequest)?;
         request.validate_shape()?;
         let scope = self.authority.check(context).await?;
-        if self.limiter.check().is_err() {
-            return Err(PluginError::LimitExceeded);
-        }
         let _permit = self
             .concurrent
             .try_acquire()
             .map_err(|_| PluginError::LimitExceeded)?;
+        if self.limiter.check().is_err() {
+            return Err(PluginError::LimitExceeded);
+        }
         let timeout = request
             .timeout_ms
             .unwrap_or(5000)
             .min(self.authority.grant.manifest().network.timeout_ms);
-        let operation = self.send(context, request);
+        let operation = async move {
+            let _permit = _permit;
+            self.send(context, request).await
+        };
         self.bounded(scope, timeout, operation).await
     }
     async fn bounded(
@@ -326,6 +329,8 @@ impl HttpTransport for PinnedTransport {
                 PluginError::Unavailable
             }
         })?;
+        // Post-send peer check is defense in depth; pre-send DNS validation/pinning is
+        // the prevention boundary. A sent request's remote side effects cannot be rolled back.
         if response
             .remote_addr()
             .is_none_or(|a| !addresses.contains(&a))

@@ -6,12 +6,15 @@
 use crate::plugin::{
     api::{event::PluginEventEnvelope, *},
     execution_api::call_json,
+    limits::{ACTIVATION_TIMEOUT, EVENT_TIMEOUT},
 };
 use rquickjs::{
     function::{Async, Func},
     AsyncContext, AsyncRuntime, Function, Module, Object, Persistent, Promise,
 };
 use std::{
+    collections::HashSet,
+    hash::{Hash, Hasher},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -27,6 +30,24 @@ pub struct QuickJsRuntime {
     deliver: Option<Persistent<Function<'static>>>,
     deadline: Arc<Mutex<Option<Instant>>>,
     stopped: CancellationToken,
+    rejections: Arc<Mutex<Rejections>>,
+    plugin_id: Option<String>,
+}
+#[derive(Default)]
+struct Rejections {
+    pending: HashSet<u64>,
+    overflow: bool,
+}
+impl Rejections {
+    fn report(&mut self, plugin_id: Option<&str>) {
+        if !self.pending.is_empty() || self.overflow {
+            tracing::warn!(plugin_id=?plugin_id,runtime="js",operation="promise.rejection",
+                category="unhandled_rejection",count=self.pending.len(),overflow=self.overflow,
+                "Plugin Promise rejected without a handler at the end of the execution window");
+        }
+        self.pending.clear();
+        self.overflow = false;
+    }
 }
 impl QuickJsRuntime {
     /// @plugin-api
@@ -40,6 +61,24 @@ impl QuickJsRuntime {
         let deadline: Arc<Mutex<Option<Instant>>> = Arc::default();
         let clock = deadline.clone();
         let cancellation = stopped.clone();
+        let rejections = Arc::new(Mutex::new(Rejections::default()));
+        let pending_rejections = rejections.clone();
+        runtime
+            .set_host_promise_rejection_tracker(Some(Box::new(move |_, promise, _, handled| {
+                // Track identity only, never retain/format JS rejection reasons or grow without bound.
+                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                promise.hash(&mut hash);
+                let key = hash.finish();
+                let mut state = pending_rejections.lock().unwrap_or_else(|e| e.into_inner());
+                if handled {
+                    state.pending.remove(&key);
+                } else if state.pending.len() < 256 {
+                    state.pending.insert(key);
+                } else {
+                    state.overflow = true;
+                }
+            })))
+            .await;
         runtime
             .set_interrupt_handler(Some(Box::new(move || {
                 cancellation.is_cancelled()
@@ -56,6 +95,8 @@ impl QuickJsRuntime {
             deliver: None,
             deadline,
             stopped,
+            rejections,
+            plugin_id: None,
         })
     }
     /// @plugin-api
@@ -72,11 +113,12 @@ impl QuickJsRuntime {
         if source.len() > 1024 * 1024 {
             return Err(PluginError::LimitExceeded);
         }
+        self.plugin_id = api.audit_identity().map(|(id, _)| id.to_owned());
         let config = config.to_string();
         let allowed = serde_json::to_string(&allowed).map_err(|_| PluginError::InvalidInput)?;
         let stopped = self.stopped.clone();
         let pending = Arc::new(tokio::sync::Semaphore::new(16));
-        self.set_deadline(Duration::from_secs(10));
+        self.set_deadline(ACTIVATION_TIMEOUT);
         let operation = self.context.async_with(async |ctx| {
             let host = Func::from(Async(move |operation: String, input: String| {
                 // Acquire before creating the Future: JS may enqueue many calls in one
@@ -110,10 +152,11 @@ impl QuickJsRuntime {
         });
         let result = tokio::select! { biased;
             _ = self.stopped.cancelled() => Err(PluginError::ContextExpired),
-            result = tokio::time::timeout(Duration::from_secs(10), operation) => result.map_err(|_| PluginError::Timeout)?.map_err(engine_error),
+            result = tokio::time::timeout(ACTIVATION_TIMEOUT, operation) => result.map_err(|_| PluginError::Timeout).and_then(|value| value.map_err(engine_error)),
         };
+        self.report_rejections();
         self.deliver = Some(result.map_err(|error| self.classify(error))?);
-        self.set_deadline(Duration::from_secs(30));
+        self.set_deadline(EVENT_TIMEOUT);
         Ok(())
     }
     fn set_deadline(&self, duration: Duration) {
@@ -133,12 +176,18 @@ impl QuickJsRuntime {
             error
         }
     }
+    fn report_rejections(&self) {
+        self.rejections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .report(self.plugin_id.as_deref());
+    }
     /// @plugin-api
     /// @since 2.0
     /// @permission events.subscribe
     /// @stability stable
     pub async fn deliver(&mut self, envelope: &PluginEventEnvelope) -> PluginResult<()> {
-        self.set_deadline(Duration::from_secs(30));
+        self.set_deadline(EVENT_TIMEOUT);
         let deliver = self
             .deliver
             .as_ref()
@@ -152,8 +201,9 @@ impl QuickJsRuntime {
         });
         let result = tokio::select! { biased;
             _ = self.stopped.cancelled() => Err(PluginError::ContextExpired),
-            result = tokio::time::timeout(Duration::from_secs(30), operation) => result.map_err(|_| PluginError::Timeout)?.map_err(engine_error),
+            result = tokio::time::timeout(EVENT_TIMEOUT, operation) => result.map_err(|_| PluginError::Timeout).and_then(|value| value.map_err(engine_error)),
         };
+        self.report_rejections();
         result.map_err(|error| self.classify(error))
     }
     /// @plugin-api
@@ -164,14 +214,20 @@ impl QuickJsRuntime {
         self.stopped.cancel();
         self.deliver.take();
         self.runtime.run_gc().await;
+        self.report_rejections();
     }
 }
 fn engine_error(error: rquickjs::Error) -> PluginError {
     match error {
+        rquickjs::Error::Allocation => PluginError::LimitExceeded,
         rquickjs::Error::Exception => PluginError::ScriptError,
         _ => PluginError::Unavailable,
     }
 }
+
+#[cfg(test)]
+#[path = "tests/quickjs_tests.rs"]
+mod tests;
 
 #[async_trait::async_trait(?Send)]
 impl super::PluginRuntime for QuickJsRuntime {

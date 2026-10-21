@@ -125,6 +125,7 @@ async fn timed_out_worker_is_reaped_after_native_work_finishes() {
     manager.workers.lock().unwrap().insert(
         "test.cleanup".into(),
         Worker {
+            reaping: false,
             stop,
             thread,
             status: Arc::new(Mutex::new(PluginStatus {
@@ -165,6 +166,7 @@ async fn stop_timeout_marks_worker_failed_and_reaps_it_after_exit() {
     manager.workers.lock().unwrap().insert(
         "test.stop".into(),
         Worker {
+            reaping: false,
             stop: CancellationToken::new(),
             thread,
             status: Arc::new(Mutex::new(PluginStatus {
@@ -175,6 +177,11 @@ async fn stop_timeout_marks_worker_failed_and_reaps_it_after_exit() {
         },
     );
     assert_eq!(manager.stop("test.stop").await, Err(PluginError::Timeout));
+    // Repeated timeouts retain one cleanup task for this worker generation.
+    let owners = Arc::strong_count(&manager.workers);
+    assert!(manager.workers.lock().unwrap()["test.stop"].reaping);
+    assert_eq!(manager.stop("test.stop").await, Err(PluginError::Timeout));
+    assert_eq!(Arc::strong_count(&manager.workers), owners);
     assert_eq!(manager.list().unwrap()[0].state, "failed");
     {
         let worker = manager.workers.lock().unwrap();

@@ -30,3 +30,24 @@ fn snapshot_is_immutable_and_invalid_manifest_cannot_be_authorized() {
     assert_eq!(grant.manifest().id, "com.example.demo");
     assert!(PluginGrant::authorize(&source, &[]).is_err());
 }
+
+#[test]
+fn event_allowlist_requires_grant_and_payload_permissions_and_adds_one_resync() {
+    let mut m = manifest();
+    m.events.push(PluginEventSubscription::ResyncRequired);
+    let grant = PluginGrant::authorize(&m, &[]).unwrap();
+    assert!(grant.allowed_events().next().is_none());
+    let grant = PluginGrant::authorize(&m, &[PluginPermission::EventsSubscribe]).unwrap();
+    assert_eq!(
+        grant.allowed_events().collect::<Vec<_>>(),
+        vec![PluginEventSubscription::ResyncRequired]
+    );
+    let grant = PluginGrant::authorize(&m, &m.permissions).unwrap();
+    assert_eq!(
+        grant.allowed_events().collect::<Vec<_>>(),
+        vec![
+            PluginEventSubscription::SubmissionJudged,
+            PluginEventSubscription::ResyncRequired
+        ]
+    );
+}

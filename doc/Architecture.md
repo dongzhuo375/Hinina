@@ -207,6 +207,8 @@ Hinina/
         │       └── cache_tests.rs        # 缓存原语测试（TTL/容量/复活回归/磁盘往返）
         ├── plugin/
         │   ├── mod.rs
+        │   ├── bounded_json.rs        # 流式JSON计数/输出上限，避免先构建无界响应
+        │   ├── limits.rs              # 运行期限、桥响应和游标预算统一常量
         │   ├── query.rs               # 当前作用域、本人只读投影、有界游标
         │   ├── execution_api.rs       # 权限包装、专用I/O装配与有限JSON桥
         │   ├── manager.rs             # 独立worker、启停/重载、通用Resync
@@ -240,11 +242,11 @@ Hinina/
         │   ├── registry/
         │   │   └── mod.rs                # PluginRepository 端口（从 core 移入）
         │   ├── runtime/
-        │   │   ├── tests/               # engine_tests、runtime_tests：真实引擎及非Send契约
+        │   │   ├── tests/               # engine_tests、runtime_tests、quickjs_tests：真实引擎、非Send契约与拒绝诊断
         │   │   ├── mod.rs                # !Send Runtime/Bridge契约
         │   │   ├── quickjs.rs            # 真实引擎、Promise、中断与稳定错误
         │   │   └── bootstrap.js          # 冻结API与私有host桥
-        │   └── tests/                   # query/manager/manager_history与装配支撑
+        │   └── tests/                   # query/manager/manager_history/execution_api/bounded_json与装配支撑
         └── commands/                     # Tauri Command 薄封装
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
@@ -523,11 +525,15 @@ src/
 
 真实基线见[审计](../ARCHITECTURE_REVIEW.md)。Manifest/API v2，事件协议v2。PluginRepository属于plugin/registry，FsPluginRepository负责宿主配置与有限代码加载。PluginHost保留唯一CoreEventBus消费者与128有界队列；Manager才管理worker，不创建第二套业务事件底座。
 
+插件专用 Infra 依赖 plugin 的能力契约及 ScopedQueries 做逐调用授权；ServiceQueries 再依赖只读 Service，因此存在 infra → plugin → service 的概念依赖环。此为专用能力执行器的显式例外：Core/Service 不依赖 plugin，业务 Service 不导入这些插件 Infra，具体文件/网络实现由组合根装配，Manager 只依赖仓库及工厂端口。
+
 AppContext注入通用core/access到Auth/Contest/Config与Registry，登录/登出/会话失效、比赛/OJ切换、连接变化显式撤销作用域，不能依赖事件。PluginQueryContext绑定实际Provider地址和稳定用户，旧请求、旧游标与旧授权失效；查询仅本人元数据、不读源码。Hydro历史不使用假定页大小判断末尾，API提供不透明游标及可空total。
 
 专用Infra新增plugin_storage（fs4+atomicwrites，JSON/CAS/配额）、plugin_http（独立reqwest、精确origin、DNS/IP固定、无代理/跳转/重试）、plugin_notification（纯文本Tauri输出）。数据在plugin-data，代码在plugins或管理员codeRoot，审批在plugins.json。默认未启用任何插件。
 
 rquickjs std/futures提供Promise和引擎中断；每插件独立线程、16MiB、activate10秒/事件30秒，使用Tauri持久Tokio handle。stop先撤销调用与订阅，reload等待旧worker退出；退出不阻塞工作区落盘。定期Resync默认60秒，范围10..3600秒，每次成功代表实际入队，满/关闭即注销并报告不可用，非历史重放。
+
+执行期限集中于 plugin/limits：启动等待为激活期限加2秒宽限，停止5秒。桥响应含JSON包络最多1MiB；native提交投影页最多1MiB，所有保留游标余项合计4MiB（仍最多32个游标）。编码边写边计数；超限返回limit_exceeded。引擎分配失败也返回该码。Promise拒绝跟踪只保留最多256个身份摘要、输出安全计数，不记录reason/栈；不增加后台调度，所有宿主Promise仍须await。
 
 事件订阅与插件激活分离：仅实际获批 events.subscribe 才建立队列并接收 Resync，其他合法插件仍可运行。Manager 列表通过 Result 暴露配置损坏/验证错误，启动和重载启动阶段的失败保留安全诊断。已有查询句柄的 scope 读取失败视为 ContextExpired，读取后的取消检查继续防护并发作用域切换。
 

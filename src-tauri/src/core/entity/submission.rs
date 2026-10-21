@@ -221,10 +221,6 @@ pub struct SubmissionCases {
     pub mode: String,
 }
 
-#[cfg(test)]
-#[path = "tests/submission_tests.rs"]
-mod tests;
-
 /// Read-only native pagination evidence. Unknown totals stay unknown.
 ///
 /// 必须由 Provider 直接构造并立即消费：`SubmissionRecord::owner_id` 不参与序列化，
@@ -235,3 +231,7 @@ pub struct SubmissionHistoryPage {
     pub total: Option<u64>,
     pub has_more: bool,
 }
+
+#[cfg(test)]
+#[path = "tests/submission_tests.rs"]
+mod tests;

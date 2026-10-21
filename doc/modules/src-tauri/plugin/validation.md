@@ -43,3 +43,5 @@ Storage真实文件覆盖跨实例CAS单胜者、missing/null区分、命名空�
 新增Hydro展示名不同/udict缺失的owner校验、转换中签发上下文、OJ组合切换、慢激活期间256条事件、启动超时清理、两个真实JS插件共享预算、并发游标领取、approval隔离、订阅日志锁外写出、存储限流、Client复用、稳定脚本/IPC错误和revision内会话读取去重。公开PluginHttp::request成功路径使用无网络HttpTransport fixture；实际reqwest固定地址和响应策略继续由本地transport测试验证。Provider与HTTP超时用Tokio虚拟时间，周期测试注入短间隔；详见[逐项记录](review-fixes.md)。
 
 PR #41 MEDIUM跟进验证：增加stop超时状态与reaper历史、基础设施日志阶段/脱敏、PluginError穷尽wire契约、域名origin正例及带scheme的IPv4/IPv6负例；通知校验/队列/过期/手动关闭/卸载及订阅失败清理改由Service测试锁定。所有宿主Promise必须await是文档契约，本轮未实现drain或未await检测。数量以当轮测试输出为准。
+
+PR #41 LOW收尾验证：补atomicwrites两支ErrorKind及invalid ID、重复stop单reaper、真实引擎拒绝跟踪/容量/脱敏、桥响应含包络上限/转义字节、CAS读写审计、共享事件allowlist、游标合计预算及消费释放、scope缓存交错/回绕令牌、真实比赛服务组合切换、HTTP并发拒绝不扣令牌及取消/丢弃归还、前端可读错误和未知原型键兜底。Promise诊断只覆盖引擎实际观察到的拒绝，不增加后台调度。

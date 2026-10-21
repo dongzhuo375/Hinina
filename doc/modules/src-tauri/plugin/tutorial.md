@@ -10,6 +10,8 @@
 
 在仓库根目录可用现有 esbuild 验证并构建：
 
+要求Node.js ≥20.6（脚本使用import.meta.resolve）。构建输出为src-tauri/target/plugin-scaffold.js；将其复制到插件目录并命名为index.js，与manifest.entry一致。脚本成功后也会提示此步骤。
+
 ```powershell
 npm run plugin:sdk:check
 npm run plugin:scaffold:build

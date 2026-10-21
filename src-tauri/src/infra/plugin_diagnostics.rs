@@ -20,6 +20,14 @@ pub(crate) fn failure(id: Option<&str>, operation: &'static str, category: &'sta
 pub(crate) fn io(id: Option<&str>, operation: &'static str, error: &std::io::Error) {
     tracing::warn!(plugin_id=?safe_id(id), runtime="js", operation, category="io", error_kind=?error.kind(), "Plugin infrastructure failure");
 }
+pub(crate) fn atomic_write(id: Option<&str>, error: &atomicwrites::Error<std::io::Error>) {
+    // Both failure sites contain an io::Error; never format its potentially sensitive message.
+    let (stage, error) = match error {
+        atomicwrites::Error::Internal(error) => ("atomic_replace", error),
+        atomicwrites::Error::User(error) => ("write_callback", error),
+    };
+    tracing::warn!(plugin_id=?safe_id(id),runtime="js",operation="storage.commit",category="atomic_write",stage,error_kind=?error.kind(),"Plugin infrastructure failure");
+}
 pub(crate) fn json(id: Option<&str>, operation: &'static str, error: &serde_json::Error) {
     tracing::warn!(plugin_id=?safe_id(id), runtime="js", operation, category="json", error_kind=?error.classify(), "Plugin infrastructure failure");
 }

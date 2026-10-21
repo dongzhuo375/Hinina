@@ -5,12 +5,14 @@
 //! Permission checked read projections and bounded, opaque, scope-bound cursors.
 use super::{
     api::{contest::PluginContest, identity::PluginIdentity, submission::*, *},
+    bounded_json,
     host::manifest::PluginPermission,
+    limits::{MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES},
     permission::PluginGrant,
 };
 use crate::{
     core::{
-        access::AccessRevision,
+        access::{AccessRevision, AccessSnapshot},
         entity::{contest::Contest, submission::SubmissionHistoryPage},
         provider::registry::ProviderRegistry,
     },
@@ -103,7 +105,7 @@ pub struct ServiceQueries {
     pub registry: Arc<dyn ProviderRegistry>,
     pub config: Arc<ConfigService<FsConfigRepository>>,
     pub access: Arc<AccessRevision>,
-    pub cached_scope: Mutex<Option<(u64, QueryScope)>>,
+    pub cached_scope: Mutex<Option<(AccessSnapshot, QueryScope)>>,
 }
 #[async_trait]
 impl QuerySource for ServiceQueries {
@@ -113,8 +115,11 @@ impl QuerySource for ServiceQueries {
         // must not serialize every plugin's scope check.
         {
             let cache = self.cached_scope.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some((revision, scope)) = cache.as_ref() {
-                if *revision == snapshot.revision && !snapshot.cancellation.is_cancelled() {
+            if let Some((cached, scope)) = cache.as_ref() {
+                if cached.revision == snapshot.revision
+                    && !cached.cancellation.is_cancelled()
+                    && !snapshot.cancellation.is_cancelled()
+                {
                     return Ok(scope.clone());
                 }
             }
@@ -147,7 +152,7 @@ impl QuerySource for ServiceQueries {
             return Err(PluginError::ContextExpired);
         }
         *self.cached_scope.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some((snapshot.revision, scope.clone()));
+            Some((snapshot, scope.clone()));
         Ok(scope)
     }
     async fn contest(&self, id: &str) -> PluginResult<Contest> {
@@ -171,7 +176,6 @@ struct Context {
     created: Instant,
     cancellation: CancellationToken,
 }
-#[derive(Clone)]
 struct Cursor {
     context: String,
     query: PluginSubmissionQuery,
@@ -180,6 +184,7 @@ struct Cursor {
     more: bool,
     total: Option<u64>,
     created: Instant,
+    buffered_bytes: usize,
 }
 #[derive(Default)]
 struct State {
@@ -341,8 +346,8 @@ impl ScopedQueries {
         self.require(PluginPermission::IdentityRead)?;
         let context = self.context(handle).await?;
         Ok(context.scope.user.map(|(id, _)| {
-            let key =
-                serde_json::to_vec(&(&context.scope.oj, &context.scope.endpoint, id)).unwrap();
+            let key = serde_json::to_vec(&(&context.scope.oj, &context.scope.endpoint, id))
+                .expect("identity key contains only JSON-serializable strings");
             PluginIdentity {
                 oj_id: context.scope.oj,
                 user_key: format!("{:x}", Sha256::digest(key)),
@@ -402,11 +407,7 @@ impl ScopedQueries {
         }
         let mut cursor = if let Some(id) = &query.cursor {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            let c = state
-                .cursors
-                .get(id)
-                .cloned()
-                .ok_or(PluginError::ContextExpired)?;
+            let c = state.cursors.get(id).ok_or(PluginError::ContextExpired)?;
             if c.context != handle.host_id()
                 || c.query.contest_id != query.contest_id
                 || c.query.problem_id != query.problem_id
@@ -429,6 +430,7 @@ impl ScopedQueries {
                 more: true,
                 total: None,
                 created: Instant::now(),
+                buffered_bytes: 0,
             }
         };
         if cursor.pending.is_empty() && cursor.more {
@@ -469,36 +471,49 @@ impl ScopedQueries {
                     submitted_at: r.submit_time.saturating_mul(1000),
                 })
                 .collect();
-            if serde_json::to_vec(&cursor.pending)
-                .map_err(|_| PluginError::ProviderError)?
-                .len()
-                > 1024 * 1024
-            {
-                return Err(PluginError::LimitExceeded);
-            }
+            bounded_json::encoded_len(&cursor.pending, MAX_CURSOR_PAGE_BYTES)?;
         }
         let records = cursor
             .pending
             .drain(..cursor.pending.len().min(query.limit as usize))
             .collect();
+        let total = cursor.total;
         let next = if cursor.more || !cursor.pending.is_empty() {
+            cursor.buffered_bytes =
+                bounded_json::encoded_len(&cursor.pending, MAX_CURSOR_PAGE_BYTES)?;
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state
                 .cursors
                 .retain(|_, c| c.created.elapsed() < Duration::from_secs(300));
-            if state.cursors.len() >= 32 {
+            let retained = state
+                .cursors
+                .values()
+                .map(|c| c.buffered_bytes)
+                .sum::<usize>();
+            if state.cursors.len() >= 32
+                || retained + cursor.buffered_bytes > MAX_CURSOR_BUFFER_BYTES
+            {
                 return Err(PluginError::LimitExceeded);
             }
             let id = uuid::Uuid::new_v4().to_string();
-            state.cursors.insert(id.clone(), cursor.clone());
+            state.cursors.insert(id.clone(), cursor);
             Some(id)
         } else {
             None
         };
-        self.check(handle).await?;
+        if let Err(error) = self.check(handle).await {
+            if let Some(id) = &next {
+                self.state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .cursors
+                    .remove(id);
+            }
+            return Err(error);
+        }
         Ok(PluginSubmissionPage {
             records,
-            total: cursor.total,
+            total,
             next_cursor: next,
         })
     }
