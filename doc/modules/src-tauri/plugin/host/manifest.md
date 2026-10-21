@@ -29,3 +29,5 @@ Manifest v1/API v1 不再加载，旧 `allowHosts` / `httpsOnly` 必须迁移为
 ```
 
 这是管理员对明文和私网的显式批准，仅示范配置，不会实现气球业务。loopback/link-local/保留等特殊地址即使写入 CIDR 也拒绝。公开 HTTPS origin 不需要 privateCidrs。默认没有任何网络批准。
+
+origin必须使用规范化域名：拒绝所有IPv4/IPv6字面量（含公网IP），没有旧IP清单的隐式兼容。域名合法不代表地址已授权，执行时仍检查DNS全部结果并固定连接；私网域名需匹配宿主privateCidrs批准。

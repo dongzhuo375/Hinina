@@ -25,12 +25,15 @@ async fn plugin_identity_revocation_survives_session_delete_failure() {
         service.registry.clone(),
         Arc::new(FailingDelete(repo.clone())),
         bus,
+        service.access.clone(),
     );
     assert_eq!(
         service.identity_metadata().unwrap(),
         Some(("uid".into(), "alice".into()))
     );
+    let before_logout = service.access.snapshot().unwrap();
     assert!(service.logout().await.is_err());
+    assert!(before_logout.cancellation.is_cancelled());
     assert!(repo.load(&oj).unwrap().is_some());
     assert_eq!(service.identity_metadata().unwrap(), None);
 }
@@ -95,7 +98,9 @@ fn make_service_with_auth(
     let event_bus = Arc::new(CoreEventBus::new());
     let session_repo: Arc<dyn SessionRepository> =
         Arc::new(FsSessionRepository::new(Arc::clone(&storage)));
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let access = Arc::new(crate::core::access::AccessRevision::default());
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone()));
     if let Some(p) = provider {
         registry.register(
             OjId::new("HOJ"),
@@ -109,6 +114,7 @@ fn make_service_with_auth(
         Arc::clone(&registry),
         Arc::clone(&session_repo),
         Arc::clone(&event_bus),
+        access,
     );
     (service, event_bus, session_repo, dir, registry)
 }

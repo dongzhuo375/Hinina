@@ -3,6 +3,7 @@
 //! @version 2
 //! @stability stable
 //! Read-only code repository and host-owned approvals. Loading never grants new privileges.
+use super::plugin_diagnostics as diagnostics;
 use crate::{
     plugin::registry::*,
     plugin::{api::*, host::manifest::*, permission::PluginGrant},
@@ -43,11 +44,19 @@ impl PluginRepository for FsPluginRepository {
             #[serde(default)]
             plugins: std::collections::BTreeMap<String, serde_json::Value>,
         }
-        let raw: RawConfiguration = match read(&path, 65536) {
+        let raw: RawConfiguration = match read(&path, 65536, None, "repository.configuration") {
             Err(PluginError::NotFound) => return Ok(PluginConfiguration::default()),
-            result => serde_json::from_slice(&result?).map_err(|_| PluginError::InvalidInput)?,
+            result => serde_json::from_slice(&result?).map_err(|error| {
+                diagnostics::json(None, "repository.configuration_decode", &error);
+                PluginError::InvalidInput
+            })?,
         };
         if raw.plugins.len() > 128 || raw.code_root.as_ref().is_some_and(|p| !p.is_absolute()) {
+            diagnostics::failure(
+                None,
+                "repository.configuration_validate",
+                "invalid_configuration",
+            );
             return Err(PluginError::InvalidInput);
         }
         let mut config = PluginConfiguration {
@@ -66,6 +75,7 @@ impl PluginRepository for FsPluginRepository {
                     config.plugins.insert(id, approval);
                 }
                 Err(error) => {
+                    diagnostics::failure(Some(&id), "repository.approval", "invalid_approval");
                     config.invalid_plugins.insert(id, error);
                 }
             }
@@ -77,6 +87,10 @@ impl PluginRepository for FsPluginRepository {
     /// @permission host-only
     /// @stability stable
     fn load(&self, id: &str) -> PluginResult<LoadedPlugin> {
+        let unavailable = |operation, error: std::io::Error| {
+            diagnostics::io(Some(id), operation, &error);
+            PluginError::Unavailable
+        };
         let config = self.configuration()?;
         if let Some(error) = config.invalid_plugins.get(id) {
             return Err(error.clone());
@@ -90,18 +104,21 @@ impl PluginRepository for FsPluginRepository {
         let root = config
             .code_root
             .unwrap_or_else(|| self.base.join("plugins"));
-        let root = root.canonicalize().map_err(|_| PluginError::Unavailable)?;
+        let root = root
+            .canonicalize()
+            .map_err(|error| unavailable("repository.root", error))?;
         let mut ids = HashSet::new();
         let mut selected = None;
-        let entries = std::fs::read_dir(&root).map_err(|_| PluginError::Unavailable)?;
+        let entries =
+            std::fs::read_dir(&root).map_err(|error| unavailable("repository.scan", error))?;
         for (index, entry) in entries.enumerate() {
             if index >= 128 {
                 return Err(PluginError::LimitExceeded);
             }
-            let entry = entry.map_err(|_| PluginError::Unavailable)?;
+            let entry = entry.map_err(|error| unavailable("repository.entry", error))?;
             if !entry
                 .file_type()
-                .map_err(|_| PluginError::Unavailable)?
+                .map_err(|error| unavailable("repository.entry_type", error))?
                 .is_dir()
             {
                 continue;
@@ -109,21 +126,36 @@ impl PluginRepository for FsPluginRepository {
             let directory = entry
                 .path()
                 .canonicalize()
-                .map_err(|_| PluginError::Unavailable)?;
+                .map_err(|error| unavailable("repository.directory", error))?;
             if !directory.starts_with(&root) {
                 return Err(PluginError::InvalidInput);
             }
             let manifest_path = match directory.join("manifest.json").canonicalize() {
                 Ok(path) if path.starts_with(&directory) => path,
-                _ => continue,
+                Ok(_) => {
+                    diagnostics::failure(None, "repository.manifest", "path_boundary");
+                    continue;
+                }
+                Err(error) => {
+                    if error.kind() != std::io::ErrorKind::NotFound {
+                        diagnostics::io(None, "repository.manifest", &error);
+                    }
+                    continue;
+                }
             };
             // A malformed unrelated plugin must not prevent a valid plugin from starting.
-            let raw: serde_json::Value = match read(&manifest_path, 65536).and_then(|bytes| {
-                serde_json::from_slice(&bytes).map_err(|_| PluginError::InvalidInput)
-            }) {
-                Ok(raw) => raw,
-                Err(_) => continue,
-            };
+            let raw: serde_json::Value =
+                match read(&manifest_path, 65536, None, "repository.manifest_read").and_then(
+                    |bytes| {
+                        serde_json::from_slice(&bytes).map_err(|error| {
+                            diagnostics::json(None, "repository.manifest_decode", &error);
+                            PluginError::InvalidInput
+                        })
+                    },
+                ) {
+                    Ok(raw) => raw,
+                    Err(_) => continue,
+                };
             let Some(candidate) = raw["id"].as_str() else {
                 continue;
             };
@@ -134,9 +166,18 @@ impl PluginRepository for FsPluginRepository {
                 if raw["manifestVersion"] != 2 || raw["apiVersion"] != 2 {
                     return Err(PluginError::Unsupported);
                 }
-                let manifest: PluginManifest =
-                    serde_json::from_value(raw).map_err(|_| PluginError::InvalidInput)?;
-                manifest.validate().map_err(|_| PluginError::InvalidInput)?;
+                let manifest: PluginManifest = serde_json::from_value(raw).map_err(|error| {
+                    diagnostics::json(Some(id), "repository.manifest_type", &error);
+                    PluginError::InvalidInput
+                })?;
+                manifest.validate().map_err(|_| {
+                    diagnostics::failure(
+                        Some(id),
+                        "repository.manifest_validate",
+                        "invalid_manifest",
+                    );
+                    PluginError::InvalidInput
+                })?;
                 selected = Some((directory, manifest));
             }
         }
@@ -150,7 +191,10 @@ impl PluginRepository for FsPluginRepository {
         let entry = directory
             .join(&manifest.entry)
             .canonicalize()
-            .map_err(|_| PluginError::NotFound)?;
+            .map_err(|error| {
+                diagnostics::io(Some(id), "repository.source_path", &error);
+                PluginError::NotFound
+            })?;
         if !entry.starts_with(&directory) {
             return Err(PluginError::InvalidInput);
         }
@@ -162,8 +206,16 @@ impl PluginRepository for FsPluginRepository {
             .filter(|p| manifest.permissions.contains(p))
             .collect::<Vec<_>>();
         let grant = PluginGrant::authorize(&manifest, &approved)?;
-        let source =
-            String::from_utf8(read(&entry, 1024 * 1024)?).map_err(|_| PluginError::InvalidInput)?;
+        let source = String::from_utf8(read(
+            &entry,
+            1024 * 1024,
+            Some(id),
+            "repository.source_read",
+        )?)
+        .map_err(|_| {
+            diagnostics::failure(Some(id), "repository.source_decode", "invalid_utf8");
+            PluginError::InvalidInput
+        })?;
         Ok(LoadedPlugin {
             grant,
             source,
@@ -171,19 +223,29 @@ impl PluginRepository for FsPluginRepository {
         })
     }
 }
-fn read(path: &Path, limit: usize) -> PluginResult<Vec<u8>> {
+fn read(
+    path: &Path,
+    limit: usize,
+    id: Option<&str>,
+    operation: &'static str,
+) -> PluginResult<Vec<u8>> {
     let file = File::open(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             PluginError::NotFound
         } else {
+            diagnostics::io(id, operation, &e);
             PluginError::Unavailable
         }
     })?;
     let mut bytes = Vec::new();
     file.take(limit as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| PluginError::Unavailable)?;
+        .map_err(|error| {
+            diagnostics::io(id, operation, &error);
+            PluginError::Unavailable
+        })?;
     if bytes.len() > limit {
+        diagnostics::failure(id, operation, "file_size_limit");
         return Err(PluginError::LimitExceeded);
     }
     Ok(bytes)

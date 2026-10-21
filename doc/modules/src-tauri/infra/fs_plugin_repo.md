@@ -5,3 +5,5 @@
 代码默认plugins/<目录>/，可由管理员codeRoot指定。授权和声明交集后生成LoadedPlugin，不执行JS或自动批准。见[仓库](../plugin/registry/mod.md)。
 
 approval逐项解析验证，错误进入invalid_plugins；list逐项报告，load只拒绝目标错误，无关非法项不阻塞好插件。整体JSON/根字段或codeRoot非法仍拒绝整份配置。
+
+宿主侧失败调用plugin_diagnostics输出warn：保留操作阶段及安全错误类别，不输出原始错误文本、URL、凭据、绝对路径或业务内容；插件侧PluginError保持原契约。

@@ -3,6 +3,7 @@
 //! @version 2
 //! @stability stable
 //! Per-plugin JSON, separate lock inode and durable atomic replacement. Corruption is never reset.
+use super::plugin_diagnostics as diagnostics;
 use crate::plugin::{
     api::{storage::*, *},
     host::manifest::PluginPermission,
@@ -80,18 +81,26 @@ impl JsonPluginStorage {
         }
         let directory = self.directory.clone();
         let stopped = self.authority.stopped.clone();
+        let plugin_id = self.authority.grant.manifest().id.clone();
+        let join_id = plugin_id.clone();
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
         tokio::task::spawn_blocking(move || {
+            let _subscriber = tracing::dispatcher::set_default(&dispatch);
             // Keep capacity reserved even if the waiting JS future is dropped.
             let _permit = permit;
-            let unavailable = |_| PluginError::Unavailable;
-            std::fs::create_dir_all(&directory).map_err(unavailable)?;
+            let io_error = |operation, error: std::io::Error| {
+                diagnostics::io(Some(&plugin_id), operation, &error);
+                PluginError::Unavailable
+            };
+            std::fs::create_dir_all(&directory)
+                .map_err(|error| io_error("storage.directory", error))?;
             let lock = OpenOptions::new()
                 .create(true)
                 .truncate(false)
                 .read(true)
                 .write(true)
                 .open(directory.join("storage.lock"))
-                .map_err(unavailable)?;
+                .map_err(|error| io_error("storage.lock_open", error))?;
             let start = Instant::now();
             loop {
                 if stopped.is_cancelled() {
@@ -101,11 +110,15 @@ impl JsonPluginStorage {
                     Ok(()) => break,
                     Err(fs4::TryLockError::WouldBlock) => {
                         if start.elapsed() > Duration::from_secs(5) {
+                            diagnostics::failure(Some(&plugin_id), "storage.lock", "timeout");
                             return Err(PluginError::Timeout);
                         }
                         std::thread::sleep(Duration::from_millis(5));
                     }
-                    Err(_) => return Err(PluginError::Unavailable),
+                    Err(_) => {
+                        diagnostics::failure(Some(&plugin_id), "storage.lock", "lock_io");
+                        return Err(PluginError::Unavailable);
+                    }
                 }
             }
             let path = directory.join("storage.json");
@@ -114,33 +127,52 @@ impl JsonPluginStorage {
                     let mut bytes = Vec::new();
                     file.take((MAX_STORAGE_BYTES + 1) as u64)
                         .read_to_end(&mut bytes)
-                        .map_err(unavailable)?;
+                        .map_err(|error| io_error("storage.read", error))?;
                     if bytes.len() > MAX_STORAGE_BYTES {
                         return Err(PluginError::LimitExceeded);
                     }
-                    serde_json::from_slice::<BTreeMap<String, Value>>(&bytes)
-                        .map_err(|_| PluginError::Unavailable)?
+                    serde_json::from_slice::<BTreeMap<String, Value>>(&bytes).map_err(|error| {
+                        diagnostics::json(Some(&plugin_id), "storage.decode", &error);
+                        PluginError::Unavailable
+                    })?
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-                Err(_) => return Err(PluginError::Unavailable),
+                Err(error) => return Err(io_error("storage.open", error)),
             };
             if stopped.is_cancelled() {
                 return Err(PluginError::ContextExpired);
             }
             let (result, changed) = edit(&mut data)?;
             if changed {
-                let bytes = serde_json::to_vec(&data).map_err(|_| PluginError::InvalidInput)?;
+                let bytes = serde_json::to_vec(&data).map_err(|error| {
+                    diagnostics::json(Some(&plugin_id), "storage.encode", &error);
+                    PluginError::InvalidInput
+                })?;
                 if bytes.len() > MAX_STORAGE_BYTES {
                     return Err(PluginError::LimitExceeded);
                 }
                 AtomicFile::new(&path, AllowOverwrite)
                     .write(|file| file.write_all(&bytes))
-                    .map_err(|_| PluginError::Unavailable)?;
+                    .map_err(|_| {
+                        diagnostics::failure(Some(&plugin_id), "storage.commit", "atomic_write");
+                        PluginError::Unavailable
+                    })?;
             }
             Ok(result)
         })
         .await
-        .map_err(|_| PluginError::Unavailable)?
+        .map_err(|error| {
+            diagnostics::failure(
+                Some(&join_id),
+                "storage.task",
+                if error.is_panic() {
+                    "panic"
+                } else {
+                    "cancelled"
+                },
+            );
+            PluginError::Unavailable
+        })?
     }
     /// @plugin-api
     /// @since 2.0

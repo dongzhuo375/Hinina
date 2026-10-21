@@ -32,7 +32,14 @@ impl PluginApiFactory for FsPluginApiFactory {
     ) -> PluginResult<Arc<dyn PluginApi>> {
         let storage = JsonPluginStorage::new(self.data_root.clone(), queries.clone())
             .with_shared_budget(self.storage_budget.clone());
-        let http = PluginHttp::new(queries.clone(), approval.network.clone())?;
+        let http =
+            PluginHttp::new(queries.clone(), approval.network.clone()).inspect_err(|_| {
+                super::plugin_diagnostics::failure(
+                    Some(&queries.grant.manifest().id),
+                    "factory.create",
+                    "capability_setup",
+                );
+            })?;
         Ok(Arc::new(ExecutionApi::new(queries, storage, http, output)))
     }
 }

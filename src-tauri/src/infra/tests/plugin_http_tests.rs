@@ -137,6 +137,15 @@ async fn public_request_runs_approval_ip_policy_budgets_and_projects_a_successfu
     use crate::plugin::{permission::PluginGrant, query::ScopedQueries, tests::support::*};
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct FixtureTransport(Arc<AtomicUsize>);
+    struct FixtureResolver;
+    #[async_trait::async_trait]
+    impl Resolver for FixtureResolver {
+        async fn resolve(&self, host: &str, port: u16) -> std::io::Result<Vec<SocketAddr>> {
+            assert_eq!(host, "fixture.example");
+            assert_eq!(port, 80);
+            Ok(vec!["8.8.8.8:80".parse().unwrap()])
+        }
+    }
     #[async_trait::async_trait]
     impl HttpTransport for FixtureTransport {
         async fn send(
@@ -149,7 +158,7 @@ async fn public_request_runs_approval_ip_policy_budgets_and_projects_a_successfu
         ) -> PluginResult<PluginHttpResponse> {
             authority.check(context).await?;
             assert_eq!(addresses, vec!["8.8.8.8:80".parse().unwrap()]);
-            assert_eq!(url.origin().ascii_serialization(), "http://8.8.8.8");
+            assert_eq!(url.origin().ascii_serialization(), "http://fixture.example");
             assert_eq!(request.body, Some(serde_json::json!({"value": 1})));
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(PluginHttpResponse {
@@ -161,7 +170,7 @@ async fn public_request_runs_approval_ip_policy_budgets_and_projects_a_successfu
         }
     }
     let mut m = manifest("test.public-http");
-    m.network.allow_origins = vec!["http://8.8.8.8".into()];
+    m.network.allow_origins = vec!["http://fixture.example".into()];
     let authority = Arc::new(ScopedQueries::new(
         PluginGrant::authorize(&m, &m.permissions).unwrap(),
         Arc::new(Source::default()),
@@ -172,17 +181,18 @@ async fn public_request_runs_approval_ip_policy_budgets_and_projects_a_successfu
     let mut api = PluginHttp::new(
         authority.clone(),
         vec![NetworkApproval {
-            origin: "http://8.8.8.8".into(),
+            origin: "http://fixture.example".into(),
             allow_http: true,
             private_cidrs: vec![],
         }],
     )
     .unwrap();
     api.transport = Arc::new(FixtureTransport(calls.clone()));
+    api.resolver = Arc::new(FixtureResolver);
     let context = authority.current_context().await.unwrap();
     let request = PluginHttpRequest {
         method: PluginHttpMethod::Post,
-        url: "http://8.8.8.8/path".into(),
+        url: "http://fixture.example/path".into(),
         headers: BTreeMap::new(),
         body: Some(serde_json::json!({"value": 1})),
         timeout_ms: None,

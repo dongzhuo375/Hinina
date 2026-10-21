@@ -73,8 +73,9 @@ export class IpcError extends Error {
  * 只有这两个键的载荷才算插件错误 —— 不能把任意带 `code` 字段的对象（将来可能的
  * 其他 IPC 响应）都当成插件错误，否则 message 会退化成 code 并丢掉真实原因。
  */
-function isPluginErrorPayload(raw: object): raw is { code: string; permission?: unknown } {
+function isPluginErrorPayload(raw: object): raw is { code: string; permission?: string } {
   if (typeof (raw as { code?: unknown }).code !== 'string') return false
+  if ('permission' in raw && typeof raw.permission !== 'string') return false
   return Object.keys(raw).every(key => key === 'code' || key === 'permission')
 }
 

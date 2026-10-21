@@ -89,6 +89,7 @@ impl ContestService {
         registry: Arc<dyn ProviderRegistry>,
         event_bus: Arc<CoreEventBus>,
         storage: Arc<Storage>,
+        access: Arc<crate::core::access::AccessRevision>,
     ) -> Self {
         let cache = Arc::new(RwLock::new(None));
         let meta_cache = Arc::new(TtlCache::new(CONTEST_META_TTL, CONTEST_META_CAPACITY));
@@ -97,7 +98,7 @@ impl ContestService {
             CONTEST_META_NAMESPACE,
         ));
         Self {
-            access: Arc::default(),
+            access,
             registry,
             event_bus,
             meta_cache,
@@ -107,12 +108,6 @@ impl ContestService {
             cache,
             announcement_baseline: Arc::new(RwLock::new(HashMap::new())),
         }
-    }
-
-    /// Bind the application's explicit access revision fence at assembly time.
-    pub fn with_access(mut self, access: Arc<crate::core::access::AccessRevision>) -> Self {
-        self.access = access;
-        self
     }
 
     /// OJ 切换后的缓存清理（**由 `switch_oj` 命令显式调用**，不订阅事件）。

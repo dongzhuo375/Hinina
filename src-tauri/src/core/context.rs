@@ -109,9 +109,11 @@ impl AppContext {
 
         // 5. 加载配置（通过 FsConfigRepository）
         let config_repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
-        let config = Arc::new(
-            ConfigService::new(config_repo, Arc::clone(&event_bus)).with_access(access.clone()),
-        );
+        let config = Arc::new(ConfigService::new(
+            config_repo,
+            Arc::clone(&event_bus),
+            access.clone(),
+        ));
 
         // 6. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
         let timeout_secs = config.get().oj.timeout_secs;
@@ -127,8 +129,10 @@ impl AppContext {
         // 与工厂按 id 匹配 —— 接一个新 OJ = 配置加一条实例 + 工厂清单加一行。
         // 未注册的 active（配置手改/拼写错误）在注册完成后回退 HOJ 并告警。
         let configured_oj = OjId::new(&config.get().oj.active);
-        let provider_registry: Arc<dyn ProviderRegistry> =
-            Arc::new(ProviderRegistryImpl::new(configured_oj.clone()).with_access(access.clone()));
+        let provider_registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(
+            configured_oj.clone(),
+            access.clone(),
+        ));
 
         let adapter_deps = crate::adapter::AdapterDeps {
             http_client: Arc::clone(&http_client),
@@ -178,22 +182,18 @@ impl AppContext {
             Arc::clone(&config),
             Arc::clone(&event_bus),
         ));
-        let auth = Arc::new(
-            AuthService::new(
-                Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
-                Arc::clone(&session_repo),
-                Arc::clone(&event_bus),
-            )
-            .with_access(access.clone()),
-        );
-        let contest = Arc::new(
-            ContestService::new(
-                Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
-                Arc::clone(&event_bus),
-                Arc::clone(&storage),
-            )
-            .with_access(access.clone()),
-        );
+        let auth = Arc::new(AuthService::new(
+            Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
+            Arc::clone(&session_repo),
+            Arc::clone(&event_bus),
+            access.clone(),
+        ));
+        let contest = Arc::new(ContestService::new(
+            Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
+            Arc::clone(&event_bus),
+            Arc::clone(&storage),
+            access.clone(),
+        ));
         let problem = Arc::new(ProblemService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&event_bus),

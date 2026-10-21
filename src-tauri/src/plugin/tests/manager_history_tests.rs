@@ -145,3 +145,61 @@ async fn timed_out_worker_is_reaped_after_native_work_finishes() {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn stop_timeout_marks_worker_failed_and_reaps_it_after_exit() {
+    let dir = crate::test_support::TempDir::unique("plugin-stop-timeout");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("plugins.json"), r#"{"plugins":{"test.stop":{}}}"#).unwrap();
+    let manager = make_manager(
+        dir.to_path_buf(),
+        Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+        Arc::new(Source::default()),
+        Arc::default(),
+    )
+    .with_test_stop_timeout(Duration::from_millis(5));
+    let (release, blocked) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        blocked.recv().unwrap();
+    });
+    manager.workers.lock().unwrap().insert(
+        "test.stop".into(),
+        Worker {
+            stop: CancellationToken::new(),
+            thread,
+            status: Arc::new(Mutex::new(PluginStatus {
+                id: "test.stop".into(),
+                state: "running",
+                error: None,
+            })),
+        },
+    );
+    assert_eq!(manager.stop("test.stop").await, Err(PluginError::Timeout));
+    assert_eq!(manager.list().unwrap()[0].state, "failed");
+    {
+        let worker = manager.workers.lock().unwrap();
+        assert!(worker["test.stop"].stop.is_cancelled());
+        assert_eq!(worker["test.stop"].status.lock().unwrap().state, "failed");
+        assert_eq!(
+            worker["test.stop"].status.lock().unwrap().error,
+            Some(PluginError::Timeout)
+        );
+    }
+    assert_eq!(
+        manager.start("test.stop").await,
+        Err(PluginError::Unavailable)
+    );
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !manager.workers.lock().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        manager.statuses.lock().unwrap().back().unwrap().error,
+        Some(PluginError::Timeout)
+    );
+    assert_eq!(manager.list().unwrap()[0].error, Some(PluginError::Timeout));
+}

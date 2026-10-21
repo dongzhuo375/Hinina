@@ -1,24 +1,27 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, it, expect, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import type { PluginNotification } from '@/types/plugin'
 const { pluginService } = vi.hoisted(() => ({ pluginService: {
-  list: vi.fn(), start: vi.fn(), stop: vi.fn(), reload: vi.fn(), resync: vi.fn(), onNotification: vi.fn(),
+  list: vi.fn(), start: vi.fn(), stop: vi.fn(), reload: vi.fn(), resync: vi.fn(), subscribeNotifications: vi.fn(),
 } }))
 vi.mock('@/services/plugin.service', () => ({ pluginService }))
 import { usePluginStore } from '@/stores/pluginStore'
 beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks(); vi.useFakeTimers() })
 afterEach(() => vi.useRealTimers())
-it('keeps notifications as literal text and bounds the queue and lifetime', async () => {
-  let receive!: (value: PluginNotification) => void
-  pluginService.onNotification.mockImplementation(handler => { receive = handler; return Promise.resolve(() => {}) })
+it('stores only service-normalized notifications and applies service dismissals', async () => {
+  let add!: (value: { id: number, pluginId: string, level: 'info', message: string }) => void
+  let remove!: (id: number) => void
+  pluginService.subscribeNotifications.mockImplementation((onAdd, onDismiss) => {
+    add = onAdd; remove = onDismiss
+    return Promise.resolve(Object.assign(() => {}, { dismiss: onDismiss }))
+  })
   const store = usePluginStore(); await store.subscribe()
-  for (let n = 0; n < 10; n++) receive({ pluginId: 'test.demo', level: 'info', message: '<script>alert(1)</script>' })
-  expect(store.notifications).toHaveLength(5)
-  expect(store.notifications[0].message).toBe('<script>alert(1)</script>')
-  receive({ pluginId: 'test.demo', level: 'info', message: 'x'.repeat(513) })
-  expect(store.notifications).toHaveLength(5)
-  vi.advanceTimersByTime(6000)
+  add({ id: 1, pluginId: 'test.demo', level: 'info', message: '<script>alert(1)</script>' })
+  expect(store.notifications).toEqual([{ id: 1, pluginId: 'test.demo', level: 'info', message: '<script>alert(1)</script>' }])
+  remove(1)
+  expect(store.notifications).toHaveLength(0)
+  add({ id: 2, pluginId: 'test.demo', level: 'info', message: 'dismiss' })
+  store.dismiss(2)
   expect(store.notifications).toHaveLength(0)
 })
 it('refreshes status only after a lifecycle operation completes', async () => {

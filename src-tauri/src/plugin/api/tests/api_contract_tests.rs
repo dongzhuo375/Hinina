@@ -108,3 +108,62 @@ fn notifications_are_bounded_literal_text_and_errors_drop_internal_data() {
         assert!(!error.to_string().contains("private"));
     }
 }
+
+#[test]
+fn plugin_error_wire_shape_matches_the_bridge_contract() {
+    use crate::plugin::host::manifest::PluginPermission;
+    // Exhaustive match forces future error variants to update this wire contract test.
+    fn expected_fields(error: &PluginError) -> Vec<&'static str> {
+        match error {
+            PluginError::PermissionDenied { .. } => vec!["code", "permission"],
+            PluginError::InvalidInput
+            | PluginError::ContextExpired
+            | PluginError::Unauthenticated
+            | PluginError::NotFound
+            | PluginError::ProviderError
+            | PluginError::LimitExceeded
+            | PluginError::Timeout
+            | PluginError::Unavailable
+            | PluginError::ScriptError
+            | PluginError::Unsupported => vec!["code"],
+        }
+    }
+    let errors = [
+        PluginError::InvalidInput,
+        PluginError::ContextExpired,
+        PluginError::Unauthenticated,
+        PluginError::NotFound,
+        PluginError::ProviderError,
+        PluginError::LimitExceeded,
+        PluginError::Timeout,
+        PluginError::Unavailable,
+        PluginError::ScriptError,
+        PluginError::Unsupported,
+    ];
+    for error in errors {
+        let value = serde_json::to_value(&error).unwrap();
+        assert_eq!(
+            value
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            expected_fields(&error)
+        );
+        assert!(value["code"].is_string());
+    }
+    let denied = serde_json::to_value(PluginError::PermissionDenied {
+        permission: PluginPermission::EventsSubscribe,
+    })
+    .unwrap();
+    assert_eq!(
+        denied.as_object().unwrap().keys().collect::<Vec<_>>(),
+        vec!["code", "permission"]
+    );
+    assert!(denied["permission"].is_string());
+    assert_eq!(
+        denied,
+        json!({"code": "permission_denied", "permission": "events.subscribe"})
+    );
+}

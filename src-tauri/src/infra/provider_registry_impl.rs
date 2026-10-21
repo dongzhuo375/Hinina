@@ -17,19 +17,13 @@ pub struct ProviderRegistryImpl {
 }
 
 impl ProviderRegistryImpl {
-    pub fn new(default_oj: OjId) -> Self {
+    pub fn new(default_oj: OjId, access: Arc<crate::core::access::AccessRevision>) -> Self {
         Self {
-            access: Arc::default(),
+            access,
             endpoints: RwLock::default(),
             providers: RwLock::new(HashMap::new()),
             current: RwLock::new(default_oj),
         }
-    }
-
-    /// Bind the shared fence before registering providers.
-    pub fn with_access(mut self, access: Arc<crate::core::access::AccessRevision>) -> Self {
-        self.access = access;
-        self
     }
 
     /// 按能力取当前 OJ 的 Provider（私有帮手，四个 current_xxx 共用）。

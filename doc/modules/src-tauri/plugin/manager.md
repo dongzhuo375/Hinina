@@ -13,3 +13,5 @@ Manager 持有跨插件、跨重载的 Provider 查询总预算；与每次激�
 仓库与 PluginApiFactory 由组合根注入，Manager 不直接构造文件仓库、存储或 HTTP。激活期间没有 Host 订阅，成功后才建立队列并发送初始 Resync；激活期间的业务事件由重查补偿。启动12秒超时立即标记 failed/timeout，撤销后等待 worker 退出并回收；无法在停止期限内清理时保持 failed，并记录清理警告。重复 start 只拒绝命令，不写 failed 历史。失败退出用 warn 并带稳定错误，正常退出用 info，停止5秒超时同样记录 warn；外部字符串按 Debug 转义，operation 日志限制64字符。
 
 原生阻塞延迟退出时，异步reaper继续跟踪同一worker代次，线程完成后回收；轮询间隔从100ms指数退避到2s上限，原生调用永不返回也不会形成高频轮询。旧worker尚未结束期间拒绝同ID重启，不能与新worker并存。迟到退出也不能覆盖已锁定的failed/timeout诊断。
+
+stop_inner超时与start超时一致：撤销权限与订阅、标记failed/timeout、启动reaper。线程未结束仍拒绝同ID启动；reaper按同一代次保存最终历史再回收，避免后台退出覆盖新代次状态。配置仍存在时list在回收后继续显示timeout历史。

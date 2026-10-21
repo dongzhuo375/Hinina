@@ -7,6 +7,8 @@ import type { Hinina, JsonValue } from '../hinina'
  * @api-version 2
  */
 export default async function activate(hinina: Hinina, _config: Readonly<JsonValue>): Promise<void> {
+  // Await every host API Promise in activate/handlers; detached work is unsupported.
+  // events.on itself is synchronous; its async handler must await its own host calls.
   /**
    * @plugin-handler
    * @event resync.required

@@ -51,11 +51,12 @@ pub struct PluginManager {
     source: Arc<dyn QuerySource>,
     access: Arc<AccessRevision>,
     workers: Arc<Mutex<BTreeMap<String, Worker>>>,
-    statuses: Mutex<VecDeque<PluginStatus>>,
+    statuses: Arc<Mutex<VecDeque<PluginStatus>>>,
     operation: tokio::sync::Mutex<()>,
     output: Mutex<Option<Arc<dyn NotificationOutput>>>,
     query_budget: Arc<QueryBudget>,
     start_timeout: Duration,
+    stop_timeout: Duration,
     resync_interval_override: Option<Duration>,
 }
 impl PluginManager {
@@ -72,6 +73,11 @@ impl PluginManager {
     #[cfg(test)]
     pub(crate) fn with_test_query_budget(mut self, count: u32) -> Self {
         self.query_budget = Arc::new(QueryBudget::new(count, 4));
+        self
+    }
+    #[cfg(test)]
+    pub(crate) fn with_test_stop_timeout(mut self, timeout: Duration) -> Self {
+        self.stop_timeout = timeout;
         self
     }
     /// @plugin-api
@@ -92,11 +98,12 @@ impl PluginManager {
             source,
             access,
             workers: Arc::default(),
-            statuses: Mutex::default(),
+            statuses: Arc::default(),
             operation: Default::default(),
             output: Mutex::default(),
             query_budget: Arc::new(QueryBudget::new(120, 4)),
             start_timeout: Duration::from_secs(12),
+            stop_timeout: Duration::from_secs(5),
             resync_interval_override: None,
         }
     }
@@ -193,12 +200,72 @@ impl PluginManager {
         })
     }
     fn remember_status(&self, status: PluginStatus) {
-        let mut history = self.statuses.lock().unwrap_or_else(|e| e.into_inner());
-        history.retain(|old| old.id != status.id);
-        if history.len() == 128 {
-            history.pop_front();
+        remember_status(&self.statuses, status);
+    }
+    fn mark_stop_timeout(&self, id: &str) {
+        if let Some(worker) = self
+            .workers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+        {
+            *worker.status.lock().unwrap_or_else(|e| e.into_inner()) = PluginStatus {
+                id: id.into(),
+                state: "failed",
+                error: Some(PluginError::Timeout),
+            };
         }
-        history.push_back(status);
+    }
+    fn stop_timed_out(&self, id: &str) -> PluginResult<()> {
+        self.mark_stop_timeout(id);
+        self.reap_when_finished(id);
+        Err(PluginError::Timeout)
+    }
+    fn reap_when_finished(&self, id: &str) {
+        let workers = self.workers.clone();
+        let statuses = self.statuses.clone();
+        let id = id.to_owned();
+        let expected = workers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .map(|w| w.status.clone());
+        let Some(expected) = expected else {
+            return;
+        };
+        tokio::spawn(async move {
+            let mut delay = Duration::from_millis(100);
+            loop {
+                let worker = {
+                    let mut workers = workers.lock().unwrap_or_else(|e| e.into_inner());
+                    match workers.get(&id) {
+                        Some(worker) if Arc::ptr_eq(&worker.status, &expected) => {
+                            if worker.thread.is_finished() {
+                                // Publish the old generation's final history before allowing a replacement.
+                                remember_status(
+                                    &statuses,
+                                    worker
+                                        .status
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .clone(),
+                                );
+                                workers.remove(&id)
+                            } else {
+                                None
+                            }
+                        }
+                        _ => return,
+                    }
+                };
+                if let Some(worker) = worker {
+                    let _ = worker.thread.join();
+                    return;
+                }
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(2));
+            }
+        });
     }
     async fn start_worker(&self, id: &str) -> PluginResult<()> {
         if self
@@ -360,49 +427,10 @@ impl PluginManager {
                 let cleanup = self.stop_inner(id).await;
                 if let Err(error) = cleanup {
                     tracing::warn!(plugin_id=?id,operation="start.cleanup",error=?error,"Plugin cleanup pending");
-                    self.reap_when_finished(id);
                 }
                 Err(PluginError::Timeout)
             }
         }
-    }
-    fn reap_when_finished(&self, id: &str) {
-        let workers = self.workers.clone();
-        let id = id.to_owned();
-        let expected = workers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&id)
-            .map(|w| w.status.clone());
-        let Some(expected) = expected else {
-            return;
-        };
-        tokio::spawn(async move {
-            // A native call that never returns must not turn into a 10 Hz busy loop;
-            // back off to a low, bounded poll rate while keeping the worker tracked.
-            let mut delay = Duration::from_millis(100);
-            loop {
-                let worker = {
-                    let mut workers = workers.lock().unwrap_or_else(|e| e.into_inner());
-                    match workers.get(&id) {
-                        Some(worker) if Arc::ptr_eq(&worker.status, &expected) => {
-                            if worker.thread.is_finished() {
-                                workers.remove(&id)
-                            } else {
-                                None
-                            }
-                        }
-                        _ => return,
-                    }
-                };
-                if let Some(worker) = worker {
-                    let _ = worker.thread.join();
-                    return;
-                }
-                tokio::time::sleep(delay).await;
-                delay = (delay * 2).min(Duration::from_secs(2));
-            }
-        });
     }
     /// @plugin-api
     /// @since 2.0
@@ -441,9 +469,9 @@ impl PluginManager {
             if done {
                 break;
             }
-            if start.elapsed() > Duration::from_secs(5) {
+            if start.elapsed() > self.stop_timeout {
                 tracing::warn!(plugin_id=?id,operation="worker.stop",error=?PluginError::Timeout,"Plugin stop timed out");
-                return Err(PluginError::Timeout);
+                return self.stop_timed_out(id);
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -517,6 +545,14 @@ impl PluginManager {
             self.host.unsubscribe(id);
         }
     }
+}
+fn remember_status(history: &Mutex<VecDeque<PluginStatus>>, status: PluginStatus) {
+    let mut history = history.lock().unwrap_or_else(|e| e.into_inner());
+    history.retain(|old| old.id != status.id);
+    if history.len() == 128 {
+        history.pop_front();
+    }
+    history.push_back(status);
 }
 impl Drop for PluginManager {
     fn drop(&mut self) {

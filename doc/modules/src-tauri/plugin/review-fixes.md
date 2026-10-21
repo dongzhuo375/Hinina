@@ -42,6 +42,23 @@
 | reaper 100ms 轮询 | 改为 100ms 起指数退避、2s 上限，原生调用永不返回也不会形成高频轮询 |
 | 锁检查测试的 tracing 顺序敏感 | 用 `Dispatch::new` 先注册 dispatcher 再 `with_default`，消除 callsite interest 竞态（与 Manager 诊断测试同款做法） |
 
+## PR #41 MEDIUM 跟进（基线 6af3202）
+
+本轮按确认范围处理 M-1 至 M-8，只纳入直接相关 LOW。未 await 的调用采用文档强制 await 契约，不增加 drain、拒绝跟踪器或后台调度。
+
+| 项 | 核实与处理 |
+|---|---|
+| M-1 stop超时残留 | 确认；超时设failed/timeout、启动reaper，完成后保存历史；原生线程结束前继续阻止同ID启动，不能提前移除失控线程 |
+| M-2 插件infra缺诊断 | 确认；五模块经plugin_diagnostics输出warn，仅阶段、类别和安全ID；IO/JSON/HTTP源错误正文不落日志，新增脱敏回归 |
+| M-3 私有默认栅栏 | 确认属未来装配隐患，当前生产绑定原本正确；四个组件new强制传access，删除with_access并迁移组合根及全部测试调用点 |
+| M-4 fire-and-forget | 确认未保证入口结束后继续驱动；SDK、教程、API与Runtime文档明确所有Promise调用必须await/返回Promise链，events.on等同步方法除外 |
+| M-5 IP origin | 确认属纵深防御缺口，不等同现有SSRF绕过；清单与approval拒绝IPv4/IPv6字面量（含公网IP），补带scheme负例；域名夹具通过私有Resolver端口避免真实DNS |
+| M-6 Store策略越层 | 确认；通知验证、五项上限、六秒过期和手动/卸载清理归Service，Store只应用状态事件 |
+| M-7 错误形态契约 | 当前互配正确；Rust穷尽测试锁定code/permission字段与字符串类型，前端补permission非法类型负例 |
+| M-8 文件树缺漏 | 确认；补scripts、插件infra/API测试和host/runtime/permission测试目录；同步新增诊断模块和前端Service测试 |
+
+域名校验不替代运行时DNS/IP限制；正常未配置插件和初次未创建存储不记录故障。未await仍是不受支持用法，不声称运行时已自动执行或拒绝。
+
 HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存HttpTransport响应；真实连接、响应体和redirect策略使用本地私有transport夹具。没有为了测试公开任何loopback豁免或IPC策略开关。
 
 验证命令：`cargo test --offline --manifest-path src-tauri/Cargo.toml`、`npm test`、`npm run build`、`npm run plugin:sdk:check`，以及本轮Rust文件的rustfmt检查。最终通过情况以当轮执行输出及交付说明为准。

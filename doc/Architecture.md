@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-10-18 | 分支：`main`
+> 最后更新：2026-10-21 | 分支：`feat/plugin-runtime`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -16,6 +16,8 @@ Hinina/
 ├── .github/
 │   ├── copilot-instructions.md           # Copilot CLI 指令（架构速查、开发约定）
 │   └── pr-assets/                        # PR 评审用的匿名演示截图（pr-36/：login、problemset、workspace-maximized）
+├── scripts/
+│   └── build-plugin-scaffold.mjs          # 离线构建插件脚手架ES module
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
@@ -182,6 +184,7 @@ Hinina/
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
         │   ├── fs_session_repo.rs        # FsSessionRepository：sessions/{oj_id}.json 读写；save / remove / rotate_token 共用 `mutation_lock` 串行化（消除「轮换读到旧会话 → 登出删除 → 轮换写回」复活已删除会话的窗口），写入走 `write_string_atomic`（load 不取锁以免内部调用自死锁）
         │   ├── audit.rs                  # 审计消费者：只读订阅 CoreEvent 并结构化落日志（三类消费者之一，证明同一条事件流可挂多个互不相干的观察者）
+        │   ├── plugin_diagnostics.rs     # 插件基础设施warn诊断，禁止URL/路径/内容/源错误泄漏
         │   ├── plugin_api_factory.rs     # 组合根选择的存储/HTTP能力工厂
         │   ├── plugin_http.rs            # 固定DNS、连接池、速率/并发/超时
         │   ├── plugin_storage.rs         # 原子JSON/CAS、配额与操作限流
@@ -191,6 +194,10 @@ Hinina/
         │   └── tests/
         │       ├── storage_tests.rs      # Storage 单元测试
         │       ├── http_tests.rs         # HttpClient 单元测试（401→Auth、403/5xx→Network、退避延迟、classify_status 重试判据、with_timeout 构造）
+        │       ├── plugin_http_tests.rs  # HTTP地址策略/公开请求/固定传输/超时与取消
+        │       ├── plugin_storage_tests.rs # JSON/CAS/配额/限流与损坏保留
+        │       ├── plugin_diagnostics_tests.rs # 失败阶段可见性与日志脱敏
+        │       ├── fs_plugin_repo_tests.rs # 清单加载/审批隔离
         │       ├── logger_tests.rs       # Logger 文件输出测试（落盘/追加/超限截断）
         │       ├── fs_workspace_repo_tests.rs  # FsWorkspaceRepository 单元测试
         │       ├── fs_config_repo_tests.rs     # FsConfigRepository 单元测试
@@ -209,6 +216,7 @@ Hinina/
         │   │   ├── extension.rs          # ExtensionPoint + 4 个子扩展点
         │   │   ├── api_error.rs          # 内部 AppError → 安全 PluginError
         │   │   ├── event_adapter.rs      # PluginEventAdapter：CoreEvent → PluginEvent 的**唯一**转换点（白名单 / 字段裁剪脱敏 / 协议版本 / 每订阅单调序号）
+        │   │   ├── tests/               # manifest_tests、plugin_host_tests、event_adapter_tests
         │   │   └── plugin_host.rs        # PluginHost：授权 + 声明过滤、有界队列 128、try_send、满/关闭注销、初始/Lagged Resync、防重复启动
         │   ├── api/
         │   │   ├── mod.rs
@@ -224,12 +232,15 @@ Hinina/
         │   │   ├── error.rs              # 插件安全错误白名单
         │   │   ├── ui.rs
         │   │   └── tests/
+        │   │       ├── api_contract_tests.rs # API投影与PluginError序列化契约
         │   │       └── event_tests.rs     # 协议形状锁定（camelCase + type tag）、协议无敏感字段、协议不含凭证轮换、版本号钉死
         │   ├── permission/
+        │   │   ├── tests/               # permission_tests：声明与批准/不可变授权
         │   │   └── mod.rs                # PluginGrant：声明与宿主批准分离
         │   ├── registry/
         │   │   └── mod.rs                # PluginRepository 端口（从 core 移入）
         │   ├── runtime/
+        │   │   ├── tests/               # engine_tests、runtime_tests：真实引擎及非Send契约
         │   │   ├── mod.rs                # !Send Runtime/Bridge契约
         │   │   ├── quickjs.rs            # 真实引擎、Promise、中断与稳定错误
         │   │   └── bootstrap.js          # 冻结API与私有host桥
@@ -345,7 +356,7 @@ src/
 │   ├── announcement.service.ts           # 公告列表 + 已读集合组装（markRead 返回后端合并后的权威集合）
 │   ├── system.service.ts                 # 客户端存储信息（存储目录/日志路径/版本，设置页「关于」）
 │   ├── workspace.service.ts              # 工作区创建/保存/恢复/语言持久化 + 落盘事件订阅（onWorkspaceSaved）
-│   └── __tests__/                        # auth.service / config.service / rank.service .spec.ts（本地缓存清理与三态归一契约、配置缓存/派生兜底/updateConfig 读改写、榜单查询参数编排）
+│   └── __tests__/                        # auth.service / config.service / rank.service / plugin.service .spec.ts（本地缓存清理与三态归一契约、配置缓存/派生兜底/updateConfig 读改写、榜单查询参数编排、插件通知验证/队列/定时器清理）
 ├── bridge/
 │   ├── plugin.bridge.ts                  # 插件控制IPC与通知事件
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）
@@ -529,3 +540,5 @@ Provider 只读查询每次激活60次/分钟、并发2，Manager 合计120次/�
 本轮插件审查修复：提交记录以宿主私有owner_id校验身份；OJ切换由统一guard覆盖Registry与比赛清理。生产scope按revision缓存，cursor原子单次领取。Manager注入仓库与能力工厂，激活后订阅、启动超时撤销并清理；approval独立诊断。存储操作增加限流；HTTP仅对相同origin与新近验证的DNS地址集合复用Client（最多32项）。PluginHost日志移至订阅锁外；脚本与IPC保留稳定错误类别。详见[逐项核实](modules/src-tauri/plugin/review-fixes.md)。
 
 复审后续加固：`switch_oj` 栅栏收缩到 Registry 发布与缓存清理，持久化/事件不再阻塞插件查询；scope 缓存命中只在锁内克隆，文件读取移到锁外；插件 IPC 错误只在恰好 `{code, permission?}` 时识别；`owner_id` 明确为不可序列化的宿主私有证据（缺失即整页拒绝，HOJ 缺 `uid` 亦如此）；超时 worker 回收改为指数退避（100ms→2s）；订阅锁检查测试改用已注册 dispatcher 消除 callsite 竞态。
+
+PR #41后续：四个访问变更组件构造函数必须接收共享AccessRevision，移除with_access隐式绑定；stop超时与start超时统一failed/timeout及reaper回收。插件基础设施通过plugin_diagnostics记录脱敏类别；Manifest/approval origin仅允许域名，IP字面量拒绝，运行时仍检查全部DNS地址。通知策略位于Service，Store只应用状态事件；宿主Promise API必须await，入口结束后不drain游离调用。

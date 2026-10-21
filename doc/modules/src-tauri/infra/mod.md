@@ -15,3 +15,5 @@ infra 模块的入口，声明并导出所有基础设施子模块（http、stor
 
 ## 逻辑流程
 无（仅模块层级声明）
+
+新增plugin_diagnostics作为插件基础设施内部共享安全日志模块；只记录有限错误类别与操作，不输出原始IO/reqwest/serde错误内容。

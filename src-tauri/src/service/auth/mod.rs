@@ -66,20 +66,15 @@ impl AuthService {
         registry: Arc<dyn ProviderRegistry>,
         session_repo: Arc<dyn SessionRepository>,
         event_bus: Arc<CoreEventBus>,
+        access: Arc<crate::core::access::AccessRevision>,
     ) -> Self {
         Self {
-            access: Arc::default(),
+            access,
             revoked_identities: Mutex::default(),
             registry,
             session_repo,
             event_bus,
         }
-    }
-
-    /// Bind the application's explicit access revision fence at assembly time.
-    pub fn with_access(mut self, access: Arc<crate::core::access::AccessRevision>) -> Self {
-        self.access = access;
-        self
     }
 
     /// 登录：调用 AuthProvider → 保存会话 → 发布事实通知。

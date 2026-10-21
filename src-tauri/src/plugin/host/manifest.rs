@@ -264,7 +264,7 @@ impl PluginManifest {
 pub fn valid_origin(origin: &str) -> bool {
     url::Url::parse(origin).is_ok_and(|url| {
         matches!(url.scheme(), "https" | "http")
-            && url.host_str().is_some_and(|h| !h.contains('*'))
+            && matches!(url.host(), Some(url::Host::Domain(host)) if !host.contains('*'))
             && url.username().is_empty()
             && url.password().is_none()
             && url.path() == "/"

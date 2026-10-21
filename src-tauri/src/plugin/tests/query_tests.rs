@@ -525,15 +525,12 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let bus = Arc::new(CoreEventBus::new());
     let access = Arc::new(AccessRevision::default());
-    let registry =
-        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")).with_access(access.clone()));
-    let config = Arc::new(
-        ConfigService::new(
-            Arc::new(FsConfigRepository::new(storage.clone(), "config.json")),
-            bus.clone(),
-        )
-        .with_access(access.clone()),
-    );
+    let registry = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone()));
+    let config = Arc::new(ConfigService::new(
+        Arc::new(FsConfigRepository::new(storage.clone(), "config.json")),
+        bus.clone(),
+        access.clone(),
+    ));
     let endpoint = config
         .get()
         .oj
@@ -544,16 +541,20 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
         .base_url;
     registry.set_instance_endpoint(OjId::new("HOJ"), endpoint);
     let sessions = Arc::new(Sessions(AtomicUsize::new(0)));
-    let auth = Arc::new(
-        AuthService::new(registry.clone(), sessions.clone(), bus.clone())
-            .with_access(access.clone()),
-    );
+    let auth = Arc::new(AuthService::new(
+        registry.clone(),
+        sessions.clone(),
+        bus.clone(),
+        access.clone(),
+    ));
     let source = Arc::new(ServiceQueries {
         auth: auth.clone(),
-        contest: Arc::new(
-            ContestService::new(registry.clone(), bus.clone(), storage.clone())
-                .with_access(access.clone()),
-        ),
+        contest: Arc::new(ContestService::new(
+            registry.clone(),
+            bus.clone(),
+            storage.clone(),
+            access.clone(),
+        )),
         submission: Arc::new(SubmissionService::new(registry.clone(), bus, storage)),
         registry,
         config,

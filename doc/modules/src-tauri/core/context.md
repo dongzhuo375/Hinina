@@ -103,3 +103,5 @@ switch_oj(id) → AppContext::ensure_oj_registered(id)
 AppContext新增通用access和Send的plugin_manager控制器；共享revision注入Auth/Contest/Config/Registry。Manager绑定只读ServiceQueries与PluginHost。main.rs注入Tauri文本通知并在持久Tauri运行时autostart；引擎只在独立线程构建，退出同步cancel_all，不阻塞工作区关窗。
 
 插件装配同时注入AccessRevision、ServiceQueries的revision缓存、Arc<dyn PluginRepository>和PluginApiFactory（FsPluginApiFactory）。Manager不再选择具体I/O实现，测试可使用内存仓库和假工厂。
+
+AuthService、ConfigService、ContestService、ProviderRegistryImpl均在构造时接收同一共享AccessRevision，不再以with_access可选补绑定。

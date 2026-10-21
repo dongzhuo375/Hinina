@@ -6,8 +6,7 @@ fn connection_changes_revoke_scope_even_when_persistence_fails() {
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(storage, "config.json"));
     let access = Arc::new(crate::core::access::AccessRevision::default());
-    let service =
-        ConfigService::new(repo, Arc::new(CoreEventBus::new())).with_access(access.clone());
+    let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()), access.clone());
     let before = access.snapshot().unwrap();
     service.update(|cfg| cfg.editor.font_size += 1).unwrap();
     assert!(!before.cancellation.is_cancelled());
@@ -39,7 +38,7 @@ fn test_config_service(path: &str) -> (Guarded<ConfigService<FsConfigRepository>
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
     let event_bus = Arc::new(CoreEventBus::new());
     (
-        Guarded::new(ConfigService::new(repo, event_bus), dir),
+        Guarded::new(ConfigService::new(repo, event_bus, Arc::default()), dir),
         storage,
     )
 }
@@ -56,7 +55,7 @@ fn new_loads_existing_config() {
     custom.editor.font_size = 18;
     repo.save_config(&custom).unwrap();
 
-    let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()));
+    let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()), Arc::default());
     let loaded = service.get();
     assert_eq!(loaded.theme.theme_name, "light");
     assert_eq!(loaded.editor.font_size, 18);
@@ -93,7 +92,7 @@ fn new_normalizes_legacy_config_from_disk() {
         .unwrap();
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
 
-    let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()));
+    let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()), Arc::default());
     let cfg = service.get();
     assert_eq!(cfg.editor.default_language, "C++");
     assert_eq!(cfg.theme.theme_name, "light");
@@ -108,7 +107,7 @@ fn update_persists_changes() {
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
 
     {
-        let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()));
+        let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()), Arc::default());
         service
             .update(|cfg| {
                 cfg.theme.theme_name = "light".into();
@@ -119,7 +118,7 @@ fn update_persists_changes() {
 
     // create a new ConfigService — should pick up persisted changes
     let repo2 = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
-    let service2 = ConfigService::new(repo2, Arc::new(CoreEventBus::new()));
+    let service2 = ConfigService::new(repo2, Arc::new(CoreEventBus::new()), Arc::default());
     let cfg = service2.get();
     assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.editor.tab_size, 2);
@@ -152,7 +151,7 @@ fn reload_publishes_config_changed_event() {
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
     let event_bus = Arc::new(CoreEventBus::new());
-    let service = ConfigService::new(repo, Arc::clone(&event_bus));
+    let service = ConfigService::new(repo, Arc::clone(&event_bus), Arc::default());
     let mut rx = subscribe(&event_bus);
 
     service.reload().unwrap();
@@ -177,7 +176,7 @@ fn update_publishes_config_changed_event() {
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
     let event_bus = Arc::new(CoreEventBus::new());
-    let service = ConfigService::new(repo, Arc::clone(&event_bus));
+    let service = ConfigService::new(repo, Arc::clone(&event_bus), Arc::default());
     let mut rx = subscribe(&event_bus);
 
     service.update(|cfg| cfg.editor.auto_save = false).unwrap();
@@ -196,7 +195,7 @@ fn config_changed_is_published_only_after_persist() {
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
     let event_bus = Arc::new(CoreEventBus::new());
-    let service = ConfigService::new(repo, Arc::clone(&event_bus));
+    let service = ConfigService::new(repo, Arc::clone(&event_bus), Arc::default());
     let mut rx = subscribe(&event_bus);
 
     service.update(|cfg| cfg.editor.auto_save = false).unwrap();
@@ -217,7 +216,7 @@ fn update_failure_does_not_publish_config_changed_event() {
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
     let event_bus = Arc::new(CoreEventBus::new());
-    let service = ConfigService::new(repo, Arc::clone(&event_bus));
+    let service = ConfigService::new(repo, Arc::clone(&event_bus), Arc::default());
     let mut rx = subscribe(&event_bus);
 
     // 构造后 config.json 已存在（构造函数会落盘默认值）：先删掉再占位成目录，

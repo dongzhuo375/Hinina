@@ -1,4 +1,11 @@
-/** Plugin API 2 for the embedded QuickJS host. Bundle TypeScript offline to one ES module. */
+/**
+ * Plugin API 2 for the embedded QuickJS host. Bundle TypeScript offline to one ES module.
+ * Every Promise-returning host API MUST be awaited, or returned/chained into the
+ * Promise returned by activate/an event handler. Await Promise.all for parallel calls.
+ * Fire-and-forget calls (void promise, unreturned .then, detached async work) are unsupported:
+ * after activate/handler settles there is no guarantee they execute or report rejection.
+ * events.on and its unsubscribe function are synchronous and need no await.
+ */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type PluginPermission = 'events.subscribe' | 'submission.read' | 'contest.read' | 'identity.read' | 'storage.read' | 'storage.write' | 'network.request' | 'notification'
 export type PluginQueryContext = string

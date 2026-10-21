@@ -82,7 +82,12 @@ fn default_config_has_exactly_one_enabled_hoj_instance() {
 // 锁定共享实现的行为。
 
 fn test_registry() -> Arc<dyn ProviderRegistry> {
-    Arc::new(crate::infra::provider_registry_impl::ProviderRegistryImpl::new(OjId::new("HOJ")))
+    Arc::new(
+        crate::infra::provider_registry_impl::ProviderRegistryImpl::new(
+            OjId::new("HOJ"),
+            Arc::default(),
+        ),
+    )
 }
 
 fn test_deps(tag: &str) -> Guarded<crate::adapter::AdapterDeps> {

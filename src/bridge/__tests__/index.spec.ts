@@ -31,6 +31,17 @@ describe('ipcInvoke — 成功路径', () => {
   })
 })
 
+it('rejects malformed plugin permission types instead of misclassifying them', async () => {
+  for (const permission of [null, 1, {}, ['events.subscribe']]) {
+    const payload = { code: 'permission_denied', permission }
+    invoke.mockRejectedValue(payload)
+    const error = await captureError('plugin_start')
+    expect(error.code).toBeUndefined()
+    expect(error.raw).toEqual(payload)
+    expect(error.message).toBe(JSON.stringify(payload))
+  }
+})
+
 it('保留 PluginError 的稳定 code 和权限信息', async () => {
   const payload = { code: 'permission_denied', permission: 'events.subscribe' }
   invoke.mockRejectedValue(payload)

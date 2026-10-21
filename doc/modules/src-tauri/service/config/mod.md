@@ -6,7 +6,7 @@
 ## 核心类型/函数
 - `pub mod error` — 配置错误类型模块声明
 - **`ConfigService<R: ConfigRepository>`** — 统一配置管理服务
-  - `fn new(repo, event_bus) -> Self` — 创建实例并立即加载配置；加载成功后先经 `normalize_legacy_values` 归一旧默认值（P55，见下）；首次启动时配置文件不存在则自动使用默认值并持久化
+  - `fn new(repo, event_bus, access) -> Self` — 创建实例并立即加载配置；加载成功后先经 `normalize_legacy_values` 归一旧默认值（P55，见下）；首次启动时配置文件不存在则自动使用默认值并持久化
   - `fn get(&self) -> AppConfig` — 获取当前配置的不可变副本
   - `fn update<F>(&self, updater: F) -> AppResult<AppConfig>` — 通过闭包修改配置后自动保存到磁盘（失败时保留内存修改，返回错误供调用方回滚，且**不发布事件**），成功后发布 `CoreEvent::ConfigChanged`。**为什么在这里发布**：`update` 才是生产链路的配置变更入口（`update_config`、主题切换、`switch_oj` 的持久化都走它）；只有 `reload` 发布的话，观察者永远等不到通知 —— `reload_config` 命令在前端没有调用方（2026-09-21 复核）
   - `fn reload(&self) -> AppResult<AppConfig>` — 强制从磁盘重新加载，覆盖内存副本；**与 `new()` 同一归一入口**：手改磁盘文件后 reload 同样要修正旧值；加载成功后发布 `CoreEvent::ConfigChanged`
@@ -35,4 +35,6 @@
 
 ## 有效连接变更
 
-with_access注入revision，update持有配置锁时比较OJ配置，发生变化立即撤销旧scope；即使后续持久化失败也生效。普通editor修改不撤销；reload保守撤销。配置事件仍只在持久化成功后发布。
+构造函数必传共享AccessRevision，update持有配置锁时比较OJ配置，发生变化立即撤销旧scope；即使后续持久化失败也生效。普通editor修改不撤销；reload保守撤销。配置事件仍只在持久化成功后发布。
+
+访问栅栏为构造必填参数，无私有默认栅栏或with_access后置绑定。组合根创建一次共享Arc<AccessRevision>，测试夹具也显式指定。

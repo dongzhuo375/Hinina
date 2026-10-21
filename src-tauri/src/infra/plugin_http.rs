@@ -3,6 +3,7 @@
 //! @version 2
 //! @stability stable
 //! Isolated HTTP: exact origins, all DNS answers checked then pinned, no cookies/proxy/redirects/retries.
+use super::plugin_diagnostics as diagnostics;
 use crate::plugin::{
     api::{http::*, *},
     host::manifest::PluginPermission,
@@ -17,6 +18,21 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Semaphore;
+
+#[async_trait::async_trait]
+trait Resolver: Send + Sync {
+    async fn resolve(&self, host: &str, port: u16) -> std::io::Result<Vec<SocketAddr>>;
+}
+struct SystemResolver;
+#[async_trait::async_trait]
+impl Resolver for SystemResolver {
+    async fn resolve(&self, host: &str, port: u16) -> std::io::Result<Vec<SocketAddr>> {
+        Ok(tokio::net::lookup_host((host, port))
+            .await?
+            .take(65)
+            .collect())
+    }
+}
 
 /// @plugin-api
 /// @since 2.0
@@ -68,6 +84,7 @@ pub struct PluginHttp {
     limiter: DefaultDirectRateLimiter,
     concurrent: Semaphore,
     transport: Arc<dyn HttpTransport>,
+    resolver: Arc<dyn Resolver>,
 }
 impl PluginHttp {
     /// @plugin-api
@@ -79,13 +96,20 @@ impl PluginHttp {
         approvals: Vec<NetworkApproval>,
     ) -> PluginResult<Self> {
         for approval in &approvals {
-            approval.validate()?;
+            approval.validate().inspect_err(|_| {
+                diagnostics::failure(
+                    Some(&authority.grant.manifest().id),
+                    "http.approval",
+                    "invalid_approval",
+                )
+            })?;
         }
         Ok(Self {
             authority,
             approvals,
             limiter: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(60).unwrap())),
             concurrent: Semaphore::new(2),
+            resolver: Arc::new(SystemResolver),
             transport: Arc::new(PinnedTransport {
                 clients: Mutex::default(),
             }),
@@ -127,7 +151,10 @@ impl PluginHttp {
         tokio::select! { biased;
             _ = self.authority.stopped.cancelled() => Err(PluginError::ContextExpired),
             _ = scope.cancelled() => Err(PluginError::ContextExpired),
-            result = tokio::time::timeout(Duration::from_millis(timeout.into()), operation) => result.map_err(|_| PluginError::Timeout)?,
+            result = tokio::time::timeout(Duration::from_millis(timeout.into()), operation) => result.map_err(|_| {
+                diagnostics::failure(Some(&self.authority.grant.manifest().id), "http.deadline", "timeout");
+                PluginError::Timeout
+            })?,
         }
     }
     async fn send(
@@ -166,16 +193,24 @@ impl PluginHttp {
         let addresses: Vec<SocketAddr> = if let Ok(ip) = host.parse::<IpAddr>() {
             vec![SocketAddr::new(ip, port)]
         } else {
-            tokio::net::lookup_host((host, port))
-                .await
-                .map_err(|_| PluginError::Unavailable)?
-                .take(65)
-                .collect()
+            self.resolver.resolve(host, port).await.map_err(|error| {
+                diagnostics::io(
+                    Some(&self.authority.grant.manifest().id),
+                    "http.resolve",
+                    &error,
+                );
+                PluginError::Unavailable
+            })?
         };
         if addresses.is_empty()
             || addresses.len() > 64
             || addresses.iter().any(|a| !allowed_address(a.ip(), approval))
         {
+            diagnostics::failure(
+                Some(&self.authority.grant.manifest().id),
+                "http.address_policy",
+                "rejected_addresses",
+            );
             return Err(PluginError::InvalidInput);
         }
         self.send_pinned(context, request, url, addresses).await
@@ -243,7 +278,14 @@ impl HttpTransport for PinnedTransport {
                     .retry(reqwest::retry::never())
                     .resolve_to_addrs(host, &addresses)
                     .build()
-                    .map_err(|_| PluginError::Unavailable)?;
+                    .map_err(|error| {
+                        diagnostics::http(
+                            Some(&authority.grant.manifest().id),
+                            "http.client",
+                            &error,
+                        );
+                        PluginError::Unavailable
+                    })?;
                 let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
                 if clients.len() >= 32 {
                     clients.pop_front();
@@ -264,7 +306,10 @@ impl HttpTransport for PinnedTransport {
             builder = builder.header(key, value);
         }
         if let Some(body) = request.body {
-            let bytes = serde_json::to_vec(&body).map_err(|_| PluginError::InvalidInput)?;
+            let bytes = serde_json::to_vec(&body).map_err(|error| {
+                diagnostics::json(Some(&authority.grant.manifest().id), "http.encode", &error);
+                PluginError::InvalidInput
+            })?;
             if bytes.len() > authority.grant.manifest().network.max_body_bytes as usize {
                 return Err(PluginError::LimitExceeded);
             }
@@ -274,6 +319,7 @@ impl HttpTransport for PinnedTransport {
         }
         authority.check(context).await?;
         let mut response = builder.send().await.map_err(|e| {
+            diagnostics::http(Some(&authority.grant.manifest().id), "http.send", &e);
             if e.is_timeout() {
                 PluginError::Timeout
             } else {
@@ -284,6 +330,11 @@ impl HttpTransport for PinnedTransport {
             .remote_addr()
             .is_none_or(|a| !addresses.contains(&a))
         {
+            diagnostics::failure(
+                Some(&authority.grant.manifest().id),
+                "http.peer",
+                "unexpected_address",
+            );
             return Err(PluginError::Unavailable);
         }
         let status = response.status().as_u16();
@@ -305,11 +356,10 @@ impl HttpTransport for PinnedTransport {
             return Err(PluginError::LimitExceeded);
         }
         let mut body = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| PluginError::Unavailable)?
-        {
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            diagnostics::http(Some(&authority.grant.manifest().id), "http.read", &error);
+            PluginError::Unavailable
+        })? {
             if body.len() + chunk.len() > MAX_HTTP_BODY_BYTES {
                 return Err(PluginError::LimitExceeded);
             }
@@ -320,7 +370,14 @@ impl HttpTransport for PinnedTransport {
             ok: (200..300).contains(&status),
             status,
             headers,
-            body: String::from_utf8(body).map_err(|_| PluginError::Unavailable)?,
+            body: String::from_utf8(body).map_err(|_| {
+                diagnostics::failure(
+                    Some(&authority.grant.manifest().id),
+                    "http.decode",
+                    "invalid_utf8",
+                );
+                PluginError::Unavailable
+            })?,
         })
     }
 }

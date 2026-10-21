@@ -64,7 +64,7 @@ fn empty_events_do_not_require_event_subscription_permission() {
 }
 
 #[test]
-fn network_policy_requires_permission_and_public_hostname_shape() {
+fn network_policy_requires_permission_and_normalized_domain_origin() {
     let mut value = manifest();
     value.permissions.push(PluginPermission::NetworkRequest);
     value.network.allow_origins = vec!["https://balloon.example.com".into()];
@@ -75,6 +75,13 @@ fn network_policy_requires_permission_and_public_hostname_shape() {
         "127.0.0.1",
         "10.0.0.1",
         "x.local",
+        "http://127.0.0.1",
+        "https://169.254.169.254",
+        "https://8.8.8.8",
+        "https://[2001:4860:4860::8888]",
+        "http://[::1]",
+        "https://[fe80::1]",
+        "http://2130706433",
         "https://*.example.com",
         "https://example.com/path",
     ] {
@@ -83,6 +90,12 @@ fn network_policy_requires_permission_and_public_hostname_shape() {
         value.network.allow_origins = vec![host.into()];
         assert_eq!(value.validate(), Err(ManifestError("network")), "{host}");
     }
+    let mut hostname = manifest();
+    hostname.permissions.push(PluginPermission::NetworkRequest);
+    hostname.network.allow_origins = vec!["https://public.example.com".into()];
+    hostname.validate().unwrap();
+    hostname.network.allow_origins = vec!["http://balloons.internal:8080".into()];
+    hostname.validate().unwrap(); // Runtime DNS/IP policy still validates all resolved addresses.
     let mut value = manifest();
     value.network.allow_origins = vec!["https://balloon.example.com".into()];
     assert_eq!(value.validate(), Err(ManifestError("network")));

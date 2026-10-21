@@ -10,7 +10,7 @@
 - **`Session`** — 本地会话记录，**由 `core::entity::session` re-export**（`pub use crate::core::entity::session::Session;`）：领域层与适配器层共用同一份 schema，本模块不再自带一份定义。字段与兼容别名见 `core/entity/session.md`
 - **`SessionValidity`** — 会话校验三态结果（`Valid` / `Invalid` / `Unknown`），`#[serde(rename_all = "snake_case")]` 序列化为 `valid` / `invalid` / `unknown`，属跨端契约。区分"服务端明确失效"与"无法判定"至关重要：后者若按失效处理，会在赛前把选手踢回登录页，反复重登还可能触发 HOJ 的暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）
 - **`AuthService`** — 认证服务
-  - `fn new(registry, session_repo, event_bus) -> Self` — 创建实例（**不持有 storage**；会话读写全部经 `session_repo`）
+  - `fn new(registry, session_repo, event_bus, access) -> Self` — 创建实例（**不持有 storage**；会话读写全部经 `session_repo`）
   - `async fn login(&self, username, password) -> AppResult<User>` — 调用 AuthProvider 登录 → **显式** `session_repo.save(&Session::new(...))` → 发布 `CoreEvent::LoggedIn { oj_id, user_id }`。**落盘失败则整体失败、不发布事件** —— 会话没落盘就宣告登录成功，会让重启后的客户端拿着不存在的会话工作。登录失败经 `e.context("登录失败")` 上抛，**保留原始变体**
   - `async fn logout(&self) -> AppResult<()>` — 远端登出（非致命，失败仅 `warn`）→ 显式删除本地会话 → 发布 `CoreEvent::LoggedOut { oj_id }`
   - `fn get_session(&self) -> Option<Session>` — 经 `session_repo.load(&oj_id)` 恢复会话；恢复成功时将 token 回注到 Provider（`AuthProvider::restore_token`），保证重启后认证请求仍携带 Authorization 头；仓库报错时 `warn` 留痕并按未登录处理（不静默吞掉 —— 否则「会话文件损坏」表现为「从未登录」）
@@ -53,6 +53,8 @@
 
 ## 插件安全身份读路径
 
-identity_metadata仅返回内部稳定ID/用户名，不调用get_session或恢复Token。插件 scope 读取由 ScopedQueries 通过 `spawn_blocking` 调用，避免在 Tokio 执行线程同步读取会话文件。with_access绑定通用revision，登录/登出/失效清理显式撤销在途读。
+identity_metadata仅返回内部稳定ID/用户名，不调用get_session或恢复Token。插件 scope 读取由 ScopedQueries 通过 `spawn_blocking` 调用，避免在 Tokio 执行线程同步读取会话文件。构造函数必传共享AccessRevision，登录/登出/失效清理显式撤销在途读。
 
 登录进行中由 AccessRevision 禁止新插件查询；取得 Provider 失败或远端认证失败/取消，不修改既有 revoked_identities 状态，原来可用的旧身份可供新上下文使用，原已撤销的身份仍被拒绝。Provider 成功接纳新凭据后才标记撤销，持久化成功再恢复可见性；此时若落盘失败则继续拒绝旧磁盘身份，防止新凭据与旧身份混用。登出或失效清理即使删除会话文件失败，也保留身份撤销状态。
+
+访问栅栏为构造必填参数，无私有默认栅栏或with_access后置绑定。组合根创建一次共享Arc<AccessRevision>，测试夹具也显式指定。

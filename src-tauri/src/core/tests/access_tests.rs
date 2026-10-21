@@ -21,8 +21,7 @@ fn oj_scope_switch_does_not_publish_new_oj_with_old_contest() {
     use crate::core::provider::{oj_id::OjId, registry::ProviderRegistry};
     use crate::infra::provider_registry_impl::ProviderRegistryImpl;
     let access = Arc::new(AccessRevision::default());
-    let registry =
-        Arc::new(ProviderRegistryImpl::new(OjId::new("old")).with_access(access.clone()));
+    let registry = Arc::new(ProviderRegistryImpl::new(OjId::new("old"), access.clone()));
     let contest = Arc::new(Mutex::new(Some("old-contest")));
     let (reached, inspect) = (
         Arc::new(std::sync::Barrier::new(2)),

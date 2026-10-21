@@ -24,7 +24,11 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 创建 ConfigService 并立即从 Repo 加载配置。
     ///
     /// 首次启动时配置文件不存在，自动使用默认值并持久化。
-    pub fn new(repo: Arc<R>, event_bus: Arc<CoreEventBus>) -> Self {
+    pub fn new(
+        repo: Arc<R>,
+        event_bus: Arc<CoreEventBus>,
+        access: Arc<crate::core::access::AccessRevision>,
+    ) -> Self {
         let config = match repo.load_config::<AppConfig>() {
             Ok(mut cfg) => {
                 info!("配置加载成功");
@@ -44,17 +48,11 @@ impl<R: ConfigRepository> ConfigService<R> {
         };
 
         Self {
-            access: Arc::default(),
+            access,
             repo,
             event_bus,
             config: RwLock::new(config),
         }
-    }
-
-    /// Bind the application's explicit access revision fence at assembly time.
-    pub fn with_access(mut self, access: Arc<crate::core::access::AccessRevision>) -> Self {
-        self.access = access;
-        self
     }
 
     /// 获取当前配置的不可变副本。

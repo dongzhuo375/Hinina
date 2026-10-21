@@ -2,6 +2,8 @@
 
 宿主当前可运行单文件 ES module。本文只提供通用开发脚手架，不包含首次AC或气球业务。
 
+**异步调用契约**：所有返回 Promise 的宿主 API 都必须 await，或作为 activate/事件 handler 返回的 Promise 链的一部分。并发调用使用 await Promise.all。禁止依赖 void apiCall()、未返回的 .then() 或游离异步任务：activate/handler 返回后，引擎不承诺继续执行这些调用或报告拒绝；无事件订阅的插件尤其不会因未完成调用而被后台驱动。本轮不新增 drain，也不在运行时检测/拒绝“忘记 await”。events.on 与注销函数是同步方法，无需 await。
+
 ## 1. 准备代码
 
 复制整个 [sdk](sdk/) 到本地开发目录；保留 hinina.d.ts、scaffold/index.ts，将 manifest.example.json 复制为 manifest.json。示例ID为 com.example.development，默认只声明事件和私有存储。

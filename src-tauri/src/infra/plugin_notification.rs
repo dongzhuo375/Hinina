@@ -3,6 +3,7 @@
 //! @version 2
 //! @stability stable
 //! Text-only frontend output. Rust and frontend both bound the payload.
+use super::plugin_diagnostics as diagnostics;
 use crate::plugin::{
     api::{notification::*, *},
     execution_api::NotificationOutput,
@@ -23,6 +24,7 @@ impl NotificationOutput for TauriPluginNotifications {
     ) -> PluginResult<()> {
         validate_message(message)?;
         if self.0.webview_windows().is_empty() {
+            diagnostics::failure(Some(plugin_id), "notification.emit", "no_window");
             return Err(PluginError::Unavailable);
         }
         self.0
@@ -30,6 +32,9 @@ impl NotificationOutput for TauriPluginNotifications {
                 "plugin-notification",
                 serde_json::json!({"pluginId":plugin_id,"level":level,"message":message}),
             )
-            .map_err(|_| PluginError::Unavailable)
+            .map_err(|_| {
+                diagnostics::failure(Some(plugin_id), "notification.emit", "emit_failed");
+                PluginError::Unavailable
+            })
     }
 }

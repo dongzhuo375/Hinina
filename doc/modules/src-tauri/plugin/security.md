@@ -13,3 +13,5 @@ JS只取得冻结的hinina API；不暴露AppContext、Service、Provider、Core
 日志字段统一 plugin_id/plugin_version/runtime/event/operation/permission/request_id；API debug日志仅记操作、成功与请求ID，worker记录状态。禁止记录token/password/authorization/source_code、完整请求/响应体、绝对路径、用户隐私或JS错误栈。普通Service日志沿用原项目策略，插件不接收这些日志。
 
 未完成的业务由插件负责：历史完整性与跨页变化处理、首次AC规则、幂等键、可恢复失败状态、外部重试与服务端去重。本地CAS不能提供远端exactly-once。
+
+基础设施诊断统一记录安全操作名、IO ErrorKind、serde分类或HTTP错误类别，禁止源错误字符串/URL/路径/配置和通知正文。非法plugin_id替换占位符。四个访问变更组件强制构造注入共享栅栏；所有origin必须为域名，IP字面量在清单阶段即拒绝。
