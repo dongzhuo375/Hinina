@@ -263,6 +263,9 @@ impl AppContext {
     /// 会绕过配置成为后门。
     pub fn ensure_oj_registered(&self, oj_id: &str) -> bool {
         let id = OjId::new(oj_id);
+        // Existing endpoints change only after restart, as advertised in SettingsView.
+        // Do not replace a live adapter (and its credentials/caches) or retag its endpoint.
+        // Plugin scopes also use this running endpoint while configuration is pending.
         if id.as_str().is_empty() || self.provider_registry.list_available().contains(&id) {
             return false;
         }

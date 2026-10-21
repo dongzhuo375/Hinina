@@ -1,5 +1,5 @@
 use super::*;
-use crate::plugin::tests::support::manifest;
+use crate::plugin::test_support::manifest;
 fn setup(dir: &crate::test_support::TempDir) -> FsPluginRepository {
     let code = dir.join("plugins/test.repo");
     std::fs::create_dir_all(&code).unwrap();

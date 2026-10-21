@@ -6,7 +6,7 @@
 use crate::plugin::{
     api::{event::PluginEventEnvelope, *},
     execution_api::call_json,
-    limits::{ACTIVATION_TIMEOUT, EVENT_TIMEOUT},
+    limits::{ACTIVATION_TIMEOUT, API_ERROR_GRACE, EVENT_TIMEOUT},
 };
 use rquickjs::{
     function::{Async, Func},
@@ -117,6 +117,7 @@ impl QuickJsRuntime {
         let config = config.to_string();
         let allowed = serde_json::to_string(&allowed).map_err(|_| PluginError::InvalidInput)?;
         let stopped = self.stopped.clone();
+        let execution_deadline = self.deadline.clone();
         let pending = Arc::new(tokio::sync::Semaphore::new(16));
         self.set_deadline(ACTIVATION_TIMEOUT);
         let operation = self.context.async_with(async |ctx| {
@@ -128,11 +129,16 @@ impl QuickJsRuntime {
                     Some((operation, input))
                 } else { None };
                 let api = api.clone(); let stopped = stopped.clone();
+                // Anchor each call to this execution window, including calls made late
+                // in a handler. The hard watchdog still bounds JS error handling itself.
+                let call_deadline = execution_deadline.lock().unwrap_or_else(|e| e.into_inner())
+                    .and_then(|end| end.checked_sub(API_ERROR_GRACE)).unwrap_or_else(Instant::now);
                 async move {
                     let _permit = permit;
                     let Some((operation, input)) = arguments else { return "{\"ok\":false,\"error\":{\"code\":\"limit_exceeded\"}}".to_string(); };
                     tokio::select! { biased;
                         _ = stopped.cancelled() => "{\"ok\":false,\"error\":{\"code\":\"context_expired\"}}".to_string(),
+                        _ = tokio::time::sleep_until(tokio::time::Instant::from_std(call_deadline)) => "{\"ok\":false,\"error\":{\"code\":\"timeout\"}}".to_string(),
                         result = call_json(api.as_ref(), operation, input) => result,
                     }
                 }

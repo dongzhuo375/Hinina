@@ -88,3 +88,16 @@
 HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存HttpTransport响应；真实连接、响应体和redirect策略使用本地私有transport夹具。没有为了测试公开任何loopback豁免或IPC策略开关。
 
 验证命令：`cargo test --offline --manifest-path src-tauri/Cargo.toml`、`npm test`、`npm run build`、`npm run plugin:sdk:check`，以及本轮Rust文件的rustfmt检查。最终通过情况以当轮执行输出及交付说明为准。
+
+## 查询可用性与桥契约跟进（基线bc75b18）
+
+| 发现 | 确认与修复 |
+|---|---|
+| 已有OJ地址修改后所有插件查询不可用 | Medium成立；Registry保留原Adapter是设置页“重启后生效”的既有约定，问题在scope强制等于待生效URL。改为绑定实际运行endpoint；配置变更仍撤销旧context，新context保留原身份键。删除/禁用仍拒绝，缺endpoint/不可用/待重启均有脱敏warn |
+| submission.get多页扫描超过入口期限 | Medium成立；整体扫描最多5秒，保留100页及每native页预算。Runtime宿主调用在当前入口硬截止前1秒返回timeout，晚发起请求也有catch处理时间；未捕获错误或超出硬期限仍失败。取消/丢弃扫描用RAII清理内部及未发布游标 |
+| stringify抛裸TypeError | Low成立；循环引用、BigInt及异常toJSON统一拒绝冻结的invalid_input对象，不执行host调用，不泄漏异常消息 |
+| manager/query聚合挂载测试 | Low成立（仓库约定）；移除tests/mod.rs，所属模块直接#[path]挂载测试，共享support由plugin根直接挂载为cfg(test)的test_support |
+
+真实引擎分别覆盖激活/事件扫描超时及晚发起请求的可捕获性，虚拟时间验证总期限、游标与许可释放；URL回归使用真实配置/注册表且验证诊断不含URL/凭据。保留既有地址重启契约，不热替换有会话和缓存的Provider。
+
+本轮通过完整Rust测试、前端测试/生产构建、SDK类型检查、脚手架构建和改动Rust文件的rustfmt检查。Clippy全部targets完成，仅保留六项既有告警；前端构建保留既有大chunk提示，未新增依赖或联网测试。

@@ -246,7 +246,7 @@ Hinina/
         │   │   ├── mod.rs                # !Send Runtime/Bridge契约
         │   │   ├── quickjs.rs            # 真实引擎、Promise、中断与稳定错误
         │   │   └── bootstrap.js          # 冻结API与私有host桥
-        │   └── tests/                   # query/manager/manager_history/execution_api/bounded_json与装配支撑
+        │   └── tests/                   # 各模块以#[path]挂载manager/query等回归；support.rs直接挂载为test_support，无聚合mod.rs
         └── commands/                     # Tauri Command 薄封装
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）

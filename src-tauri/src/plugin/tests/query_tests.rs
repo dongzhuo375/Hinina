@@ -1,4 +1,4 @@
-use super::support::*;
+use crate::plugin::test_support::*;
 use crate::{
     core::{access::AccessRevision, entity::submission::SubmissionHistoryPage},
     plugin::{
@@ -703,4 +703,267 @@ async fn cursor_memory_budget_is_shared_and_released_when_continuations_are_cons
         q.list(&context, query).await,
         Err(PluginError::LimitExceeded)
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn metadata_scan_has_one_total_deadline_and_releases_query_resources() {
+    use crate::plugin::limits::{ACTIVATION_TIMEOUT, API_ERROR_GRACE, SUBMISSION_LOOKUP_TIMEOUT};
+    use std::{sync::atomic::Ordering, time::Duration};
+    assert!(SUBMISSION_LOOKUP_TIMEOUT + API_ERROR_GRACE < ACTIVATION_TIMEOUT);
+    let source = Arc::new(Source {
+        history_delay: Some(Duration::from_secs(3)),
+        ..Default::default()
+    });
+    *source.pages.lock().unwrap() = (0..10)
+        .map(|_| SubmissionHistoryPage {
+            records: vec![record("other")],
+            total: None,
+            has_more: true,
+        })
+        .collect();
+    let q = Arc::new(queries_with_budget(
+        source.clone(),
+        Arc::new(crate::plugin::query::QueryBudget::new(120, 1)),
+    ));
+    let context = q.current_context().await.unwrap();
+    let (result, ()) = tokio::join!(q.submission(&context, "contest", "missing"), async {
+        source.history_started.notified().await;
+        tokio::time::advance(Duration::from_secs(3)).await;
+        source.history_started.notified().await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+    });
+    assert_eq!(result, Err(PluginError::Timeout));
+    assert_eq!(source.history_calls.load(Ordering::SeqCst), 2);
+    assert!(q.state.lock().unwrap().cursors.is_empty());
+    assert_eq!(q.budget.concurrent.available_permits(), 2);
+    assert_eq!(q.shared_budget.concurrent.available_permits(), 1);
+    q.contest(&context, None).await.unwrap();
+}
+
+#[tokio::test]
+async fn dropping_list_during_final_scope_check_removes_unpublished_continuation() {
+    use crate::plugin::query::{QueryScope, QuerySource};
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        },
+        time::Duration,
+    };
+    struct FinalCheck {
+        reads: AtomicUsize,
+        entered: tokio::sync::Notify,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    #[async_trait::async_trait]
+    impl QuerySource for FinalCheck {
+        fn scope(&self) -> PluginResult<QueryScope> {
+            // context.current, list context, remote before/after, final publication check.
+            if self.reads.fetch_add(1, Ordering::SeqCst) == 4 {
+                self.entered.notify_one();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+            }
+            Source::default().scope()
+        }
+        async fn contest(&self, _: &str) -> PluginResult<crate::core::entity::contest::Contest> {
+            unreachable!()
+        }
+        async fn history(&self, _: &str, _: u32) -> PluginResult<SubmissionHistoryPage> {
+            Ok(SubmissionHistoryPage {
+                records: vec![record("1"), record("2")],
+                total: None,
+                has_more: false,
+            })
+        }
+    }
+    let (release, receiver) = std::sync::mpsc::channel();
+    let source = Arc::new(FinalCheck {
+        reads: AtomicUsize::new(0),
+        entered: tokio::sync::Notify::new(),
+        release: Mutex::new(receiver),
+    });
+    let m = manifest("test.cancel-page");
+    let q = Arc::new(ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        Arc::default(),
+        Default::default(),
+    ));
+    let c = q.current_context().await.unwrap();
+    let operation = {
+        let q = q.clone();
+        tokio::spawn(async move {
+            q.list(
+                &c,
+                PluginSubmissionQuery {
+                    contest_id: "contest".into(),
+                    problem_id: None,
+                    cursor: None,
+                    limit: 1,
+                },
+            )
+            .await
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(2), source.entered.notified())
+        .await
+        .unwrap();
+    assert_eq!(q.state.lock().unwrap().cursors.len(), 1);
+    operation.abort();
+    assert!(operation.await.unwrap_err().is_cancelled());
+    assert!(q.state.lock().unwrap().cursors.is_empty());
+    release.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn pending_endpoint_edit_keeps_running_provider_scope_and_emits_redacted_diagnostics() {
+    use crate::{
+        core::{
+            entity::session::Session,
+            event::core_event_bus::CoreEventBus,
+            provider::{oj_id::OjId, registry::ProviderRegistry},
+        },
+        infra::{
+            fs_config_repo::FsConfigRepository, provider_registry_impl::ProviderRegistryImpl,
+            storage::Storage,
+        },
+        plugin::query::{QuerySource, ServiceQueries},
+        service::{
+            auth::AuthService, config::ConfigService, contest::ContestService,
+            submission::SubmissionService,
+        },
+    };
+    use std::{io::Write, sync::Mutex};
+    use tracing::instrument::WithSubscriber;
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl Write for Capture {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(data);
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("scope-pending-endpoint");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let bus = Arc::new(CoreEventBus::new());
+    let access = Arc::new(AccessRevision::default());
+    let registry = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone()));
+    let config = Arc::new(ConfigService::new(
+        Arc::new(FsConfigRepository::new(storage.clone(), "config.json")),
+        bus.clone(),
+        access.clone(),
+    ));
+    let endpoint = config.get().oj.instances[0].base_url.clone();
+    let deps = crate::adapter::test_adapter_deps(storage.clone());
+    let factory = crate::adapter::factories()
+        .into_iter()
+        .find(|factory| factory.id() == "HOJ")
+        .unwrap();
+    registry.register(OjId::new("HOJ"), factory.build(&deps, &endpoint));
+    registry.set_instance_endpoint(OjId::new("HOJ"), endpoint.clone());
+    let provider = registry.current_submission().unwrap();
+    deps.session_repo
+        .save(&Session::new("HOJ", "user-1", "alice", "PRIVATE_TOKEN"))
+        .unwrap();
+    let source = Arc::new(ServiceQueries {
+        auth: Arc::new(AuthService::new(
+            registry.clone(),
+            deps.session_repo,
+            bus.clone(),
+            access.clone(),
+        )),
+        contest: Arc::new(ContestService::new(
+            registry.clone(),
+            bus.clone(),
+            storage.clone(),
+            access.clone(),
+        )),
+        submission: Arc::new(SubmissionService::new(registry.clone(), bus, storage)),
+        registry: registry.clone(),
+        config: config.clone(),
+        access: access.clone(),
+        cached_scope: Mutex::default(),
+    });
+    let m = manifest("test.endpoint");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        access,
+        Default::default(),
+    );
+    let old = q.current_context().await.unwrap();
+    let old_identity = q.identity(&old).await.unwrap();
+    config
+        .update(|cfg| {
+            cfg.oj.instances[0].base_url =
+                "https://pending.example.invalid/private?token=SECRET".into()
+        })
+        .unwrap();
+    assert!(matches!(
+        q.check(&old).await,
+        Err(PluginError::ContextExpired)
+    ));
+    let _sink = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .with_writer(std::io::sink)
+            .finish(),
+    );
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let writer = Capture(bytes.clone());
+    let dispatch = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish(),
+    );
+    let current = q
+        .current_context()
+        .with_subscriber(dispatch.clone())
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            q.identity(&current)
+                .with_subscriber(dispatch.clone())
+                .await
+                .unwrap(),
+            old_identity
+        );
+    }
+    assert_eq!(source.scope().unwrap().endpoint, endpoint);
+    assert!(Arc::ptr_eq(
+        &provider,
+        &registry.current_submission().unwrap()
+    ));
+    // A pending URL is different from revoking the instance itself.
+    config
+        .update(|cfg| cfg.oj.instances[0].enabled = false)
+        .unwrap();
+    assert_eq!(
+        q.current_context().with_subscriber(dispatch.clone()).await,
+        Err(PluginError::Unavailable)
+    );
+    config
+        .update(|cfg| cfg.oj.instances[0].enabled = true)
+        .unwrap();
+    q.current_context().await.unwrap();
+    let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+    assert_eq!(log.matches("endpoint_pending_restart").count(), 1);
+    assert!(log.contains("instance_disabled_or_missing"));
+    for secret in [
+        "PRIVATE_TOKEN",
+        "SECRET",
+        "pending.example.invalid",
+        endpoint.as_str(),
+    ] {
+        assert!(!log.contains(secret));
+    }
 }

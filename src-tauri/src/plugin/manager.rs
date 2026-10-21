@@ -561,3 +561,7 @@ impl Drop for PluginManager {
 #[cfg(test)]
 #[path = "tests/manager_history_tests.rs"]
 mod history_tests;
+
+#[cfg(test)]
+#[path = "tests/manager_tests.rs"]
+mod tests;

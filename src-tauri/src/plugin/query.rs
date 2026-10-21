@@ -7,7 +7,9 @@ use super::{
     api::{contest::PluginContest, identity::PluginIdentity, submission::*, *},
     bounded_json,
     host::manifest::PluginPermission,
-    limits::{MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES},
+    limits::{
+        MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, PROVIDER_TIMEOUT, SUBMISSION_LOOKUP_TIMEOUT,
+    },
     permission::PluginGrant,
 };
 use crate::{
@@ -125,20 +127,33 @@ impl QuerySource for ServiceQueries {
             }
         }
         let oj = self.registry.current_id().to_string();
-        let endpoint = self
-            .registry
-            .current_endpoint()
-            .ok_or(PluginError::Unavailable)?;
+        let endpoint = self.registry.current_endpoint().ok_or_else(|| {
+            tracing::warn!(
+                runtime = "js",
+                operation = "scope.resolve",
+                category = "endpoint_missing",
+                "Running OJ provider has no endpoint metadata"
+            );
+            PluginError::Unavailable
+        })?;
         let configured = self.config.get();
-        // Editing a URL does not rebuild an existing provider. Never label an old provider with a new URL.
-        if !configured
+        let Some(instance) = configured
             .oj
             .instances
             .iter()
-            .any(|i| i.enabled && i.id == oj && i.base_url == endpoint)
-        {
+            .find(|i| i.enabled && i.id == oj)
+        else {
+            tracing::warn!(
+                runtime = "js",
+                operation = "scope.resolve",
+                category = "instance_disabled_or_missing",
+                "Running OJ is no longer enabled in configuration"
+            );
             return Err(PluginError::Unavailable);
-        }
+        };
+        // Existing instance URLs intentionally take effect after restart (SettingsView).
+        // Bind queries and identity keys to the running provider, never to a pending URL.
+        let pending_restart = instance.base_url != endpoint;
         let scope = QueryScope {
             oj,
             endpoint,
@@ -153,6 +168,10 @@ impl QuerySource for ServiceQueries {
         }
         *self.cached_scope.lock().unwrap_or_else(|e| e.into_inner()) =
             Some((snapshot, scope.clone()));
+        if pending_restart {
+            // Successful snapshots are cached per revision; no URL/credentials enter the log.
+            tracing::warn!(runtime="js", operation="scope.resolve", category="endpoint_pending_restart", "OJ endpoint change is pending restart; plugin queries keep using the running provider");
+        }
         Ok(scope)
     }
     async fn contest(&self, id: &str) -> PluginResult<Contest> {
@@ -190,6 +209,23 @@ struct Cursor {
 struct State {
     contexts: HashMap<String, Context>,
     cursors: HashMap<String, Cursor>,
+}
+
+/// Removes an unpublished/internal continuation even when the owning future is dropped.
+struct CursorLease<'a> {
+    state: &'a Mutex<State>,
+    id: Option<String>,
+}
+impl Drop for CursorLease<'_> {
+    fn drop(&mut self) {
+        if let Some(id) = &self.id {
+            self.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .cursors
+                .remove(id);
+        }
+    }
 }
 
 /// @plugin-api
@@ -234,9 +270,12 @@ impl ScopedQueries {
         // identity_metadata reads the session repository. Never execute that I/O
         // on the Tokio executor, including checks before/after remote requests.
         let source = self.source.clone();
-        tokio::task::spawn_blocking(move || source.scope())
-            .await
-            .map_err(|_| PluginError::Unavailable)?
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        tokio::task::spawn_blocking(move || {
+            tracing::dispatcher::with_default(&dispatch, || source.scope())
+        })
+        .await
+        .map_err(|_| PluginError::Unavailable)?
     }
     async fn remote<T>(
         &self,
@@ -249,7 +288,7 @@ impl ScopedQueries {
         let result = tokio::select! { biased;
             _ = self.stopped.cancelled() => return Err(PluginError::ContextExpired),
             _ = cancellation.cancelled() => return Err(PluginError::ContextExpired),
-            result = tokio::time::timeout(Duration::from_secs(5), operation) => {
+            result = tokio::time::timeout(PROVIDER_TIMEOUT, operation) => {
                 result.unwrap_or(Err(PluginError::Timeout))
             },
         };
@@ -501,20 +540,15 @@ impl ScopedQueries {
         } else {
             None
         };
-        if let Err(error) = self.check(handle).await {
-            if let Some(id) = &next {
-                self.state
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .cursors
-                    .remove(id);
-            }
-            return Err(error);
-        }
+        let mut continuation = CursorLease {
+            state: &self.state,
+            id: next,
+        };
+        self.check(handle).await?;
         Ok(PluginSubmissionPage {
             records,
             total,
-            next_cursor: next,
+            next_cursor: continuation.id.take(),
         })
     }
     /// @plugin-api
@@ -531,48 +565,41 @@ impl ScopedQueries {
         if id.is_empty() || id.len() > 256 {
             return Err(PluginError::InvalidInput);
         }
-        let mut query = PluginSubmissionQuery {
-            contest_id: contest.into(),
-            problem_id: None,
-            cursor: None,
-            limit: 100,
+        let mut continuation = CursorLease {
+            state: &self.state,
+            id: None,
         };
-        for _ in 0..100 {
-            let page = match self.list(handle, query.clone()).await {
-                Ok(page) => page,
-                Err(error) => {
-                    if let Some(cursor) = &query.cursor {
-                        self.state
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .cursors
-                            .remove(cursor);
-                    }
-                    return Err(error);
+        let scan = async {
+            for _ in 0..100 {
+                let page = self
+                    .list(
+                        handle,
+                        PluginSubmissionQuery {
+                            contest_id: contest.into(),
+                            problem_id: None,
+                            cursor: continuation.id.clone(),
+                            limit: 100,
+                        },
+                    )
+                    .await?;
+                continuation.id = page.next_cursor;
+                if let Some(record) = page.records.into_iter().find(|r| r.submission_id == id) {
+                    return Ok(Some(record));
                 }
-            };
-            if let Some(record) = page.records.into_iter().find(|r| r.submission_id == id) {
-                if let Some(cursor) = page.next_cursor {
-                    self.state
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .cursors
-                        .remove(&cursor);
+                if continuation.id.is_none() {
+                    return Ok(None);
                 }
-                return Ok(Some(record));
             }
-            let Some(cursor) = page.next_cursor else {
-                return Ok(None);
-            };
-            query.cursor = Some(cursor);
-        }
-        if let Some(cursor) = query.cursor {
-            self.state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .cursors
-                .remove(&cursor);
-        }
-        Err(PluginError::LimitExceeded)
+            Err(PluginError::LimitExceeded)
+        };
+        // A whole lookup, including scope checks and all native pages, must finish
+        // before the shortest JS entry deadline so timeout remains catchable in JS.
+        tokio::time::timeout(SUBMISSION_LOOKUP_TIMEOUT, scan)
+            .await
+            .unwrap_or(Err(PluginError::Timeout))
     }
 }
+
+#[cfg(test)]
+#[path = "tests/query_tests.rs"]
+mod tests;

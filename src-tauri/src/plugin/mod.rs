@@ -14,4 +14,5 @@ pub mod query;
 pub mod registry;
 pub mod runtime;
 #[cfg(test)]
-pub(crate) mod tests;
+#[path = "tests/support.rs"]
+pub(crate) mod test_support;

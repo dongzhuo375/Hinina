@@ -78,7 +78,7 @@ fn invalid_ids_are_replaced_and_atomic_failures_keep_safe_io_categories() {
 async fn repository_and_storage_failures_are_actionable_and_redacted() {
     use crate::{
         infra::{fs_plugin_repo::FsPluginRepository, plugin_storage::JsonPluginStorage},
-        plugin::{registry::PluginRepository, tests::support::authority},
+        plugin::{registry::PluginRepository, test_support::authority},
     };
     let (bytes, dispatch, _sink) = capture();
     let dir = crate::test_support::TempDir::unique("private-diagnostic-path");

@@ -2,6 +2,10 @@
 
 ScopedQueries是绑定PluginGrant的安全查询Adapter。QuerySource只提供scope、只读比赛和本人native历史，生产ServiceQueries调用最小Service读路径；不调用Command或含源码详情。
 
+已有OJ实例修改baseUrl沿用设置页“重启后生效”的约定。scope绑定Registry实际运行的endpoint，不能拿待生效地址标记旧Provider；配置变更撤销旧句柄，新句柄仍可查询，身份键也使用实际endpoint。配置中实例被删除/禁用仍拒绝访问。缺endpoint、实例不可用及地址待重启均输出稳定类别的warn，不记录URL或凭据；成功scope按revision缓存，正常热路径不重复输出待重启诊断，阻塞读取继承调用方tracing dispatch。
+
+submission.get整体扫描最多5秒（含scope检查），同时保留100次API页和逐native页预算；超时返回可捕获的timeout，不误报null。内部continuation及list尚未发布的continuation由RAII清理，超时、取消或future被丢弃时不会泄漏游标。
+
 句柄TTL5分钟、最多32；异步前后及取消时检查有效scope，防止跨用户/OJ/比赛或ABA返回。游标最多32个，绑定context和query，保留native页余项；完整性/总数/错误的语义见[提交API](api/submission.md)。
 
 单native页的安全投影JSON最多1MiB，所有保留游标余项JSON合计最多4MiB；编码流式计数，超限为limit_exceeded。领取游标移动所有权，消费后释放余项预算，不克隆整页。失败或过期的游标仍按单次使用语义处理。

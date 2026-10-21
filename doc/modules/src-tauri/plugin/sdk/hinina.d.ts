@@ -88,6 +88,8 @@ export interface PluginManifest {
  * @since 2.0
  * @stability stable
  * All calls use host-bound grants and stable Promise rejection objects.
+ * Non-JSON arguments reject with invalid_input. The host-call timeout cutoff is
+ * one second before the activation/event hard deadline; later calls time out immediately.
  */
 export interface Hinina {
   /** @plugin-api
@@ -115,6 +117,8 @@ export interface Hinina {
      * @permission submission.read
      * @stability stable
      * @async
+     * Scans own history for at most 5 seconds / 100 API pages. An incomplete scan
+     * rejects with timeout or limit_exceeded, never null; use list for incremental work.
      */
     get(context: PluginQueryContext, contestId: string, submissionId: string): Promise<PluginSubmission | null>
     /** @plugin-api

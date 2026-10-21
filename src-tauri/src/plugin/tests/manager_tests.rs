@@ -1,4 +1,4 @@
-use super::support::*;
+use crate::plugin::test_support::*;
 use crate::{
     core::{
         access::AccessRevision,
@@ -627,4 +627,43 @@ async fn two_real_plugins_share_the_manager_provider_budget() {
     assert_eq!(source.contest_calls.load(Ordering::SeqCst), 3);
     manager.stop("test.first").await.unwrap();
     manager.stop("test.second").await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn invalid_json_arguments_reject_with_stable_errors_without_failing_worker() {
+    let dir = crate::test_support::TempDir::unique("plugin-json-errors");
+    install(
+        &dir,
+        "test.json-errors",
+        r#"export default async h => {
+      const cyclic = {}; cyclic.self = cyclic;
+      for (const value of [cyclic, 1n, {toJSON() {throw Error('PRIVATE_SERIALIZATION_REASON')}}]) {
+        let caught = false;
+        try { await h.storage.set('invalid', value); }
+        catch (e) {
+          if (e.code !== 'invalid_input' || Object.keys(e).join() !== 'code' || !Object.isFrozen(e)) throw Error('bad error contract');
+          caught = true;
+        }
+        if (!caught) throw Error('invalid input accepted');
+      }
+      if ((await h.storage.get('invalid')).state !== 'missing') throw Error('invalid write reached host');
+      await h.storage.set('valid', 'ok');
+      if ((await h.storage.get('valid')).value !== 'ok') throw Error('bridge stopped working');
+      await h.notification.info('json-errors-caught');
+    }"#,
+    );
+    approve(&dir, &["test.json-errors"]);
+    let manager = make_manager(
+        dir.to_path_buf(),
+        Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+        Arc::new(Source::default()),
+        Arc::default(),
+    );
+    let output = Arc::new(Output::default());
+    manager.set_output(output.clone());
+    manager.start("test.json-errors").await.unwrap();
+    wait_for(&output, "json-errors-caught").await;
+    assert_eq!(manager.list().unwrap()[0].error, None);
+    manager.stop("test.json-errors").await.unwrap();
+    assert_eq!(manager.list().unwrap()[0].error, None);
 }

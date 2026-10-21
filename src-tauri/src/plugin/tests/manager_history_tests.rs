@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::event::core_event_bus::CoreEventBus;
-use crate::plugin::tests::support::{make_manager, Source};
+use crate::plugin::test_support::{make_manager, Source};
 
 #[test]
 fn diagnostic_history_is_bounded_and_removed_configuration_is_pruned() {
@@ -40,7 +40,7 @@ fn diagnostic_history_is_bounded_and_removed_configuration_is_pruned() {
 
 #[tokio::test]
 async fn manager_uses_injected_repository_and_capability_factory_without_filesystem() {
-    use crate::plugin::{registry::*, tests::support::manifest};
+    use crate::plugin::{registry::*, test_support::manifest};
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct MemoryRepository(Arc<AtomicUsize>);
     impl PluginRepository for MemoryRepository {

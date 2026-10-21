@@ -11,7 +11,7 @@ async fn plugin_history_uses_uid_when_display_name_differs_or_udict_is_absent() 
     use crate::core::entity::submission::SubmissionHistoryPage;
     use crate::plugin::{
         api::submission::PluginSubmissionQuery, permission::PluginGrant, query::ScopedQueries,
-        tests::support::*,
+        test_support::*,
     };
     for missing_udict in [false, true] {
         let mut value = fixture("record_list");

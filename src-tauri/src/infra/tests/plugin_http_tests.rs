@@ -34,11 +34,7 @@ fn ip_policy_rejects_special_targets_even_with_broad_private_grants() {
 }
 #[tokio::test]
 async fn unapproved_origin_and_plaintext_fail_before_network() {
-    let api = PluginHttp::new(
-        crate::plugin::tests::support::authority("test.http"),
-        vec![],
-    )
-    .unwrap();
+    let api = PluginHttp::new(crate::plugin::test_support::authority("test.http"), vec![]).unwrap();
     let c = api.authority.current_context().await.unwrap();
     for url in [
         "http://example.com",
@@ -73,7 +69,7 @@ async fn pinned_transport_does_not_redirect_and_bounds_response_bytes() {
             assert!(!headers.contains("cookie:"));assert!(!headers.contains("authorization:"));
             let _=socket.write_all(reply.as_bytes()).await;
         });
-        let api=PluginHttp::new(crate::plugin::tests::support::authority("test.http"),vec![]).unwrap();let c=api.authority.current_context().await.unwrap();
+        let api=PluginHttp::new(crate::plugin::test_support::authority("test.http"),vec![]).unwrap();let c=api.authority.current_context().await.unwrap();
         let url=url::Url::parse(&format!("http://fixture.example:{}",address.port())).unwrap();
         let request=PluginHttpRequest { method:PluginHttpMethod::Get,url:url.to_string(),headers:Default::default(),body:None,timeout_ms:Some(5000) };
         let result=api.send_pinned(&c,request,url,vec![address]).await.map(|r| { assert!(!r.headers.contains_key("set-cookie"));r.status });
@@ -93,11 +89,8 @@ async fn total_deadline_and_scope_cancellation_bound_stalled_http_reads() {
             let _ = socket.read(&mut bytes).await;
             std::future::pending::<()>().await;
         });
-        let api = PluginHttp::new(
-            crate::plugin::tests::support::authority("test.http"),
-            vec![],
-        )
-        .unwrap();
+        let api =
+            PluginHttp::new(crate::plugin::test_support::authority("test.http"), vec![]).unwrap();
         let context = api.authority.current_context().await.unwrap();
         let url = url::Url::parse(&format!("http://fixture.example:{}", address.port())).unwrap();
         let request = PluginHttpRequest {
@@ -134,7 +127,7 @@ async fn total_deadline_and_scope_cancellation_bound_stalled_http_reads() {
 
 #[tokio::test]
 async fn public_request_runs_approval_ip_policy_budgets_and_projects_a_successful_response() {
-    use crate::plugin::{permission::PluginGrant, query::ScopedQueries, tests::support::*};
+    use crate::plugin::{permission::PluginGrant, query::ScopedQueries, test_support::*};
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct FixtureTransport(Arc<AtomicUsize>);
     struct FixtureResolver;
@@ -226,7 +219,7 @@ async fn identical_pinned_targets_reuse_a_client() {
     let transport = PinnedTransport {
         clients: Mutex::default(),
     };
-    let authority = crate::plugin::tests::support::authority("test.pool");
+    let authority = crate::plugin::test_support::authority("test.pool");
     let context = authority.current_context().await.unwrap();
     let url = url::Url::parse(&format!("http://fixture.example:{}", address.port())).unwrap();
     for _ in 0..2 {
@@ -292,7 +285,7 @@ fn budget_fixture(
     Arc<crate::core::access::AccessRevision>,
     Arc<BudgetResolver>,
 ) {
-    use crate::plugin::{permission::PluginGrant, tests::support::*};
+    use crate::plugin::{permission::PluginGrant, test_support::*};
     let access = Arc::new(crate::core::access::AccessRevision::default());
     let m = manifest("test.http-budget");
     let authority = Arc::new(ScopedQueries::new(

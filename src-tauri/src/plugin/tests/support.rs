@@ -1,5 +1,5 @@
-use super::super::*;
 use crate::core::entity::{contest::Contest, submission::*};
+use crate::plugin::*;
 use api::{PluginError, PluginResult};
 use async_trait::async_trait;
 use host::manifest::{PluginManifest, PluginPermission};
@@ -13,6 +13,8 @@ pub struct Source {
     pub pages: Mutex<Vec<SubmissionHistoryPage>>,
     pub delay: bool,
     pub pending: bool,
+    pub history_delay: Option<std::time::Duration>,
+    pub history_started: tokio::sync::Notify,
     pub contest_calls: AtomicUsize,
     pub history_calls: AtomicUsize,
 }
@@ -29,6 +31,8 @@ impl Default for Source {
             pages: Mutex::new(vec![]),
             delay: false,
             pending: false,
+            history_delay: None,
+            history_started: tokio::sync::Notify::new(),
             contest_calls: AtomicUsize::new(0),
             history_calls: AtomicUsize::new(0),
         }
@@ -57,6 +61,10 @@ impl QuerySource for Source {
     }
     async fn history(&self, _: &str, page: u32) -> PluginResult<SubmissionHistoryPage> {
         self.history_calls.fetch_add(1, Ordering::SeqCst);
+        self.history_started.notify_one();
+        if let Some(delay) = self.history_delay {
+            tokio::time::sleep(delay).await;
+        }
         if self.pending {
             std::future::pending::<()>().await;
         }

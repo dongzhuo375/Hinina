@@ -103,3 +103,171 @@ async fn unhandled_rejection_diagnostics_never_format_js_reasons() {
     assert!(!log.contains("DO_NOT_FORMAT"));
     runtime.shutdown().await;
 }
+
+fn execution_api(
+    source: Arc<crate::plugin::test_support::Source>,
+    output: Arc<dyn crate::plugin::execution_api::NotificationOutput>,
+    dir: &crate::test_support::TempDir,
+) -> (Arc<dyn PluginApi>, Arc<crate::plugin::query::ScopedQueries>) {
+    use crate::plugin::{
+        execution_api::ExecutionApi, permission::PluginGrant, query::ScopedQueries,
+        test_support::manifest,
+    };
+    let m = manifest("test.runtime-timeout");
+    let queries = Arc::new(ScopedQueries::new(
+        PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source,
+        Arc::default(),
+        Default::default(),
+    ));
+    let api = Arc::new(ExecutionApi::new(
+        queries.clone(),
+        crate::infra::plugin_storage::JsonPluginStorage::new(dir.to_path_buf(), queries.clone()),
+        crate::infra::plugin_http::PluginHttp::new(queries.clone(), vec![]).unwrap(),
+        output,
+    ));
+    (api, queries)
+}
+
+#[tokio::test(start_paused = true)]
+async fn real_js_catches_scan_timeouts_in_activation_and_event_and_remains_usable() {
+    use crate::plugin::{
+        api::{event::PluginEvent, notification::PluginNotificationLevel},
+        execution_api::NotificationOutput,
+        test_support::{record, Source},
+    };
+    struct Output;
+    impl NotificationOutput for Output {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("runtime-scan-timeout");
+    let source = Arc::new(Source {
+        history_delay: Some(Duration::from_secs(3)),
+        ..Default::default()
+    });
+    *source.pages.lock().unwrap() = (0..10)
+        .map(|_| crate::core::entity::submission::SubmissionHistoryPage {
+            records: vec![record("other")],
+            total: None,
+            has_more: true,
+        })
+        .collect();
+    let (api, queries) = execution_api(source.clone(), Arc::new(Output), &dir);
+    let mut runtime = QuickJsRuntime::new(CancellationToken::new()).await.unwrap();
+    let script = r#"export default async h => {
+      globalThis.caught = 0;
+      async function scan() {
+        const c = await h.context.current();
+        try { await h.submission.get(c, 'contest', 'missing'); throw Error('unexpected result'); }
+        catch (e) { if (e.code !== 'timeout') throw e; globalThis.caught++; }
+        if (!(await h.identity.current(c)).userKey) throw Error('context lost');
+      }
+      await scan();
+      h.events.on('resync.required', scan);
+    }"#;
+    let advance_scan = || async {
+        source.history_started.notified().await;
+        tokio::time::advance(Duration::from_secs(3)).await;
+        source.history_started.notified().await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+    };
+    let (loaded, ()) = tokio::join!(
+        runtime.load(
+            script,
+            api,
+            &serde_json::Value::Null,
+            vec!["resync.required".into()]
+        ),
+        advance_scan()
+    );
+    loaded.unwrap();
+    let envelope = PluginEventEnvelope {
+        version: 2,
+        sequence: 1,
+        occurred_at: 1,
+        event: PluginEvent::ResyncRequired { lost: 0 },
+    };
+    let (delivered, ()) = tokio::join!(runtime.deliver(&envelope), advance_scan());
+    delivered.unwrap();
+    assert_eq!(
+        runtime
+            .context
+            .with(|ctx| ctx.eval::<u32, _>("caught"))
+            .await
+            .unwrap(),
+        2
+    );
+    assert!(!queries.stopped.is_cancelled());
+    let current = queries.current_context().await.unwrap();
+    queries.contest(&current, None).await.unwrap();
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn late_host_calls_return_catchable_timeout_before_hard_execution_deadline() {
+    use crate::plugin::{
+        api::{event::PluginEvent, notification::PluginNotificationLevel},
+        execution_api::NotificationOutput,
+        test_support::Source,
+    };
+    // Compress only the test's remaining window; exercise the production bridge
+    // cutoff anchored to the actual runtime deadline, in both entry kinds.
+    struct Arm(Arc<Mutex<Option<Instant>>>);
+    impl NotificationOutput for Arm {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            *self.0.lock().unwrap() =
+                Some(Instant::now() + API_ERROR_GRACE + Duration::from_millis(100));
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("runtime-late-call");
+    let mut runtime = QuickJsRuntime::new(CancellationToken::new()).await.unwrap();
+    let (api, _) = execution_api(
+        Arc::new(Source {
+            pending: true,
+            ..Default::default()
+        }),
+        Arc::new(Arm(runtime.deadline.clone())),
+        &dir,
+    );
+    let script = r#"export default async h => {
+      globalThis.caught = 0;
+      async function lateCall() {
+        const c = await h.context.current();
+        await h.notification.info('arm');
+        try { await h.contest.current(c); throw Error('unexpected result'); }
+        catch (e) { if (e.code !== 'timeout') throw e; globalThis.caught++; }
+      }
+      await lateCall();
+      h.events.on('resync.required', lateCall);
+    }"#;
+    runtime
+        .load(
+            script,
+            api,
+            &serde_json::Value::Null,
+            vec!["resync.required".into()],
+        )
+        .await
+        .unwrap();
+    runtime
+        .deliver(&PluginEventEnvelope {
+            version: 2,
+            sequence: 1,
+            occurred_at: 1,
+            event: PluginEvent::ResyncRequired { lost: 0 },
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime
+            .context
+            .with(|ctx| ctx.eval::<u32, _>("caught"))
+            .await
+            .unwrap(),
+        2
+    );
+    runtime.shutdown().await;
+}

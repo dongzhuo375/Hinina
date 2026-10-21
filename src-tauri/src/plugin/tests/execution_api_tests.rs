@@ -50,7 +50,7 @@ async fn bridge_cas_audit_names_both_permissions_and_escapes_external_operations
         }
     }
     let dir = crate::test_support::TempDir::unique("bridge-audit");
-    let queries = crate::plugin::tests::support::authority("test.audit");
+    let queries = crate::plugin::test_support::authority("test.audit");
     let api = ExecutionApi::new(
         queries.clone(),
         JsonPluginStorage::new(dir.to_path_buf(), queries.clone()),

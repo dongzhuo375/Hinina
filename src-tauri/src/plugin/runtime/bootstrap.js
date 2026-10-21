@@ -6,7 +6,11 @@
   const freeze = Object.freeze;
   const handlers = new Map();
   const call = async (operation, args = {}) => {
-    const result = parse(await host(operation, stringify(args)));
+    let input;
+    try { input = stringify(args); }
+    catch (_) { throw freeze({ code: 'invalid_input' }); }
+    if (typeof input !== 'string') throw freeze({ code: 'invalid_input' });
+    const result = parse(await host(operation, input));
     if (!result.ok) throw freeze(result.error);
     return result.value;
   };

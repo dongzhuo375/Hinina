@@ -1,5 +1,5 @@
 use super::*;
-use crate::plugin::tests::support::authority;
+use crate::plugin::test_support::authority;
 
 #[tokio::test]
 async fn private_json_cas_is_atomic_durable_and_distinguishes_null() {
