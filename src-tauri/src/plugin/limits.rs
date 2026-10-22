@@ -24,3 +24,19 @@ pub(crate) const MAX_CURSOR_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const BRIDGE_ENVELOPE_HEADROOM: usize = 256;
 pub(crate) const MAX_CURSOR_RESPONSE_BYTES: usize =
     MAX_BRIDGE_RESPONSE_BYTES - BRIDGE_ENVELOPE_HEADROOM;
+
+/// Bridge request bounds shared by the JS host function and `call_json`; the two checks
+/// must agree or one layer would silently accept what the other rejects.
+pub(crate) const MAX_BRIDGE_INPUT_BYTES: usize = 140_000;
+pub(crate) const MAX_BRIDGE_OPERATION_BYTES: usize = 64;
+
+/// Query handles and published cursors share one lifetime and one count cap.
+pub(crate) const QUERY_HANDLE_TTL: Duration = Duration::from_secs(300);
+pub(crate) const MAX_QUERY_CONTEXTS: usize = 32;
+pub(crate) const MAX_CURSORS: usize = 32;
+
+/// Provider (OJ) request budgets: one per activation, one shared across all plugins.
+pub(crate) const PLUGIN_QUERIES_PER_MINUTE: u32 = 60;
+pub(crate) const PLUGIN_QUERY_CONCURRENCY: usize = 2;
+pub(crate) const SHARED_QUERIES_PER_MINUTE: u32 = 120;
+pub(crate) const SHARED_QUERY_CONCURRENCY: usize = 4;

@@ -7,7 +7,10 @@ use super::DeliveryOutcome;
 use crate::plugin::{
     api::{event::PluginEventEnvelope, *},
     execution_api::call_json,
-    limits::{ACTIVATION_TIMEOUT, API_ERROR_GRACE, EVENT_TIMEOUT, HANDLER_WARN_INTERVAL},
+    limits::{
+        ACTIVATION_TIMEOUT, API_ERROR_GRACE, EVENT_TIMEOUT, HANDLER_WARN_INTERVAL,
+        MAX_BRIDGE_INPUT_BYTES, MAX_BRIDGE_OPERATION_BYTES,
+    },
 };
 use rquickjs::{
     function::{Async, Func},
@@ -145,7 +148,7 @@ impl QuickJsRuntime {
                 // Acquire before creating the Future: JS may enqueue many calls in one
                 // synchronous turn, before the Rust futures get their first poll.
                 let permit = pending.clone().try_acquire_owned().ok();
-                let arguments = if permit.is_some() && operation.len() <= 64 && input.len() <= 140_000 {
+                let arguments = if permit.is_some() && operation.len() <= MAX_BRIDGE_OPERATION_BYTES && input.len() <= MAX_BRIDGE_INPUT_BYTES {
                     Some((operation, input))
                 } else { None };
                 let api = api.clone(); let stopped = stopped.clone();

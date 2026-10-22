@@ -7,7 +7,7 @@ use super::{
     api::{contest::*, http::*, identity::*, notification::*, storage::*, submission::*, *},
     bounded_json,
     host::manifest::PluginPermission,
-    limits::MAX_BRIDGE_RESPONSE_BYTES,
+    limits::{MAX_BRIDGE_INPUT_BYTES, MAX_BRIDGE_OPERATION_BYTES, MAX_BRIDGE_RESPONSE_BYTES},
     query::ScopedQueries,
 };
 use crate::infra::{plugin_http::PluginHttp, plugin_storage::JsonPluginStorage};
@@ -249,16 +249,17 @@ async fn dispatch(api: &dyn PluginApi, operation: &str, args: Value) -> PluginRe
 /// @stability stable
 /// Serialized stable success/error result. No Rust error text or stack crosses the bridge.
 pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) -> String {
-    let result = if input.len() > 140_000 || operation.len() > 64 {
-        Err(PluginError::LimitExceeded)
-    } else if let Err(error) = api.admit() {
-        Err(error)
-    } else {
-        match serde_json::from_str(&input) {
-            Ok(args) => dispatch(api, &operation, args).await,
-            Err(_) => Err(PluginError::InvalidInput),
-        }
-    };
+    let result =
+        if input.len() > MAX_BRIDGE_INPUT_BYTES || operation.len() > MAX_BRIDGE_OPERATION_BYTES {
+            Err(PluginError::LimitExceeded)
+        } else if let Err(error) = api.admit() {
+            Err(error)
+        } else {
+            match serde_json::from_str(&input) {
+                Ok(args) => dispatch(api, &operation, args).await,
+                Err(_) => Err(PluginError::InvalidInput),
+            }
+        };
     let (response, success) = encode_response(result);
     if let Some((plugin_id, plugin_version)) = api.audit_identity() {
         let logged_operation = operation.chars().take(64).collect::<String>();

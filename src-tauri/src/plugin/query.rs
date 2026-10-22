@@ -8,8 +8,10 @@ use super::{
     bounded_json,
     host::manifest::PluginPermission,
     limits::{
-        MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
-        PROVIDER_TIMEOUT, SUBMISSION_LOOKUP_TIMEOUT,
+        MAX_CURSORS, MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
+        MAX_QUERY_CONTEXTS, PLUGIN_QUERIES_PER_MINUTE, PLUGIN_QUERY_CONCURRENCY, PROVIDER_TIMEOUT,
+        QUERY_HANDLE_TTL, SHARED_QUERIES_PER_MINUTE, SHARED_QUERY_CONCURRENCY,
+        SUBMISSION_LOOKUP_TIMEOUT,
     },
     permission::PluginGrant,
 };
@@ -33,7 +35,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     num::NonZeroU32,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -367,8 +369,11 @@ impl ScopedQueries {
             access,
             stopped,
             state: Mutex::default(),
-            budget: QueryBudget::new(60, 2),
-            shared_budget: Arc::new(QueryBudget::new(120, 4)),
+            budget: QueryBudget::new(PLUGIN_QUERIES_PER_MINUTE, PLUGIN_QUERY_CONCURRENCY),
+            shared_budget: Arc::new(QueryBudget::new(
+                SHARED_QUERIES_PER_MINUTE,
+                SHARED_QUERY_CONCURRENCY,
+            )),
         }
     }
     pub(crate) fn with_shared_budget(mut self, budget: Arc<QueryBudget>) -> Self {
@@ -436,7 +441,7 @@ impl ScopedQueries {
             .cloned()
             .ok_or(PluginError::ContextExpired)?;
         let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
-        if context.created.elapsed() > Duration::from_secs(300)
+        if context.created.elapsed() > QUERY_HANDLE_TTL
             || snapshot.revision != context.revision
             || self.scope().await.map_err(|_| PluginError::ContextExpired)? != context.scope
             // Check after scope(): a transition may revoke the token during the snapshot.
@@ -472,9 +477,9 @@ impl ScopedQueries {
         }
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.contexts.retain(|_, c| {
-            c.created.elapsed() < Duration::from_secs(300) && !c.cancellation.is_cancelled()
+            c.created.elapsed() < QUERY_HANDLE_TTL && !c.cancellation.is_cancelled()
         });
-        if state.contexts.len() >= 32 {
+        if state.contexts.len() >= MAX_QUERY_CONTEXTS {
             return Err(PluginError::LimitExceeded);
         }
         let id = uuid::Uuid::new_v4().to_string();
@@ -626,7 +631,7 @@ impl ScopedQueries {
                 || c.query.contest_id != query.contest_id
                 || c.query.problem_id != query.problem_id
                 || c.query.limit != query.limit
-                || c.created.elapsed() > Duration::from_secs(300)
+                || c.created.elapsed() > QUERY_HANDLE_TTL
             {
                 return Err(PluginError::ContextExpired);
             }
@@ -690,13 +695,13 @@ impl ScopedQueries {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state
                 .cursors
-                .retain(|_, c| c.created.elapsed() < Duration::from_secs(300));
+                .retain(|_, c| c.created.elapsed() < QUERY_HANDLE_TTL);
             let retained = state
                 .cursors
                 .values()
                 .map(|c| c.buffered_bytes)
                 .sum::<usize>();
-            if state.cursors.len() >= 32
+            if state.cursors.len() >= MAX_CURSORS
                 || retained + cursor.buffered_bytes > MAX_CURSOR_BUFFER_BYTES
             {
                 return Err(PluginError::LimitExceeded);

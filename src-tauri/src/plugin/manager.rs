@@ -10,7 +10,7 @@ use super::{
         manifest::PluginPermission,
         plugin_host::{PluginHost, PluginHostError},
     },
-    limits::{START_TIMEOUT, STOP_TIMEOUT},
+    limits::{SHARED_QUERIES_PER_MINUTE, SHARED_QUERY_CONCURRENCY, START_TIMEOUT, STOP_TIMEOUT},
     query::{QueryBudget, QuerySource, ScopedQueries},
     runtime::{quickjs::QuickJsRuntime, PluginRuntime},
 };
@@ -79,7 +79,7 @@ impl PluginManager {
     }
     #[cfg(test)]
     pub(crate) fn with_test_query_budget(mut self, count: u32) -> Self {
-        self.query_budget = Arc::new(QueryBudget::new(count, 4));
+        self.query_budget = Arc::new(QueryBudget::new(count, SHARED_QUERY_CONCURRENCY));
         self
     }
     #[cfg(test)]
@@ -113,7 +113,10 @@ impl PluginManager {
             statuses: Arc::default(),
             operation: Default::default(),
             output: Mutex::default(),
-            query_budget: Arc::new(QueryBudget::new(120, 4)),
+            query_budget: Arc::new(QueryBudget::new(
+                SHARED_QUERIES_PER_MINUTE,
+                SHARED_QUERY_CONCURRENCY,
+            )),
             start_timeout: START_TIMEOUT,
             stop_timeout: STOP_TIMEOUT,
             resync_interval_override: None,
