@@ -60,6 +60,11 @@ pub struct PluginManager {
     start_timeout: Duration,
     stop_timeout: Duration,
     resync_interval_override: Option<Duration>,
+    /// Runs on the worker thread immediately after readiness is published, before the
+    /// outcome is interpreted. Lets a test cancel the stop token at exactly the boundary a
+    /// concurrent `stop()` can hit.
+    #[cfg(test)]
+    post_ready_hook: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 impl PluginManager {
     #[cfg(test)]
@@ -80,6 +85,11 @@ impl PluginManager {
     #[cfg(test)]
     pub(crate) fn with_test_stop_timeout(mut self, timeout: Duration) -> Self {
         self.stop_timeout = timeout;
+        self
+    }
+    #[cfg(test)]
+    pub(crate) fn with_test_post_ready_hook(mut self, hook: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.post_ready_hook = Some(hook);
         self
     }
     /// @plugin-api
@@ -107,6 +117,8 @@ impl PluginManager {
             start_timeout: START_TIMEOUT,
             stop_timeout: STOP_TIMEOUT,
             resync_interval_override: None,
+            #[cfg(test)]
+            post_ready_hook: None,
         }
     }
     /// @plugin-api
@@ -337,6 +349,8 @@ impl PluginManager {
             .resync_interval_override
             .unwrap_or(Duration::from_secs(loaded.approval.resync_interval_secs));
         let (ready, started) = tokio::sync::oneshot::channel();
+        #[cfg(test)]
+        let post_ready = self.post_ready_hook.clone();
         let thread = std::thread::Builder::new().name("hinina-plugin".into()).spawn(move || {
             let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.block_on(async {
                 let mut runtime: Box<dyn PluginRuntime> = match QuickJsRuntime::new(cancellation.clone()).await { Ok(runtime) => Box::new(runtime), Err(error) => { let _ = ready.send(Err(error.clone())); return Err(error); } };
@@ -351,8 +365,15 @@ impl PluginManager {
                         }),
                     }
                 }
+                // Snapshot before publishing the outcome: `stop()` cancels this token as soon as
+                // the host observes readiness, so reading it afterwards would let a concurrent
+                // stop relabel a real activation failure as a clean shutdown and erase the
+                // failure from the status history the host just received.
+                let interrupted = cancellation.is_cancelled();
                 let _ = ready.send(result.clone());
-                if let Err(error) = result { let intentional = cancellation.is_cancelled(); cancellation.cancel(); let _ = runtime.shutdown().await; return if intentional { Ok(()) } else { Err(error) }; }
+                #[cfg(test)]
+                if let Some(hook) = &post_ready { hook(); }
+                if let Err(error) = result { cancellation.cancel(); let _ = runtime.shutdown().await; return if interrupted { Ok(()) } else { Err(error) }; }
                 {
                     let mut status = worker_status.lock().unwrap_or_else(|e| e.into_inner());
                     if status.error.is_none() { status.state = "running"; }

@@ -716,3 +716,38 @@ async fn invalid_json_arguments_reject_with_stable_errors_without_failing_worker
     manager.stop("test.json-errors").await.unwrap();
     assert_eq!(manager.list().unwrap()[0].error, None);
 }
+
+/// `stop()` cancels the token as soon as it can observe readiness. The outcome must be
+/// classified before readiness is published, or a real activation failure racing a stop is
+/// relabelled as a clean shutdown and disappears from the status history.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_racing_readiness_does_not_relabel_a_failure_as_clean() {
+    let dir = crate::test_support::TempDir::unique("plugin-ready-race");
+    install(&dir, "test.race", "export default !!!");
+    approve(&dir, &["test.race"]);
+    let mut manager = make_manager(
+        dir.to_path_buf(),
+        Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+        Arc::new(Source::default()),
+        Arc::default(),
+    );
+    manager.set_output(Arc::new(Output::default()));
+    let workers = manager.workers.clone();
+    manager = manager.with_test_post_ready_hook(Arc::new(move || {
+        if let Some(worker) = workers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("test.race")
+        {
+            worker.stop.cancel();
+        }
+    }));
+    assert_eq!(
+        manager.start("test.race").await,
+        Err(PluginError::ScriptError)
+    );
+    manager.stop("test.race").await.unwrap();
+    let status = manager.list().unwrap();
+    assert_eq!(status[0].state, "failed");
+    assert_eq!(status[0].error, Some(PluginError::ScriptError));
+}
