@@ -10,8 +10,8 @@ use super::{
     limits::{
         MAX_CURSORS, MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
         MAX_QUERY_CONTEXTS, PLUGIN_QUERIES_PER_MINUTE, PLUGIN_QUERY_CONCURRENCY, PROVIDER_TIMEOUT,
-        QUERY_HANDLE_TTL, SHARED_QUERIES_PER_MINUTE, SHARED_QUERY_CONCURRENCY,
-        SUBMISSION_LOOKUP_TIMEOUT,
+        QUERY_HANDLE_REUSE_AGE, QUERY_HANDLE_TTL, SHARED_QUERIES_PER_MINUTE,
+        SHARED_QUERY_CONCURRENCY, SUBMISSION_LOOKUP_TIMEOUT,
     },
     permission::PluginGrant,
 };
@@ -509,6 +509,16 @@ impl ScopedQueries {
         state.contexts.retain(|_, c| {
             c.created.elapsed() < QUERY_HANDLE_TTL && !c.cancellation.is_cancelled()
         });
+        // Handlers are told to re-acquire a context per event. Reuse a young handle that is
+        // bound to exactly this scope and revision instead of minting a new one each time,
+        // otherwise a busy plugin would hit the handle cap within one TTL window.
+        if let Some(existing) = state.contexts.iter().find(|(_, c)| {
+            c.revision == snapshot.revision
+                && c.scope == scope
+                && c.created.elapsed() < QUERY_HANDLE_REUSE_AGE
+        }) {
+            return Ok(PluginQueryContext::from_host_id(existing.0.clone()));
+        }
         if state.contexts.len() >= MAX_QUERY_CONTEXTS {
             return Err(PluginError::LimitExceeded);
         }

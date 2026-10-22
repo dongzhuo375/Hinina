@@ -34,6 +34,10 @@ pub(crate) const MAX_BRIDGE_OPERATION_BYTES: usize = 64;
 pub(crate) const QUERY_HANDLE_TTL: Duration = Duration::from_secs(300);
 pub(crate) const MAX_QUERY_CONTEXTS: usize = 32;
 pub(crate) const MAX_CURSORS: usize = 32;
+/// An unexpired handle for the same scope is reused only while younger than this, so a
+/// reused handle always keeps most of its lifetime and handlers re-acquiring a context
+/// per event cannot exhaust `MAX_QUERY_CONTEXTS`.
+pub(crate) const QUERY_HANDLE_REUSE_AGE: Duration = Duration::from_secs(150);
 
 /// Provider (OJ) request budgets: one per activation, one shared across all plugins.
 pub(crate) const PLUGIN_QUERIES_PER_MINUTE: u32 = 60;

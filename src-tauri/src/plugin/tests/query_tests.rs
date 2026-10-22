@@ -1368,6 +1368,60 @@ async fn provider_failures_are_logged_by_category_without_messages() {
     assert!(!log.contains("未提供该能力"), "{log}");
 }
 
+fn queries_over(source: Arc<Source>, access: Arc<AccessRevision>) -> ScopedQueries {
+    let m = manifest("test.cursor");
+    ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source,
+        access,
+        Default::default(),
+    )
+}
+
+#[tokio::test]
+async fn context_acquisition_reuses_a_young_handle_for_the_same_scope_and_revision() {
+    let source = Arc::new(Source::default());
+    let access = Arc::new(AccessRevision::default());
+    let q = queries_over(source.clone(), access.clone());
+    let first = q.current_context().await.unwrap();
+    // Handlers re-acquire a context per event; far more calls than the handle cap.
+    for _ in 0..MAX_QUERY_CONTEXTS * 3 {
+        assert_eq!(q.current_context().await.unwrap(), first);
+    }
+    assert_eq!(q.state.lock().unwrap().contexts.len(), 1);
+
+    // A different scope never shares a handle.
+    source.scope.lock().unwrap().contest = Some("other".into());
+    let other = q.current_context().await.unwrap();
+    assert_ne!(other, first);
+
+    // A new access revision revokes the old handle and mints a fresh one.
+    drop(access.begin());
+    assert_eq!(
+        q.check(&first).await.unwrap_err(),
+        PluginError::ContextExpired
+    );
+    let renewed = q.current_context().await.unwrap();
+    assert_ne!(renewed, other);
+    assert_ne!(renewed, first);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_aged_handle_is_not_reused() {
+    let q = queries_over(
+        Arc::new(Source::default()),
+        Arc::new(AccessRevision::default()),
+    );
+    let first = q.current_context().await.unwrap();
+    // Instant is not driven by tokio's paused clock, so age the entry directly.
+    for context in q.state.lock().unwrap().contexts.values_mut() {
+        context.created -= QUERY_HANDLE_REUSE_AGE + std::time::Duration::from_secs(1);
+    }
+    assert_ne!(q.current_context().await.unwrap(), first);
+    // The aged handle itself is still valid until the full TTL.
+    q.check(&first).await.unwrap();
+}
+
 #[test]
 fn concurrency_rejections_never_spend_a_rate_token() {
     let local = QueryBudget::new(2, 1);
