@@ -63,3 +63,67 @@ it('clears any early notifications when listener setup rejects', async () => {
   expect(vi.getTimerCount()).toBe(0)
   expect(removed).toHaveBeenCalledOnce()
 })
+
+// Subscription supersession is Service policy: one active listener, late arrivals discarded.
+type Pending = { receive: (value: unknown) => void, unlisten: ReturnType<typeof vi.fn>, resolve: () => void }
+function pendingListeners() {
+  const listeners: Pending[] = []
+  onNotification.mockImplementation(handler => {
+    const unlisten = vi.fn()
+    return new Promise<() => void>(resolve => {
+      listeners.push({ receive: handler, unlisten, resolve: () => resolve(unlisten) })
+    })
+  })
+  return listeners
+}
+const sample = (message: string) => ({ pluginId: 'test.demo', level: 'info', message })
+
+it('re-subscribing disposes the previous subscription instead of leaking it', async () => {
+  const listeners = pendingListeners()
+  const added: string[] = []
+  const first = pluginService.subscribeNotifications(v => added.push(v.message), vi.fn())
+  listeners[0].resolve(); await first
+  const second = pluginService.subscribeNotifications(v => added.push(v.message), vi.fn())
+  listeners[1].resolve(); const stop = await second
+  expect(listeners[0].unlisten).toHaveBeenCalledOnce()
+  listeners[0].receive(sample('leaked'))
+  listeners[1].receive(sample('active'))
+  expect(added).toEqual(['active'])
+  stop()
+})
+
+it('disposes an overlapping subscription that resolves after a newer one superseded it', async () => {
+  const listeners = pendingListeners()
+  const added: Array<{ id: number, message: string }> = []
+  const removed: number[] = []
+  const first = pluginService.subscribeNotifications(v => added.push(v), id => removed.push(id))
+  const second = pluginService.subscribeNotifications(v => added.push(v), id => removed.push(id))
+  expect(listeners).toHaveLength(2)
+  // The newer call settles first; the superseded one then arrives late.
+  listeners[1].resolve(); await second
+  listeners[0].resolve(); await first
+  expect(listeners[0].unlisten).toHaveBeenCalledOnce()
+  expect(listeners[1].unlisten).not.toHaveBeenCalled()
+  listeners[0].receive(sample('late'))
+  listeners[1].receive(sample('active'))
+  expect(added.map(item => item.message)).toEqual(['active'])
+  // dismissNotification targets the active subscription only.
+  pluginService.dismissNotification(added[0].id)
+  expect(removed).toEqual([added[0].id])
+  ;(await second)()
+})
+
+it('disposing a superseded subscription does not disturb the newer one', async () => {
+  const listeners = pendingListeners()
+  const added: string[] = []
+  const first = pluginService.subscribeNotifications(v => added.push(v.message), vi.fn())
+  listeners[0].resolve(); const firstStop = await first
+  const second = pluginService.subscribeNotifications(v => added.push(v.message), vi.fn())
+  listeners[1].resolve(); const secondStop = await second
+  firstStop()
+  expect(listeners[1].unlisten).not.toHaveBeenCalled()
+  listeners[1].receive(sample('still active'))
+  expect(added).toEqual(['still active'])
+  secondStop()
+  expect(listeners[1].unlisten).toHaveBeenCalledOnce()
+})
