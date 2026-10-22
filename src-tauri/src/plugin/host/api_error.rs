@@ -10,7 +10,7 @@ use crate::plugin::api::PluginError;
 /// @since 1.0
 /// @stability stable
 /// @security redacted
-/// 供未来 API Adapter 使用；不得将原错误 Display/Debug 文本传入插件。
+/// 供 API Adapter 使用；不得将原错误 Display/Debug 文本传入插件。
 pub fn redact_app_error(error: &AppError) -> PluginError {
     match error {
         AppError::Auth(_) => PluginError::Unauthenticated,

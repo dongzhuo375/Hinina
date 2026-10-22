@@ -1,11 +1,11 @@
 //! @plugin-module
 //! @layer plugin/api
-//! @version 1
+//! @version 2
 //! @stability stable
 //!
 //! 插件安全能力契约。具体实现必须绑定宿主授予的 PluginGrant，不接受 JS 指定
 //! plugin_id/权限；查询上下文由宿主签发并在切 OJ、换账号或比赛变化后失效。
-//! 本轮没有 Service/网络/存储执行器，trait 声明不代表能力已可用。
+//! 执行实现位于 plugin/query、execution_api 与专用 Infra；JS 不取得内部引用。
 pub mod contest;
 pub mod error;
 pub mod event;
@@ -36,7 +36,7 @@ impl PluginQueryContext {
     /// @plugin-api
     /// @since 1.0
     /// @stability stable
-    /// 仅供未来宿主构造；JS 传回的句柄必须重新验证，构造类型不是授权。
+    /// 仅供宿主构造；JS 传回的句柄必须重新验证，构造类型不是授权。
     #[must_use]
     pub fn from_host_id(id: String) -> Self {
         Self(id)
@@ -62,14 +62,15 @@ pub trait ContextApi: Send + Sync {
     /// @since 1.0
     /// @permission none
     /// @stability stable
-    /// 签发绑定当前 OJ/用户/比赛/授权代次的句柄。失败为 Unavailable。
+    /// 签发绑定当前 OJ/用户/比赛/授权代次的句柄。切换中返回 ContextExpired；
+    /// 初次 scope 读取的其他失败保留来源错误。
     async fn current_context(&self) -> PluginResult<PluginQueryContext>;
 }
 
 /// @plugin-api
 /// @since 1.0
 /// @stability stable
-/// 未来 Runtime Bridge 注入的最小能力集合。实现必须逐调用验证权限/上下文，
+/// Runtime 注入的最小能力集合。实现必须逐调用验证权限/上下文，
 /// 异步查询前后均验证上下文，避免在途切换后返回另一个账号的数据。
 pub trait PluginApi:
     ContextApi
@@ -80,6 +81,24 @@ pub trait PluginApi:
     + http::PluginHttpApi
     + notification::NotificationApi
 {
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Host-owned audit identifiers, never sourced from a plugin request.
+    fn audit_identity(&self) -> Option<(&str, &str)> {
+        None
+    }
+
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Admission gate for every bridge call. Implementations may throttle capabilities
+    /// that never reach a provider budget, so a script cannot spin on local calls.
+    fn admit(&self) -> PluginResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

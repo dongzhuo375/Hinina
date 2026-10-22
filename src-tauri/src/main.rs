@@ -227,12 +227,28 @@ fn main() {
             // ② 迁移结果与数据目录来源必须**在日志就绪后**立刻汇报
             report_data_dir(&plan, &migration);
 
+            ctx.plugin_manager.set_output(std::sync::Arc::new(
+                hinina_lib::infra::plugin_notification::TauriPluginNotifications(
+                    app.handle().clone(),
+                ),
+            ));
+            let plugins = ctx.plugin_manager.clone();
             app.manage(ctx);
             // ③ 消费者在 AppContext 就绪后启动：它们只观察事实，不参与任何业务动作
             spawn_event_consumers(app.handle());
+            tauri::async_runtime::spawn(async move {
+                if plugins.autostart().await.is_err() {
+                    tracing::warn!("Plugin configuration unavailable; automatic loading skipped");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::plugin_cmd::plugin_list,
+            commands::plugin_cmd::plugin_start,
+            commands::plugin_cmd::plugin_stop,
+            commands::plugin_cmd::plugin_reload,
+            commands::plugin_cmd::plugin_resync,
             commands::auth_cmd::login,
             commands::auth_cmd::logout,
             commands::auth_cmd::get_session,
@@ -274,6 +290,13 @@ fn main() {
             commands::theme_cmd::get_theme,
             commands::theme_cmd::set_theme,
         ])
-        .run(tauri::generate_context!())
-        .expect("Failed to launch Hinina");
+        .build(tauri::generate_context!())
+        .expect("Failed to launch Hinina")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(ctx) = app.try_state::<AppContext>() {
+                    ctx.plugin_manager.cancel_all();
+                }
+            }
+        });
 }

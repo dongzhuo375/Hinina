@@ -14,7 +14,7 @@
 - **常量 `ANNOUNCEMENTS_READ_DIR = "announcements_read"`** — 公告已读状态持久化目录（相对 Storage 根）
 - **`ReadAnnouncementState`** — 已读状态文件结构：`read_ids: Vec<String>`（JSON 键 `readIds`）
 - **`ContestService`** — 比赛服务
-  - `fn new(registry, event_bus, storage) -> Self` — 创建实例（`storage` 用于公告已读状态读写）
+  - `fn new(registry, event_bus, storage, access) -> Self` — 创建实例（`storage` 用于公告已读状态读写）
   - `fn on_oj_switched(&self)` — OJ 切换后的缓存清理（**由 `switch_oj` 命令显式调用，不订阅事件**）。两段语义不同：**内存段同步清**（比赛列表缓存 + 元信息内存缓存，便宜且让当前会话立刻回到干净状态）；**磁盘段延迟清**（元信息 namespace 是纯空间回收 —— 缓存键自带 OJ 维度，跨 OJ 撞号在结构上不可能，故延迟清理不影响正确性）—— 有 tokio 上下文则 `Handle::spawn`，否则（纯同步调用 / 单元测试）同步兜底
   - `async fn list_contests(&self, cache_ttl_secs: u64) -> AppResult<Vec<Contest>>` — 获取比赛列表，优先使用缓存（TTL 由 Config 传入）；缓存命中直接返回，未命中请求远端 → 更新缓存 → 返回。**不再发布任何事件**：比赛列表是查询结果，真实数据由 IPC 返回给调用方；把查询结果伪装成事件既浪费一次全量克隆，又制造「前端可能靠事件拿数据」的错误预期
   - `fn select_contest(&self, contest_id) -> AppResult<()>` — 选中比赛（写 `current_contest`）并发布 `CoreEvent::ContestSelected { contest_id }`（事实通知，供审计 / 插件 / 前端刷新）
@@ -79,7 +79,7 @@
 - **锁中毒统一 `into_inner` 取回内部数据**（与 `TtlCache` / `provider_registry_impl` 同款约定，见 `provider_registry_impl.rs` 头注释）：本文件的 `cache` / `current_contest` / `announcement_baseline` 三处全部如此。相关容器是 `Option` / `HashMap`，panic 不会让它们结构不一致 —— 而「静默跳过」或「降级不发事件」的后果更糟：重置会留下脏缓存，公告基线则会在中毒后**永久**不再报新公告（每次调用都走 Err 分支提前返回）。`clear_announcement_read_state` 是唯一返回 `bool` 的清理方法（返回「是否确实删除了」，目录不存在时为 `false`），那是「本就没有」而非错误。
 
 ## 测试
-`src-tauri/src/service/contest/tests/contest_tests.rs`（由 `mod.rs` 底部 `#[cfg(test)] #[path = "tests/contest_tests.rs"] mod tests;` 引用）以 `StubContestProvider` 锁定错误变体穿透与正常路径。Stub 用 `StubMode::{Ok, Auth, Network}` 让全部五个 trait 方法按同一模式响应（`Auth` 模拟 token 过期，即 HTTP 401 或 HOJ 体内 403「请您先登录」；`Network` 模拟断网），便于逐方法断言变体是否被保留；`mode` 可在测试中途切换（模拟「缓存命中后服务端开始 401」等时序），`calls` 计数用于断言缓存真的省掉了请求。服务经 `ProviderRegistryImpl::new(OjId::new("HOJ"))` + `register(OjId, ProviderSet)`（只挂 contest 能力）注册后构造（`make_service` 基于独立临时目录注入 `Storage`），异步用例各自建 current-thread runtime 避免嵌套 panic。
+`src-tauri/src/service/contest/tests/contest_tests.rs`（由 `mod.rs` 底部 `#[cfg(test)] #[path = "tests/contest_tests.rs"] mod tests;` 引用）以 `StubContestProvider` 锁定错误变体穿透与正常路径。Stub 用 `StubMode::{Ok, Auth, Network}` 让全部五个 trait 方法按同一模式响应（`Auth` 模拟 token 过期，即 HTTP 401 或 HOJ 体内 403「请您先登录」；`Network` 模拟断网），便于逐方法断言变体是否被保留；`mode` 可在测试中途切换（模拟「缓存命中后服务端开始 401」等时序），`calls` 计数用于断言缓存真的省掉了请求。服务经 `ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone())` + `register(OjId, ProviderSet)`（只挂 contest 能力）注册后构造（`make_service` 基于独立临时目录注入 `Storage`），异步用例各自建 current-thread runtime 避免嵌套 panic。
 
 覆盖：`get_rank` 保留 `Auth` 变体且消息含「获取比赛榜单失败」环节名、`get_rank` 保留 `Network` 变体（不被改写成 `Contest`）、`list_contests` 保留 `Auth`、`load_contest_with_problems` 保留 `Auth`（进场时 401 必须触发会话守卫）、`list_announcements` 保留 `Auth` / `Network` 变体；成功路径 `get_rank` 返回分页（records/uid 正确）、`load_contest_with_problems` 返回 `ContestBundle` 并**自动选中比赛**（`current_contest_id()` 为 `Some("1011")`）、`list_announcements` 返回分页。
 
@@ -98,3 +98,9 @@
 **清空缓存（设置页维护动作）**：`clear_caches` 后列表内存 / 元信息内存 / 元信息磁盘三层全空、清理本身不发任何请求、清后再查必须回源；`clear_caches` 保留公告基线（清空后新发的公告仍能被报出 —— 丢基线则漏报）。
 
 **重置客户端**：`clear_announcement_baseline` 后下次拉取重新建基线（等价「首次拉取」，不报新公告 —— 与上一条成对，锁定「清缓存保留 / 重置忘掉」的区别）；`clear_announcement_read_state` 删净已读状态文件（表现 = 红点复亮）、目录不存在时返回 `false` 且不报错（幂等）。
+
+## 只读接口与作用域
+
+read_metadata只查远端元信息，不选择比赛、不走持久缓存。select_contest只有ID实际改变才更新共享revision；反复刷新同一比赛不撤销。on_oj_switched显式撤销并清空current_contest，避免跨OJ复用比赛上下文。
+
+访问栅栏为构造必填参数，无私有默认栅栏或with_access后置绑定。组合根创建一次共享Arc<AccessRevision>，测试夹具也显式指定。

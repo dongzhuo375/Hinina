@@ -33,14 +33,14 @@ fn list_supports_resync_without_unbounded_history_queries() {
     let mut query = submission::PluginSubmissionQuery {
         contest_id: "c1".into(),
         problem_id: None,
-        page: 1,
-        page_size: 100,
+        cursor: None,
+        limit: 100,
     };
     query.validate().unwrap();
-    query.page_size = 101;
+    query.limit = 101;
     assert_eq!(query.validate(), Err(PluginError::LimitExceeded));
-    query.page_size = 100;
-    query.page = 0;
+    query.limit = 100;
+    query.cursor = Some(String::new());
     assert_eq!(query.validate(), Err(PluginError::InvalidInput));
     assert!(serde_json::from_value::<submission::PluginSubmissionQuery>(
         json!({"contestId":"c1","problemId":null,"page":1,"pageSize":20,"onlyMine":false})
@@ -76,6 +76,9 @@ fn http_shape_rejects_header_injection_transport_controls_and_limits() {
         ("Host", "other.example.com"),
         ("Cookie", "secret"),
         ("proxy-authorization", "secret"),
+        // The host owns Content-Type (it serializes the body as JSON); a plugin-supplied
+        // value would otherwise be appended alongside the host's, sending a duplicate.
+        ("content-type", "text/plain"),
         ("x-id", "a\r\nb"),
     ] {
         request.headers.clear();
@@ -107,4 +110,63 @@ fn notifications_are_bounded_literal_text_and_errors_drop_internal_data() {
         assert!(!serialized.contains("secret"));
         assert!(!error.to_string().contains("private"));
     }
+}
+
+#[test]
+fn plugin_error_wire_shape_matches_the_bridge_contract() {
+    use crate::plugin::host::manifest::PluginPermission;
+    // Exhaustive match forces future error variants to update this wire contract test.
+    fn expected_fields(error: &PluginError) -> Vec<&'static str> {
+        match error {
+            PluginError::PermissionDenied { .. } => vec!["code", "permission"],
+            PluginError::InvalidInput
+            | PluginError::ContextExpired
+            | PluginError::Unauthenticated
+            | PluginError::NotFound
+            | PluginError::ProviderError
+            | PluginError::LimitExceeded
+            | PluginError::Timeout
+            | PluginError::Unavailable
+            | PluginError::ScriptError
+            | PluginError::Unsupported => vec!["code"],
+        }
+    }
+    let errors = [
+        PluginError::InvalidInput,
+        PluginError::ContextExpired,
+        PluginError::Unauthenticated,
+        PluginError::NotFound,
+        PluginError::ProviderError,
+        PluginError::LimitExceeded,
+        PluginError::Timeout,
+        PluginError::Unavailable,
+        PluginError::ScriptError,
+        PluginError::Unsupported,
+    ];
+    for error in errors {
+        let value = serde_json::to_value(&error).unwrap();
+        assert_eq!(
+            value
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            expected_fields(&error)
+        );
+        assert!(value["code"].is_string());
+    }
+    let denied = serde_json::to_value(PluginError::PermissionDenied {
+        permission: PluginPermission::EventsSubscribe,
+    })
+    .unwrap();
+    assert_eq!(
+        denied.as_object().unwrap().keys().collect::<Vec<_>>(),
+        vec!["code", "permission"]
+    );
+    assert!(denied["permission"].is_string());
+    assert_eq!(
+        denied,
+        json!({"code": "permission_denied", "permission": "events.subscribe"})
+    );
 }

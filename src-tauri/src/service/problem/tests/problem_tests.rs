@@ -85,7 +85,8 @@ fn build_service_with(
         failing,
         fail_all,
     });
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), Arc::default()));
     registry.register(
         OjId::new("HOJ"),
         ProviderSet {
@@ -400,7 +401,8 @@ fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
         failing: Vec::new(),
         fail_all: false,
     });
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), Arc::default()));
     // 同一个 Provider 同时注册到两个 OJ 下（数据相同也没关系 —— 我们要断言的是
     // 「请求有没有再发出去」，即缓存有没有跨 OJ 命中）
     for id in ["HOJ", "QDUOJ"] {
@@ -444,8 +446,10 @@ fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
         failing: Vec::new(),
         fail_all: false,
     });
-    let registry2: Arc<dyn ProviderRegistry> =
-        Arc::new(ProviderRegistryImpl::new(OjId::new("QDUOJ")));
+    let registry2: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(
+        OjId::new("QDUOJ"),
+        Arc::default(),
+    ));
     registry2.register(
         OjId::new("QDUOJ"),
         ProviderSet {
@@ -476,7 +480,8 @@ fn limits_disk_cache_key_carries_oj_scope() {
         failing: Vec::new(),
         fail_all: false,
     });
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), Arc::default()));
     for id in ["HOJ", "QDUOJ"] {
         registry.register(
             OjId::new(id),
@@ -525,7 +530,8 @@ fn on_oj_switched_clears_problem_scoped_caches() {
         failing: Vec::new(),
         fail_all: false,
     });
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), Arc::default()));
     registry.register(
         OjId::new("HOJ"),
         ProviderSet {
@@ -655,7 +661,8 @@ fn open_problem_publishes_problem_opened_without_statement() {
         failing: Vec::new(),
         fail_all: false,
     });
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), Arc::default()));
     registry.register(
         OjId::new("HOJ"),
         ProviderSet {

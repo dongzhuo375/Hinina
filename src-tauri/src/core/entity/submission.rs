@@ -106,6 +106,13 @@ pub struct JudgementResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmissionRecord {
+    /// Host-private stable owner identity; display names are never authorization evidence.
+    ///
+    /// 不参与序列化（跨 IPC 与磁盘缓存都不保留）。任何 JSON 往返都会把它还原为
+    /// `None`，因此插件归属校验只能使用 Adapter 直接构造的记录，禁止从缓存恢复后
+    /// 复用 —— 缺失 owner 的记录会被插件查询整页拒绝（fail closed）。
+    #[serde(default, skip_serializing)]
+    pub owner_id: Option<String>,
     pub submit_id: String,
     /// 题目真实 ID
     pub pid: String,
@@ -212,6 +219,17 @@ pub struct SubmissionCases {
     pub sub_tasks: Vec<SubTaskCases>,
     /// 判题模式："default" / "subtask_lowest" / "subtask_lowest_all" / "ergodic_without_skipped" 等
     pub mode: String,
+}
+
+/// Read-only native pagination evidence. Unknown totals stay unknown.
+///
+/// 必须由 Provider 直接构造并立即消费：`SubmissionRecord::owner_id` 不参与序列化，
+/// 经 JSON 缓存往返后归属证据会丢失（插件查询会以 `provider_error` 拒绝）。
+#[derive(Debug, Clone)]
+pub struct SubmissionHistoryPage {
+    pub records: Vec<SubmissionRecord>,
+    pub total: Option<u64>,
+    pub has_more: bool,
 }
 
 #[cfg(test)]

@@ -31,6 +31,43 @@ describe('ipcInvoke — 成功路径', () => {
   })
 })
 
+it('rejects malformed plugin permission types instead of misclassifying them', async () => {
+  for (const permission of [null, 1, {}, ['events.subscribe']]) {
+    const payload = { code: 'permission_denied', permission }
+    invoke.mockRejectedValue(payload)
+    const error = await captureError('plugin_start')
+    expect(error.code).toBeUndefined()
+    expect(error.raw).toEqual(payload)
+    expect(error.message).toBe(JSON.stringify(payload))
+  }
+})
+
+it('保留 PluginError 的稳定 code 和权限信息', async () => {
+  const payload = { code: 'permission_denied', permission: 'events.subscribe' }
+  invoke.mockRejectedValue(payload)
+  const error = await captureError('plugin_start')
+  expect(error.code).toBe('permission_denied')
+  expect(error.message).toBe('插件缺少所需权限')
+  expect(error.raw).toEqual(payload)
+  expect(error.isAuthError).toBe(false)
+})
+
+it.each(['future_plugin_error', 'constructor', '__proto__'])('uses a readable fallback for unknown plugin code %s', async code => {
+  invoke.mockRejectedValue({ code })
+  const error = await captureError('plugin_start')
+  expect(error.code).toBe(code)
+  expect(error.message).toBe('插件操作失败')
+})
+
+it('只把 {code, permission?} 形态视为插件错误，其他带 code 的载荷保留真实消息', async () => {
+  const payload = { code: 'custom', message: '真实原因' }
+  invoke.mockRejectedValue(payload)
+  const error = await captureError('other_cmd')
+  expect(error.code).toBeUndefined()
+  expect(error.message).toBe('真实原因')
+  expect(error.raw).toEqual(payload)
+})
+
 describe('ipcInvoke — 错误归一化（Rust AppError ↔ 前端跨端契约）', () => {
   it('AppError 载荷 → IpcError，保留变体与真实原因', async () => {
     const payload = appError('Auth', '登录失败: 用户名或密码错误')

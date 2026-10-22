@@ -1,5 +1,20 @@
 use super::*;
 
+#[test]
+fn reselect_same_contest_keeps_scope_but_aba_and_oj_switch_revoke_it() {
+    let (service, _provider, _dir) = make_service(StubMode::Ok);
+    let access = service.access.clone();
+    service.select_contest("a").unwrap();
+    let snapshot = access.snapshot().unwrap();
+    service.select_contest("a").unwrap();
+    assert!(!snapshot.cancellation.is_cancelled());
+    service.select_contest("b").unwrap();
+    service.select_contest("a").unwrap();
+    assert!(snapshot.cancellation.is_cancelled());
+    service.on_oj_switched();
+    assert!(service.current_contest_id().is_none());
+}
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -285,7 +300,9 @@ fn build_service_in(
     mode: StubMode,
 ) -> (ContestService, Arc<StubContestProvider>, Arc<CoreEventBus>) {
     let provider = Arc::new(StubContestProvider::new(mode));
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let access = Arc::new(crate::core::access::AccessRevision::default());
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone()));
     registry.register(
         OjId::new("HOJ"),
         ProviderSet {
@@ -298,6 +315,7 @@ fn build_service_in(
         registry,
         Arc::clone(&bus),
         Arc::new(Storage::new(dir.to_path_buf())),
+        access,
     );
     (service, provider, bus)
 }
@@ -762,7 +780,9 @@ fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
     // 「延迟清理磁盘缓存」安全的前提：键带 OJ 维度 → 跨 OJ 结构上不可能命中
     let dir = TempDir::named("hinina-test-contest-oj-scope");
     let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let access = Arc::new(crate::core::access::AccessRevision::default());
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone()));
     for id in ["HOJ", "QDUOJ"] {
         registry.register(
             OjId::new(id),
@@ -776,6 +796,7 @@ fn contest_meta_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
         Arc::clone(&registry),
         Arc::new(CoreEventBus::new()),
         Arc::new(Storage::new(dir.to_path_buf())),
+        access,
     );
 
     // HOJ：首拉 + 二次命中
@@ -803,7 +824,9 @@ fn on_oj_switched_clears_contest_scoped_caches() {
     let dir = TempDir::named("hinina-test-contest-oj-switch");
     let bus = Arc::new(CoreEventBus::new());
     let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let access = Arc::new(crate::core::access::AccessRevision::default());
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone()));
     registry.register(
         OjId::new("HOJ"),
         ProviderSet {
@@ -815,6 +838,7 @@ fn on_oj_switched_clears_contest_scoped_caches() {
         registry,
         Arc::clone(&bus),
         Arc::new(Storage::new(dir.to_path_buf())),
+        access,
     );
 
     // 预置三层缓存：列表（内存）+ 元信息（内存 + **磁盘**）。
@@ -851,7 +875,9 @@ fn on_oj_switched_clears_contest_scoped_caches() {
 async fn on_oj_switched_disk_cleanup_runs_on_runtime() {
     let dir = TempDir::named("hinina-test-contest-oj-switch-async");
     let provider = Arc::new(StubContestProvider::new(StubMode::Ok));
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let access = Arc::new(crate::core::access::AccessRevision::default());
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone()));
     registry.register(
         OjId::new("HOJ"),
         ProviderSet {
@@ -863,6 +889,7 @@ async fn on_oj_switched_disk_cleanup_runs_on_runtime() {
         registry,
         Arc::new(CoreEventBus::new()),
         Arc::new(Storage::new(dir.to_path_buf())),
+        access,
     );
 
     // 手工预置磁盘缓存（不经过网络）：目录与文件都真实存在

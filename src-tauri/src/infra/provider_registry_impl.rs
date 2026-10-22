@@ -10,13 +10,17 @@ use crate::core::provider::registry::{ProviderRegistry, ProviderSet};
 /// 单表 `HashMap<OjId, ProviderSet>`（取代旧的 4 个能力分表）：
 /// 注册哪些 OJ 是运行期数据，接入新 OJ 不需要修改本文件。
 pub struct ProviderRegistryImpl {
+    access: Arc<crate::core::access::AccessRevision>,
+    endpoints: RwLock<HashMap<OjId, String>>,
     providers: RwLock<HashMap<OjId, ProviderSet>>,
     current: RwLock<OjId>,
 }
 
 impl ProviderRegistryImpl {
-    pub fn new(default_oj: OjId) -> Self {
+    pub fn new(default_oj: OjId, access: Arc<crate::core::access::AccessRevision>) -> Self {
         Self {
+            access,
+            endpoints: RwLock::default(),
             providers: RwLock::new(HashMap::new()),
             current: RwLock::new(default_oj),
         }
@@ -47,6 +51,7 @@ impl ProviderRegistryImpl {
 
 impl ProviderRegistry for ProviderRegistryImpl {
     fn register(&self, oj_id: OjId, set: ProviderSet) {
+        let _transition = self.access.begin();
         let mut map = self.providers.write().unwrap_or_else(|e| e.into_inner());
         map.insert(oj_id, set);
     }
@@ -77,7 +82,26 @@ impl ProviderRegistry for ProviderRegistryImpl {
 
     fn set_current(&self, oj_id: OjId) {
         let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
-        *current = oj_id;
+        if *current != oj_id {
+            let _transition = self.access.begin();
+            *current = oj_id;
+        }
+    }
+
+    fn set_instance_endpoint(&self, id: OjId, endpoint: String) {
+        let _transition = self.access.begin();
+        self.endpoints
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, endpoint);
+    }
+
+    fn current_endpoint(&self) -> Option<String> {
+        self.endpoints
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&self.current_id())
+            .cloned()
     }
 
     fn list_available(&self) -> Vec<OjId> {

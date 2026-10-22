@@ -24,10 +24,26 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry"] }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
+# rquickjs 在构建时用 C 编译器编译内置 QuickJS（MSVC/gcc/clang），构建前提见 README。
+# 新增的直接依赖均服务于插件宿主，逐项用途见 PR #41 描述与 doc/modules/src-tauri/plugin/README.md。
+rquickjs = { version = "0.14", default-features = false, features = ["std", "futures"] }
+atomicwrites = "0.4"
+fs4 = "1.1"
+governor = "0.10"
+semver = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+ipnet = "2"
+ip_network = "0.4"
+tokio-util = { version = "0.7", features = ["rt"] }
 tauri-plugin-dialog = "2.7.3"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 
 [lib]
 name = "hinina_lib"

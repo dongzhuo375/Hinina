@@ -290,6 +290,25 @@ impl SubmissionService {
         Ok(detail)
     }
 
+    /// Read-only own-history query. Never invokes source/detail/snapshot paths.
+    pub async fn read_own_history(
+        &self,
+        contest_id: &str,
+        native_page: u32,
+    ) -> AppResult<crate::core::entity::submission::SubmissionHistoryPage> {
+        self.registry
+            .current_submission()?
+            .list_history_page(&SubmissionQuery {
+                contest_id: contest_id.into(),
+                current_page: native_page.into(),
+                limit: 100,
+                only_mine: true,
+                problem_display_id: None,
+                status: None,
+            })
+            .await
+    }
+
     /// 查询提交的全部测试点结果。
     ///
     /// **仅终态结果入缓存**：评测中测试点会逐个产生，缓存会让明细停在半截。

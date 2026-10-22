@@ -1,37 +1,70 @@
-# 插件接口施工验证记录
+# 本轮验证与交付记录
 
-施工分支：feat/plugin-contracts。真实审计先提交于 a2563ef；按协议 → API/权限 → Host 队列 → 仓库/Runtime → 文档与验证分阶段施工。工作区原有 Cargo.toml 标记、AGENTS.md、截图与缓存指南不纳入提交。
+基线main 2cef9a1，新分支feat/plugin-runtime。先追加插件架构审计真实增量审计与选型，再实现引擎验证、访问基础层、查询/I/O/运行时及开发入口。未编写或加载气球业务插件。
 
-## 当前验证
+## 验证结果
 
-- Rust 全量测试：615 通过、0 失败（含主程序编译和 doc-tests）。
-- 前端 Vitest：36 个文件、493 项通过。
-- 前端 vue-tsc + Vite build：通过；已有大资源包提示，不涉及本轮 UI 改动。
-- 文档 SDK：TypeScript strict 类型检查通过；清单示例同时由 Rust 测试校验。
-- 修改范围内 Rust 文件：rustfmt 检查通过；没有对仓库其他模块做全局格式化。
-- Clippy（offline/all-targets）：检查通过；插件修改范围无告警，现有核心/测试代码共 6 条告警（Default 可派生、布尔断言/比较及无用类型转换）。
-- 插件文档本地链接、编码检查及按 Windows CRLF 规则的 git diff --check：通过。
+| 检查 | 结果 |
+|---|---|
+| cargo test --offline --manifest-path src-tauri/Cargo.toml | 最近一次完整运行（2026-10-22）722 项通过，连续 6 次无偶发失败；bin/doc-tests 通过 |
+| cargo clippy --offline --manifest-path src-tauri/Cargo.toml --all-targets | 通过；原有6条warning，涉及config默认实现、旧测试布尔断言/类型转换 |
+| rustfmt --edition 2021 --config skip_children=true（本轮Rust文件） | 通过；未全仓格式化 |
+| npm test | 最近一次完整运行（2026-10-22）508 项通过 |
+| npm run build | vue-tsc + Vite通过；保留原有大chunk提示 |
+| npm run plugin:sdk:check | SDK调用类型和非法能力负例通过 |
+| npm run plugin:scaffold:build | 使用Vite锁定的esbuild离线bundle成ES module |
 
-阶段插件相关测试从基线 21 项，逐步覆盖清单、授权、DTO/输入边界、安全错误、队列、并发注册、重连/Resync 和 !Send Runtime 类型接入。测试中的 Runtime 是本地测试替身，不能证明 JS 可执行。
+真实引擎覆盖ES module、Rust Future/JS Promise、中断不可捕获循环、内存限制及无ambient I/O。Manager真实JS覆盖身份/比赛/提交元数据/历史、存储读写删/CAS、通知、未授权HTTP拒绝、事件、注销、重载数据保留、多插件失败隔离、同步循环/悬挂Promise停止、无业务事件时周期Resync（测试注入短间隔），以及JS同步批量提交64个Promise时16个桥调用的前置配额。
 
-执行命令：cargo test --offline --manifest-path src-tauri/Cargo.toml；cargo clippy --offline --manifest-path src-tauri/Cargo.toml --all-targets；npm test；npm run build。声明检查使用 node node_modules/typescript/bin/tsc --noEmit --strict --target ES2022 --module ESNext --moduleResolution bundler --skipLibCheck doc/modules/src-tauri/plugin/sdk/typecheck.ts。rustfmt 使用 --check --edition 2021 --config skip_children=true，仅传入修改范围文件。
+Query测试覆盖native页余项、不确定total、空native页末尾、ABA/in-flight撤销、错误owner/伪造context/无权限拒绝及metadata重复查询无游标泄漏、scope快照中发生撤销的并发回归。Service测试覆盖同比赛重选不失效、切OJ清选赛、连接保存失败仍撤销、会话删除失败仍撤销身份。
 
-## 文件与模块
+Storage真实文件覆盖跨实例CAS单胜者、missing/null区分、命名空间、重启保留、value/total配额和损坏保留。HTTP策略覆盖特殊IPv4/IPv6、私网额外批准、未授权origin/HTTP拒绝；Mock HTTP server通过私有transport测试真实reqwest的固定地址、无凭证/无redirect、5xx/响应体限额、总超时与取消。测试专用直连loopback只在模块内部调用transport，生产公开API仍拒绝loopback，未开放测试后门。
 
-协议/清单：plugin/api/event.rs 及协议测试，plugin/host/manifest.rs 及清单测试。清单/API v1，事件协议 v2，点分 type，拒绝未知字段/权限/事件和入口路径逃逸语法。
+## 修改文件与职责
 
-API/权限：plugin/api/{mod,error,submission,contest,identity,storage,http,notification}.rs 及契约测试；plugin/permission 的 PluginGrant/权限测试。独立 DTO、分页/上下文、稳定错误与纯边界验证，不存在生产执行器。problem/workspace/ui、host/extension 只保留带标注的远期草案。
+- core/access、entity/submission、provider/{registry,submission}：通用访问revision与真实native历史证据。
+- service/{auth,config,contest,submission}、infra/provider_registry_impl、adapter/hydro：显式撤销、只读Service及Hydro真实末页语义。
+- plugin/api、host、permission、registry、query、execution_api：v2契约、权限快照、不透明句柄/游标、JSON能力桥。
+- infra/{fs_plugin_repo,plugin_storage,plugin_http,plugin_notification}：审批/代码读取、锁+原子JSON、隔离网络、文本通知。
+- plugin/runtime/{quickjs,bootstrap}、manager、core/context、main、commands/plugin_cmd：真实执行、启停/重载/Resync/退出装配。
+- src/types/plugin、bridge/plugin.bridge、services/plugin.service、stores/pluginStore、components/PluginNotifications、App/main：开发入口与纯文本出口，保留既有分层。
+- Cargo依赖/锁、package脚本、scripts/build-plugin-scaffold、SDK/scaffold、架构/手册/todo和对应模块文档同步。
 
-Host：plugin/host/{plugin_host,event_adapter,api_error}.rs 与测试，main.rs 处理重复启动结果。每插件有界队列 128，白名单/声明/权限过滤，非阻塞入队；满/关闭注销单插件，重连先 Resync，不创建第二套业务总线。
+## 未进行的验收及后续
 
-接入：plugin/registry/mod.rs，core/repository 删除旧插件端口，infra/fs_plugin_repo.rs 及占位行为测试；plugin/runtime/mod.rs 及非 Send 接入测试。文件仓库明确 Unsupported，Runtime/Bridge 只有契约，无 Manager 或引擎。
+未启动完整桌面应用进行人工UI截图验收；通过前端测试/构建和Rust实际worker/网络测试验证。通知未进行截图验收，不声称已完成视觉联调。没有在真实HOJ/Hydro账号/比赛和实际外部气球服务上测试，避免制造真实派发；下一步在专用测试环境按开发教程加载作者插件联调。
 
-文档：根目录 ARCHITECTURE_REVIEW.md，doc/开发手册.md、Architecture.md、todo.md，插件模块文档（含 README、Manifest/API/事件/权限/Runtime/安全/教程、SDK 声明与类型检查样例），及受影响的 core/context、仓库、infra/main 模块文档。
+当前没有完整JS→真实远端成功请求的生产网络集成：成功/500/跳转/上限/超时在Mock HTTP transport验证，JS集成验证拒绝未授权网络。DNS解析和CIDR策略分别由生产代码与地址策略测试覆盖，尚未做受控DNS服务器重绑定演练。跨OS构建、OS进程沙箱、引擎体积/性能对照、DevTools debugger和source map栈不在本轮。
 
-## 未实现与后续路径
+首次AC/可见历史完整性/外部幂等/重试恢复属于插件业务，故不实现。只交付通用脚手架和能力，不以不存在的气球端到端测试冒充业务验收。Marketplace、暂停/恢复、WASM/UI扩展未实现且没有占位运行路径。
 
-当前没有业务插件、目录发现/入口读取、授权 UI、API Adapter、JS 引擎或安全 I/O 执行器，因为本轮明确只预留接口。替代交付是可编译 trait/DTO/声明、真实事件边界和配套开发文档，不能把完整参考方案的运行验收项标为完成。
+## 审查回归更新
 
-后续先实现绑定 PluginGrant/上下文的 Service Adapter，再做私有持久化/CAS 与专用无 Cookie 网络客户端，随后实测 JS 引擎的 Windows/Tauri 兼容、Promise、中断/内存能力，再接加载/停止和外围业务测试。气球首次 AC 判断留给插件，核心 Service 不负责派发或首次 AC 判断。
+新增Hydro展示名不同/udict缺失的owner校验、转换中签发上下文、OJ组合切换、慢激活期间256条事件、启动超时清理、两个真实JS插件共享预算、并发游标领取、approval隔离、订阅日志锁外写出、存储限流、Client复用、稳定脚本/IPC错误和revision内会话读取去重。公开PluginHttp::request成功路径使用无网络HttpTransport fixture；实际reqwest固定地址和响应策略继续由本地transport测试验证。Provider与HTTP超时用Tokio虚拟时间，周期测试注入短间隔；详见[逐项记录](../../../plugin-review-fixes.md)。
 
-本轮无 Mock 气球服务器或重启派发集成测试：运行时、HTTP 与存储执行器不存在，这些测试应随实际执行器与业务插件一同落地。
+PR #41 MEDIUM跟进验证：增加stop超时状态与reaper历史、基础设施日志阶段/脱敏、PluginError穷尽wire契约、域名origin正例及带scheme的IPv4/IPv6负例；通知校验/队列/过期/手动关闭/卸载及订阅失败清理改由Service测试锁定。所有宿主Promise必须await是文档契约，本轮未实现drain或未await检测。数量以当轮测试输出为准。
+
+PR #41 LOW收尾验证：补atomicwrites两支ErrorKind及invalid ID、重复stop单reaper、真实引擎拒绝跟踪/容量/脱敏、桥响应含包络上限/转义字节、CAS读写审计、共享事件allowlist、游标合计预算及消费释放、scope缓存交错/回绕令牌、真实比赛服务组合切换、HTTP并发拒绝不扣令牌及取消/丢弃归还、前端可读错误和未知原型键兜底。Promise诊断只覆盖引擎实际观察到的拒绝，不增加后台调度。
+
+bc75b18后续查询回归：真实ConfigService/Registry验证地址待重启时旧context撤销、新context可用、实际endpoint和身份键不变、禁用仍拒绝及日志脱敏。Provider多页3秒延迟以Tokio虚拟时间验证整体5秒扫描超时、游标/并发预算归还；真实QuickJS在activate及事件内捕获timeout并继续调用API。单独压缩测试入口剩余窗口验证晚发起宿主调用提前返回timeout；真实worker验证循环引用、BigInt、抛异常toJSON统一invalid_input且无写入。丢弃list最终scope检查时也会清理未发布游标。manager/query改由所属模块直接挂载测试，跨模块共享test_support。
+
+终轮评审回归：QuickJS 加载后不调用shutdown直接drop不abort；超界响应页返回limit_exceeded且不残留游标；ExecutionApi准入限流耗尽返回limit_exceeded；start_worker替换已结束worker时保留上一代timeout历史；panic payload仅分类不格式化。Rust 全量通过，clippy仅既有6项告警；前端通过，生产构建、SDK类型检查与脚手架构建通过。
+
+并发订阅与OJ诊断回归：插件通知store以单调代次丢弃乱序完成的迟到订阅，旧卸载函数不影响新订阅（Vitest覆盖两种重叠顺序）；query的contest.get/submission.history/scope.identity失败记录稳定类别与OJ标识，ProviderNotFound原文不落日志。Rust 全量通过，前端通过。
+
+事件隔离与目录扫描回归：真实QuickJS验证首个handler抛错后其余handler与后续事件仍执行；provider校验失败后用同一游标续页成功；200个无关目录与越界符号链接不阻断目标插件；持锁并丢弃调用后存储不提交；缓存命中不触发阻塞读取。Rust 全量通过，逐项确认去掉修复后对应回归失败。
+
+## 评审一致性收敛回归（基线 be66c93）
+
+本轮验证命令：`cargo test --offline --manifest-path src-tauri/Cargo.toml`（连续 6 次无偶发失败）、`cargo clippy --offline --all-targets`（仅既有 6 项告警）、`npm test`、`npm run build`、`npm run plugin:sdk:check`、`npm run plugin:scaffold:build`，以及本轮改动 Rust 文件的 rustfmt 检查。
+
+新增回归（逐项做过"去掉修复即失败"的变异验证）：
+- `context_acquisition_reuses_a_young_handle_for_the_same_scope_and_revision`：同一 scope/revision 连续 96 次 `context.current` 返回同一句柄且只保留 1 个句柄；scope 变化不共享；revision 变化撤销旧句柄并签发新句柄。
+- `an_aged_handle_is_not_reused`：超过复用年龄后签发新句柄，而旧句柄在 TTL 内仍可 `check`。
+- `response_overflow_on_buffered_records_returns_the_cursor_unchanged`：剩余纯缓冲记录使整页超限时，游标及其 `buffered_bytes` 按调用前快照保留，可用同一游标重试。
+- `response_overflow_after_a_fetch_restores_the_pre_call_snapshot`：新抓取的超限页不入库，`native_page` 不前进、不残留陈旧计量。
+- `concurrency_rejections_never_spend_a_rate_token`：本地或共享并发拒绝后，两个桶的突发均未被扣减。
+- `stop_racing_readiness_does_not_relabel_a_failure_as_clean`：ready 发布后立即取消令牌，激活失败仍为 failed/script_error，不被改判为 stopped。
+- 前端：订阅"单一活动/迟到卸载/旧卸载不影响新订阅"测试迁到 `plugin.service.spec.ts`（Service 层），Store 测试只断言状态应用与 `dismissNotification` 委派。
+
+格式：`adapter/hydro`（保留原 BOM）、`provider_registry_impl`、`core/mod.rs`、`core/provider/submission.rs` 已回到 main 基线上重放功能性改动，本 PR 不再包含无关格式化。

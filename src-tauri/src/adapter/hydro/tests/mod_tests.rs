@@ -6,6 +6,75 @@ use super::*;
 use crate::core::entity::submission::JudgementStatus;
 use crate::test_support::{Guarded, TempDir};
 
+#[tokio::test]
+async fn plugin_history_uses_uid_when_display_name_differs_or_udict_is_absent() {
+    use crate::core::entity::submission::SubmissionHistoryPage;
+    use crate::plugin::{
+        api::submission::PluginSubmissionQuery, permission::PluginGrant, query::ScopedQueries,
+        test_support::*,
+    };
+    for missing_udict in [false, true] {
+        let mut value = fixture("record_list");
+        value["udict"]["2"]["displayName"] = serde_json::json!("A Different Display Name");
+        let vo: RecordListVO = serde_json::from_value(value).unwrap();
+        let rdoc = &vo.rdocs.as_ref().unwrap()[0];
+        let udict = if missing_udict {
+            HashMap::new()
+        } else {
+            vo.udict.unwrap()
+        };
+        let record = HydroAdapter::into_submission_record(
+            rdoc,
+            &vo.pdict.unwrap_or_default(),
+            &udict,
+            &["1000".into()],
+            true,
+        );
+        assert_eq!(record.owner_id.as_deref(), Some("2"));
+        assert_eq!(
+            record.username,
+            if missing_udict {
+                ""
+            } else {
+                "A Different Display Name"
+            }
+        );
+        let source = Arc::new(Source::default());
+        source.scope.lock().unwrap().user = Some(("2".into(), "admin".into()));
+        *source.pages.lock().unwrap() = vec![SubmissionHistoryPage {
+            records: vec![record.clone()],
+            total: None,
+            has_more: false,
+        }];
+        let m = manifest("test.hydro-owner");
+        let queries = ScopedQueries::new(
+            PluginGrant::authorize(&m, &m.permissions).unwrap(),
+            source,
+            Arc::default(),
+            Default::default(),
+        );
+        let context = queries.current_context().await.unwrap();
+        let page = queries
+            .list(
+                &context,
+                PluginSubmissionQuery {
+                    contest_id: "contest".into(),
+                    problem_id: None,
+                    cursor: None,
+                    limit: 100,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(page.records.len(), 1);
+        assert!(queries
+            .submission(&context, "contest", &record.submit_id)
+            .await
+            .unwrap()
+            .is_some());
+    }
+}
+
 /// 状态变体的线上名（`JudgementStatus` 未派生 `PartialEq`，且前端依赖序列化名）
 fn status_name(status: &JudgementStatus) -> String {
     serde_json::to_value(status)

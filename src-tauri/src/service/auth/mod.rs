@@ -10,7 +10,10 @@
 // 同步订阅者代劳写盘，既把凭证带进事件流，又把持久性保证挂在异步投递上。
 pub mod error;
 
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
@@ -50,6 +53,8 @@ pub enum SessionValidity {
 /// 不能交给异步消费者。`LoggedIn` / `LoggedOut` / `SessionExpired` 只是
 /// 「这些动作已经做完」的事实通知。
 pub struct AuthService {
+    access: Arc<crate::core::access::AccessRevision>,
+    revoked_identities: Mutex<HashSet<OjId>>,
     registry: Arc<dyn ProviderRegistry>,
     session_repo: Arc<dyn SessionRepository>,
     event_bus: Arc<CoreEventBus>,
@@ -61,8 +66,11 @@ impl AuthService {
         registry: Arc<dyn ProviderRegistry>,
         session_repo: Arc<dyn SessionRepository>,
         event_bus: Arc<CoreEventBus>,
+        access: Arc<crate::core::access::AccessRevision>,
     ) -> Self {
         Self {
+            access,
+            revoked_identities: Mutex::default(),
             registry,
             session_repo,
             event_bus,
@@ -75,6 +83,7 @@ impl AuthService {
     /// 落盘失败则整体失败（不发布 `LoggedIn`）—— 会话没落盘就宣告登录成功，
     /// 会让重启后的客户端拿着不存在的会话工作。
     pub async fn login(&self, username: &str, password: &str) -> AppResult<User> {
+        let _transition = self.access.begin();
         let oj_id = self.registry.current_id();
         let provider = self.registry.current_auth()?;
 
@@ -86,9 +95,20 @@ impl AuthService {
             e.context("登录失败")
         })?;
 
+        // AccessRevision blocks plugin reads during the attempt. Provider lookup or
+        // authentication failure must preserve the previous revocation state. Once
+        // the provider accepts new credentials, hide old disk identity until save succeeds.
+        self.revoked_identities
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(oj_id.clone());
         // 持久化会话（显式，落盘成功才算登录完成）
         let session = Session::new(oj_id.as_str(), &user.id, &user.username, &user.token);
         self.session_repo.save(&session)?;
+        self.revoked_identities
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&oj_id);
 
         info!(username = user.username, "登录成功");
         // 只带 OJ 与用户标识：token 与完整 User 实体绝不进入事件流
@@ -107,6 +127,7 @@ impl AuthService {
     /// （见 `commands::auth_cmd::logout`）—— 同属「必须完成的核心清理」，
     /// 不交给事件消费者。
     pub async fn logout(&self) -> AppResult<()> {
+        let _transition = self.access.begin();
         let oj_id = self.registry.current_id();
 
         // 尝试远端登出（非致命错误）
@@ -200,10 +221,32 @@ impl AuthService {
         }
     }
 
+    /// Read stable identity metadata without restoring credentials into a provider.
+    pub fn identity_metadata(&self) -> AppResult<Option<(String, String)>> {
+        if self
+            .revoked_identities
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&self.registry.current_id())
+        {
+            return Ok(None);
+        }
+        Ok(self
+            .session_repo
+            .load(&self.registry.current_id())?
+            .filter(|session| !session.user_id.is_empty())
+            .map(|session| (session.user_id, session.username)))
+    }
+
     // ── 内部方法 ──
 
     /// 删除指定 OJ 的本地会话（不存在时静默成功）。
     fn clear_session(&self, oj_id: &OjId) -> AppResult<()> {
+        let _transition = self.access.begin();
+        self.revoked_identities
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(oj_id.clone());
         self.session_repo.remove(oj_id)
     }
 }

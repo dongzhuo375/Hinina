@@ -1,81 +1,87 @@
-# 插件开发教程（接口预留）
+# 从零开始开发一个 JS / TS 插件
 
-当前没有 JS 加载器、可安装插件或可执行气球示例。以下是未来实现时的接口用法和业务设计注意事项，不可复制后宣称已能运行。
+宿主当前可运行单文件 ES module。本文只提供通用开发脚手架，不包含首次AC或气球业务。
 
-## 目录与入口
+**异步调用契约**：所有返回 Promise 的宿主 API 都必须 await，或作为 activate/事件 handler 返回的 Promise 链的一部分。并发调用使用 await Promise.all。禁止依赖 void apiCall()、未返回的 .then() 或游离异步任务：activate/handler 返回后，引擎不承诺继续执行这些调用或报告拒绝；无事件订阅的插件尤其不会因未完成调用而被后台驱动。本轮不新增 drain，也不在运行时检测/拒绝“忘记 await”。events.on 与注销函数是同步方法，无需 await。
 
-未来插件目录约定 plugins/<id>/manifest.json + index.js；宿主只读取 JS，TypeScript 需要在插件项目离线构建。示例清单见 [manifest.example.json](sdk/manifest.example.json)。清单只能声明能力，宿主还需明确授予。
+## 1. 准备代码
 
-入口采用 ES module 默认导出的 activate；不提供 Node 全局或任意 import。下面只展示注册形式，不实现气球判断或网络派发：
+复制整个 [sdk](sdk/) 到本地开发目录；保留 hinina.d.ts、scaffold/index.ts，将 manifest.example.json 复制为 manifest.json。示例ID为 com.example.development，默认只声明事件和私有存储。
 
-```js
-/**
- * @plugin-entry
- * @plugin-id com.example.balloon-first-ac
- * @runtime js
- * @api-version 1
- */
-export default async function activate(hinina) {
-  /**
-   * @plugin-handler
-   * @event submission.judged
-   * @idempotent true
-   * @resync-safe true
-   */
-  const stop = hinina.events.on('submission.judged', async (envelope) => {
-    // 这是刷新提醒；先签发新上下文、查询本人当前比赛，再决定是否扫描完整历史。
-    // 不把 envelope.event.status === 'Accepted' 等同于首次 AC。
-  })
-  // stop() 仅注销这个 handler；整个插件停止时 Runtime 自动清理全部 handler。
-}
+在仓库根目录可用现有 esbuild 验证并构建：
+
+要求Node.js ≥20.6（脚本使用import.meta.resolve）。构建输出为src-tauri/target/plugin-scaffold.js；将其复制到插件目录并命名为index.js，与manifest.entry一致。脚本成功后也会提示此步骤。
+
+```powershell
+npm run plugin:sdk:check
+npm run plugin:scaffold:build
 ```
 
-查询示意（TypeScript，只有接口声明）：
+独立工程可安装成熟的 esbuild（例如 npm install --save-dev esbuild），构建为 index.js。不要使用 node/fs/fetch/import运行时依赖；依赖必须离线bundle进入一个ES module。入口固定：
 
 ```ts
-const context = await hinina.currentContext()
-const contest = await hinina.contest.current(context)
-const identity = await hinina.identity.current(context)
-if (contest && identity) {
-  const page = await hinina.submission.list(context, {
-    contestId: contest.contestId, page: 1, pageSize: 50
+import type { Hinina, JsonValue } from './hinina'
+export default async function activate(hinina: Hinina, config: Readonly<JsonValue>) {
+  hinina.events.on('resync.required', async (event, envelope) => {
+    // 根据当前状态重新同步；不要依赖事件重放。
   })
-  // page.hasMore 表示还有下一页；此页不能证明首次 AC 或历史完整。
 }
 ```
 
-事件 handler 收到的是带 version/sequence 的信封，不是扁平 CoreEvent。监听 resync.required 时同样查询当前上下文；不要等待宿主重放。context_expired 后丢弃旧流程并重新获取上下文。
+## 2. 放入目录并显式批准
 
-## 首次 AC 业务应由插件决定
+设置页查看当前数据目录。默认结构：
 
-需验证当前用户/比赛/题目归属，取相关题目的完整本人历史，处理分页、OJ 隐藏历史及重判。以 submittedAt（毫秒）排序，再按 submissionId 字符串序稳定打破同秒并列；这只是客户端可确定的顺序，若服务端无法证明真实先后而业务要求严格首条，则保守不派发。
-
-未知历史或并发分页变化时不派发，先重新扫描并确认。事件可能重复；同题后续 AC、重复通知、启动 Resync 都不能产生第二次派发。当前提交事件没有 OJ/用户/比赛作用域，因此按其 ID 直接查询并派发不安全，应以当前上下文完整扫描结果为准。
-
-派发幂等键绑定 ojId/userKey/contestId/problemId；使用规范 JSON 元组或长度前缀编码，不能简单用冒号拼接导致不同字段组合冲突。私有 storage 只负责本地记账；外部服务必须按同一幂等键去重。
-
-## 失败、恢复与重试
-
-参考方案的 CAS(key, null, ...) 存在两个问题：JSON null 与键缺失不明确，且写入 dispatch_failed 后再也不等于 null。本契约用 {state:'missing'} 与 {state:'value',value:...} 明确区别。重试需读取现有状态，CAS 期望该状态/修订号，而不是永远期待 Missing。
-
-未来业务应有有限 dispatching 租约、dispatched 成功标记和带重试时间的失败状态。重启后检查过期租约；网络超时代表结果未知，不能立即换幂等键。外部服务成功但本地成功标记未落盘时，使用原幂等键恢复。500/超时采用有限退避及可人工恢复策略，不无限重试。已经被 server 判定重复的同一幂等请求仍应按成功收敛。
-
-网络调用函数的标注应包括：
-
-```js
-/**
- * @plugin-network
- * @permission network.request
- * @https-only true
- * @allowlist manifest.network.allowHosts
- * @idempotent true
- */
+```text
+<base_dir>/
+  plugins.json                       宿主审批，不放在插件目录
+  plugins/com.example.development/
+    manifest.json
+    index.js
+  plugin-data/<插件ID的SHA-256>/       宿主私有JSON，停止/重载保留
 ```
 
-不使用任意 fetch；未来只经 hinina.http.request(context, request)，Host 执行权限、HTTPS/DNS/白名单及体积/超时限制。失败通知使用纯文本，不向选手输出 token、内部路径或完整错误堆栈。
+把构建产物和Manifest放进代码目录。复制 [plugins.example.json](sdk/plugins.example.json) 为数据目录的plugins.json；只有enabled=true且审批匹配的插件才加载。没有配置时不执行任何插件。也可以在plugins.json顶层设置绝对codeRoot指向开发插件根目录，每个子目录一个插件。
 
-## 后续业务验收
+修改清单权限不会自动获得能力；更新宿主批准后reload。网络origin需要同时出现在manifest.network.allowOrigins和宿主network列表里，私网/HTTP另需显式授权，见[网络规范](api/http.md)。插件options配置作为activate第二个参数传入并深冻结；无表单schema实现。
 
-外部服务 mock 应覆盖首 AC、非 AC、他人/其他比赛、相同事件重复、同题后续 AC、不是第一条、缺页/历史不可见、相同时间戳、重判、重启、Resync、500 重试、结果未知的超时、本地标记落盘失败、并发实例与幂等键冲突。
+## 3. 启动、调试和重载
 
-这些用例依赖尚未实现的存储/HTTP/Runtime，不是本轮已通过测试。
+运行npm run tauri dev，在桌面WebView开发控制台调用：
+
+```js
+await window.hininaPlugins.list()
+await window.hininaPlugins.start('com.example.development')
+await window.hininaPlugins.resync('com.example.development')
+await window.hininaPlugins.reload('com.example.development')
+await window.hininaPlugins.stop('com.example.development')
+```
+
+enabled插件会自动启动，已运行时再次start会报错。release也按批准配置自动启动；window.hininaPlugins只在dev提供。底层命令为plugin_list/start/stop/reload/resync，不接收代码/权限/路径；前端入口仍经过Store → Service → Bridge。
+
+list显示starting/running/stopped/failed和安全错误代码。详细操作看宿主tracing日志，插件JS错误不输出内部栈。更改源码后用reload，旧worker真正退出后才加载新源码；失败时检查版本、声明/批准、入口、API错误处理。没有JS console或逐步调试器，请通过状态、私有存储和获准通知做有限开发探针，勿输出用户敏感信息。
+
+## 4. 查询当前比赛的可见历史
+
+```ts
+const context = await hinina.context.current()
+const contest = await hinina.contest.current(context)
+if (contest) {
+  let cursor: string | null = null
+  do {
+    const page = await hinina.submission.list(context, {
+      contestId: contest.contestId, cursor, limit: 100,
+    })
+    // 用submissionId去重；page.total可能为null。
+    cursor = page.nextCursor
+  } while (cursor !== null)
+}
+```
+
+上例是查询用法，实际插件需设置扫描预算、保存可恢复状态并处理context_expired；不能让整个handler超过30秒。空records仍可能有nextCursor。API仅当前比赛、当前登录用户，缺少可见历史时不得声称已经确认全站首次AC。
+
+## 5. 气球插件仍需由开发者完成
+
+宿主已具备事件、身份/比赛/提交历史、持久CAS、受控HTTP、通知及定期Resync。插件负责首次AC的业务定义、完整扫描和稳定排序、派发状态恢复、外部幂等键和重试策略。
+
+原参考示例中的CAS(null)不能把dispatch_failed再变为dispatching，崩溃后的dispatching也会卡住；应区分missing与JSON null，显式设计可恢复状态、租期/重试预算，并让外部服务通过幂等键去重。本地原子CAS不能撤回远端已成功但客户端超时的派发。

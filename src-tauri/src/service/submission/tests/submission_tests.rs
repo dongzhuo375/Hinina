@@ -118,6 +118,7 @@ impl SubmissionProvider for StubSubmissionProvider {
             StubMode::Ok | StubMode::AlwaysRunning | StubMode::NonTerminalDetail => {
                 Ok(SubmissionPage {
                     records: vec![SubmissionRecord {
+                        owner_id: Some("u1".into()),
                         submit_id: "12345".into(),
                         pid: "1061".into(),
                         display_pid: "HOJ-1061".into(),
@@ -221,7 +222,8 @@ fn build_service(mode: StubMode) -> (Guarded<SubmissionService>, StubCounters, A
         detail_calls: Arc::clone(&counters.detail),
         cases_calls: Arc::clone(&counters.cases),
     });
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), Arc::default()));
     registry.register(
         OjId::new("HOJ"),
         ProviderSet {
@@ -498,7 +500,8 @@ fn detail_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
         detail_calls: Arc::clone(&counters.detail),
         cases_calls: Arc::clone(&counters.cases),
     });
-    let registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ")));
+    let registry: Arc<dyn ProviderRegistry> =
+        Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), Arc::default()));
     for id in ["HOJ", "QDUOJ"] {
         registry.register(
             OjId::new(id),

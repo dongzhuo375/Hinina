@@ -367,6 +367,7 @@ impl HOJAdapter {
     /// JudgeVO → 提交列表条目（time/memory 评测未完成时为 null，去 null 后落 0）。
     fn into_submission_record(j: JudgeVO) -> SubmissionRecord {
         SubmissionRecord {
+            owner_id: (!j.uid.is_empty()).then_some(j.uid),
             submit_id: j.submit_id.to_string(),
             pid: j.pid.to_string(),
             display_pid: j.display_pid,

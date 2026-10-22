@@ -5,7 +5,7 @@ use std::time::Duration;
 
 fn grant(id: &str, approved: &[PluginPermission]) -> PluginGrant {
     let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
-        "id":id,"name":"Demo","version":"1.0.0","manifestVersion":1,"apiVersion":1,
+        "id":id,"name":"Demo","version":"1.0.0","manifestVersion":2,"apiVersion":2,
         "runtime":"js","entry":"index.js",
         "permissions":["events.subscribe","submission.read","contest.read","notification"],
         "events":["submission.judged","system.config_changed","system.theme_changed"]
@@ -71,7 +71,10 @@ fn subscription_and_payload_permissions_filter_before_sequence_assignment() {
     host.dispatch(&CoreEvent::ConfigChanged);
     let next = rx.try_recv().unwrap();
     assert_eq!(next.sequence, 2);
-    assert_eq!(next.event, PluginEvent::ConfigChanged);
+    assert_eq!(next.event, PluginEvent::ResyncRequired { lost: 0 });
+    let config = rx.try_recv().unwrap();
+    assert_eq!(config.sequence, 3);
+    assert_eq!(config.event, PluginEvent::ConfigChanged);
     assert!(rx.try_recv().is_err());
 }
 
@@ -290,4 +293,72 @@ fn resync_queue_overflow_also_disconnects_only_the_full_subscription() {
         Err(mpsc::error::TryRecvError::Disconnected)
     ));
     assert_eq!(host.subscriber_count(), 1);
+}
+
+#[test]
+fn explicit_resync_follows_buffered_business_events_and_reports_closed_or_full_queue() {
+    let (host, _bus) = host();
+    let id = "com.example.resync";
+    let mut rx = host.subscribe(&full_grant(id)).unwrap();
+    rx.try_recv().unwrap();
+    host.dispatch(&CoreEvent::ConfigChanged);
+    assert!(host.request_resync(id));
+    assert_eq!(rx.try_recv().unwrap().event, PluginEvent::ConfigChanged);
+    let notice = rx.try_recv().unwrap();
+    assert_eq!(notice.event, PluginEvent::ResyncRequired { lost: 0 });
+    assert_eq!(notice.sequence, 3);
+    drop(rx);
+    assert!(!host.request_resync(id));
+    assert_eq!(host.subscriber_count(), 0);
+    let _full = host.subscribe_with_capacity(&full_grant(id), 1).unwrap();
+    assert!(!host.request_resync(id));
+    assert_eq!(host.subscriber_count(), 0);
+}
+
+#[test]
+fn subscription_and_overflow_logs_never_hold_the_subscription_lock() {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // The lock assertion only runs when a log event actually reaches the writer, so the
+    // test must also prove events were received. Callsite interest is a process-global
+    // cache; without this counter the test could pass vacuously if a parallel test had
+    // cached `never` for these callsites and silently dropped every event.
+    let writes = Arc::new(AtomicUsize::new(0));
+    #[derive(Clone)]
+    struct LockCheckingWriter(std::sync::Weak<PluginHost>, Arc<AtomicUsize>);
+    impl Write for LockCheckingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if let Some(host) = self.0.upgrade() {
+                assert!(
+                    host.subscriptions.try_lock().is_ok(),
+                    "logging inside subscription lock"
+                );
+            }
+            self.1.fetch_add(1, Ordering::SeqCst);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let (host, _bus) = host();
+    let writer = LockCheckingWriter(Arc::downgrade(&host), writes.clone());
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        let _receiver = host
+            .subscribe_with_capacity(&full_grant("test.log"), 1)
+            .unwrap();
+        host.dispatch(&CoreEvent::ConfigChanged);
+        let _receiver = host
+            .subscribe_with_capacity(&full_grant("test.log"), 1)
+            .unwrap();
+        assert!(!host.request_resync("test.log"));
+    });
+    // The overflow/resync failures above must have logged at least once.
+    assert!(
+        writes.load(Ordering::SeqCst) > 0,
+        "no log events reached the writer; the lock assertion never ran"
+    );
 }

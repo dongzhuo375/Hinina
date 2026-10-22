@@ -1,16 +1,11 @@
 # PluginHost
 
-单个 CoreEventBus 消费者，接收核心事实并向每插件队列交付安全投影；不是可发布业务事实的总线。
+唯一CoreEventBus插件消费者；只负责白名单/权限过滤、安全PluginEventAdapter和有界投递，不运行JS、不加载文件、不管理业务动作。
 
-- new(bus) 只构造 Host；start() 在 Tokio 上下文启动一次，重复调用返回 AlreadyStarted。
-- subscribe(&PluginGrant) 返回 mpsc Receiver<PluginEventEnvelope>，未授予 events.subscribe 返回 PermissionDenied；重复 ID 返回 AlreadySubscribed。
-- 初始 Resync 在注册锁内先入空队列，再插入订阅表，杜绝并发重复注册方收到额外通知或 seq=2 先于 seq=1。
-- 每插件容量固定 128（包含 Resync）；外部无法注入同步回调或无界 sender。PluginEventSink 为宿主私有构造的队列出口，不再是可实现的 trait。
-- 声明和授予的领域权限共同决定投递集合；过滤后分配序号。Resync 无需事件声明，始终尝试投递。
-- 入队和注销使用同一锁，临界区只有转换/try_send，无用户代码、await 或 I/O。满/关闭返回失败，移除对应订阅并丢弃其 sender；其他订阅继续。
-- unsubscribe(id) 幂等，返回后不再入队；已缓存消息仍可能读出，未来 worker 停止时必须主动丢弃。
-- 接收端关闭最迟在下一条核心事件/Resync 时从表中移除。队列满不自动重连、不积累重试任务；未来 Manager/worker 显式重新授权接入，先处理初始 Resync。
+subscribe(&PluginGrant)需events.subscribe；重复ID拒绝。每插件mpsc容量128，初始Resync先于其他投递；过滤后分配sequence。队列满/关闭即注销单插件，worker发现关闭后停止并撤销调用。注销后放弃已缓冲消息，重启先Resync。
 
-消费者闭包只捕获订阅表，不延长总线生命。保留 core::event 的 Lagged/Closed/监督重启语义。关闭总线不代表历史事件可重放。
+request_resync(id)始终尝试把 Resync 入队，即使队列已有业务事件；返回 true 代表提示实际入队。满/关闭时注销该订阅并返回 false，不能因队列非空就静默跳过仍报成功；容量128继续约束积压。账号/OJ/比赛变化的事实通知可附加Resync，即使该领域事件未声明。lost=0不代表完整历史。消费者Startup/Lagged沿用core统一消费者；没有第二套业务事件总线。
 
-测试覆盖并发重复注册、过滤不耗序号、慢/关闭消费者隔离、控制通知溢出、重连 Resync、注销后不再入队、启动一次、真实 broadcast 投递和 Lagged。任意 JS handler 异常/死循环隔离尚未实现，因为当前没有执行器。
+Manager负责独立worker、配置授权和启停；见[Runtime](../runtime/mod.md)。单插件故障不阻止其他插件或核心。
+
+订阅和队列失败只在锁内收集诊断，释放subscriptions锁后才调用tracing；慢日志writer不占用全体订阅锁。

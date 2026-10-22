@@ -1,5 +1,7 @@
 # Hinina 插件边界真实代码审计
 
+> §1–8 是 d858e03 的历史审计快照，包含当时尚未实现的能力和建议；当前实现已由 §9–10 取代这些现状结论。后续修复以 [PR 审查记录](doc/plugin-review-fixes.md) 和 [验证记录](doc/modules/src-tauri/plugin/validation.md) 为准。
+
 审计日期：2026-10-19。基准提交：`d858e03`。当前施工分支：`feat/plugin-contracts`，由本地 `main` 创建；`git ls-remote --symref origin HEAD` 确认远端默认分支同为 `main`。审计在修改生产代码之前完成。用户原有 Cargo.toml 修改及未跟踪文档/图片不纳入施工提交。
 
 ## 1. 实际模块与依赖
@@ -82,3 +84,27 @@ SubmissionService 已有 get_submission_detail、list_contest_submissions、get_
 5. 文档/验收：能力状态表、声明、教程、后续引擎验证清单；逐层测试，最终全量 Rust/前端测试、build、rustfmt、clippy。
 
 审计基线：`cargo test --offline --manifest-path src-tauri/Cargo.toml --lib plugin::` 21/21 通过；`npm run build` 通过。现有告警：FsPluginRepository.storage 未读，Vite 大资源包。完整运行时/存储/HTTP/气球集成测试不属于本轮验收。
+
+## 9. 可运行宿主增量施工（2026-10-20）
+
+基准 main `2cef9a1`，分支 `feat/plugin-runtime`。本轮目标为真实 JS 开发宿主，不编写气球业务插件。先核对代码，再按访问作用域、查询 Adapter、专用 I/O、Runtime、装配与开发入口施工。
+
+已确认：上一轮仅事件边界可执行；API/Runtime/仓库都是端口。AuthService.get_session 有恢复 Token 的副作用，不能成为插件身份查询入口。ContestService.load_contest_with_problems 会自动选赛，插件查询应另设只读方法。only_mine 目前由 Command 强制。Hydro 的提交列表使用假定 100 条推导尾页/总数，不能作为插件历史完整性证据。提交事件无作用域，仍只用作刷新提示。
+
+采用 API/Manifest v2：游标分页、未知精确总数可空、确切网络 origin 与宿主额外批准地址范围；事件协议保持 v2。不支持旧接口自动降级或旧清单静默扩权。默认无插件启用，授权配置在代码目录外，业务数据与源码分开。
+
+优先使用 rquickjs 0.14 的 std/futures（不启用 full/dyn-load/custom allocator）、reqwest 独立客户端、semver、atomicwrites、fs4、governor、uuid/sha2、成熟 IP/CIDR 类型。先在当前 Windows/MSVC 实测 Promise、不可捕获的中断和内存上限；不以 trait 测试代替引擎测试。不创建新 Tokio runtime。
+
+保留原有未提交 Cargo.toml 标记、AGENTS.md、截图和缓存指南。仅对本轮文件格式化，逐层运行测试，最终同步实际能力和限制。
+
+## 10. 本轮实现结果与设计取舍
+
+基础层由AccessRevision RAII fence负责，显式注入变更入口，既处理ABA和并发转换，也在配置保存失败/会话删除失败时保守撤销旧读取。实际endpoint来自Provider注册元数据而非可变配置。插件只读Service方法与原核心业务分开，不读取源代码。
+
+协议采用Manifest/API v2和事件v2：精确origin替代hostname，opaque cursor替代按页号猜测完整性。Hydro可空total并继续到真实空页，保留native页剩余记录；跨页无快照保证。get仅扫描本人元数据，超预算报错而非假装不存在。
+
+复杂机制复用rquickjs、reqwest/url、fs4、atomicwrites、governor、semver、sha2/uuid、ipnet/ip_network。Manager只保留启动/运行/停止/失败，无市场、暂停/恢复、复杂生命周期或第二个Tokio运行时。独立worker沿用Tauri持久runtime的handle，AppContext不持JS值。
+
+JSON数据/代码/宿主审批分开；默认无插件执行。网络不复用OJ会话、代理或跳转，验证所有DNS结果后固定连接；内网/HTTP需额外宿主审批。通用Resync默认60秒，配置10..3600秒；业务幂等和恢复仍由插件负责。
+
+文件与接入说明见doc/modules/src-tauri/plugin/validation.md。没有新增气球插件，也未把首次AC或派发/重试规则放进核心。当前范围不含真实OJ/气球服务线上联调、跨OS构建或OS进程沙箱；进程内引擎依赖native实现正确性，已发送HTTP/原子文件写不能回滚。

@@ -1,31 +1,19 @@
-# 插件安全边界与错误处理
+# 插件安全模型
 
-当前可执行安全边界是 Manifest 验证、PluginGrant、事件白名单/裁剪及有界交付。下述网络/文件/运行时安全为未来实现要求，不是当前功能宣称。
+JS只取得冻结的hinina API；不暴露AppContext、Service、Provider、CoreEvent、Receiver、Session、Token、源代码、任意路径或原生句柄。Runtime内部API Adapter可调用只读Service，JS永远不持有Service对象。
 
-## 能力边界
+清单声明和代码目录不授予能力。宿主独立配置权限、精确网络origin和私网地址；每次调用重新检查授权，旧worker停止即撤销。作用域以真实Provider endpoint和稳定用户绑定，显式revision防止ABA及在途切换；不依赖有损事件完成安全操作。
 
-未来 JS 只接触 PluginEventEnvelope、独立 API DTO 和宿主签发查询句柄；不注入 CoreEvent、broadcast Receiver、AppContext、Service、Provider、Session、Token 或内部实体。JS 错误对象无宿主内部堆栈；Host 日志也不输出任意异常文本。恶意 native Rust 代码不在此 JS 沙箱模型内。
+采用成熟实现处理复杂边界：rquickjs限制执行、semver验证版本、reqwest/url负责协议与TLS、ipnet/ip_network处理地址、governor限流、fs4锁和atomicwrites持久化。没有网络任意代理/跳转/重试、Cookie或凭证注入。
 
-事件是已发生事实，不能替代保存配置/工作区、持久化 Session、清缓存或切 OJ 的显式核心动作。Plugin API 仅做外围增强，插件失效不改变业务正确性。
+只读 OJ 查询同样受资源预算约束，不能借宿主凭据无限访问 Provider：单次激活60次/分钟且并发2，Manager 全部插件合计120次/分钟且并发4；令牌桶允许相应初始突发，共享预算跨重载保留。按每个实际 Provider 请求计费，分页扫描不能只按一次 JS 调用计费；单请求5秒超时，超限立即拒绝。会话身份文件读取通过阻塞线程池执行，前后继续验证作用域撤销。
 
-当前提交事件缺少事实所属 OJ/账号/比赛，故只能视为刷新提醒。未来上下文在每次异步查询前后和副作用请求前检查，切换失效后重扫；进行中的已发 HTTP 不承诺远端回滚。外部派发依赖业务键/幂等和重新确认，不依赖事件 ID 直接查询。
+这是进程内脚本隔离，依赖引擎和Rust/native依赖正确性，不是独立OS进程沙箱；native内存安全缺陷或进程崩溃仍可能影响应用。代码/授权/数据目录由本机管理员维护，不向恶意本地管理员提供隔离承诺。
 
-## 网络执行器后续要求
+日志字段统一 plugin_id/plugin_version/runtime/event/operation/permission/request_id；API debug日志仅记操作、成功与请求ID，worker记录状态。禁止记录token/password/authorization/source_code、完整请求/响应体、绝对路径、用户隐私或JS错误栈。普通Service日志沿用原项目策略，插件不接收这些日志。
 
-独立创建不带 OJ Cookie/Token 的 reqwest Client；禁止复用当前启用 cookie_store 的 infra HttpClient。仅 HTTPS:443，拒绝 URL userinfo、fragment、IP literal、localhost/私网/链路本地/回环/保留地址和非全局 IPv6。精确 allowHosts，禁通配符；不能只验证字符串，需要验证 DNS 的全部候选地址并绑定连接到已验证 IP，防 DNS rebinding。禁自动重定向和系统/插件代理；若未来允许重定向，每跳重新授权与解析。
+未完成的业务由插件负责：历史完整性与跨页变化处理、首次AC规则、幂等键、可恢复失败状态、外部重试与服务端去重。本地CAS不能提供远端exactly-once。
 
-请求/响应流读取前及过程中执行体积限制（两者 <=64 KiB，Manifest 可收紧请求）、连接/总超时 <=5s、每插件 60 次/分钟限制；不自动注入 Session，不公开 Set-Cookie，不接受代理/连接控制头。非 2xx 返回状态，不自动重试；插件自行使用外部幂等键和有限退避策略。当前 validate_shape 只检查形状和体积，不判断 URL/DNS 安全。
+基础设施诊断统一记录安全操作名、IO ErrorKind、serde分类或HTTP错误类别，禁止源错误字符串/URL/路径/配置和通知正文。非法plugin_id替换占位符。四个访问变更组件强制构造注入共享栅栏；所有origin必须为域名，IP字面量在清单阶段即拒绝。
 
-## 存储与界面后续要求
-
-私有命名空间绑定授予实例，不接受真实路径或 JS 指定插件 ID。键只作数据编码，验证 canonical 目录边界、原子持久化、1 MiB 总配额、64 KiB 单值上限和并发 CAS；停止保留数据。渲染通知只使用文本节点，不使用 innerHTML；限制 512 UTF-8 字节。Runtime 资源预算和中断见运行时规范。
-
-## 日志
-
-插件日志统一包含 plugin_id、plugin_version、runtime、event、operation、permission、request_id；不适用字段用空字符串，runtime=js。事件名使用协议点分名。Host 注册/注销/队列关闭已经遵循这些字段；纯验证函数不主动记录输入。API 实际执行日志留待 Adapter 实现。
-
-禁止 token/password/authorization、源码、完整请求/响应体、绝对路径和用户隐私字段。不记录任意 Provider/JS 错误原文。内部 AppError 只经 redact_app_error 分类；JS Promise 仅返回稳定 PluginError。
-
-## 必须后续补齐的执行测试
-
-私有存储隔离/CAS/重启持久化、HTTPS/白名单/DNS/IP/IPv6/redirect/proxy/超时/流大小/限流、通知纯文本渲染、JS 死循环中断/内存/Promise/异常、气球业务的失败重试/重启/幂等。当前没有这些执行器，因此不提供虚假端到端通过结果。
+桥响应含包络最多1MiB，单native投影页最多1MiB，保留游标余项合计4MiB；这些是JSON字节预算，仍需与引擎16MiB及并发/条数上限共同约束，并非OS进程内存沙箱。引擎分配失败返回limit_exceeded。拒绝跟踪仅保留有界身份摘要并输出计数，不访问或格式化JS reason；所有宿主Promise仍必须await或加入入口返回链。

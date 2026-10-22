@@ -6,7 +6,7 @@
 ## 核心类型/函数
 - `pub mod error` — 配置错误类型模块声明
 - **`ConfigService<R: ConfigRepository>`** — 统一配置管理服务
-  - `fn new(repo, event_bus) -> Self` — 创建实例并立即加载配置；加载成功后先经 `normalize_legacy_values` 归一旧默认值（P55，见下）；首次启动时配置文件不存在则自动使用默认值并持久化
+  - `fn new(repo, event_bus, access) -> Self` — 创建实例并立即加载配置；加载成功后先经 `normalize_legacy_values` 归一旧默认值（P55，见下）；首次启动时配置文件不存在则自动使用默认值并持久化
   - `fn get(&self) -> AppConfig` — 获取当前配置的不可变副本
   - `fn update<F>(&self, updater: F) -> AppResult<AppConfig>` — 通过闭包修改配置后自动保存到磁盘（失败时保留内存修改，返回错误供调用方回滚，且**不发布事件**），成功后发布 `CoreEvent::ConfigChanged`。**为什么在这里发布**：`update` 才是生产链路的配置变更入口（`update_config`、主题切换、`switch_oj` 的持久化都走它）；只有 `reload` 发布的话，观察者永远等不到通知 —— `reload_config` 命令在前端没有调用方（2026-09-21 复核）
   - `fn reload(&self) -> AppResult<AppConfig>` — 强制从磁盘重新加载，覆盖内存副本；**与 `new()` 同一归一入口**：手改磁盘文件后 reload 同样要修正旧值；加载成功后发布 `CoreEvent::ConfigChanged`
@@ -32,3 +32,11 @@
 - **`update` 与 `reload` 都要发布 `ConfigChanged`**：生产链路的配置变更入口是 `update`（`update_config` 命令、主题切换、`switch_oj` 的持久化），而 `reload_config` 命令在前端**没有调用方** —— 只在 `reload` 里发布会让观察者（审计、插件）永远等不到通知。两条路径的语义统一为「配置已变更即通知」；**持久化失败时不发布**（磁盘与内存已不一致，让观察者按「新配置已生效」行动会掩盖问题）。两处均有用例锁定
 - **`ConfigChanged` 只是完成事实通知**：需要「配置变更后必须完成的动作」（如按新间隔同步 auto-save）由命令层在 `update` 返回后**显式调用** `commands::workspace_cmd::sync_auto_save_from_context` —— 不得依赖事件消费者（消费者可能落后、可能不存在）。旧实现把这件事挂在 `ConfigReloaded` 的订阅者上，订阅者内部还要 `tauri::async_runtime::spawn` 才拿得到 tokio 上下文
 - **归一只在加载路径**：`update()` 不做归一 —— 前端写回的配置本就来自已归一的内存副本，重复归一反而可能吞掉用户显式设置的合法值
+
+## 有效连接变更
+
+构造函数必传共享AccessRevision，update持有配置锁时比较OJ配置，发生变化立即撤销旧scope；即使后续持久化失败也生效。普通editor修改不撤销；reload保守撤销。配置事件仍只在持久化成功后发布。
+
+访问栅栏为构造必填参数，无私有默认栅栏或with_access后置绑定。组合根创建一次共享Arc<AccessRevision>，测试夹具也显式指定。
+
+update在写锁内执行闭包再比较OJ字段并撤销；新配置在解锁前不可见，旧缓存读在撤销前只能看到原scope。无需在无关编辑器配置更新时提前撤销；即使保存失败，配置解锁前也已建立新的访问代次。

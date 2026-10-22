@@ -38,6 +38,8 @@ pub enum PluginError {
     Timeout,
     #[error("capability unavailable")]
     Unavailable,
+    #[error("script execution failed")]
+    ScriptError,
     #[error("capability is not implemented")]
     Unsupported,
 }

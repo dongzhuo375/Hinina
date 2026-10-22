@@ -13,6 +13,7 @@ use crate::core::repository::config_repo::ConfigRepository;
 /// 泛型 `R` 为底层持久化实现，当前为 `FsConfigRepository`，
 /// 未来可替换为其他存储后端。
 pub struct ConfigService<R: ConfigRepository> {
+    access: Arc<crate::core::access::AccessRevision>,
     repo: Arc<R>,
     event_bus: Arc<CoreEventBus>,
     /// 当前内存中的配置副本
@@ -23,7 +24,11 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 创建 ConfigService 并立即从 Repo 加载配置。
     ///
     /// 首次启动时配置文件不存在，自动使用默认值并持久化。
-    pub fn new(repo: Arc<R>, event_bus: Arc<CoreEventBus>) -> Self {
+    pub fn new(
+        repo: Arc<R>,
+        event_bus: Arc<CoreEventBus>,
+        access: Arc<crate::core::access::AccessRevision>,
+    ) -> Self {
         let config = match repo.load_config::<AppConfig>() {
             Ok(mut cfg) => {
                 info!("配置加载成功");
@@ -43,6 +48,7 @@ impl<R: ConfigRepository> ConfigService<R> {
         };
 
         Self {
+            access,
             repo,
             event_bus,
             config: RwLock::new(config),
@@ -77,7 +83,14 @@ impl<R: ConfigRepository> ConfigService<R> {
     {
         let new_config = {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
+            let before = serde_json::to_value(&cfg.oj).ok();
+            // The write guard hides these edits from scope readers until cancellation is
+            // published below. Cached readers can only see the previous scope during the
+            // updater; they are revoked before any reader can observe the new config.
+            // Keep unrelated editor changes from invalidating plugin contexts.
             updater(&mut cfg);
+            let _transition =
+                (before != serde_json::to_value(&cfg.oj).ok()).then(|| self.access.begin());
             cfg.clone()
         };
 
@@ -107,6 +120,7 @@ impl<R: ConfigRepository> ConfigService<R> {
 
         {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
+            let _transition = self.access.begin();
             *cfg = new_config.clone();
         }
 

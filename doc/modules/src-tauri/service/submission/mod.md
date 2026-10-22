@@ -65,3 +65,7 @@
 **事件契约**：`submit_publishes_submission_created`（提交成功后发布 `SubmissionCreated`，载荷只含 submission_id）；`on_oj_switched_clears_user_scoped_caches`（切 OJ 后三个用户域缓存全空、必须回源）。
 
 **提交列表 / 详情 / 测试点**（同一 Stub 实现全部五个 trait 方法）：`list_contest_submissions` 保留 `Auth` 变体且成功路径返回分页、`get_submission_detail` 保留 `Auth` 且成功路径返回完整实体、`get_submission_cases` 保留 `Auth` / `Network` 变体且成功路径返回测试点列表 —— 锁定三个查询方法与 `submit`/`get_judgement` 遵守同一「`e.context()` 补环节名、变体不改写」约定。
+
+## 本人历史元数据
+
+read_own_history强制only_mine，走Provider.list_history_page；不调用含源码详情/快照。SubmissionHistoryPage保留可空total与真实continuation，HOJ默认使用原生分页，Hydro以真实空页证实结束；前端原分页DTO保持兼容。插件投影/游标由plugin/query负责。

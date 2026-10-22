@@ -29,12 +29,16 @@ use crate::service::workspace::manager::WorkspaceManager;
 /// 在 `main.rs` 启动时装配，注入到 Tauri State 中。
 /// 所有 Service 通过 AppContext 获取依赖，避免相互直接引用。
 pub struct AppContext {
+    /// Explicit fence for in-flight access across user/OJ/contest changes.
+    pub access: Arc<crate::core::access::AccessRevision>,
     /// 进程内事件总线（唯一事实通知源；消费者由组合根 `main.rs` 启动）
     pub event_bus: Arc<CoreEventBus>,
     /// 会话持久化仓库（应用层与适配器层共用）
     pub session_repo: Arc<dyn SessionRepository>,
-    /// 插件宿主（事件适配 / 权限 / 脱敏 / 生命周期；v0.x 无运行时）
+    /// 插件事件宿主（运行时生命周期由 plugin_manager 管理）
     pub plugin_host: Arc<PluginHost>,
+    /// Runnable plugin controls; engines live only on isolated worker threads.
+    pub plugin_manager: Arc<crate::plugin::manager::PluginManager>,
     pub config: Arc<ConfigService<FsConfigRepository>>,
     pub provider_registry: Arc<dyn ProviderRegistry>,
     pub workspace_manager: Option<Arc<WorkspaceManager>>,
@@ -84,6 +88,7 @@ impl AppContext {
         default_data_dir: PathBuf,
         source: DataDirSource,
     ) -> AppResult<Self> {
+        let access = Arc::new(crate::core::access::AccessRevision::default());
         // 1. 初始化日志（stderr + {base_dir}/logs/hinina.log 双路输出）
         let logger = Logger::init(&base_dir);
         tracing::info!("Hinina 启动中... base_dir={}", base_dir.display());
@@ -104,7 +109,11 @@ impl AppContext {
 
         // 5. 加载配置（通过 FsConfigRepository）
         let config_repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
-        let config = Arc::new(ConfigService::new(config_repo, Arc::clone(&event_bus)));
+        let config = Arc::new(ConfigService::new(
+            config_repo,
+            Arc::clone(&event_bus),
+            access.clone(),
+        ));
 
         // 6. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
         let timeout_secs = config.get().oj.timeout_secs;
@@ -120,8 +129,10 @@ impl AppContext {
         // 与工厂按 id 匹配 —— 接一个新 OJ = 配置加一条实例 + 工厂清单加一行。
         // 未注册的 active（配置手改/拼写错误）在注册完成后回退 HOJ 并告警。
         let configured_oj = OjId::new(&config.get().oj.active);
-        let provider_registry: Arc<dyn ProviderRegistry> =
-            Arc::new(ProviderRegistryImpl::new(configured_oj.clone()));
+        let provider_registry: Arc<dyn ProviderRegistry> = Arc::new(ProviderRegistryImpl::new(
+            configured_oj.clone(),
+            access.clone(),
+        ));
 
         let adapter_deps = crate::adapter::AdapterDeps {
             http_client: Arc::clone(&http_client),
@@ -175,11 +186,13 @@ impl AppContext {
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&session_repo),
             Arc::clone(&event_bus),
+            access.clone(),
         ));
         let contest = Arc::new(ContestService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&event_bus),
             Arc::clone(&storage),
+            access.clone(),
         ));
         let problem = Arc::new(ProblemService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
@@ -195,11 +208,35 @@ impl AppContext {
         // 8. 插件宿主（只持有总线句柄；消费者由 `main.rs` 启动）
         let plugin_host = Arc::new(PluginHost::new(Arc::clone(&event_bus)));
 
+        let queries = Arc::new(crate::plugin::query::ServiceQueries {
+            auth: auth.clone(),
+            contest: contest.clone(),
+            submission: submission.clone(),
+            registry: provider_registry.clone(),
+            config: config.clone(),
+            access: access.clone(),
+            cached_scope: Default::default(),
+            scope_warnings: Default::default(),
+        });
+        let plugin_manager = Arc::new(crate::plugin::manager::PluginManager::new(
+            Arc::new(crate::infra::fs_plugin_repo::FsPluginRepository::new(
+                storage.base_dir().clone(),
+            )),
+            Arc::new(crate::infra::plugin_api_factory::FsPluginApiFactory::new(
+                storage.base_dir().join("plugin-data"),
+            )),
+            plugin_host.clone(),
+            queries,
+            access.clone(),
+        ));
+
         // 9. 装配
         Ok(Self {
+            access,
             event_bus,
             session_repo,
             plugin_host,
+            plugin_manager,
             config,
             provider_registry,
             workspace_manager,
@@ -227,6 +264,9 @@ impl AppContext {
     /// 会绕过配置成为后门。
     pub fn ensure_oj_registered(&self, oj_id: &str) -> bool {
         let id = OjId::new(oj_id);
+        // Existing endpoints change only after restart, as advertised in SettingsView.
+        // Do not replace a live adapter (and its credentials/caches) or retag its endpoint.
+        // Plugin scopes also use this running endpoint while configuration is pending.
         if id.as_str().is_empty() || self.provider_registry.list_available().contains(&id) {
             return false;
         }
@@ -289,6 +329,7 @@ fn register_instance(
     };
     let id = OjId::new(factory.id());
     registry.register(id.clone(), factory.build(deps, &instance.base_url));
+    registry.set_instance_endpoint(id.clone(), instance.base_url.clone());
     tracing::info!(oj_id = %id, base_url = %instance.base_url, "OJ 适配器已注册");
     true
 }

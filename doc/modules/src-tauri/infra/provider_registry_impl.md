@@ -5,7 +5,7 @@
 
 ## 核心类型/函数
 - **`ProviderRegistryImpl`** — Provider 注册中心实现 struct，含 `providers: RwLock<HashMap<OjId, ProviderSet>>` 与 `current: RwLock<OjId>`
-- **`ProviderRegistryImpl::new(default_oj: OjId)`** — 构造函数，初始化空 HashMap 并设置默认当前 OJ
+- **`ProviderRegistryImpl::new(default_oj: OjId, access: Arc<AccessRevision>)`** — 构造函数，初始化空 HashMap 并设置默认当前 OJ
 - **`capability<T, F>(&self, pick: F) -> AppResult<Arc<T>>`**（私有帮手）— 按能力取当前 OJ 的 Provider，四个 `current_xxx` 共用：取 `current_id()` → 读锁查单表（未注册 → `ProviderNotFound`「OJ {} 未注册」）→ `pick(set)` 克隆（该能力为 `None` → `ProviderNotFound`「OJ {} 未提供该能力」）
 - **`register(oj_id, set)`** — 获取写锁，将 `(OjId, ProviderSet)` 插入单表（同 id 二次注册为覆盖）
 - **`current_auth / current_contest / current_problem / current_submission`** — 分别转调 `capability(|set| &set.xxx)`
@@ -24,7 +24,7 @@
 - `core::context`（`AppContext::init` 创建并通过 `ProviderRegistry` trait 注入）
 
 ## 逻辑流程
-1. **初始化**：`new(default_oj)` 创建空 HashMap 并设置 current OjId
+1. **初始化**：`new(default_oj, access)` 创建空 HashMap 并设置 current OjId
 2. **注册**：`register` 获取写锁，将 `(OjId, ProviderSet)` 插入单表
 3. **按能力查询**：`current_xxx` 经私有 `capability` 取当前 OJ 的对应能力；「未注册」与「已注册但缺该能力」均返回 `AppError::ProviderNotFound`
 4. **切换 OJ**：`set_current` 获取写锁更新 current；`current_id` 获取读锁返回当前值（中毒时 `into_inner`）
@@ -32,3 +32,9 @@
 
 ## 测试
 `src-tauri/src/infra/tests/provider_registry_impl_tests.rs`（由 `provider_registry_impl.rs` 底部 `#[cfg(test)] #[path = "tests/provider_registry_impl_tests.rs"] mod tests;` 引用）锁定查询侧契约：未注册时四种能力均 `ProviderNotFound` 且列表为空、部分实现（`ProviderSet::default`）是合法注册但缺能力报 `ProviderNotFound`、切换到未注册 OJ 同样 `ProviderNotFound`、同 id 二次注册覆盖与 `list_available` 反映注册、`current_id` / `set_current` 往返与 `OjId` 身份规整（trim）。
+
+## 访问作用域
+
+构造函数必传共享AccessRevision；实际set_current变化和register/endpoint更新显式撤销旧读者。current_endpoint返回构造Provider时的真实地址，不能从后改配置猜测连接身份。
+
+访问栅栏为构造必填参数，无私有默认栅栏或with_access后置绑定。组合根创建一次共享Arc<AccessRevision>，测试夹具也显式指定。

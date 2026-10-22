@@ -105,3 +105,5 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - **共用解析入口**（`HydroResponse::parse_value`，GET 通道直接依赖它）：错误包络 → `Auth`、登录重定向 → `Auth`、非 JSON → `Serialization`（消息含「不是合法 JSON」）、成功载荷透传（并已 `strip_nulls`）
 - **工厂契约**：`HydroAdapter::ID == "Hydro"` 且 `session_file() == "Hydro.json"`；`FACTORY.id()` 与适配器 ID 一致；四能力齐备（通用断言只查「至少一个能力」，完整能力在此显式锁定，避免漏装能力拖到运行期 `ProviderNotFound`）
 - 内部状态：`restore_token`（空串不回注）/`clear_identity`、顺序表缓存（空表不写 + 写入即命中 + 键隔离；过期语义归 infra `cache_tests.rs`）、URL 拼接
+
+提交历史将rdoc.uid保留为宿主私有owner_id，username继续按displayName→uname显示。插件校验稳定uid，不依赖udict或展示名与登录名一致；fixture覆盖两种情况。

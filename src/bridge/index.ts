@@ -37,6 +37,20 @@ const APP_ERROR_VARIANTS: readonly string[] = [
   'Unknown',
 ]
 
+const PLUGIN_ERROR_MESSAGES: Record<string, string> = {
+  permission_denied: '插件缺少所需权限',
+  invalid_input: '插件输入或配置无效',
+  context_expired: '插件查询上下文已失效，请重试',
+  unauthenticated: '插件查询需要登录',
+  not_found: '插件资源不存在',
+  provider_error: '插件 OJ 查询失败',
+  limit_exceeded: '插件调用超过资源限制',
+  timeout: '插件操作超时',
+  unavailable: '插件能力暂不可用',
+  script_error: '插件脚本执行失败',
+  unsupported: '插件能力尚未支持',
+}
+
 /**
  * IPC 调用失败时抛出的统一错误类型。
  *
@@ -46,6 +60,10 @@ const APP_ERROR_VARIANTS: readonly string[] = [
  * 因此在唯一的 IPC 出口归一化为 `Error`，并保留变体与原始载荷便于分流与排查。
  */
 export class IpcError extends Error {
+  /** Stable plugin error code, retained independently of AppError variants. */
+  get code(): string | undefined {
+    return this.raw && typeof this.raw === 'object' && isPluginErrorPayload(this.raw) ? this.raw.code : undefined
+  }
   constructor(
     readonly cmd: string,
     message: string,
@@ -63,11 +81,27 @@ export class IpcError extends Error {
   }
 }
 
+/**
+ * 插件错误载荷：`PluginError` 的 serde 形态 `{ code, permission? }`。
+ *
+ * 只有这两个键的载荷才算插件错误 —— 不能把任意带 `code` 字段的对象（将来可能的
+ * 其他 IPC 响应）都当成插件错误，否则 message 会退化成 code 并丢掉真实原因。
+ */
+function isPluginErrorPayload(raw: object): raw is { code: string; permission?: string } {
+  if (typeof (raw as { code?: unknown }).code !== 'string') return false
+  if ('permission' in raw && typeof raw.permission !== 'string') return false
+  return Object.keys(raw).every(key => key === 'code' || key === 'permission')
+}
+
 /** 解析 AppError 载荷 → { 变体名, 消息 }；非 AppError 形态返回 null 变体 */
 function parseAppError(raw: unknown): { variant: AppErrorVariant | null; message: string } {
   if (raw instanceof Error) return { variant: null, message: raw.message }
   if (typeof raw === 'string') return { variant: null, message: raw }
   if (raw && typeof raw === 'object') {
+    if (isPluginErrorPayload(raw)) {
+      const message = Object.hasOwn(PLUGIN_ERROR_MESSAGES, raw.code) ? PLUGIN_ERROR_MESSAGES[raw.code] : '插件操作失败'
+      return { variant: null, message }
+    }
     const entries = Object.entries(raw as Record<string, unknown>)
     // AppError 外部标签形式：{ Variant: message }
     if (entries.length === 1 && typeof entries[0][1] === 'string') {

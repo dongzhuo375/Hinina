@@ -701,6 +701,7 @@ impl HydroAdapter {
         let uid = rdoc.uid.as_ref().map(types::coerce_id).unwrap_or_default();
         let (time_ms, memory_kb, _score) = rdoc.terminal_metrics();
         SubmissionRecord {
+            owner_id: (!uid.is_empty()).then_some(uid.clone()),
             submit_id: rdoc.record_id(),
             display_pid: pdoc
                 .map(PdocVO::problem_id)
@@ -1264,6 +1265,19 @@ impl SubmissionProvider for HydroAdapter {
             size,
             current: page,
             pages: if has_more { page + 1 } else { page },
+        })
+    }
+
+    /// Hydro has no exact total or fixed page size: only an actual empty page proves exhaustion.
+    async fn list_history_page(
+        &self,
+        query: &SubmissionQuery,
+    ) -> AppResult<crate::core::entity::submission::SubmissionHistoryPage> {
+        let page = self.list_contest_submissions(query).await?;
+        Ok(crate::core::entity::submission::SubmissionHistoryPage {
+            has_more: !page.records.is_empty(),
+            total: None,
+            records: page.records,
         })
     }
 

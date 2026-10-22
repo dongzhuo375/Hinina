@@ -544,6 +544,11 @@ fn contest_submissions_fixture_parses_and_maps() {
     assert_eq!(r1.memory_kb, 10240);
     assert_eq!(r1.length, 256);
     assert_eq!(r1.submit_time, HOJAdapter::parse_time("2026-09-15T10:00:00"));
+    assert_eq!(
+        r1.owner_id.as_deref(),
+        Some("uuid-alice"),
+        "owner_id 取稳定 uid，不取展示名"
+    );
 
     // 第二条：status=8 → PartiallyAccepted（不再折算 AC），null 数值全部落 0
     let r2 = &records[1];
@@ -565,6 +570,28 @@ fn contest_submissions_fixture_fails_without_null_stripping() {
     let err = serde_json::from_str::<ApiResponse<types::PageResult<JudgeVO>>>(CONTEST_SUBMISSIONS)
         .expect_err("含显式 null 的提交列表直接解析应当失败");
     assert!(err.to_string().contains("null"), "实际: {}", err);
+}
+
+#[test]
+fn missing_uid_yields_no_owner_instead_of_trusting_a_display_name() {
+    // 某些 HOJ 部署可能不返回 uid。此时宿主不能退回按 username 判定归属，
+    // 只能让 owner_id 为 None，由插件查询侧整页拒绝（fail closed）。
+    let mut value: serde_json::Value = serde_json::from_str(CONTEST_SUBMISSIONS).unwrap();
+    value["data"]["records"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("uid");
+    let json = serde_json::to_string(&value).unwrap();
+    let resp: ApiResponse<types::PageResult<JudgeVO>> =
+        HOJAdapter::parse_hoj_json(&json, "http://oj/api/contest-submissions")
+            .expect("缺少 uid 的提交列表仍应可解析");
+    let page = resp.into_data().expect("data 非空");
+    let record = HOJAdapter::into_submission_record(page.records.into_iter().next().unwrap());
+    assert_eq!(record.owner_id, None);
+    assert_eq!(
+        record.username, "alice",
+        "展示名仍保留，但不能作为归属证据"
+    );
 }
 
 #[test]

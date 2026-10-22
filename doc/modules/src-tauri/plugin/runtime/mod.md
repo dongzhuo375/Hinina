@@ -1,29 +1,21 @@
-# Plugin Runtime 接入契约
+# Plugin Runtime / PluginManager
 
-当前只有 PluginRuntime trait 和 PluginRuntimeBridge，无 JS 引擎、模块加载或 handler 执行。测试中的 LocalRuntime 是验证 !Send 可接入的测试替身，不是 JS 支持。没有直接执行 TypeScript 的承诺。
+所有 Promise 返回的宿主 API 必须 await，或加入 activate/handler 返回的 Promise 链；并发用 await Promise.all。入口结束后不 drain 游离调用，不保证它们执行或报告拒绝；events.on/注销函数同步执行。停止超时保持 failed/timeout，继续跟踪旧 worker，完成后由 reaper 回收并保存历史。
 
-## 最小接口与顺序
+选择 rquickjs 0.14（QuickJS-NG），仅 std/futures features。不启用 dyn-load/full/custom allocator。与 boa/deno_core 相比，本轮选型重视已有 Promise 桥、引擎中断/内存限制和较小依赖；Windows/MSVC 真实引擎测试通过后才装配。rquickjs 在构建时用 C 编译器（MSVC/gcc/clang）编译内置的 QuickJS 源码，因此构建环境需要 C 编译器，已在 README 环境一节列为前提；该依赖及其构建前提已由仓库所有者确认。Linux/macOS 的运行时构建与测试尚未验证。未进行三种引擎的体积性能基准。
 
-PluginRuntime 使用 async_trait(?Send)，允许引擎由专属 OS 线程或 Tokio LocalSet 持有。异步 I/O 仍使用宿主 Tokio，不新增第二套异步 runtime。PluginRuntimeBridge 只携带 Arc<dyn PluginApi> 和插件信封有界 Receiver。
+入口是一个离线打包 ES module：`export default async function activate(hinina, config)`。源码<=1MiB，配置JSON<=64KiB且深冻结；宿主无 resolver/loader，不支持任意 import、原生模块、fs/process/env/fetch/socket/shell。TS 在宿主外通过 esbuild 等构建，宿主不执行 TS 源文件。
 
-未来入口规范是离线打包的 JS ES module，默认导出 async activate(hinina)，不做 CommonJS/TS 编译或任意模块解析。顺序：验证清单/入口 → 宿主批准权限 → 创建独立引擎/API Adapter → Host subscribe（初始 Resync 已入队）→ activate 注册 handler → 串行消费队列。activate 失败注销队列并 shutdown；先完成 handler 注册再消费初始 Resync。
+每插件独立引擎和OS worker线程，由持续存在的 Tauri Tokio handle 驱动；没有第二个 Tokio runtime。内存上限16MiB、栈256KiB、activate 10秒、一次事件交付总计30秒。同步JS由引擎 interrupt 中断；未完成Promise由取消和时间上界终止。异常/超时/内存失败停止该插件，其他插件和核心继续。
 
-- activate(source, api)：加载入口并注册监听；失败只影响此插件。
-- deliver_event(envelope)：在同一插件按注册顺序 await handler，多个 handler 共享同一串行序列。单 handler 抛错/超时记安全诊断后停止该插件，不终止 Host。
-- shutdown()：幂等释放引擎/handler/取消在途请求，停止后不再触发 handler；不删除私有存储。
+同一插件最多64个 handlers，按注册顺序串行 await；on 返回注销函数。一次事件的30秒预算包含全部 handlers。单个 handler 的未捕获异常只终止该 handler 本次调用：宿主记录脱敏计数与稳定错误码（`event.handler`/`handler_failed`），其余 handler 与后续事件继续执行，worker 不因此失败。失败告警按 code 节流（首次立即、60秒内累计、到期合并一条带累计计数），持续失败的 handler 不会刷屏。`deliver_event` 经 `DeliveryOutcome` 回传失败 handler 数，Manager 据此主动入队一次 Resync 重新对账（Resync 通知自身不再触发，避免失败循环，周期 tick 仍兜底）；插件仍应自行 catch 做局部恢复。所有API通过有限JSON桥，最多16个在途bridge调用；错误是安全代码，无内部栈。开发调试通过状态和宿主日志进行，没有DevTools逐步调试器或source map栈输出。
 
-停止由宿主显式 unsubscribe → 关闭/丢弃接收端缓存 → shutdown → 释放引擎。队列满关闭后 worker 同样停止，重新接入由未来宿主明确发起，首条 Resync；不自动无限重启。无需 Discovered/Validated/Loaded/Suspended 等完整状态机。
+状态仅 starting/running/stopped/failed。没有安装器、暂停/恢复、热更新或复杂生命周期状态机。start/reload 重新读取宿主配置并校验文件，单插件启动失败不阻止应用启动。reload 等待旧worker真正退出再创建新实例。
 
-JS events.on 支持多个 handler 并返回注销函数；stop 清空监听器。future worker 必须用引擎中断预算（每 handler/activate 默认 1s）、内存上限（初始目标 16 MiB）和有界异步在途调用，不能仅用 Tokio timeout 包住同步 JS，后者无法打断死循环。
+停止顺序：撤销本次授权/取消调用 → 注销Host订阅 → 放弃缓存事件/等待Promise → 清理handlers并释放引擎。正常stop最多等5秒，未退出则报timeout并阻止并存重载。应用退出只做同步撤销，不等待插件，不干预工作区保存关窗流程。文件系统内核调用不能强制回滚，已发送HTTP不能撤销。
 
-## 引擎评估（尚未做依赖构建或体积测量）
+周期Resync默认60秒，可配置10..3600秒；每次成功代表提示实际入队，已有业务事件不会令提示被静默跳过。队列容量128，满/关闭时注销并令 worker 失败退出。首次/Lagged/账号/OJ/比赛事件也触发Resync。它只是重新查询提示，不代表补发，更不负责气球重试。安全性由显式AccessRevision保证，不依赖这些通知。
 
-| 候选 | 与当前项目的潜在契合 | 落地前必须实测 |
-|---|---|---|
-| rquickjs | QuickJS 能力小、显式注入，适合有限外围 API | Windows C 工具链、Promise/Tokio 桥、线程归属、interrupt/memory limit、打包体积 |
-| boa_engine | Rust 实现，避免 QuickJS C 源码构建路径 | 所选版本的异步 job queue、超时中断、JS 特性、内存限制和实际体积 |
-| deno_core | V8 isolate/异步资源机制可供更丰富能力 | V8 预编译分发/下载、Windows 构建与包体成本、op 权限封装、终止和隔离 |
+activate成功后才建立事件队列，以初始Resync补偿激活窗口变化。语法/运行异常为script_error，基础设施为unavailable；超时/撤销保留timeout/context_expired，详见[QuickJS](quickjs.md)。
 
-不提前选定依赖版本；先用真实 Windows/Tauri/Rust 工具链验证上述项再决定。当前简单需求优先评估 rquickjs/Boa；deno_core 的更大集成面只有在前两者不能满足时再考虑。此比较是待验证的工程取舍，不是性能或安全基准。
-
-引擎不得默认暴露 fs、child_process、process.env、任意 fetch/socket/native module/shell；只注入 hinina 能力。真正的 JS 中断、Promise 与异常隔离必须由后续执行器测试验证。
+`PluginRuntime` 是生产路径实际使用的端口：Manager 以 `Box<dyn PluginRuntime>` 持有引擎，只调用 activate/deliver_event/shutdown（deliver_event 返回 `DeliveryOutcome`，回传失败 handler 数供宿主决定是否触发 Resync 对账），测试用的 !Send 实现与 QuickJS 实现共用同一契约。事件信封由 PluginHost 订阅产生，不存在额外的 Runtime Bridge 装配类型。

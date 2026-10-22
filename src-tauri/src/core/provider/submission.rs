@@ -37,6 +37,19 @@ pub trait SubmissionProvider: Send + Sync {
         query: &SubmissionQuery,
     ) -> AppResult<SubmissionPage>;
 
+    /// Metadata only, with honest continuation evidence. The default uses native totals.
+    async fn list_history_page(
+        &self,
+        query: &SubmissionQuery,
+    ) -> AppResult<crate::core::entity::submission::SubmissionHistoryPage> {
+        let page = self.list_contest_submissions(query).await?;
+        Ok(crate::core::entity::submission::SubmissionHistoryPage {
+            has_more: page.current < page.pages,
+            total: u64::try_from(page.total).ok(),
+            records: page.records,
+        })
+    }
+
     /// 查询提交详情（含源代码与错误信息）
     async fn get_submission_detail(&self, submit_id: &str) -> AppResult<SubmissionDetail>;
 
