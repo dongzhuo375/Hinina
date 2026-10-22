@@ -1023,3 +1023,129 @@ async fn pending_endpoint_edit_keeps_running_provider_scope_and_emits_redacted_d
         assert!(!log.contains(secret));
     }
 }
+
+#[tokio::test]
+async fn provider_failures_are_logged_by_category_without_messages() {
+    use crate::{
+        core::{
+            error::AppResult, event::core_event_bus::CoreEventBus, provider::oj_id::OjId,
+            repository::session_repo::SessionRepository,
+        },
+        infra::{
+            fs_config_repo::FsConfigRepository, provider_registry_impl::ProviderRegistryImpl,
+            storage::Storage,
+        },
+        plugin::query::{QuerySource, ServiceQueries},
+        service::{
+            auth::AuthService, config::ConfigService, contest::ContestService,
+            submission::SubmissionService,
+        },
+    };
+    use std::io::Write;
+    use std::sync::Mutex;
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl Write for Capture {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(data);
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    struct Sessions;
+    impl SessionRepository for Sessions {
+        fn load(&self, _: &OjId) -> AppResult<Option<crate::core::entity::session::Session>> {
+            Ok(None)
+        }
+        fn save(&self, _: &crate::core::entity::session::Session) -> AppResult<()> {
+            Ok(())
+        }
+        fn remove(&self, _: &OjId) -> AppResult<()> {
+            Ok(())
+        }
+        fn rotate_token(&self, _: &OjId, _: &str) -> AppResult<bool> {
+            Ok(false)
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("query-provider-log");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let bus = Arc::new(CoreEventBus::new());
+    let access = Arc::new(AccessRevision::default());
+    // No provider is registered, so both reads fail before any network call.
+    let registry = Arc::new(ProviderRegistryImpl::new(OjId::new("HOJ"), access.clone()));
+    let source = Arc::new(ServiceQueries {
+        auth: Arc::new(AuthService::new(
+            registry.clone(),
+            Arc::new(Sessions),
+            bus.clone(),
+            access.clone(),
+        )),
+        contest: Arc::new(ContestService::new(
+            registry.clone(),
+            bus.clone(),
+            storage.clone(),
+            access.clone(),
+        )),
+        submission: Arc::new(SubmissionService::new(
+            registry.clone(),
+            bus.clone(),
+            storage,
+        )),
+        registry,
+        config: Arc::new(ConfigService::new(
+            Arc::new(FsConfigRepository::new(
+                Arc::new(Storage::new(dir.to_path_buf())),
+                "config.json",
+            )),
+            bus,
+            access.clone(),
+        )),
+        access,
+        cached_scope: Mutex::default(),
+        last_scope_warning: Default::default(),
+    });
+    let _sink = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .with_writer(std::io::sink)
+            .finish(),
+    );
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let writer = Capture(bytes.clone());
+    let dispatch = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || writer.clone())
+            .finish(),
+    );
+    assert!(matches!(
+        tracing::dispatcher::with_default(&dispatch, || source.scope("test.provider-log")),
+        Err(PluginError::Unavailable)
+    ));
+    use tracing::instrument::WithSubscriber;
+    assert_eq!(
+        QuerySource::contest(&*source, "contest")
+            .with_subscriber(dispatch.clone())
+            .await
+            .unwrap_err(),
+        PluginError::ProviderError
+    );
+    assert_eq!(
+        QuerySource::history(&*source, "contest", 1)
+            .with_subscriber(dispatch)
+            .await
+            .unwrap_err(),
+        PluginError::ProviderError
+    );
+    let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+    assert!(log.contains("contest.get"), "{log}");
+    assert!(log.contains("submission.history"), "{log}");
+    assert!(log.contains("provider_not_found"), "{log}");
+    assert!(log.contains("oj_id"), "{log}");
+    // Provider messages stay out of the log; only the stable category is recorded.
+    assert!(!log.contains("未注册"), "{log}");
+    assert!(!log.contains("未提供该能力"), "{log}");
+}

@@ -105,6 +105,15 @@ HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存H
 
 验证：Rust 全量 704 passed（plugin 99），clippy 仅保留 6 项既有告警；前端 504 passed，`npm run build`、`npm run plugin:sdk:check`、`npm run plugin:scaffold:build` 通过；改动 Rust 文件 rustfmt 通过。
 
+## 并发订阅与 OJ 失败诊断（基线f667a73）
+
+| 发现 | 确认与处理 |
+|---|---|
+| 重叠 subscribe 泄漏监听器 | P2成立；旧实现先清理再 await，两个并发调用都会通过清理并在完成后互相覆盖。改为单调代次：迟到结果立即卸载，不写入活动订阅，也不接管 dismiss；返回的卸载函数只在自身仍是活动订阅时生效并推进代次。新增“乱序完成”和“卸载旧订阅不影响新订阅”两条回归 |
+| OJ 失败被压缩后无日志 | P2成立；contest.get/submission.history 直接 `map_err(|_| ProviderError)`，scope 的身份读取同样静默，release 默认级别下可能完全没有失败记录。新增 `log_provider_failure`：记录稳定操作名、OJ 标识与 AppError 变体类别，绝不输出原始消息；新增回归断言类别存在且 ProviderNotFound 文案不落日志 |
+
+验证：Rust 全量 705 passed，clippy 仍为既有 6 项告警，改动文件 rustfmt 通过；前端 507 passed。
+
 ## 查询可用性与桥契约跟进（基线bc75b18）
 
 | 发现 | 确认与修复 |

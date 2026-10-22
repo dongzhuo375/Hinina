@@ -44,6 +44,55 @@ it('re-subscribing disposes the previous subscription instead of leaking it', as
   expect(store.notifications).toHaveLength(1)
   expect(store.notifications[0].message).toBe('active')
 })
+it('disposes overlapping subscriptions that resolve after a newer one superseded them', async () => {
+  type Emitted = { id: number, pluginId: string, level: 'info', message: string }
+  type Subscription = (() => void) & { dismiss: (id: number) => void }
+  const emitters: Array<(value: Emitted) => void> = []
+  const disposed: boolean[] = []
+  const resolvers: Array<() => void> = []
+  pluginService.subscribeNotifications.mockImplementation((onAdd: (value: Emitted) => void, onDismiss: (id: number) => void) => {
+    const index = emitters.length
+    disposed.push(false)
+    emitters.push(value => { if (!disposed[index]) onAdd(value) })
+    return new Promise<Subscription>(resolve => {
+      resolvers.push(() => resolve(Object.assign(() => { disposed[index] = true }, { dismiss: onDismiss })))
+    })
+  })
+  const store = usePluginStore()
+  const first = store.subscribe()
+  const second = store.subscribe()
+  expect(resolvers).toHaveLength(2)
+  // The newer call settles first; the superseded one then arrives late.
+  resolvers[1]()
+  await second
+  resolvers[0]()
+  await first
+  expect(disposed).toEqual([true, false])
+  emitters[0]({ id: 1, pluginId: 'test.demo', level: 'info', message: 'late' })
+  emitters[1]({ id: 2, pluginId: 'test.demo', level: 'info', message: 'active' })
+  expect(store.notifications.map(item => item.message)).toEqual(['active'])
+  store.dismiss(2)
+  expect(store.notifications).toHaveLength(0)
+})
+it('unmounting the current subscription does not disturb a newer one', async () => {
+  type Emitted = { id: number, pluginId: string, level: 'info', message: string }
+  type Subscription = (() => void) & { dismiss: (id: number) => void }
+  const disposed: boolean[] = []
+  const emitters: Array<(value: Emitted) => void> = []
+  pluginService.subscribeNotifications.mockImplementation((onAdd: (value: Emitted) => void, onDismiss: (id: number) => void) => {
+    const index = disposed.length
+    disposed.push(false)
+    emitters.push(value => { if (!disposed[index]) onAdd(value) })
+    return Promise.resolve<Subscription>(Object.assign(() => { disposed[index] = true }, { dismiss: onDismiss }))
+  })
+  const store = usePluginStore()
+  const firstStop = await store.subscribe()
+  await store.subscribe()
+  firstStop()
+  expect(disposed).toEqual([true, false])
+  emitters[1]({ id: 1, pluginId: 'test.demo', level: 'info', message: 'active' })
+  expect(store.notifications).toHaveLength(1)
+})
 it('refreshes status only after a lifecycle operation completes', async () => {
   pluginService.list.mockResolvedValue([{ id: 'test.demo', state: 'running', error: null }])
   const store = usePluginStore(); await store.start('test.demo')

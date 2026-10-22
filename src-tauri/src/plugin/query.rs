@@ -17,6 +17,7 @@ use crate::{
     core::{
         access::{AccessRevision, AccessSnapshot},
         entity::{contest::Contest, submission::SubmissionHistoryPage},
+        error::AppError,
         provider::registry::ProviderRegistry,
     },
     infra::fs_config_repo::FsConfigRepository,
@@ -143,6 +144,35 @@ impl ServiceQueries {
             "Plugin scope resolution failed"
         );
     }
+    /// Record the failure class before the plugin-visible error is reduced to a stable
+    /// code. Provider messages may embed URLs, credentials or response bodies, so only
+    /// the variant and host-owned identifiers are logged.
+    fn log_provider_failure(&self, operation: &'static str, error: &AppError) {
+        tracing::warn!(
+            oj_id = ?self.registry.current_id(),
+            runtime = "js",
+            operation,
+            category = provider_error_category(error),
+            "Plugin OJ query failed"
+        );
+    }
+}
+
+/// Stable classification of a provider failure; never derived from the error message.
+fn provider_error_category(error: &AppError) -> &'static str {
+    match error {
+        AppError::Auth(_) => "auth",
+        AppError::Contest(_) => "contest",
+        AppError::Problem(_) => "problem",
+        AppError::Submission(_) => "submission",
+        AppError::Workspace(_) => "workspace",
+        AppError::Io(_) => "io",
+        AppError::Network(_) => "network",
+        AppError::Config(_) => "config",
+        AppError::ProviderNotFound(_) => "provider_not_found",
+        AppError::Serialization(_) => "serialization",
+        AppError::Unknown(_) => "unknown",
+    }
 }
 #[async_trait]
 impl QuerySource for ServiceQueries {
@@ -194,10 +224,10 @@ impl QuerySource for ServiceQueries {
         let scope = QueryScope {
             oj,
             endpoint,
-            user: self
-                .auth
-                .identity_metadata()
-                .map_err(|_| PluginError::Unavailable)?,
+            user: self.auth.identity_metadata().map_err(|error| {
+                self.log_provider_failure("scope.identity", &error);
+                PluginError::Unavailable
+            })?,
             contest: self.contest.current_contest_id(),
         };
         if snapshot.cancellation.is_cancelled() {
@@ -212,16 +242,19 @@ impl QuerySource for ServiceQueries {
         Ok(scope)
     }
     async fn contest(&self, id: &str) -> PluginResult<Contest> {
-        self.contest
-            .read_metadata(id)
-            .await
-            .map_err(|_| PluginError::ProviderError)
+        self.contest.read_metadata(id).await.map_err(|error| {
+            self.log_provider_failure("contest.get", &error);
+            PluginError::ProviderError
+        })
     }
     async fn history(&self, contest: &str, page: u32) -> PluginResult<SubmissionHistoryPage> {
         self.submission
             .read_own_history(contest, page)
             .await
-            .map_err(|_| PluginError::ProviderError)
+            .map_err(|error| {
+                self.log_provider_failure("submission.history", &error);
+                PluginError::ProviderError
+            })
     }
 }
 
