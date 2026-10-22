@@ -52,13 +52,32 @@ impl QueryBudget {
             concurrent: tokio::sync::Semaphore::new(concurrent),
         }
     }
-    fn acquire(&self) -> PluginResult<tokio::sync::SemaphorePermit<'_>> {
-        let permit = self
+    /// Admit one provider dispatch against the activation budget and the shared budget.
+    /// Both concurrency permits are taken before any rate token: permits are refunded on
+    /// drop while tokens are not, so a rejection by either concurrency limit never costs
+    /// a token. Tokens are spent activation-first; if only the shared bucket is empty the
+    /// activation has spent one of its own tokens, which cannot drain other plugins.
+    fn acquire_pair<'a>(
+        local: &'a Self,
+        shared: &'a Self,
+    ) -> PluginResult<(
+        tokio::sync::SemaphorePermit<'a>,
+        tokio::sync::SemaphorePermit<'a>,
+    )> {
+        let local_permit = local
             .concurrent
             .try_acquire()
             .map_err(|_| PluginError::LimitExceeded)?;
-        self.rate.check().map_err(|_| PluginError::LimitExceeded)?;
-        Ok(permit)
+        let shared_permit = shared
+            .concurrent
+            .try_acquire()
+            .map_err(|_| PluginError::LimitExceeded)?;
+        local.rate.check().map_err(|_| PluginError::LimitExceeded)?;
+        shared
+            .rate
+            .check()
+            .map_err(|_| PluginError::LimitExceeded)?;
+        Ok((local_permit, shared_permit))
     }
 }
 
@@ -415,8 +434,7 @@ impl ScopedQueries {
         operation: impl std::future::Future<Output = PluginResult<T>>,
     ) -> PluginResult<T> {
         let cancellation = self.check(handle).await?;
-        let _local = self.budget.acquire()?;
-        let _shared = self.shared_budget.acquire()?;
+        let _permits = QueryBudget::acquire_pair(&self.budget, &self.shared_budget)?;
         let result = tokio::select! { biased;
             _ = self.stopped.cancelled() => return Err(PluginError::ContextExpired),
             _ = cancellation.cancelled() => return Err(PluginError::ContextExpired),

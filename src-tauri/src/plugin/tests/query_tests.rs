@@ -1367,3 +1367,23 @@ async fn provider_failures_are_logged_by_category_without_messages() {
     assert!(!log.contains("未注册"), "{log}");
     assert!(!log.contains("未提供该能力"), "{log}");
 }
+
+#[test]
+fn concurrency_rejections_never_spend_a_rate_token() {
+    let local = QueryBudget::new(2, 1);
+    let shared = QueryBudget::new(120, 1);
+    let held = shared.concurrent.try_acquire().unwrap();
+    for _ in 0..5 {
+        assert!(QueryBudget::acquire_pair(&local, &shared).is_err());
+    }
+    drop(held);
+    let held_local = local.concurrent.try_acquire().unwrap();
+    for _ in 0..5 {
+        assert!(QueryBudget::acquire_pair(&local, &shared).is_err());
+    }
+    drop(held_local);
+    // Neither bucket was charged by the rejected attempts: the full burst of 2 remains.
+    drop(QueryBudget::acquire_pair(&local, &shared).unwrap());
+    drop(QueryBudget::acquire_pair(&local, &shared).unwrap());
+    assert!(QueryBudget::acquire_pair(&local, &shared).is_err());
+}
