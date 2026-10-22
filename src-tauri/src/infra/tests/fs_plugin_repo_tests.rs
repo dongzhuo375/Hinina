@@ -63,12 +63,64 @@ fn many_or_broken_sibling_entries_do_not_block_a_valid_plugin() {
     // A plain file and a directory without a manifest are unrelated entries.
     std::fs::write(dir.join("plugins/notes.txt"), "ignored").unwrap();
     std::fs::create_dir_all(dir.join("plugins/zz-empty")).unwrap();
-    // More directory candidates than the scan bound; the valid plugin is still found.
-    for index in 0..200 {
+    // Sibling directories below the scan bound: the valid plugin is found regardless of the
+    // unspecified read_dir order, and the broken/empty siblings never block it.
+    for index in 0..100 {
         std::fs::create_dir_all(dir.join(format!("plugins/zz-noise-{index:03}"))).unwrap();
     }
     let loaded = repo.load("test.repo").unwrap();
     assert_eq!(loaded.grant.manifest().id, "test.repo");
+}
+
+#[test]
+fn directory_bound_reports_truncation_instead_of_false_absence() {
+    let dir = crate::test_support::TempDir::unique("plugin-repo-dir-bound");
+    let repo = setup(&dir);
+    // Approve a target that has no directory so `load` reaches the scan, then surround it
+    // with more directory candidates than MAX_PLUGIN_DIRECTORIES.
+    std::fs::write(
+        dir.join("plugins.json"),
+        serde_json::json!({"plugins":{
+            "test.repo":{"enabled":true,"permissions":["events.subscribe"]},
+            "test.absent":{"enabled":true,"permissions":["events.subscribe"]}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    for index in 0..(MAX_PLUGIN_DIRECTORIES + 8) {
+        std::fs::create_dir_all(dir.join(format!("plugins/zz-noise-{index:04}"))).unwrap();
+    }
+    // The scan hits the directory bound without finding the target: report truncation
+    // (LimitExceeded), never NotFound. Order-independent because the target has no directory.
+    assert!(matches!(
+        repo.load("test.absent"),
+        Err(crate::plugin::api::PluginError::LimitExceeded)
+    ));
+}
+
+#[test]
+fn entry_bound_caps_a_code_root_full_of_plain_files() {
+    let dir = crate::test_support::TempDir::unique("plugin-repo-entry-bound");
+    let repo = setup(&dir);
+    std::fs::write(
+        dir.join("plugins.json"),
+        serde_json::json!({"plugins":{
+            "test.repo":{"enabled":true,"permissions":["events.subscribe"]},
+            "test.absent":{"enabled":true,"permissions":["events.subscribe"]}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    // Plain files never count toward the directory bound, so without a total-entry cap a
+    // code root full of loose files would be iterated without limit on every load. The
+    // entry bound truncates the scan; the absent target reports LimitExceeded, not NotFound.
+    for index in 0..(MAX_SCAN_ENTRIES + 8) {
+        std::fs::write(dir.join(format!("plugins/file-{index:05}.txt")), "x").unwrap();
+    }
+    assert!(matches!(
+        repo.load("test.absent"),
+        Err(crate::plugin::api::PluginError::LimitExceeded)
+    ));
 }
 
 #[cfg(unix)]

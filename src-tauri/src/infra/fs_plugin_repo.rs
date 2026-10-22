@@ -25,6 +25,12 @@ pub struct FsPluginRepository {
 /// Upper bound on directory candidates inspected per load. Exceeding it only limits the
 /// lookup of a plugin that was not found, never an already valid sibling.
 const MAX_PLUGIN_DIRECTORIES: usize = 128;
+/// Upper bound on total `read_dir` entries consumed per load, including non-directories.
+/// Directory symlinks inside the code root are followed to their canonical target (which
+/// must stay within the root); plain files are skipped but still counted here, so a code
+/// root holding many loose files cannot make `load` an unbounded scan. Like the directory
+/// bound, exceeding it only affects a not-found lookup, which reports `LimitExceeded`.
+const MAX_SCAN_ENTRIES: usize = 1024;
 impl FsPluginRepository {
     /// @plugin-api
     /// @since 2.0
@@ -117,8 +123,10 @@ impl PluginRepository for FsPluginRepository {
             std::fs::read_dir(&root).map_err(|error| unavailable("repository.scan", error))?;
         let mut scanned = 0;
         let mut truncated = false;
-        for entry in entries {
-            if scanned >= MAX_PLUGIN_DIRECTORIES {
+        for (index, entry) in entries.enumerate() {
+            // Bound both the directory candidates and the total entries consumed, so a code
+            // root with many plain files cannot make `load` an unbounded scan.
+            if scanned >= MAX_PLUGIN_DIRECTORIES || index >= MAX_SCAN_ENTRIES {
                 truncated = true;
                 break;
             }
@@ -139,7 +147,8 @@ impl PluginRepository for FsPluginRepository {
                     continue;
                 }
             };
-            // Links are followed only to their canonical target, which must stay in the root.
+            // Directory symlinks are followed only to their canonical target, which must
+            // stay within the root (checked below); escaping links are skipped, not fatal.
             if !(file_type.is_dir() || (file_type.is_symlink() && path.is_dir())) {
                 continue;
             }

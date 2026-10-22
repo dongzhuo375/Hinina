@@ -30,7 +30,7 @@ use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     num::NonZeroU32,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -120,9 +120,17 @@ pub struct ServiceQueries {
     pub config: Arc<ConfigService<FsConfigRepository>>,
     pub access: Arc<AccessRevision>,
     pub cached_scope: Mutex<Option<(AccessSnapshot, QueryScope)>>,
-    /// Last revision that emitted a scope-resolution warning; persistent misconfiguration
-    /// must not let a plugin flood the log on every bridge call.
-    pub(crate) last_scope_warning: Mutex<Option<u64>>,
+    /// (revision, plugin_id) pairs that already emitted a scope-resolution warning. A
+    /// disabled or unconfigured OJ is persistent state; warning once per plugin per
+    /// revision keeps attribution accurate and stops any single plugin flooding the log
+    /// on every bridge call.
+    pub(crate) scope_warnings: Mutex<ScopeWarnings>,
+}
+/// Per-revision set of plugin ids that already warned; cleared when the revision changes.
+#[derive(Default)]
+pub(crate) struct ScopeWarnings {
+    revision: Option<u64>,
+    seen: HashSet<String>,
 }
 impl ServiceQueries {
     /// Warn once per access revision; a disabled or unconfigured OJ is persistent state,
@@ -135,14 +143,21 @@ impl ServiceQueries {
         category: &'static str,
         message: &'static str,
     ) {
-        let mut last = self
-            .last_scope_warning
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if *last == Some(revision) {
-            return;
+        {
+            let mut warnings = self
+                .scope_warnings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if warnings.revision != Some(revision) {
+                warnings.revision = Some(revision);
+                warnings.seen.clear();
+            }
+            // First failure for this plugin at this revision warns; repeats are suppressed
+            // so the single line carries accurate per-plugin attribution.
+            if !warnings.seen.insert(plugin_id.to_string()) {
+                return;
+            }
         }
-        *last = Some(revision);
         tracing::warn!(
             plugin_id = ?plugin_id,
             oj_id = ?oj,
@@ -183,18 +198,25 @@ fn provider_error_category(error: &AppError) -> &'static str {
         AppError::Unknown(_) => "unknown",
     }
 }
+/// Single source of truth for "does this cached scope still match the live snapshot".
+/// Both the fast path (`cached_scope`) and the slow path (`scope`) must agree, or a token
+/// revoked by an OJ/account/contest switch could be served from cache. Keeping it in one
+/// function makes the two paths structurally incapable of drifting apart.
+fn scope_cache_hit(cached: &AccessSnapshot, snapshot: &AccessSnapshot) -> bool {
+    cached.revision == snapshot.revision
+        && !cached.cancellation.is_cancelled()
+        && !snapshot.cancellation.is_cancelled()
+}
 #[async_trait]
 impl QuerySource for ServiceQueries {
     fn cached_scope(&self) -> Option<QueryScope> {
-        // Same predicate as the cache-hit branch below, without touching session or config.
+        // Fast path: no session or config I/O, just the shared hit predicate.
         let snapshot = self.access.snapshot()?;
         let cache = self.cached_scope.lock().unwrap_or_else(|e| e.into_inner());
-        cache.as_ref().and_then(|(cached, scope)| {
-            (cached.revision == snapshot.revision
-                && !cached.cancellation.is_cancelled()
-                && !snapshot.cancellation.is_cancelled())
-            .then(|| scope.clone())
-        })
+        cache
+            .as_ref()
+            .filter(|(cached, _)| scope_cache_hit(cached, &snapshot))
+            .map(|(_, scope)| scope.clone())
     }
     fn scope(&self, plugin_id: &str) -> PluginResult<QueryScope> {
         let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
@@ -203,10 +225,7 @@ impl QuerySource for ServiceQueries {
         {
             let cache = self.cached_scope.lock().unwrap_or_else(|e| e.into_inner());
             if let Some((cached, scope)) = cache.as_ref() {
-                if cached.revision == snapshot.revision
-                    && !cached.cancellation.is_cancelled()
-                    && !snapshot.cancellation.is_cancelled()
-                {
+                if scope_cache_hit(cached, &snapshot) {
                     return Ok(scope.clone());
                 }
             }
@@ -523,8 +542,9 @@ impl ScopedQueries {
             })
         })
     }
-    /// Fetch and project one native page when the cursor has nothing buffered. The caller
-    /// restores the cursor on failure, so this never mutates shared state.
+    /// Fetch and project one native page when the cursor has nothing buffered. On any
+    /// failure the cursor is left untouched, so the caller's restore puts back a true
+    /// pre-call snapshot; this never mutates the shared cursor table.
     async fn advance(
         &self,
         handle: &PluginQueryContext,
@@ -552,14 +572,13 @@ impl ScopedQueries {
         {
             return Err(PluginError::ProviderError);
         }
-        cursor.native_page += 1;
-        cursor.more = page.has_more;
-        cursor.total = if query.problem_id.is_none() {
+        let has_more = page.has_more;
+        let total = if query.problem_id.is_none() {
             page.total
         } else {
             None
         };
-        cursor.pending = page
+        let pending: VecDeque<PluginSubmission> = page
             .records
             .into_iter()
             .filter(|r| query.problem_id.as_ref().is_none_or(|id| *id == r.pid))
@@ -572,7 +591,15 @@ impl ScopedQueries {
                 submitted_at: r.submit_time.saturating_mul(1000),
             })
             .collect();
-        bounded_json::encoded_len(&cursor.pending, MAX_CURSOR_PAGE_BYTES)?;
+        // Validate the encoded size before committing any mutation. A failed fetch must
+        // leave the caller's cursor at its true pre-call snapshot, so the restore path in
+        // `list` can never retain an oversized page with stale `buffered_bytes` (which
+        // would silently bypass the per-cursor and aggregate memory budgets).
+        bounded_json::encoded_len(&pending, MAX_CURSOR_PAGE_BYTES)?;
+        cursor.native_page += 1;
+        cursor.more = has_more;
+        cursor.total = total;
+        cursor.pending = pending;
         Ok(())
     }
     /// @plugin-api

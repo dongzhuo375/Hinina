@@ -3,17 +3,18 @@
 //! @version 2
 //! @stability stable
 //! Real single-module QuickJS adapter. One worker owns the engine; no loader or ambient I/O.
+use super::DeliveryOutcome;
 use crate::plugin::{
     api::{event::PluginEventEnvelope, *},
     execution_api::call_json,
-    limits::{ACTIVATION_TIMEOUT, API_ERROR_GRACE, EVENT_TIMEOUT},
+    limits::{ACTIVATION_TIMEOUT, API_ERROR_GRACE, EVENT_TIMEOUT, HANDLER_WARN_INTERVAL},
 };
 use rquickjs::{
     function::{Async, Func},
     AsyncContext, AsyncRuntime, Function, Module, Object, Persistent, Promise,
 };
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -32,6 +33,9 @@ pub struct QuickJsRuntime {
     stopped: CancellationToken,
     rejections: Arc<Mutex<Rejections>>,
     plugin_id: Option<String>,
+    /// Per-code throttle for handler-failure warnings; one worker owns one plugin, so the
+    /// key is the failure code and the value tracks suppression state.
+    handler_warnings: HashMap<String, HandlerWarning>,
 }
 impl Drop for QuickJsRuntime {
     fn drop(&mut self) {
@@ -45,6 +49,13 @@ impl Drop for QuickJsRuntime {
 struct Rejections {
     pending: HashSet<u64>,
     overflow: bool,
+}
+/// Throttle state for one handler-failure code.
+struct HandlerWarning {
+    /// Failures accumulated since the last warning was emitted.
+    suppressed: u32,
+    /// When the last warning was emitted; `None` until the first failure warns.
+    last: Option<Instant>,
 }
 impl Rejections {
     fn report(&mut self, plugin_id: Option<&str>) {
@@ -105,6 +116,7 @@ impl QuickJsRuntime {
             stopped,
             rejections,
             plugin_id: None,
+            handler_warnings: HashMap::new(),
         })
     }
     /// @plugin-api
@@ -200,7 +212,10 @@ impl QuickJsRuntime {
     /// @since 2.0
     /// @permission events.subscribe
     /// @stability stable
-    pub async fn deliver(&mut self, envelope: &PluginEventEnvelope) -> PluginResult<()> {
+    pub async fn deliver(
+        &mut self,
+        envelope: &PluginEventEnvelope,
+    ) -> PluginResult<DeliveryOutcome> {
         self.set_deadline(EVENT_TIMEOUT);
         let deliver = self
             .deliver
@@ -219,12 +234,15 @@ impl QuickJsRuntime {
         };
         self.report_rejections();
         let summary = result.map_err(|error| self.classify(error))?;
-        self.report_handler_failures(&summary);
-        Ok(())
+        Ok(self.report_handler_failures(&summary))
     }
     /// A rejected handler is isolated to that call: the remaining handlers and later
-    /// events still run, so one failing notification cannot disable the plugin.
-    fn report_handler_failures(&self, summary: &str) {
+    /// events still run, so one failing notification cannot disable the plugin. Warnings
+    /// are throttled per code (first failure immediate, repeats suppressed until
+    /// `HANDLER_WARN_INTERVAL` elapses, then reported with the accumulated count) so a
+    /// persistently failing handler cannot flood the log on every event. Returns the
+    /// per-delivery failure count so the host can prompt a reconciliation.
+    fn report_handler_failures(&mut self, summary: &str) -> DeliveryOutcome {
         #[derive(serde::Deserialize)]
         struct Summary {
             #[serde(default)]
@@ -232,22 +250,44 @@ impl QuickJsRuntime {
             #[serde(default)]
             code: String,
         }
-        let Ok(summary) = serde_json::from_str::<Summary>(summary) else {
-            return;
+        let Ok(parsed) = serde_json::from_str::<Summary>(summary) else {
+            return DeliveryOutcome::default();
         };
-        if summary.failed == 0 {
-            return;
+        if parsed.failed == 0 {
+            return DeliveryOutcome::default();
         }
-        // `code` is restricted to a stable identifier by bootstrap.js; never plugin text.
-        tracing::warn!(
-            plugin_id = ?self.plugin_id,
-            runtime = "js",
-            operation = "event.handler",
-            category = "handler_failed",
-            failed = summary.failed,
-            code = ?summary.code,
-            "Plugin event handler rejected; remaining handlers and events continue"
-        );
+        // `code` is charset-bounded by bootstrap.js to `[a-z_]{1,40}`, so it cannot inject
+        // log fields, but the value is plugin-influenced; treat it as an untrusted hint.
+        let now = Instant::now();
+        let entry = self
+            .handler_warnings
+            .entry(parsed.code.clone())
+            .or_insert(HandlerWarning {
+                suppressed: 0,
+                last: None,
+            });
+        let due = entry
+            .last
+            .is_none_or(|last| now.duration_since(last) >= HANDLER_WARN_INTERVAL);
+        if due {
+            let failed = entry.suppressed + parsed.failed;
+            entry.suppressed = 0;
+            entry.last = Some(now);
+            tracing::warn!(
+                plugin_id = ?self.plugin_id,
+                runtime = "js",
+                operation = "event.handler",
+                category = "handler_failed",
+                failed,
+                code = ?parsed.code,
+                "Plugin event handler rejected; remaining handlers and events continue"
+            );
+        } else {
+            entry.suppressed += parsed.failed;
+        }
+        DeliveryOutcome {
+            failed_handlers: parsed.failed,
+        }
     }
     /// @plugin-api
     /// @since 2.0
@@ -283,7 +323,10 @@ impl super::PluginRuntime for QuickJsRuntime {
     ) -> PluginResult<()> {
         self.load(source, api, config, allowed_events).await
     }
-    async fn deliver_event(&mut self, envelope: &PluginEventEnvelope) -> PluginResult<()> {
+    async fn deliver_event(
+        &mut self,
+        envelope: &PluginEventEnvelope,
+    ) -> PluginResult<DeliveryOutcome> {
         self.deliver(envelope).await
     }
     async fn shutdown(&mut self) -> PluginResult<()> {

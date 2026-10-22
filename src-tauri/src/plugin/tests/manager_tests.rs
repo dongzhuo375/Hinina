@@ -453,6 +453,46 @@ async fn periodic_resync_reconciles_without_new_business_events() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_business_handler_prompts_a_resync_reconciliation() {
+    let dir = crate::test_support::TempDir::unique("plugin-handler-resync");
+    // The business handler always rejects; the resync handler announces reconciliation on
+    // its second invocation. The periodic interval is one hour, so after the initial
+    // subscribe resync (n=1) the only way to reach n=2 is the manager reacting to the
+    // handler failure — locking the DeliveryOutcome -> request_resync path.
+    install(
+        &dir,
+        "test.failhandler",
+        "export default async h => { let n=0; h.events.on('submission.judged', async()=>{ throw Object.freeze({code:'provider_error'}); }); h.events.on('resync.required', async()=>{ if (++n === 2) await h.notification.info('reconciled'); }); }",
+    );
+    approve(&dir, &["test.failhandler"]);
+    let bus = Arc::new(CoreEventBus::new());
+    let host = Arc::new(PluginHost::new(bus.clone()));
+    let consumer = host.start().unwrap();
+    let manager = make_manager(
+        dir.to_path_buf(),
+        host.clone(),
+        Arc::new(Source::default()),
+        Arc::default(),
+    )
+    .with_test_timing(
+        std::time::Duration::from_secs(12),
+        std::time::Duration::from_secs(3600),
+    );
+    let output = Arc::new(Output::default());
+    manager.set_output(output.clone());
+    manager.start("test.failhandler").await.unwrap();
+    // A rejected business handler must not kill the worker; it prompts a reconciliation.
+    bus.publish(CoreEvent::SubmissionJudged {
+        submission_id: "id".into(),
+        status: "Accepted".into(),
+    });
+    wait_for(&output, "reconciled").await;
+    manager.stop("test.failhandler").await.unwrap();
+    assert_eq!(host.subscriber_count(), 0);
+    consumer.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bridge_limits_apply_before_a_batch_of_js_promises_is_polled() {
     let dir = crate::test_support::TempDir::unique("plugin-bridge-budget");
     install(

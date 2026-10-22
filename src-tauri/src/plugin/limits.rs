@@ -11,6 +11,10 @@ pub(crate) const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SUBMISSION_LOOKUP_TIMEOUT: Duration = Duration::from_secs(8);
 /// Return host-call errors early enough for a JS catch/finally before the hard watchdog.
 pub(crate) const API_ERROR_GRACE: Duration = Duration::from_secs(1);
+/// A persistently failing event handler must not warn on every delivery. The first
+/// failure for a (plugin, code) warns immediately; repeats are suppressed until this
+/// interval elapses, then reported once with the accumulated count.
+pub(crate) const HANDLER_WARN_INTERVAL: Duration = Duration::from_secs(60);
 pub(crate) const MAX_BRIDGE_RESPONSE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_CURSOR_PAGE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_CURSOR_BUFFER_BYTES: usize = 4 * 1024 * 1024;

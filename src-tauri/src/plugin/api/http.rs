@@ -81,6 +81,7 @@ impl PluginHttpRequest {
                         | "upgrade"
                         | "transfer-encoding"
                         | "content-length"
+                        | "content-type"
                 )
                 || lower.starts_with("proxy-")
             {

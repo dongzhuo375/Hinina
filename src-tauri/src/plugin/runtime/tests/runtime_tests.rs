@@ -19,9 +19,12 @@ impl PluginRuntime for LocalRuntime {
     ) -> PluginResult<()> {
         Ok(())
     }
-    async fn deliver_event(&mut self, _event: &PluginEventEnvelope) -> PluginResult<()> {
+    async fn deliver_event(
+        &mut self,
+        _event: &PluginEventEnvelope,
+    ) -> PluginResult<DeliveryOutcome> {
         self.calls.set(self.calls.get() + 1);
-        Ok(())
+        Ok(DeliveryOutcome::default())
     }
     async fn shutdown(&mut self) -> PluginResult<()> {
         Ok(())

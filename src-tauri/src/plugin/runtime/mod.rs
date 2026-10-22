@@ -12,6 +12,18 @@ use std::sync::Arc;
 pub mod quickjs;
 
 /// @plugin-api
+/// @since 2.0
+/// @stability stable
+/// What happened when one envelope was delivered to a plugin's handlers. A non-zero
+/// `failed_handlers` means the plugin's view may have diverged, so the host should prompt
+/// a reconciliation; the engine keeps running either way (one rejection never kills it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeliveryOutcome {
+    /// Handlers that rejected during this delivery.
+    pub failed_handlers: u32,
+}
+
+/// @plugin-api
 /// @since 1.0
 /// @stability experimental
 /// 引擎实现应串行等待同一插件的 handler；异常/超时只停止该插件。
@@ -35,7 +47,12 @@ pub trait PluginRuntime {
     /// @since 1.0
     /// @stability experimental
     /// 处理一条信封，可包含多个按注册顺序执行的 handler；错误只返回 PluginError。
-    async fn deliver_event(&mut self, envelope: &PluginEventEnvelope) -> PluginResult<()>;
+    /// 单个 handler 拒绝不终止引擎：失败计数经 `DeliveryOutcome` 回传，供宿主决定是否
+    /// 主动触发一次 Resync 重新对账。
+    async fn deliver_event(
+        &mut self,
+        envelope: &PluginEventEnvelope,
+    ) -> PluginResult<DeliveryOutcome>;
     /// @plugin-api
     /// @since 1.0
     /// @stability experimental

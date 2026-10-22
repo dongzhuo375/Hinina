@@ -8,7 +8,7 @@ ES module 加载与 activate 最长10秒，单事件交付最长30秒，内存16
 
 每次宿主调用绑定发起时所在入口的硬截止时间，并提前1秒返回稳定timeout，让JS可以catch/finally；submission.get另有整体8秒扫描上限。捕获错误且在剩余窗口内完成时不会使worker失败；死循环和超过入口硬期限仍按原规则失败。取消/丢弃查询会归还并发许可并清理未发布或内部游标，已发出的外部副作用无法撤回。
 
-事件投递按 handler 隔离：bootstrap 逐个 await 并捕获，返回 `{failed, code}` 摘要（code 仅接受稳定标识符形状，否则记为 script_error）。宿主记录一次脱敏 warn 后继续后续 handler 与事件，只有引擎级失败（超时、内存、撤销）才结束 worker。
+事件投递按 handler 隔离：bootstrap 逐个 await 并捕获，返回 `{failed, code}` 摘要（code 受限为 `[a-z_]{1,40}` 字符集形状，不可注入日志字段但仍可能由插件提供，按不可信诊断提示处理；非宿主形状一律记为 script_error）。宿主按 code 节流输出脱敏 warn（首次立即、60秒内累计、到期合并一条带累计计数）后继续后续 handler 与事件，只有引擎级失败（超时、内存、撤销）才结束 worker。`deliver` 经 `DeliveryOutcome` 把失败 handler 数回传 Manager，由其触发一次 Resync 对账（Resync 通知自身不再触发，避免失败循环）。
 
 bootstrap在调用host前捕获JSON.stringify失败（循环引用、BigInt、抛异常的toJSON等），统一拒绝冻结的{code:"invalid_input"}，不透传原始异常消息；序列化失败不会进入宿主执行器。
 

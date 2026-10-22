@@ -307,9 +307,12 @@ async fn a_rejected_handler_does_not_stop_later_handlers_or_events() {
         occurred_at: 1,
         event: PluginEvent::ResyncRequired { lost: 0 },
     };
-    // A rejected handler is isolated: the remaining handler and later events still run.
-    runtime.deliver(&envelope).await.unwrap();
-    runtime.deliver(&envelope).await.unwrap();
+    // A rejected handler is isolated: the remaining handler and later events still run,
+    // and the per-delivery failure count is surfaced so the host can prompt a resync.
+    let first = runtime.deliver(&envelope).await.unwrap();
+    let second = runtime.deliver(&envelope).await.unwrap();
+    assert_eq!(first.failed_handlers, 1);
+    assert_eq!(second.failed_handlers, 1);
     assert_eq!(
         runtime
             .context

@@ -4,7 +4,7 @@
 //! @stability stable
 //! Minimal lifecycle: serialized start/stop/reload, isolated engine workers, generic Resync.
 use super::{
-    api::*,
+    api::{event::PluginEvent, *},
     execution_api::{NotificationOutput, PluginApiFactory},
     host::{
         manifest::PluginPermission,
@@ -368,7 +368,22 @@ impl PluginManager {
                             event = events.recv() => {
                                 if events.is_closed() { outcome = Err(PluginError::Unavailable); break; }
                                 let Some(event) = event else { break; };
-                                if let Err(error) = runtime.deliver_event(&event).await { outcome = Err(error); break; }
+                                // A resync notice must not itself re-trigger resync, or a failing
+                                // resync handler would spawn an unbounded loop; the periodic tick
+                                // still paces reconciliation for that case.
+                                let is_resync = matches!(event.event, PluginEvent::ResyncRequired { .. });
+                                match runtime.deliver_event(&event).await {
+                                    Ok(delivery) => {
+                                        // A rejected handler means the plugin's view may have
+                                        // diverged; prompt one reconciliation so it does not run
+                                        // stale until the next periodic resync.
+                                        if delivery.failed_handlers > 0 && !is_resync && !host.request_resync(&id_owned) {
+                                            outcome = Err(PluginError::Unavailable);
+                                            break;
+                                        }
+                                    }
+                                    Err(error) => { outcome = Err(error); break; }
+                                }
                             }
                         }
                     }

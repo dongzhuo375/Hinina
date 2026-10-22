@@ -575,7 +575,7 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
         config,
         access: access.clone(),
         cached_scope: Mutex::default(),
-        last_scope_warning: Default::default(),
+        scope_warnings: Default::default(),
     });
     let m = manifest("test.cached");
     let q = ScopedQueries::new(
@@ -627,6 +627,9 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
     stale.0.revision = access.snapshot().unwrap().revision;
     stale.1.user = Some(("stale-owner".into(), "stale-name".into()));
     *source.cached_scope.lock().unwrap() = Some(stale);
+    // The no-I/O fast path must reject the numerically-equal-but-revoked snapshot too,
+    // not only the blocking slow path asserted below.
+    assert!(source.cached_scope().is_none());
     assert!(source.scope("test.cached").unwrap() == current);
     assert_eq!(sessions.loads.load(Ordering::SeqCst), 4);
     auth.logout().await.unwrap();
@@ -769,6 +772,78 @@ async fn a_failed_page_fetch_keeps_the_cursor_for_a_retry() {
 }
 
 #[tokio::test]
+async fn an_oversized_page_restores_the_true_precall_cursor_snapshot() {
+    let source = Arc::new(Source::default());
+    // Page 1 publishes a cursor; page 2 is oversized, so advance() fails at the encoded-size
+    // check AFTER it would otherwise have mutated the cursor. The restore must put back the
+    // true pre-call snapshot (empty pending, unchanged native_page), not the oversized page
+    // with stale buffered_bytes — which would bypass the per-cursor and aggregate budgets.
+    let mut oversized = record("2");
+    oversized.display_id = "x".repeat(1024 * 1024);
+    *source.pages.lock().unwrap() = vec![
+        SubmissionHistoryPage {
+            records: vec![record("1")],
+            total: None,
+            has_more: true,
+        },
+        SubmissionHistoryPage {
+            records: vec![oversized],
+            total: None,
+            has_more: false,
+        },
+    ];
+    let m = manifest("test.oversized-restore");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        Arc::default(),
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    let query = PluginSubmissionQuery {
+        contest_id: "contest".into(),
+        problem_id: None,
+        cursor: None,
+        limit: 1,
+    };
+    let cursor = q
+        .list(&context, query.clone())
+        .await
+        .unwrap()
+        .next_cursor
+        .unwrap();
+    // The next native page is oversized: rejected, and the cursor must survive uncorrupted.
+    assert_eq!(
+        q.list(
+            &context,
+            PluginSubmissionQuery {
+                cursor: Some(cursor.clone()),
+                ..query.clone()
+            },
+        )
+        .await,
+        Err(PluginError::LimitExceeded)
+    );
+    // Heal the page. A retry with the same cursor must resume from page 2, proving the
+    // restored cursor kept its true pre-call state instead of retaining the oversized
+    // records (which would make this retry fail again, and would leave >1MiB resident
+    // while the aggregate accounting still counted only the stale buffered_bytes).
+    source.pages.lock().unwrap()[1].records = vec![record("2")];
+    let resumed = q
+        .list(
+            &context,
+            PluginSubmissionQuery {
+                cursor: Some(cursor),
+                ..query
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(resumed.records[0].submission_id, "2");
+    assert!(resumed.next_cursor.is_none());
+}
+
+#[tokio::test]
 async fn cached_scope_hits_never_touch_the_blocking_read() {
     use crate::plugin::query::{QueryScope, QuerySource};
     struct Cached;
@@ -804,6 +879,49 @@ async fn cached_scope_hits_never_touch_the_blocking_read() {
     for _ in 0..5 {
         q.check(&context).await.unwrap();
     }
+}
+
+#[test]
+fn scope_cache_hit_requires_matching_revision_and_live_tokens() {
+    use crate::core::access::AccessSnapshot;
+    use tokio_util::sync::CancellationToken;
+    fn snapshot(revision: u64, cancellation: CancellationToken) -> AccessSnapshot {
+        AccessSnapshot {
+            revision,
+            cancellation,
+        }
+    }
+    // This predicate is the single source of truth shared by the no-I/O fast path
+    // (`cached_scope`) and the blocking slow path (`scope`). Locking it here means a
+    // revoked token can never be served from cache after an OJ/account/contest switch,
+    // and the two paths cannot drift apart.
+    let live = CancellationToken::new();
+    let cached = CancellationToken::new();
+    // Hit: same revision and neither token cancelled.
+    assert!(scope_cache_hit(
+        &snapshot(7, cached.clone()),
+        &snapshot(7, live.clone())
+    ));
+    // Miss: revision differs.
+    assert!(!scope_cache_hit(
+        &snapshot(6, cached.clone()),
+        &snapshot(7, live.clone())
+    ));
+    // Miss: the cached token was revoked. This is the numeric-ABA guard — a revision that
+    // wraps back to an equal value must still fail because the old token is cancelled.
+    let revoked_cached = CancellationToken::new();
+    revoked_cached.cancel();
+    assert!(!scope_cache_hit(
+        &snapshot(7, revoked_cached),
+        &snapshot(7, live.clone())
+    ));
+    // Miss: the live snapshot token was revoked mid-transition.
+    let revoked_live = CancellationToken::new();
+    revoked_live.cancel();
+    assert!(!scope_cache_hit(
+        &snapshot(7, cached),
+        &snapshot(7, revoked_live)
+    ));
 }
 
 #[tokio::test]
@@ -1045,7 +1163,7 @@ async fn pending_endpoint_edit_keeps_running_provider_scope_and_emits_redacted_d
         config: config.clone(),
         access: access.clone(),
         cached_scope: Mutex::default(),
-        last_scope_warning: Default::default(),
+        scope_warnings: Default::default(),
     });
     let m = manifest("test.endpoint");
     let q = ScopedQueries::new(
@@ -1204,7 +1322,7 @@ async fn provider_failures_are_logged_by_category_without_messages() {
         )),
         access,
         cached_scope: Mutex::default(),
-        last_scope_warning: Default::default(),
+        scope_warnings: Default::default(),
     });
     let _sink = tracing::Dispatch::new(
         tracing_subscriber::fmt()

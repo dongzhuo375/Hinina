@@ -148,3 +148,23 @@ HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存H
 | submission.get总期限与单页超时相等 | Low成立；总期限5秒恰等于单页最坏5秒，慢OJ首页即耗尽整个查找预算。提高为8秒（单页最坏+scope检查与快页余量），不变量「总期限+1秒宽限<激活10秒」仍成立并由既有测试锁定；两处虚拟时间测试同步改为5秒页延迟/8秒总期限 |
 
 验证：cargo test 全量704 passed（含真实引擎扫描超时用例）；npm test 505 passed（新增1项重订阅回归）；clippy仅保留既有告警，改动Rust文件rustfmt通过。
+
+## 代码评审跟进修复（基线4621ea3）
+
+本轮处理 PR #41 全量代码评审的 5 项 Medium + 6 项 Low，重点修复 4621ea3 引入的自我一致性回归；每项均配回归测试并验证过“去掉修复即失败”。
+
+| 发现 | 确认与处理 |
+|---|---|
+| 游标恢复打穿内存记账 | Medium成立；`advance()` 原先赋值后做 `encoded_len` 校验，超限页失败时回填的是含超限页且 `buffered_bytes` 陈旧的游标，绕过 1MiB 单页/4MiB 聚合/32 游标上限。改为在局部变量完成抓取、owner/条数与编码尺寸校验，全部通过后才一次性写回游标，失败时保持真正的调用前快照。新增“超限页失败后同游标重试可续页”回归 |
+| cached_scope 快路径谓词手工复制且零覆盖 | Medium成立；快/慢路径各复制一份命中谓词，快路径在令牌撤销后可能静默返回 stale-owner 作用域。抽出单一事实来源 `scope_cache_hit(cached, snapshot)` 供两路径共用，结构上消除漂移；新增谓词单测（命中/revision 不符/缓存令牌撤销/ live 令牌撤销），并在 ABA 用例断言快路径同样拒绝已撤销令牌 |
+| handler 失败告警无节流 | Medium成立；worker 不再因失败退出后，持续失败 handler 会按事件速率无限 warn，与 f667a73 建立的每-revision 去重约定冲突。改为按 code 节流：首次立即、60秒（`HANDLER_WARN_INTERVAL`）内静默累计、到期合并一条带累计计数 |
+| handler 失败丢失再对齐触发点 | Medium成立；`deliver` 摘要只用于打日志即丢弃，Manager 无从判断需再对齐。新增 `DeliveryOutcome { failed_handlers }` 作为 `deliver_event` 返回；Manager 在 handler 失败时请求一次 Resync，跳过 Resync 通知自身避免失败循环，周期 tick 兜底。Runtime 回归断言 failed_handlers 计数 |
+| callsite Dispatch 注册是语义空操作 | Medium成立；`Dispatch::new`+`dispatcher::with_default` 与旧 `subscriber::with_default` 完全等价（后者内部即前者），注释因果论断不成立。撤回为 `subscriber::with_default` 并移除错误注释；改用写入计数断言，事件被 interest 缓存丢失时测试显式失败而非空过 |
+| scope warn 去重键过粗 | Low成立；`last_scope_warning` 仅按 revision 去重，`ServiceQueries` 为全进程单例，同修订下其他插件同类失败被静默且归因指向首个命中插件。改为 `scope_warnings` 按 (revision, plugin_id) 集合、随修订清空，每插件首次失败各带自身归因 |
+| 目录扫描总条目无界 | Low成立；扫描计数只统计目录，含大量普通文件的 code root 每次 load 被完整遍历；且开始跟随目录符号链接未声明。新增 `MAX_SCAN_ENTRIES=1024` 总条目上限（复用 enumerate 索引），注释与模块文档声明符号链接跟随及 canonical 边界；新增“大量文件触发条目上限截断返回 limit_exceeded”回归 |
+| 扫描测试依赖 read_dir 顺序 | Low成立；原测试建 202 目录（超 128 上限）断言目标可寻，哈希序文件系统约 37% 概率失败。噪声目录降到上限以下使发现与顺序无关；另增“目标目录不存在且超上限返回 limit_exceeded 而非 not_found”的确定性回归 |
+| HTTP 头黑名单缺 content-type | Low成立；reqwest `header()` 为 append 语义，插件带 body 且自带 content-type 会与宿主强制的 application/json 重复矛盾。`validate_shape` 黑名单加入 `content-type`（由宿主按 body 形态独占决定），新增负例 |
+| errorCode 白名单注释夸大 | Low成立；bootstrap 只约束 `[a-z_]{1,40}` 字符集/长度，不校验是否属宿主变体，插件可伪造 code。注释改为准确表述（字符集有界、不可注入但可能由插件提供，按不可信诊断提示处理） |
+| SDK 扫描期限文档漂移 | Low成立；`hinina.d.ts` 仍写 submission.get 扫描 5 秒，代码已 8 秒（cce5203 同步 6 个文档唯独漏此文件）。改为 8 秒 |
+
+验证：cargo test 全量 716 passed（新增 5 个回归：超限游标快照/共享谓词/目录上限截断/条目上限截断/handler 失败触发 Resync）；npm test 507 passed（前端 src/ 未改动）；clippy 仅保留 6 项既有告警；改动 Rust 文件 rustfmt 通过；`npm run plugin:sdk:check` 通过（hinina.d.ts 注释同步）。

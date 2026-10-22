@@ -76,6 +76,9 @@ fn http_shape_rejects_header_injection_transport_controls_and_limits() {
         ("Host", "other.example.com"),
         ("Cookie", "secret"),
         ("proxy-authorization", "secret"),
+        // The host owns Content-Type (it serializes the body as JSON); a plugin-supplied
+        // value would otherwise be appended alongside the host's, sending a duplicate.
+        ("content-type", "text/plain"),
         ("x-id", "a\r\nb"),
     ] {
         request.headers.clear();
