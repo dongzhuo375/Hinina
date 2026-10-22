@@ -1,7 +1,7 @@
 //! Concrete capability assembly; only the composition root selects filesystem/network implementations.
 use super::{plugin_http::PluginHttp, plugin_storage::JsonPluginStorage};
 use crate::plugin::{
-    api::{PluginApi, PluginResult},
+    api::{http::PluginHttpApi, storage::PluginStorageApi, PluginApi, PluginResult},
     execution_api::{ExecutionApi, NotificationOutput, PluginApiFactory},
     query::ScopedQueries,
     registry::PluginApproval,
@@ -30,16 +30,19 @@ impl PluginApiFactory for FsPluginApiFactory {
         approval: &PluginApproval,
         output: Arc<dyn NotificationOutput>,
     ) -> PluginResult<Arc<dyn PluginApi>> {
-        let storage = JsonPluginStorage::new(self.data_root.clone(), queries.clone())
-            .with_shared_budget(self.storage_budget.clone());
-        let http =
+        let storage: Arc<dyn PluginStorageApi> = Arc::new(
+            JsonPluginStorage::new(self.data_root.clone(), queries.clone())
+                .with_shared_budget(self.storage_budget.clone()),
+        );
+        let http: Arc<dyn PluginHttpApi> = Arc::new(
             PluginHttp::new(queries.clone(), approval.network.clone()).inspect_err(|_| {
                 super::plugin_diagnostics::failure(
                     Some(&queries.grant.manifest().id),
                     "factory.create",
                     "capability_setup",
                 );
-            })?;
+            })?,
+        );
         Ok(Arc::new(ExecutionApi::new(queries, storage, http, output)))
     }
 }

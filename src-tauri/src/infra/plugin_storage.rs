@@ -249,6 +249,26 @@ impl JsonPluginStorage {
         .await
     }
 }
+#[async_trait::async_trait]
+impl PluginStorageApi for JsonPluginStorage {
+    async fn get(&self, key: &str) -> PluginResult<PluginStorageValue> {
+        JsonPluginStorage::get(self, key).await
+    }
+    async fn set(&self, key: &str, value: Value) -> PluginResult<()> {
+        JsonPluginStorage::set(self, key, value).await
+    }
+    async fn delete(&self, key: &str) -> PluginResult<()> {
+        JsonPluginStorage::delete(self, key).await
+    }
+    async fn compare_and_set(
+        &self,
+        key: &str,
+        expected: PluginStorageValue,
+        value: Value,
+    ) -> PluginResult<bool> {
+        JsonPluginStorage::compare_and_set(self, key, expected, value).await
+    }
+}
 /// Signals an abandoned host call to the detached blocking task. Dropping the waiting
 /// future sets the token; the task re-checks it before committing anything durable.
 struct AbortOnDrop(tokio_util::sync::CancellationToken);

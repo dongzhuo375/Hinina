@@ -21,8 +21,8 @@ use crate::{
         entity::{contest::Contest, submission::SubmissionHistoryPage},
         error::AppError,
         provider::registry::ProviderRegistry,
+        repository::config_repo::ConfigRepository,
     },
-    infra::fs_config_repo::FsConfigRepository,
     service::{
         auth::AuthService, config::ConfigService, contest::ContestService,
         submission::SubmissionService,
@@ -110,6 +110,24 @@ pub trait QuerySource: Send + Sync {
     async fn history(&self, contest: &str, page: u32) -> PluginResult<SubmissionHistoryPage>;
 }
 
+/// Read port for the configured OJ instances. Keeps this adapter independent of which
+/// repository backs the configuration; production wires `ConfigService`.
+pub trait OjInstanceConfig: Send + Sync {
+    /// Configured base URL of the enabled instance with this id (`None` when the instance
+    /// is absent or disabled).
+    fn enabled_base_url(&self, oj: &str) -> Option<String>;
+}
+impl<R: ConfigRepository> OjInstanceConfig for ConfigService<R> {
+    fn enabled_base_url(&self, oj: &str) -> Option<String> {
+        self.get()
+            .oj
+            .instances
+            .into_iter()
+            .find(|i| i.enabled && i.id == oj)
+            .map(|i| i.base_url)
+    }
+}
+
 /// @plugin-api
 /// @since 2.0
 /// @stability stable
@@ -119,7 +137,7 @@ pub struct ServiceQueries {
     pub contest: Arc<ContestService>,
     pub submission: Arc<SubmissionService>,
     pub registry: Arc<dyn ProviderRegistry>,
-    pub config: Arc<ConfigService<FsConfigRepository>>,
+    pub config: Arc<dyn OjInstanceConfig>,
     pub access: Arc<AccessRevision>,
     pub cached_scope: Mutex<Option<(AccessSnapshot, QueryScope)>>,
     /// (revision, plugin_id) pairs that already emitted a scope-resolution warning. A
@@ -243,13 +261,7 @@ impl QuerySource for ServiceQueries {
             );
             PluginError::Unavailable
         })?;
-        let configured = self.config.get();
-        let Some(instance) = configured
-            .oj
-            .instances
-            .iter()
-            .find(|i| i.enabled && i.id == oj)
-        else {
+        let Some(configured_url) = self.config.enabled_base_url(&oj) else {
             self.warn_scope_failure(
                 snapshot.revision,
                 plugin_id,
@@ -261,7 +273,7 @@ impl QuerySource for ServiceQueries {
         };
         // Existing instance URLs intentionally take effect after restart (SettingsView).
         // Bind queries and identity keys to the running provider, never to a pending URL.
-        let pending_restart = instance.base_url != endpoint;
+        let pending_restart = configured_url != endpoint;
         let scope = QueryScope {
             oj,
             endpoint,

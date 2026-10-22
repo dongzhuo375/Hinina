@@ -1,4 +1,5 @@
 use super::*;
+use crate::infra::{plugin_http::PluginHttp, plugin_storage::JsonPluginStorage};
 use std::io::Write;
 use std::sync::Mutex;
 
@@ -52,8 +53,8 @@ fn bridge_admission_bounds_local_calls_per_activation() {
     let queries = crate::plugin::test_support::authority("test.admission");
     let api = ExecutionApi::new(
         queries.clone(),
-        JsonPluginStorage::new(dir.to_path_buf(), queries.clone()),
-        PluginHttp::new(queries, vec![]).unwrap(),
+        Arc::new(JsonPluginStorage::new(dir.to_path_buf(), queries.clone())),
+        Arc::new(PluginHttp::new(queries, vec![]).unwrap()),
         Arc::new(Output),
     );
     let mut admitted = 0;
@@ -78,8 +79,8 @@ async fn bridge_cas_audit_names_both_permissions_and_escapes_external_operations
     let queries = crate::plugin::test_support::authority("test.audit");
     let api = ExecutionApi::new(
         queries.clone(),
-        JsonPluginStorage::new(dir.to_path_buf(), queries.clone()),
-        PluginHttp::new(queries, vec![]).unwrap(),
+        Arc::new(JsonPluginStorage::new(dir.to_path_buf(), queries.clone())),
+        Arc::new(PluginHttp::new(queries, vec![]).unwrap()),
         Arc::new(Output),
     );
     let _sink = tracing::Dispatch::new(

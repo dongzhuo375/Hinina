@@ -10,7 +10,6 @@ use super::{
     limits::{MAX_BRIDGE_INPUT_BYTES, MAX_BRIDGE_OPERATION_BYTES, MAX_BRIDGE_RESPONSE_BYTES},
     query::ScopedQueries,
 };
-use crate::infra::{plugin_http::PluginHttp, plugin_storage::JsonPluginStorage};
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde_json::{json, Value};
@@ -46,11 +45,12 @@ pub trait NotificationOutput: Send + Sync {
 /// @plugin-api
 /// @since 2.0
 /// @stability stable
-/// One authority and rate budget per plugin activation.
+/// One authority and rate budget per plugin activation. Storage and HTTP are injected as
+/// ports (implemented in infra), so this module never names a concrete I/O type.
 pub struct ExecutionApi {
     pub queries: Arc<ScopedQueries>,
-    pub storage: JsonPluginStorage,
-    pub http: PluginHttp,
+    pub storage: Arc<dyn PluginStorageApi>,
+    pub http: Arc<dyn PluginHttpApi>,
     output: Arc<dyn NotificationOutput>,
     notifications: DefaultDirectRateLimiter,
     calls: DefaultDirectRateLimiter,
@@ -62,8 +62,8 @@ impl ExecutionApi {
     /// @stability stable
     pub fn new(
         queries: Arc<ScopedQueries>,
-        storage: JsonPluginStorage,
-        http: PluginHttp,
+        storage: Arc<dyn PluginStorageApi>,
+        http: Arc<dyn PluginHttpApi>,
         output: Arc<dyn NotificationOutput>,
     ) -> Self {
         Self {

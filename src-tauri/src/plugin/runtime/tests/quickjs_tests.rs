@@ -122,8 +122,11 @@ fn execution_api(
     ));
     let api = Arc::new(ExecutionApi::new(
         queries.clone(),
-        crate::infra::plugin_storage::JsonPluginStorage::new(dir.to_path_buf(), queries.clone()),
-        crate::infra::plugin_http::PluginHttp::new(queries.clone(), vec![]).unwrap(),
+        Arc::new(crate::infra::plugin_storage::JsonPluginStorage::new(
+            dir.to_path_buf(),
+            queries.clone(),
+        )),
+        Arc::new(crate::infra::plugin_http::PluginHttp::new(queries.clone(), vec![]).unwrap()),
         output,
     ));
     (api, queries)

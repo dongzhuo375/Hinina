@@ -236,6 +236,17 @@ impl PluginHttp {
 }
 
 #[async_trait::async_trait]
+impl PluginHttpApi for PluginHttp {
+    async fn request(
+        &self,
+        context: &PluginQueryContext,
+        request: PluginHttpRequest,
+    ) -> PluginResult<PluginHttpResponse> {
+        PluginHttp::request(self, context, request).await
+    }
+}
+
+#[async_trait::async_trait]
 trait HttpTransport: Send + Sync {
     async fn send(
         &self,
