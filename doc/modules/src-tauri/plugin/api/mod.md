@@ -23,6 +23,6 @@
 
 错误码：permission_denied、invalid_input、context_expired、unauthenticated、not_found、provider_error、limit_exceeded、timeout、unavailable、unsupported、script_error。脚本语法/运行时异常以 script_error 脱敏，超时仍为 timeout；IPC 开发命令同样保留稳定错误对象。Resource 不可见和不存在的提交均返回 null；扫描预算用尽返回 limit_exceeded，不能当成查无记录。
 
-桥参数不能JSON编码（如循环引用或BigInt）时同样拒绝稳定的{code:"invalid_input"}对象，不抛裸TypeError。宿主调用在入口硬截止前1秒返回timeout；submission.get整体扫描最多5秒。插件可捕获API错误继续处理，仍须在激活10秒/事件30秒硬期限内完成。
+桥参数不能JSON编码（如循环引用或BigInt）时同样拒绝稳定的{code:"invalid_input"}对象，不抛裸TypeError。宿主调用在入口硬截止前1秒返回timeout；submission.get整体扫描最多8秒。插件可捕获API错误继续处理，仍须在激活10秒/事件30秒硬期限内完成。
 
 所有返回Promise的宿主API必须await或纳入activate/handler返回的Promise链，支持await Promise.all；游离调用在入口结束后不保证继续执行或报告拒绝。events.on/注销同步执行。错误载荷仅允许code和可选字符串permission，Rust穷尽序列化测试与前端形态测试共同锁定该契约。

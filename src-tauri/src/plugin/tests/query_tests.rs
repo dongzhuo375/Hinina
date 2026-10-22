@@ -766,7 +766,7 @@ async fn metadata_scan_has_one_total_deadline_and_releases_query_resources() {
     use std::{sync::atomic::Ordering, time::Duration};
     assert!(SUBMISSION_LOOKUP_TIMEOUT + API_ERROR_GRACE < ACTIVATION_TIMEOUT);
     let source = Arc::new(Source {
-        history_delay: Some(Duration::from_secs(3)),
+        history_delay: Some(Duration::from_secs(5)),
         ..Default::default()
     });
     *source.pages.lock().unwrap() = (0..10)
@@ -783,9 +783,9 @@ async fn metadata_scan_has_one_total_deadline_and_releases_query_resources() {
     let context = q.current_context().await.unwrap();
     let (result, ()) = tokio::join!(q.submission(&context, "contest", "missing"), async {
         source.history_started.notified().await;
-        tokio::time::advance(Duration::from_secs(3)).await;
+        tokio::time::advance(Duration::from_secs(5)).await;
         source.history_started.notified().await;
-        tokio::time::advance(Duration::from_secs(2)).await;
+        tokio::time::advance(Duration::from_secs(3)).await;
     });
     assert_eq!(result, Err(PluginError::Timeout));
     assert_eq!(source.history_calls.load(Ordering::SeqCst), 2);

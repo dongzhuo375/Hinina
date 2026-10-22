@@ -144,7 +144,7 @@ async fn real_js_catches_scan_timeouts_in_activation_and_event_and_remains_usabl
     }
     let dir = crate::test_support::TempDir::unique("runtime-scan-timeout");
     let source = Arc::new(Source {
-        history_delay: Some(Duration::from_secs(3)),
+        history_delay: Some(Duration::from_secs(5)),
         ..Default::default()
     });
     *source.pages.lock().unwrap() = (0..10)
@@ -169,9 +169,9 @@ async fn real_js_catches_scan_timeouts_in_activation_and_event_and_remains_usabl
     }"#;
     let advance_scan = || async {
         source.history_started.notified().await;
-        tokio::time::advance(Duration::from_secs(3)).await;
+        tokio::time::advance(Duration::from_secs(5)).await;
         source.history_started.notified().await;
-        tokio::time::advance(Duration::from_secs(2)).await;
+        tokio::time::advance(Duration::from_secs(3)).await;
     };
     let (loaded, ()) = tokio::join!(
         runtime.load(

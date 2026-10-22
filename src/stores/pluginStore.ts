@@ -16,6 +16,7 @@ export const usePluginStore = defineStore('plugin', () => {
   function applyDismiss(id: number) { notifications.value = notifications.value.filter(item => item.id !== id) }
   function dismiss(id: number) { subscription?.dismiss(id) }
   async function subscribe() {
+    subscription?.()
     subscription = await pluginService.subscribeNotifications(
       notification => { notifications.value = [...notifications.value, notification] },
       applyDismiss,

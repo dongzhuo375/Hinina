@@ -6,7 +6,9 @@ pub(crate) const EVENT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const START_TIMEOUT: Duration = Duration::from_secs(ACTIVATION_TIMEOUT.as_secs() + 2);
 pub(crate) const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
-pub(crate) const SUBMISSION_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
+/// Whole submission.get scan: one worst-case provider page plus headroom for scope
+/// checks and fast follow-up pages, still catchable before the activation deadline.
+pub(crate) const SUBMISSION_LOOKUP_TIMEOUT: Duration = Duration::from_secs(8);
 /// Return host-call errors early enough for a JS catch/finally before the hard watchdog.
 pub(crate) const API_ERROR_GRACE: Duration = Duration::from_secs(1);
 pub(crate) const MAX_BRIDGE_RESPONSE_BYTES: usize = 1024 * 1024;

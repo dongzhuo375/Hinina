@@ -24,6 +24,26 @@ it('stores only service-normalized notifications and applies service dismissals'
   store.dismiss(2)
   expect(store.notifications).toHaveLength(0)
 })
+it('re-subscribing disposes the previous subscription instead of leaking it', async () => {
+  type Emitted = { id: number, pluginId: string, level: 'info', message: string }
+  const emitters: Array<(value: Emitted) => void> = []
+  const disposed: boolean[] = []
+  pluginService.subscribeNotifications.mockImplementation((onAdd: (value: Emitted) => void, onDismiss: (id: number) => void) => {
+    const index = emitters.length
+    disposed.push(false)
+    emitters.push(value => { if (!disposed[index]) onAdd(value) })
+    return Promise.resolve(Object.assign(() => { disposed[index] = true }, { dismiss: onDismiss }))
+  })
+  const store = usePluginStore()
+  await store.subscribe()
+  await store.subscribe()
+  expect(disposed).toEqual([true, false])
+  emitters[1]({ id: 1, pluginId: 'test.demo', level: 'info', message: 'active' })
+  expect(store.notifications).toHaveLength(1)
+  emitters[0]({ id: 2, pluginId: 'test.demo', level: 'info', message: 'leaked' })
+  expect(store.notifications).toHaveLength(1)
+  expect(store.notifications[0].message).toBe('active')
+})
 it('refreshes status only after a lifecycle operation completes', async () => {
   pluginService.list.mockResolvedValue([{ id: 'test.demo', state: 'running', error: null }])
   const store = usePluginStore(); await store.start('test.demo')
