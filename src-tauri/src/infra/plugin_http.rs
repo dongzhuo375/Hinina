@@ -196,9 +196,10 @@ impl PluginHttp {
         let port = url
             .port_or_known_default()
             .ok_or(PluginError::InvalidInput)?;
-        let addresses: Vec<SocketAddr> = if let Ok(ip) = host.parse::<IpAddr>() {
-            vec![SocketAddr::new(ip, port)]
-        } else {
+        // Approvals only hold domain origins (`valid_origin` rejects IP literals), and the
+        // resolver answers any host uniformly: every answer, literal or not, goes through
+        // `allowed_address` below, so there is no separate no-DNS path to keep in sync.
+        let addresses: Vec<SocketAddr> =
             self.resolver.resolve(host, port).await.map_err(|error| {
                 diagnostics::io(
                     Some(&self.authority.grant.manifest().id),
@@ -206,8 +207,7 @@ impl PluginHttp {
                     &error,
                 );
                 PluginError::Unavailable
-            })?
-        };
+            })?;
         if addresses.is_empty()
             || addresses.len() > 64
             || addresses.iter().any(|a| !allowed_address(a.ip(), approval))
