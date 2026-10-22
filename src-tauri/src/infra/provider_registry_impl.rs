@@ -36,7 +36,10 @@ impl ProviderRegistryImpl {
         T: ?Sized,
     {
         let id = self.current_id();
-        let guard = self.providers.read().unwrap_or_else(|e| e.into_inner());
+        let guard = self
+            .providers
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
         let set = guard
             .get(&id)
             .ok_or_else(|| AppError::ProviderNotFound(format!("OJ {} 未注册", id)))?;
@@ -57,21 +60,15 @@ impl ProviderRegistry for ProviderRegistryImpl {
         self.capability(|set| &set.auth)
     }
 
-    fn current_contest(
-        &self,
-    ) -> AppResult<Arc<dyn crate::core::provider::contest::ContestProvider>> {
+    fn current_contest(&self) -> AppResult<Arc<dyn crate::core::provider::contest::ContestProvider>> {
         self.capability(|set| &set.contest)
     }
 
-    fn current_problem(
-        &self,
-    ) -> AppResult<Arc<dyn crate::core::provider::problem::ProblemProvider>> {
+    fn current_problem(&self) -> AppResult<Arc<dyn crate::core::provider::problem::ProblemProvider>> {
         self.capability(|set| &set.problem)
     }
 
-    fn current_submission(
-        &self,
-    ) -> AppResult<Arc<dyn crate::core::provider::submission::SubmissionProvider>> {
+    fn current_submission(&self) -> AppResult<Arc<dyn crate::core::provider::submission::SubmissionProvider>> {
         self.capability(|set| &set.submission)
     }
 

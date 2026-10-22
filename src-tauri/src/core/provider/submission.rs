@@ -32,7 +32,10 @@ pub trait SubmissionProvider: Send + Sync {
     async fn get_judgement(&self, submission_id: &str) -> AppResult<JudgementResult>;
 
     /// 查询比赛提交列表（分页）
-    async fn list_contest_submissions(&self, query: &SubmissionQuery) -> AppResult<SubmissionPage>;
+    async fn list_contest_submissions(
+        &self,
+        query: &SubmissionQuery,
+    ) -> AppResult<SubmissionPage>;
 
     /// Metadata only, with honest continuation evidence. The default uses native totals.
     async fn list_history_page(
