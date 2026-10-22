@@ -108,6 +108,40 @@ async fn manager_uses_injected_repository_and_capability_factory_without_filesys
 }
 
 #[tokio::test]
+async fn replacing_a_finished_worker_preserves_its_final_status() {
+    let dir = crate::test_support::TempDir::unique("plugin-replace-status");
+    let manager = make_manager(
+        dir.to_path_buf(),
+        Arc::new(PluginHost::new(Arc::new(CoreEventBus::new()))),
+        Arc::new(Source::default()),
+        Arc::default(),
+    );
+    let thread = std::thread::spawn(|| {});
+    while !thread.is_finished() {
+        std::thread::yield_now();
+    }
+    manager.workers.lock().unwrap().insert(
+        "test.replace".into(),
+        Worker {
+            reaping: false,
+            stop: CancellationToken::new(),
+            thread,
+            status: Arc::new(Mutex::new(PluginStatus {
+                id: "test.replace".into(),
+                state: "failed",
+                error: Some(PluginError::Timeout),
+            })),
+        },
+    );
+    // No plugins.json: loading fails after the finished worker has been replaced.
+    assert!(manager.start_worker("test.replace").await.is_err());
+    assert!(manager.workers.lock().unwrap().is_empty());
+    let statuses = manager.statuses.lock().unwrap();
+    assert_eq!(statuses.back().unwrap().id, "test.replace");
+    assert_eq!(statuses.back().unwrap().error, Some(PluginError::Timeout));
+}
+
+#[tokio::test]
 async fn timed_out_worker_is_reaped_after_native_work_finishes() {
     let dir = crate::test_support::TempDir::unique("plugin-reaper");
     let manager = make_manager(

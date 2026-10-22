@@ -12,7 +12,7 @@ use super::{
     },
     limits::{START_TIMEOUT, STOP_TIMEOUT},
     query::{QueryBudget, QuerySource, ScopedQueries},
-    runtime::quickjs::QuickJsRuntime,
+    runtime::{quickjs::QuickJsRuntime, PluginRuntime},
 };
 use crate::core::access::AccessRevision;
 use crate::plugin::registry::PluginRepository;
@@ -275,19 +275,23 @@ impl PluginManager {
         });
     }
     async fn start_worker(&self, id: &str) -> PluginResult<()> {
-        if self
-            .workers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(id)
-            .is_some_and(|w| !w.thread.is_finished())
         {
-            return Err(PluginError::Unavailable);
+            let mut workers = self.workers.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(worker) = workers.get(id) {
+                if !worker.thread.is_finished() {
+                    return Err(PluginError::Unavailable);
+                }
+                // Publish the finished generation before replacing it: start may race the
+                // reaper, and the previous failure must survive in the status history.
+                let status = worker
+                    .status
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                remember_status(&self.statuses, status);
+            }
+            workers.remove(id);
         }
-        self.workers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(id);
         let repository = self.repository.clone();
         let plugin_id = id.to_string();
         let loaded = tokio::task::spawn_blocking(move || repository.load(&plugin_id))
@@ -334,9 +338,9 @@ impl PluginManager {
             .unwrap_or(Duration::from_secs(loaded.approval.resync_interval_secs));
         let (ready, started) = tokio::sync::oneshot::channel();
         let thread = std::thread::Builder::new().name("hinina-plugin".into()).spawn(move || {
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.block_on(async {
-                let mut runtime = match QuickJsRuntime::new(cancellation.clone()).await { Ok(runtime) => runtime, Err(error) => { let _ = ready.send(Err(error.clone())); return Err(error); } };
-                let mut result = runtime.load(&loaded.source, api, &loaded.approval.options, allowed).await;
+            let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.block_on(async {
+                let mut runtime: Box<dyn PluginRuntime> = match QuickJsRuntime::new(cancellation.clone()).await { Ok(runtime) => Box::new(runtime), Err(error) => { let _ = ready.send(Err(error.clone())); return Err(error); } };
+                let mut result = runtime.activate(&loaded.source, api, &loaded.approval.options, allowed).await;
                 let mut events = None;
                 if result.is_ok() && !cancellation.is_cancelled() && subscribe {
                     match host.subscribe(&loaded.grant) {
@@ -348,7 +352,7 @@ impl PluginManager {
                     }
                 }
                 let _ = ready.send(result.clone());
-                if let Err(error) = result { let intentional = cancellation.is_cancelled(); cancellation.cancel(); runtime.shutdown().await; return if intentional { Ok(()) } else { Err(error) }; }
+                if let Err(error) = result { let intentional = cancellation.is_cancelled(); cancellation.cancel(); let _ = runtime.shutdown().await; return if intentional { Ok(()) } else { Err(error) }; }
                 {
                     let mut status = worker_status.lock().unwrap_or_else(|e| e.into_inner());
                     if status.error.is_none() { status.state = "running"; }
@@ -364,7 +368,7 @@ impl PluginManager {
                             event = events.recv() => {
                                 if events.is_closed() { outcome = Err(PluginError::Unavailable); break; }
                                 let Some(event) = event else { break; };
-                                if let Err(error) = runtime.deliver(&event).await { outcome = Err(error); break; }
+                                if let Err(error) = runtime.deliver_event(&event).await { outcome = Err(error); break; }
                             }
                         }
                     }
@@ -373,9 +377,16 @@ impl PluginManager {
                 }
                 let intentional = cancellation.is_cancelled();
                 cancellation.cancel();
-                runtime.shutdown().await;
+                let _ = runtime.shutdown().await;
                 if intentional { Ok(()) } else { outcome }
-            }))).unwrap_or(Err(PluginError::Unavailable));
+            }))) {
+                Ok(outcome) => outcome,
+                Err(payload) => {
+                    // Never format the payload: it may carry plugin-controlled text.
+                    tracing::warn!(plugin_id=?id_owned,plugin_version=%loaded.grant.manifest().version,runtime="js",operation="worker.panic",category="panic",panic_kind=panic_kind(payload.as_ref()),"Plugin worker panicked");
+                    Err(PluginError::Unavailable)
+                }
+            };
             cancellation.cancel(); host.unsubscribe(&id_owned);
             let status = {
                 let mut status = worker_status.lock().unwrap_or_else(|e| e.into_inner());
@@ -542,6 +553,16 @@ impl PluginManager {
             worker.stop.cancel();
             self.host.unsubscribe(id);
         }
+    }
+}
+/// Panic payloads can carry plugin-controlled text; only the stable kind is logged.
+fn panic_kind(payload: &(dyn std::any::Any + Send)) -> &'static str {
+    if payload.is::<&str>() {
+        "str"
+    } else if payload.is::<String>() {
+        "string"
+    } else {
+        "other"
     }
 }
 fn remember_status(history: &Mutex<VecDeque<PluginStatus>>, status: PluginStatus) {

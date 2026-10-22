@@ -40,6 +40,31 @@ fn bridge_response_bounds_include_envelope_and_json_escaping() {
     );
 }
 
+#[test]
+fn bridge_admission_bounds_local_calls_per_activation() {
+    struct Output;
+    impl NotificationOutput for Output {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("bridge-admission");
+    let queries = crate::plugin::test_support::authority("test.admission");
+    let api = ExecutionApi::new(
+        queries.clone(),
+        JsonPluginStorage::new(dir.to_path_buf(), queries.clone()),
+        PluginHttp::new(queries, vec![]).unwrap(),
+        Arc::new(Output),
+    );
+    let mut admitted = 0;
+    while api.admit().is_ok() {
+        admitted += 1;
+        assert!(admitted < 1_000, "admission gate must be bounded");
+    }
+    assert!(admitted >= 1);
+    assert_eq!(api.admit(), Err(PluginError::LimitExceeded));
+}
+
 #[tokio::test]
 async fn bridge_cas_audit_names_both_permissions_and_escapes_external_operations() {
     use tracing::instrument::WithSubscriber;

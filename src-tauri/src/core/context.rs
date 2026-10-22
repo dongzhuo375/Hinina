@@ -216,6 +216,7 @@ impl AppContext {
             config: config.clone(),
             access: access.clone(),
             cached_scope: Default::default(),
+            last_scope_warning: Default::default(),
         });
         let plugin_manager = Arc::new(crate::plugin::manager::PluginManager::new(
             Arc::new(crate::infra::fs_plugin_repo::FsPluginRepository::new(

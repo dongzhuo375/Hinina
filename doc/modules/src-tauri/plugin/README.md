@@ -28,7 +28,7 @@ flowchart LR
 
 Host 不执行用户回调、不建立第二套业务总线。Manager 才拥有生命周期；AppContext 只持有 Send 控制器，JS 值留在 worker。worker 使用持续存在的 Tauri Tokio handle，不使用启动临时运行时。
 
-从[开发教程](tutorial.md)开始。另见 [Manifest](host/manifest.md)、[API](api/mod.md)、[事件与 Resync](api/event.md)、[安全模型](security.md)、[Runtime](runtime/mod.md)、[验证记录](validation.md)。[真实代码审计](../../../../ARCHITECTURE_REVIEW.md)保留上一轮和本轮基线。
+从[开发教程](tutorial.md)开始。另见 [Manifest](host/manifest.md)、[API](api/mod.md)、[事件与 Resync](api/event.md)、[安全模型](security.md)、[Runtime](runtime/mod.md)、[验证记录](validation.md)。[真实代码审计](../../../plugin-architecture-review.md)保留上一轮和本轮基线。
 
 阶段成果、已知缺口、改进优先级和后续管理界面/操作语义，见[最小实现复盘与管理演进](../../../插件系统最小实现复盘与管理演进.md)。该文档中的管理能力是后续建议，当前仍采用开发命令和宿主配置。
 

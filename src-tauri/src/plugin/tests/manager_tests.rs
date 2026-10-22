@@ -13,6 +13,16 @@ use crate::{
 };
 use std::sync::{Arc, Mutex};
 
+#[test]
+fn panic_payload_kinds_are_classified_without_formatting() {
+    let payload = std::panic::catch_unwind(|| panic!("secret")).unwrap_err();
+    assert_eq!(super::panic_kind(payload.as_ref()), "str");
+    let payload = std::panic::catch_unwind(|| panic!("{}", String::from("secret"))).unwrap_err();
+    assert_eq!(super::panic_kind(payload.as_ref()), "string");
+    let payload = std::panic::catch_unwind(|| std::panic::panic_any(7u8)).unwrap_err();
+    assert_eq!(super::panic_kind(payload.as_ref()), "other");
+}
+
 #[derive(Default)]
 struct Output(Mutex<Vec<String>>);
 impl NotificationOutput for Output {

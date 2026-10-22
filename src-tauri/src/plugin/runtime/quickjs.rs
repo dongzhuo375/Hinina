@@ -33,6 +33,14 @@ pub struct QuickJsRuntime {
     rejections: Arc<Mutex<Rejections>>,
     plugin_id: Option<String>,
 }
+impl Drop for QuickJsRuntime {
+    fn drop(&mut self) {
+        // rquickjs aborts the process when a Persistent outlives its runtime. `shutdown`
+        // covers normal paths, but a worker panic unwinds without calling it, so the
+        // persistent handler must be released before `context`/`runtime` are dropped.
+        self.deliver.take();
+    }
+}
 #[derive(Default)]
 struct Rejections {
     pending: HashSet<u64>,

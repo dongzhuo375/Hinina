@@ -12,3 +12,9 @@ pub(crate) const API_ERROR_GRACE: Duration = Duration::from_secs(1);
 pub(crate) const MAX_BRIDGE_RESPONSE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_CURSOR_PAGE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_CURSOR_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+/// Room reserved for the bridge `{"ok":true,"value":…}` envelope so that a page accepted
+/// here can still be encoded and delivered; otherwise the plugin would never learn the
+/// cursor id of a continuation the host has already published.
+pub(crate) const BRIDGE_ENVELOPE_HEADROOM: usize = 256;
+pub(crate) const MAX_CURSOR_RESPONSE_BYTES: usize =
+    MAX_BRIDGE_RESPONSE_BYTES - BRIDGE_ENVELOPE_HEADROOM;

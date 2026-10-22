@@ -80,7 +80,7 @@
 | Infra L5实体排列 | SubmissionHistoryPage移至测试模块之前，宿主私有owner契约保留 |
 | 前端L1/L2 | permission类型已于前轮覆盖；错误message映射中文，code/raw保留，未知code及原型键走兜底 |
 | 前端L3/L4 | 构建脚本检查Node≥20.6并提示产物复制为index.js；教程同步；commands模块恢复字母序 |
-| 文档LOW | 此文逐节标记基线；ARCHITECTURE_REVIEW §1–8标记历史/被§9–10取代；Architecture记录插件Infra授权依赖例外及新模块 |
+| 文档LOW | 此文逐节标记基线；插件架构审计 §1–8标记历史/被§9–10取代；Architecture记录插件Infra授权依赖例外及新模块 |
 | 并发验证缺口 | 生产scope旧IO阻塞、新revision先完成、旧结果拒绝；真实ContestService与Registry经switch_scope组合切换的并发断言 |
 
 本轮回归均为离线夹具；HTTP本地成功传输的真实时钟窗口放宽为5秒，总截止测试仍用虚拟时间。资源字节预算限制JSON表示，不声称等同宿主RSS硬上限。
@@ -88,6 +88,22 @@
 HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存HttpTransport响应；真实连接、响应体和redirect策略使用本地私有transport夹具。没有为了测试公开任何loopback豁免或IPC策略开关。
 
 验证命令：`cargo test --offline --manifest-path src-tauri/Cargo.toml`、`npm test`、`npm run build`、`npm run plugin:sdk:check`，以及本轮Rust文件的rustfmt检查。最终通过情况以当轮执行输出及交付说明为准。
+
+## 终轮评审修复（基线14527dc）
+
+| 发现 | 确认与处理 |
+|---|---|
+| Persistent 晚于 runtime 析构 | High成立；worker panic 展开会绕过 `shutdown`，rquickjs 明确会在句柄晚于 runtime 析构时 abort 进程。`QuickJsRuntime` 增加 `Drop` 先释放 deliver，并新增“加载后不 shutdown 直接 drop”回归测试 |
+| 游标先发布后编码 | Medium成立；整页（含 nextCursor 与桥包络）在插入游标前按 `MAX_CURSOR_RESPONSE_BYTES` 校验，超限不占用游标配额；新增边界回归确认 cursors 为空 |
+| 本地桥调用无上限 | Medium成立；`PluginApi::admit` 统一准入，ExecutionApi 按激活 600 次/分钟限流，覆盖 context/identity/storage 等不经 Provider 预算的能力；新增准入回归 |
+| scope 告警可刷屏且无归属 | Medium成立；按 AccessRevision 去重并补充 plugin_id/oj_id，禁用 OJ 的持久状态不再每次调用输出 |
+| start 替换 worker 丢历史 | Low成立；`start_worker` 在移除已结束 worker 前写入最终状态，避免与 reaper 竞争 |
+| panic payload 无诊断 | Low成立；记录 `worker.panic` 与 panic_kind（str/string/other），不格式化可能受插件控制的 payload |
+| Runtime 死脚手架 | Low成立；删除 `PluginRuntimeBridge`，Manager 改为 `Box<dyn PluginRuntime>`，生产与测试共用同一端口 |
+| 文档漂移 | Low成立；修正 api/mod.md 的 endpoint 语义与 Architecture 能力表 |
+| 根目录审计快照 | Low成立；移入 doc/plugin-architecture-review.md 并更新全部引用 |
+
+验证：Rust 全量 704 passed（plugin 99），clippy 仅保留 6 项既有告警；前端 504 passed，`npm run build`、`npm run plugin:sdk:check`、`npm run plugin:scaffold:build` 通过；改动 Rust 文件 rustfmt 通过。
 
 ## 查询可用性与桥契约跟进（基线bc75b18）
 

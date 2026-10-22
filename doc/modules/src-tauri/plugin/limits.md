@@ -6,4 +6,4 @@ plugin/limits.rs 是 Runtime、Manager 和查询桥共用的内部常量模块�
 
 Provider单请求及submission.get整体扫描各最多5秒。Runtime的每次宿主调用另以当前入口硬截止前1秒为截止点，及时返回可捕获的timeout，为JS的catch/finally保留处理时间；晚发起的调用也不能越过入口窗口。未捕获错误或继续执行超出硬期限仍使worker失败。
 
-桥响应含JSON包络最多1MiB；单native提交投影页最多1MiB；每次激活全部保留游标余项的JSON字节合计最多4MiB，同时保留原有32游标/1000条native页上限。这些字节预算不等于整个进程的RSS上限。超限统一返回limit_exceeded。
+桥响应含JSON包络最多1MiB；单native提交投影页最多1MiB；返回给JS的整页另按`MAX_CURSOR_RESPONSE_BYTES`（1MiB减256字节包络余量）校验后才发布游标；每次激活全部保留游标余项的JSON字节合计最多4MiB，同时保留原有32游标/1000条native页上限。这些字节预算不等于整个进程的RSS上限。超限统一返回limit_exceeded。

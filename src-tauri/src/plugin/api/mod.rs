@@ -70,7 +70,7 @@ pub trait ContextApi: Send + Sync {
 /// @plugin-api
 /// @since 1.0
 /// @stability stable
-/// Runtime Bridge 注入的最小能力集合。实现必须逐调用验证权限/上下文，
+/// Runtime 注入的最小能力集合。实现必须逐调用验证权限/上下文，
 /// 异步查询前后均验证上下文，避免在途切换后返回另一个账号的数据。
 pub trait PluginApi:
     ContextApi
@@ -88,6 +88,16 @@ pub trait PluginApi:
     /// Host-owned audit identifiers, never sourced from a plugin request.
     fn audit_identity(&self) -> Option<(&str, &str)> {
         None
+    }
+
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Admission gate for every bridge call. Implementations may throttle capabilities
+    /// that never reach a provider budget, so a script cannot spin on local calls.
+    fn admit(&self) -> PluginResult<()> {
+        Ok(())
     }
 }
 

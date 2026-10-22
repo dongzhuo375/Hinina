@@ -8,7 +8,8 @@ use super::{
     bounded_json,
     host::manifest::PluginPermission,
     limits::{
-        MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, PROVIDER_TIMEOUT, SUBMISSION_LOOKUP_TIMEOUT,
+        MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
+        PROVIDER_TIMEOUT, SUBMISSION_LOOKUP_TIMEOUT,
     },
     permission::PluginGrant,
 };
@@ -80,8 +81,9 @@ pub trait QuerySource: Send + Sync {
     /// @since 2.0
     /// @permission host-only
     /// @stability stable
-    /// Snapshot current effective access without restoring credentials.
-    fn scope(&self) -> PluginResult<QueryScope>;
+    /// Snapshot current effective access without restoring credentials. `plugin_id` is
+    /// diagnostic attribution only: it never changes the resolved scope.
+    fn scope(&self, plugin_id: &str) -> PluginResult<QueryScope>;
     /// @plugin-api
     /// @since 2.0
     /// @permission host-only
@@ -108,10 +110,43 @@ pub struct ServiceQueries {
     pub config: Arc<ConfigService<FsConfigRepository>>,
     pub access: Arc<AccessRevision>,
     pub cached_scope: Mutex<Option<(AccessSnapshot, QueryScope)>>,
+    /// Last revision that emitted a scope-resolution warning; persistent misconfiguration
+    /// must not let a plugin flood the log on every bridge call.
+    pub(crate) last_scope_warning: Mutex<Option<u64>>,
+}
+impl ServiceQueries {
+    /// Warn once per access revision; a disabled or unconfigured OJ is persistent state,
+    /// not a per-call event, and the log line carries host-owned attribution only.
+    fn warn_scope_failure(
+        &self,
+        revision: u64,
+        plugin_id: &str,
+        oj: &str,
+        category: &'static str,
+        message: &'static str,
+    ) {
+        let mut last = self
+            .last_scope_warning
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if *last == Some(revision) {
+            return;
+        }
+        *last = Some(revision);
+        tracing::warn!(
+            plugin_id = ?plugin_id,
+            oj_id = ?oj,
+            runtime = "js",
+            operation = "scope.resolve",
+            category,
+            message,
+            "Plugin scope resolution failed"
+        );
+    }
 }
 #[async_trait]
 impl QuerySource for ServiceQueries {
-    fn scope(&self) -> PluginResult<QueryScope> {
+    fn scope(&self, plugin_id: &str) -> PluginResult<QueryScope> {
         let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
         // Only the clone happens under the lock: session/config reads below are I/O and
         // must not serialize every plugin's scope check.
@@ -128,11 +163,12 @@ impl QuerySource for ServiceQueries {
         }
         let oj = self.registry.current_id().to_string();
         let endpoint = self.registry.current_endpoint().ok_or_else(|| {
-            tracing::warn!(
-                runtime = "js",
-                operation = "scope.resolve",
-                category = "endpoint_missing",
-                "Running OJ provider has no endpoint metadata"
+            self.warn_scope_failure(
+                snapshot.revision,
+                plugin_id,
+                &oj,
+                "endpoint_missing",
+                "Running OJ provider has no endpoint metadata",
             );
             PluginError::Unavailable
         })?;
@@ -143,11 +179,12 @@ impl QuerySource for ServiceQueries {
             .iter()
             .find(|i| i.enabled && i.id == oj)
         else {
-            tracing::warn!(
-                runtime = "js",
-                operation = "scope.resolve",
-                category = "instance_disabled_or_missing",
-                "Running OJ is no longer enabled in configuration"
+            self.warn_scope_failure(
+                snapshot.revision,
+                plugin_id,
+                &oj,
+                "instance_disabled_or_missing",
+                "Running OJ is no longer enabled in configuration",
             );
             return Err(PluginError::Unavailable);
         };
@@ -270,9 +307,10 @@ impl ScopedQueries {
         // identity_metadata reads the session repository. Never execute that I/O
         // on the Tokio executor, including checks before/after remote requests.
         let source = self.source.clone();
+        let plugin_id = self.grant.manifest().id.clone();
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
         tokio::task::spawn_blocking(move || {
-            tracing::dispatcher::with_default(&dispatch, || source.scope())
+            tracing::dispatcher::with_default(&dispatch, || source.scope(&plugin_id))
         })
         .await
         .map_err(|_| PluginError::Unavailable)?
@@ -520,6 +558,20 @@ impl ScopedQueries {
         let next = if cursor.more || !cursor.pending.is_empty() {
             cursor.buffered_bytes =
                 bounded_json::encoded_len(&cursor.pending, MAX_CURSOR_PAGE_BYTES)?;
+            Some(uuid::Uuid::new_v4().to_string())
+        } else {
+            None
+        };
+        // Bound the whole response, including the bridge envelope, before publishing the
+        // continuation: a page that cannot be encoded must not leave a cursor the plugin
+        // never received.
+        let page = PluginSubmissionPage {
+            records,
+            total,
+            next_cursor: next.clone(),
+        };
+        bounded_json::encoded_len(&page, MAX_CURSOR_RESPONSE_BYTES)?;
+        if let Some(id) = &next {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state
                 .cursors
@@ -534,20 +586,16 @@ impl ScopedQueries {
             {
                 return Err(PluginError::LimitExceeded);
             }
-            let id = uuid::Uuid::new_v4().to_string();
             state.cursors.insert(id.clone(), cursor);
-            Some(id)
-        } else {
-            None
-        };
+        }
         let mut continuation = CursorLease {
             state: &self.state,
             id: next,
         };
         self.check(handle).await?;
         Ok(PluginSubmissionPage {
-            records,
-            total,
+            records: page.records,
+            total: page.total,
             next_cursor: continuation.id.take(),
         })
     }

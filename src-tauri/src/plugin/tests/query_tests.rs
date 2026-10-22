@@ -169,11 +169,11 @@ async fn transition_during_scope_snapshot_cannot_return_a_revoked_token() {
     }
     #[async_trait::async_trait]
     impl crate::plugin::query::QuerySource for RevokeDuringSnapshot {
-        fn scope(&self) -> PluginResult<crate::plugin::query::QueryScope> {
+        fn scope(&self, plugin_id: &str) -> PluginResult<crate::plugin::query::QueryScope> {
             if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
                 drop(self.access.begin());
             }
-            crate::plugin::query::QuerySource::scope(&self.source)
+            crate::plugin::query::QuerySource::scope(&self.source, plugin_id)
         }
         async fn contest(&self, _: &str) -> PluginResult<crate::core::entity::contest::Contest> {
             Err(PluginError::Unavailable)
@@ -357,9 +357,9 @@ async fn slow_scope_io_does_not_block_the_tokio_executor() {
     struct SlowScope;
     #[async_trait::async_trait]
     impl crate::plugin::query::QuerySource for SlowScope {
-        fn scope(&self) -> PluginResult<crate::plugin::query::QueryScope> {
+        fn scope(&self, plugin_id: &str) -> PluginResult<crate::plugin::query::QueryScope> {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            crate::plugin::query::QuerySource::scope(&Source::default())
+            crate::plugin::query::QuerySource::scope(&Source::default(), plugin_id)
         }
         async fn contest(&self, _: &str) -> PluginResult<crate::core::entity::contest::Contest> {
             unreachable!()
@@ -578,6 +578,7 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
         config,
         access: access.clone(),
         cached_scope: Mutex::default(),
+        last_scope_warning: Default::default(),
     });
     let m = manifest("test.cached");
     let q = ScopedQueries::new(
@@ -601,7 +602,7 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
     *sessions.block.lock().unwrap() = Some((reached, blocked));
     let old_reader = {
         let source = source.clone();
-        tokio::task::spawn_blocking(move || source.scope())
+        tokio::task::spawn_blocking(move || source.scope("test.cached"))
     };
     tokio::time::timeout(std::time::Duration::from_secs(2), waiting)
         .await
@@ -610,7 +611,7 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
     drop(access.begin());
     let new_reader = {
         let source = source.clone();
-        tokio::task::spawn_blocking(move || source.scope())
+        tokio::task::spawn_blocking(move || source.scope("test.cached"))
     };
     let current = tokio::time::timeout(std::time::Duration::from_secs(2), new_reader)
         .await
@@ -622,14 +623,14 @@ async fn production_scope_reads_session_once_per_revision_and_refreshes_after_re
         old_reader.await.unwrap(),
         Err(PluginError::ContextExpired)
     ));
-    assert!(source.scope().unwrap() == current);
+    assert!(source.scope("test.cached").unwrap() == current);
     assert_eq!(sessions.loads.load(Ordering::SeqCst), 3);
     // Simulate the numeric ABA after u64 wrap: a revoked token must never hit
     // even when its revision is numerically equal to the current revision.
     stale.0.revision = access.snapshot().unwrap().revision;
     stale.1.user = Some(("stale-owner".into(), "stale-name".into()));
     *source.cached_scope.lock().unwrap() = Some(stale);
-    assert!(source.scope().unwrap() == current);
+    assert!(source.scope("test.cached").unwrap() == current);
     assert_eq!(sessions.loads.load(Ordering::SeqCst), 4);
     auth.logout().await.unwrap();
     assert!(matches!(
@@ -705,6 +706,60 @@ async fn cursor_memory_budget_is_shared_and_released_when_continuations_are_cons
     );
 }
 
+#[tokio::test]
+async fn oversized_bridge_page_never_publishes_an_unreachable_cursor() {
+    use crate::plugin::limits::{
+        MAX_BRIDGE_RESPONSE_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
+    };
+    let source = Arc::new(Source::default());
+    *source.pages.lock().unwrap() = vec![SubmissionHistoryPage {
+        records: vec![record("1")],
+        total: None,
+        has_more: false,
+    }];
+    let m = manifest("test.page-bound");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        Arc::default(),
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    let query = PluginSubmissionQuery {
+        contest_id: "contest".into(),
+        problem_id: None,
+        cursor: None,
+        limit: 1,
+    };
+    let base = q.list(&context, query.clone()).await.unwrap();
+    let mut probe = base.records[0].clone();
+    probe.problem_display_id = String::new();
+    let page_overhead = serde_json::to_string(&PluginSubmissionPage {
+        records: vec![probe],
+        total: None,
+        next_cursor: Some("0".repeat(36)),
+    })
+    .unwrap()
+    .len();
+    // The page is just over the response bound, while the retained pending page is
+    // still inside the cursor bound, so only the pre-publication check can reject it.
+    let padding = MAX_BRIDGE_RESPONSE_BYTES - page_overhead - 10;
+    assert!(padding + page_overhead > MAX_CURSOR_RESPONSE_BYTES);
+    assert!(padding + page_overhead - 100 < MAX_CURSOR_PAGE_BYTES);
+    let mut large = record("2");
+    large.display_id = "x".repeat(padding);
+    *source.pages.lock().unwrap() = vec![SubmissionHistoryPage {
+        records: vec![large, record("3")],
+        total: None,
+        has_more: true,
+    }];
+    assert_eq!(
+        q.list(&context, query).await,
+        Err(PluginError::LimitExceeded)
+    );
+    assert!(q.state.lock().unwrap().cursors.is_empty());
+}
+
 #[tokio::test(start_paused = true)]
 async fn metadata_scan_has_one_total_deadline_and_releases_query_resources() {
     use crate::plugin::limits::{ACTIVATION_TIMEOUT, API_ERROR_GRACE, SUBMISSION_LOOKUP_TIMEOUT};
@@ -757,7 +812,7 @@ async fn dropping_list_during_final_scope_check_removes_unpublished_continuation
     }
     #[async_trait::async_trait]
     impl QuerySource for FinalCheck {
-        fn scope(&self) -> PluginResult<QueryScope> {
+        fn scope(&self, plugin_id: &str) -> PluginResult<QueryScope> {
             // context.current, list context, remote before/after, final publication check.
             if self.reads.fetch_add(1, Ordering::SeqCst) == 4 {
                 self.entered.notify_one();
@@ -767,7 +822,7 @@ async fn dropping_list_during_final_scope_check_removes_unpublished_continuation
                     .recv_timeout(Duration::from_secs(5))
                     .unwrap();
             }
-            Source::default().scope()
+            Source::default().scope(plugin_id)
         }
         async fn contest(&self, _: &str) -> PluginResult<crate::core::entity::contest::Contest> {
             unreachable!()
@@ -890,6 +945,7 @@ async fn pending_endpoint_edit_keeps_running_provider_scope_and_emits_redacted_d
         config: config.clone(),
         access: access.clone(),
         cached_scope: Mutex::default(),
+        last_scope_warning: Default::default(),
     });
     let m = manifest("test.endpoint");
     let q = ScopedQueries::new(
@@ -938,7 +994,7 @@ async fn pending_endpoint_edit_keeps_running_provider_scope_and_emits_redacted_d
             old_identity
         );
     }
-    assert_eq!(source.scope().unwrap().endpoint, endpoint);
+    assert_eq!(source.scope("test.endpoint").unwrap().endpoint, endpoint);
     assert!(Arc::ptr_eq(
         &provider,
         &registry.current_submission().unwrap()

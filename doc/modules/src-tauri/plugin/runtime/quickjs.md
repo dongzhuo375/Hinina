@@ -4,7 +4,7 @@
 
 `QuickJsRuntime` 由单个独立 worker 独占，使用应用 Tokio handle 驱动异步 Promise；不把 JS 引擎、值或原生函数放入 AppContext。`bootstrap.js` 只向插件提供冻结 API，host JSON bridge 引用保持私有；每批最多16个在途桥调用。
 
-ES module 加载与 activate 最长10秒，单事件交付最长30秒，内存16MiB、栈256KiB。引擎 interrupt 配合异步超时覆盖同步死循环和悬挂 Promise。停止时撤销 API、移除订阅、清理 Persistent 句柄并 shutdown。
+ES module 加载与 activate 最长10秒，单事件交付最长30秒，内存16MiB、栈256KiB。引擎 interrupt 配合异步超时覆盖同步死循环和悬挂 Promise。停止时撤销 API、移除订阅、清理 Persistent 句柄并 shutdown；`Drop` 也会先释放 Persistent 句柄，覆盖 worker panic 未调用 shutdown 的展开路径，避免 rquickjs 因句柄晚于 runtime 析构而 abort 进程。
 
 每次宿主调用绑定发起时所在入口的硬截止时间，并提前1秒返回稳定timeout，让JS可以catch/finally；submission.get另有整体5秒扫描上限。捕获错误且在剩余窗口内完成时不会使worker失败；未捕获错误、死循环和超过入口硬期限仍按原规则失败。取消/丢弃查询会归还并发许可并清理未发布或内部游标，已发出的外部副作用无法撤回。
 

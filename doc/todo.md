@@ -135,7 +135,7 @@
 - [ ] **QDUOJ Adapter** — `adapter/qduoj/`
 - [ ] **HUSTOJ Adapter** — `adapter/hustoj/`
 - [ ] **ProviderRegistry 完善** — 支持多 OJ 动态注册与切换
-- [x] **Plugin 真实代码审计** — 根目录 ARCHITECTURE_REVIEW.md；先审计后分层施工
+- [x] **Plugin 真实代码审计** — doc/plugin-architecture-review.md；先审计后分层施工
 - [x] **Plugin 协议/Manifest** — 清单/API v2、事件协议 v2、点分名、未知字段/权限/事件拒绝、入口纯路径检查
 - [x] **Plugin API 契约** — 安全只读投影、分页、私有 JSON/CAS、HTTP、纯文本通知 trait/边界，独立安全错误，生产Adapter已接入
 - [x] **Plugin 授权/事件边界** — PluginGrant、每插件有界队列 128、权限/订阅过滤、初始/Lagged Resync、满/关闭注销、防重复启动

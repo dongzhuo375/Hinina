@@ -1,6 +1,6 @@
 # 本轮验证与交付记录
 
-基线main 2cef9a1，新分支feat/plugin-runtime。先追加ARCHITECTURE_REVIEW真实增量审计与选型，再实现引擎验证、访问基础层、查询/I/O/运行时及开发入口。未编写或加载气球业务插件。
+基线main 2cef9a1，新分支feat/plugin-runtime。先追加插件架构审计真实增量审计与选型，再实现引擎验证、访问基础层、查询/I/O/运行时及开发入口。未编写或加载气球业务插件。
 
 ## 验证结果
 
@@ -47,3 +47,5 @@ PR #41 MEDIUM跟进验证：增加stop超时状态与reaper历史、基础设施
 PR #41 LOW收尾验证：补atomicwrites两支ErrorKind及invalid ID、重复stop单reaper、真实引擎拒绝跟踪/容量/脱敏、桥响应含包络上限/转义字节、CAS读写审计、共享事件allowlist、游标合计预算及消费释放、scope缓存交错/回绕令牌、真实比赛服务组合切换、HTTP并发拒绝不扣令牌及取消/丢弃归还、前端可读错误和未知原型键兜底。Promise诊断只覆盖引擎实际观察到的拒绝，不增加后台调度。
 
 bc75b18后续查询回归：真实ConfigService/Registry验证地址待重启时旧context撤销、新context可用、实际endpoint和身份键不变、禁用仍拒绝及日志脱敏。Provider多页3秒延迟以Tokio虚拟时间验证整体5秒扫描超时、游标/并发预算归还；真实QuickJS在activate及事件内捕获timeout并继续调用API。单独压缩测试入口剩余窗口验证晚发起宿主调用提前返回timeout；真实worker验证循环引用、BigInt、抛异常toJSON统一invalid_input且无写入。丢弃list最终scope检查时也会清理未发布游标。manager/query改由所属模块直接挂载测试，跨模块共享test_support。
+
+终轮评审回归：QuickJS 加载后不调用shutdown直接drop不abort；超界响应页返回limit_exceeded且不残留游标；ExecutionApi准入限流耗尽返回limit_exceeded；start_worker替换已结束worker时保留上一代timeout历史；panic payload仅分类不格式化。Rust全量704 passed（plugin 99），clippy仅既有6项告警；前端504 passed，生产构建、SDK类型检查与脚手架构建通过。

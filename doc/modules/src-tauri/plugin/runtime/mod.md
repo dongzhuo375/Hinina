@@ -17,3 +17,5 @@
 周期Resync默认60秒，可配置10..3600秒；每次成功代表提示实际入队，已有业务事件不会令提示被静默跳过。队列容量128，满/关闭时注销并令 worker 失败退出。首次/Lagged/账号/OJ/比赛事件也触发Resync。它只是重新查询提示，不代表补发，更不负责气球重试。安全性由显式AccessRevision保证，不依赖这些通知。
 
 activate成功后才建立事件队列，以初始Resync补偿激活窗口变化。语法/运行异常为script_error，基础设施为unavailable；超时/撤销保留timeout/context_expired，详见[QuickJS](quickjs.md)。
+
+`PluginRuntime` 是生产路径实际使用的端口：Manager 以 `Box<dyn PluginRuntime>` 持有引擎，只调用 activate/deliver_event/shutdown，测试用的 !Send 实现与 QuickJS 实现共用同一契约。事件信封由 PluginHost 订阅产生，不存在额外的 Runtime Bridge 装配类型。

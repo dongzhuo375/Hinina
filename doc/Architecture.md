@@ -22,6 +22,7 @@ Hinina/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
 │   ├── todo.md                            # 开发路线图（8 阶段执行顺序）
+│   ├── plugin-architecture-review.md      # 插件边界真实代码审计快照（§1–8 为历史基线，当前结论以 review-fixes/validation 为准）
 │   ├── 未解决问题清单.md                   # 仍未解决的已知问题逐条明细（当前代码位置 + 核查结论 + 处理时机）；2026-09-22 替代已删除的 problem.md 与 问题验证报告.md
 │   ├── HOJ/                              # HOJ API 文档（API 总览 / 榜单 / 题目 limits）
 │   ├── Hydro/                            # Hydro 上游 API 文档（HYDRO-API.md，逐路由源码级，入库）
@@ -443,7 +444,7 @@ src/
 | **基础设施** | `infra/` http/storage/cache/logger/data_dir/session | Vite/Naive UI/TailwindCSS |
 | **表现** | — | `views/` + `components/` |
 | **状态** | `CoreEventBus`（只发事实，不执行动作） | `stores/` Pinia |
-| **扩展** | `plugin/`（v0.x 版本化接口 + 有界事件边界；无 JS 执行器） | — |
+| **扩展** | `plugin/`（Manifest/API v2、QuickJS 宿主、有界事件与查询预算） | — |
 
 ### 关键设计约束
 
@@ -523,7 +524,7 @@ src/
 
 ### 插件宿主施工（2026-10）
 
-真实基线见[审计](../ARCHITECTURE_REVIEW.md)。Manifest/API v2，事件协议v2。PluginRepository属于plugin/registry，FsPluginRepository负责宿主配置与有限代码加载。PluginHost保留唯一CoreEventBus消费者与128有界队列；Manager才管理worker，不创建第二套业务事件底座。
+真实基线见[审计](plugin-architecture-review.md)。Manifest/API v2，事件协议v2。PluginRepository属于plugin/registry，FsPluginRepository负责宿主配置与有限代码加载。PluginHost保留唯一CoreEventBus消费者与128有界队列；Manager才管理worker，不创建第二套业务事件底座。
 
 插件专用 Infra 依赖 plugin 的能力契约及 ScopedQueries 做逐调用授权；ServiceQueries 再依赖只读 Service，因此存在 infra → plugin → service 的概念依赖环。此为专用能力执行器的显式例外：Core/Service 不依赖 plugin，业务 Service 不导入这些插件 Infra，具体文件/网络实现由组合根装配，Manager 只依赖仓库及工厂端口。
 

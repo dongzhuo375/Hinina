@@ -9,18 +9,7 @@ use crate::plugin::api::event::PluginEventEnvelope;
 use crate::plugin::api::{PluginApi, PluginResult};
 use async_trait::async_trait;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 pub mod quickjs;
-
-/// @plugin-api
-/// @since 1.0
-/// @stability experimental
-/// Runtime Bridge 的最小装配参数；api 必须已绑定宿主授权。只能接收插件信封，
-/// 无 CoreEvent、AppContext、Service 或总线 Receiver。
-pub struct PluginRuntimeBridge {
-    pub api: Arc<dyn PluginApi>,
-    pub events: mpsc::Receiver<PluginEventEnvelope>,
-}
 
 /// @plugin-api
 /// @since 1.0

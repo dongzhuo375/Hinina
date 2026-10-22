@@ -40,7 +40,7 @@ impl Default for Source {
 }
 #[async_trait]
 impl QuerySource for Source {
-    fn scope(&self) -> PluginResult<QueryScope> {
+    fn scope(&self, _plugin_id: &str) -> PluginResult<QueryScope> {
         if let Some(error) = self.scope_error.lock().unwrap().clone() {
             return Err(error);
         }

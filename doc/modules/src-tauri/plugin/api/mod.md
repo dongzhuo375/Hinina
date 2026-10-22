@@ -15,7 +15,9 @@
 
 上下文是不透明随机句柄，绑定当前实际 OJ endpoint、稳定用户 ID、比赛及本次授权；最多 32 个，TTL 5 分钟。登录/登出/会话失效、切 OJ/比赛和连接配置变化通过显式 AccessRevision 撤销旧上下文，切走再切回来也不会复活。查询前后验证，HTTP/读取还监听取消；重载重新签发授权，旧实例完全撤销。
 
-普通编辑器配置 update 不改变连接配置时不撤销；配置 reload 保守撤销。修改配置地址不会把已创建的旧 Provider 冒充新地址：不一致时查询返回 unavailable，需宿主重启以重建 Provider。
+普通编辑器配置 update 不改变连接配置时不撤销；配置 reload 保守撤销。修改实例地址不会把已创建的旧 Provider 冒充新地址：查询继续绑定运行中的 endpoint，旧上下文随配置变更撤销，新上下文仍使用实际 endpoint，重启后才应用新地址。
+
+每次桥调用都要通过按激活的准入限流（600 次/分钟），避免脚本在 `context.current`/`identity.current`/`storage.*` 等本地能力上空转；远端 OJ 调用另受 60 次/分钟与并发 2 的查询预算约束。
 
 每次 handler 应重新获取当前 context；遇到 context_expired 停止本次操作，下次 Resync 重查。未登录身份返回 null；提交查询返回 unauthenticated。插件不能指定用户、OJ、Session、权限或真实文件路径。
 

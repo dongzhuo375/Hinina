@@ -53,6 +53,7 @@ pub struct ExecutionApi {
     pub http: PluginHttp,
     output: Arc<dyn NotificationOutput>,
     notifications: DefaultDirectRateLimiter,
+    calls: DefaultDirectRateLimiter,
 }
 impl ExecutionApi {
     /// @plugin-api
@@ -71,6 +72,8 @@ impl ExecutionApi {
             http,
             output,
             notifications: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(10).unwrap())),
+            // Local capabilities have no provider budget; this only stops runaway loops.
+            calls: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(600).unwrap())),
         }
     }
 }
@@ -164,6 +167,9 @@ impl PluginApi for ExecutionApi {
         let manifest = self.queries.grant.manifest();
         Some((&manifest.id, &manifest.version))
     }
+    fn admit(&self) -> PluginResult<()> {
+        self.calls.check().map_err(|_| PluginError::LimitExceeded)
+    }
 }
 
 fn decode<T: serde::de::DeserializeOwned>(value: Value) -> PluginResult<T> {
@@ -245,6 +251,8 @@ async fn dispatch(api: &dyn PluginApi, operation: &str, args: Value) -> PluginRe
 pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) -> String {
     let result = if input.len() > 140_000 || operation.len() > 64 {
         Err(PluginError::LimitExceeded)
+    } else if let Err(error) = api.admit() {
+        Err(error)
     } else {
         match serde_json::from_str(&input) {
             Ok(args) => dispatch(api, &operation, args).await,
