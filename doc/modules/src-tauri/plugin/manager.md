@@ -18,4 +18,6 @@ worker线程用`catch_unwind`隔离插件触发的panic：捕获后记录`worker
 
 stop_inner超时与start超时一致：撤销权限与订阅、标记failed/timeout、启动reaper。线程未结束仍拒绝同ID启动；reaper按同一代次保存最终历史再回收，避免后台退出覆盖新代次状态。配置仍存在时list在回收后继续显示timeout历史。
 
+worker 在发布 ready 结果**之前**快照取消标志：`stop()` 在宿主观察到就绪后立即取消令牌，若之后才读取，会把真实的激活失败误判为主动停止，状态被改写为 stopped 并丢失失败诊断。测试通过 post-ready 钩子在该边界精确取消令牌来锁定此行为。
+
 每个worker代次在锁内标记reaping，重复stop超时只复用现有回收任务。启动ready与期限同时到达时采用fail closed并保留timeout；统一期限见[limits](limits.md)。Manager与Host都使用PluginGrant.allowed_events生成权限过滤后的allowlist，并只附加一次resync.required。

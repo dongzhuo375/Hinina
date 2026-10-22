@@ -1,6 +1,22 @@
 # 插件审查：逐轮核实与修复
 
-首轮下表23项基于aa293fa核对；第二轮加固交付于6af3202；PR #41 MEDIUM跟进基于6af3202，交付于cac8106；LOW收尾基于cac8106交付于bc75b18；查询可用性与桥契约跟进基于bc75b18交付于14527dc；终轮评审修复基于14527dc交付于f667a73；复审LOW跟进基于f667a73。各节记录对应轮次的处理，后续节更新此前结论。严重性按实际影响评估；优化建议不等同于已发生的数据泄漏。测试均使用本地夹具或可注入端口，没有访问真实 OJ 账户。
+按交付时间排列。每节记录该轮的基线与处理，后续节可更新此前结论。严重性按实际影响评估；优化建议不等同于已发生的数据泄漏。测试均使用本地夹具或可注入端口，没有访问真实 OJ 账户。测试数量不在本记录里逐轮固定，最近一次完整验证见[验证记录](modules/src-tauri/plugin/validation.md)。
+
+| 轮次 | 基线 | 交付 |
+|---|---|---|
+| 首轮（下表 23 项） | aa293fa | 598c5e8 |
+| 复审后续加固（第二轮） | 598c5e8 | 6af3202 |
+| MEDIUM 跟进 | 6af3202 | cac8106 |
+| LOW 收尾 | cac8106 | bc75b18 |
+| 查询可用性与桥契约 | bc75b18 | 14527dc |
+| 终轮评审修复 | 14527dc | f667a73 |
+| 复审 LOW 跟进 | f667a73 | cce5203 |
+| 并发订阅与 OJ 失败诊断 | cce5203 | ab061e8 |
+| 事件隔离、游标重试与目录扫描 | ab061e8 | 4621ea3 |
+| 代码评审跟进修复 | 4621ea3 | be66c93 |
+| 评审一致性收敛 | be66c93 | 本次修订 |
+
+## 首轮：23 项核实
 
 | 项 | 判定与严重性 | 修复/验证 |
 |---|---|---|
@@ -15,7 +31,7 @@
 | 9 退出/停止日志不足 | 存在，Low | failed退出warn带稳定error，正常info，stop超时warn；日志不持状态锁 |
 | 10 start超时仍有活worker | 存在，Medium：生命周期/诊断不一致 | 超时先锁定failed/timeout，取消并等待回收，迟到退出不覆盖timeout；回归覆盖超时后重启及延迟回收。原生阻塞无法强杀，停止期限内无法清理则保留failed并由reaper继续跟踪，旧worker结束前拒绝同ID重启 |
 | 11 结构/模块文档缺失 | 存在，Low | 补core/infra/运行时/测试/前端文件树、模块索引、前端5个模块文档及quickjs.md |
-| 12 cursor并发复用 | 存在，Medium：重复记录及重复请求 | 在验证锁内原子领取，只有一个调用成功；文档规定失败也消费，需重新查询 |
+| 12 cursor并发复用 | 存在，Medium：重复记录及重复请求 | 在验证锁内原子领取，只有一个调用成功；可重试失败（预算、超时、响应超限、游标配额）把游标按调用前快照归还，见「评审一致性收敛」 |
 | 13 check重复读会话文件 | 存在，Low（性能） | 生产ServiceQueries按revision缓存一个scope，所有显式访问变化撤销；测试多次身份读取只load一次且登出立即失效 |
 | 14 每请求新Client | 事实存在，Low（优化）；原实现同时承担DNS固定 | 仅对同origin和本次重新验证的相同地址集合复用Client，最多32项；保留no_proxy/禁redirect/禁retry/实际remote_addr检查，不做跨地址盲目复用 |
 | 15 guard缺must_use | 存在，Low（防误用） | AccessTransition添加must_use，文档注明持有范围 |
@@ -27,6 +43,7 @@
 | 21 HTTP超时窗口紧 | 存在，Low（测试稳定性） | 改为Tokio虚拟时间，无20/40ms真实时钟竞争 |
 | 22 高价值回归缺失 | 存在，Medium（验证缺口） | 补Hydro所有者、真实双插件预算、公开request成功路径（fake transport）、start超时、慢激活溢出、cursor并发；实际reqwest仍用本地server验证 |
 | 23 validation数量过期 | 存在，与11重复，Low | 改为不固定测试数量，结果以本轮命令输出为准；同步新增回归范围 |
+
 
 ## 复审后续加固（第二轮）
 
@@ -89,6 +106,19 @@ HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存H
 
 验证命令：`cargo test --offline --manifest-path src-tauri/Cargo.toml`、`npm test`、`npm run build`、`npm run plugin:sdk:check`，以及本轮Rust文件的rustfmt检查。最终通过情况以当轮执行输出及交付说明为准。
 
+## 查询可用性与桥契约跟进（基线bc75b18）
+
+| 发现 | 确认与修复 |
+|---|---|
+| 已有OJ地址修改后所有插件查询不可用 | Medium成立；Registry保留原Adapter是设置页“重启后生效”的既有约定，问题在scope强制等于待生效URL。改为绑定实际运行endpoint；配置变更仍撤销旧context，新context保留原身份键。删除/禁用仍拒绝，缺endpoint/不可用/待重启均有脱敏warn |
+| submission.get多页扫描超过入口期限 | Medium成立；整体扫描最多5秒，保留100页及每native页预算。Runtime宿主调用在当前入口硬截止前1秒返回timeout，晚发起请求也有catch处理时间；未捕获错误或超出硬期限仍失败。取消/丢弃扫描用RAII清理内部及未发布游标 |
+| stringify抛裸TypeError | Low成立；循环引用、BigInt及异常toJSON统一拒绝冻结的invalid_input对象，不执行host调用，不泄漏异常消息 |
+| manager/query聚合挂载测试 | Low成立（仓库约定）；移除tests/mod.rs，所属模块直接#[path]挂载测试，共享support由plugin根直接挂载为cfg(test)的test_support |
+
+真实引擎分别覆盖激活/事件扫描超时及晚发起请求的可捕获性，虚拟时间验证总期限、游标与许可释放；URL回归使用真实配置/注册表且验证诊断不含URL/凭据。保留既有地址重启契约，不热替换有会话和缓存的Provider。
+
+本轮通过完整Rust测试、前端测试/生产构建、SDK类型检查、脚手架构建和改动Rust文件的rustfmt检查。Clippy全部targets完成，仅保留六项既有告警；前端构建保留既有大chunk提示，未新增依赖或联网测试。
+
 ## 终轮评审修复（基线14527dc）
 
 | 发现 | 确认与处理 |
@@ -103,16 +133,25 @@ HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存H
 | 文档漂移 | Low成立；修正 api/mod.md 的 endpoint 语义与 Architecture 能力表 |
 | 根目录审计快照 | Low成立；移入 doc/plugin-architecture-review.md 并更新全部引用 |
 
-验证：Rust 全量 704 passed（plugin 99），clippy 仅保留 6 项既有告警；前端 504 passed，`npm run build`、`npm run plugin:sdk:check`、`npm run plugin:scaffold:build` 通过；改动 Rust 文件 rustfmt 通过。
+验证：Rust 全量通过，clippy 仅保留 6 项既有告警；前端通过，`npm run build`、`npm run plugin:sdk:check`、`npm run plugin:scaffold:build` 通过；改动 Rust 文件 rustfmt 通过。
 
-## 并发订阅与 OJ 失败诊断（基线f667a73）
+## 复审LOW跟进（基线f667a73）
+
+| 发现 | 确认与修复 |
+|---|---|
+| pluginStore.subscribe 重入泄漏监听器 | Low成立；重复调用先卸载旧订阅（解除Tauri监听并按Service契约清理其可见通知）再建立新订阅，组件重挂载/HMR不再产生重复通知或半失效dismiss；前端回归锁定二次订阅后旧通道事件不再入列 |
+| submission.get总期限与单页超时相等 | Low成立；总期限5秒恰等于单页最坏5秒，慢OJ首页即耗尽整个查找预算。提高为8秒（单页最坏+scope检查与快页余量），不变量「总期限+1秒宽限<激活10秒」仍成立并由既有测试锁定；两处虚拟时间测试同步改为5秒页延迟/8秒总期限 |
+
+验证：cargo test 全量通过（含真实引擎扫描超时用例）；npm test 通过（新增1项重订阅回归）；clippy仅保留既有告警，改动Rust文件rustfmt通过。
+
+## 并发订阅与 OJ 失败诊断（基线cce5203）
 
 | 发现 | 确认与处理 |
 |---|---|
 | 重叠 subscribe 泄漏监听器 | P2成立；旧实现先清理再 await，两个并发调用都会通过清理并在完成后互相覆盖。改为单调代次：迟到结果立即卸载，不写入活动订阅，也不接管 dismiss；返回的卸载函数只在自身仍是活动订阅时生效并推进代次。新增“乱序完成”和“卸载旧订阅不影响新订阅”两条回归 |
 | OJ 失败被压缩后无日志 | P2成立；contest.get/submission.history 直接 `map_err(|_| ProviderError)`，scope 的身份读取同样静默，release 默认级别下可能完全没有失败记录。新增 `log_provider_failure`：记录稳定操作名、OJ 标识与 AppError 变体类别，绝不输出原始消息；新增回归断言类别存在且 ProviderNotFound 文案不落日志 |
 
-验证：Rust 全量 705 passed，clippy 仍为既有 6 项告警，改动文件 rustfmt 通过；前端 507 passed。
+验证：Rust 全量通过，clippy 仍为既有 6 项告警，改动文件 rustfmt 通过；前端通过。
 
 ## 事件隔离、游标重试与目录扫描（基线ab061e8）
 
@@ -125,29 +164,7 @@ HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存H
 | scope 检查每次都进阻塞池 | 存在；即使缓存命中也要 spawn_blocking。新增 `QuerySource::cached_scope` 无 I/O 快路径，命中直接返回。新增“缓存命中时阻塞读取不得执行”的回归 |
 | CIDR 每次重复解析 / 测试文件缺 `use super::*` | 存在；`2001::/23`、`2002::/16`、`3fff::/20` 改为 OnceLock 一次解析；engine/manager/query 三个测试文件补 `use super::*;`，并新增 QuickJsRuntime 实现 PluginRuntime 的契约断言 |
 
-验证：Rust 全量 711 passed（新增 6 个回归，逐项验证过“去掉修复即失败”），clippy 仍为既有 6 项告警，改动文件 rustfmt 通过。
-
-## 查询可用性与桥契约跟进（基线bc75b18）
-
-| 发现 | 确认与修复 |
-|---|---|
-| 已有OJ地址修改后所有插件查询不可用 | Medium成立；Registry保留原Adapter是设置页“重启后生效”的既有约定，问题在scope强制等于待生效URL。改为绑定实际运行endpoint；配置变更仍撤销旧context，新context保留原身份键。删除/禁用仍拒绝，缺endpoint/不可用/待重启均有脱敏warn |
-| submission.get多页扫描超过入口期限 | Medium成立；整体扫描最多5秒，保留100页及每native页预算。Runtime宿主调用在当前入口硬截止前1秒返回timeout，晚发起请求也有catch处理时间；未捕获错误或超出硬期限仍失败。取消/丢弃扫描用RAII清理内部及未发布游标 |
-| stringify抛裸TypeError | Low成立；循环引用、BigInt及异常toJSON统一拒绝冻结的invalid_input对象，不执行host调用，不泄漏异常消息 |
-| manager/query聚合挂载测试 | Low成立（仓库约定）；移除tests/mod.rs，所属模块直接#[path]挂载测试，共享support由plugin根直接挂载为cfg(test)的test_support |
-
-真实引擎分别覆盖激活/事件扫描超时及晚发起请求的可捕获性，虚拟时间验证总期限、游标与许可释放；URL回归使用真实配置/注册表且验证诊断不含URL/凭据。保留既有地址重启契约，不热替换有会话和缓存的Provider。
-
-本轮通过完整Rust测试、前端测试/生产构建、SDK类型检查、脚手架构建和改动Rust文件的rustfmt检查。Clippy全部targets完成，仅保留六项既有告警；前端构建保留既有大chunk提示，未新增依赖或联网测试。
-
-## 复审LOW跟进（基线f667a73）
-
-| 发现 | 确认与修复 |
-|---|---|
-| pluginStore.subscribe 重入泄漏监听器 | Low成立；重复调用先卸载旧订阅（解除Tauri监听并按Service契约清理其可见通知）再建立新订阅，组件重挂载/HMR不再产生重复通知或半失效dismiss；前端回归锁定二次订阅后旧通道事件不再入列 |
-| submission.get总期限与单页超时相等 | Low成立；总期限5秒恰等于单页最坏5秒，慢OJ首页即耗尽整个查找预算。提高为8秒（单页最坏+scope检查与快页余量），不变量「总期限+1秒宽限<激活10秒」仍成立并由既有测试锁定；两处虚拟时间测试同步改为5秒页延迟/8秒总期限 |
-
-验证：cargo test 全量704 passed（含真实引擎扫描超时用例）；npm test 505 passed（新增1项重订阅回归）；clippy仅保留既有告警，改动Rust文件rustfmt通过。
+验证：Rust 全量通过（新增 6 个回归，逐项验证过“去掉修复即失败”），clippy 仍为既有 6 项告警，改动文件 rustfmt 通过。
 
 ## 代码评审跟进修复（基线4621ea3）
 
@@ -167,4 +184,25 @@ HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存H
 | errorCode 白名单注释夸大 | Low成立；bootstrap 只约束 `[a-z_]{1,40}` 字符集/长度，不校验是否属宿主变体，插件可伪造 code。注释改为准确表述（字符集有界、不可注入但可能由插件提供，按不可信诊断提示处理） |
 | SDK 扫描期限文档漂移 | Low成立；`hinina.d.ts` 仍写 submission.get 扫描 5 秒，代码已 8 秒（cce5203 同步 6 个文档唯独漏此文件）。改为 8 秒 |
 
-验证：cargo test 全量 716 passed（新增 5 个回归：超限游标快照/共享谓词/目录上限截断/条目上限截断/handler 失败触发 Resync）；npm test 507 passed（前端 src/ 未改动）；clippy 仅保留 6 项既有告警；改动 Rust 文件 rustfmt 通过；`npm run plugin:sdk:check` 通过（hinina.d.ts 注释同步）。
+验证：cargo test 全量通过（新增 5 个回归：超限游标快照/共享谓词/目录上限截断/条目上限截断/handler 失败触发 Resync）；npm test 通过（前端 src/ 未改动）；clippy 仅保留 6 项既有告警；改动 Rust 文件 rustfmt 通过；`npm run plugin:sdk:check` 通过（hinina.d.ts 注释同步）。
+
+## 评审一致性收敛（基线be66c93）
+对 PR #41 整体质量与自洽性的复核。多轮局部修复留下的文档与契约不一致、以及两处会影响插件作者的行为缺口在此一并收敛。
+
+| 发现 | 确认与处理 |
+|---|---|
+| `context.current()` 受 32 句柄上限约束，与"每个 handler 重新获取 context"的文档指引冲突 | Medium成立（探针测试第 33 次调用即 limit_exceeded）；同一 scope 与 revision 下 150 秒内的未过期句柄被复用，超龄或 revision/scope 变化才新签发；回归覆盖复用、跨 scope 不共享、revision 变化撤销旧句柄、超龄不复用 |
+| 游标语义文档自相矛盾（"失败也消费" vs 代码回填） | Medium成立；`api/submission.md`、`query.md` 与本文第 12 项统一为：可重试失败把游标按调用前快照归还 |
+| 抓取成功之后的失败（响应超限、游标配额）不回填游标 | Low成立；抽出 `publish`/`give_back`，抓取过的快照为空缓冲克隆，未抓取则把已取出记录推回队首并还原计量；回归覆盖两条路径，并经变异验证"去掉回填即失败" |
+| 预算先扣本地令牌再取共享并发许可，共享拒绝时本地令牌白扣 | Low成立；`acquire_pair` 先取两个并发许可（可回收）再依次扣令牌；令牌不可退还，先扣本激活的令牌是有意选择——共享桶耗尽时只损耗本激活自己的突发，不会让单个插件耗尽全局桶 |
+| 常量散落（桥输入 140_000、64、300 秒、32、预算数值） | Low成立；集中到 `plugin/limits`，`quickjs`、`execution_api`、`query`、`manager` 共用 |
+| `plugin_http` 中 IP 字面量分支不可达 | Low成立；该分支冗余而非不安全（其后地址策略对所有结果统一检查），直接删除，所有主机经同一解析器与同一地址策略 |
+| plugin 层依赖具体 infra | Low成立；`ExecutionApi` 持有 `PluginStorageApi`/`PluginHttpApi` 端口，infra 实现并由工厂注入；`ServiceQueries` 经 `OjInstanceConfig` 端口读配置，不再引用 `FsConfigRepository` |
+| Store 持有订阅代次协调 | Low成立；"单一活动订阅、迟到结果卸载、旧卸载不影响新订阅"下沉到 `plugin.service`，Store 只应用 add/dismiss；对应测试迁到 Service 层 |
+| 无关格式化改动 | Low成立；`adapter/hydro`（含 BOM）、`provider_registry_impl`、`core/mod.rs`、`core/provider/submission.rs` 回到 main 基线后仅重放功能性改动 |
+| `runtime/mod.rs` 契约注释过期 | Low成立；改为 handler 级隔离语义，Runtime 端口标记 stable |
+| 激活失败与 `stop()` 竞态：worker 在发布 ready 之后才读取取消标志，`stop()` 恰在其间取消会把真实失败改判为"主动停止"，状态变 stopped 且失败诊断丢失 | Medium成立（全量套件中偶发 `syntax_and_runtime_errors_are_stable_script_errors` 失败时发现）；在发布结果前快照取消标志；新增测试专用 post-ready 钩子使竞态确定性复现，回归 `stop_racing_readiness_does_not_relabel_a_failure_as_clean`，变异（读取移回钩子之后）下稳定失败 |
+| 评审记录与统计漂移 | Low成立；本记录改为按交付时间排序并移入 `doc/`，不再逐轮固定测试数量；验证记录只保留最近一次完整结果 |
+| Architecture 分支/测试清单漂移 | Low成立；头部回到 `main`，补齐 `access_tests` 与 plugin 测试文件 |
+
+依赖确认：新增 10 个直接 Cargo 依赖（含构建时需要 C 编译器的 `rquickjs`）已由仓库所有者确认；C 编译器已列为 README 的构建前提，逐项用途记录在 `doc/modules/src-tauri/plugin/README.md`。Linux/macOS 的插件运行时构建仍未验证。

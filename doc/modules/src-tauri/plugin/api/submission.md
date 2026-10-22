@@ -6,7 +6,7 @@
 
 游标绑定 context、比赛、题目和 limit；5 分钟失效，最多 32 个，单个保留页最多 1000 条/1MiB，最多 10000 个 native page。合法领取即消费旧游标；失效和超限均报错。宿主保留 native page 剩余条目，不丢弃超过 limit 的数据。HOJ 使用原生 total/pages；Hydro 总数为 null，继续到真实空 native page，不使用前端旧的假定页大小推断末尾。
 
-游标是单次使用：合法继续请求在锁内原子领取，其他并发复用收到 context_expired；领取后的远端失败也不能再次复用同一游标，应重新查询。跨作用域或不同 query 参数的非法领取不会消费游标。
+游标是单次使用：合法继续请求在锁内原子领取，其他并发复用收到 context_expired。可重试失败（预算耗尽、provider 错误、超时、响应超限、游标配额）会把该游标按本次调用前的快照放回，重试从同一 native 页继续；只有 context_expired 不回填，因为作用域已撤销。跨作用域或不同 query 参数的非法领取不会消费游标。
 
 `SubmissionRecord.owner_id` 不参与序列化（`skip_serializing`），因此本接口只能消费 Provider 直接返回的记录；任何经 JSON 缓存往返的页面都会丢失归属证据并被整页拒绝。HOJ 部署若未返回 `uid` 同样如此（fail closed，不会退化为按展示名信任）。
 

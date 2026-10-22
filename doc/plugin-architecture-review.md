@@ -1,6 +1,6 @@
 # Hinina 插件边界真实代码审计
 
-> §1–8 是 d858e03 的历史审计快照，包含当时尚未实现的能力和建议；当前实现已由 §9–10 取代这些现状结论。后续修复以 [PR 审查记录](doc/modules/src-tauri/plugin/review-fixes.md) 和 [验证记录](doc/modules/src-tauri/plugin/validation.md) 为准。
+> §1–8 是 d858e03 的历史审计快照，包含当时尚未实现的能力和建议；当前实现已由 §9–10 取代这些现状结论。后续修复以 [PR 审查记录](doc/plugin-review-fixes.md) 和 [验证记录](doc/modules/src-tauri/plugin/validation.md) 为准。
 
 审计日期：2026-10-19。基准提交：`d858e03`。当前施工分支：`feat/plugin-contracts`，由本地 `main` 创建；`git ls-remote --symref origin HEAD` 确认远端默认分支同为 `main`。审计在修改生产代码之前完成。用户原有 Cargo.toml 修改及未跟踪文档/图片不纳入施工提交。
 

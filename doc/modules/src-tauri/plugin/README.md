@@ -36,4 +36,4 @@ Host 不执行用户回调、不建立第二套业务总线。Manager 才拥有�
 
 内部实现的执行期限与字节预算见 [limits](limits.md)，流式输出限制见 [bounded_json](bounded_json.md)。
 
-[23项审查核实与修复](review-fixes.md)记录存在性、严重性和处理方式；[QuickJS细节](runtime/quickjs.md)补充引擎与错误契约。
+[逐轮审查核实与修复](../../../plugin-review-fixes.md)按交付时间记录存在性、严重性和处理方式；[QuickJS细节](runtime/quickjs.md)补充引擎与错误契约。

@@ -6,10 +6,10 @@
 
 | 检查 | 结果 |
 |---|---|
-| cargo test --offline --manifest-path src-tauri/Cargo.toml | Rust单元测试通过；历史基线bin/doc-tests通过，当前数量以命令输出为准 |
+| cargo test --offline --manifest-path src-tauri/Cargo.toml | 最近一次完整运行（2026-10-22）722 项通过，连续 6 次无偶发失败；bin/doc-tests 通过 |
 | cargo clippy --offline --manifest-path src-tauri/Cargo.toml --all-targets | 通过；原有6条warning，涉及config默认实现、旧测试布尔断言/类型转换 |
 | rustfmt --edition 2021 --config skip_children=true（本轮Rust文件） | 通过；未全仓格式化 |
-| npm test | 前端测试通过，数量以命令输出为准 |
+| npm test | 最近一次完整运行（2026-10-22）508 项通过 |
 | npm run build | vue-tsc + Vite通过；保留原有大chunk提示 |
 | npm run plugin:sdk:check | SDK调用类型和非法能力负例通过 |
 | npm run plugin:scaffold:build | 使用Vite锁定的esbuild离线bundle成ES module |
@@ -40,7 +40,7 @@ Storage真实文件覆盖跨实例CAS单胜者、missing/null区分、命名空�
 
 ## 审查回归更新
 
-新增Hydro展示名不同/udict缺失的owner校验、转换中签发上下文、OJ组合切换、慢激活期间256条事件、启动超时清理、两个真实JS插件共享预算、并发游标领取、approval隔离、订阅日志锁外写出、存储限流、Client复用、稳定脚本/IPC错误和revision内会话读取去重。公开PluginHttp::request成功路径使用无网络HttpTransport fixture；实际reqwest固定地址和响应策略继续由本地transport测试验证。Provider与HTTP超时用Tokio虚拟时间，周期测试注入短间隔；详见[逐项记录](review-fixes.md)。
+新增Hydro展示名不同/udict缺失的owner校验、转换中签发上下文、OJ组合切换、慢激活期间256条事件、启动超时清理、两个真实JS插件共享预算、并发游标领取、approval隔离、订阅日志锁外写出、存储限流、Client复用、稳定脚本/IPC错误和revision内会话读取去重。公开PluginHttp::request成功路径使用无网络HttpTransport fixture；实际reqwest固定地址和响应策略继续由本地transport测试验证。Provider与HTTP超时用Tokio虚拟时间，周期测试注入短间隔；详见[逐项记录](../../../plugin-review-fixes.md)。
 
 PR #41 MEDIUM跟进验证：增加stop超时状态与reaper历史、基础设施日志阶段/脱敏、PluginError穷尽wire契约、域名origin正例及带scheme的IPv4/IPv6负例；通知校验/队列/过期/手动关闭/卸载及订阅失败清理改由Service测试锁定。所有宿主Promise必须await是文档契约，本轮未实现drain或未await检测。数量以当轮测试输出为准。
 
@@ -48,8 +48,23 @@ PR #41 LOW收尾验证：补atomicwrites两支ErrorKind及invalid ID、重复sto
 
 bc75b18后续查询回归：真实ConfigService/Registry验证地址待重启时旧context撤销、新context可用、实际endpoint和身份键不变、禁用仍拒绝及日志脱敏。Provider多页3秒延迟以Tokio虚拟时间验证整体5秒扫描超时、游标/并发预算归还；真实QuickJS在activate及事件内捕获timeout并继续调用API。单独压缩测试入口剩余窗口验证晚发起宿主调用提前返回timeout；真实worker验证循环引用、BigInt、抛异常toJSON统一invalid_input且无写入。丢弃list最终scope检查时也会清理未发布游标。manager/query改由所属模块直接挂载测试，跨模块共享test_support。
 
-终轮评审回归：QuickJS 加载后不调用shutdown直接drop不abort；超界响应页返回limit_exceeded且不残留游标；ExecutionApi准入限流耗尽返回limit_exceeded；start_worker替换已结束worker时保留上一代timeout历史；panic payload仅分类不格式化。Rust全量704 passed（plugin 99），clippy仅既有6项告警；前端504 passed，生产构建、SDK类型检查与脚手架构建通过。
+终轮评审回归：QuickJS 加载后不调用shutdown直接drop不abort；超界响应页返回limit_exceeded且不残留游标；ExecutionApi准入限流耗尽返回limit_exceeded；start_worker替换已结束worker时保留上一代timeout历史；panic payload仅分类不格式化。Rust 全量通过，clippy仅既有6项告警；前端通过，生产构建、SDK类型检查与脚手架构建通过。
 
-并发订阅与OJ诊断回归：插件通知store以单调代次丢弃乱序完成的迟到订阅，旧卸载函数不影响新订阅（Vitest覆盖两种重叠顺序）；query的contest.get/submission.history/scope.identity失败记录稳定类别与OJ标识，ProviderNotFound原文不落日志。Rust全量705 passed，前端507 passed。
+并发订阅与OJ诊断回归：插件通知store以单调代次丢弃乱序完成的迟到订阅，旧卸载函数不影响新订阅（Vitest覆盖两种重叠顺序）；query的contest.get/submission.history/scope.identity失败记录稳定类别与OJ标识，ProviderNotFound原文不落日志。Rust 全量通过，前端通过。
 
-事件隔离与目录扫描回归：真实QuickJS验证首个handler抛错后其余handler与后续事件仍执行；provider校验失败后用同一游标续页成功；200个无关目录与越界符号链接不阻断目标插件；持锁并丢弃调用后存储不提交；缓存命中不触发阻塞读取。Rust全量711 passed，逐项确认去掉修复后对应回归失败。
+事件隔离与目录扫描回归：真实QuickJS验证首个handler抛错后其余handler与后续事件仍执行；provider校验失败后用同一游标续页成功；200个无关目录与越界符号链接不阻断目标插件；持锁并丢弃调用后存储不提交；缓存命中不触发阻塞读取。Rust 全量通过，逐项确认去掉修复后对应回归失败。
+
+## 评审一致性收敛回归（基线 be66c93）
+
+本轮验证命令：`cargo test --offline --manifest-path src-tauri/Cargo.toml`（连续 6 次无偶发失败）、`cargo clippy --offline --all-targets`（仅既有 6 项告警）、`npm test`、`npm run build`、`npm run plugin:sdk:check`、`npm run plugin:scaffold:build`，以及本轮改动 Rust 文件的 rustfmt 检查。
+
+新增回归（逐项做过"去掉修复即失败"的变异验证）：
+- `context_acquisition_reuses_a_young_handle_for_the_same_scope_and_revision`：同一 scope/revision 连续 96 次 `context.current` 返回同一句柄且只保留 1 个句柄；scope 变化不共享；revision 变化撤销旧句柄并签发新句柄。
+- `an_aged_handle_is_not_reused`：超过复用年龄后签发新句柄，而旧句柄在 TTL 内仍可 `check`。
+- `response_overflow_on_buffered_records_returns_the_cursor_unchanged`：剩余纯缓冲记录使整页超限时，游标及其 `buffered_bytes` 按调用前快照保留，可用同一游标重试。
+- `response_overflow_after_a_fetch_restores_the_pre_call_snapshot`：新抓取的超限页不入库，`native_page` 不前进、不残留陈旧计量。
+- `concurrency_rejections_never_spend_a_rate_token`：本地或共享并发拒绝后，两个桶的突发均未被扣减。
+- `stop_racing_readiness_does_not_relabel_a_failure_as_clean`：ready 发布后立即取消令牌，激活失败仍为 failed/script_error，不被改判为 stopped。
+- 前端：订阅"单一活动/迟到卸载/旧卸载不影响新订阅"测试迁到 `plugin.service.spec.ts`（Service 层），Store 测试只断言状态应用与 `dismissNotification` 委派。
+
+格式：`adapter/hydro`（保留原 BOM）、`provider_registry_impl`、`core/mod.rs`、`core/provider/submission.rs` 已回到 main 基线上重放功能性改动，本 PR 不再包含无关格式化。

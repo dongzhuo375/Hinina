@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-10-21 | 分支：`feat/plugin-runtime`
+> 最后更新：2026-10-22 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -22,6 +22,7 @@ Hinina/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
 │   ├── todo.md                            # 开发路线图（8 阶段执行顺序）
+│   ├── plugin-review-fixes.md             # 插件评审逐轮核实与修复记录（按交付时间排序）
 │   ├── plugin-architecture-review.md      # 插件边界真实代码审计快照（§1–8 为历史基线，当前结论以 review-fixes/validation 为准）
 │   ├── 未解决问题清单.md                   # 仍未解决的已知问题逐条明细（当前代码位置 + 核查结论 + 处理时机）；2026-09-22 替代已删除的 problem.md 与 问题验证报告.md
 │   ├── HOJ/                              # HOJ API 文档（API 总览 / 榜单 / 题目 limits）
@@ -51,6 +52,7 @@ Hinina/
         │   ├── error.rs                  # AppError 枚举 + user_message() + context()（补环节名但保留变体）+ AppResult<T> + From 转换
         │   ├── tests/
         │   │   ├── error_tests.rs        # AppError::context 测试（变体绝不被改写，前端 isAuthError 分流依赖它）
+        │   │   ├── access_tests.rs       # AccessRevision：转换期间无快照、嵌套/并发转换、回绕与取消令牌
         │   │   └── context_tests.rs      # enabled_instance 判定测试（跳过禁用实例 / 未配置 id 不凭空激活 / 大小写精确匹配 / 默认配置恰一个启用实例）
         │   ├── entity/
         │   │   ├── mod.rs
@@ -247,7 +249,12 @@ Hinina/
         │   │   ├── mod.rs                # !Send Runtime/Bridge契约
         │   │   ├── quickjs.rs            # 真实引擎、Promise、中断与稳定错误
         │   │   └── bootstrap.js          # 冻结API与私有host桥
-        │   └── tests/                   # 各模块以#[path]挂载manager/query等回归；support.rs直接挂载为test_support，无聚合mod.rs
+        │   └── tests/                   # 各模块以#[path]挂载，无聚合mod.rs
+        │       ├── manager_tests.rs / manager_history_tests.rs  # 生命周期、Resync、状态历史与回收
+        │       ├── query_tests.rs        # 作用域/句柄复用/游标/预算/ABA 撤销
+        │       ├── execution_api_tests.rs # 桥准入限流、响应上限与审计
+        │       ├── bounded_json_tests.rs # 流式字节上限
+        │       └── support.rs            # 直接挂载为 cfg(test) 的 test_support，跨模块夹具
         └── commands/                     # Tauri Command 薄封装
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
@@ -347,7 +354,7 @@ src/
 │   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收；终态时触发 problemStore.invalidateMyStatus）+ **重复发送防护**（pendingFor 按「比赛+题目+展示题号+语言+源码」五元组去重，评测期间复用编号；isSubmitting 同步上锁）+ **轮询超时把条目收敛为终态 Unknown**（让服务端结果接管展示）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
 │   ├── announcementStore.ts              # 公告列表 + 客户端已读状态（unreadCount 红点数据源、markAllRead 乐观更新+失败回滚+不可见不标记、isWatching 语义、60s±10s 轮询、窗口重新可见/聚焦即时补拉（去重 1s））
 │   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（两级状态机：syncPending=未推送内存 / isDirty=未落盘；语言权威值=HOJ 显示名，切换即时持久化；源文件名经 utils/language 派生；落盘事件订阅安装器）
-│   └── __tests__/                        # authStore / contestStore / problemStore / rankStore / submissionStore / announcementStore / session / workspaceStore .spec.ts（会话状态机、加载去重与 whenLoaded、我的题目状态失效、榜单去重/轮询/全量模式、评测收敛轮询与重复提交防护、公告未读语义、会话级清理、工作区落盘状态机与 flush 顺序）
+│   └── __tests__/                        # authStore / contestStore / problemStore / rankStore / submissionStore / announcementStore / session / workspaceStore / pluginStore .spec.ts（会话状态机、加载去重与 whenLoaded、我的题目状态失效、榜单去重/轮询/全量模式、评测收敛轮询与重复提交防护、公告未读语义、会话级清理、工作区落盘状态机与 flush 顺序）
 ├── services/
 │   ├── plugin.service.ts                 # 插件前端服务入口
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
@@ -526,7 +533,7 @@ src/
 
 真实基线见[审计](plugin-architecture-review.md)。Manifest/API v2，事件协议v2。PluginRepository属于plugin/registry，FsPluginRepository负责宿主配置与有限代码加载。PluginHost保留唯一CoreEventBus消费者与128有界队列；Manager才管理worker，不创建第二套业务事件底座。
 
-插件专用 Infra 依赖 plugin 的能力契约及 ScopedQueries 做逐调用授权；ServiceQueries 再依赖只读 Service，因此存在 infra → plugin → service 的概念依赖环。此为专用能力执行器的显式例外：Core/Service 不依赖 plugin，业务 Service 不导入这些插件 Infra，具体文件/网络实现由组合根装配，Manager 只依赖仓库及工厂端口。
+依赖方向：plugin 层（含 `execution_api`、`query`）不再引用任何具体 infra 实现。存储与 HTTP 以 `PluginStorageApi` / `PluginHttpApi` 端口注入 `ExecutionApi`，配置读取经 `OjInstanceConfig` 端口（由 `ConfigService<R: ConfigRepository>` 实现，不再绑定 `FsConfigRepository`）；具体实现、预算与文件/网络装配只在 infra 的专用模块与组合根。专用 Infra（`plugin_storage` / `plugin_http`）实现这些端口，并依赖 plugin 的能力契约及 `ScopedQueries` 做逐调用授权，方向为 infra → plugin；`ServiceQueries` 再依赖只读 Service。Core/Service 不依赖 plugin，业务 Service 不导入这些插件 Infra，Manager 只依赖仓库及工厂端口。通用基础设施（`storage`/`cache`）与专用插件 Infra 是不同文件，两者之间没有文件级依赖环。
 
 AppContext注入通用core/access到Auth/Contest/Config与Registry，登录/登出/会话失效、比赛/OJ切换、连接变化显式撤销作用域，不能依赖事件。PluginQueryContext绑定实际Provider地址和稳定用户，旧请求、旧游标与旧授权失效；查询仅本人元数据、不读源码。Hydro历史不使用假定页大小判断末尾，API提供不透明游标及可空total。
 
@@ -544,8 +551,10 @@ Provider 只读查询每次激活60次/分钟、并发2，Manager 合计120次/�
 
 后续管理设计见[最小实现复盘与管理演进](插件系统最小实现复盘与管理演进.md)：保持现有分层，先补宿主配置持久写入、目录盘点与诊断，再接管理页；持久启用意图与worker运行状态分别表达，不增加第二套业务总线。此处仅链接演进建议，未新增生产架构。
 
-本轮插件审查修复：提交记录以宿主私有owner_id校验身份；OJ切换由统一guard覆盖Registry与比赛清理。生产scope按revision缓存，cursor原子单次领取。Manager注入仓库与能力工厂，激活后订阅、启动超时撤销并清理；approval独立诊断。存储操作增加限流；HTTP仅对相同origin与新近验证的DNS地址集合复用Client（最多32项）。PluginHost日志移至订阅锁外；脚本与IPC保留稳定错误类别。详见[逐项核实](modules/src-tauri/plugin/review-fixes.md)。
+本轮插件审查修复：提交记录以宿主私有owner_id校验身份；OJ切换由统一guard覆盖Registry与比赛清理。生产scope按revision缓存，cursor原子单次领取。Manager注入仓库与能力工厂，激活后订阅、启动超时撤销并清理；approval独立诊断。存储操作增加限流；HTTP仅对相同origin与新近验证的DNS地址集合复用Client（最多32项）。PluginHost日志移至订阅锁外；脚本与IPC保留稳定错误类别。详见[逐项核实](plugin-review-fixes.md)。
 
 复审后续加固：`switch_oj` 栅栏收缩到 Registry 发布与缓存清理，持久化/事件不再阻塞插件查询；scope 缓存命中只在锁内克隆，文件读取移到锁外；插件 IPC 错误只在恰好 `{code, permission?}` 时识别；`owner_id` 明确为不可序列化的宿主私有证据（缺失即整页拒绝，HOJ 缺 `uid` 亦如此）；超时 worker 回收改为指数退避（100ms→2s）；订阅锁检查测试改用已注册 dispatcher 消除 callsite 竞态。
 
 PR #41后续：四个访问变更组件构造函数必须接收共享AccessRevision，移除with_access隐式绑定；stop超时与start超时统一failed/timeout及reaper回收。插件基础设施通过plugin_diagnostics记录脱敏类别；Manifest/approval origin仅允许域名，IP字面量拒绝，运行时仍检查全部DNS地址。通知策略位于Service，Store只应用状态事件；宿主Promise API必须await，入口结束后不drain游离调用。
+
+评审一致性收敛：同一 scope 与 revision 下未过期（150 秒内）的查询句柄被复用，按文档每个 handler 重新获取 context 不再触发 32 句柄上限；提交分页在抓取之后的任何失败（响应超限、游标配额）都把游标按调用前快照归还，重试从原位置继续；Provider 预算先取两个并发许可再扣速率令牌，并发拒绝不扣令牌；桥输入、句柄/游标 TTL 与数量、各预算数值集中在 `plugin/limits`；前端通知订阅的"单一活动订阅/迟到卸载"策略归 `plugin.service`，Store 只应用 add/dismiss。无关的格式化改动已从本 PR 撤出。
