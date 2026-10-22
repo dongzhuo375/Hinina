@@ -337,6 +337,7 @@ struct Context {
     created: Instant,
     cancellation: CancellationToken,
 }
+#[derive(Clone)]
 struct Cursor {
     context: String,
     query: PluginSubmissionQuery,
@@ -647,6 +648,53 @@ impl ScopedQueries {
         cursor.pending = pending;
         Ok(())
     }
+    /// Put a consumed cursor back under its original id.
+    fn give_back(&self, id: String, cursor: Cursor) {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cursors
+            .insert(id, cursor);
+    }
+    /// Account for the remainder, bound the whole response (including the bridge envelope)
+    /// and only then publish the continuation: a page that cannot be encoded must not leave
+    /// a cursor the plugin never received. On any error `slot` still holds the cursor.
+    fn publish(
+        &self,
+        slot: &mut Option<Cursor>,
+        page: &mut PluginSubmissionPage,
+    ) -> PluginResult<()> {
+        let cursor = slot.as_mut().expect("cursor present until published");
+        let next = if cursor.more || !cursor.pending.is_empty() {
+            cursor.buffered_bytes =
+                bounded_json::encoded_len(&cursor.pending, MAX_CURSOR_PAGE_BYTES)?;
+            Some(uuid::Uuid::new_v4().to_string())
+        } else {
+            None
+        };
+        page.next_cursor = next.clone();
+        bounded_json::encoded_len(&*page, MAX_CURSOR_RESPONSE_BYTES)?;
+        if let Some(id) = next {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state
+                .cursors
+                .retain(|_, c| c.created.elapsed() < QUERY_HANDLE_TTL);
+            let retained = state
+                .cursors
+                .values()
+                .map(|c| c.buffered_bytes)
+                .sum::<usize>();
+            if state.cursors.len() >= MAX_CURSORS
+                || retained + cursor.buffered_bytes > MAX_CURSOR_BUFFER_BYTES
+            {
+                return Err(PluginError::LimitExceeded);
+            }
+            state
+                .cursors
+                .insert(id, slot.take().expect("cursor present until published"));
+        }
+        Ok(())
+    }
     /// @plugin-api
     /// @since 2.0
     /// @permission submission.read
@@ -692,6 +740,11 @@ impl ScopedQueries {
                 buffered_bytes: 0,
             }
         };
+        // Pre-call evidence for rollback. A fetch replaces the (empty) buffer, so a clone of
+        // the empty cursor is the true snapshot; without a fetch, drained records are
+        // pushed back and the accounted size restored instead of cloning the buffer.
+        let snapshot = (cursor.pending.is_empty() && cursor.more).then(|| cursor.clone());
+        let prior_bytes = cursor.buffered_bytes;
         if let Err(error) = self
             .advance(handle, &query, owner.as_str(), &mut cursor)
             .await
@@ -701,53 +754,39 @@ impl ScopedQueries {
             // instead of restarting from page one. An expired context stays revoked.
             if error != PluginError::ContextExpired {
                 if let Some(id) = query.cursor.clone() {
-                    self.state
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .cursors
-                        .insert(id, cursor);
+                    self.give_back(id, cursor);
                 }
             }
             return Err(error);
         }
-        let records = cursor
-            .pending
-            .drain(..cursor.pending.len().min(query.limit as usize))
-            .collect();
-        let total = cursor.total;
-        let next = if cursor.more || !cursor.pending.is_empty() {
-            cursor.buffered_bytes =
-                bounded_json::encoded_len(&cursor.pending, MAX_CURSOR_PAGE_BYTES)?;
-            Some(uuid::Uuid::new_v4().to_string())
-        } else {
-            None
-        };
-        // Bound the whole response, including the bridge envelope, before publishing the
-        // continuation: a page that cannot be encoded must not leave a cursor the plugin
-        // never received.
-        let page = PluginSubmissionPage {
+        let take = cursor.pending.len().min(query.limit as usize);
+        let records = cursor.pending.drain(..take).collect();
+        let mut page = PluginSubmissionPage {
             records,
-            total,
-            next_cursor: next.clone(),
+            total: cursor.total,
+            next_cursor: None,
         };
-        bounded_json::encoded_len(&page, MAX_CURSOR_RESPONSE_BYTES)?;
-        if let Some(id) = &next {
-            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            state
-                .cursors
-                .retain(|_, c| c.created.elapsed() < QUERY_HANDLE_TTL);
-            let retained = state
-                .cursors
-                .values()
-                .map(|c| c.buffered_bytes)
-                .sum::<usize>();
-            if state.cursors.len() >= MAX_CURSORS
-                || retained + cursor.buffered_bytes > MAX_CURSOR_BUFFER_BYTES
-            {
-                return Err(PluginError::LimitExceeded);
+        let mut slot = Some(cursor);
+        if let Err(error) = self.publish(&mut slot, &mut page) {
+            // Failures after a successful fetch (oversized response, cursor quota) are just as
+            // retryable as fetch failures: give the caller's cursor back as it was before this
+            // call, with drained records returned to the front and byte accounting restored.
+            if let (Some(id), Some(mut cursor)) = (query.cursor.clone(), slot) {
+                let cursor = match snapshot {
+                    Some(before) => before,
+                    None => {
+                        for record in page.records.into_iter().rev() {
+                            cursor.pending.push_front(record);
+                        }
+                        cursor.buffered_bytes = prior_bytes;
+                        cursor
+                    }
+                };
+                self.give_back(id, cursor);
             }
-            state.cursors.insert(id.clone(), cursor);
+            return Err(error);
         }
+        let next = page.next_cursor.clone();
         let mut continuation = CursorLease {
             state: &self.state,
             id: next,

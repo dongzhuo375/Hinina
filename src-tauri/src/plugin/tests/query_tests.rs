@@ -1378,6 +1378,126 @@ fn queries_over(source: Arc<Source>, access: Arc<AccessRevision>) -> ScopedQueri
     )
 }
 
+/// Wire size of the page `list` would return for one projected record whose display id is
+/// `pad` bytes long; used to land exactly one byte over the response limit.
+fn single_record_page_len(pad: usize) -> usize {
+    let page = PluginSubmissionPage {
+        records: vec![PluginSubmission {
+            submission_id: "2".into(),
+            contest_id: "contest".into(),
+            problem_id: "problem".into(),
+            problem_display_id: "a".repeat(pad),
+            status: crate::core::entity::submission::JudgementStatus::Accepted
+                .as_str()
+                .into(),
+            submitted_at: 1000,
+        }],
+        total: None,
+        next_cursor: None,
+    };
+    bounded_json::encoded_len(&page, usize::MAX).unwrap()
+}
+fn oversized_record() -> crate::core::entity::submission::SubmissionRecord {
+    let mut big = record("2");
+    // One byte over the bridge response limit once projected into a single-record page,
+    // yet small enough to be accepted as a native page next to a tiny sibling record.
+    let pad = MAX_CURSOR_RESPONSE_BYTES + 1 - single_record_page_len(0);
+    big.display_id = "a".repeat(pad);
+    assert_eq!(
+        single_record_page_len(pad),
+        MAX_CURSOR_RESPONSE_BYTES + 1,
+        "fixture must sit exactly one byte over the response limit"
+    );
+    big
+}
+
+#[tokio::test]
+async fn response_overflow_on_buffered_records_returns_the_cursor_unchanged() {
+    let source = Arc::new(Source::default());
+    *source.pages.lock().unwrap() = vec![SubmissionHistoryPage {
+        records: vec![record("1"), oversized_record()],
+        total: None,
+        has_more: false,
+    }];
+    let q = queries_over(source, Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    let mut query = PluginSubmissionQuery {
+        contest_id: "contest".into(),
+        problem_id: None,
+        cursor: None,
+        limit: 1,
+    };
+    let first = q.list(&c, query.clone()).await.unwrap();
+    let id = first.next_cursor.expect("one buffered record remains");
+    let before = {
+        let state = q.state.lock().unwrap();
+        (
+            state.cursors[&id].pending.len(),
+            state.cursors[&id].buffered_bytes,
+        )
+    };
+    assert_eq!(before.0, 1);
+    query.cursor = Some(id.clone());
+    // The buffered record cannot be delivered, but failing must not destroy the cursor.
+    assert_eq!(
+        q.list(&c, query.clone()).await.unwrap_err(),
+        PluginError::LimitExceeded
+    );
+    assert_eq!(
+        q.list(&c, query).await.unwrap_err(),
+        PluginError::LimitExceeded,
+        "the same cursor stays usable for a retry"
+    );
+    let state = q.state.lock().unwrap();
+    assert_eq!(state.cursors.len(), 1);
+    let kept = &state.cursors[&id];
+    assert_eq!((kept.pending.len(), kept.buffered_bytes), before);
+    assert_eq!(kept.pending[0].submission_id, "2");
+}
+
+#[tokio::test]
+async fn response_overflow_after_a_fetch_restores_the_pre_call_snapshot() {
+    let source = Arc::new(Source::default());
+    *source.pages.lock().unwrap() = vec![
+        SubmissionHistoryPage {
+            records: vec![record("1")],
+            total: None,
+            has_more: true,
+        },
+        SubmissionHistoryPage {
+            records: vec![oversized_record()],
+            total: None,
+            has_more: false,
+        },
+    ];
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    let mut query = PluginSubmissionQuery {
+        contest_id: "contest".into(),
+        problem_id: None,
+        cursor: None,
+        limit: 1,
+    };
+    let first = q.list(&c, query.clone()).await.unwrap();
+    let id = first.next_cursor.expect("more native pages remain");
+    let before = {
+        let state = q.state.lock().unwrap();
+        let cursor = &state.cursors[&id];
+        assert!(cursor.pending.is_empty() && cursor.more);
+        (cursor.native_page, cursor.buffered_bytes)
+    };
+    query.cursor = Some(id.clone());
+    assert_eq!(
+        q.list(&c, query).await.unwrap_err(),
+        PluginError::LimitExceeded
+    );
+    let state = q.state.lock().unwrap();
+    let kept = &state.cursors[&id];
+    // The fetched page is dropped with the snapshot: no stale byte accounting, no skipped page.
+    assert!(kept.pending.is_empty() && kept.more);
+    assert_eq!((kept.native_page, kept.buffered_bytes), before);
+}
+
 #[tokio::test]
 async fn context_acquisition_reuses_a_young_handle_for_the_same_scope_and_revision() {
     let source = Arc::new(Source::default());
