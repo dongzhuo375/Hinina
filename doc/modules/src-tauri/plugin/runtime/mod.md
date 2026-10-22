@@ -2,7 +2,7 @@
 
 所有 Promise 返回的宿主 API 必须 await，或加入 activate/handler 返回的 Promise 链；并发用 await Promise.all。入口结束后不 drain 游离调用，不保证它们执行或报告拒绝；events.on/注销函数同步执行。停止超时保持 failed/timeout，继续跟踪旧 worker，完成后由 reaper 回收并保存历史。
 
-选择 rquickjs 0.14（QuickJS-NG），仅 std/futures features。不启用 dyn-load/full/custom allocator。与 boa/deno_core 相比，本轮选型重视已有 Promise 桥、引擎中断/内存限制和较小依赖；Windows/MSVC 真实引擎测试通过后才装配。未进行三种引擎的体积性能基准。
+选择 rquickjs 0.14（QuickJS-NG），仅 std/futures features。不启用 dyn-load/full/custom allocator。与 boa/deno_core 相比，本轮选型重视已有 Promise 桥、引擎中断/内存限制和较小依赖；Windows/MSVC 真实引擎测试通过后才装配。rquickjs 在构建时用 C 编译器（MSVC/gcc/clang）编译内置的 QuickJS 源码，因此构建环境需要 C 编译器，已在 README 环境一节列为前提；该依赖及其构建前提已由仓库所有者确认。Linux/macOS 的运行时构建与测试尚未验证。未进行三种引擎的体积性能基准。
 
 入口是一个离线打包 ES module：`export default async function activate(hinina, config)`。源码<=1MiB，配置JSON<=64KiB且深冻结；宿主无 resolver/loader，不支持任意 import、原生模块、fs/process/env/fetch/socket/shell。TS 在宿主外通过 esbuild 等构建，宿主不执行 TS 源文件。
 

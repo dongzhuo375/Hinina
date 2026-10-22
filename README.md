@@ -67,8 +67,9 @@ Hinina 是一个面向XCPC竞赛的桌面客户端。它把登录、题目、代
 - Node.js 和 npm
 - Rust 工具链（`rustup`、`cargo`）
 - Tauri 2 的系统依赖
+- C 编译器（插件运行时 `rquickjs` 会在构建时编译内置的 QuickJS C 源码）
 
-在 Windows 上还需要安装 WebView2 和 Visual Studio C++ 构建工具。其他平台请先按 [Tauri 官方文档](https://v2.tauri.app/start/prerequisites/) 配好对应依赖。
+在 Windows 上还需要安装 WebView2 和 Visual Studio C++ 构建工具（其中的 MSVC 即所需的 C 编译器；当前真实引擎测试在 `x86_64-pc-windows-msvc` 上验证）。Linux/macOS 需要 `gcc` 或 `clang`；这两个平台的插件运行时尚未做构建验证。其他系统依赖请按 [Tauri 官方文档](https://v2.tauri.app/start/prerequisites/) 配好。
 
 ### 安装依赖
 

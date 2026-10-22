@@ -32,6 +32,8 @@ Host 不执行用户回调、不建立第二套业务总线。Manager 才拥有�
 
 阶段成果、已知缺口、改进优先级和后续管理界面/操作语义，见[最小实现复盘与管理演进](../../../插件系统最小实现复盘与管理演进.md)。该文档中的管理能力是后续建议，当前仍采用开发命令和宿主配置。
 
+新增直接依赖（均为插件宿主服务，见 Cargo.toml）：`rquickjs`（JS 引擎，构建需 C 编译器）、`atomicwrites` + `fs4`（插件私有 JSON 的原子写与跨实例锁）、`governor`（令牌桶限流）、`semver`（清单与最低版本校验）、`sha2`（存储命名空间与身份键哈希）、`uuid`（句柄/游标不透明 ID）、`url` + `ipnet` + `ip_network`（精确 origin 与地址策略）、`tokio-util`（取消令牌）；dev-dependency 为 tokio `test-util`（虚拟时间）。
+
 内部实现的执行期限与字节预算见 [limits](limits.md)，流式输出限制见 [bounded_json](bounded_json.md)。
 
 [23项审查核实与修复](review-fixes.md)记录存在性、严重性和处理方式；[QuickJS细节](runtime/quickjs.md)补充引擎与错误契约。
