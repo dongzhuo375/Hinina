@@ -1,8 +1,15 @@
+use super::*;
 use rquickjs::{
     function::{Async, Func},
     AsyncContext, AsyncRuntime, Module,
 };
 use std::time::{Duration, Instant};
+
+#[test]
+fn quickjs_runtime_implements_the_plugin_runtime_port() {
+    fn assert_runtime<T: PluginRuntime>() {}
+    assert_runtime::<quickjs::QuickJsRuntime>();
+}
 
 #[tokio::test]
 async fn real_engine_module_awaits_rust_future_without_ambient_io() {

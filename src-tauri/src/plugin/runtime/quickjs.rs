@@ -211,14 +211,43 @@ impl QuickJsRuntime {
         let operation = self.context.async_with(async |ctx| {
             let function = deliver.restore(&ctx)?;
             let promise: Promise = function.call((json,))?;
-            promise.into_future::<()>().await
+            promise.into_future::<String>().await
         });
         let result = tokio::select! { biased;
             _ = self.stopped.cancelled() => Err(PluginError::ContextExpired),
             result = tokio::time::timeout(EVENT_TIMEOUT, operation) => result.map_err(|_| PluginError::Timeout).and_then(|value| value.map_err(engine_error)),
         };
         self.report_rejections();
-        result.map_err(|error| self.classify(error))
+        let summary = result.map_err(|error| self.classify(error))?;
+        self.report_handler_failures(&summary);
+        Ok(())
+    }
+    /// A rejected handler is isolated to that call: the remaining handlers and later
+    /// events still run, so one failing notification cannot disable the plugin.
+    fn report_handler_failures(&self, summary: &str) {
+        #[derive(serde::Deserialize)]
+        struct Summary {
+            #[serde(default)]
+            failed: u32,
+            #[serde(default)]
+            code: String,
+        }
+        let Ok(summary) = serde_json::from_str::<Summary>(summary) else {
+            return;
+        };
+        if summary.failed == 0 {
+            return;
+        }
+        // `code` is restricted to a stable identifier by bootstrap.js; never plugin text.
+        tracing::warn!(
+            plugin_id = ?self.plugin_id,
+            runtime = "js",
+            operation = "event.handler",
+            category = "handler_failed",
+            failed = summary.failed,
+            code = ?summary.code,
+            "Plugin event handler rejected; remaining handlers and events continue"
+        );
     }
     /// @plugin-api
     /// @since 2.0

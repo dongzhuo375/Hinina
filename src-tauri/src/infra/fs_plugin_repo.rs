@@ -21,6 +21,10 @@ use std::{
 pub struct FsPluginRepository {
     base: PathBuf,
 }
+
+/// Upper bound on directory candidates inspected per load. Exceeding it only limits the
+/// lookup of a plugin that was not found, never an already valid sibling.
+const MAX_PLUGIN_DIRECTORIES: usize = 128;
 impl FsPluginRepository {
     /// @plugin-api
     /// @since 2.0
@@ -111,24 +115,45 @@ impl PluginRepository for FsPluginRepository {
         let mut selected = None;
         let entries =
             std::fs::read_dir(&root).map_err(|error| unavailable("repository.scan", error))?;
-        for (index, entry) in entries.enumerate() {
-            if index >= 128 {
-                return Err(PluginError::LimitExceeded);
+        let mut scanned = 0;
+        let mut truncated = false;
+        for entry in entries {
+            if scanned >= MAX_PLUGIN_DIRECTORIES {
+                truncated = true;
+                break;
             }
-            let entry = entry.map_err(|error| unavailable("repository.entry", error))?;
-            if !entry
-                .file_type()
-                .map_err(|error| unavailable("repository.entry_type", error))?
-                .is_dir()
-            {
+            // Every per-entry problem is local to that entry: a broken link, an escaping
+            // link or a malformed manifest must never block loading a different plugin.
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    diagnostics::io(None, "repository.entry", &error);
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(error) => {
+                    diagnostics::io(None, "repository.entry_type", &error);
+                    continue;
+                }
+            };
+            // Links are followed only to their canonical target, which must stay in the root.
+            if !(file_type.is_dir() || (file_type.is_symlink() && path.is_dir())) {
                 continue;
             }
-            let directory = entry
-                .path()
-                .canonicalize()
-                .map_err(|error| unavailable("repository.directory", error))?;
+            scanned += 1;
+            let directory = match path.canonicalize() {
+                Ok(directory) => directory,
+                Err(error) => {
+                    diagnostics::io(None, "repository.directory", &error);
+                    continue;
+                }
+            };
             if !directory.starts_with(&root) {
-                return Err(PluginError::InvalidInput);
+                diagnostics::failure(None, "repository.directory", "path_boundary");
+                continue;
             }
             let manifest_path = match directory.join("manifest.json").canonicalize() {
                 Ok(path) if path.starts_with(&directory) => path,
@@ -181,7 +206,15 @@ impl PluginRepository for FsPluginRepository {
                 selected = Some((directory, manifest));
             }
         }
-        let (directory, manifest) = selected.ok_or(PluginError::NotFound)?;
+        let Some((directory, manifest)) = selected else {
+            // The scan bound was reached without finding the target: report the truncation
+            // instead of pretending the plugin does not exist.
+            return Err(if truncated {
+                PluginError::LimitExceeded
+            } else {
+                PluginError::NotFound
+            });
+        };
         if manifest.min_app_version.as_ref().is_some_and(|v| {
             semver::Version::parse(v).unwrap()
                 > semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()

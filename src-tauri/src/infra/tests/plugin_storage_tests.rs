@@ -31,6 +31,48 @@ async fn private_json_cas_is_atomic_durable_and_distinguishes_null() {
         .is_err());
 }
 #[tokio::test]
+async fn abandoned_write_is_not_committed_after_the_caller_times_out() {
+    let dir = crate::test_support::TempDir::unique("plugin-json-abandon");
+    let storage = Arc::new(JsonPluginStorage::new(
+        dir.to_path_buf(),
+        authority("test.abandon"),
+    ));
+    storage.set("seed", Value::Bool(true)).await.unwrap();
+    std::fs::create_dir_all(&storage.directory).unwrap();
+    // Hold the storage lock so the write is still queued when the caller is dropped.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(storage.directory.join("storage.lock"))
+        .unwrap();
+    FileExt::try_lock(&lock).unwrap();
+    let writer = {
+        let storage = storage.clone();
+        tokio::spawn(async move { storage.set("late", Value::Bool(true)).await })
+    };
+    while storage.concurrent.available_permits() == 16 {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    writer.abort();
+    let _ = writer.await;
+    FileExt::unlock(&lock).unwrap();
+    // The detached blocking task resumes, observes the abandonment and must not commit.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        storage.get("late").await.unwrap(),
+        PluginStorageValue::Missing
+    );
+    assert_eq!(
+        storage.get("seed").await.unwrap(),
+        PluginStorageValue::Value {
+            value: Value::Bool(true)
+        }
+    );
+}
+
+#[tokio::test]
 async fn corruption_is_retained_and_permissions_are_enforced() {
     let dir = crate::test_support::TempDir::unique("plugin-json-corruption");
     let storage = JsonPluginStorage::new(dir.to_path_buf(), authority("test.a"));

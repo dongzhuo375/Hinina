@@ -57,6 +57,40 @@ fn duplicate_ids_missing_entry_and_old_manifest_are_rejected() {
 }
 
 #[test]
+fn many_or_broken_sibling_entries_do_not_block_a_valid_plugin() {
+    let dir = crate::test_support::TempDir::unique("plugin-repo-siblings");
+    let repo = setup(&dir);
+    // A plain file and a directory without a manifest are unrelated entries.
+    std::fs::write(dir.join("plugins/notes.txt"), "ignored").unwrap();
+    std::fs::create_dir_all(dir.join("plugins/zz-empty")).unwrap();
+    // More directory candidates than the scan bound; the valid plugin is still found.
+    for index in 0..200 {
+        std::fs::create_dir_all(dir.join(format!("plugins/zz-noise-{index:03}"))).unwrap();
+    }
+    let loaded = repo.load("test.repo").unwrap();
+    assert_eq!(loaded.grant.manifest().id, "test.repo");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_escaping_the_code_root_is_skipped_not_fatal() {
+    let dir = crate::test_support::TempDir::unique("plugin-repo-symlink");
+    let repo = setup(&dir);
+    let outside = crate::test_support::TempDir::unique("plugin-repo-outside");
+    std::fs::create_dir_all(outside.join("plugin")).unwrap();
+    std::fs::write(
+        outside.join("plugin/manifest.json"),
+        serde_json::to_vec(&manifest("test.outside")).unwrap(),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(outside.join("plugin"), dir.join("plugins/escape")).unwrap();
+    // The escaping link is ignored; the in-root plugin still loads.
+    let loaded = repo.load("test.repo").unwrap();
+    assert_eq!(loaded.grant.manifest().id, "test.repo");
+    assert!(repo.load("test.outside").is_err());
+}
+
+#[test]
 fn invalid_unrelated_approvals_do_not_block_loading_a_valid_plugin() {
     let dir = crate::test_support::TempDir::unique("plugin-approval-isolation");
     let repo = setup(&dir);

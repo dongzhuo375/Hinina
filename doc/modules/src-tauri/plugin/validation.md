@@ -51,3 +51,5 @@ bc75b18后续查询回归：真实ConfigService/Registry验证地址待重启时
 终轮评审回归：QuickJS 加载后不调用shutdown直接drop不abort；超界响应页返回limit_exceeded且不残留游标；ExecutionApi准入限流耗尽返回limit_exceeded；start_worker替换已结束worker时保留上一代timeout历史；panic payload仅分类不格式化。Rust全量704 passed（plugin 99），clippy仅既有6项告警；前端504 passed，生产构建、SDK类型检查与脚手架构建通过。
 
 并发订阅与OJ诊断回归：插件通知store以单调代次丢弃乱序完成的迟到订阅，旧卸载函数不影响新订阅（Vitest覆盖两种重叠顺序）；query的contest.get/submission.history/scope.identity失败记录稳定类别与OJ标识，ProviderNotFound原文不落日志。Rust全量705 passed，前端507 passed。
+
+事件隔离与目录扫描回归：真实QuickJS验证首个handler抛错后其余handler与后续事件仍执行；provider校验失败后用同一游标续页成功；200个无关目录与越界符号链接不阻断目标插件；持锁并丢弃调用后存储不提交；缓存命中不触发阻塞读取。Rust全量711 passed，逐项确认去掉修复后对应回归失败。

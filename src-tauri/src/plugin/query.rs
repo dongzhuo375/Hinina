@@ -89,6 +89,15 @@ pub trait QuerySource: Send + Sync {
     /// @since 2.0
     /// @permission host-only
     /// @stability stable
+    /// Cheap cache probe for the async fast path. Implementations must not perform I/O;
+    /// the default `None` keeps the blocking read for every call.
+    fn cached_scope(&self) -> Option<QueryScope> {
+        None
+    }
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
     /// Read metadata without selecting a contest.
     async fn contest(&self, id: &str) -> PluginResult<Contest>;
     /// @plugin-api
@@ -176,6 +185,17 @@ fn provider_error_category(error: &AppError) -> &'static str {
 }
 #[async_trait]
 impl QuerySource for ServiceQueries {
+    fn cached_scope(&self) -> Option<QueryScope> {
+        // Same predicate as the cache-hit branch below, without touching session or config.
+        let snapshot = self.access.snapshot()?;
+        let cache = self.cached_scope.lock().unwrap_or_else(|e| e.into_inner());
+        cache.as_ref().and_then(|(cached, scope)| {
+            (cached.revision == snapshot.revision
+                && !cached.cancellation.is_cancelled()
+                && !snapshot.cancellation.is_cancelled())
+            .then(|| scope.clone())
+        })
+    }
     fn scope(&self, plugin_id: &str) -> PluginResult<QueryScope> {
         let snapshot = self.access.snapshot().ok_or(PluginError::ContextExpired)?;
         // Only the clone happens under the lock: session/config reads below are I/O and
@@ -337,6 +357,11 @@ impl ScopedQueries {
         self
     }
     async fn scope(&self) -> PluginResult<QueryScope> {
+        // Cache hits need no I/O: avoid a blocking-pool round trip on the hot path where
+        // every bridge call checks the scope two or three times.
+        if let Some(scope) = self.source.cached_scope() {
+            return Ok(scope);
+        }
         // identity_metadata reads the session repository. Never execute that I/O
         // on the Tokio executor, including checks before/after remote requests.
         let source = self.source.clone();
@@ -498,6 +523,58 @@ impl ScopedQueries {
             })
         })
     }
+    /// Fetch and project one native page when the cursor has nothing buffered. The caller
+    /// restores the cursor on failure, so this never mutates shared state.
+    async fn advance(
+        &self,
+        handle: &PluginQueryContext,
+        query: &PluginSubmissionQuery,
+        owner: &str,
+        cursor: &mut Cursor,
+    ) -> PluginResult<()> {
+        if !cursor.pending.is_empty() || !cursor.more {
+            return Ok(());
+        }
+        if cursor.native_page > 10_000 {
+            return Err(PluginError::LimitExceeded);
+        }
+        let page = self
+            .remote(
+                handle,
+                self.source.history(&query.contest_id, cursor.native_page),
+            )
+            .await?;
+        if page.records.len() > 1000
+            || page
+                .records
+                .iter()
+                .any(|r| r.owner_id.as_deref() != Some(owner))
+        {
+            return Err(PluginError::ProviderError);
+        }
+        cursor.native_page += 1;
+        cursor.more = page.has_more;
+        cursor.total = if query.problem_id.is_none() {
+            page.total
+        } else {
+            None
+        };
+        cursor.pending = page
+            .records
+            .into_iter()
+            .filter(|r| query.problem_id.as_ref().is_none_or(|id| *id == r.pid))
+            .map(|r| PluginSubmission {
+                submission_id: r.submit_id,
+                contest_id: query.contest_id.clone(),
+                problem_id: r.pid,
+                problem_display_id: r.display_id,
+                status: r.status.as_str().into(),
+                submitted_at: r.submit_time.saturating_mul(1000),
+            })
+            .collect();
+        bounded_json::encoded_len(&cursor.pending, MAX_CURSOR_PAGE_BYTES)?;
+        Ok(())
+    }
     /// @plugin-api
     /// @since 2.0
     /// @permission submission.read
@@ -543,45 +620,23 @@ impl ScopedQueries {
                 buffered_bytes: 0,
             }
         };
-        if cursor.pending.is_empty() && cursor.more {
-            if cursor.native_page > 10_000 {
-                return Err(PluginError::LimitExceeded);
+        if let Err(error) = self
+            .advance(handle, &query, owner.as_str(), &mut cursor)
+            .await
+        {
+            // A retryable failure (budget, provider timeout, transient IO) must not consume
+            // the caller's cursor: restore the pre-call snapshot so a retry resumes here
+            // instead of restarting from page one. An expired context stays revoked.
+            if error != PluginError::ContextExpired {
+                if let Some(id) = query.cursor.clone() {
+                    self.state
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .cursors
+                        .insert(id, cursor);
+                }
             }
-            let page = self
-                .remote(
-                    handle,
-                    self.source.history(&query.contest_id, cursor.native_page),
-                )
-                .await?;
-            if page.records.len() > 1000
-                || page
-                    .records
-                    .iter()
-                    .any(|r| r.owner_id.as_deref() != Some(owner.as_str()))
-            {
-                return Err(PluginError::ProviderError);
-            }
-            cursor.native_page += 1;
-            cursor.more = page.has_more;
-            cursor.total = if query.problem_id.is_none() {
-                page.total
-            } else {
-                None
-            };
-            cursor.pending = page
-                .records
-                .into_iter()
-                .filter(|r| query.problem_id.as_ref().is_none_or(|id| *id == r.pid))
-                .map(|r| PluginSubmission {
-                    submission_id: r.submit_id,
-                    contest_id: query.contest_id.clone(),
-                    problem_id: r.pid,
-                    problem_display_id: r.display_id,
-                    status: r.status.as_str().into(),
-                    submitted_at: r.submit_time.saturating_mul(1000),
-                })
-                .collect();
-            bounded_json::encoded_len(&cursor.pending, MAX_CURSOR_PAGE_BYTES)?;
+            return Err(error);
         }
         let records = cursor
             .pending

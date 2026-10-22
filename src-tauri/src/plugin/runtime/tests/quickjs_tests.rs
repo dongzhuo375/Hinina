@@ -273,6 +273,55 @@ async fn late_host_calls_return_catchable_timeout_before_hard_execution_deadline
 }
 
 #[tokio::test]
+async fn a_rejected_handler_does_not_stop_later_handlers_or_events() {
+    use crate::plugin::{
+        api::event::PluginEvent, api::notification::PluginNotificationLevel,
+        execution_api::NotificationOutput, test_support::Source,
+    };
+    struct Output;
+    impl NotificationOutput for Output {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("runtime-handler-failure");
+    let (api, _queries) = execution_api(Arc::new(Source::default()), Arc::new(Output), &dir);
+    let mut runtime = QuickJsRuntime::new(CancellationToken::new()).await.unwrap();
+    let script = r#"export default async h => {
+      globalThis.calls = 0;
+      h.events.on('resync.required', async () => { globalThis.calls += 1; throw Object.freeze({ code: 'limit_exceeded' }); });
+      h.events.on('resync.required', async () => { globalThis.calls += 1; });
+    }"#;
+    runtime
+        .load(
+            script,
+            api,
+            &serde_json::Value::Null,
+            vec!["resync.required".into()],
+        )
+        .await
+        .unwrap();
+    let envelope = PluginEventEnvelope {
+        version: 2,
+        sequence: 1,
+        occurred_at: 1,
+        event: PluginEvent::ResyncRequired { lost: 0 },
+    };
+    // A rejected handler is isolated: the remaining handler and later events still run.
+    runtime.deliver(&envelope).await.unwrap();
+    runtime.deliver(&envelope).await.unwrap();
+    assert_eq!(
+        runtime
+            .context
+            .with(|ctx| ctx.eval::<u32, _>("calls"))
+            .await
+            .unwrap(),
+        4
+    );
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn dropping_a_loaded_runtime_without_shutdown_releases_the_persistent_handler() {
     use crate::plugin::{
         api::notification::PluginNotificationLevel, execution_api::NotificationOutput,

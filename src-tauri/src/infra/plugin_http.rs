@@ -50,18 +50,9 @@ pub fn allowed_address(ip: IpAddr, approval: &NetworkApproval) -> bool {
             let global = ip.segments()[0] & 0xe000 == 0x2000
                 && network.is_global()
                 && !network.is_documentation()
-                && !"2001::/23"
-                    .parse::<ipnet::IpNet>()
-                    .unwrap()
-                    .contains(&IpAddr::V6(ip))
-                && !"2002::/16"
-                    .parse::<ipnet::IpNet>()
-                    .unwrap()
-                    .contains(&IpAddr::V6(ip))
-                && !"3fff::/20"
-                    .parse::<ipnet::IpNet>()
-                    .unwrap()
-                    .contains(&IpAddr::V6(ip));
+                && !reserved_v6()
+                    .iter()
+                    .any(|net| net.contains(&IpAddr::V6(ip)));
             (global, ip.is_unique_local())
         }
     };
@@ -72,6 +63,18 @@ pub fn allowed_address(ip: IpAddr, approval: &NetworkApproval) -> bool {
                 .iter()
                 .filter_map(|s| s.parse::<ipnet::IpNet>().ok())
                 .any(|net| net.contains(&ip)))
+}
+
+/// Parsed once: these ranges are checked for every resolved address of every request.
+fn reserved_v6() -> &'static [ipnet::IpNet] {
+    static RANGES: std::sync::OnceLock<[ipnet::IpNet; 3]> = std::sync::OnceLock::new();
+    RANGES.get_or_init(|| {
+        [
+            "2001::/23".parse().expect("literal CIDR"),
+            "2002::/16".parse().expect("literal CIDR"),
+            "3fff::/20".parse().expect("literal CIDR"),
+        ]
+    })
 }
 
 /// @plugin-api

@@ -31,4 +31,4 @@ TokenRotated 不在协议内。事件不能承载源码、token、认证头、�
 
 提交终态查询可多次产生相同 SubmissionJudged。该事件没有 OJ/用户/比赛作用域，只能触发刷新/重新扫描当前上下文。插件不得直接用此 ID 触发派发等副作用，需先由安全查询验证身份/比赛/历史；上下文切换和并发重判仍需重新确认。
 
-JS on/off、多个 handler 串行及超时是 [Runtime 契约](../runtime/mod.md)，当前由 QuickJsRuntime 真实执行；handler 接收 (event, envelope)。
+JS on/off、多个 handler 串行及超时是 [Runtime 契约](../runtime/mod.md)，当前由 QuickJsRuntime 真实执行；handler 接收 (event, envelope)。单个 handler 抛出的异常不会中断同事件的其他 handler 或后续事件，宿主只记录脱敏失败计数与稳定错误码。

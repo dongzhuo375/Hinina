@@ -28,6 +28,8 @@ fn ip_policy_rejects_special_targets_even_with_broad_private_grants() {
         "ff02::1",
         "2001:db8::1",
         "2002:7f00:1::",
+        "3fff:1::1",
+        "2001:2::1",
     ] {
         assert!(!allowed_address(ip.parse().unwrap(), &approval), "{ip}");
     }

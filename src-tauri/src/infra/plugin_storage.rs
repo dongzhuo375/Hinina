@@ -84,10 +84,15 @@ impl JsonPluginStorage {
         let plugin_id = self.authority.grant.manifest().id.clone();
         let join_id = plugin_id.clone();
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        // The waiting future can be dropped by the host-call deadline while this blocking
+        // task keeps running; cancel it so a timed-out write is not committed afterwards.
+        let abandoned = tokio_util::sync::CancellationToken::new();
+        let _commit_guard = AbortOnDrop(abandoned.clone());
         tokio::task::spawn_blocking(move || {
             let _subscriber = tracing::dispatcher::set_default(&dispatch);
             // Keep capacity reserved even if the waiting JS future is dropped.
             let _permit = permit;
+            let cancelled = || stopped.is_cancelled() || abandoned.is_cancelled();
             let io_error = |operation, error: std::io::Error| {
                 diagnostics::io(Some(&plugin_id), operation, &error);
                 PluginError::Unavailable
@@ -103,7 +108,7 @@ impl JsonPluginStorage {
                 .map_err(|error| io_error("storage.lock_open", error))?;
             let start = Instant::now();
             loop {
-                if stopped.is_cancelled() {
+                if cancelled() {
                     return Err(PluginError::ContextExpired);
                 }
                 match FileExt::try_lock(&lock) {
@@ -139,11 +144,16 @@ impl JsonPluginStorage {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
                 Err(error) => return Err(io_error("storage.open", error)),
             };
-            if stopped.is_cancelled() {
+            if cancelled() {
                 return Err(PluginError::ContextExpired);
             }
             let (result, changed) = edit(&mut data)?;
             if changed {
+                // Last check before the durable commit: an abandoned call must not mutate
+                // storage after the plugin already observed a timeout.
+                if cancelled() {
+                    return Err(PluginError::ContextExpired);
+                }
                 let bytes = serde_json::to_vec(&data).map_err(|error| {
                     diagnostics::json(Some(&plugin_id), "storage.encode", &error);
                     PluginError::InvalidInput
@@ -237,6 +247,14 @@ impl JsonPluginStorage {
             Ok((true, true))
         })
         .await
+    }
+}
+/// Signals an abandoned host call to the detached blocking task. Dropping the waiting
+/// future sets the token; the task re-checks it before committing anything durable.
+struct AbortOnDrop(tokio_util::sync::CancellationToken);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
     }
 }
 fn stored(value: Option<&Value>) -> PluginStorageValue {

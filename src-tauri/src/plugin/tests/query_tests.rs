@@ -1,11 +1,8 @@
+use super::*;
 use crate::plugin::test_support::*;
 use crate::{
     core::{access::AccessRevision, entity::submission::SubmissionHistoryPage},
-    plugin::{
-        api::{submission::*, *},
-        host::manifest::PluginPermission,
-        query::ScopedQueries,
-    },
+    plugin::{host::manifest::PluginPermission, query::ScopedQueries},
 };
 use std::sync::Arc;
 
@@ -704,6 +701,109 @@ async fn cursor_memory_budget_is_shared_and_released_when_continuations_are_cons
         q.list(&context, query).await,
         Err(PluginError::LimitExceeded)
     );
+}
+
+#[tokio::test]
+async fn a_failed_page_fetch_keeps_the_cursor_for_a_retry() {
+    let source = Arc::new(Source::default());
+    let mut intruder = record("2");
+    intruder.owner_id = Some("someone-else".into());
+    *source.pages.lock().unwrap() = vec![
+        SubmissionHistoryPage {
+            records: vec![record("1")],
+            total: None,
+            has_more: true,
+        },
+        SubmissionHistoryPage {
+            records: vec![intruder],
+            total: None,
+            has_more: false,
+        },
+    ];
+    let m = manifest("test.retry-cursor");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        Arc::default(),
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    let query = PluginSubmissionQuery {
+        contest_id: "contest".into(),
+        problem_id: None,
+        cursor: None,
+        limit: 1,
+    };
+    let cursor = q
+        .list(&context, query.clone())
+        .await
+        .unwrap()
+        .next_cursor
+        .unwrap();
+    // The page fails validation after the cursor was consumed; the caller must be able to
+    // retry with the same cursor instead of restarting from the first page.
+    assert_eq!(
+        q.list(
+            &context,
+            PluginSubmissionQuery {
+                cursor: Some(cursor.clone()),
+                ..query.clone()
+            },
+        )
+        .await,
+        Err(PluginError::ProviderError)
+    );
+    source.pages.lock().unwrap()[1].records = vec![record("2")];
+    let resumed = q
+        .list(
+            &context,
+            PluginSubmissionQuery {
+                cursor: Some(cursor),
+                ..query
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(resumed.records[0].submission_id, "2");
+    assert!(resumed.next_cursor.is_none());
+}
+
+#[tokio::test]
+async fn cached_scope_hits_never_touch_the_blocking_read() {
+    use crate::plugin::query::{QueryScope, QuerySource};
+    struct Cached;
+    #[async_trait::async_trait]
+    impl QuerySource for Cached {
+        fn scope(&self, _: &str) -> PluginResult<QueryScope> {
+            panic!("a cache hit must not perform the blocking scope read")
+        }
+        fn cached_scope(&self) -> Option<QueryScope> {
+            Some(QueryScope {
+                oj: "hoj".into(),
+                endpoint: "https://oj.example.com".into(),
+                user: Some(("user-1".into(), "alice".into())),
+                contest: Some("contest".into()),
+            })
+        }
+        async fn contest(&self, _: &str) -> PluginResult<Contest> {
+            unreachable!()
+        }
+        async fn history(&self, _: &str, _: u32) -> PluginResult<SubmissionHistoryPage> {
+            unreachable!()
+        }
+    }
+    let m = manifest("test.cached-hot");
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        Arc::new(Cached),
+        Arc::default(),
+        Default::default(),
+    );
+    let context = q.current_context().await.unwrap();
+    // Each bridge call checks the scope two or three times; all hits stay off the pool.
+    for _ in 0..5 {
+        q.check(&context).await.unwrap();
+    }
 }
 
 #[tokio::test]

@@ -8,7 +8,7 @@
 
 每插件独立引擎和OS worker线程，由持续存在的 Tauri Tokio handle 驱动；没有第二个 Tokio runtime。内存上限16MiB、栈256KiB、activate 10秒、一次事件交付总计30秒。同步JS由引擎 interrupt 中断；未完成Promise由取消和时间上界终止。异常/超时/内存失败停止该插件，其他插件和核心继续。
 
-同一插件最多64个 handlers，按注册顺序串行 await；on 返回注销函数。一次事件的30秒预算包含全部 handlers。handler未捕获异常会使插件失败，需局部恢复的逻辑由插件自行 catch。所有API通过有限JSON桥，最多16个在途bridge调用；错误是安全代码，无内部栈。开发调试通过状态和宿主日志进行，没有DevTools逐步调试器或source map栈输出。
+同一插件最多64个 handlers，按注册顺序串行 await；on 返回注销函数。一次事件的30秒预算包含全部 handlers。单个 handler 的未捕获异常只终止该 handler 本次调用：宿主记录脱敏计数与稳定错误码（`event.handler`/`handler_failed`），其余 handler 与后续事件继续执行，worker 不因此失败；插件仍应自行 catch 做局部恢复，避免每个事件都重复失败。所有API通过有限JSON桥，最多16个在途bridge调用；错误是安全代码，无内部栈。开发调试通过状态和宿主日志进行，没有DevTools逐步调试器或source map栈输出。
 
 状态仅 starting/running/stopped/failed。没有安装器、暂停/恢复、热更新或复杂生命周期状态机。start/reload 重新读取宿主配置并校验文件，单插件启动失败不阻止应用启动。reload 等待旧worker真正退出再创建新实例。
 

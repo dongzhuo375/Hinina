@@ -51,15 +51,26 @@
     notification: freeze(Object.fromEntries(['info', 'success', 'warn', 'error'].map(level =>
       [level, message => call('notification.notify', { level, message })]))),
   });
+  const errorCode = error => {
+    // Only a stable, host-known shape is reported; arbitrary thrown values stay opaque.
+    if (!error || typeof error !== 'object') return 'script_error';
+    const code = error.code;
+    return typeof code === 'string' && /^[a-z][a-z_]{0,39}$/.test(code) ? code : 'script_error';
+  };
   return {
     api,
     config: json => deepFreeze(parse(json)),
     // A snapshot preserves registration order and allows safe unregister during delivery.
+    // One handler's rejection must not cancel the remaining handlers or later events.
     deliver: async json => {
       const envelope = deepFreeze(parse(json));
+      let failed = 0;
+      let code = '';
       for (const { handler } of [...(handlers.get(envelope.event.type) || [])]) {
-        await handler(envelope.event, envelope);
+        try { await handler(envelope.event, envelope); }
+        catch (error) { failed += 1; if (!code) code = errorCode(error); }
       }
+      return stringify({ failed, code });
     },
   };
 })

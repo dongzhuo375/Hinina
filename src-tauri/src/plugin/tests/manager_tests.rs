@@ -1,3 +1,4 @@
+use super::*;
 use crate::plugin::test_support::*;
 use crate::{
     core::{
@@ -5,10 +6,8 @@ use crate::{
         event::{core_event::CoreEvent, core_event_bus::CoreEventBus},
     },
     plugin::{
-        api::{notification::PluginNotificationLevel, *},
-        execution_api::NotificationOutput,
-        host::manifest::PluginPermission,
-        host::plugin_host::PluginHost,
+        api::notification::PluginNotificationLevel, execution_api::NotificationOutput,
+        host::manifest::PluginPermission, host::plugin_host::PluginHost,
     },
 };
 use std::sync::{Arc, Mutex};

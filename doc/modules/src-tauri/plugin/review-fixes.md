@@ -114,6 +114,19 @@ HTTP公开成功路径在真实批准/地址/限流/超时包装下使用内存H
 
 验证：Rust 全量 705 passed，clippy 仍为既有 6 项告警，改动文件 rustfmt 通过；前端 507 passed。
 
+## 事件隔离、游标重试与目录扫描（基线ab061e8）
+
+| 发现 | 确认与处理 |
+|---|---|
+| 单个 handler 异常终止整个 worker | 存在；bootstrap 直接 await，异常使 deliver 拒绝，Manager 随即跳出事件循环并标记 failed。改为逐 handler try/catch 并返回 `{failed, code}` 摘要；宿主记录一次脱敏 `event.handler` 警告后继续。新增“两个 handler 各失败一次仍各执行两轮”的真实引擎回归 |
+| 抓取失败丢失分页游标 | 存在；list 先 remove 游标再抓取，失败后插件只能从第 1 页重来。抽出 `advance()`，失败时回填调用前快照（context_expired 除外）。新增 provider 校验失败后用同一游标续页的回归 |
+| 无关目录条目阻断所有插件 | 存在；条目读取/规范化错误、越界链接、第 129 个条目都会让 load 直接失败。改为逐条目隔离并跳过，扫描上限128只约束“未找到目标”的情形，链接按 canonical 目标判定。新增 200 个无关目录与越界符号链接（unix）回归 |
+| 超时后存储写入仍提交 | 存在；宿主调用超时只丢弃等待 future，spawn_blocking 继续执行并落盘。新增“调用已放弃”令牌（future 丢弃即置位），阻塞任务在加锁前/读取后/提交前复查。新增持锁丢弃调用后断言未写入的回归 |
+| scope 检查每次都进阻塞池 | 存在；即使缓存命中也要 spawn_blocking。新增 `QuerySource::cached_scope` 无 I/O 快路径，命中直接返回。新增“缓存命中时阻塞读取不得执行”的回归 |
+| CIDR 每次重复解析 / 测试文件缺 `use super::*` | 存在；`2001::/23`、`2002::/16`、`3fff::/20` 改为 OnceLock 一次解析；engine/manager/query 三个测试文件补 `use super::*;`，并新增 QuickJsRuntime 实现 PluginRuntime 的契约断言 |
+
+验证：Rust 全量 711 passed（新增 6 个回归，逐项验证过“去掉修复即失败”），clippy 仍为既有 6 项告警，改动文件 rustfmt 通过。
+
 ## 查询可用性与桥契约跟进（基线bc75b18）
 
 | 发现 | 确认与修复 |
