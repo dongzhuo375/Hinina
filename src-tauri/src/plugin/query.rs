@@ -4,21 +4,25 @@
 //! @stability stable
 //! Permission checked read projections and bounded, opaque, scope-bound cursors.
 use super::{
-    api::{contest::PluginContest, identity::PluginIdentity, submission::*, *},
+    api::{contest::*, identity::PluginIdentity, submission::*, *},
     bounded_json,
     host::manifest::PluginPermission,
     limits::{
         MAX_CURSORS, MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
-        MAX_QUERY_CONTEXTS, PLUGIN_QUERIES_PER_MINUTE, PLUGIN_QUERY_CONCURRENCY, PROVIDER_TIMEOUT,
-        QUERY_HANDLE_REUSE_AGE, QUERY_HANDLE_TTL, SHARED_QUERIES_PER_MINUTE,
-        SHARED_QUERY_CONCURRENCY, SUBMISSION_LOOKUP_TIMEOUT,
+        MAX_QUERY_CONTEXTS, MAX_RANK_PROBLEMS, MAX_RANK_ROWS, PLUGIN_QUERIES_PER_MINUTE,
+        PLUGIN_QUERY_CONCURRENCY, PROVIDER_TIMEOUT, QUERY_HANDLE_REUSE_AGE, QUERY_HANDLE_TTL,
+        SHARED_QUERIES_PER_MINUTE, SHARED_QUERY_CONCURRENCY, SUBMISSION_LOOKUP_TIMEOUT,
     },
     permission::PluginGrant,
 };
 use crate::{
     core::{
         access::{AccessRevision, AccessSnapshot},
-        entity::{contest::Contest, submission::SubmissionHistoryPage},
+        entity::{
+            contest::{Contest, ContestProblem},
+            rank::{ContestRankPage, RankQuery},
+            submission::SubmissionHistoryPage,
+        },
         error::AppError,
         provider::registry::ProviderRegistry,
         repository::config_repo::ConfigRepository,
@@ -121,6 +125,19 @@ pub trait QuerySource: Send + Sync {
     /// @stability stable
     /// Read metadata without selecting a contest.
     async fn contest(&self, id: &str) -> PluginResult<Contest>;
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Read the contest problem list without selecting a contest or caching.
+    async fn problems(&self, contest_id: &str) -> PluginResult<Vec<ContestProblem>>;
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission host-only
+    /// @stability stable
+    /// Read one page of the full contest rank; no metadata read, no cache.
+    async fn rank(&self, contest_id: &str, page: i64, limit: i64)
+        -> PluginResult<ContestRankPage>;
     /// @plugin-api
     /// @since 2.0
     /// @permission host-only
@@ -237,6 +254,22 @@ fn provider_error_category(error: &AppError) -> &'static str {
         AppError::Unknown(_) => "unknown",
     }
 }
+/// Stable opaque key for one account on one running provider endpoint. Shared by
+/// `identity.userKey` and rank `teamKey` so a plugin can compare itself to a row.
+fn user_key(oj: &str, endpoint: &str, uid: &str) -> String {
+    let key = serde_json::to_vec(&(oj, endpoint, uid))
+        .expect("identity key contains only JSON-serializable strings");
+    format!("{:x}", Sha256::digest(key))
+}
+
+/// Wall-clock epoch seconds; a pre-epoch clock reads as 0 (never "sealed by now").
+fn now_epoch_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 /// Single source of truth for "does this cached scope still match the live snapshot".
 /// Both the fast path (`cached_scope`) and the slow path (`scope`) must agree, or a token
 /// revoked by an OJ/account/contest switch could be served from cache. Keeping it in one
@@ -318,6 +351,38 @@ impl QuerySource for ServiceQueries {
             self.log_provider_failure("contest.get", &error);
             PluginError::ProviderError
         })
+    }
+    async fn problems(&self, contest_id: &str) -> PluginResult<Vec<ContestProblem>> {
+        self.contest
+            .list_problems(contest_id)
+            .await
+            .map_err(|error| {
+                self.log_provider_failure("contest.problems", &error);
+                PluginError::ProviderError
+            })
+    }
+    async fn rank(
+        &self,
+        contest_id: &str,
+        page: i64,
+        limit: i64,
+    ) -> PluginResult<ContestRankPage> {
+        // Plugin-visible rank is the plain board: no keyword search, starred teams
+        // kept (rank -1), no after-contest submissions (matches the frontend default).
+        let query = RankQuery {
+            current_page: page,
+            limit,
+            keyword: None,
+            remove_star: false,
+            contains_end: false,
+        };
+        self.contest
+            .get_rank(contest_id, &query)
+            .await
+            .map_err(|error| {
+                self.log_provider_failure("contest.rank", &error);
+                PluginError::ProviderError
+            })
     }
     async fn history(&self, contest: &str, page: u32) -> PluginResult<SubmissionHistoryPage> {
         self.submission
@@ -545,13 +610,14 @@ impl ScopedQueries {
     ) -> PluginResult<Option<PluginIdentity>> {
         self.require(PluginPermission::IdentityRead)?;
         let context = self.context(handle).await?;
-        Ok(context.scope.user.map(|(id, _)| {
-            let key = serde_json::to_vec(&(&context.scope.oj, &context.scope.endpoint, id))
-                .expect("identity key contains only JSON-serializable strings");
-            PluginIdentity {
-                oj_id: context.scope.oj,
-                user_key: format!("{:x}", Sha256::digest(key)),
-            }
+        let scope = context.scope;
+        let Some((id, _)) = scope.user else {
+            return Ok(None);
+        };
+        let key = user_key(&scope.oj, &scope.endpoint, &id);
+        Ok(Some(PluginIdentity {
+            oj_id: scope.oj,
+            user_key: key,
         }))
     }
     /// @plugin-api
@@ -580,12 +646,121 @@ impl ScopedQueries {
             }
         });
         result.map(|c| {
+            // Same rule as RankView: sealed only inside the seal window; the flag is
+            // explanatory, the real gate is the server withholding pass states.
+            let sealed =
+                c.seal_rank && c.seal_rank_time.is_some_and(|t| t <= now_epoch_secs());
             Some(PluginContest {
                 contest_id: c.id,
                 title: c.title.chars().take(256).collect(),
                 starts_at: c.start_time.saturating_mul(1000),
                 ends_at: c.end_time.saturating_mul(1000),
+                contest_type: if c.contest_type == 1 {
+                    PluginContestType::Oi
+                } else {
+                    PluginContestType::Acm
+                },
+                sealed,
+                sealed_until: sealed
+                    .then_some(c.seal_rank_time.map(|t| t.saturating_mul(1000)))
+                    .flatten(),
             })
+        })
+    }
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission contest.read
+    /// @stability stable
+    pub async fn problems(
+        &self,
+        handle: &PluginQueryContext,
+    ) -> PluginResult<Vec<PluginContestProblem>> {
+        self.require(PluginPermission::ContestRead)?;
+        let context = self.context(handle).await?;
+        let Some(contest) = context.scope.contest.clone() else {
+            return Err(PluginError::ContextExpired);
+        };
+        let problems = self.remote(handle, self.source.problems(&contest)).await?;
+        Ok(problems
+            .into_iter()
+            .map(|p| PluginContestProblem {
+                problem_id: p.problem_id,
+                display_id: p.display_id,
+                title: p.display_title.chars().take(256).collect(),
+                color: p.color.chars().take(64).collect(),
+            })
+            .collect())
+    }
+    /// @plugin-api
+    /// @since 2.0
+    /// @permission contest.rank
+    /// @stability stable
+    pub async fn rank(
+        &self,
+        handle: &PluginQueryContext,
+        query: PluginRankQuery,
+    ) -> PluginResult<PluginRankPage> {
+        // Both permissions are required: without metadata a plugin cannot tell a
+        // sealed board from an unsolved one, so rank must not be grantable alone.
+        self.require(PluginPermission::ContestRank)?;
+        self.require(PluginPermission::ContestRead)?;
+        query.validate()?;
+        let context = self.context(handle).await?;
+        let Some(contest) = context.scope.contest.clone() else {
+            return Err(PluginError::ContextExpired);
+        };
+        let page = self
+            .remote(handle, self.source.rank(&contest, query.page, query.limit))
+            .await?;
+        if page.records.len() > MAX_RANK_ROWS {
+            // Hydro returns the whole board as one page; fail explicitly instead of
+            // letting the bridge cap truncate the response.
+            return Err(PluginError::LimitExceeded);
+        }
+        let has_more = page.current < page.pages;
+        let rows = page
+            .records
+            .into_iter()
+            .map(|row| {
+                if row.submission_info.len() > MAX_RANK_PROBLEMS {
+                    return Err(PluginError::LimitExceeded);
+                }
+                let cells = row
+                    .submission_info
+                    .into_iter()
+                    .map(|(display_id, cell)| {
+                        let key = display_id.clone();
+                        Ok((
+                            key,
+                            PluginRankCell {
+                                display_id,
+                                solved: cell.is_ac,
+                                first_ac: cell.is_first_ac,
+                                ac_time: cell.ac_time,
+                                error_num: cell.error_num,
+                                try_num: cell.try_num,
+                                score: cell.score,
+                                after_contest: cell.is_after_contest,
+                            },
+                        ))
+                    })
+                    .collect::<PluginResult<HashMap<String, PluginRankCell>>>()?;
+                Ok(PluginRankRow {
+                    rank: row.rank,
+                    team_key: user_key(&context.scope.oj, &context.scope.endpoint, &row.uid),
+                    display_name: row.username.chars().take(256).collect(),
+                    school: row.school.chars().take(256).collect(),
+                    ac: row.ac,
+                    total_score: row.total_score,
+                    cells,
+                })
+            })
+            .collect::<PluginResult<Vec<PluginRankRow>>>()?;
+        Ok(PluginRankPage {
+            rows,
+            total: page.total,
+            page: query.page,
+            has_more,
         })
     }
     /// Fetch and project one native page when the cursor has nothing buffered. On any

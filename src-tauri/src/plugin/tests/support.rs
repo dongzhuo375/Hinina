@@ -1,4 +1,8 @@
-use crate::core::entity::{contest::Contest, submission::*};
+use crate::core::entity::{
+    contest::{Contest, ContestProblem},
+    rank::ContestRankPage,
+    submission::*,
+};
 use crate::plugin::*;
 use api::{PluginError, PluginResult};
 use async_trait::async_trait;
@@ -17,6 +21,14 @@ pub struct Source {
     pub history_started: tokio::sync::Notify,
     pub contest_calls: AtomicUsize,
     pub history_calls: AtomicUsize,
+    /// Overrides the default contest fixture; used to exercise sealed/contestType.
+    pub contest_override: Mutex<Option<Contest>>,
+    pub problems: Mutex<Vec<ContestProblem>>,
+    pub rank_page: Mutex<Option<ContestRankPage>>,
+    pub problems_calls: AtomicUsize,
+    pub rank_calls: AtomicUsize,
+    /// Captured (page, limit) pairs for rank assertions.
+    pub rank_args: Mutex<Vec<(i64, i64)>>,
 }
 impl Default for Source {
     fn default() -> Self {
@@ -35,6 +47,12 @@ impl Default for Source {
             history_started: tokio::sync::Notify::new(),
             contest_calls: AtomicUsize::new(0),
             history_calls: AtomicUsize::new(0),
+            contest_override: Mutex::new(None),
+            problems: Mutex::new(vec![]),
+            rank_page: Mutex::new(None),
+            problems_calls: AtomicUsize::new(0),
+            rank_calls: AtomicUsize::new(0),
+            rank_args: Mutex::new(vec![]),
         }
     }
 }
@@ -54,10 +72,39 @@ impl QuerySource for Source {
         if self.delay {
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         }
+        if let Some(contest) = self.contest_override.lock().unwrap().clone() {
+            return Ok(contest);
+        }
         serde_json::from_value(
             serde_json::json!({"id":"contest","title":"Fixture","startTime":1,"endTime":2}),
         )
         .map_err(|_| PluginError::ProviderError)
+    }
+    async fn problems(&self, _: &str) -> PluginResult<Vec<ContestProblem>> {
+        self.problems_calls.fetch_add(1, Ordering::SeqCst);
+        if self.pending {
+            std::future::pending::<()>().await;
+        }
+        Ok(self.problems.lock().unwrap().clone())
+    }
+    async fn rank(&self, _: &str, page: i64, limit: i64) -> PluginResult<ContestRankPage> {
+        self.rank_calls.fetch_add(1, Ordering::SeqCst);
+        self.rank_args.lock().unwrap().push((page, limit));
+        if self.pending {
+            std::future::pending::<()>().await;
+        }
+        Ok(self
+            .rank_page
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(ContestRankPage {
+                records: vec![],
+                total: 0,
+                size: 0,
+                current: 1,
+                pages: 1,
+            }))
     }
     async fn history(&self, _: &str, page: u32) -> PluginResult<SubmissionHistoryPage> {
         self.history_calls.fetch_add(1, Ordering::SeqCst);
@@ -85,7 +132,7 @@ impl QuerySource for Source {
     }
 }
 pub fn manifest(id: &str) -> PluginManifest {
-    serde_json::from_value(serde_json::json!({"id":id,"name":"Fixture","version":"1.0.0","manifestVersion":2,"apiVersion":2,"runtime":"js","entry":"index.js","permissions":["events.subscribe","submission.read","identity.read","contest.read","storage.read","storage.write","network.request","notification"],"events":["submission.judged"],"network":{"allowOrigins":["https://example.com"],"maxBodyBytes":65536,"timeoutMs":5000}})).unwrap()
+    serde_json::from_value(serde_json::json!({"id":id,"name":"Fixture","version":"1.0.0","manifestVersion":2,"apiVersion":2,"runtime":"js","entry":"index.js","permissions":["events.subscribe","submission.read","identity.read","contest.read","contest.rank","storage.read","storage.write","network.request","notification"],"events":["submission.judged"],"network":{"allowOrigins":["https://example.com"],"maxBodyBytes":65536,"timeoutMs":5000}})).unwrap()
 }
 pub fn authority(id: &str) -> Arc<ScopedQueries> {
     let m = manifest(id);

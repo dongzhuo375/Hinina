@@ -1,9 +1,17 @@
 use super::*;
 use crate::plugin::test_support::*;
 use crate::{
-    core::{access::AccessRevision, entity::submission::SubmissionHistoryPage},
+    core::{
+        access::AccessRevision,
+        entity::{
+            contest::Contest,
+            rank::{ContestRankPage, ContestRankRow, RankCell},
+            submission::SubmissionHistoryPage,
+        },
+    },
     plugin::{host::manifest::PluginPermission, query::ScopedQueries},
 };
+use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -173,6 +181,20 @@ async fn transition_during_scope_snapshot_cannot_return_a_revoked_token() {
             crate::plugin::query::QuerySource::scope(&self.source, plugin_id)
         }
         async fn contest(&self, _: &str) -> PluginResult<crate::core::entity::contest::Contest> {
+            Err(PluginError::Unavailable)
+        }
+        async fn problems(
+            &self,
+            _: &str,
+        ) -> PluginResult<Vec<crate::core::entity::contest::ContestProblem>> {
+            Err(PluginError::Unavailable)
+        }
+        async fn rank(
+            &self,
+            _: &str,
+            _: i64,
+            _: i64,
+        ) -> PluginResult<crate::core::entity::rank::ContestRankPage> {
             Err(PluginError::Unavailable)
         }
         async fn history(&self, _: &str, _: u32) -> PluginResult<SubmissionHistoryPage> {
@@ -359,6 +381,20 @@ async fn slow_scope_io_does_not_block_the_tokio_executor() {
             crate::plugin::query::QuerySource::scope(&Source::default(), plugin_id)
         }
         async fn contest(&self, _: &str) -> PluginResult<crate::core::entity::contest::Contest> {
+            unreachable!()
+        }
+        async fn problems(
+            &self,
+            _: &str,
+        ) -> PluginResult<Vec<crate::core::entity::contest::ContestProblem>> {
+            unreachable!()
+        }
+        async fn rank(
+            &self,
+            _: &str,
+            _: i64,
+            _: i64,
+        ) -> PluginResult<crate::core::entity::rank::ContestRankPage> {
             unreachable!()
         }
         async fn history(&self, _: &str, _: u32) -> PluginResult<SubmissionHistoryPage> {
@@ -863,6 +899,20 @@ async fn cached_scope_hits_never_touch_the_blocking_read() {
         async fn contest(&self, _: &str) -> PluginResult<Contest> {
             unreachable!()
         }
+        async fn problems(
+            &self,
+            _: &str,
+        ) -> PluginResult<Vec<crate::core::entity::contest::ContestProblem>> {
+            unreachable!()
+        }
+        async fn rank(
+            &self,
+            _: &str,
+            _: i64,
+            _: i64,
+        ) -> PluginResult<crate::core::entity::rank::ContestRankPage> {
+            unreachable!()
+        }
         async fn history(&self, _: &str, _: u32) -> PluginResult<SubmissionHistoryPage> {
             unreachable!()
         }
@@ -1043,6 +1093,20 @@ async fn dropping_list_during_final_scope_check_removes_unpublished_continuation
             Source::default().scope(plugin_id)
         }
         async fn contest(&self, _: &str) -> PluginResult<crate::core::entity::contest::Contest> {
+            unreachable!()
+        }
+        async fn problems(
+            &self,
+            _: &str,
+        ) -> PluginResult<Vec<crate::core::entity::contest::ContestProblem>> {
+            unreachable!()
+        }
+        async fn rank(
+            &self,
+            _: &str,
+            _: i64,
+            _: i64,
+        ) -> PluginResult<crate::core::entity::rank::ContestRankPage> {
             unreachable!()
         }
         async fn history(&self, _: &str, _: u32) -> PluginResult<SubmissionHistoryPage> {
@@ -1560,4 +1624,329 @@ fn concurrency_rejections_never_spend_a_rate_token() {
     drop(QueryBudget::acquire_pair(&local, &shared).unwrap());
     drop(QueryBudget::acquire_pair(&local, &shared).unwrap());
     assert!(QueryBudget::acquire_pair(&local, &shared).is_err());
+}
+
+fn contest_fixture(seal_rank: bool, seal_rank_time: Option<i64>, contest_type: i32) -> Contest {
+    serde_json::from_value(serde_json::json!({
+        "id": "contest", "title": "Fixture", "startTime": 1, "endTime": 2,
+        "sealRank": seal_rank, "sealRankTime": seal_rank_time, "contestType": contest_type
+    }))
+    .unwrap()
+}
+
+fn rank_row(uid: &str, rank: i32) -> ContestRankRow {
+    ContestRankRow {
+        rank,
+        uid: uid.into(),
+        username: "team-display".into(),
+        realname: format!("SECRET-realname-{uid}"),
+        nickname: format!("SECRET-nickname-{uid}"),
+        school: "School A".into(),
+        gender: "female".into(),
+        avatar: format!("SECRET-avatar-{uid}"),
+        ac: 3,
+        total: 10,
+        total_time: 300,
+        total_score: Some(300),
+        submission_info: std::collections::HashMap::from([
+            (
+                "A".to_string(),
+                RankCell {
+                    error_num: 2,
+                    try_num: None,
+                    is_ac: true,
+                    is_first_ac: true,
+                    ac_time: Some(120),
+                    is_after_contest: false,
+                    score: None,
+                },
+            ),
+            (
+                "B".to_string(),
+                RankCell {
+                    error_num: 1,
+                    try_num: Some(4),
+                    is_ac: false,
+                    is_first_ac: false,
+                    ac_time: None,
+                    is_after_contest: false,
+                    score: Some(40),
+                },
+            ),
+        ]),
+        time_info: std::collections::HashMap::new(),
+    }
+}
+
+#[tokio::test]
+async fn rank_requires_both_contest_rank_and_contest_read_permissions() {
+    let source = Arc::new(Source::default());
+    let access = Arc::new(AccessRevision::default());
+    let m = manifest("test.rank-perm");
+    let full = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source.clone(),
+        access.clone(),
+        Default::default(),
+    );
+    let c = full.current_context().await.unwrap();
+    full.rank(&c, PluginRankQuery { page: 1, limit: 50 })
+        .await
+        .unwrap();
+
+    // contest.read alone must not reach the board: rank is a separate grant.
+    let denied = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(
+            &m,
+            &m.permissions
+                .iter()
+                .copied()
+                .filter(|p| *p != PluginPermission::ContestRank)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap(),
+        source.clone(),
+        access.clone(),
+        Default::default(),
+    );
+    let c = denied.current_context().await.unwrap();
+    assert_eq!(
+        denied.rank(&c, PluginRankQuery { page: 1, limit: 50 }).await,
+        Err(PluginError::PermissionDenied {
+            permission: PluginPermission::ContestRank
+        })
+    );
+    // contest.rank without contest.read is equally rejected: without metadata a
+    // plugin cannot tell a sealed board from an unsolved one.
+    let no_read = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(
+            &m,
+            &m.permissions
+                .iter()
+                .copied()
+                .filter(|p| *p != PluginPermission::ContestRead)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap(),
+        source,
+        access,
+        Default::default(),
+    );
+    let c = no_read.current_context().await.unwrap();
+    assert_eq!(
+        no_read.rank(&c, PluginRankQuery { page: 1, limit: 50 }).await,
+        Err(PluginError::PermissionDenied {
+            permission: PluginPermission::ContestRead
+        })
+    );
+}
+
+#[tokio::test]
+async fn rank_bounds_are_enforced_before_any_fetch() {
+    let source = Arc::new(Source::default());
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    for (page, limit) in [(0, 50), (101, 50), (1, 0), (1, 201)] {
+        assert_eq!(
+            q.rank(&c, PluginRankQuery { page, limit }).await,
+            Err(PluginError::LimitExceeded),
+            "page={page} limit={limit}"
+        );
+    }
+    assert_eq!(source.rank_calls.load(AtomicOrdering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn rank_and_problems_require_a_selected_contest() {
+    let source = Arc::new(Source {
+        scope: Mutex::new(crate::plugin::query::QueryScope {
+            oj: "hoj".into(),
+            endpoint: "https://oj.example.com".into(),
+            user: Some(("user-1".into(), "alice".into())),
+            contest: None,
+        }),
+        ..Default::default()
+    });
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    assert_eq!(
+        q.rank(&c, PluginRankQuery { page: 1, limit: 50 }).await,
+        Err(PluginError::ContextExpired)
+    );
+    assert_eq!(q.problems(&c).await, Err(PluginError::ContextExpired));
+    assert_eq!(source.rank_calls.load(AtomicOrdering::SeqCst), 0);
+    assert_eq!(source.problems_calls.load(AtomicOrdering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn rank_rows_map_fields_and_team_key_matches_identity() {
+    let source = Arc::new(Source::default());
+    *source.rank_page.lock().unwrap() = Some(ContestRankPage {
+        records: vec![rank_row("user-1", 1), rank_row("star-1", -1)],
+        total: 2,
+        size: 50,
+        current: 1,
+        pages: 1,
+    });
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    let identity = q.identity(&c).await.unwrap().unwrap();
+    let page = q
+        .rank(&c, PluginRankQuery { page: 1, limit: 50 })
+        .await
+        .unwrap();
+    assert_eq!(page.total, 2);
+    assert_eq!(page.page, 1);
+    assert!(!page.has_more);
+    assert_eq!(page.rows.len(), 2);
+    let row = &page.rows[0];
+    // Same account on the same endpoint: the row key equals identity.userKey.
+    assert_eq!(row.team_key, identity.user_key);
+    assert_eq!(row.rank, 1);
+    assert_eq!(row.display_name, "team-display");
+    assert_eq!(row.school, "School A");
+    assert_eq!(row.ac, 3);
+    assert_eq!(row.total_score, Some(300));
+    let a = &row.cells["A"];
+    assert_eq!(a.display_id, "A");
+    assert!(a.solved);
+    assert!(a.first_ac);
+    assert_eq!(a.ac_time, Some(120));
+    assert_eq!(a.error_num, 2);
+    assert_eq!(a.try_num, None);
+    assert_eq!(a.score, None);
+    assert!(!a.after_contest);
+    let b = &row.cells["B"];
+    assert!(!b.solved);
+    assert!(!b.first_ac);
+    assert_eq!(b.ac_time, None);
+    assert_eq!(b.try_num, Some(4));
+    assert_eq!(b.score, Some(40));
+    // Starred teams stay visible with rank -1.
+    assert_eq!(page.rows[1].rank, -1);
+    // Redacted fields never cross the bridge.
+    let encoded = serde_json::to_string(&page).unwrap();
+    assert!(!encoded.contains("SECRET"));
+    assert!(!encoded.contains("user-1"));
+    assert!(!encoded.contains("totalTime"));
+    // The source received exactly the requested page and limit.
+    assert_eq!(*source.rank_args.lock().unwrap(), vec![(1, 50)]);
+}
+
+#[tokio::test]
+async fn team_key_changes_with_the_endpoint() {
+    let source = Arc::new(Source::default());
+    *source.rank_page.lock().unwrap() = Some(ContestRankPage {
+        records: vec![rank_row("user-1", 1)],
+        total: 1,
+        size: 50,
+        current: 1,
+        pages: 1,
+    });
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    let first = q
+        .rank(&c, PluginRankQuery { page: 1, limit: 50 })
+        .await
+        .unwrap()
+        .rows[0]
+        .team_key
+        .clone();
+    source.scope.lock().unwrap().endpoint = String::from("https://other.example.com");
+    let c = q.current_context().await.unwrap();
+    let second = q
+        .rank(&c, PluginRankQuery { page: 1, limit: 50 })
+        .await
+        .unwrap()
+        .rows[0]
+        .team_key
+        .clone();
+    assert_ne!(first, second);
+}
+
+#[tokio::test]
+async fn contest_current_projection_reports_sealed_and_type_without_reading_rank() {
+    let source = Arc::new(Source::default());
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    // Seal window already started: sealed=true, sealedUntil echoes seal time in ms.
+    *source.contest_override.lock().unwrap() = Some(contest_fixture(true, Some(1), 1));
+    let contest = q.contest(&c, None).await.unwrap().unwrap();
+    assert_eq!(contest.contest_type, PluginContestType::Oi);
+    assert!(contest.sealed);
+    assert_eq!(contest.sealed_until, Some(1000));
+    // Seal time not reached yet: sealed=false and no sealedUntil.
+    let future = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + 3600;
+    *source.contest_override.lock().unwrap() = Some(contest_fixture(true, Some(future), 0));
+    let contest = q.contest(&c, None).await.unwrap().unwrap();
+    assert_eq!(contest.contest_type, PluginContestType::Acm);
+    assert!(!contest.sealed);
+    assert_eq!(contest.sealed_until, None);
+    // seal_rank=false stays unsealed even with a time set.
+    *source.contest_override.lock().unwrap() = Some(contest_fixture(false, Some(1), 0));
+    let contest = q.contest(&c, None).await.unwrap().unwrap();
+    assert!(!contest.sealed);
+    assert_eq!(contest.sealed_until, None);
+    // The metadata projection never adds a rank data path.
+    assert_eq!(source.rank_calls.load(AtomicOrdering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn contest_problems_need_only_contest_read_and_pass_color_through() {
+    let source = Arc::new(Source::default());
+    *source.problems.lock().unwrap() = vec![
+        crate::core::entity::contest::ContestProblem {
+            id: 1,
+            display_id: "A".into(),
+            cid: "contest".into(),
+            problem_id: "P1001".into(),
+            display_title: "A + B".into(),
+            ac: 10,
+            total: 20,
+            color: "#FF0000".into(),
+        },
+        crate::core::entity::contest::ContestProblem {
+            id: 2,
+            display_id: "B".into(),
+            cid: "contest".into(),
+            problem_id: "P1002".into(),
+            display_title: "B + C".into(),
+            ac: 5,
+            total: 8,
+            color: String::new(),
+        },
+    ];
+    let access = Arc::new(AccessRevision::default());
+    let m = manifest("test.problems");
+    // contest.read alone is enough for the problem list.
+    let q = ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(
+            &m,
+            &m.permissions
+                .iter()
+                .copied()
+                .filter(|p| *p != PluginPermission::ContestRank)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap(),
+        source.clone(),
+        access,
+        Default::default(),
+    );
+    let c = q.current_context().await.unwrap();
+    let problems = q.problems(&c).await.unwrap();
+    assert_eq!(problems.len(), 2);
+    assert_eq!(problems[0].problem_id, "P1001");
+    assert_eq!(problems[0].display_id, "A");
+    assert_eq!(problems[0].title, "A + B");
+    assert_eq!(problems[0].color, "#FF0000");
+    // Hydro has no color: the empty string passes through unchanged.
+    assert_eq!(problems[1].color, "");
+    // Reading the list never selects a contest and never touches the rank path.
+    assert_eq!(source.contest_calls.load(AtomicOrdering::SeqCst), 0);
+    assert_eq!(source.rank_calls.load(AtomicOrdering::SeqCst), 0);
 }

@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
 use crate::core::entity::announcement::AnnouncementPage;
-use crate::core::entity::contest::{Contest, ContestBundle};
+use crate::core::entity::contest::{Contest, ContestBundle, ContestProblem};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::core_event::CoreEvent;
@@ -193,6 +193,21 @@ impl ContestService {
             .current_contest()?
             .get_contest(contest_id)
             .await
+    }
+
+    /// 只读比赛题目列表；不选中比赛、不落缓存。
+    ///
+    /// 插件查询路径专用：与 `load_contest_with_problems`（自动选中 + 元信息缓存）
+    /// 是两条独立取数路径，刻意不合并（见 doc/plugin/plan.md §8.1）。
+    pub async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
+        let provider = self.registry.current_contest()?;
+        provider
+            .list_contest_problems(contest_id)
+            .await
+            .map_err(|e| {
+                warn!(contest_id = contest_id, error = %e, "获取比赛题目列表失败");
+                e.context("获取比赛题目列表失败")
+            })
     }
 
     /// 获取比赛列表，优先使用缓存（TTL 由 Config 控制）。

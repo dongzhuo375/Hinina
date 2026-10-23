@@ -49,3 +49,10 @@ pub(crate) const SHARED_QUERY_CONCURRENCY: usize = 4;
 /// keeps a single line greppable; the budget stops a script from flooding the host log.
 pub(crate) const PLUGIN_LOG_BYTES: usize = 1024;
 pub(crate) const PLUGIN_LOGS_PER_MINUTE: u32 = 30;
+
+/// Rank page bounds: one page request, one page of rows, and one row's problem
+/// columns. Hydro returns the whole board as a single page, so an oversized page
+/// must fail as limit_exceeded instead of being truncated by the bridge cap.
+pub(crate) const MAX_RANK_PAGE: i64 = 100;
+pub(crate) const MAX_RANK_ROWS: usize = 200;
+pub(crate) const MAX_RANK_PROBLEMS: usize = 64;
