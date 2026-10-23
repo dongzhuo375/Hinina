@@ -86,11 +86,16 @@ JS submission.list(context, query)
   → 逐调用校验句柄/权限/取消
   → Service 只读方法
   → Provider
+JS contest.problems / contest.rank(context, query)
+  → 逐调用校验句柄/权限（rank 需 contest.rank ∩ contest.read）/取消
+  → ContestService.list_problems / get_rank（不选中比赛、不加缓存）
+  → Provider
 ```
 
 - 登录/登出/会话失效、切 OJ、换比赛、连接配置变化显式递增 revision 并取消在途调用。
 - 旧句柄、旧游标、旧授权一律失效；切走再切回也不会复活。
-- 查询只返回本人可见元数据；不读源码、题面或评测点。
+- 查询只返回本人可见元数据；不读源码、题面或评测点。榜单是唯一的全场数据出口：
+  行经 `teamKey`（与 `identity.userKey` 同算法）脱敏，不透出 uid/realname/avatar 等原始字段。
 
 ### 3.3 I/O 路径
 
@@ -175,6 +180,7 @@ JS log.*       → LogApi（execution_api 内实现）→ tracing → logs/hinin
 | 能力 | 状态 |
 |---|---|
 | 身份 / 当前比赛 / 本人提交历史 | ✅ |
+| 比赛题目列表 / 全场榜单 | ✅ `contest.problems` / `contest.rank`（独立权限 `contest.rank`） |
 | 私有 JSON + CAS | ✅ |
 | 受限 HTTP | ✅ |
 | 纯文本通知 | ✅ |

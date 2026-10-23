@@ -18,7 +18,7 @@
 
 Manifest v1/API v1 不再加载，旧 `allowHosts` / `httpsOnly` 必须迁移为精确 origin。没有静默兼容、默认扩权或 runtimeVersion 字段。PluginEventEnvelope.version 独立保持 2。
 
-宿主配置在数据目录的 `plugins.json`，与代码分离；结构见 [plugins.example.json](../sdk/plugins.example.json)。只启用 enabled=true 的 ID。批准权限与声明取交集，插件修改清单或重载不会自动获得新权限。批准的网络 origin 也必须仍在清单声明中。
+宿主配置在数据目录的 `plugins.json`，与代码分离；结构见 [plugins.example.json](../sdk/plugins.example.json)。只启用 enabled=true 的 ID。批准权限与声明取交集，插件修改清单或重载不会自动获得新权限。批准的网络 origin 也必须仍在清单声明中。`contest.rank`（全场榜单）是独立于 `contest.read` 的权限：榜单暴露其他队伍的显示名与学校，应单独批准。
 
 未获批 `events.subscribe` 的插件仍可激活并调用其他已授权 API，但不接收业务事件或初始/周期 Resync，也不能注册事件回调。
 

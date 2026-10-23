@@ -11,3 +11,5 @@ Provider单请求最多5秒；submission.get整体扫描最多8秒——单页�
 桥响应含JSON包络最多1MiB；单native提交投影页最多1MiB；返回给JS的整页另按`MAX_CURSOR_RESPONSE_BYTES`（1MiB减256字节包络余量）校验后才发布游标；每次激活全部保留游标余项的JSON字节合计最多4MiB，同时保留原有32游标/1000条native页上限。这些字节预算不等于整个进程的RSS上限。超限统一返回limit_exceeded。
 
 插件日志出口单条最多1024 UTF-8字节、每激活30条/分钟；换行/制表写入前拍平为空格，超限同样返回limit_exceeded。
+
+榜单分页边界：page 1..100、每页最多200行、单行最多64个题目列；Hydro 单页返回全量榜单，超限返回limit_exceeded而不是被桥上限截断。
