@@ -9,3 +9,5 @@ Provider单请求最多5秒；submission.get整体扫描最多8秒——单页�
 桥输入最多140000字节、operation名最多64字节（`quickjs`的无界检查与`call_json`使用同一常量）；查询句柄TTL 300秒、最多同时32个，150秒内同scope同revision复用；游标TTL同为300秒、最多32个。Provider预算为每激活60次/分钟并发2、全部插件合计120次/分钟并发4，常量集中在`plugin/limits.rs`，不向插件开放可调策略。
 
 桥响应含JSON包络最多1MiB；单native提交投影页最多1MiB；返回给JS的整页另按`MAX_CURSOR_RESPONSE_BYTES`（1MiB减256字节包络余量）校验后才发布游标；每次激活全部保留游标余项的JSON字节合计最多4MiB，同时保留原有32游标/1000条native页上限。这些字节预算不等于整个进程的RSS上限。超限统一返回limit_exceeded。
+
+插件日志出口单条最多1024 UTF-8字节、每激活30条/分钟；换行/制表写入前拍平为空格，超限同样返回limit_exceeded。

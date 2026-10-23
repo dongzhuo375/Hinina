@@ -164,6 +164,7 @@ export default async function activate(
 | 存储 | `storage.get/set/delete/compareAndSet` | `storage.read` / `storage.write`；CAS 两者都需 |
 | HTTP | `http.request(context, request)` | `network.request` + origin/地址批准 |
 | 通知 | `notification.info/success/warn/error(message)` | `notification` |
+| 日志 | `log.debug/info/warn/error(message)` | 无；只写宿主日志文件，不读宿主数据 |
 | 事件 | `events.on(name, handler)`，返回注销函数 | `events.subscribe` + 领域读取权限 |
 
 当前**没有**可执行的题面、工作区或 UI 扩展 API；`api/problem.rs`、`api/workspace.rs`、`api/ui.rs` 只是远期草案占位。公告只有 `announcement.changed` 事件与数量，没有正文查询 API。
@@ -284,6 +285,7 @@ Wire 形状**恰好**为：
 | Provider 预算（每激活） | 60 次/分钟，并发 2 |
 | Provider 预算（全部插件合计） | 120 次/分钟，并发 4 |
 | 通知 | 512 B，10 次/分钟 |
+| 日志 | 1024 B，30 次/分钟；换行/制表写入前拍平 |
 | 存储 | 键 256 B、值 64KiB、文件 1MiB；每激活 60 次/分钟，工厂合计 240 次/分钟，在途 16 |
 | HTTP | 请求/响应体 64KiB、总超时 ≤5s、每插件 60 次/分钟、并发 2；Client 缓存 32 |
 | 周期 Resync / 事件队列 | 默认 60s（10–3600s）/ 128 |
@@ -370,6 +372,8 @@ Wire 形状**恰好**为：
 5. 加契约测试：Rust 序列化/权限/边界 + 真实引擎 + 前端错误形状。
 6. 破坏性变更递增 `manifestVersion` / `apiVersion` / 事件版本，并写明迁移方式；不做静默兼容。
 7. 更新 [contracts.md](contracts.md) 与 [roadmap.md](roadmap.md)。
+
+新增权限、API 方法或事件是**增量**变更，不递增 `manifestVersion` / `apiVersion` / 事件版本，旧插件继续可用；只有删除变体、改变字段语义或必填性才递增。
 
 ## 18. 尚未定义的契约
 
