@@ -7,7 +7,7 @@
  * events.on and its unsubscribe function are synchronous and need no await.
  */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
-export type PluginPermission = 'events.subscribe' | 'submission.read' | 'contest.read' | 'identity.read' | 'storage.read' | 'storage.write' | 'network.request' | 'notification'
+export type PluginPermission = 'events.subscribe' | 'submission.read' | 'contest.read' | 'contest.rank' | 'identity.read' | 'storage.read' | 'storage.write' | 'network.request' | 'notification'
 export type PluginQueryContext = string
 export type PluginStorageValue = { state: 'missing' } | { state: 'value'; value: JsonValue }
 export type PluginLogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -30,7 +30,69 @@ export interface PluginSubmissionPage {
   total: number | null
   nextCursor: string | null
 }
-export interface PluginContest { contestId: string; title: string; startsAt: number; endsAt: number }
+export type PluginContestType = 'acm' | 'oi'
+export interface PluginContest {
+  contestId: string
+  title: string
+  startsAt: number
+  endsAt: number
+  contestType: PluginContestType
+  /** True only inside the seal window (sealRank && sealRankTime <= now). Explanatory
+   * only: the real gate is the server withholding pass states while sealed. */
+  sealed: boolean
+  /** UTC ms; non-null only while sealed (sealRankTime). */
+  sealedUntil: number | null
+}
+export interface PluginContestProblem {
+  /** Real problem id. */
+  problemId: string
+  /** In-contest display id ("A"). */
+  displayId: string
+  title: string
+  /** Balloon color; Hydro has no such field, may be ''. */
+  color: string
+}
+export interface PluginRankQuery {
+  /** 1..100 */
+  page: number
+  /** 1..200 */
+  limit: number
+}
+export interface PluginRankCell {
+  displayId: string
+  /** Always false while sealed: the server withholds pass states. */
+  solved: boolean
+  /** Server "first AC" mark; always false while sealed. */
+  firstAc: boolean
+  /** Seconds since contest start; null while sealed. */
+  acTime: number | null
+  errorNum: number
+  /** Submissions during the seal window. */
+  tryNum: number | null
+  /** OI score for this problem. */
+  score: number | null
+  afterContest: boolean
+}
+export interface PluginRankRow {
+  /** -1 marks a starred (unranked) team. */
+  rank: number
+  /** Host salted hash; same algorithm as identity.userKey, comparable to your own. */
+  teamKey: string
+  /** Server rank display name (rankShowName rule). */
+  displayName: string
+  school: string
+  ac: number
+  totalScore: number | null
+  /** Key = displayId. */
+  cells: Record<string, PluginRankCell>
+}
+export interface PluginRankPage {
+  rows: PluginRankRow[]
+  /** Includes server-pinned entries; not the participant count. */
+  total: number
+  page: number
+  hasMore: boolean
+}
 export interface PluginIdentity { ojId: string; userKey: string }
 export interface PluginHttpRequest {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -145,6 +207,24 @@ export interface Hinina {
      * @async
      */
     get(context: PluginQueryContext, contestId: string): Promise<PluginContest | null>
+    /** @plugin-api
+     * @since 2.0
+     * @permission contest.read
+     * @stability stable
+     * @async
+     * Problem list of the context-bound contest (problem id ↔ balloon color).
+     * No selected contest rejects with context_expired.
+     */
+    problems(context: PluginQueryContext): Promise<PluginContestProblem[]>
+    /** @plugin-api
+     * @since 2.0
+     * @permission contest.rank
+     * @stability stable
+     * @async
+     * Full-board rank page. Requires BOTH contest.rank and contest.read; pages are
+     * live views (no snapshot) — dedupe across pages by teamKey.
+     */
+    rank(context: PluginQueryContext, query: PluginRankQuery): Promise<PluginRankPage>
   }
   identity: {
     /** @plugin-api
