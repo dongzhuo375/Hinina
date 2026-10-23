@@ -4,10 +4,13 @@
 //! @stability stable
 //! Host-bound capability assembly and finite JSON bridge; no internal entity is serialized.
 use super::{
-    api::{contest::*, http::*, identity::*, notification::*, storage::*, submission::*, *},
+    api::{contest::*, http::*, identity::*, log::*, notification::*, storage::*, submission::*, *},
     bounded_json,
     host::manifest::PluginPermission,
-    limits::{MAX_BRIDGE_INPUT_BYTES, MAX_BRIDGE_OPERATION_BYTES, MAX_BRIDGE_RESPONSE_BYTES},
+    limits::{
+        MAX_BRIDGE_INPUT_BYTES, MAX_BRIDGE_OPERATION_BYTES, MAX_BRIDGE_RESPONSE_BYTES,
+        PLUGIN_LOGS_PER_MINUTE,
+    },
     query::ScopedQueries,
 };
 use async_trait::async_trait;
@@ -53,6 +56,7 @@ pub struct ExecutionApi {
     pub http: Arc<dyn PluginHttpApi>,
     output: Arc<dyn NotificationOutput>,
     notifications: DefaultDirectRateLimiter,
+    logs: DefaultDirectRateLimiter,
     calls: DefaultDirectRateLimiter,
 }
 impl ExecutionApi {
@@ -72,6 +76,10 @@ impl ExecutionApi {
             http,
             output,
             notifications: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(10).unwrap())),
+            // Log writes never touch a provider; the budget only protects the host log file.
+            logs: RateLimiter::direct(Quota::per_minute(
+                NonZeroU32::new(PLUGIN_LOGS_PER_MINUTE).unwrap(),
+            )),
             // Local capabilities have no provider budget; this only stops runaway loops.
             calls: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(600).unwrap())),
         }
@@ -162,6 +170,54 @@ impl NotificationApi for ExecutionApi {
             .emit(&self.queries.grant.manifest().id, level, message)
     }
 }
+#[async_trait]
+impl LogApi for ExecutionApi {
+    async fn write(&self, level: PluginLogLevel, message: &str) -> PluginResult<()> {
+        validate_log_message(message)?;
+        if self.logs.check().is_err() {
+            return Err(PluginError::LimitExceeded);
+        }
+        let manifest = self.queries.grant.manifest();
+        // Newlines/tabs are flattened before the Debug-escaped write so a log line
+        // stays greppable even if both defenses are ever changed independently.
+        let message = sanitize_log_message(message);
+        match level {
+            PluginLogLevel::Debug => tracing::debug!(
+                plugin_id = ?manifest.id,
+                plugin_version = ?manifest.version,
+                runtime = "js",
+                operation = "plugin.log",
+                level = "debug",
+                message = ?message
+            ),
+            PluginLogLevel::Info => tracing::info!(
+                plugin_id = ?manifest.id,
+                plugin_version = ?manifest.version,
+                runtime = "js",
+                operation = "plugin.log",
+                level = "info",
+                message = ?message
+            ),
+            PluginLogLevel::Warn => tracing::warn!(
+                plugin_id = ?manifest.id,
+                plugin_version = ?manifest.version,
+                runtime = "js",
+                operation = "plugin.log",
+                level = "warn",
+                message = ?message
+            ),
+            PluginLogLevel::Error => tracing::error!(
+                plugin_id = ?manifest.id,
+                plugin_version = ?manifest.version,
+                runtime = "js",
+                operation = "plugin.log",
+                level = "error",
+                message = ?message
+            ),
+        }
+        Ok(())
+    }
+}
 impl PluginApi for ExecutionApi {
     fn audit_identity(&self) -> Option<(&str, &str)> {
         let manifest = self.queries.grant.manifest();
@@ -240,6 +296,10 @@ async fn dispatch(api: &dyn PluginApi, operation: &str, args: Value) -> PluginRe
                 .await?;
             Ok(Value::Null)
         }
+        "log.write" => {
+            LogApi::write(api, decode(args["level"].clone())?, &text("message")?).await?;
+            Ok(Value::Null)
+        }
         _ => Err(PluginError::Unsupported),
     }
 }
@@ -278,6 +338,7 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
             }
             "http" => "network.request",
             "notification" => "notification",
+            "log" => "none",
             _ => "none",
         };
         tracing::debug!(plugin_id=?plugin_id, plugin_version=?plugin_version, runtime="js",event="",operation=?logged_operation,permission,

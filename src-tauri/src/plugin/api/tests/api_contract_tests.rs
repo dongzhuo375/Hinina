@@ -113,6 +113,40 @@ fn notifications_are_bounded_literal_text_and_errors_drop_internal_data() {
 }
 
 #[test]
+fn log_messages_are_bounded_and_control_characters_are_rejected() {
+    log::validate_log_message("stage=dispatch sealed=false count=3").unwrap();
+    // \n/\t pass validation; they are flattened only at write time.
+    log::validate_log_message("line\nbreak\ttab").unwrap();
+    assert_eq!(log::validate_log_message(""), Err(PluginError::InvalidInput));
+    assert_eq!(log::validate_log_message("   "), Err(PluginError::InvalidInput));
+    assert_eq!(log::validate_log_message("bad\0char"), Err(PluginError::InvalidInput));
+    assert_eq!(log::validate_log_message("bad\rchar"), Err(PluginError::InvalidInput));
+    assert_eq!(
+        log::validate_log_message(&"x".repeat(log::MAX_LOG_BYTES)),
+        Ok(())
+    );
+    assert_eq!(
+        log::validate_log_message(&"x".repeat(log::MAX_LOG_BYTES + 1)),
+        Err(PluginError::LimitExceeded)
+    );
+    // Multi-byte boundary: 342 CJK chars are 1026 UTF-8 bytes.
+    assert_eq!(
+        log::validate_log_message(&"气".repeat(342)),
+        Err(PluginError::LimitExceeded)
+    );
+    assert_eq!(log::sanitize_log_message("a\nb\tc"), "a b c");
+    for (level, wire) in [
+        (log::PluginLogLevel::Debug, "debug"),
+        (log::PluginLogLevel::Info, "info"),
+        (log::PluginLogLevel::Warn, "warn"),
+        (log::PluginLogLevel::Error, "error"),
+    ] {
+        assert_eq!(serde_json::to_value(level).unwrap(), json!(wire));
+    }
+    assert!(serde_json::from_value::<log::PluginLogLevel>(json!("verbose")).is_err());
+}
+
+#[test]
 fn plugin_error_wire_shape_matches_the_bridge_contract() {
     use crate::plugin::host::manifest::PluginPermission;
     // Exhaustive match forces future error variants to update this wire contract test.

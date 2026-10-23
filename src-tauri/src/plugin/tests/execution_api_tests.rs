@@ -122,3 +122,101 @@ async fn bridge_cas_audit_names_both_permissions_and_escapes_external_operations
     assert!(!log.contains("unknown\nFORGED"));
     assert!(!log.contains("private-value"));
 }
+
+#[tokio::test]
+async fn log_write_needs_no_permission_and_rate_limits_at_30_per_minute() {
+    struct Output;
+    impl NotificationOutput for Output {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("log-rate");
+    let manifest = crate::plugin::test_support::manifest("test.log");
+    // Empty approval: effective permissions are the intersection, so this plugin has
+    // none — and log.write must still work because the log outlet needs no permission.
+    let queries = Arc::new(ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&manifest, &[]).unwrap(),
+        Arc::new(crate::plugin::test_support::Source::default()),
+        Arc::default(),
+        Default::default(),
+    ));
+    let api = ExecutionApi::new(
+        queries.clone(),
+        Arc::new(JsonPluginStorage::new(dir.to_path_buf(), queries.clone())),
+        Arc::new(PluginHttp::new(queries, vec![]).unwrap()),
+        Arc::new(Output),
+    );
+    for i in 0..30 {
+        let response = call_json(
+            &api,
+            "log.write".into(),
+            json!({"level":"info","message":format!("line {i}")}).to_string(),
+        )
+        .await;
+        assert_eq!(
+            serde_json::from_str::<Value>(&response).unwrap(),
+            json!({"ok": true, "value": null})
+        );
+    }
+    let response = call_json(
+        &api,
+        "log.write".into(),
+        json!({"level":"info","message":"one too many"}).to_string(),
+    )
+    .await;
+    let error = serde_json::from_str::<Value>(&response).unwrap();
+    assert_eq!(error["error"]["code"], "limit_exceeded");
+    // The rate-limit error object carries only the stable code, never log content.
+    assert_eq!(error["error"].as_object().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn log_write_emits_sanitized_host_log_line() {
+    use tracing::instrument::WithSubscriber;
+    struct Output;
+    impl NotificationOutput for Output {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("log-line");
+    let queries = crate::plugin::test_support::authority("test.log-line");
+    let api = ExecutionApi::new(
+        queries.clone(),
+        Arc::new(JsonPluginStorage::new(dir.to_path_buf(), queries.clone())),
+        Arc::new(PluginHttp::new(queries, vec![]).unwrap()),
+        Arc::new(Output),
+    );
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let writer = Capture(bytes.clone());
+    let dispatch = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(move || writer.clone())
+            .finish(),
+    );
+    let response = call_json(
+        &api,
+        "log.write".into(),
+        json!({"level":"warn","message":"stage=dispatch\nquoted=\"x\"\ttab"}).to_string(),
+    )
+    .with_subscriber(dispatch)
+    .await;
+    assert_eq!(
+        serde_json::from_str::<Value>(&response).unwrap(),
+        json!({"ok": true, "value": null})
+    );
+    let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+    // The plugin log line: fixed identity fields plus the flattened, Debug-escaped message.
+    assert!(log.contains("operation=\"plugin.log\""));
+    assert!(log.contains("level=\"warn\""));
+    assert!(log.contains("WARN"));
+    assert!(log.contains("stage=dispatch quoted=\\\"x\\\" tab"));
+    assert!(!log.contains("stage=dispatch\nquoted"));
+    // The bridge audit line maps log.write to no permission.
+    assert!(log.contains("operation=\"log.write\""));
+    assert!(log.contains("permission=\"none\""));
+}

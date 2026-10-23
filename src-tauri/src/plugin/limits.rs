@@ -44,3 +44,8 @@ pub(crate) const PLUGIN_QUERIES_PER_MINUTE: u32 = 60;
 pub(crate) const PLUGIN_QUERY_CONCURRENCY: usize = 2;
 pub(crate) const SHARED_QUERIES_PER_MINUTE: u32 = 120;
 pub(crate) const SHARED_QUERY_CONCURRENCY: usize = 4;
+
+/// Plugin log outlet: one message bound and one write budget per activation. The bound
+/// keeps a single line greppable; the budget stops a script from flooding the host log.
+pub(crate) const PLUGIN_LOG_BYTES: usize = 1024;
+pub(crate) const PLUGIN_LOGS_PER_MINUTE: u32 = 30;

@@ -50,6 +50,8 @@
     http: freeze({ request: (context, request) => call('http.request', { context, request }) }),
     notification: freeze(Object.fromEntries(['info', 'success', 'warn', 'error'].map(level =>
       [level, message => call('notification.notify', { level, message })]))),
+    log: freeze(Object.fromEntries(['debug', 'info', 'warn', 'error'].map(level =>
+      [level, message => call('log.write', { level, message })]))),
   });
   const errorCode = error => {
     // Only a stable, host-known shape is reported; arbitrary thrown values stay opaque.

@@ -11,6 +11,7 @@ pub mod error;
 pub mod event;
 pub mod http;
 pub mod identity;
+pub mod log;
 pub mod notification;
 pub mod problem;
 pub mod storage;
@@ -77,6 +78,7 @@ pub trait PluginApi:
     + submission::SubmissionApi
     + contest::ContestApi
     + identity::IdentityApi
+    + log::LogApi
     + storage::PluginStorageApi
     + http::PluginHttpApi
     + notification::NotificationApi
