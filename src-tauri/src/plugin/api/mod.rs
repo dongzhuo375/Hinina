@@ -11,6 +11,7 @@ pub mod error;
 pub mod event;
 pub mod http;
 pub mod identity;
+pub mod log;
 pub mod notification;
 pub mod problem;
 pub mod storage;
@@ -67,6 +68,22 @@ pub trait ContextApi: Send + Sync {
     async fn current_context(&self) -> PluginResult<PluginQueryContext>;
 }
 
+/// 插件自由文本的共享边界（通知、日志共用）：非空、无非换行/制表控制字符、
+/// 单条不超过给定 UTF-8 字节数。单一实现，两个出口不会漂移。
+pub(crate) fn validate_literal_text(message: &str, max_bytes: usize) -> PluginResult<()> {
+    if message.trim().is_empty()
+        || message
+            .chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\t')
+    {
+        return Err(PluginError::InvalidInput);
+    }
+    if message.len() > max_bytes {
+        return Err(PluginError::LimitExceeded);
+    }
+    Ok(())
+}
+
 /// @plugin-api
 /// @since 1.0
 /// @stability stable
@@ -77,6 +94,7 @@ pub trait PluginApi:
     + submission::SubmissionApi
     + contest::ContestApi
     + identity::IdentityApi
+    + log::LogApi
     + storage::PluginStorageApi
     + http::PluginHttpApi
     + notification::NotificationApi

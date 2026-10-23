@@ -10,6 +10,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export type PluginPermission = 'events.subscribe' | 'submission.read' | 'contest.read' | 'identity.read' | 'storage.read' | 'storage.write' | 'network.request' | 'notification'
 export type PluginQueryContext = string
 export type PluginStorageValue = { state: 'missing' } | { state: 'value'; value: JsonValue }
+export type PluginLogLevel = 'debug' | 'info' | 'warn' | 'error'
 export interface PluginSubmission {
   submissionId: string
   contestId: string
@@ -220,6 +221,52 @@ export interface Hinina {
      * @permission notification
      * @stability stable
      * @async
+     */
+    error(message: string): Promise<void>
+  }
+  log: {
+    /** @plugin-api
+     * @since 2.0
+     * @permission none
+     * @stability stable
+     * @async
+     * Host log outlet: no permission, no host data read. One message is at most
+     * 1024 UTF-8 bytes; 30 written lines per minute per activation — calls the
+     * host level filter drops succeed without consuming the budget. Messages
+     * are plain strings — JSON.stringify objects yourself; there is no console.
+     */
+    debug(message: string): Promise<void>
+    /** @plugin-api
+     * @since 2.0
+     * @permission none
+     * @stability stable
+     * @async
+     * Host log outlet: no permission, no host data read. One message is at most
+     * 1024 UTF-8 bytes; 30 written lines per minute per activation — calls the
+     * host level filter drops succeed without consuming the budget. Messages
+     * are plain strings — JSON.stringify objects yourself; there is no console.
+     */
+    info(message: string): Promise<void>
+    /** @plugin-api
+     * @since 2.0
+     * @permission none
+     * @stability stable
+     * @async
+     * Host log outlet: no permission, no host data read. One message is at most
+     * 1024 UTF-8 bytes; 30 written lines per minute per activation — calls the
+     * host level filter drops succeed without consuming the budget. Messages
+     * are plain strings — JSON.stringify objects yourself; there is no console.
+     */
+    warn(message: string): Promise<void>
+    /** @plugin-api
+     * @since 2.0
+     * @permission none
+     * @stability stable
+     * @async
+     * Host log outlet: no permission, no host data read. One message is at most
+     * 1024 UTF-8 bytes; 30 written lines per minute per activation — calls the
+     * host level filter drops succeed without consuming the budget. Messages
+     * are plain strings — JSON.stringify objects yourself; there is no console.
      */
     error(message: string): Promise<void>
   }

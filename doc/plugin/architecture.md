@@ -98,9 +98,10 @@ JS submission.list(context, query)
 JS storage.*   → PluginStorageApi → infra/plugin_storage（fs4 + atomicwrites + CAS）
 JS http.request → PluginHttpApi → infra/plugin_http（独立 reqwest + origin/地址策略）
 JS notification.* → NotificationOutput → infra/plugin_notification → Tauri 事件 → 前端
+JS log.*       → LogApi（execution_api 内实现）→ tracing → logs/hinina.log
 ```
 
-所有 I/O 都在 Rust；插件不获得文件路径、Cookie、Token、进程或任意网络能力。
+所有 I/O 都在 Rust；插件不获得文件路径、Cookie、Token、进程或任意网络能力。日志出口不经 infra 端口：它只写宿主自己的日志文件，不读宿主数据，因此直接复用宿主 tracing 管道。
 
 ## 4. 生命周期
 
@@ -177,6 +178,7 @@ JS notification.* → NotificationOutput → infra/plugin_notification → Tauri
 | 私有 JSON + CAS | ✅ |
 | 受限 HTTP | ✅ |
 | 纯文本通知 | ✅ |
+| 宿主日志出口 | ✅ `hinina.log.*`，无需权限 |
 | 事件 + Resync | ✅ |
 | 题面查询 | ❌ 仅占位（`api/problem.rs`） |
 | 工作区读写 | ❌ 仅占位（`api/workspace.rs`） |

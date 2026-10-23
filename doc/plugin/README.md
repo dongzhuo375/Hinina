@@ -14,6 +14,7 @@
 - 私有 JSON 存储（原子写、文件锁、CAS）
 - 受限 HTTP（精确 origin、DNS 校验并固定、无 Cookie/代理/跳转/重试）
 - 纯文本通知
+- 宿主日志出口（`hinina.log.*`，写入宿主日志文件，无需权限）
 - start / stop / reload / resync 开发命令、TypeScript SDK、脚手架与离线打包
 
 **尚未交付**：管理 UI、持久启用/禁用与配置写入、安装/更新/回滚、插件市场、配置 schema、系统凭据引用、业务插件（首次 AC / 气球派发）、真实 HOJ/Hydro + 外部服务联调、Linux/macOS 运行时验证。

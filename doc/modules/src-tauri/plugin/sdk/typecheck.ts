@@ -1,5 +1,5 @@
 // Compile-only SDK contract checks; no plugin is executed.
-import type { Hinina, PluginSubmissionQuery } from './hinina'
+import type { Hinina, PluginLogLevel, PluginSubmissionQuery } from './hinina'
 declare const hinina: Hinina
 
 hinina.events.on('submission.judged', async event => {
@@ -27,3 +27,12 @@ async function checkStorageNull(): Promise<void> {
   }
 }
 void checkStorageNull
+
+async function checkLog(): Promise<void> {
+  await hinina.log.info('x')
+  // @ts-expect-error Log messages must be strings; stringify objects yourself.
+  await hinina.log.info(42)
+  const level: PluginLogLevel = 'warn'
+  void level
+}
+void checkLog

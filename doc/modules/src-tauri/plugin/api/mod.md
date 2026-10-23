@@ -11,6 +11,7 @@
 | 存储 | `storage.get/set/delete/compareAndSet` | storage.read / storage.write；CAS 两者都需 |
 | HTTP | `http.request(context, request)` | network.request + origin/地址批准 |
 | 通知 | `notification.info/success/warn/error(message)` | notification |
+| 日志 | `log.debug/info/warn/error(message)` | 无；只写宿主日志文件 |
 | 事件 | `events.on(name, (event, envelope) => {})`，返回注销函数 | events.subscribe + 领域读取权限 |
 
 上下文是不透明随机句柄，绑定当前实际 OJ endpoint、稳定用户 ID、比赛及本次授权；TTL 5 分钟，最多同时保留 32 个。同一 scope 与 revision 下 150 秒内的未过期句柄会被 `context.current` 复用（返回同一句柄），因此按"每个 handler 重新获取 context"的习惯不会耗尽上限；句柄超龄、scope 或 revision 变化时才新签发。登录/登出/会话失效、切 OJ/比赛和连接配置变化通过显式 AccessRevision 撤销旧上下文，切走再切回来也不会复活。查询前后验证，HTTP/读取还监听取消；重载重新签发授权，旧实例完全撤销。

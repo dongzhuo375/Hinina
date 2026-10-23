@@ -355,3 +355,41 @@ async fn dropping_a_loaded_runtime_without_shutdown_releases_the_persistent_hand
     // persistent handler before the engine, otherwise rquickjs aborts the process.
     drop(runtime);
 }
+
+#[tokio::test]
+async fn real_js_log_calls_resolve_undefined_without_throwing() {
+    use crate::plugin::{
+        api::notification::PluginNotificationLevel, execution_api::NotificationOutput,
+        test_support::Source,
+    };
+    struct Output;
+    impl NotificationOutput for Output {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("runtime-log");
+    let (api, _queries) = execution_api(Arc::new(Source::default()), Arc::new(Output), &dir);
+    let mut runtime = QuickJsRuntime::new(CancellationToken::new()).await.unwrap();
+    let script = r#"export default async h => {
+      globalThis.resolved = 0;
+      for (const level of ['debug', 'info', 'warn', 'error']) {
+        // Void host calls resolve with no value (bridge JSON null, like storage.set);
+        // the contract under test is "settles, does not throw, carries no value".
+        if ((await h.log[level]('hello ' + level)) == null) globalThis.resolved++;
+      }
+    }"#;
+    runtime
+        .load(script, api, &serde_json::Value::Null, vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime
+            .context
+            .with(|ctx| ctx.eval::<u32, _>("resolved"))
+            .await
+            .unwrap(),
+        4
+    );
+    runtime.shutdown().await;
+}

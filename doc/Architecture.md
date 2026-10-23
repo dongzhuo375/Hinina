@@ -239,6 +239,7 @@ Hinina/
         │   │   ├── storage.rs            # 私有 JSON/CAS 契约及边界检查
         │   │   ├── http.rs               # 受控请求/响应与宿主网络批准类型
         │   │   ├── notification.rs       # 纯文本通知契约
+        │   │   ├── log.rs                # 宿主日志出口契约（无需权限，写入宿主日志文件）
         │   │   ├── error.rs              # 插件安全错误白名单
         │   │   ├── ui.rs
         │   │   └── tests/

@@ -4,16 +4,20 @@
 //! @stability stable
 //! Host-bound capability assembly and finite JSON bridge; no internal entity is serialized.
 use super::{
-    api::{contest::*, http::*, identity::*, notification::*, storage::*, submission::*, *},
+    api::{contest::*, http::*, identity::*, log::*, notification::*, storage::*, submission::*, *},
     bounded_json,
     host::manifest::PluginPermission,
-    limits::{MAX_BRIDGE_INPUT_BYTES, MAX_BRIDGE_OPERATION_BYTES, MAX_BRIDGE_RESPONSE_BYTES},
+    limits::{
+        MAX_BRIDGE_INPUT_BYTES, MAX_BRIDGE_OPERATION_BYTES, MAX_BRIDGE_RESPONSE_BYTES,
+        PLUGIN_LOGS_PER_MINUTE,
+    },
     query::ScopedQueries,
 };
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde_json::{json, Value};
 use std::{num::NonZeroU32, sync::Arc};
+use tracing::{debug, error, info, warn};
 
 /// Host capability factory, injected by the composition root. Managers never construct I/O.
 pub trait PluginApiFactory: Send + Sync {
@@ -53,6 +57,7 @@ pub struct ExecutionApi {
     pub http: Arc<dyn PluginHttpApi>,
     output: Arc<dyn NotificationOutput>,
     notifications: DefaultDirectRateLimiter,
+    logs: DefaultDirectRateLimiter,
     calls: DefaultDirectRateLimiter,
 }
 impl ExecutionApi {
@@ -72,6 +77,10 @@ impl ExecutionApi {
             http,
             output,
             notifications: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(10).unwrap())),
+            // Log writes never touch a provider; the budget only protects the host log file.
+            logs: RateLimiter::direct(Quota::per_minute(
+                NonZeroU32::new(PLUGIN_LOGS_PER_MINUTE).unwrap(),
+            )),
             // Local capabilities have no provider budget; this only stops runaway loops.
             calls: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(600).unwrap())),
         }
@@ -162,6 +171,61 @@ impl NotificationApi for ExecutionApi {
             .emit(&self.queries.grant.manifest().id, level, message)
     }
 }
+#[async_trait]
+impl LogApi for ExecutionApi {
+    async fn write(&self, level: PluginLogLevel, message: &str) -> PluginResult<()> {
+        validate_log_message(message)?;
+        // Charge the budget only for lines the host will actually write: a level
+        // the host filters out must not starve later important lines. `enabled!`
+        // consults the current dispatcher, mirroring the emission check; a
+        // field-based filter could still disagree for one line, which is benign.
+        let host_writes = match level {
+            PluginLogLevel::Debug => tracing::enabled!(tracing::Level::DEBUG),
+            PluginLogLevel::Info => tracing::enabled!(tracing::Level::INFO),
+            PluginLogLevel::Warn => tracing::enabled!(tracing::Level::WARN),
+            PluginLogLevel::Error => tracing::enabled!(tracing::Level::ERROR),
+        };
+        if !host_writes {
+            return Ok(());
+        }
+        if self.logs.check().is_err() {
+            return Err(PluginError::LimitExceeded);
+        }
+        let manifest = self.queries.grant.manifest();
+        // Newlines/tabs are flattened before the Debug-escaped write so a log line
+        // stays greppable even if both defenses are ever changed independently.
+        let message = sanitize_log_message(message);
+        // tracing callsites need compile-time levels, so the macro choice is
+        // static; the six-field shape lives here exactly once.
+        macro_rules! emit_plugin_log {
+            ($event_macro:ident, $level_name:literal, $id:expr, $version:expr, $msg:expr) => {
+                $event_macro!(
+                    plugin_id = ?$id,
+                    plugin_version = ?$version,
+                    runtime = "js",
+                    operation = "plugin.log",
+                    level = $level_name,
+                    message = ?$msg
+                )
+            };
+        }
+        match level {
+            PluginLogLevel::Debug => {
+                emit_plugin_log!(debug, "debug", manifest.id, manifest.version, message)
+            }
+            PluginLogLevel::Info => {
+                emit_plugin_log!(info, "info", manifest.id, manifest.version, message)
+            }
+            PluginLogLevel::Warn => {
+                emit_plugin_log!(warn, "warn", manifest.id, manifest.version, message)
+            }
+            PluginLogLevel::Error => {
+                emit_plugin_log!(error, "error", manifest.id, manifest.version, message)
+            }
+        }
+        Ok(())
+    }
+}
 impl PluginApi for ExecutionApi {
     fn audit_identity(&self) -> Option<(&str, &str)> {
         let manifest = self.queries.grant.manifest();
@@ -240,6 +304,10 @@ async fn dispatch(api: &dyn PluginApi, operation: &str, args: Value) -> PluginRe
                 .await?;
             Ok(Value::Null)
         }
+        "log.write" => {
+            LogApi::write(api, decode(args["level"].clone())?, &text("message")?).await?;
+            Ok(Value::Null)
+        }
         _ => Err(PluginError::Unsupported),
     }
 }
@@ -278,6 +346,9 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
             }
             "http" => "network.request",
             "notification" => "notification",
+            // Known capability without a permission; kept explicit so the
+            // fallback below stays reserved for unknown operations.
+            "log" => "none",
             _ => "none",
         };
         tracing::debug!(plugin_id=?plugin_id, plugin_version=?plugin_version, runtime="js",event="",operation=?logged_operation,permission,

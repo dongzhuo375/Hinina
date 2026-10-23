@@ -15,6 +15,7 @@
 | 存储 | ✅ | 私有 JSON、fs4 + atomicwrites、CAS、配额 |
 | HTTP | ✅ | 精确 origin、DNS 校验并固定、无 Cookie/代理/跳转/重试 |
 | 通知 | ✅ | 纯文本、长度/频率限制、前端 5 条/6 秒 |
+| 宿主日志出口 | ✅ | `hinina.log.*`，1024B、30 次/分钟，无需权限 |
 | QuickJS Runtime | ✅ | 独立 worker、Promise、中断、内存/栈限制 |
 | 生命周期 | ✅ | start/stop/reload/resync、失败隔离、reaper |
 | 开发入口 / SDK | ✅ | 5 个命令、`hinina.d.ts`、脚手架、离线打包 |

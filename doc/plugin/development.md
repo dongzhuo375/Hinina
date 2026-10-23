@@ -120,17 +120,29 @@ if (contest) {
 - 空 `records` 仍可能有 `nextCursor`；
 - 不把“当前用户可见历史”当成“全站所有队伍的首次 AC”。
 
-### 1.6 常见失败
+### 1.6 日志
+
+`hinina.log.debug/info/warn/error(message)` 把一条文本写进宿主日志文件
+`logs/hinina.log`（设置页可查看路径）。无需权限，也不读任何宿主数据。
+
+- 参数必须是字符串；对象自己 `JSON.stringify`，宿主不注入 `console`。
+- 单条 ≤1024 UTF-8 字节；每激活 30 条/分钟，超限抛 `limit_exceeded`，不静默丢弃。
+- 换行/制表符写入前被拍平为空格，消息整体 Debug 转义；日志按行可 grep。
+- `debug` 级跟随宿主日志级别：release 默认 `info` 会过滤 `debug` 级插件日志
+  （被过滤的调用不消耗限流额度），开发构建或 `RUST_LOG=debug` 可见全部。
+- 日志是排错通道，不是业务凭据；不要写 Token、用户名、源码或响应正文。
+
+### 1.7 常见失败
 
 | 现象 | 排查 |
 |---|---|
 | 插件未加载 | `plugins.json` 是否存在、`enabled`、ID 是否匹配、清单/版本/入口是否合法 |
 | `permission_denied` | Manifest 是否声明、`plugins.json` 是否批准、事件载荷是否还需领域读取权限 |
 | `context_expired` | 登录/登出、切 OJ/比赛、连接配置变化；重新 `context.current()` |
-| `limit_exceeded` | 分页/扫描/存储/HTTP/通知/桥调用预算；缩小批量、保存进度 |
+| `limit_exceeded` | 分页/扫描/存储/HTTP/通知/日志/桥调用预算；缩小批量、保存进度 |
 | `timeout` | activate 10s、事件 30s、单请求 5s、`submission.get` 8s；拆分工作 |
 | `unsupported` | 调用了未实现的 API（题面/工作区/UI 等占位能力） |
-| `script_error` | 语法错误、未捕获异常、内存分配失败以外的脚本失败；看宿主日志的稳定码 |
+| `script_error` | 语法错误、未捕获异常、内存分配失败以外的脚本失败；看宿主日志的稳定码，并在关键步骤用 `hinina.log.*` 输出阶段 |
 | 启动失败但无栈 | 设计如此；用状态、存储、通知和宿主 tracing 定位 |
 
 ## 2. 插件作者契约清单
@@ -144,6 +156,7 @@ if (contest) {
 - [ ] 存储用 `missing` 与 JSON `null` 区分状态；CAS 只保证本地，不保证远端 exactly-once。
 - [ ] HTTP 使用外部幂等键；超时/500 由插件自行重试，核心不重试派发。
 - [ ] 不把通知当成功凭据；不输出 Token、用户名、源码、路径或响应正文。
+- [ ] 排错用 `hinina.log.*` 输出阶段与计数；不写敏感内容，不依赖日志做业务判断。
 - [ ] 业务规则（首次 AC、可见历史完整性、稳定排序、派发恢复）由插件实现。
 
 ## 3. 宿主施工步骤
