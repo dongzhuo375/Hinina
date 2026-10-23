@@ -3,7 +3,7 @@
 //! @version 1
 //! @stability stable
 //! 纯文本用户通知契约。接收端只能按文本渲染，不能执行 HTML/脚本。
-use super::{PluginError, PluginResult};
+use super::PluginResult;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -31,17 +31,7 @@ pub enum PluginNotificationLevel {
 /// @stability stable
 /// 验证文本长度与控制字符；保留字面 HTML 文本，不将其解释为标记。
 pub fn validate_message(message: &str) -> PluginResult<()> {
-    if message.trim().is_empty()
-        || message
-            .chars()
-            .any(|c| c.is_control() && c != '\n' && c != '\t')
-    {
-        return Err(PluginError::InvalidInput);
-    }
-    if message.len() > MAX_NOTIFICATION_BYTES {
-        return Err(PluginError::LimitExceeded);
-    }
-    Ok(())
+    super::validate_literal_text(message, MAX_NOTIFICATION_BYTES)
 }
 
 /// @plugin-api

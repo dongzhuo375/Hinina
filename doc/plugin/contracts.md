@@ -285,7 +285,7 @@ Wire 形状**恰好**为：
 | Provider 预算（每激活） | 60 次/分钟，并发 2 |
 | Provider 预算（全部插件合计） | 120 次/分钟，并发 4 |
 | 通知 | 512 B，10 次/分钟 |
-| 日志 | 1024 B，30 次/分钟；换行/制表写入前拍平 |
+| 日志 | 1024 B，30 次/分钟（仅对宿主实际写入的行计费，被级别过滤的调用不扣额度）；换行/制表写入前拍平 |
 | 存储 | 键 256 B、值 64KiB、文件 1MiB；每激活 60 次/分钟，工厂合计 240 次/分钟，在途 16 |
 | HTTP | 请求/响应体 64KiB、总超时 ≤5s、每插件 60 次/分钟、并发 2；Client 缓存 32 |
 | 周期 Resync / 事件队列 | 默认 60s（10–3600s）/ 128 |
@@ -360,7 +360,7 @@ Wire 形状**恰好**为：
 - `infra → plugin` 单向；业务 Service 不导入插件专用 Infra。
 - 前端禁止跨层；Bridge 是唯一 `@tauri-apps/api` 入口。
 - 安全依赖显式 `AccessRevision`，不依赖事件；转换期间 `snapshot()` 为 `None`。
-- 日志只含稳定操作名、`plugin_id/version`、错误类别；禁止 URL、凭据、正文、路径、JS 栈、panic payload。
+- 日志只含稳定操作名、`plugin_id/version`、错误类别；禁止 URL、凭据、正文、路径、JS 栈、panic payload。唯一例外是 `operation="plugin.log"` 行：携带经校验（≤1024B、拒控制字符）、换行/制表拍平且 Debug 转义的插件 message，是日志中唯一允许的插件自由文本，仍禁止凭据等敏感内容。
 - 文档与代码不一致视为缺陷；文件树/职责变更同步 `doc/Architecture.md` 与 `doc/modules/`。
 
 ## 17. 契约变更流程

@@ -134,7 +134,12 @@ fn log_messages_are_bounded_and_control_characters_are_rejected() {
         log::validate_log_message(&"气".repeat(342)),
         Err(PluginError::LimitExceeded)
     );
-    assert_eq!(log::sanitize_log_message("a\nb\tc"), "a b c");
+    assert_eq!(log::sanitize_log_message("a\nb\tc").as_ref(), "a b c");
+    // No flattening needed: the original string is borrowed, not re-allocated.
+    assert!(matches!(
+        log::sanitize_log_message("plain"),
+        std::borrow::Cow::Borrowed("plain")
+    ));
     for (level, wire) in [
         (log::PluginLogLevel::Debug, "debug"),
         (log::PluginLogLevel::Info, "info"),

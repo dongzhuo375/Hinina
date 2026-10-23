@@ -231,8 +231,9 @@ export interface Hinina {
      * @stability stable
      * @async
      * Host log outlet: no permission, no host data read. One message is at most
-     * 1024 UTF-8 bytes; 30 writes per minute per activation. Messages are plain
-     * strings — JSON.stringify objects yourself; there is no console object.
+     * 1024 UTF-8 bytes; 30 written lines per minute per activation — calls the
+     * host level filter drops succeed without consuming the budget. Messages
+     * are plain strings — JSON.stringify objects yourself; there is no console.
      */
     debug(message: string): Promise<void>
     /** @plugin-api
@@ -241,8 +242,9 @@ export interface Hinina {
      * @stability stable
      * @async
      * Host log outlet: no permission, no host data read. One message is at most
-     * 1024 UTF-8 bytes; 30 writes per minute per activation. Messages are plain
-     * strings — JSON.stringify objects yourself; there is no console object.
+     * 1024 UTF-8 bytes; 30 written lines per minute per activation — calls the
+     * host level filter drops succeed without consuming the budget. Messages
+     * are plain strings — JSON.stringify objects yourself; there is no console.
      */
     info(message: string): Promise<void>
     /** @plugin-api
@@ -251,8 +253,9 @@ export interface Hinina {
      * @stability stable
      * @async
      * Host log outlet: no permission, no host data read. One message is at most
-     * 1024 UTF-8 bytes; 30 writes per minute per activation. Messages are plain
-     * strings — JSON.stringify objects yourself; there is no console object.
+     * 1024 UTF-8 bytes; 30 written lines per minute per activation — calls the
+     * host level filter drops succeed without consuming the budget. Messages
+     * are plain strings — JSON.stringify objects yourself; there is no console.
      */
     warn(message: string): Promise<void>
     /** @plugin-api
@@ -261,8 +264,9 @@ export interface Hinina {
      * @stability stable
      * @async
      * Host log outlet: no permission, no host data read. One message is at most
-     * 1024 UTF-8 bytes; 30 writes per minute per activation. Messages are plain
-     * strings — JSON.stringify objects yourself; there is no console object.
+     * 1024 UTF-8 bytes; 30 written lines per minute per activation — calls the
+     * host level filter drops succeed without consuming the budget. Messages
+     * are plain strings — JSON.stringify objects yourself; there is no console.
      */
     error(message: string): Promise<void>
   }

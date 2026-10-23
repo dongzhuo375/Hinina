@@ -128,8 +128,8 @@ if (contest) {
 - 参数必须是字符串；对象自己 `JSON.stringify`，宿主不注入 `console`。
 - 单条 ≤1024 UTF-8 字节；每激活 30 条/分钟，超限抛 `limit_exceeded`，不静默丢弃。
 - 换行/制表符写入前被拍平为空格，消息整体 Debug 转义；日志按行可 grep。
-- `debug` 级跟随宿主日志级别：release 默认 `info` 会过滤 `debug` 级插件日志，
-  开发构建或 `RUST_LOG=debug` 可见全部。
+- `debug` 级跟随宿主日志级别：release 默认 `info` 会过滤 `debug` 级插件日志
+  （被过滤的调用不消耗限流额度），开发构建或 `RUST_LOG=debug` 可见全部。
 - 日志是排错通道，不是业务凭据；不要写 Token、用户名、源码或响应正文。
 
 ### 1.7 常见失败

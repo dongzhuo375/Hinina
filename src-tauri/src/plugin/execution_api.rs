@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde_json::{json, Value};
 use std::{num::NonZeroU32, sync::Arc};
+use tracing::{debug, error, info, warn};
 
 /// Host capability factory, injected by the composition root. Managers never construct I/O.
 pub trait PluginApiFactory: Send + Sync {
@@ -174,6 +175,19 @@ impl NotificationApi for ExecutionApi {
 impl LogApi for ExecutionApi {
     async fn write(&self, level: PluginLogLevel, message: &str) -> PluginResult<()> {
         validate_log_message(message)?;
+        // Charge the budget only for lines the host will actually write: a level
+        // the host filters out must not starve later important lines. `enabled!`
+        // consults the current dispatcher, mirroring the emission check; a
+        // field-based filter could still disagree for one line, which is benign.
+        let host_writes = match level {
+            PluginLogLevel::Debug => tracing::enabled!(tracing::Level::DEBUG),
+            PluginLogLevel::Info => tracing::enabled!(tracing::Level::INFO),
+            PluginLogLevel::Warn => tracing::enabled!(tracing::Level::WARN),
+            PluginLogLevel::Error => tracing::enabled!(tracing::Level::ERROR),
+        };
+        if !host_writes {
+            return Ok(());
+        }
         if self.logs.check().is_err() {
             return Err(PluginError::LimitExceeded);
         }
@@ -181,39 +195,33 @@ impl LogApi for ExecutionApi {
         // Newlines/tabs are flattened before the Debug-escaped write so a log line
         // stays greppable even if both defenses are ever changed independently.
         let message = sanitize_log_message(message);
+        // tracing callsites need compile-time levels, so the macro choice is
+        // static; the six-field shape lives here exactly once.
+        macro_rules! emit_plugin_log {
+            ($event_macro:ident, $level_name:literal, $id:expr, $version:expr, $msg:expr) => {
+                $event_macro!(
+                    plugin_id = ?$id,
+                    plugin_version = ?$version,
+                    runtime = "js",
+                    operation = "plugin.log",
+                    level = $level_name,
+                    message = ?$msg
+                )
+            };
+        }
         match level {
-            PluginLogLevel::Debug => tracing::debug!(
-                plugin_id = ?manifest.id,
-                plugin_version = ?manifest.version,
-                runtime = "js",
-                operation = "plugin.log",
-                level = "debug",
-                message = ?message
-            ),
-            PluginLogLevel::Info => tracing::info!(
-                plugin_id = ?manifest.id,
-                plugin_version = ?manifest.version,
-                runtime = "js",
-                operation = "plugin.log",
-                level = "info",
-                message = ?message
-            ),
-            PluginLogLevel::Warn => tracing::warn!(
-                plugin_id = ?manifest.id,
-                plugin_version = ?manifest.version,
-                runtime = "js",
-                operation = "plugin.log",
-                level = "warn",
-                message = ?message
-            ),
-            PluginLogLevel::Error => tracing::error!(
-                plugin_id = ?manifest.id,
-                plugin_version = ?manifest.version,
-                runtime = "js",
-                operation = "plugin.log",
-                level = "error",
-                message = ?message
-            ),
+            PluginLogLevel::Debug => {
+                emit_plugin_log!(debug, "debug", manifest.id, manifest.version, message)
+            }
+            PluginLogLevel::Info => {
+                emit_plugin_log!(info, "info", manifest.id, manifest.version, message)
+            }
+            PluginLogLevel::Warn => {
+                emit_plugin_log!(warn, "warn", manifest.id, manifest.version, message)
+            }
+            PluginLogLevel::Error => {
+                emit_plugin_log!(error, "error", manifest.id, manifest.version, message)
+            }
         }
         Ok(())
     }
@@ -338,6 +346,8 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
             }
             "http" => "network.request",
             "notification" => "notification",
+            // Known capability without a permission; kept explicit so the
+            // fallback below stays reserved for unknown operations.
             "log" => "none",
             _ => "none",
         };

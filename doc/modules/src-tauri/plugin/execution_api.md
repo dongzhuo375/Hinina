@@ -2,7 +2,7 @@
 
 ExecutionApi把ScopedQueries、插件私有存储、独立HTTP、文本NotificationOutput和宿主日志出口装配为PluginApi。存储与HTTP以 `PluginStorageApi`/`PluginHttpApi` 端口持有，具体实现由 `FsPluginApiFactory` 在组合根注入，本模块不导入 infra 类型；每次激活的实例是 `ExecutionApi::new` 的私有依赖组合，测试可直接替换端口。每种能力重新检查授权；call_json接受有限operation和JSON，返回稳定白名单错误，不透传内部实体或栈。
 
-日志出口（`LogApi`）不需要权限：只写宿主自己的日志文件，不读宿主数据。写入前校验单条 ≤1024 字节并拍平换行/制表，消息以 Debug 转义落盘，行内字段固定为 plugin_id/plugin_version/runtime/operation/level/message；每激活 30 条/分钟，超限返回 limit_exceeded 而非静默丢弃。
+日志出口（`LogApi`）不需要权限：只写宿主自己的日志文件，不读宿主数据。写入前先按当前订阅者检查级别（`tracing::enabled!`），被过滤的调用直接成功且不扣额度；通过者再校验单条 ≤1024 字节并扣 30 条/分钟的独立预算，超限返回 limit_exceeded 而非静默丢弃。落盘前拍平换行/制表（无需拍平时借用原串），消息以 Debug 转义，行内字段固定为 plugin_id/plugin_version/runtime/operation/level/message。
 
 Runtime最多16个在途桥调用。每次桥调用还须通过按激活的准入限流（600 次/分钟），覆盖不经过Provider预算的本地能力，防止脚本在context/identity/storage上空转；超限返回limit_exceeded且不进入分发。API日志只包含固定身份/操作/权限/成功/请求ID，不记录参数或数据。参见[API](api/mod.md)。
 
