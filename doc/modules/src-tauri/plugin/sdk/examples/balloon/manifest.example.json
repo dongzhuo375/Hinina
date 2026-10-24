@@ -1,0 +1,29 @@
+{
+  "id": "com.example.balloon",
+  "name": "首次 AC 气球参考插件",
+  "version": "1.0.0",
+  "manifestVersion": 2,
+  "runtime": "js",
+  "entry": "index.js",
+  "apiVersion": 2,
+  "description": "Reference first-AC balloon dispatcher: resync-driven board watch, seal-aware, idempotent dispatch to one configured HTTPS endpoint.",
+  "author": "Hinina",
+  "permissions": [
+    "events.subscribe",
+    "contest.read",
+    "contest.rank",
+    "storage.read",
+    "storage.write",
+    "network.request"
+  ],
+  "events": [
+    "resync.required"
+  ],
+  "network": {
+    "allowOrigins": ["https://httpbin.org"],
+    "maxBodyBytes": 65536,
+    "timeoutMs": 5000
+  },
+  "contributes": [],
+  "configSchema": {}
+}
