@@ -27,6 +27,7 @@ Runtime、Manager 和查询桥共用的内部常量模块——执行期限、�
 ## 被依赖
 - `plugin::query`、`plugin::execution_api`、`plugin::runtime::quickjs`、`plugin::manager`
 - `plugin::api::log`（`MAX_LOG_BYTES` 引用 `PLUGIN_LOG_BYTES`）
+- `plugin::api::contest`（`PluginRankQuery::validate` 引用 `MAX_RANK_PAGE`/`MAX_RANK_ROWS`）
 
 ## 逻辑流程
 - **启动截止 fail closed**：调用方未及时观察到 ready，即使引擎刚完成激活也撤销并记 timeout——启动截止边界宁可误杀不可漏放

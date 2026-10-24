@@ -13,6 +13,7 @@ Plugin Manifest v2 的解析与校验：未知字段、权限、事件均拒绝�
 
 ## 直接依赖
 - `serde`、`std::collections::HashSet`、`thiserror`
+- `url`（`valid_origin` 的 origin 解析与域名判定）、`semver`（version/minAppVersion 校验）
 
 ## 被依赖
 - `plugin::permission`（授权交集计算）、`plugin::registry`（清单加载）、`plugin::host::event_adapter`（事件白名单）

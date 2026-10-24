@@ -4,7 +4,7 @@
 `ScopedQueries`——绑定 PluginGrant 的安全查询 Adapter：作用域句柄签发与复核、只读比赛/题目/榜单/本人提交历史的取数与投影、游标分页、Provider 速率与并发预算。JS 的一切数据读取都经过这里。
 
 ## 核心类型/函数
-- **`QueryScope`** — 解析后的作用域：OJ、实际 endpoint、稳定用户、当前比赛、取消令牌
+- **`QueryScope`** — 解析后的作用域快照：`oj`、`endpoint`、`user: Option<(String, String)>`、`contest: Option<String>`——**不含撤销栅栏**；取消令牌在内部 `Context`（scope/revision/cancellation/created）里，由 `check()` 返回
 - **`QuerySource`**（trait）— 只提供 scope、只读比赛、题目列表、全场榜单和本人 native 历史；不调用 Command、不含源码详情
 - **`OjInstanceConfig`**（trait）— 连接配置抽象（endpoint 与待重启语义）
 - **`ServiceQueries`** — 生产 `QuerySource`：调用最小 Service 读路径；按 AccessRevision 缓存一个 scope
@@ -13,7 +13,7 @@
   - `require(permission)` — 权限检查（停止即 context_expired）
   - `check(handle) -> CancellationToken` — 句柄复核：TTL/revision/scope/取消四重校验，返回撤销栅栏
   - `current_context()` — 签发/复用句柄（同 scope+revision 150 秒内复用）
-  - `identity` / `contest` / `get_contest` / `problems` / `rank` / `list` / `submission` — 各只读查询
+  - `identity` / `contest` / `problems` / `rank` / `list` / `submission` — 六个只读查询；`contest(handle, id)` 的可选 id 参数同时覆盖 contest.current（无 id）与 contest.get（有 id），没有独立的 get_contest 方法
   - （私有）`remote` — 预算获取 + 超时 + 前后校验的取数包装
 
 ## 直接依赖

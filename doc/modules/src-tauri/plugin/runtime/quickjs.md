@@ -27,7 +27,7 @@
 - 停止时撤销 API、移除订阅、清理 Persistent 句柄并 shutdown；`Drop` 也先释放 Persistent 句柄——覆盖 worker panic 未调用 shutdown 的展开路径，避免 rquickjs 因句柄晚于 runtime 析构而 abort 进程
 
 ### 事件投递与错误分类
-- 按 handler 隔离：bootstrap 逐个 await 并捕获，返回 `{failed, code}` 摘要（code 受限 `[a-z_]{1,40}`，不可注入日志字段但仍可能由插件提供，按不可信诊断提示处理；非宿主形状一律记为 script_error）。宿主按 code 节流输出脱敏 warn（首次立即、60 秒内累计、到期合并带累计计数）后继续后续 handler 与事件——只有引擎级失败（超时、内存、撤销）才结束 worker
+- 按 handler 隔离：bootstrap 逐个 await 并捕获，返回 `{failed, code}` 摘要（code 受限 `^[a-z][a-z_]{0,39}$`——首字符不许下划线，不可注入日志字段但仍可能由插件提供，按不可信诊断提示处理；非宿主形状一律记为 script_error）。宿主按 code 节流输出脱敏 warn（首次立即、60 秒内累计、到期合并带累计计数）后继续后续 handler 与事件——只有引擎级失败（超时、内存、撤销）才结束 worker
 - 引擎 Allocation 错误映射 `limit_exceeded`
 - host promise rejection tracker 仅记录 Promise 身份摘要（最多 256 项及溢出标志），同一窗口补装 handler 会移除记录；load/deliver 结束及 shutdown 汇总输出 promise.rejection/unhandled_rejection 警告和计数后清空——不保存或格式化 reason、不调用 JS toString、不输出栈或秘密。未被调度的调用可能尚未产生拒绝，该诊断不保证发现所有游离调用
 - 错误码：语法/脚本异常 → `script_error`；截止到达 → `timeout`；停止/作用域撤销 → `context_expired`；初始化或引擎基础设施不可用 → `unavailable`。日志只保留稳定类别，不输出异常消息、栈、源码或路径

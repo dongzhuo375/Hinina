@@ -4,6 +4,8 @@
 插件可见能力面的模块入口：声明 `PluginApi` 组合 trait 并 re-export 错误/DTO。真实方法以 [hinina.d.ts](../sdk/hinina.d.ts) 为准；由 Runtime 注入的对象已冻结。
 
 ## 核心类型/函数
+- `pub struct PluginQueryContext(String)` — **不透明句柄**（本文件定义）：绑定 scope/revision 的随机串，贯穿所有需要 context 参数的 API；TTL/复用语义见下方"上下文"一节
+- `pub trait ContextApi` — `current_context() -> PluginResult<PluginQueryContext>`（无权限要求）
 - `pub trait PluginApi: ContextApi + IdentityApi + ContestApi + SubmissionApi + PluginStorageApi + PluginHttpApi + NotificationApi + LogApi` — 能力组合 trait
 - `pub use error::{PluginError, PluginResult}` — 错误契约（见 [error.md](error.md)）
 

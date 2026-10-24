@@ -26,7 +26,7 @@
 - 入口是离线打包 ES module：`export default async function activate(hinina, config)`。源码 ≤1 MiB，配置 JSON ≤64 KiB 且深冻结；宿主无 resolver/loader——不支持任意 import、原生模块、fs/process/env/fetch/socket/shell；TS 在宿主外经 esbuild 等构建，宿主不执行 TS 源文件
 - **异步契约**：所有 Promise 返回的宿主 API 必须 await，或加入 activate/handler 返回的 Promise 链（并发用 await Promise.all）；入口结束后不 drain 游离调用、不保证它们执行或报告拒绝；events.on/注销函数同步执行
 - 每插件独立引擎和 OS worker 线程，由持续存在的 Tauri Tokio handle 驱动（没有第二个 Tokio runtime）；内存 16 MiB、栈 256 KiB、activate 10 秒、单事件交付总计 30 秒。同步 JS 由引擎 interrupt 中断，未完成 Promise 由取消和时间上界终止；异常/超时/内存失败停止该插件，其他插件和核心继续
-- 同一插件最多 64 个 handlers，按注册顺序串行 await；on 返回注销函数；一次事件的 30 秒预算包含全部 handlers。单个 handler 的未捕获异常只终止该 handler 本次调用——宿主记录脱敏计数与稳定错误码（`event.handler`/`handler_failed`），其余 handler 与后续事件继续、worker 不因此失败；失败告警按 code 节流（首次立即、60 秒内累计、到期合并一条带累计计数）。Manager 据此主动入队一次 Resync 对账（Resync 通知自身不再触发，避免失败循环，周期 tick 兜底）；插件仍应自行 catch 做局部恢复
+- 同一插件最多 64 个 handlers，按注册顺序串行 await；on 返回注销函数；一次事件的 30 秒预算包含全部 handlers。单个 handler 的未捕获异常只终止该 handler 本次调用——宿主记录脱敏计数与稳定错误码（`event.handler`/`handler_failed`，code 形状为 `^[a-z][a-z_]{0,39}$`），其余 handler 与后续事件继续、worker 不因此失败；失败告警按 code 节流（首次立即、60 秒内累计、到期合并一条带累计计数）。Manager 据此主动入队一次 Resync 对账（Resync 通知自身不再触发，避免失败循环，周期 tick 兜底）；插件仍应自行 catch 做局部恢复
 - 所有 API 经有限 JSON 桥（最多 16 个在途调用）；错误是安全代码、无内部栈。开发调试靠状态和宿主日志——没有 DevTools 逐步调试器或 source map 栈输出
 
 ### 生命周期

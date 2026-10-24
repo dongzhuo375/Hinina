@@ -6,7 +6,7 @@
 ## 核心类型/函数
 - **`PluginStatus`** — 列表视图：插件 ID、状态、失败诊断等稳定字段
 - **`PluginManager`**：
-  - `new(...)` — 仓库、工厂、共享 Provider 预算、Resync 间隔由组合根注入
+  - `new(repository, factory, host, source, access)` — 组合根注入五项：文件仓库、API 工厂、PluginHost、QuerySource、AccessRevision；**共享 Provider 预算在 new() 内部按 limits 常量构造**（`SHARED_QUERIES_PER_MINUTE`/`SHARED_QUERY_CONCURRENCY`），Resync 间隔来自每个插件 approval 的 `resyncIntervalSecs`（测试可用 override 覆盖），二者都不是注入项
   - `set_output(Arc<dyn NotificationOutput>)` — 通知出口
   - `list() -> PluginResult<Vec<PluginStatus>>` — 状态汇总（语义见下）
   - `start(id)` / `stop(id)` / `reload(id)` — 生命周期命令（串行化）

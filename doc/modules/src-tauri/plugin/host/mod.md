@@ -18,6 +18,7 @@
 
 ## 被依赖
 - `plugin::manager`（订阅与交付消费）、`plugin::permission`（授权快照）
+- `plugin::registry`（清单类型 `host::manifest::*`）、`plugin::api::error`（`PluginPermission` 载荷）
 
 ## 逻辑流程
 - Host 不运行 JS、不加载文件、不管理业务动作；事件从 CoreEventBus 经 PluginHost 白名单/权限过滤后进入每插件有界队列

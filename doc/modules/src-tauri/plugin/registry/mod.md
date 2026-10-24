@@ -6,7 +6,7 @@
 ## 核心类型/函数
 - **`PluginApproval`** — 单插件批准（enabled、permissions、network、resyncIntervalSecs、options 等）；`validate()` 校验结构与间隔
 - **`PluginConfiguration`** — `plugins.json` 整体（plugins 映射 + codeRoot）；整体 JSON ≤64 KiB
-- **`LoadedPlugin`** — 清单 + 内存源码 + 目录信息
+- **`LoadedPlugin`** — `grant: PluginGrant`（授权快照；清单经 `grant.manifest()` 访问，不在顶层）、`source: String`（内存源码）、`approval: PluginApproval`（宿主批准）
 - **`PluginRepository`**（trait）— `configuration()` / `load(id)`；Manager 经 `Arc<dyn PluginRepository>` 使用，具体 `FsPluginRepository` 由 AppContext 选择
 
 ## 直接依赖

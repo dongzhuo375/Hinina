@@ -8,7 +8,7 @@
   - `authorize(manifest, approved)` — 构造：批准 ∩ 声明，非法交集拒绝
   - `require(permission) -> PluginResult<()>` — 每个 API 调用前的授权检查
   - `manifest() -> &PluginManifest` — 清单只读访问
-  - `allowed_events(self) -> Option<HashSet<...>>` — 事件过滤结果（`required_permission` 为领域事件的载荷权限判定）
+  - `pub(crate) fn allowed_events(&self) -> impl Iterator<Item = PluginEventSubscription> + '_` — 事件 allowlist：过滤清单声明中缺少载荷权限的业务事件、`ResyncRequired` 只追加一次，无 events.subscribe 时迭代器为空；调用方（manager/plugin_host）自行 collect
 
 ## 直接依赖
 - `plugin::api::{PluginError, PluginResult}`

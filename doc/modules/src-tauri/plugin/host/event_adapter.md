@@ -15,7 +15,8 @@ CoreEvent → PluginEvent 的唯一白名单/裁剪点：不创建 channel、不
 - `plugin::api::event::{PluginEvent, PluginEventEnvelope, PLUGIN_EVENT_PROTOCOL_VERSION}`
 
 ## 被依赖
-- `plugin::host::plugin_host`（投递路径）、`plugin::manager`（allowlist 生成）
+- `plugin::host::plugin_host`（投递路径）
+- 事件白名单不经本模块生成：`PluginGrant::allowed_events()`（[permission](../permission/mod.md)）产出 allowlist，manager 与 plugin_host 消费；本模块只做单事件投影
 
 ## 逻辑流程
 - **裁剪原则**：TokenRotated 始终返回 None；登录丢弃用户 ID；公告只给数量；工作区不带路径或内容
