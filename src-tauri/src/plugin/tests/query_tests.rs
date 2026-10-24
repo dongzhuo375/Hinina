@@ -2182,7 +2182,7 @@ async fn rank_names_are_byte_bounded_so_a_full_page_stays_encodable() {
     *source.rank_page.lock().unwrap() = Some(ContestRankPage {
         records: (0..200)
             .map(|i| ContestRankRow {
-                rank: i as i32 + 1,
+                rank: i + 1,
                 uid: format!("u{i}"),
                 username: long_name.clone(),
                 realname: long_name.clone(),
@@ -2217,4 +2217,21 @@ async fn rank_names_are_byte_bounded_so_a_full_page_stays_encodable() {
     assert_eq!(page.rows[0].school.len(), 96);
     assert!(page.rows.iter().all(|row| row.display_name.len() <= 96));
     bounded_json::encoded_len(&page, crate::plugin::limits::MAX_BRIDGE_RESPONSE_BYTES).unwrap();
+}
+
+#[test]
+fn truncate_bytes_cuts_at_char_boundaries() {
+    // ASCII passes through untouched up to the bound.
+    assert_eq!(truncate_bytes("abcdef", 4), "abcd");
+    assert_eq!(truncate_bytes("abc", 8), "abc");
+    // A 3-byte CJK char: the cut walks back to the nearest boundary instead of
+    // splitting the code point — 2 bytes lands inside "张", so the result is empty.
+    assert_eq!(truncate_bytes("张", 2), "");
+    // 96 bytes over pure 3-byte chars hits the boundary exactly: 32 chars.
+    assert_eq!(truncate_bytes(&"名".repeat(33), 96), "名".repeat(32));
+    // 95 bytes lands inside the 32nd char and walks back to 31 chars.
+    assert_eq!(truncate_bytes(&"名".repeat(33), 95), "名".repeat(31));
+    // Mixed content: the walk-back never produces invalid UTF-8.
+    let mixed = format!("{}{}", "x".repeat(94), "汉");
+    assert_eq!(truncate_bytes(&mixed, 95), "x".repeat(94));
 }
