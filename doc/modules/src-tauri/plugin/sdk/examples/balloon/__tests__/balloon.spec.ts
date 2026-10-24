@@ -545,51 +545,65 @@ describe('balloon reference plugin host contract', () => {
     )
     const section = contracts.match(/## 10\. 资源上限[\s\S]*?(?=\n## )/)
     expect(section, 'contracts.md must keep the §10 section').not.toBeNull()
-    const table = section![0]
-    // [source file, constant, how the fact table spells the value, explicit value?]
+    // Per-row matching, not whole-section substring: several values (5s,
+    // 1MiB, 32, 60 次/分钟, 128) legitimately appear in more than one row,
+    // and a shared-value row must not mask drift in its twin.
+    const tableRows = section![0]
+      .split('\n')
+      .filter(line => line.startsWith('|') && line.includes(' | ') && !line.includes('| 项 |') && !line.includes('|---'))
+    const rowFor = (label: string): string => {
+      const row = tableRows.find(line => line.includes(label))
+      expect(row, `§10 must keep a row for "${label}"`).toBeDefined()
+      return row!
+    }
+    // [source file, constant, §10 row label, how that row spells the value, explicit value?]
     // START_TIMEOUT is computed (activation + 2s grace) in limits.rs, so it
     // carries its explicit value here — a change to the formula must update
     // this row in the same PR.
-    const rows: Array<[string, string, (value: number) => string, number?]> = [
-      ['limits', 'ACTIVATION_TIMEOUT', v => `${v}s`],
-      ['limits', 'EVENT_TIMEOUT', v => `${v}s`],
-      ['limits', 'START_TIMEOUT', v => `${v}s`, 12],
-      ['limits', 'STOP_TIMEOUT', v => `${v}s`],
-      ['limits', 'PROVIDER_TIMEOUT', v => `${v}s`],
-      ['limits', 'SUBMISSION_LOOKUP_TIMEOUT', v => `${v}s`],
-      ['limits', 'QUERY_HANDLE_TTL', v => `${v}s`],
-      ['limits', 'QUERY_HANDLE_REUSE_AGE', v => `${v}s`],
-      ['limits', 'MAX_BRIDGE_INPUT_BYTES', v => `${v} B`],
-      ['limits', 'MAX_BRIDGE_OPERATION_BYTES', v => `${v} B`],
-      ['limits', 'MAX_BRIDGE_RESPONSE_BYTES', v => `${v / 1024 / 1024}MiB`],
-      ['limits', 'MAX_CURSOR_PAGE_BYTES', v => `${v / 1024 / 1024}MiB`],
-      ['limits', 'MAX_CURSOR_BUFFER_BYTES', v => `${v / 1024 / 1024}MiB`],
-      ['limits', 'MAX_CURSORS', v => `${v}`],
-      ['limits', 'MAX_QUERY_CONTEXTS', v => `${v}`],
-      ['limits', 'PLUGIN_QUERIES_PER_MINUTE', v => `${v} 次/分钟`],
-      ['limits', 'PLUGIN_QUERY_CONCURRENCY', v => `并发 ${v}`],
-      ['limits', 'SHARED_QUERIES_PER_MINUTE', v => `${v} 次/分钟`],
-      ['limits', 'SHARED_QUERY_CONCURRENCY', v => `并发 ${v}`],
-      ['limits', 'PLUGIN_LOG_BYTES', v => `${v} B`],
-      ['limits', 'PLUGIN_LOGS_PER_MINUTE', v => `${v} 次/分钟`],
-      ['limits', 'PLUGIN_RANK_QUERIES_PER_MINUTE', v => `${v} 次/分钟`],
-      ['limits', 'MAX_RANK_PAGE', v => `page 1..${v}`],
-      ['limits', 'MAX_RANK_ROWS', v => `${v} 行`],
-      ['limits', 'MAX_RANK_PROBLEMS', v => `${v} 列`],
-      ['limits', 'MAX_RANK_CELLS', v => `${v.toLocaleString('en-US')}`],
-      ['notification', 'MAX_NOTIFICATION_BYTES', v => `${v} B`],
-      ['storage', 'MAX_STORAGE_KEY_BYTES', v => `${v} B`],
-      ['storage', 'MAX_STORAGE_VALUE_BYTES', v => `${v / 1024}KiB`],
-      ['http', 'MAX_HTTP_BODY_BYTES', v => `${v / 1024}KiB`],
-      ['host', 'PLUGIN_EVENT_QUEUE_CAPACITY', v => `${v}`],
-      ['fsrepo', 'MAX_PLUGIN_DIRECTORIES', v => `${v} 个目录`],
-      ['fsrepo', 'MAX_SCAN_ENTRIES', v => `${v} 个条目`],
-      ['storageInfra', 'MAX_STORAGE_BYTES', v => `${v / 1024 / 1024}MiB`],
+    const rows: Array<[string, string, string, (value: number) => string, number?]> = [
+      ['limits', 'ACTIVATION_TIMEOUT', '激活 / 单次事件', v => `${v}s`],
+      ['limits', 'EVENT_TIMEOUT', '激活 / 单次事件', v => `${v}s`],
+      ['limits', 'START_TIMEOUT', '激活 / 单次事件', v => `${v}s`, 12],
+      ['limits', 'STOP_TIMEOUT', '激活 / 单次事件', v => `${v}s`],
+      ['limits', 'PROVIDER_TIMEOUT', 'Provider 单请求', v => `${v}s`],
+      ['limits', 'SUBMISSION_LOOKUP_TIMEOUT', 'Provider 单请求', v => `${v}s`],
+      ['limits', 'QUERY_HANDLE_TTL', '句柄与游标 TTL', v => `${v}s`],
+      ['limits', 'QUERY_HANDLE_REUSE_AGE', '句柄与游标 TTL', v => `${v}s`],
+      ['limits', 'MAX_BRIDGE_INPUT_BYTES', '桥输入', v => `${v} B`],
+      ['limits', 'MAX_BRIDGE_OPERATION_BYTES', '桥输入', v => `${v} B`],
+      ['limits', 'MAX_BRIDGE_RESPONSE_BYTES', '桥输入', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSOR_PAGE_BYTES', 'native 页数', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSOR_BUFFER_BYTES', 'native 页数', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSORS', 'native 页数', v => `${v}`],
+      ['limits', 'MAX_QUERY_CONTEXTS', 'native 页数', v => `${v}`],
+      ['limits', 'PLUGIN_QUERIES_PER_MINUTE', 'Provider 预算（每激活）', v => `${v} 次/分钟`],
+      ['limits', 'PLUGIN_QUERY_CONCURRENCY', 'Provider 预算（每激活）', v => `并发 ${v}`],
+      ['limits', 'SHARED_QUERIES_PER_MINUTE', 'Provider 预算（全部插件合计）', v => `${v} 次/分钟`],
+      ['limits', 'SHARED_QUERY_CONCURRENCY', 'Provider 预算（全部插件合计）', v => `并发 ${v}`],
+      ['limits', 'PLUGIN_LOG_BYTES', '日志', v => `${v} B`],
+      ['limits', 'PLUGIN_LOGS_PER_MINUTE', '日志', v => `${v} 次/分钟`],
+      ['limits', 'PLUGIN_RANK_QUERIES_PER_MINUTE', '榜单', v => `${v} 次/分钟`],
+      ['limits', 'MAX_RANK_PAGE', '榜单', v => `page 1..${v}`],
+      ['limits', 'MAX_RANK_ROWS', '榜单', v => `${v} 行`],
+      ['limits', 'MAX_RANK_PROBLEMS', '榜单', v => `${v} 列`],
+      ['limits', 'MAX_RANK_CELLS', '榜单', v => `${v.toLocaleString('en-US')}`],
+      ['limits', 'API_ERROR_GRACE', '宿主调用提前截止', v => `前 ${v} 秒`],
+      ['notification', 'MAX_NOTIFICATION_BYTES', '通知', v => `${v} B`],
+      ['storage', 'MAX_STORAGE_KEY_BYTES', '存储', v => `${v} B`],
+      ['storage', 'MAX_STORAGE_VALUE_BYTES', '存储', v => `${v / 1024}KiB`],
+      ['http', 'MAX_HTTP_BODY_BYTES', 'HTTP', v => `${v / 1024}KiB`],
+      ['host', 'PLUGIN_EVENT_QUEUE_CAPACITY', '周期 Resync', v => `${v}`],
+      ['fsrepo', 'MAX_PLUGIN_DIRECTORIES', '插件目录扫描', v => `${v} 个目录`],
+      ['fsrepo', 'MAX_SCAN_ENTRIES', '插件目录扫描', v => `${v} 个条目`],
+      ['storageInfra', 'MAX_STORAGE_BYTES', '存储', v => `${v / 1024 / 1024}MiB`],
     ]
     const missing = rows
-      .map(([file, name, display, explicit]) => {
+      .map(([file, name, label, display, explicit]) => {
         const spelled = display(valueOf(file, name, explicit))
-        return table.includes(spelled) ? null : `${file}:${name} (expected "${spelled}" in §10)`
+        const row = rowFor(label)
+        return row.includes(spelled)
+          ? null
+          : `${file}:${name} (row "${label}" expected "${spelled}", got "${row.trim()}")`
       })
       .filter(Boolean)
     expect(missing, 'fact-table drift').toEqual([])
