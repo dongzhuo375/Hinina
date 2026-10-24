@@ -1,15 +1,38 @@
-# 插件宿主资源上限
+# plugin/limits
 
-plugin/limits.rs 是 Runtime、Manager 和查询桥共用的内部常量模块，不向插件开放可调策略。
+## 职责
+Runtime、Manager 和查询桥共用的内部常量模块——执行期限、字节预算、并发与速率上限的唯一事实来源；不向插件开放可调策略。
 
-激活10秒、事件30秒、启动等待为激活期限加2秒、停止5秒。启动截止边界采用fail closed：调用方未及时观察到ready，即使引擎刚完成激活也撤销并记录timeout。事件 handler 失败告警按 (plugin, code) 节流：首次立即输出，`HANDLER_WARN_INTERVAL`（60秒）内静默累计，到期合并输出一条并带累计计数，避免持续失败的 handler 按事件速率刷屏。
+## 核心类型/函数
+纯常量模块，无类型与函数。常量分组如下（均为 `pub(crate)`，改动需同步 [limits 上游文档](../../../plugin/contracts.md)）：
 
-Provider单请求最多5秒；submission.get整体扫描最多8秒——单页最坏情形之上留出scope检查与后续快页余量，仍保持在激活期限前可捕获。Runtime的每次宿主调用另以当前入口硬截止前1秒为截止点，及时返回可捕获的timeout，为JS的catch/finally保留处理时间；晚发起的调用也不能越过入口窗口。死循环或继续执行超出硬期限仍使worker失败；单个事件 handler 的异常被隔离，不会让 worker 失败。
+| 分组 | 常量 | 值 |
+|---|---|---|
+| 执行期限 | `ACTIVATION_TIMEOUT` / `EVENT_TIMEOUT` / `START_TIMEOUT` / `STOP_TIMEOUT` | 10s / 30s / 激活+2s / 5s |
+| Provider | `PROVIDER_TIMEOUT`（单请求）/ `SUBMISSION_LOOKUP_TIMEOUT`（get 整体扫描） | 5s / 8s |
+| 错误宽限 | `API_ERROR_GRACE`（宿主调用提前返回 timeout 的余量） | 1s |
+| 告警节流 | `HANDLER_WARN_INTERVAL` | 60s |
+| 桥 | `MAX_BRIDGE_INPUT_BYTES` / `MAX_BRIDGE_OPERATION_BYTES` / `MAX_BRIDGE_RESPONSE_BYTES` | 140 000 B / 64 B / 1 MiB |
+| 游标 | `MAX_CURSOR_PAGE_BYTES` / `MAX_CURSOR_BUFFER_BYTES` / `MAX_CURSOR_RESPONSE_BYTES` / `BRIDGE_ENVELOPE_HEADROOM` | 1 MiB / 4 MiB / 1 MiB−256 B / 256 B |
+| 查询句柄 | `QUERY_HANDLE_TTL` / `MAX_QUERY_CONTEXTS` / `QUERY_HANDLE_REUSE_AGE` | 300s / 32 / 150s |
+| Provider 预算 | `PLUGIN_QUERIES_PER_MINUTE` / `PLUGIN_QUERY_CONCURRENCY` / `SHARED_QUERIES_PER_MINUTE` / `SHARED_QUERY_CONCURRENCY` | 60/min 并发 2 / 120/min 并发 4 |
+| 日志出口 | `PLUGIN_LOG_BYTES` / `PLUGIN_LOGS_PER_MINUTE` | 1024 B / 30/min |
+| 榜单 | `MAX_RANK_PAGE` / `MAX_RANK_ROWS` / `MAX_RANK_PROBLEMS` / `MAX_RANK_CELLS` / `MAX_RANK_NAME_BYTES` | 100 / 200 / 64 / 6 000 / 96 B |
+| 题目列表 | `MAX_PROBLEM_TITLE_BYTES` / `MAX_PROBLEM_COLOR_BYTES` | 256 B / 64 B |
+| 榜单速率 | `PLUGIN_RANK_QUERIES_PER_MINUTE` | 6/min |
 
-桥输入最多140000字节、operation名最多64字节（`quickjs`的无界检查与`call_json`使用同一常量）；查询句柄TTL 300秒、最多同时32个，150秒内同scope同revision复用；游标TTL同为300秒、最多32个。Provider预算为每激活60次/分钟并发2、全部插件合计120次/分钟并发4，常量集中在`plugin/limits.rs`，不向插件开放可调策略。
+## 直接依赖
+- `std::time::Duration`
 
-桥响应含JSON包络最多1MiB；单native提交投影页最多1MiB；返回给JS的整页另按`MAX_CURSOR_RESPONSE_BYTES`（1MiB减256字节包络余量）校验后才发布游标；每次激活全部保留游标余项的JSON字节合计最多4MiB，同时保留原有32游标/1000条native页上限。这些字节预算不等于整个进程的RSS上限。超限统一返回limit_exceeded。
+## 被依赖
+- `plugin::query`、`plugin::execution_api`、`plugin::runtime::quickjs`、`plugin::manager`
+- `plugin::api::log`（`MAX_LOG_BYTES` 引用 `PLUGIN_LOG_BYTES`）
 
-插件日志出口单条最多1024 UTF-8字节、每激活30条/分钟；换行/制表写入前拍平为空格，超限同样返回limit_exceeded。
-
-榜单分页边界（可组合）：page 1..100、每页最多200行、单行最多64个题目列、单页总 cells 最多6,000——行×列乘积单独设界，且行文本按**字节**截断（≤96 UTF-8 字节，字符边界安全；256 个汉字是 768 字节，按字符截断会让顶满名字的 200×30 页超过 1MiB 桥上限），保证边界内的页可完整编码；病态内容（超长 displayId、类型上限数字）由桥上限兜底拒绝。Hydro 单页返回全量榜单，超限返回limit_exceeded。题目列表的 title/color 同样按字节截断（≤256/≤64），千题级比赛仍可编码。榜单查询另有每激活 6 次/分钟的独立预算：HOJ 每次全榜重算，不能按通用 60/min 计费，否则两个插件即可打满共享预算饿死其他查询；突发等于配额，覆盖分页同步。
+## 逻辑流程
+- **启动截止 fail closed**：调用方未及时观察到 ready，即使引擎刚完成激活也撤销并记 timeout——启动截止边界宁可误杀不可漏放
+- **handler 失败告警节流**：按 (plugin, code) 首次立即输出，`HANDLER_WARN_INTERVAL` 内静默累计，到期合并一条带累计计数，避免持续失败的 handler 按事件速率刷屏
+- **宿主调用提前截止**：每次宿主调用以当前入口硬截止前 1 秒（`API_ERROR_GRACE`）为截止点，及时返回可捕获的 timeout，为 JS 的 catch/finally 保留处理时间；晚发起的调用不能越过入口窗口。死循环或执行超出硬期限仍使 worker 失败；单个事件 handler 的异常被隔离，不影响 worker
+- **字节预算不是进程 RSS 上限**：桥响应含包络最多 1 MiB；单 native 提交投影页最多 1 MiB；返回给 JS 的整页按 `MAX_CURSOR_RESPONSE_BYTES`（1 MiB 减 256 字节包络余量）校验后才发布游标；每次激活全部保留游标余项合计最多 4 MiB，同时保留 32 游标/1000 条 native 页上限。超限统一 `limit_exceeded`
+- **日志出口**：单条 ≤1024 UTF-8 字节、每激活 30 条/分钟；换行/制表写入前拍平为空格，超限返回 `limit_exceeded` 而非静默丢弃
+- **榜单分页边界可组合**：page 1..100、每页 ≤200 行、单行 ≤64 列、单页总 cells ≤6 000（行×列乘积单独设界），行文本按**字节**截断（≤96 UTF-8 字节，字符边界安全——256 个汉字是 768 字节，按字符截断会让顶满名字的 200×30 页超过 1 MiB 桥上限），边界内的页保证可完整编码；病态内容（超长 displayId、类型上限数字）由桥上限兜底拒绝。Hydro 单页返回全量榜单，超限返回 `limit_exceeded`。题目列表 title/color 同样按字节截断（≤256/≤64），千题级比赛仍可编码
+- **榜单独立速率**：HOJ 每次全榜重算，不能按通用 60/min 计费，否则两个插件即可打满共享预算饿死其他查询；6/min 突发等于配额，覆盖初始多页同步
