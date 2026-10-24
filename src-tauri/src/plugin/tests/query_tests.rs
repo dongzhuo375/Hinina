@@ -2170,3 +2170,51 @@ async fn rank_failures_before_the_board_fetch_do_not_burn_the_rank_budget() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn rank_names_are_byte_bounded_so_a_full_page_stays_encodable() {
+    let source = Arc::new(Source::default());
+    *source.contest_override.lock().unwrap() = Some(contest_with_rank_show_name("realname"));
+    // The reviewer's probe scenario: 200 rows × 30 cells with names AND schools
+    // maxed at 256 CJK chars. Char-based truncation (768 B each) pushes the page
+    // past the 1 MiB bridge cap; byte-based truncation must keep it encodable.
+    let long_name: String = "名".repeat(256);
+    *source.rank_page.lock().unwrap() = Some(ContestRankPage {
+        records: (0..200)
+            .map(|i| ContestRankRow {
+                rank: i as i32 + 1,
+                uid: format!("u{i}"),
+                username: long_name.clone(),
+                realname: long_name.clone(),
+                nickname: long_name.clone(),
+                school: long_name.clone(),
+                gender: String::new(),
+                avatar: String::new(),
+                ac: 0,
+                total: 0,
+                total_time: 0,
+                total_score: None,
+                submission_info: (0..30)
+                    .map(|p| (format!("P{p}"), RankCell::default()))
+                    .collect(),
+                time_info: std::collections::HashMap::new(),
+            })
+            .collect(),
+        total: 200,
+        size: 200,
+        current: 1,
+        pages: 1,
+    });
+    let q = queries_over(source, Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    let page = q
+        .rank(&c, PluginRankQuery { page: 1, limit: 200 })
+        .await
+        .unwrap();
+    // 96 bytes at a char boundary: 32 CJK chars, never a split code point.
+    assert_eq!(page.rows[0].display_name.len(), 96);
+    assert_eq!(page.rows[0].display_name.chars().count(), 32);
+    assert_eq!(page.rows[0].school.len(), 96);
+    assert!(page.rows.iter().all(|row| row.display_name.len() <= 96));
+    bounded_json::encoded_len(&page, crate::plugin::limits::MAX_BRIDGE_RESPONSE_BYTES).unwrap();
+}

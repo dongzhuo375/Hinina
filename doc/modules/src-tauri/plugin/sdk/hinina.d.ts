@@ -229,7 +229,8 @@ export interface Hinina {
      * live views (no snapshot) — dedupe across pages by teamKey. limit is a hint:
      * Hydro returns the whole board in one page (rows may exceed limit, still
      * bounded by 200 rows / 6,000 total cells); page echoes the provider's page.
-     * Rank calls have a dedicated 6/min per-activation budget.
+     * Row names are byte-bounded (96 UTF-8 bytes). Rank calls have a dedicated
+     * 6/min per-activation budget and cost 2 generic provider budget units.
      */
     rank(context: PluginQueryContext, query: PluginRankQuery): Promise<PluginRankPage>
   }

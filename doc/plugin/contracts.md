@@ -226,7 +226,9 @@ export default async function activate(
 - 不使用游标：榜单是实时视图，没有快照语义。`limit` 是**提示**：HOJ 按其分页，
   Hydro 无视分页参数、整榜单页返回（行数可能超过 limit，仍受边界约束）。
 - 边界（可组合）：`page` 1..100、每页 ≤200 行、单行 ≤64 个题目列、**单页总 cells ≤6,000**；
-  超出返回 `limit_exceeded`（Hydro 大榜单可能因此不可用）。
+  行文本（`displayName`/`school`）按**字节**截断（≤96 UTF-8 字节，字符边界安全），
+  顶满名字的 200×30 页仍可完整编码；超出返回 `limit_exceeded`（Hydro 大榜单可能因此不可用），
+  病态内容（超长 displayId、类型上限数字）由 1MiB 桥上限兜底拒绝而非截断。
 - `page` 回显**服务端实际页**而非请求页：Hydro 恒为 1；`hasMore = current < pages`。
 - 跨页无事务快照，需按 `teamKey` 去重；`total` 含服务端前置条目，不可当参赛人数。
 - 投影：`rank`（-1 打星）、`teamKey`（与 `identity.userKey` 同算法，可直接比对自身）、

@@ -9,7 +9,7 @@ use super::{
     host::manifest::PluginPermission,
     limits::{
         MAX_CURSORS, MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
-        MAX_QUERY_CONTEXTS, MAX_RANK_CELLS, MAX_RANK_PROBLEMS, MAX_RANK_ROWS,
+        MAX_QUERY_CONTEXTS, MAX_RANK_CELLS, MAX_RANK_NAME_BYTES, MAX_RANK_PROBLEMS, MAX_RANK_ROWS,
         PLUGIN_QUERIES_PER_MINUTE, PLUGIN_QUERY_CONCURRENCY, PLUGIN_RANK_QUERIES_PER_MINUTE,
         PROVIDER_TIMEOUT, QUERY_HANDLE_REUSE_AGE, QUERY_HANDLE_TTL, SHARED_QUERIES_PER_MINUTE,
         SHARED_QUERY_CONCURRENCY, SUBMISSION_LOOKUP_TIMEOUT,
@@ -286,7 +286,21 @@ fn resolve_display_name(row: &ContestRankRow, rank_show_name: &str) -> String {
         candidate
     };
     let chosen = if chosen.is_empty() { row.uid.as_str() } else { chosen };
-    chosen.chars().take(256).collect()
+    truncate_bytes(chosen, MAX_RANK_NAME_BYTES)
+}
+
+/// Truncate to at most `max_bytes` UTF-8 bytes, cutting at a char boundary so the
+/// result is always valid UTF-8. Byte bounds (not char counts) are what the
+/// encodable-page guarantee is computed against.
+fn truncate_bytes(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_owned();
+    }
+    let end = (0..=max_bytes)
+        .rev()
+        .find(|i| text.is_char_boundary(*i))
+        .expect("index 0 is always a char boundary");
+    text[..end].to_owned()
 }
 
 /// Single source of truth for "does this cached scope still match the live snapshot".
@@ -806,7 +820,7 @@ impl ScopedQueries {
                     rank: row.rank,
                     team_key: user_key(&context.scope.oj, &context.scope.endpoint, &row.uid),
                     display_name,
-                    school: row.school.chars().take(256).collect(),
+                    school: truncate_bytes(row.school.trim(), MAX_RANK_NAME_BYTES),
                     ac: row.ac,
                     total_score: row.total_score,
                     cells,

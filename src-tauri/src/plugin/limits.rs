@@ -57,9 +57,15 @@ pub(crate) const MAX_RANK_PAGE: i64 = 100;
 pub(crate) const MAX_RANK_ROWS: usize = 200;
 pub(crate) const MAX_RANK_PROBLEMS: usize = 64;
 /// Total cells across one rank page. Rows × columns must combine: 200 × 64 cells
-/// would encode well past the 1 MiB bridge cap, so the product gets its own bound
-/// that keeps a worst-case page (bounded names) encodable.
+/// would encode well past the 1 MiB bridge cap, so the product gets its own bound.
+/// Row names are byte-bounded (96 UTF-8 bytes, char-boundary safe), so a full
+/// 200 × 30 page with maxed-out names still encodes with margin; adversarial
+/// content beyond that (oversized display ids, type-max numbers) fails closed at
+/// the bridge cap instead of being truncated.
 pub(crate) const MAX_RANK_CELLS: usize = 6_000;
+/// Rank row text bound in UTF-8 BYTES, not chars: 256 CJK chars would be 768
+/// bytes and, multiplied by 200 rows, break the encodable-page guarantee above.
+pub(crate) const MAX_RANK_NAME_BYTES: usize = 96;
 /// HOJ recomputes the whole board on every rank fetch; a dedicated per-activation
 /// budget keeps plugin polling at the frontend's floor (one call per 10s) instead
 /// of the generic 60/min, so two plugins cannot starve other queries. The burst
