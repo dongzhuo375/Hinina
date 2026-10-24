@@ -1,4 +1,4 @@
-# extension
+# host/extension
 
 ## 职责
 保留远期 UI 扩展点类型草案，当前不能注册或渲染，不承诺后续版本排期。
@@ -15,7 +15,7 @@
 - `serde::{Deserialize, Serialize}` — 序列化支持
 
 ## 被依赖
-暂无执行调用者。Manifest 使用空 `contributes` 预留字段，不再引用旧 `extension_points`，非空扩展声明会被拒绝。
+暂无执行调用者。Manifest 使用空 `contributes` 预留字段（`PluginContribution = serde_json::Value`），不再引用旧 `extension_points`，非空扩展声明会被拒绝。
 
 ## 逻辑流程
-无（纯类型定义）
+无（纯类型定义）。
