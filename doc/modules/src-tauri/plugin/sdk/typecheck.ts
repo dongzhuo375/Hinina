@@ -1,5 +1,5 @@
 // Compile-only SDK contract checks; no plugin is executed.
-import type { Hinina, PluginLogLevel, PluginSubmissionQuery } from './hinina'
+import type { Hinina, PluginContest, PluginContestProblem, PluginLogLevel, PluginRankCell, PluginRankRow, PluginSubmissionQuery } from './hinina'
 declare const hinina: Hinina
 
 hinina.events.on('submission.judged', async event => {
@@ -36,3 +36,44 @@ async function checkLog(): Promise<void> {
   void level
 }
 void checkLog
+
+async function checkRank(): Promise<void> {
+  const context = await hinina.context.current()
+  const contest: PluginContest | null = await hinina.contest.current(context)
+  if (contest) {
+    const sealed: boolean = contest.sealed
+    const type: 'acm' | 'oi' = contest.contestType
+    const since: number | null = contest.sealedSince
+    void sealed
+    void type
+    void since
+  }
+  const page = await hinina.contest.rank(context, { page: 1, limit: 50 })
+  const first: PluginRankRow | undefined = page.rows[0]
+  if (first) {
+    const cell: PluginRankCell | undefined = first.cells.A
+    // @ts-expect-error Rank cells never expose the server uid.
+    first.cells.A.uid
+    void cell
+  }
+  void first
+  // @ts-expect-error The rank query carries no contestId: the scope is context-bound.
+  await hinina.contest.rank(context, { page: 1, limit: 50, contestId: 'c1' })
+}
+
+async function checkProblems(): Promise<void> {
+  const context = await hinina.context.current()
+  const problems: PluginContestProblem[] = await hinina.contest.problems(context)
+  const first: PluginContestProblem | undefined = problems[0]
+  if (first) {
+    const color: string = first.color
+    const title: string = first.title
+    void color
+    void title
+    // @ts-expect-error Problem summaries carry no statement or limits.
+    first.timeLimit
+  }
+  void first
+}
+void checkProblems
+void checkRank

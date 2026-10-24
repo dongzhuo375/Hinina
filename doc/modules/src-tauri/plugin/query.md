@@ -1,6 +1,8 @@
 # plugin/query
 
-ScopedQueries是绑定PluginGrant的安全查询Adapter。QuerySource只提供scope、只读比赛和本人native历史，生产ServiceQueries调用最小Service读路径；不调用Command或含源码详情。
+ScopedQueries是绑定PluginGrant的安全查询Adapter。QuerySource只提供scope、只读比赛、题目列表、全场榜单和本人native历史，生产ServiceQueries调用最小Service读路径；不调用Command或含源码详情。
+
+题目列表与榜单沿用同一纪律：problems 只需 contest.read，rank 需 contest.rank ∩ contest.read（先查 contest.rank，错误指认第一个缺失项）；两者都要求上下文绑定的当前比赛（未选中返回 context_expired），经 remote 前后校验并按 Provider 预算计费。rank 只调 ContestService::get_rank 取榜单数据，另读一次比赛元信息**仅用于按 `rank_show_name` 解析 displayName**（与前端 resolveDisplayName 同规则，保证插件榜与 App 榜一致；sealed/contestType 仍只来自 contest.current）——这次元信息读取同样走 remote 计费，**每次 contest.rank 共消耗 2 份通用 Provider 预算**（元信息 + 榜单）。行投影用与 identity.userKey 同算法的 `user_key(oj, endpoint, uid)` 生成 teamKey；行 uid 为空 → 整页 provider_error（空 uid 会让所有此类行塌缩到同一 teamKey）。页边界可组合：page ≤100、行 ≤200、列 ≤64、**单页总 cells ≤6,000**，超限返回 limit_exceeded 而非被 1MiB 桥上限截断；page 回显服务端实际页（Hydro 恒 1）。HOJ 全榜重算昂贵：榜单查询另有每激活 6 次/分钟的独立预算，令牌在元信息校验通过后、榜单取数前扣——元信息失败不烧令牌，榜单取数后的边界拒绝仍计费（OJ 已完成全榜重算，预算保护的是 OJ 而非插件调试体验）。contest 投影含 contestType/sealed/sealedSince，只读 read_metadata 已有返回，不加缓存、不改时效，也不新增取数路径（不调 get_rank）。
 
 已有OJ实例修改baseUrl沿用设置页“重启后生效”的约定。scope绑定Registry实际运行的endpoint，不能拿待生效地址标记旧Provider；配置变更撤销旧句柄，新句柄仍可查询，身份键也使用实际endpoint。配置中实例被删除/禁用仍拒绝访问。缺endpoint、实例不可用及地址待重启均输出稳定类别的warn，不记录URL或凭据；同一AccessRevision内每个插件只记录一次（去重键为 revision+plugin_id，修订变更即清空），并带plugin_id/oj_id归属，既避免持久性配置错误被插件反复刷屏，也保证归因指向真正失败的插件而非该修订下首个撞上者。成功scope按revision缓存，正常热路径不重复输出待重启诊断，阻塞读取继承调用方tracing dispatch。
 

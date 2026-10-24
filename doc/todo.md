@@ -136,7 +136,7 @@
 - [ ] **HUSTOJ Adapter** — `adapter/hustoj/`
 - [ ] **ProviderRegistry 完善** — 支持多 OJ 动态注册与切换
 - [x] **Plugin 宿主（PR #40/#41）** — 契约 v2 + 最小可运行 QuickJS 宿主；架构/契约/施工见 [doc/plugin/](plugin/README.md)
-- [ ] **Plugin 业务集成验证** — 插件作者实现首次 AC/恢复/幂等；真实 HOJ/Hydro 与外部服务联调
+- [ ] **Plugin 业务集成验证** — 能力已就绪（`hinina.log.*`、`contest.problems`、`contest.rank` 榜单分页）；待插件作者实现首次 AC/恢复/幂等与真实 HOJ/Hydro、外部服务联调
 - [ ] **CI/CD 流水线** — GitHub Actions：构建 → 测试 → 打包 → Release
 
 ### 插件系统后续（详见 [doc/plugin/roadmap.md](plugin/roadmap.md)）

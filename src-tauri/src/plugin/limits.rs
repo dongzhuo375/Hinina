@@ -49,3 +49,30 @@ pub(crate) const SHARED_QUERY_CONCURRENCY: usize = 4;
 /// keeps a single line greppable; the budget stops a script from flooding the host log.
 pub(crate) const PLUGIN_LOG_BYTES: usize = 1024;
 pub(crate) const PLUGIN_LOGS_PER_MINUTE: u32 = 30;
+
+/// Rank page bounds: one page request, one page of rows, and one row's problem
+/// columns. Hydro returns the whole board as a single page, so an oversized page
+/// must fail as limit_exceeded instead of being truncated by the bridge cap.
+pub(crate) const MAX_RANK_PAGE: i64 = 100;
+pub(crate) const MAX_RANK_ROWS: usize = 200;
+pub(crate) const MAX_RANK_PROBLEMS: usize = 64;
+/// Total cells across one rank page. Rows × columns must combine: 200 × 64 cells
+/// would encode well past the 1 MiB bridge cap, so the product gets its own bound.
+/// Row names are byte-bounded (96 UTF-8 bytes, char-boundary safe), so a full
+/// 200 × 30 page with maxed-out names still encodes with margin; adversarial
+/// content beyond that (oversized display ids, type-max numbers) fails closed at
+/// the bridge cap instead of being truncated.
+pub(crate) const MAX_RANK_CELLS: usize = 6_000;
+/// Rank row text bound in UTF-8 BYTES, not chars: 256 CJK chars would be 768
+/// bytes and, multiplied by 200 rows, break the encodable-page guarantee above.
+pub(crate) const MAX_RANK_NAME_BYTES: usize = 96;
+/// Problem-list text bounds in UTF-8 bytes. Titles are legitimately longer than
+/// rank names, but byte bounds keep a 1,000-problem contest's list encodable
+/// where char bounds (256 CJK chars = 768 B) would hit the bridge cap.
+pub(crate) const MAX_PROBLEM_TITLE_BYTES: usize = 256;
+pub(crate) const MAX_PROBLEM_COLOR_BYTES: usize = 64;
+/// HOJ recomputes the whole board on every rank fetch; a dedicated per-activation
+/// budget keeps plugin polling at the frontend's floor (one call per 10s) instead
+/// of the generic 60/min, so two plugins cannot starve other queries. The burst
+/// equals the quota, which also covers an initial multi-page board sync.
+pub(crate) const PLUGIN_RANK_QUERIES_PER_MINUTE: u32 = 6;

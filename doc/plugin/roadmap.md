@@ -11,6 +11,7 @@
 | 声明与授权分离 | ✅ | 有效权限 = Manifest ∩ `plugins.json`；默认不启用 |
 | 事件边界 | ✅ | 唯一 `CoreEventBus` → `PluginHost` → 128 有界队列 |
 | 只读查询 | ✅ | 身份 / 当前比赛 / 本人提交历史；不读源码 |
+| 比赛题目列表 + 全场榜单 | ✅ | `contest.problems` / `contest.rank`（`contest.rank` ∩ `contest.read`），`teamKey` 与 `identity.userKey` 同算法 |
 | 查询作用域与游标 | ✅ | `AccessRevision`、不透明句柄/游标、预算与回填 |
 | 存储 | ✅ | 私有 JSON、fs4 + atomicwrites、CAS、配额 |
 | HTTP | ✅ | 精确 origin、DNS 校验并固定、无 Cookie/代理/跳转/重试 |
@@ -23,7 +24,7 @@
 | 持久启用/禁用 | ❌ | `stop` 不改 `enabled`，重启可能再次自动启动 |
 | 安装 / 更新 / 回滚 | ❌ | 无发布物摘要、无导入、无失败保留旧版本 |
 | 配置 schema / 密钥 | ❌ | `configSchema` 只接受 `{}`；无系统凭据引用 |
-| 业务插件 | ❌ | 首次 AC、气球派发、外部幂等未实现 |
+| 业务插件 | 🔶 | 能力已就绪（日志/题目列表/榜单），待参考插件与真实环境联调 |
 | 真实环境验收 | ❌ | 未真实 HOJ/Hydro + 外部服务联调 |
 | 跨平台 | ❌ | Windows 已验证；Linux/macOS 构建未验证 |
 
@@ -59,8 +60,8 @@
 ### 2.4 业务插件
 
 - “第一次 AC”定义未定：当前账号对当前比赛某题的第一次可见 AC？是否含赛前/赛后？如何处理重判/同时间提交？
-- 本人查询不能证明“全场所有队伍的第一次 AC”。
-- 跨页无事务快照；需按 `submissionId` 去重，必要时重扫。
+- ~~本人查询不能证明“全场所有队伍的第一次 AC”~~ 榜单能力已就绪（`contest.rank` 带 `firstAc`），待参考插件与真实环境联调。
+- 跨页无事务快照；榜单按 `teamKey` 去重，本人历史按 `submissionId` 去重，必要时重扫。
 - 需要显式可恢复状态、租期/重试预算、外部幂等键；本地 CAS 不能保证远端 exactly-once。
 - 事件 `submission.judged` 没有 OJ/用户/比赛作用域，只能触发刷新；不能凭 ID 直接派发。
 

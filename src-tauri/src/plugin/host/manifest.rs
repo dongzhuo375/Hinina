@@ -22,6 +22,8 @@ pub enum PluginPermission {
     SubmissionRead,
     #[serde(rename = "contest.read")]
     ContestRead,
+    #[serde(rename = "contest.rank")]
+    ContestRank,
     #[serde(rename = "identity.read")]
     IdentityRead,
     #[serde(rename = "storage.read")]

@@ -6,7 +6,8 @@
 |---|---|---|
 | 上下文 | `context.current()` | 无；无事件授权也可启动 |
 | 提交 | `submission.get(context, contestId, submissionId)`、`submission.list(context, query)` | submission.read |
-| 比赛 | `contest.current(context)`、`contest.get(context, contestId)` | contest.read |
+| 比赛 | `contest.current(context)`、`contest.get(context, contestId)`、`contest.problems(context)` | contest.read |
+| 榜单 | `contest.rank(context, {page, limit})` | contest.rank + contest.read |
 | 身份 | `identity.current(context)` | identity.read |
 | 存储 | `storage.get/set/delete/compareAndSet` | storage.read / storage.write；CAS 两者都需 |
 | HTTP | `http.request(context, request)` | network.request + origin/地址批准 |

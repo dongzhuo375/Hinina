@@ -124,7 +124,8 @@ export default async function activate(
 |---|---|
 | `events.subscribe` | 注册事件 handler、接收初始/周期/Lagged Resync |
 | `submission.read` | `submission.get` / `submission.list`；`submission.*` 事件载荷 |
-| `contest.read` | `contest.current` / `contest.get`；`contest/announcement/problem` 事件载荷 |
+| `contest.read` | `contest.current` / `contest.get` / `contest.problems`；`contest/announcement/problem` 事件载荷 |
+| `contest.rank` | `contest.rank`（还需同时具备 `contest.read`）；全场榜单：其他队伍的显示名与学校 |
 | `identity.read` | `identity.current` |
 | `storage.read` | `storage.get`；`compareAndSet` 的读侧 |
 | `storage.write` | `storage.set` / `delete`；`compareAndSet` 的写侧 |
@@ -160,6 +161,8 @@ export default async function activate(
 | 上下文 | `context.current()` | 无；无事件授权也可启动 |
 | 身份 | `identity.current(context)` | `identity.read` |
 | 比赛 | `contest.current(context)` / `contest.get(context, contestId)` | `contest.read` |
+| 题目列表 | `contest.problems(context)` | `contest.read` |
+| 榜单 | `contest.rank(context, {page, limit})` | `contest.rank` + `contest.read` |
 | 提交 | `submission.get(context, contestId, submissionId)` / `submission.list(context, query)` | `submission.read` |
 | 存储 | `storage.get/set/delete/compareAndSet` | `storage.read` / `storage.write`；CAS 两者都需 |
 | HTTP | `http.request(context, request)` | `network.request` + origin/地址批准 |
@@ -207,6 +210,48 @@ export default async function activate(
 - 可重试失败（预算、provider 错误、超时、响应超限、游标配额）把游标按调用前快照归还，重试从同一 native 页继续。
 - 只有 `context_expired` 不归还，因为作用域已撤销。
 - 跨作用域或不同 query 参数的非法领取不会消费游标。
+
+### 6.4 题目列表与榜单
+
+`contest.problems(context)`：
+
+- 需 `contest.read`；返回当前比赛的 `{problemId, displayId, title, color}`。
+- `color` 为气球颜色，Hydro 无此字段（空串）；插件必须容忍空色，不能自己编颜色。
+- `title`/`color` 按字节截断（≤256/≤64 UTF-8 字节，字符边界安全）：千题级比赛的
+  列表仍可完整编码，而非被 1MiB 桥上限拒绝。
+- 未选中比赛 → `context_expired`；不自动选中比赛、不落缓存。
+
+`contest.rank(context, {page, limit})`：
+
+- 需 `contest.rank` **∩** `contest.read`，缺任一返回 `permission_denied` 并指认缺失项。
+- 入参不带 `contestId`（`deny_unknown_fields`，多余字段拒绝）；未选中比赛 → `context_expired`。
+- 不使用游标：榜单是实时视图，没有快照语义。`limit` 是**提示**：HOJ 按其分页，
+  Hydro 无视分页参数、整榜单页返回（行数可能超过 limit，仍受边界约束）。
+- 边界（可组合）：`page` 1..100、每页 ≤200 行、单行 ≤64 个题目列、**单页总 cells ≤6,000**；
+  行文本（`displayName`/`school`）按**字节**截断（≤96 UTF-8 字节，字符边界安全），
+  顶满名字的 200×30 页仍可完整编码；超出返回 `limit_exceeded`（Hydro 大榜单可能因此不可用），
+  病态内容（超长 displayId、类型上限数字）由 1MiB 桥上限兜底拒绝而非截断。
+- `page` 回显**服务端实际页**而非请求页：Hydro 恒为 1；`hasMore = current < pages`。
+- 跨页无事务快照，需按 `teamKey` 去重；**不提供 `total`**（HOJ 的 total 含服务端
+  前置条目且偏大）——行数以去重后非打星行为准。
+- 投影：`rank`（-1 打星）、`teamKey`（与 `identity.userKey` 同算法，可直接比对自身）、
+  `displayName`、`school`、`ac`、`totalScore`、`cells`（key = displayId）。
+- `displayName` 由宿主按比赛 `rankShowName` 规则解析（与前端榜单同规则：
+  realname/nickname/username 选字段，空则回退 username，再回退 uid 文本），
+  保证插件榜与 App 榜显示一致。为此 `rank` 每次额外读取一次比赛元信息——
+  仅用于名字解析，`sealed`/`contestType` 仍只来自 `contest.current`。
+- 行 `uid` 为空（Hydro 无 `raw` 的 user cell）→ 整页 `provider_error`：
+  空uid 无法生成稳定 `teamKey`，静默合并队伍比失败更糟。
+- 不返回：`uid`（字段）、原始 `username`、`realname`、`nickname`、`avatar`、`gender`、
+  `totalTime`、任何原始响应。
+- 封榜态不来自榜单页：`PluginContest.sealed`（`seal_rank && seal_rank_time <= now`，
+  与 RankView 同规则）解释"未 AC"是否可信；封榜期间 `solved`/`firstAc` 恒 false、
+  `acTime` 恒 null。`sealedSince` 为封榜**开始**时刻（UTC 毫秒，仅封榜时非 null）；
+  服务端不下发封榜结束时刻，故无 `sealedUntil`。
+- HOJ 榜单为实时全量计算，较慢：**榜单查询另有每激活 6 次/分钟的独立预算**
+  （突发 6 次覆盖分页同步，持续轮询 ≥10s，建议 ≥30s）；令牌在元信息校验通过后、
+  榜单取数前扣——元信息失败不烧令牌，取数后的边界拒绝仍计费（OJ 已完成全榜重算）。
+  每次调用另消耗 2 份通用 Provider 预算（元信息 + 榜单）；宿主不加缓存（缓存会给过期名次）。
 
 ## 7. 事件与 Resync 契约
 
@@ -286,6 +331,7 @@ Wire 形状**恰好**为：
 | Provider 预算（全部插件合计） | 120 次/分钟，并发 4 |
 | 通知 | 512 B，10 次/分钟 |
 | 日志 | 1024 B，30 次/分钟（仅对宿主实际写入的行计费，被级别过滤的调用不扣额度）；换行/制表写入前拍平 |
+| 榜单 | page 1..100、每页 ≤200 行、单行 ≤64 列、单页总 cells ≤6,000（可组合边界）；每激活 6 次/分钟独立预算；Hydro 超页返回 `limit_exceeded` |
 | 存储 | 键 256 B、值 64KiB、文件 1MiB；每激活 60 次/分钟，工厂合计 240 次/分钟，在途 16 |
 | HTTP | 请求/响应体 64KiB、总超时 ≤5s、每插件 60 次/分钟、并发 2；Client 缓存 32 |
 | 周期 Resync / 事件队列 | 默认 60s（10–3600s）/ 128 |

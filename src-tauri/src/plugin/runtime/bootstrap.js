@@ -36,6 +36,8 @@
     contest: freeze({
       current: context => call('contest.current', { context }),
       get: (context, contestId) => call('contest.get', { context, contestId }),
+      problems: context => call('contest.problems', { context }),
+      rank: (context, query) => call('contest.rank', { context, query }),
     }),
     submission: freeze({
       get: (context, contestId, submissionId) => call('submission.get', { context, contestId, submissionId }),

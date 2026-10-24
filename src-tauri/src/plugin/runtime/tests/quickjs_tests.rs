@@ -393,3 +393,64 @@ async fn real_js_log_calls_resolve_undefined_without_throwing() {
     );
     runtime.shutdown().await;
 }
+
+#[tokio::test]
+async fn real_js_rank_and_problems_return_full_json_with_plain_object_cells() {
+    use crate::plugin::{
+        api::notification::PluginNotificationLevel, execution_api::NotificationOutput,
+        test_support::Source,
+    };
+    struct Output;
+    impl NotificationOutput for Output {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("runtime-rank");
+    let source = Arc::new(Source::default());
+    *source.rank_page.lock().unwrap() = Some(
+        serde_json::from_value(serde_json::json!({
+            "records": [{
+                "rank": 1, "uid": "user-1", "username": "team-display", "school": "School A",
+                "ac": 3, "totalScore": 300,
+                "submissionInfo": { "A": { "errorNum": 2, "isAc": true, "isFirstAc": true, "acTime": 120 } }
+            }],
+            "total": 1, "size": 50, "current": 1, "pages": 1
+        }))
+        .unwrap(),
+    );
+    *source.problems.lock().unwrap() = vec![
+        serde_json::from_value(serde_json::json!({
+            "id": 1, "displayId": "A", "cid": "contest", "problemId": "P1001",
+            "displayTitle": "A + B", "color": "#FF0000"
+        }))
+        .unwrap(),
+    ];
+    let (api, _queries) = execution_api(source, Arc::new(Output), &dir);
+    let mut runtime = QuickJsRuntime::new(CancellationToken::new()).await.unwrap();
+    let script = r#"export default async h => {
+      const c = await h.context.current();
+      const page = await h.contest.rank(c, { page: 1, limit: 50 });
+      globalThis.rows = page.rows.length;
+      globalThis.cellOk = typeof page.rows[0].cells.A === 'object'
+        && page.rows[0].cells.A.firstAc === true
+        && page.rows[0].cells.A.acTime === 120 ? 1 : 0;
+      globalThis.problems = (await h.contest.problems(c)).length;
+    }"#;
+    runtime
+        .load(script, api, &serde_json::Value::Null, vec![])
+        .await
+        .unwrap();
+    for expression in ["rows", "cellOk", "problems"] {
+        assert_eq!(
+            runtime
+                .context
+                .with(|ctx| ctx.eval::<u32, _>(expression))
+                .await
+                .unwrap(),
+            1,
+            "{expression}"
+        );
+    }
+    runtime.shutdown().await;
+}

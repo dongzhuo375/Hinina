@@ -132,14 +132,53 @@ if (contest) {
   （被过滤的调用不消耗限流额度），开发构建或 `RUST_LOG=debug` 可见全部。
 - 日志是排错通道，不是业务凭据；不要写 Token、用户名、源码或响应正文。
 
-### 1.7 常见失败
+### 1.7 榜单与题目列表
+
+```ts
+const context = await hinina.context.current()
+const contest = await hinina.contest.current(context)
+if (contest && !contest.sealed) {
+  const problems = await hinina.contest.problems(context)
+  let page = 1
+  for (;;) {
+    const board = await hinina.contest.rank(context, { page, limit: 200 })
+    for (const row of board.rows) {
+      if (row.rank === -1) continue // 打星队
+      for (const cell of Object.values(row.cells)) {
+        if (cell.firstAc) { /* row.teamKey + cell.displayId 首A */ }
+      }
+    }
+    if (!board.hasMore) break
+    page += 1
+  }
+}
+```
+
+- `contest.rank` 需在 Manifest 声明**且** `plugins.json` 批准，同时还要有 `contest.read`。
+- **先看 `contest.current` 的 `sealed`**：为 true 则整轮直接结束，不读榜单、不派发——
+  封榜期间 `solved`/`firstAc` 恒 false，与真没通过不可区分；解封后不补派历史首 A。
+  `sealedSince` 是封榜**开始**时刻（服务端不下发结束时刻，别拿它当解封时间）。
+- 跨页无事务快照：按 `teamKey` 去重；**不提供 `total`**（HOJ 的含服务端前置条目且
+  偏大）——行数以去重后非打星行为准。
+- `teamKey` 与 `identity.current(context).userKey` 同算法：相等即自己那队。
+- `displayName` 由宿主按比赛 `rankShowName` 解析（与 App 榜单同规则），无需自己拼。
+- `limit` 是提示：Hydro 无视分页、整榜单页返回（行数可能超过 limit）；`page` 回显
+  服务端实际页（Hydro 恒 1），`hasMore=false` 即整榜已取完。
+- HOJ 榜单实时全量计算，较慢：**榜单查询有每激活 6 次/分钟的独立预算**（突发 6 次
+  覆盖分页同步；持续轮询 ≥10s，建议 ≥30s，节拍只能来自 Resync，运行时无 `setTimeout`）；
+  每次调用另消耗 2 份通用 Provider 预算（元信息 + 榜单）。
+- Hydro 单页返回全量：超过 200 行或总 cells 超限会得到 `limit_exceeded`，大榜单可能不可用。
+- `color` 可能为空串（Hydro）；不能自己编颜色。
+- 查询入参不带 `contestId`（多余字段直接拒绝）；未选中比赛返回 `context_expired`，等下次 Resync。
+
+### 1.8 常见失败
 
 | 现象 | 排查 |
 |---|---|
 | 插件未加载 | `plugins.json` 是否存在、`enabled`、ID 是否匹配、清单/版本/入口是否合法 |
 | `permission_denied` | Manifest 是否声明、`plugins.json` 是否批准、事件载荷是否还需领域读取权限 |
 | `context_expired` | 登录/登出、切 OJ/比赛、连接配置变化；重新 `context.current()` |
-| `limit_exceeded` | 分页/扫描/存储/HTTP/通知/日志/桥调用预算；缩小批量、保存进度 |
+| `limit_exceeded` | 分页/扫描/存储/HTTP/通知/日志/榜单/桥调用预算；缩小批量、保存进度 |
 | `timeout` | activate 10s、事件 30s、单请求 5s、`submission.get` 8s；拆分工作 |
 | `unsupported` | 调用了未实现的 API（题面/工作区/UI 等占位能力） |
 | `script_error` | 语法错误、未捕获异常、内存分配失败以外的脚本失败；看宿主日志的稳定码，并在关键步骤用 `hinina.log.*` 输出阶段 |

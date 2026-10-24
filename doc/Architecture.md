@@ -110,7 +110,7 @@ Hinina/
         │   │   └── tests/
         │   │       └── auth_tests.rs     # AuthService 单元测试（会话持久化/轮换回写/失效清理）
         │   ├── contest/
-        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存（TTL 来自配置）/比赛元信息缓存（内存+磁盘，固定 TTL 120s，题面总览页轮询请求减半）/比赛切换/get_rank（榜单不缓存）/list_announcements（公告不缓存；按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`，首次拉取只建基线不发事件）+ 公告已读状态持久化（announcements_read/{cid}_{uid}.json，合并去重、损坏降级为空+warn）；`on_oj_switched()` 供 `switch_oj` 显式清 OJ 域缓存
+        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存（TTL 来自配置）/比赛元信息缓存（内存+磁盘，固定 TTL 120s，题面总览页轮询请求减半）/比赛切换/get_rank（榜单不缓存）/list_problems（插件路径：只读题目列表，不选中比赛、不落缓存）/list_announcements（公告不缓存；按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`，首次拉取只建基线不发事件）+ 公告已读状态持久化（announcements_read/{cid}_{uid}.json，合并去重、损坏降级为空+warn）；`on_oj_switched()` 供 `switch_oj` 显式清 OJ 域缓存
         │   │   ├── error.rs              # ContestError
         │   │   └── tests/
         │   │       └── contest_tests.rs  # ContestService 单元测试（错误变体穿透 + TTL 缓存语义：命中零请求/过期重取/refresh 强制/失败不留 stale + 元信息缓存：命中跳过 get_contest 而题目列表仍实时/磁盘跨实例命中/按比赛隔离/refresh 清两层/错误不入缓存 + 公告已读读写与损坏降级 + 新公告检测：首次不发/新 ID 发一次/重复不发/基线按比赛隔离/失败保留基线）
@@ -233,7 +233,7 @@ Hinina/
         │   │   ├── event.rs              # 插件事件协议：PluginEvent + PluginEventEnvelope{version,sequence,occurredAt,event}（插件侧唯一允许依赖的事件接口）
         │   │   ├── workspace.rs
         │   │   ├── problem.rs
-        │   │   ├── contest.rs            # 比赛只读安全投影与 trait
+        │   │   ├── contest.rs            # 比赛只读安全投影与 trait（+ 题目列表/全场榜单 DTO 与 contest.rank 权限方法）
         │   │   ├── submission.rs         # 本人提交分页/详情契约，无源码
         │   │   ├── identity.rs           # 稳定不透明身份投影
         │   │   ├── storage.rs            # 私有 JSON/CAS 契约及边界检查

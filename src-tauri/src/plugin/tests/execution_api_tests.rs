@@ -293,3 +293,69 @@ async fn log_write_emits_sanitized_host_log_line() {
     assert!(log.contains("operation=\"log.write\""));
     assert!(log.contains("permission=\"none\""));
 }
+
+#[tokio::test]
+async fn contest_rank_bridge_maps_permission_and_bounds_oversized_pages() {
+    use tracing::instrument::WithSubscriber;
+    struct Output;
+    impl NotificationOutput for Output {
+        fn emit(&self, _: &str, _: PluginNotificationLevel, _: &str) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+    let dir = crate::test_support::TempDir::unique("rank-bridge");
+    let source = Arc::new(crate::plugin::test_support::Source::default());
+    // A page larger than MAX_RANK_ROWS (Hydro returns the whole board) must fail
+    // as limit_exceeded instead of being truncated by the 1MiB bridge cap.
+    *source.rank_page.lock().unwrap() = Some(crate::core::entity::rank::ContestRankPage {
+        records: (0..201)
+            .map(|i| {
+                serde_json::from_value(serde_json::json!({
+                    "rank": i + 1, "uid": format!("u{i}"), "username": format!("team-{i}")
+                }))
+                .unwrap()
+            })
+            .collect(),
+        total: 201,
+        size: 201,
+        current: 1,
+        pages: 1,
+    });
+    let m = crate::plugin::test_support::manifest("test.rank-bridge");
+    let queries = Arc::new(ScopedQueries::new(
+        crate::plugin::permission::PluginGrant::authorize(&m, &m.permissions).unwrap(),
+        source,
+        Arc::default(),
+        Default::default(),
+    ));
+    let api = ExecutionApi::new(
+        queries.clone(),
+        Arc::new(JsonPluginStorage::new(dir.to_path_buf(), queries.clone())),
+        Arc::new(PluginHttp::new(queries, vec![]).unwrap()),
+        Arc::new(Output),
+    );
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let writer = Capture(bytes.clone());
+    let dispatch = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(move || writer.clone())
+            .finish(),
+    );
+    let context = ContextApi::current_context(&api).await.unwrap();
+    let response = call_json(
+        &api,
+        "contest.rank".into(),
+        json!({"context": context, "query": {"page": 1, "limit": 50}}).to_string(),
+    )
+    .with_subscriber(dispatch)
+    .await;
+    let value = serde_json::from_str::<Value>(&response).unwrap();
+    assert_eq!(value["error"]["code"], "limit_exceeded");
+    let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+    // The audit line maps the full operation to its own permission.
+    assert!(log.contains("operation=\"contest.rank\""));
+    assert!(log.contains("permission=\"contest.rank\""));
+}

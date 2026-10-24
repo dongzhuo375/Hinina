@@ -32,6 +32,47 @@ fn valid_manifest_is_accepted_and_uses_stable_wire_names() {
 }
 
 #[test]
+fn contest_rank_permission_parses_and_typos_are_rejected() {
+    assert_eq!(
+        serde_json::to_value(PluginPermission::ContestRank).unwrap(),
+        "contest.rank"
+    );
+    assert_eq!(
+        serde_json::from_value::<PluginPermission>("contest.rank".into()).unwrap(),
+        PluginPermission::ContestRank
+    );
+    // Misspellings must fail loudly instead of silently becoming no-ops.
+    for typo in ["contest.ranking", "contestRank", "contest.ranks"] {
+        assert!(
+            serde_json::from_value::<PluginPermission>(typo.into()).is_err(),
+            "{typo} must not parse"
+        );
+    }
+}
+
+#[test]
+fn approving_an_undeclared_contest_rank_is_rejected() {
+    let mut value = manifest();
+    value.permissions = vec![PluginPermission::ContestRead];
+    value.events = vec![];
+    value.validate().unwrap();
+    // Approval is an intersection; approving an undeclared permission is a
+    // configuration error, not a silent no-op.
+    let error = crate::plugin::permission::PluginGrant::authorize(
+        &value,
+        &[PluginPermission::ContestRank],
+    )
+    .unwrap_err();
+    assert_eq!(error, crate::plugin::api::PluginError::InvalidInput);
+    // Declared and approved keeps working.
+    crate::plugin::permission::PluginGrant::authorize(
+        &value,
+        &[PluginPermission::ContestRead],
+    )
+    .unwrap();
+}
+
+#[test]
 fn invalid_identity_versions_runtime_and_entry_are_rejected() {
     let mut value = manifest();
     value.id = "../escape".into();

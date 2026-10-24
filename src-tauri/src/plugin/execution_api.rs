@@ -110,6 +110,19 @@ impl ContestApi for ExecutionApi {
     ) -> PluginResult<Option<PluginContest>> {
         self.queries.contest(context, Some(id)).await
     }
+    async fn problems(
+        &self,
+        context: &PluginQueryContext,
+    ) -> PluginResult<Vec<PluginContestProblem>> {
+        self.queries.problems(context).await
+    }
+    async fn rank(
+        &self,
+        context: &PluginQueryContext,
+        query: PluginRankQuery,
+    ) -> PluginResult<PluginRankPage> {
+        self.queries.rank(context, query).await
+    }
 }
 #[async_trait]
 impl SubmissionApi for ExecutionApi {
@@ -257,6 +270,10 @@ async fn dispatch(api: &dyn PluginApi, operation: &str, args: Value) -> PluginRe
         "identity.current" => encode(IdentityApi::current(api, &context()?).await?),
         "contest.current" => encode(ContestApi::current(api, &context()?).await?),
         "contest.get" => encode(ContestApi::get(api, &context()?, &text("contestId")?).await?),
+        "contest.problems" => encode(ContestApi::problems(api, &context()?).await?),
+        "contest.rank" => encode(
+            ContestApi::rank(api, &context()?, decode(args["query"].clone())?).await?,
+        ),
         "submission.get" => encode(
             SubmissionApi::get(
                 api,
@@ -331,25 +348,29 @@ pub async fn call_json(api: &dyn PluginApi, operation: String, input: String) ->
     let (response, success) = encode_response(result);
     if let Some((plugin_id, plugin_version)) = api.audit_identity() {
         let logged_operation = operation.chars().take(64).collect::<String>();
-        let permission = match operation.split('.').next().unwrap_or("") {
-            "submission" => "submission.read",
-            "contest" => "contest.read",
-            "identity" => "identity.read",
-            "storage" => {
-                if operation == "storage.get" {
-                    "storage.read"
-                } else if operation == "storage.compareAndSet" {
-                    "storage.read storage.write"
-                } else {
-                    "storage.write"
+        let permission = match operation.as_str() {
+            // Full-operation match: rank is its own permission, not contest.read.
+            "contest.rank" => "contest.rank",
+            _ => match operation.split('.').next().unwrap_or("") {
+                "submission" => "submission.read",
+                "contest" => "contest.read",
+                "identity" => "identity.read",
+                "storage" => {
+                    if operation == "storage.get" {
+                        "storage.read"
+                    } else if operation == "storage.compareAndSet" {
+                        "storage.read storage.write"
+                    } else {
+                        "storage.write"
+                    }
                 }
-            }
-            "http" => "network.request",
-            "notification" => "notification",
-            // Known capability without a permission; kept explicit so the
-            // fallback below stays reserved for unknown operations.
-            "log" => "none",
-            _ => "none",
+                "http" => "network.request",
+                "notification" => "notification",
+                // Known capability without a permission; kept explicit so the
+                // fallback below stays reserved for unknown operations.
+                "log" => "none",
+                _ => "none",
+            },
         };
         tracing::debug!(plugin_id=?plugin_id, plugin_version=?plugin_version, runtime="js",event="",operation=?logged_operation,permission,
             request_id=%uuid::Uuid::new_v4(),success,"Plugin API completed");
