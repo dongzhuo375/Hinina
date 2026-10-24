@@ -380,7 +380,9 @@ Wire 形状**恰好**为：
 - `PluginStatus` 当前只有 `{id, state, error: {code, permission?} | null}`。
 - 启动阶段失败保留 `failed` 与稳定错误码；成功重启后的状态覆盖旧诊断。
 - 状态历史按最近写入保留最多 128 个 ID；列表读取时清除已从配置移除的历史记录。
+- **`enabled` 只由 `plugins.json` 决定**：`stop` 是"本次停止"，不改变自动启用意图——重启应用后 enabled 插件仍会自动启动；持久禁用必须改 `plugins.json`。
 - `stop` 先撤销权限与订阅，再等待 worker 释放；超时保持 `failed/timeout` 并由 reaper 回收。
+- **`reload` 是开发期便利**（免于重启 `tauri dev`）：先停旧实例、确认退出、再按当前代码/配置/批准启动。**发布形态的语义是"改配置/改代码后重启应用生效"**。
 - 旧 worker 未结束前拒绝同 ID 重启；迟到退出不能覆盖已锁定的失败诊断。
 - 应用退出只做同步撤销，不等待插件，不干预工作区保存。
 
@@ -397,7 +399,7 @@ Wire 形状**恰好**为：
 - 事件：`plugin-notification`，载荷 `{ pluginId, level, message }`。
 - 命令不接收权限、代码、URL 或文件路径。
 - 前端分层：View → Store → Service → Bridge；通知校验、5 项上限、6 秒过期、单一活动订阅/迟到订阅卸载都在 `plugin.service`；Store 只应用 add/dismiss。
-- `window.hininaPlugins` 仅在 DEV 提供；release 仍按批准配置自动启动插件。
+- 四个命令在 release 构建中依然注册，但前端只在 DEV 暴露入口：`window.hininaPlugins` 仅 DEV 提供；release 按批准配置自动启动插件，无运行时管理入口。
 
 ## 16. 对内分层契约
 
