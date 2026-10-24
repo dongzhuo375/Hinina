@@ -17,7 +17,7 @@
 | `manager.rs` | 启动/停止/重载/Resync 生命周期 | [manager.md](manager.md) |
 | `limits.rs` | 全宿主共用的期限与字节预算常量 | [limits.md](limits.md) |
 
-无源文件的专题文档：[安全模型](security.md)、[开发教程](tutorial.md)、[验证记录](validation.md)、[总览](README.md)。
+无源文件的专题内容统一放在 [doc/plugin/](../../../plugin/README.md)：安全模型（[architecture.md §6](../../../plugin/architecture.md)）、开发教程（[development.md §1](../../../plugin/development.md)）、验证记录（[history.md](../../../plugin/history.md)）、路线图（[roadmap.md](../../../plugin/roadmap.md)）；模块索引见 [README.md](README.md)。
 
 ## 直接依赖
 - `core::access`（AccessRevision 撤销栅栏）

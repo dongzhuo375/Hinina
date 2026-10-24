@@ -1,6 +1,6 @@
 # 插件开发与宿主施工
 
-> 基线：`main@8379772`。契约细节见 [contracts.md](contracts.md)，架构见 [architecture.md](architecture.md)。
+> 代码是事实标准，本文不逐次标注基线。契约细节见 [contracts.md](contracts.md)，架构见 [architecture.md](architecture.md)。
 
 ## 1. 插件作者快速开始
 
@@ -204,7 +204,7 @@ if (contest && !contest.sealed) {
 - [ ] 每个 handler 重新获取 context；遇到 `context_expired` 停止本次操作。
 - [ ] 分页用 `nextCursor` 判断末尾，不靠 `records` 是否为空；按 `submissionId` 去重。
 - [ ] 大量历史用 `list` 分批，保存进度；不要用 `submission.get` 反复全量扫描。
-- [ ] 存储用 `missing` 与 JSON `null` 区分状态；CAS 只保证本地，不保证远端 exactly-once。
+- [ ] 存储用 `missing` 与 JSON `null` 区分状态；CAS 只保证本地，不保证远端 exactly-once。设计可恢复状态时注意：`CAS(null)` 不能把 `dispatch_failed` 再变回 `dispatching`，崩溃后的 `dispatching` 也会卡住——显式设计状态机、租期/重试预算，并让外部服务通过幂等键去重；本地原子 CAS 不能撤回远端已成功但客户端超时的派发。
 - [ ] HTTP 使用外部幂等键；超时/500 由插件自行重试，核心不重试派发。
 - [ ] 不把通知当成功凭据；不输出 Token、用户名、源码、路径或响应正文。
 - [ ] 排错用 `hinina.log.*` 输出阶段与计数；不写敏感内容，不依赖日志做业务判断。

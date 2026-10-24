@@ -1,7 +1,6 @@
 # Hinina 插件系统
 
-> 代码基线：`main@8379772`（PR #41 squash），文档整理：2026-10-22。
-> 代码是事实标准；本目录是插件系统的设计、契约、施工和路线图入口，模块级细节见 [`../modules/src-tauri/plugin/`](../modules/src-tauri/plugin/README.md)。
+> 代码是事实标准，本目录不逐次标注基线；本目录是插件系统的设计、契约、施工和路线图入口，模块级细节见 [`../modules/src-tauri/plugin/`](../modules/src-tauri/plugin/README.md)。
 
 ## 当前状态
 
@@ -33,17 +32,16 @@
 
 模块级参考：
 
-- [插件模块总览](../modules/src-tauri/plugin/README.md)
-- [开发教程](../modules/src-tauri/plugin/tutorial.md)
+- [插件模块文档索引](../modules/src-tauri/plugin/README.md)
 - [Manifest v2](../modules/src-tauri/plugin/host/manifest.md)
 - [Plugin API v2](../modules/src-tauri/plugin/api/mod.md)
 - [事件与 Resync](../modules/src-tauri/plugin/api/event.md)
 - [Runtime](../modules/src-tauri/plugin/runtime/mod.md)
-- [安全模型](../modules/src-tauri/plugin/security.md)
 - [资源上限](../modules/src-tauri/plugin/limits.md)
-- [验证记录](../modules/src-tauri/plugin/validation.md)
 - [TypeScript 声明](../modules/src-tauri/plugin/sdk/hinina.d.ts)
 - [参考业务插件（首次 AC 气球派发）](../modules/src-tauri/plugin/sdk/examples/balloon/README.md)
+
+安全模型见 [architecture.md §6](architecture.md)，开发教程见 [development.md §1](development.md)，验证记录见 [history.md](history.md)。
 
 ## 先读什么
 
