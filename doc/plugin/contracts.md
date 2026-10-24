@@ -317,7 +317,7 @@ Wire 形状**恰好**为：
 
 ## 10. 资源上限
 
-常量集中在 [`plugin/limits.rs`](../../src-tauri/src/plugin/limits.rs) 及所属模块。
+**本表是插件宿主全部数值上限的唯一事实表**：其他文档叙述行为时只引用常量名，不重复数值；各源文件的模块文档（`doc/modules/`）允许记录**本文件自身**的常量值。常量集中在 [`plugin/limits.rs`](../../src-tauri/src/plugin/limits.rs) 及所属模块，数值由测试锁定；本表改动必须与代码同 PR。
 
 | 项 | 上限 |
 |---|---|

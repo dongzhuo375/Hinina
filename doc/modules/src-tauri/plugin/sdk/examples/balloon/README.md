@@ -14,7 +14,7 @@
    `solved`/`firstAc` 恒 false，与真没通过不可区分；
 3. `contest.problems`（题号 ↔ 气球颜色）→ `contest.rank` 逐页拉取（配额
    见下；每页行数按题数自适应——`min(RANK_MAX_ROWS, RANK_MAX_CELLS ÷ (题数+1))`——
-   保证页在宿主单页 `RANK_MAX_ROWS` 行 / `RANK_MAX_CELLS` 格上限内可编码），
+   保证页在宿主 `MAX_RANK_ROWS` 行 / `MAX_RANK_CELLS` 格上限内可编码），
    跨页按 `teamKey` 去重，打星队（`rank === -1`）跳过；页游标跨轮推进、
    榜末回绕，同一页被**连续 `SKIP_AFTER_WINDOWS` 个窗口**以 `limit_exceeded`
    拒绝后才跳过（短暂配额抖动不丢页，游标也不会被钉死）；榜单列不在题目
@@ -85,15 +85,15 @@ fragment，宿主一律拒绝）：
 }
 ```
 
-- 榜单查询有**每激活 `RANK_QUERIES_PER_MINUTE` 次/分钟的硬配额**（宿主
-  实现为 governor GCRA：突发等于配额、按每分钟配额个逐个回补；数值见
-  `src-tauri/src/plugin/limits.rs`，与测试锁定）。插件本地以**相同参数的
-  GCRA** 记账（模块态、随激活重置；时钟取事件信封时间——它就是适配时刻
-  的宿主墙钟），与宿主限流器的等价由构造保证；预算跨轮连续回补、共享
-  使用（无每轮上限），不足一个整令牌的轮次一页不取、安静跳过（日志含
-  `rank budget exhausted`）。本地记账看不到的偏差（共享 provider 预算、
-  信封入队到处理之间的排队延迟等）表现为瞬时拒绝，由重试路径吸收——
-  同一页连续 `SKIP_AFTER_WINDOWS` 个窗口（60 秒计窗）被拒才会跳页。
+- 榜单查询有**每激活 `PLUGIN_RANK_QUERIES_PER_MINUTE` 次/分钟的硬配额**（宿主
+  实现为 governor GCRA：突发等于配额、按每分钟配额个逐个回补）。插件本地
+  以**相同参数的 GCRA** 记账（模块态、随激活重置；时钟取事件信封时间——
+  它就是适配时刻的宿主墙钟），与宿主限流器的等价由构造保证；预算跨轮
+  连续回补、共享使用（无每轮上限），不足一个整令牌的轮次一页不取、
+  安静跳过（日志含 `rank budget exhausted`）。本地记账看不到的偏差
+  （共享 provider 预算、信封入队到处理之间的排队延迟等）表现为瞬时拒绝，
+  由重试路径吸收——同一页连续 `SKIP_AFTER_WINDOWS` 个窗口（60 秒计窗）
+  被拒才会跳页。
 - 激活时（已登录、可取得查询上下文）插件会对端点**真实发送 1 次 GET**
   探测，用于提前暴露 origin 审批/URL 配置错误——按请求计费或无状态的
   webhook 端点请知悉：每次启动/重载都有这一次出站请求。
@@ -122,25 +122,35 @@ fragment，宿主一律拒绝）：
 
 ## 已知边界
 
-> 本文不重复宿主数值：出现的大写标识符都是常量名——宿主侧在
-> `src-tauri/src/plugin/limits.rs`（榜单/日志/桥）与 `infra/plugin_storage.rs`
->（存储配额），插件侧在 `index.ts` 顶部；数值由测试锁定，以代码为准。
+> 本文不重复宿主数值：宿主上限一律用**宿主常量名**（定义于
+> `src-tauri/src/plugin/limits.rs` 与 `infra/plugin_storage.rs`，数值见
+> [contracts.md §10](../../../../../../plugin/contracts.md)），插件侧逻辑用
+> `index.ts` 顶部的本地别名。两套名字的镜像关系由契约测试锁定
+> （`__tests__/balloon.spec.ts` 解析两侧源码逐对比对），宿主数值另有
+> Rust 侧测试与 [contracts.md](../../../../../../plugin/contracts.md) 守住。
+>
+> | 宿主常量（limits.rs / plugin_storage.rs） | 插件别名（index.ts） |
+> |---|---|
+> | `MAX_RANK_ROWS` | `RANK_MAX_ROWS` |
+> | `MAX_RANK_CELLS` | `RANK_MAX_CELLS` |
+> | `PLUGIN_RANK_QUERIES_PER_MINUTE` | `RANK_QUERIES_PER_MINUTE` |
+> | `MAX_RANK_PAGE` | `MAX_RANK_PAGES` |
 
 - 榜单分页按 OJ 而异：**HOJ** 按请求分页，页游标以每分钟至多
-  `RANK_QUERIES_PER_MINUTE` 页的速度跨轮推进、榜末回绕，全榜轮转周期
-  约为「榜单页数 ÷ 配额」分钟——深榜单不会漏扫，只是新首 A 的检测延迟
-  受该周期限制；页数不超过配额的榜单每分钟至少完整扫一遍；轮转中途
-  加题会改变每页行数、页号与队伍错位，部分队伍要等下一轮转才被扫到。
-  **Hydro** 不支持分页：整榜单页返回、忽略请求的 limit 与页码，每轮
-  1 次查询即拿全榜（窗口配额大部分闲置），且单页须同时满足宿主
-  `RANK_MAX_ROWS` 行与 `RANK_MAX_CELLS` 格两个硬限、均不受插件请求
-  调节（题数 × 队数超过 `RANK_MAX_CELLS` 即超）——超限的 Hydro 比赛
+  `PLUGIN_RANK_QUERIES_PER_MINUTE` 页的速度跨轮推进、榜末回绕，全榜轮转
+  周期约为「榜单页数 ÷ 配额」分钟——深榜单不会漏扫，只是新首 A 的检测
+  延迟受该周期限制；页数不超过配额的榜单每分钟至少完整扫一遍；轮转
+  中途加题会改变每页行数、页号与队伍错位，部分队伍要等下一轮转才被
+  扫到。**Hydro** 不支持分页：整榜单页返回、忽略请求的 limit 与页码，
+  每轮 1 次查询即拿全榜（窗口配额大部分闲置），且单页须同时满足宿主
+  `MAX_RANK_ROWS` 行与 `MAX_RANK_CELLS` 格两个硬限、均不受插件请求
+  调节（题数 × 队数超过 `MAX_RANK_CELLS` 即超）——超限的 Hydro 比赛
   每次查询都被拒，插件无法派发（日志按跳页报告）。契约页数上限
-  `MAX_RANK_PAGES`，可覆盖行数 = `MAX_RANK_PAGES` × 每页自适应行数
+  `MAX_RANK_PAGE`，可覆盖行数 = `MAX_RANK_PAGE` × 每页自适应行数
   （随题数增多而减少）。
 - 页被连续 **`SKIP_AFTER_WINDOWS` 个窗口**（60 秒计窗）以 `limit_exceeded`
   拒绝后才跳过：一两个窗口的配额/共享预算抖动不会丢页；真正的超限页
-  （超过 `RANK_MAX_ROWS` 行或 `RANK_MAX_CELLS` 格）与持续的预算干旱都会
+  （超过 `MAX_RANK_ROWS` 行或 `MAX_RANK_CELLS` 格）与持续的预算干旱都会
   走到跳页，游标继续推进（不会钉死）、回绕后重扫。超限页上的队伍始终
   收不到气球，这是宿主页上限下的硬边界；被误跳的健康页只是延迟一个
   轮转周期，不丢数据。

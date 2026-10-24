@@ -459,6 +459,48 @@ describe('balloon reference plugin host contract', () => {
     // The proxy- prefix rule belongs to the same blacklist behavior.
     expect(source).toMatch(/lower\.starts_with\("proxy-"\)/)
   })
+
+  it('keeps the plugin rank aliases mirroring the host limits', async () => {
+    // The README refers readers to the HOST constants (limits.rs); index.ts
+    // works with plugin-side aliases. This test parses both sources so a
+    // one-sided change breaks here instead of silently drifting the docs
+    // and the accounting.
+    const fsModule = 'node:fs'
+    const { readFileSync } = (await import(fsModule)) as {
+      readFileSync: (path: URL, encoding: string) => string
+    }
+    const limits = readFileSync(
+      new URL('../../../../../../../../src-tauri/src/plugin/limits.rs', import.meta.url),
+      'utf-8',
+    )
+    const plugin = readFileSync(new URL('../index.ts', import.meta.url), 'utf-8')
+    const rustValue = (name: string): string => {
+      const match = limits.match(new RegExp(`const ${name}: \\w+ = ([0-9_]+);`))
+      expect(match, `limits.rs must define ${name}`).not.toBeNull()
+      return match![1].replace(/_/g, '')
+    }
+    const pluginValue = (name: string): string => {
+      const match = plugin.match(new RegExp(`const ${name} = ([0-9_]+)`))
+      expect(match, `index.ts must define ${name}`).not.toBeNull()
+      return match![1].replace(/_/g, '')
+    }
+    // alias → host constant (both sides must exist and stay equal)
+    const mirror: Array<[string, string]> = [
+      ['RANK_MAX_ROWS', 'MAX_RANK_ROWS'],
+      ['RANK_MAX_CELLS', 'MAX_RANK_CELLS'],
+      ['RANK_QUERIES_PER_MINUTE', 'PLUGIN_RANK_QUERIES_PER_MINUTE'],
+      ['MAX_RANK_PAGES', 'MAX_RANK_PAGE'],
+    ]
+    for (const [alias, host] of mirror) {
+      expect(pluginValue(alias)).toBe(rustValue(host))
+    }
+    // The README documents host caps under the HOST names; a rename that
+    // breaks that promise must fail here too.
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf-8')
+    for (const host of ['MAX_RANK_ROWS', 'MAX_RANK_CELLS', 'PLUGIN_RANK_QUERIES_PER_MINUTE', 'MAX_RANK_PAGE']) {
+      expect(readme, `README must reference host constant ${host}`).toContain(host)
+    }
+  })
 })
 
 describe('balloon reference plugin activation', () => {
