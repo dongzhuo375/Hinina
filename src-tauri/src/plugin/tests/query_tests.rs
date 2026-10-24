@@ -1953,7 +1953,8 @@ async fn contest_current_projection_reports_sealed_and_type_without_reading_rank
 }
 
 #[tokio::test]
-async fn contest_problems_need_only_contest_read_and_pass_color_through() {    let source = Arc::new(Source::default());
+async fn contest_problems_need_only_contest_read_and_pass_color_through() {
+    let source = Arc::new(Source::default());
     *source.problems.lock().unwrap() = vec![
         crate::core::entity::contest::ContestProblem {
             id: 1,
@@ -2145,4 +2146,27 @@ async fn rank_has_a_dedicated_budget_above_the_generic_query_rate() {
     // The dedicated rank gate is separate from the generic query budget: a cheap
     // remote query still works after rank is exhausted.
     q.contest(&c, None).await.unwrap();
+}
+
+#[tokio::test]
+async fn rank_failures_before_the_board_fetch_do_not_burn_the_rank_budget() {
+    let source = Arc::new(Source::default());
+    // Metadata mismatch fails before the board fetch: the rank token must stay
+    // untouched, so debugging a misconfigured contest cannot lock the plugin out.
+    let mut mismatched = contest_fixture(false, None, 0);
+    mismatched.id = "other-contest".into();
+    *source.contest_override.lock().unwrap() = Some(mismatched);
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    for _ in 0..6 {
+        assert_eq!(
+            q.rank(&c, PluginRankQuery { page: 1, limit: 50 }).await,
+            Err(PluginError::ProviderError)
+        );
+    }
+    // Restore matching metadata: the full 6/min burst is still available.
+    *source.contest_override.lock().unwrap() = None;
+    q.rank(&c, PluginRankQuery { page: 1, limit: 50 })
+        .await
+        .unwrap();
 }

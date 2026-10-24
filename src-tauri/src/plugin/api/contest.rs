@@ -125,7 +125,9 @@ pub struct PluginRankCell {
 /// @permission contest.rank
 /// @stability stable
 /// @security redacted
-/// 榜单行；不返回 uid、原始 username、realname、nickname、avatar、gender、totalTime。
+/// 榜单行；不返回 uid 字段、原始 username、realname、nickname、avatar、gender、totalTime。
+/// 唯一例外是 `displayName` 的最终回退：全空时以 uid 文本作显示名（与前端
+/// resolveDisplayName 同规则，保证榜单永远有可辨识文本）。
 /// `teamKey` 与 `identity.userKey` 同算法，可直接比对自身。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

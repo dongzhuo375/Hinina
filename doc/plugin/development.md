@@ -164,7 +164,8 @@ if (contest && !contest.sealed) {
 - `limit` 是提示：Hydro 无视分页、整榜单页返回（行数可能超过 limit）；`page` 回显
   服务端实际页（Hydro 恒 1），`hasMore=false` 即整榜已取完。
 - HOJ 榜单实时全量计算，较慢：**榜单查询有每激活 6 次/分钟的独立预算**（突发 6 次
-  覆盖分页同步；持续轮询 ≥10s，建议 ≥30s，节拍只能来自 Resync，运行时无 `setTimeout`）。
+  覆盖分页同步；持续轮询 ≥10s，建议 ≥30s，节拍只能来自 Resync，运行时无 `setTimeout`）；
+  每次调用另消耗 2 份通用 Provider 预算（元信息 + 榜单）。
 - Hydro 单页返回全量：超过 200 行或总 cells 超限会得到 `limit_exceeded`，大榜单可能不可用。
 - `color` 可能为空串（Hydro）；不能自己编颜色。
 - 查询入参不带 `contestId`（多余字段直接拒绝）；未选中比赛返回 `context_expired`，等下次 Resync。

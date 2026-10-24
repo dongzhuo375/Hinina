@@ -735,16 +735,17 @@ impl ScopedQueries {
         let Some(contest) = context.scope.contest.clone() else {
             return Err(PluginError::ContextExpired);
         };
-        // Dedicated budget: HOJ recomputes the whole board per fetch, so rank calls
-        // must not be chargeable at the generic 60/min query rate.
-        if self.rank_rate.check().is_err() {
-            return Err(PluginError::LimitExceeded);
-        }
         // Display names follow the contest's rankShowName rule (same as the app's
         // board); the metadata read serves only name resolution, never sealed state.
         let metadata = self.remote(handle, self.source.contest(&contest)).await?;
         if metadata.id != contest {
             return Err(PluginError::ProviderError);
+        }
+        // Dedicated budget, charged only when the expensive board fetch is about to
+        // happen: metadata-only failures stay free, while post-fetch rejections keep
+        // their charge — the OJ already did the full-board recompute either way.
+        if self.rank_rate.check().is_err() {
+            return Err(PluginError::LimitExceeded);
         }
         let page = self
             .remote(handle, self.source.rank(&contest, query.page, query.limit))
