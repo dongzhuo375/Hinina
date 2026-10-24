@@ -91,7 +91,7 @@ await window.hininaPlugins.stop('com.example.development')
 - 已在运行的插件再次 `start` 会报错（重复 start 只拒绝命令、不写失败历史）。
 - **`enabled` 只由 `plugins.json` 决定**：`stop` 是"本次停止"，不改变自动启用意图——重启应用后 enabled 插件仍会自动启动；持久禁用必须改 `plugins.json`。
 - **`reload` 是开发期便利**（免于重启 `tauri dev`）：旧 worker 真正退出后才加载新源码。**发布形态的语义是"改配置/改代码后重启应用生效"**。
-- **运行时不提供 `setTimeout` 或任何定时器**：所有节拍只能来自 Resync（周期默认 60 秒，`plugins.json` 的 `resyncIntervalSecs` 可调，最小 10 秒）。不要试图轮询或自造时钟；时间引用可用事件 `envelope.occurredAt`。
+- **运行时不提供 `setTimeout` 或任何定时器**：所有节拍只能来自 Resync（周期默认与可调范围见 [contracts.md §10](contracts.md)，由 `plugins.json` 的 `resyncIntervalSecs` 配置）。不要试图轮询或自造时钟；时间引用可用事件 `envelope.occurredAt`。
 - 底层命令为 `plugin_list/start/stop/reload/resync`，不接收代码/权限/路径。
 - 前端入口仍经过 Store → Service → Bridge。
 - `list` 显示 `starting/running/stopped/failed` 和安全错误码。
@@ -260,7 +260,7 @@ if (contest && !contest.sealed) {
 - 提供 `plugin_list/start/stop/reload/resync` 命令；不接收代码/权限/路径。
 - `AppContext` 只持有 Send 控制器；JS 值留在 worker。
 - 仅实际获批 `events.subscribe` 才建立事件队列并接收 Resync。
-- 周期 Resync 默认 60 秒；初始/Lagged/账号/OJ/比赛变化也可触发。
+- 周期 Resync 的默认与可调范围见 [contracts.md §10](contracts.md)；初始/Lagged/账号/OJ/比赛变化也可触发。
 - 前端按 View → Store → Service → Bridge 接入；通知策略在 Service。
 
 ### 阶段 6：验证与文档

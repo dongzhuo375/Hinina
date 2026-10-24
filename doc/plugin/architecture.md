@@ -23,7 +23,8 @@ flowchart LR
   Bus --> Frontend[前端事实桥]
   Bus --> Audit[审计]
   Bus --> Host[PluginHost: 白名单/权限/有界队列]
-  Host --> Runtime[PluginManager + QuickJS worker]
+  Host --> Queue[每插件有界队列]
+  Queue --> Runtime[PluginManager + QuickJS worker]
   Runtime --> API[Plugin API Adapter]
   API --> Query[ScopedQueries: 作用域/游标]
   Query --> Service
@@ -43,7 +44,7 @@ flowchart LR
 | `plugin/permission` | 声明与宿主批准取交集 | 默认拒绝，批准在代码目录外 |
 | `plugin/query` | 作用域句柄、游标、只读投影 | 绑定实际 endpoint + 用户 + 比赛 + revision |
 | `plugin/execution_api` | 能力装配与有限 JSON 桥 | 逐调用鉴权、准入限流、响应上限 |
-| `plugin/host` | 唯一插件事件消费者、白名单、128 有界队列 | 不执行用户代码 |
+| `plugin/host` | 唯一插件事件消费者、白名单、有界队列（`PLUGIN_EVENT_QUEUE_CAPACITY`） | 不执行用户代码 |
 | `plugin/runtime` | QuickJS 引擎、Promise、中断、内存限制 | 每插件独立 worker；`!Send` 端口 |
 | `plugin/manager` | 启停/重载/状态/Resync/回收 | 生命周期串行化，失败隔离 |
 | `plugin/registry` | `PluginRepository` 端口与审批结构 | 仓库实现只在 infra |
@@ -64,10 +65,10 @@ flowchart LR
 ### 3.1 事件路径
 
 ```
-CoreEventBus (broadcast, 容量 1024)
+CoreEventBus (broadcast)
   → PluginHost（唯一插件消费者）
   → PluginEventAdapter（白名单 + 裁剪 + 脱敏 + 版本化）
-  → 每插件 mpsc 队列（128）
+  → 每插件有界队列（PLUGIN_EVENT_QUEUE_CAPACITY）
   → QuickJS worker（串行 handler）
 ```
 
@@ -148,7 +149,7 @@ JS log.*       → LogApi（execution_api 内实现）→ tracing → logs/hinin
 1. **声明 ≠ 授权**：有效权限 = Manifest 声明 ∩ `plugins.json` 批准；默认拒绝，清单变更不会自动扩权。四个访问变更组件（登录/登出、OJ、比赛、连接配置）强制构造注入共享撤销栅栏。
 2. **访问作用域**：`AccessRevision` 显式撤销，不依赖有损事件；转换期间 `snapshot()` 为 `None`。
 3. **网络**：精确 origin（仅域名，IP 字面量在 Manifest/审批阶段即拒绝）；全部 DNS 结果过地址策略后固定连接；无代理/跳转/重试/Cookie/宿主凭证；私网 CIDR 与明文 HTTP 需单独批准。
-4. **执行与资源隔离**：每插件独立引擎/线程，期限与内存上限见 `plugin/limits` 常量（`ACTIVATION_TIMEOUT`/`EVENT_TIMEOUT`、引擎 16MiB 堆等，[contracts.md §10](contracts.md) 为唯一数值事实表）；同步死循环由引擎中断，未完成 Promise 由取消和时间上界终止。只读查询受每激活与全局两级速率预算约束（每个实际 Provider 请求单独计费，单请求超时 `PROVIDER_TIMEOUT`）。桥响应、native 投影页与保留游标余项各有 JSON 字节预算（`MAX_BRIDGE_RESPONSE_BYTES`/`MAX_CURSOR_PAGE_BYTES`/`MAX_CURSOR_BUFFER_BYTES`），与引擎堆限制及并发/条数上限共同约束，并非 OS 进程内存沙箱；引擎分配失败返回 `limit_exceeded`。
+4. **执行与资源隔离**：每插件独立引擎/线程，期限与内存上限见 `plugin/limits` 常量（`ACTIVATION_TIMEOUT`/`EVENT_TIMEOUT` 等，[contracts.md §10](contracts.md) 为唯一数值事实表；引擎堆上限见 [runtime/quickjs](../modules/src-tauri/plugin/runtime/quickjs.md)）；同步死循环由引擎中断，未完成 Promise 由取消和时间上界终止。只读查询受每激活与全局两级速率预算约束（每个实际 Provider 请求单独计费，单请求超时 `PROVIDER_TIMEOUT`）。桥响应、native 投影页与保留游标余项各有 JSON 字节预算（`MAX_BRIDGE_RESPONSE_BYTES`/`MAX_CURSOR_PAGE_BYTES`/`MAX_CURSOR_BUFFER_BYTES`），与引擎堆限制及并发/条数上限共同约束，并非 OS 进程内存沙箱；引擎分配失败返回 `limit_exceeded`。
 5. **错误与日志**：JS 只收到 11 个稳定错误码（`{code, permission?}` 白名单形状）。日志字段统一 plugin_id / plugin_version / runtime / event / operation / permission / request_id；唯一例外是 `operation="plugin.log"` 行——额外携带 `level` 与经校验（长度上限、拒控制字符）、换行/制表拍平且 Debug 转义的插件 `message`，是唯一允许进入日志的插件自由文本。禁止记录 token/password/authorization/source_code、完整请求/响应体、绝对路径、用户隐私或 JS 错误栈；基础设施诊断统一记录安全操作名、IO ErrorKind、serde 分类或 HTTP 错误类别，非法 plugin_id 替换占位符。Promise 拒绝跟踪仅保留有界身份摘要并输出计数，不访问或格式化 JS reason。
 6. **进程内隔离不等于 OS 沙箱**：native 缺陷或进程崩溃仍可能影响应用；已发送 HTTP 和已完成的文件写不能回滚。复杂边界采用成熟实现：rquickjs（执行限制）、semver（版本）、reqwest/url（协议与 TLS）、ipnet/ip_network（地址策略）、governor（限流）、fs4 + atomicwrites（持久化）。
 

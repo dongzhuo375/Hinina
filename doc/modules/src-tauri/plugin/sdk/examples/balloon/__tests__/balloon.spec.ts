@@ -501,6 +501,99 @@ describe('balloon reference plugin host contract', () => {
       expect(readme, `README must reference host constant ${host}`).toContain(host)
     }
   })
+
+  it('keeps the contracts.md §10 fact table in sync with the named source constants', async () => {
+    // contracts.md §10 is the single numeric fact table. Named constants
+    // from the sources must appear there under their documented value —
+    // if either side drifts, this fails and the fix must land in the same
+    // PR. Values that still exist only as inline literals in the sources
+    // (e.g. the 600/min bridge-admit budget, in-flight semaphores) are not
+    // covered here and stay review-synced.
+    const fsModule = 'node:fs'
+    const { readFileSync } = (await import(fsModule)) as {
+      readFileSync: (path: URL, encoding: string) => string
+    }
+    const src = (rel: string): string =>
+      readFileSync(new URL(`../../../../../../../../src-tauri/src/${rel}`, import.meta.url), 'utf-8')
+    const sources: Record<string, string> = {
+      limits: src('plugin/limits.rs'),
+      notification: src('plugin/api/notification.rs'),
+      storage: src('plugin/api/storage.rs'),
+      http: src('plugin/api/http.rs'),
+      host: src('plugin/host/plugin_host.rs'),
+      fsrepo: src('infra/fs_plugin_repo.rs'),
+      storageInfra: src('infra/plugin_storage.rs'),
+    }
+    const valueOf = (file: string, name: string, explicit?: number): number => {
+      if (explicit !== undefined) return explicit
+      // Byte budgets are often spelled as products: `1024 * 1024`.
+      const literal = sources[file].match(new RegExp(`const ${name}:?[^=]*= ([0-9_]+(?: \\* [0-9_]+)*)[;,]`))
+      if (literal) {
+        return literal[1]
+          .split('*')
+          .map(part => Number(part.trim().replace(/_/g, '')))
+          .reduce((a, b) => a * b)
+      }
+      // Time constants are spelled `Duration::from_secs(N)`.
+      const duration = sources[file].match(new RegExp(`const ${name}:?[^=]*= Duration::from_secs\\((\\d+)\\)`))
+      expect(duration, `${file} must define ${name}`).not.toBeNull()
+      return Number(duration![1])
+    }
+    const contracts = readFileSync(
+      new URL('../../../../../../../../doc/plugin/contracts.md', import.meta.url),
+      'utf-8',
+    )
+    const section = contracts.match(/## 10\. 资源上限[\s\S]*?(?=\n## )/)
+    expect(section, 'contracts.md must keep the §10 section').not.toBeNull()
+    const table = section![0]
+    // [source file, constant, how the fact table spells the value, explicit value?]
+    // START_TIMEOUT is computed (activation + 2s grace) in limits.rs, so it
+    // carries its explicit value here — a change to the formula must update
+    // this row in the same PR.
+    const rows: Array<[string, string, (value: number) => string, number?]> = [
+      ['limits', 'ACTIVATION_TIMEOUT', v => `${v}s`],
+      ['limits', 'EVENT_TIMEOUT', v => `${v}s`],
+      ['limits', 'START_TIMEOUT', v => `${v}s`, 12],
+      ['limits', 'STOP_TIMEOUT', v => `${v}s`],
+      ['limits', 'PROVIDER_TIMEOUT', v => `${v}s`],
+      ['limits', 'SUBMISSION_LOOKUP_TIMEOUT', v => `${v}s`],
+      ['limits', 'QUERY_HANDLE_TTL', v => `${v}s`],
+      ['limits', 'QUERY_HANDLE_REUSE_AGE', v => `${v}s`],
+      ['limits', 'MAX_BRIDGE_INPUT_BYTES', v => `${v} B`],
+      ['limits', 'MAX_BRIDGE_OPERATION_BYTES', v => `${v} B`],
+      ['limits', 'MAX_BRIDGE_RESPONSE_BYTES', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSOR_PAGE_BYTES', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSOR_BUFFER_BYTES', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSORS', v => `${v}`],
+      ['limits', 'MAX_QUERY_CONTEXTS', v => `${v}`],
+      ['limits', 'PLUGIN_QUERIES_PER_MINUTE', v => `${v} 次/分钟`],
+      ['limits', 'PLUGIN_QUERY_CONCURRENCY', v => `并发 ${v}`],
+      ['limits', 'SHARED_QUERIES_PER_MINUTE', v => `${v} 次/分钟`],
+      ['limits', 'SHARED_QUERY_CONCURRENCY', v => `并发 ${v}`],
+      ['limits', 'PLUGIN_LOG_BYTES', v => `${v} B`],
+      ['limits', 'PLUGIN_LOGS_PER_MINUTE', v => `${v} 次/分钟`],
+      ['limits', 'PLUGIN_RANK_QUERIES_PER_MINUTE', v => `${v} 次/分钟`],
+      ['limits', 'MAX_RANK_PAGE', v => `page 1..${v}`],
+      ['limits', 'MAX_RANK_ROWS', v => `${v} 行`],
+      ['limits', 'MAX_RANK_PROBLEMS', v => `${v} 列`],
+      ['limits', 'MAX_RANK_CELLS', v => `${v.toLocaleString('en-US')}`],
+      ['notification', 'MAX_NOTIFICATION_BYTES', v => `${v} B`],
+      ['storage', 'MAX_STORAGE_KEY_BYTES', v => `${v} B`],
+      ['storage', 'MAX_STORAGE_VALUE_BYTES', v => `${v / 1024}KiB`],
+      ['http', 'MAX_HTTP_BODY_BYTES', v => `${v / 1024}KiB`],
+      ['host', 'PLUGIN_EVENT_QUEUE_CAPACITY', v => `${v}`],
+      ['fsrepo', 'MAX_PLUGIN_DIRECTORIES', v => `${v} 个目录`],
+      ['fsrepo', 'MAX_SCAN_ENTRIES', v => `${v} 个条目`],
+      ['storageInfra', 'MAX_STORAGE_BYTES', v => `${v / 1024 / 1024}MiB`],
+    ]
+    const missing = rows
+      .map(([file, name, display, explicit]) => {
+        const spelled = display(valueOf(file, name, explicit))
+        return table.includes(spelled) ? null : `${file}:${name} (expected "${spelled}" in §10)`
+      })
+      .filter(Boolean)
+    expect(missing, 'fact-table drift').toEqual([])
+  })
 })
 
 describe('balloon reference plugin activation', () => {
