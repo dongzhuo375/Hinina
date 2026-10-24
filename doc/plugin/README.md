@@ -16,9 +16,10 @@
 - 受限 HTTP（精确 origin、DNS 校验并固定、无 Cookie/代理/跳转/重试）
 - 纯文本通知
 - 宿主日志出口（`hinina.log.*`，写入宿主日志文件，无需权限）
+- 参考业务插件：首次 AC 气球派发（`sdk/examples/balloon`，Resync 节拍、封榜门控、幂等派发、含逻辑测试与验收指南）
 - start / stop / reload / resync 开发命令、TypeScript SDK、脚手架与离线打包
 
-**尚未交付**：管理 UI、持久启用/禁用与配置写入、安装/更新/回滚、插件市场、配置 schema、系统凭据引用、业务插件（首次 AC / 气球派发）、真实 HOJ/Hydro + 外部服务联调、Linux/macOS 运行时验证。
+**尚未交付**：管理 UI、持久启用/禁用与配置写入、安装/更新/回滚、插件市场、配置 schema、系统凭据引用、真实 HOJ/Hydro + 外部服务联调（验收指南已就绪，待人工执行）、Linux/macOS 运行时验证。
 
 ## 文档地图
 
@@ -42,6 +43,7 @@
 - [资源上限](../modules/src-tauri/plugin/limits.md)
 - [验证记录](../modules/src-tauri/plugin/validation.md)
 - [TypeScript 声明](../modules/src-tauri/plugin/sdk/hinina.d.ts)
+- [参考业务插件（首次 AC 气球派发）](../modules/src-tauri/plugin/sdk/examples/balloon/README.md)
 
 ## 先读什么
 

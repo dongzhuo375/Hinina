@@ -68,6 +68,7 @@ npm run plugin:scaffold:build
 - 也可以在 `plugins.json` 顶层设置绝对 `codeRoot`，每个子目录一个插件。
 - 修改清单权限不会自动获得能力；更新宿主批准后 `reload`。
 - 网络 origin 必须同时出现在 `manifest.network.allowOrigins` 和宿主 `network` 列表；私网/HTTP 另需显式授权。
+- **插件 HTTP 拒绝 loopback/私网地址**：不能用本地 mock server 做端到端验收——用公网 HTTPS echo 端点接收假数据，验收完即关（见 `sdk/examples/balloon/README.md` 的验收指南）。
 - `options` 作为 activate 第二个参数传入并深冻结。
 
 ### 1.4 启动、调试、重载
@@ -86,12 +87,14 @@ await window.hininaPlugins.reload('com.example.development')
 await window.hininaPlugins.stop('com.example.development')
 ```
 
-- `window.hininaPlugins` 仅在 DEV 提供；release 仍按批准配置自动启动插件。
+- `window.hininaPlugins` 仅在 DEV 提供；release 仍按批准配置自动启动插件（四个命令在 release 构建中依然注册，只是前端不暴露入口）。
+- **`enabled` 只由 `plugins.json` 决定**：`stop` 是"本次停止"，不改变自动启用意图——重启应用后 enabled 插件仍会自动启动；持久禁用必须改 `plugins.json`。
+- **`reload` 是开发期便利**（免于重启 `tauri dev`）：旧 worker 真正退出后才加载新源码。**发布形态的语义是"改配置/改代码后重启应用生效"**。
+- **运行时不提供 `setTimeout` 或任何定时器**：所有节拍只能来自 Resync（周期默认 60 秒，`plugins.json` 的 `resyncIntervalSecs` 可调，最小 10 秒）。不要试图轮询或自造时钟；时间引用可用事件 `envelope.occurredAt`。
 - 底层命令为 `plugin_list/start/stop/reload/resync`，不接收代码/权限/路径。
 - 前端入口仍经过 Store → Service → Bridge。
 - `list` 显示 `starting/running/stopped/failed` 和安全错误码。
-- 没有 JS console 或逐步调试器；通过状态、私有存储和获准通知做有限探针，勿输出敏感信息。
-- 改源码后用 `reload`，旧 worker 真正退出后才加载新源码。
+- 没有 JS console 或逐步调试器；通过状态、私有存储、`hinina.log.*` 和获准通知做有限探针，勿输出敏感信息。
 
 ### 1.5 查询示例
 
@@ -183,6 +186,15 @@ if (contest && !contest.sealed) {
 | `unsupported` | 调用了未实现的 API（题面/工作区/UI 等占位能力） |
 | `script_error` | 语法错误、未捕获异常、内存分配失败以外的脚本失败；看宿主日志的稳定码，并在关键步骤用 `hinina.log.*` 输出阶段 |
 | 启动失败但无栈 | 设计如此；用状态、存储、通知和宿主 tracing 定位 |
+
+### 1.9 参考业务插件
+
+[`sdk/examples/balloon/`](../modules/src-tauri/plugin/sdk/examples/balloon/README.md)
+是完整的首次 AC 气球派发参考实现（阶段 C 交付）：Resync 驱动、封榜门控、
+跨页去重、`pending`→`sent` 幂等派发、封榜窗口不补派、`context_expired` 停轮、
+`hinina.log.*` 全程可观测。构建用 `npm run plugin:balloon:build`；安装、批准与
+端到端验收步骤见其 README。业务规则（首次 AC 判定、幂等、恢复）留在插件，
+核心 Service 不参与。
 
 ## 2. 插件作者契约清单
 
@@ -295,7 +307,7 @@ npm run plugin:scaffold:build
 
 ## 6. 当前不做
 
-- 气球插件、首次 AC 判定、外部派发/重试
+- ~~气球插件、首次 AC 判定、外部派发/重试~~ 参考实现已交付（`sdk/examples/balloon/`，见 §1.9）；真实业务的首次 AC 定义与派发策略由插件作者实现，不进核心
 - 管理 UI、配置写入、安装/更新/市场
 - 暂停/恢复、WASM、UI 扩展、自定义页面
 - 远程代码热更新、依赖求解
