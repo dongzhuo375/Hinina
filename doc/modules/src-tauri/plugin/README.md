@@ -1,6 +1,6 @@
 # Hinina 外围 JavaScript 插件宿主
 
-本轮提供可运行的最小宿主，Manifest **2**、Plugin API **2**、事件协议 **2**。不包含气球插件、首次 AC 判断、外部服务的重试业务或完整管理界面。
+本轮提供可运行的最小宿主，Manifest **2**、Plugin API **2**、事件协议 **2**。宿主不包含首次 AC 判断、外部服务的重试业务或完整管理界面——业务规则留在插件侧，参考实现见 [sdk/examples/balloon](sdk/examples/balloon/README.md)（首次 AC 气球派发，不构建进应用）。
 
 | 层 | 实现 |
 |---|---|

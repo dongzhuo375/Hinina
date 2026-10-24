@@ -1,6 +1,6 @@
 # 本轮验证与交付记录
 
-基线main 2cef9a1，新分支feat/plugin-runtime。先追加插件架构审计真实增量审计与选型，再实现引擎验证、访问基础层、查询/I/O/运行时及开发入口。未编写或加载气球业务插件。
+基线main 2cef9a1，新分支feat/plugin-runtime。先追加插件架构审计真实增量审计与选型，再实现引擎验证、访问基础层、查询/I/O/运行时及开发入口。本轮未编写或加载气球业务插件；后续阶段交付见文末「阶段 B/C 交付更新」。
 
 ## 验证结果
 
@@ -36,7 +36,7 @@ Storage真实文件覆盖跨实例CAS单胜者、missing/null区分、命名空�
 
 当前没有完整JS→真实远端成功请求的生产网络集成：成功/500/跳转/上限/超时在Mock HTTP transport验证，JS集成验证拒绝未授权网络。DNS解析和CIDR策略分别由生产代码与地址策略测试覆盖，尚未做受控DNS服务器重绑定演练。跨OS构建、OS进程沙箱、引擎体积/性能对照、DevTools debugger和source map栈不在本轮。
 
-首次AC/可见历史完整性/外部幂等/重试恢复属于插件业务，故不实现。只交付通用脚手架和能力，不以不存在的气球端到端测试冒充业务验收。Marketplace、暂停/恢复、WASM/UI扩展未实现且没有占位运行路径。
+首次AC/可见历史完整性/外部幂等/重试恢复属于插件业务，宿主不实现；能力组合由文档侧参考插件（`sdk/examples/balloon`，含 fake-host 逻辑测试与人工验收指南，不构建进应用）证明，真实 HOJ/Hydro + 外部服务的端到端验收仍未执行（见该插件 README 的验收表）。Marketplace、暂停/恢复、WASM/UI扩展未实现且没有占位运行路径。
 
 ## 审查回归更新
 
@@ -68,3 +68,10 @@ bc75b18后续查询回归：真实ConfigService/Registry验证地址待重启时
 - 前端：订阅"单一活动/迟到卸载/旧卸载不影响新订阅"测试迁到 `plugin.service.spec.ts`（Service 层），Store 测试只断言状态应用与 `dismissNotification` 委派。
 
 格式：`adapter/hydro`（保留原 BOM）、`provider_registry_impl`、`core/mod.rs`、`core/provider/submission.rs` 已回到 main 基线上重放功能性改动，本 PR 不再包含无关格式化。
+
+## 阶段 B/C 交付更新（PR #43–#45）
+
+- 阶段 A（PR #43）：宿主日志出口 `hinina.log.*`（无需权限，1024B/30 次每分钟）。
+- 阶段 B（PR #44）：`contest.problems` / `contest.rank`（新权限 `contest.rank`，专用 6 次/分钟预算）、`PluginContest` 封榜字段。
+- 阶段 C（PR #45）：参考业务插件 `sdk/examples/balloon`（首次 AC 气球派发：Resync 节拍、封榜门控、滑动窗口配额翻页、幂等派发、激活探针）。逻辑测试以强制宿主规则的 fake host 运行（header 黑名单、URL 形状、榜单配额与页内容上限、日志配额、存储操作配额、30s 截止），28 例；真实环境人工验收指南在其 README，尚未执行。
+- 本阶段验证：`npm test` 全量、`npm run build`、`npm run plugin:sdk:check`、`npm run plugin:balloon:build` 通过；无 Rust 宿主行为改动（B 阶段的 Rust 改动以 `cargo test` 按 PR #44 记录为准）。

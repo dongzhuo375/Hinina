@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-10-22 | 分支：`main`
+> 最后更新：2026-10-24 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -17,7 +17,7 @@ Hinina/
 │   ├── copilot-instructions.md           # Copilot CLI 指令（架构速查、开发约定）
 │   └── pr-assets/                        # PR 评审用的匿名演示截图（pr-36/：login、problemset、workspace-maximized）
 ├── scripts/
-│   └── build-plugin-scaffold.mjs          # 离线构建插件脚手架ES module
+│   └── build-plugin-scaffold.mjs          # 离线构建插件 ES module（默认脚手架；传 entry/outfile 参数构建 sdk/examples/balloon 等示例）
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
@@ -37,7 +37,8 @@ Hinina/
 │   ├── screen/                           # 界面设计稿（login / problem_set / problem_solve / rank / submissios / notice，各含 DESIGN.md + code.html + screen.png）
 │   ├── icon/                             # 应用图标设计稿（DESIGN.md + SVG 母版/浅色/单色/小尺寸变体 + preview.html/.png + PNG 导出 16–1024）
 │   ├── modules/                          # 模块文档（与 src/ 与 src-tauri/src/ 的文件树一一对应）
-│   │   └── README.md                     # 模块文档索引（格式约定与维护规则）
+│   │   ├── README.md                     # 模块文档索引（格式约定与维护规则）
+│   │   └── src-tauri/plugin/sdk/         # TypeScript SDK 声明与脚手架、参考业务插件 examples/balloon（文档侧代码，不构建进应用）
 └── src-tauri/
     ├── Cargo.toml                        # Rust 项目清单（依赖、版本、feature flags）
     ├── tauri.conf.json                   # Tauri 2 配置文件（含 bundle：NSIS 打包目标、publisher/版权/描述、图标清单）
@@ -471,7 +472,7 @@ src/
 - **`broadcast` 的语义边界（务必读）**：`send()` 成功 ≠ 消费者已处理完成 ≠ 事件可靠送达 ≠ 业务动作执行成功。通道**容量有限**（1024）、**允许丢失**、**不保留历史**（订阅前的事件收不到）。因此：① 没有 receiver 时 `send` 返回 `Err`，只记 `debug`，**绝不是业务失败**；② 消费者启动时与 `Lagged` 后都必须 `resync`（查询当前状态）；③ 业务动作在发布**之前**就已完成的，发布失败不回滚它。
 - **三类消费者、一条事件流**：`Tauri 前端桥`（emit 到 webview，仅刷新触发）、`审计`（只读落日志）、`PluginHost`（→ `PluginEvent`）。内部 Service **不订阅任何事件**（旧实现的同步订阅表与延迟线程已删除 —— 它同时承担「事实通知」与「必须完成的核心动作」两种语义，导致 Token 轮换、OJ 切换、配置热生效三处出现隐式同步依赖）。
 - **事件载荷约束**：只放 ID / 修订号 / 状态摘要。禁止出现 Token、密码、完整 Session、认证头、源代码、内部文件路径、完整领域实体、内部缓存对象、未脱敏用户实体、内部错误栈。大数据由消费者收到事件后经 Service / IPC 查询。
-- **插件系统**：当前提供最小可运行的外围 JS 宿主（QuickJS），不含业务插件。插件只能访问 `plugin/api/`，禁止直接调用内部 Service；插件事件经 `PluginEventAdapter` 白名单 + 脱敏 + 版本化（`PluginEventEnvelope{version,sequence,occurredAt,event}`）后投递，插件**不得**依赖 `CoreEvent` / 内部 Service / 领域实体 / `broadcast::Receiver`。设计、契约与路线图见 [doc/plugin/](plugin/README.md)
+- **插件系统**：当前提供最小可运行的外围 JS 宿主（QuickJS）与文档侧参考业务插件（首次 AC 气球派发，doc/modules/src-tauri/plugin/sdk/examples/balloon，不构建进应用）。插件只能访问 `plugin/api/`，禁止直接调用内部 Service；插件事件经 `PluginEventAdapter` 白名单 + 脱敏 + 版本化（`PluginEventEnvelope{version,sequence,occurredAt,event}`）后投递，插件**不得**依赖 `CoreEvent` / 内部 Service / 领域实体 / `broadcast::Receiver`。设计、契约与路线图见 [doc/plugin/](plugin/README.md)
 - **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。唯一的插件是 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为它的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**新增插件时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **依赖卫生：直接依赖必须被真正引用；不审批依赖的安装脚本**。`package.json` 的 `dependencies` 只放代码里实际 import 的包（曾出现 `approve` / `esbuild` / `vue-demi` 三个零引用的直接依赖 —— 其中 `esbuild` 还与 vite 嵌套的版本重复安装）。另外**刻意不写 `allowScripts`**：它是 npm 11.18 起的脚本审批字段，写上等于允许依赖的 postinstall 在每次安装时执行（供应链面）。实测不审批无影响：`vue-demi` 发布的默认就是 Vue 3 版（`isVue3 = true`，postinstall 只在检测到 Vue 2 时才切换），`esbuild` 的 postinstall 只是 optional platform 包的兜底。代价是 `npm install` 会提示「N packages have install scripts not yet covered by allowScripts」—— **这是预期的**，不要为消除提示而审批
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
