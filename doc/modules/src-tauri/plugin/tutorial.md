@@ -80,8 +80,8 @@ if (contest) {
 
 上例是查询用法，实际插件需设置扫描预算、保存可恢复状态并处理context_expired；不能让整个handler超过30秒。空records仍可能有nextCursor。API仅当前比赛、当前登录用户，缺少可见历史时不得声称已经确认全站首次AC。
 
-## 5. 气球插件仍需由开发者完成
+## 5. 参考业务插件：首次 AC 气球派发
 
-宿主已具备事件、身份/比赛/提交历史、持久CAS、受控HTTP、通知及定期Resync。插件负责首次AC的业务定义、完整扫描和稳定排序、派发状态恢复、外部幂等键和重试策略。
+宿主已具备事件、身份/比赛/提交历史、题目列表/全场榜单、持久CAS、受控HTTP、通知、日志及定期Resync。完整的参考实现在 [sdk/examples/balloon](sdk/examples/balloon/README.md)：Resync 节拍（运行时无 `setTimeout`）、封榜门控与不补派、跨页 `teamKey` 去重、`pending`→`sent` 幂等派发（远端幂等键 `contestId:teamKey:displayId`）、`context_expired` 停轮、`hinina.log.*` 可观测；构建用 `npm run plugin:balloon:build`，验收指南在其 README。
 
-原参考示例中的CAS(null)不能把dispatch_failed再变为dispatching，崩溃后的dispatching也会卡住；应区分missing与JSON null，显式设计可恢复状态、租期/重试预算，并让外部服务通过幂等键去重。本地原子CAS不能撤回远端已成功但客户端超时的派发。
+自行实现业务插件时仍需注意：首次AC的业务定义、完整扫描和稳定排序、派发状态恢复、外部幂等键和重试策略都由插件负责。CAS(null)不能把dispatch_failed再变为dispatching，崩溃后的dispatching也会卡住；应区分missing与JSON null，显式设计可恢复状态、租期/重试预算，并让外部服务通过幂等键去重。本地原子CAS不能撤回远端已成功但客户端超时的派发。

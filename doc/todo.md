@@ -136,7 +136,8 @@
 - [ ] **HUSTOJ Adapter** — `adapter/hustoj/`
 - [ ] **ProviderRegistry 完善** — 支持多 OJ 动态注册与切换
 - [x] **Plugin 宿主（PR #40/#41）** — 契约 v2 + 最小可运行 QuickJS 宿主；架构/契约/施工见 [doc/plugin/](plugin/README.md)
-- [ ] **Plugin 业务集成验证** — 能力已就绪（`hinina.log.*`、`contest.problems`、`contest.rank` 榜单分页）；待插件作者实现首次 AC/恢复/幂等与真实 HOJ/Hydro、外部服务联调
+- [x] **Plugin 参考业务插件** — 首次 AC 气球派发参考实现（`sdk/examples/balloon`：封榜门控/跨页去重/幂等派发/不补派 + 13 例逻辑测试 + 验收指南）
+- [ ] **Plugin 业务集成验证** — 真实 HOJ/Hydro + 外部服务联调：按 `sdk/examples/balloon/README.md` 验收清单人工执行（公网 HTTPS echo 端点 + 假队伍名）
 - [ ] **CI/CD 流水线** — GitHub Actions：构建 → 测试 → 打包 → Release
 
 ### 插件系统后续（详见 [doc/plugin/roadmap.md](plugin/roadmap.md)）

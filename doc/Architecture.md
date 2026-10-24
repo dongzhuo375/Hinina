@@ -17,7 +17,7 @@ Hinina/
 │   ├── copilot-instructions.md           # Copilot CLI 指令（架构速查、开发约定）
 │   └── pr-assets/                        # PR 评审用的匿名演示截图（pr-36/：login、problemset、workspace-maximized）
 ├── scripts/
-│   └── build-plugin-scaffold.mjs          # 离线构建插件脚手架ES module
+│   └── build-plugin-scaffold.mjs          # 离线构建插件 ES module（默认脚手架；传 entry/outfile 参数构建 sdk/examples/balloon 等示例）
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
