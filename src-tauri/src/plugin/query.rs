@@ -9,9 +9,10 @@ use super::{
     host::manifest::PluginPermission,
     limits::{
         MAX_CURSORS, MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
-        MAX_QUERY_CONTEXTS, MAX_RANK_PROBLEMS, MAX_RANK_ROWS, PLUGIN_QUERIES_PER_MINUTE,
-        PLUGIN_QUERY_CONCURRENCY, PROVIDER_TIMEOUT, QUERY_HANDLE_REUSE_AGE, QUERY_HANDLE_TTL,
-        SHARED_QUERIES_PER_MINUTE, SHARED_QUERY_CONCURRENCY, SUBMISSION_LOOKUP_TIMEOUT,
+        MAX_QUERY_CONTEXTS, MAX_RANK_CELLS, MAX_RANK_PROBLEMS, MAX_RANK_ROWS,
+        PLUGIN_QUERIES_PER_MINUTE, PLUGIN_QUERY_CONCURRENCY, PLUGIN_RANK_QUERIES_PER_MINUTE,
+        PROVIDER_TIMEOUT, QUERY_HANDLE_REUSE_AGE, QUERY_HANDLE_TTL, SHARED_QUERIES_PER_MINUTE,
+        SHARED_QUERY_CONCURRENCY, SUBMISSION_LOOKUP_TIMEOUT,
     },
     permission::PluginGrant,
 };
@@ -20,7 +21,7 @@ use crate::{
         access::{AccessRevision, AccessSnapshot},
         entity::{
             contest::{Contest, ContestProblem},
-            rank::{ContestRankPage, RankQuery},
+            rank::{ContestRankPage, ContestRankRow, RankQuery},
             submission::SubmissionHistoryPage,
         },
         error::AppError,
@@ -270,6 +271,24 @@ fn now_epoch_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// Same rule as the frontend's `resolveDisplayName`: pick the field named by the
+/// contest's `rank_show_name`, fall back to `username`, then `uid` — the board
+/// must always show identifiable text and must match the app's own board.
+fn resolve_display_name(row: &ContestRankRow, rank_show_name: &str) -> String {
+    let candidate = match rank_show_name {
+        "realname" => row.realname.trim(),
+        "nickname" => row.nickname.trim(),
+        _ => row.username.trim(),
+    };
+    let chosen = if candidate.is_empty() {
+        row.username.trim()
+    } else {
+        candidate
+    };
+    let chosen = if chosen.is_empty() { row.uid.as_str() } else { chosen };
+    chosen.chars().take(256).collect()
+}
+
 /// Single source of truth for "does this cached scope still match the live snapshot".
 /// Both the fast path (`cached_scope`) and the slow path (`scope`) must agree, or a token
 /// revoked by an OJ/account/contest switch could be served from cache. Keeping it in one
@@ -448,6 +467,9 @@ pub struct ScopedQueries {
     state: Mutex<State>,
     budget: QueryBudget,
     shared_budget: Arc<QueryBudget>,
+    /// HOJ recomputes the whole board per rank fetch; this dedicated rate gate
+    /// keeps plugin polling at the frontend's floor instead of the generic budget.
+    rank_rate: DefaultDirectRateLimiter,
 }
 impl ScopedQueries {
     /// @plugin-api
@@ -471,6 +493,10 @@ impl ScopedQueries {
                 SHARED_QUERIES_PER_MINUTE,
                 SHARED_QUERY_CONCURRENCY,
             )),
+            rank_rate: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(
+                PLUGIN_RANK_QUERIES_PER_MINUTE,
+            )
+            .unwrap())),
         }
     }
     pub(crate) fn with_shared_budget(mut self, budget: Arc<QueryBudget>) -> Self {
@@ -661,7 +687,7 @@ impl ScopedQueries {
                     PluginContestType::Acm
                 },
                 sealed,
-                sealed_until: sealed
+                sealed_since: sealed
                     .then_some(c.seal_rank_time.map(|t| t.saturating_mul(1000)))
                     .flatten(),
             })
@@ -709,6 +735,17 @@ impl ScopedQueries {
         let Some(contest) = context.scope.contest.clone() else {
             return Err(PluginError::ContextExpired);
         };
+        // Dedicated budget: HOJ recomputes the whole board per fetch, so rank calls
+        // must not be chargeable at the generic 60/min query rate.
+        if self.rank_rate.check().is_err() {
+            return Err(PluginError::LimitExceeded);
+        }
+        // Display names follow the contest's rankShowName rule (same as the app's
+        // board); the metadata read serves only name resolution, never sealed state.
+        let metadata = self.remote(handle, self.source.contest(&contest)).await?;
+        if metadata.id != contest {
+            return Err(PluginError::ProviderError);
+        }
         let page = self
             .remote(handle, self.source.rank(&contest, query.page, query.limit))
             .await?;
@@ -717,6 +754,18 @@ impl ScopedQueries {
             // letting the bridge cap truncate the response.
             return Err(PluginError::LimitExceeded);
         }
+        // Rows × columns must combine under the bridge cap: the product gets its
+        // own bound so a page legal per-row is not silently killed by encoding.
+        let total_cells: usize = page
+            .records
+            .iter()
+            .map(|row| row.submission_info.len())
+            .sum();
+        if total_cells > MAX_RANK_CELLS {
+            return Err(PluginError::LimitExceeded);
+        }
+        // Echo the provider's page, not the request: Hydro ignores paging and
+        // always reports its single page, and the response must stay self-consistent.
         let has_more = page.current < page.pages;
         let rows = page
             .records
@@ -725,6 +774,13 @@ impl ScopedQueries {
                 if row.submission_info.len() > MAX_RANK_PROBLEMS {
                     return Err(PluginError::LimitExceeded);
                 }
+                // A blank uid cannot form a stable teamKey: every such row would
+                // collapse onto one key and merge different teams. Fail the page
+                // closed instead of silently corrupting dedupe.
+                if row.uid.trim().is_empty() {
+                    return Err(PluginError::ProviderError);
+                }
+                let display_name = resolve_display_name(&row, &metadata.rank_show_name);
                 let cells = row
                     .submission_info
                     .into_iter()
@@ -748,7 +804,7 @@ impl ScopedQueries {
                 Ok(PluginRankRow {
                     rank: row.rank,
                     team_key: user_key(&context.scope.oj, &context.scope.endpoint, &row.uid),
-                    display_name: row.username.chars().take(256).collect(),
+                    display_name,
                     school: row.school.chars().take(256).collect(),
                     ac: row.ac,
                     total_score: row.total_score,
@@ -759,7 +815,7 @@ impl ScopedQueries {
         Ok(PluginRankPage {
             rows,
             total: page.total,
-            page: query.page,
+            page: page.current.max(1),
             has_more,
         })
     }

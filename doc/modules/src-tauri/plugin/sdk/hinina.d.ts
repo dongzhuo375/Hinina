@@ -40,8 +40,9 @@ export interface PluginContest {
   /** True only inside the seal window (sealRank && sealRankTime <= now). Explanatory
    * only: the real gate is the server withholding pass states while sealed. */
   sealed: boolean
-  /** UTC ms; non-null only while sealed (sealRankTime). */
-  sealedUntil: number | null
+  /** UTC ms; when the seal window STARTED (sealRankTime); non-null only while
+   * sealed. The server never publishes a seal end, so there is no sealedUntil. */
+  sealedSince: number | null
 }
 export interface PluginContestProblem {
   /** Real problem id. */
@@ -78,7 +79,9 @@ export interface PluginRankRow {
   rank: number
   /** Host salted hash; same algorithm as identity.userKey, comparable to your own. */
   teamKey: string
-  /** Server rank display name (rankShowName rule). */
+  /** Display name resolved by the host per the contest's rankShowName rule —
+   * the same text the app's own board shows (realname/nickname/username, then
+   * username, then uid as fallbacks). */
   displayName: string
   school: string
   ac: number
@@ -90,6 +93,7 @@ export interface PluginRankPage {
   rows: PluginRankRow[]
   /** Includes server-pinned entries; not the participant count. */
   total: number
+  /** The provider's actual page, not the requested one (Hydro always reports 1). */
   page: number
   hasMore: boolean
 }
@@ -222,7 +226,10 @@ export interface Hinina {
      * @stability stable
      * @async
      * Full-board rank page. Requires BOTH contest.rank and contest.read; pages are
-     * live views (no snapshot) — dedupe across pages by teamKey.
+     * live views (no snapshot) — dedupe across pages by teamKey. limit is a hint:
+     * Hydro returns the whole board in one page (rows may exceed limit, still
+     * bounded by 200 rows / 6,000 total cells); page echoes the provider's page.
+     * Rank calls have a dedicated 6/min per-activation budget.
      */
     rank(context: PluginQueryContext, query: PluginRankQuery): Promise<PluginRankPage>
   }

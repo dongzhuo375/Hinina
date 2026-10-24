@@ -41,8 +41,9 @@ pub struct PluginContest {
     /// 封榜窗口内为 true（`seal_rank && seal_rank_time <= now`，与 RankView 同规则）。
     /// 解释性标志，不是安全闸门：真正的闸门是服务端封榜期间不下发通过状态。
     pub sealed: bool,
-    /// 仅封榜时非 null（UTC 毫秒，取 `seal_rank_time`）。
-    pub sealed_until: Option<i64>,
+    /// 封榜**开始**时刻（`seal_rank_time`，UTC 毫秒）；仅封榜时非 null。
+    /// 服务端不下发封榜结束时刻（比赛结束后也不自动解封），故不提供 sealedUntil。
+    pub sealed_since: Option<i64>,
 }
 
 /// @plugin-api
@@ -69,7 +70,7 @@ pub struct PluginContestProblem {
 /// @stability stable
 /// 榜单分页查询；不带 contestId（作用域由上下文绑定）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PluginRankQuery {
     /// 页码，1..=100
     pub page: i64,

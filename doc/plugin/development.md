@@ -157,12 +157,17 @@ if (contest && !contest.sealed) {
 - `contest.rank` 需在 Manifest 声明**且** `plugins.json` 批准，同时还要有 `contest.read`。
 - **先看 `contest.current` 的 `sealed`**：为 true 则整轮直接结束，不读榜单、不派发——
   封榜期间 `solved`/`firstAc` 恒 false，与真没通过不可区分；解封后不补派历史首 A。
+  `sealedSince` 是封榜**开始**时刻（服务端不下发结束时刻，别拿它当解封时间）。
 - 跨页无事务快照：按 `teamKey` 去重；`total` 含服务端前置条目，不是参赛人数。
 - `teamKey` 与 `identity.current(context).userKey` 同算法：相等即自己那队。
-- HOJ 榜单实时全量计算，较慢：轮询节拍 ≥30s（节拍只能来自 Resync，运行时无 `setTimeout`）。
-- Hydro 单页返回全量：超过 200 行会得到 `limit_exceeded`，大榜单可能不可用。
+- `displayName` 由宿主按比赛 `rankShowName` 解析（与 App 榜单同规则），无需自己拼。
+- `limit` 是提示：Hydro 无视分页、整榜单页返回（行数可能超过 limit）；`page` 回显
+  服务端实际页（Hydro 恒 1），`hasMore=false` 即整榜已取完。
+- HOJ 榜单实时全量计算，较慢：**榜单查询有每激活 6 次/分钟的独立预算**（突发 6 次
+  覆盖分页同步；持续轮询 ≥10s，建议 ≥30s，节拍只能来自 Resync，运行时无 `setTimeout`）。
+- Hydro 单页返回全量：超过 200 行或总 cells 超限会得到 `limit_exceeded`，大榜单可能不可用。
 - `color` 可能为空串（Hydro）；不能自己编颜色。
-- 查询入参不带 `contestId`；未选中比赛返回 `context_expired`，等下次 Resync。
+- 查询入参不带 `contestId`（多余字段直接拒绝）；未选中比赛返回 `context_expired`，等下次 Resync。
 
 ### 1.8 常见失败
 

@@ -152,6 +152,20 @@ fn log_messages_are_bounded_and_control_characters_are_rejected() {
 }
 
 #[test]
+fn rank_query_rejects_unknown_fields_like_the_other_input_dtos() {
+    // The type-level "no contestId" guarantee must also hold at the wire level:
+    // serde silently ignoring unknown fields would make the TS check meaningless.
+    assert!(serde_json::from_value::<contest::PluginRankQuery>(serde_json::json!({
+        "page": 1, "limit": 50, "contestId": "c1"
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<contest::PluginRankQuery>(serde_json::json!({
+        "page": 1, "limit": 50
+    }))
+    .is_ok());
+}
+
+#[test]
 fn plugin_error_wire_shape_matches_the_bridge_contract() {
     use crate::plugin::host::manifest::PluginPermission;
     // Exhaustive match forces future error variants to update this wire contract test.

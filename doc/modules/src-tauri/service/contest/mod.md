@@ -25,6 +25,7 @@
   - `fn clear_announcement_read_state(&self) -> bool` — 清空全部公告已读状态（`announcements_read/`），返回是否确实删除了目录（不存在时 `false`，不算失败）。仅「重置客户端」用：表现是红点全部复亮，这正是重置应有的语义
   - `async fn load_contest_meta(&self, contest_id) -> AppResult<Contest>`（私有） — 比赛元信息：内存 → 磁盘 → 网络，命中即回填上游缓存；**只缓存成功结果**，Provider 错误（含 401/403）原样上抛
   - `async fn get_rank(&self, contest_id, query: &RankQuery) -> AppResult<ContestRankPage>` — 获取比赛排行榜（分页），经 registry 调 `ContestProvider::get_contest_rank`。**不做缓存**：HOJ 内榜每次实时计算（`doc/HOJ/HOJ-Contest-Rank-API.md` §4），缓存反而会给出过期名次；轮询节奏由前端控制（≥10s 且加抖动错峰、后台暂停）
+  - `async fn list_problems(&self, contest_id) -> AppResult<Vec<ContestProblem>>` — 只读比赛题目列表，经 registry 调 `ContestProvider::list_contest_problems`。**插件查询路径专用**：不选中比赛、不落缓存（与 `load_contest_with_problems` 的自动选中 + 元信息缓存是刻意分开的两条取数路径——插件查询绑定运行中的作用域，不应有选中副作用，也不消费为页面轮询服务的缓存）
   - `async fn load_contest_with_problems(&self, contest_id, password) -> AppResult<ContestBundle>` — 一次性获取比赛详情（走元信息缓存）+ 题目列表（**每次实时**）+ 自动选中（阶段 7 单比赛模式入口）
   - `async fn list_announcements(&self, contest_id, current_page: i64, limit: i64) -> AppResult<AnnouncementPage>` — 获取比赛公告（分页），经 registry 调 `ContestProvider::list_announcements`。**不做缓存**：公告可能包含裁判组临场发布的规则变更，必须每次拉取最新数据。每次拉取都会与上次结果比对，**出现新公告 ID 时发布 `CoreEvent::AnnouncementChanged { contest_id, new_ids }`**（红点提醒属状态变更，由 `main.rs` 的前端事件桥转发到 webview；**首次拉取只建基线不发事件** —— 没有基线可比，发了等于给每位选手一开机就亮红点）
   - `fn get_read_announcement_ids(&self, contest_id, uid) -> AppResult<Vec<String>>` — 读取某用户在某比赛下已读的公告 ID 列表。文件不存在视为「从未读过」；文件损坏只 `warn!` 并降级为空列表 —— 已读状态是纯 UI 便利特性，任何情况下都不应阻断公告展示
@@ -61,6 +62,7 @@
 - **clear_announcement_read_state**：`storage.exists("announcements_read")` 守卫 → `storage.remove_all(...)` → 返回是否删除（不存在或失败均为 `false`）
 - **load_contest_meta(contest_id)**：内存缓存命中 → 直接返回；否则磁盘缓存（`read` 按 `fetchedAt` 判 TTL）命中 → 回填内存并返回；仍未命中 → `ContestProvider::get_contest()`（失败 `e.context("获取比赛详情失败")`）→ **成功才**回写内存 + 磁盘
 - **get_rank(contest_id, query)**：`registry.current_contest()` → `ContestProvider::get_contest_rank()` → 失败先 `warn!` 再 `e.context("获取比赛榜单失败")` 上抛（**变体原样穿透**）；成功直接透传 `ContestRankPage`（records 前置副本的去重与真实人数推导由前端处理，Service 不加工）
+- **list_problems(contest_id)**：`registry.current_contest()` → `ContestProvider::list_contest_problems()` → 失败 `warn!` + `e.context("获取比赛题目列表失败")`；成功透传，不选中比赛、不落缓存
 - **load_contest_with_problems(id, password)**：`load_contest_meta()` 获取详情（命中缓存时零请求）→（私有赛校验密码）→ `list_contest_problems()` 获取题目（**每次实时**，失败 `e.context("获取比赛题目列表失败")`）→ `select_contest()` 自动选中 → 返回 `ContestBundle { contest, problems }`
 - **list_announcements(contest_id, page, limit)**：`registry.current_contest()` → `ContestProvider::list_announcements()` → 失败先 `warn!` 再 `e.context("获取比赛公告")` 上抛（**变体原样穿透**）；成功先 `publish_new_announcements(contest_id, &page)` 再透传 `AnnouncementPage`，不缓存
 - **get_read_announcement_ids(cid, uid)**：`read_state_path()` 校验并拼路径 → `storage.read_to_string()` 失败（不存在/读取错误）按未读返回空列表 → JSON 解析失败 `warn!` 后降级空列表

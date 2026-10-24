@@ -222,21 +222,29 @@ export default async function activate(
 `contest.rank(context, {page, limit})`：
 
 - 需 `contest.rank` **∩** `contest.read`，缺任一返回 `permission_denied` 并指认缺失项。
-- 入参不带 `contestId`：作用域由上下文绑定；未选中比赛 → `context_expired`。
-- 不使用游标：榜单是实时视图，没有快照语义；`page` 1..100、`limit` 1..200、
-  单行 ≤64 个题目列，超出返回 `limit_exceeded`（Hydro 单页全量返回，大榜单可能不可用）。
+- 入参不带 `contestId`（`deny_unknown_fields`，多余字段拒绝）；未选中比赛 → `context_expired`。
+- 不使用游标：榜单是实时视图，没有快照语义。`limit` 是**提示**：HOJ 按其分页，
+  Hydro 无视分页参数、整榜单页返回（行数可能超过 limit，仍受边界约束）。
+- 边界（可组合）：`page` 1..100、每页 ≤200 行、单行 ≤64 个题目列、**单页总 cells ≤6,000**；
+  超出返回 `limit_exceeded`（Hydro 大榜单可能因此不可用）。
+- `page` 回显**服务端实际页**而非请求页：Hydro 恒为 1；`hasMore = current < pages`。
 - 跨页无事务快照，需按 `teamKey` 去重；`total` 含服务端前置条目，不可当参赛人数。
 - 投影：`rank`（-1 打星）、`teamKey`（与 `identity.userKey` 同算法，可直接比对自身）、
-  `displayName`（服务端 rankShowName 规则结果）、`school`、`ac`、`totalScore`、
-  `cells`（key = displayId）。
-- 不返回：`uid`、原始 `username`、`realname`、`nickname`、`avatar`、`gender`、
+  `displayName`、`school`、`ac`、`totalScore`、`cells`（key = displayId）。
+- `displayName` 由宿主按比赛 `rankShowName` 规则解析（与前端榜单同规则：
+  realname/nickname/username 选字段，空则回退 username，再回退 uid 文本），
+  保证插件榜与 App 榜显示一致。为此 `rank` 每次额外读取一次比赛元信息——
+  仅用于名字解析，`sealed`/`contestType` 仍只来自 `contest.current`。
+- 行 `uid` 为空（Hydro 无 `raw` 的 user cell）→ 整页 `provider_error`：
+  空uid 无法生成稳定 `teamKey`，静默合并队伍比失败更糟。
+- 不返回：`uid`（字段）、原始 `username`、`realname`、`nickname`、`avatar`、`gender`、
   `totalTime`、任何原始响应。
 - 封榜态不来自榜单页：`PluginContest.sealed`（`seal_rank && seal_rank_time <= now`，
   与 RankView 同规则）解释"未 AC"是否可信；封榜期间 `solved`/`firstAc` 恒 false、
-  `acTime` 恒 null。`sealedUntil` 仅封榜时非 null（UTC 毫秒）。
-- `PluginRankPage` 刻意不带 `sealed`/`contestType`：一个 API 方法对应一个 service
-  取数路径（`rank` 只调 `get_rank`，不读比赛元信息、不加缓存）。
-- HOJ 榜单为实时全量计算，较慢：插件轮询节拍应 ≥30s；宿主不加缓存（缓存会给过期名次）。
+  `acTime` 恒 null。`sealedSince` 为封榜**开始**时刻（UTC 毫秒，仅封榜时非 null）；
+  服务端不下发封榜结束时刻，故无 `sealedUntil`。
+- HOJ 榜单为实时全量计算，较慢：**榜单查询另有每激活 6 次/分钟的独立预算**
+  （突发 6 次覆盖分页同步，持续轮询 ≥10s，建议 ≥30s）；宿主不加缓存（缓存会给过期名次）。
 
 ## 7. 事件与 Resync 契约
 
@@ -316,7 +324,7 @@ Wire 形状**恰好**为：
 | Provider 预算（全部插件合计） | 120 次/分钟，并发 4 |
 | 通知 | 512 B，10 次/分钟 |
 | 日志 | 1024 B，30 次/分钟（仅对宿主实际写入的行计费，被级别过滤的调用不扣额度）；换行/制表写入前拍平 |
-| 榜单 | page 1..100、limit 1..200 行、单行 ≤64 个题目列；超页（Hydro 单页全量）返回 `limit_exceeded` |
+| 榜单 | page 1..100、每页 ≤200 行、单行 ≤64 列、单页总 cells ≤6,000（可组合边界）；每激活 6 次/分钟独立预算；Hydro 超页返回 `limit_exceeded` |
 | 存储 | 键 256 B、值 64KiB、文件 1MiB；每激活 60 次/分钟，工厂合计 240 次/分钟，在途 16 |
 | HTTP | 请求/响应体 64KiB、总超时 ≤5s、每插件 60 次/分钟、并发 2；Client 缓存 32 |
 | 周期 Resync / 事件队列 | 默认 60s（10–3600s）/ 128 |

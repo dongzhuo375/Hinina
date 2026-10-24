@@ -198,7 +198,8 @@ impl ContestService {
     /// 只读比赛题目列表；不选中比赛、不落缓存。
     ///
     /// 插件查询路径专用：与 `load_contest_with_problems`（自动选中 + 元信息缓存）
-    /// 是两条独立取数路径，刻意不合并（见 doc/plugin/plan.md §8.1）。
+    /// 是两条刻意分开的取数路径——插件查询绑定运行中的作用域，不应有选中比赛的
+    /// 副作用，也不消费为页面轮询服务的缓存。
     pub async fn list_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
         let provider = self.registry.current_contest()?;
         provider

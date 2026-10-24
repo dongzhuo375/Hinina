@@ -56,3 +56,12 @@ pub(crate) const PLUGIN_LOGS_PER_MINUTE: u32 = 30;
 pub(crate) const MAX_RANK_PAGE: i64 = 100;
 pub(crate) const MAX_RANK_ROWS: usize = 200;
 pub(crate) const MAX_RANK_PROBLEMS: usize = 64;
+/// Total cells across one rank page. Rows × columns must combine: 200 × 64 cells
+/// would encode well past the 1 MiB bridge cap, so the product gets its own bound
+/// that keeps a worst-case page (bounded names) encodable.
+pub(crate) const MAX_RANK_CELLS: usize = 6_000;
+/// HOJ recomputes the whole board on every rank fetch; a dedicated per-activation
+/// budget keeps plugin polling at the frontend's floor (one call per 10s) instead
+/// of the generic 60/min, so two plugins cannot starve other queries. The burst
+/// equals the quota, which also covers an initial multi-page board sync.
+pub(crate) const PLUGIN_RANK_QUERIES_PER_MINUTE: u32 = 6;

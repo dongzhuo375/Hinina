@@ -43,8 +43,10 @@ async function checkRank(): Promise<void> {
   if (contest) {
     const sealed: boolean = contest.sealed
     const type: 'acm' | 'oi' = contest.contestType
+    const since: number | null = contest.sealedSince
     void sealed
     void type
+    void since
   }
   const page = await hinina.contest.rank(context, { page: 1, limit: 50 })
   const first: PluginRankRow | undefined = page.rows[0]

@@ -1634,6 +1634,63 @@ fn contest_fixture(seal_rank: bool, seal_rank_time: Option<i64>, contest_type: i
     .unwrap()
 }
 
+fn contest_with_rank_show_name(rank_show_name: &str) -> Contest {
+    serde_json::from_value(serde_json::json!({
+        "id": "contest", "title": "Fixture", "startTime": 1, "endTime": 2,
+        "rankShowName": rank_show_name
+    }))
+    .unwrap()
+}
+
+fn named_row(uid: &str, username: &str, realname: &str, nickname: &str) -> ContestRankRow {
+    ContestRankRow {
+        rank: 1,
+        uid: uid.into(),
+        username: username.into(),
+        realname: realname.into(),
+        nickname: nickname.into(),
+        school: String::new(),
+        gender: String::new(),
+        avatar: String::new(),
+        ac: 0,
+        total: 0,
+        total_time: 0,
+        total_score: None,
+        submission_info: std::collections::HashMap::new(),
+        time_info: std::collections::HashMap::new(),
+    }
+}
+
+/// A synthetic board of `rows` teams × `cols` problems with default cells.
+fn cells_page(rows: usize, cols: usize) -> ContestRankPage {
+    ContestRankPage {
+        records: (0..rows)
+            .map(|i| ContestRankRow {
+                rank: i as i32 + 1,
+                uid: format!("u{i}"),
+                username: format!("team-{i}"),
+                realname: String::new(),
+                nickname: String::new(),
+                school: String::new(),
+                gender: String::new(),
+                avatar: String::new(),
+                ac: 0,
+                total: 0,
+                total_time: 0,
+                total_score: None,
+                submission_info: (0..cols)
+                    .map(|p| (format!("P{p}"), RankCell::default()))
+                    .collect(),
+                time_info: std::collections::HashMap::new(),
+            })
+            .collect(),
+        total: rows as i64,
+        size: rows as i64,
+        current: 1,
+        pages: 1,
+    }
+}
+
 fn rank_row(uid: &str, rank: i32) -> ContestRankRow {
     ContestRankRow {
         rank,
@@ -1869,13 +1926,13 @@ async fn contest_current_projection_reports_sealed_and_type_without_reading_rank
     let source = Arc::new(Source::default());
     let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
     let c = q.current_context().await.unwrap();
-    // Seal window already started: sealed=true, sealedUntil echoes seal time in ms.
+    // Seal window already started: sealed=true, sealedSince echoes the seal start in ms.
     *source.contest_override.lock().unwrap() = Some(contest_fixture(true, Some(1), 1));
     let contest = q.contest(&c, None).await.unwrap().unwrap();
     assert_eq!(contest.contest_type, PluginContestType::Oi);
     assert!(contest.sealed);
-    assert_eq!(contest.sealed_until, Some(1000));
-    // Seal time not reached yet: sealed=false and no sealedUntil.
+    assert_eq!(contest.sealed_since, Some(1000));
+    // Seal time not reached yet: sealed=false and no sealedSince.
     let future = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -1885,19 +1942,18 @@ async fn contest_current_projection_reports_sealed_and_type_without_reading_rank
     let contest = q.contest(&c, None).await.unwrap().unwrap();
     assert_eq!(contest.contest_type, PluginContestType::Acm);
     assert!(!contest.sealed);
-    assert_eq!(contest.sealed_until, None);
+    assert_eq!(contest.sealed_since, None);
     // seal_rank=false stays unsealed even with a time set.
     *source.contest_override.lock().unwrap() = Some(contest_fixture(false, Some(1), 0));
     let contest = q.contest(&c, None).await.unwrap().unwrap();
     assert!(!contest.sealed);
-    assert_eq!(contest.sealed_until, None);
+    assert_eq!(contest.sealed_since, None);
     // The metadata projection never adds a rank data path.
     assert_eq!(source.rank_calls.load(AtomicOrdering::SeqCst), 0);
 }
 
 #[tokio::test]
-async fn contest_problems_need_only_contest_read_and_pass_color_through() {
-    let source = Arc::new(Source::default());
+async fn contest_problems_need_only_contest_read_and_pass_color_through() {    let source = Arc::new(Source::default());
     *source.problems.lock().unwrap() = vec![
         crate::core::entity::contest::ContestProblem {
             id: 1,
@@ -1949,4 +2005,144 @@ async fn contest_problems_need_only_contest_read_and_pass_color_through() {
     // Reading the list never selects a contest and never touches the rank path.
     assert_eq!(source.contest_calls.load(AtomicOrdering::SeqCst), 0);
     assert_eq!(source.rank_calls.load(AtomicOrdering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn rank_display_names_follow_the_contest_rank_show_name_rule() {
+    let source = Arc::new(Source::default());
+    *source.contest_override.lock().unwrap() = Some(contest_with_rank_show_name("realname"));
+    *source.rank_page.lock().unwrap() = Some(ContestRankPage {
+        records: vec![
+            named_row("u1", "uname-1", "Real One", "nick-1"),
+            named_row("u2", "uname-2", "   ", "nick-2"),
+            named_row("u3", "uname-3", "", ""),
+        ],
+        total: 3,
+        size: 50,
+        current: 1,
+        pages: 1,
+    });
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    let page = q
+        .rank(&c, PluginRankQuery { page: 1, limit: 50 })
+        .await
+        .unwrap();
+    // Same rule as the app's board: rankShowName picks the field, blank falls
+    // back to username — the plugin's board matches the app's board.
+    assert_eq!(page.rows[0].display_name, "Real One");
+    assert_eq!(page.rows[1].display_name, "uname-2");
+    assert_eq!(page.rows[2].display_name, "uname-3");
+
+    *source.contest_override.lock().unwrap() = Some(contest_with_rank_show_name("nickname"));
+    let page = q
+        .rank(&c, PluginRankQuery { page: 1, limit: 50 })
+        .await
+        .unwrap();
+    assert_eq!(page.rows[0].display_name, "nick-1");
+
+    // Unknown rule value → username; a blank username falls back to the uid text.
+    *source.contest_override.lock().unwrap() = Some(contest_with_rank_show_name(""));
+    *source.rank_page.lock().unwrap() = Some(ContestRankPage {
+        records: vec![named_row("u9", "  ", "Real", "nick")],
+        total: 1,
+        size: 50,
+        current: 1,
+        pages: 1,
+    });
+    let page = q
+        .rank(&c, PluginRankQuery { page: 1, limit: 50 })
+        .await
+        .unwrap();
+    assert_eq!(page.rows[0].display_name, "u9");
+}
+
+#[tokio::test]
+async fn rank_page_bounds_combine_under_a_total_cell_budget() {
+    let source = Arc::new(Source::default());
+    // 95 rows × 64 cells: every single bound is legal, the product is not.
+    *source.rank_page.lock().unwrap() = Some(cells_page(95, 64));
+    let q = queries_over(source.clone(), Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    assert_eq!(
+        q.rank(&c, PluginRankQuery { page: 1, limit: 95 }).await,
+        Err(PluginError::LimitExceeded)
+    );
+    // A combinable page (200 rows × 30 cells = 6,000) is delivered whole and
+    // actually encodes under the 1 MiB bridge cap.
+    *source.rank_page.lock().unwrap() = Some(cells_page(200, 30));
+    let page = q
+        .rank(&c, PluginRankQuery { page: 1, limit: 200 })
+        .await
+        .unwrap();
+    assert_eq!(page.rows.len(), 200);
+    assert!(page.rows.iter().all(|row| row.cells.len() == 30));
+    bounded_json::encoded_len(&page, crate::plugin::limits::MAX_BRIDGE_RESPONSE_BYTES).unwrap();
+}
+
+#[tokio::test]
+async fn rank_echoes_the_provider_page_not_the_request() {
+    let source = Arc::new(Source::default());
+    // Hydro-style: the whole board is one page and the request's page is ignored.
+    *source.rank_page.lock().unwrap() = Some(ContestRankPage {
+        records: vec![rank_row("user-1", 1)],
+        total: 1,
+        size: 50,
+        current: 1,
+        pages: 1,
+    });
+    let q = queries_over(source, Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    let page = q
+        .rank(&c, PluginRankQuery { page: 3, limit: 50 })
+        .await
+        .unwrap();
+    assert_eq!(page.page, 1);
+    assert!(!page.has_more);
+}
+
+#[tokio::test]
+async fn rank_rows_with_blank_uid_fail_closed() {
+    let source = Arc::new(Source::default());
+    *source.rank_page.lock().unwrap() = Some(ContestRankPage {
+        records: vec![rank_row("user-1", 1), rank_row("   ", 2)],
+        total: 2,
+        size: 50,
+        current: 1,
+        pages: 1,
+    });
+    let q = queries_over(source, Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    // A blank uid cannot form a stable teamKey: every such row would collapse onto
+    // one key and merge different teams, so the page fails closed.
+    assert_eq!(
+        q.rank(&c, PluginRankQuery { page: 1, limit: 50 }).await,
+        Err(PluginError::ProviderError)
+    );
+}
+
+#[tokio::test]
+async fn rank_has_a_dedicated_budget_above_the_generic_query_rate() {
+    let source = Arc::new(Source::default());
+    let q = queries_over(source, Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    // governor replenishes one token every 10s, so drain until the limit with
+    // bounds instead of asserting a fixed 7th failure.
+    let mut calls = 0u32;
+    loop {
+        let result = q.rank(&c, PluginRankQuery { page: 1, limit: 50 }).await;
+        if result.is_err() {
+            assert_eq!(result, Err(PluginError::LimitExceeded));
+            break;
+        }
+        calls += 1;
+        assert!(calls < 12, "rank budget must stay bounded");
+    }
+    assert!(
+        calls >= 6,
+        "rank budget must allow the 6/min quota (got {calls})"
+    );
+    // The dedicated rank gate is separate from the generic query budget: a cheap
+    // remote query still works after rank is exhausted.
+    q.contest(&c, None).await.unwrap();
 }
