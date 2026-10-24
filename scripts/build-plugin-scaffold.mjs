@@ -6,12 +6,19 @@ if (major < 20 || (major === 20 && minor < 6)) {
 }
 const { build } = createRequire(import.meta.resolve('vite'))('esbuild')
 
+// Usage: node build-plugin-scaffold.mjs [entry] [outfile]
+// Without arguments it builds the scaffold (original behavior); the balloon
+// example passes its own entry/outfile via the plugin:balloon:build script.
+const [entry, outfile] = process.argv.length > 2
+  ? [process.argv[2], process.argv[3] ?? 'src-tauri/target/plugin.js']
+  : ['doc/modules/src-tauri/plugin/sdk/scaffold/index.ts', 'src-tauri/target/plugin-scaffold.js']
+
 await build({
-  entryPoints: ['doc/modules/src-tauri/plugin/sdk/scaffold/index.ts'],
+  entryPoints: [entry],
   bundle: true,
   format: 'esm',
   platform: 'neutral',
   target: 'es2022',
-  outfile: 'src-tauri/target/plugin-scaffold.js',
+  outfile,
 })
-console.log('Built src-tauri/target/plugin-scaffold.js; copy it to your plugin directory as index.js (matching manifest.entry).')
+console.log(`Built ${outfile}; copy it to your plugin directory as index.js (matching manifest.entry).`)
