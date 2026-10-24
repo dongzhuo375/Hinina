@@ -217,6 +217,8 @@ export default async function activate(
 
 - 需 `contest.read`；返回当前比赛的 `{problemId, displayId, title, color}`。
 - `color` 为气球颜色，Hydro 无此字段（空串）；插件必须容忍空色，不能自己编颜色。
+- `title`/`color` 按字节截断（≤256/≤64 UTF-8 字节，字符边界安全）：千题级比赛的
+  列表仍可完整编码，而非被 1MiB 桥上限拒绝。
 - 未选中比赛 → `context_expired`；不自动选中比赛、不落缓存。
 
 `contest.rank(context, {page, limit})`：
@@ -230,7 +232,8 @@ export default async function activate(
   顶满名字的 200×30 页仍可完整编码；超出返回 `limit_exceeded`（Hydro 大榜单可能因此不可用），
   病态内容（超长 displayId、类型上限数字）由 1MiB 桥上限兜底拒绝而非截断。
 - `page` 回显**服务端实际页**而非请求页：Hydro 恒为 1；`hasMore = current < pages`。
-- 跨页无事务快照，需按 `teamKey` 去重；`total` 含服务端前置条目，不可当参赛人数。
+- 跨页无事务快照，需按 `teamKey` 去重；**不提供 `total`**（HOJ 的 total 含服务端
+  前置条目且偏大）——行数以去重后非打星行为准。
 - 投影：`rank`（-1 打星）、`teamKey`（与 `identity.userKey` 同算法，可直接比对自身）、
   `displayName`、`school`、`ac`、`totalScore`、`cells`（key = displayId）。
 - `displayName` 由宿主按比赛 `rankShowName` 规则解析（与前端榜单同规则：

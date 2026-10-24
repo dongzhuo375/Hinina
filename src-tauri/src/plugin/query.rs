@@ -9,9 +9,10 @@ use super::{
     host::manifest::PluginPermission,
     limits::{
         MAX_CURSORS, MAX_CURSOR_BUFFER_BYTES, MAX_CURSOR_PAGE_BYTES, MAX_CURSOR_RESPONSE_BYTES,
-        MAX_QUERY_CONTEXTS, MAX_RANK_CELLS, MAX_RANK_NAME_BYTES, MAX_RANK_PROBLEMS, MAX_RANK_ROWS,
-        PLUGIN_QUERIES_PER_MINUTE, PLUGIN_QUERY_CONCURRENCY, PLUGIN_RANK_QUERIES_PER_MINUTE,
-        PROVIDER_TIMEOUT, QUERY_HANDLE_REUSE_AGE, QUERY_HANDLE_TTL, SHARED_QUERIES_PER_MINUTE,
+        MAX_PROBLEM_COLOR_BYTES, MAX_PROBLEM_TITLE_BYTES, MAX_QUERY_CONTEXTS, MAX_RANK_CELLS,
+        MAX_RANK_NAME_BYTES, MAX_RANK_PROBLEMS, MAX_RANK_ROWS, PLUGIN_QUERIES_PER_MINUTE,
+        PLUGIN_QUERY_CONCURRENCY, PLUGIN_RANK_QUERIES_PER_MINUTE, PROVIDER_TIMEOUT,
+        QUERY_HANDLE_REUSE_AGE, QUERY_HANDLE_TTL, SHARED_QUERIES_PER_MINUTE,
         SHARED_QUERY_CONCURRENCY, SUBMISSION_LOOKUP_TIMEOUT,
     },
     permission::PluginGrant,
@@ -726,8 +727,8 @@ impl ScopedQueries {
             .map(|p| PluginContestProblem {
                 problem_id: p.problem_id,
                 display_id: p.display_id,
-                title: p.display_title.chars().take(256).collect(),
-                color: p.color.chars().take(64).collect(),
+                title: truncate_bytes(&p.display_title, MAX_PROBLEM_TITLE_BYTES),
+                color: truncate_bytes(&p.color, MAX_PROBLEM_COLOR_BYTES),
             })
             .collect())
     }
@@ -829,7 +830,6 @@ impl ScopedQueries {
             .collect::<PluginResult<Vec<PluginRankRow>>>()?;
         Ok(PluginRankPage {
             rows,
-            total: page.total,
             page: page.current.max(1),
             has_more,
         })

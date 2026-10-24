@@ -149,13 +149,14 @@ pub struct PluginRankRow {
 /// @permission contest.rank
 /// @stability stable
 /// @security redacted
-/// 榜单分页；刻意不带 `sealed`/`contestType`（来自比赛元信息，见 `contest.current`）。
-/// 跨页无事务快照，需按 `teamKey` 去重；`total` 含服务端前置条目，不可当参赛人数。
+/// 榜单分页；刻意不带 `sealed`/`contestType`（来自比赛元信息，见 `contest.current`），
+/// 也不带 `total`（HOJ 的 total 含服务端前置条目且偏大，行数以去重后非打星行为准）。
+/// 跨页无事务快照，需按 `teamKey` 去重。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginRankPage {
     pub rows: Vec<PluginRankRow>,
-    pub total: i64,
+    /// 服务端实际页（Hydro 恒为 1），非请求页。
     pub page: i64,
     pub has_more: bool,
 }

@@ -1,5 +1,5 @@
 // Compile-only SDK contract checks; no plugin is executed.
-import type { Hinina, PluginContest, PluginLogLevel, PluginRankCell, PluginRankRow, PluginSubmissionQuery } from './hinina'
+import type { Hinina, PluginContest, PluginContestProblem, PluginLogLevel, PluginRankCell, PluginRankRow, PluginSubmissionQuery } from './hinina'
 declare const hinina: Hinina
 
 hinina.events.on('submission.judged', async event => {
@@ -60,4 +60,20 @@ async function checkRank(): Promise<void> {
   // @ts-expect-error The rank query carries no contestId: the scope is context-bound.
   await hinina.contest.rank(context, { page: 1, limit: 50, contestId: 'c1' })
 }
+
+async function checkProblems(): Promise<void> {
+  const context = await hinina.context.current()
+  const problems: PluginContestProblem[] = await hinina.contest.problems(context)
+  const first: PluginContestProblem | undefined = problems[0]
+  if (first) {
+    const color: string = first.color
+    const title: string = first.title
+    void color
+    void title
+    // @ts-expect-error Problem summaries carry no statement or limits.
+    first.timeLimit
+  }
+  void first
+}
+void checkProblems
 void checkRank

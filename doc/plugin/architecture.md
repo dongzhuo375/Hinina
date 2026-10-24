@@ -88,14 +88,18 @@ JS submission.list(context, query)
   → Provider
 JS contest.problems / contest.rank(context, query)
   → 逐调用校验句柄/权限（rank 需 contest.rank ∩ contest.read）/取消
-  → ContestService.list_problems / get_rank（不选中比赛、不加缓存）
+  → contest.problems：ContestService.list_problems（不选中比赛、不落缓存）
+  → contest.rank：read_metadata（仅 rankShowName 名字解析）+ get_rank（不缓存）
   → Provider
 ```
 
 - 登录/登出/会话失效、切 OJ、换比赛、连接配置变化显式递增 revision 并取消在途调用。
 - 旧句柄、旧游标、旧授权一律失效；切走再切回也不会复活。
 - 查询只返回本人可见元数据；不读源码、题面或评测点。榜单是唯一的全场数据出口：
-  行经 `teamKey`（与 `identity.userKey` 同算法）脱敏，不透出 uid/realname/avatar 等原始字段。
+  行经 `teamKey`（与 `identity.userKey` 同算法）脱敏，不透出 uid/realname/avatar 等原始字段
+  （唯一例外：`displayName` 在所有名字字段全空时回退 uid **文本**，与前端
+  resolveDisplayName 同规则——榜单永远要有可辨识文本）。`displayName` 由宿主按比赛
+  `rankShowName` 解析（与 App 榜单同规则），为此 rank 每次额外读一次元信息。
 
 ### 3.3 I/O 路径
 

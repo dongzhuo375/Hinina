@@ -49,8 +49,9 @@ export interface PluginContestProblem {
   problemId: string
   /** In-contest display id ("A"). */
   displayId: string
+  /** Byte-bounded to 256 UTF-8 bytes. */
   title: string
-  /** Balloon color; Hydro has no such field, may be ''. */
+  /** Balloon color; Hydro has no such field, may be ''. Byte-bounded to 64 bytes. */
   color: string
 }
 export interface PluginRankQuery {
@@ -91,8 +92,6 @@ export interface PluginRankRow {
 }
 export interface PluginRankPage {
   rows: PluginRankRow[]
-  /** Includes server-pinned entries; not the participant count. */
-  total: number
   /** The provider's actual page, not the requested one (Hydro always reports 1). */
   page: number
   hasMore: boolean

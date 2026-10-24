@@ -158,7 +158,8 @@ if (contest && !contest.sealed) {
 - **先看 `contest.current` 的 `sealed`**：为 true 则整轮直接结束，不读榜单、不派发——
   封榜期间 `solved`/`firstAc` 恒 false，与真没通过不可区分；解封后不补派历史首 A。
   `sealedSince` 是封榜**开始**时刻（服务端不下发结束时刻，别拿它当解封时间）。
-- 跨页无事务快照：按 `teamKey` 去重；`total` 含服务端前置条目，不是参赛人数。
+- 跨页无事务快照：按 `teamKey` 去重；**不提供 `total`**（HOJ 的含服务端前置条目且
+  偏大）——行数以去重后非打星行为准。
 - `teamKey` 与 `identity.current(context).userKey` 同算法：相等即自己那队。
 - `displayName` 由宿主按比赛 `rankShowName` 解析（与 App 榜单同规则），无需自己拼。
 - `limit` 是提示：Hydro 无视分页、整榜单页返回（行数可能超过 limit）；`page` 回显

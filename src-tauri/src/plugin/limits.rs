@@ -66,6 +66,11 @@ pub(crate) const MAX_RANK_CELLS: usize = 6_000;
 /// Rank row text bound in UTF-8 BYTES, not chars: 256 CJK chars would be 768
 /// bytes and, multiplied by 200 rows, break the encodable-page guarantee above.
 pub(crate) const MAX_RANK_NAME_BYTES: usize = 96;
+/// Problem-list text bounds in UTF-8 bytes. Titles are legitimately longer than
+/// rank names, but byte bounds keep a 1,000-problem contest's list encodable
+/// where char bounds (256 CJK chars = 768 B) would hit the bridge cap.
+pub(crate) const MAX_PROBLEM_TITLE_BYTES: usize = 256;
+pub(crate) const MAX_PROBLEM_COLOR_BYTES: usize = 64;
 /// HOJ recomputes the whole board on every rank fetch; a dedicated per-activation
 /// budget keeps plugin polling at the frontend's floor (one call per 10s) instead
 /// of the generic 60/min, so two plugins cannot starve other queries. The burst

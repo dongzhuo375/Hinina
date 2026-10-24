@@ -1852,7 +1852,8 @@ async fn rank_rows_map_fields_and_team_key_matches_identity() {
         .rank(&c, PluginRankQuery { page: 1, limit: 50 })
         .await
         .unwrap();
-    assert_eq!(page.total, 2);
+    // No total on the wire: the count comes from deduped rows, not the server's
+    // inflated page count.
     assert_eq!(page.page, 1);
     assert!(!page.has_more);
     assert_eq!(page.rows.len(), 2);
@@ -2234,4 +2235,33 @@ fn truncate_bytes_cuts_at_char_boundaries() {
     // Mixed content: the walk-back never produces invalid UTF-8.
     let mixed = format!("{}{}", "x".repeat(94), "汉");
     assert_eq!(truncate_bytes(&mixed, 95), "x".repeat(94));
+}
+
+#[tokio::test]
+async fn problem_titles_are_byte_bounded_so_large_contests_stay_encodable() {
+    let source = Arc::new(Source::default());
+    // A 1,024-problem contest (rare but legal) with maxed-out CJK titles: char
+    // bounds (256 chars = 768 B) would push the list past the 1 MiB bridge cap.
+    let long_title: String = "题".repeat(256);
+    *source.problems.lock().unwrap() = (0..1024)
+        .map(|i| crate::core::entity::contest::ContestProblem {
+            id: i,
+            display_id: format!("P{i}"),
+            cid: "contest".into(),
+            problem_id: format!("PID{i}"),
+            display_title: long_title.clone(),
+            ac: 0,
+            total: 0,
+            color: "#FF0000".into(),
+        })
+        .collect();
+    let q = queries_over(source, Arc::new(AccessRevision::default()));
+    let c = q.current_context().await.unwrap();
+    let problems = q.problems(&c).await.unwrap();
+    assert_eq!(problems.len(), 1024);
+    // 256 bytes at a char boundary: 85 CJK chars (255 bytes), never a split code point.
+    assert_eq!(problems[0].title.len(), 255);
+    assert_eq!(problems[0].title.chars().count(), 85);
+    bounded_json::encoded_len(&problems, crate::plugin::limits::MAX_BRIDGE_RESPONSE_BYTES)
+        .unwrap();
 }
