@@ -68,7 +68,7 @@ npm run plugin:scaffold:build
 - 也可以在 `plugins.json` 顶层设置绝对 `codeRoot`，每个子目录一个插件。
 - 修改清单权限不会自动获得能力；更新宿主批准后 `reload`。
 - 网络 origin 必须同时出现在 `manifest.network.allowOrigins` 和宿主 `network` 列表；私网/HTTP 另需显式授权。
-- **插件 HTTP 拒绝 loopback/私网地址**：不能用本地 mock server 做端到端验收——用公网 HTTPS echo 端点接收假数据，验收完即关（见 `sdk/examples/balloon/README.md` 的验收指南）。
+- **插件 HTTP 一律拒绝 loopback，私网目标需 `privateCidrs` 显式批准**：不能用本地 mock server 做端到端验收——用公网 HTTPS echo 端点（或已批准私网 CIDR 的内网 HTTP(S) 端点）接收假数据，验收完即关（见 `sdk/examples/balloon/README.md` 的验收指南）。
 - `options` 作为 activate 第二个参数传入并深冻结。
 
 ### 1.4 启动、调试、重载

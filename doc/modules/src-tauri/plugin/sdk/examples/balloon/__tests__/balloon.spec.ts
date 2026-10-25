@@ -639,10 +639,12 @@ describe('balloon reference plugin activation', () => {
     ).toBe(true)
   })
 
-  it('rejects endpoint options the host would refuse, and accepts a query string', async () => {
+  it('accepts http and https endpoints and a query string, rejects the rest', async () => {
     const harness = createHarness()
     await expect(activate(harness.hinina, {})).rejects.toMatchObject({ code: 'invalid_input' })
-    await expect(activate(harness.hinina, { endpoint: 'http://insecure.example' })).rejects.toMatchObject({
+    // Only http(s) reaches the host's send path; any other scheme is dead
+    // configuration and must fail activation.
+    await expect(activate(harness.hinina, { endpoint: 'ftp://example.com/p' })).rejects.toMatchObject({
       code: 'invalid_input',
     })
     // Userinfo and fragment are rejected by the host's send path.
@@ -655,6 +657,13 @@ describe('balloon reference plugin activation', () => {
     // A query string is legal for the host and must not fail activation.
     await activate(harness.hinina, { endpoint: 'https://example.com/p?x=1' })
     expect(harness.handlers.length).toBe(1)
+    // A plaintext-http endpoint activates like an https one; the allowHttp
+    // approval the host requires for its origin is host policy, enforced
+    // before this plugin's code ever runs, so activation sees no difference.
+    const plain = createHarness()
+    await start(plain, 'http://balloon.internal:8080/post')
+    expect(plain.handlers.length).toBe(1)
+    expect(plain.probeRequests.map(request => request.url)).toEqual(['http://balloon.internal:8080/post'])
   })
 
   it('fails activation when the endpoint origin is not approved and a context exists', async () => {
@@ -755,6 +764,15 @@ describe('balloon reference plugin rounds', () => {
     await resync(harness, 1_000_000_160_000)
     expect(harness.requests.length).toBe(1)
     expect(harness.logs.some(line => line.includes('nothing to do'))).toBe(true)
+  })
+
+  it('dispatches balloons to an http endpoint identically', async () => {
+    const harness = createHarness()
+    await start(harness, 'http://balloon.internal:8080/post')
+    harness.rankPages = [pageFixture([rowFixture({ cells: { A: cellFixture() } })])]
+    await resync(harness, 1_000_000_100_000)
+    expect(harness.requests.map(request => request.url)).toEqual(['http://balloon.internal:8080/post'])
+    expect(records(harness)['team-a:A']).toEqual(expect.objectContaining({ state: 'sent' }))
   })
 
   it('keeps pending on 5xx and retries the same idempotency key next round', async () => {

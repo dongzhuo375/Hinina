@@ -165,18 +165,19 @@ export default async function activate(hinina: Hinina, config: Readonly<JsonValu
 }
 
 /**
- * Read and validate `options.endpoint`: an https URL with no whitespace,
- * userinfo, or fragment — the host's send path rejects all three, and a bad
- * value must fail activation instead of failing every dispatch forever. Query
- * strings are allowed; loopback/private targets are the host's address
- * policy, not checked here.
+ * Read and validate `options.endpoint`: an http or https URL with no
+ * whitespace, userinfo, or fragment — the host's send path rejects all
+ * three, and a bad value must fail activation instead of failing every
+ * dispatch forever. Query strings are allowed; approving a plaintext-http
+ * origin (plugins.json `allowHttp`) and loopback/private targets are the
+ * host's policy, not checked here.
  */
 function readOptions(config: Readonly<JsonValue>): BalloonOptions {
   if (config === null || typeof config !== 'object' || Array.isArray(config)) {
     throw Object.freeze({ code: 'invalid_input' })
   }
   const endpoint = (config as Record<string, JsonValue>).endpoint
-  if (typeof endpoint !== 'string' || !/^https:\/\/[^\s/@#]+(\/[^\s#]*)?$/.test(endpoint)) {
+  if (typeof endpoint !== 'string' || !/^https?:\/\/[^\s/@#]+(\/[^\s#]*)?$/.test(endpoint)) {
     throw Object.freeze({ code: 'invalid_input' })
   }
   return { endpoint }

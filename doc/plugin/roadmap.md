@@ -204,5 +204,5 @@
 
 1. **文档与代码一致性**：保持本目录、`Architecture.md`、`doc/modules/` 同步。
 2. **管理基础契约**：inventory、诊断、原子写入、持久启用意图。
-3. **作者联调闭环**：按 `sdk/examples/balloon/README.md` 的验收清单走真实宿主 → 测试 OJ/外部服务（公网 HTTPS echo 端点 + 假队伍名）。
+3. **作者联调闭环**：按 `sdk/examples/balloon/README.md` 的验收清单走真实宿主 → 测试 OJ/外部服务（公网 HTTPS 或已批准私网 CIDR 的内网 HTTP(S) echo 端点 + 假队伍名）。
 4. **业务插件**：参考实现已交付；后续按真实联调反馈调整首次 AC 定义、恢复与幂等策略，仍由插件作者实现，不放进核心 Service。

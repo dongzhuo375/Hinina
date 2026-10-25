@@ -6,7 +6,7 @@
   "runtime": "js",
   "entry": "index.js",
   "apiVersion": 2,
-  "description": "Reference first-AC balloon dispatcher: resync-driven board watch, seal-aware, idempotent dispatch to one configured HTTPS endpoint.",
+  "description": "Reference first-AC balloon dispatcher: resync-driven board watch, seal-aware, idempotent dispatch to one configured HTTP(S) endpoint.",
   "author": "Hinina",
   "permissions": [
     "events.subscribe",
