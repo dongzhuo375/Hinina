@@ -22,12 +22,12 @@ Hinina 是基于 Tauri 2 + Rust + Vue 3 的 OJ 桌面竞赛客户端，面向 AC
 
 | 层 | 关键模块 |
 |-------|------------|
-| `core/entity` | User, Contest, Problem, Submission, **Workspace** |
+| `core/entity` | User, Session, Contest, Problem, Submission, **Workspace**, AppConfig, Announcement, Rank |
 | `core/provider` | 拆分的 trait：`AuthProvider`, `ContestProvider`, `ProblemProvider`, `SubmissionProvider` |
-| `core/event` | `AppEvent` 枚举 + EventBus |
+| `core/event` | `CoreEvent` 枚举 + `CoreEventBus` |
 | `service/` | auth, contest, problem, submission, **workspace**, config, theme |
-| `adapter/` | hoj, qduoj, hustoj（各自组合实现需要的 trait） |
-| `infra/` | http, storage, cache, logger |
+| `adapter/` | hoj、hydro 已实现；qduoj、hustoj 仅有骨架（各自组合实现需要的 trait） |
+| `infra/` | http, storage, cache, logger, audit, data_dir, fs_*_repo, plugin_*（插件存储/HTTP/通知等适配层） |
 
 ### Vue 前端 (`src/`)
 
@@ -42,7 +42,7 @@ Hinina 是基于 Tauri 2 + Rust + Vue 3 的 OJ 桌面竞赛客户端，面向 AC
 - **Workspace First**：`Workspace` 是核心领域对象，负责代码存储、自动保存、崩溃恢复、比赛隔离、模板管理、缓存
 - **Provider trait 必须拆分**：禁止单一巨型 `trait OJProvider`，按 Auth/Contest/Problem/Submission 拆分组合
 - **EventBus 原则**：查询与命令走 Service，状态变更走 EventBus。禁止将所有逻辑事件化
-- **插件系统**：v0.x 仅预留架构，不实现运行时。插件只能访问 `plugin/api/`，禁止直接调用内部 Service
+- **插件系统**：已实现 QuickJS 隔离运行时（`plugin/runtime`、`plugin/manager.rs`、`plugin/host` 等）。插件只能访问 `plugin/api/` 暴露的安全 DTO 与有界桥接，禁止直接调用内部 Service；权限 = manifest 声明 ∩ 宿主批准，网络绑定精确源，事件经白名单脱敏后投递
 
 ## 项目边界
 
@@ -52,7 +52,7 @@ Hinina 是基于 Tauri 2 + Rust + Vue 3 的 OJ 桌面竞赛客户端，面向 AC
 
 - **分支策略**：GitHub Flow，`main` 受保护，功能分支开发，squash merge
 - **分支命名**：`feat/<描述>`, `fix/<描述>`, `docs/<描述>`, `chore/<描述>`
-- **PR 要求**：至少一人 Review 通过后方可合并（CI/CD 流水线短期不搭建，待后期补充）
+- **PR 要求**：至少一人 Review 通过后方可合并（CI 门禁尚未建成，落地前 PR 验证依赖本地运行测试与构建）
 - **权威文档**：`doc/开发手册.md`，涉及架构决策、NFR、风险等时请先查阅此文档
 - **文件树同步**：每次新增、删除或移动文件/目录时，必须同步更新 `doc/Architecture.md` 中对应的文件树与职责说明
 - **模块文档同步**：每次对源文件进行新增、删除、修改职责或接口变更时，须同步更新 `doc/modules/` 下对应的 `.md` 文档（含职责、核心类型/函数、依赖关系、逻辑流程，同步更新时机由用户决定）
