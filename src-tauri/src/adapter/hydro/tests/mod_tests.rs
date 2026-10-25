@@ -650,17 +650,16 @@ fn hydro_factory_provides_all_four_capabilities() {
     assert_eq!(adapter.url("/login"), "https://hydro.ac/login");
 }
 
-
 // ── 本地 scripted HTTP 契约测试（M2 工作包 B）──
 //
 // 与上方 DTO/fixture 测试互补：打**真实网络栈**（reqwest → loopback server，
 // `test_support::loopback`），锁定线上协议行为而非判定函数。
 
-use std::sync::Arc;
 use crate::adapter::hydro::HydroAdapter;
 use crate::core::provider::auth::AuthProvider;
 use crate::infra::http::HttpClient;
 use crate::test_support::loopback::{LoopbackServer, ScriptedResponse};
+use std::sync::Arc;
 
 fn loopback_adapter(base_url: &str) -> Arc<HydroAdapter> {
     Arc::new(HydroAdapter::new(
@@ -892,6 +891,77 @@ async fn login_switching_accounts_refreshes_cached_identity() {
         "换号后身份必须来自新探测（旧缓存未清会返回 alice 的 7）"
     );
     assert_eq!(second.token, "sid-2");
+
+    server.shutdown();
+}
+
+/// 探测进行中换号：慢响应晚到必须作废，不得把旧身份写回缓存、
+/// 不得以旧会话的判定结论清除新会话（评审第三轮 #1/#2 的真实竞态）。
+#[tokio::test]
+async fn probe_response_during_account_switch_is_discarded() {
+    let alice_ctx = || ScriptedResponse::json(r#"{"UserContext":{"_id":7,"uname":"alice"}}"#);
+    // 队列按请求序（login 自带一次探测，别忘了它）：
+    // [0] login(A) POST → [1] 登录 A 的探测（立即，alice 身份入缓存）
+    // → [2] validate(A) 的探测（延迟 600ms——它就是将被作废的过期响应）
+    // → [3] login(B) POST → [4] 登录 B 的探测（bob 身份）
+    let server = LoopbackServer::start(vec![
+        login_ok("sid-A"),
+        alice_ctx(),
+        alice_ctx().delayed(std::time::Duration::from_millis(600)),
+        login_ok("sid-B"),
+        ScriptedResponse::json(r#"{"UserContext":{"_id":9,"uname":"bob"}}"#),
+        // 尾部：B 会话的再次校验（断言新会话不受晚到响应波及）
+        ScriptedResponse::json(r#"{"UserContext":{"_id":9,"uname":"bob"}}"#),
+    ])
+    .await;
+    let adapter = loopback_adapter(server.url());
+
+    let alice = adapter.login("alice", "pw").await.unwrap();
+    assert_eq!(alice.token, "sid-A");
+
+    // 发起 validate(A)（携带 sid-A，响应延迟 600ms），等它的请求确实到达服务端
+    let validating = Arc::clone(&adapter);
+    let validate = tokio::spawn(async move { validating.validate_session().await });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while server.requests().len() < 3 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(server.requests().len() >= 3, "validate 的探测应已发出");
+
+    // 探测在途期间完成换号登录 B
+    let bob = match adapter.login("bob", "pw").await {
+        Ok(u) => u,
+        Err(e) => {
+            for (i, r) in server.requests().iter().enumerate() {
+                eprintln!(
+                    "REQ[{i}] {} {} auth={:?}",
+                    r.method,
+                    r.path,
+                    r.header("authorization")
+                );
+            }
+            panic!("login(B) 失败: {e}");
+        }
+    };
+    assert_eq!(bob.token, "sid-B");
+    assert_eq!(bob.id, "9", "B 的身份来自 B 的探测");
+
+    // 晚到的 A 响应到达：代际保护必须作废它
+    let verdict = validate
+        .await
+        .expect("validate 任务不应 panic")
+        .expect_err("过期响应属「无法判定」，不得得出任何结论");
+    assert!(
+        verdict.to_string().contains("会话已变更"),
+        "应因会话代际变更而作废: {}",
+        verdict
+    );
+
+    // 新会话（B）不受影响：再次校验真实回访并判有效
+    assert!(
+        adapter.validate_session().await.expect("B 会话应判有效"),
+        "换号后的新会话不得被 A 的晚到响应波及"
+    );
 
     server.shutdown();
 }

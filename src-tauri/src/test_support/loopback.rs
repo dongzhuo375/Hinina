@@ -25,6 +25,9 @@ pub struct ScriptedResponse {
     /// 附加响应头（如 `Set-Cookie`、`Refresh-Token`）；`Content-Length` 自动生成
     pub headers: Vec<(String, String)>,
     pub body: String,
+    /// 发送本响应前的延迟：用于制造「请求在途期间测试侧继续操作」的真实竞态
+    /// （如探测进行中换号登录）。
+    pub delay: std::time::Duration,
 }
 
 impl ScriptedResponse {
@@ -34,6 +37,7 @@ impl ScriptedResponse {
             status: 200,
             headers: Vec::new(),
             body: body.into(),
+            delay: std::time::Duration::ZERO,
         }
     }
 
@@ -43,7 +47,14 @@ impl ScriptedResponse {
             status,
             headers,
             body: body.into(),
+            delay: std::time::Duration::ZERO,
         }
+    }
+
+    /// 延迟 `delay` 后再发送本响应（并发竞态测试用）。
+    pub fn delayed(mut self, delay: std::time::Duration) -> Self {
+        self.delay = delay;
+        self
     }
 }
 
@@ -132,23 +143,28 @@ async fn run_server(
             let Some(record) = read_request(&mut socket).await else {
                 return;
             };
-            requests
-                .lock()
-                .expect("requests 锁中毒")
-                .push(record.clone());
-
-            let response = queue
-                .lock()
-                .expect("queue 锁中毒")
-                .pop_front()
-                .unwrap_or_else(|| {
+            // 录制与弹出必须在同一临界区：带延迟的响应若在弹出后 sleep，
+            // 后续连接会抢先弹出它（响应分配序 ≠ 请求到达序），脚本彻底错位
+            let response = {
+                let mut queue = queue.lock().expect("queue 锁中毒");
+                requests
+                    .lock()
+                    .expect("requests 锁中毒")
+                    .push(record.clone());
+                queue.pop_front().unwrap_or_else(|| {
                     // 队列耗尽：显式 500，让「测试多打了请求」在断言里现形
                     ScriptedResponse {
                         status: 500,
                         headers: Vec::new(),
                         body: "scripted queue exhausted".into(),
+                        delay: std::time::Duration::ZERO,
                     }
-                });
+                })
+            };
+            if !response.delay.is_zero() {
+                // 延迟必须在锁外：持锁 sleep 会冻结整个 server
+                tokio::time::sleep(response.delay).await;
+            }
 
             let mut head = format!(
                 "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nConnection: close\r\n",
