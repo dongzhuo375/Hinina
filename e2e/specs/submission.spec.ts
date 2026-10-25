@@ -41,4 +41,26 @@ test.describe('提交流', () => {
     await page.waitForURL('**/contest/submissions**')
     await expect(page.getByText('#9001').first()).toBeVisible()
   })
+
+  test('pending 期间离开再回来复用同一提交，不重复发送 IPC', async ({ page }) => {
+    // 评测序列恒为 Running（非终态）：pending 窗口覆盖整个用例，断言不受轮询推进影响
+    await loginAndEnterContest(page, { judgementSequence: ['Running'] })
+    await page.getByRole('button', { name: '打开题目 A' }).click()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+
+    await page.getByRole('button', { name: '提交代码' }).click()
+    await expect(page.getByRole('status')).toContainText('已提交 #9001')
+    expect(await callCount(page, 'submit_code')).toBe(1)
+
+    // 路由往返（解题页卸载重挂）：pendingFor 五元组仍匹配，按钮保持「评测中…」禁用，
+    // 且不产生新的 submit_code —— 五元组复用语义的可观测面（store 内部去重行由
+    // submissionStore.spec 单测覆盖，UI 全部调用方都预守卫，E2E 不可直达）
+    await page.getByRole('link', { name: '返回题目总览' }).click()
+    await page.waitForURL('**/contest/problems')
+    await page.getByRole('button', { name: '打开题目 A' }).click()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+    await expect(page.getByRole('button', { name: '评测中…' })).toBeDisabled()
+    await expect(page.getByRole('status')).toContainText('已提交 #9001')
+    expect(await callCount(page, 'submit_code')).toBe(1)
+  })
 })

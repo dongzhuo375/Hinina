@@ -42,12 +42,12 @@
 
 | spec | 覆盖场景 | 用例 |
 |---|---|---|
-| auth.spec | 场景 1 | 登录失败（错误可见、停留登录页）/ 登录成功（进入外壳与题目总览）/ 会话恢复（预置 get_session 直达赛场） |
+| auth.spec | 场景 1 | 登录失败（错误可见、停留登录页）/ 登录成功（进入外壳与题目总览）/ 会话恢复（预置 get_session 直达赛场）+ 事件注销前置全局哨兵 |
 | workspace.spec | 场景 3（部分）+ 4 | 编辑 2s 防抖推送（文件名/内容断言）、切题与回切按 pid 恢复 |
-| submission.spec | 场景 5 | pending 期禁用 + 五元组去重（submit_code 恒 1 次）、轮询 Pending→Running→Accepted 终态、提交历史反映会话内提交 |
-| session.spec | 场景 6 | Auth 错误 → sessionGuard 全链路（logout 调用 + 域状态清理 + 跳登录页）、失效后重新登录可再次进场 |
+| submission.spec | 场景 5 | pending 期禁用 + 五元组去重（submit_code 恒 1 次）、轮询 Pending→Running→Accepted 终态、提交历史反映会话内提交、**pending 跨页往返复用同一提交且不重复发送 IPC** |
+| session.spec | 场景 6 | Auth 错误 → sessionGuard 全链路（logout 调用 + 域状态清理 + 跳登录页）、**失效后评测轮询停止（get_judgement 停增，clearDomainState 的可观测凭证）**、失效后重新登录可再次进场 |
 
-实测（口径：Windows 11 本地 + chromium-1248 + vite dev @1420，`PLAYWRIGHT_BROWSERS_PATH=D:\DevTool\pw-browsers`）：**9 passed**，连跑 3 轮全绿（16.2s / 16.4s / 16.4s）。
+实测（口径：Windows 11 本地 + chromium-1248 + vite dev @1420，`PLAYWRIGHT_BROWSERS_PATH=D:\DevTool\pw-browsers`）：评审修复轮 **11 passed** 连续 2 轮全绿（20.0s / 18.2s）；M3 合并前为 9 用例 3 轮全绿（16.2s / 16.4s / 16.4s）。
 
 ## 五、施工中的观察（如实记录，未在本 PR 处理）
 
@@ -66,12 +66,13 @@
 
 ## 七、遗留项
 
-- **ttl_cache 并发测试竞态修复**（stress-repeat 首跑发现，见 §六）：测试侧消除「读先于写」的调度依赖，属后续 PR。
-- **PR #55 评审跟进项**（另会话评审核实属实）：
-  - fake 缺 `__TAURI_EVENT_PLUGIN_INTERNALS__`：`@tauri-apps/api` 2.11.1 的 `_unlisten`（event.js:43）首行即调用它，任何 unlisten 会抛 TypeError——当前 9 用例无 unlisten 路径故未触发，fake 的 `plugin:event|unlisten` 分支实为死代码；一行修复为补该全局。
-  - e2e job 缺 node 版本校验步（build leg 有，对齐即可）。
-  - fake 保真度：get_session/login/logout 无共享状态（无法表达刷新恢复/登出清空语义）；必填参数无校验（真实 Tauri 对缺参拒绝，fake 以 `?? ''` 兜底会放过参数回归）。
-  - spec 强度：提交去重用例只点一次按钮（未有效驱动 store 五元组去重）；会话失效用例未断言 clearDomainState（如轮询停止、get_judgement 不再增长）。
+- ~~**ttl_cache 并发测试竞态修复**（stress-repeat 首跑发现，见 §六）~~ **已处置**（65cd097，评审修复 PR）：种子条目先于读线程插入 + barrier 对齐覆盖写，「至少命中一次」改为确定性下界；本地连跑 10 轮全绿。
+- ~~**PR #55 评审跟进项**（另会话评审核实属实）~~ **已全部处置**（评审修复 PR）：
+  - ~~fake 缺 `__TAURI_EVENT_PLUGIN_INTERNALS__`~~（3facd84）：补该全局并接到事件注册表清理；auth.spec 增设存在性哨兵。
+  - ~~e2e job 缺 node 版本校验步~~（7c0697d）：与 build/frontend job 对齐。
+  - ~~fake 保真度~~（3facd84）：get_session/login/logout/validate_session 共享同一 currentUser；16 个命令按 Rust 签名取证必填参数表，缺参以 Tauri 形态裸字符串拒绝（参数回归不再假绿）。
+  - ~~spec 强度~~（2166f02）：pending 跨页往返复用同一提交（不发新 submit_code）；失效后 get_judgement 停增断言。store 内部五元组去重行由 submissionStore.spec 单测覆盖（「相同内容评测期间复用编号/修改代码或语言仍能提交/终态释放」），E2E 只断言可观测面——UI 全部调用方都以同一 getter 预守卫，store 去重行不可直达。
+- **会话失效文案被 checkSession 清空**（§五第 1 条）：待产品决策，本修复轮未动。
 - 桌面 smoke 6 场景（tauri-driver + capabilities，§6.4）：真实 Rust invoke/事件往返、Monaco worker 在打包产物可用、工作区重启恢复、窗口操作、关窗前保存、目录选择器。
 - 真实 OJ 联调（§6.5）：需独立测试实例与专用测试账号 secrets，仅进受保护的定时/人工环境。
 - E2E 剩余 3 场景：赛前深链与开赛自动进入（场景 2）、语言切换与代码上传（场景 3 余项）、榜单/公告/设置最小主流程（场景 7）。
