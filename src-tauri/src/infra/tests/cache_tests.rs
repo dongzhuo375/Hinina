@@ -2,6 +2,7 @@ use super::*;
 use crate::test_support::{Guarded, TempDir};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Barrier;
 use std::thread;
 
 /// 每个用例独立的临时 Storage 根目录（避免磁盘缓存用例相互串扰）。
@@ -170,11 +171,23 @@ fn ttl_cache_supports_concurrent_reads_and_writes() {
     let cache: Arc<TtlCache<String, i32>> = Arc::new(TtlCache::new(ms(5_000), 64));
     let hits = Arc::new(AtomicUsize::new(0));
 
+    // 种子条目先于读线程存在：「至少命中一次」由预置数据保证，不再依赖读/写
+    // 线程的调度顺序 —— 此前 4 个读线程先 spawn、主线程后插入且无同步点，
+    // runner 高负载下读线程可在首次插入前清空全部读数，hits=0 随机失败
+    //（stress-repeat 首跑 run 40225126527 第 7/10 轮实证，§6.5 抖动治理产出）。
+    for i in 0..32 {
+        cache.insert(format!("k{}", i), i);
+    }
+
+    // barrier 对齐释放：读与覆盖写确定性地重叠，保留「并发读写」的测试意图
+    let barrier = Arc::new(Barrier::new(5));
     let readers: Vec<_> = (0..4)
         .map(|worker| {
             let cache = Arc::clone(&cache);
             let hits = Arc::clone(&hits);
+            let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
+                barrier.wait();
                 for i in 0..200 {
                     if cache
                         .get(&format!("k{}", (worker * 200 + i) % 32))
@@ -187,8 +200,9 @@ fn ttl_cache_supports_concurrent_reads_and_writes() {
         })
         .collect();
 
+    barrier.wait();
     for i in 0..32 {
-        cache.insert(format!("k{}", i), i);
+        cache.insert(format!("k{}", i), i * 10);
     }
     for reader in readers {
         reader.join().expect("读线程不应 panic");
