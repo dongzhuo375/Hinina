@@ -11,7 +11,7 @@ const pkgVersion: string = JSON.parse(
   readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf-8"),
 ).version;
 
-export default defineConfig(async () => ({
+export default defineConfig({
   plugins: [
     vue(),
     tailwindcss(),
@@ -66,4 +66,4 @@ export default defineConfig(async () => ({
     clearMocks: true,
     restoreMocks: true,
   },
-}));
+});
