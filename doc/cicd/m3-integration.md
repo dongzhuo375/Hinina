@@ -32,7 +32,7 @@
 
 **原理**：Tauri v2 的命令与事件全部经 `window.__TAURI_INTERNALS__.invoke` 单点（`listen` 也是 `invoke('plugin:event|listen',…)`，`main.ts` 在 mount 前同步消费 `metadata.currentWindow.label`）。因此 `addInitScript` 注入自包含 fake 即可承接全部 IPC——零生产代码改动、零构建开关，fake 只存在于 Playwright 会话。
 
-- **命令表**：auth/config/contest/problem/rank/submission/workspace 域 19 个命令按取证签名实现；**未实现命令 fail-loud**（console.error + `{Unknown}` 拒绝），不得静默兜底。
+- **命令表**：auth/config/contest/problem/rank/submission/workspace 域 26 个命令按取证签名实现；**未实现命令 fail-loud**（console.error + `{Unknown}` 拒绝），不得静默兜底。
 - **错误形状**：拒绝载荷 `{ Variant: message }` 对象，与 bridge `parseAppError` 的单键对象路径一致（生产 sessionGuard 判定链依赖 `variant === 'Auth'`）。
 - **fixtures**：比赛时间动态计算（`startTime = now-1h`、`endTime = now+8h`、status=0），保证恒处 running 赛段（路由守卫按赛段放行，否则已登录用户也会被弹回登录页）；`pollIntervalSecs=1` 快轮询；`oj.contestRef` 必须与比赛 id 一致（登录页简报按它筛选）；工作区按题目真实 pid 内存隔离，`update_workspace_file` 返回递增修订号，`save_workspace` 发 `workspace-saved` 事件。
 - **控制面 `window.__e2e`**：`calls` 调用记录（断言去重/轮询次数）、`emitEvent` 事件推送、`failNext(cmd, variant, message)` 一次性错误注入。
@@ -67,6 +67,11 @@
 ## 七、遗留项
 
 - **ttl_cache 并发测试竞态修复**（stress-repeat 首跑发现，见 §六）：测试侧消除「读先于写」的调度依赖，属后续 PR。
+- **PR #55 评审跟进项**（另会话评审核实属实）：
+  - fake 缺 `__TAURI_EVENT_PLUGIN_INTERNALS__`：`@tauri-apps/api` 2.11.1 的 `_unlisten`（event.js:43）首行即调用它，任何 unlisten 会抛 TypeError——当前 9 用例无 unlisten 路径故未触发，fake 的 `plugin:event|unlisten` 分支实为死代码；一行修复为补该全局。
+  - e2e job 缺 node 版本校验步（build leg 有，对齐即可）。
+  - fake 保真度：get_session/login/logout 无共享状态（无法表达刷新恢复/登出清空语义）；必填参数无校验（真实 Tauri 对缺参拒绝，fake 以 `?? ''` 兜底会放过参数回归）。
+  - spec 强度：提交去重用例只点一次按钮（未有效驱动 store 五元组去重）；会话失效用例未断言 clearDomainState（如轮询停止、get_judgement 不再增长）。
 - 桌面 smoke 6 场景（tauri-driver + capabilities，§6.4）：真实 Rust invoke/事件往返、Monaco worker 在打包产物可用、工作区重启恢复、窗口操作、关窗前保存、目录选择器。
 - 真实 OJ 联调（§6.5）：需独立测试实例与专用测试账号 secrets，仅进受保护的定时/人工环境。
 - E2E 剩余 3 场景：赛前深链与开赛自动进入（场景 2）、语言切换与代码上传（场景 3 余项）、榜单/公告/设置最小主流程（场景 7）。
