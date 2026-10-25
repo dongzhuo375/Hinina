@@ -119,3 +119,54 @@ describe('myStatus 数据归属 — 比赛切换必须重拉', () => {
     expect(store.myStatusNeedsReloadFor(CONTEST_ID)).toBe(true)
   })
 })
+
+// ── M2 工作包 C：openProblem / loadLimits 的失败语义（此前未覆盖）──
+
+const problemOf = (id: string) => ({
+  id, title: `题-${id}`, description: '', inputDescription: '', outputDescription: '',
+  samples: [], timeLimit: 1000, memoryLimit: 256, languages: ['C++'],
+})
+
+describe('openProblem 失败语义', () => {
+  it('失败重抛并写入 error，currentProblem 保持旧题', async () => {
+    problemService.getProblem.mockRejectedValue(new Error('BOOM'))
+    const store = useProblemStore()
+    store.currentProblem = problemOf('old') as never
+
+    await expect(store.openProblem(CONTEST_ID, 'A')).rejects.toThrow('BOOM')
+
+    expect(store.error).toContain('BOOM')
+    expect((store.currentProblem as { id: string }).id).toBe('old') // openProblem 失败不得清空旧题（视图配对校验依赖此语义）
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('成功时清空既有错误并写入新题', async () => {
+    problemService.getProblem.mockResolvedValue(problemOf('p1'))
+    const store = useProblemStore()
+    store.error = '上次失败'
+
+    await store.openProblem(CONTEST_ID, 'A')
+
+    expect((store.currentProblem as { id: string }).id).toBe('p1')
+    expect(store.error).toBeNull()
+  })
+})
+
+describe('loadLimits 失败语义', () => {
+  it('失败吞错（不重抛）且保留旧值', async () => {
+    problemService.getProblemLimits.mockRejectedValue(new Error('net'))
+    const store = useProblemStore()
+    store.limits = { A: { timeLimitMs: 1000, memoryLimitKb: 256 } } as never
+
+    await expect(store.loadLimits(CONTEST_ID, ['A'])).resolves.toBeUndefined()
+
+    expect(store.limits.A).toBeDefined() // 旧值必须保留，视图显示占位而不是清空
+    expect(store.isLimitsLoading).toBe(false)
+  })
+
+  it('空列表短路，不打请求', async () => {
+    const store = useProblemStore()
+    await store.loadLimits(CONTEST_ID, [])
+    expect(problemService.getProblemLimits).not.toHaveBeenCalled()
+  })
+})
