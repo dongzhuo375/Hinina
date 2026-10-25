@@ -38,3 +38,5 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 - **会话文件按 OJ 隔离是特性**：`sessions/{id}.json` 各自独立，切换不清旧 OJ 的登录态 —— 切回旧 OJ 免登录。也因此前端重置**不能走 `authStore.logout()`**（它会让已切换的 Registry 删新 OJ 的会话文件）。
 
 统一AccessTransition覆盖Registry切换与比赛/其他Service清理；switch_scope组合发布与reset，且只覆盖这一段有效作用域变更。持久化`oj.active`与发布`OjSwitched`在guard释放之后执行，不再把插件查询挡在写盘/广播期间。
+
+- `pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str)` — 切换编排本体（M2 提取，测试见 `tests/oj_cmd_tests.rs`：注册校验/registry 切换/配置落盘/`OjSwitched` 事件）

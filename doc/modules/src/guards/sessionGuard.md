@@ -59,3 +59,8 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
   由 `invalidating` 标记拦截，不会递归。
 - 与赛前预检（`utils/session-check`）互补：预检负责"提前发现"，本守卫负责"随时兜底"
   （含比赛进行中的 token 过期、服务端重启清空 Redis 等场景）。
+
+
+## 测试（M2）
+
+`__tests__/sessionGuard.spec.ts`：并发认证错误只清理一次（`invalidating` 防重入）、未登录与非认证错误不处理、仅受保护路由跳登录页、失效完成后的后续错误因已登出而短路。

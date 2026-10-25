@@ -27,4 +27,6 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 无（仅模块声明）。
 
 ## 测试
-`src-tauri/src/commands/tests/mod_tests.rs` 锁定 Command 层**可测的纯部分**：`#[tauri::command]` 函数签名依赖 `tauri::State<'_, AppContext>`，而 `State` 没有公开构造器（只能在 Tauri 运行时内获得），命令本体无法直接单测；其实质逻辑分两段 —— ① 参数默认值/钳制与 uid 解析（以同形纯函数等价锁定），② Service 调用与错误变体穿透（已在各 Service 测试中覆盖）。既有用例：`auto_save_action` 的判据表（`Keep`/`Start`/`Stop` 逐格锁定，含「关掉再打开」循环 —— 取代已删除的 `static AtomicBool` 一次性标记用例）、workspace_cmd 降级路径的 `Option::ok_or_else` 逻辑（原 `auth_cmd::parse_oj_type` 解析测试已随闭集枚举移除：OJ 身份改为数据 `OjId`，注册校验在 `ProviderRegistry` 层由 `list_available` 承担）。P58 新增：`StorageInfo` camelCase 序列化形状（前端按 `baseDir`/`logPath`/`version` 键读取）、分页参数默认值与钳制（公告默认 50、提交列表默认 20、页码至少 1，0/负数钳到 1）、`session_uid` 解析规则（优先 user_id，缺失回退 username）、提交列表 `problemDisplayId` 空白过滤（空串/纯空白视为不筛选）。
+**M2 起命令本体直接可测**：有编排逻辑的命令把实现提取为 `pub(crate) async fn *_impl(ctx: &AppContext, ...)`，`#[tauri::command]` 只做薄转发（零行为变化）。测试经 `test_support::app_ctx::context_with_hoj` 构造**全真上下文**（`AppContext::init` 跑在 TempDir 上、HOJ 实例指向 loopback 脚本 server），直接调用 `*_impl` 验证生产行为 —— 分页钳制与 `only_mine` 强制以脚本 server **实际收到**的查询串断言，`switch_oj` 的注册校验/配置落盘/`OjSwitched` 事件、logout 的会话清理、reset/purge 的精确删除范围均在真实文件系统与事件总线上验证。
+
+`tests/` 下按命令分文件（`auth/oj/maintenance/submission/contest_cmd_tests.rs`）；`mod_tests.rs` 保留独立于命令编排的纯函数与 VO 锁定用例（`auto_save_action` 判据表、`run_purge` 容错、`validate_reset`、`StorageInfo`/`DataDirInfo` 序列化、榜单默认页大小三处同值锁定）。M2 已删除四个「测试文件内复制等价逻辑」的用例（分页钳制、`session_uid`、空白过滤、`Option::ok_or_else`），由真实调用取代。

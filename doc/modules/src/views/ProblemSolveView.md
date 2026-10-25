@@ -102,3 +102,8 @@ load(id):
   EditorConsoleBar 的 `tabSize`。本视图不自己读配置：弹层改动是即时的，重复读取只会
   拿到滞后值并与弹层写入竞态。
 - 分层约束：View 不 import `@/bridge`；配置读写走 `config.service`（架构指定的配置唯一入口）。
+
+
+## 测试（M2）
+
+`__tests__/ProblemSolveView.spec.ts`（store 整店打桩 + 共享挂载 helper）：切题先落盘脏工作区（saveWorkspace 先于 loadWorkspace）、迟到响应不覆盖新题、加载失败后旧题与新路由不配对时拒绝提交（PR21-8 防错题提交）、卸载时落盘在途改动。

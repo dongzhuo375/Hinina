@@ -38,3 +38,8 @@
 
 - **运行期清理用「重开 + 截断」而不是句柄 `set_len`**：日志句柄是**追加模式**打开的（只有 `FILE_APPEND_DATA`，没有 `FILE_WRITE_DATA`），Windows 上 `set_len` 会被拒（实测 `Os code 5, PermissionDenied`）。新句柄带 `GENERIC_WRITE`，而两个句柄的共享模式都允许对方写入，故互不冲突；`append` 模式保证后续日志自动从 0 开始。这与启动时的截断式轮转是同一手法（`fs::write(path, [])`），两处不会漂移。
 - **只清内容、不删文件**：删了要等下次启动才重建，中间这段排障信息就彻底没了。
+
+
+## 测试构建不装全局订阅器（M2）
+
+`Logger::init` 在 `cfg(test)` 下只探测文件层是否可用（决定 `log_path`），**不安装全局 tracing 订阅器**：全局订阅器是进程级单例，并行测试各自 `AppContext::init` 会争抢全局位；且装上后整个测试进程全部用例的调试日志都会被格式化输出，与 libtest 捕获机制叠加在 Windows 上曾引发进程级崩溃（STATUS_STACK_BUFFER_OVERRUN）。`clear_log_file` / `has_log_file` 是纯文件层操作，测试语义不受影响。

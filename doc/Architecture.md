@@ -381,6 +381,7 @@ src/
 │   ├── system.service.ts                 # 客户端存储信息（存储目录/日志路径/版本，设置页「关于」）
 │   ├── workspace.service.ts              # 工作区创建/保存/恢复/语言持久化 + 落盘事件订阅（onWorkspaceSaved）
 │   └── __tests__/                        # auth.service / config.service / rank.service / plugin.service .spec.ts（本地缓存清理与三态归一契约、配置缓存/派生兜底/updateConfig 读改写、榜单查询参数编排、插件通知验证/队列/定时器清理）
+├── test-support/                      # 测试共享设施（view-mount：createApp+pinia+settle 挂载收敛，仅测试引用）
 ├── bridge/
 │   ├── plugin.bridge.ts                  # 插件控制IPC与通知事件
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）

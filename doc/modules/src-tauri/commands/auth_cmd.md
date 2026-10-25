@@ -29,3 +29,5 @@
 `validate_session` 的三态语义是跨端契约：
 - `invalid` — 本地无会话，或服务端已判定失效（`AuthService` 已清除磁盘会话并发布 `CoreEvent::SessionExpired`），前端须回到登录页
 - `unknown` — 网络异常 / Provider 不可用，本地会话保留，前端应稍后重试而**不是**踢出用户（赛前误踢的代价远高于多等一轮校验）
+
+- `pub(crate) async fn logout_impl(ctx: &AppContext)` / `pub(crate) fn get_session_impl(ctx: &AppContext)` — 命令薄转发提取出的真实编排与 VO 映射（M2，测试见 `tests/auth_cmd_tests.rs`）

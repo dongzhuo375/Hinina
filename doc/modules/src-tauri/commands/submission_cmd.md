@@ -27,3 +27,5 @@
 3. 提交记录页调用 `invoke('list_contest_submissions', {...})`：Command 收敛分页参数、强制 `only_mine = true`、过滤空白筛选后组装 `SubmissionQuery`，交 `SubmissionService::list_contest_submissions` 透传 `SubmissionPage`
 4. 点击单条记录调用 `get_submission_detail`（源码/CE 信息）与 `get_submission_cases`（测试点面板），分别透传 `SubmissionDetail` / `SubmissionCases`
 5. 错误变体由 Service 层 `e.context()` 补环节名后原样穿透（`Auth` 变体驱动前端会话守卫，见 `service/submission/mod.md`）
+
+- `pub(crate) async fn list_contest_submissions_impl(...)` — M2 提取的参数编排（`only_mine` 强制与分页钳制经 loopback 契约断言，测试见 `tests/submission_cmd_tests.rs`）
