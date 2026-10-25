@@ -45,6 +45,8 @@ export interface FakeControl {
 declare global {
   interface Window {
     __e2e: FakeControl
+    /** @tauri-apps/api 2.11 的事件插件内部全局（_unlisten 前置调用） */
+    __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener(event: string, eventId: number): void }
   }
 }
 
@@ -194,6 +196,58 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     failQueue.set('login', [options.failLogin])
   }
 
+  // 会话共享状态：get_session / login / logout / validate_session 读写同一份，
+  // 使「登录后刷新恢复会话」「登出后 get_session 为空」可被真实表达
+  //（评审 P3：此前三命令无共享状态，会话语义只能靠预置 user 绕开）
+  let currentUser: { id: string; username: string; token: string } | null = options.user ?? null
+
+  // 必填参数表（键名为前端 invoke 的 camelCase 键）。取证自 Rust 命令签名的
+  // 非 Option 参数：auth_cmd login(username,password)、workspace_cmd
+  // load_workspace(contest_id,problem_id)/update_workspace_file(file_name,content)/
+  // set_workspace_language(language)/delete_workspace_file(file_name)、
+  // submission_cmd submit_code(contest_id,problem_id,display_id,language,source_code)/
+  // get_judgement(submission_id)/list_contest_submissions(contest_id)、
+  // problem_cmd get_problem(contest_id,problem_id)/get_user_problem_status(contest_id,problem_ids)/
+  // get_contest_problem_limits(contest_id,display_ids)、
+  // contest_cmd get_contest_rank(contest_id)/list_contest_announcements(contest_id)/
+  // get_read_announcement_ids(contest_id)/mark_announcements_read(contest_id,ids)、
+  // config_cmd update_config(config)。缺参时真实 Tauri 运行时直接拒绝——
+  // fake 同样拒绝（裸字符串，与 Tauri 的参数错误形态一致），避免参数回归假绿。
+  const REQUIRED_ARGS: Record<string, string[]> = {
+    login: ['username', 'password'],
+    get_problem: ['contestId', 'problemId'],
+    get_user_problem_status: ['contestId', 'problemIds'],
+    get_contest_problem_limits: ['contestId', 'displayIds'],
+    get_contest_rank: ['contestId'],
+    list_contest_announcements: ['contestId'],
+    get_read_announcement_ids: ['contestId'],
+    mark_announcements_read: ['contestId', 'ids'],
+    submit_code: ['contestId', 'problemId', 'displayId', 'language', 'sourceCode'],
+    get_judgement: ['submissionId'],
+    list_contest_submissions: ['contestId'],
+    load_workspace: ['contestId', 'problemId'],
+    update_workspace_file: ['fileName', 'content'],
+    set_workspace_language: ['language'],
+    delete_workspace_file: ['fileName'],
+    update_config: ['config'],
+  }
+  const VEC_ARGS = new Set(['problemIds', 'displayIds', 'ids'])
+
+  function rejectMissingArg(cmd: string, key: string): never {
+    // 形态对齐 Tauri 参数错误（裸字符串，bridge 的 parseAppError 按纯消息处理）
+    throw `invalid args \`${key}\` for command \`${cmd}\`: missing required key`
+  }
+
+  function assertRequiredArgs(cmd: string, args: Record<string, unknown> | undefined): void {
+    const required = REQUIRED_ARGS[cmd]
+    if (!required) return
+    for (const key of required) {
+      const value = args?.[key]
+      if (value === undefined || value === null) rejectMissingArg(cmd, key)
+      if (VEC_ARGS.has(key) && !Array.isArray(value)) rejectMissingArg(cmd, key)
+    }
+  }
+
   let callbackSeq = 0
   const callbacks = new Map<number, { cb: (event: unknown) => void; once: boolean }>()
   const eventListeners = new Map<string, Set<number>>()
@@ -226,13 +280,20 @@ function fakeTauriBootstrap(options: FakeOptions): void {
 
     switch (cmd) {
       case 'get_session':
-        return options.user ?? null
-      case 'login':
-        return { id: '1', username: String(args?.username ?? 'e2e_player'), token: 'e2e-session-token' }
+        return currentUser ? structuredClone(currentUser) : null
+      case 'login': {
+        currentUser = {
+          id: '1',
+          username: String(args?.username),
+          token: 'e2e-session-token',
+        }
+        return structuredClone(currentUser)
+      }
       case 'logout':
+        currentUser = null
         return null
       case 'validate_session':
-        return 'valid'
+        return currentUser ? 'valid' : 'invalid'
       case 'get_config':
         return structuredClone(config)
       case 'update_config':
@@ -310,7 +371,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
             displayPid: `HOJ-${contest.id}-${String(args?.problemId ?? '')}`,
             title: problemDetails[displayId]?.title ?? '',
             displayId,
-            username: 'e2e_player',
+            username: currentUser?.username ?? 'anonymous',
             submitTime: Math.floor(Date.now() / 1000),
             status: 'Pending',
             timeMs: 0,
@@ -406,6 +467,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       calls.push({ cmd, args: args ?? {} })
       return null
     }
+    // 参数校验先于错误注入与命令体（对齐 Tauri：反序列化先于命令执行）
+    assertRequiredArgs(cmd, args)
     return invoke(cmd, args)
   }
 
@@ -435,6 +498,16 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     failNext(cmd: string, variant: string, message: string): void {
       if (!failQueue.has(cmd)) failQueue.set(cmd, [])
       failQueue.get(cmd)!.push({ variant, message })
+    },
+  }
+
+  // @tauri-apps/api 2.11.x 的 _unlisten（event.js:43）在 invoke 之前先调
+  // window.__TAURI_EVENT_PLUGIN_INTERNALS__.unregisterListener —— 缺了这个全局，
+  // 任何 unlisten 都会先抛 TypeError（评审 P2：当前用例未触发，第一个卸载/注销类
+  // spec 必撞）。接到事件注册表的清理上（后续 invoke 的 unlisten 分支幂等）。
+  ;(window as unknown as Record<string, unknown>).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener(event: string, eventId: number): void {
+      eventListeners.get(String(event))?.delete(Number(eventId))
     },
   }
 }

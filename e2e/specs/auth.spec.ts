@@ -47,5 +47,10 @@ test.describe('认证与会话', () => {
     await expect(page.getByText('题目总览')).toBeVisible()
     // 登录表单不应出现（会话已恢复，无需再走认证）
     await expect(page.locator('#contest-username')).toHaveCount(0)
+    // 事件注销的前置全局存在：@tauri-apps/api 2.11 的 _unlisten 首行即调用它，
+    // fake 缺失时任何 unlisten 都会抛 TypeError（评审 P2 的回归哨兵）
+    await expect(
+      page.evaluate(() => typeof window.__TAURI_EVENT_PLUGIN_INTERNALS__?.unregisterListener),
+    ).resolves.toBe('function')
   })
 })
