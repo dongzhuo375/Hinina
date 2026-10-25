@@ -13,6 +13,13 @@ export const useProblemStore = defineStore('problem', {
     isLoading: false,
     error: null as string | null,
 
+    /// openProblem 的请求序号：快速切题时丢弃过期响应（评审 P1）。
+    ///
+    /// 迟到的旧题响应若无条件写入 currentProblem，会出现「路由是 B、
+    /// 题面显示 A」的脏状态 —— 视图的提交配对校验只能挡住错误提交，
+    /// 挡不住错误显示；过期防护的正确位置在 store（数据所有者）。
+    openProblemSeq: 0,
+
     /// displayId → limits（渐进填充：卡片先渲染，limits 到达后补齐）
     limits: {} as Record<string, ProblemLimits>,
     isLimitsLoading: false,
@@ -57,17 +64,26 @@ export const useProblemStore = defineStore('problem', {
   },
 
   actions: {
-    /** 打开指定题目详情并设为当前题目 */
+    /** 打开指定题目详情并设为当前题目（带过期响应保护：只认最新一次请求） */
     async openProblem(contestId: string, problemId: string) {
+      const token = ++this.openProblemSeq
       this.isLoading = true
       this.error = null
       try {
-        this.currentProblem = await problemService.getProblem(contestId, problemId)
+        const problem = await problemService.getProblem(contestId, problemId)
+        // 过期响应：期间又发起了新的 openProblem，状态（currentProblem/error/
+        // isLoading）一律由最新请求决定。失败也不重抛 —— 调用方（视图）对
+        // 这次加载早已通过自身 loadToken 放弃，重抛只会制造未处理拒绝
+        if (token !== this.openProblemSeq) return
+        this.currentProblem = problem
       } catch (e) {
+        if (token !== this.openProblemSeq) return
         this.error = errorMessage(e, '加载题目失败')
         throw e
       } finally {
-        this.isLoading = false
+        // 只有最新一次请求负责收尾 isLoading（旧请求的 finally 不得提前
+        // 关掉新请求的加载态）
+        if (token === this.openProblemSeq) this.isLoading = false
       }
     },
 

@@ -65,5 +65,21 @@ export default defineConfig({
     include: ["src/**/__tests__/**/*.spec.ts", "doc/modules/**/__tests__/**/*.spec.ts"],
     clearMocks: true,
     restoreMocks: true,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+      reportsDirectory: "coverage",
+      // 只统计 src（SDK 示例在 doc/modules，单独口径，不并入前端指标）。
+      // vitest 5 在显式给出 include 后，未被测试加载的匹配文件默认以 0% 计入
+      include: ["src/**"],
+      exclude: [
+        "src/**/__tests__/**",
+        "src/test-support/**",
+        "src/**/*.d.ts",
+        "src/main.ts",
+        // Monaco 壳组件：V8 覆盖器无法解析（vitest 本就只是将其排除并告警），显式剔除保持日志干净
+        "src/components/editor/CodeEditor.vue",
+      ],
+    },
   },
 });

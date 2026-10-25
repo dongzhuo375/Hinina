@@ -1,17 +1,23 @@
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::Path;
+#[cfg(not(test))]
 use std::sync::{Arc, Mutex};
 
+use crate::core::error::{AppError, AppResult};
+
+// 订阅器装配只存在于非测试构建（见 `Logger::init` 的 cfg 拆分）：
+// 测试构建不装全局 tracing 订阅器，这些导入若不加门控会在 `cargo clippy
+// --all-targets -- -D warnings` 下以 unused-import 阻塞 CI（评审 #6）。
+#[cfg(not(test))]
 use tracing_subscriber::fmt::MakeWriter;
+#[cfg(not(test))]
 use tracing_subscriber::{
     fmt::{self, format::FmtSpan},
     layer::SubscriberExt,
     util::SubscriberInitExt,
     EnvFilter,
 };
-
-use crate::core::error::{AppError, AppResult};
 
 /// 日志文件相对 base_dir 的路径。
 ///
@@ -24,6 +30,15 @@ pub const LOG_RELATIVE_PATH: &str = "logs/hinina.log";
 /// 采用「截断式轮转」而不是按天/按份数滚动：客户端无长期日志留存需求，
 /// 日志只服务于近期排障，单文件 + 上限截断足以防止无限膨胀占满选手磁盘。
 const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
+
+/// 进程内**实际接管文件层的日志路径**（评审第三轮 #12）。
+///
+/// 全局订阅器是进程级单例：第二次 `init` 的 `try_init` 必然失败，但第一次
+/// 安装的文件层仍在向**它自己的路径**写入。`log_path`/`has_log_file` 以
+/// 实际生效的路径为准——同路径二次 init 时沿用已安装路径（文件层确实还在
+/// 写），进程内从未成功安装过则如实为 `None`。仅非测试构建使用。
+#[cfg(not(test))]
+static ACTIVE_LOG_PATH: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 
 /// 日志追踪（基于 Tracing）。
 ///
@@ -44,14 +59,14 @@ pub struct Logger {
 ///
 /// tracing 的 `MakeWriter` 每次事件都会取一个 `io::Write`，
 /// 而 `File` 不是 `Sync`，故用 `Arc<Mutex<File>>` 共享句柄并逐条加锁写入。
+/// 仅非测试构建使用（测试构建不装订阅器，见 `Logger::init`）。
+#[cfg(not(test))]
 struct SharedFileWriter(Arc<Mutex<File>>);
 
+#[cfg(not(test))]
 impl io::Write for SharedFileWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut file = self
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut file = self.0.lock().unwrap_or_else(|e| e.into_inner());
         io::Write::write(&mut *file, buf)
     }
 
@@ -60,6 +75,7 @@ impl io::Write for SharedFileWriter {
     }
 }
 
+#[cfg(not(test))]
 impl<'a> MakeWriter<'a> for SharedFileWriter {
     type Writer = SharedFileWriter;
 
@@ -78,51 +94,85 @@ impl Logger {
     /// - 文件层失败（磁盘只读等）时降级为仅 stderr，不阻断启动
     ///
     /// 返回持有文件句柄的实例（供运行期截断日志，见 [`Logger::clear_log_file`]）。
+    ///
+    /// **测试构建不装全局订阅器**（`cfg(test)` 分支只探测文件层是否可用）：
+    /// 全局订阅器是进程级单例，并行测试各自 `AppContext::init` 会争抢全局位；
+    /// 且一旦装上，整个测试进程所有用例的调试日志都会被格式化输出——
+    /// 输出体积暴涨，与 libtest 的捕获机制叠加在 Windows 上曾引发进程级崩溃
+    /// （STATUS_STACK_BUFFER_OVERRUN）。`clear_log_file` / `has_log_file` 是
+    /// 纯文件层操作，不依赖订阅器，测试语义不受影响。
     pub fn init(base_dir: &Path) -> Self {
-        let default_level = if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "info"
-        };
+        #[cfg(not(test))]
+        {
+            let default_level = if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "info"
+            };
 
-        let filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new(default_level));
+            let filter =
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
-        let stderr_layer = fmt::layer()
-            .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
-            .with_target(true)
-            .with_thread_ids(true)
-            .with_file(true)
-            .with_line_number(true)
-            .with_writer(io::stderr);
+            let stderr_layer = fmt::layer()
+                .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_writer(io::stderr);
 
-        match Self::open_log_file(base_dir) {
-            Some(file) => {
-                let file_layer = fmt::layer()
-                    .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
-                    .with_target(true)
-                    .with_thread_ids(true)
-                    .with_file(true)
-                    .with_line_number(true)
-                    // 文件里的 ANSI 转义序列不可读，必须关闭着色
-                    .with_ansi(false)
-                    .with_writer(SharedFileWriter(Arc::new(Mutex::new(file))));
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(stderr_layer)
-                    .with(file_layer)
-                    .init();
-                Self {
-                    log_path: Some(base_dir.join(LOG_RELATIVE_PATH)),
+            match Self::open_log_file(base_dir) {
+                Some(file) => {
+                    let file_layer = fmt::layer()
+                        .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
+                        .with_target(true)
+                        .with_thread_ids(true)
+                        .with_file(true)
+                        .with_line_number(true)
+                        // 文件里的 ANSI 转义序列不可读，必须关闭着色
+                        .with_ansi(false)
+                        .with_writer(SharedFileWriter(Arc::new(Mutex::new(file))));
+                    // try_init 而非 init：全局 subscriber 每进程只能设一次，重复
+                    // init 时沿用已装好的订阅器而不是 panic（防御性；生产只跑一次）。
+                    // 安装失败时本次没有任何订阅器生效，文件层不会有写入 ——
+                    // log_path 必须如实为 None（评审 #4：has_log_file 不得虚报）
+                    let installed = tracing_subscriber::registry()
+                        .with(filter)
+                        .with(stderr_layer)
+                        .with(file_layer)
+                        .try_init();
+                    let path = if installed.is_ok() {
+                        let p = base_dir.join(LOG_RELATIVE_PATH);
+                        *ACTIVE_LOG_PATH.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(p.clone());
+                        Some(p)
+                    } else {
+                        // 安装失败时沿用实际接管文件层的路径（若有）：第一次
+                        // 安装的文件层仍在向它写入，has_log_file 以此为准；
+                        // 进程内从未成功安装过则如实为 None（评审 #4/#12）
+                        ACTIVE_LOG_PATH
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clone()
+                    };
+                    Self { log_path: path }
+                }
+                None => {
+                    // 文件层不可用：保持旧的单路 stderr 行为
+                    let _ = tracing_subscriber::registry()
+                        .with(filter)
+                        .with(stderr_layer)
+                        .try_init();
+                    Self { log_path: None }
                 }
             }
-            None => {
-                // 文件层不可用：保持旧的单路 stderr 行为
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(stderr_layer)
-                    .init();
-                Self { log_path: None }
+        }
+
+        #[cfg(test)]
+        {
+            let opened = Self::open_log_file(base_dir).is_some();
+            Self {
+                log_path: opened.then(|| base_dir.join(LOG_RELATIVE_PATH)),
             }
         }
     }

@@ -96,3 +96,5 @@ purge_local_data(logs, staleSnapshots)
 - `commands/tests/mod_tests.rs`：`run_purge` 的逐项容错 —— **日志失败时留档清理照常执行**（曾用 `?` 冒泡导致留档一条都不删）、文件层不可用时 `log_cleared=false` 且释放 0 字节、两项都成功时数值如实汇总、未勾选的项不执行（闭包 `unreachable!` 即证明）。
 - `service/submission/tests/snapshot_tests.rs`：`inspect_snapshots` 的总量与过期判定（用 `File::set_times` 伪造 mtime）、`purge_stale_snapshots` **保留窗口内留档**（本功能唯一会丢数据的地方）、释放字节数与预览一致、空目录回收、无留档时全零且不报错。
 - `service/contest/tests/contest_tests.rs`：`clear_announcement_baseline` 后下次拉取重新建基线（不报新公告）、`clear_announcement_read_state` 删净且幂等。
+
+- `pub(crate) fn reset_client_impl / local_data_usage_impl / purge_local_data_impl(ctx: &AppContext, ...)` — M2 提取的编排本体（测试见 `tests/maintenance_cmd_tests.rs`：精确删除范围与 PurgeReport 数值）

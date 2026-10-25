@@ -34,3 +34,5 @@
 4. `get_contest_rank` 把可选参数收敛为 `RankQuery`（缺省第 1 页 / 50 条 / 不过滤）后调用 `ContestService::get_rank`，透传 `ContestRankPage`
 5. `list_contest_announcements` 收敛分页参数（缺省第 1 页 / 50 条）后调用 `ContestService::list_announcements`，透传 `AnnouncementPage`
 6. 已读状态两个 command 先经 `session_uid` 解析 uid（无会话分别走「空列表」/「静默跳过」降级），再调用 `ContestService::get_read_announcement_ids` / `mark_announcements_read`
+
+- `pub(crate) async fn get_contest_rank_impl / list_contest_announcements_impl`、`get_read_announcement_ids_impl / mark_announcements_read_impl`、`pub(crate) fn session_uid` — M2 提取的编排与会话分支（测试见 `tests/contest_cmd_tests.rs`：`session_uid` 直调生产函数验证，公告分页钳制经 loopback 断言）

@@ -45,6 +45,7 @@ Hinina/
 │   │   └── m0-baseline.md                # M0 基线冻结：工具链基线、10 条检查命令实测、问题分类、runner 准备步骤
 └── src-tauri/
     ├── Cargo.toml                        # Rust 项目清单（依赖、版本、feature flags）
+    ├── tests/                             # 顶层集成测试二进制（刻意例外：Logger::init 的生产分支在单元测试不可达，见 doc/cicd/m2-tests.md；单元测试仍在各模块旁 tests/ 子目录）
     ├── tauri.conf.json                   # Tauri 2 配置文件（含 bundle：NSIS 打包目标、publisher/版权/描述、图标清单）
     ├── build.rs                          # Tauri 构建脚本
     ├── icons/                            # 应用图标（源图 doc/icon/，tauri icon 生成 + 小尺寸优化版替换；icon.ico 为母版/小尺寸混合多帧）
@@ -381,6 +382,7 @@ src/
 │   ├── system.service.ts                 # 客户端存储信息（存储目录/日志路径/版本，设置页「关于」）
 │   ├── workspace.service.ts              # 工作区创建/保存/恢复/语言持久化 + 落盘事件订阅（onWorkspaceSaved）
 │   └── __tests__/                        # auth.service / config.service / rank.service / plugin.service .spec.ts（本地缓存清理与三态归一契约、配置缓存/派生兜底/updateConfig 读改写、榜单查询参数编排、插件通知验证/队列/定时器清理）
+├── test-support/                      # 测试共享设施（view-mount：createApp+pinia+settle 挂载收敛，仅测试引用）
 ├── bridge/
 │   ├── plugin.bridge.ts                  # 插件控制IPC与通知事件
 │   ├── index.ts                          # ipcInvoke 统一封装 + IpcError（AppError 载荷归一化为 Error，单点日志且不记录参数）

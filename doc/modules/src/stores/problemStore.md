@@ -79,3 +79,8 @@ loadMyStatus(contestId, problemIds)
 `src/stores/__tests__/problemStore.spec.ts`：myStatusStale 初值为真、成功清位、失败置位、
 `invalidateMyStatus` 只置位不发请求、空列表短路；数据归属（首次记录 `myStatusContestId`、
 同比赛不重拉、换比赛必须重拉、过期与归属取并集、**失败不改变归属**）。
+
+
+## openProblem 过期响应保护（评审第二轮）
+
+`openProblem` 持有请求序号（`openProblemSeq`）：迟到的旧题响应被丢弃——不写 `currentProblem`、不占错误态、不重抛，`isLoading` 只由最新请求收尾。数据所有者在 store 层挡住「路由是 B、题面显示 A」的显示错配；视图层的提交配对校验（见 ProblemSolveView）保留为失败路径错配的第二道防线。测试：迟到成功/迟到失败/isLoading 归属三例。

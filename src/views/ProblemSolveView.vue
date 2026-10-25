@@ -44,6 +44,12 @@ let isLoadingPage = false
 /// 而 workspaceStore.code 已是新题：提交前必须校验配对，否则新题代码会提交到
 /// 旧题题号下（PR21-8 评审二轮）
 let loadedProblemDisplayId: string | null = null
+/// 同一次成功加载写入的题目真实 ID（`cp.problemId`）—— 提交前的第二道配对校验。
+/// openProblem 对迟到的旧题响应**没有过期防护**（store 无条件写入 currentProblem），
+/// 而视图的 loadToken 只能丢弃旧加载的后续编排、无法撤销已发生的 store 写入：
+/// 会出现「配对标记是 B、currentProblem 却被迟到的 A 响应改回 A」的脏状态，
+/// displayId 配对对此失明。用真实 ID 兜底（M2 评审 P1）。
+let loadedProblemId: string | null = null
 
 async function ensureContestId(): Promise<string> {
   if (!contestStore.contest) {
@@ -84,6 +90,7 @@ async function load(id: string) {
     await problemStore.openProblem(contestId, id)
     if (token !== loadToken) return
     loadedProblemDisplayId = id
+    loadedProblemId = cp.problemId
 
     // 允许语言归位（与 QuickSubmitDialog 同款语义）：工作区/配置默认存的是规范名
     //（"C++"），服务端按题列表可能是部署变体（"C++17 (GCC 13.2)"）或不含当前语言族。
@@ -259,14 +266,27 @@ async function handleSubmit() {
   // 加载编排未完成时拒绝提交（isLoadingPage 覆盖 loadWorkspace 与 openProblem
   // 全程）：此间隙 workspaceStore.code 已是新题代码而 problemStore.currentProblem
   // 仍是旧题，放行会把新题代码提交到旧题题号下（PR21-8 评审）
-  if (isLoadingPage) return
+  if (isLoadingPage) {
+    submissionStore.reportSubmitBlocked('题目仍在切换中，请稍候再提交')
+    return
+  }
   const contestId = contestStore.contest?.id
   const problem = problemStore.currentProblem
   if (!contestId || !problem || submissionStore.isSubmitting || pendingSubmission.value) return
   // currentProblem 必须与路由 displayId 配对：openProblem 失败时 problemStore
   // 不清空（currentProblem 仍是旧题），而 code 已是新题 —— 无需并发，一次失败
-  // 的切换就会造成错配（PR21-8 评审二轮）
-  if (loadedProblemDisplayId !== displayId.value) return
+  // 的切换就会造成错配（PR21-8 评审二轮）。此外 currentProblem.id 还必须与
+  // 本次成功加载写入的真实 ID 一致：store 已有请求序号过期保护（主防线），
+  // 此处是失败路径错配与防御纵深的兜底。拒绝必须可见 —— 静默 return 会让
+  // 「点提交没反应」看起来像按钮坏了（M2 评审 P2），复用控制台条的错误面。
+  if (loadedProblemDisplayId !== displayId.value) {
+    submissionStore.reportSubmitBlocked('题目仍在切换中，请稍候再提交')
+    return
+  }
+  if (loadedProblemId !== problem.id) {
+    submissionStore.reportSubmitBlocked('题目数据与当前题号不一致，已阻止提交；请等待加载完成后重试')
+    return
+  }
   try {
     // 轮询由 store 在提交成功后自动启动（终态或超时停止），此处不重复实现
     // displayId 取路由参数（比赛内题号 "A"）—— HOJ 提交接口认的是它而不是数字 pid

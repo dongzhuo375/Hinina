@@ -65,3 +65,8 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 
 ## 测试
 `src-tauri/src/infra/tests/http_tests.rs`（由 `http.rs` 底部 `#[cfg(test)] #[path = "tests/http_tests.rs"] mod tests;` 引用）锁定：`status_error` 把 **HTTP 401 映射为 `Auth`** 变体（并断言消息保留状态码与 URL，便于现场排障）、**403 保持 `Network`**（业务性无权访问不得误判为会话失效）、400 / 404 / 500 / 502 / 503 一律 `Network`、`retry_delay` 指数退避 1s / 2s / 4s（纯函数性质；实际重试只用到 attempt 0/1，即 1s / 2s）；`classify_status` 的完整判据 —— 2xx 在任意 attempt 都 `Accept`、5xx（500/502/503/504）在额度内 `Retry` 而**耗尽后 `Fail`**（正面锁定上述回归）、4xx（400/401/403/404）在任意 attempt 都 `Fail` 不重试、3xx 残留同样 `Fail`；`with_timeout` 构造路径可用（reqwest::Client 不暴露 timeout getter，「配置值确实被传入」由 context.rs 的装配代码保证：`timeout_secs → with_timeout`）。
+
+
+## 真实传输层测试（M2）
+
+`tests/http_tests.rs` 除判定函数外，新增经 loopback 脚本 server 的真实传输用例：GET 5xx 恰好重试一次后成功 / 重试耗尽如实报错、POST 500 一律不重试且错误附响应体摘录、401→`Auth` 与 403→`Network` 的线上映射、自定义头与 `Hinina/{version}` UA 透传。

@@ -29,6 +29,11 @@ pub async fn login(
 /// 不清理会让同机换账号后仍能读到上一位选手的提交内容。
 #[tauri::command]
 pub async fn logout(ctx: State<'_, AppContext>) -> AppResult<()> {
+    logout_impl(&ctx).await
+}
+
+/// `logout` 的真实编排（提取自命令本体，供命令与测试共用同一实现）。
+pub(crate) async fn logout_impl(ctx: &AppContext) -> AppResult<()> {
     let result = ctx.auth.logout().await;
     ctx.submission.clear_user_caches();
     result
@@ -42,12 +47,16 @@ pub async fn logout(ctx: State<'_, AppContext>) -> AppResult<()> {
 /// 返回的 `User.token` 可用于恢复 API 认证。
 #[tauri::command]
 pub async fn get_session(ctx: State<'_, AppContext>) -> AppResult<Option<User>> {
-    let session = ctx.auth.get_session();
-    Ok(session.map(|s| User {
+    Ok(get_session_impl(&ctx))
+}
+
+/// `get_session` 的 VO 映射（Session → 前端 User 形状）。
+pub(crate) fn get_session_impl(ctx: &AppContext) -> Option<User> {
+    ctx.auth.get_session().map(|s| User {
         id: s.user_id,
         username: s.username,
         token: s.token,
-    }))
+    })
 }
 
 /// 校验当前会话是否仍然有效 Command。
@@ -63,3 +72,7 @@ pub async fn get_session(ctx: State<'_, AppContext>) -> AppResult<Option<User>> 
 pub async fn validate_session(ctx: State<'_, AppContext>) -> AppResult<SessionValidity> {
     Ok(ctx.auth.validate_session().await)
 }
+
+#[cfg(test)]
+#[path = "tests/auth_cmd_tests.rs"]
+mod tests;

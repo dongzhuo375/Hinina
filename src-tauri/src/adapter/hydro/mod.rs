@@ -1,4 +1,4 @@
-﻿// Hydro Adapter：实现 Auth + Contest + Problem + Submission 四个 trait。
+// Hydro Adapter：实现 Auth + Contest + Problem + Submission 四个 trait。
 //
 // 目标对象是**上游 Hydro OJ**（`packages/hydrooj`），与 `adapter/hoj` 的 HOJ
 // （Hydro 衍生版，自带 REST + JWT 层）是两套不同协议，故不能复用 HOJ 的调用方式：
@@ -37,8 +37,8 @@ use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::problem::Problem;
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::entity::submission::{
-    JudgeCase, JudgementResult, SubmissionCases, SubmissionDetail, SubmissionPage, SubmissionQuery,
-    SubmissionRecord, SubTaskCases,
+    JudgeCase, JudgementResult, SubTaskCases, SubmissionCases, SubmissionDetail, SubmissionPage,
+    SubmissionQuery, SubmissionRecord,
 };
 use crate::core::entity::user::User;
 use crate::core::error::{AppError, AppResult};
@@ -171,9 +171,8 @@ impl HydroResponse {
     fn into_json<T: DeserializeOwned>(self) -> AppResult<T> {
         let url = self.url.clone();
         let value = self.into_value()?;
-        serde_json::from_value::<T>(value).map_err(|e| {
-            AppError::Serialization(format!("Hydro 响应字段不匹配 {}: {}", url, e))
-        })
+        serde_json::from_value::<T>(value)
+            .map_err(|e| AppError::Serialization(format!("Hydro 响应字段不匹配 {}: {}", url, e)))
     }
 }
 
@@ -373,18 +372,41 @@ impl HydroAdapter {
     ///
     /// 最后一条尤其重要：若把「不支持注入头」当成「匿名」，一次版本差异就会把
     /// 全部在线选手踢回登录页；按「无法判定」处理才会保留会话（缺口 D18）。
+    /// 探测当前用户上下文（**带缓存**：展示类查询用，命中即免网络请求）。
+    ///
+    /// **会话校验不得走本方法**：缓存命中会短路网络，服务器吊销 sid 后校验
+    /// 在进程生命周期内恒判有效 —— 三态校验必须用
+    /// [`Self::probe_user_context_uncached`]（与 HOJ 每次回访服务端同语义）。
     async fn probe_user_context(&self) -> AppResult<Option<HydroUser>> {
         if let Some(user) = self.cached_user() {
             return Ok(Some(user));
         }
-        if self.session().is_none() {
+        self.probe_user_context_uncached().await
+    }
+
+    /// 探测当前用户上下文（**绕过缓存**：每次真实回访服务端）。
+    ///
+    /// 专供 `validate_session` 使用（评审 P0）：身份缓存只服务展示类查询的
+    /// 加速，若校验也走缓存，「服务器已吊销 sid」在进程内永远不可见。
+    /// 成功路径仍会回写缓存（下次展示查询受益）。
+    async fn probe_user_context_uncached(&self) -> AppResult<Option<HydroUser>> {
+        // 记录发起时持有的会话：慢响应晚到期间会话可能已被替换
+        // （登出 / 换号登录），响应属于旧会话，不得影响新会话（评审第三轮 #1/#2）
+        let sid_at_start = self.session();
+        if sid_at_start.is_none() {
             return Ok(None);
         }
 
-        let value = self
-            .get_value("/", true)
-            .await
-            .map_err(|e| e.context("Hydro 用户上下文"))?;
+        let result = self.get_value("/", true).await;
+        // 代际保护：会话在探测期间被替换 → 响应无论内容如何都作废。
+        // 既不写入共享身份缓存（晚到的旧身份会覆盖新登录者，造成
+        // 「B 看到 A 的提交记录」），也不作为校验结论（旧会话的「匿名」
+        // 判定会误清新登录者的会话）。按「无法判定」上抛，调用方
+        // （validate_session）的未知分支保留当前会话。
+        if self.session() != sid_at_start {
+            return Err(AppError::Unknown("探测期间会话已变更，响应作废".into()));
+        }
+        let value = result.map_err(|e| e.context("Hydro 用户上下文"))?;
 
         let Some(context) = value
             .get("UserContext")
@@ -594,10 +616,7 @@ impl HydroAdapter {
                     .map(types::coerce_id)
                     .filter(|s| !s.is_empty())
                     .unwrap_or_default();
-                let index = pids
-                    .iter()
-                    .position(|pid| *pid == doc_id)
-                    .unwrap_or(order);
+                let index = pids.iter().position(|pid| *pid == doc_id).unwrap_or(order);
                 ContestProblem {
                     // Hydro 的题目主键是数字 docId，与 `ContestProblem.id: i64` 同域
                     id: pdoc.doc_id_num(),
@@ -715,7 +734,10 @@ impl HydroAdapter {
                 .map(types::display_letter)
                 .unwrap_or_default(),
             pid,
-            username: udict.get(&uid).map(UserBriefVO::display).unwrap_or_default(),
+            username: udict
+                .get(&uid)
+                .map(UserBriefVO::display)
+                .unwrap_or_default(),
             submit_time: rdoc.submit_time(),
             status: types::map_status(rdoc.status_code()),
             time_ms,
@@ -807,9 +829,8 @@ impl AuthProvider for HydroAdapter {
             .await
             .map_err(|e| e.context("Hydro 登录"))?;
 
-        let sid = types::extract_sid(&response.headers).ok_or_else(|| {
-            AppError::Auth("Hydro 登录响应未携带会话 Cookie（sid）".into())
-        })?;
+        let sid = types::extract_sid(&response.headers)
+            .ok_or_else(|| AppError::Auth("Hydro 登录响应未携带会话 Cookie（sid）".into()))?;
         // 先取会话再消费响应体：错误包络（LoginError 等）在这里被翻译成 AppError
         let _: Value = response.into_value().map_err(|e| {
             warn!(error = %e, "Hydro 登录失败");
@@ -817,8 +838,18 @@ impl AuthProvider for HydroAdapter {
         })?;
 
         self.set_session(Some(sid.clone()));
-        // 取 uid/uname：失败时降级为「用输入的用户名」，不让一次上下文探测
-        // 失败否定已经建立好的会话
+        // 换号登录必须先清旧身份：身份缓存是「上一个账号」的，若不清，
+        // 探测命中缓存会返回旧账号的 uid/uname 配上新 sid（评审 P0）。
+        // 新身份由下方探测成功路径重新缓存。
+        self.set_user(None);
+        // 取 uid/uname：探测失败/匿名时降级为「用输入的用户名」，**不得否定
+        // 已经建立好的会话**（sid 已写入，主流程继续）。
+        //
+        // **降级身份只用于登录返回值展示，绝不写入已验证用户缓存**（`self.user`）：
+        // `probe_user_context` 命中缓存即直接返回，占位用户一旦入缓存，
+        // `validate_session` 会无条件判 `Ok(true)` —— 明确匿名的会话被判有效、
+        // 本应 Unknown 的网络失败也被判有效，违反同文件的三态契约。
+        // 服务端已验证的身份由 probe 成功路径自行缓存（见其内部 set_user）。
         let user = match self.probe_user_context().await {
             Ok(Some(user)) => user,
             Ok(None) => {
@@ -836,7 +867,6 @@ impl AuthProvider for HydroAdapter {
                 }
             }
         };
-        self.set_user(Some(user.clone()));
 
         info!(username = user.uname, uid = user.id, "Hydro 登录成功");
         Ok(User {
@@ -856,10 +886,7 @@ impl AuthProvider for HydroAdapter {
             self.clear_identity();
             return Ok(());
         }
-        if let Err(e) = self
-            .post_json::<Value>("/logout", None)
-            .await
-        {
+        if let Err(e) = self.post_json::<Value>("/logout", None).await {
             warn!(error = %e, "Hydro 远端登出失败，仅清除本地身份");
         }
         self.clear_identity();
@@ -881,7 +908,9 @@ impl AuthProvider for HydroAdapter {
             debug!("Hydro 本地无会话，判定为失效");
             return Ok(false);
         }
-        match self.probe_user_context().await {
+        // 必须绕过身份缓存：校验的职责就是问服务器（缓存命中即恒真，
+        // 服务器吊销 sid 在进程内不可见 —— 评审 P0）
+        match self.probe_user_context_uncached().await {
             Ok(Some(_)) => Ok(true),
             Ok(None) => {
                 info!("Hydro 服务端判定会话已失效（匿名）");
@@ -989,7 +1018,11 @@ impl ContestProvider for HydroAdapter {
             .get_json(&format!("/contest/{}/scoreboard", contest_id), false)
             .await
             .map_err(|e| e.context("Hydro 榜单"))?;
-        if query.keyword.as_deref().is_some_and(|k| !k.trim().is_empty()) {
+        if query
+            .keyword
+            .as_deref()
+            .is_some_and(|k| !k.trim().is_empty())
+        {
             debug!("Hydro 榜单不支持服务端关键词搜索，本次搜索条件被忽略");
         }
         let page = types::scoreboard_rank_page(&vo);
@@ -1105,7 +1138,11 @@ impl ProblemProvider for HydroAdapter {
                 statuses.insert(pid.clone(), code);
             }
         }
-        debug!(contest_id = contest_id, count = statuses.len(), "Hydro 题目状态已获取");
+        debug!(
+            contest_id = contest_id,
+            count = statuses.len(),
+            "Hydro 题目状态已获取"
+        );
         Ok(statuses)
     }
 }
@@ -1193,10 +1230,7 @@ impl SubmissionProvider for HydroAdapter {
     /// - Hydro **不返回总条数**，故 `total`/`pages` 只能按假定页大小推导（D8）；
     /// - `status` 收 Hydro 码，前端传的是 HOJ 码 → 经 `types::hoj_status_to_hydro` 翻译，
     ///   无对应语义时明确报错而不是静默忽略筛选（D13）。
-    async fn list_contest_submissions(
-        &self,
-        query: &SubmissionQuery,
-    ) -> AppResult<SubmissionPage> {
+    async fn list_contest_submissions(&self, query: &SubmissionQuery) -> AppResult<SubmissionPage> {
         let page = query.current_page.max(1);
         let mut path = format!("/record?page={}", page);
         if !query.contest_id.trim().is_empty() {
@@ -1321,7 +1355,11 @@ impl SubmissionProvider for HydroAdapter {
             .and_then(|config| config.kind)
             .unwrap_or_else(|| "default".to_string());
 
-        debug!(submit_id = submit_id, cases = cases.len(), "Hydro 测试点结果已获取");
+        debug!(
+            submit_id = submit_id,
+            cases = cases.len(),
+            "Hydro 测试点结果已获取"
+        );
         Ok(SubmissionCases {
             cases,
             sub_tasks,
@@ -1329,7 +1367,6 @@ impl SubmissionProvider for HydroAdapter {
         })
     }
 }
-
 
 // ── 适配器工厂 ──
 

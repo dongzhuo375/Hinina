@@ -9,6 +9,9 @@
 //! panic 展开时都会执行。调用点只需**持有**它 —— 把它绑到一个变量上，或用
 //! `_dir` 与其它返回值一起接住。
 
+pub mod app_ctx;
+pub mod loopback;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 

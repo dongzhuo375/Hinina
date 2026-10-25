@@ -131,6 +131,16 @@ export const useSubmissionStore = defineStore('submission', {
   },
 
   actions: {
+    /**
+     * 视图层提交守卫的阻断上报（评审 #14：视图经 action 操作 store 状态）。
+     *
+     * 三道守卫（加载中 / displayId 未配对 / 题目 ID 不一致）拒绝提交时调用，
+     * 文案经控制台条现有错误面展示 —— 消除「点提交没反应」的静默失败。
+     */
+    reportSubmitBlocked(message: string) {
+      this.error = message
+    },
+
     /** 提交代码、记录提交条目并启动评测轮询 */
     async submitCode(
       contestId: string,
