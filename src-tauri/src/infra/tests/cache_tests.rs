@@ -188,7 +188,7 @@ fn ttl_cache_supports_concurrent_reads_and_writes() {
         .collect();
 
     for i in 0..32 {
-        cache.insert(format!("k{}", i), i as i32);
+        cache.insert(format!("k{}", i), i);
     }
     for reader in readers {
         reader.join().expect("读线程不应 panic");

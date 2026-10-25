@@ -424,9 +424,9 @@ fn ok_resp(status: i32) -> AppResult<ApiResponse<serde_json::Value>> {
 
 #[test]
 fn validity_success_is_valid() {
-    assert_eq!(
+    assert!(
         HOJAdapter::session_validity_from_response(ok_resp(200)).expect("不应报错"),
-        true
+        "HTTP 200 + 成功体应判会话有效"
     );
 }
 
@@ -438,9 +438,8 @@ fn validity_auth_error_is_definitively_invalid() {
         AppError::Auth("HTTP 401 Unauthorized: http://oj/api/get-user-auth-info".into()),
         AppError::Auth("请您先登录！（HOJ status=403）".into()),
     ] {
-        assert_eq!(
-            HOJAdapter::session_validity_from_response(Err(err)).expect("不应报错"),
-            false,
+        assert!(
+            !HOJAdapter::session_validity_from_response(Err(err)).expect("不应报错"),
             "服务端明确判定失效应返回 Ok(false)"
         );
     }
@@ -783,7 +782,7 @@ fn judgement_projection_submitting_is_non_terminal() {
         serde_json::from_str(r#"{ "submitId": 1, "status": 9 }"#).expect("解析失败");
     let result = HOJAdapter::into_judgement_result(&d);
     assert!(matches!(result.status, JudgementStatus::Pending));
-    assert!(result.status.is_terminal() == false);
+    assert!(!result.status.is_terminal());
 }
 
 #[test]

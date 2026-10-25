@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 以 JSON 格式持久化，ConfigService 负责加载/保存。
 /// 所有可变行为参数均从 Config 读取，支持运行时热更新。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     /// 用户偏好
@@ -22,18 +22,6 @@ pub struct AppConfig {
     /// 布局偏好
     #[serde(default)]
     pub layout: LayoutConfig,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            user: UserConfig::default(),
-            oj: OjConfig::default(),
-            editor: EditorConfig::default(),
-            theme: ThemeConfig::default(),
-            layout: LayoutConfig::default(),
-        }
-    }
 }
 
 // ── 用户偏好 ──

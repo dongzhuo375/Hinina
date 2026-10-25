@@ -133,7 +133,9 @@ async fn real_switch_moves_registry_persists_config_and_clears_caches() {
     // 磁盘题面缓存键带 OJ 维度、切 OJ 时刻意保留（空间回收由异步任务做），
     // 因此先删除磁盘层排除其干扰——此后 open_problem 是否打网络**只**取决于
     // 内存 statement_cache 是否已被 on_oj_switched 清空。
-    ctx.storage.remove_all("cache/problem_statement");
+    ctx.storage
+        .remove_all("cache/problem_statement")
+        .expect("清理题面磁盘缓存应成功");
     let requests_before = hoj.requests().len();
     let problem = ctx
         .problem
