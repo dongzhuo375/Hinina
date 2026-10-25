@@ -50,7 +50,7 @@ Hinina 是基于 Tauri 2 + Rust + Vue 3 的 OJ 桌面竞赛客户端，面向 AC
 
 ## 开发约定
 
-- **分支策略**：GitHub Flow，`main` 分支保护（M1 收尾时启用：必需检查 ci-required + 禁止 force push），功能分支开发，squash merge
+- **分支策略**：GitHub Flow，`main` 分支保护（必需检查 ci-required + 禁止 force push，2026-10-25 已启用），功能分支开发，squash merge
 - **分支命名**：`feat/<描述>`, `fix/<描述>`, `docs/<描述>`, `chore/<描述>`
 - **PR 要求**：至少一人 Review 通过后方可合并（CI 门禁已落地：`.github/workflows/ci.yml`，frontend/rust-test 为必需检查、rust-lint 暂非阻塞，详见 doc/cicd/）
 - **权威文档**：`doc/开发手册.md`，涉及架构决策、NFR、风险等时请先查阅此文档

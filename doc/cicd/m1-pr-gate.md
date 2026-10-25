@@ -3,7 +3,7 @@
 > 记录日期：2026-10-25  
 > 版本锚定：`main` @ 84cb7f8，分支 `chore/ci-m1-workflow`，PR #50  
 > 文档性质：CI/CD 施工过程记录（入库，见 [doc/cicd/](README.md)）；前置：[M0 基线](m0-baseline.md)  
-> 状态：CI 已落地并完成首跑验证（§三）；分支保护与红路径验收待合并后执行（§五）
+> 状态：CI 已落地（PR #50 合并于 `29b5d6a`）；分支保护、Actions 只读权限与红路径验收均已完成（§五）
 
 ## 一、落地范围（PR #50）
 
@@ -47,16 +47,16 @@
 
 ## 四、验证边界
 
-- 本 PR 自身完成的是绿路径验证；红路径（必需检查失败应阻止合并）待合并后用临时失败 PR 验收（§五）。
+- 绿路径由 PR #50 自身验证；红路径已由临时失败 PR 验收（§五.3）：ci-required 红 → 合并 BLOCKED。
 - Ubuntu clippy 编译路径未验证（见 §三）；`npm --version` 未加显式断言，由 setup-node（.nvmrc）+ corepack（packageManager）双机制保证。
 - 宽松保护下管理员仍可越过红检查合并——单人仓库的已接受边界，如需收紧改 enforce_admins 即可。
 
-## 五、合并后动作（待执行）
+## 五、合并后动作（已于 2026-10-25 执行完毕）
 
-1. `gh api` 配置分支保护（宽松）：`required_status_checks` contexts=["ci-required"]、strict=true（要求与 main 同步）、`allow_force_pushes=false`、`enforce_admins=false`。
-2. `gh api` 设 `actions/permissions` 默认 `default_workflow_permissions=read`。
-3. 建临时失败分支开 PR，验证 `ci-required` 变红且合并被阻，验证后关闭并删支。
-4. 结果回写本节，并将开发手册/copilot-instructions 中分支保护的「待启用」措辞改为现状。
+1. **分支保护已配置（宽松模式）**：`required_status_checks` contexts=["ci-required"]、strict=true（要求与 main 同步）、`allow_force_pushes=false`、`enforce_admins=false`（管理员直推保留）。
+2. **Actions 默认权限已设为只读**：`default_workflow_permissions=read` + 禁止 PR 审批。注意该字段在 `/actions/permissions/workflow` 子端点，主端点 `/actions/permissions` 只管 enabled/allowed_actions。
+3. **红路径验收通过（PR #51，run 40175020303）**：故意失败用例使 `frontend` 红 → `ci-required` 红（`rust-test` 双平台仍绿，fail-fast: false 的故障隔离按设计工作）→ PR `mergeStateStatus=BLOCKED`，合并被必需检查阻止。验收后 PR 已关闭、临时分支已删。边界：宽松模式下管理员仍可越过红检查合并（enforce_admins=false），已在 §四 声明。
+4. **本节结果回写 + 开发手册/copilot-instructions 中分支保护措辞由「待启用」翻转为现状**（本提交直推 main，宽松模式允许管理员直推）。
 
 ## 六、遗留项
 
