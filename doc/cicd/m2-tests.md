@@ -63,6 +63,14 @@
 
 验证：Rust 779 / 前端 560 全绿；clippy 相对存量 E3 零新增；build/TSC 通过。
 
+### 第二轮复核补严（2026-10-25，用户逐条复核后）
+
+- **#4 补直接测试**：`try_init` 失败分支在单元测试不可达（测试构建不装订阅器），新增**集成测试二进制** `src-tauri/tests/logger_try_init_{fail,ok}_tests.rs`——集成测试链接 lib 时 `cfg(test)`=false，`init` 走生产分支，成败两分支各自真实覆盖（占位订阅器→has_log_file=false；空闲→接管且日志有写入）。两文件必须分离：全局订阅器是进程级单例。
+- **#7 补 problem 内存缓存断言**：磁盘题面缓存键带 OJ 维度会被保留，故先 `remove_all` 磁盘层排除干扰——此后 open_problem 是否打网络**只**取决于内存 statement_cache 是否被切换清空（请求计数断言 +1）。
+- **#9 补齐参数结构体**：`RankParams`（7 参）/`AnnouncementsParams`/`PurgeParams` 全部结构体化，不再逐参转发。
+- **#5 覆盖核实**：`loadedProblemId` 第二道守卫的拒绝分支**已有测试覆盖**（ProblemSolveView.spec 的竞态用例断言 error 含「不一致」），复核时被看漏；「切换中」为第一道守卫的独立分支。
+- **#6 clippy 取证**：本地实跑 `clippy --all-targets -- -D warnings`，RC=101 的 7 个错误全部为 M0 存量（config.rs 可 derive impl / hoj mod_tests / cache_tests），本 PR 文件零命中；rust-lint 的 fmt 失败同属 E2 既有。
+
 **施工教训（两次踩坑）**：对已 rustfmt 重排过的文件做字符串替换必须以重新读取的内容为准——本轮两次 python 批量替换因目标串与磁盘文本不符而静默无效（其一导致 git restore 误覆盖未提交修复，其二导致测试断言与扩展代码三处未写入、诊断走了弯路）。多段替换要么用带断言的精确工具（Edit），要么逐段 `assert in` 后再写盘。
 
 **CI 补课**：上述教训的直接代价——CI 首跑 frontend 红（本地 vitest 全绿但 vue-tsc 红）：追加测试段时重犯 matcher 消息参数错误 + 引用未导入类型，而 `vitest run` 不做类型检查、全量 build 又跑在追加之前。修复后以 `npm run build`（vue-tsc）作为追加测试后的**必跑项**，不因单文件 vitest 绿而省略。

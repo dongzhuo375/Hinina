@@ -128,12 +128,24 @@ async fn real_switch_moves_registry_persists_config_and_clears_caches() {
         5,
         "提交详情必须重新拉取（submission 用户域缓存已清，status=2 终态在预热时入缓存）"
     );
+
+    // problem 内存 statement_cache 的清理断言（评审 #7 补严）：
+    // 磁盘题面缓存键带 OJ 维度、切 OJ 时刻意保留（空间回收由异步任务做），
+    // 因此先删除磁盘层排除其干扰——此后 open_problem 是否打网络**只**取决于
+    // 内存 statement_cache 是否已被 on_oj_switched 清空。
+    ctx.storage.remove_all("cache/problem_statement");
+    let requests_before = hoj.requests().len();
     let problem = ctx
         .problem
         .open_problem("1001", "A", true)
         .await
         .expect("题面应成功");
     assert_eq!(problem.id, "42");
+    assert_eq!(
+        hoj.requests().len(),
+        requests_before + 1,
+        "磁盘层已删：能否打网络只取决于内存 statement_cache——必须已被切换清空"
+    );
 
     // 事件：两次 OjSwitched（ConfigChanged 会交错，过滤后按序断言）
     let mut switched = Vec::new();

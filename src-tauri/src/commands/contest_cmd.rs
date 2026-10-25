@@ -87,26 +87,42 @@ pub async fn get_contest_rank(
 ) -> AppResult<ContestRankPage> {
     get_contest_rank_impl(
         &ctx,
+        RankParams {
+            contest_id,
+            current_page,
+            limit,
+            keyword,
+            remove_star,
+            contains_end,
+        },
+    )
+    .await
+}
+
+/// `get_contest_rank` 的原始入参（评审 #9：参数收敛为结构体，命令与实现
+/// 之间不再逐参转发——新增筛选参数只改两处，不再两份签名漂移）。
+pub(crate) struct RankParams {
+    pub contest_id: String,
+    pub current_page: Option<i64>,
+    pub limit: Option<i64>,
+    pub keyword: Option<String>,
+    pub remove_star: Option<bool>,
+    pub contains_end: Option<bool>,
+}
+
+/// `get_contest_rank` 的参数编排（提取自命令本体，供命令与测试共用）。
+pub(crate) async fn get_contest_rank_impl(
+    ctx: &AppContext,
+    params: RankParams,
+) -> AppResult<ContestRankPage> {
+    let RankParams {
         contest_id,
         current_page,
         limit,
         keyword,
         remove_star,
         contains_end,
-    )
-    .await
-}
-
-/// `get_contest_rank` 的参数编排（提取自命令本体，供命令与测试共用）。
-pub(crate) async fn get_contest_rank_impl(
-    ctx: &AppContext,
-    contest_id: String,
-    current_page: Option<i64>,
-    limit: Option<i64>,
-    keyword: Option<String>,
-    remove_star: Option<bool>,
-    contains_end: Option<bool>,
-) -> AppResult<ContestRankPage> {
+    } = params;
     let query = RankQuery {
         current_page: current_page.unwrap_or(1).max(1),
         limit: limit.unwrap_or(DEFAULT_RANK_LIMIT),
@@ -136,16 +152,34 @@ pub async fn list_contest_announcements(
     current_page: Option<i64>,
     limit: Option<i64>,
 ) -> AppResult<AnnouncementPage> {
-    list_contest_announcements_impl(&ctx, contest_id, current_page, limit).await
+    list_contest_announcements_impl(
+        &ctx,
+        AnnouncementsParams {
+            contest_id,
+            current_page,
+            limit,
+        },
+    )
+    .await
+}
+
+/// `list_contest_announcements` 的原始入参（评审 #9，同 `RankParams`）。
+pub(crate) struct AnnouncementsParams {
+    pub contest_id: String,
+    pub current_page: Option<i64>,
+    pub limit: Option<i64>,
 }
 
 /// `list_contest_announcements` 的参数编排（提取自命令本体，供命令与测试共用）。
 pub(crate) async fn list_contest_announcements_impl(
     ctx: &AppContext,
-    contest_id: String,
-    current_page: Option<i64>,
-    limit: Option<i64>,
+    params: AnnouncementsParams,
 ) -> AppResult<AnnouncementPage> {
+    let AnnouncementsParams {
+        contest_id,
+        current_page,
+        limit,
+    } = params;
     let page = current_page.unwrap_or(1).max(1);
     let limit = limit.unwrap_or(DEFAULT_ANNOUNCEMENT_LIMIT).max(1);
 

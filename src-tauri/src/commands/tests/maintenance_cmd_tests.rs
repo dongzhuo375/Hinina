@@ -65,7 +65,13 @@ async fn purge_removes_only_stale_snapshots_and_reports_numbers() {
     let stale_bytes = seed_snapshot(dir.path(), "hoj", "stale-1", true);
     let fresh_bytes = seed_snapshot(dir.path(), "hoj", "fresh-1", false);
 
-    let report = purge_local_data_impl(&ctx, false, true);
+    let report = purge_local_data_impl(
+        &ctx,
+        super::PurgeParams {
+            logs: false,
+            stale_snapshots: true,
+        },
+    );
 
     assert_eq!(report.removed_snapshots, 1, "只应删除过期留档");
     assert_eq!(
@@ -95,7 +101,13 @@ async fn purge_clears_log_content_when_selected() {
     // init 后 logger 已写入启动日志（文件必然存在且非空）
     assert!(log_path.exists(), "init 后日志文件应已存在");
 
-    let report = purge_local_data_impl(&ctx, true, false);
+    let report = purge_local_data_impl(
+        &ctx,
+        super::PurgeParams {
+            logs: true,
+            stale_snapshots: false,
+        },
+    );
 
     assert!(report.log_cleared, "日志文件存在且可写时应清空成功");
     assert_eq!(

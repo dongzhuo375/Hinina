@@ -113,6 +113,12 @@ pub(crate) fn local_data_usage_impl(ctx: &AppContext) -> LocalDataUsage {
     }
 }
 
+/// `purge_local_data` 的原始入参（评审 #9，同 `RankParams` 的收敛理由）。
+pub(crate) struct PurgeParams {
+    pub logs: bool,
+    pub stale_snapshots: bool,
+}
+
 /// 清理结果。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -181,15 +187,21 @@ pub async fn purge_local_data(
     logs: bool,
     stale_snapshots: bool,
 ) -> AppResult<PurgeReport> {
-    Ok(purge_local_data_impl(&ctx, logs, stale_snapshots))
+    Ok(purge_local_data_impl(
+        &ctx,
+        PurgeParams {
+            logs,
+            stale_snapshots,
+        },
+    ))
 }
 
 /// `purge_local_data` 的真实编排（提取自命令本体，供命令与测试共用）。
-pub(crate) fn purge_local_data_impl(
-    ctx: &AppContext,
-    logs: bool,
-    stale_snapshots: bool,
-) -> PurgeReport {
+pub(crate) fn purge_local_data_impl(ctx: &AppContext, params: PurgeParams) -> PurgeReport {
+    let PurgeParams {
+        logs,
+        stale_snapshots,
+    } = params;
     info!(logs, stale_snapshots, "Command: 清理本地数据");
 
     run_purge(
