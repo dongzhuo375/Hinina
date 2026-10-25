@@ -273,10 +273,17 @@ async function handleSubmit() {
   // currentProblem 必须与路由 displayId 配对：openProblem 失败时 problemStore
   // 不清空（currentProblem 仍是旧题），而 code 已是新题 —— 无需并发，一次失败
   // 的切换就会造成错配（PR21-8 评审二轮）。此外 currentProblem.id 还必须与
-  // 本次成功加载写入的真实 ID 一致：迟到的旧题响应会把 store 改回旧题而
-  // 配对标记不动（store 无过期防护，见 loadedProblemId 注释）
-  if (loadedProblemDisplayId !== displayId.value) return
-  if (loadedProblemId !== problem.id) return
+  // 本次成功加载写入的真实 ID 一致：store 已有请求序号过期保护（主防线），
+  // 此处是失败路径错配与防御纵深的兜底。拒绝必须可见 —— 静默 return 会让
+  // 「点提交没反应」看起来像按钮坏了（M2 评审 P2），复用控制台条的错误面。
+  if (loadedProblemDisplayId !== displayId.value) {
+    submissionStore.error = '题目仍在切换中，请稍候再提交'
+    return
+  }
+  if (loadedProblemId !== problem.id) {
+    submissionStore.error = '题目数据与当前题号不一致，已阻止提交；请等待加载完成后重试'
+    return
+  }
   try {
     // 轮询由 store 在提交成功后自动启动（终态或超时停止），此处不重复实现
     // displayId 取路由参数（比赛内题号 "A"）—— HOJ 提交接口认的是它而不是数字 pid

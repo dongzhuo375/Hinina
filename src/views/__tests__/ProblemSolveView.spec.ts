@@ -46,7 +46,7 @@ const storeMocks = vi.hoisted(() => ({
     loadLimits: vi.fn(), loadMyStatus: vi.fn(),
   },
   submission: {
-    isSubmitting: false, pendingFor: vi.fn(() => null),
+    isSubmitting: false, pendingFor: vi.fn(() => null), error: null as string | null,
     submitCode: vi.fn(async () => { calls.push('submitCode') }),
   },
 }))
@@ -101,6 +101,7 @@ beforeEach(() => {
   storeMocks.problem.currentProblem = null
   storeMocks.problem.error = null
   storeMocks.workspace.isDirty = false
+  storeMocks.submission.error = null
   editorSubmit.handler = null
 })
 
@@ -127,10 +128,10 @@ describe('ProblemSolveView 加载与切题编排', () => {
     await m2.unmount()
   })
 
-  it('快速切题：迟到的旧题响应覆盖 store 后，提交守卫拒绝错配（评审 P1）', async () => {
-    // 复刻真实语义：openProblem 对迟到响应**没有过期防护**，会无条件写入
-    // currentProblem（problemStore.ts）。视图的 loadToken 只丢弃旧加载的编排，
-    // 撤销不了已发生的 store 写入 —— 因此这里让 A 的迟到 mock 真实写入 p-A。
+  it('快速切题：迟到旧题响应污染 store 后，提交守卫拒绝错配并给出可见反馈（评审 P1）', async () => {
+    // store 现已内置请求序号过期保护（主防线，见 problemStore.spec.ts）；
+    // 本测试故意让迟到 mock 复刻「未受保护的写入」，锁定视图层第二道防线的
+    // 契约：失败路径错配与防御纵深下，拒绝必须可见而不是静默无响应。
     const lateA = deferred<void>()
     storeMocks.problem.openProblem.mockImplementationOnce(async () => {
       await lateA.promise
@@ -152,16 +153,17 @@ describe('ProblemSolveView 加载与切题编排', () => {
 
     // 脏状态下提交：displayId 配对仍是 B（第一道校验放行），
     // 但 currentProblem.id 与本次成功加载写入的真实 ID 不一致 —— 必须拒绝，
-    // 否则 B 的代码会以 A 的 problem.id 提交
+    // 否则 B 的代码会以 A 的 problem.id 提交；且拒绝必须经控制台条可见
     storeMocks.workspace.code = 'code-B'
     editorSubmit.handler?.()
     for (let i = 0; i < 6; i += 1) await Promise.resolve()
     expect(storeMocks.submission.submitCode).not.toHaveBeenCalled()
+    expect(storeMocks.submission.error).toContain('不一致')
 
     await m.unmount()
   })
 
-  it('防错题提交：openProblem 失败后旧题与新路由不配对，提交被拒绝', async () => {
+  it('防错题提交：openProblem 失败后旧题与新路由不配对，提交被拒绝且可见', async () => {
     // 初始 A 加载成功
     storeMocks.problem.openProblem.mockImplementationOnce(async () => {
       storeMocks.problem.currentProblem = problemOf('p-A', 'A')
@@ -177,8 +179,10 @@ describe('ProblemSolveView 加载与切题编排', () => {
     storeMocks.workspace.code = 'code-B'
     editorSubmit.handler?.()
     for (let i = 0; i < 6; i += 1) await Promise.resolve()
-    // 旧题与新路由不配对：放行会把新题代码提交到旧题题号（PR21-8）
+    // 旧题与新路由不配对：放行会把新题代码提交到旧题题号（PR21-8）。
+    // 此场景 openProblem 未成功，displayId 配对即不成立 —— 命中第一道守卫
     expect(storeMocks.submission.submitCode).not.toHaveBeenCalled()
+    expect(storeMocks.submission.error).toContain('切换中')
 
     await m.unmount()
   })

@@ -170,3 +170,69 @@ describe('loadLimits 失败语义', () => {
     expect(problemService.getProblemLimits).not.toHaveBeenCalled()
   })
 })
+
+describe('openProblem 过期响应保护（评审 P1，store 层）', () => {
+  interface Deferred<T> {
+    promise: Promise<T>
+    resolve: (v: T) => void
+    reject: (e: unknown) => void
+  }
+  const deferred = <T,>(): Deferred<T> => {
+    let resolve!: (v: T) => void
+    let reject!: (e: unknown) => void
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+
+  it('迟到的旧题成功响应不得覆盖新题', async () => {
+    const lateA = deferred<Problem>()
+    problemService.getProblem.mockImplementationOnce(() => lateA.promise)
+    problemService.getProblem.mockImplementationOnce(async () => problemOf('p-B') as never)
+
+    const store = useProblemStore()
+    const first = store.openProblem(CONTEST_ID, 'A')
+    const second = store.openProblem(CONTEST_ID, 'B')
+    await second
+    lateA.resolve(problemOf('p-A') as never)
+    await first
+
+    expect((store.currentProblem as { id: string }).id).toBe(
+      'p-B',
+      '路由已在 B：迟到的 A 响应不得把题面拉回旧题（提交配对挡得住错误提交，挡不住错误显示）',
+    )
+    expect(store.isLoading).toBe(false)
+    expect(store.error).toBeNull()
+  })
+
+  it('迟到的失败响应不占错误态、不重抛', async () => {
+    const lateA = deferred<Problem>()
+    problemService.getProblem.mockImplementationOnce(() => lateA.promise)
+    problemService.getProblem.mockImplementationOnce(async () => problemOf('p-B') as never)
+
+    const store = useProblemStore()
+    const first = store.openProblem(CONTEST_ID, 'A')
+    const second = store.openProblem(CONTEST_ID, 'B')
+    await second
+    lateA.reject(new Error('late boom'))
+    await expect(first).resolves.toBeUndefined()
+
+    expect(store.error).toBeNull('错误态由最新请求决定')
+    expect((store.currentProblem as { id: string }).id).toBe('p-B')
+  })
+
+  it('isLoading 只由最新一次请求收尾（旧请求 finally 不得提前关闭新加载态）', async () => {
+    const lateA = deferred<Problem>()
+    problemService.getProblem.mockImplementationOnce(() => lateA.promise)
+    problemService.getProblem.mockImplementationOnce(async () => problemOf('p-B') as never)
+
+    const store = useProblemStore()
+    const first = store.openProblem(CONTEST_ID, 'A')
+    const second = store.openProblem(CONTEST_ID, 'B')
+    await second
+    expect(store.isLoading).toBe(false, 'B 已完成，加载态应结束')
+
+    lateA.resolve(problemOf('p-A') as never)
+    await first
+    expect(store.isLoading).toBe(false, '过期的 finally 不得翻转加载态')
+  })
+})
