@@ -29,6 +29,7 @@
 1. **测试进程的全局 tracing 订阅器冲突（E 级）**：命令测试并行构造多个 `AppContext::init`，`Logger::init` 争抢进程级唯一全局位（第二次起 panic）；改为 `try_init` 容忍后，又出现装上 DEBUG 级订阅器导致全部用例日志被格式化输出、与 libtest 捕获叠加在 Windows 上引发 STATUS_STACK_BUFFER_OVERRUN 进程崩溃（偶发，2/2 复现后定位）。最终修正：`Logger::init` 在 `cfg(test)` 下**不装全局订阅器**（文件层探测照常），五连跑 775 全绿。已同步 `doc/modules/src-tauri/infra/logger.md`。
 2. **OJ 实例 id 大小写敏感**：工厂声明为 `"HOJ"`/`"Hydro"`，测试配置写 `"hoj"` 会被静默跳过注册（warn「配置了未知 OJ」）。已写入 `test_support.md` 的约束节。
 3. **vitest 5 移除了 `coverage.all`**：显式给出 `coverage.include` 后未加载的匹配文件默认以 0% 计入，无需该选项（类型层面直接报错发现的）。
+4. **CI 首跑暴露 main.spec 两处时序依赖（本地侥幸通过）**：① `main.ts` 的 DEV 分支在 `window` 上 `defineProperty('hininaPlugins')`（不可配置），逐用例重置模块后二次导入必抛 "Cannot redefine property"（CI 以未处理错误判红；本地因动态 import 的异步时序侥幸过）——修法：`vi.stubEnv('DEV', false)` 跳过该分支 + 单次导入；② vite.config 全局 `clearMocks: true` 在每个测试前清 mock 记录，而装配发生在 beforeAll 导入期——修法：导入后立即把调用次数与事件 handler 快照进普通对象再断言。另将 V8 覆盖器无法解析的 `CodeEditor.vue`（Monaco 壳）显式加入 coverage 排除（vitest 本就只是排除并告警，显式化保持日志干净）。
 
 ## 五、范围收窄与遗留
 
@@ -42,4 +43,4 @@
 - `cargo test --lib`：775 通过 / 0 失败（并行五连跑全绿，崩溃已消除）。
 - `npm test`：43 文件 / 557 通过；`npm run build`（vue-tsc + vite）通过；`npx tsc -p tsconfig.node.json --noEmit` 通过。
 - `npm run test:coverage`：产出报告，基线数字见 §二。
-- CI 全链路由本 PR 的运行复验（frontend 将首次执行 coverage 步骤与 artifact 上传）。
+- CI 首跑（run 40182012394）：frontend 红（上述 §四.4 的 main.spec 时序问题，本地未能复现）；rust-test 双平台绿、rust-lint 红（E2/E3 预期内）。修复后由后续运行复验 coverage 步骤与 artifact 上传。

@@ -77,6 +77,8 @@ export default defineConfig({
         "src/test-support/**",
         "src/**/*.d.ts",
         "src/main.ts",
+        // Monaco 壳组件：V8 覆盖器无法解析（vitest 本就只是将其排除并告警），显式剔除保持日志干净
+        "src/components/editor/CodeEditor.vue",
       ],
     },
   },
