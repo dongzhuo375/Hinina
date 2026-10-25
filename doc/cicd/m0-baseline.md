@@ -10,7 +10,7 @@
 | 项 | 值 | 说明 |
 |---|---|---|
 | Node.js | 22.14.0 | 与 `.nvmrc` 一致（265e918 引入） |
-| npm | 11.18.0（**未固定**） | 本机手动升级所得；Node 22.14.0 官方自带 npm 为 10.9.2，CI 经 setup-node + `.nvmrc` 得到的是自带版本，与本机存在静默不一致。M1 ci.yml 施工时需决策：`packageManager` 字段固定，或接受 runner 自带 npm 并更新本记录（见 §十） |
+| npm | 11.18.0 | 本机手动升级所得（Node 22.14.0 官方自带 10.9.2）；**已闭环（M1）**：`packageManager: "npm@11.18.0"` + CI corepack enable，runner 与本地同版本，见 [m1-pr-gate.md](m1-pr-gate.md) |
 | Rust | 1.96.0 (ac68faa20 2026-05-25) | 与 `rust-toolchain.toml` 一致（265e918 引入；rustup 已为固定 channel 下载组件） |
 | rustfmt | 1.9.0-stable (ac68faa20) | 已安装 |
 | clippy | 0.1.96 (ac68faa20) | 已安装 |
@@ -41,7 +41,7 @@
 
 | 编号 | 现象 | 分类 | 证据（日志名，存本地 `doc/local/m0-logs/`） | 处置 |
 |---|---|---|---|---|
-| E1 | `tsc -p tsconfig.node.json --noEmit` 失败：`@types/node` 不在 devDependencies，`tsconfig.node.json` 亦无 `types` 配置 | 存量依赖缺口（非本机问题、非产品缺陷） | `02-tsc-node.log`；package.json devDependencies 无 `@types/node` | **阻塞 M1 frontend job 的 tsc-node 步骤**。修复：新增 `@types/node` devDependency（按仓库约定先与用户确认安装位置）→ 归 PR1/PR2 |
+| E1 | `tsc -p tsconfig.node.json --noEmit` 失败：`@types/node` 不在 devDependencies，`tsconfig.node.json` 亦无 `types` 配置 | 存量依赖缺口（非本机问题、非产品缺陷） | `02-tsc-node.log`；package.json devDependencies 无 `@types/node` | **阻塞 M1 frontend job 的 tsc-node 步骤**。修复：新增 `@types/node` devDependency（按仓库约定先与用户确认安装位置）→ 归 PR1/PR2（**已于 M1 PR #50 修复**：@types/node@^22 + tsconfig 作用域收敛 + vite.config async 包装移除，本地与 CI 均绿） |
 | E2 | rustfmt 220 个差异块，全模块分布 | 存量格式欠账 | `06-cargo-fmt.log`（2730 行 diff） | 修复 = 一次性 `cargo fmt` 全量格式化，独立提交 → PR2 |
 | E3 | clippy `-D warnings` 下 7 个错误 | 存量 lint 欠账 | `07-cargo-clippy.log` | 4 类均为机械改写；PR2 清零后将 rust-lint 设为必需检查（施工方案 §4.2 原设计） |
 | E4 | `D:\nodejs\node_cache` 全树对普通用户不可写（ACL 仅 Administrators/SYSTEM 有写权，Users/Authenticated Users 只读），npm 写缓存 EPERM；非提升会话连 `icacls /grant` 亦被拒 | 本机环境故障（仅影响本机，不影响 CI；**已闭环**） | `01-npm-ci.log` 首次失败记录 + icacls 探测输出 | **已修复（2026-10-25）**：本机管理员终端执行 `icacls "D:\nodejs\node_cache" /grant "hdz:(OI)(CI)M" /T`，探测确认可写；回滚命令：`icacls "D:\nodejs\node_cache" /remove:d hdz /T`。基线执行时以工作区回退缓存绕过（该缓存已删除） |
@@ -111,6 +111,6 @@ sudo apt install -y \
 ## 十、遗留事项
 
 - ~~E4 ACL 修复~~ 已完成（2026-10-25，见 §三）；工作区回退缓存 `doc/local/m0-npm-cache/`（88MB，不入库）已删除。
-- npm 未随工具链固定（§一）：本机 11.18.0 为手动升级，Node 22.14.0 自带 10.9.2——M1 ci.yml 施工时决策 `packageManager` 或接受 runner 默认，决策后更新 §一。
+- ~~npm 未随工具链固定~~ 已闭环（M1）：`packageManager: "npm@11.18.0"` + CI corepack enable（§一）。
 - 749/748 测试计数差异待 PR2 核实（§二）。
 - 开发手册 §5.3「CI 自动发布」等描述仍超前于现状，按施工方案 §11.2 在 M1 落地后统一纠正。
