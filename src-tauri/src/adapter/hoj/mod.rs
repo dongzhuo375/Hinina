@@ -554,6 +554,10 @@ fn unescape_html(s: &str) -> String {
 #[path = "tests/mod_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "tests/contract_tests.rs"]
+mod contract_tests;
+
 // ── 适配器工厂 ──
 
 /// HOJ 工厂（`adapter::factories()` 清单成员）。

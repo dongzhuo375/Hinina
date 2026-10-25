@@ -246,3 +246,134 @@ fn raw_accepts_success_same_as_default() {
         );
     }
 }
+// ── 真实传输层契约（M2 工作包 B）：此前只测判定函数，重试/不重试/头透传
+// 从未在真实 reqwest 栈上验证过。以下经 loopback 脚本 server 断言线上行为。──
+
+use crate::test_support::loopback::{LoopbackServer, ScriptedResponse};
+
+fn client() -> HttpClient {
+    HttpClient::with_timeout(std::time::Duration::from_secs(5)).expect("HttpClient 应可构造")
+}
+
+/// GET 5xx 自动重试且成功即止：恰好 2 次请求（首次 500 + 重试 200）。
+/// 重试退避为真实时钟（1s），用例耗时约 1 秒。
+#[tokio::test]
+async fn get_retries_5xx_then_succeeds_exactly_once() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::with(500, vec![], "err"),
+        ScriptedResponse::json("ok"),
+    ])
+    .await;
+
+    let (body, _) = client()
+        .get_text_with_headers(&format!("{}/data", server.url()), &Default::default())
+        .await
+        .expect("重试后应成功");
+    assert_eq!(body, "ok");
+    assert_eq!(
+        server.requests().len(),
+        2,
+        "GET 幂等：5xx 重试一次即止，不得多发"
+    );
+
+    server.shutdown();
+}
+
+/// GET 5xx 重试耗尽后如实报错（不把错误页当正常响应交上层）。
+#[tokio::test]
+async fn get_reports_error_after_retry_budget_exhausted() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::with(500, vec![], "e1"),
+        ScriptedResponse::with(500, vec![], "e2"),
+        ScriptedResponse::with(500, vec![], "e3"),
+    ])
+    .await;
+
+    let err = client()
+        .get_text_with_headers(&format!("{}/x", server.url()), &Default::default())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("500")),
+        "重试耗尽应为含状态码的 Network 错误，实得 {:?}",
+        err
+    );
+    assert_eq!(server.requests().len(), 3, "首次 + 最多 2 次重试");
+
+    server.shutdown();
+}
+
+/// POST 非幂等：500 一律不重试（防重复提交），错误附响应体摘录。
+#[tokio::test]
+async fn post_never_retries_and_carries_body_excerpt() {
+    let server = LoopbackServer::start(vec![ScriptedResponse::with(
+        500,
+        vec![],
+        r#"{"status":500,"msg":"duplicate submit"}"#,
+    )])
+    .await;
+
+    let err = client()
+        .post_text_with_headers(
+            &format!("{}/submit", server.url()),
+            &serde_json::json!({"code": "x"}),
+            &Default::default(),
+        )
+        .await
+        .unwrap_err();
+    let msg = err.user_message();
+    assert!(msg.contains("500"), "应含状态码: {}", msg);
+    assert!(msg.contains("duplicate submit"), "应含响应体摘录: {}", msg);
+    assert_eq!(server.requests().len(), 1, "POST 绝不自动重试");
+
+    server.shutdown();
+}
+
+/// 401 → Auth、403 → Network：经真实传输复验变体映射（sessionGuard 的判据）。
+#[tokio::test]
+async fn transport_maps_401_to_auth_and_403_to_network() {
+    let s401 = LoopbackServer::start(vec![ScriptedResponse::with(401, vec![], "")]).await;
+    let err = client()
+        .get_text_with_headers(&format!("{}/p", s401.url()), &Default::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::Auth(_)), "401 应为 Auth，实得 {:?}", err);
+    s401.shutdown();
+
+    let s403 = LoopbackServer::start(vec![ScriptedResponse::with(403, vec![], "")]).await;
+    let err = client()
+        .get_text_with_headers(&format!("{}/p", s403.url()), &Default::default())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(_)),
+        "403 可能是业务限制，应保持 Network，实得 {:?}",
+        err
+    );
+    s403.shutdown();
+}
+
+/// 请求头原样透传 + UA 固定为 Hinina/{version}（OJ 侧按 UA 识别客户端）。
+#[tokio::test]
+async fn custom_headers_and_user_agent_pass_through() {
+    let server = LoopbackServer::start(vec![ScriptedResponse::json("ok")]).await;
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("X-Custom", "v1".parse().unwrap());
+
+    client()
+        .get_text_with_headers(&format!("{}/h", server.url()), &headers)
+        .await
+        .unwrap();
+
+    let req = &server.requests()[0];
+    assert_eq!(req.header("x-custom"), Some("v1"));
+    assert!(
+        req.header("user-agent")
+            .unwrap_or("")
+            .starts_with("Hinina/"),
+        "UA 应为 Hinina/{{version}}，实得 {:?}",
+        req.header("user-agent")
+    );
+
+    server.shutdown();
+}
