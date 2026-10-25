@@ -12,6 +12,7 @@ const { problemService } = vi.hoisted(() => ({
 vi.mock('@/services/problem.service', () => ({ problemService }))
 
 import { useProblemStore } from '@/stores/problemStore'
+import type { Problem } from '@/types/problem'
 
 const CONTEST_ID = '1011'
 const PROBLEM_IDS = ['1061', '1062']
@@ -196,10 +197,8 @@ describe('openProblem 过期响应保护（评审 P1，store 层）', () => {
     lateA.resolve(problemOf('p-A') as never)
     await first
 
-    expect((store.currentProblem as { id: string }).id).toBe(
-      'p-B',
-      '路由已在 B：迟到的 A 响应不得把题面拉回旧题（提交配对挡得住错误提交，挡不住错误显示）',
-    )
+    // 路由已在 B：迟到的 A 响应不得把题面拉回旧题（提交配对挡得住错误提交，挡不住错误显示）
+    expect((store.currentProblem as { id: string }).id).toBe('p-B')
     expect(store.isLoading).toBe(false)
     expect(store.error).toBeNull()
   })
@@ -216,7 +215,7 @@ describe('openProblem 过期响应保护（评审 P1，store 层）', () => {
     lateA.reject(new Error('late boom'))
     await expect(first).resolves.toBeUndefined()
 
-    expect(store.error).toBeNull('错误态由最新请求决定')
+    expect(store.error).toBeNull() // 错误态由最新请求决定
     expect((store.currentProblem as { id: string }).id).toBe('p-B')
   })
 
@@ -229,10 +228,10 @@ describe('openProblem 过期响应保护（评审 P1，store 层）', () => {
     const first = store.openProblem(CONTEST_ID, 'A')
     const second = store.openProblem(CONTEST_ID, 'B')
     await second
-    expect(store.isLoading).toBe(false, 'B 已完成，加载态应结束')
+    expect(store.isLoading).toBe(false) // B 已完成，加载态应结束
 
     lateA.resolve(problemOf('p-A') as never)
     await first
-    expect(store.isLoading).toBe(false, '过期的 finally 不得翻转加载态')
+    expect(store.isLoading).toBe(false) // 过期的 finally 不得翻转加载态
   })
 })
