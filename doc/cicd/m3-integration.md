@@ -64,6 +64,8 @@
 - **stress-repeat：❌ 第 7/10 轮抓到真实抖动**——`infra::cache::tests::ttl_cache_supports_concurrent_reads_and_writes`（src/infra/tests/cache_tests.rs:197）`assert!(hits > 0)` 失败。根因是**测试设计竞态**，非产品缺陷：4 个读线程先 spawn，主线程后插入 32 个键；runner 高负载下读线程可能在首次插入前就跑完全部 800 次读，hits=0。前 6 轮两过滤串均全绿。按 §6.5 不默认重试，修复走后续 PR（测试侧：插入先于 spawn 或加栅栏对齐，保并发语义不变）。
 - **integration-summary：红**（stress-repeat 在阻塞口径内）——判红路径按设计生效；Step Summary 表与 build leg 自报行如实呈现各 job 结果。
 
+**恢复验证**（PR #56 修复后，run 40231321064，main @ ce69dd4，2026-10-25）：6 个 job + integration-summary 全绿，stress-repeat 20 轮过滤跑无抖动——夜间链恢复可用。合并前本地已连跑 10 轮验证确定性。
+
 ## 七、遗留项
 
 - ~~**ttl_cache 并发测试竞态修复**（stress-repeat 首跑发现，见 §六）~~ **已处置**（65cd097，评审修复 PR）：种子条目先于读线程插入 + barrier 对齐覆盖写，「至少命中一次」改为确定性下界；本地连跑 10 轮全绿。
