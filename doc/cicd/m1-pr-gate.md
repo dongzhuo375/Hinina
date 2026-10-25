@@ -5,7 +5,7 @@
 > 文档性质：CI/CD 施工过程记录（入库，见 [doc/cicd/](README.md)）；前置：[M0 基线](m0-baseline.md)  
 > 状态：CI 已落地并完成首跑验证（§三）；分支保护与红路径验收待合并后执行（§五）
 
-## 一、落地范围（PR #50，4 个提交）
+## 一、落地范围（PR #50）
 
 | 提交 | 内容 |
 |---|---|
@@ -13,6 +13,8 @@
 | `1e114aa` | E1 修复：`@types/node@^22` devDependency + tsconfig 作用域收敛——`tsconfig.node.json` 显式 `types:["node"]`，app `tsconfig.json` 加 `types:[]` 保持 DOM 语义（不收敛时 `plugin.service.ts` 的 timer 句柄被 node 语义污染，`npm run build` 编译失败）；顺带移除 `vite.config.ts` 无必要的 async 包装（`defineConfig` 重载不匹配，M0 日志中该错误曾被模块缺失错误掩盖） |
 | `88a519d` | `.github/workflows/ci.yml`（§二）+ `package.json` 增加 `packageManager: "npm@11.18.0"` |
 | `0a354d3` | 文档同步：Architecture.md（.github 树 + 根目录树）、开发手册（分支保护/CI 检查/jsdom/发布流程四处按实际改写）、todo.md CI 项、copilot-instructions |
+| `b7ae7ff` | 本记录（含首跑结果）+ doc/cicd 索引更新 + m0 记录闭环标注（npm 决策、E1 已修） |
+| `bae74e3` | 评审修复：分支保护措辞改为「M1 收尾时经 API 启用」（避免把目标写成现状） |
 
 ## 二、ci.yml 结构与三项施工决策
 
