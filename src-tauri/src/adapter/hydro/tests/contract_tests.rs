@@ -160,3 +160,88 @@ async fn validate_session_does_not_trust_degraded_cached_identity() {
 
     server.shutdown();
 }
+
+// ── 会话校验与身份缓存（PR #52 评审 P0 两项）──
+
+/// 已缓存身份的 validate_session 仍必须真实回访服务端（评审 P0-1）：
+/// 身份缓存只服务展示查询；校验走缓存会让「服务器吊销 sid」在进程内不可见。
+#[tokio::test]
+async fn validate_session_revalidates_despite_cached_identity() {
+    let server = LoopbackServer::start(vec![
+        login_ok("sid-1"),
+        // 登录探测成功：真实身份进缓存
+        ScriptedResponse::json(r#"{"UserContext":{"_id":7,"uname":"alice"}}"#),
+        // validate 的全新探测：服务端不可达（3 个请求 = 首次 + 2 次重试）
+        ScriptedResponse::with(500, vec![], "boom"),
+        ScriptedResponse::with(500, vec![], "boom"),
+        ScriptedResponse::with(500, vec![], "boom"),
+    ])
+    .await;
+    let adapter = fixture(server.url());
+
+    let user = adapter.login("alice", "pw").await.unwrap();
+    assert_eq!(user.id, "7", "登录探测成功后身份应已缓存");
+    let requests_after_login = server.requests().len();
+
+    // 若校验错误地走了缓存，这里会直接 Ok(true) 且零请求
+    let verdict = adapter.validate_session().await;
+    assert!(
+        verdict.is_err(),
+        "服务端不可达属「无法判定」（Err），不得因缓存身份判有效: {:?}",
+        verdict
+    );
+    assert!(
+        server.requests().len() > requests_after_login,
+        "validate_session 必须回访服务端，不得被身份缓存短路"
+    );
+
+    server.shutdown();
+}
+
+/// 服务端已吊销（匿名）：缓存的旧身份必须被推翻，判失效并清除（评审 P0-1）。
+#[tokio::test]
+async fn validate_session_reports_invalid_when_server_says_anonymous() {
+    let server = LoopbackServer::start(vec![
+        login_ok("sid-1"),
+        ScriptedResponse::json(r#"{"UserContext":{"_id":7,"uname":"alice"}}"#),
+        // validate 的全新探测：服务端判定匿名（_id == 0）
+        ScriptedResponse::json(r#"{"UserContext":{"_id":0}}"#),
+    ])
+    .await;
+    let adapter = fixture(server.url());
+
+    adapter.login("alice", "pw").await.unwrap();
+
+    let verdict = adapter.validate_session().await;
+    assert!(
+        !verdict.unwrap(),
+        "服务端匿名 = 会话已失效，缓存身份不得掩盖"
+    );
+
+    server.shutdown();
+}
+
+/// 换号登录：新身份不得沿用上一个账号的缓存（评审 P0-2）。
+#[tokio::test]
+async fn login_switching_accounts_refreshes_cached_identity() {
+    let server = LoopbackServer::start(vec![
+        login_ok("sid-1"),
+        ScriptedResponse::json(r#"{"UserContext":{"_id":7,"uname":"alice"}}"#),
+        login_ok("sid-2"),
+        ScriptedResponse::json(r#"{"UserContext":{"_id":9,"uname":"bob"}}"#),
+    ])
+    .await;
+    let adapter = fixture(server.url());
+
+    let first = adapter.login("alice", "pw").await.unwrap();
+    assert_eq!(first.id, "7");
+
+    let second = adapter.login("bob", "pw").await.expect("换号登录应成功");
+    assert_eq!(
+        second.id, "9",
+        "换号后身份必须来自新探测（旧缓存未清会返回 alice 的 7）"
+    );
+    assert_eq!(second.token, "sid-2");
+
+    server.shutdown();
+}

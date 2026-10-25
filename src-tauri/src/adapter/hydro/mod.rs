@@ -372,10 +372,24 @@ impl HydroAdapter {
     ///
     /// 最后一条尤其重要：若把「不支持注入头」当成「匿名」，一次版本差异就会把
     /// 全部在线选手踢回登录页；按「无法判定」处理才会保留会话（缺口 D18）。
+    /// 探测当前用户上下文（**带缓存**：展示类查询用，命中即免网络请求）。
+    ///
+    /// **会话校验不得走本方法**：缓存命中会短路网络，服务器吊销 sid 后校验
+    /// 在进程生命周期内恒判有效 —— 三态校验必须用
+    /// [`Self::probe_user_context_uncached`]（与 HOJ 每次回访服务端同语义）。
     async fn probe_user_context(&self) -> AppResult<Option<HydroUser>> {
         if let Some(user) = self.cached_user() {
             return Ok(Some(user));
         }
+        self.probe_user_context_uncached().await
+    }
+
+    /// 探测当前用户上下文（**绕过缓存**：每次真实回访服务端）。
+    ///
+    /// 专供 `validate_session` 使用（评审 P0）：身份缓存只服务展示类查询的
+    /// 加速，若校验也走缓存，「服务器已吊销 sid」在进程内永远不可见。
+    /// 成功路径仍会回写缓存（下次展示查询受益）。
+    async fn probe_user_context_uncached(&self) -> AppResult<Option<HydroUser>> {
         if self.session().is_none() {
             return Ok(None);
         }
@@ -815,7 +829,10 @@ impl AuthProvider for HydroAdapter {
         })?;
 
         self.set_session(Some(sid.clone()));
-        // 取 uid/uname：失败时降级为「用输入的用户名」，不让一次上下文探测
+        // 换号登录必须先清旧身份：身份缓存是「上一个账号」的，若不清，
+        // 探测命中缓存会返回旧账号的 uid/uname 配上新 sid（评审 P0）。
+        // 新身份由下方探测成功路径重新缓存。
+        self.set_user(None);
         // 失败否定已经建立好的会话。
         //
         // **降级身份只用于登录返回值展示，绝不写入已验证用户缓存**（`self.user`）：
@@ -881,7 +898,9 @@ impl AuthProvider for HydroAdapter {
             debug!("Hydro 本地无会话，判定为失效");
             return Ok(false);
         }
-        match self.probe_user_context().await {
+        // 必须绕过身份缓存：校验的职责就是问服务器（缓存命中即恒真，
+        // 服务器吊销 sid 在进程内不可见 —— 评审 P0）
+        match self.probe_user_context_uncached().await {
             Ok(Some(_)) => Ok(true),
             Ok(None) => {
                 info!("Hydro 服务端判定会话已失效（匿名）");
