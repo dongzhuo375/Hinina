@@ -16,7 +16,7 @@
 | 2026-10-24 | `806101d`（squash） | PR #45：阶段 C 参考业务插件（含五轮评审修复） | `sdk/examples/balloon` 首次 AC 气球派发参考实现 + 验收指南；评审修复的关键结论见 §2（content-type 黑名单、GCRA 本地记账与游标轮转、跳页门槛、逐成功落盘、激活探针与 `script_error` 口径、fake host 强制宿主规则）；无 Rust 宿主改动 |
 | 2026-10-25 | `806101d` | PR #46：模块文档五节化 | `doc/modules/src-tauri/plugin/` 31 份文档重构为五节格式；评审发现 9 处签名/依赖/字段错误逐一取证修正；纯文档改动 |
 | 2026-10-25 | 本次整理 | 文档整合 | `doc/modules` 的 tutorial/security/validation（无源文件、与 `doc/plugin/` 重复）分别并入 development/architecture/history；文档数字改为常量名 + 行为描述，数值断言由测试守住（见 §3） |
-| 2026-10-25 | 本次变更 | 气球示例插件兼容明文 HTTP 端点 | `readOptions` 接受 http(s) URL（原为插件侧 https-only 自限）；明文 origin 需 plugins.json `allowHttp`、私网目标需 `privateCidrs`——均为宿主既有契约，宿主无改动；示例 README/development/roadmap 同步 |
+| 2026-10-25 | `63a05f1` | PR #49：气球示例插件兼容明文 HTTP 端点 | `readOptions` 接受 http(s) URL（原为插件侧 https-only 自限）；明文 origin 需 plugins.json `allowHttp`、私网目标需 `privateCidrs`——均为宿主既有契约，宿主无改动；示例 README/development/roadmap 同步 |
 
 ## 2. 验证记录（每次合并时的快照）
 
@@ -25,7 +25,7 @@
 - 逐提交验证：10 个触及 `src-tauri/` 的提交各自独立编译并通过 `cargo test --lib`。
 - PR #45（squash 合并时）：前端 536 项通过（含 balloon 逻辑测试 28 例，fake host 强制宿主规则）；`plugin:sdk:check`、`plugin:balloon:build`、`npm run build` 通过；无 Rust 改动。
 - PR #46：balloon 28/28；链接检查通过；`npm run build` 通过；无代码改动。
-- 本次变更：前端 39 文件/539 项通过（balloon 31 例，含 http 端点激活与派发断言）；`plugin:sdk:check` 通过；无 Rust 改动。
+- PR #49：前端 39 文件/539 项通过（balloon 31 例，含 http 端点激活与派发断言）；`plugin:sdk:check` 通过；无 Rust 改动。
 - 当前数字以 `cargo test` / `npm test` 输出为准，不在文档中另行维护。
 
 ## 3. 关键修复
