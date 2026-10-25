@@ -2,6 +2,9 @@
 doc/Hydro/Hydro-Adapter-设计缺口报告.md
 doc/Hydro/适配新架构的冲突记录.md
 
+# 本地调研、方案与报告（整个目录不入库）
+doc/local/
+
 # Dependencies
 node_modules/
 

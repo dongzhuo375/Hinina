@@ -1,0 +1,5 @@
+# 工具链基线固定（2026-10 M0）：CI 与本地使用同一 channel，防止各自漂移。
+# 不固定 targets：各平台使用宿主默认目标，避免 Linux/macOS 强制安装 msvc target。
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
