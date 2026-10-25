@@ -54,15 +54,19 @@
 1. **会话失效文案落地即被清空**：`invalidateSession` 写入的 `SESSION_INVALID_MESSAGE`（authStore，设计意图是登录页展示可执行的下一步），会被登录页挂载时的 `checkSession()` 无条件 `error = null` 清掉——该流程下用户落到登录页看到的是干净表单，文案从未展示。sessionGuard 的清理与跳转本身工作正常（E2E 以 logout 调用为凭证断言）。是否调整（如 checkSession 不清外部写入的 error、或失效跳转不触发 checkSession）留产品决策，见遗留清单。
 2. **终态 pill 的双形态**：终态后本地 pill（`最新记录: #9001 Accepted`）会被紧随的摘要刷新接管为服务端 pill（`最新记录: #9001 AC (12 ms)`）；fake 摘要零延迟时本地形态一闪而过。spec 以两种形态的正则断言，属正常时序而非缺陷。
 
-## 六、runner 首跑结果（合并后 workflow_dispatch，回写此处）
+## 六、runner 首跑结果（run 40225126527，main @ cd35edd，2026-10-25）
 
-- build 矩阵（windows / ubuntu / macos）：待回写
-- stress-repeat（concurrent + auto_save × 10 轮）：待回写
-- rust-coverage 基线（`cargo llvm-cov --locked --lib`，口径=780 个 lib 单测）：待回写
-- e2e（runner chromium）：待回写
+全程约 12.5 分钟（19:15–19:27 UTC）。注：合并 push 与 workflow_dispatch 双触发同 SHA，dispatch 运行已手动取消，以 push 运行为首跑记录。
+
+- **build 矩阵：三平台全绿**（windows 12m / ubuntu 8m / macos 11m）。macOS 首验达成：插件运行时（rquickjs QuickJS C 编译）在该平台首次编译通过。观测注解：macOS leg 的 rust-cache 步骤打出「could not find Cargo.toml」commandFailed 注解（仓库根无清单，cargo metadata 探测落空），未影响构建，保持原样。
+- **rust-coverage：✅ 基线 7883/9498 行 = 83.00%**（`cargo llvm-cov --locked --lib`，780 个 lib 单测，ubuntu runner；只报告不卡线）。
+- **e2e：✅ 9 passed**（runner chromium，干净环境可重复）。
+- **stress-repeat：❌ 第 7/10 轮抓到真实抖动**——`infra::cache::tests::ttl_cache_supports_concurrent_reads_and_writes`（src/infra/tests/cache_tests.rs:197）`assert!(hits > 0)` 失败。根因是**测试设计竞态**，非产品缺陷：4 个读线程先 spawn，主线程后插入 32 个键；runner 高负载下读线程可能在首次插入前就跑完全部 800 次读，hits=0。前 6 轮两过滤串均全绿。按 §6.5 不默认重试，修复走后续 PR（测试侧：插入先于 spawn 或加栅栏对齐，保并发语义不变）。
+- **integration-summary：红**（stress-repeat 在阻塞口径内）——判红路径按设计生效；Step Summary 表与 build leg 自报行如实呈现各 job 结果。
 
 ## 七、遗留项
 
+- **ttl_cache 并发测试竞态修复**（stress-repeat 首跑发现，见 §六）：测试侧消除「读先于写」的调度依赖，属后续 PR。
 - 桌面 smoke 6 场景（tauri-driver + capabilities，§6.4）：真实 Rust invoke/事件往返、Monaco worker 在打包产物可用、工作区重启恢复、窗口操作、关窗前保存、目录选择器。
 - 真实 OJ 联调（§6.5）：需独立测试实例与专用测试账号 secrets，仅进受保护的定时/人工环境。
 - E2E 剩余 3 场景：赛前深链与开赛自动进入（场景 2）、语言切换与代码上传（场景 3 余项）、榜单/公告/设置最小主流程（场景 7）。
