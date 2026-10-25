@@ -32,7 +32,8 @@ export const useProblemStore = defineStore('problem', {
     /// 整表重拉：提交到达终态（或轮询超时、终态未知）时由 `submissionStore` 调
     /// `invalidateMyStatus()` 置位，总览页在下次可见刷新时重拉一次即清位。
     /// 初始为 true（首屏必拉一次）。
-    myStatusStale: true,    /// `myStatus` 中的数据属于哪场比赛（null = 尚无数据）。
+    myStatusStale: true,
+    /// `myStatus` 中的数据属于哪场比赛（null = 尚无数据）。
     ///
     /// 状态表以 **pid** 为键，而同一题可能出现在多场比赛里 —— 切换比赛（设置页改
     /// `contestId`）后必须重拉，否则旧比赛的状态会命中新比赛的卡片。
