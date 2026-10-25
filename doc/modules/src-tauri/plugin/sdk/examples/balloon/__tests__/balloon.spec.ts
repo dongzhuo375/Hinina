@@ -459,6 +459,155 @@ describe('balloon reference plugin host contract', () => {
     // The proxy- prefix rule belongs to the same blacklist behavior.
     expect(source).toMatch(/lower\.starts_with\("proxy-"\)/)
   })
+
+  it('keeps the plugin rank aliases mirroring the host limits', async () => {
+    // The README refers readers to the HOST constants (limits.rs); index.ts
+    // works with plugin-side aliases. This test parses both sources so a
+    // one-sided change breaks here instead of silently drifting the docs
+    // and the accounting.
+    const fsModule = 'node:fs'
+    const { readFileSync } = (await import(fsModule)) as {
+      readFileSync: (path: URL, encoding: string) => string
+    }
+    const limits = readFileSync(
+      new URL('../../../../../../../../src-tauri/src/plugin/limits.rs', import.meta.url),
+      'utf-8',
+    )
+    const plugin = readFileSync(new URL('../index.ts', import.meta.url), 'utf-8')
+    const rustValue = (name: string): string => {
+      const match = limits.match(new RegExp(`const ${name}: \\w+ = ([0-9_]+);`))
+      expect(match, `limits.rs must define ${name}`).not.toBeNull()
+      return match![1].replace(/_/g, '')
+    }
+    const pluginValue = (name: string): string => {
+      const match = plugin.match(new RegExp(`const ${name} = ([0-9_]+)`))
+      expect(match, `index.ts must define ${name}`).not.toBeNull()
+      return match![1].replace(/_/g, '')
+    }
+    // alias → host constant (both sides must exist and stay equal)
+    const mirror: Array<[string, string]> = [
+      ['RANK_MAX_ROWS', 'MAX_RANK_ROWS'],
+      ['RANK_MAX_CELLS', 'MAX_RANK_CELLS'],
+      ['RANK_QUERIES_PER_MINUTE', 'PLUGIN_RANK_QUERIES_PER_MINUTE'],
+      ['MAX_RANK_PAGES', 'MAX_RANK_PAGE'],
+    ]
+    for (const [alias, host] of mirror) {
+      expect(pluginValue(alias)).toBe(rustValue(host))
+    }
+    // The README documents host caps under the HOST names; a rename that
+    // breaks that promise must fail here too.
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf-8')
+    for (const host of ['MAX_RANK_ROWS', 'MAX_RANK_CELLS', 'PLUGIN_RANK_QUERIES_PER_MINUTE', 'MAX_RANK_PAGE']) {
+      expect(readme, `README must reference host constant ${host}`).toContain(host)
+    }
+  })
+
+  it('keeps the contracts.md §10 fact table in sync with the named source constants', async () => {
+    // contracts.md §10 is the single numeric fact table. Named constants
+    // from the sources must appear there under their documented value —
+    // if either side drifts, this fails and the fix must land in the same
+    // PR. Values that still exist only as inline literals in the sources
+    // (e.g. the 600/min bridge-admit budget, in-flight semaphores) are not
+    // covered here and stay review-synced.
+    const fsModule = 'node:fs'
+    const { readFileSync } = (await import(fsModule)) as {
+      readFileSync: (path: URL, encoding: string) => string
+    }
+    const src = (rel: string): string =>
+      readFileSync(new URL(`../../../../../../../../src-tauri/src/${rel}`, import.meta.url), 'utf-8')
+    const sources: Record<string, string> = {
+      limits: src('plugin/limits.rs'),
+      notification: src('plugin/api/notification.rs'),
+      storage: src('plugin/api/storage.rs'),
+      http: src('plugin/api/http.rs'),
+      host: src('plugin/host/plugin_host.rs'),
+      fsrepo: src('infra/fs_plugin_repo.rs'),
+      storageInfra: src('infra/plugin_storage.rs'),
+    }
+    const valueOf = (file: string, name: string, explicit?: number): number => {
+      if (explicit !== undefined) return explicit
+      // Byte budgets are often spelled as products: `1024 * 1024`.
+      const literal = sources[file].match(new RegExp(`const ${name}:?[^=]*= ([0-9_]+(?: \\* [0-9_]+)*)[;,]`))
+      if (literal) {
+        return literal[1]
+          .split('*')
+          .map(part => Number(part.trim().replace(/_/g, '')))
+          .reduce((a, b) => a * b)
+      }
+      // Time constants are spelled `Duration::from_secs(N)`.
+      const duration = sources[file].match(new RegExp(`const ${name}:?[^=]*= Duration::from_secs\\((\\d+)\\)`))
+      expect(duration, `${file} must define ${name}`).not.toBeNull()
+      return Number(duration![1])
+    }
+    const contracts = readFileSync(
+      new URL('../../../../../../../../doc/plugin/contracts.md', import.meta.url),
+      'utf-8',
+    )
+    const section = contracts.match(/## 10\. 资源上限[\s\S]*?(?=\n## )/)
+    expect(section, 'contracts.md must keep the §10 section').not.toBeNull()
+    // Per-row matching, not whole-section substring: several values (5s,
+    // 1MiB, 32, 60 次/分钟, 128) legitimately appear in more than one row,
+    // and a shared-value row must not mask drift in its twin.
+    const tableRows = section![0]
+      .split('\n')
+      .filter(line => line.startsWith('|') && line.includes(' | ') && !line.includes('| 项 |') && !line.includes('|---'))
+    const rowFor = (label: string): string => {
+      const row = tableRows.find(line => line.includes(label))
+      expect(row, `§10 must keep a row for "${label}"`).toBeDefined()
+      return row!
+    }
+    // [source file, constant, §10 row label, how that row spells the value, explicit value?]
+    // START_TIMEOUT is computed (activation + 2s grace) in limits.rs, so it
+    // carries its explicit value here — a change to the formula must update
+    // this row in the same PR.
+    const rows: Array<[string, string, string, (value: number) => string, number?]> = [
+      ['limits', 'ACTIVATION_TIMEOUT', '激活 / 单次事件', v => `${v}s`],
+      ['limits', 'EVENT_TIMEOUT', '激活 / 单次事件', v => `${v}s`],
+      ['limits', 'START_TIMEOUT', '激活 / 单次事件', v => `${v}s`, 12],
+      ['limits', 'STOP_TIMEOUT', '激活 / 单次事件', v => `${v}s`],
+      ['limits', 'PROVIDER_TIMEOUT', 'Provider 单请求', v => `${v}s`],
+      ['limits', 'SUBMISSION_LOOKUP_TIMEOUT', 'Provider 单请求', v => `${v}s`],
+      ['limits', 'QUERY_HANDLE_TTL', '句柄与游标 TTL', v => `${v}s`],
+      ['limits', 'QUERY_HANDLE_REUSE_AGE', '句柄与游标 TTL', v => `${v}s`],
+      ['limits', 'MAX_BRIDGE_INPUT_BYTES', '桥输入', v => `${v} B`],
+      ['limits', 'MAX_BRIDGE_OPERATION_BYTES', '桥输入', v => `${v} B`],
+      ['limits', 'MAX_BRIDGE_RESPONSE_BYTES', '桥输入', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSOR_PAGE_BYTES', 'native 页数', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSOR_BUFFER_BYTES', 'native 页数', v => `${v / 1024 / 1024}MiB`],
+      ['limits', 'MAX_CURSORS', 'native 页数', v => `${v}`],
+      ['limits', 'MAX_QUERY_CONTEXTS', 'native 页数', v => `${v}`],
+      ['limits', 'PLUGIN_QUERIES_PER_MINUTE', 'Provider 预算（每激活）', v => `${v} 次/分钟`],
+      ['limits', 'PLUGIN_QUERY_CONCURRENCY', 'Provider 预算（每激活）', v => `并发 ${v}`],
+      ['limits', 'SHARED_QUERIES_PER_MINUTE', 'Provider 预算（全部插件合计）', v => `${v} 次/分钟`],
+      ['limits', 'SHARED_QUERY_CONCURRENCY', 'Provider 预算（全部插件合计）', v => `并发 ${v}`],
+      ['limits', 'PLUGIN_LOG_BYTES', '日志', v => `${v} B`],
+      ['limits', 'PLUGIN_LOGS_PER_MINUTE', '日志', v => `${v} 次/分钟`],
+      ['limits', 'PLUGIN_RANK_QUERIES_PER_MINUTE', '榜单', v => `${v} 次/分钟`],
+      ['limits', 'MAX_RANK_PAGE', '榜单', v => `page 1..${v}`],
+      ['limits', 'MAX_RANK_ROWS', '榜单', v => `${v} 行`],
+      ['limits', 'MAX_RANK_PROBLEMS', '榜单', v => `${v} 列`],
+      ['limits', 'MAX_RANK_CELLS', '榜单', v => `${v.toLocaleString('en-US')}`],
+      ['limits', 'API_ERROR_GRACE', '宿主调用提前截止', v => `前 ${v} 秒`],
+      ['notification', 'MAX_NOTIFICATION_BYTES', '通知', v => `${v} B`],
+      ['storage', 'MAX_STORAGE_KEY_BYTES', '存储', v => `${v} B`],
+      ['storage', 'MAX_STORAGE_VALUE_BYTES', '存储', v => `${v / 1024}KiB`],
+      ['http', 'MAX_HTTP_BODY_BYTES', 'HTTP', v => `${v / 1024}KiB`],
+      ['host', 'PLUGIN_EVENT_QUEUE_CAPACITY', '周期 Resync', v => `${v}`],
+      ['fsrepo', 'MAX_PLUGIN_DIRECTORIES', '插件目录扫描', v => `${v} 个目录`],
+      ['fsrepo', 'MAX_SCAN_ENTRIES', '插件目录扫描', v => `${v} 个条目`],
+      ['storageInfra', 'MAX_STORAGE_BYTES', '存储', v => `${v / 1024 / 1024}MiB`],
+    ]
+    const missing = rows
+      .map(([file, name, label, display, explicit]) => {
+        const spelled = display(valueOf(file, name, explicit))
+        const row = rowFor(label)
+        return row.includes(spelled)
+          ? null
+          : `${file}:${name} (row "${label}" expected "${spelled}", got "${row.trim()}")`
+      })
+      .filter(Boolean)
+    expect(missing, 'fact-table drift').toEqual([])
+  })
 })
 
 describe('balloon reference plugin activation', () => {

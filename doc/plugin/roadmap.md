@@ -1,6 +1,6 @@
 # 插件系统路线图
 
-> 基线：`main@8379772`，最后更新：2026-10-22。
+> 代码是事实标准，本文不逐次标注基线。
 > 当前是“作者/维护者参与的开发模式”，不是“终端用户可自行安装”的产品模式。
 
 ## 1. 完成度
@@ -9,14 +9,14 @@
 |---|---|---|
 | Manifest / API / 事件 v2 | ✅ | 版本独立，未知字段/权限/事件拒绝 |
 | 声明与授权分离 | ✅ | 有效权限 = Manifest ∩ `plugins.json`；默认不启用 |
-| 事件边界 | ✅ | 唯一 `CoreEventBus` → `PluginHost` → 128 有界队列 |
+| 事件边界 | ✅ | 唯一 `CoreEventBus` → `PluginHost` → 有界队列（`PLUGIN_EVENT_QUEUE_CAPACITY`） |
 | 只读查询 | ✅ | 身份 / 当前比赛 / 本人提交历史；不读源码 |
 | 比赛题目列表 + 全场榜单 | ✅ | `contest.problems` / `contest.rank`（`contest.rank` ∩ `contest.read`），`teamKey` 与 `identity.userKey` 同算法 |
 | 查询作用域与游标 | ✅ | `AccessRevision`、不透明句柄/游标、预算与回填 |
 | 存储 | ✅ | 私有 JSON、fs4 + atomicwrites、CAS、配额 |
 | HTTP | ✅ | 精确 origin、DNS 校验并固定、无 Cookie/代理/跳转/重试 |
 | 通知 | ✅ | 纯文本、长度/频率限制、前端 5 条/6 秒 |
-| 宿主日志出口 | ✅ | `hinina.log.*`，1024B、30 次/分钟，无需权限 |
+| 宿主日志出口 | ✅ | `hinina.log.*`，无需权限（单条与速率上限见 `plugin/limits` 常量，测试锁定） |
 | QuickJS Runtime | ✅ | 独立 worker、Promise、中断、内存/栈限制 |
 | 生命周期 | ✅ | start/stop/reload/resync、失败隔离、reaper |
 | 开发入口 / SDK | ✅ | 5 个命令、`hinina.d.ts`、脚手架、离线打包 |
@@ -24,7 +24,7 @@
 | 持久启用/禁用 | ❌ | `stop` 不改 `enabled`，重启可能再次自动启动 |
 | 安装 / 更新 / 回滚 | ❌ | 无发布物摘要、无导入、无失败保留旧版本 |
 | 配置 schema / 密钥 | ❌ | `configSchema` 只接受 `{}`；无系统凭据引用 |
-| 业务插件 | ✅ | 参考实现已交付：`sdk/examples/balloon`（Resync 节拍、封榜门控、跨页去重、逐成功落盘的 pending→sent 幂等派发、封榜窗口不补派、榜单配额内翻页、逻辑测试 28 例）；真实环境联调见"真实环境验收"行 |
+| 业务插件 | ✅ | 参考实现已交付：`sdk/examples/balloon`（Resync 节拍、封榜门控、跨页去重、逐成功落盘的 pending→sent 幂等派发、封榜窗口不补派、榜单配额内翻页；逻辑测试以强制宿主规则的 fake host 运行，数量以 vitest 输出为准）；真实环境联调见"真实环境验收"行 |
 | 真实环境验收 | ❌ | 未真实 HOJ/Hydro + 外部服务联调 |
 | 跨平台 | ❌ | Windows 已验证；Linux/macOS 构建未验证 |
 
@@ -51,8 +51,8 @@
 
 - 无配置 schema 子集；`options` 只能是原始 JSON。
 - 无系统凭据库/秘密引用；外部服务密钥没有专用管理路径。
-- 无全局资源预算；16MiB 是引擎堆限制，不是进程 RSS 上限。
-- 无 handler 级独立超时；只有整次事件 30 秒。
+- 无全局资源预算；引擎堆上限（见 [runtime/quickjs.md](../modules/src-tauri/plugin/runtime/quickjs.md)）不是进程 RSS 上限。
+- 无 handler 级独立超时；只有整次事件 `EVENT_TIMEOUT`。
 - 所有插件生命周期操作共用一把异步锁；多个慢激活会拉长总启动时间。
 - 无 Rust DTO ↔ 桥 ↔ TypeScript 的自动化契约测试/生成。
 - 诊断缺少贯穿一次 handler 的关联 ID、耗时和失败阶段。
@@ -184,7 +184,7 @@
 | 问题 | 说明 | 处理时机 |
 |---|---|---|
 | `PluginManifest.permissions` 使用 `Vec` | 检查为 O(n)，且语义上应去重；当前校验拒绝重复，但类型仍是 Vec | 下次契约清理时改 `HashSet` 或保持并注明 |
-| handler 级超时未实现 | 只有整次事件 30 秒；单 handler 无独立预算 | 有实际需求时定义 |
+| handler 级超时未实现 | 只有整次事件 `EVENT_TIMEOUT`；单 handler 无独立预算 | 有实际需求时定义 |
 | 授权未绑定代码摘要 | 同 ID 替换代码可沿用原批准 | 安装/更新流程 |
 | 游离 Promise 不检测 | 文档强制 await；运行时不 drain、不拒绝检测 | 保持现状；若需求变化再评估 |
 | `owner_id` 不序列化 | 经 JSON 缓存往返的记录会丢失归属证据，插件查询只能消费 Provider 直接返回的记录 | 保持现状；不要用缓存记录做归属判断 |

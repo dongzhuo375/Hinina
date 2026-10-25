@@ -317,11 +317,12 @@ Wire 形状**恰好**为：
 
 ## 10. 资源上限
 
-常量集中在 [`plugin/limits.rs`](../../src-tauri/src/plugin/limits.rs) 及所属模块。
+**本表是插件宿主全部数值上限的唯一事实表**：其他文档叙述行为时只引用常量名，不重复数值；各源文件的模块文档（`doc/modules/`）允许记录**本文件自身**的常量值。常量集中在 [`plugin/limits.rs`](../../src-tauri/src/plugin/limits.rs) 及所属模块，数值由测试锁定；本表改动必须与代码同 PR。
 
 | 项 | 上限 |
 |---|---|
 | 激活 / 单次事件 / 启动等待 / 停止 | 10s / 30s / 12s / 5s |
+| 宿主调用提前截止（`API_ERROR_GRACE`） | 当前入口硬截止前 1 秒返回可捕获的 `timeout`，为 JS 的 catch/finally 留出处理时间 |
 | Provider 单请求 / `submission.get` 整体 | 5s / 8s（最多 100 页） |
 | 桥输入 / operation 名 / 桥响应（含包络） | 140000 B / 64 B / 1MiB |
 | native 页数 / native 投影页 / 保留游标余项 / 游标数 / 句柄数 | 10000 / 1MiB / 4MiB / 32 / 32 |

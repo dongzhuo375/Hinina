@@ -1,6 +1,6 @@
 # 插件系统历史与关键修复
 
-> 本文只保留里程碑和会影响行为的关键结论。逐轮评审流水账已删除；需要细节时查 Git 历史和 PR #41。
+> 本文只保留里程碑和会影响行为的关键结论：**时间线每个 PR（或整理事件）一行**，验证数字是当次合并时的快照（不随后续轮次更新，当前数字以测试输出为准）；逐轮评审流水账已删除，需要细节时查 Git 历史与对应 PR。
 
 ## 1. 时间线
 
@@ -11,28 +11,22 @@
 | 2026-10-22 | `8379772` | PR #41：最小可运行宿主 | QuickJS worker、只读查询、游标、存储/CAS、HTTP、通知、Manager、开发命令、SDK；Manifest/API 升 v2 |
 | 2026-10-22 | `8379772` 之后 | 远端删除 6 份本地文档 | 代码不变；`doc/plugin/` 成为新的顶层入口 |
 | 2026-10-22 | 本次整理 | 文档收敛 | 审计/评审/复盘合并为 `doc/plugin/`；`Architecture.md` 插件段落精简 |
-| 2026-10-24 | `1a1dd20` | PR #43：阶段 A 宿主日志出口 | `hinina.log.*` 四方法，无需权限，1024B/30 次每分钟，级别过滤不扣预算 |
+| 2026-10-24 | `1a1dd20` | PR #43：阶段 A 宿主日志出口 | `hinina.log.*` 四方法，无需权限，级别过滤不扣预算 |
 | 2026-10-24 | `4d894cb` | PR #44：阶段 B 题目列表与榜单 | `contest.problems`/`contest.rank`（新权限 `contest.rank`）、`PluginContest` 封榜三字段、`teamKey` 与 `identity.userKey` 同算法 |
-| 2026-10-24 | `62613a8` | 阶段 C：参考业务插件 | `sdk/examples/balloon` 首次 AC 气球派发参考实现 + 13 例逻辑测试（mock Hinina）+ 验收指南；vitest include 扩展到 `doc/modules/**/__tests__`；无 Rust 宿主改动 |
-| 2026-10-24 | PR #45 评审修复 | 参考插件状态机修复 | 移除被宿主黑名单拒绝的 `content-type` 头；榜单分页适配 6 次/分钟硬配额（每轮 3 页，`limit_exceeded` 只结束翻页不中止轮次）；`sent` 逐成功落盘，`timeout`/`permission_denied`/`invalid_input` 归为死区停止队列；激活期补端点 origin GET 探测，失败原因写入宿主日志（宿主错误码统一 `script_error`）；日志全部经 `note()`；mock 升级为强制宿主规则的 fake host（header 黑名单/URL 形状/配额/30s 截止，20 例）；无 Rust 宿主改动 |
-| 2026-10-24 | PR #45 评审修复（二） | 榜单翻页滑动窗口 | 配额从每轮 3 页上限改为 60s 窗口共享（模块态，与宿主预算同生命周期，多轮共花 6 次、无每轮上限）+ 页游标跨轮推进/榜末回绕，深榜单以每分钟 6 页轮转覆盖全榜；timeout 注释区分单请求超时与 handler 截止两个来源；fake host 补日志配额拒绝（`logQuota`）；22 例 |
-| 2026-10-24 | PR #45 评审修复（三） | 榜单页上限与游标钉死修复 | 每页行数按题数自适应（`min(200, 6000÷(题数+1))`），40 题比赛的页不再恒被 6000 格上限拒绝；`limit_exceeded` 区分首拒（同页重试）与再拒（判定超限页、跳页推进游标，不再钉死），>200 队 Hydro 整榜被拒时游标仍能轮转；榜单深于 100 页回绕时告警；fake host 补页内容硬限与查询越界校验、配额改用 envelope 时钟（24 例）；README 按 HOJ/Hydro 分开写边界并给出存储写配额量级（约 30 球）；validation/Architecture/todo/roadmap 同步 |
-| 2026-10-24 | PR #45 评审修复（四） | 跳页门槛与文档数字修正 | 跳页门槛从「两次被拒」提高到「连续 3 个窗口被拒」（同窗口重试不计数，短暂配额/共享预算抖动不再误跳健康页；上一轮"配额抖动保持旧行为"的声明不成立，已修正）；重试日志不再断言「下一窗口」与「超限页」；跳页路径在第 100 页回绕同样告警；README 修正存储写配额数字（每球约 1 次写、首轮约 56 个，测试证实）、Hydro 补 6000 格上限（自适应行数对 Hydro 无效）、契约行数随题数自适应、轮转中途加题的页号错位；fake host 补存储操作配额（60 次/分钟，get/set/CAS 共享）与收敛测试（25 例）；Architecture.md 文件树补 sdk 目录 |
-| 2026-10-24 | PR #45 评审修复（五） | 限流模型与结构修正 | fake host 配额从滚动窗口改为 GCRA 令牌桶（governor `Quota::per_minute`：突发 n、每 60s/n 回补一个，已对照 0.10.4 源码确认）；插件本地记账从固定 60s 窗口改为**相同参数的 GCRA**（固定窗口在窗口边界可超领宿主预算——上一窗口末尾消费后几秒即开新窗口，评审反例证实，"同一时钟下恒保守"论证不成立），等价改由构造保证；信封时间即适配时刻的宿主墙钟，与处理时刻的差异仅为入队排队延迟（至多约一个 handler 时长，只让本地桶滞后、方向保守）；`round()` 拆分为 `pageRank()` 与 `dispatchQueue()`；新增头黑名单契约测试（解析 `api/http.rs` 源码与手抄副本比对，已变异验证）与窗口边界零超领、宿主桶更严格两例回归；README 补日志突发限流说明、GCRA 措辞与存储配额限定；28 例 |
+| 2026-10-24 | `806101d`（squash） | PR #45：阶段 C 参考业务插件（含五轮评审修复） | `sdk/examples/balloon` 首次 AC 气球派发参考实现 + 验收指南；评审修复的关键结论见 §2（content-type 黑名单、GCRA 本地记账与游标轮转、跳页门槛、逐成功落盘、激活探针与 `script_error` 口径、fake host 强制宿主规则）；无 Rust 宿主改动 |
+| 2026-10-25 | `806101d` | PR #46：模块文档五节化 | `doc/modules/src-tauri/plugin/` 31 份文档重构为五节格式；评审发现 9 处签名/依赖/字段错误逐一取证修正；纯文档改动 |
+| 2026-10-25 | 本次整理 | 文档整合 | `doc/modules` 的 tutorial/security/validation（无源文件、与 `doc/plugin/` 重复）分别并入 development/architecture/history；文档数字改为常量名 + 行为描述，数值断言由测试守住（见 §3） |
 
-验证记录：
+## 2. 验证记录（每次合并时的快照）
 
 - PR #40：Rust 615 项、前端 36 文件/493 项通过。
 - PR #41：Rust 722 项、前端 38 文件/508 项通过；`npm run build`、`plugin:sdk:check`、`plugin:scaffold:build` 通过。
 - 逐提交验证：10 个触及 `src-tauri/` 的提交各自独立编译并通过 `cargo test --lib`。
-- 阶段 C：前端 39 文件/521 项通过（含 balloon 逻辑测试 13 例）；`plugin:sdk:check`、`plugin:balloon:build`、`plugin:scaffold:build`、`npm run build` 通过；无 Rust 改动。
-- PR #45 评审修复：前端 528 项通过（含 balloon 20 例，fake host 强制宿主规则）；`plugin:sdk:check`、`plugin:balloon:build` 通过；无 Rust 改动。
-- PR #45 评审修复（一/二两次提交）：前端 530 项通过（含 balloon 22 例，补日志配额与滑动窗口翻页）；`plugin:sdk:check`、`plugin:balloon:build`、`npm run build` 通过；无 Rust 改动。
-- PR #45 评审修复（三）：前端 532 项通过（含 balloon 24 例，补页上限跳页与自适应 limit）；`plugin:sdk:check`、`plugin:balloon:build` 通过；无 Rust 改动。
-- PR #45 评审修复（四）：前端 533 项通过（含 balloon 25 例，补存储配额收敛）；`plugin:sdk:check`、`plugin:balloon:build` 通过；无 Rust 改动。
-- PR #45 评审修复（五）：前端 536 项通过（含 balloon 28 例，本地 GCRA 记账 + 头黑名单契约测试 + 窗口边界/自愈回归）；`plugin:sdk:check`、`plugin:balloon:build` 通过；无 Rust 改动。
+- PR #45（squash 合并时）：前端 536 项通过（含 balloon 逻辑测试 28 例，fake host 强制宿主规则）；`plugin:sdk:check`、`plugin:balloon:build`、`npm run build` 通过；无 Rust 改动。
+- PR #46：balloon 28/28；链接检查通过；`npm run build` 通过；无代码改动。
+- 当前数字以 `cargo test` / `npm test` 输出为准，不在文档中另行维护。
 
-## 2. 关键修复
+## 3. 关键修复
 
 | 问题 | 结论 |
 |---|---|
@@ -57,15 +51,18 @@
 | 审批不足的插件静默空转 | 参考插件 activate 用无副作用探针（哑上下文 + 不可能命中的 CAS，有查询上下文时再加一次端点 GET）前置校验权限与 origin 审批；缺失时 `failed` 并把具体原因写入宿主日志——宿主把 activate 的任何 reject 都记为 `script_error`，不读插件抛出的 code，指认以日志为准 |
 | 插件 IPC 错误形态 | 只在恰好 `{code, permission?}` 时识别为插件错误；保留真实 message 兜底 |
 | 派发请求自带 `content-type` | 宿主对 `content-type` 等头有硬黑名单、并为带体请求自动设置 JSON content-type；插件自带该头即 `invalid_input`，参考插件已移除 |
-| 榜单 6 次/分钟配额与单页 200 行/6000 格上限撞上逐页扫描 | 参考插件本地以与宿主相同的 GCRA 参数记账（突发 6、每 10 秒回补 1；模块态，随激活与宿主预算一同重置，等价由构造保证），预算跨轮连续回补，页游标跨轮推进、榜末回绕，深榜单以每分钟 6 页轮转覆盖；每页行数按题数自适应保证页可编码；`limit_exceeded` 同页重试，连续 3 个窗口被拒才跳页（短暂抖动不丢页、游标不钉死），已取到的页照常派发、轮次不中止 |
-| `sent` 批量落盘被 30s handler 截止吞掉 | 参考插件每个成功立即落盘；`timeout`/`permission_denied`/`invalid_input` 归为死区停止队列，`pending`→`sent` 可收敛，端点不再承受无界重复流量 |
+| 固定窗口记账在窗口边界超领宿主预算 | 上一窗口末尾消费后几秒即开新窗口，固定窗口会重置出宿主从未回补的预算（评审反例证实）；参考插件改为与宿主 governor GCRA 同参数的本地记账（等价由构造保证），反例调度固化为回归测试 |
+| 榜单配额与单页上限撞上逐页扫描 | 参考插件按宿主 GCRA 参数记账、页游标跨轮推进/榜末与契约上界回绕、每页行数按题数自适应保证页可编码；`limit_exceeded` 同页重试、连续 `SKIP_AFTER_WINDOWS` 个窗口被拒才跳页（短暂抖动不丢页、游标不钉死），已取到的页照常派发、轮次不中止 |
+| `sent` 批量落盘被 handler 截止吞掉 | 参考插件每个成功立即落盘；`timeout`/`permission_denied`/`invalid_input` 归为死区停止队列，`pending`→`sent` 可收敛，端点不再承受无界重复流量 |
+| 文档数字靠人工同步漂移 | **[contracts.md §10](contracts.md) 是宿主数值上限的唯一事实表**：其他文档叙述行为只引用常量名，各源文件模块文档只记录本文件常量。命名常量由契约测试自动锁定——balloon spec 解析 `limits.rs`/`api/*.rs`/`plugin_host.rs`/`fs_plugin_repo.rs`/`plugin_storage.rs`，**按 §10 表格行定位逐项比对**（35 个命名常量，含 `API_ERROR_GRACE`；按行匹配防止同值行互相掩蔽），并锁定插件侧别名与宿主常量的镜像；表格改动不同步代码（或反之）即测试失败。仍以内联字面量存在的少量数值（桥准入 600 次/分钟、各在途信号量、存储/HTTP 操作速率等）暂由评审同步，提取为命名常量后即可纳入同一测试；时间线每个 PR（或整理事件）一行 |
 
-## 3. 已删除的详细文档
+## 4. 已删除/合并的详细文档
 
-以下内容已合并进本目录，原文件不再维护：
+以下内容已合并进本目录或模块文档，原文件不再维护；需要逐项细节时查 Git 历史与对应 PR，不要重新引入流水账式文档：
 
 - `doc/plugin-architecture-review.md` → 当前结论进入 [architecture.md](architecture.md) 与本文时间线
-- `doc/plugin-review-fixes.md` → 关键修复进入本文 §2
+- `doc/plugin-review-fixes.md` → 关键修复进入本文 §3
 - `doc/插件系统最小实现复盘与管理演进.md` → 进度/缺口/管理页/路线图进入 [roadmap.md](roadmap.md)
-
-如需逐项评审细节，使用 PR #41 描述与分支历史；不要重新引入流水账式文档。
+- `doc/modules/src-tauri/plugin/validation.md`（本 PR 删除）→ 验证数字进入本文 §2，验收缺口进入 [roadmap.md §2.5](roadmap.md)，验证命令进入 [development.md §5](development.md)
+- `doc/modules/src-tauri/plugin/tutorial.md`（本 PR 删除）→ 内容并入 [development.md §1](development.md)
+- `doc/modules/src-tauri/plugin/security.md`（本 PR 删除）→ 内容并入 [architecture.md §6](architecture.md)

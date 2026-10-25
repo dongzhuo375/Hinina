@@ -1,6 +1,6 @@
 # 插件开发与宿主施工
 
-> 基线：`main@8379772`。契约细节见 [contracts.md](contracts.md)，架构见 [architecture.md](architecture.md)。
+> 代码是事实标准，本文不逐次标注基线。契约细节见 [contracts.md](contracts.md)，架构见 [architecture.md](architecture.md)。
 
 ## 1. 插件作者快速开始
 
@@ -88,9 +88,10 @@ await window.hininaPlugins.stop('com.example.development')
 ```
 
 - `window.hininaPlugins` 仅在 DEV 提供；release 仍按批准配置自动启动插件（四个命令在 release 构建中依然注册，只是前端不暴露入口）。
+- 已在运行的插件再次 `start` 会报错（重复 start 只拒绝命令、不写失败历史）。
 - **`enabled` 只由 `plugins.json` 决定**：`stop` 是"本次停止"，不改变自动启用意图——重启应用后 enabled 插件仍会自动启动；持久禁用必须改 `plugins.json`。
 - **`reload` 是开发期便利**（免于重启 `tauri dev`）：旧 worker 真正退出后才加载新源码。**发布形态的语义是"改配置/改代码后重启应用生效"**。
-- **运行时不提供 `setTimeout` 或任何定时器**：所有节拍只能来自 Resync（周期默认 60 秒，`plugins.json` 的 `resyncIntervalSecs` 可调，最小 10 秒）。不要试图轮询或自造时钟；时间引用可用事件 `envelope.occurredAt`。
+- **运行时不提供 `setTimeout` 或任何定时器**：所有节拍只能来自 Resync（周期默认与可调范围见 [contracts.md §10](contracts.md)，由 `plugins.json` 的 `resyncIntervalSecs` 配置）。不要试图轮询或自造时钟；时间引用可用事件 `envelope.occurredAt`。
 - 底层命令为 `plugin_list/start/stop/reload/resync`，不接收代码/权限/路径。
 - 前端入口仍经过 Store → Service → Bridge。
 - `list` 显示 `starting/running/stopped/failed` 和安全错误码。
@@ -119,7 +120,7 @@ if (contest) {
 
 - 设置扫描预算并保存可恢复状态；
 - 处理 `context_expired`（停止本次操作，等下次 Resync）；
-- 不让整个 handler 超过 30 秒；
+- 不让整个 handler 超过 `EVENT_TIMEOUT`；
 - 空 `records` 仍可能有 `nextCursor`；
 - 不把“当前用户可见历史”当成“全站所有队伍的首次 AC”。
 
@@ -129,7 +130,7 @@ if (contest) {
 `logs/hinina.log`（设置页可查看路径）。无需权限，也不读任何宿主数据。
 
 - 参数必须是字符串；对象自己 `JSON.stringify`，宿主不注入 `console`。
-- 单条 ≤1024 UTF-8 字节；每激活 30 条/分钟，超限抛 `limit_exceeded`，不静默丢弃。
+- 单条与速率上限见 `plugin/limits` 的 `PLUGIN_LOG_BYTES`/`PLUGIN_LOGS_PER_MINUTE`（[contracts.md §10](contracts.md)），超限抛 `limit_exceeded`，不静默丢弃。
 - 换行/制表符写入前被拍平为空格，消息整体 Debug 转义；日志按行可 grep。
 - `debug` 级跟随宿主日志级别：release 默认 `info` 会过滤 `debug` 级插件日志
   （被过滤的调用不消耗限流额度），开发构建或 `RUST_LOG=debug` 可见全部。
@@ -167,10 +168,10 @@ if (contest && !contest.sealed) {
 - `displayName` 由宿主按比赛 `rankShowName` 解析（与 App 榜单同规则），无需自己拼。
 - `limit` 是提示：Hydro 无视分页、整榜单页返回（行数可能超过 limit）；`page` 回显
   服务端实际页（Hydro 恒 1），`hasMore=false` 即整榜已取完。
-- HOJ 榜单实时全量计算，较慢：**榜单查询有每激活 6 次/分钟的独立预算**（突发 6 次
-  覆盖分页同步；持续轮询 ≥10s，建议 ≥30s，节拍只能来自 Resync，运行时无 `setTimeout`）；
-  每次调用另消耗 2 份通用 Provider 预算（元信息 + 榜单）。
-- Hydro 单页返回全量：超过 200 行或总 cells 超限会得到 `limit_exceeded`，大榜单可能不可用。
+- HOJ 榜单实时全量计算，较慢：**榜单查询有每激活 `PLUGIN_RANK_QUERIES_PER_MINUTE`
+  次/分钟的独立预算**（突发等于配额覆盖分页同步；持续轮询建议 ≥30s，节拍只能来自
+  Resync，运行时无 `setTimeout`）；每次调用另消耗 2 份通用 Provider 预算（元信息 + 榜单）。
+- Hydro 单页返回全量：超过 `MAX_RANK_ROWS` 行或 `MAX_RANK_CELLS` 格超限会得到 `limit_exceeded`，大榜单可能不可用。
 - `color` 可能为空串（Hydro）；不能自己编颜色。
 - 查询入参不带 `contestId`（多余字段直接拒绝）；未选中比赛返回 `context_expired`，等下次 Resync。
 
@@ -182,7 +183,7 @@ if (contest && !contest.sealed) {
 | `permission_denied` | Manifest 是否声明、`plugins.json` 是否批准、事件载荷是否还需领域读取权限 |
 | `context_expired` | 登录/登出、切 OJ/比赛、连接配置变化；重新 `context.current()` |
 | `limit_exceeded` | 分页/扫描/存储/HTTP/通知/日志/榜单/桥调用预算；缩小批量、保存进度 |
-| `timeout` | activate 10s、事件 30s、单请求 5s、`submission.get` 8s；拆分工作 |
+| `timeout` | activate `ACTIVATION_TIMEOUT`、事件 `EVENT_TIMEOUT`、单请求 `PROVIDER_TIMEOUT`、`submission.get` `SUBMISSION_LOOKUP_TIMEOUT`；拆分工作 |
 | `unsupported` | 调用了未实现的 API（题面/工作区/UI 等占位能力） |
 | `script_error` | 语法错误、未捕获异常、内存分配失败以外的脚本失败；看宿主日志的稳定码，并在关键步骤用 `hinina.log.*` 输出阶段 |
 | 启动失败但无栈 | 设计如此；用状态、存储、通知和宿主 tracing 定位 |
@@ -204,7 +205,7 @@ if (contest && !contest.sealed) {
 - [ ] 每个 handler 重新获取 context；遇到 `context_expired` 停止本次操作。
 - [ ] 分页用 `nextCursor` 判断末尾，不靠 `records` 是否为空；按 `submissionId` 去重。
 - [ ] 大量历史用 `list` 分批，保存进度；不要用 `submission.get` 反复全量扫描。
-- [ ] 存储用 `missing` 与 JSON `null` 区分状态；CAS 只保证本地，不保证远端 exactly-once。
+- [ ] 存储用 `missing` 与 JSON `null` 区分状态；CAS 只保证本地，不保证远端 exactly-once。设计可恢复状态时注意：`CAS(null)` 不能把 `dispatch_failed` 再变回 `dispatching`，崩溃后的 `dispatching` 也会卡住——显式设计状态机、租期/重试预算，并让外部服务通过幂等键去重；本地原子 CAS 不能撤回远端已成功但客户端超时的派发。
 - [ ] HTTP 使用外部幂等键；超时/500 由插件自行重试，核心不重试派发。
 - [ ] 不把通知当成功凭据；不输出 Token、用户名、源码、路径或响应正文。
 - [ ] 排错用 `hinina.log.*` 输出阶段与计数；不写敏感内容，不依赖日志做业务判断。
@@ -259,7 +260,7 @@ if (contest && !contest.sealed) {
 - 提供 `plugin_list/start/stop/reload/resync` 命令；不接收代码/权限/路径。
 - `AppContext` 只持有 Send 控制器；JS 值留在 worker。
 - 仅实际获批 `events.subscribe` 才建立事件队列并接收 Resync。
-- 周期 Resync 默认 60 秒；初始/Lagged/账号/OJ/比赛变化也可触发。
+- 周期 Resync 的默认与可调范围见 [contracts.md §10](contracts.md)；初始/Lagged/账号/OJ/比赛变化也可触发。
 - 前端按 View → Store → Service → Bridge 接入；通知策略在 Service。
 
 ### 阶段 6：验证与文档

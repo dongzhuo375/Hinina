@@ -29,7 +29,7 @@
 ### 作用域与句柄
 - 句柄 TTL 5 分钟、最多同时 32 个；同 scope+revision 下 150 秒内的未过期句柄由 `current_context` 复用（返回同一句柄），超龄或 scope/revision 变化才新签发——"每个 handler 重新获取 context"不会耗尽上限。异步前后及取消时检查有效 scope，防止跨用户/OJ/比赛或 ABA 返回
 - 已有句柄复核时 `scope()` 读取失败统一返回 `context_expired`；首次获取上下文失败保留来源错误。取消令牌检查放在 scope 读取**之后**，防止读取期间发生作用域切换却返回已撤销的令牌
-- `check` 先走无 I/O 的缓存探测（`QuerySource::cached_scope`），未命中才 `spawn_blocking` 读会话文件；快慢路径共用同一 `scope_cache_hit` 谓词（revision 相等且两侧取消令牌均未撤销），单一事实来源使撤销令牌在切 OJ/换账号/换比赛后不可能从缓存命中
+- `check` 先走无 I/O 的缓存探测（`QuerySource::cached_scope`），未命中才 `spawn_blocking` 读会话文件（**安全不变量**：会话身份文件读取只在阻塞线程池执行，读取前后继续验证作用域撤销，见 `query.rs` 的 `spawn_blocking` 与 `scope()`）；快慢路径共用同一 `scope_cache_hit` 谓词（revision 相等且两侧取消令牌均未撤销），单一事实来源使撤销令牌在切 OJ/换账号/换比赛后不可能从缓存命中
 - 生产 ServiceQueries 按 AccessRevision 缓存 scope：同一修订反复 check 不再读盘，会话/配置读取不在锁内执行；显式身份/OJ/比赛/配置变更撤销缓存，在途结果由取消栅栏拒绝；revision 递增用 `wrapping_add` 且缓存同时保留取消令牌，数值回绕也不能命中已撤销缓存
 - 配置语义：OJ 实例改 baseUrl 沿用"重启后生效"——scope 绑定 Registry **实际运行**的 endpoint，配置变更撤销旧句柄、新句柄仍用实际 endpoint；实例被删除/禁用仍拒绝。缺 endpoint/实例不可用/地址待重启输出稳定类别 warn（去重键 revision+plugin_id，修订变更即清空），不记录 URL 或凭据
 
