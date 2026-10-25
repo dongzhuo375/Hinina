@@ -35,6 +35,9 @@ impl Drop for TempDir {
 #[test]
 fn init_with_free_global_subscriber_takes_over_log_file() {
     let dir = TempDir::new("taken-by-nobody");
+    // EnvFilter 优先读 RUST_LOG：宿主环境若设了 warn 及以上，info! 探针会被
+    // 过滤，写入断言将在正确代码上失败——显式固定本测试所需级别（评审 #11）
+    std::env::set_var("RUST_LOG", "info");
     let logger = hinina_lib::infra::logger::Logger::init(&dir.0);
 
     assert!(logger.has_log_file(), "订阅器空闲时 init 应成功接管文件层");

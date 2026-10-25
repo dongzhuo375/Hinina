@@ -31,6 +31,15 @@ pub const LOG_RELATIVE_PATH: &str = "logs/hinina.log";
 /// 日志只服务于近期排障，单文件 + 上限截断足以防止无限膨胀占满选手磁盘。
 const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
+/// 进程内**实际接管文件层的日志路径**（评审第三轮 #12）。
+///
+/// 全局订阅器是进程级单例：第二次 `init` 的 `try_init` 必然失败，但第一次
+/// 安装的文件层仍在向**它自己的路径**写入。`log_path`/`has_log_file` 以
+/// 实际生效的路径为准——同路径二次 init 时沿用已安装路径（文件层确实还在
+/// 写），进程内从未成功安装过则如实为 `None`。仅非测试构建使用。
+#[cfg(not(test))]
+static ACTIVE_LOG_PATH: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
 /// 日志追踪（基于 Tracing）。
 ///
 /// 双路输出：stderr（开发调试）+ 文件（现场排障，选手机器上没有控制台）。
@@ -132,9 +141,21 @@ impl Logger {
                         .with(stderr_layer)
                         .with(file_layer)
                         .try_init();
-                    Self {
-                        log_path: installed.is_ok().then(|| base_dir.join(LOG_RELATIVE_PATH)),
-                    }
+                    let path = if installed.is_ok() {
+                        let p = base_dir.join(LOG_RELATIVE_PATH);
+                        *ACTIVE_LOG_PATH.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(p.clone());
+                        Some(p)
+                    } else {
+                        // 安装失败时沿用实际接管文件层的路径（若有）：第一次
+                        // 安装的文件层仍在向它写入，has_log_file 以此为准；
+                        // 进程内从未成功安装过则如实为 None（评审 #4/#12）
+                        ACTIVE_LOG_PATH
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clone()
+                    };
+                    Self { log_path: path }
                 }
                 None => {
                     // 文件层不可用：保持旧的单路 stderr 行为
