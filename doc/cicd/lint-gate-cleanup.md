@@ -1,8 +1,8 @@
-# CI/CD 基线清理记录（PR2：fmt/clippy 清零与 rust-lint 升必需）
+# CI/CD 记录：lint 门禁清理（fmt/clippy 清零与 rust-lint 升必需）
 
 > 记录日期：2026-10-25  
 > 版本锚定：`main` @ 116b700（PR #52 合并后），分支 `chore/ci-baseline-cleanup`  
-> 文档性质：CI/CD 施工过程记录（入库，见 [doc/cicd/](README.md)）；对应施工方案 §十 的 PR2「存量 lint/test 基线修复」  
+> 文档性质：CI/CD 施工过程记录（入库，见 [doc/cicd/](README.md)）；对应施工方案 §十 的「存量 lint/test 基线修复」项（插在 M2 与 M3 之间的清理 PR，非阶段编号）  
 > 状态：E2/E3 全部清零，rust-lint 已升为必需检查
 
 ## 一、处置内容（4 个提交）
