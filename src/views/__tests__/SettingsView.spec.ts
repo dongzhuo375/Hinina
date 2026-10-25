@@ -2,8 +2,9 @@
 // SettingsView 维护区（重置/清理）关键流测试（M2 工作包 C，范围刻意收窄：
 // 只测「不可逆操作的如实反馈」—— 双空勾选拦截、日志未清掉的 warn 文案、
 // 重置后补拉失败的 warn 文案。其余区块的 mock 面过大，留待后续按需补充。
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mountView } from '@/test-support/view-mount'
+import type { Mounted } from '@/test-support/view-mount'
 import type { AppConfig } from '@/types/config'
 
 const mocks = vi.hoisted(() => ({
@@ -70,9 +71,14 @@ const baseConfig = (): AppConfig => ({
   layout: { sidebarWidth: 240, splitRatio: 0.48 },
 })
 
+/// 登记挂载实例，afterEach 统一卸载（评审第三轮 #10）：失败用例不残留挂载
+/// 实例，避免后续用例经全局 document 查询误触旧实例产生连带失败。
+const mounted: Mounted[] = []
 async function render() {
   mocks.getConfig.mockImplementation(async () => baseConfig())
-  return mountView(SettingsView)
+  const m = await mountView(SettingsView)
+  mounted.push(m)
+  return m
 }
 
 /// 按标签文本找复选框并改选（v-model checkbox 走 change 事件）。
@@ -100,9 +106,13 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
+afterEach(() => {
+  while (mounted.length > 0) mounted.pop()?.unmount()
+})
+
 describe('SettingsView 清理本地数据（不可逆，反馈必须如实）', () => {
   it('两个勾选全空：不发清理请求，给出「请先选择」错误', async () => {
-    const m = await render()
+    await render()
     await settle()
     setCheckbox('日志内容', false)
     setCheckbox('提交源码留档', false)
@@ -115,13 +125,11 @@ describe('SettingsView 清理本地数据（不可逆，反馈必须如实）', 
 
     expect(mocks.purgeLocalData).not.toHaveBeenCalled() // 全空勾选必须在前端拦截
     expect(document.body.textContent).toContain('请先选择要清理的内容')
-
-    await m.unmount()
   })
 
   it('勾了日志但后端没清掉（logCleared=false）：warn 文案如实说明', async () => {
     mocks.purgeLocalData.mockResolvedValueOnce({ freedBytes: 2048, removedSnapshots: 2, logCleared: false })
-    const m = await render()
+    await render()
     await settle()
 
     clickButton('清理本地数据')
@@ -132,15 +140,13 @@ describe('SettingsView 清理本地数据（不可逆，反馈必须如实）', 
     expect(mocks.purgeLocalData).toHaveBeenCalledWith(true, true)
     expect(document.body.textContent).toContain('日志未清理') // 不能笼统报已清理
     expect(mocks.localDataUsage).toHaveBeenCalledTimes(2) // 清理后必须重读占用预览
-
-    await m.unmount()
   })
 })
 
 describe('SettingsView 重置客户端', () => {
   it('重置成功但补拉失败：提示必须带 warn 语义（如实，不宣称数据已最新）', async () => {
     mocks.loadContest.mockRejectedValueOnce(new Error('net'))
-    const m = await render()
+    await render()
     await settle()
 
     clickButton('重置客户端')
@@ -152,7 +158,5 @@ describe('SettingsView 重置客户端', () => {
     expect(mocks.invalidateMyStatus).toHaveBeenCalledTimes(1) // 我的题目状态标记过期
     expect(mocks.announcementRefresh).toHaveBeenCalledTimes(1) // 公告与已读必须补拉
     expect(document.body.textContent).toContain('数据重新拉取失败')
-
-    await m.unmount()
   })
 })

@@ -88,7 +88,7 @@
 | 7 | 提交缺正向断言 | 新增正向用例：配对正确时 submitCode 以正确题目 ID 调用且无错误（守卫恒拒时旧测试全绿的问题被堵住） |
 | 8 | 断言中含赋值 | 状态准备拆为独立语句 |
 | 9 | 固定次数 Promise.resolve 等待 | 全部改为 vi.waitFor 等可观察条件（mockRejectedValueOnce 路径不经过默认实现的限制已注明） |
-| 10 | 失败用例残留挂载实例 | afterEach 统一卸载 |
+| 10 | 失败用例残留挂载实例 | afterEach 统一卸载（ProblemSolveView 当轮落地；SettingsView 在复核指出后补齐——此前处置表述与事实不符） |
 | 11 | ok 集成测试依赖宿主 RUST_LOG | 测试内显式 `set_var("RUST_LOG","info")`（RUST_LOG=warn 下实测复现后修复） |
 | 12 | log_path 应反映实际安装路径 | 新增 `ACTIVE_LOG_PATH`（成功安装时记录）：同路径二次 init 沿用已安装路径，进程内从未成功安装则 None |
 | 13 | 参数结构体过度 | 回退 5/4/2 参三处为逐参转发（低于 clippy 阈值）；仅 7 参的 RankParams 保留 |
