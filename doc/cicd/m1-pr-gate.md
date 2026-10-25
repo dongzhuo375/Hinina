@@ -54,7 +54,7 @@
 1. `gh api` 配置分支保护（宽松）：`required_status_checks` contexts=["ci-required"]、strict=true（要求与 main 同步）、`allow_force_pushes=false`、`enforce_admins=false`。
 2. `gh api` 设 `actions/permissions` 默认 `default_workflow_permissions=read`。
 3. 建临时失败分支开 PR，验证 `ci-required` 变红且合并被阻，验证后关闭并删支。
-4. 结果回写本节。
+4. 结果回写本节，并将开发手册/copilot-instructions 中分支保护的「待启用」措辞改为现状。
 
 ## 六、遗留项
 
