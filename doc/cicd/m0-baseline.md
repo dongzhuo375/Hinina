@@ -10,7 +10,7 @@
 | 项 | 值 | 说明 |
 |---|---|---|
 | Node.js | 22.14.0 | 与 `.nvmrc` 一致（265e918 引入） |
-| npm | 11.18.0 | 官方提示有 11.21.1 可用，本次未升级 |
+| npm | 11.18.0（**未固定**） | 本机手动升级所得；Node 22.14.0 官方自带 npm 为 10.9.2，CI 经 setup-node + `.nvmrc` 得到的是自带版本，与本机存在静默不一致。M1 ci.yml 施工时需决策：`packageManager` 字段固定，或接受 runner 自带 npm 并更新本记录（见 §十） |
 | Rust | 1.96.0 (ac68faa20 2026-05-25) | 与 `rust-toolchain.toml` 一致（265e918 引入；rustup 已为固定 channel 下载组件） |
 | rustfmt | 1.9.0-stable (ac68faa20) | 已安装 |
 | clippy | 0.1.96 (ac68faa20) | 已安装 |
@@ -47,7 +47,7 @@
 | E4 | `D:\nodejs\node_cache` 全树对普通用户不可写（ACL 仅 Administrators/SYSTEM 有写权，Users/Authenticated Users 只读），npm 写缓存 EPERM；非提升会话连 `icacls /grant` 亦被拒 | 本机环境故障（仅影响本机，不影响 CI；**已闭环**） | `01-npm-ci.log` 首次失败记录 + icacls 探测输出 | **已修复（2026-10-25）**：本机管理员终端执行 `icacls "D:\nodejs\node_cache" /grant "hdz:(OI)(CI)M" /T`，探测确认可写；回滚命令：`icacls "D:\nodejs\node_cache" /remove:d hdz /T`。基线执行时以工作区回退缓存绕过（该缓存已删除） |
 | — | 产品缺陷 | 无 | 测试 0 失败、构建全通过 | — |
 | — | 测试错误或抖动 | 无（本次无 flaky；749/748 差异非抖动） | `04`/`08` 日志 | — |
-| — | CI 配置尚未具备 | 无 workflows（by design，M1 施工） | `.github/` 仅 copilot-instructions.md | — |
+| — | CI 配置尚未具备 | 无 workflows（by design，M1 施工） | 无 `.github/workflows/` 目录（`.github/` 下仅 copilot-instructions.md 与 pr-assets/，均非 CI） | — |
 
 ## 四、Ubuntu runner 准备步骤（M0 任务 4，可直接复制）
 
@@ -102,14 +102,15 @@ sudo apt install -y \
 2. **首个 CI 能否全量阻塞已明确** ✅：不能；阻塞项有具体修复任务（E1/E2/E3 → PR1/PR2），非长期忽略（见 §七）。
 3. **未把"尚未执行"写成"已经通过"** ✅：10 条命令全部实际执行，失败 3 条（#2/#6/#7）如实记录为失败。
 
-## 九、分支与 PR 顺序（照录施工方案 §十，M0 产出的两个提交在前）
+## 九、分支与 PR 顺序（照录施工方案 §十，M0 分支提交在前）
 
-分支 `chore/ci-m0-baseline` 已含：`3bc2398` chore(repo): ignore local planning notes under doc/local；`265e918` chore(ci): pin node and rust toolchain baselines（.nvmrc / rust-toolchain.toml / package.json engines / Architecture.md 根目录树同步）；本记录入库 `doc/cicd/`（`1b619a1`，另含 E4 闭环补充）。
+分支 `chore/ci-m0-baseline` 共四个提交：`3bc2398` chore(repo): ignore local planning notes under doc/local；`265e918` chore(ci): pin node and rust toolchain baselines（.nvmrc / rust-toolchain.toml / package.json engines / Architecture.md 根目录树同步）；`1b619a1` docs(cicd): add M0 baseline record under doc/cicd（本记录入库 + Architecture.md doc 树同步）；`350e735` docs(cicd): mark E4 npm cache ACL fixed and fallback cache removed（E4 闭环补充）。
 
 后续 PR 顺序：① 工具链固定、engines.node、.gitattributes 行尾治理与最小 ci.yml → ② 存量 lint/test 基线修复（E1/E2/E3）→ ③ 真实 Command 测试 → ④ 本地 HTTP 与 Adapter 契约测试 → ⑤ 关键前端测试 → ⑥ 覆盖率与夜间构建 → ⑦ Playwright 与桌面 smoke → ⑧ 版本门禁与草稿 Release（含 CHANGELOG/RELEASE/SECURITY）→ ⑨ OS 签名与平台扩展 → ⑩ Updater 与供应链。
 
 ## 十、遗留事项
 
 - ~~E4 ACL 修复~~ 已完成（2026-10-25，见 §三）；工作区回退缓存 `doc/local/m0-npm-cache/`（88MB，不入库）已删除。
+- npm 未随工具链固定（§一）：本机 11.18.0 为手动升级，Node 22.14.0 自带 10.9.2——M1 ci.yml 施工时决策 `packageManager` 或接受 runner 默认，决策后更新 §一。
 - 749/748 测试计数差异待 PR2 核实（§二）。
 - 开发手册 §5.3「CI 自动发布」等描述仍超前于现状，按施工方案 §11.2 在 M1 落地后统一纠正。
