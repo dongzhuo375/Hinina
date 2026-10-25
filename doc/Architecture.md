@@ -291,6 +291,8 @@ Hinina/
 ├── tsconfig.json                         # TypeScript 配置
 ├── tsconfig.node.json                    # Vite/Node 端 TS 配置
 ├── .gitignore                            # Git 忽略规则
+├── .nvmrc                                # Node 版本固定（22.14.0，CI/本地一致）
+├── rust-toolchain.toml                   # Rust 工具链固定（1.96.0 + rustfmt/clippy）
 ```
 
 ### Vue3 前端 — `src/`（阶段 7 已完成）
