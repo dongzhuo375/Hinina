@@ -35,15 +35,15 @@
 
 计时口径：npm 侧命令 1 为全新缓存冷安装；cargo 侧命令 7/8/9 在既有暖缓存上执行（target/ 约 20GB）。CI 无缓存首跑耗时将显著高于本表。
 
-静态 vs 运行差异：Rust 测试函数静态盘点 749 个（源码 `#[test]`/`#[tokio::test]` 属性计数），实际运行 748 个，差 1 待查（无 ignored；PR2 基线清理时核实，不阻塞 M1）。
+静态 vs 运行差异：Rust 测试函数静态盘点 749 个（源码 `#[test]`/`#[tokio::test]` 属性计数），实际运行 748 个——**已结案（基线清理 PR）**：差 1 = `fs_plugin_repo_tests.rs` 的 symlink 测试标注 `#[cfg(unix)]`，Windows 上不编译运行；Linux runner 计入。
 
 ## 三、问题分类清单（施工方案 §3.2.3 六类逐项）
 
 | 编号 | 现象 | 分类 | 证据（日志名，存本地 `doc/local/m0-logs/`） | 处置 |
 |---|---|---|---|---|
 | E1 | `tsc -p tsconfig.node.json --noEmit` 失败：`@types/node` 不在 devDependencies，`tsconfig.node.json` 亦无 `types` 配置 | 存量依赖缺口（非本机问题、非产品缺陷） | `02-tsc-node.log`；package.json devDependencies 无 `@types/node` | **阻塞 M1 frontend job 的 tsc-node 步骤**。修复：新增 `@types/node` devDependency（按仓库约定先与用户确认安装位置）→ 归 PR1/PR2（**已于 M1 PR #50 修复**：@types/node@^22 + tsconfig 作用域收敛 + vite.config async 包装移除，本地与 CI 均绿） |
-| E2 | rustfmt 220 个差异块，全模块分布 | 存量格式欠账 | `06-cargo-fmt.log`（2730 行 diff） | 修复 = 一次性 `cargo fmt` 全量格式化，独立提交 → PR2 |
-| E3 | clippy `-D warnings` 下 7 个错误 | 存量 lint 欠账 | `07-cargo-clippy.log` | 4 类均为机械改写；PR2 清零后将 rust-lint 设为必需检查（施工方案 §4.2 原设计） |
+| E2 | rustfmt 220 个差异块，全模块分布 | 存量格式欠账 | `06-cargo-fmt.log`（2730 行 diff） | ~~修复 = 一次性 `cargo fmt` 全量格式化，独立提交 → PR2~~ **已清零（基线清理 PR，`cargo fmt --all`，48 文件）** |
+| E3 | clippy `-D warnings` 下 7 个错误 | 存量 lint 欠账 | `07-cargo-clippy.log` | ~~4 类均为机械改写；PR2 清零后将 rust-lint 设为必需检查~~ **已清零并升必需（基线清理 PR，7 处机械改写）** |
 | E4 | `D:\nodejs\node_cache` 全树对普通用户不可写（ACL 仅 Administrators/SYSTEM 有写权，Users/Authenticated Users 只读），npm 写缓存 EPERM；非提升会话连 `icacls /grant` 亦被拒 | 本机环境故障（仅影响本机，不影响 CI；**已闭环**） | `01-npm-ci.log` 首次失败记录 + icacls 探测输出 | **已修复（2026-10-25）**：本机管理员终端执行 `icacls "D:\nodejs\node_cache" /grant "hdz:(OI)(CI)M" /T`，探测确认可写；回滚命令：`icacls "D:\nodejs\node_cache" /remove:d hdz /T`。基线执行时以工作区回退缓存绕过（该缓存已删除） |
 | — | 产品缺陷 | 无 | 测试 0 失败、构建全通过 | — |
 | — | 测试错误或抖动 | 无（本次无 flaky；749/748 差异非抖动） | `04`/`08` 日志 | — |

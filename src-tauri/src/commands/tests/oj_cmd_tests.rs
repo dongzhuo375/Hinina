@@ -133,9 +133,15 @@ async fn real_switch_moves_registry_persists_config_and_clears_caches() {
     // 磁盘题面缓存键带 OJ 维度、切 OJ 时刻意保留（空间回收由异步任务做），
     // 因此先删除磁盘层排除其干扰——此后 open_problem 是否打网络**只**取决于
     // 内存 statement_cache 是否已被 on_oj_switched 清空。
-    ctx.storage
-        .remove_all("cache/problem_statement")
-        .expect("清理题面磁盘缓存应成功");
+    // problem 内存 statement_cache 的清理断言（评审 #7 补严）：
+    // on_oj_switched 会**异步 spawn** 清理磁盘题面缓存（键带 OJ 维度，属空间
+    // 回收）——轮询等清理落地；若超时仍在则显式删除兜底。此后 open_problem
+    // 是否打网络**只**取决于内存 statement_cache 是否已被切换清空。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while ctx.storage.exists("cache/problem_statement") && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let _ = ctx.storage.remove_all("cache/problem_statement");
     let requests_before = hoj.requests().len();
     let problem = ctx
         .problem

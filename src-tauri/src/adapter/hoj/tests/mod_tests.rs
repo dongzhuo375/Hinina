@@ -947,7 +947,8 @@ fn fixture(base_url: &str) -> Fixture {
     let session_repo: Arc<dyn SessionRepository> =
         Arc::new(FsSessionRepository::new(Arc::clone(&storage)));
     let event_bus = Arc::new(CoreEventBus::new());
-    let http = Arc::new(HttpClient::with_timeout(std::time::Duration::from_secs(5)).unwrap());
+    let http =
+        Arc::new(HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(5)).unwrap());
     let adapter = Arc::new(HOJAdapter::new(
         http,
         base_url.to_string(),

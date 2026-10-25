@@ -167,6 +167,24 @@ impl HttpClient {
         &self.client
     }
 
+    /// 测试专用：**禁用环境代理**的构造器（仅 `cfg(test)` 编译）。
+    ///
+    /// reqwest 默认读取 `HTTP_PROXY` 等环境变量——宿主开着代理时，契约测试
+    /// 打向 loopback 的请求会被代理劫持，表现为约 45% 的 "error sending
+    /// request"（评审第三轮 flaky 根因，hyper trace 实证
+    /// `proxy(http://127.0.0.1:10809/) intercepts`）。生产构造器保持读环境
+    /// 代理的默认行为不变。
+    #[cfg(test)]
+    pub fn with_timeout_no_proxy(timeout: Duration) -> Result<Self, reqwest::Error> {
+        let client = reqwest::Client::builder()
+            .cookie_store(true)
+            .user_agent(format!("Hinina/{}", env!("CARGO_PKG_VERSION")))
+            .timeout(timeout)
+            .no_proxy()
+            .build()?;
+        Ok(Self { client })
+    }
+
     // ── 请求方法 ──
 
     /// 发送 GET 请求，返回**原始响应体**与响应头（自动重试 5xx）。

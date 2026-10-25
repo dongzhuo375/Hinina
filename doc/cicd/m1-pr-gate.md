@@ -60,6 +60,6 @@
 
 ## 六、遗留项
 
-- **rust-lint 升必需**：条件 = PR2 清零 E2（fmt 220 块）+ E3（clippy 7 错）；届时把 rust-lint 加入 ci-required 的 needs 并回写 §二/§三。分支保护 contexts 不变（仍是 ci-required）。
+- ~~**rust-lint 升必需**~~：条件已达成（基线清理 PR：E2/E3 清零），rust-lint 已加入 ci-required 的 needs；分支保护 contexts 不变（仍是 ci-required）。
 - M0 遗留的 Rust 测试 749/748 计数差异仍待 PR2 核实。
 - 前端测试计数基线更新为 39 文件 539 测试（M0 记录为 538；PR #49 为 balloon 示例新增 1 个）。

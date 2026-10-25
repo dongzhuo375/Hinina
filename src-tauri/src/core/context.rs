@@ -117,6 +117,16 @@ impl AppContext {
 
         // 6. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
         let timeout_secs = config.get().oj.timeout_secs;
+        // 测试构建禁用环境代理：全真上下文测试把 OJ 实例指向 loopback，
+        // 宿主环境代理会劫持 127.0.0.1 请求（评审第三轮 flaky 根因）
+        #[cfg(test)]
+        let http_client = Arc::new(
+            HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(timeout_secs.max(1)))
+                .map_err(|e| {
+                    crate::core::error::AppError::Network(format!("HttpClient 创建失败: {}", e))
+                })?,
+        );
+        #[cfg(not(test))]
         let http_client = Arc::new(
             HttpClient::with_timeout(std::time::Duration::from_secs(timeout_secs.max(1))).map_err(
                 |e| crate::core::error::AppError::Network(format!("HttpClient 创建失败: {}", e)),

@@ -5,8 +5,9 @@
 //! 契约测试用它断言「真实网络栈发出的请求长什么样」，替代对判定函数的孤岛测试。
 //!
 //! 约定：
-//! - 每个连接只处理**一个**请求，响应带 `Connection: close` 后关连接 ——
-//!   reqwest 会对每个请求新建连接，行为等价且免去 keep-alive 解析；
+//! - 每个连接按 HTTP/1.1 keep-alive **循环处理多个请求**（reqwest 会复用连接池
+//!   里的连接——曾因「Connection: close 后立即关闭 socket」与连接池复用竞态，
+//!   导致下一个 POST 偶发 "error sending request"，评审第三轮 #10 顺带修复）；
 //! - 响应队列耗尽后再来请求会得到 500（并计入录制）—— 用例里多出的意外
 //!   请求因此显式暴露，而不是被静默吞掉；
 //! - 请求头录制为小写键值对，查询串保留在 `path` 中原样不拆。
@@ -138,48 +139,50 @@ async fn run_server(
         };
         let queue = Arc::clone(&queue);
         let requests = Arc::clone(&requests);
-        // 每连接一个请求；慢客户端由测试超时兜底
+        // 慢客户端由测试超时兜底；连接按 keep-alive 循环处理直到对端关闭
         tokio::spawn(async move {
-            let Some(record) = read_request(&mut socket).await else {
-                return;
-            };
-            // 录制与弹出必须在同一临界区：带延迟的响应若在弹出后 sleep，
-            // 后续连接会抢先弹出它（响应分配序 ≠ 请求到达序），脚本彻底错位
-            let response = {
-                let mut queue = queue.lock().expect("queue 锁中毒");
-                requests
-                    .lock()
-                    .expect("requests 锁中毒")
-                    .push(record.clone());
-                queue.pop_front().unwrap_or_else(|| {
-                    // 队列耗尽：显式 500，让「测试多打了请求」在断言里现形
-                    ScriptedResponse {
-                        status: 500,
-                        headers: Vec::new(),
-                        body: "scripted queue exhausted".into(),
-                        delay: std::time::Duration::ZERO,
-                    }
-                })
-            };
-            if !response.delay.is_zero() {
-                // 延迟必须在锁外：持锁 sleep 会冻结整个 server
-                tokio::time::sleep(response.delay).await;
-            }
+            loop {
+                let Some(record) = read_request(&mut socket).await else {
+                    return;
+                };
+                // 录制与弹出必须在同一临界区：带延迟的响应若在弹出后 sleep，
+                // 后续连接会抢先弹出它（响应分配序 ≠ 请求到达序），脚本彻底错位
+                let response = {
+                    let mut queue = queue.lock().expect("queue 锁中毒");
+                    requests
+                        .lock()
+                        .expect("requests 锁中毒")
+                        .push(record.clone());
+                    queue.pop_front().unwrap_or_else(|| {
+                        // 队列耗尽：显式 500，让「测试多打了请求」在断言里现形
+                        ScriptedResponse {
+                            status: 500,
+                            headers: Vec::new(),
+                            body: "scripted queue exhausted".into(),
+                            delay: std::time::Duration::ZERO,
+                        }
+                    })
+                };
+                if !response.delay.is_zero() {
+                    // 延迟必须在锁外：持锁 sleep 会冻结整个 server
+                    tokio::time::sleep(response.delay).await;
+                }
 
-            let mut head = format!(
-                "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nConnection: close\r\n",
-                response.status,
-                reason_phrase(response.status),
-                response.body.len(),
-            );
-            for (k, v) in &response.headers {
-                head.push_str(&format!("{}: {}\r\n", k, v));
-            }
-            head.push_str("\r\n");
+                let mut head = format!(
+                    "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n",
+                    response.status,
+                    reason_phrase(response.status),
+                    response.body.len(),
+                );
+                for (k, v) in &response.headers {
+                    head.push_str(&format!("{}: {}\r\n", k, v));
+                }
+                head.push_str("\r\n");
 
-            let _ = socket.write_all(head.as_bytes()).await;
-            let _ = socket.write_all(response.body.as_bytes()).await;
-            let _ = socket.flush().await;
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(response.body.as_bytes()).await;
+                let _ = socket.flush().await;
+            } // keep-alive 循环：继续读同连接上的下一个请求
         });
     }
 }

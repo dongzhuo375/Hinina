@@ -518,7 +518,10 @@ fn group_sub_tasks_is_empty_for_flat_judging() {
 
 #[test]
 fn adapter_identity_state_round_trips() {
-    let http = Arc::new(HttpClient::new().expect("HttpClient 应可构造"));
+    let http = Arc::new(
+        HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(5))
+            .expect("HttpClient 应可构造"),
+    );
     let adapter = HydroAdapter::new(http, "https://hydro.ac/".to_string());
 
     assert_eq!(adapter.base_url, "https://hydro.ac", "尾部斜杠应被去掉");
@@ -542,7 +545,10 @@ fn adapter_identity_state_round_trips() {
 
 #[test]
 fn pid_cache_skips_empty_lists_and_hits_after_store() {
-    let http = Arc::new(HttpClient::new().expect("HttpClient 应可构造"));
+    let http = Arc::new(
+        HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(5))
+            .expect("HttpClient 应可构造"),
+    );
     let adapter = HydroAdapter::new(http, "https://hydro.ac".to_string());
 
     adapter.store_pids("tid", &[]);
@@ -559,7 +565,10 @@ fn pid_cache_skips_empty_lists_and_hits_after_store() {
 
 #[test]
 fn url_joins_without_double_slash() {
-    let http = Arc::new(HttpClient::new().expect("HttpClient 应可构造"));
+    let http = Arc::new(
+        HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(5))
+            .expect("HttpClient 应可构造"),
+    );
     let adapter = HydroAdapter::new(http, "https://hydro.ac/".to_string());
     assert_eq!(adapter.url("/login"), "https://hydro.ac/login");
     assert_eq!(
@@ -663,7 +672,7 @@ use std::sync::Arc;
 
 fn loopback_adapter(base_url: &str) -> Arc<HydroAdapter> {
     Arc::new(HydroAdapter::new(
-        Arc::new(HttpClient::with_timeout(std::time::Duration::from_secs(5)).unwrap()),
+        Arc::new(HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(5)).unwrap()),
         base_url.to_string(),
     ))
 }
