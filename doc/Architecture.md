@@ -15,7 +15,7 @@ Hinina/
 ├── .git/                                 # Git 版本控制目录（不入库）
 ├── .github/
 │   ├── copilot-instructions.md           # Copilot CLI 指令（架构速查、开发约定）
-│   ├── workflows/                        # CI 工作流（ci.yml：M1 PR 门禁；frontend/rust-test 阻塞、rust-lint 暂非阻塞，见 doc/cicd/）
+│   ├── workflows/                        # CI 工作流（ci.yml：M1 PR 门禁；integration.yml：M3 夜间集成，见 doc/cicd/）
 │   └── pr-assets/                        # PR 评审用的匿名演示截图（pr-36/：login、problemset、workspace-maximized）
 ├── scripts/
 │   └── build-plugin-scaffold.mjs          # 离线构建插件 ES module（默认脚手架；传 entry/outfile 参数构建 sdk/examples/balloon 等示例）
@@ -299,6 +299,8 @@ Hinina/
 ├── .gitattributes                        # 行尾治理（* text=auto eol=lf + binary 标记；历史 CRLF 文件已规范化）
 ├── .nvmrc                                # Node 版本固定（22.14.0，CI/本地一致）
 ├── rust-toolchain.toml                   # Rust 工具链固定（1.96.0 + rustfmt/clippy）
+├── playwright.config.ts                  # Playwright E2E 配置（chromium，webServer 起 vite dev @1420）
+├── e2e/                                  # 浏览器 E2E（fake-tauri.ts 注入 __TAURI_INTERNALS__；specs/ 首批 4 场景，见 doc/cicd/m3-integration.md）
 ```
 
 ### Vue3 前端 — `src/`（阶段 7 已完成）

@@ -1,0 +1,250 @@
+# M3 夜间集成（doc/cicd/m3-integration.md）：三平台原生构建、并发压力重复、
+# Rust 覆盖率基线、浏览器 E2E。
+# 独立 workflow，不在 ci-required 分支保护链内（必需检查仅属 ci.yml）；
+# 阻塞口径：build(windows-latest) + stress-repeat + rust-coverage + e2e → integration-summary。
+# macOS/Linux 为观测平台（施工方案 §6.2：不伪装成已支持平台）——continue-on-error 会把其
+# 失败吞成 job success，真实结果由各 build leg 自报进 Step Summary，阻塞判定不含观测平台。
+name: Integration
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 每日北京时间 10:30 = UTC 02:30
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # bundle.targets 现仅 ["nsis"]：Windows 出安装包；ubuntu/macos 跳过打包只验
+          # 原生编译（deb/app/dmg 等 bundle 类型扩展属 M4），产物为主二进制 smoke artifact。
+          - os: windows-latest
+            bundleArgs: ''
+            observability: false
+            artifactName: bundle-windows
+            artifactPath: src-tauri/target/release/bundle/nsis/*.exe
+          - os: ubuntu-24.04
+            bundleArgs: --no-bundle
+            observability: true
+            artifactName: binary-ubuntu
+            # Tauri v2 以 productName 复制主二进制，两种命名都兜上
+            artifactPath: |
+              src-tauri/target/release/hinina
+              src-tauri/target/release/Hinina
+          - os: macos-latest
+            bundleArgs: --no-bundle
+            observability: true
+            artifactName: binary-macos
+            artifactPath: |
+              src-tauri/target/release/hinina
+              src-tauri/target/release/Hinina
+    continue-on-error: ${{ matrix.observability }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
+      - name: Enable corepack (pin npm via packageManager)
+        run: corepack enable
+      - name: Verify node version matches .nvmrc
+        shell: bash
+        run: test "$(node --version)" = "v$(cat .nvmrc)"
+      - name: Install Tauri 2 system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build frontend (npm ci + vue-tsc + vite build)
+        id: npm_ci_build
+        run: |
+          npm ci
+          npm run build
+      - name: Build desktop app (tauri build)
+        id: tauri_build
+        run: npm run tauri build -- ${{ matrix.bundleArgs }}
+      # continue-on-error 下 needs.*.result 不可信：关键步骤的真实 outcome 在这里落
+      # Step Summary（汇总 job 据此展示观测平台明细，且不因其失败而红）。
+      - name: Record real build outcome
+        if: always()
+        shell: bash
+        env:
+          NPM_BUILD: ${{ steps.npm_ci_build.outcome }}
+          TAURI_BUILD: ${{ steps.tauri_build.outcome }}
+        run: |
+          outcome=success
+          for value in "$NPM_BUILD" "$TAURI_BUILD"; do
+            if [ "$value" != "success" ]; then outcome=failure; fi
+          done
+          echo "| ${{ matrix.os }} | ${outcome} |" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload smoke artifact
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.artifactName }}
+          path: ${{ matrix.artifactPath }}
+          retention-days: 7
+
+  # §6.5 定时重复：对并发与自动保存用例做 10 轮重复取抖动。
+  # 失败即止不重试——抖动按施工方案建问题单修复，发现即收敛。
+  stress-repeat:
+    name: stress-repeat
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Tauri 2 system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # `concurrent` 恰好命中 7 个并发用例；`auto_save` 命中 auto-save 组 8 个
+      # （与前者重叠 1 个——恰是最需要重复的 orphan-task 概率用例，接受重复跑）。
+      # --lib 跳过 src-tauri/tests/ 下两个 logger 集成二进制（进程级订阅器单例设计）。
+      - name: Stress repeat (concurrent + auto_save, 10 rounds)
+        run: |
+          for i in $(seq 1 10); do
+            echo "===== round $i / 10 ====="
+            cargo test --manifest-path src-tauri/Cargo.toml --locked --lib concurrent
+            cargo test --manifest-path src-tauri/Cargo.toml --locked --lib auto_save
+          done
+
+  # Rust 覆盖率基线（M2 遗留项，用户裁定留 M3 夜间）：--lib 口径与单元测试套件一致，
+  # 只报告不卡线；基线数字回写 doc/cicd/m3-integration.md。
+  rust-coverage:
+    name: rust-coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Tauri 2 system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-llvm-cov
+      - name: Add llvm-tools-preview component
+        run: rustup component add llvm-tools-preview
+      - name: Rust coverage baseline (lib unit tests)
+        working-directory: src-tauri
+        # --output-path 仅支持单一格式，text 汇总改为从 lcov 行数统计得出
+        run: |
+          cargo llvm-cov --locked --lib --lcov --output-path lcov.info
+          awk -F: '/^LF:/{lf+=$2} /^LH:/{lh+=$2} END{printf "rust-coverage baseline (lib): %d/%d lines = %.2f%%\n", lh, lf, (lf>0 ? lh*100/lf : 0)}' lcov.info
+      - name: Upload lcov report
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-coverage-lcov
+          path: src-tauri/lcov.info
+          retention-days: 14
+
+  # 浏览器 E2E（施工方案 §6.3）：真实前端 + fake internals，chromium 单引擎。
+  # 属夜间/集成层，刻意不进 ci.yml PR 门禁。
+  e2e:
+    name: e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # §6.3：runner 上显式声明浏览器缓存路径，不依赖默认值
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/.cache/ms-playwright
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
+      - name: Enable corepack (pin npm via packageManager)
+        run: corepack enable
+      - run: npm ci
+      - name: Install Playwright Chromium (with system dependencies)
+        run: npx playwright install --with-deps chromium
+      # webServer 由 playwright.config 起 vite dev（strictPort 1420）
+      - run: npx playwright test
+      # 失败保留 trace/截图/HTML 报告；fake 数据全部虚构，产物无凭证
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  # 汇总 job：阻塞口径失败（Windows 构建或 stress/coverage/e2e）则本 run 红；
+  # macOS/Linux 观测平台的失败只在 Step Summary 展示（见 build leg 的自报步骤）。
+  integration-summary:
+    name: integration-summary
+    needs: [build, stress-repeat, rust-coverage, e2e]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Summarize results and enforce blocking scope
+        run: |
+          echo "## Integration summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 检查 | 结果 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| build (windows-latest，阻塞口径) | ${{ needs.build.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| stress-repeat | ${{ needs.stress-repeat.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| rust-coverage | ${{ needs.rust-coverage.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| e2e | ${{ needs.e2e.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "macOS/Linux 构建明细见上方 build 各 leg 自报行（观测平台，不计入失败）。" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ needs.build.result }}" != "success" ] || \
+             [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || \
+             [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::integration failed (see run summary for details)"
+            exit 1
+          fi
