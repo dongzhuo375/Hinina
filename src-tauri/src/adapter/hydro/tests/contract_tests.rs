@@ -105,3 +105,58 @@ async fn login_without_sid_cookie_fails_as_auth() {
 
     server.shutdown();
 }
+
+/// 登录降级身份不进已验证用户缓存（M2 评审 P2）：探测失败的登录仍成功，
+/// 但随后的 validate_session 必须真实回访服务端 —— 探测失败判 Unknown（Err）、
+/// 服务端给出身份后恢复 Ok(true)，而不是被占位用户缓存无条件判有效。
+#[tokio::test]
+async fn validate_session_does_not_trust_degraded_cached_identity() {
+    // 探测走 raw GET：5xx 由 infra 重试（首次 + 2 次重试 = 一次探测 3 个请求）
+    let probe_500 = || ScriptedResponse::with(500, vec![], "boom");
+    let server = LoopbackServer::start(vec![
+        login_ok("sid-1"),
+        // 登录后的用户上下文探测失败（3 个请求）→ 身份降级（登录成功，uid 空）
+        probe_500(),
+        probe_500(),
+        probe_500(),
+        // validate_session 的探测同样失败（3 个请求）→ 三态契约的「无法判定」（Err）
+        probe_500(),
+        probe_500(),
+        probe_500(),
+        // 服务端恢复：给出真实身份 → 判有效
+        ScriptedResponse::json(r#"{"UserContext":{"_id":7,"uname":"alice"}}"#),
+    ])
+    .await;
+    let adapter = fixture(server.url());
+
+    adapter
+        .login("alice", "pw")
+        .await
+        .expect("探测失败不应否定登录");
+    // 登录 = POST + 1 次探测（探测 500 经 infra GET 重试，一次探测占多个请求，
+    // 故这里只断言「探测确实发生过」，不与重试次数耦合）
+    assert!(server.requests().len() >= 2);
+
+    // 关键断言：若占位用户被写入了缓存，这里会直接 Ok(true) 且不发请求
+    let requests_before_validate = server.requests().len();
+    let verdict = adapter.validate_session().await;
+    assert!(
+        verdict.is_err(),
+        "探测失败属「无法判定」，不得因降级身份缓存判有效: {:?}",
+        verdict
+    );
+    assert!(
+        server.requests().len() > requests_before_validate,
+        "validate_session 必须真实回访服务端（缓存未命中）"
+    );
+
+    assert!(
+        adapter
+            .validate_session()
+            .await
+            .expect("服务端给出身份后应判有效"),
+        "恢复路径应返回 Ok(true)"
+    );
+
+    server.shutdown();
+}

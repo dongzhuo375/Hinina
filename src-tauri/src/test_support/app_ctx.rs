@@ -40,6 +40,45 @@ pub async fn context_with_hoj(base_url: &str) -> (AppContext, TempDir) {
     (ctx, dir)
 }
 
+/// 构造**双 OJ** 全真上下文：HOJ 与 Hydro 实例均已启用并注册（各指向给定地址），
+/// 活动为 HOJ。用于验证真实的 OJ 切换（评审 P2：单 OJ 上下文里「切到自己」
+/// 无法证明注册表切换、配置持久化与缓存清理发生）。
+pub async fn context_with_two_ojs(hoj_url: &str, hydro_url: &str) -> (AppContext, TempDir) {
+    let dir = TempDir::unique("hinina-test-ctx2");
+    let config = AppConfig {
+        oj: OjConfig {
+            active: "HOJ".into(),
+            instances: vec![
+                OjInstance {
+                    id: "HOJ".into(),
+                    base_url: hoj_url.to_string(),
+                    enabled: true,
+                    options: serde_json::Map::new(),
+                },
+                OjInstance {
+                    id: "Hydro".into(),
+                    base_url: hydro_url.to_string(),
+                    enabled: true,
+                    options: serde_json::Map::new(),
+                },
+            ],
+            ..OjConfig::default()
+        },
+        ..AppConfig::default()
+    };
+    std::fs::create_dir_all(dir.path()).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string(&config).unwrap(),
+    )
+    .unwrap();
+
+    let ctx = AppContext::init(dir.to_path_buf(), dir.to_path_buf(), DataDirSource::Default)
+        .await
+        .expect("AppContext::init 失败");
+    (ctx, dir)
+}
+
 /// 在 `submissions/{oj_id}/` 下造一份提交留档，返回其字节数。
 ///
 /// `stale` 为真时把修改时间拨回保留窗口之外（`SNAPSHOT_KEEP_DAYS` 之上），

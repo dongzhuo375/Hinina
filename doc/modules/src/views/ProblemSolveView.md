@@ -107,3 +107,7 @@ load(id):
 ## 测试（M2）
 
 `__tests__/ProblemSolveView.spec.ts`（store 整店打桩 + 共享挂载 helper）：切题先落盘脏工作区（saveWorkspace 先于 loadWorkspace）、迟到响应不覆盖新题、加载失败后旧题与新路由不配对时拒绝提交（PR21-8 防错题提交）、卸载时落盘在途改动。
+
+## 提交配对的第二道校验（M2 评审 P1）
+
+`handleSubmit` 除 displayId 配对外，还要求 `currentProblem.id === loadedProblemId`（本次成功加载写入的题目真实 ID）。原因：`openProblem` 对迟到的旧题响应**没有过期防护**（store 无条件写入 currentProblem），视图的 loadToken 只能丢弃旧加载的编排、无法撤销已发生的 store 写入 —— 会出现「配对标记是 B、currentProblem 被迟到响应改回 A」的脏状态，displayId 配对对此失明（放行会把 B 的代码以 A 的 problem.id 提交）。竞态测试的迟到 mock 复刻该真实写入语义。

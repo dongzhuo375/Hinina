@@ -18,7 +18,7 @@
 
 - **Rust**：748 → **775**（净 +27 = 新增 31 − 删除 4）。新增构成：loopback 底座 2、命令层 16、适配器契约 8（HOJ 6 + Hydro 2）、http 真实传输 5。删除：`mod_tests.rs` 的 4 个复制等价逻辑用例。
 - **前端**：539 → **557**（+18）。构成：sessionGuard 5、ProblemSolveView 4、SettingsView 3、main 2、problemStore 4。
-- **覆盖率基线**（本地，2026-10-25，V8，include `src/**`、未加载文件计 0%）：**行 55.74% / 分支 54.41%**。只报告不卡线；棘轮（ratchet）待基线稳定后按 `commands`、`adapter transport`、`views/guards` 等关键区域设置。
+- **覆盖率基线**（2026-10-25，V8，include `src/**`、未加载文件计 0%；列名按报告口径标注）：**行 57.25% / 分支 54.48% / 语句 55.74%**（CI 首跑报告为行 57.27%，环境差异 ±0.02，以同口径重跑为准）。只报告不卡线；棘轮（ratchet）待基线稳定后按 `commands`、`adapter transport`、`views/guards` 等关键区域设置。
 
 ## 三、变异验证（施工方案 §5.2 要求）
 
@@ -30,17 +30,19 @@
 2. **OJ 实例 id 大小写敏感**：工厂声明为 `"HOJ"`/`"Hydro"`，测试配置写 `"hoj"` 会被静默跳过注册（warn「配置了未知 OJ」）。已写入 `test_support.md` 的约束节。
 3. **vitest 5 移除了 `coverage.all`**：显式给出 `coverage.include` 后未加载的匹配文件默认以 0% 计入，无需该选项（类型层面直接报错发现的）。
 4. **CI 首跑暴露 main.spec 两处时序依赖（本地侥幸通过）**：① `main.ts` 的 DEV 分支在 `window` 上 `defineProperty('hininaPlugins')`（不可配置），逐用例重置模块后二次导入必抛 "Cannot redefine property"（CI 以未处理错误判红；本地因动态 import 的异步时序侥幸过）——修法：`vi.stubEnv('DEV', false)` 跳过该分支 + 单次导入；② vite.config 全局 `clearMocks: true` 在每个测试前清 mock 记录，而装配发生在 beforeAll 导入期——修法：导入后立即把调用次数与事件 handler 快照进普通对象再断言。另将 V8 覆盖器无法解析的 `CodeEditor.vue`（Monaco 壳）显式加入 coverage 排除（vitest 本就只是排除并告警，显式化保持日志干净）。
+5. **（评审 P1，生产缺陷）快速切题竞态可绕过提交配对**：`openProblem` 对迟到响应无过期防护（无条件写 currentProblem），视图 loadToken 只丢弃旧加载编排、无法撤销 store 写入 —— 「配对标记 B、currentProblem 被改回 A」的脏状态下 displayId 配对放行，B 的代码会以 A 的 problem.id 提交。修复：视图记录本次成功加载的真实 `problemId`，`handleSubmit` 增加 `currentProblem.id === loadedProblemId` 第二道校验；竞态测试的迟到 mock 改为复刻真实写入语义（原 mock 只返回 undefined，测试对实际竞态失明）。
+6. **（评审 P2，生产缺陷）Hydro 降级身份入缓存致会话校验恒真**：登录探测失败/匿名时把空 id 占位用户写入已验证用户缓存，`validate_session` 经缓存短路无条件判 `Ok(true)`（匿名判有效、网络失败判有效，违反三态契约）。修复：降级身份只用于登录返回值展示、不写缓存；契约测试延伸到 validate_session（探测失败判 Err、服务端恢复判 Ok(true)、真实回访服务端）。
 
 ## 五、范围收窄与遗留
 
 - **SettingsView 只测维护区**（3 例）：全页 1668 行、mock 面大，保存/切换/数据目录流留待按需补充（已在模块文档注明）。
 - Rust `llvm-cov` 基线未做（用户裁定留 M3 夜间）。
 - E2E / 桌面 smoke 属 M3；fmt/clippy 存量清零（E2/E3）与 749/748 计数差异核实属 PR2，本 PR 未动。
-- 前端覆盖率对 `src/main.ts` 计 0%（组合根无独立可测面，装配行为已由 `main.spec.ts` 验证但 V8 对入口文件的统计口径如此）——基线已知噪音，不影响区域棘轮。
+- `src/main.ts`（组合根）与 Monaco 壳 `CodeEditor.vue` 在 coverage 配置中显式排除：组合根无独立可测面（装配行为已由 `main.spec.ts` 验证），后者 V8 覆盖器无法解析（不排除只会得到「排除并告警」的噪音）。
 
 ## 六、验证记录（本地，2026-10-25）
 
 - `cargo test --lib`：775 通过 / 0 失败（并行五连跑全绿，崩溃已消除）。
 - `npm test`：43 文件 / 557 通过；`npm run build`（vue-tsc + vite）通过；`npx tsc -p tsconfig.node.json --noEmit` 通过。
-- `npm run test:coverage`：产出报告，基线数字见 §二。
+- `npm run test:coverage`：产出报告，基线数字见 §二（评审修正：初版把 Statements 列误标为 Lines）。
 - CI 首跑（run 40182012394）：frontend 红（上述 §四.4 的 main.spec 时序问题，本地未能复现）；rust-test 双平台绿、rust-lint 红（E2/E3 预期内）。修复后由后续运行复验 coverage 步骤与 artifact 上传。

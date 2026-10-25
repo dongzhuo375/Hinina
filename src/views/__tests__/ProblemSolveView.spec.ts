@@ -127,10 +127,15 @@ describe('ProblemSolveView 加载与切题编排', () => {
     await m2.unmount()
   })
 
-  it('快速切题：迟到响应不得覆盖新题，提交使用新题配对', async () => {
+  it('快速切题：迟到的旧题响应覆盖 store 后，提交守卫拒绝错配（评审 P1）', async () => {
+    // 复刻真实语义：openProblem 对迟到响应**没有过期防护**，会无条件写入
+    // currentProblem（problemStore.ts）。视图的 loadToken 只丢弃旧加载的编排，
+    // 撤销不了已发生的 store 写入 —— 因此这里让 A 的迟到 mock 真实写入 p-A。
     const lateA = deferred<void>()
-    const fastB = deferred<void>()
-    storeMocks.problem.openProblem.mockImplementationOnce(() => lateA.promise)
+    storeMocks.problem.openProblem.mockImplementationOnce(async () => {
+      await lateA.promise
+      storeMocks.problem.currentProblem = problemOf('p-A', 'A')
+    })
     storeMocks.problem.openProblem.mockImplementationOnce(async () => {
       storeMocks.problem.currentProblem = problemOf('p-B', 'B')
     })
@@ -138,22 +143,20 @@ describe('ProblemSolveView 加载与切题编排', () => {
     const m = await mountView(ProblemSolveView)
     route.params = { displayId: 'B' }
     for (let i = 0; i < 10; i += 1) await Promise.resolve()
-    // B 已就位，A 的响应此时才回来
+    // B 已就位（配对标记 = B），A 的响应此时才回来并无条件覆盖 store
     lateA.resolve(undefined)
     for (let i = 0; i < 10; i += 1) await Promise.resolve()
 
-    expect(storeMocks.problem.currentProblem?.id).toBe('p-B') // 迟到响应不得把视图拉回旧题
-    void fastB
+    // store 已被迟到响应改回旧题（真实语义，视图无法阻止）
+    expect(storeMocks.problem.currentProblem?.id).toBe('p-A')
 
-    // 配对成立（loadedProblemDisplayId == B），提交必须走新题
+    // 脏状态下提交：displayId 配对仍是 B（第一道校验放行），
+    // 但 currentProblem.id 与本次成功加载写入的真实 ID 不一致 —— 必须拒绝，
+    // 否则 B 的代码会以 A 的 problem.id 提交
     storeMocks.workspace.code = 'code-B'
     editorSubmit.handler?.()
     for (let i = 0; i < 6; i += 1) await Promise.resolve()
-    expect(storeMocks.submission.submitCode).toHaveBeenCalledTimes(1)
-    const submitArgs = storeMocks.submission.submitCode.mock.calls as unknown as [
-      string, string, string, string, string,
-    ][]
-    expect(submitArgs[0]?.[1]).toBe('p-B')
+    expect(storeMocks.submission.submitCode).not.toHaveBeenCalled()
 
     await m.unmount()
   })

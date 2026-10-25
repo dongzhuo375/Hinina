@@ -1,4 +1,4 @@
-﻿// Hydro Adapter：实现 Auth + Contest + Problem + Submission 四个 trait。
+// Hydro Adapter：实现 Auth + Contest + Problem + Submission 四个 trait。
 //
 // 目标对象是**上游 Hydro OJ**（`packages/hydrooj`），与 `adapter/hoj` 的 HOJ
 // （Hydro 衍生版，自带 REST + JWT 层）是两套不同协议，故不能复用 HOJ 的调用方式：
@@ -37,8 +37,8 @@ use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::problem::Problem;
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::entity::submission::{
-    JudgeCase, JudgementResult, SubmissionCases, SubmissionDetail, SubmissionPage, SubmissionQuery,
-    SubmissionRecord, SubTaskCases,
+    JudgeCase, JudgementResult, SubTaskCases, SubmissionCases, SubmissionDetail, SubmissionPage,
+    SubmissionQuery, SubmissionRecord,
 };
 use crate::core::entity::user::User;
 use crate::core::error::{AppError, AppResult};
@@ -171,9 +171,8 @@ impl HydroResponse {
     fn into_json<T: DeserializeOwned>(self) -> AppResult<T> {
         let url = self.url.clone();
         let value = self.into_value()?;
-        serde_json::from_value::<T>(value).map_err(|e| {
-            AppError::Serialization(format!("Hydro 响应字段不匹配 {}: {}", url, e))
-        })
+        serde_json::from_value::<T>(value)
+            .map_err(|e| AppError::Serialization(format!("Hydro 响应字段不匹配 {}: {}", url, e)))
     }
 }
 
@@ -594,10 +593,7 @@ impl HydroAdapter {
                     .map(types::coerce_id)
                     .filter(|s| !s.is_empty())
                     .unwrap_or_default();
-                let index = pids
-                    .iter()
-                    .position(|pid| *pid == doc_id)
-                    .unwrap_or(order);
+                let index = pids.iter().position(|pid| *pid == doc_id).unwrap_or(order);
                 ContestProblem {
                     // Hydro 的题目主键是数字 docId，与 `ContestProblem.id: i64` 同域
                     id: pdoc.doc_id_num(),
@@ -715,7 +711,10 @@ impl HydroAdapter {
                 .map(types::display_letter)
                 .unwrap_or_default(),
             pid,
-            username: udict.get(&uid).map(UserBriefVO::display).unwrap_or_default(),
+            username: udict
+                .get(&uid)
+                .map(UserBriefVO::display)
+                .unwrap_or_default(),
             submit_time: rdoc.submit_time(),
             status: types::map_status(rdoc.status_code()),
             time_ms,
@@ -807,9 +806,8 @@ impl AuthProvider for HydroAdapter {
             .await
             .map_err(|e| e.context("Hydro 登录"))?;
 
-        let sid = types::extract_sid(&response.headers).ok_or_else(|| {
-            AppError::Auth("Hydro 登录响应未携带会话 Cookie（sid）".into())
-        })?;
+        let sid = types::extract_sid(&response.headers)
+            .ok_or_else(|| AppError::Auth("Hydro 登录响应未携带会话 Cookie（sid）".into()))?;
         // 先取会话再消费响应体：错误包络（LoginError 等）在这里被翻译成 AppError
         let _: Value = response.into_value().map_err(|e| {
             warn!(error = %e, "Hydro 登录失败");
@@ -818,7 +816,13 @@ impl AuthProvider for HydroAdapter {
 
         self.set_session(Some(sid.clone()));
         // 取 uid/uname：失败时降级为「用输入的用户名」，不让一次上下文探测
-        // 失败否定已经建立好的会话
+        // 失败否定已经建立好的会话。
+        //
+        // **降级身份只用于登录返回值展示，绝不写入已验证用户缓存**（`self.user`）：
+        // `probe_user_context` 命中缓存即直接返回，占位用户一旦入缓存，
+        // `validate_session` 会无条件判 `Ok(true)` —— 明确匿名的会话被判有效、
+        // 本应 Unknown 的网络失败也被判有效，违反同文件的三态契约。
+        // 服务端已验证的身份由 probe 成功路径自行缓存（见其内部 set_user）。
         let user = match self.probe_user_context().await {
             Ok(Some(user)) => user,
             Ok(None) => {
@@ -836,7 +840,6 @@ impl AuthProvider for HydroAdapter {
                 }
             }
         };
-        self.set_user(Some(user.clone()));
 
         info!(username = user.uname, uid = user.id, "Hydro 登录成功");
         Ok(User {
@@ -856,10 +859,7 @@ impl AuthProvider for HydroAdapter {
             self.clear_identity();
             return Ok(());
         }
-        if let Err(e) = self
-            .post_json::<Value>("/logout", None)
-            .await
-        {
+        if let Err(e) = self.post_json::<Value>("/logout", None).await {
             warn!(error = %e, "Hydro 远端登出失败，仅清除本地身份");
         }
         self.clear_identity();
@@ -989,7 +989,11 @@ impl ContestProvider for HydroAdapter {
             .get_json(&format!("/contest/{}/scoreboard", contest_id), false)
             .await
             .map_err(|e| e.context("Hydro 榜单"))?;
-        if query.keyword.as_deref().is_some_and(|k| !k.trim().is_empty()) {
+        if query
+            .keyword
+            .as_deref()
+            .is_some_and(|k| !k.trim().is_empty())
+        {
             debug!("Hydro 榜单不支持服务端关键词搜索，本次搜索条件被忽略");
         }
         let page = types::scoreboard_rank_page(&vo);
@@ -1105,7 +1109,11 @@ impl ProblemProvider for HydroAdapter {
                 statuses.insert(pid.clone(), code);
             }
         }
-        debug!(contest_id = contest_id, count = statuses.len(), "Hydro 题目状态已获取");
+        debug!(
+            contest_id = contest_id,
+            count = statuses.len(),
+            "Hydro 题目状态已获取"
+        );
         Ok(statuses)
     }
 }
@@ -1193,10 +1201,7 @@ impl SubmissionProvider for HydroAdapter {
     /// - Hydro **不返回总条数**，故 `total`/`pages` 只能按假定页大小推导（D8）；
     /// - `status` 收 Hydro 码，前端传的是 HOJ 码 → 经 `types::hoj_status_to_hydro` 翻译，
     ///   无对应语义时明确报错而不是静默忽略筛选（D13）。
-    async fn list_contest_submissions(
-        &self,
-        query: &SubmissionQuery,
-    ) -> AppResult<SubmissionPage> {
+    async fn list_contest_submissions(&self, query: &SubmissionQuery) -> AppResult<SubmissionPage> {
         let page = query.current_page.max(1);
         let mut path = format!("/record?page={}", page);
         if !query.contest_id.trim().is_empty() {
@@ -1321,7 +1326,11 @@ impl SubmissionProvider for HydroAdapter {
             .and_then(|config| config.kind)
             .unwrap_or_else(|| "default".to_string());
 
-        debug!(submit_id = submit_id, cases = cases.len(), "Hydro 测试点结果已获取");
+        debug!(
+            submit_id = submit_id,
+            cases = cases.len(),
+            "Hydro 测试点结果已获取"
+        );
         Ok(SubmissionCases {
             cases,
             sub_tasks,
@@ -1329,7 +1338,6 @@ impl SubmissionProvider for HydroAdapter {
         })
     }
 }
-
 
 // ── 适配器工厂 ──
 
