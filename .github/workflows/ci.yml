@@ -1,0 +1,115 @@
+# M1 最小 PR CI（doc/cicd/m1-pr-gate.md）
+# 阻塞链：frontend + rust-test → ci-required（分支保护必需检查）
+# rust-lint 首版非阻塞：存量 fmt/clippy 欠账清零（E2/E3，PR2）后并入 ci-required。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
+      - name: Enable corepack (pin npm via packageManager)
+        run: corepack enable
+      - name: Verify node version matches .nvmrc
+        run: test "$(node --version)" = "v$(cat .nvmrc)"
+      - run: npm ci
+      - run: npx tsc -p tsconfig.node.json --noEmit
+      - run: npm run plugin:sdk:check
+      - run: npm test
+      - run: npm run build
+
+  rust-lint:
+    name: rust-lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Tauri 2 系统依赖 + QuickJS C 编译前提（doc/cicd/m0-baseline.md §四）
+      - name: Install Tauri 2 system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      # --locked 同时充当锁文件校验：Cargo.lock 与 Cargo.toml 不同步时直接失败
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+
+  rust-test:
+    name: rust-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Tauri 2 system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --all-targets
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --doc
+
+  # 汇总 job：作为分支保护的唯一必需检查名（稳定名，改名须同步分支保护）。
+  # rust-lint 刻意不在 needs 内（首版非阻塞）。
+  ci-required:
+    name: ci-required
+    needs: [frontend, rust-test]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Fail if any required job failed or was cancelled
+        run: |
+          echo "frontend=${{ needs.frontend.result }} rust-test=${{ needs.rust-test.result }}"
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || \
+             [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::a required job failed or was cancelled"
+            exit 1
+          fi

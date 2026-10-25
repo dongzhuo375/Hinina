@@ -1,0 +1,13 @@
+# 文本文件统一以 LF 入库并检出：终结混合行尾，CI 与 diff 不再受 CRLF 干扰。
+# 规范化背景与 10 个历史 CRLF 文件的独立提交见 doc/cicd/m1-pr-gate.md。
+* text=auto eol=lf
+
+# 二进制文件：不做任何行尾或编码转换
+*.png binary
+*.ico binary
+*.icns binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pdf binary

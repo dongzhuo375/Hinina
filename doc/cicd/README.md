@@ -10,3 +10,4 @@
 ## 目录内容
 
 - [m0-baseline.md](m0-baseline.md) — M0 基线冻结（2026-10-25）：工具链基线、10 条检查命令实测结果、问题分类、Ubuntu runner 准备步骤、workflow 稳定命名与 M1 阻塞性判定。
+- [m1-pr-gate.md](m1-pr-gate.md) — M1 最小 PR CI（2026-10-25，PR #50）：ci.yml 结构与三项决策、行尾治理、E1 修复、首跑逐 job 结果（Ubuntu Rust 套件首跑全绿、非阻塞汇总语义实证）、合并后保护配置与验收清单。
