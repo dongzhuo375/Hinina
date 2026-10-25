@@ -8,24 +8,6 @@ use super::*;
 use crate::test_support::app_ctx::context_with_hoj;
 use crate::test_support::loopback::{LoopbackServer, ScriptedResponse};
 
-/// 测试用参数构造（结构体字段收敛点，评审 #9 配套）。
-#[allow(clippy::too_many_arguments)]
-fn params(
-    contest_id: &str,
-    current_page: Option<i64>,
-    limit: Option<i64>,
-    problem_display_id: Option<String>,
-    status: Option<i32>,
-) -> super::ListSubmissionsParams {
-    super::ListSubmissionsParams {
-        contest_id: contest_id.into(),
-        current_page,
-        limit,
-        problem_display_id,
-        status,
-    }
-}
-
 /// HOJ 提交列表的成功响应（信封 {status,msg,data}；JudgeVO 全字段 serde(default)，
 /// 空对象即可映射）。与真实协议的差异由适配器契约测试（hoj/tests/contract_tests.rs）覆盖。
 fn submissions_page() -> ScriptedResponse {
@@ -39,7 +21,7 @@ async fn only_mine_is_forced_and_defaults_applied() {
     let server = LoopbackServer::start(vec![submissions_page()]).await;
     let (ctx, _dir) = context_with_hoj(server.url()).await;
 
-    let page = list_contest_submissions_impl(&ctx, params("1001", None, None, None, None))
+    let page = list_contest_submissions_impl(&ctx, "1001".into(), None, None, None, None)
         .await
         .expect("默认参数应成功");
 
@@ -73,7 +55,7 @@ async fn paging_clamps_and_blank_filter_is_dropped() {
 
     list_contest_submissions_impl(
         &ctx,
-        params("1001", Some(-5), Some(0), Some("   ".into()), None),
+        "1001".into(), Some(-5), Some(0), Some("   ".into()), None,
     )
     .await
     .expect("非法入参应被钳制而不是报错");
@@ -98,7 +80,7 @@ async fn optional_filters_pass_through() {
 
     list_contest_submissions_impl(
         &ctx,
-        params("1001", Some(3), Some(100), Some("A".into()), Some(-1)),
+        "1001".into(), Some(3), Some(100), Some("A".into()), Some(-1),
     )
     .await
     .unwrap();

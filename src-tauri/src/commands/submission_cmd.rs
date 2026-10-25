@@ -80,40 +80,27 @@ pub async fn list_contest_submissions(
 ) -> AppResult<SubmissionPage> {
     list_contest_submissions_impl(
         &ctx,
-        ListSubmissionsParams {
-            contest_id,
-            current_page,
-            limit,
-            problem_display_id,
-            status,
-        },
-    )
-    .await
-}
-
-/// `list_contest_submissions` 的原始入参（评审 #9：参数收敛为结构体，
-/// 命令与实现之间不再逐参转发——新增筛选参数只改两处，不再两份签名漂移）。
-pub(crate) struct ListSubmissionsParams {
-    pub contest_id: String,
-    pub current_page: Option<i64>,
-    pub limit: Option<i64>,
-    pub problem_display_id: Option<String>,
-    pub status: Option<i32>,
-}
-
-/// `list_contest_submissions` 的参数编排（提取自命令本体，供命令与测试共用）：
-/// 分页默认值与钳制、`only_mine` 强制、空白筛选过滤。
-pub(crate) async fn list_contest_submissions_impl(
-    ctx: &AppContext,
-    params: ListSubmissionsParams,
-) -> AppResult<SubmissionPage> {
-    let ListSubmissionsParams {
         contest_id,
         current_page,
         limit,
         problem_display_id,
         status,
-    } = params;
+    )
+    .await
+}
+
+/// `list_contest_submissions` 的参数编排（提取自命令本体，供命令与测试共用）：
+/// 分页默认值与钳制、`only_mine` 强制、空白筛选过滤。
+/// 评审 #13 定稿：5 参未超 clippy 阈值，保持逐参（仅 7 参的 get_contest_rank
+/// 保留参数结构体）。
+pub(crate) async fn list_contest_submissions_impl(
+    ctx: &AppContext,
+    contest_id: String,
+    current_page: Option<i64>,
+    limit: Option<i64>,
+    problem_display_id: Option<String>,
+    status: Option<i32>,
+) -> AppResult<SubmissionPage> {
     let query = SubmissionQuery {
         current_page: current_page.unwrap_or(1).max(1),
         limit: limit.unwrap_or(DEFAULT_SUBMISSION_LIMIT).max(1),

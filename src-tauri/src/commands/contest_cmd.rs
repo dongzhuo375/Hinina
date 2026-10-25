@@ -152,34 +152,17 @@ pub async fn list_contest_announcements(
     current_page: Option<i64>,
     limit: Option<i64>,
 ) -> AppResult<AnnouncementPage> {
-    list_contest_announcements_impl(
-        &ctx,
-        AnnouncementsParams {
-            contest_id,
-            current_page,
-            limit,
-        },
-    )
-    .await
-}
-
-/// `list_contest_announcements` 的原始入参（评审 #9，同 `RankParams`）。
-pub(crate) struct AnnouncementsParams {
-    pub contest_id: String,
-    pub current_page: Option<i64>,
-    pub limit: Option<i64>,
+    list_contest_announcements_impl(&ctx, contest_id, current_page, limit).await
 }
 
 /// `list_contest_announcements` 的参数编排（提取自命令本体，供命令与测试共用）。
+/// 评审 #13 定稿：4 参保持逐参（仅 7 参的 get_contest_rank 保留参数结构体）。
 pub(crate) async fn list_contest_announcements_impl(
     ctx: &AppContext,
-    params: AnnouncementsParams,
+    contest_id: String,
+    current_page: Option<i64>,
+    limit: Option<i64>,
 ) -> AppResult<AnnouncementPage> {
-    let AnnouncementsParams {
-        contest_id,
-        current_page,
-        limit,
-    } = params;
     let page = current_page.unwrap_or(1).max(1);
     let limit = limit.unwrap_or(DEFAULT_ANNOUNCEMENT_LIMIT).max(1);
 

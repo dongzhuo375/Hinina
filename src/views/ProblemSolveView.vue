@@ -267,7 +267,7 @@ async function handleSubmit() {
   // 全程）：此间隙 workspaceStore.code 已是新题代码而 problemStore.currentProblem
   // 仍是旧题，放行会把新题代码提交到旧题题号下（PR21-8 评审）
   if (isLoadingPage) {
-    submissionStore.error = '题目仍在切换中，请稍候再提交'
+    submissionStore.reportSubmitBlocked('题目仍在切换中，请稍候再提交')
     return
   }
   const contestId = contestStore.contest?.id
@@ -280,11 +280,11 @@ async function handleSubmit() {
   // 此处是失败路径错配与防御纵深的兜底。拒绝必须可见 —— 静默 return 会让
   // 「点提交没反应」看起来像按钮坏了（M2 评审 P2），复用控制台条的错误面。
   if (loadedProblemDisplayId !== displayId.value) {
-    submissionStore.error = '题目仍在切换中，请稍候再提交'
+    submissionStore.reportSubmitBlocked('题目仍在切换中，请稍候再提交')
     return
   }
   if (loadedProblemId !== problem.id) {
-    submissionStore.error = '题目数据与当前题号不一致，已阻止提交；请等待加载完成后重试'
+    submissionStore.reportSubmitBlocked('题目数据与当前题号不一致，已阻止提交；请等待加载完成后重试')
     return
   }
   try {

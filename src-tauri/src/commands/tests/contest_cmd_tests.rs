@@ -63,16 +63,9 @@ async fn announcement_paging_defaults_and_clamping() {
     .await;
     let (ctx, _dir) = context_with_hoj(server.url()).await;
 
-    list_contest_announcements_impl(
-        &ctx,
-        super::AnnouncementsParams {
-            contest_id: "1001".into(),
-            current_page: Some(0),
-            limit: Some(-3),
-        },
-    )
-    .await
-    .expect("非法分页应钳制");
+    list_contest_announcements_impl(&ctx, "1001".into(), Some(0), Some(-3))
+        .await
+        .expect("非法分页应钳制");
 
     let path = &server.requests()[0].path;
     assert!(path.contains("currentPage=1"), "钳制到 1: {}", path);
