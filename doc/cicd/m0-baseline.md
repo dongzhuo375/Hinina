@@ -16,7 +16,7 @@
 | clippy | 0.1.96 (ac68faa20) | 已安装 |
 | 默认 target | x86_64-pc-windows-msvc | 唯一已安装 target |
 | 操作系统 | Windows 10.0.26200 x64 | |
-| npm 缓存 | `D:\nodejs\node_cache` | 在 C 盘外，符合仓库约定；但存在 ACL 故障（见 E4） |
+| npm 缓存 | `D:\nodejs\node_cache` | 在 C 盘外，符合仓库约定；执行当日曾现 ACL 故障（见 E4，当日已修复） |
 
 ## 二、命令执行结果（施工方案 §3.2.2 全量，逐条实测）
 
@@ -44,7 +44,7 @@
 | E1 | `tsc -p tsconfig.node.json --noEmit` 失败：`@types/node` 不在 devDependencies，`tsconfig.node.json` 亦无 `types` 配置 | 存量依赖缺口（非本机问题、非产品缺陷） | `02-tsc-node.log`；package.json devDependencies 无 `@types/node` | **阻塞 M1 frontend job 的 tsc-node 步骤**。修复：新增 `@types/node` devDependency（按仓库约定先与用户确认安装位置）→ 归 PR1/PR2 |
 | E2 | rustfmt 220 个差异块，全模块分布 | 存量格式欠账 | `06-cargo-fmt.log`（2730 行 diff） | 修复 = 一次性 `cargo fmt` 全量格式化，独立提交 → PR2 |
 | E3 | clippy `-D warnings` 下 7 个错误 | 存量 lint 欠账 | `07-cargo-clippy.log` | 4 类均为机械改写；PR2 清零后将 rust-lint 设为必需检查（施工方案 §4.2 原设计） |
-| E4 | `D:\nodejs\node_cache` 全树对普通用户不可写（ACL 仅 Administrators/SYSTEM 有写权，Users/Authenticated Users 只读），npm 写缓存 EPERM；非提升会话连 `icacls /grant` 亦被拒 | 本机环境故障（仅影响本机，不影响 CI） | `01-npm-ci.log` 首次失败记录 + icacls 探测输出 | **需本机管理员终端执行**：`icacls "D:\nodejs\node_cache" /grant "hdz:(OI)(CI)M" /T`；回滚：`icacls "D:\nodejs\node_cache" /remove:d hdz /T`。本次以回退缓存绕过完成基线 |
+| E4 | `D:\nodejs\node_cache` 全树对普通用户不可写（ACL 仅 Administrators/SYSTEM 有写权，Users/Authenticated Users 只读），npm 写缓存 EPERM；非提升会话连 `icacls /grant` 亦被拒 | 本机环境故障（仅影响本机，不影响 CI；**已闭环**） | `01-npm-ci.log` 首次失败记录 + icacls 探测输出 | **已修复（2026-10-25）**：本机管理员终端执行 `icacls "D:\nodejs\node_cache" /grant "hdz:(OI)(CI)M" /T`，探测确认可写；回滚命令：`icacls "D:\nodejs\node_cache" /remove:d hdz /T`。基线执行时以工作区回退缓存绕过（该缓存已删除） |
 | — | 产品缺陷 | 无 | 测试 0 失败、构建全通过 | — |
 | — | 测试错误或抖动 | 无（本次无 flaky；749/748 差异非抖动） | `04`/`08` 日志 | — |
 | — | CI 配置尚未具备 | 无 workflows（by design，M1 施工） | `.github/` 仅 copilot-instructions.md | — |
@@ -104,12 +104,12 @@ sudo apt install -y \
 
 ## 九、分支与 PR 顺序（照录施工方案 §十，M0 产出的两个提交在前）
 
-分支 `chore/ci-m0-baseline` 已含：`3bc2398` chore(repo): ignore local planning notes under doc/local；`265e918` chore(ci): pin node and rust toolchain baselines（.nvmrc / rust-toolchain.toml / package.json engines / Architecture.md 根目录树同步）。
+分支 `chore/ci-m0-baseline` 已含：`3bc2398` chore(repo): ignore local planning notes under doc/local；`265e918` chore(ci): pin node and rust toolchain baselines（.nvmrc / rust-toolchain.toml / package.json engines / Architecture.md 根目录树同步）；本记录入库 `doc/cicd/`（`1b619a1`，另含 E4 闭环补充）。
 
 后续 PR 顺序：① 工具链固定、engines.node、.gitattributes 行尾治理与最小 ci.yml → ② 存量 lint/test 基线修复（E1/E2/E3）→ ③ 真实 Command 测试 → ④ 本地 HTTP 与 Adapter 契约测试 → ⑤ 关键前端测试 → ⑥ 覆盖率与夜间构建 → ⑦ Playwright 与桌面 smoke → ⑧ 版本门禁与草稿 Release（含 CHANGELOG/RELEASE/SECURITY）→ ⑨ OS 签名与平台扩展 → ⑩ Updater 与供应链。
 
 ## 十、遗留事项
 
-- E4 ACL 修复待本机管理员终端执行（§三）；修复后可删除工作区回退缓存 `doc/local/m0-npm-cache/`（88MB，不入库）。
+- ~~E4 ACL 修复~~ 已完成（2026-10-25，见 §三）；工作区回退缓存 `doc/local/m0-npm-cache/`（88MB，不入库）已删除。
 - 749/748 测试计数差异待 PR2 核实（§二）。
 - 开发手册 §5.3「CI 自动发布」等描述仍超前于现状，按施工方案 §11.2 在 M1 落地后统一纠正。
