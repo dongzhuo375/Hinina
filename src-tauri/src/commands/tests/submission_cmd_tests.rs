@@ -9,7 +9,7 @@ use crate::test_support::app_ctx::context_with_hoj;
 use crate::test_support::loopback::{LoopbackServer, ScriptedResponse};
 
 /// HOJ 提交列表的成功响应（信封 {status,msg,data}；JudgeVO 全字段 serde(default)，
-/// 空对象即可映射）。与真实协议的差异由适配器契约测试（hoj/tests/contract_tests.rs）覆盖。
+/// 空对象即可映射）。与真实协议的差异由适配器契约测试（hoj/tests/mod_tests.rs 契约段）覆盖。
 fn submissions_page() -> ScriptedResponse {
     ScriptedResponse::json(
         r#"{"status":200,"msg":"success","data":{"records":[{}],"total":1,"size":20,"current":1,"pages":1}}"#,

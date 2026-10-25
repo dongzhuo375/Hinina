@@ -13,7 +13,7 @@
 ## 依赖关系
 
 - 只被 `#[cfg(test)]` 目标编译；依赖 tokio / reqwest / serde_json（均为既有多带依赖）。
-- 适配器契约测试（`adapter/{hoj,hydro}/tests/contract_tests.rs`）、命令测试（`commands/tests/*_cmd_tests.rs`）、http 传输测试（`infra/tests/http_tests.rs`）共用。
+- 适配器契约测试（`adapter/{hoj,hydro}/tests/mod_tests.rs` 契约段）、命令测试（`commands/tests/*_cmd_tests.rs`）、http 传输测试（`infra/tests/http_tests.rs`）共用。
 
 ## 相关约束
 

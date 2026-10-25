@@ -74,3 +74,27 @@
 **施工教训（两次踩坑）**：对已 rustfmt 重排过的文件做字符串替换必须以重新读取的内容为准——本轮两次 python 批量替换因目标串与磁盘文本不符而静默无效（其一导致 git restore 误覆盖未提交修复，其二导致测试断言与扩展代码三处未写入、诊断走了弯路）。多段替换要么用带断言的精确工具（Edit），要么逐段 `assert in` 后再写盘。
 
 **CI 补课**：上述教训的直接代价——CI 首跑 frontend 红（本地 vitest 全绿但 vue-tsc 红）：追加测试段时重犯 matcher 消息参数错误 + 引用未导入类型，而 `vitest run` 不做类型检查、全量 build 又跑在追加之前。修复后以 `npm run build`（vue-tsc）作为追加测试后的**必跑项**，不因单文件 vitest 绿而省略。
+
+## 十二、评审第三轮（2026-10-25，15 条 + 2 条文档，逐条验证后处置）
+
+| # | 意见 | 处置 |
+|---|---|---|
+| 1 | probe 无条件写共享身份缓存（慢响应晚到跨账号串号） | 代际保护：探测记录发起时会话，响应回来会话已变即整体作废（Err Unknown），不写缓存不作结论（`9705acc`） |
+| 2 | validate 晚到的「匿名」判定误踢新登录者 | 同一代际保护覆盖：#1 的作废路径使 Ok(false)/Auth 分支只在会话未变时可达；「服务层与 store 无代际校验」为全局既有窗口（HOJ 同样存在），记录为本 PR 之外遗留 |
+| 3 | hydro mod_tests 3 处 fmt | cargo fmt 该文件（0 残留） |
+| 4 | 登录降级注释语义相反 | 改回「不得否定已经建立好的会话」并并入降级说明 |
+| 5 | problemStore 文档注释拼接错位 | 修复换行 |
+| 6 | isLoadingPage 守卫静默 | 三道守卫统一可见反馈（经 store action，见 #14） |
+| 7 | 提交缺正向断言 | 新增正向用例：配对正确时 submitCode 以正确题目 ID 调用且无错误（守卫恒拒时旧测试全绿的问题被堵住） |
+| 8 | 断言中含赋值 | 状态准备拆为独立语句 |
+| 9 | 固定次数 Promise.resolve 等待 | 全部改为 vi.waitFor 等可观察条件（mockRejectedValueOnce 路径不经过默认实现的限制已注明） |
+| 10 | 失败用例残留挂载实例 | afterEach 统一卸载 |
+| 11 | ok 集成测试依赖宿主 RUST_LOG | 测试内显式 `set_var("RUST_LOG","info")`（RUST_LOG=warn 下实测复现后修复） |
+| 12 | log_path 应反映实际安装路径 | 新增 `ACTIVE_LOG_PATH`（成功安装时记录）：同路径二次 init 沿用已安装路径，进程内从未成功安装则 None |
+| 13 | 参数结构体过度 | 回退 5/4/2 参三处为逐参转发（低于 clippy 阈值）；仅 7 参的 RankParams 保留 |
+| 14 | 视图直写 submissionStore.error | 新增 `reportSubmitBlocked(message)` action，三道守卫改经 action；展示面契约断言不变 |
+| 15 | view-mount 注释与事实不符 | 注释如实化（2 个新 spec 在用、5 个既有 spec 保留手写样板）；settleView 导出 |
+| 16 | 四处引用不存在的 contract_tests.rs | 全部改为 mod_tests.rs 契约段 |
+| 17 | Architecture.md 缺 src-tauri/tests/ | 补条目并注明「刻意例外」及理由 |
+
+验证：Rust 780+2 集成 / 前端 561 全绿；clippy 存量外零新增；build/TSC 通过。竞态测试经 loopback 底座的响应延迟能力构造（录制与弹出原子化修复了延迟导致的脚本错位）。
