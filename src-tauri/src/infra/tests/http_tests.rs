@@ -253,7 +253,9 @@ fn raw_accepts_success_same_as_default() {
 use crate::test_support::loopback::{LoopbackServer, ScriptedResponse};
 
 fn client() -> HttpClient {
-    HttpClient::with_timeout(std::time::Duration::from_secs(5)).expect("HttpClient 应可构造")
+    // no_proxy：传输测试打 loopback，宿主环境代理会劫持 127.0.0.1 请求
+    HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(5))
+        .expect("HttpClient 应可构造")
 }
 
 /// GET 5xx 自动重试且成功即止：恰好 2 次请求（首次 500 + 重试 200）。

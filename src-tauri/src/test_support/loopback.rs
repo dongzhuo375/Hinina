@@ -276,7 +276,8 @@ mod tests {
     async fn serves_scripted_response_and_records_request() {
         let server = LoopbackServer::start(vec![ScriptedResponse::json("{\"ok\":true}")]).await;
 
-        let client = reqwest::Client::new();
+        // no_proxy：自测打 loopback，环境代理会劫持 127.0.0.1 请求
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let resp = client
             .get(format!("{}/probe?x=1", server.url()))
             .header("X-Custom", "v")
@@ -298,7 +299,8 @@ mod tests {
     #[tokio::test]
     async fn exhausted_queue_answers_500() {
         let server = LoopbackServer::start(vec![]).await;
-        let client = reqwest::Client::new();
+        // no_proxy：自测打 loopback，环境代理会劫持 127.0.0.1 请求
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let resp = client.get(server.url().to_string()).send().await.unwrap();
         assert_eq!(resp.status(), 500);
         assert_eq!(server.requests().len(), 1);

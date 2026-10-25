@@ -1,6 +1,6 @@
 # M1 最小 PR CI（doc/cicd/m1-pr-gate.md）
 # 阻塞链：frontend + rust-lint + rust-test → ci-required（分支保护必需检查）。
-# rust-lint 于基线清理 PR（doc/cicd/pr2-baseline-cleanup.md）后升为必需。
+# rust-lint 于 lint 门禁清理 PR（doc/cicd/lint-gate-cleanup.md）后升为必需。
 name: CI
 
 on:

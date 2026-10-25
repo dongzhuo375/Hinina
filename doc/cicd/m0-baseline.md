@@ -112,5 +112,5 @@ sudo apt install -y \
 
 - ~~E4 ACL 修复~~ 已完成（2026-10-25，见 §三）；工作区回退缓存 `doc/local/m0-npm-cache/`（88MB，不入库）已删除。
 - ~~npm 未随工具链固定~~ 已闭环（M1）：`packageManager: "npm@11.18.0"` + CI corepack enable（§一）。
-- 749/748 测试计数差异待 PR2 核实（§二）。
+- ~~749/748 测试计数差异~~ 已结案（lint 门禁清理 PR：差异来自 `#[cfg(unix)]` 的 symlink 测试，Windows 不编译运行，见 §二）。
 - ~~开发手册 §5.3「CI 自动发布」等描述仍超前于现状~~ 已纠正（M1 PR #50：发布流程标注为 M4 规划，分支保护/CI 检查/jsdom 描述改写为实际）。
