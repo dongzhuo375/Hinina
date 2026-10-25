@@ -39,6 +39,9 @@ Hinina/
 │   ├── modules/                          # 模块文档（与 src/ 与 src-tauri/src/ 的文件树一一对应）
 │   │   ├── README.md                     # 模块文档索引（格式约定与维护规则）
 │   │   └── src-tauri/plugin/sdk/         # TypeScript SDK 声明与脚手架、参考业务插件 examples/balloon（文档侧代码，不构建进应用）
+│   ├── cicd/                            # CI/CD 施工记录（M0 基线实测与后续 M1+ 阶段记录；规划文档在 doc/local/ 不入库）
+│   │   ├── README.md                     # 目录定位、命名约定与入库边界
+│   │   └── m0-baseline.md                # M0 基线冻结：工具链基线、10 条检查命令实测、问题分类、runner 准备步骤
 └── src-tauri/
     ├── Cargo.toml                        # Rust 项目清单（依赖、版本、feature flags）
     ├── tauri.conf.json                   # Tauri 2 配置文件（含 bundle：NSIS 打包目标、publisher/版权/描述、图标清单）
