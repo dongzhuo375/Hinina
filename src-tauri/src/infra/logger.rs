@@ -1,17 +1,23 @@
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::Path;
+#[cfg(not(test))]
 use std::sync::{Arc, Mutex};
 
+use crate::core::error::{AppError, AppResult};
+
+// 订阅器装配只存在于非测试构建（见 `Logger::init` 的 cfg 拆分）：
+// 测试构建不装全局 tracing 订阅器，这些导入若不加门控会在 `cargo clippy
+// --all-targets -- -D warnings` 下以 unused-import 阻塞 CI（评审 #6）。
+#[cfg(not(test))]
 use tracing_subscriber::fmt::MakeWriter;
+#[cfg(not(test))]
 use tracing_subscriber::{
     fmt::{self, format::FmtSpan},
     layer::SubscriberExt,
     util::SubscriberInitExt,
     EnvFilter,
 };
-
-use crate::core::error::{AppError, AppResult};
 
 /// 日志文件相对 base_dir 的路径。
 ///
@@ -44,14 +50,14 @@ pub struct Logger {
 ///
 /// tracing 的 `MakeWriter` 每次事件都会取一个 `io::Write`，
 /// 而 `File` 不是 `Sync`，故用 `Arc<Mutex<File>>` 共享句柄并逐条加锁写入。
+/// 仅非测试构建使用（测试构建不装订阅器，见 `Logger::init`）。
+#[cfg(not(test))]
 struct SharedFileWriter(Arc<Mutex<File>>);
 
+#[cfg(not(test))]
 impl io::Write for SharedFileWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut file = self
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut file = self.0.lock().unwrap_or_else(|e| e.into_inner());
         io::Write::write(&mut *file, buf)
     }
 
@@ -60,6 +66,7 @@ impl io::Write for SharedFileWriter {
     }
 }
 
+#[cfg(not(test))]
 impl<'a> MakeWriter<'a> for SharedFileWriter {
     type Writer = SharedFileWriter;
 
@@ -117,14 +124,16 @@ impl Logger {
                         .with_ansi(false)
                         .with_writer(SharedFileWriter(Arc::new(Mutex::new(file))));
                     // try_init 而非 init：全局 subscriber 每进程只能设一次，重复
-                    // init 时沿用已装好的订阅器而不是 panic（防御性；生产只跑一次）
-                    let _ = tracing_subscriber::registry()
+                    // init 时沿用已装好的订阅器而不是 panic（防御性；生产只跑一次）。
+                    // 安装失败时本次没有任何订阅器生效，文件层不会有写入 ——
+                    // log_path 必须如实为 None（评审 #4：has_log_file 不得虚报）
+                    let installed = tracing_subscriber::registry()
                         .with(filter)
                         .with(stderr_layer)
                         .with(file_layer)
                         .try_init();
                     Self {
-                        log_path: Some(base_dir.join(LOG_RELATIVE_PATH)),
+                        log_path: installed.is_ok().then(|| base_dir.join(LOG_RELATIVE_PATH)),
                     }
                 }
                 None => {
