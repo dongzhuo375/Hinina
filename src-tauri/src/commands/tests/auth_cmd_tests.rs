@@ -3,7 +3,7 @@
 // 重点锁定：登出后的本地会话清除必须无条件发生（远端登出失败也不影响），
 // 以及 Session → User 的 VO 映射（前端按这三个字段读取）。
 
-use crate::commands::auth_cmd::{get_session_impl, logout_impl};
+use super::*;
 use crate::core::entity::session::Session;
 use crate::core::event::core_event::CoreEvent;
 use crate::core::provider::oj_id::OjId;

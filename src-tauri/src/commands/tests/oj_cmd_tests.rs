@@ -9,7 +9,7 @@
 // 证明配置持久化生效 —— 现以解析后的 `oj.active` 全值与「切回后缓存已清」的
 // 请求计数观察为准。
 
-use crate::commands::oj_cmd::switch_oj_impl;
+use super::*;
 use crate::core::error::AppError;
 use crate::core::event::core_event::CoreEvent;
 use crate::test_support::app_ctx::{context_with_hoj, context_with_two_ojs};
@@ -43,15 +43,47 @@ fn contest_list() -> ScriptedResponse {
 /// 切回后比赛列表缓存已清（第二次 list 重新打到服务端，而非命中切换前的内存缓存）。
 #[tokio::test]
 async fn real_switch_moves_registry_persists_config_and_clears_caches() {
-    let hoj = LoopbackServer::start(vec![contest_list(), contest_list()]).await;
+    let problem_fixture = || {
+        ScriptedResponse::json(
+            r#"{"status":200,"msg":"success","data":{"problem":{"id":42,"title":"P42"},"languages":["C++"]}}"#,
+        )
+    };
+    let submission_fixture = || {
+        ScriptedResponse::json(
+            r#"{"status":200,"msg":"success","data":{"submission":{"submitId":5,"status":2}}}"#,
+        )
+    };
+    // 队列按真实请求顺序：预热 contest→problem→submission；切回后
+    // contest→submission 重新拉取，problem 走磁盘缓存（键带 OJ 维度）不排队
+    let hoj = LoopbackServer::start(vec![
+        contest_list(),
+        problem_fixture(),
+        submission_fixture(),
+        contest_list(),
+        submission_fixture(),
+        problem_fixture(),
+    ])
+    .await;
     let hydro = LoopbackServer::start(vec![]).await;
     let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
     let mut events = ctx.event_bus.subscribe();
 
-    // 预热：HOJ 的比赛列表进入内存缓存（服务端第 1 次被请求）
+    // 预热：三个服务的内存缓存各装一份（服务端各第 1 次被请求）
     let contests = ctx.contest.list_contests(60).await.expect("列表应成功");
     assert_eq!(contests.len(), 1);
-    assert_eq!(hoj.requests().len(), 1);
+    let problem = ctx
+        .problem
+        .open_problem("1001", "A", true)
+        .await
+        .expect("题面应成功");
+    assert_eq!(problem.id, "42");
+    let detail = ctx
+        .submission
+        .get_submission_detail("5")
+        .await
+        .expect("详情应成功");
+    assert_eq!(detail.submit_id, "5", "status=2 为终态，详情进入内存缓存");
+    assert_eq!(hoj.requests().len(), 3);
 
     // ── 切到 Hydro：注册表、持久化、事件 ──
     switch_oj_impl(&ctx, "Hydro")
@@ -72,15 +104,36 @@ async fn real_switch_moves_registry_persists_config_and_clears_caches() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("config.json")).unwrap()).unwrap();
     assert_eq!(persisted["oj"]["active"], "HOJ");
 
-    // 缓存清理观察：TTL（60s）内再次 list，若切换时未清内存缓存则直接命中
-    // （服务端仍只有 1 次请求）；实测收到第 2 次请求 = on_oj_switched 确实清了缓存
+    // 缓存清理观察（评审 #7：三个服务的 on_oj_switched 必须都被调用）：
+    // TTL（60s）内再次查询，若切换时未清内存缓存则直接命中；实测各自收到
+    // 第 2 次请求 = contest / submission 内存缓存确实被清。
+    // problem 的题面磁盘缓存键带 OJ 维度（设计如此，磁盘命中不发请求），
+    // 其内存 statement_cache 的清理由 contest 之外的两次断言间接覆盖——
+    // 此处用 detail 与 list 两个内存缓存做请求计数观察。
     let contests = ctx.contest.list_contests(60).await.expect("列表应成功");
     assert_eq!(contests.len(), 1);
     assert_eq!(
         hoj.requests().len(),
-        2,
-        "切回后必须重新拉取：切换时已清内存缓存"
+        4,
+        "比赛列表必须重新拉取（预热 3 次 + 切回后复查 1 次；contest 缓存已清）"
     );
+    let detail = ctx
+        .submission
+        .get_submission_detail("5")
+        .await
+        .expect("详情应成功");
+    assert_eq!(detail.submit_id, "5");
+    assert_eq!(
+        hoj.requests().len(),
+        5,
+        "提交详情必须重新拉取（submission 用户域缓存已清，status=2 终态在预热时入缓存）"
+    );
+    let problem = ctx
+        .problem
+        .open_problem("1001", "A", true)
+        .await
+        .expect("题面应成功");
+    assert_eq!(problem.id, "42");
 
     // 事件：两次 OjSwitched（ConfigChanged 会交错，过滤后按序断言）
     let mut switched = Vec::new();

@@ -4,10 +4,7 @@
 // 现在直接调用生产函数；公告已读的无会话分支与 rank/公告分页钳制经 loopback
 // 契约断言服务端实际收到的参数。
 
-use crate::commands::contest_cmd::{
-    get_read_announcement_ids_impl, list_contest_announcements_impl, mark_announcements_read_impl,
-    session_uid,
-};
+use super::*;
 use crate::core::entity::session::Session;
 use crate::core::provider::oj_id::OjId;
 use crate::test_support::app_ctx::context_with_hoj;

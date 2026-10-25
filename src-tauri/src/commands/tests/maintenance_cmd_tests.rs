@@ -2,9 +2,7 @@
 // （M2 工作包 A）。锁定「精确删除范围」：可重建的缓存全清、不可重建的本地事实
 // （工作区/配置/会话/留档）分毫不动——这是设置页两个危险按钮的行为边界。
 
-use crate::commands::maintenance_cmd::{
-    local_data_usage_impl, purge_local_data_impl, reset_client_impl,
-};
+use super::*;
 use crate::test_support::app_ctx::{context_with_hoj, seed_snapshot};
 use crate::test_support::loopback::LoopbackServer;
 

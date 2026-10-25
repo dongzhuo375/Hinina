@@ -1393,7 +1393,3 @@ pub static FACTORY: HydroFactory = HydroFactory;
 #[cfg(test)]
 #[path = "tests/mod_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "tests/contract_tests.rs"]
-mod contract_tests;

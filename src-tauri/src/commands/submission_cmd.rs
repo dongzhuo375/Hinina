@@ -80,37 +80,52 @@ pub async fn list_contest_submissions(
 ) -> AppResult<SubmissionPage> {
     list_contest_submissions_impl(
         &ctx,
-        contest_id,
-        current_page,
-        limit,
-        problem_display_id,
-        status,
+        ListSubmissionsParams {
+            contest_id,
+            current_page,
+            limit,
+            problem_display_id,
+            status,
+        },
     )
     .await
+}
+
+/// `list_contest_submissions` 的原始入参（评审 #9：参数收敛为结构体，
+/// 命令与实现之间不再逐参转发——新增筛选参数只改两处，不再两份签名漂移）。
+pub(crate) struct ListSubmissionsParams {
+    pub contest_id: String,
+    pub current_page: Option<i64>,
+    pub limit: Option<i64>,
+    pub problem_display_id: Option<String>,
+    pub status: Option<i32>,
 }
 
 /// `list_contest_submissions` 的参数编排（提取自命令本体，供命令与测试共用）：
 /// 分页默认值与钳制、`only_mine` 强制、空白筛选过滤。
 pub(crate) async fn list_contest_submissions_impl(
     ctx: &AppContext,
-    contest_id: String,
-    current_page: Option<i64>,
-    limit: Option<i64>,
-    problem_display_id: Option<String>,
-    status: Option<i32>,
+    params: ListSubmissionsParams,
 ) -> AppResult<SubmissionPage> {
+    let ListSubmissionsParams {
+        contest_id,
+        current_page,
+        limit,
+        problem_display_id,
+        status,
+    } = params;
     let query = SubmissionQuery {
-        contest_id: contest_id.clone(),
         current_page: current_page.unwrap_or(1).max(1),
         limit: limit.unwrap_or(DEFAULT_SUBMISSION_LIMIT).max(1),
         // 产品决策「提交记录只显示本人」，后端强制，前端不可绕过
         only_mine: true,
         problem_display_id: problem_display_id.filter(|s| !s.trim().is_empty()),
         status,
+        contest_id,
     };
 
     info!(
-        contest_id = %contest_id,
+        contest_id = %query.contest_id,
         page = query.current_page,
         limit = query.limit,
         "Command: 获取比赛提交列表"
