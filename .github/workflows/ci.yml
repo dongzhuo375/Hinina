@@ -38,8 +38,15 @@ jobs:
       - run: npm ci
       - run: npx tsc -p tsconfig.node.json --noEmit
       - run: npm run plugin:sdk:check
-      - run: npm test
+      # vitest run --coverage：同一套测试 + V8 覆盖率报告（基线只报告不卡线，M2 起）
+      - run: npm run test:coverage
       - run: npm run build
+      - name: Upload coverage report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-coverage
+          path: coverage/
+          retention-days: 14
 
   rust-lint:
     name: rust-lint
