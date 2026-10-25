@@ -205,6 +205,9 @@ jobs:
       # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
       - name: Enable corepack (pin npm via packageManager)
         run: corepack enable
+      - name: Verify node version matches .nvmrc
+        shell: bash
+        run: test "$(node --version)" = "v$(cat .nvmrc)"
       - run: npm ci
       - name: Install Playwright Chromium (with system dependencies)
         run: npx playwright install --with-deps chromium
