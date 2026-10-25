@@ -46,3 +46,21 @@
 - `npm test`：43 文件 / 557 通过；`npm run build`（vue-tsc + vite）通过；`npx tsc -p tsconfig.node.json --noEmit` 通过。
 - `npm run test:coverage`：产出报告，基线数字见 §二（评审修正：初版把 Statements 列误标为 Lines）。
 - CI 首跑（run 40182012394）：frontend 红（上述 §四.4 的 main.spec 时序问题，本地未能复现）；rust-test 双平台绿、rust-lint 红（E2/E3 预期内）。修复后由后续运行复验 coverage 步骤与 artifact 上传。
+
+## 十一、评审第二轮（2026-10-25，9 条全部处置）
+
+| # | 意见 | 处置 | 提交 |
+|---|---|---|---|
+| 1 | Hydro 身份缓存令 validate_session 进程内恒真（服务器吊销 sid 不可见） | `probe_user_context` 拆出 `probe_user_context_uncached`，校验走全新探测（与 HOJ 每次回访同语义）；缓存仅供展示查询 | `256a065` |
+| 2 | login 未清旧身份缓存（换号后旧 uid/uname 配新 sid） | `set_session` 后 `set_user(None)`；换号身份来自新探测 | `256a065` |
+| 3 | openProblem 无过期响应保护（视图补丁挡提交挡不住显示） | store 内置请求序号，迟到响应丢弃（不写 currentProblem/不占错误态/isLoading 由最新请求收尾）；视图 `loadedProblemId` 校验保留为失败路径第二道防线 | `9127a4d` |
+| 4 | logger `try_init` 失败仍置 log_path（has_log_file 虚报） | 安装失败时 log_path=None | `fde71af` |
+| 5 | 提交 ID 不匹配静默失败 | 经 EditorConsoleBar 现有错误面给出可见提示 | `9127a4d` |
+| 6 | logger 测试构建未使用导入（clippy 阻塞） | 导入与 SharedFileWriter 按 cfg 门控 | `fde71af` |
+| 7 | oj 缓存清理测试只覆盖 contest | 扩展到 contest+submission 内存缓存（请求计数观察）；problem 题面磁盘缓存键带 OJ 维度、磁盘命中不发请求为设计行为（已注明） | `6b9f4fd` |
+| 8 | 测试文件规范 | commands 测试补 `use super::*;`；contract 测试并入各 `mod_tests.rs`（单一测试模块约定） | `6b9f4fd` |
+| 9 | *_impl 重复参数签名 | `list_contest_submissions_impl` 改收 `ListSubmissionsParams` 结构体；其余 3-4 参命令收益不成比例、保持 | `6b9f4fd` |
+
+验证：Rust 779 / 前端 560 全绿；clippy 相对存量 E3 零新增；build/TSC 通过。
+
+**施工教训（两次踩坑）**：对已 rustfmt 重排过的文件做字符串替换必须以重新读取的内容为准——本轮两次 python 批量替换因目标串与磁盘文本不符而静默无效（其一导致 git restore 误覆盖未提交修复，其二导致测试断言与扩展代码三处未写入、诊断走了弯路）。多段替换要么用带断言的精确工具（Edit），要么逐段 `assert in` 后再写盘。
