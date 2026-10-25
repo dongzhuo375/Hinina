@@ -795,12 +795,7 @@ impl RdocVO {
     /// （比提交晚若干秒），故优先用 ObjectId 前缀；两者都拿不到返回 0。
     pub fn submit_time(&self) -> i64 {
         let from_id = objectid_seconds(&self.record_id());
-        from_id.unwrap_or_else(|| {
-            self.judge_at
-                .as_deref()
-                .map(parse_time)
-                .unwrap_or_default()
-        })
+        from_id.unwrap_or_else(|| self.judge_at.as_deref().map(parse_time).unwrap_or_default())
     }
 
     /// 源代码长度（字节）；代码被清空时为 0
@@ -1122,13 +1117,9 @@ pub fn scoreboard_rank_page(vo: &ScoreboardVO) -> ContestRankPage {
         // 单位契约（entity 注释）：ACM 的 `total_time` 是秒、OI 是毫秒。
         // Hydro 的时长一律是秒（`time(jdoc) = floor((rid - beginAt) / 1000)`），
         // 故非 ACM 赛制换算为毫秒以满足上层契约。
-        let time_seconds = cell_duration_seconds(
-            header
-                .time
-                .or(header.solved)
-                .and_then(|i| row.get(i)),
-        )
-        .unwrap_or(0);
+        let time_seconds =
+            cell_duration_seconds(header.time.or(header.solved).and_then(|i| row.get(i)))
+                .unwrap_or(0);
         let total_time = if is_acm {
             time_seconds
         } else {

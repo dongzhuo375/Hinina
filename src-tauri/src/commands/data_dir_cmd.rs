@@ -156,10 +156,7 @@ pub(crate) fn validate_reset(
 ///
 /// 不勾迁移时无需校验：用户只是想切回默认目录，里面有什么就是什么（那是他自己的选择）。
 #[tauri::command]
-pub async fn reset_data_dir(
-    ctx: State<'_, AppContext>,
-    migrate: bool,
-) -> AppResult<DataDirChange> {
+pub async fn reset_data_dir(ctx: State<'_, AppContext>, migrate: bool) -> AppResult<DataDirChange> {
     let default_dir = ctx.default_data_dir.clone();
     let current = ctx.storage.base_dir().to_path_buf();
     validate_reset(&default_dir, &current, migrate)?;

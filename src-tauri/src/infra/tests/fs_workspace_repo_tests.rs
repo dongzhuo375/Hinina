@@ -43,9 +43,11 @@ fn list_files_excludes_atomic_write_temp_artifacts() {
     let r = repo("atomic-stale");
     let ws = "ws-stale";
     r.save_file(ws, Path::new("main.cpp"), "// code").unwrap();
-    r.save_file(ws, Path::new("main.cpp.41.tmp"), "stale").unwrap();
+    r.save_file(ws, Path::new("main.cpp.41.tmp"), "stale")
+        .unwrap();
     r.save_file(ws, Path::new("notes.tmp"), "keep-me").unwrap();
-    r.save_file(ws, Path::new("main.cpp.tmp"), "not-ours").unwrap();
+    r.save_file(ws, Path::new("main.cpp.tmp"), "not-ours")
+        .unwrap();
 
     let mut files = r.list_files(ws).unwrap();
     files.sort();
@@ -170,7 +172,9 @@ fn rejects_drive_letter_paths() {
     let ws = "ws-safe3";
     r.save_file(ws, Path::new("legit.txt"), "ok").unwrap();
 
-    assert!(r.delete_file(ws, Path::new("C:/Windows/system32/config")).is_err());
+    assert!(r
+        .delete_file(ws, Path::new("C:/Windows/system32/config"))
+        .is_err());
     assert!(r.save_file(ws, Path::new("C:/evil.txt"), "bad").is_err());
     assert_eq!(r.read_file(ws, Path::new("legit.txt")).unwrap(), "ok");
 }
@@ -186,10 +190,14 @@ fn rejects_ads_device_and_trailing_variant_paths() {
     r.save_file(ws, Path::new("legit.txt"), "ok").unwrap();
 
     // ADS 删除绕过（评审实测复现的链路）
-    assert!(r.delete_file(ws, Path::new("workspace.json::$DATA")).is_err());
+    assert!(r
+        .delete_file(ws, Path::new("workspace.json::$DATA"))
+        .is_err());
     assert!(r.delete_file(ws, Path::new("Main.java::$DATA")).is_err());
     // ADS 写路径
-    assert!(r.save_file(ws, Path::new("workspace.json:evil"), "bad").is_err());
+    assert!(r
+        .save_file(ws, Path::new("workspace.json:evil"), "bad")
+        .is_err());
     // 其余 Win32 非法字符
     assert!(r.save_file(ws, Path::new("a<b.txt"), "bad").is_err());
     assert!(r.save_file(ws, Path::new("a>b.txt"), "bad").is_err());
@@ -203,7 +211,9 @@ fn rejects_ads_device_and_trailing_variant_paths() {
     assert!(r.save_file(ws, Path::new("COM1"), "bad").is_err());
     assert!(r.save_file(ws, Path::new("aux.js"), "bad").is_err());
     // 尾随点/空格（Windows 等价类，堵住 save_file("workspace.json.") 写路径）
-    assert!(r.save_file(ws, Path::new("workspace.json."), "bad").is_err());
+    assert!(r
+        .save_file(ws, Path::new("workspace.json."), "bad")
+        .is_err());
     assert!(r.save_file(ws, Path::new("main.cpp "), "bad").is_err());
     assert!(r.delete_file(ws, Path::new("legit.txt.")).is_err());
     // 合法文件不受影响
@@ -253,7 +263,10 @@ fn validate_workspace_id_rejects_non_ascii() {
 #[test]
 fn validate_workspace_id_accepts_valid() {
     // 合法 ID 应通过
-    assert!(FsWorkspaceRepository::validate_workspace_id("ws-contest1-problemA-1234567890-abcd").is_ok());
+    assert!(
+        FsWorkspaceRepository::validate_workspace_id("ws-contest1-problemA-1234567890-abcd")
+            .is_ok()
+    );
     assert!(FsWorkspaceRepository::validate_workspace_id("my_workspace").is_ok());
     assert!(FsWorkspaceRepository::validate_workspace_id("abc123").is_ok());
 }

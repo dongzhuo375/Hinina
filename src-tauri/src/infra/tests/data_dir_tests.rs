@@ -27,7 +27,11 @@ fn seed_legacy(dir: &Path) {
     write_file(dir, "config.json", r#"{"oj":{"active":"HOJ"}}"#);
     write_file(dir, "workspaces/HOJ-1012-1000/main.cpp", "int main(){}");
     write_file(dir, "submissions/HOJ/1167.cpp", "int main(){}");
-    write_file(dir, "announcements_read/1012_uid-1.json", r#"{"readIds":["9001"]}"#);
+    write_file(
+        dir,
+        "announcements_read/1012_uid-1.json",
+        r#"{"readIds":["9001"]}"#,
+    );
     write_file(dir, "logs/hinina.log", "old log line");
 }
 
@@ -65,7 +69,6 @@ fn pointer_round_trip() {
     // 指针文件固定放在默认目录下（否则「自定义目录在哪」本身就需要指针）
     assert!(pointer_path(&dir).exists());
     assert_eq!(pointer_path(&dir), dir.join("data_dir.json"));
-
 }
 
 #[test]
@@ -78,7 +81,6 @@ fn missing_or_corrupt_pointer_degrades_to_default() {
     // 损坏 → 仍按未指定处理，绝不阻断启动
     write_file(&dir, "data_dir.json", "not-json{{{");
     assert_eq!(read_pointer(&dir), DataDirPointer::default());
-
 }
 
 #[test]
@@ -101,7 +103,6 @@ fn dir_is_usable_creates_missing_dir_and_leaves_no_probe() {
     assert!(dir.is_dir());
     // 探针文件必须被清掉，否则「空目录」判定会失败
     assert!(dir_is_empty(&dir), "探测后不应留下残留文件");
-
 }
 
 #[test]
@@ -132,13 +133,13 @@ fn validate_target_accepts_fresh_absolute_dir() {
     let got = validate_target(&target, &legacy, false).expect("全新绝对路径应通过");
     assert_eq!(got, target);
     assert!(target.is_dir(), "校验顺带创建目录");
-
 }
 
 #[test]
 fn validate_target_rejects_relative_path() {
     let legacy = unique_dir("validate-rel-legacy");
-    let err = validate_target(Path::new("relative/dir"), &legacy, false).expect_err("相对路径应被拒");
+    let err =
+        validate_target(Path::new("relative/dir"), &legacy, false).expect_err("相对路径应被拒");
     assert!(matches!(err, AppError::Config(_)), "应为配置类错误");
     assert!(err.to_string().contains("绝对路径"));
 }
@@ -154,8 +155,10 @@ fn validate_target_rejects_legacy_temp_dir_and_its_children() {
     // 其子目录同样拒绝（否则数据又落在会被清理的位置）
     let child = legacy.join("sub");
     std::fs::create_dir_all(&child).unwrap();
-    assert!(validate_target(&child, &legacy, false).is_err(), "临时目录的子目录也应被拒");
-
+    assert!(
+        validate_target(&child, &legacy, false).is_err(),
+        "临时目录的子目录也应被拒"
+    );
 }
 
 #[test]
@@ -166,7 +169,6 @@ fn validate_target_rejects_file() {
 
     let err = validate_target(&dir.join("afile"), &legacy, false).expect_err("文件应被拒");
     assert!(err.to_string().contains("不是目录"));
-
 }
 
 #[test]
@@ -189,7 +191,6 @@ fn validate_target_allows_going_back_to_a_used_dir_without_migrating() {
         validate_target(&dir, &legacy, false).is_ok(),
         "不勾迁移时必须能改回用过的目录 —— 否则用户只能删掉自己的数据"
     );
-
 }
 
 #[test]
@@ -209,7 +210,6 @@ fn validate_target_allows_dir_with_only_non_conflicting_content() {
         validate_target(&dir, &legacy, true).is_ok(),
         "非冲突内容不得阻止迁移 —— 迁移只创建自己的条目，不会动用户的东西"
     );
-
 }
 
 #[test]
@@ -223,7 +223,11 @@ fn validate_target_rejects_conflicts_only_when_migrating() {
     let err = validate_target(&dir, &legacy, true).expect_err("迁移到有冲突条目的目录应被拒");
     let msg = err.to_string();
     assert!(msg.contains("workspaces"), "错误应点名冲突条目: {}", msg);
-    assert!(msg.contains("config.json"), "错误应点名全部冲突条目: {}", msg);
+    assert!(
+        msg.contains("config.json"),
+        "错误应点名全部冲突条目: {}",
+        msg
+    );
     // 指引必须给出「改回该目录」的可行路径，而不是诱导删数据
     assert!(
         msg.contains("不勾选"),
@@ -241,7 +245,6 @@ fn validate_target_rejects_conflicts_only_when_migrating() {
         validate_target(&dir, &legacy, false).is_ok(),
         "同一目录在不迁移时应放行"
     );
-
 }
 
 #[test]
@@ -283,7 +286,6 @@ fn migrate_moves_listed_entries_and_skips_logs() {
 
     // logs 不搬：旧日志留在原地，新目录没有 logs
     assert!(!to.join("logs").exists(), "logs 按约定不迁移");
-
 }
 
 #[test]
@@ -297,7 +299,6 @@ fn migrate_keeps_legacy_dir_when_logs_remain() {
     // logs/ 未搬 → 旧目录非空，删不掉，如实回报 false（属预期，不是失败）
     assert!(!outcome.legacy_removed, "留着 logs 时旧目录无法删除");
     assert!(from.join("logs/hinina.log").exists(), "旧日志原地保留");
-
 }
 
 #[test]
@@ -312,7 +313,6 @@ fn migrate_removes_legacy_dir_when_nothing_left() {
     assert!(outcome.is_ok());
     assert!(outcome.legacy_removed, "搬空后旧目录应被删除");
     assert!(!from.exists());
-
 }
 
 #[test]
@@ -333,7 +333,6 @@ fn migrate_skips_entries_already_present_at_target() {
         r#"{"new":true}"#,
         "目标既有数据不得被覆盖"
     );
-
 }
 
 #[test]
@@ -345,7 +344,6 @@ fn migrate_is_noop_when_source_has_nothing_listed() {
     let outcome = migrate(&from, &to);
 
     assert!(outcome.is_noop(), "只有 logs 时无事可做: {:?}", outcome);
-
 }
 
 #[test]
@@ -366,13 +364,15 @@ fn migrate_never_deletes_unmigrated_entries() {
     assert!(!outcome.is_ok(), "目标不可用必须记录为失败");
     assert!(outcome.moved.is_empty(), "一条都不该被搬走");
     // 核心断言：源数据一条都不能少
-    assert!(from.join("config.json").exists(), "未迁移的 config.json 必须保留");
+    assert!(
+        from.join("config.json").exists(),
+        "未迁移的 config.json 必须保留"
+    );
     assert!(
         from.join("workspaces/HOJ-1012-1000/main.cpp").exists(),
         "未迁移的代码必须保留 —— 递归删除会让它消失"
     );
     assert!(!outcome.legacy_removed, "有失败项时绝不能删除旧目录");
-
 }
 
 #[test]
@@ -395,7 +395,6 @@ fn existing_target_is_skipped_not_failed() {
         to.join("workspaces/existing.txt").exists(),
         "目标既有内容不得被覆盖"
     );
-
 }
 
 #[test]
@@ -404,8 +403,11 @@ fn mark_legacy_migrated_persists_failure_state_and_survives_pointer_rewrite() {
     // 写入，会把同一次启动里刚被 `clear_migrate_from` 清掉的字段复活。
     // 现在改为读-改-写，两处修改必须互不干扰。
     let dir = unique_dir("pointer-rmw");
-    write_pointer(&dir, &pointer(Some(Path::new(r"D:\custom")), Some(Path::new(r"C:\from"))))
-        .expect("写指针失败");
+    write_pointer(
+        &dir,
+        &pointer(Some(Path::new(r"D:\custom")), Some(Path::new(r"C:\from"))),
+    )
+    .expect("写指针失败");
 
     // 先清 migrate_from（模拟分支 ① 成功）
     clear_migrate_from(&dir);
@@ -420,7 +422,6 @@ fn mark_legacy_migrated_persists_failure_state_and_survives_pointer_rewrite() {
         Some(r"D:\custom".to_string()),
         "用户指定的目录不得被抹掉"
     );
-
 }
 
 #[test]
@@ -463,7 +464,6 @@ fn should_attempt_legacy_retries_failed_migration_regardless_of_source() {
         DataDirSource::Default,
         &default.join("nope")
     ));
-
 }
 
 #[test]
@@ -503,7 +503,6 @@ fn prepare_startup_records_failure_so_later_retry_is_not_lost() {
         Some(true),
         "成功后置位一次性标记"
     );
-
 }
 
 #[test]
@@ -542,7 +541,6 @@ fn prepare_startup_runs_both_migration_sources_in_one_launch() {
         Some(true),
         "临时目录搬家应在同一次启动内完成"
     );
-
 }
 
 #[test]
@@ -565,7 +563,6 @@ fn conflicting_entries_ignores_files_that_are_always_present_in_default_dir() {
         "以上三者都不在迁移清单里、都不冲突 —— 不得判为冲突: {:?}",
         conflicting_entries_in(&dir)
     );
-
 }
 
 #[test]
@@ -592,7 +589,6 @@ fn conflicting_entries_reports_stale_migratable_data() {
         ],
         "应逐个报出（顺序与 MIGRATED_ENTRIES 一致），且不含 data_dir.json / EBWebView"
     );
-
 }
 
 #[test]
@@ -610,13 +606,15 @@ fn conflicting_entries_excludes_cache_deliberately() {
     // 同时确认它确实在迁移清单里（两处判定不是简单重复）
     assert!(MIGRATED_ENTRIES.contains(&"cache"));
     assert!(!conflicting_entries().any(|e| e == "cache"));
-
 }
 
 #[test]
 fn conflicting_entries_on_missing_dir_is_empty() {
     let dir = unique_dir("conflict-missing");
-    assert!(conflicting_entries_in(&dir).is_empty(), "目录不存在 → 无冲突");
+    assert!(
+        conflicting_entries_in(&dir).is_empty(),
+        "目录不存在 → 无冲突"
+    );
 }
 
 #[test]
@@ -635,7 +633,6 @@ fn pointer_write_is_atomic_and_leaves_no_temp_file() {
         Some(r"D:\x".to_string()),
         "内容应可完整读回"
     );
-
 }
 
 #[test]
@@ -653,7 +650,10 @@ fn failed_move_leaves_nothing_behind_so_retry_actually_retries() {
     let dst = blocker.join("sub");
 
     assert!(move_entry(&dir.join("src"), &dst).is_err(), "复制必须失败");
-    assert!(!dst.exists(), "失败后不得留下目标（否则会被当成「已完成」）");
+    assert!(
+        !dst.exists(),
+        "失败后不得留下目标（否则会被当成「已完成」）"
+    );
     assert!(!staging_path(&dst).exists(), "失败后不得留下暂存残片");
     assert!(dir.join("src/a.txt").exists(), "源必须完好");
 
@@ -664,7 +664,6 @@ fn failed_move_leaves_nothing_behind_so_retry_actually_retries() {
         std::fs::read_to_string(retry_dst.join("a.txt")).unwrap(),
         "payload"
     );
-
 }
 
 #[test]
@@ -689,7 +688,6 @@ fn migrate_retries_entry_that_failed_before_instead_of_skipping() {
         outcome
     );
     assert!(to.join("config.json").exists());
-
 }
 
 #[test]
@@ -705,7 +703,6 @@ fn move_entry_cleans_stale_staging_before_retry() {
     assert!(dst.join("new.txt").exists(), "新内容应就位");
     assert!(!dst.join("old.txt").exists(), "旧残片不得混入目标");
     assert!(!staging_path(&dst).exists(), "暂存应已改名，不留残片");
-
 }
 
 // ── 启动准备（解析 + 迁移） ──
@@ -721,7 +718,6 @@ fn prepare_startup_uses_default_dir_when_no_pointer() {
     assert_eq!(plan.default_dir, default_dir);
     assert_eq!(plan.source, DataDirSource::Default);
     assert!(outcome.is_noop(), "没有旧数据时不该有迁移动作");
-
 }
 
 #[test]
@@ -734,9 +730,15 @@ fn prepare_startup_migrates_legacy_into_empty_default_dir() {
 
     assert_eq!(plan.source, DataDirSource::Default);
     assert_eq!(plan.base_dir, default_dir);
-    assert!(outcome.moved.contains(&"workspaces".to_string()), "{:?}", outcome);
     assert!(
-        default_dir.join("workspaces/HOJ-1012-1000/main.cpp").exists(),
+        outcome.moved.contains(&"workspaces".to_string()),
+        "{:?}",
+        outcome
+    );
+    assert!(
+        default_dir
+            .join("workspaces/HOJ-1012-1000/main.cpp")
+            .exists(),
         "代码必须被搬到新目录（这是本次修复的核心目的）"
     );
     assert_eq!(
@@ -744,7 +746,6 @@ fn prepare_startup_migrates_legacy_into_empty_default_dir() {
         Some(true),
         "成功后应置位一次性标记"
     );
-
 }
 
 #[test]
@@ -768,12 +769,13 @@ fn prepare_startup_migrates_even_when_default_dir_has_webview_profile() {
         outcome
     );
     assert!(
-        default_dir.join("workspaces/HOJ-1012-1000/main.cpp").exists(),
+        default_dir
+            .join("workspaces/HOJ-1012-1000/main.cpp")
+            .exists(),
         "代码必须被搬到新目录"
     );
     // WebView 自己的文件不受影响
     assert!(default_dir.join("EBWebView/Default/Cache/index").exists());
-
 }
 
 #[test]
@@ -800,7 +802,6 @@ fn prepare_startup_does_not_migrate_twice() {
         !default_dir.join("workspaces").exists(),
         "删掉的工作区不得被搬回来（一次性标记的核心作用）"
     );
-
 }
 
 // 注：**「迁移失败时不置位标记」无法用单测确定性构造** —— 需要真实的 I/O 失败
@@ -827,9 +828,10 @@ fn prepare_startup_skips_legacy_entries_that_already_exist_at_target() {
         "目标既有数据不得被覆盖"
     );
     // 其余条目照常搬过来（不是「目标非空就整体放弃」）
-    assert!(default_dir.join("workspaces/HOJ-1012-1000/main.cpp").exists());
+    assert!(default_dir
+        .join("workspaces/HOJ-1012-1000/main.cpp")
+        .exists());
     assert_eq!(read_pointer(&default_dir).legacy_migrated, Some(true));
-
 }
 
 #[test]
@@ -870,8 +872,11 @@ fn prepare_startup_does_not_migrate_legacy_when_custom_dir_is_set() {
 
     assert_eq!(plan.base_dir, custom);
     assert_eq!(plan.source, DataDirSource::Custom);
-    assert!(outcome.is_noop(), "自定义目录 + 无待迁移标记 → 不迁移: {:?}", outcome);
-
+    assert!(
+        outcome.is_noop(),
+        "自定义目录 + 无待迁移标记 → 不迁移: {:?}",
+        outcome
+    );
 }
 
 #[test]
@@ -888,7 +893,11 @@ fn prepare_startup_honours_pending_migration_and_clears_flag() {
 
     assert_eq!(plan.base_dir, target);
     assert_eq!(plan.source, DataDirSource::Custom);
-    assert!(outcome.moved.contains(&"workspaces".to_string()), "{:?}", outcome);
+    assert!(
+        outcome.moved.contains(&"workspaces".to_string()),
+        "{:?}",
+        outcome
+    );
     assert!(target.join("workspaces/HOJ-1012-1000/main.cpp").exists());
 
     // 迁移完成 → 标记被清除（否则每次启动都重试）
@@ -903,7 +912,6 @@ fn prepare_startup_honours_pending_migration_and_clears_flag() {
     // 再次启动：无事可做
     let (_, second) = prepare_startup(&default_dir, &source);
     assert!(second.is_noop(), "第二次启动不该重复搬运: {:?}", second);
-
 }
 
 #[test]
@@ -924,7 +932,9 @@ fn prepare_startup_falls_back_and_still_migrates_when_custom_dir_unusable() {
     assert_eq!(plan.base_dir, default_dir, "指定目录不可用 → 退回默认目录");
     assert!(outcome.is_ok(), "迁移应照常完成: {:?}", outcome);
     assert!(
-        default_dir.join("workspaces/HOJ-1012-1000/main.cpp").exists(),
+        default_dir
+            .join("workspaces/HOJ-1012-1000/main.cpp")
+            .exists(),
         "数据必须落到可用的目录里（不能因为用户选错目录就搬不过去）"
     );
     assert_eq!(
@@ -932,7 +942,6 @@ fn prepare_startup_falls_back_and_still_migrates_when_custom_dir_unusable() {
         None,
         "迁移成功 → 清除待迁移标记"
     );
-
 }
 
 #[test]
@@ -947,8 +956,10 @@ fn resolve_falls_back_to_legacy_when_default_dir_unusable() {
 
     assert_eq!(plan.source, DataDirSource::FallbackTemp, "不可用时必须回退");
     assert_eq!(plan.base_dir, legacy);
-    assert_eq!(plan.default_dir, unusable_default, "仍要报告默认目录（供界面展示）");
-
+    assert_eq!(
+        plan.default_dir, unusable_default,
+        "仍要报告默认目录（供界面展示）"
+    );
 }
 
 #[test]
@@ -966,7 +977,10 @@ fn resolve_falls_back_to_default_when_custom_dir_unusable() {
 
     let plan = resolve(&default_dir, &legacy);
 
-    assert_eq!(plan.source, DataDirSource::Default, "指定目录不可用 → 退回默认");
+    assert_eq!(
+        plan.source,
+        DataDirSource::Default,
+        "指定目录不可用 → 退回默认"
+    );
     assert_eq!(plan.base_dir, default_dir);
-
 }

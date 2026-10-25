@@ -25,90 +25,141 @@ fn map_status_cancelled() {
 
 #[test]
 fn map_status_ce() {
-    assert!(matches!(map_status(-2), crate::core::entity::submission::JudgementStatus::CompilationError));
+    assert!(matches!(
+        map_status(-2),
+        crate::core::entity::submission::JudgementStatus::CompilationError
+    ));
 }
 
 #[test]
 fn map_status_pe() {
-    assert!(matches!(map_status(-3), crate::core::entity::submission::JudgementStatus::PresentationError));
+    assert!(matches!(
+        map_status(-3),
+        crate::core::entity::submission::JudgementStatus::PresentationError
+    ));
 }
 
 #[test]
 fn map_status_wa() {
-    assert!(matches!(map_status(-1), crate::core::entity::submission::JudgementStatus::WrongAnswer));
+    assert!(matches!(
+        map_status(-1),
+        crate::core::entity::submission::JudgementStatus::WrongAnswer
+    ));
 }
 
 #[test]
 fn map_status_ac() {
     // 关键回归：0 是 Accepted 而非 Pending。实测 HOJ 提交 1166（status=0，time=2ms，
     // memory=532KB）是一份通过的代码，旧表把它显示为 Pending 并无限轮询
-    assert!(matches!(map_status(0), crate::core::entity::submission::JudgementStatus::Accepted));
+    assert!(matches!(
+        map_status(0),
+        crate::core::entity::submission::JudgementStatus::Accepted
+    ));
 }
 
 #[test]
 fn map_status_tle() {
-    assert!(matches!(map_status(1), crate::core::entity::submission::JudgementStatus::TimeLimitExceeded));
+    assert!(matches!(
+        map_status(1),
+        crate::core::entity::submission::JudgementStatus::TimeLimitExceeded
+    ));
 }
 
 #[test]
 fn map_status_mle() {
-    assert!(matches!(map_status(2), crate::core::entity::submission::JudgementStatus::MemoryLimitExceeded));
+    assert!(matches!(
+        map_status(2),
+        crate::core::entity::submission::JudgementStatus::MemoryLimitExceeded
+    ));
 }
 
 #[test]
 fn map_status_re() {
-    assert!(matches!(map_status(3), crate::core::entity::submission::JudgementStatus::RuntimeError));
+    assert!(matches!(
+        map_status(3),
+        crate::core::entity::submission::JudgementStatus::RuntimeError
+    ));
 }
 
 #[test]
 fn map_status_se() {
-    assert!(matches!(map_status(4), crate::core::entity::submission::JudgementStatus::SystemError));
+    assert!(matches!(
+        map_status(4),
+        crate::core::entity::submission::JudgementStatus::SystemError
+    ));
 }
 
 #[test]
 fn map_status_pending() {
-    assert!(matches!(map_status(5), crate::core::entity::submission::JudgementStatus::Pending));
+    assert!(matches!(
+        map_status(5),
+        crate::core::entity::submission::JudgementStatus::Pending
+    ));
 }
 
 #[test]
 fn map_status_compiling() {
-    assert!(matches!(map_status(6), crate::core::entity::submission::JudgementStatus::Compiling));
+    assert!(matches!(
+        map_status(6),
+        crate::core::entity::submission::JudgementStatus::Compiling
+    ));
 }
 
 #[test]
 fn map_status_judging() {
     // Judging 沿用既有 Running 语义（轮询判据不变）
-    assert!(matches!(map_status(7), crate::core::entity::submission::JudgementStatus::Running));
+    assert!(matches!(
+        map_status(7),
+        crate::core::entity::submission::JudgementStatus::Running
+    ));
 }
 
 #[test]
 fn map_status_pa() {
     // Partial AC 使用独立变体，不折算为 Accepted
-    assert!(matches!(map_status(8), crate::core::entity::submission::JudgementStatus::PartiallyAccepted));
+    assert!(matches!(
+        map_status(8),
+        crate::core::entity::submission::JudgementStatus::PartiallyAccepted
+    ));
 }
 
 #[test]
 fn map_status_submitting_is_non_terminal() {
     // 9 = Submitting（判题机尚未接手）：折入 Pending，必须是非终态，
     // 否则轮询会在开跑前就停住
-    assert!(matches!(map_status(9), crate::core::entity::submission::JudgementStatus::Pending));
+    assert!(matches!(
+        map_status(9),
+        crate::core::entity::submission::JudgementStatus::Pending
+    ));
 }
 
 #[test]
 fn map_status_sf() {
-    assert!(matches!(map_status(10), crate::core::entity::submission::JudgementStatus::SubmitFailed));
+    assert!(matches!(
+        map_status(10),
+        crate::core::entity::submission::JudgementStatus::SubmitFailed
+    ));
 }
 
 #[test]
 fn map_status_no_status() {
     // 15 = No Status
-    assert!(matches!(map_status(15), crate::core::entity::submission::JudgementStatus::Unknown));
+    assert!(matches!(
+        map_status(15),
+        crate::core::entity::submission::JudgementStatus::Unknown
+    ));
 }
 
 #[test]
 fn map_status_out_of_range() {
-    assert!(matches!(map_status(999), crate::core::entity::submission::JudgementStatus::Unknown));
-    assert!(matches!(map_status(11), crate::core::entity::submission::JudgementStatus::Unknown));
+    assert!(matches!(
+        map_status(999),
+        crate::core::entity::submission::JudgementStatus::Unknown
+    ));
+    assert!(matches!(
+        map_status(11),
+        crate::core::entity::submission::JudgementStatus::Unknown
+    ));
 }
 
 #[test]
@@ -267,7 +318,10 @@ fn oi_rank_row_normalizes_score_and_time_info() {
     assert_eq!(row.total_score, Some(280));
     assert_eq!(row.total_time, 3560);
     // OI 的 submissionInfo 值是整数得分，归一到 RankCell.score
-    assert_eq!(row.submission_info.get("A").and_then(|c| c.score), Some(100));
+    assert_eq!(
+        row.submission_info.get("A").and_then(|c| c.score),
+        Some(100)
+    );
     assert_eq!(row.submission_info.get("B").and_then(|c| c.score), Some(80));
     assert!(!row.submission_info.get("A").expect("缺少 A").is_ac);
     assert_eq!(row.time_info.get("A"), Some(&1200));
@@ -294,7 +348,8 @@ fn star_team_keeps_rank_minus_one_and_defaults_optional_text() {
 fn malformed_cell_degrades_instead_of_failing_row() {
     // 单元格既不是整数也不是合法明细对象 → 该格降级为默认值，整行仍可用。
     // 榜单是赛场高频只读数据，局部字段异常不应导致整页不可用。
-    let json = r#"{ "rank": 7, "uid": "u", "username": "x", "submissionInfo": { "A": "not-a-cell" } }"#;
+    let json =
+        r#"{ "rank": 7, "uid": "u", "username": "x", "submissionInfo": { "A": "not-a-cell" } }"#;
     let row = serde_json::from_str::<ContestRankVO>(json)
         .expect("解析失败")
         .into_rank_row();
@@ -336,14 +391,29 @@ fn rank_dto_serializes_camel_case_and_never_force_refreshes() {
 
 #[test]
 fn extract_problem_status_code_accepts_number_bool_and_object() {
-    assert_eq!(extract_problem_status_code(&serde_json::json!(-10)), Some(-10));
+    assert_eq!(
+        extract_problem_status_code(&serde_json::json!(-10)),
+        Some(-10)
+    );
     assert_eq!(extract_problem_status_code(&serde_json::json!(0)), Some(0));
     // 布尔形态：true = 已 AC（= HOJ 的 0），false = 未提交（= HOJ 的 -10）
-    assert_eq!(extract_problem_status_code(&serde_json::json!(true)), Some(0));
-    assert_eq!(extract_problem_status_code(&serde_json::json!(false)), Some(-10));
+    assert_eq!(
+        extract_problem_status_code(&serde_json::json!(true)),
+        Some(0)
+    );
+    assert_eq!(
+        extract_problem_status_code(&serde_json::json!(false)),
+        Some(-10)
+    );
     // 实测形态：{"status": <码>, "score": …}
-    assert_eq!(extract_problem_status_code(&serde_json::json!({"status": -10})), Some(-10));
-    assert_eq!(extract_problem_status_code(&serde_json::json!({"status": 0})), Some(0));
+    assert_eq!(
+        extract_problem_status_code(&serde_json::json!({"status": -10})),
+        Some(-10)
+    );
+    assert_eq!(
+        extract_problem_status_code(&serde_json::json!({"status": 0})),
+        Some(0)
+    );
 }
 
 #[test]
@@ -361,7 +431,12 @@ fn normalize_problem_status_maps_hoj_codes_to_frontend_contract() {
     assert_eq!(normalize_problem_status(-10), 0);
     // 其余（含负数与各类失败）→ 2 尝试过
     for code in [-4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15] {
-        assert_eq!(normalize_problem_status(code), 2, "状态码 {} 应归一为「尝试过」", code);
+        assert_eq!(
+            normalize_problem_status(code),
+            2,
+            "状态码 {} 应归一为「尝试过」",
+            code
+        );
     }
 }
 
@@ -448,8 +523,8 @@ fn contest_vo_parses_rank_and_seal_fields() {
 #[test]
 fn contest_vo_tolerates_missing_rank_fields() {
     // get-contest-list 不返回榜单相关字段，必须靠 serde default 解析成功
-    let vo: ContestVO = serde_json::from_str(r#"{ "id": 2, "title": "T2" }"#)
-        .expect("ContestVO 解析失败");
+    let vo: ContestVO =
+        serde_json::from_str(r#"{ "id": 2, "title": "T2" }"#).expect("ContestVO 解析失败");
 
     assert_eq!(vo.rank_show_name, None);
     assert!(!vo.seal_rank);
@@ -484,12 +559,21 @@ fn strip_nulls_removes_null_members_and_array_items() {
     assert!(!obj.contains_key("drop"), "null 成员应被剔除");
     assert_eq!(obj.get("keep").and_then(|v| v.as_i64()), Some(1));
     // false 与 0 不是 null，必须保留（否则封榜、打星、零分等语义会被抹掉）
-    assert_eq!(obj.get("falseButNotNull").and_then(|v| v.as_bool()), Some(false));
+    assert_eq!(
+        obj.get("falseButNotNull").and_then(|v| v.as_bool()),
+        Some(false)
+    );
     assert_eq!(obj.get("zeroButNotNull").and_then(|v| v.as_i64()), Some(0));
-    let nested = obj.get("nested").and_then(|v| v.as_object()).expect("nested 应保留");
+    let nested = obj
+        .get("nested")
+        .and_then(|v| v.as_object())
+        .expect("nested 应保留");
     assert!(!nested.contains_key("a"));
     assert_eq!(nested.get("b").and_then(|v| v.as_str()), Some("x"));
-    let list = obj.get("list").and_then(|v| v.as_array()).expect("list 应保留");
+    let list = obj
+        .get("list")
+        .and_then(|v| v.as_array())
+        .expect("list 应保留");
     assert_eq!(list.len(), 2, "数组中的 null 元素应被剔除");
 }
 
@@ -529,8 +613,7 @@ fn contest_vo_tolerates_hoj_null_fields() {
 fn page_result_accepts_documented_and_degenerate_shapes() {
     // 文档只承诺 records/total；实测还会带 size/current/orders/searchCount/pages
     let minimal = r#"{ "records": [{ "id": 1 }], "total": 1 }"#;
-    let page: PageResult<ContestVO> =
-        serde_json::from_str(minimal).expect("最小分页形状应可解析");
+    let page: PageResult<ContestVO> = serde_json::from_str(minimal).expect("最小分页形状应可解析");
     assert_eq!(page.records.len(), 1);
     assert_eq!(page.total, 1);
     assert_eq!(page.pages, 0, "未返回的字段落到默认值");
@@ -539,8 +622,7 @@ fn page_result_accepts_documented_and_degenerate_shapes() {
     let mut degenerate: serde_json::Value =
         serde_json::from_str(r#"{ "records": null, "total": null }"#).expect("夹具合法");
     strip_nulls(&mut degenerate);
-    let page: PageResult<ContestVO> =
-        serde_json::from_value(degenerate).expect("空分页应可解析");
+    let page: PageResult<ContestVO> = serde_json::from_value(degenerate).expect("空分页应可解析");
     assert!(page.records.is_empty());
     assert_eq!(page.total, 0);
 }

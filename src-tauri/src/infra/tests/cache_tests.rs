@@ -110,7 +110,10 @@ fn ttl_cache_isolates_keys() {
     cache.insert("2/A".into(), "题面A（另一场比赛）".into());
 
     assert_eq!(cache.get(&"1/A".into()).as_deref(), Some("题面A"));
-    assert_eq!(cache.get(&"2/A".into()).as_deref(), Some("题面A（另一场比赛）"));
+    assert_eq!(
+        cache.get(&"2/A".into()).as_deref(),
+        Some("题面A（另一场比赛）")
+    );
     assert_eq!(cache.get(&"1/B".into()), None);
 }
 
@@ -173,7 +176,10 @@ fn ttl_cache_supports_concurrent_reads_and_writes() {
             let hits = Arc::clone(&hits);
             thread::spawn(move || {
                 for i in 0..200 {
-                    if cache.get(&format!("k{}", (worker * 200 + i) % 32)).is_some() {
+                    if cache
+                        .get(&format!("k{}", (worker * 200 + i) % 32))
+                        .is_some()
+                    {
                         hits.fetch_add(1, Ordering::Relaxed);
                     }
                 }
@@ -217,7 +223,11 @@ fn disk_cache_round_trip_within_ttl() {
     let raw = storage
         .read_to_string("sample_ns/1/A.json")
         .expect("缓存文件应存在");
-    assert!(raw.contains("fetchedAt"), "磁盘条目必须携带 fetchedAt: {}", raw);
+    assert!(
+        raw.contains("fetchedAt"),
+        "磁盘条目必须携带 fetchedAt: {}",
+        raw
+    );
 }
 
 #[test]
@@ -229,7 +239,13 @@ fn disk_cache_misses_when_missing_or_key_unsafe() {
     assert_eq!(missing, None);
 
     // 非法键：不落盘、不读取（放弃缓存而非报错）
-    cache.write("../escape", &Sample { id: "x".into(), text: "x".into() });
+    cache.write(
+        "../escape",
+        &Sample {
+            id: "x".into(),
+            text: "x".into(),
+        },
+    );
     let escaped: Option<Sample> = cache.read("../escape", ms(60_000));
     assert_eq!(escaped, None);
     assert!(!storage.exists("escape.json"));
@@ -239,7 +255,13 @@ fn disk_cache_misses_when_missing_or_key_unsafe() {
 fn disk_cache_expires_by_fetched_at_and_deletes_file() {
     let storage = temp_storage("expiry");
     let cache = JsonDiskCache::new(Arc::clone(&storage), "sample_ns");
-    cache.write("1/A", &Sample { id: "1".into(), text: "旧".into() });
+    cache.write(
+        "1/A",
+        &Sample {
+            id: "1".into(),
+            text: "旧".into(),
+        },
+    );
 
     // TTL 0：任何已写条目都视为过期
     let expired: Option<Sample> = cache.read("1/A", Duration::from_secs(0));
@@ -268,23 +290,38 @@ fn disk_cache_purges_legacy_layout_once_per_namespace() {
     let storage = temp_storage("legacy-purge");
     // 模拟升级前落下的旧布局条目（键无 OJ 维度），且各 namespace 都没有布局标记
     storage
-        .write_string("sample_ns/1/A.json", r#"{"fetchedAt":4102444800,"value":{"id":"old","text":"旧"}}"#)
+        .write_string(
+            "sample_ns/1/A.json",
+            r#"{"fetchedAt":4102444800,"value":{"id":"old","text":"旧"}}"#,
+        )
         .expect("写入旧布局条目");
     storage
-        .write_string("other_ns/1/A.json", r#"{"fetchedAt":4102444800,"value":{"id":"old","text":"旧"}}"#)
+        .write_string(
+            "other_ns/1/A.json",
+            r#"{"fetchedAt":4102444800,"value":{"id":"old","text":"旧"}}"#,
+        )
         .expect("写入另一 namespace 的旧布局条目");
 
     // 首次构造：只清自己的 namespace（标记是按 namespace 记的，
     // 否则「先构造者写标记」会让其余 namespace 的旧条目永不清扫）
     let cache = JsonDiskCache::new(Arc::clone(&storage), "sample_ns");
-    assert!(!storage.exists("sample_ns/1/A.json"), "本 namespace 的旧条目应被清扫");
+    assert!(
+        !storage.exists("sample_ns/1/A.json"),
+        "本 namespace 的旧条目应被清扫"
+    );
     assert!(
         storage.exists("other_ns/1/A.json"),
         "不得越界清理别的 namespace（它会在自己构造时清扫）"
     );
 
     // 标记就位后，新写入的数据跨实例存活（不得每次启动都清）
-    cache.write("1/A", &Sample { id: "new".into(), text: "新".into() });
+    cache.write(
+        "1/A",
+        &Sample {
+            id: "new".into(),
+            text: "新".into(),
+        },
+    );
     let reopened = JsonDiskCache::new(Arc::clone(&storage), "sample_ns");
     let loaded: Option<Sample> = reopened.read("1/A", ms(60_000));
     assert_eq!(
@@ -304,7 +341,10 @@ fn disk_cache_purges_legacy_layout_once_per_namespace() {
 #[test]
 fn disk_cache_survives_new_instance_and_supports_clear() {
     let storage = temp_storage("persist");
-    let value = Sample { id: "1".into(), text: "跨实例".into() };
+    let value = Sample {
+        id: "1".into(),
+        text: "跨实例".into(),
+    };
     JsonDiskCache::new(Arc::clone(&storage), "sample_ns").write("1/A", &value);
 
     // 新实例（模拟重启）仍能命中：TTL 计时依据落盘的 fetchedAt
@@ -315,7 +355,13 @@ fn disk_cache_survives_new_instance_and_supports_clear() {
     assert!(reopened.remove("1/A"));
     assert!(!storage.exists("sample_ns/1/A.json"));
 
-    reopened.write("2/B", &Sample { id: "2".into(), text: "x".into() });
+    reopened.write(
+        "2/B",
+        &Sample {
+            id: "2".into(),
+            text: "x".into(),
+        },
+    );
     assert!(reopened.clear_namespace());
     assert!(!storage.exists("sample_ns"));
     // 目录已不存在时清空是幂等 no-op
@@ -326,8 +372,20 @@ fn disk_cache_survives_new_instance_and_supports_clear() {
 fn disk_cache_nested_keys_are_scoped_per_contest() {
     let storage = temp_storage("nested");
     let cache = JsonDiskCache::new(Arc::clone(&storage), "sample_ns");
-    cache.write("1/A", &Sample { id: "1A".into(), text: "第一场".into() });
-    cache.write("2/A", &Sample { id: "2A".into(), text: "第二场".into() });
+    cache.write(
+        "1/A",
+        &Sample {
+            id: "1A".into(),
+            text: "第一场".into(),
+        },
+    );
+    cache.write(
+        "2/A",
+        &Sample {
+            id: "2A".into(),
+            text: "第二场".into(),
+        },
+    );
 
     let first: Option<Sample> = cache.read("1/A", ms(60_000));
     let second: Option<Sample> = cache.read("2/A", ms(60_000));

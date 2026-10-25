@@ -53,7 +53,13 @@ impl Workspace {
     #[must_use]
     pub fn new(contest_id: String, problem_id: String, root_path: String) -> Self {
         let now = utc_now_ms();
-        let id = format!("ws-{}-{}-{}-{}", contest_id, problem_id, now, random_hex_suffix());
+        let id = format!(
+            "ws-{}-{}-{}-{}",
+            contest_id,
+            problem_id,
+            now,
+            random_hex_suffix()
+        );
         Self {
             id,
             contest_id,

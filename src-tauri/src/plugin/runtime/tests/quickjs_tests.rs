@@ -419,13 +419,11 @@ async fn real_js_rank_and_problems_return_full_json_with_plain_object_cells() {
         }))
         .unwrap(),
     );
-    *source.problems.lock().unwrap() = vec![
-        serde_json::from_value(serde_json::json!({
-            "id": 1, "displayId": "A", "cid": "contest", "problemId": "P1001",
-            "displayTitle": "A + B", "color": "#FF0000"
-        }))
-        .unwrap(),
-    ];
+    *source.problems.lock().unwrap() = vec![serde_json::from_value(serde_json::json!({
+        "id": 1, "displayId": "A", "cid": "contest", "problemId": "P1001",
+        "displayTitle": "A + B", "color": "#FF0000"
+    }))
+    .unwrap()];
     let (api, _queries) = execution_api(source, Arc::new(Output), &dir);
     let mut runtime = QuickJsRuntime::new(CancellationToken::new()).await.unwrap();
     let script = r#"export default async h => {

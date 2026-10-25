@@ -117,10 +117,22 @@ fn log_messages_are_bounded_and_control_characters_are_rejected() {
     log::validate_log_message("stage=dispatch sealed=false count=3").unwrap();
     // \n/\t pass validation; they are flattened only at write time.
     log::validate_log_message("line\nbreak\ttab").unwrap();
-    assert_eq!(log::validate_log_message(""), Err(PluginError::InvalidInput));
-    assert_eq!(log::validate_log_message("   "), Err(PluginError::InvalidInput));
-    assert_eq!(log::validate_log_message("bad\0char"), Err(PluginError::InvalidInput));
-    assert_eq!(log::validate_log_message("bad\rchar"), Err(PluginError::InvalidInput));
+    assert_eq!(
+        log::validate_log_message(""),
+        Err(PluginError::InvalidInput)
+    );
+    assert_eq!(
+        log::validate_log_message("   "),
+        Err(PluginError::InvalidInput)
+    );
+    assert_eq!(
+        log::validate_log_message("bad\0char"),
+        Err(PluginError::InvalidInput)
+    );
+    assert_eq!(
+        log::validate_log_message("bad\rchar"),
+        Err(PluginError::InvalidInput)
+    );
     assert_eq!(
         log::validate_log_message(&"x".repeat(log::MAX_LOG_BYTES)),
         Ok(())
@@ -155,14 +167,18 @@ fn log_messages_are_bounded_and_control_characters_are_rejected() {
 fn rank_query_rejects_unknown_fields_like_the_other_input_dtos() {
     // The type-level "no contestId" guarantee must also hold at the wire level:
     // serde silently ignoring unknown fields would make the TS check meaningless.
-    assert!(serde_json::from_value::<contest::PluginRankQuery>(serde_json::json!({
-        "page": 1, "limit": 50, "contestId": "c1"
-    }))
-    .is_err());
-    assert!(serde_json::from_value::<contest::PluginRankQuery>(serde_json::json!({
-        "page": 1, "limit": 50
-    }))
-    .is_ok());
+    assert!(
+        serde_json::from_value::<contest::PluginRankQuery>(serde_json::json!({
+            "page": 1, "limit": 50, "contestId": "c1"
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<contest::PluginRankQuery>(serde_json::json!({
+            "page": 1, "limit": 50
+        }))
+        .is_ok()
+    );
 }
 
 #[test]

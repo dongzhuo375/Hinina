@@ -96,7 +96,8 @@ fn empty_error_body_falls_back_to_plain_status_error() {
 #[test]
 fn retry_delay_backs_off_exponentially() {
     assert_eq!(retry_delay(0), Duration::from_millis(1000));
-    assert_eq!(retry_delay(1), Duration::from_millis(2000));    assert_eq!(retry_delay(2), Duration::from_millis(4000));
+    assert_eq!(retry_delay(1), Duration::from_millis(2000));
+    assert_eq!(retry_delay(2), Duration::from_millis(4000));
 }
 
 // ── classify_status（GET 重试决策）──
@@ -337,7 +338,11 @@ async fn transport_maps_401_to_auth_and_403_to_network() {
         .get_text_with_headers(&format!("{}/p", s401.url()), &Default::default())
         .await
         .unwrap_err();
-    assert!(matches!(err, AppError::Auth(_)), "401 应为 Auth，实得 {:?}", err);
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "401 应为 Auth，实得 {:?}",
+        err
+    );
     s401.shutdown();
 
     let s403 = LoopbackServer::start(vec![ScriptedResponse::with(403, vec![], "")]).await;

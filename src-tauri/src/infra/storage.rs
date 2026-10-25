@@ -64,8 +64,7 @@ impl Storage {
     /// 路径不安全或文件不存在时返回 `AppError::Io`。
     pub fn read(&self, relative_path: &str) -> AppResult<Vec<u8>> {
         let path = self.resolve(relative_path)?;
-        fs::read(&path)
-            .map_err(|e| AppError::Io(format!("读取文件失败 {}: {}", relative_path, e)))
+        fs::read(&path).map_err(|e| AppError::Io(format!("读取文件失败 {}: {}", relative_path, e)))
     }
 
     /// 读取文件内容（UTF-8 字符串）。
@@ -85,9 +84,8 @@ impl Storage {
     pub fn write(&self, relative_path: &str, data: &[u8]) -> AppResult<()> {
         let path = self.resolve(relative_path)?;
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                AppError::Io(format!("创建父目录失败 {}: {}", relative_path, e))
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|e| AppError::Io(format!("创建父目录失败 {}: {}", relative_path, e)))?;
         }
         fs::write(&path, data)
             .map_err(|e| AppError::Io(format!("写入文件失败 {}: {}", relative_path, e)))
@@ -122,9 +120,8 @@ impl Storage {
     pub fn write_string_atomic(&self, relative_path: &str, content: &str) -> AppResult<()> {
         let path = self.resolve(relative_path)?;
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                AppError::Io(format!("创建父目录失败 {}: {}", relative_path, e))
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|e| AppError::Io(format!("创建父目录失败 {}: {}", relative_path, e)))?;
         }
         self.remove_stale_temps(&path);
 
@@ -158,7 +155,9 @@ impl Storage {
         let Some(prefix) = target.file_name().and_then(|n| n.to_str()) else {
             return;
         };
-        let Ok(entries) = fs::read_dir(dir) else { return };
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
@@ -208,9 +207,8 @@ impl Storage {
     pub fn remove_all(&self, relative_path: &str) -> AppResult<()> {
         let path = self.resolve(relative_path)?;
         if path.is_dir() {
-            fs::remove_dir_all(&path).map_err(|e| {
-                AppError::Io(format!("递归删除目录失败 {}: {}", relative_path, e))
-            })
+            fs::remove_dir_all(&path)
+                .map_err(|e| AppError::Io(format!("递归删除目录失败 {}: {}", relative_path, e)))
         } else {
             fs::remove_file(&path)
                 .map_err(|e| AppError::Io(format!("删除文件失败 {}: {}", relative_path, e)))

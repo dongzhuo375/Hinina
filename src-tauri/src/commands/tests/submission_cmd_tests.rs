@@ -55,7 +55,11 @@ async fn paging_clamps_and_blank_filter_is_dropped() {
 
     list_contest_submissions_impl(
         &ctx,
-        "1001".into(), Some(-5), Some(0), Some("   ".into()), None,
+        "1001".into(),
+        Some(-5),
+        Some(0),
+        Some("   ".into()),
+        None,
     )
     .await
     .expect("非法入参应被钳制而不是报错");
@@ -80,7 +84,11 @@ async fn optional_filters_pass_through() {
 
     list_contest_submissions_impl(
         &ctx,
-        "1001".into(), Some(3), Some(100), Some("A".into()), Some(-1),
+        "1001".into(),
+        Some(3),
+        Some(100),
+        Some("A".into()),
+        Some(-1),
     )
     .await
     .unwrap();

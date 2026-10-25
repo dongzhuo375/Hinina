@@ -138,11 +138,7 @@ fn sanitize_path_part(part: &str, name: &str) -> AppResult<String> {
 }
 
 /// 精确路径：`submissions/{oj_id}/{submit_id}.{ext}`。
-pub fn snapshot_path(
-    oj_id: &str,
-    submit_id: &str,
-    language: &str,
-) -> AppResult<String> {
+pub fn snapshot_path(oj_id: &str, submit_id: &str, language: &str) -> AppResult<String> {
     let dir = snapshot_dir(oj_id)?;
     let id = sanitize_path_part(submit_id, "submit_id")?;
     Ok(format!("{}/{}.{}", dir, id, source_extension(language)))
@@ -306,7 +302,12 @@ pub fn purge_stale_snapshots(storage: &Storage, keep_days: u64) -> (usize, u64) 
                 }
             }
         }
-        tracing::info!(removed, freed_bytes = freed, keep_days, "已清理过期提交留档");
+        tracing::info!(
+            removed,
+            freed_bytes = freed,
+            keep_days,
+            "已清理过期提交留档"
+        );
     }
     (removed, freed)
 }

@@ -199,8 +199,8 @@ fn parse_cid_rejects_invalid_id_instead_of_falling_back_to_zero() {
     // HOJ 以 cid = 0 表示「非比赛场景」：静默回退会让比赛中的提交落到练习题库，
     // 不计入榜单，而选手在赛场上完全无从察觉 —— 必须显式报错
     for invalid in ["", "abc", "12.5", "12345678901234567890123456789"] {
-        let err = HOJAdapter::parse_cid(invalid)
-            .expect_err(&format!("非法比赛 ID {:?} 应报错", invalid));
+        let err =
+            HOJAdapter::parse_cid(invalid).expect_err(&format!("非法比赛 ID {:?} 应报错", invalid));
         assert!(
             matches!(err, AppError::Contest(_)),
             "非法比赛 ID {:?} 应报 Contest 错误，实际 {:?}",
@@ -234,8 +234,16 @@ fn parse_hoj_json_reports_invalid_json_as_serialization_with_preview() {
         .expect_err("HTML 不应被当成 JSON");
     match err {
         AppError::Serialization(msg) => {
-            assert!(msg.contains("不是合法 JSON"), "应说明是 JSON 语法问题: {}", msg);
-            assert!(msg.contains("502 Bad Gateway"), "应带响应体前缀便于定位: {}", msg);
+            assert!(
+                msg.contains("不是合法 JSON"),
+                "应说明是 JSON 语法问题: {}",
+                msg
+            );
+            assert!(
+                msg.contains("502 Bad Gateway"),
+                "应带响应体前缀便于定位: {}",
+                msg
+            );
             assert!(msg.contains("http://oj/api/x"), "应带上出错的 URL: {}", msg);
         }
         other => panic!("应为 Serialization 变体，实际 {:?}", other),
@@ -288,7 +296,10 @@ fn real_anonymous_contest_list_response_parses() {
     let page = resp.into_data().expect("data 非空");
     assert_eq!(page.records.len(), 13);
     assert_eq!(page.total, 13);
-    assert_eq!(page.size, 500, "实测 size=500，与请求的 limit=1000 并不相同");
+    assert_eq!(
+        page.size, 500,
+        "实测 size=500，与请求的 limit=1000 并不相同"
+    );
 
     // null 字段一律落到默认值，而不是让整页解析失败
     let null_heavy = page
@@ -340,8 +351,9 @@ fn body_403_login_prompt_is_auth_failure() {
 #[test]
 fn body_401_is_always_auth_failure() {
     // 401 语义明确，即使消息里没提登录也按会话失效处理
-    let err = HOJAdapter::auth_failure_from_body(&body(r#"{ "status": 401, "msg": "unauthorized" }"#))
-        .expect("应识别为认证失败");
+    let err =
+        HOJAdapter::auth_failure_from_body(&body(r#"{ "status": 401, "msg": "unauthorized" }"#))
+            .expect("应识别为认证失败");
     assert!(matches!(err, AppError::Auth(_)));
 }
 
@@ -349,7 +361,11 @@ fn body_401_is_always_auth_failure() {
 fn body_403_permission_error_is_not_auth_failure() {
     // 保守判定的意义：私有赛未注册/需要密码不是会话问题，
     // 误判会把已登录的选手踢回登录页
-    for msg in ["该比赛需要密码", "您没有权限访问该比赛", "contest not registered"] {
+    for msg in [
+        "该比赛需要密码",
+        "您没有权限访问该比赛",
+        "contest not registered",
+    ] {
         let json = format!(r#"{{ "status": 403, "msg": "{}" }}"#, msg);
         assert!(
             HOJAdapter::auth_failure_from_body(&body(&json)).is_none(),
@@ -361,9 +377,18 @@ fn body_403_permission_error_is_not_auth_failure() {
 
 #[test]
 fn body_success_and_other_errors_are_not_auth_failure() {
-    assert!(HOJAdapter::auth_failure_from_body(&body(r#"{ "status": 200, "msg": "success" }"#)).is_none());
-    assert!(HOJAdapter::auth_failure_from_body(&body(r#"{ "status": 400, "msg": "参数错误" }"#)).is_none());
-    assert!(HOJAdapter::auth_failure_from_body(&body(r#"{ "status": 500, "msg": "服务器异常" }"#)).is_none());
+    assert!(
+        HOJAdapter::auth_failure_from_body(&body(r#"{ "status": 200, "msg": "success" }"#))
+            .is_none()
+    );
+    assert!(
+        HOJAdapter::auth_failure_from_body(&body(r#"{ "status": 400, "msg": "参数错误" }"#))
+            .is_none()
+    );
+    assert!(
+        HOJAdapter::auth_failure_from_body(&body(r#"{ "status": 500, "msg": "服务器异常" }"#))
+            .is_none()
+    );
     assert!(HOJAdapter::auth_failure_from_body(&body(r#"{ "msg": "缺少 status" }"#)).is_none());
 }
 
@@ -493,7 +518,10 @@ fn announcement_list_fixture_parses_and_maps() {
     assert_eq!(first.author, "admin", "username 映射为 author");
     assert!(first.content.contains("比赛已开始"));
     // 时间为秒级时间戳，且与 parse_time 同一算法
-    assert_eq!(first.created_at, HOJAdapter::parse_time("2026-09-15T08:00:00"));
+    assert_eq!(
+        first.created_at,
+        HOJAdapter::parse_time("2026-09-15T08:00:00")
+    );
     assert!(first.created_at > 1_700_000_000);
     assert!(first.updated_at >= first.created_at);
 }
@@ -530,8 +558,11 @@ fn contest_submissions_fixture_parses_and_maps() {
     assert_eq!(page.records.len(), 2);
     assert_eq!(page.size, 20);
 
-    let records: Vec<SubmissionRecord> =
-        page.records.into_iter().map(HOJAdapter::into_submission_record).collect();
+    let records: Vec<SubmissionRecord> = page
+        .records
+        .into_iter()
+        .map(HOJAdapter::into_submission_record)
+        .collect();
 
     let r1 = &records[0];
     assert_eq!(r1.submit_id, "12345", "submitId i64 → String");
@@ -543,7 +574,10 @@ fn contest_submissions_fixture_parses_and_maps() {
     assert_eq!(r1.time_ms, 15);
     assert_eq!(r1.memory_kb, 10240);
     assert_eq!(r1.length, 256);
-    assert_eq!(r1.submit_time, HOJAdapter::parse_time("2026-09-15T10:00:00"));
+    assert_eq!(
+        r1.submit_time,
+        HOJAdapter::parse_time("2026-09-15T10:00:00")
+    );
     assert_eq!(
         r1.owner_id.as_deref(),
         Some("uuid-alice"),
@@ -588,10 +622,7 @@ fn missing_uid_yields_no_owner_instead_of_trusting_a_display_name() {
     let page = resp.into_data().expect("data 非空");
     let record = HOJAdapter::into_submission_record(page.records.into_iter().next().unwrap());
     assert_eq!(record.owner_id, None);
-    assert_eq!(
-        record.username, "alice",
-        "展示名仍保留，但不能作为归属证据"
-    );
+    assert_eq!(record.username, "alice", "展示名仍保留，但不能作为归属证据");
 }
 
 #[test]
@@ -656,7 +687,10 @@ fn case_result_malformed_entries_are_skipped_not_fatal() {
         .collect();
     assert_eq!(sub_tasks.len(), 1, "非对象分组应被跳过");
     assert_eq!(sub_tasks[0].group_num, Some(1));
-    assert_eq!(types::lenient_case_list(&sub_tasks[0].judge_case_list).len(), 1);
+    assert_eq!(
+        types::lenient_case_list(&sub_tasks[0].judge_case_list).len(),
+        1
+    );
     assert_eq!(vo.judge_case_mode.as_deref(), Some("subtask_lowest"));
 }
 
@@ -689,7 +723,10 @@ fn submission_detail_maps_full_entity() {
     assert_eq!(detail.submit_id, "12345");
     assert_eq!(detail.pid, "1061");
     assert_eq!(detail.username, "alice");
-    assert_eq!(detail.submit_time, HOJAdapter::parse_time("2026-09-15T10:00:00"));
+    assert_eq!(
+        detail.submit_time,
+        HOJAdapter::parse_time("2026-09-15T10:00:00")
+    );
     assert!(matches!(detail.status, JudgementStatus::CompilationError));
     assert_eq!(detail.code, "int main(){}");
     assert!(detail.error_message.unwrap().contains("expected ';'"));
@@ -716,7 +753,8 @@ fn submission_detail_null_code_degrades_to_empty_string() {
     }"#;
     let resp: ApiResponse<types::SubmissionInfoVO> =
         HOJAdapter::parse_hoj_json(body, "http://oj/api/get-submission-detail").expect("应能解析");
-    let detail = HOJAdapter::into_submission_detail(resp.into_data().expect("data 非空").submission);
+    let detail =
+        HOJAdapter::into_submission_detail(resp.into_data().expect("data 非空").submission);
     assert_eq!(detail.code, "");
     assert_eq!(detail.language, "");
     assert_eq!(detail.submit_time, 0, "submitTime 为 null 应回退 0");
@@ -762,9 +800,10 @@ fn judgement_projection_running_passthrough() {
 #[test]
 fn judgement_projection_terminal_carries_metrics() {
     // 终态（0=AC）：携带 score/time/memory
-    let d: types::SubmissionDetail =
-        serde_json::from_str(r#"{ "submitId": 1, "status": 0, "time": 15, "memory": 2048, "score": 100.0 }"#)
-            .expect("解析失败");
+    let d: types::SubmissionDetail = serde_json::from_str(
+        r#"{ "submitId": 1, "status": 0, "time": 15, "memory": 2048, "score": 100.0 }"#,
+    )
+    .expect("解析失败");
     let result = HOJAdapter::into_judgement_result(&d);
     assert!(matches!(result.status, JudgementStatus::Accepted));
     assert_eq!(result.score, 100.0);
@@ -805,10 +844,9 @@ fn judgement_projection_filters_placeholder_error_message() {
 
 #[test]
 fn contest_vo_maps_oi_rank_score_type() {
-    let vo: ContestVO = serde_json::from_str(
-        r#"{ "id": 1011, "title": "OI 赛", "oiRankScoreType": "Highest" }"#,
-    )
-    .expect("解析失败");
+    let vo: ContestVO =
+        serde_json::from_str(r#"{ "id": 1011, "title": "OI 赛", "oiRankScoreType": "Highest" }"#)
+            .expect("解析失败");
     let contest = HOJAdapter::into_contest(vo);
     assert_eq!(contest.oi_rank_score_type.as_deref(), Some("Highest"));
 
@@ -878,13 +916,11 @@ fn problem_details_missing_or_null_languages_yield_empty_vec() {
     }
 }
 
-
 // ── 本地 scripted HTTP 契约测试（M2 工作包 B）──
 //
 // 与上方 DTO/fixture 测试互补：打**真实网络栈**（reqwest → loopback server，
 // `test_support::loopback`），锁定线上协议行为而非判定函数。
 
-use std::sync::Arc;
 use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
@@ -896,6 +932,7 @@ use crate::infra::http::HttpClient;
 use crate::infra::storage::Storage;
 use crate::test_support::loopback::{LoopbackServer, ScriptedResponse};
 use crate::test_support::TempDir;
+use std::sync::Arc;
 
 struct Fixture {
     adapter: Arc<HOJAdapter>,

@@ -185,7 +185,11 @@ pub async fn purge_local_data(
 }
 
 /// `purge_local_data` 的真实编排（提取自命令本体，供命令与测试共用）。
-pub(crate) fn purge_local_data_impl(ctx: &AppContext, logs: bool, stale_snapshots: bool) -> PurgeReport {
+pub(crate) fn purge_local_data_impl(
+    ctx: &AppContext,
+    logs: bool,
+    stale_snapshots: bool,
+) -> PurgeReport {
     info!(logs, stale_snapshots, "Command: 清理本地数据");
 
     run_purge(

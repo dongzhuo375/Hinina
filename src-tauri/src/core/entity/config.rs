@@ -416,7 +416,8 @@ impl AppConfig {
             }
             // id 会拼进会话文件名（`sessions/{id}.json`）与注册表键：
             // 拒绝路径分隔符与 `..`（路径穿越），`Storage::resolve` 是第二道防线
-            if instance.id.contains('/') || instance.id.contains('\\') || instance.id.contains("..") {
+            if instance.id.contains('/') || instance.id.contains('\\') || instance.id.contains("..")
+            {
                 return Err(format!("OJ 实例 id 不得包含 /、\\ 或 ..：{}", instance.id));
             }
             if !seen.insert(instance.id.trim().to_string()) {
@@ -433,8 +434,16 @@ impl AppConfig {
             }
         }
         // active 必须指向已启用的实例（禁用实例不会被注册，指向它等于死路）
-        if !self.oj.instances.iter().any(|i| i.enabled && i.id == self.oj.active) {
-            return Err(format!("当前 OJ（{}）不在已启用的实例列表中", self.oj.active));
+        if !self
+            .oj
+            .instances
+            .iter()
+            .any(|i| i.enabled && i.id == self.oj.active)
+        {
+            return Err(format!(
+                "当前 OJ（{}）不在已启用的实例列表中",
+                self.oj.active
+            ));
         }
         Ok(())
     }

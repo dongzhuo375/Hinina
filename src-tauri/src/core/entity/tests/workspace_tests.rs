@@ -2,11 +2,7 @@ use super::*;
 
 #[test]
 fn new_workspace_has_timestamps_set() {
-    let ws = Workspace::new(
-        "contest-1".into(),
-        "problem-A".into(),
-        "/tmp/ws".into(),
-    );
+    let ws = Workspace::new("contest-1".into(), "problem-A".into(), "/tmp/ws".into());
 
     assert!(ws.created_at > 0);
     assert!(ws.updated_at > 0);
@@ -60,7 +56,11 @@ fn workspace_id_format() {
     assert!(ws.id.starts_with("ws-c42-pB-"));
     // ID 格式: ws-{contest}-{problem}-{timestamp_ms}-{4hex}
     let parts: Vec<&str> = ws.id.split('-').collect();
-    assert_eq!(parts.len(), 5, "id 应包含 5 段: ws / contest / problem / timestamp / hex");
+    assert_eq!(
+        parts.len(),
+        5,
+        "id 应包含 5 段: ws / contest / problem / timestamp / hex"
+    );
     assert_eq!(parts[1], "c42");
     assert_eq!(parts[2], "pB");
     // 时间戳为 13 位毫秒级，随机后缀为 4 位十六进制

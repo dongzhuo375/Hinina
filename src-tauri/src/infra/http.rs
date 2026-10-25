@@ -47,7 +47,12 @@ const fn retry_delay(attempt: u32) -> Duration {
 /// **403 保持 `Network`**：它可能是「无权访问某场私有赛」这类业务限制而非会话问题，
 /// 误判为 Auth 会把已登录选手踢回登录页。
 fn status_error(url: &str, status: reqwest::StatusCode) -> crate::core::error::AppError {
-    let msg = format!("HTTP {} {}: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), url);
+    let msg = format!(
+        "HTTP {} {}: {}",
+        status.as_u16(),
+        status.canonical_reason().unwrap_or(""),
+        url
+    );
     if status == reqwest::StatusCode::UNAUTHORIZED {
         return crate::core::error::AppError::Auth(msg);
     }
@@ -177,9 +182,10 @@ impl HttpClient {
     ) -> AppResult<(String, reqwest::header::HeaderMap)> {
         let response = self.retry_get(url, headers, false).await?;
         let response_headers = response.headers().clone();
-        let body = response.text().await.map_err(|e| {
-            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
-        })?;
+        let body = response
+            .text()
+            .await
+            .map_err(|e| crate::core::error::AppError::Network(format!("读取响应体失败: {}", e)))?;
         Ok((body, response_headers))
     }
 
@@ -204,9 +210,10 @@ impl HttpClient {
         let response = self.retry_get(url, headers, true).await?;
         let status = response.status();
         let response_headers = response.headers().clone();
-        let body = response.text().await.map_err(|e| {
-            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
-        })?;
+        let body = response
+            .text()
+            .await
+            .map_err(|e| crate::core::error::AppError::Network(format!("读取响应体失败: {}", e)))?;
         Ok((status, response_headers, body))
     }
 
@@ -231,9 +238,10 @@ impl HttpClient {
             return Err(status_error_with_body(url, status, &excerpt));
         }
         let response_headers = response.headers().clone();
-        let text = response.text().await.map_err(|e| {
-            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
-        })?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| crate::core::error::AppError::Network(format!("读取响应体失败: {}", e)))?;
         Ok((text, response_headers))
     }
 
@@ -259,9 +267,10 @@ impl HttpClient {
             })?;
         let status = response.status();
         let response_headers = response.headers().clone();
-        let text = response.text().await.map_err(|e| {
-            crate::core::error::AppError::Network(format!("读取响应体失败: {}", e))
-        })?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| crate::core::error::AppError::Network(format!("读取响应体失败: {}", e)))?;
         Ok((status, response_headers, text))
     }
 

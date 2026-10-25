@@ -297,7 +297,10 @@ fn delete_file_rejects_ads_names_end_to_end() {
             .unwrap(),
         "// active"
     );
-    assert!(mgr.load(&ws.id, "/ws").is_ok(), "元数据未被删除，工作区仍可加载");
+    assert!(
+        mgr.load(&ws.id, "/ws").is_ok(),
+        "元数据未被删除，工作区仍可加载"
+    );
 }
 
 #[test]
@@ -333,11 +336,7 @@ fn delete_file_disk_only_file_still_removed_from_memory() {
     // 模拟「内存里没有 main.cpp」：直接从 HashMap 移除（磁盘仍在）
     {
         let mut current = mgr.current.write().unwrap_or_else(|e| e.into_inner());
-        current
-            .as_mut()
-            .unwrap()
-            .files
-            .remove("main.cpp");
+        current.as_mut().unwrap().files.remove("main.cpp");
     }
 
     mgr.delete_file("main.cpp").unwrap();
