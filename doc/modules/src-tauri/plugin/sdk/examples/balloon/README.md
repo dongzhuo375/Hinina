@@ -64,9 +64,10 @@ npm run plugin:balloon:build  # esbuild 离线打包 → src-tauri/target/plugin
     index.js
 ```
 
-`plugins.json`（`options.endpoint` 是派发目标，必须是 HTTPS URL——插件 HTTP
-拒绝 loopback/私网，明文 HTTP 需另行显式批准；URL 不能带 userinfo 或
-fragment，宿主一律拒绝）：
+`plugins.json`（`options.endpoint` 是派发目标，必须是 http(s) URL；明文
+HTTP origin 需在 `network` 审批里显式加 `"allowHttp": true`，RFC1918/ULA
+私网目标需 `privateCidrs` 批准，loopback 地址无审批路径一律拒绝；URL 不能
+带 userinfo 或 fragment，宿主一律拒绝）：
 
 ```json
 {
@@ -85,6 +86,17 @@ fragment，宿主一律拒绝）：
 }
 ```
 
+赛场内网的明文 HTTP 派发后端（如局域网接收端）把 `network` 与 `options`
+换成（清单 `network.allowOrigins` 同步改）：
+
+```json
+"network": [{ "origin": "http://balloon.internal:8080", "allowHttp": true, "privateCidrs": ["10.10.0.0/16"] }],
+"options": { "endpoint": "http://balloon.internal:8080/post" }
+```
+
+公网 HTTPS 端点两项额外批准都不需要。明文 HTTP 仅建议用于可信内网——气球
+体（队伍名/校名）经明文传输，配置前自行评估。
+
 - 榜单查询有**每激活 `PLUGIN_RANK_QUERIES_PER_MINUTE` 次/分钟的硬配额**（宿主
   实现为 governor GCRA：突发等于配额、按每分钟配额个逐个回补）。插件本地
   以**相同参数的 GCRA** 记账（模块态、随激活重置；时钟取事件信封时间——
@@ -101,8 +113,9 @@ fragment，宿主一律拒绝）：
 
 ## 端到端验收（需真实环境，人工执行）
 
-> **约束**：插件 HTTP 明确拒绝 loopback/私网地址，**不能用本地 mock server**。
-> 推荐用公网 HTTPS echo 端点（如 httpbin.org）接收假数据，验收完即关；
+> **约束**：插件 HTTP 一律拒绝 loopback 地址，**不能用本地 mock server**；
+> 私网目标需 `privateCidrs` 显式批准后可用内网 HTTP(S) 端点。推荐用公网
+> HTTPS echo 端点（如 httpbin.org）接收假数据，验收完即关；
 > 验收数据一律使用假队伍名，不涉及真实选手。
 
 | # | 场景 | 操作 | 预期 |
