@@ -78,51 +78,71 @@ impl Logger {
     /// - 文件层失败（磁盘只读等）时降级为仅 stderr，不阻断启动
     ///
     /// 返回持有文件句柄的实例（供运行期截断日志，见 [`Logger::clear_log_file`]）。
+    ///
+    /// **测试构建不装全局订阅器**（`cfg(test)` 分支只探测文件层是否可用）：
+    /// 全局订阅器是进程级单例，并行测试各自 `AppContext::init` 会争抢全局位；
+    /// 且一旦装上，整个测试进程所有用例的调试日志都会被格式化输出——
+    /// 输出体积暴涨，与 libtest 的捕获机制叠加在 Windows 上曾引发进程级崩溃
+    /// （STATUS_STACK_BUFFER_OVERRUN）。`clear_log_file` / `has_log_file` 是
+    /// 纯文件层操作，不依赖订阅器，测试语义不受影响。
     pub fn init(base_dir: &Path) -> Self {
-        let default_level = if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "info"
-        };
+        #[cfg(not(test))]
+        {
+            let default_level = if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "info"
+            };
 
-        let filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new(default_level));
+            let filter =
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
-        let stderr_layer = fmt::layer()
-            .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
-            .with_target(true)
-            .with_thread_ids(true)
-            .with_file(true)
-            .with_line_number(true)
-            .with_writer(io::stderr);
+            let stderr_layer = fmt::layer()
+                .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_writer(io::stderr);
 
-        match Self::open_log_file(base_dir) {
-            Some(file) => {
-                let file_layer = fmt::layer()
-                    .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
-                    .with_target(true)
-                    .with_thread_ids(true)
-                    .with_file(true)
-                    .with_line_number(true)
-                    // 文件里的 ANSI 转义序列不可读，必须关闭着色
-                    .with_ansi(false)
-                    .with_writer(SharedFileWriter(Arc::new(Mutex::new(file))));
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(stderr_layer)
-                    .with(file_layer)
-                    .init();
-                Self {
-                    log_path: Some(base_dir.join(LOG_RELATIVE_PATH)),
+            match Self::open_log_file(base_dir) {
+                Some(file) => {
+                    let file_layer = fmt::layer()
+                        .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
+                        .with_target(true)
+                        .with_thread_ids(true)
+                        .with_file(true)
+                        .with_line_number(true)
+                        // 文件里的 ANSI 转义序列不可读，必须关闭着色
+                        .with_ansi(false)
+                        .with_writer(SharedFileWriter(Arc::new(Mutex::new(file))));
+                    // try_init 而非 init：全局 subscriber 每进程只能设一次，重复
+                    // init 时沿用已装好的订阅器而不是 panic（防御性；生产只跑一次）
+                    let _ = tracing_subscriber::registry()
+                        .with(filter)
+                        .with(stderr_layer)
+                        .with(file_layer)
+                        .try_init();
+                    Self {
+                        log_path: Some(base_dir.join(LOG_RELATIVE_PATH)),
+                    }
+                }
+                None => {
+                    // 文件层不可用：保持旧的单路 stderr 行为
+                    let _ = tracing_subscriber::registry()
+                        .with(filter)
+                        .with(stderr_layer)
+                        .try_init();
+                    Self { log_path: None }
                 }
             }
-            None => {
-                // 文件层不可用：保持旧的单路 stderr 行为
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(stderr_layer)
-                    .init();
-                Self { log_path: None }
+        }
+
+        #[cfg(test)]
+        {
+            let opened = Self::open_log_file(base_dir).is_some();
+            Self {
+                log_path: opened.then(|| base_dir.join(LOG_RELATIVE_PATH)),
             }
         }
     }

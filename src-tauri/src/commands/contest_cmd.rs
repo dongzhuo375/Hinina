@@ -85,6 +85,28 @@ pub async fn get_contest_rank(
     remove_star: Option<bool>,
     contains_end: Option<bool>,
 ) -> AppResult<ContestRankPage> {
+    get_contest_rank_impl(
+        &ctx,
+        contest_id,
+        current_page,
+        limit,
+        keyword,
+        remove_star,
+        contains_end,
+    )
+    .await
+}
+
+/// `get_contest_rank` 的参数编排（提取自命令本体，供命令与测试共用）。
+pub(crate) async fn get_contest_rank_impl(
+    ctx: &AppContext,
+    contest_id: String,
+    current_page: Option<i64>,
+    limit: Option<i64>,
+    keyword: Option<String>,
+    remove_star: Option<bool>,
+    contains_end: Option<bool>,
+) -> AppResult<ContestRankPage> {
     let query = RankQuery {
         current_page: current_page.unwrap_or(1).max(1),
         limit: limit.unwrap_or(DEFAULT_RANK_LIMIT),
@@ -114,6 +136,16 @@ pub async fn list_contest_announcements(
     current_page: Option<i64>,
     limit: Option<i64>,
 ) -> AppResult<AnnouncementPage> {
+    list_contest_announcements_impl(&ctx, contest_id, current_page, limit).await
+}
+
+/// `list_contest_announcements` 的参数编排（提取自命令本体，供命令与测试共用）。
+pub(crate) async fn list_contest_announcements_impl(
+    ctx: &AppContext,
+    contest_id: String,
+    current_page: Option<i64>,
+    limit: Option<i64>,
+) -> AppResult<AnnouncementPage> {
     let page = current_page.unwrap_or(1).max(1);
     let limit = limit.unwrap_or(DEFAULT_ANNOUNCEMENT_LIMIT).max(1);
 
@@ -126,7 +158,7 @@ pub async fn list_contest_announcements(
 /// 从当前会话解析公告已读状态使用的 uid。
 ///
 /// 优先用 HOJ 的用户 UUID（user_id）；旧版会话文件可能缺失该字段，回退 username。
-fn session_uid(ctx: &AppContext) -> Option<String> {
+pub(crate) fn session_uid(ctx: &AppContext) -> Option<String> {
     ctx.auth.get_session().map(|s| {
         if s.user_id.is_empty() {
             s.username
@@ -147,10 +179,18 @@ pub async fn get_read_announcement_ids(
     ctx: State<'_, AppContext>,
     contest_id: String,
 ) -> AppResult<Vec<String>> {
-    let Some(uid) = session_uid(&ctx) else {
+    get_read_announcement_ids_impl(&ctx, &contest_id)
+}
+
+/// `get_read_announcement_ids` 的会话分支实现（提取自命令本体，供命令与测试共用）。
+pub(crate) fn get_read_announcement_ids_impl(
+    ctx: &AppContext,
+    contest_id: &str,
+) -> AppResult<Vec<String>> {
+    let Some(uid) = session_uid(ctx) else {
         return Ok(Vec::new());
     };
-    ctx.contest.get_read_announcement_ids(&contest_id, &uid)
+    ctx.contest.get_read_announcement_ids(contest_id, &uid)
 }
 
 /// 标记公告为已读（与既有记录合并去重）。
@@ -164,9 +204,22 @@ pub async fn mark_announcements_read(
     contest_id: String,
     ids: Vec<String>,
 ) -> AppResult<()> {
-    let Some(uid) = session_uid(&ctx) else {
+    mark_announcements_read_impl(&ctx, &contest_id, &ids)
+}
+
+/// `mark_announcements_read` 的会话分支实现（提取自命令本体，供命令与测试共用）。
+pub(crate) fn mark_announcements_read_impl(
+    ctx: &AppContext,
+    contest_id: &str,
+    ids: &[String],
+) -> AppResult<()> {
+    let Some(uid) = session_uid(ctx) else {
         warn!(contest_id = %contest_id, "无会话，跳过公告已读标记");
         return Ok(());
     };
-    ctx.contest.mark_announcements_read(&contest_id, &uid, &ids)
+    ctx.contest.mark_announcements_read(contest_id, &uid, ids)
 }
+
+#[cfg(test)]
+#[path = "tests/contest_cmd_tests.rs"]
+mod tests;

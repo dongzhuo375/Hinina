@@ -40,6 +40,11 @@ use crate::service::submission::snapshot::{self, SNAPSHOT_KEEP_DAYS};
 /// 否则界面会停在前端 store 的旧内存副本上）。
 #[tauri::command]
 pub async fn reset_client(ctx: State<'_, AppContext>) -> AppResult<()> {
+    reset_client_impl(&ctx)
+}
+
+/// `reset_client` 的真实编排（提取自命令本体，供命令与测试共用同一实现）。
+pub(crate) fn reset_client_impl(ctx: &AppContext) -> AppResult<()> {
     info!("Command: 重置客户端");
 
     ctx.contest.clear_caches();
@@ -88,11 +93,16 @@ pub struct LocalDataUsage {
 /// 而不是点下去才知道删了什么。
 #[tauri::command]
 pub async fn local_data_usage(ctx: State<'_, AppContext>) -> AppResult<LocalDataUsage> {
+    Ok(local_data_usage_impl(&ctx))
+}
+
+/// `local_data_usage` 的统计实现（提取自命令本体，供命令与测试共用）。
+pub(crate) fn local_data_usage_impl(ctx: &AppContext) -> LocalDataUsage {
     let log_path = ctx.storage.base_dir().join(LOG_RELATIVE_PATH);
     let log_bytes = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
     let usage = snapshot::inspect_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS);
 
-    Ok(LocalDataUsage {
+    LocalDataUsage {
         log_bytes,
         log_path: log_path.to_string_lossy().into_owned(),
         snapshot_total_count: usage.total_count,
@@ -100,7 +110,7 @@ pub async fn local_data_usage(ctx: State<'_, AppContext>) -> AppResult<LocalData
         snapshot_stale_count: usage.stale_count,
         snapshot_stale_bytes: usage.stale_bytes,
         keep_days: SNAPSHOT_KEEP_DAYS,
-    })
+    }
 }
 
 /// 清理结果。
@@ -171,9 +181,18 @@ pub async fn purge_local_data(
     logs: bool,
     stale_snapshots: bool,
 ) -> AppResult<PurgeReport> {
+    Ok(purge_local_data_impl(&ctx, logs, stale_snapshots))
+}
+
+/// `purge_local_data` 的真实编排（提取自命令本体，供命令与测试共用）。
+pub(crate) fn purge_local_data_impl(
+    ctx: &AppContext,
+    logs: bool,
+    stale_snapshots: bool,
+) -> PurgeReport {
     info!(logs, stale_snapshots, "Command: 清理本地数据");
 
-    let report = run_purge(
+    run_purge(
         logs,
         stale_snapshots,
         // 文件层不可用（磁盘只读等）时 clear_log_file 返回 Ok(0)：此时并没有清掉
@@ -184,7 +203,9 @@ pub async fn purge_local_data(
                 .map(|freed| (freed, ctx.logger.has_log_file()))
         },
         || snapshot::purge_stale_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS),
-    );
-
-    Ok(report)
+    )
 }
+
+#[cfg(test)]
+#[path = "tests/maintenance_cmd_tests.rs"]
+mod tests;

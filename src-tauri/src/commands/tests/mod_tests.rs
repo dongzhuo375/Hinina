@@ -29,7 +29,10 @@ fn auto_save_action_decision_table() {
     // 运行中 + 间隔未变 → 保持（避免每次 load_workspace 都重置计时器）
     assert_eq!(auto_save_action(true, 30, Some(30)), AutoSaveAction::Keep);
     // 运行中 + 间隔变了 → 以新间隔重启
-    assert_eq!(auto_save_action(true, 60, Some(30)), AutoSaveAction::Start(60));
+    assert_eq!(
+        auto_save_action(true, 60, Some(30)),
+        AutoSaveAction::Start(60)
+    );
     // 运行中 + 配置关闭 → 停止（旧实现在这里再也起不来）
     assert_eq!(auto_save_action(false, 30, Some(30)), AutoSaveAction::Stop);
     // 运行中 + 间隔改为 0 → 停止
@@ -44,37 +47,25 @@ fn auto_save_action_supports_off_then_on_cycle() {
 
     // 开启 → 关闭 → 再开启 的完整循环
     let mut running = None;
-    assert_eq!(auto_save_action(true, 30, running), AutoSaveAction::Start(30));
+    assert_eq!(
+        auto_save_action(true, 30, running),
+        AutoSaveAction::Start(30)
+    );
     running = Some(30);
     assert_eq!(auto_save_action(false, 30, running), AutoSaveAction::Stop);
     running = None;
-    assert_eq!(auto_save_action(true, 30, running), AutoSaveAction::Start(30));
-}
-
-/// 验证 workspace_cmd 中 WorkspaceManager 为 None 时的降级逻辑。
-/// `Option::ok_or_else` 在 None 时返回 Err，在 Some 时返回 Ok。
-#[test]
-fn option_none_produces_error() {
-    let manager: Option<&str> = None;
-    let result: Result<&str, String> = manager.ok_or_else(|| "未初始化".into());
-    assert!(result.is_err());
-
-    let manager: Option<&str> = Some("ready");
-    let result: Result<&str, String> = manager.ok_or_else(|| "未初始化".into());
-    assert!(result.is_ok());
+    assert_eq!(
+        auto_save_action(true, 30, running),
+        AutoSaveAction::Start(30)
+    );
 }
 
 // ── P58：Command 层可测的纯部分 ──
 //
-// 说明：`#[tauri::command]` 函数签名依赖 `tauri::State<'_, AppContext>`，
-// 而 `State` 没有公开构造器，只能在 Tauri 运行时（AppHandle）内获得 ——
-// 单元测试无法直接调用 get_contest_rank / get_user_problem_status /
-// get_contest_problem_limits / set_workspace_language / list_contest_announcements /
-// list_contest_submissions 等命令本体。这些命令的实质逻辑分两段：
-// ① 参数默认值/钳制与 uid 解析（下方以纯函数等价锁定）；
-// ② Service 调用与错误变体穿透（已在 service/contest、service/submission、
-//    service/problem、service/workspace 的测试中覆盖，含未注册 Provider 时
-//    registry 返回 ProviderNotFound 的分支）。
+// M2 起，依赖 `State` 的命令已把编排提取为 `*_impl(&AppContext)` 并在各
+// `tests/*_cmd_tests.rs` 用全真上下文直接测试（分页钳制、only_mine 强制、
+// uid 解析等此前靠「纯函数等价锁定」的条目已由真实调用取代）。本文件保留
+// 真正独立于命令编排的纯函数与 VO 锁定用例。
 
 use super::super::commands::config_cmd::StorageInfo;
 
@@ -90,57 +81,6 @@ fn storage_info_serializes_camel_case() {
     assert_eq!(json["baseDir"], r"D:\data\hinina");
     assert_eq!(json["logPath"], r"D:\data\hinina\logs\hinina.log");
     assert_eq!(json["version"], "0.1.0");
-}
-
-/// 分页参数默认值与钳制逻辑（与 contest_cmd / submission_cmd 内联表达式一致）：
-/// 公告默认 50、提交列表默认 20、页码至少 1。
-#[test]
-fn paging_defaults_and_clamping() {
-    const DEFAULT_ANNOUNCEMENT_LIMIT: i64 = 50;
-    const DEFAULT_SUBMISSION_LIMIT: i64 = 20;
-
-    // 与命令内联表达式同形的纯函数（Option 入参避免字面量折叠）
-    fn resolve(current_page: Option<i64>, limit: Option<i64>, default_limit: i64) -> (i64, i64) {
-        (
-            current_page.unwrap_or(1).max(1),
-            limit.unwrap_or(default_limit).max(1),
-        )
-    }
-
-    // 未传参 → 默认值
-    assert_eq!(resolve(None, None, DEFAULT_ANNOUNCEMENT_LIMIT), (1, 50));
-    assert_eq!(resolve(None, None, DEFAULT_SUBMISSION_LIMIT), (1, 20));
-
-    // 非法入参（0 / 负数）→ 钳制到 1，不会把 0 页发给 HOJ
-    assert_eq!(resolve(Some(0), Some(0), DEFAULT_SUBMISSION_LIMIT), (1, 1));
-    assert_eq!(resolve(Some(-5), Some(-1), DEFAULT_SUBMISSION_LIMIT), (1, 1));
-    assert_eq!(resolve(Some(3), Some(100), DEFAULT_SUBMISSION_LIMIT), (3, 100));
-}
-
-/// 公告已读状态的 uid 解析规则（与 contest_cmd::session_uid 一致）：
-/// 优先 HOJ 用户 UUID，旧版会话缺失 user_id 时回退 username。
-#[test]
-fn session_uid_prefers_user_id_and_falls_back_to_username() {
-    fn resolve(user_id: &str, username: &str) -> String {
-        if user_id.is_empty() {
-            username.to_string()
-        } else {
-            user_id.to_string()
-        }
-    }
-    assert_eq!(resolve("uuid-1", "alice"), "uuid-1");
-    assert_eq!(resolve("", "alice"), "alice", "旧版会话文件无 user_id 时回退");
-}
-
-/// 提交列表筛选参数的空白过滤（与 submission_cmd 内联表达式一致）：
-/// 空串/纯空白视为「不筛选」，不会拼进 HOJ 查询串。
-#[test]
-fn blank_problem_display_id_is_treated_as_no_filter() {
-    let filter = |s: Option<String>| s.filter(|v| !v.trim().is_empty());
-    assert_eq!(filter(Some("A".into())).as_deref(), Some("A"));
-    assert_eq!(filter(Some("".into())), None);
-    assert_eq!(filter(Some("   ".into())), None);
-    assert_eq!(filter(None), None);
 }
 
 // ── 清理本地数据：逐项容错（两个勾选项互不牵连） ──
@@ -177,7 +117,12 @@ fn run_purge_continues_snapshot_cleanup_when_log_clearing_fails() {
 /// 释放 0 字节，且 `log_cleared` 必须如实为 `false`（不能笼统报「已清理」）。
 #[test]
 fn run_purge_reports_log_not_cleared_when_file_layer_unavailable() {
-    let report = run_purge(true, false, || Ok((0, false)), || unreachable!("未勾选留档"));
+    let report = run_purge(
+        true,
+        false,
+        || Ok((0, false)),
+        || unreachable!("未勾选留档"),
+    );
 
     assert_eq!(report.log_cleared, false);
     assert_eq!(report.freed_bytes, 0);
@@ -227,8 +172,14 @@ fn data_dir_info_serializes_camel_case() {
         restart_required: false,
     };
     let json = serde_json::to_value(&info).expect("序列化失败");
-    assert_eq!(json["currentDir"], r"C:\Users\u\AppData\Local\com.hinina.app");
-    assert_eq!(json["defaultDir"], r"C:\Users\u\AppData\Local\com.hinina.app");
+    assert_eq!(
+        json["currentDir"],
+        r"C:\Users\u\AppData\Local\com.hinina.app"
+    );
+    assert_eq!(
+        json["defaultDir"],
+        r"C:\Users\u\AppData\Local\com.hinina.app"
+    );
     assert_eq!(json["restartRequired"], false);
     // source 是枚举字符串：前端据此区分「默认 / 用户指定 / 回退临时目录」
     assert_eq!(json["source"], "default");
@@ -262,8 +213,8 @@ fn data_dir_change_serializes_camel_case_and_nullable_migrate_from() {
 // `reset_data_dir` 本体依赖 `State` 无法单测，故校验抽成 `validate_reset` 纯函数 ——
 // 判据用错（`dir_is_empty` 而非「冲突条目」）时，命令会在真机上永远失败。
 
-use super::super::commands::data_dir_cmd::validate_reset;
 use super::super::commands::contest_cmd::DEFAULT_RANK_LIMIT;
+use super::super::commands::data_dir_cmd::validate_reset;
 use crate::core::entity::rank::RankQuery;
 use crate::test_support::TempDir;
 
@@ -288,15 +239,22 @@ fn validate_reset_allows_realistic_default_dir() {
     // 删指针则按钮消失）。
     let default_dir = temp_dir("allow-default");
     let current = temp_dir("allow-current");
-    write_at(default_dir.path(), "data_dir.json", r#"{"dataDir":"D:\\custom"}"#);
-    write_at(default_dir.path(), "EBWebView/Default/Cache/index", "binary");
+    write_at(
+        default_dir.path(),
+        "data_dir.json",
+        r#"{"dataDir":"D:\\custom"}"#,
+    );
+    write_at(
+        default_dir.path(),
+        "EBWebView/Default/Cache/index",
+        "binary",
+    );
     write_at(default_dir.path(), "logs/hinina.log", "old log");
 
     assert!(
         validate_reset(default_dir.path(), current.path(), true).is_ok(),
         "这些条目都不在迁移清单里，不得阻止「恢复默认 + 迁移」"
     );
-
 }
 
 #[test]
@@ -308,7 +266,8 @@ fn validate_reset_rejects_stale_migratable_entries_when_migrating() {
     write_at(default_dir.path(), "EBWebView/x", "binary");
     write_at(default_dir.path(), "config.json", r#"{"stale":true}"#);
 
-    let err = validate_reset(default_dir.path(), current.path(), true).expect_err("有陈旧 config.json 应拒绝");
+    let err = validate_reset(default_dir.path(), current.path(), true)
+        .expect_err("有陈旧 config.json 应拒绝");
     let msg = err.to_string();
     assert!(msg.contains("config.json"), "错误应点名冲突条目: {}", msg);
     assert!(
@@ -316,7 +275,6 @@ fn validate_reset_rejects_stale_migratable_entries_when_migrating() {
         "不得把必然存在的条目也算成冲突（否则指引是死循环）: {}",
         msg
     );
-
 }
 
 #[test]
@@ -331,7 +289,6 @@ fn validate_reset_allows_stale_cache_only() {
         validate_reset(default_dir.path(), current.path(), true).is_ok(),
         "残留旧 cache 不该阻止恢复默认"
     );
-
 }
 
 #[test]
@@ -345,7 +302,6 @@ fn validate_reset_skips_conflict_check_when_not_migrating() {
         validate_reset(default_dir.path(), current.path(), false).is_ok(),
         "不迁移时无需校验冲突"
     );
-
 }
 
 #[test]

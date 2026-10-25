@@ -45,7 +45,12 @@ pub(crate) fn switch_scope(
 /// `OjSwitched` 只用来通知其他观察者（审计、插件、前端）。
 #[tauri::command]
 pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<()> {
-    let id = OjId::new(&oj_id);
+    switch_oj_impl(&ctx, &oj_id).await
+}
+
+/// `switch_oj` 的真实编排（提取自命令本体，供命令与测试共用同一实现）。
+pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<()> {
+    let id = OjId::new(oj_id);
     // 新配置的实例可能尚未注册（注册只在启动时发生）——先补注册，再校验
     ctx.ensure_oj_registered(id.as_str());
     if !ctx.provider_registry.list_available().contains(&id) {
@@ -88,3 +93,7 @@ pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/oj_cmd_tests.rs"]
+mod tests;
