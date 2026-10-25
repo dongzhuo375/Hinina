@@ -124,7 +124,7 @@ fn run_purge_reports_log_not_cleared_when_file_layer_unavailable() {
         || unreachable!("未勾选留档"),
     );
 
-    assert_eq!(report.log_cleared, false);
+    assert!(!report.log_cleared);
     assert_eq!(report.freed_bytes, 0);
     assert_eq!(report.removed_snapshots, 0);
 }

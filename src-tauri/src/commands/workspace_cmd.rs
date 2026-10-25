@@ -212,10 +212,7 @@ pub async fn set_workspace_language(
 /// 旧文件删除后 `save()` 不再全量写出它们。后端守卫拒绝删除当前代码文件
 /// （`active_file`）与元数据 `workspace.json`，前端无需重复设防。
 #[tauri::command]
-pub async fn delete_workspace_file(
-    ctx: State<'_, AppContext>,
-    file_name: String,
-) -> AppResult<()> {
+pub async fn delete_workspace_file(ctx: State<'_, AppContext>, file_name: String) -> AppResult<()> {
     let wm = ctx
         .workspace_manager
         .as_ref()

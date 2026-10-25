@@ -26,17 +26,20 @@ impl FsConfigRepository {
 
 impl ConfigRepository for FsConfigRepository {
     fn load_config<T: DeserializeOwned>(&self) -> AppResult<T> {
-        let raw = self.storage.read_to_string(&self.config_path).map_err(|e| {
-            warn!(
-                config_path = %self.config_path,
-                error = %e,
-                "配置文件读取失败"
-            );
-            AppError::Config(format!(
-                "配置文件读取失败: {}, 错误: {}",
-                self.config_path, e
-            ))
-        })?;
+        let raw = self
+            .storage
+            .read_to_string(&self.config_path)
+            .map_err(|e| {
+                warn!(
+                    config_path = %self.config_path,
+                    error = %e,
+                    "配置文件读取失败"
+                );
+                AppError::Config(format!(
+                    "配置文件读取失败: {}, 错误: {}",
+                    self.config_path, e
+                ))
+            })?;
         debug!(config_path = %self.config_path, "配置文件已加载");
         serde_json::from_str::<T>(&raw).map_err(|e| {
             warn!(
@@ -54,14 +57,16 @@ impl ConfigRepository for FsConfigRepository {
             AppError::Serialization(format!("配置序列化失败: {}", e))
         })?;
         debug!(config_path = %self.config_path, "保存配置文件");
-        self.storage.write_string(&self.config_path, &json).map_err(|e| {
-            warn!(
-                config_path = %self.config_path,
-                error = %e,
-                "配置文件写入失败"
-            );
-            e
-        })
+        self.storage
+            .write_string(&self.config_path, &json)
+            .map_err(|e| {
+                warn!(
+                    config_path = %self.config_path,
+                    error = %e,
+                    "配置文件写入失败"
+                );
+                e
+            })
     }
 
     fn config_exists(&self) -> bool {

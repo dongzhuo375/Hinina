@@ -138,8 +138,7 @@ pub trait QuerySource: Send + Sync {
     /// @permission host-only
     /// @stability stable
     /// Read one page of the full contest rank; no metadata read, no cache.
-    async fn rank(&self, contest_id: &str, page: i64, limit: i64)
-        -> PluginResult<ContestRankPage>;
+    async fn rank(&self, contest_id: &str, page: i64, limit: i64) -> PluginResult<ContestRankPage>;
     /// @plugin-api
     /// @since 2.0
     /// @permission host-only
@@ -286,7 +285,11 @@ fn resolve_display_name(row: &ContestRankRow, rank_show_name: &str) -> String {
     } else {
         candidate
     };
-    let chosen = if chosen.is_empty() { row.uid.as_str() } else { chosen };
+    let chosen = if chosen.is_empty() {
+        row.uid.as_str()
+    } else {
+        chosen
+    };
     truncate_bytes(chosen, MAX_RANK_NAME_BYTES)
 }
 
@@ -395,12 +398,7 @@ impl QuerySource for ServiceQueries {
                 PluginError::ProviderError
             })
     }
-    async fn rank(
-        &self,
-        contest_id: &str,
-        page: i64,
-        limit: i64,
-    ) -> PluginResult<ContestRankPage> {
+    async fn rank(&self, contest_id: &str, page: i64, limit: i64) -> PluginResult<ContestRankPage> {
         // Plugin-visible rank is the plain board: no keyword search, starred teams
         // kept (rank -1), no after-contest submissions (matches the frontend default).
         let query = RankQuery {
@@ -508,10 +506,9 @@ impl ScopedQueries {
                 SHARED_QUERIES_PER_MINUTE,
                 SHARED_QUERY_CONCURRENCY,
             )),
-            rank_rate: RateLimiter::direct(Quota::per_minute(NonZeroU32::new(
-                PLUGIN_RANK_QUERIES_PER_MINUTE,
-            )
-            .unwrap())),
+            rank_rate: RateLimiter::direct(Quota::per_minute(
+                NonZeroU32::new(PLUGIN_RANK_QUERIES_PER_MINUTE).unwrap(),
+            )),
         }
     }
     pub(crate) fn with_shared_budget(mut self, budget: Arc<QueryBudget>) -> Self {
@@ -689,8 +686,7 @@ impl ScopedQueries {
         result.map(|c| {
             // Same rule as RankView: sealed only inside the seal window; the flag is
             // explanatory, the real gate is the server withholding pass states.
-            let sealed =
-                c.seal_rank && c.seal_rank_time.is_some_and(|t| t <= now_epoch_secs());
+            let sealed = c.seal_rank && c.seal_rank_time.is_some_and(|t| t <= now_epoch_secs());
             Some(PluginContest {
                 contest_id: c.id,
                 title: c.title.chars().take(256).collect(),

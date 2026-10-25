@@ -374,12 +374,25 @@ fn normalize_falls_back_to_first_enabled_when_active_points_to_disabled_instance
     // 回退首个启用实例，而不是停留在禁用 id 上
     let mut cfg = AppConfig::default();
     cfg.oj.instances = vec![
-        OjInstance { id: "HOJ".into(), base_url: "https://a.example.com".into(), enabled: false, options: serde_json::Map::new() },
-        OjInstance { id: "QDUOJ".into(), base_url: "https://b.example.com".into(), enabled: true, options: serde_json::Map::new() },
+        OjInstance {
+            id: "HOJ".into(),
+            base_url: "https://a.example.com".into(),
+            enabled: false,
+            options: serde_json::Map::new(),
+        },
+        OjInstance {
+            id: "QDUOJ".into(),
+            base_url: "https://b.example.com".into(),
+            enabled: true,
+            options: serde_json::Map::new(),
+        },
     ];
     cfg.oj.active = "HOJ".into();
     normalize_legacy_values(&mut cfg);
-    assert_eq!(cfg.oj.active, "QDUOJ", "应回退首个启用实例而非停留在禁用 id");
+    assert_eq!(
+        cfg.oj.active, "QDUOJ",
+        "应回退首个启用实例而非停留在禁用 id"
+    );
 }
 
 #[test]

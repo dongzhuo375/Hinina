@@ -146,7 +146,10 @@ fn parse_time_handles_leap_day_and_empty_input() {
 #[test]
 fn objectid_seconds_reads_creation_time_from_prefix() {
     // 0x6530f0c1 = 1697706177（2023-10-19T12:22:57Z）
-    assert_eq!(objectid_seconds("6530f0c1a1b2c3d4e5f60718"), Some(1_697_706_177));
+    assert_eq!(
+        objectid_seconds("6530f0c1a1b2c3d4e5f60718"),
+        Some(1_697_706_177)
+    );
 }
 
 #[test]
@@ -330,7 +333,10 @@ fn strip_html_keeps_text_and_unescapes_entities() {
         style: None,
         hover: None,
     };
-    assert_eq!(cell_text(&cell), "<span class=\"icon icon-check\"></span>\n0:12:00&nbsp;");
+    assert_eq!(
+        cell_text(&cell),
+        "<span class=\"icon icon-check\"></span>\n0:12:00&nbsp;"
+    );
     let text = strip_html(&cell_text(&cell));
     // 首行是被剥离的图标（空行），第二行才是 AC 用时 —— 整体 trim 会破坏该结构
     assert_eq!(text.lines().next(), Some(""));
@@ -391,14 +397,19 @@ fn contest_problems_fixture_parses_and_tolerates_string_config() {
     // config 是字符串（服务端解析失败）时按缺失处理，不得让整页失败
     assert!(pdict["1000"].problem_config().is_none());
     assert_eq!(pdict["1000"].problem_id(), "P1000");
-    let config = pdict["1001"].problem_config().expect("对象 config 应可解析");
+    let config = pdict["1001"]
+        .problem_config()
+        .expect("对象 config 应可解析");
     assert_eq!(config.time_limit_ms(), 1000);
     assert_eq!(config.memory_limit_mb(), 256);
     assert_eq!(config.langs, Some(vec!["cc".to_string()]));
 
     let tdoc = vo.tdoc.expect("应含 tdoc");
     assert!(tdoc.is_locked());
-    assert_eq!(tdoc.pid_list(), vec!["1001".to_string(), "1000".to_string()]);
+    assert_eq!(
+        tdoc.pid_list(),
+        vec!["1001".to_string(), "1000".to_string()]
+    );
 }
 
 #[test]
@@ -648,6 +659,9 @@ fn domain_redirect_ignores_non_domain_urls() {
     }))
     .is_none());
     // 登录重定向由 login_redirect_url 负责，此处不重复认领
-    assert!(domain_redirect_error(&serde_json::json!({ "url": "/login?redirect=%2Fp%2F1000" })).is_none());
+    assert!(
+        domain_redirect_error(&serde_json::json!({ "url": "/login?redirect=%2Fp%2F1000" }))
+            .is_none()
+    );
     assert!(domain_redirect_error(&serde_json::json!({})).is_none());
 }

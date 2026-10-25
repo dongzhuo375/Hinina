@@ -62,7 +62,11 @@ impl FsWorkspaceRepository {
 
     /// 校验 workspace_id 合法性：仅允许字母、数字、短横线和下划线。
     fn validate_workspace_id(id: &str) -> AppResult<()> {
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if id.is_empty()
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return Err(AppError::Workspace(format!(
                 "无效的 workspace_id: {}（仅允许字母、数字、-、_）",
                 id
@@ -113,9 +117,8 @@ impl FsWorkspaceRepository {
     fn is_reserved_device_name(component: &str) -> bool {
         let stem = component.split('.').next().unwrap_or(component);
         const DEVICES: [&str; 22] = [
-            "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
-            "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
-            "LPT8", "LPT9",
+            "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+            "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
         ];
         DEVICES.contains(&stem.to_uppercase().as_str())
     }
@@ -171,12 +174,11 @@ impl FsWorkspaceRepository {
 
     /// 递归遍历目录，收集所有文件相对于 `dir_root` 的路径。
     fn walk_dir(dir: &Path, dir_root: &Path, files: &mut Vec<PathBuf>) -> AppResult<()> {
-        for entry in std::fs::read_dir(dir).map_err(|e| {
-            AppError::Workspace(format!("读取目录失败 {}: {}", dir.display(), e))
-        })? {
-            let entry = entry.map_err(|e| {
-                AppError::Workspace(format!("读取目录条目失败: {}", e))
-            })?;
+        for entry in std::fs::read_dir(dir)
+            .map_err(|e| AppError::Workspace(format!("读取目录失败 {}: {}", dir.display(), e)))?
+        {
+            let entry =
+                entry.map_err(|e| AppError::Workspace(format!("读取目录条目失败: {}", e)))?;
             let path = entry.path();
             let relative = path.strip_prefix(dir_root).map_err(|e| {
                 AppError::Workspace(format!("路径前缀剥离失败 {}: {}", path.display(), e))
@@ -327,12 +329,11 @@ impl WorkspaceRepository for FsWorkspaceRepository {
         }
 
         let mut ids = Vec::new();
-        for entry in std::fs::read_dir(&workspaces_dir).map_err(|e| {
-            AppError::Workspace(format!("读取 workspaces 目录失败: {}", e))
-        })? {
-            let entry = entry.map_err(|e| {
-                AppError::Workspace(format!("读取目录条目失败: {}", e))
-            })?;
+        for entry in std::fs::read_dir(&workspaces_dir)
+            .map_err(|e| AppError::Workspace(format!("读取 workspaces 目录失败: {}", e)))?
+        {
+            let entry =
+                entry.map_err(|e| AppError::Workspace(format!("读取目录条目失败: {}", e)))?;
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 if let Some(name) = entry.file_name().to_str() {
                     ids.push(name.to_string());

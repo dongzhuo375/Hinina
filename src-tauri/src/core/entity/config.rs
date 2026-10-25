@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 以 JSON 格式持久化，ConfigService 负责加载/保存。
 /// 所有可变行为参数均从 Config 读取，支持运行时热更新。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     /// 用户偏好
@@ -22,18 +22,6 @@ pub struct AppConfig {
     /// 布局偏好
     #[serde(default)]
     pub layout: LayoutConfig,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            user: UserConfig::default(),
-            oj: OjConfig::default(),
-            editor: EditorConfig::default(),
-            theme: ThemeConfig::default(),
-            layout: LayoutConfig::default(),
-        }
-    }
 }
 
 // ── 用户偏好 ──
@@ -416,7 +404,8 @@ impl AppConfig {
             }
             // id 会拼进会话文件名（`sessions/{id}.json`）与注册表键：
             // 拒绝路径分隔符与 `..`（路径穿越），`Storage::resolve` 是第二道防线
-            if instance.id.contains('/') || instance.id.contains('\\') || instance.id.contains("..") {
+            if instance.id.contains('/') || instance.id.contains('\\') || instance.id.contains("..")
+            {
                 return Err(format!("OJ 实例 id 不得包含 /、\\ 或 ..：{}", instance.id));
             }
             if !seen.insert(instance.id.trim().to_string()) {
@@ -433,8 +422,16 @@ impl AppConfig {
             }
         }
         // active 必须指向已启用的实例（禁用实例不会被注册，指向它等于死路）
-        if !self.oj.instances.iter().any(|i| i.enabled && i.id == self.oj.active) {
-            return Err(format!("当前 OJ（{}）不在已启用的实例列表中", self.oj.active));
+        if !self
+            .oj
+            .instances
+            .iter()
+            .any(|i| i.enabled && i.id == self.oj.active)
+        {
+            return Err(format!(
+                "当前 OJ（{}）不在已启用的实例列表中",
+                self.oj.active
+            ));
         }
         Ok(())
     }

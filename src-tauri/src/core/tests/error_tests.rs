@@ -65,7 +65,10 @@ fn context_keeps_auth_error_recognisable() {
     assert!(matches!(err, AppError::Auth(_)));
     assert_eq!(err.user_message(), "HOJ judgement: HTTP 401 Unauthorized");
     // Display 仍带变体前缀，日志里能一眼看出类别
-    assert_eq!(err.to_string(), "认证错误: HOJ judgement: HTTP 401 Unauthorized");
+    assert_eq!(
+        err.to_string(),
+        "认证错误: HOJ judgement: HTTP 401 Unauthorized"
+    );
 }
 
 #[test]

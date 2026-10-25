@@ -39,7 +39,10 @@ fn open_log_file_appends_without_truncating_small_file() {
     drop(file);
 
     let content = fs::read_to_string(&log_path).unwrap();
-    assert_eq!(content, "old-line\nnew-line\n", "未超限的既有日志应追加而不是清空");
+    assert_eq!(
+        content, "old-line\nnew-line\n",
+        "未超限的既有日志应追加而不是清空"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

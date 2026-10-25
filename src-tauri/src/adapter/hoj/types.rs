@@ -56,7 +56,9 @@ impl<T> ApiResponse<T> {
         if self.is_success() {
             self.data.ok_or_else(|| "响应数据为空".to_string())
         } else {
-            Err(self.msg.unwrap_or_else(|| format!("HOJ 错误 status={}", self.status)))
+            Err(self
+                .msg
+                .unwrap_or_else(|| format!("HOJ 错误 status={}", self.status)))
         }
     }
 }
@@ -353,7 +355,10 @@ pub fn extract_problem_status_code(value: &serde_json::Value) -> Option<i32> {
         // 历史形态：布尔直出（true=已 AC）
         return Some(if b { 0 } else { -10 });
     }
-    value.get("status").and_then(|v| v.as_i64()).map(|n| n as i32)
+    value
+        .get("status")
+        .and_then(|v| v.as_i64())
+        .map(|n| n as i32)
 }
 
 /// HOJ 原始状态码 → 前端「我的题目状态」契约 `0=未提交 / 1=已AC / 2=尝试过`。
@@ -372,9 +377,9 @@ pub fn extract_problem_status_code(value: &serde_json::Value) -> Option<i32> {
 /// - 其余（-4/-3/-2/-1/1..15）→ `2` 尝试过（未通过）
 pub fn normalize_problem_status(code: i32) -> i32 {
     match code {
-        0 => 1,    // AC
-        -10 => 0,  // Not Submitted
-        _ => 2,    // 已尝试未通过
+        0 => 1,   // AC
+        -10 => 0, // Not Submitted
+        _ => 2,   // 已尝试未通过
     }
 }
 

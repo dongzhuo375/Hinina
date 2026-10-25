@@ -4,7 +4,9 @@
 //! @stability stable
 //! Host-bound capability assembly and finite JSON bridge; no internal entity is serialized.
 use super::{
-    api::{contest::*, http::*, identity::*, log::*, notification::*, storage::*, submission::*, *},
+    api::{
+        contest::*, http::*, identity::*, log::*, notification::*, storage::*, submission::*, *,
+    },
     bounded_json,
     host::manifest::PluginPermission,
     limits::{
@@ -271,9 +273,9 @@ async fn dispatch(api: &dyn PluginApi, operation: &str, args: Value) -> PluginRe
         "contest.current" => encode(ContestApi::current(api, &context()?).await?),
         "contest.get" => encode(ContestApi::get(api, &context()?, &text("contestId")?).await?),
         "contest.problems" => encode(ContestApi::problems(api, &context()?).await?),
-        "contest.rank" => encode(
-            ContestApi::rank(api, &context()?, decode(args["query"].clone())?).await?,
-        ),
+        "contest.rank" => {
+            encode(ContestApi::rank(api, &context()?, decode(args["query"].clone())?).await?)
+        }
         "submission.get" => encode(
             SubmissionApi::get(
                 api,

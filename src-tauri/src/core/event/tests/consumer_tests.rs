@@ -263,10 +263,7 @@ async fn healthy_run_resets_restart_counter() {
             "panic 后应触发重启（或放弃）",
         )
         .await;
-        assert!(
-            !task.is_finished(),
-            "健康存活后的重启不应累计到放弃阈值"
-        );
+        assert!(!task.is_finished(), "健康存活后的重启不应累计到放弃阈值");
         tokio::time::sleep(Duration::from_millis(80)).await;
     }
 
@@ -297,11 +294,7 @@ async fn rapid_crash_loop_exhausts_consumer() {
     for n in 1..=MAX_CONSUMER_RESTARTS {
         bus.publish(CoreEvent::ThemeChanged);
         let target = usize::try_from(n + 1).expect("重启计数不会溢出 usize");
-        wait_until(
-            || resync_count() >= target,
-            "panic 后应触发重启",
-        )
-        .await;
+        wait_until(|| resync_count() >= target, "panic 后应触发重启").await;
     }
 
     // 第 MAX+1 次异常退出：不再重启，消费者被放弃

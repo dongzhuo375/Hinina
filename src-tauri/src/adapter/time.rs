@@ -150,7 +150,10 @@ fn try_parse(s: &str) -> Option<(i64, i64)> {
         (hour, minute, second)
     };
 
-    Some((epoch_secs(year, month, day, hour, minute, second) - offset, offset))
+    Some((
+        epoch_secs(year, month, day, hour, minute, second) - offset,
+        offset,
+    ))
 }
 
 #[cfg(test)]

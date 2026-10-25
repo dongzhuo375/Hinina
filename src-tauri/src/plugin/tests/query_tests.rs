@@ -1768,7 +1768,9 @@ async fn rank_requires_both_contest_rank_and_contest_read_permissions() {
     );
     let c = denied.current_context().await.unwrap();
     assert_eq!(
-        denied.rank(&c, PluginRankQuery { page: 1, limit: 50 }).await,
+        denied
+            .rank(&c, PluginRankQuery { page: 1, limit: 50 })
+            .await,
         Err(PluginError::PermissionDenied {
             permission: PluginPermission::ContestRank
         })
@@ -1791,7 +1793,9 @@ async fn rank_requires_both_contest_rank_and_contest_read_permissions() {
     );
     let c = no_read.current_context().await.unwrap();
     assert_eq!(
-        no_read.rank(&c, PluginRankQuery { page: 1, limit: 50 }).await,
+        no_read
+            .rank(&c, PluginRankQuery { page: 1, limit: 50 })
+            .await,
         Err(PluginError::PermissionDenied {
             permission: PluginPermission::ContestRead
         })
@@ -2074,7 +2078,13 @@ async fn rank_page_bounds_combine_under_a_total_cell_budget() {
     // actually encodes under the 1 MiB bridge cap.
     *source.rank_page.lock().unwrap() = Some(cells_page(200, 30));
     let page = q
-        .rank(&c, PluginRankQuery { page: 1, limit: 200 })
+        .rank(
+            &c,
+            PluginRankQuery {
+                page: 1,
+                limit: 200,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(page.rows.len(), 200);
@@ -2209,7 +2219,13 @@ async fn rank_names_are_byte_bounded_so_a_full_page_stays_encodable() {
     let q = queries_over(source, Arc::new(AccessRevision::default()));
     let c = q.current_context().await.unwrap();
     let page = q
-        .rank(&c, PluginRankQuery { page: 1, limit: 200 })
+        .rank(
+            &c,
+            PluginRankQuery {
+                page: 1,
+                limit: 200,
+            },
+        )
         .await
         .unwrap();
     // 96 bytes at a char boundary: 32 CJK chars, never a split code point.
@@ -2262,6 +2278,5 @@ async fn problem_titles_are_byte_bounded_so_large_contests_stay_encodable() {
     // 256 bytes at a char boundary: 85 CJK chars (255 bytes), never a split code point.
     assert_eq!(problems[0].title.len(), 255);
     assert_eq!(problems[0].title.chars().count(), 85);
-    bounded_json::encoded_len(&problems, crate::plugin::limits::MAX_BRIDGE_RESPONSE_BYTES)
-        .unwrap();
+    bounded_json::encoded_len(&problems, crate::plugin::limits::MAX_BRIDGE_RESPONSE_BYTES).unwrap();
 }

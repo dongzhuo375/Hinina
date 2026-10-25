@@ -186,8 +186,13 @@ pub fn read_pointer(default_dir: &Path) -> DataDirPointer {
 /// 不会崩，但那等于**静默丢掉用户自定义的目录设置**（他下次启动会发现数据「换位置了」）。
 /// 同目录改名是原子的，故读者要么看到旧内容、要么看到新内容。
 pub fn write_pointer(default_dir: &Path, pointer: &DataDirPointer) -> AppResult<()> {
-    std::fs::create_dir_all(default_dir)
-        .map_err(|e| AppError::Io(format!("创建默认数据目录失败 {}: {}", default_dir.display(), e)))?;
+    std::fs::create_dir_all(default_dir).map_err(|e| {
+        AppError::Io(format!(
+            "创建默认数据目录失败 {}: {}",
+            default_dir.display(),
+            e
+        ))
+    })?;
     let json = serde_json::to_string_pretty(pointer)
         .map_err(|e| AppError::Serialization(format!("序列化数据目录指针失败: {}", e)))?;
 
@@ -232,7 +237,10 @@ pub fn dir_is_empty(dir: &Path) -> bool {
 /// = [`MIGRATED_ENTRIES`] 去掉 `cache`：缓存可重建，被跳过只是让新目录从空缓存开始
 /// （TTL 自然填充），不构成陈旧数据问题。**派生而非另列一份**，避免两处漂移。
 pub fn conflicting_entries() -> impl Iterator<Item = &'static str> {
-    MIGRATED_ENTRIES.iter().copied().filter(|e| *e != CACHE_ENTRY)
+    MIGRATED_ENTRIES
+        .iter()
+        .copied()
+        .filter(|e| *e != CACHE_ENTRY)
 }
 
 /// `dir` 中已存在的**冲突条目**（迁移会跳过它们 → 陈旧数据被静默采用）。

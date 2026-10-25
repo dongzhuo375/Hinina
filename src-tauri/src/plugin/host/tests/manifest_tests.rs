@@ -58,18 +58,13 @@ fn approving_an_undeclared_contest_rank_is_rejected() {
     value.validate().unwrap();
     // Approval is an intersection; approving an undeclared permission is a
     // configuration error, not a silent no-op.
-    let error = crate::plugin::permission::PluginGrant::authorize(
-        &value,
-        &[PluginPermission::ContestRank],
-    )
-    .unwrap_err();
+    let error =
+        crate::plugin::permission::PluginGrant::authorize(&value, &[PluginPermission::ContestRank])
+            .unwrap_err();
     assert_eq!(error, crate::plugin::api::PluginError::InvalidInput);
     // Declared and approved keeps working.
-    crate::plugin::permission::PluginGrant::authorize(
-        &value,
-        &[PluginPermission::ContestRead],
-    )
-    .unwrap();
+    crate::plugin::permission::PluginGrant::authorize(&value, &[PluginPermission::ContestRead])
+        .unwrap();
 }
 
 #[test]

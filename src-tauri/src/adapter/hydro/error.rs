@@ -81,11 +81,7 @@ fn classify_business_error(name: &str, code: i32, detail: &str) -> AppError {
 impl From<HydroError> for AppError {
     fn from(e: HydroError) -> Self {
         match e {
-            HydroError::ApiError {
-                code,
-                name,
-                params,
-            } => {
+            HydroError::ApiError { code, name, params } => {
                 // 会话失效优先于领域归类：`PrivilegeError` 也带 403，
                 // 但它的语义是「未登录」，必须让前端能据此登出。
                 if is_auth_error_name(&name) {
@@ -153,12 +149,18 @@ mod tests {
             api(404, "ProblemNotFoundError"),
             AppError::Problem(_)
         ));
-        assert!(matches!(api(403, "ContestNotLiveError"), AppError::Contest(_)));
+        assert!(matches!(
+            api(403, "ContestNotLiveError"),
+            AppError::Contest(_)
+        ));
         assert!(matches!(
             api(404, "RecordNotFoundError"),
             AppError::Submission(_)
         ));
-        assert!(matches!(api(404, "HomeworkNotFoundError"), AppError::Contest(_)));
+        assert!(matches!(
+            api(404, "HomeworkNotFoundError"),
+            AppError::Contest(_)
+        ));
     }
 
     #[test]

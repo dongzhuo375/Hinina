@@ -89,7 +89,6 @@ fn write_then_read_roundtrip() {
 
     let read = read_snapshot(&storage, "HOJ", "1166", "C++");
     assert_eq!(read.as_deref(), Some(code));
-
 }
 
 #[test]
@@ -103,7 +102,6 @@ fn read_falls_back_to_scan_when_language_changed() {
 
     let read = read_snapshot(&storage, "HOJ", "1166", "C++ 17");
     assert_eq!(read.as_deref(), Some(code));
-
 }
 
 #[test]
@@ -128,7 +126,6 @@ fn snapshots_of_different_ojs_do_not_collide() {
         read_snapshot(&storage, "Hydro", "1", "C++").as_deref(),
         Some("hydro code")
     );
-
 }
 
 #[test]
@@ -177,8 +174,10 @@ fn inspect_snapshots_counts_totals_and_stale() {
     assert_eq!(inspect_snapshots(&storage, 365).stale_count, 0);
 
     // 统计是只读的：不改变磁盘状态
-    assert_eq!(inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS).total_count, 3);
-
+    assert_eq!(
+        inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS).total_count,
+        3
+    );
 }
 
 #[test]
@@ -202,17 +201,28 @@ fn purge_stale_snapshots_keeps_fresh_and_removes_aged() {
     );
     assert!(!storage.exists("submissions/HOJ/1168.cpp"));
     // 空掉的 OJ 子目录回收，仍有留档的保留
-    assert!(!dir.join("submissions").join("Hydro").exists(), "清空的 OJ 子目录应被回收");
-    assert!(dir.join("submissions").join("HOJ").exists(), "仍有留档的目录不得回收");
+    assert!(
+        !dir.join("submissions").join("Hydro").exists(),
+        "清空的 OJ 子目录应被回收"
+    );
+    assert!(
+        dir.join("submissions").join("HOJ").exists(),
+        "仍有留档的目录不得回收"
+    );
 
-    assert_eq!(inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS).total_count, 1);
-
+    assert_eq!(
+        inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS).total_count,
+        1
+    );
 }
 
 #[test]
 fn inspect_and_purge_are_safe_without_any_snapshot() {
     // 从未提交过（目录不存在）：统计返回全零、清理是 no-op 而不是报错
     let (storage, _dir) = temp_storage("purge-empty");
-    assert_eq!(inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS), SnapshotUsage::default());
+    assert_eq!(
+        inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS),
+        SnapshotUsage::default()
+    );
     assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
 }

@@ -35,9 +35,7 @@ impl From<HOJError> for AppError {
             HOJError::HttpError(msg) => AppError::Network(format!("HOJ: {}", msg)),
             HOJError::JsonError(msg) => AppError::Serialization(format!("HOJ: {}", msg)),
             HOJError::Unauthorized(msg) => AppError::Auth(format!("HOJ: {}", msg)),
-            HOJError::UnknownStatus(code) => {
-                AppError::Unknown(format!("HOJ 未知状态码: {}", code))
-            }
+            HOJError::UnknownStatus(code) => AppError::Unknown(format!("HOJ 未知状态码: {}", code)),
         }
     }
 }

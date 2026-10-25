@@ -60,7 +60,7 @@ pub fn factories() -> Vec<&'static dyn AdapterFactory> {
 pub(crate) fn test_adapter_deps(storage: Arc<Storage>) -> AdapterDeps {
     AdapterDeps {
         http_client: Arc::new(
-            HttpClient::with_timeout(std::time::Duration::from_secs(5))
+            HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(5))
                 .expect("HttpClient 构造失败"),
         ),
         event_bus: Arc::new(crate::core::event::core_event_bus::CoreEventBus::new()),

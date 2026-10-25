@@ -96,7 +96,8 @@ fn empty_error_body_falls_back_to_plain_status_error() {
 #[test]
 fn retry_delay_backs_off_exponentially() {
     assert_eq!(retry_delay(0), Duration::from_millis(1000));
-    assert_eq!(retry_delay(1), Duration::from_millis(2000));    assert_eq!(retry_delay(2), Duration::from_millis(4000));
+    assert_eq!(retry_delay(1), Duration::from_millis(2000));
+    assert_eq!(retry_delay(2), Duration::from_millis(4000));
 }
 
 // ── classify_status（GET 重试决策）──
@@ -187,7 +188,7 @@ fn classify_fails_redirect_leftovers() {
 fn with_timeout_builds_client() {
     // reqwest::Client 不暴露 timeout getter，此处锁定构造路径可用；
     // 「配置值确实被传入」由 context.rs 的装配代码保证（timeout_secs → with_timeout）
-    HttpClient::with_timeout(Duration::from_secs(7)).expect("应能创建指定超时的客户端");
+    HttpClient::with_timeout_no_proxy(Duration::from_secs(7)).expect("应能创建指定超时的客户端");
     HttpClient::new().expect("默认构造应保持可用");
 }
 
@@ -252,7 +253,9 @@ fn raw_accepts_success_same_as_default() {
 use crate::test_support::loopback::{LoopbackServer, ScriptedResponse};
 
 fn client() -> HttpClient {
-    HttpClient::with_timeout(std::time::Duration::from_secs(5)).expect("HttpClient 应可构造")
+    // no_proxy：传输测试打 loopback，宿主环境代理会劫持 127.0.0.1 请求
+    HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(5))
+        .expect("HttpClient 应可构造")
 }
 
 /// GET 5xx 自动重试且成功即止：恰好 2 次请求（首次 500 + 重试 200）。
@@ -337,7 +340,11 @@ async fn transport_maps_401_to_auth_and_403_to_network() {
         .get_text_with_headers(&format!("{}/p", s401.url()), &Default::default())
         .await
         .unwrap_err();
-    assert!(matches!(err, AppError::Auth(_)), "401 应为 Auth，实得 {:?}", err);
+    assert!(
+        matches!(err, AppError::Auth(_)),
+        "401 应为 Auth，实得 {:?}",
+        err
+    );
     s401.shutdown();
 
     let s403 = LoopbackServer::start(vec![ScriptedResponse::with(403, vec![], "")]).await;

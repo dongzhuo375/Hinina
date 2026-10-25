@@ -55,7 +55,9 @@ fn load_missing_config_returns_error() {
 fn load_invalid_json_returns_error() {
     let r = repo("invalid-json");
     // 手动写入非法 JSON
-    r.storage.write_string("config.json", "not valid json").unwrap();
+    r.storage
+        .write_string("config.json", "not valid json")
+        .unwrap();
     let result: AppResult<TestConfig> = r.load_config();
     assert!(result.is_err());
 }

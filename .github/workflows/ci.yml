@@ -1,6 +1,6 @@
 # M1 最小 PR CI（doc/cicd/m1-pr-gate.md）
-# 阻塞链：frontend + rust-test → ci-required（分支保护必需检查）
-# rust-lint 首版非阻塞：存量 fmt/clippy 欠账清零（E2/E3，PR2）后并入 ci-required。
+# 阻塞链：frontend + rust-lint + rust-test → ci-required（分支保护必需检查）。
+# rust-lint 于 lint 门禁清理 PR（doc/cicd/lint-gate-cleanup.md）后升为必需。
 name: CI
 
 on:
@@ -104,17 +104,16 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --doc
 
   # 汇总 job：作为分支保护的唯一必需检查名（稳定名，改名须同步分支保护）。
-  # rust-lint 刻意不在 needs 内（首版非阻塞）。
   ci-required:
     name: ci-required
-    needs: [frontend, rust-test]
+    needs: [frontend, rust-lint, rust-test]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
       - name: Fail if any required job failed or was cancelled
         run: |
-          echo "frontend=${{ needs.frontend.result }} rust-test=${{ needs.rust-test.result }}"
+          echo "frontend=${{ needs.frontend.result }} rust-lint=${{ needs.rust-lint.result }} rust-test=${{ needs.rust-test.result }}"
           if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || \
              [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
             echo "::error::a required job failed or was cancelled"

@@ -95,10 +95,12 @@ impl FsSessionRepository {
         self.storage.create_dir(SESSIONS_DIR)?;
         let path = self.path(&OjId::new(&session.oj_id));
         let json = serde_json::to_string_pretty(session)?;
-        self.storage.write_string_atomic(&path, &json).map_err(|e| {
-            warn!(path = %path, error = %e, "会话文件写入失败");
-            e
-        })?;
+        self.storage
+            .write_string_atomic(&path, &json)
+            .map_err(|e| {
+                warn!(path = %path, error = %e, "会话文件写入失败");
+                e
+            })?;
         debug!(path = %path, "会话已保存");
         Ok(())
     }
