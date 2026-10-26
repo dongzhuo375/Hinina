@@ -20,6 +20,14 @@ let loadInFlightToken: object | null = null
 /// 复用会让新会话拿到一个不会写入任何数据的空结果（静默空数据）。
 let loadInFlightGeneration = -1
 
+/// 匿名简报的失效世代：**只**在 OJ 切换时递增（`invalidateBrief`）。
+///
+/// 简报跨登出保留（同 OJ 的匿名数据），因此不能用会话代际做守卫；但切 OJ
+/// 后旧 OJ 的简报必须作废——否则切换前发出的 brief 请求在 reset 之后 resolve
+/// 时会把旧 OJ 的比赛写回已重置状态，LoginView 的 canEnter 会按旧时间窗
+/// 误自动进赛场（评审八轮）。
+let briefEpoch = 0
+
 export const useContestStore = defineStore('contest', {
   state: () => ({
     contest: null as Contest | null,
@@ -106,10 +114,14 @@ export const useContestStore = defineStore('contest', {
      * 由 `briefState` / `briefError` 驱动登录页的连接状态与重试入口。
      */
     async loadBrief() {
+      // 简报的过期守卫用「OJ 失效世代」而不是会话代际：简报跨登出保留，
+      // 但切 OJ 后旧请求的回写必须丢弃（评审八轮）
+      const epoch = briefEpoch
       this.briefState = 'connecting'
       this.briefError = null
       try {
         const result = await contestService.loadContestBrief()
+        if (epoch !== briefEpoch) return
         this.briefBaseUrl = result.baseUrl
         if (result.status === 'unconfigured') {
           this.brief = null
@@ -119,10 +131,26 @@ export const useContestStore = defineStore('contest', {
         this.brief = result.contest
         this.briefState = 'connected'
       } catch (e) {
+        if (epoch !== briefEpoch) return
         this.brief = null
         this.briefError = errorMessage(e, '获取比赛信息失败')
         this.briefState = 'failed'
       }
+    },
+
+    /**
+     * 作废匿名简报（**仅 OJ 切换时**由 `resetSessionForOjSwitch` 调用）。
+     *
+     * 递增 `briefEpoch` 使在途的旧 OJ brief 请求在 resolve 时被丢弃；
+     * 再清空简报状态让登录页按新 OJ 重拉。登出不清简报（同 OJ 的匿名数据，
+     * 保留可避免切换账号时右侧氛围区空白）。
+     */
+    invalidateBrief() {
+      briefEpoch += 1
+      this.brief = null
+      this.briefBaseUrl = ''
+      this.briefError = null
+      this.briefState = 'idle'
     },
 
     /**
