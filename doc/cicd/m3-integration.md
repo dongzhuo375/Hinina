@@ -3,7 +3,7 @@
 > 记录日期：2026-10-25  
 > 版本锚定：`main` @ 56140c5（PR #54 合并后），分支 `chore/ci-m3-integration`  
 > 文档性质：CI/CD 施工过程记录（入库，见 [doc/cicd/](README.md)）；对应施工方案 §六（M3）与 m0-baseline §六命名表的 `integration.yml` 条目  
-> 状态：夜间链路已建立并经多轮验证（§六首跑/恢复/首验）；评审一/二/三/四轮处置分别见 §七/§八/§九/§十；当前 E2E 14 用例
+> 状态：夜间链路已建立并经多轮验证（§六首跑/恢复/首验）；评审一~五轮处置分别见 §七/§八/§九/§十/§十一；当前 E2E 14 用例
 
 ## 一、范围与相对原计划的修正
 
@@ -124,4 +124,14 @@
 | **#5 fake 未持久化 lastWorkspaceId** | 属实：`lastWorkspaceId` 纳入 `PersistedBackend`；`__e2e.backendState()` 暴露快照；新增「刷新后当前工作区仍在」（在题目总览 reload，该页不 load_workspace）用例可区分持久化与否 |
 | **#6 session.ts ↔ store import 环** | 属实：计数器移到叶子模块 `src/stores/sessionGeneration.ts`（`getSessionGeneration`/`bumpSessionGeneration`），session.ts 只负责递增、store 只读取；新增模块文档，store 文档依赖清单同步 |
 
-**验证**：前端 **565 单测**（563 + 新增 loadMyStatus 与 finally 锁两条）、**14 E2E**、`npm run build`、`tsc -p tsconfig.node.json`（`--listFiles` 实证 6 个 e2e 文件在编译程序内）、fmt/clippy 全绿；loadMyStatus 守卫、finally 锁守卫、lastWorkspaceId 持久化三处均经**变异验证**（去守卫/去持久化后对应用例恰红）；`fetchHistory` 守卫经实测确认是纵深防御（去掉后用例仍绿，故不保留误导性用例）。
+**验证**：前端 **568 单测**（565 + 跨会话去重/保存收尾/轮询收尾三条）、**14 E2E**、`npm run build`、`tsc -p tsconfig.node.json`（`--listFiles` 实证 6 个 e2e 文件在编译程序内）、fmt/clippy 全绿；本轮三条修复均经**变异验证**（还原旧实现后对应用例恰红）。四轮的三处守卫/持久化同理。
+
+## 十一、评审五轮处置（跨会话去重回归 + 两处收尾残留）
+
+| 发现 | 核实与处置 |
+|---|---|
+| **回归：`loadContest` 去重复用跨会话旧请求**（`loadInFlight` 模块级、`clearSessionData()` 不清；旧 promise 的结果被代际守卫丢弃 → 新会话静默空数据，无错误提示） | 属实。双保险：① 登记在途请求时一并记录**所属代际**，`whenLoaded`/`loadContest` 只在代际相同时复用；② `clearSessionData()` 同时注销 `loadInFlight`/token/代际登记。新增回归用例（旧请求在途 → 清理 → 新会话加载必须发新请求并写入新数据），**变异验证**（还原为「无条件复用 + 不注销」即红） |
+| 残留：`pollResult` 无守卫，旧会话在途轮询返回时 `error = null` 抹掉新会话错误提示 | 属实。`pollResult` 代际未变才写条目/清 error；`pollOnce` 代际未变才做收尾（`invalidateMyStatus`/失败计数）。新增用例（旧轮询返回后新会话 error 保持），**变异验证**通过 |
+| 残留：`saveWorkspace` 在 await 后写 `isDirty = false`，旧会话保存落定可能清新会话脏标记（假「已保存」） | 属实。`saveWorkspace` 与 `flushPendingSync` 均加代际守卫（旧会话推送落定不推进修订水位、不改 `syncPending`/`isDirty`）。新增用例（旧保存落定不清新会话脏标记），**变异验证**通过 |
+
+**一处自查撤回**：曾顺带给 `markPersisted`（`workspace-saved` 事件）加「当前工作区加载代际」守卫，但事件载荷不携带代际、既有 6 条用例（手工构造状态、不经 loadWorkspace）因此全红，属超出本轮范围的推测性改动——已撤回，仅保留被点名的 flush/save 与轮询修复。事件路径的既有防线（workspaceId 过滤 + revision 幂等/水位）不变。
