@@ -104,8 +104,11 @@ jobs:
         run: |
           outcome=success
           for value in "$NPM_BUILD" "$TAURI_BUILD" "$ARTIFACT_UPLOAD"; do
-            # skipped = 前序步骤已失败时的正常跳过，不代表本步通过
-            if [ "$value" != "success" ] && [ "$value" != "skipped" ]; then outcome=failure; fi
+            # 必须三步全部 success：它们没有「成功路径下的正常跳过」。
+            # 前置步骤（checkout/setup-node/corepack/apt/rust-cache）失败时三者
+            # 全为 skipped——若把 skipped 当中性，观测平台会把初始化失败报成成功
+            #（评审三轮：macOS/Linux 的唯一真实结果渠道就是这份自报）
+            if [ "$value" != "success" ]; then outcome=failure; fi
           done
           echo "- build (${{ matrix.os }}): **${outcome}**" >> "$GITHUB_STEP_SUMMARY"
 
