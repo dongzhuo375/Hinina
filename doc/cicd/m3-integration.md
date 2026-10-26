@@ -166,3 +166,12 @@
 **runner 实证（分支 dispatch 两次）**：
 - run **40315416236**（首跑，4e8e03e）：7 job + summary 全绿。rust-cache 日志确认 `workspaces: src-tauri -> target`、Cache Paths 含 `src-tauri/target`（首次为 write 模式，round 1 冷编译 3m16s）；stress 每轮 `7 passed` / `8 passed`（守卫未误报）；rust-coverage `7883/9498 = 83.00%`；e2e 绿。
 - run **40317140558**（复跑，同 SHA）：`Cache restored successfully`，stress 10 轮从 round 1（11:44:08）到 round 10（11:45:25）仅约 77 秒——**target 缓存命中实证**（此前因根目录无 Cargo.toml 从未缓存）。
+
+## 十四、评审七轮处置（两处 workspaceStore 跨会话边界，均属实）
+
+| 发现 | 核验与处置 |
+|---|---|
+| `loadWorkspace` 的 `loadQueue` 轮次闭包只查 `loadGeneration`：清理后已排队的旧加载仍发 `load_workspace` IPC，后端 current 短暂指向旧会话题目 | 属实（清理不递增 `loadGeneration`；flush 后检查通过 → 队列 turn 时 gen 仍是「最新」→ 发 IPC）。**修复**：flush 后与 **turn 内**都校验会话代际，清理后不再发出旧会话 IPC；新增用例（推送挂起 → 清理 → 放行 → 断言 `load_workspace` 未被调用），**变异验证**（去掉会话检查即红）。原 P2 用例调整为「IPC 已在途 → 清理 → 响应返回」以继续覆盖在途丢弃 |
+| `cancelPendingSync` 归零修订水位：新会话恢复脏工作区后，旧会话迟到 `markPersisted` 可把 `isDirty` 清为 false（假「已自动备份」） | 属实。**方案（先定后改）**：后端 `revision` 是 WorkspaceManager 进程级 `Arc<AtomicU64>`，登出/切 OJ 继续单调（管理器存活于 AppContext），仅数据目录变更需重启重建——**修订号跨会话可比**，水位的正确语义是保留。**修复**：`cancelPendingSync` 默认保留水位，新增 `resetRevisionWatermarks` 选项仅供测试隔离/管理器重建；`markPersisted` 因此按真实磁盘进度裁决旧事件（≤ 已落盘水位幂等跳过、< 已推送水位不清脏）。新增「旧会话迟到事件不得清新会话脏工作区」用例，**变异验证**（恢复归零即红） |
+
+**验证**：前端 **574 单测**（572 + 两条）、15 E2E、build/tsc/fmt 全绿；两处均变异验证。文档同步：workspaceStore（loadWorkspace/cancelPendingSync/markPersisted/已闭合边界）、sessionGeneration 边界说明。

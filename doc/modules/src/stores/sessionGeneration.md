@@ -23,7 +23,7 @@
 
 - `@/stores/session`（`bumpSessionGeneration`）
 - `@/stores/submissionStore`（`submitCode` / `startPolling` / `fetchHistory` 的写入与收尾）
-- `@/stores/workspaceStore`（`loadWorkspace` 两处检查点与失败分支）
+- `@/stores/workspaceStore`（`loadWorkspace` 的 flush 后、**队列 turn 内**、apply 前置 await 后与失败分支；队列 turn 的会话检查保证清理后已排队的旧加载不发 `load_workspace` IPC —— 评审七轮）
 - `@/stores/problemStore`（`openProblem` / `loadLimits` / `loadMyStatus`）
 - `@/stores/contestStore`（`loadContest`）
 - `@/stores/rankStore`（`loadRank` / `fetchAllRows` 的中止检查点）
@@ -44,4 +44,4 @@ store 内的写回路径
   finally { if (gen === getSessionGeneration()) …收尾… }
 ```
 
-边界：`contestStore.loadBrief`（登录页匿名简报）**不比对代际**——登出时简报按设计保留；其余会话域数据（比赛、题面、我的状态、提交历史、榜单、公告）全部比对。`submissionStore.history` 因 `$reset()` 整体替换嵌套对象，迟到写入落在旧引用上（本身不泄漏），其守卫是纵深防御。`workspaceStore.markPersisted`（`workspace-saved` 事件）**也不加代际守卫**：事件不带代际，加了会误挡新会话自己的落盘事件；其跨会话安全性由后端 revision 进程级全局单调 + 仅在磁盘写入后发布 + `workspaceId`/`syncPending` 过滤保证（评审五轮核验，见 workspaceStore 文档与专项用例）。`contestStore` 的**在途去重**另需按代际判定：`loadInFlight` 登记代际，跨会话不复用旧 promise，`clearSessionData()` 一并注销。
+边界：`contestStore.loadBrief`（登录页匿名简报）**不比对代际**——登出时简报按设计保留；其余会话域数据（比赛、题面、我的状态、提交历史、榜单、公告）全部比对。`submissionStore.history` 因 `$reset()` 整体替换嵌套对象，迟到写入落在旧引用上（本身不泄漏），其守卫是纵深防御。`workspaceStore.markPersisted`（`workspace-saved` 事件）**也不加代际守卫**：事件不带代际，加了会误挡新会话自己的落盘事件；其跨会话安全性由后端 revision 进程级全局单调 + 仅在磁盘写入后发布 + `workspaceId`/`syncPending` 过滤保证，且本地修订水位**跨会话保留**（`cancelPendingSync` 默认不归零，评审七轮；归零会让旧事件误清新会话的脏标记）。`contestStore` 的**在途去重**另需按代际判定：`loadInFlight` 登记代际，跨会话不复用旧 promise，`clearSessionData()` 一并注销。
