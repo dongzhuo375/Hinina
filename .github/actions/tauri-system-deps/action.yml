@@ -10,22 +10,41 @@ runs:
   steps:
     - name: Install Tauri 2 system dependencies
       shell: bash
-      # 重试/超时经 apt.conf.d drop-in 注入：update 与 install 都继承。
-      # **再用 timeout 加硬墙钟上限**：实测 runner 镜像慢速挂起时，Acquire 超时
-      # 与重试仍可能吃掉几十分钟（PR run 的 ubuntu job 卡在 apt 33 分钟）。
-      # 墙钟上限让故障在 ~10/15 分钟内显性失败，而不是等到 job 超时。
+      # 三层防护：
+      # ① apt.conf.d drop-in（Retries/连接超时）—— update 与 install 都继承；
+      # ② 已装快路径——runner 镜像若已带全部依赖则跳过网络（镜像挂起时最有效）；
+      # ③ 每命令硬墙钟 + 最多 3 次整体重试——镜像慢速挂起实测可吃掉 15 分钟以上
+      #    （PR/main 两处实测：install 命中 timeout 900 的 rc=124），重试给它换一次机会，
+      #    同时把最坏耗时限制在 ~22 分钟以内（远低于 45 分钟 job 上限）。
       run: |
         echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
         echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
         echo 'Acquire::https::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
-        sudo timeout 420 apt-get update
-        sudo timeout 900 apt-get install -y \
-          libwebkit2gtk-4.1-dev \
-          build-essential \
-          curl \
-          wget \
-          file \
-          libxdo-dev \
-          libssl-dev \
-          libayatana-appindicator3-dev \
-          librsvg2-dev
+
+        packages="libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev"
+
+        missing=0
+        for pkg in $packages; do
+          if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
+            missing=1
+            break
+          fi
+        done
+        if [ "$missing" = "0" ]; then
+          echo "All Tauri 2 system dependencies already installed; skipping apt."
+          exit 0
+        fi
+
+        for attempt in 1 2 3; do
+          echo "::group::apt install attempt $attempt / 3"
+          if sudo timeout 150 apt-get update && \
+             sudo timeout 300 apt-get install -y $packages; then
+            echo "::endgroup::"
+            exit 0
+          fi
+          echo "::endgroup::"
+          echo "::warning::apt attempt $attempt failed (mirror stall or timeout); cleaning and retrying"
+          sudo apt-get clean || true
+        done
+        echo "::error::apt install failed after 3 attempts"
+        exit 1
