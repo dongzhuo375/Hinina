@@ -186,3 +186,5 @@
 **验证**：前端 **576 单测**（574 + 两条）、15 E2E、build/tsc/fmt 全绿；runner 复跑见下。
 
 **runner 复跑**（run 40327257825，4eef32a）：7 job + summary 全绿；stress 日志确认 `99-hinina-apt` drop-in 生效、`Cache restored successfully`。**同时暴露新缺口**：同一批次的 PR run 中 ubuntu rust-test 在复合 action 的 apt 步**卡住 33 分钟**（Retries/连接超时兜不住镜像慢速挂起）→ 追加硬墙钟：`sudo timeout 420 apt-get update` / `timeout 900 apt-get install`、e2e 的 `playwright install --with-deps` 包 `timeout 900`（c6983c1），故障将在 ~10/15 分钟内显性失败而非等 job 45 分钟上限。
+
+**main 合并后验证**：PR #58 squash 合并（`615d0a6`）触发的 push run **40333654166：7 个 job + integration-summary 全绿**——三平台构建、stress 10 轮、覆盖基线、e2e 在 main 上按最终形态复跑通过。
