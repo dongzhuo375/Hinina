@@ -4,7 +4,7 @@ import { workspaceService } from '@/services/workspace.service'
 import { configService } from '@/services/config.service'
 import { normalizeHojLanguage, SOURCE_FILE_EXTENSIONS, hojLanguageOfFileName, sourceFileNameOf } from '@/utils/language'
 import { createLogger } from '@/utils/logger'
-import { getSessionGeneration } from '@/stores/session'
+import { getSessionGeneration } from '@/stores/sessionGeneration'
 
 const log = createLogger('workspaceStore')
 

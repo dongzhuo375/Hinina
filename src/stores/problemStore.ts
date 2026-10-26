@@ -4,6 +4,7 @@ import type { ProblemLimits, UserProblemStatus } from '@/types/rank'
 import { problemService } from '@/services/problem.service'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
+import { getSessionGeneration } from '@/stores/sessionGeneration'
 
 const log = createLogger('problemStore')
 
@@ -67,6 +68,8 @@ export const useProblemStore = defineStore('problem', {
     /** 打开指定题目详情并设为当前题目（带过期响应保护：只认最新一次请求） */
     async openProblem(contestId: string, problemId: string) {
       const token = ++this.openProblemSeq
+      // 会话代际：登出后旧会话的题面响应不得写回新会话（评审四轮 #1）
+      const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
       try {
@@ -74,16 +77,16 @@ export const useProblemStore = defineStore('problem', {
         // 过期响应：期间又发起了新的 openProblem，状态（currentProblem/error/
         // isLoading）一律由最新请求决定。失败也不重抛 —— 调用方（视图）对
         // 这次加载早已通过自身 loadToken 放弃，重抛只会制造未处理拒绝
-        if (token !== this.openProblemSeq) return
+        if (token !== this.openProblemSeq || sessionGen !== getSessionGeneration()) return
         this.currentProblem = problem
       } catch (e) {
-        if (token !== this.openProblemSeq) return
+        if (token !== this.openProblemSeq || sessionGen !== getSessionGeneration()) return
         this.error = errorMessage(e, '加载题目失败')
         throw e
       } finally {
         // 只有最新一次请求负责收尾 isLoading（旧请求的 finally 不得提前
-        // 关掉新请求的加载态）
-        if (token === this.openProblemSeq) this.isLoading = false
+        // 关掉新请求的加载态）；会话切换后同样不写状态
+        if (token === this.openProblemSeq && sessionGen === getSessionGeneration()) this.isLoading = false
       }
     },
 
@@ -96,14 +99,17 @@ export const useProblemStore = defineStore('problem', {
      */
     async loadLimits(contestId: string, displayIds: string[]) {
       if (displayIds.length === 0) return
+      // 会话代际：登出后旧会话的 limits 不得写回新会话（评审四轮 #1）
+      const sessionGen = getSessionGeneration()
       this.isLimitsLoading = true
       try {
         const fetched = await problemService.getProblemLimits(contestId, displayIds)
+        if (sessionGen !== getSessionGeneration()) return
         this.limits = { ...this.limits, ...fetched }
       } catch (e) {
         log.error('题目 limits 加载失败:', e)
       } finally {
-        this.isLimitsLoading = false
+        if (sessionGen === getSessionGeneration()) this.isLimitsLoading = false
       }
     },
 
@@ -115,9 +121,14 @@ export const useProblemStore = defineStore('problem', {
      */
     async loadMyStatus(contestId: string, problemIds: string[]) {
       if (problemIds.length === 0) return
+      // 会话代际：该请求每个轮询周期都会发起，登出后旧用户的 AC 状态不得显示给新用户
+      //（评审四轮 #1）
+      const sessionGen = getSessionGeneration()
       this.isStatusLoading = true
       try {
-        this.myStatus = await problemService.getUserProblemStatus(contestId, problemIds)
+        const status = await problemService.getUserProblemStatus(contestId, problemIds)
+        if (sessionGen !== getSessionGeneration()) return
+        this.myStatus = status
         this.myStatusStale = false
         // 记录数据归属：切比赛后据此判定必须重拉
         this.myStatusContestId = contestId
@@ -125,10 +136,10 @@ export const useProblemStore = defineStore('problem', {
         // 拉取失败：数据仍是旧的 → 置为过期，下一周期重试（与改造前「每周期重拉」
         // 的容错等价，只是不再在成功路径上白打请求）。归属保持不变 —— 表里装的
         // 仍是上一次成功拉取的那场比赛的数据。
-        this.myStatusStale = true
+        if (sessionGen === getSessionGeneration()) this.myStatusStale = true
         log.error('我的题目状态加载失败:', e)
       } finally {
-        this.isStatusLoading = false
+        if (sessionGen === getSessionGeneration()) this.isStatusLoading = false
       }
     },
 

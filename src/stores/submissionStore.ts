@@ -8,7 +8,7 @@ import type { Poller } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
 import { useProblemStore } from '@/stores/problemStore'
-import { getSessionGeneration } from '@/stores/session'
+import { getSessionGeneration } from '@/stores/sessionGeneration'
 
 const log = createLogger('submissionStore')
 
@@ -184,7 +184,9 @@ export const useSubmissionStore = defineStore('submission', {
         if (sessionGen === getSessionGeneration()) this.error = errorMessage(e, '提交失败')
         throw e
       } finally {
-        this.isSubmitting = false
+        // 会话切换后 $reset 已把锁复位；此刻新会话可能已有自己的提交在途，
+        // 旧请求的 finally 不得把新会话的锁清掉（评审四轮 #2）
+        if (sessionGen === getSessionGeneration()) this.isSubmitting = false
       }
       // 提交已成功，轮询启动与提交结果解耦（轮询参数读取失败也有兜底值）。
       // pendingSubmissions 已同步写入，初始化轮询期间仍会拦截重复发送。
@@ -316,6 +318,10 @@ export const useSubmissionStore = defineStore('submission', {
      * 失败记录 history.error 并上抛，由调用方决定提示；轮询路径自行吞错。
      */
     async fetchHistory(contestId: string, page?: number) {
+      // 会话代际（评审四轮 #1）：history 是 state 内的嵌套对象，`$reset()` 会整体
+      // 替换它，因此迟到的旧请求写的是被替换掉的旧对象引用 —— 实际不会泄漏。
+      // 守卫保留为纵深防御（若将来 history 改为模块级句柄或浅重置，这层仍成立）
+      const sessionGen = getSessionGeneration()
       const h = this.history
       h.contestId = contestId
       h.isLoading = true
@@ -328,15 +334,18 @@ export const useSubmissionStore = defineStore('submission', {
           problemDisplayId: h.problemFilter,
           status: h.statusFilter,
         })
+        if (sessionGen !== getSessionGeneration()) return
         h.records = result.records
         h.total = result.total
         h.current = result.current
         h.pages = result.pages
       } catch (e) {
+        if (sessionGen !== getSessionGeneration()) return
         h.error = errorMessage(e, '加载提交记录失败')
         throw e
       } finally {
-        h.isLoading = false
+        // 旧会话的 finally 不得改动新会话的加载态
+        if (sessionGen === getSessionGeneration()) h.isLoading = false
       }
     },
 

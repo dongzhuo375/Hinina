@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import type { Contest, ContestProblem } from '@/types/contest'
 import { contestService } from '@/services/contest.service'
 import { errorMessage } from '@/utils/error'
+import { getSessionGeneration } from '@/stores/sessionGeneration'
 
 /**
  * 进行中的比赛加载请求（模块级，不进响应式状态）。
@@ -11,6 +12,9 @@ import { errorMessage } from '@/utils/error'
  * 重复 IPC —— 开赛瞬间全场客户端同时进场时，这类重复请求会成倍放大服务端压力。
  */
 let loadInFlight: Promise<void> | null = null
+/// 在途登记的归属 token：`finally` 只清理自己登记的那次请求（会话切换后
+/// 新会话可能已发起新的加载，旧请求不得把它清掉 —— 评审四轮 #1）
+let loadInFlightToken: object | null = null
 
 export const useContestStore = defineStore('contest', {
   state: () => ({
@@ -62,20 +66,29 @@ export const useContestStore = defineStore('contest', {
 
       this.isLoading = true
       this.error = null
+      // 会话代际：登出后旧会话的比赛数据不得写回新会话（评审四轮 #1）
+      const sessionGen = getSessionGeneration()
+      const token = {}
       const task = (async () => {
         try {
           const result = await contestService.loadConfiguredContest()
+          if (sessionGen !== getSessionGeneration()) return
           this.contest = result.contest
           this.problems = result.problems
         } catch (e) {
-          this.error = errorMessage(e, '加载比赛失败')
+          if (sessionGen === getSessionGeneration()) this.error = errorMessage(e, '加载比赛失败')
           throw e
         } finally {
-          this.isLoading = false
-          loadInFlight = null
+          if (sessionGen === getSessionGeneration()) this.isLoading = false
+          // 只清理自己登记的在途请求
+          if (loadInFlightToken === token) {
+            loadInFlight = null
+            loadInFlightToken = null
+          }
         }
       })()
       loadInFlight = task
+      loadInFlightToken = token
       return task
     },
 

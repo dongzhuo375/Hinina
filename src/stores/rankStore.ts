@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { ContestRankPage, ContestRankRow } from '@/types/rank'
 import { DEFAULT_RANK_PAGE_SIZE, rankService } from '@/services/rank.service'
+import { getSessionGeneration } from '@/stores/sessionGeneration'
 import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
 import {
@@ -161,6 +162,8 @@ export const useRankStore = defineStore('rank', {
      * 认证类错误（401）已由全局会话守卫统一处理，此处不重复应对。
      */
     async loadRank(contestId: string, uid: string | null, page?: number) {
+      // 会话代际：登出后旧会话的榜单响应不得写回新会话（评审四轮 #1）
+      const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
       this.contestId = contestId
@@ -172,12 +175,13 @@ export const useRankStore = defineStore('rank', {
           keyword: this.keyword || null,
           removeStar: this.removeStar,
         })
+        if (sessionGen !== getSessionGeneration()) return
         this.applyPage(result, uid)
       } catch (e) {
-        this.error = errorMessage(e, '加载榜单失败')
+        if (sessionGen === getSessionGeneration()) this.error = errorMessage(e, '加载榜单失败')
         throw e
       } finally {
-        this.isLoading = false
+        if (sessionGen === getSessionGeneration()) this.isLoading = false
       }
     },
 
@@ -216,6 +220,8 @@ export const useRankStore = defineStore('rank', {
       // 记住拉取前状态：失败且仍有旧快照时回退到它（不能停在 loading，否则重入保护会永久锁死）
       const previousState = this.fullFetchState
       const generation = ++fullFetchGeneration
+      // 会话代际：登出后旧会话的全量快照不得写回新会话（评审四轮 #1）
+      const sessionGen = getSessionGeneration()
       this.fullFetchState = 'loading'
       this.isLoading = true
       this.error = null
@@ -230,9 +236,15 @@ export const useRankStore = defineStore('rank', {
             keyword: this.keyword || null,
             removeStar: false,
           })
-          // 拉取期间已被更新的拉取取代，或用户已退出全量模式（切筛选/登出 $reset）：
-          // 中止且不写快照 —— 过期数据复活比缺一次刷新更糟
-          if (generation !== fullFetchGeneration || !isFullSnapshotFilter(this.groupFilter)) return
+          // 拉取期间已被更新的拉取取代、用户已退出全量模式（切筛选/登出 $reset），
+          // 或会话已切换：中止且不写快照 —— 过期数据复活比缺一次刷新更糟
+          if (
+            generation !== fullFetchGeneration ||
+            !isFullSnapshotFilter(this.groupFilter) ||
+            sessionGen !== getSessionGeneration()
+          ) {
+            return
+          }
           merged = mergeRankPages(merged, result.records)
           if (page >= result.pages) break
           if (page >= FULL_FETCH_MAX_PAGES || merged.length >= FULL_FETCH_MAX_ROWS) {
@@ -241,7 +253,13 @@ export const useRankStore = defineStore('rank', {
           }
           // 页间节流（见 FULL_FETCH_PAGE_DELAY_MS 注释）；节流窗口同样是中止检查点
           await sleep(FULL_FETCH_PAGE_DELAY_MS)
-          if (generation !== fullFetchGeneration || !isFullSnapshotFilter(this.groupFilter)) return
+          if (
+            generation !== fullFetchGeneration ||
+            !isFullSnapshotFilter(this.groupFilter) ||
+            sessionGen !== getSessionGeneration()
+          ) {
+            return
+          }
         }
         this.fullRows = merged
         this.fullLoadedRows = merged.length
@@ -250,11 +268,13 @@ export const useRankStore = defineStore('rank', {
         this.syncFullPaging()
       } catch (e) {
         // 有旧快照则保留并回退到拉取前状态供继续浏览；毫无快照才标记 error
-        this.fullFetchState = this.fullRows === null ? 'error' : previousState
-        this.error = errorMessage(e, '拉取全量榜单失败')
+        if (sessionGen === getSessionGeneration()) {
+          this.fullFetchState = this.fullRows === null ? 'error' : previousState
+          this.error = errorMessage(e, '拉取全量榜单失败')
+        }
         throw e
       } finally {
-        this.isLoading = false
+        if (sessionGen === getSessionGeneration()) this.isLoading = false
       }
     },
 

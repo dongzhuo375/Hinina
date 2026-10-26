@@ -593,3 +593,34 @@ describe('会话代际（评审 P1：清理后才完成的提交请求）', () =
     expect(submissionService.pollJudgement).not.toHaveBeenCalled()
   })
 })
+
+describe('会话代际（评审四轮：其余写入方）', () => {
+  it('旧提交的 finally 不得清掉新会话的提交锁', async () => {
+    const store = useSubmissionStore()
+    const resolvers: Array<(id: string) => void> = []
+    submissionService.submitCode.mockImplementation(
+      () => new Promise<string>((resolve) => { resolvers.push(resolve) }),
+    )
+
+    // 会话 A 的提交在途
+    const first = store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code-a')
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+
+    // 登出（$reset 复位锁）→ 新会话 B 的提交在途（锁再次置位）
+    clearDomainState()
+    const second = store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code-b')
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+    expect(store.isSubmitting).toBe(true)
+
+    // A 的响应返回：finally 不得把 B 在途期间的锁清掉
+    resolvers[0]('s-old')
+    await first
+    expect(store.isSubmitting).toBe(true)
+
+    // B 完成收尾
+    resolvers[1]('s-new')
+    await second
+    expect(store.isSubmitting).toBe(false)
+    store.stopAllPolling()
+  })
+})

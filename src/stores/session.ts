@@ -3,21 +3,9 @@ import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useRankStore } from '@/stores/rankStore'
+import { bumpSessionGeneration } from '@/stores/sessionGeneration'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-
-/// 会话代际计数器：`clearDomainState()`（含 OJ 切换）递增。
-///
-/// 在途 IPC 响应在写回 store 前必须比对代际：清理只重置 state、停止定时器，
-/// 并不会取消已经发出的请求——旧会话的迟到响应若直接落库，会在清理后
-/// 重建状态（评审 P1：submit_code 重建提交并重启轮询；P2：load_workspace
-/// 恢复上一位选手的代码）。
-let sessionGeneration = 0
-
-/** 当前会话代际（在请求发起时捕获，写回前比对） */
-export function getSessionGeneration(): number {
-  return sessionGeneration
-}
 
 /**
  * 会话级领域状态清理。
@@ -30,7 +18,7 @@ export function getSessionGeneration(): number {
  */
 export function clearDomainState(): void {
   // 先递增代际，使所有在途请求的迟到响应失效（再重置 state、停止定时器）
-  sessionGeneration += 1
+  bumpSessionGeneration()
 
   // 先取消防抖定时器，避免登出后仍向后端写入已失效会话的代码
   const workspace = useWorkspaceStore()
