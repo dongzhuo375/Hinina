@@ -106,7 +106,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     },
   }
 
-  const config: AppConfig = {
+  const configDefaults: AppConfig = {
     user: { lastUsername: 'e2e_player' },
     oj: {
       active: 'HOJ',
@@ -131,6 +131,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     theme: { themeName: 'light', editorTheme: 'vs' },
     layout: { sidebarWidth: 240, splitRatio: 0.48 },
   }
+  let config: AppConfig = configDefaults
 
   // 工作区按题目真实 ID（pid）隔离，内存态跨切题保留（对应 Rust 磁盘 + 内存双层）
   const initialCode: Record<string, string> = {
@@ -140,6 +141,63 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   const workspaces = new Map<string, Workspace>()
   let lastWorkspaceId: string | null = null
   let revisionCounter = 100
+  let currentUser: { id: string; username: string; token: string } | null = null
+  let submissions: SessionSubmission[] = []
+  let submitSeq = 9000
+
+  // ── 后端状态跨 reload 持久化（评审三轮 #4） ──────────────────────────
+  //
+  // addInitScript 在每次文档导航/reload 都会重跑：若状态只挂在这个文档的
+  // 内存里，reload 就会重建「后端」，与真实 Tauri（WebView reload 不重建
+  // Rust 进程）相反。把**后端侧状态**序列化到 sessionStorage（同一 tab 的
+  // reload 会保留），模拟 Rust 侧的持久会话/工作区/提交；`calls`（IPC 日志）、
+  // `failQueue`、事件回调属文档生命周期，不持久化。
+  const BACKEND_STORAGE_KEY = '__e2e_backend_v1__'
+  interface PersistedBackend {
+    workspaces: [string, Workspace][]
+    submissions: SessionSubmission[]
+    currentUser: { id: string; username: string; token: string } | null
+    revisionCounter: number
+    submitSeq: number
+    config: AppConfig
+  }
+  function persistBackend(): void {
+    const snapshot: PersistedBackend = {
+      workspaces: [...workspaces.entries()],
+      submissions,
+      currentUser,
+      revisionCounter,
+      submitSeq,
+      config,
+    }
+    sessionStorage.setItem(BACKEND_STORAGE_KEY, JSON.stringify(snapshot))
+  }
+  function restoreBackend(): boolean {
+    const raw = sessionStorage.getItem(BACKEND_STORAGE_KEY)
+    if (!raw) return false
+    try {
+      const saved = JSON.parse(raw) as PersistedBackend
+      for (const [pid, ws] of saved.workspaces) workspaces.set(pid, ws)
+      submissions = saved.submissions
+      currentUser = saved.currentUser
+      revisionCounter = saved.revisionCounter
+      submitSeq = saved.submitSeq
+      config = saved.config
+      return true
+    } catch {
+      return false
+    }
+  }
+  const restored = restoreBackend()
+  if (!restored) {
+    currentUser = options.user ?? null
+  }
+  /** 会产生后端状态变更的命令：返回成功后写回 sessionStorage */
+  const PERSIST_CMDS = new Set([
+    'login', 'logout', 'update_config', 'switch_oj',
+    'load_workspace', 'update_workspace_file', 'set_workspace_language', 'delete_workspace_file',
+    'submit_code', 'get_judgement',
+  ])
 
   function getWorkspace(problemId: string): Workspace {
     let ws = workspaces.get(problemId)
@@ -196,21 +254,14 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     sequence: JudgementStatus[]
     seqIndex: number
   }
-  const submissions: SessionSubmission[] = []
-  let submitSeq = 9000
 
   // ── 调用记录 / 一次性错误注入 / 事件注册表 ──────────────────────────
 
   const calls: { cmd: string; args: Record<string, unknown> }[] = []
   const failQueue = new Map<string, { variant: string; message: string }[]>()
-  if (options.failLogin) {
+  if (!restored && options.failLogin) {
     failQueue.set('login', [options.failLogin])
   }
-
-  // 会话共享状态：get_session / login / logout / validate_session 读写同一份，
-  // 使「登录后刷新恢复会话」「登出后 get_session 为空」可被真实表达
-  //（评审 P3：此前三命令无共享状态，会话语义只能靠预置 user 绕开）
-  let currentUser: { id: string; username: string; token: string } | null = options.user ?? null
 
   // 必填参数表（键名为前端 invoke 的 camelCase 键）。取证自 Rust 命令签名的
   // 非 Option 参数：auth_cmd login(username,password)、workspace_cmd
@@ -241,21 +292,53 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     set_workspace_language: ['language'],
     delete_workspace_file: ['fileName'],
     update_config: ['config'],
+    switch_oj: ['ojId'],
   }
-  const VEC_ARGS = new Set(['problemIds', 'displayIds', 'ids'])
+  // 必填参数的类型（默认 string；Vec<String> → array；AppConfig → object）
+  const ARG_TYPES: Record<string, 'array' | 'object'> = {
+    problemIds: 'array',
+    displayIds: 'array',
+    ids: 'array',
+    config: 'object',
+  }
+  // 可选参数：出现（非 null/undefined）即校验类型；null 视为未提供（Option<T>）
+  const OPTIONAL_ARG_TYPES: Record<string, 'number' | 'boolean' | 'string'> = {
+    currentPage: 'number',
+    limit: 'number',
+    status: 'number',
+    removeStar: 'boolean',
+    containsEnd: 'boolean',
+    keyword: 'string',
+    problemDisplayId: 'string',
+  }
 
-  function rejectMissingArg(cmd: string, key: string): never {
+  function rejectArg(cmd: string, key: string, reason: string): never {
     // 形态对齐 Tauri 参数错误（裸字符串，bridge 的 parseAppError 按纯消息处理）
-    throw `invalid args \`${key}\` for command \`${cmd}\`: missing required key`
+    throw `invalid args \`${key}\` for command \`${cmd}\`: ${reason}`
   }
 
   function assertRequiredArgs(cmd: string, args: Record<string, unknown> | undefined): void {
     const required = REQUIRED_ARGS[cmd]
-    if (!required) return
-    for (const key of required) {
+    if (required) {
+      for (const key of required) {
+        const value = args?.[key]
+        if (value === undefined || value === null) rejectArg(cmd, key, 'missing required key')
+        const expected = ARG_TYPES[key]
+        if (expected === 'array') {
+          if (!Array.isArray(value)) rejectArg(cmd, key, 'invalid type')
+        } else if (expected === 'object') {
+          if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+            rejectArg(cmd, key, 'invalid type')
+          }
+        } else if (typeof value !== 'string') {
+          rejectArg(cmd, key, 'invalid type')
+        }
+      }
+    }
+    for (const [key, expected] of Object.entries(OPTIONAL_ARG_TYPES)) {
       const value = args?.[key]
-      if (value === undefined || value === null) rejectMissingArg(cmd, key)
-      if (VEC_ARGS.has(key) && !Array.isArray(value)) rejectMissingArg(cmd, key)
+      if (value === undefined || value === null) continue
+      if (typeof value !== expected) rejectArg(cmd, key, 'invalid type')
     }
   }
 
@@ -312,12 +395,23 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return null
       case 'reload_config':
         return null
-      case 'switch_oj':
+      case 'switch_oj': {
+        // 真实命令会校验实例并切换活动 OJ、清缓存、更新配置（oj_cmd.rs）
+        const ojId = String(args?.ojId)
+        const instance = config.oj.instances.find((i) => i.id === ojId && i.enabled)
+        if (!instance) throw { ProviderNotFound: `fake: 未注册或未启用的 OJ 实例 ${ojId}` }
+        config.oj.active = ojId
         return null
+      }
       case 'list_contests':
         return structuredClone([contest])
-      case 'load_configured_contest':
+      case 'load_configured_contest': {
+        // 真实命令读取并校验当前 contestRef（contest_cmd.rs），不是固定成功
+        const ref = config.oj.contestRef.trim()
+        if (!ref) throw { Config: 'fake: 未配置比赛引用（oj.contestRef 为空）' }
+        if (ref !== contest.id) throw { Contest: `fake: 比赛 ${ref} 不存在或不可见` }
         return structuredClone({ contest, problems })
+      }
       case 'get_problem': {
         const detail = problemDetails[String(args?.problemId ?? '')]
         if (!detail) throw { Problem: `fake 未找到题目 ${String(args?.problemId)}` }
@@ -370,6 +464,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return null
       }
       case 'submit_code': {
+        // 真实 HOJ 路径先 require_token()：匿名提交必须失败，不能假绿
+        if (!currentUser) throw { Auth: 'fake: 未登录或会话已失效（require_token）' }
         submitSeq += 1
         const id = String(submitSeq)
         const displayId = String(args?.displayId ?? '')
@@ -478,7 +574,10 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     }
     // 参数校验先于错误注入与命令体（对齐 Tauri：反序列化先于命令执行）
     assertRequiredArgs(cmd, args)
-    return invoke(cmd, args)
+    const result = await invoke(cmd, args)
+    // 后端状态变更成功落库后同步到 sessionStorage（供 reload 恢复）
+    if (PERSIST_CMDS.has(cmd)) persistBackend()
+    return result
   }
 
   ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
