@@ -37,7 +37,10 @@ jobs:
       - name: Verify node version matches .nvmrc
         run: test "$(node --version)" = "v$(cat .nvmrc)"
       - run: npm ci
-      - run: npx tsc -p tsconfig.node.json --noEmit
+      # tsconfig.node.json 的 include 含 vite.config.ts / playwright.config.ts / e2e/**/*.ts：
+      # 这一步同时门禁 E2E 与配置文件的类型（评审四轮的「e2e 无门禁」在此已覆盖）
+      - name: Type-check config and e2e sources
+        run: npx tsc -p tsconfig.node.json --noEmit
       - run: npm run plugin:sdk:check
       # vitest run --coverage：同一套测试 + V8 覆盖率报告（基线只报告不卡线，M2 起）
       - run: npm run test:coverage

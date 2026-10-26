@@ -40,6 +40,8 @@ export interface FakeControl {
   calls: { cmd: string; args: Record<string, unknown> }[]
   emitEvent(name: string, payload: unknown): void
   failNext(cmd: string, variant: string, message: string): void
+  /** 后端状态快照（只读断言用；如 reload 后当前工作区是否仍在） */
+  backendState(): { lastWorkspaceId: string | null }
 }
 
 declare global {
@@ -160,6 +162,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     revisionCounter: number
     submitSeq: number
     config: AppConfig
+    /** 当前工作区：真实后端的 WorkspaceManager 存活于 Rust 进程，WebView reload 不会丢失
+     *（评审四轮 #5——不持久化会让 reload 后的 update_workspace_file 错误地报「无工作区」） */
+    lastWorkspaceId: string | null
   }
   function persistBackend(): void {
     const snapshot: PersistedBackend = {
@@ -169,6 +174,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       revisionCounter,
       submitSeq,
       config,
+      lastWorkspaceId,
     }
     sessionStorage.setItem(BACKEND_STORAGE_KEY, JSON.stringify(snapshot))
   }
@@ -183,6 +189,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       revisionCounter = saved.revisionCounter
       submitSeq = saved.submitSeq
       config = saved.config
+      lastWorkspaceId = saved.lastWorkspaceId
       return true
     } catch {
       return false
@@ -606,6 +613,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     failNext(cmd: string, variant: string, message: string): void {
       if (!failQueue.has(cmd)) failQueue.set(cmd, [])
       failQueue.get(cmd)!.push({ variant, message })
+    },
+    backendState(): { lastWorkspaceId: string | null } {
+      return { lastWorkspaceId }
     },
   }
 

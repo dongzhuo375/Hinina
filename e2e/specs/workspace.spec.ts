@@ -86,4 +86,22 @@ test.describe('题目与工作区', () => {
     await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
     await expect(page.locator('.monaco-editor .view-lines')).toContainText('// e2e edited')
   })
+
+  test('刷新后「当前工作区」仍在（不依赖页面重新 load_workspace）', async ({ page }) => {
+    // 评审四轮 #5：真实后端的 WorkspaceManager.current 存活于 Rust 进程，reload 不丢。
+    // fake 若只持久化工作区内容而不持久化 current id，reload 后的
+    // update_workspace_file 会错误地报「尚无已加载的工作区」。
+    await loginAndEnterContest(page)
+    await page.getByRole('button', { name: '打开题目 A' }).click()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+
+    // 回到题目总览（该页面不会调用 load_workspace）后刷新
+    await page.getByRole('link', { name: '返回题目总览' }).click()
+    await page.waitForURL('**/contest/problems')
+    await page.reload()
+    await expect(page.getByText('题目总览')).toBeVisible()
+
+    const state = await page.evaluate(() => window.__e2e.backendState())
+    expect(state.lastWorkspaceId).toBe('ws-101')
+  })
 })
