@@ -175,3 +175,12 @@
 | `cancelPendingSync` 归零修订水位：新会话恢复脏工作区后，旧会话迟到 `markPersisted` 可把 `isDirty` 清为 false（假「已自动备份」） | 属实。**方案（先定后改）**：后端 `revision` 是 WorkspaceManager 进程级 `Arc<AtomicU64>`，登出/切 OJ 继续单调（管理器存活于 AppContext），仅数据目录变更需重启重建——**修订号跨会话可比**，水位的正确语义是保留。**修复**：`cancelPendingSync` 默认保留水位，新增 `resetRevisionWatermarks` 选项仅供测试隔离/管理器重建；`markPersisted` 因此按真实磁盘进度裁决旧事件（≤ 已落盘水位幂等跳过、< 已推送水位不清脏）。新增「旧会话迟到事件不得清新会话脏工作区」用例，**变异验证**（恢复归零即红） |
 
 **验证**：前端 **574 单测**（572 + 两条）、15 E2E、build/tsc/fmt 全绿；两处均变异验证。文档同步：workspaceStore（loadWorkspace/cancelPendingSync/markPersisted/已闭合边界）、sessionGeneration 边界说明。
+
+## 十五、评审八轮处置（loadBrief 过期回写 + apt install 重试）
+
+| 发现 | 核验与处置 |
+|---|---|
+| `contestStore.loadBrief` 是唯一无过期守卫的 session 级异步 writer：切 OJ 前发出的 brief 请求在 `resetSessionForOjSwitch` 之后 resolve，会把旧 OJ 的比赛写回已重置状态（LoginView canEnter 按旧时间窗误进场） | 属实。**注意不能直接用会话代际**：简报跨登出按设计保留，会话代际守卫会误挡登出后的合法 briefing。方案：引入**简报失效世代**（`briefEpoch`），仅 OJ 切换时由 `invalidateBrief()` 递增；`loadBrief` 发起时捕获、成功/失败回写前比对，不一致即丢弃。`resetSessionForOjSwitch` 改为调用该 action（清空 + 递增一并完成）。新增两条用例：切 OJ 后旧回写被丢弃（**变异验证**：去掉世代比对即红）、登出不清简报（在途 brief 仍可落地，保留语义） |
+| 复合 action 的 apt 重试/超时只加在 `update` 上，`install` 仍可能被镜像挂起 | 属实。改为 `/etc/apt/apt.conf.d/99-hinina-apt` drop-in（Retries=3、http/https 连接超时 20s），update 与 install 都继承；e2e job 的 playwright `--with-deps` 使用独立 drop-in（99e2e-retries），两者互不依赖 |
+
+**验证**：前端 **576 单测**（574 + 两条）、15 E2E、build/tsc/fmt 全绿；runner 复跑见下。
