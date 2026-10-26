@@ -48,6 +48,6 @@
 ## 七、遗留项
 
 - 桌面 smoke（tauri-driver 6 场景）属 M3 遗留，不在本阶段。
-- OS 代码签名（Windows Authenticode / macOS 公证）属 M5；updater 属 M6（前置：至少一次稳定正式发布）。
+- OS 代码签名属 M5（按发布范围决策只做 Windows 签名，macOS/Linux 产物推迟、不进支持矩阵）；updater 属 M6（前置：至少一次稳定正式发布）。
 - 升级安装覆盖验收（`RELEASE.md` §五第 4 项）自第二个版本起适用。
 - `CHANGELOG.md` 0.1.0 段落日期为 TBD，首次发版时填入。
