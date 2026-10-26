@@ -1,0 +1,22 @@
+# Changelog
+
+本文件记录 Hinina 的用户可见变更，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [Unreleased]
+
+## [0.1.0] - TBD
+
+首个公开版本：面向 XCPC 竞赛的桌面客户端，把登录、题目、代码编辑、提交、榜单和公告放在同一个比赛工作台里。
+
+### Added
+
+- 连接 HOJ 或 Hydro 实例：登录、会话恢复与登出后的本地数据清理。
+- 比赛工作台：比赛列表与简报、题目列表与题目状态、ACM/OI 榜单、公告查看与已读标记、赛后留档。
+- Monaco 编辑器工作区：按题目隔离的本地工作区、自动保存与原子落盘、切题与刷新后内容恢复、关窗前保存守卫。
+- 提交与评测：代码提交、防重复提交、评测状态轮询与终态详情查看。
+- 插件系统：最小可运行的 JavaScript 插件宿主（Manifest / API / 事件 v2，QuickJS worker）与 balloon 参考插件。
+- 设置与维护：数据目录配置与一次性迁移、「重置客户端」「清理本地数据」维护动作。
+
+### Known Issues
+
+- 项目仍在开发中，界面与配置格式可能继续调整（见 README）。

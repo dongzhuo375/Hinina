@@ -161,6 +161,12 @@ describe('runCli', () => {
     expect(out).toContain('matches app version')
   })
 
+  it('passes the full gate including the CHANGELOG section on the real repository', () => {
+    const { code, out } = capture(['--tag', 'v0.1.0', '--changelog'], repoRoot)
+    expect(code).toBe(0)
+    expect(out).toContain('CHANGELOG.md')
+  })
+
   it('fails with exit code 1 when versions disagree', () => {
     const root = makeFixtureRoot(
       fixtureFiles({ 'src-tauri/tauri.conf.json': JSON.stringify({ version: '9.9.9' }) }),
