@@ -61,6 +61,9 @@ jobs:
       # Tauri 2 系统依赖 + QuickJS C 编译前提（单一事实来源：.github/actions/tauri-system-deps）
       - uses: ./.github/actions/tauri-system-deps
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # 仓库根无 Cargo.toml：不指定则探测失败、src-tauri/target 永不缓存（评审六轮）
+          workspaces: "src-tauri -> target"
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       # --locked 同时充当锁文件校验：Cargo.lock 与 Cargo.toml 不同步时直接失败
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
@@ -80,6 +83,8 @@ jobs:
       - uses: ./.github/actions/tauri-system-deps
         if: runner.os == 'Linux'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "src-tauri -> target"
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --all-targets
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --doc
 
