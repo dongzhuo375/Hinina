@@ -81,3 +81,17 @@
 - mac/linux bundle 类型扩展（deb/app/dmg）：属 M4 发布链。
 - 会话失效文案被 checkSession 清空的调整评估（§五第 1 条）。
 - 生产 HttpClient 代理语义是否显式化（lint-gate-cleanup §五既有观察，保持）。
+
+## 八、评审二轮处置（PR #57，全部 8 条核实属实并修复）
+
+| 发现 | 处置 |
+|---|---|
+| build 自报步骤无表头（孤立表格行渲染错乱）且在产物上传前执行，上传失败不被记录 | 自报移到上传之后并把 `artifact_upload.outcome` 一并计入（skipped 视为正常跳过）；表格行改列表行 `build (<os>): <outcome>`（各 leg 完成时间不定，没有共享表头） |
+| integration-summary「见上方」措辞误导（leg 摘要在各 job 页面） | 改为明确说明观测平台明细由各 build leg 以列表行写入**本运行摘要页**（各 job 的 Step Summary 汇聚到 run 级摘要） |
+| 设了 `PLAYWRIGHT_BROWSERS_PATH` 却无 cache 步骤，每夜重下 Chromium | `actions/cache@v6.1.0`（SHA 固定）restore 该路径，key=`playwright-<os>-<package-lock 哈希>`（Chromium 版本随 @playwright/test） |
+| 三处 upload 无 `if-no-files-found: error`，glob 落空只警告、leg 照样绿 | build 产物 / lcov / e2e 失败产物三处全部加 error |
+| Tauri apt 依赖清单 5 份拷贝（integration.yml 3 + ci.yml 2） | 抽成复合 action `.github/actions/tauri-system-deps`，5 处调用收敛为单一来源（rust-test 矩阵保留 `if: runner.os == 'Linux'` 守卫） |
+| playwright.config 缺 `forbidOnly`，CI 上提交 test.only 只跑一个用例仍退 0 | `forbidOnly: !!process.env.CI` |
+| fake 工作区变更命令以空 pid 兜底建幻影工作区（真实后端会拒绝） | `requireLoadedProblemId()` 守卫：未 load_workspace 即以 `{Workspace}` 拒绝（fail-loud 纪律同样适用于此边界） |
+| workspace.spec 防抖断言只等 count>=1，可能读到不完整中间快照 | 改为 `expect.poll` 等「携带预期内容」的那次调用出现，再断言最后一次（打字结束后无新防抖）为最终快照 |
+| 新增 e2e/ 与 playwright.config.ts 未按 CLAUDE.md 规则补 doc/modules 文档 | 新增 `doc/modules/e2e/`（README：fake 保真度规则 6 条 + 索引；playwright.config.md；fake-tauri.md；specs/ 4 篇）+ Architecture.md 两处树形条目 |

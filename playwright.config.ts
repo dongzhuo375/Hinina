@@ -8,6 +8,8 @@ export default defineConfig({
   testDir: "./e2e",
   // 各用例独立 browser context，fake 状态按页面隔离，可安全并行
   fullyParallel: true,
+  // CI 上提交了 test.only 时只跑该用例且退出码为 0 —— 夜间静默漏测，直接拒绝
+  forbidOnly: !!process.env.CI,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   reporter: [

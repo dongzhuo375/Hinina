@@ -1,0 +1,24 @@
+# Tauri 2 Ubuntu 构建依赖的单一事实来源。
+# 此前这份 apt 清单在 ci.yml（rust-lint / rust-test）与 integration.yml
+# （build / stress-repeat / rust-coverage）共 5 份拷贝，存在漂移风险（评审二轮）。
+# 调用方自行守卫 `if: runner.os == 'Linux'`（composite action 内拿不到稳定的
+# 平台语境；纯 ubuntu job 可不守卫）。
+name: 'Install Tauri 2 system dependencies'
+description: 'apt 安装 Tauri 2 / QuickJS 构建所需系统依赖（WebKitGTK、libxdo、libssl 等）'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Tauri 2 system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libwebkit2gtk-4.1-dev \
+          build-essential \
+          curl \
+          wget \
+          file \
+          libxdo-dev \
+          libssl-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev
