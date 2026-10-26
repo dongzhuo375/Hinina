@@ -95,3 +95,5 @@
 | fake 工作区变更命令以空 pid 兜底建幻影工作区（真实后端会拒绝） | `requireLoadedProblemId()` 守卫：未 load_workspace 即以 `{Workspace}` 拒绝（fail-loud 纪律同样适用于此边界） |
 | workspace.spec 防抖断言只等 count>=1，可能读到不完整中间快照 | 改为 `expect.poll` 等「携带预期内容」的那次调用出现，再断言最后一次（打字结束后无新防抖）为最终快照 |
 | 新增 e2e/ 与 playwright.config.ts 未按 CLAUDE.md 规则补 doc/modules 文档 | 新增 `doc/modules/e2e/`（README：fake 保真度规则 6 条 + 索引；playwright.config.md；fake-tauri.md；specs/ 4 篇）+ Architecture.md 两处树形条目 |
+
+**验证**：本地 YAML 解析（两个 workflow + action.yml）/ tsc node / 561 单测 / 11 E2E 全绿；PR #57 的 ci-required 绿（composite action 在 rust-lint 与 rust-test ubuntu 经实证）后 squash 合并（7d400d8）；合并 push 首验 **run 40276943895 全 7 job 绿**——自报列表行与汇总新措辞生效、Playwright 缓存首次保存（key `playwright-Linux-<lock 哈希>`，后续运行复用）、三处 `if-no-files-found: error` 未误报。
