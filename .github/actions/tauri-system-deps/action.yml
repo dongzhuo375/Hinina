@@ -13,10 +13,11 @@ runs:
       # 三层防护：
       # ① apt.conf.d drop-in（Retries/连接超时）—— update 与 install 都继承；
       # ② 已装快路径——runner 镜像若已带全部依赖则跳过网络（镜像挂起时最有效）；
-      # ③ 每命令硬墙钟 + 一次整体重试。墙钟**自适应**：首次保留原有宽松值
-      #    （update 420s / install 900s，「慢但可用」的镜像仍能走通），重试收紧
-      #    （180s / 300s，挂起时尽快失败）；重试前退避 20s，并给被 timeout 杀掉
-      #    的 apt/dpkg 锁留出释放时间。最坏耗时约 30 分钟（< 45 分钟上限）。
+      # ③ 每命令硬墙钟 + 一次整体重试。update 实测仅需数秒（12.6MB/1s），墙钟收到
+      #    120s；install 首次 900s、重试 600s。**重试之间不清 apt 缓存**
+      #    （`apt-get clean` 会删掉已下载的 .deb，让重试从零开始——实测 runner 对
+      #    单个 25MB 大包可慢到 8 分钟，清缓存等于必然失败）。另外用
+      #    `--no-install-recommends` 缩小下载量。最坏耗时约 29 分钟（< 45 分钟上限）。
       run: |
         echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
         echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
@@ -24,40 +25,37 @@ runs:
 
         packages="libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev"
 
-        missing=0
+        missing=""
         for pkg in $packages; do
           if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
-            missing=1
-            break
+            missing="$missing $pkg"
           fi
         done
-        if [ "$missing" = "0" ]; then
+        if [ -z "$missing" ]; then
           echo "All Tauri 2 system dependencies already installed; skipping apt."
           exit 0
         fi
+        echo "Missing packages:$missing"
 
         for attempt in 1 2; do
-          # 退避 + 锁释放窗口：timeout 杀掉 apt 后 dpkg/apt 锁可能短暂残留，
-          # 立刻重试 update 会报 lock 错误（评审建议 2/3）
+          # 退避 + 锁释放窗口：timeout 杀掉 apt 后 dpkg/apt 锁可能短暂残留（评审建议 2/3）
           if [ "$attempt" -gt 1 ]; then
             sleep 20
           fi
           if [ "$attempt" -eq 1 ]; then
-            update_timeout=420
             install_timeout=900
           else
-            update_timeout=180
-            install_timeout=300
+            install_timeout=600
           fi
-          echo "::group::apt install attempt $attempt / 2 (update ${update_timeout}s, install ${install_timeout}s)"
-          if sudo timeout "$update_timeout" apt-get update && \
-             sudo timeout "$install_timeout" apt-get install -y $packages; then
+          echo "::group::apt install attempt $attempt / 2 (install ${install_timeout}s, cache preserved)"
+          # 只装缺的包；update 墙钟 120s（实测数秒）
+          if sudo timeout 120 apt-get update && \
+             sudo timeout "$install_timeout" apt-get install -y --no-install-recommends $missing; then
             echo "::endgroup::"
             exit 0
           fi
           echo "::endgroup::"
-          echo "::warning::apt attempt $attempt failed (mirror stall or timeout); cleaning before retry"
-          sudo apt-get clean || true
+          echo "::warning::apt attempt $attempt failed; retrying with the existing package cache (no apt-get clean)"
         done
         echo "::error::apt install failed after 2 attempts"
         exit 1
