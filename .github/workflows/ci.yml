@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # release.yml 的 test job 通过 workflow_call 复用本门禁（发布同样不跳过检查）。
+  workflow_call:
 
 permissions:
   contents: read
