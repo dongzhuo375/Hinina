@@ -231,13 +231,16 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 顺序有意：**先把在途改动推进后端内存，再落盘** —— 反了会把旧内容写进磁盘。
      */
     async saveWorkspace() {
+      // 会话代际：旧会话的保存落定时不得清掉新会话的脏标记（评审五轮：
+      // 产生假的「已保存」）
+      const sessionGen = getSessionGeneration()
       const pushed = await this.flushPendingSync()
       await workspaceService.saveWorkspace()
       // 只有「推送成功 **且** 推送/落盘期间没有新改动」才能清脏：
       // - 推送失败 → 内容未进后端；
       // - 期间又落键（syncPending）→ 最新改动连后端内存都还没到，
       //   此时清脏会显示「已自动备份」而磁盘落后于编辑器（假 clean）
-      if (pushed && !this.syncPending) this.isDirty = false
+      if (pushed && !this.syncPending && sessionGen === getSessionGeneration()) this.isDirty = false
     },
 
     /** 更新编辑器内代码（标记脏状态 + 防抖推送到后端内存） */
@@ -286,8 +289,12 @@ export const useWorkspaceStore = defineStore('workspace', {
       // 回退仅用于 activeFile 尚未建立的极早时刻。
       const fileName = this.activeFile ?? sourceFileNameOf(this.language)
       const content = this.code
+      // 会话代际：旧会话的在途推送落定时不得改写水位或新会话的脏/待推标记
+      //（评审五轮）
+      const sessionGen = getSessionGeneration()
       try {
         const revision = await workspaceService.updateWorkspaceFile(fileName, content)
+        if (sessionGen !== getSessionGeneration()) return false
         if (typeof revision === 'number') lastPushedRevision = revision
         if (this.code === content) this.syncPending = false
         // 落盘事件可能在推送在途时已到达：markPersisted 因 syncPending 推迟清脏，

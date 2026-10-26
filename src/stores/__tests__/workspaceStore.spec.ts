@@ -976,3 +976,38 @@ describe('会话代际（评审 P2：清理后才完成的工作区加载）', (
     expect(store.isLoadingWorkspace).toBe(false)
   })
 })
+
+describe('会话代际（评审五轮：保存收尾）', () => {
+  it('旧会话的保存落定时不得清掉新会话的脏标记', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const store = useWorkspaceStore()
+    let resolvePush!: (revision: number) => void
+    let resolveSave!: () => void
+    workspaceService.updateWorkspaceFile.mockImplementation(
+      () => new Promise<number>((resolve) => { resolvePush = resolve }),
+    )
+    workspaceService.saveWorkspace.mockImplementation(
+      () => new Promise<void>((resolve) => { resolveSave = resolve }),
+    )
+
+    // 旧会话：推送成功在途 → 落盘在途
+    store.updateCode('old session code')
+    const saving = store.saveWorkspace()
+    await vi.waitFor(() => expect(workspaceService.updateWorkspaceFile).toHaveBeenCalled())
+    resolvePush(3)
+    await vi.waitFor(() => expect(workspaceService.saveWorkspace).toHaveBeenCalled())
+
+    // 登出后新会话：编辑并完成推送（脏标记保留等待落盘）
+    clearDomainState()
+    workspaceService.updateWorkspaceFile.mockResolvedValue(5)
+    store.updateCode('new session code')
+    await store.flushPendingSync()
+    expect(store.isDirty).toBe(true)
+    expect(store.syncPending).toBe(false)
+
+    // 旧会话的 save_workspace 落定：不得清掉新会话的脏标记（假「已保存」）
+    resolveSave()
+    await saving
+    expect(store.isDirty).toBe(true)
+  })
+})

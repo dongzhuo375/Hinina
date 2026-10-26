@@ -229,3 +229,37 @@ describe('whenLoaded — 等待比赛数据就绪（P59 统一入口）', () => 
     expect(store.error).toBe('网络异常')
   })
 })
+
+describe('会话代际（评审五轮：跨会话去重回归）', () => {
+  it('旧会话在途的加载不得被新会话复用（否则静默空数据）', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const resolvers: Array<(v: { contest: Contest; problems: typeof problems }) => void> = []
+    contestService.loadConfiguredContest.mockImplementation(
+      () => new Promise((resolve) => { resolvers.push(resolve) }),
+    )
+    const store = useContestStore()
+
+    // 旧会话加载在途
+    const first = store.loadContest()
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+
+    // 登出/切换 OJ：清理（代际递增 + clearSessionData 注销在途登记）
+    clearDomainState()
+    expect(store.contest).toBeNull()
+
+    // 新会话发起加载：必须发新请求，而不是复用旧 promise
+    const second = store.loadContest()
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+
+    // 旧请求先返回：被代际守卫丢弃
+    resolvers[0]({ contest, problems })
+    await first
+    expect(store.contest).toBeNull()
+
+    // 新请求返回：必须写入新会话
+    const fresh = { ...contest, id: '2', title: '新会话比赛' }
+    resolvers[1]({ contest: fresh, problems })
+    await second
+    expect(store.contest?.id).toBe('2')
+  })
+})

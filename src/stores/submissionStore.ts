@@ -196,7 +196,11 @@ export const useSubmissionStore = defineStore('submission', {
 
     /** 轮询评测结果并更新对应提交的状态 */
     async pollResult(submissionId: string) {
+      // 会话代际：旧会话在途的轮询返回时不得改动新会话的状态
+      //（评审五轮：`error = null` 会清掉新会话的错误提示）
+      const sessionGen = getSessionGeneration()
       const result = await submissionService.pollJudgement(submissionId)
+      if (sessionGen !== getSessionGeneration()) return result
       const entry = this.submissions.find((s) => s.id === submissionId)
       if (entry) {
         entry.status = result.status
@@ -261,6 +265,9 @@ export const useSubmissionStore = defineStore('submission', {
     async pollOnce(submissionId: string) {
       const ctx = pollContexts.get(submissionId)
       if (!ctx) return
+      // 会话代际：清理后旧轮询的收尾（invalidateMyStatus / stopPolling）不得
+      // 作用于新会话（评审五轮）
+      const sessionGen = getSessionGeneration()
       if (Date.now() >= ctx.deadline) {
         log.warn(`提交 ${submissionId} 评测轮询超时，已停止`)
         // 超时停止时**终态未知**（服务端可能稍后才出结果）：安全动作是把「我的题目
@@ -278,6 +285,7 @@ export const useSubmissionStore = defineStore('submission', {
       }
       try {
         const result = await this.pollResult(submissionId)
+        if (sessionGen !== getSessionGeneration()) return
         ctx.failures = 0
         if (isTerminalStatus(result.status)) {
           // 评测终结意味着「我的题目状态」可能已变（AC / 尝试过）：标记过期，
@@ -289,7 +297,7 @@ export const useSubmissionStore = defineStore('submission', {
         // 网络抖动等瞬时错误：等待下一次轮询。**计数上报在这里而不是 poller 的
         // onError** —— pollOnce 自己吞掉异常，poller 永远收不到 rejection，
         // 挂在 onError 上等于计数永不发生（错误提示静默失效）
-        this.notePollFailure(submissionId)
+        if (sessionGen === getSessionGeneration()) this.notePollFailure(submissionId)
       }
     },
 

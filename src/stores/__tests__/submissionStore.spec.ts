@@ -624,3 +624,25 @@ describe('会话代际（评审四轮：其余写入方）', () => {
     store.stopAllPolling()
   })
 })
+
+describe('会话代际（评审五轮：轮询收尾）', () => {
+  it('旧会话的轮询返回不得清掉新会话的错误提示', async () => {
+    const store = useSubmissionStore()
+    store.submissions.push({ id: 's-old', problemId: 'p1', status: 'Pending', submittedAt: new Date().toISOString() })
+    let resolvePoll!: (r: JudgementResult) => void
+    submissionService.pollJudgement.mockImplementation(
+      () => new Promise<JudgementResult>((resolve) => { resolvePoll = resolve }),
+    )
+
+    const pending = store.pollResult('s-old')
+    await vi.waitFor(() => expect(submissionService.pollJudgement).toHaveBeenCalled())
+
+    clearDomainState()
+    store.error = '新会话的提交错误'
+
+    resolvePoll(makeResult('WrongAnswer'))
+    await pending
+    expect(store.error).toBe('新会话的提交错误')
+    expect(store.submissions).toHaveLength(0)
+  })
+})

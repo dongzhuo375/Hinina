@@ -15,6 +15,10 @@ let loadInFlight: Promise<void> | null = null
 /// 在途登记的归属 token：`finally` 只清理自己登记的那次请求（会话切换后
 /// 新会话可能已发起新的加载，旧请求不得把它清掉 —— 评审四轮 #1）
 let loadInFlightToken: object | null = null
+/// 在途登记所属的会话代际：去重只复用**同代际**的在途请求（评审五轮）。
+/// 旧会话的 promise 即使仍在途也不能复用——它的结果会被代际守卫丢弃，
+/// 复用会让新会话拿到一个不会写入任何数据的空结果（静默空数据）。
+let loadInFlightGeneration = -1
 
 export const useContestStore = defineStore('contest', {
   state: () => ({
@@ -51,7 +55,7 @@ export const useContestStore = defineStore('contest', {
      */
     async whenLoaded(): Promise<void> {
       if (this.contest) return
-      if (loadInFlight) return loadInFlight
+      if (loadInFlight && loadInFlightGeneration === getSessionGeneration()) return loadInFlight
       return this.loadContest()
     },
 
@@ -62,12 +66,13 @@ export const useContestStore = defineStore('contest', {
      * 因此调用方必须自行 catch（错误信息已写入 `error`）。
      */
     async loadContest() {
-      if (loadInFlight) return loadInFlight
+      // 会话代际：登出后旧会话的比赛数据不得写回新会话（评审四轮 #1）；
+      // 去重也只复用同代际的在途请求（评审五轮：跨会话复用会得到静默空结果）
+      const sessionGen = getSessionGeneration()
+      if (loadInFlight && loadInFlightGeneration === sessionGen) return loadInFlight
 
       this.isLoading = true
       this.error = null
-      // 会话代际：登出后旧会话的比赛数据不得写回新会话（评审四轮 #1）
-      const sessionGen = getSessionGeneration()
       const token = {}
       const task = (async () => {
         try {
@@ -84,11 +89,13 @@ export const useContestStore = defineStore('contest', {
           if (loadInFlightToken === token) {
             loadInFlight = null
             loadInFlightToken = null
+            loadInFlightGeneration = -1
           }
         }
       })()
       loadInFlight = task
       loadInFlightToken = token
+      loadInFlightGeneration = sessionGen
       return task
     },
 
@@ -121,8 +128,15 @@ export const useContestStore = defineStore('contest', {
     /**
      * 清空会话相关状态（登出/切换账号时调用）。
      * 匿名比赛简报与登录态无关，予以保留。
+     *
+     * **同时注销在途加载登记**：`loadInFlight` 是模块级变量，`$reset()` 之外的
+     * 定向清理不会触及它；不注销的话新会话的去重会拿到旧会话的 promise
+     * （其结果被代际守卫丢弃 → 新会话静默空数据，评审五轮）。
      */
     clearSessionData() {
+      loadInFlight = null
+      loadInFlightToken = null
+      loadInFlightGeneration = -1
       this.contest = null
       this.problems = []
       this.isLoading = false
