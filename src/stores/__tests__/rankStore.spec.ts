@@ -681,3 +681,30 @@ describe('全量快照模式 — 打星/女生队跨页过滤', () => {
     expect(rankService.getRank).not.toHaveBeenCalled()
   })
 })
+
+describe('会话代际（评审六轮：榜单去抖缓存）', () => {
+  it('旧会话查询落定时不写 memo（新会话必须重新请求）', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+    let resolveFirst!: (p: ContestRankPage) => void
+    rankService.getRank.mockImplementationOnce(
+      () => new Promise<ContestRankPage>((resolve) => { resolveFirst = resolve }),
+    )
+
+    const first = store.loadRankDeduped(1)
+    await vi.waitFor(() => expect(rankService.getRank).toHaveBeenCalledTimes(1))
+    clearDomainState()
+    resolveFirst(makePage([makeRow()], 1))
+    await first
+
+    // 新会话同一查询：跨会话的旧结果不得算命中
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+    store.current = 1
+    rankService.getRank.mockResolvedValueOnce(makePage([makeRow()], 1))
+    await store.loadRankDeduped(1)
+    expect(rankService.getRank).toHaveBeenCalledTimes(2)
+  })
+})

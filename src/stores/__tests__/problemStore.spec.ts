@@ -258,3 +258,22 @@ describe('会话代际（评审四轮 #1：旧用户的题目状态）', () => {
     expect(store.isStatusLoading).toBe(false)
   })
 })
+
+describe('会话代际（评审六轮：limits）', () => {
+  it('迟到的 limits 不得写回新会话', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const store = useProblemStore()
+    let resolveLimits!: (v: Array<{ displayId: string; timeLimit: number; memoryLimit: number }>) => void
+    problemService.getProblemLimits.mockImplementation(
+      () => new Promise((resolve) => { resolveLimits = resolve }),
+    )
+
+    const pending = store.loadLimits(CONTEST_ID, ['A'])
+    await vi.waitFor(() => expect(problemService.getProblemLimits).toHaveBeenCalled())
+    clearDomainState()
+    resolveLimits([{ displayId: 'A', timeLimit: 1000, memoryLimit: 128 }])
+    await pending
+    expect(store.limits).toEqual({})
+    expect(store.isLimitsLoading).toBe(false)
+  })
+})

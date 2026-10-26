@@ -10,11 +10,10 @@ test.describe('题目与工作区', () => {
     await loginAndEnterContest(page)
     await page.getByRole('button', { name: '打开题目 A' }).click()
 
-    // 题面按展示题号加载
+    // 题面按展示题号加载；新建工作区与真实后端一致：无预置代码
     await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
     await expect(page.locator('.monaco-editor')).toBeVisible()
-    // 初始代码来自 load_workspace fixture（A 题）
-    await expect(page.locator('.monaco-editor .view-lines')).toContainText('int main()')
+    await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('// e2e edited')
 
     // 编辑 → 2s 防抖后经 update_workspace_file 推送到后端内存
     await page.locator('.monaco-editor .view-lines').click()
@@ -26,21 +25,27 @@ test.describe('题目与工作区', () => {
     // 切到 B：B 题工作区独立（不携带 A 的编辑内容）
     await page.getByRole('button', { name: 'B', exact: true }).click()
     await expect(page.locator('h1.statement-title')).toHaveText(/^B\./)
-    await expect(page.locator('.monaco-editor .view-lines')).toContainText('B 题工作区初始代码')
     // 负向断言：A 的编辑不得混入 B（A/B 被错误合并时仅靠正向包含也会假绿）
     await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('// e2e edited')
 
-    // 切回 A：内容恢复（工作区按 pid 隔离的恢复承诺），且不含 B 的初始代码
+    // B 写入自己的内容，用于验证回切后互不串扰
+    await page.locator('.monaco-editor .view-lines').click()
+    await page.keyboard.type('// b content')
+    await expect
+      .poll(() => callCount(page, 'update_workspace_file'), { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(2)
+
+    // 切回 A：内容恢复（工作区按 pid 隔离的恢复承诺），且不含 B 的内容
     await page.getByRole('button', { name: 'A', exact: true }).click()
     await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
     await expect(page.locator('.monaco-editor .view-lines')).toContainText('// e2e edited')
-    await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('B 题工作区初始代码')
+    await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('// b content')
   })
 
   test('编辑推送的文件名与内容与编辑器一致', async ({ page }) => {
     await loginAndEnterContest(page)
     await page.getByRole('button', { name: '打开题目 B' }).click()
-    await expect(page.locator('.monaco-editor .view-lines')).toContainText('B 题工作区初始代码')
+    await expect(page.locator('h1.statement-title')).toHaveText(/^B\./)
 
     const expected = 'int main(void) { return 1; }'
     await page.locator('.monaco-editor .view-lines').click()
@@ -72,7 +77,8 @@ test.describe('题目与工作区', () => {
   test('编辑后刷新页面：工作区代码恢复（场景 4 的刷新路径）', async ({ page }) => {
     await loginAndEnterContest(page)
     await page.getByRole('button', { name: '打开题目 A' }).click()
-    await expect(page.locator('.monaco-editor .view-lines')).toContainText('int main()')
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+    await expect(page.locator('.monaco-editor')).toBeVisible()
 
     await page.locator('.monaco-editor .view-lines').click()
     await page.keyboard.type('// e2e edited')

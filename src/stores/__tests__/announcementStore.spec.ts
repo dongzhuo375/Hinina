@@ -365,3 +365,25 @@ describe('refresh / startLive / stopLive — 轮询编排', () => {
     }
   })
 })
+
+describe('会话代际（评审六轮：公告与已读）', () => {
+  it('迟到的公告加载不得写回新会话', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const store = useAnnouncementStore()
+    let resolveList!: (p: AnnouncementPage) => void
+    announcementService.listAnnouncements.mockImplementation(
+      () => new Promise<AnnouncementPage>((resolve) => { resolveList = resolve }),
+    )
+    announcementService.getReadIds.mockResolvedValue(new Set<string>())
+
+    const pending = store.load(CONTEST_ID)
+    await vi.waitFor(() => expect(announcementService.listAnnouncements).toHaveBeenCalled())
+
+    clearDomainState()
+    resolveList(makePage([makeAnnouncement('1')]))
+    await pending
+    expect(store.announcements).toHaveLength(0)
+    expect(store.total).toBe(0)
+    expect(store.isLoading).toBe(false)
+  })
+})

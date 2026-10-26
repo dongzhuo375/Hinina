@@ -43,7 +43,9 @@ function sleep(ms: number): Promise<void> {
 
 /// 用户操作路径的查询 memo 与在途合并（模块级：非渲染状态，不进响应式系统）
 let queryMemo: { key: string; at: number } | null = null
-let queryInFlight: { key: string; promise: Promise<void> } | null = null
+/// 在途合并记录代际与归属 token：跨会话不复用旧 promise，finally 只清自己的登记
+/// （评审六轮：与 contestStore 的在途去重同类问题）
+let queryInFlight: { key: string; promise: Promise<void>; generation: number; token: object } | null = null
 
 /// 查询指纹：同一比赛 + 同一用户 + 同一页 + 同一关键词 + 同一 removeStar
 /// 才算「同一查询」。含 uid 是为了避免换账号后误命中上一位用户的查询。
@@ -326,21 +328,27 @@ export const useRankStore = defineStore('rank', {
      */
     async loadRankDeduped(page: number) {
       const key = rankQueryKey(this.contestId, this.uid, page, this.keyword, this.removeStar)
+      const generation = getSessionGeneration()
 
-      if (queryInFlight?.key === key) return queryInFlight.promise
+      // 只复用同代际的在途查询（旧会话 promise 的结果会被守卫丢弃，复用 = 空结果）
+      if (queryInFlight?.key === key && queryInFlight.generation === generation) {
+        return queryInFlight.promise
+      }
 
       if (queryMemo?.key === key && Date.now() - queryMemo.at < RANK_QUERY_MEMO_TTL_MS) {
         return
       }
 
+      const token = {}
       const promise = this.loadRank(this.contestId, this.uid, page)
         .then(() => {
-          queryMemo = { key, at: Date.now() }
+          // 会话已切换时不写 memo（否则新会话会把旧会话的查询当成已命中）
+          if (generation === getSessionGeneration()) queryMemo = { key, at: Date.now() }
         })
         .finally(() => {
-          if (queryInFlight?.key === key) queryInFlight = null
+          if (queryInFlight?.token === token) queryInFlight = null
         })
-      queryInFlight = { key, promise }
+      queryInFlight = { key, promise, generation, token }
       return promise
     },
 
