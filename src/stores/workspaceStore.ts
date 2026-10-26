@@ -327,6 +327,20 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 该落盘快照早于编辑器已推送的最新内容，磁盘还没追上编辑器。
      * 事件在推送在途到达（`syncPending` 推迟清脏）的场景由 `flushPendingSync`
      * 在推送返回后按「水位 ≥ 推送」补判，避免指示器卡住。
+     *
+     * **跨会话安全性（评审五轮核验）**：事件载荷不携带会话代际，因此这里不加
+     * 代际守卫（加了会把新会话自己的落盘事件也挡掉）。安全性由三条既有不变量
+     * 共同保证，且**不依赖「工作区 id 跨会话不同」**——`find_or_create` 会恢复
+     * 同一 contest+problem 的既有工作区（同一 id）：
+     * ① 不同工作区的事件被 `workspaceId` 过滤；
+     * ② 后端 `revision` 是 WorkspaceManager 进程级 `AtomicU64`，**跨登出/切会话
+     *    单调递增且从不重置**，并且只在磁盘确已写入该 revision 的快照、且快照
+     *    仍是最新（`snapshot_revision == current_revision`）时才发布事件 —— 所以
+     *    「事件 revision ≥ 已推送 revision」等价于「磁盘已包含编辑器推送的全部内容」，
+     *    此时清脏是真值；
+     * ③ `syncPending` 为真时推迟清脏（事件到达后又落键）。
+     * 登出会归零本地水位（`cancelPendingSync`），但后端修订号继续单调，因此旧会话
+     * 事件不会获得「高水位特权」，只会按真实的磁盘进度裁决。
      */
     markPersisted(workspaceId?: string, revision?: number) {
       if (workspaceId && this.workspace && this.workspace.id !== workspaceId) return

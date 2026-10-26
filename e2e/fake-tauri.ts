@@ -40,6 +40,8 @@ export interface FakeControl {
   calls: { cmd: string; args: Record<string, unknown> }[]
   emitEvent(name: string, payload: unknown): void
   failNext(cmd: string, variant: string, message: string): void
+  /** 让下一次指定命令延迟返回（毫秒）：用于构造「请求在途时发生会话失效」的时序 */
+  delayNext(cmd: string, ms: number): void
   /** 后端状态快照（只读断言用；如 reload 后当前工作区是否仍在） */
   backendState(): { lastWorkspaceId: string | null }
 }
@@ -266,6 +268,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
 
   const calls: { cmd: string; args: Record<string, unknown> }[] = []
   const failQueue = new Map<string, { variant: string; message: string }[]>()
+  /// 一次性延迟队列（毫秒）：按命令排队，先进先出（评审五轮 E2E 时序构造）
+  const delayQueue = new Map<string, number[]>()
   if (!restored && options.failLogin) {
     failQueue.set('login', [options.failLogin])
   }
@@ -471,8 +475,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return null
       }
       case 'submit_code': {
-        // 真实 HOJ 路径先 require_token()：匿名提交必须失败，不能假绿
-        if (!currentUser) throw { Auth: 'fake: 未登录或会话已失效（require_token）' }
+        // 登录态校验在 dispatch 中于命令发起时执行（先于 delayNext 的延迟）
         submitSeq += 1
         const id = String(submitSeq)
         const displayId = String(args?.displayId ?? '')
@@ -581,6 +584,19 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     }
     // 参数校验先于错误注入与命令体（对齐 Tauri：反序列化先于命令执行）
     assertRequiredArgs(cmd, args)
+    // 登录态在**命令发起时**校验（先于延迟）：延迟响应模拟的是「请求已带凭证发出、
+    // 服务端稍后才处理完」，而不是「延迟期间用户登出 → 请求被拒」。否则
+    // delayNext('submit_code') 永远拿不到「旧会话迟到成功」的时序，跨会话回写
+    // 守卫的 E2E 会被假阴性掩盖（评审五轮）
+    if (cmd === 'submit_code' && !currentUser) {
+      throw { Auth: 'fake: 未登录或会话已失效（require_token）' }
+    }
+    // 一次性延迟：构造「命令在途期间发生会话失效」的时序（先于错误注入）
+    const delays = delayQueue.get(cmd)
+    if (delays && delays.length > 0) {
+      const ms = delays.shift()!
+      await new Promise((resolve) => setTimeout(resolve, ms))
+    }
     const result = await invoke(cmd, args)
     // 后端状态变更成功落库后同步到 sessionStorage（供 reload 恢复）
     if (PERSIST_CMDS.has(cmd)) persistBackend()
@@ -613,6 +629,10 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     failNext(cmd: string, variant: string, message: string): void {
       if (!failQueue.has(cmd)) failQueue.set(cmd, [])
       failQueue.get(cmd)!.push({ variant, message })
+    },
+    delayNext(cmd: string, ms: number): void {
+      if (!delayQueue.has(cmd)) delayQueue.set(cmd, [])
+      delayQueue.get(cmd)!.push(ms)
     },
     backendState(): { lastWorkspaceId: string | null } {
       return { lastWorkspaceId }

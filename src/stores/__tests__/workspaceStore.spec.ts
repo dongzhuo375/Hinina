@@ -1011,3 +1011,29 @@ describe('会话代际（评审五轮：保存收尾）', () => {
     expect(store.isDirty).toBe(true)
   })
 })
+
+describe('markPersisted — 跨会话安全性（评审五轮核验）', () => {
+  it('同一工作区 id 的旧会话迟到事件按全局单调修订号裁决，不产生假 clean', async () => {
+    const store = useWorkspaceStore()
+    // 旧会话：编辑后登出 —— 取消在途同步、水位归零、脏标记清
+    store.updateCode(CODE)
+    store.cancelPendingSync()
+
+    // 新会话：恢复同一工作区（真实 find_or_create 返回同一 id）并推送 rev 4
+    store.workspace = wsFixture({ id: 'ws-1', activeFile: 'main.cpp', files: { 'main.cpp': CODE } })
+    store.activeFile = 'main.cpp'
+    store.language = 'C++'
+    workspaceService.updateWorkspaceFile.mockResolvedValue(4)
+    store.updateCode(CODE)
+    await store.flushPendingSync()
+    expect(store.isDirty).toBe(true) // 已推内存、尚未落盘
+
+    // 旧会话的迟到事件 rev 3：磁盘落后于已推送内容 → 不得清脏
+    store.markPersisted('ws-1', 3)
+    expect(store.isDirty).toBe(true)
+
+    // rev 5：后端修订号全局单调、且只在磁盘写入后发布 → 磁盘已含最新内容，清脏为真值
+    store.markPersisted('ws-1', 5)
+    expect(store.isDirty).toBe(false)
+  })
+})

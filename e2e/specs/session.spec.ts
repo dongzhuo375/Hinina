@@ -65,4 +65,40 @@ test.describe('会话失效', () => {
     await page.waitForURL('**/contest/problems')
     await expect(page.getByText('题目总览')).toBeVisible()
   })
+
+  test('提交在途时失效：迟到的提交响应不得重建状态或重启轮询（端到端）', async ({ page }) => {
+    // 评审五轮 #2：跨会话守卫此前只有 store 层单测，这里用延迟注入构造
+    // 「submit_code 在途 → 会话失效 → 旧响应成功」的真实时序
+    await loginAndEnterContest(page)
+    await page.getByRole('button', { name: '打开题目 A' }).click()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+    await page.evaluate(() => {
+      window.__e2e.delayNext('submit_code', 1_500)
+      window.__e2e.failNext('list_contest_submissions', 'Auth', '会话已被服务端吊销')
+    })
+
+    await page.getByRole('button', { name: '提交代码' }).click()
+    // 提交尚在途（按钮显示「提交中…」），此时用一次提交历史请求触发会话失效
+    await expect(page.getByRole('button', { name: '提交中…' })).toBeDisabled()
+    await page.getByRole('button', { name: /^提交记录/ }).click()
+    await page.waitForURL('**/login')
+
+    // 等旧 submit_code 的延迟响应真正落地（fake 在延迟结束后才记录该次调用）
+    await expect.poll(() => callCount(page, 'submit_code'), { timeout: 8_000 }).toBe(1)
+    // 轮询节拍 1s±20%：给足两个周期，确保「若守卫缺失、轮询已重启」必被观测到
+    await page.waitForTimeout(2_500)
+    // 关键断言：旧会话的提交没有启动评测轮询
+    expect(await callCount(page, 'get_judgement')).toBe(0)
+
+    // 重新登录并回到同一题：不得残留「已提交」锁或待评测状态
+    await page.locator('#contest-username').fill('e2e_player')
+    await page.locator('#contest-password').fill('e2e-not-a-real-password')
+    await page.getByRole('button', { name: '登录进入赛场' }).click()
+    await page.waitForURL('**/contest/problems')
+    await page.getByRole('button', { name: '打开题目 A' }).click()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+    await expect(page.getByRole('button', { name: '提交代码' })).toBeEnabled()
+    await expect(page.getByRole('status')).toHaveCount(0)
+    expect(await callCount(page, 'get_judgement')).toBe(0)
+  })
 })
