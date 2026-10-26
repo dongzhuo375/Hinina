@@ -3,7 +3,7 @@
 > 记录日期：2026-10-25  
 > 版本锚定：`main` @ 56140c5（PR #54 合并后），分支 `chore/ci-m3-integration`  
 > 文档性质：CI/CD 施工过程记录（入库，见 [doc/cicd/](README.md)）；对应施工方案 §六（M3）与 m0-baseline §六命名表的 `integration.yml` 条目  
-> 状态：夜间链路已建立并经多轮验证（§六首跑/恢复/首验）；评审一/二/三轮处置分别见 §七/§八/§九；当前 E2E 13 用例
+> 状态：夜间链路已建立并经多轮验证（§六首跑/恢复/首验）；评审一/二/三/四轮处置分别见 §七/§八/§九/§十；当前 E2E 14 用例
 
 ## 一、范围与相对原计划的修正
 
@@ -47,7 +47,7 @@
 | submission.spec | 场景 5 | pending 期禁用 + 五元组去重（submit_code 恒 1 次）、轮询 Pending→Running→Accepted 终态、提交历史反映会话内提交、**pending 跨页往返复用同一提交且不重复发送 IPC** |
 | session.spec | 场景 6 | Auth 错误 → sessionGuard 全链路（logout 调用 + 域状态清理 + 跳登录页）、**失效后评测轮询停止（get_judgement 停增，clearDomainState 的可观测凭证）**、失效后重新登录可再次进场 |
 
-实测（口径：Windows 11 本地 + chromium-1248 + vite dev @1420，`PLAYWRIGHT_BROWSERS_PATH=D:\DevTool\pw-browsers`）：评审三轮 **13 passed**（auth 新增登录后 reload 恢复、workspace 新增编辑后 reload 恢复与全等/负向断言，详见 §九）；此前评审修复轮 **11 passed** 连续 2 轮全绿（20.0s / 18.2s）；M3 合并前为 9 用例 3 轮全绿（16.2s / 16.4s / 16.4s）。
+实测（口径：Windows 11 本地 + chromium-1248 + vite dev @1420，`PLAYWRIGHT_BROWSERS_PATH=D:\DevTool\pw-browsers`）：评审四轮 **14 passed**（新增「刷新后当前工作区仍在」）；评审三轮 **13 passed**（auth 新增登录后 reload 恢复、workspace 新增编辑后 reload 恢复与全等/负向断言，详见 §九）；此前评审修复轮 **11 passed** 连续 2 轮全绿（20.0s / 18.2s）；M3 合并前为 9 用例 3 轮全绿（16.2s / 16.4s / 16.4s）。
 
 ## 五、施工中的观察（如实记录，未在本 PR 处理）
 
@@ -112,3 +112,16 @@
 | 文档漂移：doc/cicd/README 仍写 9 用例；m3 状态行仍写「待回写」；失效文案遗留项重复；doc/modules 缺生产代际与 fake 新机制 | README 更正为 13；m3 状态行改为多轮验证已记录；删除重复遗留项；session.md/submissionStore.md/workspaceStore.md 补会话代际与回归；doc/modules/e2e/ 补 fixtures 索引、fake 持久化与契约、spec 新用例与全等/负向断言 |
 
 **验证**：两条生产回归均经**变异验证**（暂存生产修复后恰好对应用例失败）；reload 两用例同样经变异验证（无持久化时恰红）；`corepack enable npm` 与 IPC 附件均本地实测；`npx tsc -p tsconfig.node.json`、561+2 新增单测、13 E2E 全绿（详见 PR 描述）。
+
+## 十、评审四轮处置（会话代际覆盖面、锁复位、CI 证据与 fake 保真度）
+
+| 发现 | 核实与处置 |
+|---|---|
+| **#1 会话代际覆盖不完整**：只有 submitCode/startPolling/loadWorkspace 使用，fetchHistory、loadMyStatus、loadRank、loadContest、announcement、getProblem 等写入方未守卫 | 属实的部分全部补守卫：problemStore（openProblem/loadLimits/loadMyStatus）、contestStore.loadContest、rankStore（loadRank/fetchAllRows）、announcementStore（load/markAllRead）、submissionStore.fetchHistory 与收尾。**一处修正**：`fetchHistory` 的迟到写入落在 `$reset()` 原替换掉的旧 history 对象引用上，实际不泄漏——守卫保留为纵深防御，且不写误导性回归用例（已实测去掉守卫该用例仍绿，说明它证明的不是守卫）。`loadMyStatus` 与 finally 锁两条新用例经**变异验证**（去守卫恰红）。`loadBrief`（登录页匿名简报）按设计跨登出保留，不比对代际（文档已写明边界） |
+| **#2 submitCode finally 无条件复位锁** | 属实：`finally` 改为仅代际未变时复位 `isSubmitting`；新增「旧提交 finally 不得清掉新会话在途提交锁」用例并变异验证 |
+| **#3 round-3 工作流改动未在 runner 验证**（integration.yml 无 PR 触发，最近运行 SHA 是 main 9c1a5cd） | 属实。处置：在 PR 分支上 `gh workflow run integration.yml --ref fix/m3-review-round3` 取得 runner 证据（corepack shim、三步全 success 自报、缓存恢复），结果回写本节 |
+| **#4 e2e 类型检查不在任何门禁** | **不属实**：`ci.yml` frontend job 早已执行 `npx tsc -p tsconfig.node.json --noEmit`，且 `tsconfig.node.json` 的 include 含 `e2e/**/*.ts`（`--listFiles` 实证 6 个 e2e 文件在编译程序内）。为可发现性把步骤改名为 `Type-check config and e2e sources` 并加注释 |
+| **#5 fake 未持久化 lastWorkspaceId** | 属实：`lastWorkspaceId` 纳入 `PersistedBackend`；`__e2e.backendState()` 暴露快照；新增「刷新后当前工作区仍在」（在题目总览 reload，该页不 load_workspace）用例可区分持久化与否 |
+| **#6 session.ts ↔ store import 环** | 属实：计数器移到叶子模块 `src/stores/sessionGeneration.ts`（`getSessionGeneration`/`bumpSessionGeneration`），session.ts 只负责递增、store 只读取；新增模块文档，store 文档依赖清单同步 |
+
+**验证**：前端 **565 单测**（563 + 新增 loadMyStatus 与 finally 锁两条）、**14 E2E**、`npm run build`、`tsc -p tsconfig.node.json`（`--listFiles` 实证 6 个 e2e 文件在编译程序内）、fmt/clippy 全绿；loadMyStatus 守卫、finally 锁守卫、lastWorkspaceId 持久化三处均经**变异验证**（去守卫/去持久化后对应用例恰红）；`fetchHistory` 守卫经实测确认是纵深防御（去掉后用例仍绿，故不保留误导性用例）。

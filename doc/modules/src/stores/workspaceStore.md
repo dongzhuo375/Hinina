@@ -35,6 +35,7 @@
 - `@/services/config.service`（`getDefaultLanguage` 默认语言）
 - `@/utils/language`（`sourceFileNameOf` / `normalizeHojLanguage` / `SOURCE_FILE_EXTENSIONS`）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
+- `@/stores/sessionGeneration`（`getSessionGeneration` —— 会话代际守卫；叶子模块，避免 store ↔ session 编排层成环）
 
 ## 被依赖
 

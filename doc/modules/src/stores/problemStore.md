@@ -20,9 +20,9 @@
 | `currentProblemId` | getter | 当前打开的题目 ID（无则 null） |
 | `limitsOf` | getter `(displayId) => ProblemLimits \| null` | 取某题 limits；**null = 后端获取失败**，视图应显示占位而非假默认值 |
 | `statusOf` | getter `(problemId) => UserProblemStatus` | 取某题我的状态；未出现在 map 中视为未提交（0） |
-| `openProblem` | `(contestId, problemId) => Promise<void>` | 加载详情并设为当前题目；失败记录 error 并抛出 |
-| `loadLimits` | `(contestId, displayIds) => Promise<void>` | 批量加载 limits（后端双层缓存，命中时零网络请求）；**失败不抛出** |
-| `loadMyStatus` | `(contestId, problemIds) => Promise<void>` | 批量加载我的提交状态；**失败不抛出**；成功后清除 `myStatusStale`，失败则置为过期（数据仍是旧的）以便下一周期重试 |
+| `openProblem` | `(contestId, problemId) => Promise<void>` | 加载详情并设为当前题目；失败记录 error 并抛出。**请求序号 + 会话代际双守卫**：过期响应不写 `currentProblem`/`error`/`isLoading` |
+| `loadLimits` | `(contestId, displayIds) => Promise<void>` | 批量加载 limits（后端双层缓存，命中时零网络请求）；**失败不抛出**；会话切换后迟到的 limits 不写回（评审四轮 #1） |
+| `loadMyStatus` | `(contestId, problemIds) => Promise<void>` | 批量加载我的提交状态；**失败不抛出**；成功后清除 `myStatusStale`，失败则置为过期（数据仍是旧的）以便下一周期重试。**会话代际守卫**：每轮询周期都会发起，登出后旧用户的 AC/尝试状态不得显示给新用户（评审四轮 #1） |
 | `invalidateMyStatus` | `() => void` | 标记我的题目状态已过期（提交终态、轮询超时时由 `submissionStore` 调用）；**只置位不发请求** —— 重拉交给总览页在下次可见刷新时执行，避免在解题页后台凭空多打一次请求 |
 | `myStatusNeedsReloadFor` | `(contestId) => boolean`（getter） | 指定比赛是否需要重拉我的状态：`myStatusStale`（提交终态/超时）**或** `myStatusContestId !== contestId`（切比赛）—— 两个失效维度取并集，总览页只读这一个判据 |
 
@@ -33,6 +33,7 @@
 - `@/services/problem.service`（`problemService`）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
+- `@/stores/sessionGeneration`（`getSessionGeneration` —— 会话代际守卫）
 
 ## 被依赖
 

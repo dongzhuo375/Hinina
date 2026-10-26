@@ -18,9 +18,9 @@
 | `unreadCount` | getter `=> number` | 未读数（ActivityBar 红点数据源） |
 | `isUnread` | getter `(id) => boolean` | 单条未读判定（列表圆点） |
 | `hasData` | getter `=> boolean` | 区分「空列表」与「尚未请求」 |
-| `load` | `(contestId) => Promise<void>` | 并行拉列表 + 已读集合；**已读拉取失败降级为空集**（宁可多显红点，不可漏报公告）；列表失败写 error 并抛出；`isWatching && !document.hidden` 时顺带 `markAllRead()` —— 「加载后标记」与「刷新后标记」由此收敛为**一条**路径 |
+| `load` | `(contestId) => Promise<void>` | 并行拉列表 + 已读集合；**已读拉取失败降级为空集**（宁可多显红点，不可漏报公告）；列表失败写 error 并抛出；`isWatching && !document.hidden` 时顺带 `markAllRead()` —— 「加载后标记」与「刷新后标记」由此收敛为**一条**路径。**会话代际守卫**：登出后迟到的公告/已读不写回（评审四轮 #1） |
 | `refresh` | `() => Promise<void>` | 轮询用刷新：吞掉异常，不打断轮询节奏（也使其可安全用作可见性补拉） |
-| `markAllRead` | `() => Promise<void>` | **页面隐藏时直接返回**（切走了 = 没看到，标记已读等于把红点吞掉）；否则乐观更新本地 → 后端持久化 → 以后端合并结果为准；**持久化失败回滚本地**（红点复发优于假已读） |
+| `markAllRead` | `() => Promise<void>` | **页面隐藏时直接返回**（切走了 = 没看到，标记已读等于把红点吞掉）；否则乐观更新本地 → 后端持久化 → 以后端合并结果为准；**持久化失败回滚本地**（红点复发优于假已读）；会话切换后不写合并结果/不回滚（评审四轮 #1） |
 | `startLive` | `(contestId, isPaused?) => void` | 立即拉取一次（红点不等轮询周期）+ 60s±10s createPoller（`document.hidden` 暂停）+ 注册可见性补拉监听（`visibilitychange` / `focus`，1s 去重） |
 | `stopLive` | `() => void` | 停止轮询 + 注销可见性监听并复位去重时间戳（离开工作台/比赛结束/登出） |
 
@@ -32,6 +32,7 @@
 - `@/utils/polling`（`createPoller`）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
+- `@/stores/sessionGeneration`（`getSessionGeneration` —— 会话代际守卫）
 
 ## 被依赖
 

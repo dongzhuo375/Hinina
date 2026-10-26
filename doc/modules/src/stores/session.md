@@ -10,8 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `clearDomainState` | `() => void` | **先递增 `sessionGeneration`**（使所有在途 IPC 的迟到响应失效），再重置 contest / problem / submission / rank / announcement / workspace 六个 store；重置工作区前先取消其防抖同步定时器，重置榜单/公告前先停止各自的实时刷新轮询 |
-| `getSessionGeneration` | `() => number` | 返回当前会话代际（模块级计数器）。store 在发起请求时捕获、写回前比对：`clearDomainState()` 只重置 state 与定时器，并不取消已发出的请求，代际不一致即丢弃旧会话的迟到响应（评审三轮 P1/P2：submit_code 重建提交并重启轮询、load_workspace 恢复旧会话代码） |
+| `clearDomainState` | `() => void` | **先 `bumpSessionGeneration()`**（使所有在途 IPC 的迟到响应失效，见 [sessionGeneration.md](sessionGeneration.md)），再重置 contest / problem / submission / rank / announcement / workspace 六个 store；重置工作区前先取消其防抖同步定时器，重置榜单/公告前先停止各自的实时刷新轮询 |
 | `resetSessionForOjSwitch` | `() => void` | OJ 切换的会话上下文重置（调用点：SettingsView 切换成功后）。= `clearDomainState()` + **匿名简报复位**（brief/briefBaseUrl/briefError 清空、briefState 置 idle —— 简报属旧 OJ，且 LoginView 的 canEnter 侦听器会按简报时间窗计算阶段，陈旧值会在新 OJ 有会话时立即自动推进赛场）+ 认证态清零（`user = null` / `error = null` / **`sessionResolved = false`**，下次导航由路由守卫 `checkSession` 按新 OJ 的 `sessions/{id}.json` 自动恢复会话）。**刻意不调用 `authStore.logout()`**：Registry 已切到新 OJ，后端 logout 会拿新 OJ 的无凭证会话打它的登出端点、并误删新 OJ 自己的会话文件；各 OJ 会话文件按 id 隔离，**旧 OJ 登录态保留**（切回免登录） |
 
 ## 直接依赖
@@ -35,7 +34,7 @@ authStore.logout()
   → authService.logout()（后端会话 + localStorage，失败不阻断）
   → user = null
   → clearDomainState()
-      → sessionGeneration += 1                 // 在途请求的迟到响应全部失效
+      → bumpSessionGeneration()              // 在途请求的迟到响应全部失效
       → workspaceStore.cancelPendingSync()   // 防止登出后仍向后端写入代码
       → workspaceStore.$reset()
       → submissionStore.stopAllPolling()     // 回收评测轮询定时器
@@ -64,9 +63,11 @@ SettingsView.onSwitchOj()（切换成功分支）
 
 - Pinia store 生命周期与组件无关，路由跳转不会自动清空状态，必须显式重置。
 - **重置不等于取消在途请求**：清理只重置 state、停止定时器，已发出的 IPC 仍会返回。
-  因此所有「请求发起 → await → 写回」的路径都要比对会话代际（当前已接入
-  `submissionStore.submitCode` / `startPolling` 与 `workspaceStore.loadWorkspace`，
-  失败分支同样不写错误/锁状态，避免旧会话污染新会话）。
+  因此所有「请求发起 → await → 写回」的路径都要比对会话代际（`bumpSessionGeneration`
+  由本模块触发，读取方见 [sessionGeneration.md](sessionGeneration.md)；已接入
+  submissionStore 的提交/轮询/历史、workspaceStore 的加载、problemStore 的题面/
+  limits/我的状态、contestStore 的比赛、rankStore 的榜单/全量快照、announcementStore
+  的公告与已读；失败分支同样不写错误/加载态，避免旧会话污染新会话）。
 - 认证状态由 `authStore` 自行清理，本模块只负责领域状态，避免循环依赖
   （`authStore → session → 各领域 store`，各领域 store 不反向依赖 `authStore`）。
 - `contestStore` 同时持有登录页的匿名比赛简报（不依赖会话），因此走定向清理

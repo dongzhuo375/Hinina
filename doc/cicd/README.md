@@ -13,4 +13,4 @@
 - [m1-pr-gate.md](m1-pr-gate.md) — M1 最小 PR CI（2026-10-25，PR #50）：ci.yml 结构与三项决策、行尾治理、E1 修复、首跑逐 job 结果（Ubuntu Rust 套件首跑全绿、非阻塞汇总语义实证）、合并后保护配置与验收清单。
 - [m2-tests.md](m2-tests.md) — M2 关键测试补位与覆盖率基线（2026-10-25）：命令 `*_impl` 全真上下文测试、HOJ/Hydro loopback 契约测试、前端关键组合测试、V8 覆盖率基线（行 57.25% / 分支 54.48% / 语句 55.74%，只报告不卡线）。
 - [lint-gate-cleanup.md](lint-gate-cleanup.md) — lint 门禁清理（2026-10-25）：`cargo fmt` 全量清零 E2、clippy 7 处清零 E3、rust-lint 升为必需检查、749/748 计数差异结案（cfg(unix)）。
-- [m3-integration.md](m3-integration.md) — M3 夜间集成（2026-10-25）：integration.yml 三平台构建矩阵（macOS/Linux 观测平台自报机制）、stress-repeat 10 轮、cargo-llvm-cov 基线、浏览器 E2E（Tauri internals 单点 fake + 首批 4 场景 13 用例，含评审三轮新增）。
+- [m3-integration.md](m3-integration.md) — M3 夜间集成（2026-10-25）：integration.yml 三平台构建矩阵（macOS/Linux 观测平台自报机制）、stress-repeat 10 轮、cargo-llvm-cov 基线、浏览器 E2E（Tauri internals 单点 fake + 首批 4 场景 14 用例，含评审三/四轮新增）。

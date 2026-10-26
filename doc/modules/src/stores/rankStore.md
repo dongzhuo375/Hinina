@@ -22,9 +22,9 @@
 | `fullFilteredRows` | getter | 快照按当前分组过滤后的全部行（未分页，`filterRankRowsByGroup`） |
 | `visibleRows` | getter | 全量模式：过滤快照后 `paginateRankRows` 客户端切片（`pages`/`current` 已由 `syncFullPaging` 同步为等效值，视图无需感知模式差异）；常规模式：`filterRankRowsByGroup(rows, groupFilter)`——star/female 但快照未就位（拉取中/失败）时退化为筛当前页，聊胜于无 |
 | `hasData` | getter | 是否已加载过（区分「空榜单」与「尚未请求」） |
-| `loadRank` | `(contestId, uid, page?) => Promise<void>` | 加载一页；失败记录 `error` 并**向上抛出**，由调用方决定是否提示 |
+| `loadRank` | `(contestId, uid, page?) => Promise<void>` | 加载一页；失败记录 `error` 并**向上抛出**，由调用方决定是否提示。**会话代际守卫**：登出后迟到的榜单不写回（评审四轮 #1） |
 | `applyPage` | `(page, uid) => void` | 应用一页数据的三处归一（见逻辑流程） |
-| `fetchAllRows` | `() => Promise<void>` | 全量快照拉取，见逻辑流程 |
+| `fetchAllRows` | `() => Promise<void>` | 全量快照拉取，见逻辑流程。中止检查点同时包含 `fullFetchGeneration`、分组筛选与会话代际 |
 | `syncFullPaging` | `() => void` | 把客户端分页状态同步到 `pages`/`current`（RankView 分页条直接读这两个字段） |
 | `refresh` | `() => Promise<void>` | 轮询/手动刷新：**吞掉异常**；全量筛选态下重拉整个快照（只会被手动刷新触发），否则重拉当前页 |
 | `setPage` | `(page) => Promise<void>` | 翻页（越界忽略）；全量模式为**纯客户端切片，不发请求**；常规模式走 `loadRankDeduped`（去抖） |
@@ -42,6 +42,7 @@
 - `@/utils/polling`（`createPoller` + `Poller` 类型）
 - `@/utils/rank`（`dedupeRankRows` / `filterRankRowsByGroup` / `mergeRankPages` / `paginateRankRows` / `resolveMyRow` / `resolveParticipantCountFromPage` + `RankGroupFilter` 类型）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/stores/sessionGeneration`（`getSessionGeneration` —— 会话代际守卫）
 
 ## 被依赖
 

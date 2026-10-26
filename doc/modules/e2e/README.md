@@ -25,6 +25,6 @@
 3. **必填参数校验先于命令体**（对齐 Tauri 反序列化时机）：按 Rust 命令签名的非 Option 参数建表，缺参/类型错直接拒绝，防止前端漏传参数的回归假绿。
 4. **无工作区时拒绝变更**：`update_workspace_file` / `set_workspace_language` / `delete_workspace_file` 作用于「当前已加载工作区」，未加载即拒绝——不得建幻影工作区（真实后端会拒绝的行为测试不能通过）。
 5. **fixtures 动态时间**：比赛 `startTime = now-1h`、`endTime = now+8h`、`status=0`，保证恒处 running 赛段（路由守卫按赛段放行）；`oj.contestRef` 必须等于比赛 id。
-6. **后端状态跨 reload 持久化**：`addInitScript` 每次导航/reload 都重跑——若后端状态只挂文档内存，reload 就重建「后端」，与真实 Tauri（WebView reload 不重建 Rust 进程）相反。工作区/提交/会话/修订计数/配置序列化到 **sessionStorage** 并在 bootstrap 恢复；`calls`（IPC 日志）、`failQueue`、事件回调属文档生命周期，不持久化。
+6. **后端状态跨 reload 持久化**：`addInitScript` 每次导航/reload 都重跑——若后端状态只挂文档内存，reload 就重建「后端」，与真实 Tauri（WebView reload 不重建 Rust 进程）相反。工作区/提交/会话/修订计数/配置/**当前工作区 id** 序列化到 **sessionStorage** 并在 bootstrap 恢复；`calls`（IPC 日志）、`failQueue`、事件回调属文档生命周期，不持久化。
 7. **契约优先于固定成功**：`switch_oj` 校验实例并切换 `oj.active`；`load_configured_contest` 校验 `oj.contestRef`（空 → Config，不匹配 → Contest）；`submit_code` 要求已登录（HOJ require_token，匿名以 `{Auth}` 拒绝）。未实现的命令不得返回无条件成功。
 8. **数据全部虚构**：无真实凭证；`calls` 正常情况只留内存，**失败时**经 `fixtures.ts` 附件写入 test-results（内容虚构）。
