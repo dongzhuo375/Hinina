@@ -43,8 +43,9 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   vi.spyOn(console, 'error').mockImplementation(() => {})
-  // 模块级落盘修订号是副作用句柄（跨用例存活），先归零让每个用例独立
-  useWorkspaceStore().cancelPendingSync()
+  // 模块级落盘修订号是副作用句柄（跨用例存活），测试隔离需显式归零
+  //（生产语义已改为跨会话保留：后端 revision 进程级单调，评审七轮）
+  useWorkspaceStore().cancelPendingSync({ resetRevisionWatermarks: true })
   workspaceService.updateWorkspaceFile.mockResolvedValue(undefined)
   workspaceService.saveWorkspace.mockResolvedValue(undefined)
   workspaceService.deleteWorkspaceFile.mockResolvedValue(undefined)
@@ -955,15 +956,16 @@ describe('会话代际（评审 P2：清理后才完成的工作区加载）', (
       () => new Promise<Workspace>((resolve) => { resolveLoad = resolve }),
     )
 
-    // load_workspace 保持在途
+    // load_workspace 保持在途（清理发生在 IPC 已发出之后 → 覆盖「在途响应丢弃」；
+    // 「清理后才轮到队首的加载不发 IPC」由评审七轮用例覆盖）
     const pending = store.loadWorkspace('1', 'p-old')
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalled())
 
     // 清理执行：代际递增 + $reset
     clearDomainState()
     expect(store.workspace).toBeNull()
 
     // 旧请求成功返回：不得写回 workspace/code/语言/加载状态
-    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalled())
     resolveLoad(wsFixture({
       id: 'ws-old',
       activeFile: 'main.cpp',
@@ -1035,5 +1037,59 @@ describe('markPersisted — 跨会话安全性（评审五轮核验）', () => {
     // rev 5：后端修订号全局单调、且只在磁盘写入后发布 → 磁盘已含最新内容，清脏为真值
     store.markPersisted('ws-1', 5)
     expect(store.isDirty).toBe(false)
+  })
+})
+
+describe('会话代际（评审七轮：排队中的旧加载）', () => {
+  it('清理后已排队的旧加载不得再发 load_workspace IPC', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const store = useWorkspaceStore()
+    let resolvePush!: (v: unknown) => void
+    workspaceService.updateWorkspaceFile.mockImplementation(
+      () => new Promise((resolve) => { resolvePush = resolve }),
+    )
+
+    // 加载挂在 flushPendingSync 上（推送在途）
+    store.updateCode('old session code')
+    const loading = store.loadWorkspace('1', 'p-old')
+    await vi.waitFor(() => expect(workspaceService.updateWorkspaceFile).toHaveBeenCalled())
+
+    // 会话在 flush 期间失效
+    clearDomainState()
+    resolvePush(1)
+    await loading
+
+    // 旧会话的 load_workspace 不得在清理后发出（否则后端 current 指向旧题）
+    expect(workspaceService.loadWorkspace).not.toHaveBeenCalled()
+    expect(store.workspace).toBeNull()
+  })
+})
+
+describe('会话代际（评审七轮：修订水位跨会话保留）', () => {
+  it('旧会话迟到的落盘事件不得清新会话恢复出的脏工作区', async () => {
+    const store = useWorkspaceStore()
+    // 旧会话：推 rev 10 → 落盘 10；再推 rev 11（未落盘）
+    workspaceService.updateWorkspaceFile.mockResolvedValue(10)
+    store.updateCode('v10')
+    await store.flushPendingSync()
+    store.markPersisted('ws-1', 10)
+    expect(store.isDirty).toBe(false)
+
+    workspaceService.updateWorkspaceFile.mockResolvedValue(11)
+    store.updateCode('v11')
+    await store.flushPendingSync()
+    expect(store.isDirty).toBe(true)
+
+    // 登出（水位保留）→ 新会话恢复出脏工作区（后端内存 rev 11 尚未落盘）
+    store.cancelPendingSync()
+    store.workspace = wsFixture({ id: 'ws-1', activeFile: 'main.cpp', files: { 'main.cpp': 'v11' } })
+    store.activeFile = 'main.cpp'
+    store.code = 'v11'
+    store.isDirty = true
+    store.syncPending = false
+
+    // 旧会话迟到的落盘事件 rev 10：磁盘落后于已推送的 11 → 不得清脏（假「已自动备份」）
+    store.markPersisted('ws-1', 10)
+    expect(store.isDirty).toBe(true)
   })
 })
