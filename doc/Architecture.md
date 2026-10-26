@@ -16,6 +16,7 @@ Hinina/
 ├── .github/
 │   ├── copilot-instructions.md           # Copilot CLI 指令（架构速查、开发约定）
 │   ├── workflows/                        # CI 工作流（ci.yml：M1 PR 门禁；integration.yml：M3 夜间集成，见 doc/cicd/）
+│   ├── actions/                          # 复合 action（tauri-system-deps：Tauri 2 Ubuntu apt 依赖单一来源，ci.yml 与 integration.yml 共用）
 │   └── pr-assets/                        # PR 评审用的匿名演示截图（pr-36/：login、problemset、workspace-maximized）
 ├── scripts/
 │   └── build-plugin-scaffold.mjs          # 离线构建插件 ES module（默认脚手架；传 entry/outfile 参数构建 sdk/examples/balloon 等示例）
@@ -37,8 +38,9 @@ Hinina/
 │   ├── 接入新OJ的改动清单与改造建议.md     # 接入新 OJ 曾要改 5 个既有文件的根因分析与改造建议（改造 1–4 已由 #20 落地，保留为决策记录）
 │   ├── screen/                           # 界面设计稿（login / problem_set / problem_solve / rank / submissios / notice，各含 DESIGN.md + code.html + screen.png）
 │   ├── icon/                             # 应用图标设计稿（DESIGN.md + SVG 母版/浅色/单色/小尺寸变体 + preview.html/.png + PNG 导出 16–1024）
-│   ├── modules/                          # 模块文档（与 src/ 与 src-tauri/src/ 的文件树一一对应）
+│   ├── modules/                          # 模块文档（与 src/、src-tauri/src/ 及根级 e2e/ 的文件树一一对应）
 │   │   ├── README.md                     # 模块文档索引（格式约定与维护规则）
+│   │   ├── e2e/                          # E2E 层模块文档（playwright 配置、fake internals 设计与保真度规则、各 spec 职责）
 │   │   └── src-tauri/plugin/sdk/         # TypeScript SDK 声明与脚手架、参考业务插件 examples/balloon（文档侧代码，不构建进应用）
 │   ├── cicd/                             # CI/CD 施工记录（M0 基线实测与后续 M1+ 阶段记录；规划文档在 doc/local/ 不入库）
 │   │   ├── README.md                     # 目录定位、命名约定与入库边界
