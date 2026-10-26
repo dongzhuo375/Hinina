@@ -11,7 +11,8 @@
 ## 二、版本门禁设计决策
 
 - 门禁对象为**五处版本**（package.json、package-lock.json 根与 packages[""]、Cargo.toml [package]、Cargo.lock hinina 条目、tauri.conf.json），必须与 package.json 一致。
-- 脚本四种模式：无参（一致性报告）、`--tag vX.Y.Z`（格式 `^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$` 且与应用版本一致）、`--changelog`（存在对应 `## [X.Y.Z]` 段落，同时兼容无括号写法）、`--extract-notes`（stdout 只输出段落正文供草稿发布说明，诊断走 stderr）、`--print-version`（verify-artifact 断言产物文件名用）。
+- 脚本四种模式：无参（一致性报告）、`--tag vX.Y.Z`（格式 `^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$` 且与应用版本一致）、`--changelog`（存在对应 `## [X.Y.Z]` 段落，同时兼容无括号写法）、`--extract-notes`（stdout 只输出段落正文供草稿发布说明，诊断走 stderr）、`--print-version`（verify-artifact 断言产物文件名用；仅读 package.json 不做一致性校验——前提是调用前已跑过完整门禁，release.yml 在同一 job 内先复跑门禁再取版本号）。
+- 所有文件读取/JSON 解析失败经 runCli 统一转为一行 `error: …` 并以 exit 1 结束，不抛栈。
 - Cargo.lock 解析只认 `name = "hinina"` 条目内的 version，依赖包条目不参与比较。
 - 测试：正向用例直接跑真实仓库（0.1.0）；负向用例用 tmp 目录 fixture；做过变异验证（破坏 Cargo.lock 包名判据后正向用例全部变红，已还原）。
 
@@ -20,7 +21,7 @@
 - 顶层 `permissions: contents: read`；concurrency 按 workflow+ref 分组、cancel-in-progress: false；仅 `draft-release` job 提升 `contents: write` 并挂受保护 environment `release`。
 - `validate`：fetch-depth 0 → `git merge-base --is-ancestor` 确认 tag 指向 main 历史 → 门禁脚本 `--tag --changelog`。
 - `test`：`uses: ./.github/workflows/ci.yml`（方案 §7.3「调用或复用完整必需 CI」，发布不跳过检查）。
-- `build-windows`：步骤照抄 integration.yml windows leg（corepack npm shim、rust-cache `src-tauri -> target`、npm ci + build + tauri build）；构建后生成 build-metadata.json（tag/commit/built_at/node/npm/rustc/cargo/target/bundle/`signed: false`）；artifact 名 `release-windows-unsigned`（如实标注未签名，签名属 M5）。
+- `build-windows`：步骤照抄 integration.yml windows leg（corepack npm shim、rust-cache `src-tauri -> target`、npm ci + build + tauri build）；构建后生成 build-metadata.json（tag/commit/built_at/node/npm/rustc/cargo/target/bundle/`signed: false`）；**上传前先把 exe 与 metadata 平铺暂存进 `release-staging/`，再以单路径 `release-staging/*` 上传**为 `release-windows-unsigned`——upload-artifact v4+ 以所有搜索路径的最小公共祖先为 artifact 根且通配符后层级保留，若直接同时上传 bundle 深路径与根目录 json，exe 会嵌到 `src-tauri/…` 下、下载侧断言必空（评审一轮发现，见 §八）；artifact 名如实标注未签名，签名属 M5。
 - `verify-artifact`：在标签树上复跑门禁 → 下载 artifact → 断言恰一个 exe 且文件名恰为 `Hinina_<版本>_x64-setup.exe`（M0 构建日志实证的 NSIS 命名）、`file` 识别为 Windows PE → `sha256sum` 生成 SHA256SUMS.txt → 上传 `release-windows-verified`。
 - `draft-release`：needs [test, verify-artifact]，默认语义任一失败即跳过，不产生半成品草稿；发布说明由 `--extract-notes` 从 CHANGELOG 段落生成；`gh release create --draft`，同标签重跑走 `gh release upload --clobber` + `gh release edit --draft` 复用同一草稿；**遇到已发布同名 Release 显式失败**（发布后产物不可变，修复走新版本）。
 - 第三方 action 全部 SHA 固定：沿用现库批（checkout v7.0.1 / setup-node v7.1.0 / upload-artifact v7.0.2 / rust-cache v2.9.3），新增 download-artifact v7.0.0（37930b1c2abaa49bbe596cd826c3c89aef350131，与 upload v7 同主版本配套）。
@@ -51,3 +52,13 @@
 - OS 代码签名属 M5（按发布范围决策只做 Windows 签名，macOS/Linux 产物推迟、不进支持矩阵）；updater 属 M6（前置：至少一次稳定正式发布）。
 - 升级安装覆盖验收（`RELEASE.md` §五第 4 项）自第二个版本起适用。
 - `CHANGELOG.md` 0.1.0 段落日期为 TBD，首次发版时填入。
+
+## 八、评审一轮处置（PR #60）
+
+| 发现 | 核验与处置 |
+|---|---|
+| 🔴 upload-artifact 多路径上传以最小公共祖先为 artifact 根：bundle 深路径 + 根目录 build-metadata.json 双路径上传会把 exe 嵌到 `src-tauri/target/release/bundle/nsis/` 下，verify-artifact 的 `artifact/*.exe` 与 draft-release 的 glob 全部落空，首个试跑 tag 必在 verify-artifact 失败 | 属实（upload-artifact v4+ 文档语义；integration.yml 此前单路径上传故未暴露）。修复：build-windows 先把 exe 与 metadata 平铺进 `release-staging/`，以单路径 `release-staging/*` 上传——artifact 根即该目录，下载侧 `artifact/` 平铺，下游 verify-artifact / draft-release 的断言与 glob 无需改动 |
+| ⚪ readDeclaredVersions 对缺失/损坏 JSON 直接抛栈（exit 1 能挡住但输出不友好） | 属实。文件读取与 JSON 解析经 readTextFile/readJsonFile 转为一行 `error: <位置> is missing or unreadable / is not valid JSON`，runCli 统一 catch 后以 exit 1 结束；新增两条用例（缺失文件、坏 JSON，并断言输出无栈帧） |
+| ⚪ `--print-version` 不做一致性校验 | 设计如此（各调用点之前均已跑过完整门禁）；已在脚本头注释写明前提，verify-artifact 的用法是同 job 内先复跑门禁再取版本号 |
+| ⚪ spec 的 `mkdirSync(join(target, '..'))` 依赖 `..` 归一化，稍隐晦 | 属实，改用 `dirname(target)` |
+| ⚪ 合并前确认 ubuntu rust-test 转绿 | 首轮 run 40377057052 中该 job 因 azure 镜像卡死失败（两轮 apt 均挂满超时，25m37s），`gh run rerun --failed` 后 1m50s 绿——M3 已证实的按 runner 抖动，与本 PR 改动无关 |
