@@ -59,10 +59,15 @@ export default defineConfig({
   /// 与 store/service 状态机；IPC 边界一律用 vi.mock 在 bridge 层打桩，
   /// 因此测试无需真实 Rust 后端或 OJ 服务器。
   /// 另含 doc/modules 下插件 SDK 示例的逻辑测试（mock Hinina 接口，同样不依赖宿主）。
+  /// 以及 scripts 下发布门禁脚本的测试（node 环境，无 UI 依赖）。
   /// 测试文件置于各模块的 `__tests__/` 子目录（与 Rust 端 tests/ 分离约定一致）。
   test: {
     environment: "node",
-    include: ["src/**/__tests__/**/*.spec.ts", "doc/modules/**/__tests__/**/*.spec.ts"],
+    include: [
+      "src/**/__tests__/**/*.spec.ts",
+      "doc/modules/**/__tests__/**/*.spec.ts",
+      "scripts/**/__tests__/**/*.spec.ts",
+    ],
     clearMocks: true,
     restoreMocks: true,
     coverage: {
