@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-三个用例：
+四个用例：
 
 1. **Auth 错误触发状态清理并跳回登录页**：`failNext('load_workspace', 'Auth', …)` → 点击 B 题 chip 触发加载 → 断言跳 `/login`、`calls` 含 `logout`（invalidateSession 的可观测凭证）、登录表单可见可编辑（表单为空时按钮禁用属正常校验行为）。**已知现象**：失效文案（`SESSION_INVALID_MESSAGE`）会被登录页挂载时的 `checkSession` 清空（`error = null`），用户实际看不到失效原因——待产品决策，见 `doc/cicd/m3-integration.md` §五。
 2. **会话失效停止评测轮询（clearDomainState 的可观测凭证）**：`judgementSequence: ['Running']` 让轮询永不终态 → 提交并确认 `get_judgement` 已开始 → 注入 Auth 错误失效 → **先等 1.5s 让在途轮询落地，再观测 3s 断言计数停增**（若未停，3s 内按 1s±20% 间隔还会增长约 2-3 次）——对应 `clearDomainState` 里 `submissionStore.stopAllPolling()`。

@@ -3,7 +3,7 @@
 > 记录日期：2026-10-25  
 > 版本锚定：`main` @ 56140c5（PR #54 合并后），分支 `chore/ci-m3-integration`  
 > 文档性质：CI/CD 施工过程记录（入库，见 [doc/cicd/](README.md)）；对应施工方案 §六（M3）与 m0-baseline §六命名表的 `integration.yml` 条目  
-> 状态：夜间链路已建立并经多轮验证（§六首跑/恢复/首验）；评审一~五轮处置分别见 §七/§八/§九/§十/§十一；当前 E2E 14 用例
+> 状态：夜间链路已建立并经多轮验证（§六首跑/恢复/首验）；评审一~六轮处置分别见 §七/§八/§九/§十/§十一/§十二/§十三；当前 E2E 15 用例
 
 ## 一、范围与相对原计划的修正
 
@@ -143,3 +143,23 @@
 | `markPersisted` 跨会话安全性的依据 | **修正前提**：`find_or_create` 会恢复同一 contest+problem 的既有工作区（**同一 id**），因此「已加载且 id 不同会被过滤」不是常见路径。真正的保证是：后端 `revision` 是 WorkspaceManager 进程级 `Arc<AtomicU64>`（从不随登出重置）、且只在磁盘确已写入该 revision 的快照且快照仍最新时才发布事件 —— 「事件 revision ≥ 已推送 revision」等价于「磁盘已含推送内容」。再叠加 `workspaceId` 过滤与 `syncPending` 推迟。**处置**：不新增代际守卫（会误挡新会话自己的事件），把不变量写进 `markPersisted` 文档注释、workspaceStore 模块文档与 sessionGeneration 边界，并新增「同 id 旧会话迟到事件」专项用例（水位归零后 rev 3 不清脏、rev 5 清脏） |
 | 跨会话守卫只有 store 单测、E2E 无端到端路径 | 已补：fake 新增 `delayNext(cmd, ms)`；session.spec 新增「提交在途时失效」端到端用例。**过程中发现并修正两个会掩盖回归的问题**：① fake 的 `submit_code` 登录校验在延迟之后执行，导致延迟期间登出后旧请求被拒、永远构造不出「迟到成功」——校验改到命令发起时（先于延迟）；② 原用例只等 2s，轮询首 tick（1s±20%）可能晚于断言——改为等 `submit_code` 真正记账后再等两个周期。修正后**变异验证**：移除 submitCode 守卫，用例恰红（`get_judgement = 2`） |
 | 当前验证口径 | 前端 **569 单测**（568 + markPersisted 跨会话核验）、**15 E2E**、build/tsc/fmt 全绿 |
+
+## 十三、评审六轮处置（三平台缓存、空匹配假绿、fake 保真与脱敏、文档一致性）
+
+| 发现 | 核验与处置 |
+|---|---|
+| stress-repeat 过滤 0 匹配时 `cargo test` 退出码为 0 → 阻塞 job 假绿 | **实测确认**（`cargo test --lib zzz_nonexistent` 退出码 0）。每轮改为解析 `test result: ok. N passed` 的 N，N=0 即 `::error` + 失败；本地用同一函数验证：空过滤串返回 1、`concurrent` 返回 7 |
+| Swatinem/rust-cache 未覆盖 `src-tauri/target`（根无 Cargo.toml，探测失败） | 属实（action 默认 `workspaces: ". -> target"`；macOS 日志注解即探测失败）。5 处 rust-cache 全部加 `workspaces: "src-tauri -> target"`（integration build/stress/coverage + ci rust-lint/rust-test）；runner 实证见下 |
+| fake 保真度：limits 忽略 displayIds 并默认兜底；submit 不校验 displayId↔problemId/语言；工作区允许删活动文件、update 不设 activeFile/isDirty、虚构初始代码 | 全部修复：limits 只返回请求过且已知的 id；submit 校验展示题号、真实 pid、语言列表；`update_workspace_file` 与 Rust `update_file` 一致（写内容 + 设 activeFile + 置 dirty）；`delete_workspace_file` 与 Rust `delete_file` 一致（拒绝活动文件与 workspace.json）；新建工作区无预置文件（与 `Workspace::new` 一致），workspace.spec 相应改为先输入再断言 |
+| IPC 记录含 password，与头注释「不落 artifact」矛盾 | 新增 `recordCall` 统一脱敏（`password → ***`），头注释改为「内存记录 + 失败时作 artifact，password 脱敏」；规矩写入 e2e README |
+| 文档不一致：Architecture 缺 sessionGeneration.ts；spec 用例数（session/workspace 4、submission 3）；m3/README 写 14 | 全部修正：Architecture 补叶子模块条目；三份 spec 文档计数修正；m3 与 README 改 15 |
+| rust-coverage 空数据仍绿 | awk 在 `lf == 0` 时 `::error` + exit 1 |
+| e2e 的 `playwright install --with-deps` 未套用 apt 重试/超时 | 在 e2e job 注入 `/etc/apt/apt.conf.d/99e2e-retries`（Retries=3、连接超时 20s），playwright 的 apt 调用自动继承 |
+| cargo-llvm-cov 未固定版本 | 钉 `cargo-llvm-cov@0.9.1`（当前最新稳定版） |
+| integration-summary 不把 skipped 视为失败 | 汇总条件加入 `skipped` |
+| main 上 push/schedule/dispatch 共用并发组，定时运行可能被后续 push 挤掉 | **文档核实属实**（GitHub：默认只允许 1 个 pending，新 pending 取消并替换旧 pending）。integration.yml 加 `queue: max`（保留 `cancel-in-progress: false`），定时运行排队而不被挤掉 |
+| rankStore.loadRankDeduped 的 memo 写入无会话守卫；rank/announcement/problem 部分守卫缺单测 | memo 写入加代际守卫（`stopLive()` 本就清空 memo/在途，代际为纵深防御）；新增 rank memo、announcement 公告、problem limits 三条守卫用例；rank **变异验证**：去守卫后 memo 用例恰红（在途用例无法区分——`stopLive` 已清登记——故删除，不作误导性覆盖） |
+| 基线已有（记录在案，未修改）：authStore ↔ session 函数级循环；loadWorkspace 队列闭包只查 loadGeneration（清理后已排队的旧加载仍发 IPC）；cancelPendingSync 归零水位后窄窗口旧事件可能清新会话脏标记 | session.md 如实修正「无反向依赖」的表述；workspaceStore.md 新增「已知边界」两条（含设计判断说明） |
+| 分歧：concurrent 命中 7 还是 8 | **`cargo test --lib -- --list` 定论：7 个**（列出 7 条测试名；`--list` 只列测试函数，8 应含非测试 fn 或近似名）。文档中的 7 正确 |
+
+**验证**：前端 **572 单测**（569 + rank memo / announcement / limits 三条守卫）、15 E2E、build/tsc/fmt 全绿；stress 守卫函数本地实证；工作流 YAML 解析通过。**runner 实证**（分支 dispatch，见下）。

@@ -30,7 +30,7 @@
 | `setPage` | `(page) => Promise<void>` | 翻页（越界忽略）；全量模式为**纯客户端切片，不发请求**；常规模式走 `loadRankDeduped`（去抖） |
 | `setKeyword` | `(keyword) => Promise<void>` | 搜索（trim 后回到第 1 页）；全量模式下 keyword 是快照拉取的请求参数，须**重拉快照**；常规模式走 `loadRankDeduped` |
 | `setGroupFilter` | `(filter) => Promise<void>` | 分组切换，见逻辑流程；常规模式走 `loadRankDeduped` |
-| `loadRankDeduped` | `(page) => Promise<void>` | **用户操作路径**的榜单加载：同查询 in-flight 合并 + 3s memo（`RANK_QUERY_MEMO_TTL_MS`）。查询指纹 = `contestId｜uid｜page｜keyword｜removeStar`（含 uid 避免换账号误命中）。**轮询 `refresh()` 与手动刷新不走这里**（榜单实时性是公平性要求，后端 `get_rank` 同样刻意不缓存） |
+| `loadRankDeduped` | `(page) => Promise<void>` | **用户操作路径**的榜单加载：同查询 in-flight 合并 + 3s memo（`RANK_QUERY_MEMO_TTL_MS`）。查询指纹 = `contestId｜uid｜page｜keyword｜removeStar`（含 uid 避免换账号误命中）。**轮询 `refresh()` 与手动刷新不走这里**（榜单实时性是公平性要求，后端 `get_rank` 同样刻意不缓存）。**会话代际**：memo 只在同代际内写入（旧会话落定不得为新会话留下「已命中」）；`stopLive()`（登出经 clearDomainState 调用）本就清空 memo/在途登记，代际字段为纵深防御（评审六轮） |
 | `startLive` | `(isPaused?: () => boolean) => void` | 开启实时刷新；先 `stopLive()` 防重复；暂停判据 = 页面隐藏 ‖ **全量快照模式** ‖ 调用方条件；同时清空查询去抖 memo（进入页面 = 新上下文） |
 | `stopLive` | `() => void` | 停止轮询并置空句柄（离开榜单页、比赛结束、登出时调用）；**同时清空查询去抖 memo** —— memo 只在停留榜单页期间有意义，保留会让「登出 → 重新登录 → 首次翻页」跳过请求（界面停空） |
 

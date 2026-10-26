@@ -167,3 +167,6 @@ workspace=ws-old、code='old session code'。
   且只在 `new()` 初始化为 0、无其他重置点 —— 所以跨工作区切换不会回退，比较仍然成立；
   `markPersisted` 的 `workspaceId` 过滤先于水位推进，其他工作区的快照不会污染本工作区的水位。
 - 代码文件按后缀识别而非固定文件名：兼容后端工作区中已存在的任意命名。
+- **已知边界（基线遗留，评审六轮记录，未在本 PR 修改）**：
+  ① `loadQueue` 的轮次闭包只检查 `loadGeneration`：清理（登出/切 OJ）不会使**已排队**的旧加载失效，它仍会发出 `load_workspace` IPC，后端「当前工作区」可能短暂指向旧会话（结果不会写回 store，但后端 current 会被切换一次）；
+  ② `cancelPendingSync` 归零修订水位后，窄窗口内旧会话的 `workspace-saved` 事件可能清掉新会话的 `isDirty`——是否「修订号跨会话可比」属设计判断（后端 revision 进程级单调，理论上是真值水位），不宜直接改动。

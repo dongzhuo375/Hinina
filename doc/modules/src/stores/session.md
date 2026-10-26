@@ -68,8 +68,7 @@ SettingsView.onSwitchOj()（切换成功分支）
   submissionStore 的提交/轮询/历史、workspaceStore 的加载、problemStore 的题面/
   limits/我的状态、contestStore 的比赛、rankStore 的榜单/全量快照、announcementStore
   的公告与已读；失败分支同样不写错误/加载态，避免旧会话污染新会话）。
-- 认证状态由 `authStore` 自行清理，本模块只负责领域状态，避免循环依赖
-  （`authStore → session → 各领域 store`，各领域 store 不反向依赖 `authStore`）。
+- 认证状态由 `authStore` 自行清理，本模块只负责领域状态。**注意：与 `authStore` 存在函数级循环**（`authStore → clearDomainState`；`resetSessionForOjSwitch` 内读取 `authStore` 做认证态复位）——运行时安全（只在函数内调用、无模块初始化期求值），属既有基线；文档如实记录，不宣称「无反向依赖」（评审六轮）。
 - `contestStore` 同时持有登录页的匿名比赛简报（不依赖会话），因此走定向清理
   `clearSessionData()` 而非 `$reset()`，避免切换账号时右侧氛围区与倒计时被清空。
 - `rankStore` 的轮询器句柄在模块作用域（不在 state 里），`$reset()` 清不掉它，
