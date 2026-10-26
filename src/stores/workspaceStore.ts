@@ -4,6 +4,7 @@ import { workspaceService } from '@/services/workspace.service'
 import { configService } from '@/services/config.service'
 import { normalizeHojLanguage, SOURCE_FILE_EXTENSIONS, hojLanguageOfFileName, sourceFileNameOf } from '@/utils/language'
 import { createLogger } from '@/utils/logger'
+import { getSessionGeneration } from '@/stores/session'
 
 const log = createLogger('workspaceStore')
 
@@ -97,6 +98,8 @@ export const useWorkspaceStore = defineStore('workspace', {
       // 更坏 —— 会把旧题文本推到新工作区文件名下。正解是编辑器只读（CodeEditor
       // locked）+ store 拒收（updateCode / changeLanguage 守卫）双保险
       const gen = ++loadGeneration
+      // 会话代际：load_workspace 在途时若发生登出/失效清理，迟到响应不得恢复旧会话代码
+      const sessionGen = getSessionGeneration()
       this.isLoadingWorkspace = true
       try {
         await this.flushPendingSync()
@@ -120,7 +123,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 会留下「workspace 已是新题、code 还是旧题」的失配对，后续加载失败时
         // 无法自愈（PR21-8 评审二轮）
         const ws = await turn
-        if (gen !== loadGeneration || !ws) return
+        if (gen !== loadGeneration || sessionGen !== getSessionGeneration() || !ws) return
 
         // 元数据语言解析在 language 为空（新建工作区恒如此，Rust 端
         // `language: String::new()`）时走 getDefaultLanguage —— 配置缓存冷时是
@@ -129,7 +132,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         const metaLanguage = ws.language
           ? normalizeHojLanguage(ws.language)
           : await configService.getDefaultLanguage()
-        if (gen !== loadGeneration) return
+        if (gen !== loadGeneration || sessionGen !== getSessionGeneration()) return
 
         this.workspace = ws
 
@@ -177,8 +180,9 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 结果被代际检查丢弃），此刻后端 current 与 store 是否一致不可知 ——
         // 保持加载锁，杜绝解锁后的防抖推送把 store 代码写进后端实际工作区
         //（跨工作区写入）。显式重置标志（而非仅「不清除」）：防御任何路径上
-        // 的提前解锁。编辑器只读 + 视图层错误提示（含重试），下次加载成功即解锁
-        if (gen === loadGeneration) {
+        // 的提前解锁。编辑器只读 + 视图层错误提示（含重试），下次加载成功即解锁。
+        // 会话已切换时不再写状态（旧会话的失败不污染新会话）
+        if (gen === loadGeneration && sessionGen === getSessionGeneration()) {
           this.isLoadingWorkspace = true
           log.error('工作区加载失败，编辑器保持锁定直至下次加载成功:', e)
         }

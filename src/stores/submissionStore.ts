@@ -8,6 +8,7 @@ import type { Poller } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
 import { useProblemStore } from '@/stores/problemStore'
+import { getSessionGeneration } from '@/stores/session'
 
 const log = createLogger('submissionStore')
 
@@ -155,6 +156,8 @@ export const useSubmissionStore = defineStore('submission', {
       if (this.isSubmitting) throw new Error('代码正在提交，请稍候')
       this.isSubmitting = true
       this.error = null
+      // 会话代际：submit_code 在途时若发生登出/会话失效清理，迟到响应不得落库
+      const sessionGen = getSessionGeneration()
       let submissionId: string
       try {
         submissionId = await submissionService.submitCode(
@@ -164,6 +167,11 @@ export const useSubmissionStore = defineStore('submission', {
           language,
           sourceCode,
         )
+        if (sessionGen !== getSessionGeneration()) {
+          // 清理后才返回的旧提交：不得重建 submissions/pendingSubmissions，
+          // 也不得进入下方 startPolling（评审 P1）
+          return submissionId
+        }
         this.submissions.push({
           id: submissionId,
           problemId,
@@ -172,7 +180,8 @@ export const useSubmissionStore = defineStore('submission', {
         })
         this.pendingSubmissions.push({ id: submissionId, contestId, problemId, displayId, language, sourceCode })
       } catch (e) {
-        this.error = errorMessage(e, '提交失败')
+        // 会话已切换时不写错误，避免把旧会话的失败污染进新会话状态
+        if (sessionGen === getSessionGeneration()) this.error = errorMessage(e, '提交失败')
         throw e
       } finally {
         this.isSubmitting = false
@@ -209,8 +218,10 @@ export const useSubmissionStore = defineStore('submission', {
       // 重启轮询只替换定时器，保留该提交的重复发送保护。
       pollContexts.get(submissionId)?.poller.stop()
       pollContexts.delete(submissionId)
+      const sessionGen = getSessionGeneration()
       const { intervalMs, timeoutMs } = await configService.getPollSchedule()
       // 读取配置期间会话可能已被清理（登出/切换账号），此时不再注册轮询器
+      if (sessionGen !== getSessionGeneration()) return
       if (!this.submissions.some((s) => s.id === submissionId)) return
 
       const deadline = Date.now() + timeoutMs

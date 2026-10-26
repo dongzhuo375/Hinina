@@ -945,3 +945,34 @@ describe('purgeStaleCodeFiles — 单代码文件约束（P62 清理）', () => 
     expect(store.workspace?.files['main.cpp']).toBe('a')
   })
 })
+
+describe('会话代际（评审 P2：清理后才完成的工作区加载）', () => {
+  it('迟到的 load_workspace 不得恢复旧会话代码', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const store = useWorkspaceStore()
+    let resolveLoad!: (ws: Workspace) => void
+    workspaceService.loadWorkspace.mockImplementation(
+      () => new Promise<Workspace>((resolve) => { resolveLoad = resolve }),
+    )
+
+    // load_workspace 保持在途
+    const pending = store.loadWorkspace('1', 'p-old')
+
+    // 清理执行：代际递增 + $reset
+    clearDomainState()
+    expect(store.workspace).toBeNull()
+
+    // 旧请求成功返回：不得写回 workspace/code/语言/加载状态
+    await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalled())
+    resolveLoad(wsFixture({
+      id: 'ws-old',
+      activeFile: 'main.cpp',
+      files: { 'main.cpp': 'old session code' },
+    }))
+    await pending
+    expect(store.workspace).toBeNull()
+    expect(store.activeFile).toBeNull()
+    expect(store.code).toBe('')
+    expect(store.isLoadingWorkspace).toBe(false)
+  })
+})

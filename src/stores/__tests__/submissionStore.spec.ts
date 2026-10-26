@@ -22,6 +22,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useProblemStore } from '@/stores/problemStore'
+import { clearDomainState } from '@/stores/session'
 
 const CONTEST_ID = '1'
 /// 轮询节奏：2s 间隔（抖动 ≤500ms）、10s 总超时
@@ -562,5 +563,33 @@ describe('失败原因可见性（CE 编译错误 / 轮询持续失败）', () =
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('会话代际（评审 P1：清理后才完成的提交请求）', () => {
+  it('迟到的 submit_code 不得重建状态或重启轮询', async () => {
+    const store = useSubmissionStore()
+    let resolveSubmit!: (id: string) => void
+    submissionService.submitCode.mockImplementation(
+      () => new Promise<string>((resolve) => { resolveSubmit = resolve }),
+    )
+
+    // submit_code 保持在途
+    const pending = store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+    expect(store.isSubmitting).toBe(true)
+
+    // 另一 IPC 返回 Auth 错误 → 清理执行（此处直接调用清理入口模拟）
+    clearDomainState()
+    expect(store.submissions).toHaveLength(0)
+
+    // 旧请求成功返回：条目与 pending 都不得重建，轮询不得重启
+    resolveSubmit('s-old')
+    await pending
+    expect(store.submissions).toHaveLength(0)
+    expect(store.pendingSubmissions).toHaveLength(0)
+    expect(store.isSubmitting).toBe(false)
+    expect(store.error).toBeNull()
+    expect(configService.getPollSchedule).not.toHaveBeenCalled()
+    expect(submissionService.pollJudgement).not.toHaveBeenCalled()
   })
 })
