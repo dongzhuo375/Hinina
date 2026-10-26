@@ -85,10 +85,19 @@ loadWorkspace(contestId, problemId)
   → flushPendingSync() → 代际检查（过期则作废，不发 IPC）
   → loadQueue 单飞发起加载 IPC（过期 turn 跳过 IPC 返回 null）
   → 代际检查 + 原子应用（迟到结果作废，一次性写入 store；
-    language 为空时 getDefaultLanguage 属 apply 前置解析，其后复查代际）
+    language 为空时 getDefaultLanguage 属 apply 前置解析，其后复查代际；
+    两处检查同时比对 loadGeneration 与 getSessionGeneration()，
+    防止清理后迟到的 load_workspace 恢复旧会话代码，评审三轮 P2）
   → activeFile 解析（权威源 + 历史回退链）
   → void purgeStaleCodeFiles()                // 历史多文件工作区收敛（P62）
-  → 仅成功路径复位 isLoadingWorkspace（带代际守卫；失败 catch 显式重置为 true）
+  → 仅成功路径复位 isLoadingWorkspace（带代际守卫；失败 catch 显式重置为 true，
+    且仅在 loadGeneration 与会话代际均未变时才写锁状态）
+
+**会话代际回归（评审三轮 P2）**：`loadWorkspace` 的 turn 后与 apply 前置 await 后
+都比对 `getSessionGeneration()`；`clearDomainState()` 在 `load_workspace` 在途时执行，
+旧响应成功返回后 workspace/activeFile/code 保持重置态（workspace=null、code=''），
+失败 catch 也不会在会话切换后重新上锁。变异验证（暂存修复）时恢复出
+workspace=ws-old、code='old session code'。
 ```
 
 设计要点：

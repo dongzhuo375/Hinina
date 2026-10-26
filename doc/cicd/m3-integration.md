@@ -3,7 +3,7 @@
 > 记录日期：2026-10-25  
 > 版本锚定：`main` @ 56140c5（PR #54 合并后），分支 `chore/ci-m3-integration`  
 > 文档性质：CI/CD 施工过程记录（入库，见 [doc/cicd/](README.md)）；对应施工方案 §六（M3）与 m0-baseline §六命名表的 `integration.yml` 条目  
-> 状态：workflow 与 E2E 首批场景已落地；三平台构建 / stress 10 轮 / llvm-cov 基线 / E2E 的 **runner 首跑结果在合并后 workflow_dispatch 执行，回写至本文 §六**（不在此预写）
+> 状态：夜间链路已建立并经多轮验证（§六首跑/恢复/首验）；评审一/二/三轮处置分别见 §七/§八/§九；当前 E2E 13 用例
 
 ## 一、范围与相对原计划的修正
 
@@ -36,7 +36,7 @@
 - **错误形状**：拒绝载荷 `{ Variant: message }` 对象，与 bridge `parseAppError` 的单键对象路径一致（生产 sessionGuard 判定链依赖 `variant === 'Auth'`）。
 - **fixtures**：比赛时间动态计算（`startTime = now-1h`、`endTime = now+8h`、status=0），保证恒处 running 赛段（路由守卫按赛段放行，否则已登录用户也会被弹回登录页）；`pollIntervalSecs=1` 快轮询；`oj.contestRef` 必须与比赛 id 一致（登录页简报按它筛选）；工作区按题目真实 pid 内存隔离，`update_workspace_file` 返回递增修订号，`save_workspace` 发 `workspace-saved` 事件。
 - **控制面 `window.__e2e`**：`calls` 调用记录（断言去重/轮询次数）、`emitEvent` 事件推送、`failNext(cmd, variant, message)` 一次性错误注入。
-- **数据边界**：全部虚构，无真实凭证；IPC 调用日志只留内存，不落 artifact；失败产物仅 trace/截图/报告（保留 7 天）。
+- **数据边界**：全部虚构，无真实凭证；`calls` 正常仅留内存，**失败时经 `fixtures.ts` 附件写入 `test-results/**/ipc-calls.json`**（§6.3 要求的 IPC 日志，评审三轮补齐），随 trace/截图/报告保留 7 天。
 
 ## 四、首批场景与本地验证（§6.3 七条的收敛子集）
 
@@ -47,7 +47,7 @@
 | submission.spec | 场景 5 | pending 期禁用 + 五元组去重（submit_code 恒 1 次）、轮询 Pending→Running→Accepted 终态、提交历史反映会话内提交、**pending 跨页往返复用同一提交且不重复发送 IPC** |
 | session.spec | 场景 6 | Auth 错误 → sessionGuard 全链路（logout 调用 + 域状态清理 + 跳登录页）、**失效后评测轮询停止（get_judgement 停增，clearDomainState 的可观测凭证）**、失效后重新登录可再次进场 |
 
-实测（口径：Windows 11 本地 + chromium-1248 + vite dev @1420，`PLAYWRIGHT_BROWSERS_PATH=D:\DevTool\pw-browsers`）：评审修复轮 **11 passed** 连续 2 轮全绿（20.0s / 18.2s）；M3 合并前为 9 用例 3 轮全绿（16.2s / 16.4s / 16.4s）。
+实测（口径：Windows 11 本地 + chromium-1248 + vite dev @1420，`PLAYWRIGHT_BROWSERS_PATH=D:\DevTool\pw-browsers`）：评审三轮 **13 passed**（auth 新增登录后 reload 恢复、workspace 新增编辑后 reload 恢复与全等/负向断言，详见 §九）；此前评审修复轮 **11 passed** 连续 2 轮全绿（20.0s / 18.2s）；M3 合并前为 9 用例 3 轮全绿（16.2s / 16.4s / 16.4s）。
 
 ## 五、施工中的观察（如实记录，未在本 PR 处理）
 
@@ -79,7 +79,6 @@
 - 真实 OJ 联调（§6.5）：需独立测试实例与专用测试账号 secrets，仅进受保护的定时/人工环境。
 - E2E 剩余 3 场景：赛前深链与开赛自动进入（场景 2）、语言切换与代码上传（场景 3 余项）、榜单/公告/设置最小主流程（场景 7）。
 - mac/linux bundle 类型扩展（deb/app/dmg）：属 M4 发布链。
-- 会话失效文案被 checkSession 清空的调整评估（§五第 1 条）。
 - 生产 HttpClient 代理语义是否显式化（lint-gate-cleanup §五既有观察，保持）。
 
 ## 八、评审二轮处置（PR #57，全部 8 条核实属实并修复）
@@ -97,3 +96,19 @@
 | 新增 e2e/ 与 playwright.config.ts 未按 CLAUDE.md 规则补 doc/modules 文档 | 新增 `doc/modules/e2e/`（README：fake 保真度规则 6 条 + 索引；playwright.config.md；fake-tauri.md；specs/ 4 篇）+ Architecture.md 两处树形条目 |
 
 **验证**：本地 YAML 解析（两个 workflow + action.yml）/ tsc node / 561 单测 / 11 E2E 全绿；PR #57 的 ci-required 绿（composite action 在 rust-lint 与 rust-test ubuntu 经实证）后 squash 合并（7d400d8）；合并 push 首验 **run 40276943895 全 7 job 绿**——自报列表行与汇总新措辞生效、Playwright 缓存首次保存（key `playwright-Linux-<lock 哈希>`，后续运行复用）、三处 `if-no-files-found: error` 未误报。
+
+## 九、评审三轮处置（2 个高优先生产竞态 + CI/fake/E2E 缺口 + 文档一致性）
+
+| 发现 | 处置 |
+|---|---|
+| **P1 旧 submit_code 在清理后重建提交并重启轮询**（submissionStore.submitCode 成功后无条件写条目 + startPolling；startPolling 的存在性检查恰被刚重建的条目满足） | `src/stores/session.ts` 新增模块级**会话代际** `sessionGeneration` / `getSessionGeneration()`，`clearDomainState()` 先递增（OJ 切换同覆盖）；`submitCode` 在请求发起时捕获，响应写回前比对，不一致直接返回（不写条目、不启动轮询），失败分支也只在代际未变时写 error；`startPolling` 读配置前后双校验。Vitest 手动延迟响应回归：`请求在途 → 清理 → 旧响应成功` 后 submissions/pending/polls 全为 0（变异验证：暂存修复时复现 submissions=1/pending=1/polls=1） |
+| **P2 迟到 load_workspace 在清理后恢复旧会话代码**（loadGeneration 只管并发切题，clearDomainState 不使在途加载失效） | 同一代际机制接入 `workspaceStore.loadWorkspace`：turn 后与 apply 前置 `getDefaultLanguage` await 后双检查；catch 也只在两代际未变时才写锁状态。回归复现修正前 `workspace=ws-old、code="old session code"` → 修复后 workspace/activeFile/code 保持重置态 |
+| 观测平台前置步骤失败被自报为 success（skipped 被视为中性，checkout/setup-node/corepack/apt/rust-cache 失败时三步全 skipped） | 三个采样步骤**必须全部 success**——它们没有「成功路径下正常跳过」的情形；macOS/Linux 的唯一真实结果渠道因此闭合盲区（Windows 本就有 needs.build.result） |
+| fake 后端状态随 reload 重建（addInitScript 每次导航重跑，工作区/提交/currentUser 全重置，与真实 Tauri 相反，场景 4 刷新路径未覆盖） | 后端状态（workspaces/submissions/currentUser/revisionCounter/submitSeq/config）序列化到 sessionStorage，bootstrap 先恢复；`PERSIST_CMDS` 成功后写回；文档级 `calls`/`failQueue`/事件回调不持久化。新增 auth「登录后刷新恢复会话」与 workspace「编辑后刷新恢复」两用例（变异验证：无持久化时恰红） |
+| fake 与真实契约相反的成功路径（switch_oj no-op、load_configured_contest 固定比赛、漏 switch_oj.ojId 与类型校验、匿名可 submit_code） | switch_oj 校验实例并更新 `oj.active`（未注册/未启用 → ProviderNotFound）；load_configured_contest 校验 contestRef（空 → Config、不匹配 → Contest）；必填表补 `switch_oj.ojId` 并加 ARG_TYPES/OPTIONAL_ARG_TYPES 类型校验（缺参与类型错均拒绝）；submit_code 要求 currentUser（匿名 → Auth，对应 HOJ require_token） |
+| #57 的「最终快照」仍是子串；隔离只有正向包含 | workspace.spec 改为等「完整目标内容」的调用并断言最后一次**全等**；隔离用例加双向负向（B 不含 A 的编辑、A 不含 B 的初始代码） |
+| `corepack enable` 不含 npm shim，注释却声称按 packageManager 固定版本（M3 复制 M1 的错误假设） | 三处改为 `corepack enable npm`（ci.yml frontend + integration build/e2e）。本地隔离 shim 目录实测：npm/npx shim 建立且 `npm --version` 解析到 packageManager 的 11.18.0 |
+| §6.3 要求失败保留 IPC 日志，但 `calls` 只留内存 | 新增 `e2e/fixtures.ts` 共享 test 入口：失败时把 `window.__e2e.calls` 写入 `testInfo.outputPath('ipc-calls.json')` 并 attach（临时失败用例实测落盘 14 条，顺序正确），随 test-results/HTML 报告上传 |
+| 文档漂移：doc/cicd/README 仍写 9 用例；m3 状态行仍写「待回写」；失效文案遗留项重复；doc/modules 缺生产代际与 fake 新机制 | README 更正为 13；m3 状态行改为多轮验证已记录；删除重复遗留项；session.md/submissionStore.md/workspaceStore.md 补会话代际与回归；doc/modules/e2e/ 补 fixtures 索引、fake 持久化与契约、spec 新用例与全等/负向断言 |
+
+**验证**：两条生产回归均经**变异验证**（暂存生产修复后恰好对应用例失败）；reload 两用例同样经变异验证（无持久化时恰红）；`corepack enable npm` 与 IPC 附件均本地实测；`npx tsc -p tsconfig.node.json`、561+2 新增单测、13 E2E 全绿（详见 PR 描述）。

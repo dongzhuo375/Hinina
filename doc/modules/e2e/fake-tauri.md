@@ -21,8 +21,10 @@
 **命令表（26 个，按 Rust 命令签名取证）**：auth 域 4（get_session/login/logout/validate_session，共享 `currentUser`——登录后恢复、登出后 get_session 为空可被真实表达）；config 域 4；contest/announcement 域 5；problem 域 3（get_problem 按**展示题号**查询，返回的 `Problem.id` 是真实 pid）；rank 1；submission 域 3（submit 生成 9001 起的会话内提交，评测序列逐次推进并回填记录状态）；workspace 域 6（按题目真实 pid 内存隔离，`update_workspace_file` 返回递增修订号，`save_workspace` 发 `workspace-saved` 事件）。
 
 **关键内部机制**：
-- `REQUIRED_ARGS`（16 命令）+ `VEC_ARGS`：必填参数表（键名 = 前端 invoke 的 camelCase；Vec 参数校验 `Array.isArray`），`assertRequiredArgs` 在命令体**之前**执行（对齐 Tauri 反序列化时机）。
+- **后端状态持久化（评审三轮 #4）**：`PersistedBackend`（workspaces/submissions/currentUser/revisionCounter/submitSeq/config）经 `persistBackend()` 在变更命令成功后写入 `sessionStorage`，bootstrap 先 `restoreBackend()` 恢复（恢复成功则忽略 `options.user`/`failLogin` 播种）；`PERSIST_CMDS` 列出需要落库的命令。文档级 `calls`/`failQueue`/事件回调不持久化。
+- `REQUIRED_ARGS`（17 命令，含 `switch_oj.ojId`）+ `ARG_TYPES`（Vec → array，AppConfig → object）+ `OPTIONAL_ARG_TYPES`（currentPage/limit/status → number，removeStar/containsEnd → boolean，keyword/problemDisplayId → string，null 视为未提供）：`assertRequiredArgs` 在命令体**之前**执行（对齐 Tauri 反序列化时机），缺参与类型错都以 Tauri 形态裸字符串拒绝。
 - `requireLoadedProblemId()`：工作区变更类命令必须先 `load_workspace`，否则拒绝——不建幻影工作区。
+- **契约约束**：`switch_oj` 实例校验（未注册/未启用 → `{ProviderNotFound}`）并更新 `oj.active`；`load_configured_contest` 校验 `oj.contestRef`；`submit_code` 要求 `currentUser`（匿名 → `{Auth}`，对应 HOJ `require_token`）。
 - `dispatch`：`plugin:event|listen/unlisten`（回调 id 注册表）与 `plugin:window|*`（no-op）单独分派，其余走命令表；`transformCallback`/`unregisterCallback` 支撑事件订阅。
 - 错误双形态：业务错误 `throw { [variant]: message }`；参数错误 `throw \`invalid args ...\``（裸字符串）。
 
@@ -37,4 +39,4 @@
 
 ## 逻辑流程
 
-`installFakeTauri` → 页面首次导航前注入 bootstrap → 构建 fixtures（动态时间保证 running 赛段）+ 事件注册表 + 控制面 → 应用启动后所有 invoke 进 `dispatch` → 参数校验 → failQueue 命中则注入错误 → 命令表执行（工作区状态跨切题保留）→ 每次调用记入 `calls`。
+`installFakeTauri` → 页面首次导航前注入 bootstrap → 先从 sessionStorage 恢复后端状态（无则构建 fixtures，动态时间保证 running 赛段）+ 事件注册表 + 控制面 → 应用启动后所有 invoke 进 `dispatch` → 参数校验 → failQueue 命中则注入错误 → 命令表执行 → `PERSIST_CMDS` 成功后写回 sessionStorage（reload 后可恢复）→ 每次调用记入 `calls`（文档级；失败时由 `fixtures.ts` 附件落盘）。
