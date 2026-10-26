@@ -232,7 +232,9 @@ jobs:
           path: /home/runner/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright Chromium (with system dependencies)
-        run: npx playwright install --with-deps chromium
+        # 硬墙钟上限：--with-deps 内部 apt 在镜像慢速挂起时可能吃掉整个 job 预算
+        #（PR run 的 ubuntu apt 实测卡过 33 分钟）
+        run: timeout 900 npx playwright install --with-deps chromium
       # webServer 由 playwright.config 起 vite dev（strictPort 1420）
       - run: npx playwright test
       # 失败保留 trace/截图/HTML 报告；fake 数据全部虚构，产物无凭证
