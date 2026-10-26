@@ -12,14 +12,18 @@
 Hinina/
 ├── README.md                             # 项目简介（For XCPC）
 ├── LICENSE                               # MIT 开源许可证
+├── CHANGELOG.md                          # 用户可见变更记录（Keep a Changelog；版本段落是发布门禁项）
+├── RELEASE.md                            # 发布手册（版本准备/打标签/草稿验收/正式发布/回退，见 doc/cicd/m4-release.md）
+├── SECURITY.md                           # 安全策略（GitHub 私密漏洞报告渠道、响应约定）
 ├── .git/                                 # Git 版本控制目录（不入库）
 ├── .github/
 │   ├── copilot-instructions.md           # Copilot CLI 指令（架构速查、开发约定）
-│   ├── workflows/                        # CI 工作流（ci.yml：M1 PR 门禁；integration.yml：M3 夜间集成，见 doc/cicd/）
+│   ├── workflows/                        # CI 工作流（ci.yml：M1 PR 门禁 + release.yml 复用源；integration.yml：M3 夜间集成；release.yml：M4 标签触发的 Windows 草稿发布，见 doc/cicd/）
 │   ├── actions/                          # 复合 action（tauri-system-deps：Tauri 2 Ubuntu apt 依赖单一来源，ci.yml 与 integration.yml 共用）
 │   └── pr-assets/                        # PR 评审用的匿名演示截图（pr-36/：login、problemset、workspace-maximized）
 ├── scripts/
-│   └── build-plugin-scaffold.mjs          # 离线构建插件 ES module（默认脚手架；传 entry/outfile 参数构建 sdk/examples/balloon 等示例）
+│   ├── build-plugin-scaffold.mjs          # 离线构建插件 ES module（默认脚手架；传 entry/outfile 参数构建 sdk/examples/balloon 等示例）
+│   └── check-release-versions.mjs         # 发布版本一致性门禁（五处版本/标签/CHANGELOG 段落；npm run release:check 与 release.yml validate/draft-release 共用）
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
@@ -301,6 +305,9 @@ Hinina/
 ├── .gitattributes                        # 行尾治理（* text=auto eol=lf + binary 标记；历史 CRLF 文件已规范化）
 ├── .nvmrc                                # Node 版本固定（22.14.0，CI/本地一致）
 ├── rust-toolchain.toml                   # Rust 工具链固定（1.96.0 + rustfmt/clippy）
+├── CHANGELOG.md                          # 用户可见变更记录（Keep a Changelog；版本段落是发布门禁项）
+├── RELEASE.md                            # 发布手册（版本准备/打标签/草稿验收/正式发布/回退，M4）
+├── SECURITY.md                           # 安全策略（GitHub 私密漏洞报告渠道、响应约定）
 ├── playwright.config.ts                  # Playwright E2E 配置（chromium，webServer 起 vite dev @1420）
 ├── e2e/                                  # 浏览器 E2E（fake-tauri.ts 注入 __TAURI_INTERNALS__；specs/ 首批 4 场景，见 doc/cicd/m3-integration.md）
 ```
