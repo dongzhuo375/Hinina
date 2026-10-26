@@ -62,9 +62,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
-      - name: Enable corepack (pin npm via packageManager)
-        run: corepack enable
+      # packageManager 固定 npm 11.18.0；corepack enable npm 安装 npm shim，使其按该
+      # 字段解析（裸 corepack enable 默认不含 npm shim）
+      - name: Enable corepack npm shim (pin npm via packageManager)
+        run: corepack enable npm
       - name: Verify node version matches .nvmrc
         shell: bash
         run: test "$(node --version)" = "v$(cat .nvmrc)"
@@ -178,9 +179,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
-      - name: Enable corepack (pin npm via packageManager)
-        run: corepack enable
+      # packageManager 固定 npm 11.18.0；corepack enable npm 安装 npm shim，使其按该
+      # 字段解析（裸 corepack enable 默认不含 npm shim）
+      - name: Enable corepack npm shim (pin npm via packageManager)
+        run: corepack enable npm
       - name: Verify node version matches .nvmrc
         shell: bash
         run: test "$(node --version)" = "v$(cat .nvmrc)"
