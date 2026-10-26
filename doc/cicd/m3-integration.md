@@ -162,4 +162,7 @@
 | 基线已有（记录在案，未修改）：authStore ↔ session 函数级循环；loadWorkspace 队列闭包只查 loadGeneration（清理后已排队的旧加载仍发 IPC）；cancelPendingSync 归零水位后窄窗口旧事件可能清新会话脏标记 | session.md 如实修正「无反向依赖」的表述；workspaceStore.md 新增「已知边界」两条（含设计判断说明） |
 | 分歧：concurrent 命中 7 还是 8 | **`cargo test --lib -- --list` 定论：7 个**（列出 7 条测试名；`--list` 只列测试函数，8 应含非测试 fn 或近似名）。文档中的 7 正确 |
 
-**验证**：前端 **572 单测**（569 + rank memo / announcement / limits 三条守卫）、15 E2E、build/tsc/fmt 全绿；stress 守卫函数本地实证；工作流 YAML 解析通过。**runner 实证**（分支 dispatch，见下）。
+**验证**：前端 **572 单测**（569 + rank memo / announcement / limits 三条守卫）、15 E2E、build/tsc/fmt 全绿；stress 守卫函数本地实证；工作流 YAML 解析通过。
+**runner 实证（分支 dispatch 两次）**：
+- run **40315416236**（首跑，4e8e03e）：7 job + summary 全绿。rust-cache 日志确认 `workspaces: src-tauri -> target`、Cache Paths 含 `src-tauri/target`（首次为 write 模式，round 1 冷编译 3m16s）；stress 每轮 `7 passed` / `8 passed`（守卫未误报）；rust-coverage `7883/9498 = 83.00%`；e2e 绿。
+- run **40317140558**（复跑，同 SHA）：`Cache restored successfully`，stress 10 轮从 round 1（11:44:08）到 round 10（11:45:25）仅约 77 秒——**target 缓存命中实证**（此前因根目录无 Cargo.toml 从未缓存）。
