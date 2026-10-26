@@ -161,6 +161,17 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     return ws
   }
 
+  /**
+   * 工作区变更类命令的目标 pid：必须已有工作区经 load_workspace 加载。
+   * 真实后端的这些命令作用于「当前工作区」，没有工作区会被 Rust 侧拒绝——
+   * fake 若以空 id 兜底建出幻影工作区，前端在真实后端会失败的调用就假绿了
+   * （评审二轮：本文件自身的 fail-loud 纪律同样适用于这条边界）。
+   */
+  function requireLoadedProblemId(): string {
+    if (!lastWorkspaceId) throw { Workspace: 'fake: 尚无已加载的工作区（先 load_workspace）' }
+    return lastWorkspaceId.replace('ws-', '')
+  }
+
   const announcements = [
     { id: '701', title: '比赛须知', content: '请勿交流题目解法。', author: 'admin', createdAt: nowSecs - 1800, updatedAt: nowSecs - 1800 },
   ]
@@ -342,22 +353,20 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       case 'current_workspace':
         return lastWorkspaceId ? structuredClone(getWorkspace(lastWorkspaceId.replace('ws-', ''))) : null
       case 'update_workspace_file': {
-        const problemId = lastWorkspaceId?.replace('ws-', '') ?? ''
-        const ws = getWorkspace(problemId)
+        const ws = getWorkspace(requireLoadedProblemId())
         ws.files[String(args?.fileName ?? 'main.cpp')] = String(args?.content ?? '')
         ws.updatedAt = Math.floor(Date.now() / 1000)
         revisionCounter += 1
         return revisionCounter
       }
       case 'set_workspace_language': {
-        const problemId = lastWorkspaceId?.replace('ws-', '') ?? ''
-        const ws = getWorkspace(problemId)
+        const ws = getWorkspace(requireLoadedProblemId())
         ws.language = String(args?.language ?? '')
         return structuredClone(ws)
       }
       case 'delete_workspace_file': {
-        const problemId = lastWorkspaceId?.replace('ws-', '') ?? ''
-        delete getWorkspace(problemId).files[String(args?.fileName ?? '')]
+        const ws = getWorkspace(requireLoadedProblemId())
+        delete ws.files[String(args?.fileName ?? '')]
         return null
       }
       case 'submit_code': {

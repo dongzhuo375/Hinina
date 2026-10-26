@@ -42,10 +42,20 @@ test.describe('题目与工作区', () => {
     await page.locator('.monaco-editor .view-lines').click()
     await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.type('int main(void) { return 1; }')
-    await expect
-      .poll(() => callCount(page, 'update_workspace_file'), { timeout: 10_000 })
-      .toBeGreaterThanOrEqual(1)
 
+    // 不能只等 count >= 1 再读最后一次：慢打字下 2s 防抖可能先 flush 出内容不完整
+    // 的中间快照，读到它会让 toContain 偶发失败——必须等「携带预期内容」的那次调用
+    //（评审二轮竞态）
+    await expect
+      .poll(async () => {
+        const calls = await page.evaluate(() =>
+          window.__e2e.calls.filter((c) => c.cmd === 'update_workspace_file'),
+        )
+        return calls.some((c) => String(c.args.content).includes('return 1;'))
+      }, { timeout: 10_000 })
+      .toBe(true)
+
+    // 最后一次调用即最终快照（打字结束后无新输入，不会再触发防抖）
     const calls = await page.evaluate(() =>
       window.__e2e.calls.filter((c) => c.cmd === 'update_workspace_file'),
     )
