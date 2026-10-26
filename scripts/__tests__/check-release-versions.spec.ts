@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
@@ -20,7 +20,7 @@ function makeFixtureRoot(files: Record<string, string | undefined>): string {
   for (const [relativePath, content] of Object.entries(files)) {
     if (content === undefined) continue
     const target = join(root, relativePath)
-    mkdirSync(join(target, '..'), { recursive: true })
+    mkdirSync(dirname(target), { recursive: true })
     writeFileSync(target, content)
   }
   return root
@@ -41,6 +41,12 @@ function fixtureFiles(overrides: Record<string, string | undefined> = {}): Recor
       '# Changelog\n\n## [Unreleased]\n\n## [1.2.3] - 2026-10-26\n\n### Added\n- feature one\n- feature two\n',
     ...overrides,
   }
+}
+
+function captureGate(argv: string[], root: string) {
+  const out: string[] = []
+  const code = runCli(argv, root, (line: string) => out.push(line), (line: string) => out.push(line))
+  return { code, out: out.join('\n') }
 }
 
 describe('checkVersionConsistency', () => {
@@ -89,6 +95,22 @@ describe('checkVersionConsistency', () => {
     const result = checkVersionConsistency(root)
     expect(result.ok).toBe(false)
     expect(result.errors.join('\n')).toContain('Cargo.lock')
+  })
+
+  it('reports a missing file as a clean one-line error, not a stack trace', () => {
+    const root = makeFixtureRoot({})
+    const { code, out } = captureGate([], root)
+    expect(code).toBe(1)
+    expect(out).toContain('package.json is missing or unreadable')
+    expect(out).not.toMatch(/^\s+at /m)
+  })
+
+  it('reports invalid JSON as a clean one-line error', () => {
+    const root = makeFixtureRoot(fixtureFiles({ 'package.json': '{not json' }))
+    const { code, out } = captureGate([], root)
+    expect(code).toBe(1)
+    expect(out).toContain('package.json is not valid JSON')
+    expect(out).not.toMatch(/^\s+at /m)
   })
 })
 
@@ -148,21 +170,15 @@ describe('findChangelogSection / extractNotes', () => {
 })
 
 describe('runCli', () => {
-  function capture(argv: string[], root: string) {
-    const out: string[] = []
-    const code = runCli(argv, root, (line: string) => out.push(line), (line: string) => out.push(line))
-    return { code, out: out.join('\n') }
-  }
-
   it('passes the full gate on the real repository for the current version', () => {
-    const { code, out } = capture(['--tag', 'v0.1.0'], repoRoot)
+    const { code, out } = captureGate(['--tag', 'v0.1.0'], repoRoot)
     expect(code).toBe(0)
     expect(out).toContain('release version gate:')
     expect(out).toContain('matches app version')
   })
 
   it('passes the full gate including the CHANGELOG section on the real repository', () => {
-    const { code, out } = capture(['--tag', 'v0.1.0', '--changelog'], repoRoot)
+    const { code, out } = captureGate(['--tag', 'v0.1.0', '--changelog'], repoRoot)
     expect(code).toBe(0)
     expect(out).toContain('CHANGELOG.md')
   })
@@ -171,39 +187,39 @@ describe('runCli', () => {
     const root = makeFixtureRoot(
       fixtureFiles({ 'src-tauri/tauri.conf.json': JSON.stringify({ version: '9.9.9' }) }),
     )
-    const { code, out } = capture([], root)
+    const { code, out } = captureGate([], root)
     expect(code).toBe(1)
     expect(out).toContain('tauri.conf.json')
   })
 
   it('enforces tag format and CHANGELOG section when requested', () => {
     const root = makeFixtureRoot(fixtureFiles())
-    expect(capture(['--tag', 'v1.2.3', '--changelog'], root).code).toBe(0)
-    expect(capture(['--tag', 'v1.2.4', '--changelog'], root).code).toBe(1)
-    expect(capture(['--tag', 'not-a-tag'], root).code).toBe(1)
-    expect(capture(['--changelog'], makeFixtureRoot(fixtureFiles({ 'CHANGELOG.md': '# Changelog\n' }))).code).toBe(1)
+    expect(captureGate(['--tag', 'v1.2.3', '--changelog'], root).code).toBe(0)
+    expect(captureGate(['--tag', 'v1.2.4', '--changelog'], root).code).toBe(1)
+    expect(captureGate(['--tag', 'not-a-tag'], root).code).toBe(1)
+    expect(captureGate(['--changelog'], makeFixtureRoot(fixtureFiles({ 'CHANGELOG.md': '# Changelog\n' }))).code).toBe(1)
   })
 
   it('extract-notes prints only the notes body on stdout', () => {
     const root = makeFixtureRoot(fixtureFiles())
-    const { code, out } = capture(['--extract-notes'], root)
+    const { code, out } = captureGate(['--extract-notes'], root)
     expect(code).toBe(0)
     expect(out).toBe('### Added\n- feature one\n- feature two')
   })
 
   it('extract-notes fails when the section is missing', () => {
-    const { code } = capture(['--extract-notes'], makeFixtureRoot(fixtureFiles({ 'CHANGELOG.md': '# Changelog\n' })))
+    const { code } = captureGate(['--extract-notes'], makeFixtureRoot(fixtureFiles({ 'CHANGELOG.md': '# Changelog\n' })))
     expect(code).toBe(1)
   })
 
   it('print-version prints just the version', () => {
-    const { code, out } = capture(['--print-version'], makeFixtureRoot(fixtureFiles()))
+    const { code, out } = captureGate(['--print-version'], makeFixtureRoot(fixtureFiles()))
     expect(code).toBe(0)
     expect(out).toBe(APP_VERSION)
   })
 
   it('rejects unknown arguments', () => {
-    const { code, out } = capture(['--bogus'], makeFixtureRoot(fixtureFiles()))
+    const { code, out } = captureGate(['--bogus'], makeFixtureRoot(fixtureFiles()))
     expect(code).toBe(1)
     expect(out).toContain('unknown argument')
   })

@@ -6,24 +6,52 @@
 //
 // Usage:
 //   node scripts/check-release-versions.mjs [--tag vX.Y.Z] [--changelog] [--extract-notes] [--print-version]
+//
+// `--print-version` only reads package.json (no consistency check); every
+// caller must have run the full gate first — release.yml re-runs the gate in
+// the same job immediately before using it.
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 
+// All file access failures surface as clean one-line errors through runCli's
+// catch, never as raw stack traces.
+function readJsonFile(filePath, label) {
+  let text
+  try {
+    text = readFileSync(filePath, 'utf-8')
+  } catch (error) {
+    throw new Error(`${label} is missing or unreadable (${error.code ?? error.message})`)
+  }
+  try {
+    return JSON.parse(text)
+  } catch (error) {
+    throw new Error(`${label} is not valid JSON: ${error.message}`)
+  }
+}
+
+function readTextFile(filePath, label) {
+  try {
+    return readFileSync(filePath, 'utf-8')
+  } catch (error) {
+    throw new Error(`${label} is missing or unreadable (${error.code ?? error.message})`)
+  }
+}
+
 // package-lock.json carries the version twice (root and packages[""]);
 // Cargo.lock carries it inside the hinina [[package]] entry. All must agree
 // with package.json for a release.
 export function readDeclaredVersions(root) {
-  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'))
-  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf-8'))
-  const tauri = JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf-8'))
+  const pkg = readJsonFile(join(root, 'package.json'), 'package.json')
+  const lock = readJsonFile(join(root, 'package-lock.json'), 'package-lock.json')
+  const tauri = readJsonFile(join(root, 'src-tauri', 'tauri.conf.json'), 'src-tauri/tauri.conf.json')
   return {
     'package.json': pkg.version,
     'package-lock.json (root version)': lock.version,
     'package-lock.json (packages[""] version)': lock.packages?.['']?.version,
-    'src-tauri/Cargo.toml ([package] version)': readCargoTomlVersion(join(root, 'src-tauri', 'Cargo.toml')),
-    'src-tauri/Cargo.lock (hinina version)': readCargoLockVersion(join(root, 'src-tauri', 'Cargo.lock')),
+    'src-tauri/Cargo.toml ([package] version)': readCargoTomlVersion(join(root, 'src-tauri', 'Cargo.toml'), 'src-tauri/Cargo.toml'),
+    'src-tauri/Cargo.lock (hinina version)': readCargoLockVersion(join(root, 'src-tauri', 'Cargo.lock'), 'src-tauri/Cargo.lock'),
     'src-tauri/tauri.conf.json (version)': tauri.version,
   }
 }
@@ -86,9 +114,9 @@ export function extractNotes(root, version) {
   return section.found ? section.body : null
 }
 
-function readCargoTomlVersion(filePath) {
+function readCargoTomlVersion(filePath, label) {
   let inPackageSection = false
-  for (const line of readFileSync(filePath, 'utf-8').split(/\r?\n/)) {
+  for (const line of readTextFile(filePath, label).split(/\r?\n/)) {
     const heading = line.match(/^\[(.+?)\]/)
     if (heading) {
       inPackageSection = heading[1] === 'package'
@@ -101,9 +129,9 @@ function readCargoTomlVersion(filePath) {
   return undefined
 }
 
-function readCargoLockVersion(filePath) {
+function readCargoLockVersion(filePath, label) {
   let currentName = null
-  for (const line of readFileSync(filePath, 'utf-8').split(/\r?\n/)) {
+  for (const line of readTextFile(filePath, label).split(/\r?\n/)) {
     if (line.startsWith('[[')) {
       currentName = null
       continue
@@ -129,6 +157,15 @@ function escapeRegExp(text) {
 // bad usage. --extract-notes prints ONLY the notes body on stdout (diagnostics
 // go to stderr) so its output can be redirected into a release notes file.
 export function runCli(argv, root, log = console.log, errorLog = console.error) {
+  try {
+    return runGate(argv, root, log, errorLog)
+  } catch (error) {
+    errorLog(`error: ${error.message}`)
+    return 1
+  }
+}
+
+function runGate(argv, root, log, errorLog) {
   const flags = { changelog: false, extractNotes: false, printVersion: false }
   let tag = null
   for (let i = 0; i < argv.length; i += 1) {
