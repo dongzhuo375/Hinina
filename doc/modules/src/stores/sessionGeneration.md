@@ -44,4 +44,4 @@ store 内的写回路径
   finally { if (gen === getSessionGeneration()) …收尾… }
 ```
 
-边界：`contestStore.loadBrief`（登录页匿名简报）**不比对代际**——登出时简报按设计保留；其余会话域数据（比赛、题面、我的状态、提交历史、榜单、公告）全部比对。`submissionStore.history` 因 `$reset()` 整体替换嵌套对象，迟到写入落在旧引用上（本身不泄漏），其守卫是纵深防御。
+边界：`contestStore.loadBrief`（登录页匿名简报）**不比对代际**——登出时简报按设计保留；其余会话域数据（比赛、题面、我的状态、提交历史、榜单、公告）全部比对。`submissionStore.history` 因 `$reset()` 整体替换嵌套对象，迟到写入落在旧引用上（本身不泄漏），其守卫是纵深防御。`workspaceStore.markPersisted`（`workspace-saved` 事件）**也不加代际守卫**：事件不带代际，加了会误挡新会话自己的落盘事件；其跨会话安全性由后端 revision 进程级全局单调 + 仅在磁盘写入后发布 + `workspaceId`/`syncPending` 过滤保证（评审五轮核验，见 workspaceStore 文档与专项用例）。`contestStore` 的**在途去重**另需按代际判定：`loadInFlight` 登记代际，跨会话不复用旧 promise，`clearSessionData()` 一并注销。

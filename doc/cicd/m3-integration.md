@@ -135,3 +135,11 @@
 | 残留：`saveWorkspace` 在 await 后写 `isDirty = false`，旧会话保存落定可能清新会话脏标记（假「已保存」） | 属实。`saveWorkspace` 与 `flushPendingSync` 均加代际守卫（旧会话推送落定不推进修订水位、不改 `syncPending`/`isDirty`）。新增用例（旧保存落定不清新会话脏标记），**变异验证**通过 |
 
 **一处自查撤回**：曾顺带给 `markPersisted`（`workspace-saved` 事件）加「当前工作区加载代际」守卫，但事件载荷不携带代际、既有 6 条用例（手工构造状态、不经 loadWorkspace）因此全红，属超出本轮范围的推测性改动——已撤回，仅保留被点名的 flush/save 与轮询修复。事件路径的既有防线（workspaceId 过滤 + revision 幂等/水位）不变。
+
+## 十二、评审五轮补充核验（markPersisted 不变量 + 跨会话端到端覆盖）
+
+| 事项 | 核验与处置 |
+|---|---|
+| `markPersisted` 跨会话安全性的依据 | **修正前提**：`find_or_create` 会恢复同一 contest+problem 的既有工作区（**同一 id**），因此「已加载且 id 不同会被过滤」不是常见路径。真正的保证是：后端 `revision` 是 WorkspaceManager 进程级 `Arc<AtomicU64>`（从不随登出重置）、且只在磁盘确已写入该 revision 的快照且快照仍最新时才发布事件 —— 「事件 revision ≥ 已推送 revision」等价于「磁盘已含推送内容」。再叠加 `workspaceId` 过滤与 `syncPending` 推迟。**处置**：不新增代际守卫（会误挡新会话自己的事件），把不变量写进 `markPersisted` 文档注释、workspaceStore 模块文档与 sessionGeneration 边界，并新增「同 id 旧会话迟到事件」专项用例（水位归零后 rev 3 不清脏、rev 5 清脏） |
+| 跨会话守卫只有 store 单测、E2E 无端到端路径 | 已补：fake 新增 `delayNext(cmd, ms)`；session.spec 新增「提交在途时失效」端到端用例。**过程中发现并修正两个会掩盖回归的问题**：① fake 的 `submit_code` 登录校验在延迟之后执行，导致延迟期间登出后旧请求被拒、永远构造不出「迟到成功」——校验改到命令发起时（先于延迟）；② 原用例只等 2s，轮询首 tick（1s±20%）可能晚于断言——改为等 `submit_code` 真正记账后再等两个周期。修正后**变异验证**：移除 submitCode 守卫，用例恰红（`get_judgement = 2`） |
+| 当前验证口径 | 前端 **569 单测**（568 + markPersisted 跨会话核验）、**15 E2E**、build/tsc/fmt 全绿 |
