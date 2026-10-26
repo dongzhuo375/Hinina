@@ -8,6 +8,7 @@ import type { Poller } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
 import { useProblemStore } from '@/stores/problemStore'
+import { getSessionGeneration } from '@/stores/sessionGeneration'
 
 const log = createLogger('submissionStore')
 
@@ -155,6 +156,8 @@ export const useSubmissionStore = defineStore('submission', {
       if (this.isSubmitting) throw new Error('代码正在提交，请稍候')
       this.isSubmitting = true
       this.error = null
+      // 会话代际：submit_code 在途时若发生登出/会话失效清理，迟到响应不得落库
+      const sessionGen = getSessionGeneration()
       let submissionId: string
       try {
         submissionId = await submissionService.submitCode(
@@ -164,6 +167,11 @@ export const useSubmissionStore = defineStore('submission', {
           language,
           sourceCode,
         )
+        if (sessionGen !== getSessionGeneration()) {
+          // 清理后才返回的旧提交：不得重建 submissions/pendingSubmissions，
+          // 也不得进入下方 startPolling（评审 P1）
+          return submissionId
+        }
         this.submissions.push({
           id: submissionId,
           problemId,
@@ -172,10 +180,13 @@ export const useSubmissionStore = defineStore('submission', {
         })
         this.pendingSubmissions.push({ id: submissionId, contestId, problemId, displayId, language, sourceCode })
       } catch (e) {
-        this.error = errorMessage(e, '提交失败')
+        // 会话已切换时不写错误，避免把旧会话的失败污染进新会话状态
+        if (sessionGen === getSessionGeneration()) this.error = errorMessage(e, '提交失败')
         throw e
       } finally {
-        this.isSubmitting = false
+        // 会话切换后 $reset 已把锁复位；此刻新会话可能已有自己的提交在途，
+        // 旧请求的 finally 不得把新会话的锁清掉（评审四轮 #2）
+        if (sessionGen === getSessionGeneration()) this.isSubmitting = false
       }
       // 提交已成功，轮询启动与提交结果解耦（轮询参数读取失败也有兜底值）。
       // pendingSubmissions 已同步写入，初始化轮询期间仍会拦截重复发送。
@@ -185,7 +196,11 @@ export const useSubmissionStore = defineStore('submission', {
 
     /** 轮询评测结果并更新对应提交的状态 */
     async pollResult(submissionId: string) {
+      // 会话代际：旧会话在途的轮询返回时不得改动新会话的状态
+      //（评审五轮：`error = null` 会清掉新会话的错误提示）
+      const sessionGen = getSessionGeneration()
       const result = await submissionService.pollJudgement(submissionId)
+      if (sessionGen !== getSessionGeneration()) return result
       const entry = this.submissions.find((s) => s.id === submissionId)
       if (entry) {
         entry.status = result.status
@@ -209,8 +224,10 @@ export const useSubmissionStore = defineStore('submission', {
       // 重启轮询只替换定时器，保留该提交的重复发送保护。
       pollContexts.get(submissionId)?.poller.stop()
       pollContexts.delete(submissionId)
+      const sessionGen = getSessionGeneration()
       const { intervalMs, timeoutMs } = await configService.getPollSchedule()
       // 读取配置期间会话可能已被清理（登出/切换账号），此时不再注册轮询器
+      if (sessionGen !== getSessionGeneration()) return
       if (!this.submissions.some((s) => s.id === submissionId)) return
 
       const deadline = Date.now() + timeoutMs
@@ -248,6 +265,9 @@ export const useSubmissionStore = defineStore('submission', {
     async pollOnce(submissionId: string) {
       const ctx = pollContexts.get(submissionId)
       if (!ctx) return
+      // 会话代际：清理后旧轮询的收尾（invalidateMyStatus / stopPolling）不得
+      // 作用于新会话（评审五轮）
+      const sessionGen = getSessionGeneration()
       if (Date.now() >= ctx.deadline) {
         log.warn(`提交 ${submissionId} 评测轮询超时，已停止`)
         // 超时停止时**终态未知**（服务端可能稍后才出结果）：安全动作是把「我的题目
@@ -265,6 +285,7 @@ export const useSubmissionStore = defineStore('submission', {
       }
       try {
         const result = await this.pollResult(submissionId)
+        if (sessionGen !== getSessionGeneration()) return
         ctx.failures = 0
         if (isTerminalStatus(result.status)) {
           // 评测终结意味着「我的题目状态」可能已变（AC / 尝试过）：标记过期，
@@ -276,7 +297,7 @@ export const useSubmissionStore = defineStore('submission', {
         // 网络抖动等瞬时错误：等待下一次轮询。**计数上报在这里而不是 poller 的
         // onError** —— pollOnce 自己吞掉异常，poller 永远收不到 rejection，
         // 挂在 onError 上等于计数永不发生（错误提示静默失效）
-        this.notePollFailure(submissionId)
+        if (sessionGen === getSessionGeneration()) this.notePollFailure(submissionId)
       }
     },
 
@@ -305,6 +326,10 @@ export const useSubmissionStore = defineStore('submission', {
      * 失败记录 history.error 并上抛，由调用方决定提示；轮询路径自行吞错。
      */
     async fetchHistory(contestId: string, page?: number) {
+      // 会话代际（评审四轮 #1）：history 是 state 内的嵌套对象，`$reset()` 会整体
+      // 替换它，因此迟到的旧请求写的是被替换掉的旧对象引用 —— 实际不会泄漏。
+      // 守卫保留为纵深防御（若将来 history 改为模块级句柄或浅重置，这层仍成立）
+      const sessionGen = getSessionGeneration()
       const h = this.history
       h.contestId = contestId
       h.isLoading = true
@@ -317,15 +342,18 @@ export const useSubmissionStore = defineStore('submission', {
           problemDisplayId: h.problemFilter,
           status: h.statusFilter,
         })
+        if (sessionGen !== getSessionGeneration()) return
         h.records = result.records
         h.total = result.total
         h.current = result.current
         h.pages = result.pages
       } catch (e) {
+        if (sessionGen !== getSessionGeneration()) return
         h.error = errorMessage(e, '加载提交记录失败')
         throw e
       } finally {
-        h.isLoading = false
+        // 旧会话的 finally 不得改动新会话的加载态
+        if (sessionGen === getSessionGeneration()) h.isLoading = false
       }
     },
 

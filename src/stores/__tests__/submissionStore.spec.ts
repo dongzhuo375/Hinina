@@ -22,6 +22,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useProblemStore } from '@/stores/problemStore'
+import { clearDomainState } from '@/stores/session'
 
 const CONTEST_ID = '1'
 /// 轮询节奏：2s 间隔（抖动 ≤500ms）、10s 总超时
@@ -562,5 +563,86 @@ describe('失败原因可见性（CE 编译错误 / 轮询持续失败）', () =
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('会话代际（评审 P1：清理后才完成的提交请求）', () => {
+  it('迟到的 submit_code 不得重建状态或重启轮询', async () => {
+    const store = useSubmissionStore()
+    let resolveSubmit!: (id: string) => void
+    submissionService.submitCode.mockImplementation(
+      () => new Promise<string>((resolve) => { resolveSubmit = resolve }),
+    )
+
+    // submit_code 保持在途
+    const pending = store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code')
+    expect(store.isSubmitting).toBe(true)
+
+    // 另一 IPC 返回 Auth 错误 → 清理执行（此处直接调用清理入口模拟）
+    clearDomainState()
+    expect(store.submissions).toHaveLength(0)
+
+    // 旧请求成功返回：条目与 pending 都不得重建，轮询不得重启
+    resolveSubmit('s-old')
+    await pending
+    expect(store.submissions).toHaveLength(0)
+    expect(store.pendingSubmissions).toHaveLength(0)
+    expect(store.isSubmitting).toBe(false)
+    expect(store.error).toBeNull()
+    expect(configService.getPollSchedule).not.toHaveBeenCalled()
+    expect(submissionService.pollJudgement).not.toHaveBeenCalled()
+  })
+})
+
+describe('会话代际（评审四轮：其余写入方）', () => {
+  it('旧提交的 finally 不得清掉新会话的提交锁', async () => {
+    const store = useSubmissionStore()
+    const resolvers: Array<(id: string) => void> = []
+    submissionService.submitCode.mockImplementation(
+      () => new Promise<string>((resolve) => { resolvers.push(resolve) }),
+    )
+
+    // 会话 A 的提交在途
+    const first = store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code-a')
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+
+    // 登出（$reset 复位锁）→ 新会话 B 的提交在途（锁再次置位）
+    clearDomainState()
+    const second = store.submitCode(CONTEST_ID, 'p1', 'A', 'cpp', 'code-b')
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+    expect(store.isSubmitting).toBe(true)
+
+    // A 的响应返回：finally 不得把 B 在途期间的锁清掉
+    resolvers[0]('s-old')
+    await first
+    expect(store.isSubmitting).toBe(true)
+
+    // B 完成收尾
+    resolvers[1]('s-new')
+    await second
+    expect(store.isSubmitting).toBe(false)
+    store.stopAllPolling()
+  })
+})
+
+describe('会话代际（评审五轮：轮询收尾）', () => {
+  it('旧会话的轮询返回不得清掉新会话的错误提示', async () => {
+    const store = useSubmissionStore()
+    store.submissions.push({ id: 's-old', problemId: 'p1', status: 'Pending', submittedAt: new Date().toISOString() })
+    let resolvePoll!: (r: JudgementResult) => void
+    submissionService.pollJudgement.mockImplementation(
+      () => new Promise<JudgementResult>((resolve) => { resolvePoll = resolve }),
+    )
+
+    const pending = store.pollResult('s-old')
+    await vi.waitFor(() => expect(submissionService.pollJudgement).toHaveBeenCalled())
+
+    clearDomainState()
+    store.error = '新会话的提交错误'
+
+    resolvePoll(makeResult('WrongAnswer'))
+    await pending
+    expect(store.error).toBe('新会话的提交错误')
+    expect(store.submissions).toHaveLength(0)
   })
 })

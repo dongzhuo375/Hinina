@@ -235,3 +235,45 @@ describe('openProblem 过期响应保护（评审 P1，store 层）', () => {
     expect(store.isLoading).toBe(false) // 过期的 finally 不得翻转加载态
   })
 })
+
+describe('会话代际（评审四轮 #1：旧用户的题目状态）', () => {
+  it('迟到的 loadMyStatus 不得把旧会话 AC 状态写回新会话', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const store = useProblemStore()
+    let resolveStatus!: (v: Record<string, number>) => void
+    problemService.getUserProblemStatus.mockImplementation(
+      () => new Promise((resolve) => { resolveStatus = resolve }),
+    )
+
+    const pending = store.loadMyStatus(CONTEST_ID, PROBLEM_IDS)
+    await vi.waitFor(() => expect(problemService.getUserProblemStatus).toHaveBeenCalled())
+
+    clearDomainState()
+    expect(store.myStatus).toEqual({})
+
+    // 旧会话的「已 AC / 尝试过」不得显示给新用户
+    resolveStatus({ '1061': 1, '1062': 2 })
+    await pending
+    expect(store.myStatus).toEqual({})
+    expect(store.isStatusLoading).toBe(false)
+  })
+})
+
+describe('会话代际（评审六轮：limits）', () => {
+  it('迟到的 limits 不得写回新会话', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const store = useProblemStore()
+    let resolveLimits!: (v: Array<{ displayId: string; timeLimit: number; memoryLimit: number }>) => void
+    problemService.getProblemLimits.mockImplementation(
+      () => new Promise((resolve) => { resolveLimits = resolve }),
+    )
+
+    const pending = store.loadLimits(CONTEST_ID, ['A'])
+    await vi.waitFor(() => expect(problemService.getProblemLimits).toHaveBeenCalled())
+    clearDomainState()
+    resolveLimits([{ displayId: 'A', timeLimit: 1000, memoryLimit: 128 }])
+    await pending
+    expect(store.limits).toEqual({})
+    expect(store.isLimitsLoading).toBe(false)
+  })
+})

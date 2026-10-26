@@ -5,6 +5,7 @@ import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
+import { getSessionGeneration } from '@/stores/sessionGeneration'
 
 const log = createLogger('announcementStore')
 
@@ -127,6 +128,8 @@ export const useAnnouncementStore = defineStore('announcement', {
      * 失败记录 error 并上抛，由调用方决定提示；轮询路径经 `refresh` 吞错。
      */
     async load(contestId: string) {
+      // 会话代际：登出后旧会话的公告/已读状态不得写回新会话（评审四轮 #1）
+      const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
       this.contestId = contestId
@@ -139,16 +142,17 @@ export const useAnnouncementStore = defineStore('announcement', {
             return new Set<string>()
           }),
         ])
+        if (sessionGen !== getSessionGeneration()) return
         this.announcements = page.records
         this.total = page.total
         this.readIds = [...readIds]
         // 用户正在看公告页 → 刚落地的这批就是「屏幕上已有的」，标为已读
         if (this.isWatching && !isPageHidden()) void this.markAllRead()
       } catch (e) {
-        this.error = errorMessage(e, '加载公告失败')
+        if (sessionGen === getSessionGeneration()) this.error = errorMessage(e, '加载公告失败')
         throw e
       } finally {
-        this.isLoading = false
+        if (sessionGen === getSessionGeneration()) this.isLoading = false
       }
     },
 
@@ -176,6 +180,8 @@ export const useAnnouncementStore = defineStore('announcement', {
       if (!contestId) return
       // 不可见 = 没看到，不标记（见方法注释）
       if (isPageHidden()) return
+      // 会话代际：登出后旧会话的已读持久化结果不得写回新会话（评审四轮 #1）
+      const sessionGen = getSessionGeneration()
       const read = new Set(this.readIds)
       const unreadIds = this.announcements.filter((a) => !read.has(a.id)).map((a) => a.id)
       if (unreadIds.length === 0) return
@@ -184,9 +190,10 @@ export const useAnnouncementStore = defineStore('announcement', {
       this.readIds = [...previous, ...unreadIds]
       try {
         const merged = await announcementService.markRead(contestId, unreadIds)
+        if (sessionGen !== getSessionGeneration()) return
         this.readIds = [...merged]
       } catch (e) {
-        this.readIds = previous
+        if (sessionGen === getSessionGeneration()) this.readIds = previous
         log.error('已读状态持久化失败，已回滚本地标记:', e)
       }
     },

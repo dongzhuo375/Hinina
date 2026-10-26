@@ -21,10 +21,11 @@
 |------|------|------|
 | `currentProblemIds` | getter | 当前比赛所有题目的 displayId 列表 |
 | `problemCount` | getter | 比赛题目数量 |
-| `whenLoaded` | `() => Promise<void>` | **等待比赛数据就绪的统一入口（P59）**：已有数据立即返回；加载在途复用同一 in-flight Promise；无人加载则由本调用发起。失败 rejection 透传（错误已写入 `error`），调用方自行 catch |
-| `loadContest` | `() => Promise<void>` | 加载配置比赛（并发去重，见逻辑流程）；失败写入 `error` 并抛出 |
-| `loadBrief` | `() => Promise<void>` | 加载匿名简报；三态映射，**失败不抛出** |
-| `clearSessionData` | `() => void` | 只清空会话相关四项，保留匿名简报 |
+| `whenLoaded` | `() => Promise<void>` | **等待比赛数据就绪的统一入口（P59）**：已有数据立即返回；加载在途且**代际相同**时复用同一 in-flight Promise；无人加载（或登记的代际已失效）则由本调用发起。失败 rejection 透传（错误已写入 `error`），调用方自行 catch |
+| `loadContest` | `() => Promise<void>` | 加载配置比赛（并发去重，见逻辑流程）；失败写入 `error` 并抛出。**会话代际守卫**：登出后迟到的比赛数据不写回新会话；**去重只复用同代际的在途请求**（跨会话复用会拿到被丢弃的空结果 → 静默空数据，评审五轮）；`finally` 只清理自己登记的在途请求 |
+| `loadBrief` | `() => Promise<void>` | 加载匿名简报；三态映射，**失败不抛出**。**OJ 失效世代守卫**：请求发起时捕获 `briefEpoch`，回写前比对——切 OJ（`invalidateBrief`）后旧 OJ 的迟到简报直接丢弃（否则会把旧比赛写回已重置状态，LoginView 的 canEnter 按旧时间窗误进场，评审八轮）。**登出不清简报**（同 OJ 的匿名数据），因此不用会话代际守卫 |
+| `invalidateBrief` | `() => void` | **仅 OJ 切换**时由 `resetSessionForOjSwitch` 调用：递增 `briefEpoch`（作废在途旧请求）+ 清空 brief/briefBaseUrl/briefError 并置 `briefState = 'idle'`（登录页按新 OJ 重拉） |
+| `clearSessionData` | `() => void` | 只清空会话相关四项，保留匿名简报；**同时注销在途加载登记**（`loadInFlight` 是模块级变量，不注销会让新会话去重复用旧 promise） |
 
 `briefState`：`'idle' | 'connecting' | 'connected' | 'failed' | 'unconfigured'`。
 
@@ -34,6 +35,7 @@
 - `@/types/contest`（仅类型）
 - `@/services/contest.service`（`loadConfiguredContest` / `loadContestBrief`）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
+- `@/stores/sessionGeneration`（`getSessionGeneration` —— 会话代际守卫）
 
 ## 被依赖
 

@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test'
-import { installFakeTauri } from '../fake-tauri'
+import { expect, test } from '../fixtures'
+import { installFakeTauri, loginAndEnterContest } from '../fake-tauri'
 
 /**
  * §6.3 场景 1（收敛）：登录失败 / 登录成功 / 会话恢复。
@@ -52,5 +52,15 @@ test.describe('认证与会话', () => {
     await expect(
       page.evaluate(() => typeof window.__TAURI_EVENT_PLUGIN_INTERNALS__?.unregisterListener),
     ).resolves.toBe('function')
+  })
+
+  test('登录后刷新恢复会话（fake 后端状态不随 reload 重建）', async ({ page }) => {
+    await loginAndEnterContest(page)
+    // reload 重跑 addInitScript：若 fake 的后端状态只挂在文档内存里，
+    // get_session 会退回 null，守卫把用户弹回登录页——本用例正是这条回归的哨兵
+    await page.reload()
+    await page.waitForURL('**/contest/problems')
+    await expect(page.getByText('题目总览')).toBeVisible()
+    await expect(page.locator('#contest-username')).toHaveCount(0)
   })
 })

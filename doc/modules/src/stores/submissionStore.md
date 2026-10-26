@@ -17,10 +17,10 @@
 | `history` | 子对象 | `{ contestId, records, total, current, pageSize, pages, problemFilter, statusFilter, isLoading, error }` —— 评测页数据源（onlyMine 由后端强制） |
 | `pendingFor` | getter `(contestId, problemId, displayId, language, sourceCode) => SubmissionEntry \| null` | 按五元组匹配 `pendingSubmissions`；命中后**再要求对应 `submissions` 条目存在且 `!isTerminalStatus(status)`**，否则返回 null（终态/超时/清理后自动释放保护） |
 | `latestLocalFor` | getter `(problemId) => SubmissionEntry \| null` | 本题本会话最新一条提交 |
-| `submitCode` | `(contestId, problemId, displayId, language, sourceCode) => Promise<string>` | 提交 → 追加 Pending 条目 → 启动轮询；失败记录 error 并抛出。**开头先查 `pendingFor`，命中直接返回既有编号（不再发请求）**；随后 `isSubmitting` 为真则抛「代码正在提交，请稍候」（同步上锁，同帧多入口只发一个）；成功后同步写入 `pendingSubmissions`。**`problemId`（真实 pid）与 `displayId`（比赛内题号 "A"）必须都传** —— 各 OJ 认的不是同一个标识，见 `bridge/submission.bridge.md` |
-| `pollResult` | `(submissionId) => Promise<JudgementResult>` | 单次查询并回填 `status`/`time`/`memory`/`errorMessage`；**成功即清 `error`**（P69：一次瞬时失败的红字不得永久残留）。**失败不再写 `error`** —— 上报改为阈值制（`notePollFailure`），单次瞬时抖动保持静默是刻意设计 |
-| `startPolling` | `(submissionId) => Promise<void>` | 幂等启动：**只替换定时器**（`pollContexts.get(id)?.poller.stop()` + `delete`，**刻意不调用 `stopPolling`** —— 那会顺带清掉重复发送保护），读 `getPollSchedule()` 后建 `createPoller`（间隔抖动 ±20% 封顶 500ms），记入 `pollContexts`（`failures: 0`） |
-| `pollOnce` | `(submissionId) => Promise<void>` | 超 deadline → warn + `invalidateMyStatus()` + **把非终态条目收敛为 `Unknown`** + 停止；否则查询一次，成功即 `failures = 0`，`isTerminalStatus` 命中即 `invalidateMyStatus()` + 停止；`catch` 里 `notePollFailure`（**计数点必须在这里**，见设计要点） |
+| `submitCode` | `(contestId, problemId, displayId, language, sourceCode) => Promise<string>` | 提交 → 追加 Pending 条目 → 启动轮询；失败记录 error 并抛出。**开头先查 `pendingFor`，命中直接返回既有编号（不再发请求）**；随后 `isSubmitting` 为真则抛「代码正在提交，请稍候」（同步上锁，同帧多入口只发一个）；成功后同步写入 `pendingSubmissions`。**会话代际守卫**：`submit_code` 返回时若已发生 `clearDomainState()`（代际变化），直接返回编号而不写条目、不进 `startPolling`；失败分支同样只在代际未变时写 error；**`finally` 也只在代际未变时复位 `isSubmitting`** —— 否则旧请求收尾会清掉新会话在途提交的锁（评审三轮 P1 / 四轮 #2）。**`problemId`（真实 pid）与 `displayId`（比赛内题号 "A"）必须都传** —— 各 OJ 认的不是同一个标识，见 `bridge/submission.bridge.md` |
+| `pollResult` | `(submissionId) => Promise<JudgementResult>` | 单次查询并回填 `status`/`time`/`memory`/`errorMessage`；**成功即清 `error`**（P69：一次瞬时失败的红字不得永久残留）。**会话代际守卫**：清理后旧会话的在途轮询返回时直接返回结果、不写条目也不清 `error`（否则会抹掉新会话的错误提示，评审五轮）。**失败不再写 `error`** —— 上报改为阈值制（`notePollFailure`），单次瞬时抖动保持静默是刻意设计 |
+| `startPolling` | `(submissionId) => Promise<void>` | 幂等启动：**只替换定时器**（`pollContexts.get(id)?.poller.stop()` + `delete`，**刻意不调用 `stopPolling`** —— 那会顺带清掉重复发送保护），读 `getPollSchedule()` 后建 `createPoller`（间隔抖动 ±20% 封顶 500ms），记入 `pollContexts`（`failures: 0`）。读配置前后均校验会话代际与条目存在性，防止清理后重启轮询 |
+| `pollOnce` | `(submissionId) => Promise<void>` | 超 deadline → warn + `invalidateMyStatus()` + **把非终态条目收敛为 `Unknown`** + 停止；否则查询一次，成功即 `failures = 0`，`isTerminalStatus` 命中即 `invalidateMyStatus()` + 停止；`catch` 里 `notePollFailure`（**计数点必须在这里**，见设计要点）。**会话代际守卫**：轮询返回后若会话已切换，直接返回（跳过 `invalidateMyStatus`/计数，评审五轮） |
 | `notePollFailure` | `(submissionId) => void` | 连续失败计数 +1；达 `POLL_ERROR_REPORT_THRESHOLD`(3) 时写 `error = \`评测结果查询连续失败 N 次（提交 #id），仍在重试\``；成功一次即清零 |
 | `stopPolling` / `stopAllPolling` | `(submissionId?) => void` | 停单个 / 停全部（登出经 `stores/session` 调用）；**两者都会清理对应的 `pendingSubmissions`**（保护随轮询生命周期结束而释放） |
 | `fetchHistory` | `(contestId, page?) => Promise<void>` | 拉一页提交历史，透传 `problemFilter`/`statusFilter`/`pageSize`；失败写 `history.error` 并抛出 |
@@ -40,6 +40,7 @@
 - `@/utils/polling`（`createPoller` 轮询原语）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
+- `@/stores/sessionGeneration`（`getSessionGeneration` —— 会话代际守卫；叶子模块，避免 store ↔ session 编排层成环）
 
 ## 被依赖
 
@@ -118,3 +119,4 @@ pollOnce(id)
 - **轮询组**：提交后启动轮询、终态后停止（再推进 30s 不再请求）、终态触发 `problemStore.myStatusStale`、**轮询超时同样置 stale 且本地条目收敛为 `Unknown`、`pendingSubmissions` 清空**、memory/time 回填、瞬时失败静默且恢复后清 error（P69）、`stopAllPolling` 回收、重复 `startPolling` 幂等（同一提交只一个 poller）。
 - **重复提交保护组**：同一帧多次触发只发一个请求（第二次 rejects「正在提交」且 `error` 仍为 null，完成后 `isSubmitting=false`）；请求返回后相同内容在评测期间复用编号（改代码/改语言仍可提交，共 3 次请求）；**轮询初始化未完成（`getPollSchedule` 挂起）时也能识别已受理提交**；终态后释放保护（可再提交得新编号）；超时或会话清理后释放保护；提交请求失败时恢复按钮并允许重试。
 - **历史组**：`fetchHistory` 参数透传与错误、切筛选回第 1 页、`resetHistoryFilters`（清空筛选且不发请求）、翻页越界、`fetchProblemSummary`（latest + total、空提交、不污染 history）；另有 `latestLocalFor`、`submitCode` 原样透传 `displayId`。轮询用 `vi.useFakeTimers()` 推进。
+- **会话代际组（评审三轮 P1 / 四轮 #1#2）**：手动延迟 `submitCode` 响应，`请求在途 → clearDomainState() → 旧响应成功` 后 submissions/pendingSubmissions 保持为空、轮询不启动（变异验证复现 submissions=1/pending=1/polls=1）；旧请求的 `finally` 不得清掉新会话在途提交的 `isSubmitting`（变异验证：去掉守卫后该用例失败）。`fetchHistory` 的迟到写入落在 `$reset()` 替换前的旧 history 对象引用上（本身不泄漏），其代际守卫为纵深防御。

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../fixtures'
 import { callCount, loginAndEnterContest } from '../fake-tauri'
 
 /**
@@ -10,11 +10,10 @@ test.describe('题目与工作区', () => {
     await loginAndEnterContest(page)
     await page.getByRole('button', { name: '打开题目 A' }).click()
 
-    // 题面按展示题号加载
+    // 题面按展示题号加载；新建工作区与真实后端一致：无预置代码
     await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
     await expect(page.locator('.monaco-editor')).toBeVisible()
-    // 初始代码来自 load_workspace fixture（A 题）
-    await expect(page.locator('.monaco-editor .view-lines')).toContainText('int main()')
+    await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('// e2e edited')
 
     // 编辑 → 2s 防抖后经 update_workspace_file 推送到后端内存
     await page.locator('.monaco-editor .view-lines').click()
@@ -26,41 +25,89 @@ test.describe('题目与工作区', () => {
     // 切到 B：B 题工作区独立（不携带 A 的编辑内容）
     await page.getByRole('button', { name: 'B', exact: true }).click()
     await expect(page.locator('h1.statement-title')).toHaveText(/^B\./)
-    await expect(page.locator('.monaco-editor .view-lines')).toContainText('B 题工作区初始代码')
+    // 负向断言：A 的编辑不得混入 B（A/B 被错误合并时仅靠正向包含也会假绿）
+    await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('// e2e edited')
 
-    // 切回 A：内容恢复（工作区按 pid 隔离的恢复承诺）
+    // B 写入自己的内容，用于验证回切后互不串扰
+    await page.locator('.monaco-editor .view-lines').click()
+    await page.keyboard.type('// b content')
+    await expect
+      .poll(() => callCount(page, 'update_workspace_file'), { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(2)
+
+    // 切回 A：内容恢复（工作区按 pid 隔离的恢复承诺），且不含 B 的内容
     await page.getByRole('button', { name: 'A', exact: true }).click()
     await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
     await expect(page.locator('.monaco-editor .view-lines')).toContainText('// e2e edited')
+    await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('// b content')
   })
 
   test('编辑推送的文件名与内容与编辑器一致', async ({ page }) => {
     await loginAndEnterContest(page)
     await page.getByRole('button', { name: '打开题目 B' }).click()
-    await expect(page.locator('.monaco-editor .view-lines')).toContainText('B 题工作区初始代码')
+    await expect(page.locator('h1.statement-title')).toHaveText(/^B\./)
 
+    const expected = 'int main(void) { return 1; }'
     await page.locator('.monaco-editor .view-lines').click()
     await page.keyboard.press('ControlOrMeta+a')
-    await page.keyboard.type('int main(void) { return 1; }')
+    await page.keyboard.type(expected)
 
     // 不能只等 count >= 1 再读最后一次：慢打字下 2s 防抖可能先 flush 出内容不完整
-    // 的中间快照，读到它会让 toContain 偶发失败——必须等「携带预期内容」的那次调用
-    //（评审二轮竞态）
+    // 的中间快照。必须等「完整目标内容」的那次调用（全等而非子串——子串会让
+    // 「return 1; 已写、结尾 } 未到」的中间快照通过，截断/多余内容也检不出）
     await expect
       .poll(async () => {
         const calls = await page.evaluate(() =>
           window.__e2e.calls.filter((c) => c.cmd === 'update_workspace_file'),
         )
-        return calls.some((c) => String(c.args.content).includes('return 1;'))
+        return calls.some((c) => c.args.content === expected)
       }, { timeout: 10_000 })
       .toBe(true)
 
-    // 最后一次调用即最终快照（打字结束后无新输入，不会再触发防抖）
+    // 最后一次调用即最终快照（打字结束后无新输入，不会再触发防抖）：
+    // 与编辑器内容**完整相等**，而不是只包含 return 1;
     const calls = await page.evaluate(() =>
       window.__e2e.calls.filter((c) => c.cmd === 'update_workspace_file'),
     )
     const last = calls[calls.length - 1]
     expect(last.args.fileName).toBe('main.cpp')
-    expect(String(last.args.content)).toContain('return 1;')
+    expect(last.args.content).toBe(expected)
+  })
+
+  test('编辑后刷新页面：工作区代码恢复（场景 4 的刷新路径）', async ({ page }) => {
+    await loginAndEnterContest(page)
+    await page.getByRole('button', { name: '打开题目 A' }).click()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+    await expect(page.locator('.monaco-editor')).toBeVisible()
+
+    await page.locator('.monaco-editor .view-lines').click()
+    await page.keyboard.type('// e2e edited')
+    await expect
+      .poll(() => callCount(page, 'update_workspace_file'), { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(1)
+
+    // reload 后 fake 从 sessionStorage 恢复后端工作区（真实 Tauri 的 Rust 进程
+    // 不随 WebView reload 重建），加载结果必须仍是编辑后的代码
+    await page.reload()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+    await expect(page.locator('.monaco-editor .view-lines')).toContainText('// e2e edited')
+  })
+
+  test('刷新后「当前工作区」仍在（不依赖页面重新 load_workspace）', async ({ page }) => {
+    // 评审四轮 #5：真实后端的 WorkspaceManager.current 存活于 Rust 进程，reload 不丢。
+    // fake 若只持久化工作区内容而不持久化 current id，reload 后的
+    // update_workspace_file 会错误地报「尚无已加载的工作区」。
+    await loginAndEnterContest(page)
+    await page.getByRole('button', { name: '打开题目 A' }).click()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+
+    // 回到题目总览（该页面不会调用 load_workspace）后刷新
+    await page.getByRole('link', { name: '返回题目总览' }).click()
+    await page.waitForURL('**/contest/problems')
+    await page.reload()
+    await expect(page.getByText('题目总览')).toBeVisible()
+
+    const state = await page.evaluate(() => window.__e2e.backendState())
+    expect(state.lastWorkspaceId).toBe('ws-101')
   })
 })

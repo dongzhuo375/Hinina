@@ -4,6 +4,7 @@ import { workspaceService } from '@/services/workspace.service'
 import { configService } from '@/services/config.service'
 import { normalizeHojLanguage, SOURCE_FILE_EXTENSIONS, hojLanguageOfFileName, sourceFileNameOf } from '@/utils/language'
 import { createLogger } from '@/utils/logger'
+import { getSessionGeneration } from '@/stores/sessionGeneration'
 
 const log = createLogger('workspaceStore')
 
@@ -18,11 +19,15 @@ let syncTimer: ReturnType<typeof setTimeout> | null = null
 
 /// 最近一次被接受的落盘修订号（模块级副作用句柄，不进响应式系统）。
 ///
+/// 后端 `revision` 是**全局单调计数器**（工作区每次内容改动 +1），且跨登出/切换
+/// 账号/切换 OJ 都继续递增（WorkspaceManager 存活于 AppContext，只有数据目录
+/// 变更需重启才重建）。因此该水位**不随会话清理归零**：归零会让旧会话的迟到
+/// 落盘事件重新获得「高水位特权」，把新会话恢复出的脏工作区误清为「已备份」
+/// （评审七轮）。测试隔离通过 `cancelPendingSync({ resetRevisionWatermarks: true })`。
+///
 /// 后端 `revision` 是**全局单调计数器**（工作区每次内容改动 +1），因此只需记一个
 /// 标量：小于等于它的落盘事件一律视为重复或过期，幂等跳过 —— 落盘事实只能被
 /// 更新的修订号推进，不能被回退。
-///
-/// 登出/切换账号时由 `cancelPendingSync` 归零（新会话与旧会话的修订号不可比）。
 let lastPersistedRevision = 0
 
 /// 最近一次成功推送到后端内存的修订号（模块级副作用句柄，不进响应式系统）。
@@ -31,7 +36,7 @@ let lastPersistedRevision = 0
 /// 说明磁盘还没追上编辑器已推送的最新内容（后端内存里有比磁盘新的改动），
 /// 不能清除脏标记 —— 否则指示器会短暂显示「已自动备份」而磁盘落后于编辑器。
 ///
-/// 登出/切换账号时同样由 `cancelPendingSync` 归零。
+/// 与 `lastPersistedRevision` 一样跨会话保留（同一进程内修订号可比）。
 let lastPushedRevision = 0
 
 /// 加载代际计数器：并发 `loadWorkspace` 只认最新一次（模块级副作用句柄）。
@@ -97,17 +102,19 @@ export const useWorkspaceStore = defineStore('workspace', {
       // 更坏 —— 会把旧题文本推到新工作区文件名下。正解是编辑器只读（CodeEditor
       // locked）+ store 拒收（updateCode / changeLanguage 守卫）双保险
       const gen = ++loadGeneration
+      // 会话代际：load_workspace 在途时若发生登出/失效清理，迟到响应不得恢复旧会话代码
+      const sessionGen = getSessionGeneration()
       this.isLoadingWorkspace = true
       try {
         await this.flushPendingSync()
-        // flush 期间已有更新的切题发起：本次加载作废 —— IPC 由更新的加载发起，
-        // 加载锁保持（复位由最新一次加载的 finally 负责）
-        if (gen !== loadGeneration) return
+        // flush 期间已有更新的切题发起，或会话已被清理：本次加载作废 ——
+        // IPC 由更新的加载发起；清理后绝不发旧会话的 load_workspace（评审七轮）
+        if (gen !== loadGeneration || sessionGen !== getSessionGeneration()) return
 
         // 单飞：等前一次加载 IPC 落定再发起本次；轮到本 turn 时已非最新代际
-        // 则跳过 IPC（返回 null），不产生多余的后端工作区切换
+        // 或会话已切换则跳过 IPC（返回 null），不产生多余的后端工作区切换
         const turn = loadQueue.then(async (): Promise<Workspace | null> => {
-          if (gen !== loadGeneration) return null
+          if (gen !== loadGeneration || sessionGen !== getSessionGeneration()) return null
           return await workspaceService.loadWorkspace(contestId, problemId)
         })
         // 队列吞错：单次加载失败不阻塞后续切题（错误经 turn 向本调用方传播）
@@ -120,7 +127,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 会留下「workspace 已是新题、code 还是旧题」的失配对，后续加载失败时
         // 无法自愈（PR21-8 评审二轮）
         const ws = await turn
-        if (gen !== loadGeneration || !ws) return
+        if (gen !== loadGeneration || sessionGen !== getSessionGeneration() || !ws) return
 
         // 元数据语言解析在 language 为空（新建工作区恒如此，Rust 端
         // `language: String::new()`）时走 getDefaultLanguage —— 配置缓存冷时是
@@ -129,7 +136,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         const metaLanguage = ws.language
           ? normalizeHojLanguage(ws.language)
           : await configService.getDefaultLanguage()
-        if (gen !== loadGeneration) return
+        if (gen !== loadGeneration || sessionGen !== getSessionGeneration()) return
 
         this.workspace = ws
 
@@ -177,8 +184,9 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 结果被代际检查丢弃），此刻后端 current 与 store 是否一致不可知 ——
         // 保持加载锁，杜绝解锁后的防抖推送把 store 代码写进后端实际工作区
         //（跨工作区写入）。显式重置标志（而非仅「不清除」）：防御任何路径上
-        // 的提前解锁。编辑器只读 + 视图层错误提示（含重试），下次加载成功即解锁
-        if (gen === loadGeneration) {
+        // 的提前解锁。编辑器只读 + 视图层错误提示（含重试），下次加载成功即解锁。
+        // 会话已切换时不再写状态（旧会话的失败不污染新会话）
+        if (gen === loadGeneration && sessionGen === getSessionGeneration()) {
           this.isLoadingWorkspace = true
           log.error('工作区加载失败，编辑器保持锁定直至下次加载成功:', e)
         }
@@ -227,13 +235,16 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 顺序有意：**先把在途改动推进后端内存，再落盘** —— 反了会把旧内容写进磁盘。
      */
     async saveWorkspace() {
+      // 会话代际：旧会话的保存落定时不得清掉新会话的脏标记（评审五轮：
+      // 产生假的「已保存」）
+      const sessionGen = getSessionGeneration()
       const pushed = await this.flushPendingSync()
       await workspaceService.saveWorkspace()
       // 只有「推送成功 **且** 推送/落盘期间没有新改动」才能清脏：
       // - 推送失败 → 内容未进后端；
       // - 期间又落键（syncPending）→ 最新改动连后端内存都还没到，
       //   此时清脏会显示「已自动备份」而磁盘落后于编辑器（假 clean）
-      if (pushed && !this.syncPending) this.isDirty = false
+      if (pushed && !this.syncPending && sessionGen === getSessionGeneration()) this.isDirty = false
     },
 
     /** 更新编辑器内代码（标记脏状态 + 防抖推送到后端内存） */
@@ -282,8 +293,12 @@ export const useWorkspaceStore = defineStore('workspace', {
       // 回退仅用于 activeFile 尚未建立的极早时刻。
       const fileName = this.activeFile ?? sourceFileNameOf(this.language)
       const content = this.code
+      // 会话代际：旧会话的在途推送落定时不得改写水位或新会话的脏/待推标记
+      //（评审五轮）
+      const sessionGen = getSessionGeneration()
       try {
         const revision = await workspaceService.updateWorkspaceFile(fileName, content)
+        if (sessionGen !== getSessionGeneration()) return false
         if (typeof revision === 'number') lastPushedRevision = revision
         if (this.code === content) this.syncPending = false
         // 落盘事件可能在推送在途时已到达：markPersisted 因 syncPending 推迟清脏，
@@ -316,6 +331,21 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 该落盘快照早于编辑器已推送的最新内容，磁盘还没追上编辑器。
      * 事件在推送在途到达（`syncPending` 推迟清脏）的场景由 `flushPendingSync`
      * 在推送返回后按「水位 ≥ 推送」补判，避免指示器卡住。
+     *
+     * **跨会话安全性（评审五轮核验）**：事件载荷不携带会话代际，因此这里不加
+     * 代际守卫（加了会把新会话自己的落盘事件也挡掉）。安全性由三条既有不变量
+     * 共同保证，且**不依赖「工作区 id 跨会话不同」**——`find_or_create` 会恢复
+     * 同一 contest+problem 的既有工作区（同一 id）：
+     * ① 不同工作区的事件被 `workspaceId` 过滤；
+     * ② 后端 `revision` 是 WorkspaceManager 进程级 `AtomicU64`，**跨登出/切会话
+     *    单调递增且从不重置**，并且只在磁盘确已写入该 revision 的快照、且快照
+     *    仍是最新（`snapshot_revision == current_revision`）时才发布事件 —— 所以
+     *    「事件 revision ≥ 已推送 revision」等价于「磁盘已包含编辑器推送的全部内容」，
+     *    此时清脏是真值；
+     * ③ `syncPending` 为真时推迟清脏（事件到达后又落键）。
+     * 登出**不再归零**本地水位（`cancelPendingSync` 默认保留）：后端修订号进程级
+     * 单调、跨会话可比，归零会让旧会话事件重获「高水位特权」。因此旧会话迟到事件
+     * 只会按真实磁盘进度裁决（≤ 已落盘水位被幂等跳过；< 已推送水位不清脏）。
      */
     markPersisted(workspaceId?: string, revision?: number) {
       if (workspaceId && this.workspace && this.workspace.id !== workspaceId) return
@@ -332,15 +362,19 @@ export const useWorkspaceStore = defineStore('workspace', {
     },
 
     /** 取消尚未触发的防抖同步（登出/切换账号时调用，避免向已失效会话写入代码） */
-    cancelPendingSync() {
+    cancelPendingSync(options: { resetRevisionWatermarks?: boolean } = {}) {
       if (syncTimer) {
         clearTimeout(syncTimer)
         syncTimer = null
       }
       this.syncPending = false
-      // 登出/切换账号后修订号不再可比（新会话与旧会话的落盘事实无关）
-      lastPersistedRevision = 0
-      lastPushedRevision = 0
+      // 修订水位默认**保留**：后端 revision 是进程级单调计数器，跨会话可比；
+      // 归零会让旧会话的迟到落盘事件误清新会话的脏标记（评审七轮）。
+      // 仅测试隔离/未来重建后端管理器时显式归零。
+      if (options.resetRevisionWatermarks) {
+        lastPersistedRevision = 0
+        lastPushedRevision = 0
+      }
     },
 
     /**

@@ -20,6 +20,9 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+  # 默认只允许 1 个 pending：定时运行在排队时会被后续 push 挤掉
+  #（GitHub 文档：新 pending 会取消并替换同组既有 pending）。max 让它们排队。
+  queue: max
 
 env:
   CARGO_TERM_COLOR: always
@@ -62,9 +65,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
-      - name: Enable corepack (pin npm via packageManager)
-        run: corepack enable
+      # packageManager 固定 npm 11.18.0；corepack enable npm 安装 npm shim，使其按该
+      # 字段解析（裸 corepack enable 默认不含 npm shim）
+      - name: Enable corepack npm shim (pin npm via packageManager)
+        run: corepack enable npm
       - name: Verify node version matches .nvmrc
         shell: bash
         run: test "$(node --version)" = "v$(cat .nvmrc)"
@@ -72,6 +76,8 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/tauri-system-deps
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "src-tauri -> target"
       - name: Build frontend (npm ci + vue-tsc + vite build)
         id: npm_ci_build
         run: |
@@ -104,8 +110,11 @@ jobs:
         run: |
           outcome=success
           for value in "$NPM_BUILD" "$TAURI_BUILD" "$ARTIFACT_UPLOAD"; do
-            # skipped = 前序步骤已失败时的正常跳过，不代表本步通过
-            if [ "$value" != "success" ] && [ "$value" != "skipped" ]; then outcome=failure; fi
+            # 必须三步全部 success：它们没有「成功路径下的正常跳过」。
+            # 前置步骤（checkout/setup-node/corepack/apt/rust-cache）失败时三者
+            # 全为 skipped——若把 skipped 当中性，观测平台会把初始化失败报成成功
+            #（评审三轮：macOS/Linux 的唯一真实结果渠道就是这份自报）
+            if [ "$value" != "success" ]; then outcome=failure; fi
           done
           echo "- build (${{ matrix.os }}): **${outcome}**" >> "$GITHUB_STEP_SUMMARY"
 
@@ -114,20 +123,37 @@ jobs:
   stress-repeat:
     name: stress-repeat
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # 30 分钟：覆盖 apt 依赖 + 冷缓存编译 + 10 轮过滤跑。原 15 分钟在冷缓存/apt 抖动
+    # 下会被预算耗尽（评审四轮 #3 首验：apt 无响应吃掉全部 15 分钟 → job 取消）
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/tauri-system-deps
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "src-tauri -> target"
       # `concurrent` 恰好命中 7 个并发用例；`auto_save` 命中 auto-save 组 8 个
       # （与前者重叠 1 个——恰是最需要重复的 orphan-task 概率用例，接受重复跑）。
       # --lib 跳过 src-tauri/tests/ 下两个 logger 集成二进制（进程级订阅器单例设计）。
+      # 过滤串匹配不到用例时 cargo test 退出码仍为 0（阻塞 job 会假绿），因此每轮
+      # 解析 test result 的 passed 数并要求 > 0（评审六轮）。
       - name: Stress repeat (concurrent + auto_save, 10 rounds)
         run: |
+          run_filter() {
+            local filter="$1"
+            local out passed
+            out=$(cargo test --manifest-path src-tauri/Cargo.toml --locked --lib "$filter")
+            echo "$out" | tail -5
+            passed=$(echo "$out" | sed -n 's/^test result: ok\. \([0-9]\+\) passed.*/\1/p' | awk '{s+=$1} END{print s+0}')
+            if [ "${passed:-0}" -eq 0 ]; then
+              echo "::error::filter '$filter' matched no tests (expected > 0)"
+              return 1
+            fi
+          }
           for i in $(seq 1 10); do
             echo "===== round $i / 10 ====="
-            cargo test --manifest-path src-tauri/Cargo.toml --locked --lib concurrent
-            cargo test --manifest-path src-tauri/Cargo.toml --locked --lib auto_save
+            run_filter concurrent
+            run_filter auto_save
           done
 
   # Rust 覆盖率基线（M2 遗留项，用户裁定留 M3 夜间）：--lib 口径与单元测试套件一致，
@@ -140,17 +166,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/tauri-system-deps
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "src-tauri -> target"
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
-          tool: cargo-llvm-cov
+          # 报告性质但固定版本，避免上游行为漂移悄悄改变基线口径（评审六轮）
+          tool: cargo-llvm-cov@0.9.1
       - name: Add llvm-tools-preview component
         run: rustup component add llvm-tools-preview
       - name: Rust coverage baseline (lib unit tests)
         working-directory: src-tauri
-        # --output-path 仅支持单一格式，text 汇总改为从 lcov 行数统计得出
+        # --output-path 仅支持单一格式，text 汇总改为从 lcov 行数统计得出。
+        # 空数据（0 行）必须判红：否则 awk 打印 0.00% 而 job 仍绿（评审六轮）
         run: |
           cargo llvm-cov --locked --lib --lcov --output-path lcov.info
-          awk -F: '/^LF:/{lf+=$2} /^LH:/{lh+=$2} END{printf "rust-coverage baseline (lib): %d/%d lines = %.2f%%\n", lh, lf, (lf>0 ? lh*100/lf : 0)}' lcov.info
+          awk -F: '/^LF:/{lf+=$2} /^LH:/{lh+=$2} END{
+            if (lf == 0) { print "::error::lcov has no line data"; exit 1 }
+            printf "rust-coverage baseline (lib): %d/%d lines = %.2f%%\n", lh, lf, lh*100/lf
+          }' lcov.info
       - name: Upload lcov report
         if: success()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -175,13 +208,21 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
-      - name: Enable corepack (pin npm via packageManager)
-        run: corepack enable
+      # packageManager 固定 npm 11.18.0；corepack enable npm 安装 npm shim，使其按该
+      # 字段解析（裸 corepack enable 默认不含 npm shim）
+      - name: Enable corepack npm shim (pin npm via packageManager)
+        run: corepack enable npm
       - name: Verify node version matches .nvmrc
         shell: bash
         run: test "$(node --version)" = "v$(cat .nvmrc)"
       - run: npm ci
+      # playwright install --with-deps 自带 apt-get update，同样需要重试与超时：
+      # 通过 apt 配置注入（不重复安装复合 action 的依赖清单）
+      - name: Bound apt retries for Playwright system dependencies
+        run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99e2e-retries
+          echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99e2e-retries
+          echo 'Acquire::https::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99e2e-retries
       # 浏览器缓存：PLAYWRIGHT_BROWSERS_PATH 只声明路径不产生缓存，必须有 cache 步骤
       # 才能避免每次夜间跑重新下载 Chromium（评审二轮）。Chromium 版本跟随
       # @playwright/test，以 package-lock 哈希为 key。
@@ -191,7 +232,9 @@ jobs:
           path: /home/runner/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright Chromium (with system dependencies)
-        run: npx playwright install --with-deps chromium
+        # 硬墙钟上限：--with-deps 内部 apt 在镜像慢速挂起时可能吃掉整个 job 预算
+        #（PR run 的 ubuntu apt 实测卡过 33 分钟）
+        run: timeout 900 npx playwright install --with-deps chromium
       # webServer 由 playwright.config 起 vite dev（strictPort 1420）
       - run: npx playwright test
       # 失败保留 trace/截图/HTML 报告；fake 数据全部虚构，产物无凭证
@@ -229,7 +272,8 @@ jobs:
           echo "macOS/Linux 观测平台的真实构建结果由各 build leg 以 \`build (<os>): <outcome>\` 列表行写入本运行摘要页（各 job 完成即追加，不计入阻塞判定）。" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ needs.build.result }}" != "success" ] || \
              [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || \
-             [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+             [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ] || \
+             [ "${{ contains(needs.*.result, 'skipped') }}" = "true" ]; then
             echo "::error::integration failed (see run summary for details)"
             exit 1
           fi

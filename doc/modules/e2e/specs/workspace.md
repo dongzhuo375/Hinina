@@ -8,10 +8,12 @@
 
 ## 核心类型/函数
 
-两个用例：
+四个用例：
 
-1. **加载 → 编辑 → 切题 → 回切内容恢复**：打开 A 题（断言 `h1.statement-title` 与初始代码来自 load_workspace fixture）→ `.view-lines` 点击后键盘输入 `// e2e edited` → `expect.poll` 等 `update_workspace_file` 调用出现（防抖 2s，`workspaceStore.SYNC_DEBOUNCE_MS`）→ Tab 条切 B（断言 B 初始代码，不携带 A 的编辑）→ 切回 A（断言编辑内容恢复）。
-2. **编辑推送的文件名与内容一致**：B 题全选重写 `int main(void) { return 1; }` → **等「携带预期内容」的那次调用**（不能只等 count>=1 再读最后一次：慢打字下防抖可能先 flush 出内容不完整的中间快照，`toContain` 偶发失败）→ 断言最后一次调用的 `fileName === 'main.cpp'` 且内容含 `return 1;`（打字结束后无新输入，最后一次即最终快照）。
+1. **加载 → 编辑 → 切题 → 回切内容恢复**：打开 A 题（断言 `h1.statement-title`；新建工作区**无预置代码**，与真实后端一致）→ `.view-lines` 点击后键盘输入 `// e2e edited` → `expect.poll` 等 `update_workspace_file` 调用出现（防抖 2s，`workspaceStore.SYNC_DEBOUNCE_MS`）→ Tab 条切 B（**负向：不含 A 的编辑**）→ B 写入自己的内容并等推送 → 切回 A（断言编辑内容恢复 + **负向：不含 B 的内容**）。隔离必须双向负向，A/B 被错误合并时仅靠正向包含也会假绿（评审三轮 #6）。
+2. **编辑推送的文件名与内容一致**：B 题全选重写 `int main(void) { return 1; }` → **等「完整目标内容」的那次调用（`args.content === expected` 全等）**——子串会让「return 1; 已写、结尾 } 未到」的中间快照通过，截断/多余内容也检不出 → 断言最后一次调用 `fileName === 'main.cpp'` 且 `content` **完整相等**（打字结束后无新输入，最后一次即最终快照）。
+3. **编辑后刷新页面：工作区代码恢复**（场景 4 的刷新路径，评审三轮 #4）：编辑并等防抖推送后 `page.reload()` → fake 从 sessionStorage 恢复后端工作区 → 题面与编辑器仍显示编辑后代码（变异验证：无持久化时恰红）。
+4. **刷新后「当前工作区」仍在**（评审四轮 #5）：打开 A 题后回到题目总览（该页不调用 `load_workspace`）再 reload → `window.__e2e.backendState().lastWorkspaceId === 'ws-101'`。真实后端的 `WorkspaceManager.current` 存活于 Rust 进程，不随 WebView reload 丢失；fake 若不持久化当前工作区 id，reload 后的 `update_workspace_file` 会错误地报「无工作区」。
 
 **断言锚点**：`.monaco-editor .view-lines`（Monaco 可见面文本，短代码全量可见）；Tab 条按钮以 displayId 为可访问名（`getByRole('button', { name: 'B', exact: true })`）。
 
@@ -26,4 +28,4 @@
 
 ## 逻辑流程
 
-进场 → 打开题目（load_workspace + get_problem 编排）→ 键盘输入驱动 `workspaceStore.updateCode` → 防抖 flush 为 `update_workspace_file` IPC → 路由切换触发切题前落盘 → 回切时按 pid 从 fake 内存恢复。
+进场 → 打开题目（load_workspace + get_problem 编排）→ 键盘输入驱动 `workspaceStore.updateCode` → 防抖 flush 为 `update_workspace_file` IPC → 路由切换触发切题前落盘 → 回切时按 pid 从 fake 内存恢复；reload 场景由 sessionStorage 持久化承接后端状态。

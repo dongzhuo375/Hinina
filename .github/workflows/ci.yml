@@ -30,13 +30,17 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      # packageManager 固定 npm 11.18.0，corepack 使 runner 与本地同版本
-      - name: Enable corepack (pin npm via packageManager)
-        run: corepack enable
+      # packageManager 固定 npm 11.18.0；corepack enable npm 安装 npm shim，使其按该
+      # 字段解析（裸 corepack enable 默认不含 npm shim，实测见 m3-integration §九）
+      - name: Enable corepack npm shim (pin npm via packageManager)
+        run: corepack enable npm
       - name: Verify node version matches .nvmrc
         run: test "$(node --version)" = "v$(cat .nvmrc)"
       - run: npm ci
-      - run: npx tsc -p tsconfig.node.json --noEmit
+      # tsconfig.node.json 的 include 含 vite.config.ts / playwright.config.ts / e2e/**/*.ts：
+      # 这一步同时门禁 E2E 与配置文件的类型（评审四轮的「e2e 无门禁」在此已覆盖）
+      - name: Type-check config and e2e sources
+        run: npx tsc -p tsconfig.node.json --noEmit
       - run: npm run plugin:sdk:check
       # vitest run --coverage：同一套测试 + V8 覆盖率报告（基线只报告不卡线，M2 起）
       - run: npm run test:coverage
@@ -57,6 +61,9 @@ jobs:
       # Tauri 2 系统依赖 + QuickJS C 编译前提（单一事实来源：.github/actions/tauri-system-deps）
       - uses: ./.github/actions/tauri-system-deps
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # 仓库根无 Cargo.toml：不指定则探测失败、src-tauri/target 永不缓存（评审六轮）
+          workspaces: "src-tauri -> target"
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       # --locked 同时充当锁文件校验：Cargo.lock 与 Cargo.toml 不同步时直接失败
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
@@ -76,6 +83,8 @@ jobs:
       - uses: ./.github/actions/tauri-system-deps
         if: runner.os == 'Linux'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "src-tauri -> target"
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --all-targets
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --doc
 

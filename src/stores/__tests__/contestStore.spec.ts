@@ -229,3 +229,78 @@ describe('whenLoaded — 等待比赛数据就绪（P59 统一入口）', () => 
     expect(store.error).toBe('网络异常')
   })
 })
+
+describe('会话代际（评审五轮：跨会话去重回归）', () => {
+  it('旧会话在途的加载不得被新会话复用（否则静默空数据）', async () => {
+    const { clearDomainState } = await import('@/stores/session')
+    const resolvers: Array<(v: { contest: Contest; problems: typeof problems }) => void> = []
+    contestService.loadConfiguredContest.mockImplementation(
+      () => new Promise((resolve) => { resolvers.push(resolve) }),
+    )
+    const store = useContestStore()
+
+    // 旧会话加载在途
+    const first = store.loadContest()
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+
+    // 登出/切换 OJ：清理（代际递增 + clearSessionData 注销在途登记）
+    clearDomainState()
+    expect(store.contest).toBeNull()
+
+    // 新会话发起加载：必须发新请求，而不是复用旧 promise
+    const second = store.loadContest()
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+
+    // 旧请求先返回：被代际守卫丢弃
+    resolvers[0]({ contest, problems })
+    await first
+    expect(store.contest).toBeNull()
+
+    // 新请求返回：必须写入新会话
+    const fresh = { ...contest, id: '2', title: '新会话比赛' }
+    resolvers[1]({ contest: fresh, problems })
+    await second
+    expect(store.contest?.id).toBe('2')
+  })
+})
+
+describe('loadBrief — OJ 切换的过期守卫（评审八轮）', () => {
+  it('切 OJ 后旧 OJ 的简报请求回写必须丢弃（否则 canEnter 按旧时间窗误进场）', async () => {
+    let resolveBrief!: (v: unknown) => void
+    contestService.loadContestBrief.mockImplementation(
+      () => new Promise((resolve) => { resolveBrief = resolve }),
+    )
+    const store = useContestStore()
+
+    const pending = store.loadBrief()
+    await vi.waitFor(() => expect(contestService.loadContestBrief).toHaveBeenCalled())
+
+    // 切 OJ：resetSessionForOjSwitch 调用 invalidateBrief（递增世代 + 清空）
+    store.invalidateBrief()
+    expect(store.briefState).toBe('idle')
+
+    resolveBrief({ status: 'ok', contest, baseUrl: 'https://old-oj.invalid' })
+    await pending
+    expect(store.brief).toBeNull()
+    expect(store.briefState).toBe('idle')
+    expect(store.briefBaseUrl).toBe('')
+  })
+
+  it('登出不清简报：同 OJ 的在途 brief 仍可落地（保留语义）', async () => {
+    let resolveBrief!: (v: unknown) => void
+    contestService.loadContestBrief.mockImplementation(
+      () => new Promise((resolve) => { resolveBrief = resolve }),
+    )
+    const store = useContestStore()
+
+    const pending = store.loadBrief()
+    await vi.waitFor(() => expect(contestService.loadContestBrief).toHaveBeenCalled())
+
+    // 登出：clearSessionData 保留简报（不递增简报世代）
+    store.clearSessionData()
+    resolveBrief({ status: 'ok', contest, baseUrl: 'https://e2e.invalid' })
+    await pending
+    expect(store.brief?.id).toBe(contest.id)
+    expect(store.briefState).toBe('connected')
+  })
+})
