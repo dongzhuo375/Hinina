@@ -3,59 +3,140 @@
 # （build / stress-repeat / rust-coverage）共 5 份拷贝，存在漂移风险（评审二轮）。
 # 调用方自行守卫 `if: runner.os == 'Linux'`（composite action 内拿不到稳定的
 # 平台语境；纯 ubuntu job 可不守卫）。
+#
+# 抗抖动策略（按代价从低到高）：
+# ① 已装快路径：runner 镜像自带全部依赖时直接跳过；
+# ② **deb 缓存**：跨运行复用 /var/cache/apt/archives，命中时 apt 直接从本地 .deb
+#    安装、不再下载（这是「每次都要等几分钟」的根因）。key 取候选版本哈希——
+#    actions/cache 的条目不可覆盖，写死 key 会让缓存永远停在上游更新前的内容；
+# ③ 镜像回退：第 2 次尝试把 azure.archive.ubuntu.com 换成 archive.ubuntu.com；
+# ④ 硬墙钟：每次尝试都有上限，含 key 解析的 update 墙钟最坏约 21.3 分钟，
+#    低于调用方 job 的 timeout。key 解析失败（unresolved）时跳过缓存恢复与保存，
+#    退化为纯在线安装。
 name: 'Install Tauri 2 system dependencies'
-description: 'apt 安装 Tauri 2 / QuickJS 构建所需系统依赖（WebKitGTK、libxdo、libssl 等）'
+description: 'apt 安装 Tauri 2 / QuickJS 构建所需系统依赖（WebKitGTK、libxdo、libssl 等），带 deb 缓存与镜像回退'
 runs:
   using: 'composite'
   steps:
-    - name: Install Tauri 2 system dependencies
+    - name: Probe missing packages
+      id: probe
       shell: bash
-      # 三层防护：
-      # ① apt.conf.d drop-in（Retries/连接超时）—— update 与 install 都继承；
-      # ② 已装快路径——runner 镜像若已带全部依赖则跳过网络（镜像挂起时最有效）；
-      # ③ 每命令硬墙钟 + 一次整体重试。update 实测仅需数秒（12.6MB/1s），墙钟收到
-      #    120s；install 首次 900s、重试 600s。**重试之间不清 apt 缓存**
-      #    （`apt-get clean` 会删掉已下载的 .deb，让重试从零开始——实测 runner 对
-      #    单个 25MB 大包可慢到 8 分钟，清缓存等于必然失败）。另外用
-      #    `--no-install-recommends` 缩小下载量。最坏耗时约 29 分钟（< 45 分钟上限）。
       run: |
-        echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
-        echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
-        echo 'Acquire::https::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
-
         packages="libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev"
-
         missing=""
         for pkg in $packages; do
           if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
             missing="$missing $pkg"
           fi
         done
+        missing="$(echo "$missing" | xargs)"
         if [ -z "$missing" ]; then
           echo "All Tauri 2 system dependencies already installed; skipping apt."
-          exit 0
+          echo "missing=" >> "$GITHUB_OUTPUT"
+        else
+          echo "Missing packages: $missing"
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
         fi
-        echo "Missing packages:$missing"
+
+    # actions/cache 以 runner 用户身份写入，必须先拿到目录属主，否则恢复阶段会因
+    # /var/cache/apt/archives 属 root 而失败。
+    - name: Prepare apt archive cache directory
+      if: steps.probe.outputs.missing != ''
+      shell: bash
+      run: |
+        sudo mkdir -p /var/cache/apt/archives/partial
+        sudo chown -R "$USER":"$USER" /var/cache/apt/archives
+
+    # actions/cache 的条目不可覆盖：同一 key 命中后不会再保存。若 key 写死，上游一更新
+    # 包版本，缓存就永久停留在旧内容——每次都要重下变化的包，且再也无法刷新。
+    # 因此 key 取「当前候选版本」的哈希：上游更新 → key 变化 → 存新缓存；
+    # 配合 restore-keys 前缀，版本变化时仍能复用到旧缓存里的其余 .deb。
+    - name: Resolve package versions for the cache key
+      id: pkgs
+      if: steps.probe.outputs.missing != ''
+      shell: bash
+      env:
+        MISSING: ${{ steps.probe.outputs.missing }}
+      run: |
+        key="unresolved"
+        # update 失败不应阻塞：退回未知 key，安装步骤会自行重试 update。
+        if sudo timeout 90 apt-get update; then
+          versions=""
+          for pkg in $MISSING; do
+            v="$(apt-cache policy "$pkg" | awk '/Candidate:/{print $2; exit}')"
+            versions="$versions$pkg=$v;"
+          done
+          key="$(printf '%s' "$versions" | sha256sum | cut -c1-16)"
+          echo "resolved key from candidate versions: $key"
+        else
+          echo "::warning::apt-get update failed while resolving cache key; using the fallback key"
+        fi
+        echo "key=$key" >> "$GITHUB_OUTPUT"
+
+    - name: Restore apt package cache
+      # key 为 unresolved（key 解析时 update 失败）时跳过恢复与保存：否则会沉淀一个
+      # 永不刷新的 `…-unresolved` 缓存条目（actions/cache 条目不可覆盖）。跳过后退化为
+      # 纯在线安装——本来就是降级路径。
+      if: steps.probe.outputs.missing != '' && steps.pkgs.outputs.key != 'unresolved'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # 缓存不可用不应阻塞构建：缺失时退回在线安装。
+      continue-on-error: true
+      with:
+        path: /var/cache/apt/archives
+        key: tauri-apt-archives-${{ runner.os }}-${{ steps.pkgs.outputs.key }}
+        restore-keys: |
+          tauri-apt-archives-${{ runner.os }}-
+
+    - name: Install missing packages
+      if: steps.probe.outputs.missing != ''
+      shell: bash
+      env:
+        MISSING: ${{ steps.probe.outputs.missing }}
+      run: |
+        echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
+        echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
+        echo 'Acquire::https::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-hinina-apt >/dev/null
+
+        # 第 2 次尝试切到主镜像：runner 默认的 azure 镜像在部分机器上会挂到超时。
+        switch_mirror() {
+          for f in /etc/apt/apt-mirrors.txt /etc/apt/sources.list; do
+            [ -f "$f" ] && sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' "$f"
+          done
+          for f in /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+            [ -f "$f" ] && sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' "$f"
+          done
+        }
 
         for attempt in 1 2; do
-          # 退避 + 锁释放窗口：timeout 杀掉 apt 后 dpkg/apt 锁可能短暂残留（评审建议 2/3）
-          if [ "$attempt" -gt 1 ]; then
-            sleep 20
-          fi
           if [ "$attempt" -eq 1 ]; then
-            install_timeout=900
-          else
+            update_timeout=90
             install_timeout=600
+          else
+            # 退避 + 锁释放窗口：timeout 杀掉 apt 后 dpkg/apt 锁可能短暂残留
+            sleep 15
+            echo "::warning::retrying with the main Ubuntu mirror (archive.ubuntu.com)"
+            switch_mirror
+            update_timeout=60
+            install_timeout=420
           fi
-          echo "::group::apt install attempt $attempt / 2 (install ${install_timeout}s, cache preserved)"
-          # 只装缺的包；update 墙钟 120s（实测数秒）
-          if sudo timeout 120 apt-get update && \
-             sudo timeout "$install_timeout" apt-get install -y --no-install-recommends $missing; then
+          echo "::group::apt install attempt $attempt / 2 (update ${update_timeout}s, install ${install_timeout}s, deb cache kept)"
+          # 只装缺的包；命中 deb 缓存时不会重新下载
+          if sudo timeout "$update_timeout" apt-get update && \
+             sudo timeout "$install_timeout" apt-get install -y --no-install-recommends $MISSING; then
             echo "::endgroup::"
             exit 0
           fi
           echo "::endgroup::"
-          echo "::warning::apt attempt $attempt failed; retrying with the existing package cache (no apt-get clean)"
+          echo "::warning::apt attempt $attempt failed; keeping downloaded .debs for the next attempt"
         done
         echo "::error::apt install failed after 2 attempts"
         exit 1
+
+    # apt 以 root 运行，会把 /var/cache/apt/archives 及其 partial 子目录改成 root 属主；
+    # actions/cache 的 post-save 以 runner 身份打包，会因 partial 不可读而整包失败
+    # （实测错误：tar: …/archives/partial: Cannot open: Permission denied）。
+    # 这里在保存前把权限放开——post step 在所有常规 step 之后运行。
+    - name: Make apt package cache readable for the cache save
+      if: always() && steps.probe.outputs.missing != ''
+      shell: bash
+      run: sudo chmod -R a+rX /var/cache/apt/archives || true
