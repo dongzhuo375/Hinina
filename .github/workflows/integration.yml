@@ -227,6 +227,46 @@ jobs:
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99e2e-retries
           echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99e2e-retries
           echo 'Acquire::https::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99e2e-retries
+      # deb 缓存（与复合 action 的缓存同策略同前缀，两者可互相补货）：实测同一段
+      # 25.9 MB 的 apt 下载，镜像快时 1s、慢时 5min9s（run 40483752731）。
+      # key 取 playwright 依赖候选版本的哈希——actions/cache 条目不可覆盖，写死 key
+      # 会在上游更新后永久停留在旧包；restore-keys 前缀保证版本变化时仍复用其余 .deb。
+      - name: Prepare apt archive cache directory
+        run: |
+          sudo mkdir -p /var/cache/apt/archives/partial
+          sudo chown -R "$USER":"$USER" /var/cache/apt/archives
+      - name: Resolve apt package versions for the cache key
+        id: aptkey
+        run: |
+          key="unresolved"
+          if sudo timeout 90 apt-get update; then
+            # playwright --with-deps 的实际清单在其 coreBundle 内的 chromium deps 数组
+            # （ubuntu runner 上 --dry-run 输出同源）。node -e 解析出包名后逐个取
+            # apt-cache policy 的候选版本，拼成哈希作 key。
+            deps="$(node -e "
+              const s = require('fs').readFileSync('./node_modules/playwright-core/lib/coreBundle.js','utf8');
+              const m = s.match(/chromium: \[\s*(\"lib[^\]]+|\"x[^\]]+|\"fonts[^\]]+|\"xdg[^\]]+)/);
+              process.stdout.write(JSON.parse('[' + m[1].replace(/,\s*\$/,'') + ']').join(' '));
+            ")"
+            versions=""
+            for pkg in $deps; do
+              v="$(apt-cache policy "$pkg" | awk '/Candidate:/{print $2; exit}')"
+              versions="$versions$pkg=$v;"
+            done
+            key="$(printf '%s' "$versions" | sha256sum | cut -c1-16)"
+            echo "resolved key from ${#deps} chars of the chromium deps list: $key"
+          else
+            echo "::warning::apt-get update failed while resolving cache key; using the fallback key"
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      - name: Restore apt package cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: /var/cache/apt/archives
+          key: tauri-apt-archives-${{ runner.os }}-${{ steps.aptkey.outputs.key }}
+          restore-keys: |
+            tauri-apt-archives-${{ runner.os }}-
       # 浏览器缓存：PLAYWRIGHT_BROWSERS_PATH 只声明路径不产生缓存，必须有 cache 步骤
       # 才能避免每次夜间跑重新下载 Chromium（评审二轮）。Chromium 版本跟随
       # @playwright/test，以 package-lock 哈希为 key。
@@ -239,6 +279,11 @@ jobs:
         # 硬墙钟上限：--with-deps 内部 apt 在镜像慢速挂起时可能吃掉整个 job 预算
         #（PR run 的 ubuntu apt 实测卡过 33 分钟）
         run: timeout 900 npx playwright install --with-deps chromium
+      # apt 以 root 运行会把 archives/partial 变成 root 属主；actions/cache 的
+      # post-save 以 runner 身份打包，不改权限会报 tar: Permission denied 且静默失败
+      - name: Make apt package cache readable for the cache save
+        if: always()
+        run: sudo chmod -R a+rX /var/cache/apt/archives || true
       # webServer 由 playwright.config 起 vite dev（strictPort 1420）
       - run: npx playwright test
       # 失败保留 trace/截图/HTML 报告；fake 数据全部虚构，产物无凭证
