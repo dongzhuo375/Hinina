@@ -44,23 +44,31 @@
 
 **首轮（tag v0.1.0 @ 2f737c4，run 40474819558，合并当天）**：
 
-- `validate`：通过（tag 格式、指向 main、五处版本一致、CHANGELOG 0.1.0 段落日期 2026-10-27 均过门禁）。
+- `validate`：通过（tag 格式、指向 main、五个文件六处版本值一致、CHANGELOG 0.1.0 段落日期 2026-10-27 均过门禁）。
 - `test`（嵌套 ci.yml）：frontend / rust-lint / rust-test ×2 / ci-required 全绿，**且外层发布运行全程未被取消**——ci.yml 组名加 `github.event_name` 的修复在真实 tag 运行上得到实证（此前 §十 的互消推演成立）。
 - `build-windows`：失败于 `Build desktop app` 步骤——runner 默认 shell 为 pwsh，把 `npm run tauri -- build -- --locked` 的两个 `--` 都吞掉，展开成 `tauri build --locked`，被 tauri 拒收。**失败是显式的**（不会静默用未锁定依赖出包），但命令链在 pwsh 下不可用，见 §十二。
 - `verify-artifact` / `draft-release`：按 needs 语义跳过，未产生任何 Release。
 
+**正式发布（tag `v0.1.1` @ `27ea3d4`，run 40483797433）**：
+
+- `validate`：通过（tag 格式、指向 main、五个文件六处版本值 0.1.1、CHANGELOG `## [0.1.1] - 2026-10-27` 均过门禁）。
+- `test`（嵌套 ci.yml）：五项全绿，外层发布运行未被取消。
+- `build-windows`：通过。日志逐行实证 `##[group]Run npm run tauri -- build -- --locked` → `> tauri build -- --locked`（内层 `--` 在 bash 下存活），产出 `Hinina_0.1.1_x64-setup.exe`（20,302,515 字节）。
+- `verify-artifact`：通过（恰一个安装包、文件名精确匹配、`file` 识别为 Windows PE、生成 SHA256SUMS.txt）。
+- `draft-release`：在 `release` environment 人工批准后通过，创建草稿 Release「Hinina v0.1.1」（`isDraft: true`），附件三件：安装包 20,302,515 字节、SHA256SUMS.txt 93 字节、build-metadata.json 339 字节；发布说明由 CHANGELOG 的 0.1.1 段落生成（含「v0.1.0 是试跑记录」的声明）。
+
 **待回填**：
 
-- `v0.1.1` 正式发布运行与草稿 Release 链接：<待回填>
-- 草稿验收（按 `RELEASE.md` §五清单）：<待回填>
+- 草稿人工验收（按 `RELEASE.md` §五清单在干净 Windows 安装并试用）：<待回填>
 - 失败路径验证（validate 拒绝指向非 main 的标签 / 版本漂移的标签）：<待回填>
-- 发布运行不被 test 子调用取消的端到端确认：**首轮已确认**（见上）
+- 发布运行不被 test 子调用取消的端到端确认：**两轮均已确认**（v0.1.0 首轮与 v0.1.1 正式轮）
 
 ## 七、遗留项
 
 - 桌面 smoke（tauri-driver 6 场景）属 M3 遗留，不在本阶段。
 - OS 代码签名属 M5（按发布范围决策只做 Windows 签名，macOS/Linux 产物推迟、不进支持矩阵）；updater 属 M6（前置：至少一次稳定正式发布）。
 - 升级安装覆盖验收（`RELEASE.md` §五第 4 项）自第二个版本起适用。
+- 草稿 Release 的「收尾」是两步人工动作：environment 批准（已由维护者执行）+ 安装验收后手动公开（`gh release edit v0.1.1 --draft=false`）；后者不在 CI 自动化范围内，也不应由 agent 代点。
 
 ## 八、评审一轮处置（PR #60）
 
