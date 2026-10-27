@@ -69,11 +69,13 @@ jobs:
           npm ci
           npm run build
       - name: Build desktop app (tauri build, NSIS bundle)
-        # --locked 必须经 tauri 的 [ARGS]... 透传给 cargo，而 npm 会剥掉脚本名后的
-        # 第一个 `--`：`npm run tauri build -- --locked` 展开为 `tauri build --locked`
-        # → tauri 自己拒收（exit 2，永远到不了 cargo）。正确写法是
-        # `npm run tauri -- build -- --locked`：内层 `--` 存活，--locked 送达 cargo，
-        # 锁文件与 Cargo.toml 不一致时构建显式失败。
+        # --locked 必须经 tauri 的 [ARGS]... 透传给 cargo，而 `--` 在 npm 转发链上
+        # 会被逐层剥除：`npm run tauri build -- --locked` → npm 剥掉 `--` → tauri 自己
+        # 拒收（exit 2/1，永远到不了 cargo）。`npm run tauri -- build -- --locked` 在
+        # bash 下内层 `--` 存活、参数送达 cargo（本机实证）；但 runner 默认 pwsh 会把
+        # 两个 `--` 都吞掉，展开成 `tauri build --locked` 而失败（首次试跑 tag 实证）。
+        # 故显式钉 shell: bash。注意失败模式是显式的，不会静默用未锁定依赖出包。
+        shell: bash
         run: npm run tauri -- build -- --locked
       - name: Collect build metadata
         shell: bash
