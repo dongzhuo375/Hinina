@@ -294,7 +294,7 @@ GET /api/get-test-judge-result?testJudgeKey={testJudgeKey}
 }
 ```
 
-- `status` 为 `0`（Pending）或 `1`（Judging）时需要继续轮询；结果在 Redis 中缓存 **10 分钟**。
+- `status` 需继续轮询的非终态码为 `5`（Pending）/ `6`（Compiling）/ `7`（Judging）/ `9`（Submitting），完整码表见主文档第 7 节（`0` 是 Accepted，不是 Pending）；结果在 Redis 中缓存 **10 分钟**。
 
 ---
 
@@ -311,12 +311,13 @@ GET /api/get-submission-detail?submitId={submitId}
 
 | 状态码 | 含义 | 与 limits 的关系 |
 |--------|------|------------------|
-| 5 | Accepted | 未超限 |
-| 6 | Time Limit Exceeded (TLE) | 超出 `timeLimit`（其它语言 ×2） |
-| 7 | Memory Limit Exceeded (MLE) | 超出 `memoryLimit`（其它语言 ×2） |
-| 8 | Output Limit Exceeded (OLE) | 输出超限，与题目 limits 无关 |
-| 9 | Runtime Error (RE) | 可能与 `stackLimit` 有关（爆栈） |
-| 13 | Partially Accepted | OI 题部分通过，可能部分测试点 TLE/MLE |
+| 0 | Accepted (AC) | 未超限 |
+| 1 | Time Limit Exceeded (TLE) | 超出 `timeLimit`（其它语言 ×2） |
+| 2 | Memory Limit Exceeded (MLE) | 超出 `memoryLimit`（其它语言 ×2） |
+| 3 | Runtime Error (RE) | 可能与 `stackLimit` 有关（爆栈） |
+| 8 | Partially Accepted (PA) | OI 题部分通过，可能部分测试点 TLE/MLE |
+
+> 完整评测状态码表（含负数码与 Pending/Compiling/Judging/Submitting 等非终态）见主文档第 7 节；Hinina 适配器与该表逐码对齐（`src-tauri/src/adapter/hoj/types.rs` 的 `map_status`）。
 
 > 换算提示：`memory`(KB) / 1024 = MB，可与 `memoryLimit`(MB) 直接比较。
 

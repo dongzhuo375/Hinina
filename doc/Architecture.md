@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-10-27 | 分支：`main`
+> 最后更新：2026-10-28 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -35,20 +35,27 @@ Hinina/
 │   │   ├── development.md                 # 插件作者快速开始与宿主施工步骤
 │   │   ├── roadmap.md                     # 完成度、缺口、管理页/分发/业务插件优先级
 │   │   └── history.md                     # 审计/评审时间线与关键修复
-│   ├── 未解决问题清单.md                   # 仍未解决的已知问题逐条明细（当前代码位置 + 核查结论 + 处理时机）；插件问题已移至 doc/plugin/roadmap.md
+│   ├── 未解决问题清单.md                   # 仍未解决的已知问题逐条明细（当前代码位置 + 核查结论 + 处理时机）；插件问题已移至 doc/plugin/roadmap.md（**本地文档，不入库**）
+│   ├── 缓存测试指南.md                     # 客户端缓存功能测试指南（**本地文档，不入库**）
 │   ├── HOJ/                              # HOJ API 文档（API 总览 / 榜单 / 题目 limits）
 │   ├── Hydro/                            # Hydro 上游 API 文档（HYDRO-API.md，逐路由源码级，入库）
 │   │                                     #   + 适配器设计缺口报告 / 适配新架构的冲突记录（**本地文档，不入库**，见 .gitignore）
-│   ├── 接入新OJ的改动清单与改造建议.md     # 接入新 OJ 曾要改 5 个既有文件的根因分析与改造建议（改造 1–4 已由 #20 落地，保留为决策记录）
-│   ├── screen/                           # 界面设计稿（login / problem_set / problem_solve / rank / submissios / notice，各含 DESIGN.md + code.html + screen.png）
+│   ├── 接入新OJ的改动清单与改造建议.md     # 接入新 OJ 曾要改 5 个既有文件的根因分析与改造建议（改造 1–4 已由 #20 落地，保留为决策记录；**本地文档，不入库**）
+│   ├── screen/                           # 界面设计稿（login / problem_set / problem_solve / rank / submissios / notice，各含 DESIGN.md + code.html + screen.png；**本地文档，不入库**）
 │   ├── icon/                             # 应用图标设计稿（DESIGN.md + SVG 母版/浅色/单色/小尺寸变体 + preview.html/.png + PNG 导出 16–1024）
 │   ├── modules/                          # 模块文档（与 src/、src-tauri/src/ 及根级 e2e/ 的文件树一一对应）
 │   │   ├── README.md                     # 模块文档索引（格式约定与维护规则）
 │   │   ├── e2e/                          # E2E 层模块文档（playwright 配置、fake internals 设计与保真度规则、各 spec 职责）
-│   │   └── src-tauri/plugin/sdk/         # TypeScript SDK 声明与脚手架、参考业务插件 examples/balloon（文档侧代码，不构建进应用）
+│   │   ├── src/                          # 前端逐文件模块文档（App/main/env/router/guards/views/components/stores/services/bridge/types/utils）
+│   │   └── src-tauri/                    # 后端逐文件模块文档（adapter/commands/core/infra/service/plugin + main/lib/test_support；plugin/sdk/ 为文档侧 TS SDK 与示例代码，不构建进应用）
 │   ├── cicd/                             # CI/CD 施工记录（M0 基线实测与后续 M1+ 阶段记录；规划文档在 doc/local/ 不入库）
 │   │   ├── README.md                     # 目录定位、命名约定与入库边界
-│   │   └── m0-baseline.md                # M0 基线冻结：工具链基线、10 条检查命令实测、问题分类、runner 准备步骤
+│   │   ├── m0-baseline.md                # M0 基线冻结：工具链基线、10 条检查命令实测、问题分类、runner 准备步骤
+│   │   ├── m1-pr-gate.md                 # M1：PR 门禁 CI（frontend / rust-lint / rust-test + ci-required 汇总）与分支保护
+│   │   ├── m2-tests.md                   # M2：测试补位（Rust/前端测试组织、coverage 基线）
+│   │   ├── lint-gate-cleanup.md          # rust-lint 门禁化的存量清零记录
+│   │   ├── m3-integration.md             # M3：夜间集成（三平台构建、压力复跑、coverage、E2E）与 apt/deb 缓存治理
+│   │   └── m4-release.md                 # M4：标签触发 Windows 草稿发布（版本门禁、五 job、试跑与 v0.1.1 记录）
 └── src-tauri/
     ├── Cargo.toml                        # Rust 项目清单（依赖、版本、feature flags）
     ├── tests/                             # 顶层集成测试二进制（刻意例外：Logger::init 的生产分支在单元测试不可达，见 doc/cicd/m2-tests.md；单元测试仍在各模块旁 tests/ 子目录）
@@ -298,6 +305,7 @@ Hinina/
 Hinina/
 ├── index.html                            # Vite 入口 HTML
 ├── package.json                          # 前端依赖清单
+├── package-lock.json                     # 依赖锁定（npm ci 与发布构建 --locked 的输入）
 ├── vite.config.ts                        # Vite 构建配置
 ├── tsconfig.json                         # TypeScript 配置
 ├── tsconfig.node.json                    # Vite/Node 端 TS 配置
@@ -316,8 +324,8 @@ Hinina/
 
 ```
 src/
-├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配 + 工作区落盘事件订阅 + 新公告事件订阅 + 关窗前落盘握手（装配 utils/close-guard）+ KaTeX 公式样式全局引入 + styles/contest.css 赛场主题引入，字体本地打包不经 CDN）
-├── App.vue                               # 根组件（n-config-provider + n-dialog-provider；按路由分区切换主题：比赛外壳内挂 .contest-theme 并用赛场 themeOverrides，入口页用紫系 themeOverrides）
+├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配 + 工作区落盘事件订阅 + 新公告事件订阅 + 关窗前落盘握手（装配 utils/close-guard）+ KaTeX 公式样式全局引入 + styles/contest.css 赛场主题引入 + DEV-only 插件控制台助手 window.hininaPlugins（发布构建不含），字体本地打包不经 CDN）
+├── App.vue                               # 根组件（n-config-provider + n-dialog-provider，其内挂插件通知出口 PluginNotifications；按路由分区切换主题：比赛外壳内挂 .contest-theme 并用赛场 themeOverrides，入口页用紫系 themeOverrides）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
 │   ├── index.ts                          # Vue Router（/login + /contest 嵌套子树：problems / problem/:displayId / rank / submissions / submissions/:submitId / announcements / settings）+ requiresAuth 认证守卫 + **赛程阶段闸门**（首次进入工作台/深链时按权威赛程判 `running`，赛前赛后退回登录页）
@@ -384,7 +392,7 @@ src/
 │   └── __tests__/                        # authStore / contestStore / problemStore / rankStore / submissionStore / announcementStore / session / workspaceStore / pluginStore .spec.ts（会话状态机、加载去重与 whenLoaded、我的题目状态失效、榜单去重/轮询/全量模式、评测收敛轮询与重复提交防护、公告未读语义、会话级清理、工作区落盘状态机与 flush 顺序）
 ├── services/
 │   ├── plugin.service.ts                 # 插件前端服务入口
-│   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（localStorage 缓存，登出失败也清本地）
+│   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（刻意不做前端持久化：会话唯一存放处是后端会话文件，前端每次经后端查询）
 │   ├── config.service.ts                 # 配置读写唯一入口（进程内缓存 + 兜底）+ updateConfig 读改写 + 派生参数（OJ 基址、轮询调度、编辑器偏好、默认语言归一、分栏比例）
 │   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
 │   ├── problem.service.ts                # 获取题目详情/列表 + 我的题目状态 + 批量 limits
