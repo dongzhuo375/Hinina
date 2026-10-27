@@ -207,4 +207,6 @@ apt 抖动在本记录之后又复现 3 次（#60 的 ubuntu rust-test、v0.1.1 
 
 **dispatch 实证**（run 40530740054，e2e job 122282520231）：key 解析得 `0d743f48ff107a59` → **主 key 与 `restore-keys` 前缀全部 miss**（此前复审曾误写为「前缀复用旧缓存」——run 日志实为 `Cache not found for input keys: …-0d743f48ff107a59, tauri-apt-archives-Linux-`）。原因是 GitHub 的**缓存作用域规则**：运行只能恢复「当前分支或默认分支」创建的缓存；此前的 `-v1` / `92b0853a…` 条目都存于 `refs/pull/64/merge`（PR run）作用域，分支 `ci/apt-deb-cache` 上的 dispatch run 看不到它们。该次 `--with-deps` 恰逢镜像极慢（25.9 MB 下载 **13min42s**，24.7 kB/s），完成后 deb 成功存入**分支作用域**的 `…-0d743f48ff107a59`——同分支的下一次运行起 e2e 免疫慢镜像。全 7 job 绿。
 
-**推论（合并后的预期行为）**：PR 作用域与分支作用域的缓存对 main 均不可见，合并后 main 的首次 ubuntu 运行（CI + 夜间 e2e）是**一次性全量下载**，属预期而非回归；此后 main 自己的缓存接管。
+**缓存作用域的修正**：本节初稿曾推断「合并后 main 首跑是一次性全量下载（PR/分支缓存对 main 不可见）」——**实测推翻**。合并 `9d129dc` 后立即 dispatch 的夜间 run 40542777633（main 首跑）直接恢复了 PR 作用域的 `…-92b0853a…` 与分支作用域的 `…-0d743f48…` 两个缓存，ubuntu build 与 e2e 的 apt 下载量均为 **0 B**。对照 GitHub 文档的访问矩阵，正确规则是：**推送到默认分支的运行可访问任何分支创建的缓存**（main 权限最宽）；受限的是 feature 分支互访与 PR merge 作用域（后者只对同一 PR 可见）——这正是本分支 dispatch 全冷的真正原因。
+
+**合并后首夜实测**（run 40542777633，7 job 全绿）：ubuntu build 3m35s、e2e 1m10s、rust-coverage 1m24s、stress-repeat 2m30s、windows build 6m15s；ubuntu 两个 job 的 apt 下载量均为 **0 B**（61.7 MB 与 25.9 MB 全部来自缓存）。对照合并前的抖动记录（rust-test 卡满 25 分钟取消、e2e 单是 apt 下载就 5min9s～13min42s），**apt 抖动问题就此关闭**。
