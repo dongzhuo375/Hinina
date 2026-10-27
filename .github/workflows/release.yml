@@ -69,9 +69,12 @@ jobs:
           npm ci
           npm run build
       - name: Build desktop app (tauri build, NSIS bundle)
-        # --locked 经 tauri CLI 的 [ARGS]... 透传给 cargo：Cargo.lock 与 Cargo.toml
-        # 不一致时构建显式失败，安装包依赖版本与 CI 已测试版本完全一致。
-        run: npm run tauri build -- --locked
+        # --locked 必须经 tauri 的 [ARGS]... 透传给 cargo，而 npm 会剥掉脚本名后的
+        # 第一个 `--`：`npm run tauri build -- --locked` 展开为 `tauri build --locked`
+        # → tauri 自己拒收（exit 2，永远到不了 cargo）。正确写法是
+        # `npm run tauri -- build -- --locked`：内层 `--` 存活，--locked 送达 cargo，
+        # 锁文件与 Cargo.toml 不一致时构建显式失败。
+        run: npm run tauri -- build -- --locked
       - name: Collect build metadata
         shell: bash
         run: |

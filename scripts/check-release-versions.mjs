@@ -87,6 +87,8 @@ export function checkTag(tag, appVersion) {
 
 // Accepts both `## [0.1.0] - 2026-10-26` (Keep a Changelog) and `## 0.1.0`.
 // Duplicate sections for the same version are rejected as ambiguous.
+// When a header carries a date suffix it must be a real YYYY-MM-DD date, so a
+// release cannot ship with the `- TBD` placeholder still in place.
 export function findChangelogSection(root, version) {
   let text
   try {
@@ -107,14 +109,25 @@ export function findChangelogSection(root, version) {
     return { found: false, reason: `CHANGELOG.md has ${starts.length} sections for ${version}; keep exactly one` }
   }
   const start = starts[0]
+  const header = lines[start]
+  const dateSuffix = header.match(/^##\s+\S+\s+-\s+(.+?)\s*$/)
+  if (dateSuffix) {
+    const date = dateSuffix[1]
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+      return { found: false, reason: `CHANGELOG.md section header for ${version} has an invalid date "${date}" (expected YYYY-MM-DD)` }
+    }
+  }
   let end = lines.length
   for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s/.test(lines[i])) {
+    // A new section header, or the trailing link-reference block that Keep a
+    // Changelog puts at the end of the file ([1.0.0]: https://...) — that block
+    // belongs to the document, not to this version's notes.
+    if (/^##\s/.test(lines[i]) || /^\[[^\]]+\]:\s/.test(lines[i])) {
       end = i
       break
     }
   }
-  return { found: true, header: lines[start], body: lines.slice(start + 1, end).join('\n').trim() }
+  return { found: true, header, body: lines.slice(start + 1, end).join('\n').trim() }
 }
 
 export function extractNotes(root, version) {

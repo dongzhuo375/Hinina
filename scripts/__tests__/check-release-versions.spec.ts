@@ -182,6 +182,39 @@ describe('findChangelogSection / extractNotes', () => {
     expect(captureGate(['--extract-notes'], root).code).toBe(1)
   })
 
+  it('rejects an undated/placeholder date suffix so releases cannot ship with TBD', () => {
+    const root = makeFixtureRoot(
+      fixtureFiles({ 'CHANGELOG.md': '# Changelog\n\n## [1.2.3] - TBD\n\nbody\n' }),
+    )
+    const section = findChangelogSection(root, APP_VERSION)
+    expect(section.found).toBe(false)
+    expect(section.reason).toContain('invalid date')
+    expect(captureGate(['--tag', 'v1.2.3', '--changelog'], root).code).toBe(1)
+  })
+
+  it('rejects a malformed date and accepts a header with no date suffix', () => {
+    const bad = makeFixtureRoot(
+      fixtureFiles({ 'CHANGELOG.md': '# Changelog\n\n## [1.2.3] - 2026-13-45\n\nbody\n' }),
+    )
+    expect(findChangelogSection(bad, APP_VERSION).found).toBe(false)
+    const undated = makeFixtureRoot(
+      fixtureFiles({ 'CHANGELOG.md': '# Changelog\n\n## [1.2.3]\n\nbody\n' }),
+    )
+    expect(findChangelogSection(undated, APP_VERSION).found).toBe(true)
+  })
+
+  it('stops notes before the trailing link-reference block', () => {
+    const root = makeFixtureRoot(
+      fixtureFiles({
+        'CHANGELOG.md':
+          '# Changelog\n\n## [1.2.3] - 2026-10-26\n\n### Added\n- one\n\n[1.2.3]: https://example.test/compare/v1.2.2...v1.2.3\n[1.2.2]: https://example.test/compare/v1.2.1...v1.2.2\n',
+      }),
+    )
+    const notes = extractNotes(root, APP_VERSION)
+    expect(notes).toBe('### Added\n- one')
+    expect(notes).not.toContain('example.test')
+  })
+
   it('extractNotes returns the section body without the header', () => {
     const root = makeFixtureRoot(fixtureFiles())
     expect(extractNotes(root, APP_VERSION)).toBe('### Added\n- feature one\n- feature two')

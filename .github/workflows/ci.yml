@@ -15,9 +15,13 @@ permissions:
   contents: read
 
 # 组名含 event_name：被 workflow_call 调用时 github.workflow 解析为调用方的名字
-# （orgs/community#30708），若组模板与调用方相同（workflow-ref），被调用方的并发
-# 求值会作为新请求进入调用方运行所在的组并按本文件的 cancel-in-progress 取消它
-# （对 tag ref 恒为 true）——release.yml 的发布运行会被自己的 test 子调用取消。
+# （orgs/community#30708 社区实证；官方文档未记载该语义）。若组模板与调用方相同
+# （workflow-ref），被调用方的并发求值会作为新请求进入调用方运行所在的组，并按本文件
+# 的 cancel-in-progress 取消它（对 tag ref 恒为 true）——release.yml 的发布运行会被
+# 自己的 test 子调用取消。加 event_name 后 callee 组为 <Caller>-push-refs/tags/…，
+# 与调用方自身组（无 event 段）恒不同。注意：callee 的 event_name 是调用方的原始
+# 触发事件（tag 推送 = push），不是 workflow_call。副作用：main 的 push 与
+# workflow_dispatch 由共享一组变为可并行。
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
