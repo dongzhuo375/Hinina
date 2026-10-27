@@ -57,13 +57,30 @@
 - `test`（嵌套 ci.yml）：五项全绿，外层发布运行未被取消。
 - `build-windows`：通过。日志逐行实证 `##[group]Run npm run tauri -- build -- --locked` → `> tauri build -- --locked`（内层 `--` 在 bash 下存活），产出 `Hinina_0.1.1_x64-setup.exe`（20,302,515 字节）。
 - `verify-artifact`：通过（恰一个安装包、文件名精确匹配、`file` 识别为 Windows PE、生成 SHA256SUMS.txt）。
-- `draft-release`：在 `release` environment 人工批准后通过，创建草稿 Release「Hinina v0.1.1」（`isDraft: true`），附件三件：安装包 20,302,515 字节、SHA256SUMS.txt 93 字节、build-metadata.json 339 字节；发布说明由 CHANGELOG 的 0.1.1 段落生成（含「v0.1.0 是试跑记录」的声明）。
+- `draft-release`：在 `release` environment 人工批准后通过，创建草稿 Release「Hinina v0.1.1」（`isDraft: true`），附件三件：安装包 20,302,515 字节、SHA256SUMS.txt 93 字节、build-metadata.json 339 字节；发布说明由 CHANGELOG 的 0.1.1 段落生成（含「0.1.0 是内部试跑版本、从未发布」的声明）。
 
-**待回填**：
+**验收状态**：
 
 - 草稿人工验收：**按版本策略推迟**——0.x 以 CI 验证为准，本机核验（重算 SHA256 + 干净环境安装）留到 1.0.0 起执行，见 `RELEASE.md §五` 版本分级验收（维护者裁定）
-- 失败路径验证（validate 拒绝指向非 main 的标签 / 版本漂移的标签）：<待回填>
 - 发布运行不被 test 子调用取消的端到端确认：**两轮均已确认**（v0.1.0 首轮与 v0.1.1 正式轮）
+
+**拒绝路径验证（两条，均已实测）**：
+
+| 场景 | 做法 | 结果 |
+|---|---|---|
+| 标签指向不在 main 历史里的提交 | `v0.1.2` 指向 `docs/m4-v011-record` 分支提交 `1653360` | run 40499550816：`validate` 在 `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` 退出 1；`test`/`build-windows`/`verify-artifact`/`draft-release` 全部 skipped，未产生 Release |
+| 标签版本与应用版本漂移 | `v9.9.9` 指向 main HEAD | run 40499658577：门禁输出 `BAD tag v9.9.9: tag v9.9.9 does not match app version 0.1.1` 并 exit 1；下游同样全部 skipped |
+
+两个测试标签验证后即删除（`v0.1.2`、`v9.9.9`），远端最终只剩 `v0.1.1`。
+
+**同标签幂等验证**：对 run 40483797433 做**完整重跑**（`gh run rerun`，非 `--failed`），再次经 `release` environment 批准后：
+
+- Release 列表仍为 **1 个**（未创建重复草稿）；
+- 三个附件被 `gh release upload --clobber` 覆盖更新（`updatedAt` 由 11:12:04Z 变为 12:04:00Z）；
+- 发布说明由 `gh release edit --notes-file` 重写，内容一致；
+- 作业日志末行 `draft=true assets=3`。
+
+**顺带观察**：两次构建的安装包字节数不同（20,302,515 → 20,306,342），NSIS 会嵌入时间戳，因此**不能用文件大小做校验**——这也是 `verify-artifact` 断言「精确文件名 + PE 类型 + SHA256」而不断言大小的原因。
 
 ## 七、遗留项
 
@@ -145,5 +162,7 @@
 - CHANGELOG 的版本段落改为 `## [0.1.1] - 2026-10-27`，并注明 `v0.1.0` 是试跑记录、从未产生 Release；
 - `RELEASE.md §二` 增加「标签不可变策略」：标签不删除、不重指，发布运行失败时该标签保留为记录，修复以新版本交付；
 - `v0.1.0` 标签与其失败 run 保留，作为发布链路的首次真实演练证据。
+
+**后续修订（同日晚，维护者裁定）**：`v0.1.0` 标签已被删除。理由：不可变策略保护的是**已产生 Release 的发布标签**；`v0.1.0` 从未发布过（无 Release、无可下载产物、无外部依赖），把它留在 Tags 里只会让「一版一标签」的语义变模糊。失败证据由 Actions run 40474819558 与本文件 §六 承担。删除经管理员 bypass 执行，属治理决定，非日常流程。
 
 规范含义：`v0.1.0` 永远不会成为已发布版本，首个正式版本是 `v0.1.1`。
