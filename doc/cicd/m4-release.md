@@ -40,12 +40,21 @@
 3. 创建 tag Ruleset：限制 `v*` 标签的创建与更新，防止已发布标签被移动。
 4. 打首个试跑标签 `v0.1.0` 跑通 Release 工作流，产出草稿 Release 供人工验收（按 `RELEASE.md` §五清单）。
 
-## 六、首 tag 试跑结果（合并后回填）
+## 六、试跑结果
 
-- 试跑 run：<待回填>
-- 草稿 Release 与验收：<待回填>
-- 失败路径验证（validate 拒绝不指向 main / 版本漂移的标签）：<待回填>
-- 试跑确认发布运行全程不被 test 子调用取消（§十修复后的端到端确认）：<待回填>
+**首轮（tag v0.1.0 @ 2f737c4，run 40474819558，合并当天）**：
+
+- `validate`：通过（tag 格式、指向 main、五处版本一致、CHANGELOG 0.1.0 段落日期 2026-10-27 均过门禁）。
+- `test`（嵌套 ci.yml）：frontend / rust-lint / rust-test ×2 / ci-required 全绿，**且外层发布运行全程未被取消**——ci.yml 组名加 `github.event_name` 的修复在真实 tag 运行上得到实证（此前 §十 的互消推演成立）。
+- `build-windows`：失败于 `Build desktop app` 步骤——runner 默认 shell 为 pwsh，把 `npm run tauri -- build -- --locked` 的两个 `--` 都吞掉，展开成 `tauri build --locked`，被 tauri 拒收。**失败是显式的**（不会静默用未锁定依赖出包），但命令链在 pwsh 下不可用，见 §十二。
+- `verify-artifact` / `draft-release`：按 needs 语义跳过，未产生任何 Release。
+
+**待回填**：
+
+- 修复后重跑 run 与草稿 Release 链接：<待回填>
+- 草稿验收（按 `RELEASE.md` §五清单）：<待回填>
+- 失败路径验证（validate 拒绝指向非 main 的标签 / 版本漂移的标签）：<待回填>
+- 发布运行不被 test 子调用取消的端到端确认：**首轮已确认**（见上）
 
 ## 七、遗留项
 
@@ -91,3 +100,10 @@
 | extractNotes 只以 `^##\s` 为结束条件，Keep a Changelog 文末的链接引用块（`[1.2.3]: https://…`）会被并入最后一个版本正文 | 属实（当前 CHANGELOG 无链接引用，属潜在问题）。结束条件增加 `^\[[^\]]+\]:\s` 分支；新增用例断言链接引用块不进入 notes |
 | 已解决项复核：spec 26/26（4beb7cc head）、print-version 纯读、重复章节报错 | 确认，无需处置（本轮新增用例后为 29 项） |
 | §六 四项仍为 `<待回填>`：发布链路尚未端到端验证 | 确认，保持待回填——需合并后打试跑标签才能填 |
+
+## 十二、试跑首轮发现与处置（合并后，tag v0.1.0）
+
+| 发现 | 核验与处置 |
+|---|---|
+| `npm run tauri -- build -- --locked` 在本地 bash 实证可用、在 runner 上失败：windows runner 默认 shell 为 pwsh，把两个 `--` 都吞掉，实际展开为 `tauri build --locked`，被 tauri 以 `unexpected argument '--locked'` 拒收（run 40474819558，build-windows 步骤） | 属实（CI 日志逐行实证：`##[group]Run npm run tauri -- build -- --locked` 后紧跟 `> tauri build --locked`）。根因是 npm 的 `--` 转发链受 shell 影响：bash 下内层 `--` 存活、pwsh 下两个都被剥除。**修复**：该步骤显式 `shell: bash`（runner 已具备，corepack/版本校验步骤已在用），并在步骤注释里写明两种 shell 的差别与失败模式（显式失败、不静默出包）。修复需新提交进 main 后重新打 tag——tag 运行使用的是 tag 所指提交里的 workflow 文件，rerun 不会带上修复 |
+| 首轮试跑同时验证了两件事（正面结论） | ① `validate` 与门禁在真实 tag 上全通过；② 嵌套 `test`（ci.yml 经 workflow_call）全绿且**外层发布运行未被取消**——§十 的并发组互消推演与修复在真实运行上得到实证 |
