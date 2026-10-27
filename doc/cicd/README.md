@@ -14,4 +14,4 @@
 - [m2-tests.md](m2-tests.md) — M2 关键测试补位与覆盖率基线（2026-10-25）：命令 `*_impl` 全真上下文测试、HOJ/Hydro loopback 契约测试、前端关键组合测试、V8 覆盖率基线（行 57.25% / 分支 54.48% / 语句 55.74%，只报告不卡线）。
 - [lint-gate-cleanup.md](lint-gate-cleanup.md) — lint 门禁清理（2026-10-25）：`cargo fmt` 全量清零 E2、clippy 7 处清零 E3、rust-lint 升为必需检查、749/748 计数差异结案（cfg(unix)）。
 - [m3-integration.md](m3-integration.md) — M3 夜间集成（2026-10-25）：integration.yml 三平台构建矩阵（macOS/Linux 观测平台自报机制）、stress-repeat 10 轮、cargo-llvm-cov 基线、浏览器 E2E（Tauri internals 单点 fake + 首批 4 场景 15 用例，含评审三~六轮新增）。
-- [m4-release.md](m4-release.md) — M4 Windows 发布 MVP（2026-10-27）：版本一致性门禁脚本（五处版本/标签/CHANGELOG 段落）、release.yml 五 job（test 经 workflow_call 复用 ci.yml）、CHANGELOG/RELEASE/SECURITY 发布文档、合并时 PVR/release environment/tag Ruleset 配置与首 tag 试跑回填栏位。
+- [m4-release.md](m4-release.md) — M4 Windows 发布 MVP（2026-10-27）：版本一致性门禁（五个文件六处版本值 / 标签 / CHANGELOG 段落与真实日期）、release.yml 五 job（test 经 workflow_call 复用 ci.yml）、CHANGELOG/RELEASE/SECURITY 发布文档、标签不可变策略；PVR / `release` environment / tag Ruleset 已落地，v0.1.0 为失败试跑记录、v0.1.1 首次跑通并生成草稿 Release。

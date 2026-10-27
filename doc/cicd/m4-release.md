@@ -33,34 +33,78 @@
 - `npm test` / `npm run build` / `npx tsc -p tsconfig.node.json --noEmit` 全绿（计数不记入本文档）。
 - Rust 零改动。
 
-## 五、合并时动作（逐项经维护者同意后执行）
+## 五、合并后动作（已执行，逐项经维护者同意）
 
-1. 启用 GitHub 私密漏洞报告（PVR）——`SECURITY.md` 的报告渠道随本 PR 合入即真。
-2. 创建受保护 environment `release`（required reviewer）——draft-release 的人工批准随之生效。
-3. 创建 tag Ruleset：限制 `v*` 标签的创建与更新，防止已发布标签被移动。
-4. 打首个试跑标签跑通 Release 工作流，产出草稿 Release 供人工验收（按 `RELEASE.md` §五清单）。**实际执行**：试跑用 `v0.1.0` 但构建失败（§六）；因标签不可变策略不重指旧标签，正式发布改用 `v0.1.1`（§十四）。
+| 动作 | 结果 |
+|---|---|
+| 启用 GitHub 私密漏洞报告（PVR） | 已启用：`GET /repos/…/private-vulnerability-reporting` 返回 `enabled: true`，`SECURITY.md` 的报告渠道有效 |
+| 创建受保护 environment `release` | 已创建（id 25440480289），`required_reviewers` = 维护者；v0.1.1 发布时 `draft-release` 确实停在此处等待批准，批准后才继续。后续加固：`deployment_branch_policy` 由 `null` 改为 custom，仅允许 `v*` 标签（policy id 64530431），并以单 job 重跑验证合法标签仍可部署 |
+| 创建 tag Ruleset | 已创建（id 25942934）：`refs/tags/v*` 限制 creation/update/deletion，`bypass_actors` 仅 RepositoryRole 5；推 v0.1.0 时远端日志出现 `Bypassed rule violations … creations being restricted`，证明规则生效且管理员 bypass 可用 |
+| 首个发布标签试跑 | `v0.1.0` 构建失败（§六）→ 按标签不可变策略改发 `v0.1.1`（§十四），全链路通过并生成草稿 Release（§六） |
 
 ## 六、试跑结果
 
 **首轮（tag v0.1.0 @ 2f737c4，run 40474819558，合并当天）**：
 
-- `validate`：通过（tag 格式、指向 main、五处版本一致、CHANGELOG 0.1.0 段落日期 2026-10-27 均过门禁）。
+- `validate`：通过（tag 格式、指向 main、五个文件六处版本值一致、CHANGELOG 0.1.0 段落日期 2026-10-27 均过门禁）。
 - `test`（嵌套 ci.yml）：frontend / rust-lint / rust-test ×2 / ci-required 全绿，**且外层发布运行全程未被取消**——ci.yml 组名加 `github.event_name` 的修复在真实 tag 运行上得到实证（此前 §十 的互消推演成立）。
 - `build-windows`：失败于 `Build desktop app` 步骤——runner 默认 shell 为 pwsh，把 `npm run tauri -- build -- --locked` 的两个 `--` 都吞掉，展开成 `tauri build --locked`，被 tauri 拒收。**失败是显式的**（不会静默用未锁定依赖出包），但命令链在 pwsh 下不可用，见 §十二。
 - `verify-artifact` / `draft-release`：按 needs 语义跳过，未产生任何 Release。
 
-**待回填**：
+**正式发布（tag `v0.1.1` @ `27ea3d4`，run 40483797433）**——该 run 共执行 3 次，产物与说明以最后一次为准：
 
-- `v0.1.1` 正式发布运行与草稿 Release 链接：<待回填>
-- 草稿验收（按 `RELEASE.md` §五清单）：<待回填>
-- 失败路径验证（validate 拒绝指向非 main 的标签 / 版本漂移的标签）：<待回填>
-- 发布运行不被 test 子调用取消的端到端确认：**首轮已确认**（见上）
+| 尝试 | 触发方式 | `draft-release` 启动时间（UTC） | 说明 |
+|---|---|---|---|
+| 1 | 首次 tag 推送 | 11:11:52 | 全链路首次通过；草稿安装包 20,302,515 字节 |
+| 2 | 完整重跑（`gh run rerun`） | 12:03:48 | 幂等验证：重建产物并覆盖同一草稿；安装包 20,306,342 字节（与第 1 次不同，NSIS 嵌入时间戳） |
+| 3 | 仅重跑 `draft-release` job | 12:33:40 | 验证 `release` environment 的 `v*` 标签部署策略；不重建，附件摘要与第 2 次相同 |
+
+- `validate`：通过（tag 格式、指向 main、五个文件六处版本值 0.1.1、CHANGELOG `## [0.1.1] - 2026-10-27` 均过门禁）。
+- `test`（嵌套 ci.yml）：五项全绿，外层发布运行未被取消。
+- `build-windows`：通过。日志逐行实证 `##[group]Run npm run tauri -- build -- --locked` → `> tauri build -- --locked`（内层 `--` 在 bash 下存活）。
+- `verify-artifact`：通过（恰一个安装包、文件名精确匹配、`file` 识别为 Windows PE、生成 SHA256SUMS.txt）。
+- `draft-release`：在 `release` environment 人工批准后通过，创建草稿 Release「Hinina v0.1.1」（`isDraft: true`）。
+
+**草稿当前的附件（以第 3 次尝试为准）**：
+
+| 附件 | 大小 | SHA-256 |
+|---|---|---|
+| `Hinina_0.1.1_x64-setup.exe` | 20,306,342 | `99071e1152939f87aa4f5a3a20aad965c6bf42bb4bce8e8c0bf56163ae2b42e4` |
+| `SHA256SUMS.txt` | 93 | — |
+| `build-metadata.json` | 339 | tag `v0.1.1` / commit `27ea3d4` / built_at 12:02:06Z / node 22.14.0 / npm 11.18.0 / rustc 1.96.0 / cargo 1.96.0 / target x86_64-pc-windows-msvc / bundle nsis / `signed: false` |
+
+**发布说明的手动修正**：草稿说明由 tag 提交（`27ea3d4`）里的 CHANGELOG 生成，当时那句是「`v0.1.0` 标签是发布链路的试跑记录」。由于 tag 不移动、而 CHANGELOG 后续改成「0.1.0 是内部试跑版本（试跑标签已清理）」，已用 `gh release edit v0.1.1 --notes-file` 重写草稿说明（**草稿可改，公开后不可改**）。这暴露一条流程约束：**发布说明取自 tag 所指提交，tag 之后对 CHANGELOG 的修正不会自动反映到草稿**，需要在草稿阶段手动同步。
+
+**验收状态**：
+
+- 附件校验（本机）：**已执行一次**（2026-10-27）——把三个附件下载到本地临时目录（D 盘，非仓库工作区），本地 `sha256sum` 重算得 `99071e11…2b42e4`，与发布内 `SHA256SUMS.txt` 逐字符一致，文件大小 20,306,342 与 API 记录一致。
+- 干净环境安装验收：**按版本策略推迟**——0.x 不要求，1.0.0 起强制执行，见 `RELEASE.md §五` 版本分级验收（维护者裁定）
+- 发布运行不被 test 子调用取消的端到端确认：**三轮均已确认**（v0.1.0 首轮与 v0.1.1 的三个尝试）
+
+**拒绝路径验证（两条，均已实测）**：
+
+| 场景 | 做法 | 结果 |
+|---|---|---|
+| 标签指向不在 main 历史里的提交 | `v0.1.2` 指向 `docs/m4-v011-record` 分支提交 `1653360` | run 40499550816：`validate` 在 `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` 退出 1；`test`/`build-windows`/`verify-artifact`/`draft-release` 全部 skipped，未产生 Release |
+| 标签版本与应用版本漂移 | `v9.9.9` 指向 main HEAD | run 40499658577：门禁输出 `BAD tag v9.9.9: tag v9.9.9 does not match app version 0.1.1` 并 exit 1；下游同样全部 skipped |
+
+两个测试标签验证后即删除（`v0.1.2`、`v9.9.9`），远端最终只剩 `v0.1.1`。
+
+**同标签幂等验证**：对 run 40483797433 做**完整重跑**（`gh run rerun`，非 `--failed`），再次经 `release` environment 批准后：
+
+- Release 列表仍为 **1 个**（未创建重复草稿）；
+- 三个附件被 `gh release upload --clobber` 覆盖更新（`updatedAt` 由 11:12:04Z 变为 12:04:00Z）；
+- 发布说明由 `gh release edit --notes-file` 重写，内容一致；
+- 作业日志末行 `draft=true assets=3`。
+
+**顺带观察**：两次构建的安装包字节数不同（20,302,515 → 20,306,342），NSIS 会嵌入时间戳，因此**不能用文件大小做校验**——这也是 `verify-artifact` 断言「精确文件名 + PE 类型 + SHA256」而不断言大小的原因。
 
 ## 七、遗留项
 
 - 桌面 smoke（tauri-driver 6 场景）属 M3 遗留，不在本阶段。
 - OS 代码签名属 M5（按发布范围决策只做 Windows 签名，macOS/Linux 产物推迟、不进支持矩阵）；updater 属 M6（前置：至少一次稳定正式发布）。
 - 升级安装覆盖验收（`RELEASE.md` §五第 4 项）自第二个版本起适用。
+- 草稿 Release 的「收尾」是两步人工动作：environment 批准（已由维护者执行）+ 安装验收后手动公开（`gh release edit v0.1.1 --draft=false`）；后者不在 CI 自动化范围内，也不应由 agent 代点。
 
 ## 八、评审一轮处置（PR #60）
 
@@ -94,12 +138,12 @@
 |---|---|
 | `--locked` 未可靠生效：`npm run tauri build -- --locked` 中 npm 会剥掉 `--`，`tauri build --locked` 被 tauri 自己拒收（exit 2），`--locked` 永远到不了 cargo；三轮 §九 用 `npx tauri build --help` 作证据不成立（只证明 `[ARGS]...` 存在，未验证 npm 转发链） | 属实。本机实证：旧写法 `npm run tauri build -- --locked` → `error: unexpected argument '--locked' found`，**exit 2**；新写法 `npm run tauri -- build -- --locked` 以无害探针 `--bogus-hinina-probe` 验证 → 前端构建通过后错误出自 cargo（**exit 1**，与 tauri 的 exit 2 可区分），证明内层 `--` 存活、参数经 tauri 送达 runner。失败模式澄清：CI 上旧写法是**显式失败**（首个试跑 tag 会在 build-windows 就红），不会静默出包；但修法仍必须换。已改为 `npm run tauri -- build -- --locked`，release.yml 步骤注释写明两种写法的差别 |
 | event_name 入组带来新行为：ci.yml 触发器含 push(main) 与 workflow_dispatch，加 event_name 前二者共享组（`cancel-in-progress: false` → 串行排队），加之后分成两组可并行；「独立运行行为不变」对该边界不准确 | 属实。已在 §十 与本表补记该副作用：main 的 push 与 dispatch 现在可并行，PR 重推取消旧跑不受影响。接受此代价——发布链路正确性优先于 main 上偶发的并行（main 推送通常由合并触发，与手动 dispatch 重叠概率低） |
-| callee 中 `github.event_name` 解析为调用方原始事件（tag 推送 = `push`），§十 原写的 `Release-workflow_call-…` 字面量错误 | 属实（actions/runner#3146 等实证）。§十 已改写为 `Release-push-refs/tags/vX.Y.Z`，分组安全性结论不变 |
+| callee 中 `github.event_name` 解析为调用方原始事件（tag 推送 = `push`），§十 原写的 `Release-workflow_call-…` 字面量错误 | 属实。证据等级：actions/runner#3146 的讨论明确「callee 里 `event_name` 取调用方的值」（社区回复，**无 GitHub 维护者确认**），与 #30708 同级；本轮已复核原帖。§十 已改写为 `Release-push-refs/tags/vX.Y.Z`，分组安全性结论不变 |
 | `## [0.1.0] - TBD` 能通过门禁：日期后缀无格式校验，RELEASE.md 要求填日期但无强制 | 属实。门禁现在校验日期后缀必须是合法 `YYYY-MM-DD`：`TBD`/`2026-13-45` 均报 `invalid date` 并 exit 1；无日期后缀的标题仍接受。CHANGELOG 0.1.0 改为 `2026-10-27`。新增 3 条用例（TBD 拒绝、畸形日期拒绝、无后缀接受） |
 | cip:false 的排队语义：`queue: single` 下新排队项取消并替换较早的排队项，RELEASE.md §四未记录 | 属实（官方文档）。RELEASE.md §四 补「并发排队语义」段：同一标签短时间内多次触发时只执行最新排队项、更早的被静默取消；正常流程用 `gh run rerun` 不产生新运行 |
 | extractNotes 只以 `^##\s` 为结束条件，Keep a Changelog 文末的链接引用块（`[1.2.3]: https://…`）会被并入最后一个版本正文 | 属实（当前 CHANGELOG 无链接引用，属潜在问题）。结束条件增加 `^\[[^\]]+\]:\s` 分支；新增用例断言链接引用块不进入 notes |
-| 已解决项复核：spec 26/26（4beb7cc head）、print-version 纯读、重复章节报错 | 确认，无需处置（本轮新增用例后为 29 项） |
-| §六 四项仍为 `<待回填>`：发布链路尚未端到端验证 | 确认，保持待回填——需合并后打试跑标签才能填 |
+| 已解决项复核：spec 26/26（4beb7cc head）、print-version 纯读、重复章节报错 | 确认，无需处置（该轮后 29 项；四轮累计 33 项） |
+| §六 四项仍为 `<待回填>`：发布链路尚未端到端验证 | 当时确认；后续已由 v0.1.1 正式运行与负向/幂等验证补齐，见 §六 |
 
 ## 十二、试跑首轮发现与处置（合并后，tag v0.1.0）
 
@@ -136,4 +180,28 @@
 - `RELEASE.md §二` 增加「标签不可变策略」：标签不删除、不重指，发布运行失败时该标签保留为记录，修复以新版本交付；
 - `v0.1.0` 标签与其失败 run 保留，作为发布链路的首次真实演练证据。
 
+**后续修订（同日晚，维护者裁定）**：`v0.1.0` 标签已被删除。理由：不可变策略保护的是**已产生 Release 的发布标签**；`v0.1.0` 从未发布过（无 Release、无可下载产物、无外部依赖），把它留在 Tags 里只会让「一版一标签」的语义变模糊。失败证据由 Actions run 40474819558 与本文件 §六 承担。删除经管理员 bypass 执行，属治理决定，非日常流程。
+
 规范含义：`v0.1.0` 永远不会成为已发布版本，首个正式版本是 `v0.1.1`。
+
+
+## 十五、发布后复审处置（第六轮）
+
+| 发现 | 核验与处置 |
+|---|---|
+| §六 仍写「待回填」而已有 v0.1.1 运行与草稿 | 属实（合并版本尚未含补齐内容）。本 PR 已将 §六 改为「验收状态」并写入 v0.1.1 逐 job 结果、两条拒绝路径与幂等验证；§十一 的历史行补注「后续已补齐」 |
+| 文档数字与措辞过期：§十一 写「29 项」（实际 33）；`Architecture.md` 的 scripts 说明仍写「五处版本」、文件头仍是 2026-10-24 | 属实。改为「该轮后 29 项；四轮累计 33 项」；Architecture 改为「五个文件六处版本值」并把最后更新日期改为 2026-10-27 |
+| `RELEASE.md §四` 的「`queue: single`」不是 GitHub 语法 | 属实。改为描述实际语义：并发组默认「同时最多一个运行中 + 一个排队」，新排队项替换较旧的排队项（旧的被取消、不报失败）；并注明 GitHub 没有 `queue:` 配置项 |
+| `release` 环境没有部署分支/标签限制（`deployment_branch_policy: null`） | 属实，已加固：改为 custom 策略，仅允许 `v*` 标签部署（policy id 64530431，`required_reviewers` 保留）。验证方式：单独重跑 run 40483797433 的 `draft-release` job，先进入 waiting（说明标签通过了策略校验），批准后成功——合法 tag 部署未被挡住 |
+| §十/§十一 引用的 orgs/community#30708 与 actions/runner#3146 未独立核实 | 出处与证据等级：#30708 是 **GitHub Discussions 帖子**（`gh` 读不了 Discussion，只能网页/WebFetch 读取），其正文含 caller 被取消的日志原文；#3146 是 actions/runner 的**用户提问 issue**，内容与文档论断一致，但**无维护者确认**，两人都属社区证据、非官方语义。文档已删除「已复核原帖」这类第三方无法验证的过程陈述，只保留出处、内容要点与证据等级；结论本身另有本仓库三轮真实运行独立佐证（发布运行未被嵌套 test 取消） |
+
+## 十六、第七轮复审处置（发布后）
+
+| 发现 | 核验与处置 |
+|---|---|
+| §六 记录的是第 1 次尝试的安装包大小（20,302,515），而草稿当前文件是第 2 次构建的 20,306,342；PR 未记录当前校验和，也未说明草稿附件已被替换 | 属实。§六 改为**三次尝试表**（`draft-release` 启动时间 11:11:52Z / 12:03:48Z / 12:33:40Z；此前误用了 deployment 记录创建时间）并列出草稿当前附件表：安装包 20,306,342、SHA-256 `99071e11…2b42e4`、`build-metadata.json` 的关键字段。第 1 次与第 2 次大小不同源于 NSIS 嵌入时间戳；第 3 次不重建、摘要不变 |
+| PR 描述称「负向路径仍待回填」，与 diff 矛盾 | 属实（描述写于补齐之前）。已更新 PR 描述，补上负向与幂等结果 |
+| 第 3 次尝试（仅重跑 `draft-release`，用于验证部署策略）未记入文档 | 属实。已并入 §六 尝试表与 §五 的环境加固说明 |
+| 草稿说明仍是 tag 提交里的旧文案（「v0.1.0 标签是发布链路的试跑记录」），而该标签已删除 | 属实。已用 `gh release edit v0.1.1 --notes-file` 重写草稿说明（草稿可改）。并在 §六 记录这条流程约束：发布说明取自 tag 所指提交，tag 之后修改 CHANGELOG 不会自动同步到草稿 |
+| 「已复核原帖」无法被第三方验证 | 属实。见上一行处置：改为标注出处与证据等级，不再写过程性断言 |
+| 本机核验此前一次也没做过，而政策说 0.1.1 以 CI 为准 | 维护者要求补一次实测：已把三个附件下载到 D 盘临时目录（本地临时目录），本地重算 SHA-256 = `99071e1152939f87aa4f5a3a20aad965c6bf42bb4bce8e8c0bf56163ae2b42e4`，与发布内 `SHA256SUMS.txt` 逐字符一致。结论写入 §六「验收状态」；**干净环境安装验收仍按政策留到 1.0.0** |
