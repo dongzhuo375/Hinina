@@ -51,18 +51,35 @@
 - `build-windows`：失败于 `Build desktop app` 步骤——runner 默认 shell 为 pwsh，把 `npm run tauri -- build -- --locked` 的两个 `--` 都吞掉，展开成 `tauri build --locked`，被 tauri 拒收。**失败是显式的**（不会静默用未锁定依赖出包），但命令链在 pwsh 下不可用，见 §十二。
 - `verify-artifact` / `draft-release`：按 needs 语义跳过，未产生任何 Release。
 
-**正式发布（tag `v0.1.1` @ `27ea3d4`，run 40483797433）**：
+**正式发布（tag `v0.1.1` @ `27ea3d4`，run 40483797433）**——该 run 共执行 3 次，产物与说明以最后一次为准：
+
+| 尝试 | 触发方式 | deployment 时间（UTC） | 说明 |
+|---|---|---|---|
+| 1 | 首次 tag 推送 | 10:02:55 | 全链路首次通过；草稿安装包 20,302,515 字节 |
+| 2 | 完整重跑（`gh run rerun`） | 12:02:33 | 幂等验证：重建产物并覆盖同一草稿；安装包 20,306,342 字节（与第 1 次不同，NSIS 嵌入时间戳） |
+| 3 | 仅重跑 `draft-release` job | 12:32:44 | 验证 `release` environment 的 `v*` 标签部署策略；不重建，附件摘要与第 2 次相同 |
 
 - `validate`：通过（tag 格式、指向 main、五个文件六处版本值 0.1.1、CHANGELOG `## [0.1.1] - 2026-10-27` 均过门禁）。
 - `test`（嵌套 ci.yml）：五项全绿，外层发布运行未被取消。
-- `build-windows`：通过。日志逐行实证 `##[group]Run npm run tauri -- build -- --locked` → `> tauri build -- --locked`（内层 `--` 在 bash 下存活），产出 `Hinina_0.1.1_x64-setup.exe`（20,302,515 字节）。
+- `build-windows`：通过。日志逐行实证 `##[group]Run npm run tauri -- build -- --locked` → `> tauri build -- --locked`（内层 `--` 在 bash 下存活）。
 - `verify-artifact`：通过（恰一个安装包、文件名精确匹配、`file` 识别为 Windows PE、生成 SHA256SUMS.txt）。
-- `draft-release`：在 `release` environment 人工批准后通过，创建草稿 Release「Hinina v0.1.1」（`isDraft: true`），附件三件：安装包 20,302,515 字节、SHA256SUMS.txt 93 字节、build-metadata.json 339 字节；发布说明由 CHANGELOG 的 0.1.1 段落生成（含「0.1.0 是内部试跑版本、从未发布」的声明）。
+- `draft-release`：在 `release` environment 人工批准后通过，创建草稿 Release「Hinina v0.1.1」（`isDraft: true`）。
+
+**草稿当前的附件（以第 3 次尝试为准）**：
+
+| 附件 | 大小 | SHA-256 |
+|---|---|---|
+| `Hinina_0.1.1_x64-setup.exe` | 20,306,342 | `99071e1152939f87aa4f5a3a20aad965c6bf42bb4bce8e8c0bf56163ae2b42e4` |
+| `SHA256SUMS.txt` | 93 | — |
+| `build-metadata.json` | 339 | tag `v0.1.1` / commit `27ea3d4` / built_at 12:02:06Z / node 22.14.0 / npm 11.18.0 / rustc+rustc 1.96.0 / target x86_64-pc-windows-msvc / bundle nsis / `signed: false` |
+
+**发布说明的手动修正**：草稿说明由 tag 提交（`27ea3d4`）里的 CHANGELOG 生成，当时那句是「`v0.1.0` 标签是发布链路的试跑记录」。由于 tag 不移动、而 CHANGELOG 后续改成「0.1.0 是内部试跑版本（试跑标签已清理）」，已用 `gh release edit v0.1.1 --notes-file` 重写草稿说明（**草稿可改，公开后不可改**）。这暴露一条流程约束：**发布说明取自 tag 所指提交，tag 之后对 CHANGELOG 的修正不会自动反映到草稿**，需要在草稿阶段手动同步。
 
 **验收状态**：
 
-- 草稿人工验收：**按版本策略推迟**——0.x 以 CI 验证为准，本机核验（重算 SHA256 + 干净环境安装）留到 1.0.0 起执行，见 `RELEASE.md §五` 版本分级验收（维护者裁定）
-- 发布运行不被 test 子调用取消的端到端确认：**两轮均已确认**（v0.1.0 首轮与 v0.1.1 正式轮）
+- 附件校验（本机）：**已执行一次**（2026-10-27）——把三个附件下载到 `D:/DevTool/hinina-verify-20261027-205109`（D 盘临时目录），本地 `sha256sum` 重算得 `99071e11…2b42e4`，与发布内 `SHA256SUMS.txt` 逐字符一致，文件大小 20,306,342 与 API 记录一致。
+- 干净环境安装验收：**按版本策略推迟**——0.x 不要求，1.0.0 起强制执行，见 `RELEASE.md §五` 版本分级验收（维护者裁定）
+- 发布运行不被 test 子调用取消的端到端确认：**三轮均已确认**（v0.1.0 首轮与 v0.1.1 的三个尝试）
 
 **拒绝路径验证（两条，均已实测）**：
 
@@ -176,4 +193,15 @@
 | 文档数字与措辞过期：§十一 写「29 项」（实际 33）；`Architecture.md` 的 scripts 说明仍写「五处版本」、文件头仍是 2026-10-24 | 属实。改为「该轮后 29 项；四轮累计 33 项」；Architecture 改为「五个文件六处版本值」并把最后更新日期改为 2026-10-27 |
 | `RELEASE.md §四` 的「`queue: single`」不是 GitHub 语法 | 属实。改为描述实际语义：并发组默认「同时最多一个运行中 + 一个排队」，新排队项替换较旧的排队项（旧的被取消、不报失败）；并注明 GitHub 没有 `queue:` 配置项 |
 | `release` 环境没有部署分支/标签限制（`deployment_branch_policy: null`） | 属实，已加固：改为 custom 策略，仅允许 `v*` 标签部署（policy id 64530431，`required_reviewers` 保留）。验证方式：单独重跑 run 40483797433 的 `draft-release` job，先进入 waiting（说明标签通过了策略校验），批准后成功——合法 tag 部署未被挡住 |
-| §十/§十一 引用的 orgs/community#30708 与 actions/runner#3146 未独立核实 | 本轮已复核原帖：#30708 明确 caller 被取消的日志原文，根因是 callee 中 `github.workflow` 取调用方名；#3146 明确 callee 中 `event_name` 取调用方原始事件。两者**均为社区实证、无 GitHub 维护者确认**，文档已按此标注证据等级；本仓库两次真实运行（40474819558、40483797433）独立验证了结论（发布运行未被嵌套 test 取消） |
+| §十/§十一 引用的 orgs/community#30708 与 actions/runner#3146 未独立核实 | 出处与证据等级：#30708 是 **GitHub Discussions 帖子**（`gh` 读不了 Discussion，只能网页/WebFetch 读取），其正文含 caller 被取消的日志原文；#3146 是 actions/runner 的**用户提问 issue**，内容与文档论断一致，但**无维护者确认**，两人都属社区证据、非官方语义。文档已删除「已复核原帖」这类第三方无法验证的过程陈述，只保留出处、内容要点与证据等级；结论本身另有本仓库三轮真实运行独立佐证（发布运行未被嵌套 test 取消） |
+
+## 十六、第七轮复审处置（发布后）
+
+| 发现 | 核验与处置 |
+|---|---|
+| §六 记录的是第 1 次尝试的安装包大小（20,302,515），而草稿当前文件是第 2 次构建的 20,306,342；PR 未记录当前校验和，也未说明草稿附件已被替换 | 属实。§六 改为**三次尝试表**（deployment 时间 10:02:55Z / 12:02:33Z / 12:32:44Z）并列出草稿当前附件表：安装包 20,306,342、SHA-256 `99071e11…2b42e4`、`build-metadata.json` 的关键字段。第 1 次与第 2 次大小不同源于 NSIS 嵌入时间戳；第 3 次不重建、摘要不变 |
+| PR 描述称「负向路径仍待回填」，与 diff 矛盾 | 属实（描述写于补齐之前）。已更新 PR 描述，补上负向与幂等结果 |
+| 第 3 次尝试（仅重跑 `draft-release`，用于验证部署策略）未记入文档 | 属实。已并入 §六 尝试表与 §五 的环境加固说明 |
+| 草稿说明仍是 tag 提交里的旧文案（「v0.1.0 标签是发布链路的试跑记录」），而该标签已删除 | 属实。已用 `gh release edit v0.1.1 --notes-file` 重写草稿说明（草稿可改）。并在 §六 记录这条流程约束：发布说明取自 tag 所指提交，tag 之后修改 CHANGELOG 不会自动同步到草稿 |
+| 「已复核原帖」无法被第三方验证 | 属实。见上一行处置：改为标注出处与证据等级，不再写过程性断言 |
+| 本机核验此前一次也没做过，而政策说 0.1.1 以 CI 为准 | 维护者要求补一次实测：已把三个附件下载到 D 盘临时目录（`D:/DevTool/hinina-verify-20261027-205109`），本地重算 SHA-256 = `99071e1152939f87aa4f5a3a20aad965c6bf42bb4bce8e8c0bf56163ae2b42e4`，与发布内 `SHA256SUMS.txt` 逐字符一致。结论写入 §六「验收状态」；**干净环境安装验收仍按政策留到 1.0.0** |
