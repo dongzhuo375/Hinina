@@ -18,7 +18,7 @@
 - `infra::storage::Storage`
 
 ## 被依赖
-暂无（未被 infra 外部模块直接引用，预期由 `service::config` 通过 trait 使用）
+- `core::context`（`AppContext::init` 构造本实现并注入 `ConfigService<FsConfigRepository>`，经 `core::repository::config_repo` trait 使用）
 
 ## 逻辑流程
 配置文件以 JSON 格式存储在 `{storage.base_dir}/{config_path}` 单文件中。

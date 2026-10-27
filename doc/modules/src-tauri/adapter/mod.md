@@ -1,10 +1,10 @@
 # mod
 
 ## 职责
-adapter 模块根文件：声明 HOJ、Hydro、QDUOJ、HUSTOJ 四个 OJ 适配器子模块（各自组合实现拆分的 Provider trait），并定义适配器层的公共形状 —— 构造依赖 `AdapterDeps`、工厂 trait `AdapterFactory` 与内建工厂清单 `factories()`。「有哪些 OJ」是数据：接入新 OJ = 新建一个子目录 + 在 `factories()` 加一行，不需要修改 core / infra / commands 的任何文件。
+adapter 模块根文件：声明 HOJ、Hydro、QDUOJ、HUSTOJ 四个 OJ 适配器子模块（各自组合实现拆分的 Provider trait）与时间解析公共子模块 `time`，并定义适配器层的公共形状 —— 构造依赖 `AdapterDeps`、工厂 trait `AdapterFactory` 与内建工厂清单 `factories()`。「有哪些 OJ」是数据：接入新 OJ = 新建一个子目录 + 在 `factories()` 加一行，不需要修改 core / infra / commands 的任何文件。
 
 ## 核心类型/函数
-- `pub mod hoj / hydro / qduoj / hustoj` — OJ 适配器子模块声明（`hydro` 为完整实现，`qduoj` / `hustoj` 仍为骨架）
+- `pub mod hoj / hydro / qduoj / hustoj / time` — OJ 适配器子模块声明（`hydro` 为完整实现，`qduoj` / `hustoj` 仍为骨架；`time` 为跨适配器共用的比赛时间解析，见 `time.md`）
 - **`AdapterDeps`** — 适配器构造依赖（`http_client: Arc<HttpClient>`, `event_bus: Arc<CoreEventBus>`, `session_repo: Arc<dyn SessionRepository>`, `storage: Arc<Storage>`）。**只准 infra 依赖**（硬约束：禁止把 Service 塞进 `AdapterDeps`，与「插件只能访问 `plugin/api`，禁止直接调用内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界就彻底糊掉了）。各适配器按需消费：HOJ 用 http + event_bus + session_repo（凭证轮换当场落盘、落盘成功后发布 `CoreEvent::TokenRotated`），Hydro 只用 http_client。`session_repo` 是**仓库（infra 侧）**而不是 Service：Provider 侧凭证轮换需要的是「会话持久化能力」，而不是认证业务逻辑
 - **`AdapterFactory`** — OJ 适配器工厂 trait（`Send + Sync`）：
   - `id() -> &'static str` — OJ 身份自声明（稳定契约：决定会话文件名 `sessions/{id}.json`，并与 `oj.instances[].id` 匹配）

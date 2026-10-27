@@ -13,6 +13,7 @@ Hydro 响应 DTO 与全部归一化纯函数。**不含任何网络调用**，�
 - `HydroErrorBody` / `HydroErrorEnvelope` — `{"error":{"name","params","code"}}` 的 DTO（**没有 message 字段**）
 - `parse_hydro_error(&Value) -> Option<AppError>` — 错误包络 → `AppError`，变体判定委托给 `error::HydroError` 的 `From` 实现（会话失效与业务错误的边界集中在那里）
 - `login_redirect_url(&Value) -> Option<String>` — 识别 JSON 化的「未登录重定向」`{"url":"/login?redirect=..."}`。判定保守：只认指向 `/login` 的 url
+- `domain_redirect_error(&Value) -> Option<AppError>` — 识别「`url` 以 `/d/` 开头的域路径重定向」（只认相对路径）：含义是 base_url 的域前缀与该部署不匹配（Host 绑定到了另一个域）或当前账号尚未加入该域，不识别会漏进 DTO 解析报成「响应字段不匹配」。变体取 `Unknown` 而非 `Auth` —— 这不是会话失效，不该触发登出（前端 `sessionGuard` 只认 `Auth`）
 - `extract_sid(&HeaderMap) -> Option<String>` — 从 `Set-Cookie: sid=<32 位>` 提取会话 ID。登录响应体里**没有** token，这是唯一的取 sid 途径；取第一段 `name=value`，忽略 `Expires`/`Path`/`SameSite` 属性段
 
 ### 时间

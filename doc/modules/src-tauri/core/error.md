@@ -32,7 +32,8 @@
 - `core::provider::registry`
 - `core::repository::workspace_repo`
 - `core::repository::config_repo`
-- `core::repository::plugin_repo`
+- `plugin::query`（插件作用域查询以 `AppError` 上抛服务端事实）
+- `plugin::host::api_error`（`redact_app_error` 把 `AppError` 归一为插件错误码，见其模块文档）
 - `infra::fs_config_repo`
 - `infra::fs_plugin_repo`
 - `infra::fs_workspace_repo`

@@ -4,7 +4,7 @@
 定义核心领域对象 `Workspace`，负责代码存储、自动保存、崩溃恢复、比赛隔离、模板管理及缓存。工作区按 `(contest_id, problem_id)` 隔离，通过 `HashMap<String, String>` 管理多文件。提供 `new()`、`touch()`、`mark_dirty()`、`mark_clean()` 辅助方法。
 
 ## 核心类型/函数
-- **`Workspace`** — 工作区 struct，字段：`id`, `contest_id`, `problem_id`, `root_path`, `files`（文件名→内容映射）, `language`, `is_dirty`, `created_at`, `updated_at`
+- **`Workspace`** — 工作区 struct，字段：`id`, `contest_id`, `problem_id`, `root_path`, `files`（文件名→内容映射）, `active_file: Option<String>`（当前代码文件，`#[serde(default)]`——新工作区与历史工作区可为 `None`；`delete_workspace_file` 的守卫与恢复展示都以它为准）, `language`, `is_dirty`, `created_at`, `updated_at`
 - **`Workspace::new(contest_id, problem_id, root_path)`** — 构造器，自动生成 id 并填充 UTC 毫秒级时间戳
 - **`Workspace::touch(&mut self)`** — 更新 `updated_at` 为当前 UTC 毫秒时间戳
 - **`Workspace::mark_dirty(&mut self)`** — 标记未保存 + 更新 `updated_at`

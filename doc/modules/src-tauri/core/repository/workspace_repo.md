@@ -11,6 +11,7 @@
   - `delete_file(&self, workspace_id, path) -> AppResult<()>` — 删除单个文件（文件不存在时为无操作，幂等；P62 旧代码文件清理）
   - `delete_workspace(&self, workspace_id) -> AppResult<()>` — 删除工作区
   - `exists(&self, workspace_id) -> bool` — 检查是否存在
+  - `list_workspace_ids(&self) -> AppResult<Vec<String>>` — 列出所有工作区 ID（`find_or_create` 扫描匹配用）
 
 ## 直接依赖
 - `std::path::{Path, PathBuf}`
