@@ -113,7 +113,9 @@ jobs:
         with:
           name: release-windows-unsigned
           path: release-staging/*
-          retention-days: 7
+          # 30 天：draft-release 可能在 release environment 等待人工审批数日，
+          # 产物必须活过审批窗口（超期需整跑 gh run rerun <id>，见 RELEASE.md §四）。
+          retention-days: 30
           if-no-files-found: error
 
   verify-artifact:
@@ -160,7 +162,7 @@ jobs:
         with:
           name: release-windows-verified
           path: artifact/*
-          retention-days: 7
+          retention-days: 30
           if-no-files-found: error
 
   # 任一前置失败则本 job 跳过（默认语义），不产生半成品草稿。
@@ -190,15 +192,21 @@ jobs:
         run: |
           set -- artifact/Hinina_*-setup.exe artifact/SHA256SUMS.txt artifact/build-metadata.json
           title="Hinina $GITHUB_REF_NAME"
-          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')"
+          # 先探状态：只有「确实不存在」才 create。把 stderr 一并吞掉会把认证/网络/
+          # 限流故障误判为「无 release」，进而走 create 报出误导性错误，故保留 stderr
+          # 并按输出区分。
+          if is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>view.err)"; then
             if [ "$is_draft" != "true" ]; then
               echo "::error::release $GITHUB_REF_NAME is already published; published releases are immutable - deliver fixes as a new version"
               exit 1
             fi
             gh release upload "$GITHUB_REF_NAME" "$@" --clobber
             gh release edit "$GITHUB_REF_NAME" --draft --title "$title" --notes-file notes.md
-          else
+          elif grep -qiE 'release not found|HTTP 404|Not Found' view.err; then
             gh release create "$GITHUB_REF_NAME" "$@" --draft --title "$title" --notes-file notes.md
+          else
+            echo "::error::failed to inspect release $GITHUB_REF_NAME (not a not-found error):"
+            cat view.err
+            exit 1
           fi
           gh release view "$GITHUB_REF_NAME" --json isDraft,assets --jq '"draft=\(.isDraft) assets=\(.assets | length)"'

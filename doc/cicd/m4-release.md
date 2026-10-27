@@ -10,11 +10,11 @@
 
 ## 二、版本门禁设计决策
 
-- 门禁对象为**五处版本**（package.json、package-lock.json 根与 packages[""]、Cargo.toml [package]、Cargo.lock hinina 条目、tauri.conf.json），必须与 package.json 一致。
-- 脚本四种模式：无参（一致性报告）、`--tag vX.Y.Z`（格式 `^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$` 且与应用版本一致）、`--changelog`（存在对应 `## [X.Y.Z]` 段落，同时兼容无括号写法）、`--extract-notes`（stdout 只输出段落正文供草稿发布说明，诊断走 stderr）、`--print-version`（verify-artifact 断言产物文件名用；仅读 package.json 不做一致性校验——前提是调用前已跑过完整门禁，release.yml 在同一 job 内先复跑门禁再取版本号）。
+- 门禁对象为**五个文件的六处版本值**（package.json；package-lock.json 的根 `version` 与 `packages[""].version` 两处；Cargo.toml `[package]`；Cargo.lock 的 `hinina` 条目；tauri.conf.json），必须与 package.json 一致。
+- 脚本四种模式：无参（一致性报告）、`--tag vX.Y.Z`（格式 `^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$` 且与应用版本一致；预发布标签不受支持）、`--changelog`（存在对应 `## [X.Y.Z]` 段落，同时兼容无括号写法；带日期时必须是真实存在的 `YYYY-MM-DD`）、`--extract-notes`（stdout 只输出段落正文供草稿发布说明，诊断走 stderr）、`--print-version`（verify-artifact 断言产物文件名用；仅读 package.json 不做一致性校验——前提是调用前已跑过完整门禁，release.yml 在同一 job 内先复跑门禁再取版本号）。`--tag` 与 `--print-version`/`--extract-notes` 组合会显式报错（这两条路径不消费 tag，静默忽略会掩盖打错的标签）。
 - 所有文件读取/JSON 解析失败经 runCli 统一转为一行 `error: …` 并以 exit 1 结束，不抛栈。
 - Cargo.lock 解析只认 `name = "hinina"` 条目内的 version，依赖包条目不参与比较。
-- 测试：正向用例直接跑真实仓库（0.1.0）；负向用例用 tmp 目录 fixture；做过变异验证（破坏 Cargo.lock 包名判据后正向用例全部变红，已还原）。
+- 测试：正向用例直接跑真实仓库（版本从 package.json 动态读取，升版不会假红）；负向用例用 tmp 目录 fixture；做过变异验证（破坏 Cargo.lock 包名判据后正向用例全部变红，已还原）。
 
 ## 三、release.yml 结构与关键决策
 
@@ -28,7 +28,7 @@
 
 ## 四、本地验证
 
-- 门禁 spec 全绿，含「真实仓库全门禁 `--tag v0.1.0 --changelog` exit 0」用例；变异验证通过。
+- 门禁 spec 全绿，含「真实仓库全门禁 `--tag v<当前版本> --changelog` exit 0」用例（版本动态读取）；变异验证通过。
 - release.yml / ci.yml 经 PyYAML 解析通过；job 名与 m0-baseline §六稳定名逐一对上。
 - `npm test` / `npm run build` / `npx tsc -p tsconfig.node.json --noEmit` 全绿（计数不记入本文档）。
 - Rust 零改动。
@@ -38,7 +38,7 @@
 1. 启用 GitHub 私密漏洞报告（PVR）——`SECURITY.md` 的报告渠道随本 PR 合入即真。
 2. 创建受保护 environment `release`（required reviewer）——draft-release 的人工批准随之生效。
 3. 创建 tag Ruleset：限制 `v*` 标签的创建与更新，防止已发布标签被移动。
-4. 打首个试跑标签 `v0.1.0` 跑通 Release 工作流，产出草稿 Release 供人工验收（按 `RELEASE.md` §五清单）。
+4. 打首个试跑标签跑通 Release 工作流，产出草稿 Release 供人工验收（按 `RELEASE.md` §五清单）。**实际执行**：试跑用 `v0.1.0` 但构建失败（§六）；因标签不可变策略不重指旧标签，正式发布改用 `v0.1.1`（§十四）。
 
 ## 六、试跑结果
 
@@ -51,7 +51,7 @@
 
 **待回填**：
 
-- 修复后重跑 run 与草稿 Release 链接：<待回填>
+- `v0.1.1` 正式发布运行与草稿 Release 链接：<待回填>
 - 草稿验收（按 `RELEASE.md` §五清单）：<待回填>
 - 失败路径验证（validate 拒绝指向非 main 的标签 / 版本漂移的标签）：<待回填>
 - 发布运行不被 test 子调用取消的端到端确认：**首轮已确认**（见上）
@@ -107,3 +107,33 @@
 |---|---|
 | `npm run tauri -- build -- --locked` 在本地 bash 实证可用、在 runner 上失败：windows runner 默认 shell 为 pwsh，把两个 `--` 都吞掉，实际展开为 `tauri build --locked`，被 tauri 以 `unexpected argument '--locked'` 拒收（run 40474819558，build-windows 步骤） | 属实（CI 日志逐行实证：`##[group]Run npm run tauri -- build -- --locked` 后紧跟 `> tauri build --locked`）。根因是 npm 的 `--` 转发链受 shell 影响：bash 下内层 `--` 存活、pwsh 下两个都被剥除。**修复**：该步骤显式 `shell: bash`（runner 已具备，corepack/版本校验步骤已在用），并在步骤注释里写明两种 shell 的差别与失败模式（显式失败、不静默出包）。修复需新提交进 main 后重新打 tag——tag 运行使用的是 tag 所指提交里的 workflow 文件，rerun 不会带上修复 |
 | 首轮试跑同时验证了两件事（正面结论） | ① `validate` 与门禁在真实 tag 上全通过；② 嵌套 `test`（ci.yml 经 workflow_call）全绿且**外层发布运行未被取消**——§十 的并发组互消推演与修复在真实运行上得到实证 |
+
+## 十三、试跑评审（第五轮）处置：发布链路加固
+
+| 发现 | 核验与处置 |
+|---|---|
+| artifact `retention-days: 7` 短于 `draft-release` 的人工审批等待期；超期后 `gh run rerun --failed` 仍会失败 | 属实。**恢复路径按评审纠正**：`rerun --failed` 确实无效（产物过期），但**完整重跑 `gh run rerun <id>`（不带 `--failed`）会重建全部产物，不需要重推标签**。处置：两个 artifact 的 retention 提到 **30 天**，并在 `RELEASE.md §四` 增「审批超期」段写明完整重跑方式 |
+| `gh release view … > /dev/null 2>&1` 把认证/网络/限流故障也当成「无 release」，随后 create 报出误导性错误 | 属实。改为保留 stderr 并按内容区分：命中 `release not found` / `HTTP 404` 才走 create，其它故障显式失败并打印 stderr |
+| `Date.parse` 接受不存在的日期：`2026-02-31` 解析成功并滚到 `2026-03-03`，能过门禁，与「合法日期」说法矛盾 | 属实（本地实证：`Date.parse('2026-02-31T00:00:00Z')` 返回合法时间戳、`toISOString()` 为 `2026-03-03T00:00:00.000Z`）。改为 UTC 往返校验（`toISOString().startsWith(date)`）。新增用例：`2026-02-31` 拒绝、闰年 `2028-02-29` 接受、平年 `2026-02-29` 拒绝 |
+| `--tag` 与 `--print-version` / `--extract-notes` 组合被静默忽略（两条路径提前 return） | 属实（实证：`--print-version --tag v0.0.9` exit 0，标签未参与校验）。当前无调用方这么用，但静默忽略会掩盖打错的标签。改为组合即报错 exit 1，新增用例 |
+| 「五处版本」措辞与实际六处版本值不符（package-lock.json 查 root 与 `packages[""]` 两处） | 属实。`RELEASE.md §一/§三`、本文件 §二 统一改为「**五个文件的六处版本值**」 |
+| `v*.*.*` 会匹配预发布标签（如 `v0.1.0-rc1`），门禁拒绝后产生一个看不出原因的红 run | 属实（workflow 的 tag 过滤无法排除预发布）；但失败本身是正确的。处置：门禁错误文案补明「pre-release and other tag formats are not supported by the release workflow」，`RELEASE.md §三` 同步；新增用例断言该说明存在 |
+| （评审新发现，Medium）`integration.yml` windows leg 的 `npm run tauri build -- ${{ matrix.bundleArgs }}` 同样未钉 shell，`--` 透传在 pwsh 下会被剥除，当前仅因 windows 的 `bundleArgs` 为空而侥幸可用 | 属实。已给该步骤加 `shell: bash` 与注释；与 `release.yml` 的注释「步骤照抄 integration.yml」保持同源约束 |
+
+## 十四、标签策略决定：不重指 v0.1.0，改发 v0.1.1
+
+首轮试跑的 `v0.1.0` 指向 `2f737c4`（build 步骤在 pwsh 下不可用的提交）。两条出路：
+
+| 方案 | 代价与风险 |
+|---|---|
+| 绕过 Ruleset 删除并重建 `v0.1.0` | 需要管理员 bypass 一个被设计为防篡改的标签；把「已推送即不可变」的规则用在第一次试跑上就破例，规则形同虚设 |
+| 升版 `v0.1.1`，保留 `v0.1.0` 为失败记录 | 需要改动五个文件的六处版本值 + CHANGELOG；但符合 Ruleset 的设计意图，也让「修复以新版本交付」这条纪律从第一版就成立 |
+
+**决定：采用后者。** 处置：
+
+- 版本值 0.1.0 → 0.1.1（package.json、package-lock.json 两处、Cargo.toml、Cargo.lock 的 `hinina` 条目、tauri.conf.json）；
+- CHANGELOG 的版本段落改为 `## [0.1.1] - 2026-10-27`，并注明 `v0.1.0` 是试跑记录、从未产生 Release；
+- `RELEASE.md §二` 增加「标签不可变策略」：标签不删除、不重指，发布运行失败时该标签保留为记录，修复以新版本交付；
+- `v0.1.0` 标签与其失败 run 保留，作为发布链路的首次真实演练证据。
+
+规范含义：`v0.1.0` 永远不会成为已发布版本，首个正式版本是 `v0.1.1`。

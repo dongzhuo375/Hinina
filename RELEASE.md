@@ -4,7 +4,7 @@ Hinina 的 Windows x64 NSIS 发布流程（M4 范围）。OS 代码签名接入�
 
 ## 一、版本准备
 
-1. 确认五处版本一致：`npm run release:check`（package.json、package-lock.json、src-tauri/Cargo.toml、src-tauri/Cargo.lock、src-tauri/tauri.conf.json）。
+1. 确认五个文件里的六处版本值一致：`npm run release:check`（package.json；package-lock.json 的根 `version` 与 `packages[""].version` 两处；src-tauri/Cargo.toml；src-tauri/Cargo.lock 的 `hinina` 条目；src-tauri/tauri.conf.json）。
 2. 在 `CHANGELOG.md` 将 `## [Unreleased]` 内容整理进新版本段落，并填入发布日期。
 3. 版本推进经普通 PR 合入 main，等待 ci-required 绿；打标签前保持工作树干净。
 
@@ -17,11 +17,13 @@ git push origin vX.Y.Z
 
 推送标签后 Release 工作流自动运行；标签受 Ruleset 保护，不可随意创建/移动。
 
+**标签不可变策略**：标签一旦推送就不删除、不重指（Ruleset 对 `refs/tags/v*` 禁止创建/更新/删除，仅仓库管理员可 bypass，且**正常流程不使用 bypass**）。若某个标签的发布运行失败（例如构建步骤缺陷），该标签保留为失败记录，修复后**以新版本号重新发布**——不在旧标签上重试、不移动标签。示例：`v0.1.0` 为试跑失败记录（未产生 Release），首个正式版本是 `v0.1.1`。
+
 ## 三、工作流阶段（.github/workflows/release.yml）
 
 | Job | 说明 |
 | --- | --- |
-| validate | 校验 tag 格式、tag 指向 main 历史、五处版本一致、CHANGELOG 段落存在 |
+| validate | 校验 tag 格式（仅 `v<major>.<minor>.<patch>`，预发布标签不受支持）、tag 指向 main 历史、五个文件六处版本值一致、CHANGELOG 段落存在（含真实日期） |
 | test | 通过 workflow_call 复用完整必需 CI（ci.yml），发布不跳过任何检查 |
 | build-windows | Windows x64 NSIS 构建，产出安装包与 build-metadata.json（tag/commit/工具链版本） |
 | verify-artifact | 校验安装包文件名（`Hinina_<版本>_x64-setup.exe`）与 PE 文件类型，生成 SHA256SUMS.txt |
@@ -32,6 +34,8 @@ git push origin vX.Y.Z
 - 个别 job 失败：`gh run rerun --failed <run-id>`。
 - 同一标签重跑会复用并更新**同一个草稿**，不创建重复 Release。
 - 已正式发布的 Release 不可变：重跑遇到已发布的同名 Release 会显式失败，修复应走新版本。
+
+**审批超期**：`draft-release` 会在受保护 environment `release` 等待人工批准，期间构建产物需存活。产物保留 30 天；若草稿步骤等待超过该期限，`gh run rerun --failed` 会因产物已过期而再次失败，此时用**完整重跑** `gh run rerun <run-id>`（不带 `--failed`）重建全部产物——不需要重新推标签。
 
 **并发排队语义**：release.yml 的并发组是默认的 `queue: single`——组内已有排队项时，新进入的排队项会**取消并替换**较早的排队项。也就是说同一标签若在短时间内产生多个发布运行，只有最新的会实际执行，更早的排队运行被静默取消（不会报失败）。正常流程不受影响：标签受 Ruleset 保护，重跑用 `gh run rerun` 不产生新运行；但**不要为同一标签重复推送触发多次运行**，如需重新发布请用 rerun。
 
