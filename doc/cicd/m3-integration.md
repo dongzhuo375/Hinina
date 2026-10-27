@@ -201,3 +201,7 @@ apt 抖动在本记录之后又复现 3 次（#60 的 ubuntu rust-test、v0.1.1 
 - **超时收进 job 预算**：两轮最坏约 20 分钟（原来约 29 分钟，超过 rust-lint 的 25 分钟上限，必然以「job 取消」收场）；同时把 rust-lint 25→32、stress-repeat 30→40、rust-coverage 30→45。
 
 **runner 实证**（run 40517984943）：冷缓存 rust-lint 11m40s（第 1 次尝试被镜像挂住 ~10 分钟后切镜像成功）；同一 job 重跑（job 122243876270）日志 `Cache restored from key: tauri-apt-archives-Linux-v1` + `Need to get 0 B/61.7 MB of archives`，耗时 **65 秒**。
+
+**e2e 也套用同款缓存（同 PR）**：e2e 的 `playwright install --with-deps` 每次都要拉同一段 25.9 MB 的 apt 包——实测镜像快时 1s、慢时 5min9s（run 40483752731）。key 取 **playwright chromium 依赖清单**的候选版本哈希：该清单在 `playwright-core/lib/coreBundle.js` 内的 `chromium: [...]` 数组（ubuntu runner 上与 `--with-deps` 实际安装同源；Windows 上 `--dry-run` 不输出 linux deps，故用 node 解析 bundle 而非解析 dry-run 输出）。`restore-keys` 前缀与复合 action 共享（`tauri-apt-archives-Linux-`），两处缓存可互相补货。
+
+**dispatch 实证**（run 40530740054，e2e job 122282520231）：key 解析得 `0d743f48ff107a59` → 主 key miss → 前缀复用旧缓存；`playwright install --with-deps` 恰逢镜像极慢（25.9 MB 下载 **13min42s**，24.7 kB/s），但完成后 e2e 的 deb 成功存为新 key（25.9 MB）——**下一次起 e2e 遇到慢镜像也不再受苦**。全 7 job 绿。
