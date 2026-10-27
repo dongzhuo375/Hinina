@@ -185,7 +185,7 @@
 
 **验证**：前端 **576 单测**（574 + 两条）、15 E2E、build/tsc/fmt 全绿；runner 复跑见下。
 
-**runner 复跑**（run 40327257825，4eef32a）：7 job + summary 全绿；stress 日志确认 `99-hinina-apt` drop-in 生效、`Cache restored successfully`。**同时暴露新缺口**：同一批次的 PR run 中 ubuntu rust-test 在复合 action 的 apt 步**卡住 33 分钟**（Retries/连接超时兜不住镜像慢速挂起）→ 追加硬墙钟：`sudo timeout 420 apt-get update` / `timeout 900 apt-get install`、e2e 的 `playwright install --with-deps` 包 `timeout 900`（c6983c1），故障将在 ~10/15 分钟内显性失败而非等 job 45 分钟上限。
+**runner 复跑**（run 40327257825，4eef32a）：7 job + summary 全绿；stress 日志确认 `99-hinina-apt` drop-in 生效、`Cache restored successfully`。**同时暴露新缺口**：同一批次的 PR run 中 ubuntu rust-test 在复合 action 的 apt 步**卡住 33 分钟**（Retries/连接超时兜不住镜像慢速挂起）→ 追加硬墙钟：`sudo timeout 420 apt-get update` / `timeout 900 apt-get install`、e2e 的 `playwright install --with-deps` 包 `timeout 900`（c6983c1），故障将在 ~10/15 分钟内显性失败而非等 job 45 分钟上限。**（该结论已过期：这些超时数值与「只能等失败后 rerun」的判断都被 §十六 的 deb 缓存取代；现行值为两轮 90/600s 与 60/420s。）**
 
 **main 合并后验证**：PR #58 squash 合并（`615d0a6`）触发的 push run **40333654166：7 个 job + integration-summary 全绿**——三平台构建、stress 10 轮、覆盖基线、e2e 在 main 上按最终形态复跑通过。
 
@@ -195,7 +195,8 @@ apt 抖动在本记录之后又复现 3 次（#60 的 ubuntu rust-test、v0.1.1 
 
 复合 action 因此改为四段式（探针 → 准备缓存目录 → 恢复缓存 → 安装），并加镜像回退：
 
-- **deb 缓存**：`actions/cache` 缓存 `/var/cache/apt/archives`，key `tauri-apt-archives-Linux-v1`，命中时 `Need to get 0 B/… of archives`，不再下载。目录需在恢复前 `chown` 给 runner；apt 以 root 运行会把 `partial` 子目录变成 root 属主，因此在安装步骤之后追加 `chmod -R a+rX`——否则 post-save 打包时报 `tar: …/archives/partial: Cannot open: Permission denied`（实测踩到）。
+- **deb 缓存**：`actions/cache` 缓存 `/var/cache/apt/archives`，命中时 `Need to get 0 B/… of archives`，不再下载。
+- **key 不能写死**：`actions/cache` 的条目**不可覆盖**（同 key 命中后不再保存），写死 `-v1` 会让缓存永久停在上游更新前的版本——之后每次都要重下变化的包且再也存不进去。改为 key = **候选版本哈希**（`apt-cache policy` 取各缺失包 Candidate 版本，sha256 截 16 位），配合 `restore-keys` 前缀：上游更新 → key 变化 → 存新缓存；版本变化时仍能通过前缀复用旧缓存里的其余 .deb。`apt-get update` 失败时退回 `unresolved` key，不阻塞安装。目录需在恢复前 `chown` 给 runner；apt 以 root 运行会把 `partial` 子目录变成 root 属主，因此在安装步骤之后追加 `chmod -R a+rX`——否则 post-save 打包时报 `tar: …/archives/partial: Cannot open: Permission denied`（实测踩到）。
 - **镜像回退**：第 2 次尝试把 `azure.archive.ubuntu.com` 换成 `archive.ubuntu.com`。
 - **超时收进 job 预算**：两轮最坏约 20 分钟（原来约 29 分钟，超过 rust-lint 的 25 分钟上限，必然以「job 取消」收场）；同时把 rust-lint 25→32、stress-repeat 30→40、rust-coverage 30→45。
 

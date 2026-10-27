@@ -7,7 +7,8 @@
 # 抗抖动策略（按代价从低到高）：
 # ① 已装快路径：runner 镜像自带全部依赖时直接跳过；
 # ② **deb 缓存**：跨运行复用 /var/cache/apt/archives，命中时 apt 直接从本地 .deb
-#    安装、不再下载（这是「每次都要等几分钟」的根因）；
+#    安装、不再下载（这是「每次都要等几分钟」的根因）。key 取候选版本哈希——
+#    actions/cache 的条目不可覆盖，写死 key 会让缓存永远停在上游更新前的内容；
 # ③ 镜像回退：第 2 次尝试把 azure.archive.ubuntu.com 换成 archive.ubuntu.com；
 # ④ 硬墙钟：每次尝试都有上限，最坏耗时约 20 分钟，低于调用方 job 的 timeout。
 name: 'Install Tauri 2 system dependencies'
@@ -44,6 +45,32 @@ runs:
         sudo mkdir -p /var/cache/apt/archives/partial
         sudo chown -R "$USER":"$USER" /var/cache/apt/archives
 
+    # actions/cache 的条目不可覆盖：同一 key 命中后不会再保存。若 key 写死，上游一更新
+    # 包版本，缓存就永久停留在旧内容——每次都要重下变化的包，且再也无法刷新。
+    # 因此 key 取「当前候选版本」的哈希：上游更新 → key 变化 → 存新缓存；
+    # 配合 restore-keys 前缀，版本变化时仍能复用到旧缓存里的其余 .deb。
+    - name: Resolve package versions for the cache key
+      id: pkgs
+      if: steps.probe.outputs.missing != ''
+      shell: bash
+      env:
+        MISSING: ${{ steps.probe.outputs.missing }}
+      run: |
+        key="unresolved"
+        # update 失败不应阻塞：退回未知 key，安装步骤会自行重试 update。
+        if sudo timeout 90 apt-get update; then
+          versions=""
+          for pkg in $MISSING; do
+            v="$(apt-cache policy "$pkg" | awk '/Candidate:/{print $2; exit}')"
+            versions="$versions$pkg=$v;"
+          done
+          key="$(printf '%s' "$versions" | sha256sum | cut -c1-16)"
+          echo "resolved key from candidate versions: $key"
+        else
+          echo "::warning::apt-get update failed while resolving cache key; using the fallback key"
+        fi
+        echo "key=$key" >> "$GITHUB_OUTPUT"
+
     - name: Restore apt package cache
       if: steps.probe.outputs.missing != ''
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -51,8 +78,7 @@ runs:
       continue-on-error: true
       with:
         path: /var/cache/apt/archives
-        # 清单变化时手动 bump 末尾版本号，让旧缓存自然失效。
-        key: tauri-apt-archives-${{ runner.os }}-v1
+        key: tauri-apt-archives-${{ runner.os }}-${{ steps.pkgs.outputs.key }}
         restore-keys: |
           tauri-apt-archives-${{ runner.os }}-
 
