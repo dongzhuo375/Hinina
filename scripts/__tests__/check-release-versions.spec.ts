@@ -138,6 +138,12 @@ describe('checkTag', () => {
   it('rejects a well-formed tag that does not match the app version', () => {
     expect(checkTag('v1.2.4', '1.2.3').ok).toBe(false)
   })
+
+  it('explains that pre-release tag formats are unsupported', () => {
+    const result = checkTag('v0.1.0-rc1', '0.1.0')
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('not supported')
+  })
 })
 
 describe('findChangelogSection / extractNotes', () => {
@@ -201,6 +207,29 @@ describe('findChangelogSection / extractNotes', () => {
       fixtureFiles({ 'CHANGELOG.md': '# Changelog\n\n## [1.2.3]\n\nbody\n' }),
     )
     expect(findChangelogSection(undated, APP_VERSION).found).toBe(true)
+  })
+
+  it('rejects dates that parse but do not exist (2026-02-31 rolls over to 03-03)', () => {
+    // Date.parse accepts it and rolls forward; only a round-trip check catches it.
+    expect(Number.isNaN(Date.parse('2026-02-31T00:00:00Z'))).toBe(false)
+    const root = makeFixtureRoot(
+      fixtureFiles({ 'CHANGELOG.md': '# Changelog\n\n## [1.2.3] - 2026-02-31\n\nbody\n' }),
+    )
+    const section = findChangelogSection(root, APP_VERSION)
+    expect(section.found).toBe(false)
+    expect(section.reason).toContain('invalid date')
+    expect(captureGate(['--tag', 'v1.2.3', '--changelog'], root).code).toBe(1)
+  })
+
+  it('accepts leap day of a leap year and rejects it in a non-leap year', () => {
+    const leap = makeFixtureRoot(
+      fixtureFiles({ 'CHANGELOG.md': '# Changelog\n\n## [1.2.3] - 2028-02-29\n\nbody\n' }),
+    )
+    expect(findChangelogSection(leap, APP_VERSION).found).toBe(true)
+    const nonLeap = makeFixtureRoot(
+      fixtureFiles({ 'CHANGELOG.md': '# Changelog\n\n## [1.2.3] - 2026-02-29\n\nbody\n' }),
+    )
+    expect(findChangelogSection(nonLeap, APP_VERSION).found).toBe(false)
   })
 
   it('stops notes before the trailing link-reference block', () => {
@@ -281,5 +310,15 @@ describe('runCli', () => {
     const { code, out } = captureGate(['--bogus'], makeFixtureRoot(fixtureFiles()))
     expect(code).toBe(1)
     expect(out).toContain('unknown argument')
+  })
+
+  it('rejects --tag combined with --print-version or --extract-notes instead of ignoring it', () => {
+    const root = makeFixtureRoot(fixtureFiles())
+    const withPrint = captureGate(['--print-version', '--tag', 'v1.2.3'], root)
+    expect(withPrint.code).toBe(1)
+    expect(withPrint.out).toContain('cannot be combined')
+    const withNotes = captureGate(['--extract-notes', '--tag', 'v9.9.9'], root)
+    expect(withNotes.code).toBe(1)
+    expect(withNotes.out).toContain('cannot be combined')
   })
 })

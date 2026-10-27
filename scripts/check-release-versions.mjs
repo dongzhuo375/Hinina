@@ -77,7 +77,10 @@ const TAG_PATTERN = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
 export function checkTag(tag, appVersion) {
   if (!TAG_PATTERN.test(tag)) {
-    return { ok: false, error: `tag "${tag}" is not v<major>.<minor>.<patch>` }
+    return {
+      ok: false,
+      error: `tag "${tag}" is not v<major>.<minor>.<patch> (pre-release and other tag formats are not supported by the release workflow)`,
+    }
   }
   if (tag.slice(1) !== appVersion) {
     return { ok: false, error: `tag ${tag} does not match app version ${appVersion}` }
@@ -113,8 +116,13 @@ export function findChangelogSection(root, version) {
   const dateSuffix = header.match(/^##\s+\S+\s+-\s+(.+?)\s*$/)
   if (dateSuffix) {
     const date = dateSuffix[1]
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
-      return { found: false, reason: `CHANGELOG.md section header for ${version} has an invalid date "${date}" (expected YYYY-MM-DD)` }
+    // Date.parse rolls impossible dates forward (2026-02-31 → 2026-03-03), so a
+    // pattern match alone is not enough: round-trip through UTC and require the
+    // ISO prefix to equal the input.
+    const parsed = new Date(`${/^\d{4}-\d{2}-\d{2}$/.test(date) ? date : 'invalid'}T00:00:00Z`)
+    const isRealDate = !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(date)
+    if (!isRealDate) {
+      return { found: false, reason: `CHANGELOG.md section header for ${version} has an invalid date "${date}" (expected a real YYYY-MM-DD date)` }
     }
   }
   let end = lines.length
@@ -208,6 +216,14 @@ function runGate(argv, root, log, errorLog) {
       errorLog('usage: node scripts/check-release-versions.mjs [--tag vX.Y.Z] [--changelog] [--extract-notes] [--print-version]')
       return 1
     }
+  }
+
+  // print-version reads only package.json and extract-notes only needs the app
+  // version; both would silently ignore a --tag, which would hide a mistyped or
+  // mismatched tag from the caller. Reject the combination instead.
+  if (tag !== null && (flags.printVersion || flags.extractNotes)) {
+    errorLog('error: --tag cannot be combined with --print-version or --extract-notes')
+    return 1
   }
 
   // print-version is a pure readout of the app version: it must not touch any

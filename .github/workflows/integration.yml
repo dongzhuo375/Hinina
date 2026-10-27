@@ -85,6 +85,10 @@ jobs:
           npm run build
       - name: Build desktop app (tauri build)
         id: tauri_build
+        # 显式钉 bash：`-- ${{ matrix.bundleArgs }}` 是 `--` 透传，pwsh 会把它吞掉
+        # （release.yml 首次试跑实证：同型命令在 pwsh 下 `--` 被剥除后 tauri 拒收参数）。
+        # 当前 windows leg 的 bundleArgs 为空所以侥幸可用，一旦改为非空即会失败。
+        shell: bash
         run: npm run tauri build -- ${{ matrix.bundleArgs }}
       - name: Upload smoke artifact
         id: artifact_upload
