@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-10-24 | 分支：`main`
+> 最后更新：2026-10-27 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -23,7 +23,7 @@ Hinina/
 │   └── pr-assets/                        # PR 评审用的匿名演示截图（pr-36/：login、problemset、workspace-maximized）
 ├── scripts/
 │   ├── build-plugin-scaffold.mjs          # 离线构建插件 ES module（默认脚手架；传 entry/outfile 参数构建 sdk/examples/balloon 等示例）
-│   └── check-release-versions.mjs         # 发布版本一致性门禁（五处版本/标签/CHANGELOG 段落；npm run release:check 与 release.yml validate/draft-release 共用）
+│   └── check-release-versions.mjs         # 发布版本一致性门禁（五个文件六处版本值/标签/CHANGELOG 段落与真实日期；npm run release:check 与 release.yml validate/draft-release 共用）
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明

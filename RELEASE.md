@@ -29,7 +29,7 @@ git push origin vX.Y.Z
 | test | 通过 workflow_call 复用完整必需 CI（ci.yml），发布不跳过任何检查 |
 | build-windows | Windows x64 NSIS 构建，产出安装包与 build-metadata.json（tag/commit/工具链版本） |
 | verify-artifact | 校验安装包文件名（`Hinina_<版本>_x64-setup.exe`）与 PE 文件类型，生成 SHA256SUMS.txt |
-| draft-release | 在受保护 environment（人工批准）中创建或更新草稿 Release |
+| draft-release | 在受保护 environment `release`（人工批准 + 仅允许 `v*` 标签部署）中创建或更新草稿 Release |
 
 ## 四、重跑
 
@@ -39,7 +39,7 @@ git push origin vX.Y.Z
 
 **审批超期**：`draft-release` 会在受保护 environment `release` 等待人工批准，期间构建产物需存活。产物保留 30 天；若草稿步骤等待超过该期限，`gh run rerun --failed` 会因产物已过期而再次失败，此时用**完整重跑** `gh run rerun <run-id>`（不带 `--failed`）重建全部产物——不需要重新推标签。
 
-**并发排队语义**：release.yml 的并发组是默认的 `queue: single`——组内已有排队项时，新进入的排队项会**取消并替换**较早的排队项。也就是说同一标签若在短时间内产生多个发布运行，只有最新的会实际执行，更早的排队运行被静默取消（不会报失败）。正常流程不受影响：标签受 Ruleset 保护，重跑用 `gh run rerun` 不产生新运行；但**不要为同一标签重复推送触发多次运行**，如需重新发布请用 rerun。
+**并发排队语义**：并发组默认「同一组同时最多一个运行中 + 一个排队」（GitHub 没有 `queue:` 配置项，这是默认行为）；新排队项进入时会**替换掉较旧的排队项**——旧的被取消、不会报失败。也就是说同一标签若在短时间内触发多个发布运行，只有最新的会实际执行。正常流程不受影响：标签受 Ruleset 保护，重跑用 `gh run rerun` 不产生新运行；但**不要为同一标签重复推送触发多次运行**，如需重新发布请用 rerun。
 
 ## 五、草稿人工验收清单
 

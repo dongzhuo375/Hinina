@@ -38,7 +38,7 @@
 | 动作 | 结果 |
 |---|---|
 | 启用 GitHub 私密漏洞报告（PVR） | 已启用：`GET /repos/…/private-vulnerability-reporting` 返回 `enabled: true`，`SECURITY.md` 的报告渠道有效 |
-| 创建受保护 environment `release` | 已创建（id 25440480289），`required_reviewers` = 维护者；v0.1.1 发布时 `draft-release` 确实停在此处等待批准，批准后才继续 |
+| 创建受保护 environment `release` | 已创建（id 25440480289），`required_reviewers` = 维护者；v0.1.1 发布时 `draft-release` 确实停在此处等待批准，批准后才继续。后续加固：`deployment_branch_policy` 由 `null` 改为 custom，仅允许 `v*` 标签（policy id 64530431），并以单 job 重跑验证合法标签仍可部署 |
 | 创建 tag Ruleset | 已创建（id 25942934）：`refs/tags/v*` 限制 creation/update/deletion，`bypass_actors` 仅 RepositoryRole 5；推 v0.1.0 时远端日志出现 `Bypassed rule violations … creations being restricted`，证明规则生效且管理员 bypass 可用 |
 | 首个发布标签试跑 | `v0.1.0` 构建失败（§六）→ 按标签不可变策略改发 `v0.1.1`（§十四），全链路通过并生成草稿 Release（§六） |
 
@@ -121,12 +121,12 @@
 |---|---|
 | `--locked` 未可靠生效：`npm run tauri build -- --locked` 中 npm 会剥掉 `--`，`tauri build --locked` 被 tauri 自己拒收（exit 2），`--locked` 永远到不了 cargo；三轮 §九 用 `npx tauri build --help` 作证据不成立（只证明 `[ARGS]...` 存在，未验证 npm 转发链） | 属实。本机实证：旧写法 `npm run tauri build -- --locked` → `error: unexpected argument '--locked' found`，**exit 2**；新写法 `npm run tauri -- build -- --locked` 以无害探针 `--bogus-hinina-probe` 验证 → 前端构建通过后错误出自 cargo（**exit 1**，与 tauri 的 exit 2 可区分），证明内层 `--` 存活、参数经 tauri 送达 runner。失败模式澄清：CI 上旧写法是**显式失败**（首个试跑 tag 会在 build-windows 就红），不会静默出包；但修法仍必须换。已改为 `npm run tauri -- build -- --locked`，release.yml 步骤注释写明两种写法的差别 |
 | event_name 入组带来新行为：ci.yml 触发器含 push(main) 与 workflow_dispatch，加 event_name 前二者共享组（`cancel-in-progress: false` → 串行排队），加之后分成两组可并行；「独立运行行为不变」对该边界不准确 | 属实。已在 §十 与本表补记该副作用：main 的 push 与 dispatch 现在可并行，PR 重推取消旧跑不受影响。接受此代价——发布链路正确性优先于 main 上偶发的并行（main 推送通常由合并触发，与手动 dispatch 重叠概率低） |
-| callee 中 `github.event_name` 解析为调用方原始事件（tag 推送 = `push`），§十 原写的 `Release-workflow_call-…` 字面量错误 | 属实（actions/runner#3146 等实证）。§十 已改写为 `Release-push-refs/tags/vX.Y.Z`，分组安全性结论不变 |
+| callee 中 `github.event_name` 解析为调用方原始事件（tag 推送 = `push`），§十 原写的 `Release-workflow_call-…` 字面量错误 | 属实。证据等级：actions/runner#3146 的讨论明确「callee 里 `event_name` 取调用方的值」（社区回复，**无 GitHub 维护者确认**），与 #30708 同级；本轮已复核原帖。§十 已改写为 `Release-push-refs/tags/vX.Y.Z`，分组安全性结论不变 |
 | `## [0.1.0] - TBD` 能通过门禁：日期后缀无格式校验，RELEASE.md 要求填日期但无强制 | 属实。门禁现在校验日期后缀必须是合法 `YYYY-MM-DD`：`TBD`/`2026-13-45` 均报 `invalid date` 并 exit 1；无日期后缀的标题仍接受。CHANGELOG 0.1.0 改为 `2026-10-27`。新增 3 条用例（TBD 拒绝、畸形日期拒绝、无后缀接受） |
 | cip:false 的排队语义：`queue: single` 下新排队项取消并替换较早的排队项，RELEASE.md §四未记录 | 属实（官方文档）。RELEASE.md §四 补「并发排队语义」段：同一标签短时间内多次触发时只执行最新排队项、更早的被静默取消；正常流程用 `gh run rerun` 不产生新运行 |
 | extractNotes 只以 `^##\s` 为结束条件，Keep a Changelog 文末的链接引用块（`[1.2.3]: https://…`）会被并入最后一个版本正文 | 属实（当前 CHANGELOG 无链接引用，属潜在问题）。结束条件增加 `^\[[^\]]+\]:\s` 分支；新增用例断言链接引用块不进入 notes |
-| 已解决项复核：spec 26/26（4beb7cc head）、print-version 纯读、重复章节报错 | 确认，无需处置（本轮新增用例后为 29 项） |
-| §六 四项仍为 `<待回填>`：发布链路尚未端到端验证 | 确认，保持待回填——需合并后打试跑标签才能填 |
+| 已解决项复核：spec 26/26（4beb7cc head）、print-version 纯读、重复章节报错 | 确认，无需处置（该轮后 29 项；四轮累计 33 项） |
+| §六 四项仍为 `<待回填>`：发布链路尚未端到端验证 | 当时确认；后续已由 v0.1.1 正式运行与负向/幂等验证补齐，见 §六 |
 
 ## 十二、试跑首轮发现与处置（合并后，tag v0.1.0）
 
@@ -166,3 +166,14 @@
 **后续修订（同日晚，维护者裁定）**：`v0.1.0` 标签已被删除。理由：不可变策略保护的是**已产生 Release 的发布标签**；`v0.1.0` 从未发布过（无 Release、无可下载产物、无外部依赖），把它留在 Tags 里只会让「一版一标签」的语义变模糊。失败证据由 Actions run 40474819558 与本文件 §六 承担。删除经管理员 bypass 执行，属治理决定，非日常流程。
 
 规范含义：`v0.1.0` 永远不会成为已发布版本，首个正式版本是 `v0.1.1`。
+
+
+## 十五、发布后复审处置（第六轮）
+
+| 发现 | 核验与处置 |
+|---|---|
+| §六 仍写「待回填」而已有 v0.1.1 运行与草稿 | 属实（合并版本尚未含补齐内容）。本 PR 已将 §六 改为「验收状态」并写入 v0.1.1 逐 job 结果、两条拒绝路径与幂等验证；§十一 的历史行补注「后续已补齐」 |
+| 文档数字与措辞过期：§十一 写「29 项」（实际 33）；`Architecture.md` 的 scripts 说明仍写「五处版本」、文件头仍是 2026-10-24 | 属实。改为「该轮后 29 项；四轮累计 33 项」；Architecture 改为「五个文件六处版本值」并把最后更新日期改为 2026-10-27 |
+| `RELEASE.md §四` 的「`queue: single`」不是 GitHub 语法 | 属实。改为描述实际语义：并发组默认「同时最多一个运行中 + 一个排队」，新排队项替换较旧的排队项（旧的被取消、不报失败）；并注明 GitHub 没有 `queue:` 配置项 |
+| `release` 环境没有部署分支/标签限制（`deployment_branch_policy: null`） | 属实，已加固：改为 custom 策略，仅允许 `v*` 标签部署（policy id 64530431，`required_reviewers` 保留）。验证方式：单独重跑 run 40483797433 的 `draft-release` job，先进入 waiting（说明标签通过了策略校验），批准后成功——合法 tag 部署未被挡住 |
+| §十/§十一 引用的 orgs/community#30708 与 actions/runner#3146 未独立核实 | 本轮已复核原帖：#30708 明确 caller 被取消的日志原文，根因是 callee 中 `github.workflow` 取调用方名；#3146 明确 callee 中 `event_name` 取调用方原始事件。两者**均为社区实证、无 GitHub 维护者确认**，文档已按此标注证据等级；本仓库两次真实运行（40474819558、40483797433）独立验证了结论（发布运行未被嵌套 test 取消） |
