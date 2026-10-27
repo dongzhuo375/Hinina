@@ -188,3 +188,15 @@
 **runner 复跑**（run 40327257825，4eef32a）：7 job + summary 全绿；stress 日志确认 `99-hinina-apt` drop-in 生效、`Cache restored successfully`。**同时暴露新缺口**：同一批次的 PR run 中 ubuntu rust-test 在复合 action 的 apt 步**卡住 33 分钟**（Retries/连接超时兜不住镜像慢速挂起）→ 追加硬墙钟：`sudo timeout 420 apt-get update` / `timeout 900 apt-get install`、e2e 的 `playwright install --with-deps` 包 `timeout 900`（c6983c1），故障将在 ~10/15 分钟内显性失败而非等 job 45 分钟上限。
 
 **main 合并后验证**：PR #58 squash 合并（`615d0a6`）触发的 push run **40333654166：7 个 job + integration-summary 全绿**——三平台构建、stress 10 轮、覆盖基线、e2e 在 main 上按最终形态复跑通过。
+
+## 十六、后续：apt deb 缓存（2026-10-27，PR #64）
+
+apt 抖动在本记录之后又复现 3 次（#60 的 ubuntu rust-test、v0.1.1 合并前的 rust-lint、#63 合并前的 rust-lint），其中两次被 25 分钟 job 上限取消。根因不是重试或超时参数不够，而是**每个 job 都在全新 VM 上重新下载约 62 MB 的 .deb**。
+
+复合 action 因此改为四段式（探针 → 准备缓存目录 → 恢复缓存 → 安装），并加镜像回退：
+
+- **deb 缓存**：`actions/cache` 缓存 `/var/cache/apt/archives`，key `tauri-apt-archives-Linux-v1`，命中时 `Need to get 0 B/… of archives`，不再下载。目录需在恢复前 `chown` 给 runner；apt 以 root 运行会把 `partial` 子目录变成 root 属主，因此在安装步骤之后追加 `chmod -R a+rX`——否则 post-save 打包时报 `tar: …/archives/partial: Cannot open: Permission denied`（实测踩到）。
+- **镜像回退**：第 2 次尝试把 `azure.archive.ubuntu.com` 换成 `archive.ubuntu.com`。
+- **超时收进 job 预算**：两轮最坏约 20 分钟（原来约 29 分钟，超过 rust-lint 的 25 分钟上限，必然以「job 取消」收场）；同时把 rust-lint 25→32、stress-repeat 30→40、rust-coverage 30→45。
+
+**runner 实证**（run 40517984943）：冷缓存 rust-lint 11m40s（第 1 次尝试被镜像挂住 ~10 分钟后切镜像成功）；同一 job 重跑（job 122243876270）日志 `Cache restored from key: tauri-apt-archives-Linux-v1` + `Need to get 0 B/61.7 MB of archives`，耗时 **65 秒**。
