@@ -45,6 +45,7 @@
 - 试跑 run：<待回填>
 - 草稿 Release 与验收：<待回填>
 - 失败路径验证（validate 拒绝不指向 main / 版本漂移的标签）：<待回填>
+- 嵌套 ci.yml（workflow_call）在标签运行中的并发表现复核：<待回填，见 §九第 2 条>
 
 ## 七、遗留项
 
@@ -62,3 +63,13 @@
 | ⚪ `--print-version` 不做一致性校验 | 设计如此（各调用点之前均已跑过完整门禁）；已在脚本头注释写明前提，verify-artifact 的用法是同 job 内先复跑门禁再取版本号 |
 | ⚪ spec 的 `mkdirSync(join(target, '..'))` 依赖 `..` 归一化，稍隐晦 | 属实，改用 `dirname(target)` |
 | ⚪ 合并前确认 ubuntu rust-test 转绿 | 首轮 run 40377057052 中该 job 因 azure 镜像卡死失败（两轮 apt 均挂满超时，25m37s），`gh run rerun --failed` 后 1m50s 绿——M3 已证实的按 runner 抖动，与本 PR 改动无关 |
+
+## 九、评审二轮处置（PR #60）
+
+| 发现 | 核验与处置 |
+|---|---|
+| 发布构建缺 `--locked`：`npm run tauri build` 未向 cargo 透传 `--locked`，锁文件与 Cargo.toml 不一致时安装包可能用到 CI 未测过的依赖版本 | 属实（实际是纵深防御缺口：release 的 test job 会在同 SHA 上先跑 `--locked` 的 clippy/test，正常流程下到 build-windows 时锁文件已被证明一致；但发布链路应显式断言而非依赖前置 job 的次序）。修复：`npm run tauri build -- --locked`——tauri CLI 的 `[ARGS]...` 透传给 runner（`npx tauri build --help` 实证），锁不一致时构建显式失败。integration.yml 构建矩阵为同模式但属夜间观测、不入发布链，本 PR 不动，留后续单独处理 |
+| 嵌套 ci.yml 的并发组可能与发布运行互相取消（test 经 workflow_call 复用，ci.yml 对非 main ref 设 `cancel-in-progress: true`） | 官方文档核实：workflow syntax 与 reuse 页对「被调用 workflow 的顶层 concurrency 是否生效」均无记载，评审者的不确定成立。结构分析核验为**不可达**：即使该并发被以任何语义采纳，组值含 `github.ref`（= 标签 ref），而同标签的发布运行已被 release.yml 自身 `cancel-in-progress: false` 串行化——该组内永远只有一个成员，不存在可取消的并发对象；不同标签/分支的组天然不同。处置：不改 ci.yml（为不可达场景修改 M1 门禁文件违背最小变更）；试跑 tag 时在 Actions 页复核嵌套运行并发表现并回填 §六 |
+| spec 硬编码真实版本 `0.1.0`/`v0.1.0`：升版后即便五个文件一致，真实仓库用例也会假红 | 属实。改为从 package.json 动态读取当前版本（`v${repoVersion}` 参与全门禁用例）。语义升级为持续不变量：任何时候五文件一致、tag 与 CHANGELOG 段落齐备即绿——将来升版 PR 若忘了同步 CHANGELOG 段落，`npm test` 会当场拦下 |
+| `--print-version` 注释与行为不符：注释说只读 package.json，实际 runGate 先跑全量一致性（Cargo.lock 缺失会连带走失败） | 属实（一轮时只改了注释没改行为，二轮抓到）。修复：print-version 分支移到一致性计算之前，真正只读 package.json；新增用例「其余四个文件缺失时仍正常出版本号」——旧代码下该用例必红，兼作变异验证 |
+| CHANGELOG 重复章节会被静默采用第一个（findChangelogSection 取首个匹配） | 属实。改为扫描全部匹配标题，发现重复即按段落歧义失败（reason 注明 N 个章节）；`--changelog` 与 `--extract-notes` 均受保护；新增用例（重复章节 → 两模式均 exit 1） |
