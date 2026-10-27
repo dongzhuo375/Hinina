@@ -23,8 +23,9 @@
 | `ConfigService.updateEditorPrefs` | `(patch: Partial<EditorPrefs>) => Promise<void>` | **解题页编辑器设置弹层落盘入口**：只写传入字段（读-改-写保留其余配置）；主题落 `theme.editorTheme` 且**不触碰 `theme.themeName`**，落盘前经 `normalizeEditorTheme` 归一 |
 | `ConfigService.getDefaultLanguage` | `() => Promise<string>` | 默认语言（**HOJ 显示名**，如 "C++"）；经 `normalizeHojLanguage` 归一，历史配置遗留的 Monaco id（'cpp'）映射回显示名，空值回退 "C++"，其它非空值（Go/Rust…）原样保留 |
 | `ConfigService.getSplitRatio` | `() => Promise<number>` | 解题页初始分栏比例（非法回退 0.48） |
-| `normalizeLanguageId` | `(raw: string \| undefined \| null) => string` | 显示名/大小写变体 → Monaco language id；无法识别回退 `'cpp'`（P55：保证喂给 Monaco 的恒为合法值） |
 | `configService` | 单例 | 全局唯一实例 |
+
+> 语言归一函数是 `@/utils/language` 的 `normalizeHojLanguage`（历史配置遗留的 Monaco id → HOJ 显示名），本服务消费它而非自定义导出（P55 语言域改为「权威值 = HOJ 显示名」后原 `normalizeLanguageId` 已删除）。
 
 ## 直接依赖
 
@@ -88,4 +89,4 @@ getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / g
 
 ## 测试
 
-`src/services/__tests__/config.service.spec.ts`：normalizeLanguageId 全表、缓存并发去重与失败重试、派生参数透传/越界回退/读取失败兜底（含 `editorTheme` 未知值回退 `vs`）、updateConfig 整体写回 + 缓存失效 + 副本隔离 + 失败仍失效缓存、updateEditorPrefs 只写传入字段 + 主题落 `theme.editorTheme` 且不动 `themeName` + 非法主题名归一后落盘。OJ 实例化新增：`getOjBaseUrl`/`activeOjBaseUrl` 取 active 实例地址、active 未命中回退第一个启用实例、禁用实例不参与匹配与回退（enabled = 后端不注册）、读取失败返回空串；`switchOj` 调 bridge 且切换后本地缓存失效（下次读取重新拉后端真值）、bridge 失败原样上抛（设置页据此回滚下拉显示）。
+`src/services/__tests__/config.service.spec.ts`：缓存并发去重与失败重试、派生参数透传/越界回退/读取失败兜底（含 `editorTheme` 未知值回退 `vs`）、updateConfig 整体写回 + 缓存失效 + 副本隔离 + 失败仍失效缓存、updateEditorPrefs 只写传入字段 + 主题落 `theme.editorTheme` 且不动 `themeName` + 非法主题名归一后落盘。OJ 实例化新增：`getOjBaseUrl`/`activeOjBaseUrl` 取 active 实例地址、active 未命中回退第一个启用实例、禁用实例不参与匹配与回退（enabled = 后端不注册）、读取失败返回空串；`switchOj` 调 bridge 且切换后本地缓存失效（下次读取重新拉后端真值）、bridge 失败原样上抛（设置页据此回滚下拉显示）。
