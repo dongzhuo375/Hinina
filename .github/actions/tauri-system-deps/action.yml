@@ -100,3 +100,12 @@ runs:
         done
         echo "::error::apt install failed after 2 attempts"
         exit 1
+
+    # apt 以 root 运行，会把 /var/cache/apt/archives 及其 partial 子目录改成 root 属主；
+    # actions/cache 的 post-save 以 runner 身份打包，会因 partial 不可读而整包失败
+    # （实测错误：tar: …/archives/partial: Cannot open: Permission denied）。
+    # 这里在保存前把权限放开——post step 在所有常规 step 之后运行。
+    - name: Make apt package cache readable for the cache save
+      if: always() && steps.probe.outputs.missing != ''
+      shell: bash
+      run: sudo chmod -R a+rX /var/cache/apt/archives || true
