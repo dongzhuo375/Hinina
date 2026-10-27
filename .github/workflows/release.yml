@@ -1,0 +1,202 @@
+# M4：标签触发的 Windows 草稿发布（doc/cicd/m4-release.md）。
+# job 名是稳定名（doc/cicd/m0-baseline.md §六），改名须同步该表与 RELEASE.md。
+# OS 签名（M5）与 updater（M6）不在本工作流范围内；产物为未签名草稿，人工验收后手动公开。
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout tag (full history for main containment check)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Require tag to point into main history
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Version gate (five files, tag match, CHANGELOG section)
+        run: node scripts/check-release-versions.mjs --tag "$GITHUB_REF_NAME" --changelog
+
+  # 复用完整必需 CI：发布时同样不跳过任何检查（ci.yml 需保留 workflow_call 触发器）。
+  test:
+    name: test
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
+  build-windows:
+    name: build-windows
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Enable corepack npm shim (pin npm via packageManager)
+        run: corepack enable npm
+        shell: bash
+      - name: Verify node version matches .nvmrc
+        run: test "$(node --version)" = "v$(cat .nvmrc)"
+        shell: bash
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+      - name: Build frontend (npm ci + vue-tsc + vite build)
+        run: |
+          npm ci
+          npm run build
+      - name: Build desktop app (tauri build, NSIS bundle)
+        # --locked 必须经 tauri 的 [ARGS]... 透传给 cargo，而 npm 会剥掉脚本名后的
+        # 第一个 `--`：`npm run tauri build -- --locked` 展开为 `tauri build --locked`
+        # → tauri 自己拒收（exit 2，永远到不了 cargo）。正确写法是
+        # `npm run tauri -- build -- --locked`：内层 `--` 存活，--locked 送达 cargo，
+        # 锁文件与 Cargo.toml 不一致时构建显式失败。
+        run: npm run tauri -- build -- --locked
+      - name: Collect build metadata
+        shell: bash
+        run: |
+          node -e "
+            const { execSync } = require('node:child_process');
+            const { writeFileSync } = require('node:fs');
+            const v = (c) => execSync(c).toString().trim();
+            writeFileSync('build-metadata.json', JSON.stringify({
+              tag: process.env.GITHUB_REF_NAME,
+              commit: process.env.GITHUB_SHA,
+              built_at: new Date().toISOString(),
+              node: v('node --version'),
+              npm: v('npm --version'),
+              rustc: v('rustc --version'),
+              cargo: v('cargo --version'),
+              target: 'x86_64-pc-windows-msvc',
+              bundle: 'nsis',
+              signed: false,
+            }, null, 2) + '\n');
+          "
+      - name: Stage release files
+        # upload-artifact v4+ 以所有搜索路径的最小公共祖先为 artifact 根、通配符后的层级保留：
+        # 若直接同时上传 bundle 深路径与根目录的 build-metadata.json，exe 会被嵌到
+        # src-tauri/target/release/bundle/nsis/ 下，下载侧的 artifact/*.exe 断言必然落空。
+        # 先平铺进单一目录再单路径上传，artifact 根即该目录。
+        shell: bash
+        run: |
+          mkdir -p release-staging
+          cp src-tauri/target/release/bundle/nsis/*.exe release-staging/
+          cp build-metadata.json release-staging/
+          ls -l release-staging/
+      - name: Upload installer artifact (unsigned)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-unsigned
+          path: release-staging/*
+          retention-days: 7
+          if-no-files-found: error
+
+  verify-artifact:
+    name: verify-artifact
+    needs: build-windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Re-run version gate on the tagged tree
+        run: node scripts/check-release-versions.mjs --tag "$GITHUB_REF_NAME" --changelog
+      - name: Download installer artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-windows-unsigned
+          path: artifact
+      - name: Verify installer name and file type
+        run: |
+          version="$(node scripts/check-release-versions.mjs --print-version)"
+          expected="Hinina_${version}_x64-setup.exe"
+          set -- artifact/*.exe
+          if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+            echo "::error::expected exactly one installer file, found $#"
+            exit 1
+          fi
+          base="$(basename "$1")"
+          if [ "$base" != "$expected" ]; then
+            echo "::error::unexpected installer name: $base (expected $expected)"
+            exit 1
+          fi
+          if ! file "$1" | grep -qi "ms windows"; then
+            echo "::error::$base is not a Windows PE file"
+            exit 1
+          fi
+      - name: Compute SHA-256 checksums
+        run: |
+          cd artifact
+          sha256sum Hinina_*-setup.exe > SHA256SUMS.txt
+      - name: Upload verified artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-verified
+          path: artifact/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # 任一前置失败则本 job 跳过（默认语义），不产生半成品草稿。
+  draft-release:
+    name: draft-release
+    needs: [test, verify-artifact]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Download verified artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-windows-verified
+          path: artifact
+      - name: Build release notes from CHANGELOG
+        run: node scripts/check-release-versions.mjs --extract-notes > notes.md
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -- artifact/Hinina_*-setup.exe artifact/SHA256SUMS.txt artifact/build-metadata.json
+          title="Hinina $GITHUB_REF_NAME"
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')"
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::release $GITHUB_REF_NAME is already published; published releases are immutable - deliver fixes as a new version"
+              exit 1
+            fi
+            gh release upload "$GITHUB_REF_NAME" "$@" --clobber
+            gh release edit "$GITHUB_REF_NAME" --draft --title "$title" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" "$@" --draft --title "$title" --notes-file notes.md
+          fi
+          gh release view "$GITHUB_REF_NAME" --json isDraft,assets --jq '"draft=\(.isDraft) assets=\(.assets | length)"'

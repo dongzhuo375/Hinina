@@ -86,7 +86,7 @@ sudo apt install -y \
 |---|---|---|
 | `ci.yml` | pull_request、push main、workflow_dispatch | `frontend`、`rust-lint`、`rust-test`（windows + ubuntu 矩阵）、`ci-required`（汇总） |
 | `integration.yml` | push main、每日定时、workflow_dispatch | `build`（windows + ubuntu + macos 矩阵）、`stress-repeat`、`rust-coverage`、`e2e`、`integration-summary`（M3 落地） |
-| `release.yml` | `v*.*.*` 标签、人工 | M4 定义（validate / test / build-windows / verify-artifact / draft-release） |
+| `release.yml` | `v*.*.*` 标签 | M4 已落地（validate / test / build-windows / verify-artifact / draft-release；test 经 workflow_call 复用 ci.yml） |
 
 ## 七、M1 阻塞性判定（施工方案 §3.4 第 2 条）
 
