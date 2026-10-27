@@ -400,7 +400,7 @@ Wire 形状**恰好**为：
 - 事件：`plugin-notification`，载荷 `{ pluginId, level, message }`。
 - 命令不接收权限、代码、URL 或文件路径。
 - 前端分层：View → Store → Service → Bridge；通知校验、5 项上限、6 秒过期、单一活动订阅/迟到订阅卸载都在 `plugin.service`；Store 只应用 add/dismiss。
-- 四个命令在 release 构建中依然注册，但前端只在 DEV 暴露入口：`window.hininaPlugins` 仅 DEV 提供；release 按批准配置自动启动插件，无运行时管理入口。
+- 五个命令在 release 构建中依然注册，但前端只在 DEV 暴露入口：`window.hininaPlugins` 仅 DEV 提供；release 按批准配置自动启动插件，无运行时管理入口。
 
 ## 16. 对内分层契约
 
