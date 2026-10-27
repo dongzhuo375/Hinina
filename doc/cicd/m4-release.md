@@ -33,12 +33,14 @@
 - `npm test` / `npm run build` / `npx tsc -p tsconfig.node.json --noEmit` 全绿（计数不记入本文档）。
 - Rust 零改动。
 
-## 五、合并时动作（逐项经维护者同意后执行）
+## 五、合并后动作（已执行，逐项经维护者同意）
 
-1. 启用 GitHub 私密漏洞报告（PVR）——`SECURITY.md` 的报告渠道随本 PR 合入即真。
-2. 创建受保护 environment `release`（required reviewer）——draft-release 的人工批准随之生效。
-3. 创建 tag Ruleset：限制 `v*` 标签的创建与更新，防止已发布标签被移动。
-4. 打首个试跑标签跑通 Release 工作流，产出草稿 Release 供人工验收（按 `RELEASE.md` §五清单）。**实际执行**：试跑用 `v0.1.0` 但构建失败（§六）；因标签不可变策略不重指旧标签，正式发布改用 `v0.1.1`（§十四）。
+| 动作 | 结果 |
+|---|---|
+| 启用 GitHub 私密漏洞报告（PVR） | 已启用：`GET /repos/…/private-vulnerability-reporting` 返回 `enabled: true`，`SECURITY.md` 的报告渠道有效 |
+| 创建受保护 environment `release` | 已创建（id 25440480289），`required_reviewers` = 维护者；v0.1.1 发布时 `draft-release` 确实停在此处等待批准，批准后才继续 |
+| 创建 tag Ruleset | 已创建（id 25942934）：`refs/tags/v*` 限制 creation/update/deletion，`bypass_actors` 仅 RepositoryRole 5；推 v0.1.0 时远端日志出现 `Bypassed rule violations … creations being restricted`，证明规则生效且管理员 bypass 可用 |
+| 首个发布标签试跑 | `v0.1.0` 构建失败（§六）→ 按标签不可变策略改发 `v0.1.1`（§十四），全链路通过并生成草稿 Release（§六） |
 
 ## 六、试跑结果
 
