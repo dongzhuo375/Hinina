@@ -13,7 +13,7 @@
 
 1. **三平台 artifact**：`tauri.conf.json` 的 `bundle.targets` 仅 `["nsis"]`，ubuntu/macos 上该配置不产出任何包。修正为 Windows 出 nsis 安装包、ubuntu/macos 以 `--no-bundle` 验证原生编译并上传主二进制作 smoke artifact；deb/app/dmg 等 bundle 类型扩展留 M4。
 2. **新增 rust-coverage job**：m2-tests §五记录的用户裁定「Rust `llvm-cov` 基线留 M3 夜间」，原计划遗漏。
-3. **e2e 目录无需排除配置**：根 `tsconfig.json` 只含 `src/**`（vue-tsc 不可见）、vite.config 的 vitest `include` 是显式双 glob（不可见）；反向把 `playwright.config.ts` + `e2e/**/*.ts` 并入 `tsconfig.node.json`，使 CI frontend job 的 `tsc -p tsconfig.node.json` 类型检查 E2E 代码。
+3. **e2e 目录无需排除配置**：根 `tsconfig.json` 只含 `src/**`（vue-tsc 不可见）、vite.config 的 vitest `include` 是显式 glob 清单（M3 时为 src/doc/modules 两项，M4 起追加 scripts，始终不含 e2e）；反向把 `playwright.config.ts` + `e2e/**/*.ts` 并入 `tsconfig.node.json`，使 CI frontend job 的 `tsc -p tsconfig.node.json` 类型检查 E2E 代码。
 4. **观测平台的上报机制**：job 级 `continue-on-error` 会把失败吞成 success，`needs.*.result` 不可信——macOS/Linux 的真实结果由各 build leg 的末步（`if: always()`）自报进 Step Summary，汇总 job 只按阻塞口径判红。
 
 ## 二、施工内容（5 个提交）

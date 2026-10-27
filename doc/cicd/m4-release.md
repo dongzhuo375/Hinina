@@ -191,7 +191,7 @@
 |---|---|
 | §六 仍写「待回填」而已有 v0.1.1 运行与草稿 | 属实（合并版本尚未含补齐内容）。本 PR 已将 §六 改为「验收状态」并写入 v0.1.1 逐 job 结果、两条拒绝路径与幂等验证；§十一 的历史行补注「后续已补齐」 |
 | 文档数字与措辞过期：§十一 写「29 项」（实际 33）；`Architecture.md` 的 scripts 说明仍写「五处版本」、文件头仍是 2026-10-24 | 属实。改为「该轮后 29 项；四轮累计 33 项」；Architecture 改为「五个文件六处版本值」并把最后更新日期改为 2026-10-27 |
-| `RELEASE.md §四` 的「`queue: single`」不是 GitHub 语法 | 属实。改为描述实际语义：并发组默认「同时最多一个运行中 + 一个排队」，新排队项替换较旧的排队项（旧的被取消、不报失败）；并注明 GitHub 没有 `queue:` 配置项 |
+| `RELEASE.md §四` 的「`queue: single`」不是 GitHub 语法 | 属实。改为描述实际语义：并发组默认「同时最多一个运行中 + 一个排队」，新排队项替换较旧的排队项（旧的被取消、不报失败）。（真实性同步勘误：当时附注「GitHub 没有 `queue:` 配置项」失实——官方语法含 `concurrency.queue`（`single`/`max`），integration.yml 即在用 `queue: max`；RELEASE.md §四 已随之更正） |
 | `release` 环境没有部署分支/标签限制（`deployment_branch_policy: null`） | 属实，已加固：改为 custom 策略，仅允许 `v*` 标签部署（policy id 64530431，`required_reviewers` 保留）。验证方式：单独重跑 run 40483797433 的 `draft-release` job，先进入 waiting（说明标签通过了策略校验），批准后成功——合法 tag 部署未被挡住 |
 | §十/§十一 引用的 orgs/community#30708 与 actions/runner#3146 未独立核实 | 出处与证据等级：#30708 是 **GitHub Discussions 帖子**（`gh` 读不了 Discussion，只能网页/WebFetch 读取），其正文含 caller 被取消的日志原文；#3146 是 actions/runner 的**用户提问 issue**，内容与文档论断一致，但**无维护者确认**，两人都属社区证据、非官方语义。文档已删除「已复核原帖」这类第三方无法验证的过程陈述，只保留出处、内容要点与证据等级；结论本身另有本仓库三轮真实运行独立佐证（发布运行未被嵌套 test 取消） |
 
