@@ -10,7 +10,9 @@
 #    安装、不再下载（这是「每次都要等几分钟」的根因）。key 取候选版本哈希——
 #    actions/cache 的条目不可覆盖，写死 key 会让缓存永远停在上游更新前的内容；
 # ③ 镜像回退：第 2 次尝试把 azure.archive.ubuntu.com 换成 archive.ubuntu.com；
-# ④ 硬墙钟：每次尝试都有上限，最坏耗时约 20 分钟，低于调用方 job 的 timeout。
+# ④ 硬墙钟：每次尝试都有上限，含 key 解析的 update 墙钟最坏约 21.3 分钟，
+#    低于调用方 job 的 timeout。key 解析失败（unresolved）时跳过缓存恢复与保存，
+#    退化为纯在线安装。
 name: 'Install Tauri 2 system dependencies'
 description: 'apt 安装 Tauri 2 / QuickJS 构建所需系统依赖（WebKitGTK、libxdo、libssl 等），带 deb 缓存与镜像回退'
 runs:
@@ -72,7 +74,10 @@ runs:
         echo "key=$key" >> "$GITHUB_OUTPUT"
 
     - name: Restore apt package cache
-      if: steps.probe.outputs.missing != ''
+      # key 为 unresolved（key 解析时 update 失败）时跳过恢复与保存：否则会沉淀一个
+      # 永不刷新的 `…-unresolved` 缓存条目（actions/cache 条目不可覆盖）。跳过后退化为
+      # 纯在线安装——本来就是降级路径。
+      if: steps.probe.outputs.missing != '' && steps.pkgs.outputs.key != 'unresolved'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       # 缓存不可用不应阻塞构建：缺失时退回在线安装。
       continue-on-error: true

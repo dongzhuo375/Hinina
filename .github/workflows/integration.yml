@@ -202,7 +202,10 @@ jobs:
   e2e:
     name: e2e
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # 25 分钟：最坏路径 = key 解析 update 90s + playwright install 顶到 900s + 测试
+    # 数分钟 ≈ 19-20 分钟，20 分钟上限在「key 轮换 + 慢镜像」同时发生时会撞线取消
+    # （dispatch run 40530740054 实测全程 15m16s）。
+    timeout-minutes: 25
     env:
       # §6.3：runner 上显式声明浏览器缓存路径，不依赖默认值
       PLAYWRIGHT_BROWSERS_PATH: /home/runner/.cache/ms-playwright
@@ -243,23 +246,33 @@ jobs:
             # playwright --with-deps 的实际清单在其 coreBundle 内的 chromium deps 数组
             # （ubuntu runner 上 --dry-run 输出同源）。node -e 解析出包名后逐个取
             # apt-cache policy 的候选版本，拼成哈希作 key。
+            # playwright 升级可能改变 coreBundle 格式导致正则不匹配——解析失败必须
+            # 退回 unresolved key（跳过缓存），而不是让 e2e 在这一步红掉。
             deps="$(node -e "
               const s = require('fs').readFileSync('./node_modules/playwright-core/lib/coreBundle.js','utf8');
               const m = s.match(/chromium: \[\s*(\"lib[^\]]+|\"x[^\]]+|\"fonts[^\]]+|\"xdg[^\]]+)/);
+              if (!m) process.exit(0);
               process.stdout.write(JSON.parse('[' + m[1].replace(/,\s*\$/,'') + ']').join(' '));
-            ")"
-            versions=""
-            for pkg in $deps; do
-              v="$(apt-cache policy "$pkg" | awk '/Candidate:/{print $2; exit}')"
-              versions="$versions$pkg=$v;"
-            done
-            key="$(printf '%s' "$versions" | sha256sum | cut -c1-16)"
-            echo "resolved key from ${#deps} chars of the chromium deps list: $key"
+            " 2>/dev/null || true)"
+            if [ -z "$deps" ]; then
+              echo "::warning::could not parse the playwright chromium deps list; using the fallback key"
+            else
+              versions=""
+              for pkg in $deps; do
+                v="$(apt-cache policy "$pkg" | awk '/Candidate:/{print $2; exit}')"
+                versions="$versions$pkg=$v;"
+              done
+              key="$(printf '%s' "$versions" | sha256sum | cut -c1-16)"
+              echo "resolved key from ${#deps} chars of the chromium deps list: $key"
+            fi
           else
             echo "::warning::apt-get update failed while resolving cache key; using the fallback key"
           fi
           echo "key=$key" >> "$GITHUB_OUTPUT"
       - name: Restore apt package cache
+        # key 为 unresolved（deps 解析失败或 update 失败）时跳过恢复与保存，避免沉淀
+        # 永不刷新的 `…-unresolved` 缓存条目；退化为纯在线安装。
+        if: steps.aptkey.outputs.key != 'unresolved'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         continue-on-error: true
         with:

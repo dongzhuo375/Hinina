@@ -196,12 +196,15 @@ apt 抖动在本记录之后又复现 3 次（#60 的 ubuntu rust-test、v0.1.1 
 复合 action 因此改为四段式（探针 → 准备缓存目录 → 恢复缓存 → 安装），并加镜像回退：
 
 - **deb 缓存**：`actions/cache` 缓存 `/var/cache/apt/archives`，命中时 `Need to get 0 B/… of archives`，不再下载。
+- **e2e job 上限 20→25**：最坏路径（key 解析 update 90s + `playwright install` 顶到 900s + 测试数分钟）≈ 19-20 分钟，会在「key 轮换 + 慢镜像」同时发生时撞线取消（dispatch run 实测全程 15m16s）。
 - **key 不能写死**：`actions/cache` 的条目**不可覆盖**（同 key 命中后不再保存），写死 `-v1` 会让缓存永久停在上游更新前的版本——之后每次都要重下变化的包且再也存不进去。改为 key = **候选版本哈希**（`apt-cache policy` 取各缺失包 Candidate 版本，sha256 截 16 位），配合 `restore-keys` 前缀：上游更新 → key 变化 → 存新缓存；版本变化时仍能通过前缀复用旧缓存里的其余 .deb。`apt-get update` 失败时退回 `unresolved` key，不阻塞安装。目录需在恢复前 `chown` 给 runner；apt 以 root 运行会把 `partial` 子目录变成 root 属主，因此在安装步骤之后追加 `chmod -R a+rX`——否则 post-save 打包时报 `tar: …/archives/partial: Cannot open: Permission denied`（实测踩到）。
 - **镜像回退**：第 2 次尝试把 `azure.archive.ubuntu.com` 换成 `archive.ubuntu.com`。
-- **超时收进 job 预算**：两轮最坏约 20 分钟（原来约 29 分钟，超过 rust-lint 的 25 分钟上限，必然以「job 取消」收场）；同时把 rust-lint 25→32、stress-repeat 30→40、rust-coverage 30→45。
+- **超时收进 job 预算**：两轮最坏约 21.3 分钟（含 key 解析步 90s 的 update 墙钟；原方案约 29 分钟，超过 rust-lint 的 25 分钟上限，必然以「job 取消」收场）；同时把 rust-lint 25→32、stress-repeat 30→40、rust-coverage 30→45。key 解析失败（unresolved）时跳过缓存恢复与保存，避免沉淀永不刷新的条目。
 
 **runner 实证**（run 40517984943）：冷缓存 rust-lint 11m40s（第 1 次尝试被镜像挂住 ~10 分钟后切镜像成功）；同一 job 重跑（job 122243876270）日志 `Cache restored from key: tauri-apt-archives-Linux-v1` + `Need to get 0 B/61.7 MB of archives`，耗时 **65 秒**。
 
 **e2e 也套用同款缓存（同 PR）**：e2e 的 `playwright install --with-deps` 每次都要拉同一段 25.9 MB 的 apt 包——实测镜像快时 1s、慢时 5min9s（run 40483752731）。key 取 **playwright chromium 依赖清单**的候选版本哈希：该清单在 `playwright-core/lib/coreBundle.js` 内的 `chromium: [...]` 数组（ubuntu runner 上与 `--with-deps` 实际安装同源；Windows 上 `--dry-run` 不输出 linux deps，故用 node 解析 bundle 而非解析 dry-run 输出）。`restore-keys` 前缀与复合 action 共享（`tauri-apt-archives-Linux-`），两处缓存可互相补货。
 
-**dispatch 实证**（run 40530740054，e2e job 122282520231）：key 解析得 `0d743f48ff107a59` → 主 key miss → 前缀复用旧缓存；`playwright install --with-deps` 恰逢镜像极慢（25.9 MB 下载 **13min42s**，24.7 kB/s），但完成后 e2e 的 deb 成功存为新 key（25.9 MB）——**下一次起 e2e 遇到慢镜像也不再受苦**。全 7 job 绿。
+**dispatch 实证**（run 40530740054，e2e job 122282520231）：key 解析得 `0d743f48ff107a59` → **主 key 与 `restore-keys` 前缀全部 miss**（此前复审曾误写为「前缀复用旧缓存」——run 日志实为 `Cache not found for input keys: …-0d743f48ff107a59, tauri-apt-archives-Linux-`）。原因是 GitHub 的**缓存作用域规则**：运行只能恢复「当前分支或默认分支」创建的缓存；此前的 `-v1` / `92b0853a…` 条目都存于 `refs/pull/64/merge`（PR run）作用域，分支 `ci/apt-deb-cache` 上的 dispatch run 看不到它们。该次 `--with-deps` 恰逢镜像极慢（25.9 MB 下载 **13min42s**，24.7 kB/s），完成后 deb 成功存入**分支作用域**的 `…-0d743f48ff107a59`——同分支的下一次运行起 e2e 免疫慢镜像。全 7 job 绿。
+
+**推论（合并后的预期行为）**：PR 作用域与分支作用域的缓存对 main 均不可见，合并后 main 的首次 ubuntu 运行（CI + 夜间 e2e）是**一次性全量下载**，属预期而非回归；此后 main 自己的缓存接管。
