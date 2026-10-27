@@ -127,9 +127,9 @@ jobs:
   stress-repeat:
     name: stress-repeat
     runs-on: ubuntu-24.04
-    # 30 分钟：覆盖 apt 依赖 + 冷缓存编译 + 10 轮过滤跑。原 15 分钟在冷缓存/apt 抖动
-    # 下会被预算耗尽（评审四轮 #3 首验：apt 无响应吃掉全部 15 分钟 → job 取消）
-    timeout-minutes: 30
+    # 40 分钟：覆盖 apt 依赖（最坏 ~20 分钟）+ 冷缓存编译 + 10 轮过滤跑。原 15 分钟在
+    # 冷缓存/apt 抖动下会被预算耗尽（评审四轮 #3 首验：apt 无响应吃掉全部 15 分钟 → job 取消）
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/tauri-system-deps
@@ -165,7 +165,7 @@ jobs:
   rust-coverage:
     name: rust-coverage
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/tauri-system-deps
