@@ -31,7 +31,7 @@
 2. **npm 固定**：`packageManager: "npm@11.18.0"` + CI `corepack enable`，runner 与本地同版本，闭环 M0 遗留决策项；本地未启用 corepack 不受影响。
 3. **分支保护宽松模式**：必需检查 `ci-required` + 禁 force push，管理员直推保留（单人仓库渐进收紧）。
 
-其它要点：concurrency 按 workflow+event_name+ref（PR 可取消旧跑、main 不取消；组名含 event_name 系 M4 期间修订——被 workflow_call 调用时 `github.workflow` 解析为调用方名，不含 event_name 会与调用方组同名互消，见 doc/cicd/m4-release.md §十）；顶层 `contents: read`；全部 action 固定 commit SHA（checkout v7.0.1 / setup-node v7.1.0 / rust-cache v2.9.3，2026-10-25 解析）；工具链由 runner 预装 rustup 读 `rust-toolchain.toml` 自动安装（1.96.0 + rustfmt/clippy），无第三方 Rust action；Ubuntu 两个 job 的 apt 步骤照抄 M0 记录 §四。
+其它要点：concurrency 按 workflow+event_name+ref（PR 可取消旧跑、main 不取消；组名含 event_name 系 M4 期间修订——被 workflow_call 调用时 `github.workflow` 解析为调用方名，不含 event_name 会与调用方组同名互消；副作用是 main 的 push 与 workflow_dispatch 分属两组可并行，见 doc/cicd/m4-release.md §十/§十一）；顶层 `contents: read`；全部 action 固定 commit SHA（checkout v7.0.1 / setup-node v7.1.0 / rust-cache v2.9.3，2026-10-25 解析）；工具链由 runner 预装 rustup 读 `rust-toolchain.toml` 自动安装（1.96.0 + rustfmt/clippy），无第三方 Rust action；Ubuntu 两个 job 的 apt 步骤照抄 M0 记录 §四。
 
 ## 三、首跑结果（run 40173734801，2026-10-25，无缓存冷跑）
 

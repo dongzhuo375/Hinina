@@ -52,7 +52,6 @@
 - 桌面 smoke（tauri-driver 6 场景）属 M3 遗留，不在本阶段。
 - OS 代码签名属 M5（按发布范围决策只做 Windows 签名，macOS/Linux 产物推迟、不进支持矩阵）；updater 属 M6（前置：至少一次稳定正式发布）。
 - 升级安装覆盖验收（`RELEASE.md` §五第 4 项）自第二个版本起适用。
-- `CHANGELOG.md` 0.1.0 段落日期为 TBD，首次发版时填入。
 
 ## 八、评审一轮处置（PR #60）
 
@@ -68,7 +67,7 @@
 
 | 发现 | 核验与处置 |
 |---|---|
-| 发布构建缺 `--locked`：`npm run tauri build` 未向 cargo 透传 `--locked`，锁文件与 Cargo.toml 不一致时安装包可能用到 CI 未测过的依赖版本 | 属实（实际是纵深防御缺口：release 的 test job 会在同 SHA 上先跑 `--locked` 的 clippy/test，正常流程下到 build-windows 时锁文件已被证明一致；但发布链路应显式断言而非依赖前置 job 的次序）。修复：`npm run tauri build -- --locked`——tauri CLI 的 `[ARGS]...` 透传给 runner（`npx tauri build --help` 实证），锁不一致时构建显式失败。integration.yml 构建矩阵为同模式但属夜间观测、不入发布链，本 PR 不动，留后续单独处理 |
+| 发布构建缺 `--locked`：`npm run tauri build` 未向 cargo 透传 `--locked`，锁文件与 Cargo.toml 不一致时安装包可能用到 CI 未测过的依赖版本 | 属实（纵深防御缺口：release 的 test job 会在同 SHA 上先跑 `--locked` 的 clippy/test，正常流程下到 build-windows 时锁文件已被证明一致；但发布链路应显式断言而非依赖前置 job 的次序）。**三轮修法本身有误，四轮已纠正**，见 §十一 |
 | 嵌套 ci.yml 的并发组可能与发布运行互相取消（test 经 workflow_call 复用，ci.yml 对非 main ref 设 `cancel-in-progress: true`） | 二轮处置为「不可达」（组含 tag ref + 外层串行化 → 组内单成员），**该结论于三轮被推翻并修复，见 §十** |
 | spec 硬编码真实版本 `0.1.0`/`v0.1.0`：升版后即便五个文件一致，真实仓库用例也会假红 | 属实。改为从 package.json 动态读取当前版本（`v${repoVersion}` 参与全门禁用例）。语义升级为持续不变量：任何时候五文件一致、tag 与 CHANGELOG 段落齐备即绿——将来升版 PR 若忘了同步 CHANGELOG 段落，`npm test` 会当场拦下 |
 | `--print-version` 注释与行为不符：注释说只读 package.json，实际 runGate 先跑全量一致性（Cargo.lock 缺失会连带走失败） | 属实（一轮时只改了注释没改行为，二轮抓到）。修复：print-version 分支移到一致性计算之前，真正只读 package.json；新增用例「其余四个文件缺失时仍正常出版本号」——旧代码下该用例必红，兼作变异验证 |
@@ -78,4 +77,17 @@
 
 | 发现 | 核验与处置 |
 |---|---|
-| 二轮第 2 条的「不可达」推理有漏洞：被调用方 ci.yml 的 concurrency 求值本身就是组内**第二个成员**（携带对 tag 恒为 true 的 cancel-in-progress），进入与外层发布运行同名的组时会取消**正在执行的外层运行**——「组内只有一个成员」前提不成立 | 属实，二轮结论收回。实证：GitHub 社区讨论 orgs/community#30708 与本 PR 完全同型（caller 组 `workflow-ref` + cancel true 经 workflow_call 调用 callee → caller 被取消，日志 `Canceling since a higher priority waiting request for 'Build app-refs/heads/main' exists`；根因即被调用上下文 `github.workflow` 解析为调用方名）。已独立拉取原帖核实原文。套用本仓库：release.yml 组 `Release-refs/tags/vX.Y.Z`；ci.yml 被调用时组解析为逐字符相同的 `Release-refs/tags/vX.Y.Z`，且其 cancel 表达式对 tag ref 为 true → test job 启动瞬间发布运行被自己的子调用取消，首个试跑 tag 必死。**修复**：ci.yml 组名加入 `github.event_name`（`${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}`）——被调用时组为 `Release-workflow_call-refs/tags/vX.Y.Z`，与任何调用方自身组（不含 event_name 段）恒不同；独立运行行为不变（同 PR 分支新提交仍共享组可取消旧跑、main 不取消）。integration.yml/release.yml 自身组模板不动（两者都不被 workflow_call 调用，无 callee 侧碰撞面）。m1-pr-gate.md §二 的 concurrency 描述已同步 |
+| 二轮第 2 条的「不可达」推理有漏洞：被调用方 ci.yml 的 concurrency 求值本身就是组内**第二个成员**（携带对 tag 恒为 true 的 cancel-in-progress），进入与外层发布运行同名的组时会取消**正在执行的外层运行**——「组内只有一个成员」前提不成立 | 属实，二轮结论收回。实证：GitHub 社区讨论 orgs/community#30708 与本 PR 完全同型（caller 组 `workflow-ref` + cancel true 经 workflow_call 调用 callee → caller 被取消，日志 `Canceling since a higher priority waiting request for 'Build app-refs/heads/main' exists`；根因即被调用上下文 `github.workflow` 解析为调用方名）。**注意证据等级：这是社区实证（另有多方 Stack Overflow 佐证），官方文档对此语义无记载**，三轮的 §十 原文曾把它写成已核实的机制事实，四轮已修正措辞，见 §十一。套用本仓库：release.yml 组 `Release-refs/tags/vX.Y.Z`；ci.yml 被调用时组解析为相同的 `Release-refs/tags/vX.Y.Z`，其 cancel 表达式对 tag ref 为 true → test job 启动时发布运行被自己的子调用取消，首个试跑 tag 必死。**修复**：ci.yml 组名加入 `github.event_name`——但该值在 callee 中是**调用方的原始触发事件**（tag 推送时为 `push`，不是 `workflow_call`），故实际组为 `Release-push-refs/tags/vX.Y.Z`；安全性结论不变（release.yml 自身组无 event 段，恒不同）。**副作用（四轮补记）**：main 上 push 与 workflow_dispatch 由共享一组变为两组，两份 CI 可并行；PR 重推取消旧跑不受影响 |
+
+## 十一、评审四轮处置（PR #60）
+
+| 发现 | 核验与处置 |
+|---|---|
+| `--locked` 未可靠生效：`npm run tauri build -- --locked` 中 npm 会剥掉 `--`，`tauri build --locked` 被 tauri 自己拒收（exit 2），`--locked` 永远到不了 cargo；三轮 §九 用 `npx tauri build --help` 作证据不成立（只证明 `[ARGS]...` 存在，未验证 npm 转发链） | 属实。本机实证：旧写法 `npm run tauri build -- --locked` → `error: unexpected argument '--locked' found`，**exit 2**；新写法 `npm run tauri -- build -- --locked` 以无害探针 `--bogus-hinina-probe` 验证 → 前端构建通过后错误出自 cargo（**exit 1**，与 tauri 的 exit 2 可区分），证明内层 `--` 存活、参数经 tauri 送达 runner。失败模式澄清：CI 上旧写法是**显式失败**（首个试跑 tag 会在 build-windows 就红），不会静默出包；但修法仍必须换。已改为 `npm run tauri -- build -- --locked`，release.yml 步骤注释写明两种写法的差别 |
+| event_name 入组带来新行为：ci.yml 触发器含 push(main) 与 workflow_dispatch，加 event_name 前二者共享组（`cancel-in-progress: false` → 串行排队），加之后分成两组可并行；「独立运行行为不变」对该边界不准确 | 属实。已在 §十 与本表补记该副作用：main 的 push 与 dispatch 现在可并行，PR 重推取消旧跑不受影响。接受此代价——发布链路正确性优先于 main 上偶发的并行（main 推送通常由合并触发，与手动 dispatch 重叠概率低） |
+| callee 中 `github.event_name` 解析为调用方原始事件（tag 推送 = `push`），§十 原写的 `Release-workflow_call-…` 字面量错误 | 属实（actions/runner#3146 等实证）。§十 已改写为 `Release-push-refs/tags/vX.Y.Z`，分组安全性结论不变 |
+| `## [0.1.0] - TBD` 能通过门禁：日期后缀无格式校验，RELEASE.md 要求填日期但无强制 | 属实。门禁现在校验日期后缀必须是合法 `YYYY-MM-DD`：`TBD`/`2026-13-45` 均报 `invalid date` 并 exit 1；无日期后缀的标题仍接受。CHANGELOG 0.1.0 改为 `2026-10-27`。新增 3 条用例（TBD 拒绝、畸形日期拒绝、无后缀接受） |
+| cip:false 的排队语义：`queue: single` 下新排队项取消并替换较早的排队项，RELEASE.md §四未记录 | 属实（官方文档）。RELEASE.md §四 补「并发排队语义」段：同一标签短时间内多次触发时只执行最新排队项、更早的被静默取消；正常流程用 `gh run rerun` 不产生新运行 |
+| extractNotes 只以 `^##\s` 为结束条件，Keep a Changelog 文末的链接引用块（`[1.2.3]: https://…`）会被并入最后一个版本正文 | 属实（当前 CHANGELOG 无链接引用，属潜在问题）。结束条件增加 `^\[[^\]]+\]:\s` 分支；新增用例断言链接引用块不进入 notes |
+| 已解决项复核：spec 26/26（4beb7cc head）、print-version 纯读、重复章节报错 | 确认，无需处置（本轮新增用例后为 29 项） |
+| §六 四项仍为 `<待回填>`：发布链路尚未端到端验证 | 确认，保持待回填——需合并后打试跑标签才能填 |
