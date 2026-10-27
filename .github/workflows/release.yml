@@ -69,7 +69,9 @@ jobs:
           npm ci
           npm run build
       - name: Build desktop app (tauri build, NSIS bundle)
-        run: npm run tauri build
+        # --locked 经 tauri CLI 的 [ARGS]... 透传给 cargo：Cargo.lock 与 Cargo.toml
+        # 不一致时构建显式失败，安装包依赖版本与 CI 已测试版本完全一致。
+        run: npm run tauri build -- --locked
       - name: Collect build metadata
         shell: bash
         run: |

@@ -86,6 +86,7 @@ export function checkTag(tag, appVersion) {
 }
 
 // Accepts both `## [0.1.0] - 2026-10-26` (Keep a Changelog) and `## 0.1.0`.
+// Duplicate sections for the same version are rejected as ambiguous.
 export function findChangelogSection(root, version) {
   let text
   try {
@@ -95,10 +96,17 @@ export function findChangelogSection(root, version) {
   }
   const headerPattern = new RegExp(`^##\\s+\\[?v?${escapeRegExp(version)}\\]?(\\s|$)`)
   const lines = text.split(/\r?\n/)
-  const start = lines.findIndex((line) => headerPattern.test(line))
-  if (start === -1) {
+  const starts = []
+  for (let i = 0; i < lines.length; i += 1) {
+    if (headerPattern.test(lines[i])) starts.push(i)
+  }
+  if (starts.length === 0) {
     return { found: false, reason: `CHANGELOG.md has no section for ${version}` }
   }
+  if (starts.length > 1) {
+    return { found: false, reason: `CHANGELOG.md has ${starts.length} sections for ${version}; keep exactly one` }
+  }
+  const start = starts[0]
   let end = lines.length
   for (let i = start + 1; i < lines.length; i += 1) {
     if (/^##\s/.test(lines[i])) {
@@ -189,16 +197,19 @@ function runGate(argv, root, log, errorLog) {
     }
   }
 
-  const consistency = checkVersionConsistency(root)
-
+  // print-version is a pure readout of the app version: it must not touch any
+  // of the other version files, so it runs before the consistency check.
   if (flags.printVersion) {
-    if (!consistency.version) {
+    const version = readJsonFile(join(root, 'package.json'), 'package.json').version
+    if (typeof version !== 'string' || version.length === 0) {
       errorLog('error: package.json has no version field')
       return 1
     }
-    log(consistency.version)
+    log(version)
     return 0
   }
+
+  const consistency = checkVersionConsistency(root)
 
   if (flags.extractNotes) {
     if (!consistency.ok) {

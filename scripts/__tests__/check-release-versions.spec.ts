@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,11 @@ import {
 } from '../check-release-versions.mjs'
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
+
+// Never hardcode the repo version: these tests must keep passing across version
+// bumps as long as the five files (and the CHANGELOG section) stay in sync —
+// that continuous invariant is exactly what they assert.
+const repoVersion = (JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf-8')) as { version: string }).version
 
 const APP_VERSION = '1.2.3'
 
@@ -53,7 +58,7 @@ describe('checkVersionConsistency', () => {
   it('passes on the real repository (all five files at the same version)', () => {
     const result = checkVersionConsistency(repoRoot)
     expect(result.ok).toBe(true)
-    expect(result.version).toBe('0.1.0')
+    expect(result.version).toBe(repoVersion)
   })
 
   it('passes when every declared version agrees', () => {
@@ -163,6 +168,20 @@ describe('findChangelogSection / extractNotes', () => {
     expect(findChangelogSection(makeFixtureRoot(fixtureFiles()), '4.5.6').found).toBe(false)
   })
 
+  it('rejects duplicate sections for the same version as ambiguous', () => {
+    const root = makeFixtureRoot(
+      fixtureFiles({
+        'CHANGELOG.md':
+          '# Changelog\n\n## [1.2.3] - 2026-10-25\n\nstale body\n\n## [1.2.3] - 2026-10-26\n\nfresh body\n',
+      }),
+    )
+    const section = findChangelogSection(root, APP_VERSION)
+    expect(section.found).toBe(false)
+    expect(section.reason).toContain('2 sections')
+    expect(captureGate(['--changelog'], root).code).toBe(1)
+    expect(captureGate(['--extract-notes'], root).code).toBe(1)
+  })
+
   it('extractNotes returns the section body without the header', () => {
     const root = makeFixtureRoot(fixtureFiles())
     expect(extractNotes(root, APP_VERSION)).toBe('### Added\n- feature one\n- feature two')
@@ -171,14 +190,14 @@ describe('findChangelogSection / extractNotes', () => {
 
 describe('runCli', () => {
   it('passes the full gate on the real repository for the current version', () => {
-    const { code, out } = captureGate(['--tag', 'v0.1.0'], repoRoot)
+    const { code, out } = captureGate(['--tag', `v${repoVersion}`], repoRoot)
     expect(code).toBe(0)
     expect(out).toContain('release version gate:')
     expect(out).toContain('matches app version')
   })
 
   it('passes the full gate including the CHANGELOG section on the real repository', () => {
-    const { code, out } = captureGate(['--tag', 'v0.1.0', '--changelog'], repoRoot)
+    const { code, out } = captureGate(['--tag', `v${repoVersion}`, '--changelog'], repoRoot)
     expect(code).toBe(0)
     expect(out).toContain('CHANGELOG.md')
   })
@@ -214,6 +233,13 @@ describe('runCli', () => {
 
   it('print-version prints just the version', () => {
     const { code, out } = captureGate(['--print-version'], makeFixtureRoot(fixtureFiles()))
+    expect(code).toBe(0)
+    expect(out).toBe(APP_VERSION)
+  })
+
+  it('print-version reads only package.json and works when other version files are absent', () => {
+    const root = makeFixtureRoot({ 'package.json': JSON.stringify({ version: APP_VERSION }) })
+    const { code, out } = captureGate(['--print-version'], root)
     expect(code).toBe(0)
     expect(out).toBe(APP_VERSION)
   })
