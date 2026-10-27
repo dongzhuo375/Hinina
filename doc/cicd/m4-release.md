@@ -45,7 +45,7 @@
 - 试跑 run：<待回填>
 - 草稿 Release 与验收：<待回填>
 - 失败路径验证（validate 拒绝不指向 main / 版本漂移的标签）：<待回填>
-- 嵌套 ci.yml（workflow_call）在标签运行中的并发表现复核：<待回填，见 §九第 2 条>
+- 试跑确认发布运行全程不被 test 子调用取消（§十修复后的端到端确认）：<待回填>
 
 ## 七、遗留项
 
@@ -69,7 +69,13 @@
 | 发现 | 核验与处置 |
 |---|---|
 | 发布构建缺 `--locked`：`npm run tauri build` 未向 cargo 透传 `--locked`，锁文件与 Cargo.toml 不一致时安装包可能用到 CI 未测过的依赖版本 | 属实（实际是纵深防御缺口：release 的 test job 会在同 SHA 上先跑 `--locked` 的 clippy/test，正常流程下到 build-windows 时锁文件已被证明一致；但发布链路应显式断言而非依赖前置 job 的次序）。修复：`npm run tauri build -- --locked`——tauri CLI 的 `[ARGS]...` 透传给 runner（`npx tauri build --help` 实证），锁不一致时构建显式失败。integration.yml 构建矩阵为同模式但属夜间观测、不入发布链，本 PR 不动，留后续单独处理 |
-| 嵌套 ci.yml 的并发组可能与发布运行互相取消（test 经 workflow_call 复用，ci.yml 对非 main ref 设 `cancel-in-progress: true`） | 官方文档核实：workflow syntax 与 reuse 页对「被调用 workflow 的顶层 concurrency 是否生效」均无记载，评审者的不确定成立。结构分析核验为**不可达**：即使该并发被以任何语义采纳，组值含 `github.ref`（= 标签 ref），而同标签的发布运行已被 release.yml 自身 `cancel-in-progress: false` 串行化——该组内永远只有一个成员，不存在可取消的并发对象；不同标签/分支的组天然不同。处置：不改 ci.yml（为不可达场景修改 M1 门禁文件违背最小变更）；试跑 tag 时在 Actions 页复核嵌套运行并发表现并回填 §六 |
+| 嵌套 ci.yml 的并发组可能与发布运行互相取消（test 经 workflow_call 复用，ci.yml 对非 main ref 设 `cancel-in-progress: true`） | 二轮处置为「不可达」（组含 tag ref + 外层串行化 → 组内单成员），**该结论于三轮被推翻并修复，见 §十** |
 | spec 硬编码真实版本 `0.1.0`/`v0.1.0`：升版后即便五个文件一致，真实仓库用例也会假红 | 属实。改为从 package.json 动态读取当前版本（`v${repoVersion}` 参与全门禁用例）。语义升级为持续不变量：任何时候五文件一致、tag 与 CHANGELOG 段落齐备即绿——将来升版 PR 若忘了同步 CHANGELOG 段落，`npm test` 会当场拦下 |
 | `--print-version` 注释与行为不符：注释说只读 package.json，实际 runGate 先跑全量一致性（Cargo.lock 缺失会连带走失败） | 属实（一轮时只改了注释没改行为，二轮抓到）。修复：print-version 分支移到一致性计算之前，真正只读 package.json；新增用例「其余四个文件缺失时仍正常出版本号」——旧代码下该用例必红，兼作变异验证 |
 | CHANGELOG 重复章节会被静默采用第一个（findChangelogSection 取首个匹配） | 属实。改为扫描全部匹配标题，发现重复即按段落歧义失败（reason 注明 N 个章节）；`--changelog` 与 `--extract-notes` 均受保护；新增用例（重复章节 → 两模式均 exit 1） |
+
+## 十、评审三轮处置（PR #60）：二轮「不可达」结论推翻，并发组互消实锤并修复
+
+| 发现 | 核验与处置 |
+|---|---|
+| 二轮第 2 条的「不可达」推理有漏洞：被调用方 ci.yml 的 concurrency 求值本身就是组内**第二个成员**（携带对 tag 恒为 true 的 cancel-in-progress），进入与外层发布运行同名的组时会取消**正在执行的外层运行**——「组内只有一个成员」前提不成立 | 属实，二轮结论收回。实证：GitHub 社区讨论 orgs/community#30708 与本 PR 完全同型（caller 组 `workflow-ref` + cancel true 经 workflow_call 调用 callee → caller 被取消，日志 `Canceling since a higher priority waiting request for 'Build app-refs/heads/main' exists`；根因即被调用上下文 `github.workflow` 解析为调用方名）。已独立拉取原帖核实原文。套用本仓库：release.yml 组 `Release-refs/tags/vX.Y.Z`；ci.yml 被调用时组解析为逐字符相同的 `Release-refs/tags/vX.Y.Z`，且其 cancel 表达式对 tag ref 为 true → test job 启动瞬间发布运行被自己的子调用取消，首个试跑 tag 必死。**修复**：ci.yml 组名加入 `github.event_name`（`${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}`）——被调用时组为 `Release-workflow_call-refs/tags/vX.Y.Z`，与任何调用方自身组（不含 event_name 段）恒不同；独立运行行为不变（同 PR 分支新提交仍共享组可取消旧跑、main 不取消）。integration.yml/release.yml 自身组模板不动（两者都不被 workflow_call 调用，无 callee 侧碰撞面）。m1-pr-gate.md §二 的 concurrency 描述已同步 |
