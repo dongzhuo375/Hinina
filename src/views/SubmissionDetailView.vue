@@ -19,11 +19,12 @@ import {
   statusLabel,
   statusTone,
 } from '@/utils/submission'
-import type { StatusTone } from '@/utils/submission'
+import { statusToneClasses } from '@/utils/submission-tone'
 import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
+import { useTransientValue } from '@/composables/useTransientValue'
 
 const log = createLogger('SubmissionDetailView')
 
@@ -58,20 +59,6 @@ let pollTimeoutMs = 0
 let scheduleReady: Promise<void> | null = null
 
 const judging = computed(() => (detail.value ? isJudging(detail.value.status) : false))
-
-/// tone → pill 样式类（与评测页同一套语义色）
-const TONE_CLASSES: Record<StatusTone, string> = {
-  ac: 'border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
-  wa: 'border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-[var(--color-error)]',
-  tle: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
-  pending: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-info)]',
-  system: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
-  neutral: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
-}
-
-function toneClasses(tone: StatusTone): string {
-  return TONE_CLASSES[tone] ?? TONE_CLASSES.neutral
-}
 
 /// 详情 pid 匹配到当前比赛题目时可跳解题页；匹配不到（如赛后换配置）只显示 displayPid
 const matchedProblem = computed(() => {
@@ -118,8 +105,7 @@ const codeExpanded = ref(false)
 
 // ── CE / 错误信息复制 ──
 
-const copied = ref(false)
-let copiedTimer: ReturnType<typeof setTimeout> | null = null
+const { value: copied, show: showCopied, clear: clearCopied } = useTransientValue(false, 1_500)
 
 async function copyErrorMessage() {
   const text = detail.value?.errorMessage
@@ -141,9 +127,7 @@ async function copyErrorMessage() {
     }
     document.body.removeChild(ta)
   }
-  copied.value = true
-  if (copiedTimer) clearTimeout(copiedTimer)
-  copiedTimer = setTimeout(() => (copied.value = false), 1500)
+  showCopied(true)
 }
 
 // ── 数据加载与收敛轮询 ──
@@ -163,11 +147,7 @@ async function reload(id: string): Promise<void> {
   loadError.value = null
   isLoading.value = true
   codeExpanded.value = false
-  copied.value = false
-  if (copiedTimer) {
-    clearTimeout(copiedTimer)
-    copiedTimer = null
-  }
+  clearCopied()
   if (!id) {
     isLoading.value = false
     return
@@ -273,7 +253,6 @@ watch(submitId, (id) => { void reload(id) })
 onUnmounted(() => {
   alive = false
   stopPoller()
-  if (copiedTimer) clearTimeout(copiedTimer)
 })
 
 function goBack() {
@@ -335,7 +314,7 @@ function openProblem() {
           <div class="flex flex-wrap items-center gap-4">
             <span
               class="inline-flex items-center gap-2 rounded-sm border px-4 py-2 text-base font-bold shadow-none"
-              :class="[toneClasses(statusTone(detail.status)), judging ? '' : '']"
+              :class="[statusToneClasses(statusTone(detail.status)), judging ? '' : '']"
             >
               <svg
                 v-if="judging"
@@ -532,7 +511,7 @@ function openProblem() {
                     <td class="px-3.5 py-2">
                       <span
                         class="inline-flex rounded-sm border px-2 py-0.5 font-mono text-xs font-semibold"
-                        :class="toneClasses(statusTone(c.status))"
+                        :class="statusToneClasses(statusTone(c.status))"
                       >
                         {{ statusAbbr(c.status) }}
                       </span>
@@ -565,7 +544,7 @@ function openProblem() {
                 <td class="px-4 py-2">
                   <span
                     class="inline-flex rounded-sm border px-2 py-0.5 font-mono text-xs font-semibold"
-                    :class="toneClasses(statusTone(c.status))"
+                    :class="statusToneClasses(statusTone(c.status))"
                   >
                     {{ statusAbbr(c.status) }}
                   </span>

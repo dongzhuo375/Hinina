@@ -170,6 +170,31 @@ describe('SubmissionDetailView 路由参数切换', () => {
     expect(view.host.textContent).not.toContain('2/2 通过')
   })
 
+  it('复制反馈在路由切换时立即复位，不带入下一条提交', async () => {
+    vi.useFakeTimers()
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    mocks.getSubmissionDetail.mockImplementationOnce(async () => ({
+      ...detailOf('A'),
+      errorMessage: 'compile error',
+    }))
+    const view = await mount()
+    const copyButton = [...view.host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === '复制')!
+
+    copyButton.click()
+    await settle()
+    expect(writeText).toHaveBeenCalledWith('compile error')
+    expect(copyButton.textContent).toContain('已复制')
+
+    route.params = { submitId: 'B' }
+    await settle()
+    expect(view.host.textContent).not.toContain('已复制')
+  })
+
   it('旧 poller 停止且新提交重建 deadline：跨过旧截止时刻后 B 仍轮询', async () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0.5)

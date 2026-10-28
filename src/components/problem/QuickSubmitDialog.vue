@@ -21,7 +21,7 @@ import {
   statusLabel,
   statusTone,
 } from '@/utils/submission'
-import type { StatusTone } from '@/utils/submission'
+import { statusToneClasses } from '@/utils/submission-tone'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('QuickSubmitDialog')
@@ -63,15 +63,9 @@ async function loadAllowedLanguages() {
 const submitError = ref<string | null>(null)
 const fileError = ref<string | null>(null)
 
-/// tone → pill 样式类（与评测页/详情页同一套语义色）
-const TONE_CLASSES: Record<StatusTone, string> = {
-  ac: 'border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
-  wa: 'border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-[var(--color-error)]',
-  tle: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
-  pending: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
-  system: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
-  neutral: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
-}
+/// 本弹窗历史使用琥珀色 pending；其余 tone 与评测页/详情页共享，不做全局改色
+const QUICK_SUBMIT_PENDING_CLASS =
+  'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]'
 
 // ── Esc 关闭 ──
 
@@ -343,7 +337,7 @@ function goDetail() {
           <template v-else>
             <span
               class="inline-flex items-center rounded-sm border px-2.5 py-1 text-xs font-semibold"
-              :class="TONE_CLASSES[statusTone(entry.status)]"
+              :class="statusToneClasses(statusTone(entry.status), { pending: QUICK_SUBMIT_PENDING_CLASS })"
             >
               {{ statusLabel(entry.status) }}
             </span>

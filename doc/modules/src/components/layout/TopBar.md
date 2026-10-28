@@ -12,7 +12,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `now` | `ref<number>`（秒） | 每秒 setInterval 刷新，驱动倒计时与阶段跃迁；onUnmounted 清理 |
+| `nowMs` / `now` | `useNowMs()` / computed（秒） | 共享毫秒墙钟派生秒，驱动倒计时与阶段跃迁；scope dispose 清理 interval |
 | `contest` | computed | `contestStore.contest` |
 | `phase` | computed | `getContestPhase(contest, now)`（与登录页共用判据） |
 | `phaseBadge` | computed | 四态徽章：进行中 / 未开始 / 已结束 / 未加载，配色全部取 CSS 令牌（`--color-ac-*`、`--color-pending-*`、`--border-color`），不再硬编码色值 |
@@ -32,6 +32,7 @@
 - `@/stores/authStore` / `@/stores/contestStore`
 - `@/utils/contest`（`getContestPhase`）、`@/utils/markdown`（`renderMarkdown`）、`@/utils/focus-scope`（`vFocusScope` —— 简介浮层/账号菜单的焦点陷阱与 Esc 关闭）
 - `@/services/config.service`（OJ 基址，用于简介图片改写）
+- `@/composables/useNowMs`（毫秒墙钟，派生秒）
 
 ## 被依赖
 

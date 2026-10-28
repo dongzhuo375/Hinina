@@ -19,9 +19,10 @@ import {
   statusLabel,
   statusTone,
 } from '@/utils/submission'
-import type { StatusTone } from '@/utils/submission'
+import { statusToneClasses } from '@/utils/submission-tone'
 import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
+import { getPageItems } from '@/utils/pagination'
 
 /// 评测页轮询节奏：5s ± 1s，仅在当前页存在评测中的提交时运行（收敛即停）
 const POLL_INTERVAL_MS = 5_000
@@ -78,20 +79,6 @@ function contestElapsed(record: SubmissionRecord): string {
   return formatDurationHms(record.submitTime - start)
 }
 
-/// tone → pill 样式类（与 utils/submission 的语义色调一一对应）
-const TONE_CLASSES: Record<StatusTone, string> = {
-  ac: 'border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
-  wa: 'border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-[var(--color-error)]',
-  tle: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
-  pending: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-info)]',
-  system: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
-  neutral: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
-}
-
-function toneClasses(tone: StatusTone): string {
-  return TONE_CLASSES[tone] ?? TONE_CLASSES.neutral
-}
-
 /// 首次加载（还没有任何可展示数据）才铺满 spinner；刷新时保留旧表格不打断阅读
 const isBootstrapping = computed(
   () => history.value.isLoading && history.value.records.length === 0,
@@ -105,31 +92,8 @@ const fatalMessage = computed(
   () => history.value.error ?? contestStore.error ?? '加载提交记录失败',
 )
 
-/**
- * 页码窗口：首尾页 + 当前页 ±1，其余折叠成省略号（与榜单页同一算法）。
- */
-const pageItems = computed<(number | '…')[]>(() => {
-  const pages = history.value.pages
-  const current = history.value.current
-  if (pages <= 1) return []
-  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1)
-  const nums = new Set<number>([1, pages, current])
-  for (const delta of [-1, 1]) {
-    const candidate = current + delta
-    if (candidate > 1 && candidate < pages) nums.add(candidate)
-  }
-  if (current <= 3) for (const n of [2, 3, 4]) nums.add(n)
-  if (current >= pages - 2) for (const n of [pages - 3, pages - 2, pages - 1]) nums.add(n)
-  const sorted = [...nums].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b)
-  const items: (number | '…')[] = []
-  let previous = 0
-  for (const n of sorted) {
-    if (previous !== 0 && n - previous > 1) items.push('…')
-    items.push(n)
-    previous = n
-  }
-  return items
-})
+/// 页码窗口算法与榜单页共享；视图只提供提交历史分页状态
+const pageItems = computed(() => getPageItems(history.value.current, history.value.pages))
 
 async function bootstrap(): Promise<void> {
   try {
@@ -528,7 +492,7 @@ onUnmounted(() => {
                 <td class="px-4 py-3">
                   <span
                     class="inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-xs font-semibold shadow-none"
-                    :class="toneClasses(statusTone(record.status))"
+                    :class="statusToneClasses(statusTone(record.status))"
                   >
                     <svg
                       v-if="isJudging(record.status)"

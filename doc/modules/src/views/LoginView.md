@@ -31,7 +31,7 @@
 | `reschedulePrecheck` / `runPrecheck` / `clearPrecheck` | fn | 赛前会话预检的排程/执行/取消（策略纯函数在 `utils/session-check`） |
 | `watch([() => auth.isLoggedIn, contestPhase], reschedulePrecheck)` | — | 登录态或阶段变化即重新排程 |
 
-模块级普通变量（副作用句柄与计数，刻意不进响应式系统）：`timer`（每秒时钟）、`disposed`（卸载标记，阻止卸载后在途回调继续排程）、`briefRetryCount` / `briefRetryTimer`（简报重试）、`precheckTimer` / `precheckRetried`（预检与 unknown 单次重试标记）。另有 `briefRetryScheduled: ref<boolean>` 仅用于页脚文案（「正在自动重试」）。
+模块级普通变量（副作用句柄与计数，刻意不进响应式系统）：`disposed`（卸载标记，阻止卸载后在途回调继续排程）、`briefRetryCount` / `briefRetryTimer`（简报重试）、`precheckTimer` / `precheckRetried`（预检与 unknown 单次重试标记）。墙钟 interval 已归 `useNowMs`。另有 `briefRetryScheduled: ref<boolean>` 仅用于页脚文案（「正在自动重试」）。
 
 ## 直接依赖
 
@@ -40,6 +40,7 @@
 - 组件：`@/components/login/EventTitle.vue` / `Countdown.vue` / `LoginForm.vue`
 - stores：`@/stores/authStore` / `@/stores/contestStore`
 - `@/utils/markdown`（`renderMarkdown`）、`@/utils/contest`（`getAuthoritativeSchedule` / `getContestPhase`）、`@/utils/brief-retry`（`briefRetryDelayMs`）、`@/utils/session-check`（`planNextPrecheck` / `planRetryDelayMs` + `PrecheckReason` 类型）
+- `@/composables/useNowMs`（毫秒墙钟，派生秒）
 
 ## 被依赖
 
@@ -50,7 +51,6 @@
 ```
 onMounted:
   loadBrief()                            // 匿名简报（contestStore.loadBrief 三态）
-  timer = setInterval(1s)                // 驱动倒计时与阶段跃迁
   !auth.sessionResolved → auth.checkSession()   // 路由守卫可能已确认过，跳过避免重复 IPC
   !disposed → reschedulePrecheck()
 
@@ -73,7 +73,7 @@ canEnter 侦听器（immediate）:
     └─ reason === 'periodic' → 继续排程；window/immediate 为一次性，
        之后交给进场流程与全局 401 兜底
   每次回调先查 disposed / isLoggedIn / phase，离开页面或开赛后不再排程
-onUnmounted → disposed = true；清理时钟、简报重试、预检三个定时器
+onUnmounted → disposed = true；清理简报重试与预检定时器；墙钟由 scope dispose 清理
 ```
 
 设计要点：

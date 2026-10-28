@@ -34,7 +34,7 @@
 | `pendingDir` / `migrateData` | ref | 选择器返回的候选路径（确认前不写指针）与「是否迁移现有数据」（**默认勾选**） |
 | `cancelDataDirChoice` | fn | 取消候选：清 `pendingDir` 并**复位 `migrateData`** —— 它是「更改目录」与「恢复默认」共用的状态，若停在 `false` 会让后续「恢复默认」**静默不迁移** |
 | `changingDir` / `changeNotice` / `changeError` / `chooseDataDir` / `confirmDataDir` / `restoreDefaultDataDir` | ref/fn | 更改流程：选择器 → 确认行 → 写指针 → 提示「重启后生效」；`恢复默认` 仅当前为自定义目录时显示。**两个动作都在函数开头取 `migrateData` 快照**（见下），完成后复位 |
-| `copyText` / `copiedKey` | fn/ref | 关于区块逐项复制（版本/目录/路径），「已复制」2s 回弹；剪贴板不可用静默忽略 |
+| `copyText` / `copiedKey` | fn/ref | 关于区块逐项复制（版本/目录/路径）；成功后经共享 `useTransientValue(null, 2000)` 显示反馈，scope dispose 清理；剪贴板不可用静默忽略 |
 | `onSplitInput` / `splitPercent` | fn/computed | 布局滑杆输入（钳位后写回）与百分比文案 |
 | `INPUT` / `INPUT_ERROR` / `inputClass` | 常量/fn | 输入框样式拼接（错误态红框） |
 | `SECTION_LABELS` | 常量 | 左侧索引导航的七个分组标签，与 `settings-{i}` section 的顺序/数量一一对应 |
@@ -55,6 +55,7 @@
 - `@/utils/editor`（`EDITOR_TAB_SIZES` / `EDITOR_FONT_SIZE_MIN` / `EDITOR_FONT_SIZE_MAX` —— 编辑器分组的值域唯一权威）
 - `@/utils/language`（`DEFAULT_LANGUAGES` / `normalizeHojLanguage` —— 语言候选与归一）
 - `@/utils/oj`（`ojSelectOptions` / `ojBaseUrlHint` —— OJ 下拉候选与地址占位）
+- `@/composables/useTransientValue`（About 复制反馈与 timer 生命周期；本分支不拆分 SettingsView 其它结构）
 
 ## 被依赖
 
@@ -162,7 +163,7 @@ discard(): Object.assign(form, JSON.parse(baseline))
   平滑滚动会途经中间各分组，每帧实时校正会让高亮在途中分组间跳动（导航文字闪烁）；
   锁定期间只认「目标到位」（顶边抵达 scroll-margin 停靠点 ±2px，或容器滚到底），
   1s 超时兜底释放，防止用户中途反拖滚轮把锁卡死。
-- 定时器（savedTimer/copiedTimer/resetTimer/purgeTimer/changeTimer）onBeforeUnmount 统一清理。
+- 定时器（savedTimer/resetTimer/purgeTimer/changeTimer）onBeforeUnmount 统一清理；About 复制反馈改由 `useTransientValue` 的 scope dispose 管理，时长仍为 2s。
 - **视觉随赛场主题收敛**（PR #36）：硬编码 `slate/emerald/rose/amber/blue/purple-*`
   全部换成主题变量（`--text-*` / `--bg-*` / `--border-color` / `--color-*`），
   圆角统一 `rounded-sm`、去掉阴影；页头改由 `PageHeading` 承担

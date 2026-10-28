@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useNowMs } from '@/composables/useNowMs'
 import { useRouter } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useAuthStore } from '@/stores/authStore'
@@ -16,19 +17,9 @@ const contestStore = useContestStore()
 const appWindow = getCurrentWindow()
 defineProps<{ navigationDisabled?: boolean }>()
 
-/// 当前时间戳（秒），每秒刷新驱动倒计时与比赛阶段跃迁
-const now = ref(Math.floor(Date.now() / 1000))
-let timer: ReturnType<typeof setInterval> | null = null
-
-onMounted(() => {
-  timer = setInterval(() => {
-    now.value = Math.floor(Date.now() / 1000)
-  }, 1000)
-})
-
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
+/// 当前时间戳（秒），共享毫秒墙钟派生；每秒驱动倒计时与比赛阶段跃迁
+const nowMs = useNowMs()
+const now = computed(() => Math.floor(nowMs.value / 1000))
 
 const contest = computed(() => contestStore.contest)
 

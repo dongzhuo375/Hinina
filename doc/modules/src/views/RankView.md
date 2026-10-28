@@ -8,11 +8,11 @@
 
 ## 核心类型/函数
 
-模块级/组件级普通变量：`clock`（每秒 setInterval 句柄）、`alive`（卸载标记，异步引导链落地后不得再触碰 store）。
+组件级普通变量：`alive`（卸载标记，异步引导链落地后不得再触碰 store）。墙钟 interval 已归 `useNowMs`，不再单独持有 `clock` 句柄。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `nowMs` / `nowSecs` | ref/computed | 每秒推进的时钟，驱动 updatedText、phase、isSealed |
+| `nowMs` / `nowSecs` | `useNowMs()` / computed | 共享毫秒墙钟并派生秒，驱动 updatedText、phase、isSealed；scope dispose 清理 interval |
 | `phase` / `isEnded` / `isUpcoming` | computed | `utils/contest.getContestPhase` 派生 |
 | `isSealed` | computed | 封榜判据：`sealRank && sealRankTime !== null && nowSecs >= sealRankTime`（只判下界，见设计要点） |
 | `isBootstrapping` | computed | 首次加载（无任何可展示数据）才铺满屏 spinner；轮询刷新保留旧表格 |
@@ -21,7 +21,7 @@
 | `updatedText` / `liveText` | computed | 「更新于 x 秒/分/小时前」；刷新状态文案三分支：已结束 →「比赛已结束，停止刷新」，全量快照模式 →「全量快照 · 手动刷新」，否则「实时刷新中 / 未开启」（底栏呼吸灯同步：`isLive && !isFullMode` 才绿色脉冲，否则琥珀） |
 | `isFullFilterActive` | computed | 是否处于打星/女生的客户端筛选（**含快照尚未就位**的拉取中/失败态，比 `rankStore.isFullMode` 宽） |
 | `totalLabel` | computed | 底栏「共 N 队」：全量模式显示筛选后行数（`fullFilteredRows.length`，标注「筛选后」），常规模式显示修正后的真实参与人数 |
-| `pageItems` | computed | 页码窗口：首尾页 + 当前页 ±1，其余折叠 `…`（≤7 页全量展示；渲染由 `PagePager` 承担） |
+| `pageItems` | computed | 把 `rankStore.current/pages` 传给共享纯函数 `utils/pagination.getPageItems`；视图不再持有窗口算法，渲染仍由 `PagePager` 承担 |
 | `ensureContest` | `() => Promise<void>` | 子视图 onMounted 先于外壳触发，直达本页时这里才是实际发起方；统一走 `contestStore.whenLoaded()`（P59：复用在途请求，原 100ms sleep 轮询写法已删除） |
 | `bootstrap` / `retry` / `manualRefresh` / `goToPage` | — | 引导链 / 错误条与致命错误重试（全量筛选态下错误来自快照拉取，重试走 `rankStore.refresh()` 重拉快照）/ 手动刷新按钮（`refresh` 内部按模式分流且吞异常）/ 翻页（失败静默，旧数据保留；全量模式为纯客户端切片） |
 | `watch(contestStore.contest?.id)` | — | 非首次挂载的比赛切换：外壳把缓存的比赛 A 刷新为 B 后，停旧轮询并按 B 重跑 `bootstrap`；不依赖子视图重新挂载 |
@@ -32,6 +32,8 @@
 - 组件：`PageHeading`（页头，编号 `02` / `LIVE SCOREBOARD`）/ `ContestStatsBar`（页头右侧插槽）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner` / `RankToolbar` / `ScoreboardTable`
 - stores：`authStore`（uid）/ `contestStore` / `rankStore`
 - `@/utils/contest`（`getContestPhase`）
+- `@/utils/pagination`（`getPageItems` 页码窗口纯函数）
+- `@/composables/useNowMs`（毫秒墙钟；保留 updatedText 的亚秒边界）
 
 ## 被依赖
 
@@ -40,7 +42,7 @@
 ## 逻辑流程
 
 ```
-onMounted: clock = setInterval(1s)；bootstrap()
+onMounted: bootstrap()（墙钟 interval 由 useNowMs 自持）
 
 bootstrap():
   ensureContest() → 无 contestId 则终止
@@ -49,7 +51,7 @@ bootstrap():
               // 已结束不启动：HOJ 网页端此时禁用刷新，继续打请求只是浪费服务端算力
               // 暂停判据传入 isEnded：停留期间比赛结束由 watch 兜底 stopLive
 
-onUnmounted: alive = false；clearInterval(clock)；rankStore.stopLive()
+onUnmounted: alive = false；rankStore.stopLive()（墙钟由 scope dispose 清理）
               // 轮询器是模块级副作用句柄，离开榜单页必须回收，否则后台持续打 OJ
 
 watch(isEnded): 结束瞬间立即 stopLive()

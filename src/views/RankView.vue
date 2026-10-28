@@ -11,15 +11,16 @@ import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useRankStore } from '@/stores/rankStore'
 import { getContestPhase } from '@/utils/contest'
+import { getPageItems } from '@/utils/pagination'
+import { useNowMs } from '@/composables/useNowMs'
 
 const contestStore = useContestStore()
 const rankStore = useRankStore()
 const authStore = useAuthStore()
 
-/// 每秒推进一次的时钟：同时驱动「更新于 x 秒前」、比赛阶段跃迁与封榜判定
-const nowMs = ref(Date.now())
+/// 每秒推进一次的毫秒墙钟：同时驱动「更新于 x 秒前」、比赛阶段跃迁与封榜判定
+const nowMs = useNowMs()
 const nowSecs = computed(() => Math.floor(nowMs.value / 1000))
-let clock: ReturnType<typeof setInterval> | null = null
 /// 组件已卸载标记：异步引导链路可能在卸载后才落地，此时不得再触碰 store
 let alive = true
 
@@ -85,32 +86,8 @@ const totalLabel = computed(() =>
     : `共 ${rankStore.participants} 队`,
 )
 
-/**
- * 页码窗口：首尾页 + 当前页 ±1，其余折叠成省略号。
- * 榜单按 50 条分页，几百人的比赛会有十几页，全量页码会挤爆底栏。
- */
-const pageItems = computed<(number | '…')[]>(() => {
-  const pages = rankStore.pages
-  const current = rankStore.current
-  if (pages <= 1) return []
-  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1)
-  const nums = new Set<number>([1, pages, current])
-  for (const delta of [-1, 1]) {
-    const candidate = current + delta
-    if (candidate > 1 && candidate < pages) nums.add(candidate)
-  }
-  if (current <= 3) for (const n of [2, 3, 4]) nums.add(n)
-  if (current >= pages - 2) for (const n of [pages - 3, pages - 2, pages - 1]) nums.add(n)
-  const sorted = [...nums].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b)
-  const items: (number | '…')[] = []
-  let previous = 0
-  for (const n of sorted) {
-    if (previous !== 0 && n - previous > 1) items.push('…')
-    items.push(n)
-    previous = n
-  }
-  return items
-})
+/// 页码窗口算法与评测页共享；视图只提供榜单分页状态
+const pageItems = computed(() => getPageItems(rankStore.current, rankStore.pages))
 
 /**
  * 确保比赛数据就绪。
@@ -184,16 +161,11 @@ function goToPage(page: number) {
 }
 
 onMounted(() => {
-  clock = setInterval(() => {
-    nowMs.value = Date.now()
-  }, 1000)
   void bootstrap()
 })
 
 onUnmounted(() => {
   alive = false
-  if (clock) clearInterval(clock)
-  clock = null
   // 轮询器是模块级副作用句柄，离开榜单页必须回收，否则会在后台持续打 OJ
   rankStore.stopLive()
 })

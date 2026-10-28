@@ -18,7 +18,7 @@
 | `isDouble` / `shownLimits` | computed | 当前语言是否 ×2（`isDoubleLimitLanguage(workspaceStore.language)`）；头部展示的是**当前语言实际生效阈值**（`effectiveLimits`），与判题行为一致（HOJ-Problem-Limits-API.md §5） |
 | `timeText` / `memoryText` / `baseTimeText` / `baseMemoryText` / `languageLabel` | computed | 生效值与基准值文案；×2 语言时头部下方标注「题面限制为 C/C++ 基准（x / y），当前语言 {lang} 判题时时间与内存 ×2」 |
 | `renderedDescription/Input/Output` | computed | `renderMarkdown(文本, baseUrl)` → v-html |
-| `samples` / `copySampleInput` / `copiedIndex` | — | 样例列表（`problem.samples ?? []`）；复制输入到剪贴板并显示「已复制」1.5s 反馈（`copyTimer` 在 onUnmounted 清理）；剪贴板不可用只 `log.error` 记录（`utils/logger` 作用域日志），**不打断做题** |
+| `samples` / `copySampleInput` / `copiedIndex` | — | 样例列表（`problem.samples ?? []`）；复制输入到剪贴板后调用共享 `useTransientValue(-1, 1500)` 显示反馈，scope dispose 清理 timer；剪贴板不可用只 `log.error` 记录，**不打断做题** |
 | `acText` | computed | 通过率文案（`ac / total` + 百分比），无摘要数据时不编造 |
 
 模板结构：根 `.problem-statement`（`container-type: inline-size`）→ `.statement-header`（`.statement-title` + 限制/通过率元信息）→ `.statement-content`（各 `section` 的 `h2.statement-section-title` + 正文 `.prose`）→ 样例区（`.sample` 输入/输出 + 复制按钮）。
@@ -33,6 +33,7 @@ scoped 样式要点：`--statement-font: clamp(14px, min(calc(7px + 1.1cqi), cal
 - `@/services/config.service`（OJ 基址；配置读取按约定一律经该服务，不直接调 config.bridge）
 - `@/stores/contestStore`（通过率）/ `problemStore`（limits）/ `workspaceStore`（当前语言）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
+- `@/composables/useTransientValue`（复制反馈临时值与 timer 生命周期）
 
 ## 被依赖
 
@@ -45,7 +46,7 @@ props.problem 到达 → 分节正文 renderMarkdown（图片相对地址用 bas
 limits 双源合并：limitsOf(displayId) ?? problem.timeLimit/memoryLimit ?? null → `—`
 workspaceStore.language 切换 → isDouble/shownLimits 重算 → 头部阈值实时跟随
                               （与 CodeEditor 语言下拉、后端 set_workspace_language 同一状态源）
-样例复制 → navigator.clipboard.writeText → 「已复制」反馈 1.5s（定时器 onUnmounted 清理）
+样例复制 → navigator.clipboard.writeText → useTransientValue.show(index) → 1.5s 回弹（scope dispose 清理）
 ```
 
 设计要点：
