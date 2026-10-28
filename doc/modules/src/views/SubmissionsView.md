@@ -17,7 +17,7 @@
 | `searchQuery` / `visibleRecords` | ref/computed | **当前页**客户端搜索：运行编号 / 题目标题 / 展示题号（displayId/displayPid）小写包含匹配；不发请求 |
 | `problemByDisplayId` | computed | displayId → 比赛题目映射（气球色徽章 / 解题页跳转用） |
 | `contestElapsed` | `(record) => string` | 赛时相对时间 = `submitTime − contest.startTime`（同为 epoch 秒），经 `formatDurationHms` 格式化；赛前提交钳制 `--:--:--` |
-| `TONE_CLASSES` / `toneClasses` | — | `StatusTone` → pill 样式类（ac 绿 / wa 红 / tle 琥珀 / pending 青 / system·neutral 灰） |
+| `statusToneClasses` | 共享 fn | 使用 `utils/submission-tone` 的默认 pill 样式（ac 绿 / wa 红 / tle 琥珀 / pending 青 / system·neutral 灰），本视图不再持有色表 |
 | `isBootstrapping` / `isFatalError` / `fatalMessage` | computed | 首次加载（无记录）才铺满 spinner；致命错误 =（history.error 且无记录）或（contestStore.error 且无 contest） |
 | `pageItems` | computed | 把 `history.current/pages` 传给共享纯函数 `utils/pagination.getPageItems`；视图不再持有窗口算法，渲染仍由 `PagePager` 承担 |
 | `bootstrap` / `retry` | — | 引导链 / 错误条与致命错误重试（无 contest 时重走 bootstrap） |
@@ -32,7 +32,8 @@
 - 组件：`PageHeading`（页头，编号 `03` / `SUBMISSION ARCHIVE`）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner`
 - stores：`contestStore`（比赛标题 / startTime / 题目列表）、`submissionStore`（history 数据源）
 - `@/types/contest` / `@/types/submission`（仅类型）
-- `@/utils/submission`（`STATUS_OPTIONS` / `formatClock` / `formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `statusLabel` / `statusTone` + `StatusTone` 类型）
+- `@/utils/submission`（`STATUS_OPTIONS` / `formatClock` / `formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `statusLabel` / `statusTone`）
+- `@/utils/submission-tone`（共享 pill 类串）
 - `@/utils/polling`（`createPoller` + `Poller` 类型）
 - `@/utils/pagination`（`getPageItems` 页码窗口纯函数）
 

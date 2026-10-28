@@ -33,7 +33,8 @@
 - `@/services/config.service`（`getPollSchedule` 轮询参数）、`@/services/submission.service`（`getSubmissionDetail` / `getSubmissionCases`）
 - `@/stores/contestStore`（`whenLoaded`：赛时相对时间与题目跳转）
 - `@/types/submission`（仅类型）
-- `@/utils/submission`（`formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `isTerminalStatus` / `statusAbbr` / `statusLabel` / `statusTone` + `StatusTone` 类型）
+- `@/utils/submission`（`formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `isTerminalStatus` / `statusAbbr` / `statusLabel` / `statusTone`）
+- `@/utils/submission-tone`（共享 pill 类串）
 - `@/utils/language`（`monacoIdOf` 只读代码视图高亮）
 - `@/utils/polling`（`createPoller` + `Poller` 类型）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）

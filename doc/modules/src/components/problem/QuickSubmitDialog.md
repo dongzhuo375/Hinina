@@ -23,7 +23,7 @@
 | `submittedId` | `ref<string \| null>` | 本弹窗提交的 ID |
 | `doSubmit` | `async fn` | 提交链路，见逻辑流程 |
 | `goDetail` | fn | 终态后跳 `SubmissionDetail`（**用 `entry.id`**，与 `pendingSubmission` 复用编号保持一致） |
-| `TONE_CLASSES` | 常量 | 6 个 `StatusTone` → 主题 CSS 变量类（与评测页/详情页同一套语义色） |
+| `statusToneClasses` / `QUICK_SUBMIT_PENDING_CLASS` | 共享 fn / 本地覆盖 | 使用 `utils/submission-tone` 的基础表，仅 pending 覆盖为原有琥珀色；其余 tone 与评测页/详情页一致 |
 | `onKeydown` | fn | window 级 Esc 监听（onMounted 挂 / onUnmounted 摘） |
 | `MAX_FILE_BYTES` / `ACCEPTED_EXTENSIONS` | 常量 | 256KB 大小护栏（快捷提交场景无需超大文件）；可导入扩展名白名单**从 `utils/language` 的 `SOURCE_FILE_EXTENSIONS` 派生**（识别面唯一来源，防多处清单漂移）+ `.txt`。语言自动切换经 `hojLanguageOfFileName` 反推 + `resolveAllowedLanguage` 按语言族解析为允许列表中的服务端原名（"Python3" 等变体命中）；无命中保持原选择（拖入 .py 但本题只允许 C++ 时不切换）；`.txt` 不切语言 |
 | `pickFile` / `onFileChange` / `extOf` / `ingestFile` | fn | 原生 `input[type=file]`（读后立即重置 value 允许连续选同一文件）；`ingestFile` 校验扩展名与大小 → `file.text()` 读入 → 按扩展名切语言 |
@@ -38,7 +38,8 @@
 - `@/services/problem.service`（允许语言列表）
 - `@/types/contest`（仅类型）
 - `@/utils/language`（`DEFAULT_LANGUAGE` / `DEFAULT_LANGUAGES` / `hojLanguageOfFileName` / `resolveAllowedLanguage` / `SOURCE_FILE_EXTENSIONS`）
-- `@/utils/submission`（`formatMemoryKb` / `isTerminalStatus` / `statusLabel` / `statusTone` + `StatusTone` 类型）
+- `@/utils/submission`（`formatMemoryKb` / `isTerminalStatus` / `statusLabel` / `statusTone`）
+- `@/utils/submission-tone`（共享 pill 类串 + 单项 pending 覆盖）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖

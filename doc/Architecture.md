@@ -431,6 +431,7 @@ src/
 │   ├── pagination.ts                     # 榜单与提交历史共用的页码窗口纯函数（getPageItems；PagePager 仍只接收 items）
 │   ├── brief-retry.ts                    # 匿名简报失败后的有界指数退避延迟（2s/4s/8s，用尽返回 null）
 │   ├── submission.ts                     # 评测终态判据（isTerminalStatus，与 Rust 对齐）+ 状态文案/缩写/色调唯一映射（statusLabel/statusAbbr/statusTone/STATUS_OPTIONS，码值 = HOJ 真实码表含负数）+ 时间/内存/长度格式化 + findFirstFailedCase
+│   ├── submission-tone.ts                # 提交状态 pill 默认类串与 neutral fallback（QuickSubmit 仅覆盖 pending 保留琥珀色）
 │   ├── close-guard.ts                    # 关窗守卫（状态机 idle/flushing/allowing + 时间上界 flushTimeout/hardTimeout + 收尾看门狗（destroy 悬挂时 close 兜底）+ 有界多轮重刷 shouldReflush/maxFlushRounds：每轮落盘后复查在途改动，握手窗口内到达的落键也纳入落盘；收尾用 destroy 兜底 close；依赖全注入故可穷尽单测）
 │   ├── settings-access.ts                # 设置入口的隐藏解锁（连点状态栏版本号 5 下；注入式计数状态机 createUnlockGate + 会话级单例 settingsUnlocked/tapVersion；状态不落盘）
 │   ├── focus-scope.ts                    # vFocusScope 指令（弹层焦点作用域：打开即聚焦首个可见控件 + Tab 循环陷阱 + Esc 关闭 + 卸载归还焦点；defaultPrevented 短路以不吞 Monaco 的 Tab 缩进）
@@ -443,7 +444,7 @@ src/
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
 │   ├── oj.ts                             # OJ 类型域唯一权威（OJ_TYPES 已知类型枚举 / ojSelectOptions 下拉候选组装：枚举在前含未配置者 + 枚举外实例追加 / ojBaseUrlHint 地址占位）
-│   └── __tests__/                        # brief-retry / close-guard / contest / contest-clock / editor / error / focus-scope / language / limits / logger / markdown / markdown-dom / oj / pagination / polling / rank / session-check / settings-access / submission .spec.ts（退避延迟表、关窗守卫状态机与有界多轮重刷、阶段判据与权威赛程、时钟模型与 urgent 阈值、编辑器偏好值域、错误文案收敛、弹层焦点陷阱与归还、语言映射、limits 换算、日志级别分流与作用域前缀、渲染契约、jsdom 消毒激活态的生产链路契约、OJ 候选取值域与顺序、预检调度边界、轮询节奏、榜单映射与口径、设置解锁计数状态机、终态穷尽映射与双层时间上界）
+│   └── __tests__/                        # brief-retry / close-guard / contest / contest-clock / editor / error / focus-scope / language / limits / logger / markdown / markdown-dom / oj / pagination / polling / rank / session-check / settings-access / submission / submission-tone .spec.ts（退避延迟表、关窗守卫状态机与有界多轮重刷、阶段判据与权威赛程、时钟模型与 urgent 阈值、编辑器偏好值域、错误文案收敛、弹层焦点陷阱与归还、语言映射、limits 换算、日志级别分流与作用域前缀、渲染契约、jsdom 消毒激活态的生产链路契约、OJ 候选取值域与顺序、预检调度边界、轮询节奏、榜单映射与口径、设置解锁计数状态机、终态穷尽映射与双层时间上界）
 └── styles/
     ├── global.css                        # TailwindCSS + 字体栈（Inter / JetBrains Mono / Noto Sans SC，经 @fontsource-variable 本地打包）+ CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题 + KaTeX 公式全局样式（块级公式横向滚动防裁切，题面/公告/简介共用）；**不覆写 Monaco 背景**（编辑器底色由 theme.editorTheme 自绘，否则 vs-dark 只换字色）
     └── contest.css                       # 赛场主题（PR #36）：在 `.contest-theme` 作用域重写整套令牌（中性灰/木色主色/低饱和语义色/`--radius: 3px`/响应式密度 `--ui-step` 与派生字号），并提供通用类（`.eyebrow`/`.action-primary`/`.action-quiet`/`.page-heading`/`.page-title`/`.workspace-main`/`.data-page`/`.reading-body`/`.surface-overlay`、表格与 `:focus-visible`/`::selection` 统一样式、≤1100px 与 prefers-reduced-motion 媒体查询）

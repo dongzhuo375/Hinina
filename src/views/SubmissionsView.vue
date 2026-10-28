@@ -19,7 +19,7 @@ import {
   statusLabel,
   statusTone,
 } from '@/utils/submission'
-import type { StatusTone } from '@/utils/submission'
+import { statusToneClasses } from '@/utils/submission-tone'
 import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
 import { getPageItems } from '@/utils/pagination'
@@ -77,20 +77,6 @@ function contestElapsed(record: SubmissionRecord): string {
   const start = contest.value?.startTime
   if (start == null) return '--:--:--'
   return formatDurationHms(record.submitTime - start)
-}
-
-/// tone → pill 样式类（与 utils/submission 的语义色调一一对应）
-const TONE_CLASSES: Record<StatusTone, string> = {
-  ac: 'border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] text-[var(--color-success)]',
-  wa: 'border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] text-[var(--color-error)]',
-  tle: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-warning)]',
-  pending: 'border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] text-[var(--color-info)]',
-  system: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
-  neutral: 'border-[var(--border-color)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)]',
-}
-
-function toneClasses(tone: StatusTone): string {
-  return TONE_CLASSES[tone] ?? TONE_CLASSES.neutral
 }
 
 /// 首次加载（还没有任何可展示数据）才铺满 spinner；刷新时保留旧表格不打断阅读
@@ -506,7 +492,7 @@ onUnmounted(() => {
                 <td class="px-4 py-3">
                   <span
                     class="inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-xs font-semibold shadow-none"
-                    :class="toneClasses(statusTone(record.status))"
+                    :class="statusToneClasses(statusTone(record.status))"
                   >
                     <svg
                       v-if="isJudging(record.status)"
