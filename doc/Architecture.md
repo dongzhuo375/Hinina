@@ -52,7 +52,7 @@ Hinina/
 │   │   ├── lint-gate-cleanup.md          # rust-lint 门禁化的存量清零记录
 │   │   ├── m3-integration.md             # M3：夜间集成（三平台构建、压力复跑、coverage、E2E）与 apt/deb 缓存治理
 │   │   └── m4-release.md                 # M4：标签触发 Windows 草稿发布（版本门禁、五 job、试跑与 v0.1.1 记录）
-│   ├── local/                            # 本地文档（**整目录不入库**，.gitignore 强制）：未解决问题清单 / 缓存测试指南 / 接入新OJ的改动清单与改造建议 / 界面设计稿 screen/ / CI/CD 施工方案与日志 / balloon 验证后端工具
+│   ├── local/                            # 本地文档（**整目录不入库**，.gitignore 强制）：未解决问题清单 / 缓存测试指南 / 接入新OJ的改动清单与改造建议 / 界面设计稿 screen/ / CI-CD 与插件施工方案及日志 / balloon 验证后端工具
 └── src-tauri/
     ├── Cargo.toml                        # Rust 项目清单（依赖、版本、feature flags）
     ├── tests/                             # 顶层集成测试二进制（刻意例外：Logger::init 的生产分支在单元测试不可达，见 doc/cicd/m2-tests.md；单元测试仍在各模块旁 tests/ 子目录）
