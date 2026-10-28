@@ -709,7 +709,7 @@ describe('会话代际（评审六轮：榜单去抖缓存）', () => {
   })
 })
 
-describe('loadRank 同会话过期响应保护', () => {
+describe('榜单同会话请求代际保护', () => {
   interface Deferred<T> {
     promise: Promise<T>
     resolve: (value: T) => void
@@ -858,5 +858,77 @@ describe('loadRank 同会话过期响应保护', () => {
     await Promise.all([first, direct])
     expect(store.rows.map((row) => row.uid)).toEqual(['latest-page-2'])
     expect(store.current).toBe(2)
+  })
+
+  it('被新全量拉取取代的旧失败不得覆盖新状态或收尾 loading', async () => {
+    const oldFetch = deferred<ContestRankPage>()
+    const newFetch = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldFetch.promise)
+      .mockResolvedValueOnce(makePage([makeRow({ uid: 'all' })], 200, 1))
+      .mockImplementationOnce(() => newFetch.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.setGroupFilter('star')
+    await store.setGroupFilter('all')
+    const second = store.setGroupFilter('star')
+    oldFetch.reject(new Error('stale full fetch'))
+    await expect(first).resolves.toBeUndefined()
+
+    expect(store.fullFetchState).toBe('loading')
+    expect(store.error).toBeNull()
+    expect(store.isLoading).toBe(true)
+    newFetch.resolve(makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1))
+    await second
+    expect(store.fullFetchState).toBe('done')
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('退出全量后，旧失败与 finally 不得污染普通分页', async () => {
+    const oldFetch = deferred<ContestRankPage>()
+    const normalPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldFetch.promise)
+      .mockImplementationOnce(() => normalPage.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.setGroupFilter('star')
+    const exiting = store.setGroupFilter('all')
+    oldFetch.reject(new Error('late full failure'))
+    await expect(first).resolves.toBeUndefined()
+
+    expect(store.fullFetchState).toBe('idle')
+    expect(store.error).toBeNull()
+    expect(store.isLoading).toBe(true)
+    normalPage.resolve(makePage([makeRow({ uid: 'normal' })], 200, 1))
+    await exiting
+    expect(store.rows.map((row) => row.uid)).toEqual(['normal'])
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('进入全量后，旧普通响应不得覆盖数据或关掉全量 loading', async () => {
+    const normalPage = deferred<ContestRankPage>()
+    const fullFetch = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => normalPage.promise)
+      .mockImplementationOnce(() => fullFetch.promise)
+    const store = useRankStore()
+
+    const normal = store.loadRank(CONTEST_ID, MY_UID, 1)
+    const full = store.setGroupFilter('star')
+    normalPage.resolve(makePage([makeRow({ uid: 'stale-normal' })], 200, 1))
+    await normal
+
+    expect(store.rows).toEqual([])
+    expect(store.fullFetchState).toBe('loading')
+    expect(store.isLoading).toBe(true)
+    fullFetch.resolve(makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1))
+    await full
+    expect(store.fullFetchState).toBe('done')
+    expect(store.isLoading).toBe(false)
   })
 })

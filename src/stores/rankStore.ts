@@ -240,6 +240,9 @@ export const useRankStore = defineStore('rank', {
       // 记住拉取前状态：失败且仍有旧快照时回退到它（不能停在 loading，否则重入保护会永久锁死）
       const previousState = this.fullFetchState
       const generation = ++fullFetchGeneration
+      // 普通分页与全量拉取共享 isLoading：进入全量模式同时作废旧普通请求，
+      // 其迟到响应/finally 不得覆盖快照状态或提前结束全量加载
+      this.loadSeq++
       // 会话代际：登出后旧会话的全量快照不得写回新会话（评审四轮 #1）
       const sessionGen = getSessionGeneration()
       this.fullFetchState = 'loading'
@@ -287,14 +290,18 @@ export const useRankStore = defineStore('rank', {
         this.lastUpdated = Date.now()
         this.syncFullPaging()
       } catch (e) {
+        // 已被新拉取取代或已退出全量模式：旧失败不得覆盖新状态，也不得重抛给
+        // 早已放弃这次加载的调用方；否则会把新拉取的 loading 覆盖成 error
+        if (generation !== fullFetchGeneration || sessionGen !== getSessionGeneration()) return
         // 有旧快照则保留并回退到拉取前状态供继续浏览；毫无快照才标记 error
-        if (sessionGen === getSessionGeneration()) {
-          this.fullFetchState = this.fullRows === null ? 'error' : previousState
-          this.error = errorMessage(e, '拉取全量榜单失败')
-        }
+        this.fullFetchState = this.fullRows === null ? 'error' : previousState
+        this.error = errorMessage(e, '拉取全量榜单失败')
         throw e
       } finally {
-        if (sessionGen === getSessionGeneration()) this.isLoading = false
+        // 只有当前代际负责收尾共享 loading（旧拉取不得关掉新普通/全量请求）
+        if (generation === fullFetchGeneration && sessionGen === getSessionGeneration()) {
+          this.isLoading = false
+        }
       }
     },
 
@@ -416,6 +423,9 @@ export const useRankStore = defineStore('rank', {
       }
 
       const wasFullMode = isFullSnapshotFilter(previous)
+      // 退出本身也是一次“取代”：即使旧循环尚未走到下一个中止检查点，
+      // 其 catch/finally 也已失去写回资格，不能污染恢复后的普通分页
+      if (wasFullMode) fullFetchGeneration++
       this.fullRows = null
       this.fullFetchState = 'idle'
       this.fullPage = 1
