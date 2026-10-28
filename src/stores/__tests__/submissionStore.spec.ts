@@ -509,6 +509,20 @@ describe('提交历史（评测页数据源）', () => {
     expect(store.history.records.map((record) => record.submitId)).toEqual(['polled-page-2'])
   })
 
+  it('最新翻页失败恢复最后成功页，避免旧记录配新页码', async () => {
+    submissionService.listContestSubmissions
+      .mockResolvedValueOnce(makePage([makeRecord({ submitId: 'page-1' })], 40, 1))
+      .mockRejectedValueOnce(new Error('翻页失败'))
+    const store = useSubmissionStore()
+
+    await store.fetchHistory(CONTEST_ID, 1)
+    await expect(store.setHistoryPage(CONTEST_ID, 2)).rejects.toThrow('翻页失败')
+
+    expect(store.history.current).toBe(1)
+    expect(store.history.records.map((record) => record.submitId)).toEqual(['page-1'])
+    expect(store.history.error).toBe('翻页失败')
+  })
+
   it('fetchProblemSummary 只取 1 条并返回 latest + total；无提交时 latest 为 null', async () => {
     submissionService.listContestSubmissions.mockResolvedValue(makePage([makeRecord()], 12))
     const store = useSubmissionStore()

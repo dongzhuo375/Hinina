@@ -340,6 +340,7 @@ export const useSubmissionStore = defineStore('submission', {
       h.error = null
       // 视图轮询读取 history.current 发请求；目标页须在响应前落地，
       // 否则翻页在途时轮询会用旧页号发起更新的请求，反过来使用户翻页失效
+      const previousPage = h.current
       if (page !== undefined) h.current = page
       try {
         const result = await submissionService.listContestSubmissions({
@@ -357,6 +358,8 @@ export const useSubmissionStore = defineStore('submission', {
       } catch (e) {
         // 过期失败不占错误态也不重抛；调用方对这次查询早已放弃
         if (token !== this.historySeq || sessionGen !== getSessionGeneration()) return
+        // 失败时 records 仍是上一次成功页，页码同步回退以免旧记录配新页码且无自愈
+        h.current = previousPage
         h.error = errorMessage(e, '加载提交记录失败')
         throw e
       } finally {
