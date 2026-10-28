@@ -338,7 +338,7 @@ src/
 │   ├── SubmissionDetailView.vue          # 提交详情页（自有顶栏 + 判定横幅 + CE 面板 + 测试点表格/子任务分组 + Monaco 只读代码区，评测中轮询至终态）
 │   ├── AnnouncementsView.vue             # 公告页（PageHeading 04 + 卡片 feed：Grid 两列版式 + 长文折叠 + 未读圆点，进入即全部已读）
 │   ├── SettingsView.vue                  # 设置页（PageHeading 05；OJ（当前 OJ 下拉=显式 switch_oj + 实例地址 + 比赛 ID/引用）/编辑器/布局/主题置灰/数据目录/重置与清理/关于 分组，读改写 AppConfig + 生效性提示）
-│   └── __tests__/                        # ContestLayout.spec.ts（赛程闸门与退出延迟）/ LoginView.spec.ts（入口生命周期：自动进场、简报重试、预检）/ SubmissionDetailView.spec.ts（路由参数切换、迟到响应与轮询 deadline）
+│   └── __tests__/                        # ContestLayout.spec.ts（赛程闸门与退出延迟）/ LoginView.spec.ts（入口生命周期：自动进场、简报重试、预检）/ RankView.spec.ts（比赛切换后按新 contestId 重拉快照）/ SubmissionDetailView.spec.ts（路由参数切换、迟到响应与轮询 deadline）
 ├── components/
 │   ├── PluginNotifications.vue           # 插件纯文本通知与订阅清理
 │   ├── layout/
