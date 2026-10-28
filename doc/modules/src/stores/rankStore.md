@@ -22,7 +22,7 @@
 | `fullFilteredRows` | getter | 快照按当前分组过滤后的全部行（未分页，`filterRankRowsByGroup`） |
 | `visibleRows` | getter | 全量模式：过滤快照后 `paginateRankRows` 客户端切片（`pages`/`current` 已由 `syncFullPaging` 同步为等效值，视图无需感知模式差异）；常规模式：`filterRankRowsByGroup(rows, groupFilter)`——star/female 但快照未就位（拉取中/失败）时退化为筛当前页，聊胜于无 |
 | `hasData` | getter | 是否已加载过（区分「空榜单」与「尚未请求」） |
-| `loadRank` | `(contestId, uid, page?) => Promise<void>` | 加载一页；全量筛选中统一转 `fetchAllRows`（含重新进入 RankView 的直接调用），不得让普通分页覆写全量分页。常规模式显式页码在请求前同步到 `current`，使翻页在途时的轮询仍读取目标页。**请求序号 + 会话代际双守卫**：过期成功/失败均静默丢弃，只有最新请求记录 `error`、向上抛出并收尾 `isLoading` |
+| `loadRank` | `(contestId, uid, page?) => Promise<void>` | 加载一页；全量筛选中统一转 `fetchAllRows`（含重新进入 RankView 的直接调用），不得让普通分页覆写全量分页。常规模式显式页码在请求前同步到 `current`，使翻页在途时的轮询仍读取目标页；最新请求失败时把页码回退到请求前的成功页。**请求序号 + 会话代际双守卫**：过期成功/失败均静默丢弃，只有最新请求记录 `error`、向上抛出并收尾 `isLoading` |
 | `applyPage` | `(page, uid) => void` | 应用一页数据的三处归一（见逻辑流程） |
 | `fetchAllRows` | `() => Promise<void>` | 全量快照拉取，见逻辑流程。循环中止检查点包含 `fullFetchGeneration`、分组筛选与会话代际；catch/finally 同样只认当前拉取代际。进入全量时作废旧普通 `loadRank`，退出全量时作废旧快照拉取，共享 `isLoading` 仅由当前请求收尾 |
 | `syncFullPaging` | `() => void` | 把客户端分页状态同步到 `pages`/`current`（RankView 分页条直接读这两个字段） |
@@ -69,7 +69,8 @@ loadRank(contestId, uid, page)
       3. participants = resolveParticipantCountFromPage(page, uid)
                                                // total − 本页重复行数 − 我的窗外前置副本
       4. lastUpdated = Date.now()
-  失败 → 仅最新请求记录 error + rethrow；过期失败静默丢弃
+  失败 → 仅最新请求先把 current 回退到请求前页，再记录 error + rethrow
+         （rows 保留上一次成功数据时不能留下新页码）；过期失败静默丢弃
   收尾 → 仅最新请求清 isLoading（401 已由全局会话守卫统一处理，此处不重复应对）
 
 setGroupFilter(filter)
@@ -151,7 +152,7 @@ stopLive → poller?.stop() + 置 null + isLive = false + 清空查询去抖 mem
 `runWithFakeTimers` 辅助以 fake timers 推进页间节流）锁定：
 
 - **applyPage 三处归一**：uid 去重、我的行从未去重 records 定位（uid 为空不抛错）、参与人数 `resolveParticipantCountFromPage(page, uid)` 修正、分页信息与刷新时间记录。
-- **loadRank / refresh**：失败记录原因、复位 loading 并抛出但**保留上一次数据**；`refresh` 吞异常且无 contestId 不发请求；旧页迟到成功/失败不得覆盖新页或提前收尾 loading；翻页在途时轮询读取目标页；过期响应不得污染 memo，旧在途登记不得截获更新后的查询。
+- **loadRank / refresh**：失败记录原因、复位 loading 并抛出但**保留上一次数据**；`refresh` 吞异常且无 contestId 不发请求；旧页迟到成功/失败不得覆盖新页或提前收尾 loading；翻页在途时轮询读取目标页；最新翻页失败恢复最后成功页；过期响应不得污染 memo，旧在途登记不得截获更新后的查询。
 - **分页与筛选**：`setPage` 越界短路 / 范围内按页请求；`setKeyword` trim 后回第 1 页且空串传 null；official 置 removeStar 重新请求（服务端参数）、从 official 切回 all 复位重载。
 - **全量快照模式专节**：`setGroupFilter(star)` 顺序拉取全部页并按 uid 跨页去重合并；star↔female 互切重拉快照并按新分组过滤；全量模式翻页是纯客户端切片不发请求；超过 40 页上限截断并标记 `truncated`；**拉取中途退出全量模式时旧循环中止、过期快照不复活，旧失败/finally 不污染普通分页**；被新全量拉取取代的旧失败不覆盖新状态；普通 ↔ 全量交错时 loading 仅由当前请求收尾；全量筛选中的直接/去重加载入口仍走快照、不发普通分页；全量模式自动轮询暂停、`refresh()` 手动触发重拉快照；切回 all/official 清空快照恢复服务端分页；全量模式 `setKeyword` 携带关键词重拉快照并回第 1 页；快照失败且无旧快照标记 `error`（`visibleRows` 退化为筛当前页）；重拉失败保留旧快照继续浏览（状态不回退、不停在 loading）；无 contestId 不发请求。
 - **startLive / stopLive**：按 10s±2s 抖动刷新、停止后不再刷新、重复调用不产生多个轮询器、暂停判据生效时跳过请求但轮询存活、`stopLive` 幂等。

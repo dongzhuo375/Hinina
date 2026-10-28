@@ -190,6 +190,7 @@ export const useRankStore = defineStore('rank', {
       this.uid = uid
       // 页码同步落地：refresh 轮询读 this.current 发请求；若等响应落地才更新，
       // 翻页在途期间触发的轮询会带着旧页号回来（序号更新反而把新页响应判过期）
+      const previousPage = this.current
       if (page !== undefined) this.current = page
       try {
         const result = await rankService.getRank({
@@ -203,6 +204,9 @@ export const useRankStore = defineStore('rank', {
       } catch (e) {
         // 调用方对过期加载早已放弃，重抛只会让视图把旧失败当成新失败提示
         if (token !== this.loadSeq || sessionGen !== getSessionGeneration()) return
+        // 目标页请求失败时页面仍展示上一次成功数据，页码必须同步回退，
+        // 否则会出现「第 1 页的行 + 第 2 页的页码」且没有后续请求自愈
+        this.current = previousPage
         this.error = errorMessage(e, '加载榜单失败')
         throw e
       } finally {

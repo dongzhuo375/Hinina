@@ -954,4 +954,18 @@ describe('榜单同会话请求代际保护', () => {
     expect(store.visibleRows.map((row) => row.uid)).toEqual(['star'])
     expect(store.isLoading).toBe(false)
   })
+
+  it('最新翻页失败恢复最后成功页，避免旧行数据配新页码', async () => {
+    rankService.getRank
+      .mockResolvedValueOnce(makePage([makeRow({ uid: 'page-1' })], 200, 1))
+      .mockRejectedValueOnce(new Error('翻页失败'))
+    const store = useRankStore()
+
+    await store.loadRank(CONTEST_ID, MY_UID, 1)
+    await expect(store.setPage(2)).rejects.toThrow('翻页失败')
+
+    expect(store.current).toBe(1)
+    expect(store.rows.map((row) => row.uid)).toEqual(['page-1'])
+    expect(store.error).toBe('翻页失败')
+  })
 })
