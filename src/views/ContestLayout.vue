@@ -6,16 +6,17 @@ import StatusBar from '@/components/layout/StatusBar.vue'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
+import { useNowMs } from '@/composables/useNowMs'
 
 const router = useRouter()
 const contestStore = useContestStore()
 const announcementStore = useAnnouncementStore()
-const now = ref(Math.floor(Date.now() / 1000))
+const nowMs = useNowMs()
+const now = computed(() => Math.floor(nowMs.value / 1000))
 const phase = computed(() => getContestPhase(
   getAuthoritativeSchedule(contestStore.contest, contestStore.brief),
   now.value,
 ))
-let clockTimer: ReturnType<typeof setInterval> | null = null
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
@@ -63,15 +64,11 @@ async function bootstrap(): Promise<void> {
 }
 
 onMounted(() => {
-  clockTimer = setInterval(() => {
-    now.value = Math.floor(Date.now() / 1000)
-  }, 1_000)
   void bootstrap()
 })
 
 onUnmounted(() => {
   disposed = true
-  if (clockTimer) clearInterval(clockTimer)
   if (exitTimer) clearTimeout(exitTimer)
   // 轮询器是模块级副作用句柄，离开工作台必须回收
   announcementStore.stopLive()

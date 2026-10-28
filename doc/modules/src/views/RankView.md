@@ -8,11 +8,11 @@
 
 ## 核心类型/函数
 
-模块级/组件级普通变量：`clock`（每秒 setInterval 句柄）、`alive`（卸载标记，异步引导链落地后不得再触碰 store）。
+组件级普通变量：`alive`（卸载标记，异步引导链落地后不得再触碰 store）。墙钟 interval 已归 `useNowMs`，不再单独持有 `clock` 句柄。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `nowMs` / `nowSecs` | ref/computed | 每秒推进的时钟，驱动 updatedText、phase、isSealed |
+| `nowMs` / `nowSecs` | `useNowMs()` / computed | 共享毫秒墙钟并派生秒，驱动 updatedText、phase、isSealed；scope dispose 清理 interval |
 | `phase` / `isEnded` / `isUpcoming` | computed | `utils/contest.getContestPhase` 派生 |
 | `isSealed` | computed | 封榜判据：`sealRank && sealRankTime !== null && nowSecs >= sealRankTime`（只判下界，见设计要点） |
 | `isBootstrapping` | computed | 首次加载（无任何可展示数据）才铺满屏 spinner；轮询刷新保留旧表格 |
@@ -33,6 +33,7 @@
 - stores：`authStore`（uid）/ `contestStore` / `rankStore`
 - `@/utils/contest`（`getContestPhase`）
 - `@/utils/pagination`（`getPageItems` 页码窗口纯函数）
+- `@/composables/useNowMs`（毫秒墙钟；保留 updatedText 的亚秒边界）
 
 ## 被依赖
 
@@ -41,7 +42,7 @@
 ## 逻辑流程
 
 ```
-onMounted: clock = setInterval(1s)；bootstrap()
+onMounted: bootstrap()（墙钟 interval 由 useNowMs 自持）
 
 bootstrap():
   ensureContest() → 无 contestId 则终止
@@ -50,7 +51,7 @@ bootstrap():
               // 已结束不启动：HOJ 网页端此时禁用刷新，继续打请求只是浪费服务端算力
               // 暂停判据传入 isEnded：停留期间比赛结束由 watch 兜底 stopLive
 
-onUnmounted: alive = false；clearInterval(clock)；rankStore.stopLive()
+onUnmounted: alive = false；rankStore.stopLive()（墙钟由 scope dispose 清理）
               // 轮询器是模块级副作用句柄，离开榜单页必须回收，否则后台持续打 OJ
 
 watch(isEnded): 结束瞬间立即 stopLive()

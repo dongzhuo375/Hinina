@@ -12,15 +12,15 @@ import { useContestStore } from '@/stores/contestStore'
 import { useRankStore } from '@/stores/rankStore'
 import { getContestPhase } from '@/utils/contest'
 import { getPageItems } from '@/utils/pagination'
+import { useNowMs } from '@/composables/useNowMs'
 
 const contestStore = useContestStore()
 const rankStore = useRankStore()
 const authStore = useAuthStore()
 
-/// 每秒推进一次的时钟：同时驱动「更新于 x 秒前」、比赛阶段跃迁与封榜判定
-const nowMs = ref(Date.now())
+/// 每秒推进一次的毫秒墙钟：同时驱动「更新于 x 秒前」、比赛阶段跃迁与封榜判定
+const nowMs = useNowMs()
 const nowSecs = computed(() => Math.floor(nowMs.value / 1000))
-let clock: ReturnType<typeof setInterval> | null = null
 /// 组件已卸载标记：异步引导链路可能在卸载后才落地，此时不得再触碰 store
 let alive = true
 
@@ -161,16 +161,11 @@ function goToPage(page: number) {
 }
 
 onMounted(() => {
-  clock = setInterval(() => {
-    nowMs.value = Date.now()
-  }, 1000)
   void bootstrap()
 })
 
 onUnmounted(() => {
   alive = false
-  if (clock) clearInterval(clock)
-  clock = null
   // 轮询器是模块级副作用句柄，离开榜单页必须回收，否则会在后台持续打 OJ
   rankStore.stopLive()
 })

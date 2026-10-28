@@ -12,11 +12,11 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `now` | `ref<number>`（秒） | 每秒 `setInterval` 刷新，驱动 `phase` 跃迁 |
+| `nowMs` / `now` | `useNowMs()` / computed（秒） | 共享毫秒墙钟派生秒，驱动 `phase` 跃迁；scope dispose 清理 interval |
 | `phase` | computed | `getContestPhase(getAuthoritativeSchedule(contestStore.contest, contestStore.brief), now)` |
 | `watch(phase, …, { immediate: true })` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer` |
 | `bootstrap` | `() => Promise<void>` | `whenLoaded()` → 跨场刷新 → 启动公告轮询，见逻辑流程 |
-| `clockTimer` / `exitTimer` | 定时器句柄 | 时钟与退出延迟；模块级普通变量，不进响应式系统 |
+| `exitTimer` | 定时器句柄 | 结束退出延迟；模块级普通变量，不进响应式系统（墙钟 interval 已归 `useNowMs`） |
 | `disposed` | `boolean` | 卸载后阻断在途异步续跑 |
 
 ## 直接依赖
@@ -25,6 +25,7 @@
 - `@/components/layout/TopBar.vue` / `StatusBar.vue`
 - `@/stores/contestStore` / `@/stores/announcementStore`
 - `@/utils/contest`（`getAuthoritativeSchedule` / `getContestPhase`）
+- `@/composables/useNowMs`（毫秒墙钟，派生秒）
 
 注：**不再 import `ActivityBar`** —— 导航条已移入 `TopBar` 第二行（PR #36）。
 
@@ -35,7 +36,7 @@
 ## 逻辑流程
 
 ```
-onMounted → clockTimer 每秒更新 now；bootstrap()
+onMounted → bootstrap()（墙钟 interval 由 useNowMs 自持）
 bootstrap:
   await contestStore.whenLoaded()             // 复用在途请求（P59），子视图先触发也走同一链路
   ├ disposed → return
@@ -50,7 +51,7 @@ watch(phase, immediate):
              2s 后 router.replace(Login)            // 保留会话与工作区，让离页保存链路落盘
   两次分支前都先清 exitTimer（避免 upcoming 之后又被旧的 ended 定时器踢走）
 
-onUnmounted → disposed = true；清时钟与退出定时器；announcementStore.stopLive()
+onUnmounted → disposed = true；清退出定时器；announcementStore.stopLive()（墙钟由 scope dispose 清理）
 
 模板：
   根 .contest-theme（启用赛场 CSS 令牌）

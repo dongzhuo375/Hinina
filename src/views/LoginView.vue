@@ -12,6 +12,7 @@ import { briefRetryDelayMs } from '@/utils/brief-retry'
 import { renderMarkdown } from '@/utils/markdown'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import { planNextPrecheck, planRetryDelayMs } from '@/utils/session-check'
+import { useNowMs } from '@/composables/useNowMs'
 import type { PrecheckReason } from '@/utils/session-check'
 
 const router = useRouter()
@@ -36,9 +37,9 @@ const briefRetryScheduled = ref(false)
 /// 版本号构建期注入（vite define ← package.json），与 StatusBar 同源，避免写死后漂移
 const version = __APP_VERSION__
 
-/// 当前时间戳（每秒刷新，驱动倒计时）
-const now = ref(Math.floor(Date.now() / 1000))
-let timer: ReturnType<typeof setInterval> | null = null
+/// 当前时间戳（共享毫秒墙钟派生秒，驱动倒计时）
+const nowMs = useNowMs()
+const now = computed(() => Math.floor(nowMs.value / 1000))
 let disposed = false
 
 /// 比赛阶段（判据集中在 utils/contest，与顶部栏共用）
@@ -198,9 +199,6 @@ watch([() => auth.isLoggedIn, contestPhase], reschedulePrecheck)
 
 onMounted(async () => {
   loadBrief()
-  timer = setInterval(() => {
-    now.value = Math.floor(Date.now() / 1000)
-  }, 1000)
   // 恢复既有会话（路由守卫可能已确认过，跳过以避免重复 IPC）；
   // 恢复后的导航同样交由 canEnter 侦听器决策
   if (!auth.sessionResolved) await auth.checkSession()
@@ -209,7 +207,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disposed = true
-  if (timer) clearInterval(timer)
   clearBriefRetry()
   clearPrecheck()
 })
