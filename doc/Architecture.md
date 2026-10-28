@@ -424,6 +424,9 @@ src/
 │   ├── rank.ts                           # RankCell / ContestRankRow / ContestRankPage / RankQuery / ProblemLimits（榜单与题目限制跨端契约）
 │   ├── workspace.ts                      # Workspace 实体
 │   └── config.ts                         # AppConfig 及其子配置（含 oj.cacheProblemStatement 题面缓存开关）
+├── composables/
+│   ├── useTransientValue.ts               # 临时反馈值与唯一回弹 timer（复制反馈；scope dispose 清理）
+│   └── __tests__/                         # useTransientValue.spec.ts（到期/连续 show/clear/dispose/多实例）
 ├── utils/
 │   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白；剥离只为安全，表现性标记保真渲染）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / **getAuthoritativeSchedule**（认证赛程与匿名简报跨场时以简报为准），登录页、路由守卫与顶部栏共用；原 hasContestStarted 已删除）

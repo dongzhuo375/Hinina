@@ -20,7 +20,7 @@
 | `submitTimeText` / `contestElapsedText` | computed | 本地化提交时间；赛时相对时间（`formatDurationHms(submitTime − startTime)`） |
 | `codeLanguage` | computed | `monacoIdOf(detail.language)`（`utils/language`）—— 服务端返回展示名，按前缀归一为 Monaco id |
 | `caseList` / `acCaseCount` / `hasSubTasks` / `showScoreColumn` / `modeBadge` | computed | 测试点表派生：通过计数、子任务制判定（`subTasks` 非空）、得分列仅在有 score 时出现、判题模式徽章（非 `default` 才显示，如 spj/subtask） |
-| `copyErrorMessage` | fn | 剪贴板复制 CE 信息；WebView API 不可用时兜底隐藏 textarea + `execCommand('copy')`；「已复制」1.5s 回弹 |
+| `copyErrorMessage` | fn | 剪贴板复制 CE 信息；WebView API 不可用时兜底隐藏 textarea + `execCommand('copy')`；成功后经共享 `useTransientValue(false, 1500)` 显示反馈，路由切换 `clear()` |
 | `reload` / `watch(submitId)` | — | 首载、重试与路由参数切换统一入口：递增 `loadToken`、停旧 poller、重置提交级状态并重建 deadline；watch 非 immediate，首载仍由 onMounted 触发 |
 | `loadDetail` / `loadCases` / `retry` | — | 详情与测试点分离拉取：请求固定使用发起时的 `id + loadToken`，旧提交响应不得回写；轮询周期只走 `loadDetail`，终态命中后补拉一次 `loadCases` |
 | `syncPoller` / `stopPoller` | — | 收敛轮询启停决策；poller task 捕获同一 `id + loadToken`，不得随路由隐式改查另一提交 |
@@ -39,6 +39,7 @@
 - `@/utils/polling`（`createPoller` + `Poller` 类型）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
+- `@/composables/useTransientValue`（复制反馈与路由复位）
 
 ## 被依赖
 
@@ -57,7 +58,7 @@ watch(submitId)（非 immediate）→ reload(新 id)  // 同路由记录复用�
 
 reload(id):
   token = ++loadToken → stopPoller()
-  重置 detail/cases/两类 error/isLoading/codeExpanded/copied + copiedTimer
+  重置 detail/cases/两类 error/isLoading/codeExpanded，并 clearCopied()
   等待 scheduleReady（若配置在途）→ 仅当前 id/token 才继续
   deadline = now + pollTimeoutMs → loadDetail(id, token)
 
@@ -78,7 +79,7 @@ syncPoller(id, token):
     → createPoller(task 捕获 id/token 并调 loadDetail, 不配置 isPaused)
   终态或超时 → stopPoller()                    // 收敛即停
 
-onUnmounted: alive = false；stopPoller()；清理 copiedTimer
+onUnmounted: alive = false；stopPoller()；复制反馈 timer 由 useTransientValue 的 scope dispose 清理
 ```
 
 设计要点：

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useTransientValue } from '@/composables/useTransientValue'
 import type { Problem, Sample } from '@/types/problem'
 import type { ProblemLimits } from '@/types/rank'
 import { renderMarkdown } from '@/utils/markdown'
@@ -96,24 +97,17 @@ const samples = computed<Sample[]>(() => props.problem.samples ?? [])
 
 // ── 样例复制反馈 ──
 
-const copiedIndex = ref(-1)
-let copyTimer: ReturnType<typeof setTimeout> | null = null
+const { value: copiedIndex, show: showCopied } = useTransientValue(-1, 1_500)
 
 async function copySampleInput(index: number, text: string) {
   try {
     await navigator.clipboard.writeText(text)
-    copiedIndex.value = index
-    if (copyTimer) clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => (copiedIndex.value = -1), 1500)
+    showCopied(index)
   } catch (e) {
     // 剪贴板不可用（权限/环境）：不打断做题，仅记录
     log.error('复制样例输入失败:', e)
   }
 }
-
-onUnmounted(() => {
-  if (copyTimer) clearTimeout(copyTimer)
-})
 </script>
 
 <template>

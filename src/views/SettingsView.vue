@@ -20,6 +20,7 @@ import { errorMessage } from '@/utils/error'
 import { ojBaseUrlHint, ojSelectOptions } from '@/utils/oj'
 import type { AppConfig, OjInstance } from '@/types/config'
 import type { DataDirInfo, LocalDataUsage, StorageInfo } from '@/types/system'
+import { useTransientValue } from '@/composables/useTransientValue'
 
 /**
  * 设置页 —— 应用配置（AppConfig）的可视化编辑入口。
@@ -336,18 +337,12 @@ async function loadStorage(): Promise<void> {
   }
 }
 
-const copiedKey = ref<string | null>(null)
-let copiedTimer: ReturnType<typeof setTimeout> | null = null
+const { value: copiedKey, show: showCopied } = useTransientValue<string | null>(null, 2_000)
 
 async function copyText(key: string, text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text)
-    copiedKey.value = key
-    if (copiedTimer) clearTimeout(copiedTimer)
-    copiedTimer = setTimeout(() => {
-      copiedKey.value = null
-      copiedTimer = null
-    }, 2_000)
+    showCopied(key)
   } catch {
     // 剪贴板不可用（权限/环境）时静默忽略，复制不是关键路径
   }
@@ -731,7 +726,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   releaseSpyLock()
   if (savedTimer) clearTimeout(savedTimer)
-  if (copiedTimer) clearTimeout(copiedTimer)
   if (resetTimer) clearTimeout(resetTimer)
   if (purgeTimer) clearTimeout(purgeTimer)
   if (changeTimer) clearTimeout(changeTimer)

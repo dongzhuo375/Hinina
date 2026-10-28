@@ -24,6 +24,7 @@ import { createPoller } from '@/utils/polling'
 import type { Poller } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
+import { useTransientValue } from '@/composables/useTransientValue'
 
 const log = createLogger('SubmissionDetailView')
 
@@ -104,8 +105,7 @@ const codeExpanded = ref(false)
 
 // ── CE / 错误信息复制 ──
 
-const copied = ref(false)
-let copiedTimer: ReturnType<typeof setTimeout> | null = null
+const { value: copied, show: showCopied, clear: clearCopied } = useTransientValue(false, 1_500)
 
 async function copyErrorMessage() {
   const text = detail.value?.errorMessage
@@ -127,9 +127,7 @@ async function copyErrorMessage() {
     }
     document.body.removeChild(ta)
   }
-  copied.value = true
-  if (copiedTimer) clearTimeout(copiedTimer)
-  copiedTimer = setTimeout(() => (copied.value = false), 1500)
+  showCopied(true)
 }
 
 // ── 数据加载与收敛轮询 ──
@@ -149,11 +147,7 @@ async function reload(id: string): Promise<void> {
   loadError.value = null
   isLoading.value = true
   codeExpanded.value = false
-  copied.value = false
-  if (copiedTimer) {
-    clearTimeout(copiedTimer)
-    copiedTimer = null
-  }
+  clearCopied()
   if (!id) {
     isLoading.value = false
     return
@@ -259,7 +253,6 @@ watch(submitId, (id) => { void reload(id) })
 onUnmounted(() => {
   alive = false
   stopPoller()
-  if (copiedTimer) clearTimeout(copiedTimer)
 })
 
 function goBack() {
