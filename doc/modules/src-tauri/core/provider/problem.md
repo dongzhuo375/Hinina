@@ -1,7 +1,7 @@
 # problem
 
 ## 职责
-定义题目 Provider trait `ProblemProvider`，声明题目详情、比赛题目列表与用户题目状态三个异步方法。各 OJ Adapter 需实现此 trait。
+定义题目 Provider trait `ProblemProvider`，声明题目详情与用户题目状态两个异步方法。各 OJ Adapter 需实现此 trait（比赛题目列表属于 `ContestProvider::list_contest_problems`，不在本 trait）。
 
 ## 核心类型/函数
 - **`ProblemProvider`** — 题目 Provider trait（`#[async_trait]`），方法：
@@ -17,7 +17,7 @@
 ## 被依赖
 - `core::provider::registry`（ProviderRegistry 注册/获取 ProblemProvider）
 - `infra::provider_registry_impl`
-- `adapter::hoj`（实现全部三个方法）
+- `adapter::hoj`（实现全部两个方法）
 - `service::problem`（`get_user_problem_status` / `load_problem_limits` 经 registry 调用；后者复用 `get_problem` 逐题取 limits）
 
 ## 逻辑流程

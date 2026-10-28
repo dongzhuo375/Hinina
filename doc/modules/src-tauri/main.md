@@ -4,7 +4,7 @@
 应用程序入口点与**组合根**。按顺序初始化所有子系统，构造 `AppContext`，启动全部事件消费者，启动 Tauri 桌面窗口。
 
 ## 核心类型/函数
-- `fn main()` — 程序入口：创建 Tokio runtime → 注册 dialog 插件 → **在 `.setup()` 里**解析数据目录（`app_local_data_dir()`）、执行一次性迁移、初始化 `AppContext` 并 `manage` → 启动事件消费者 → 以 `generate_handler!` 注册全部 Command → 启动 Tauri App
+- `fn main()` — 程序入口：创建 Tokio runtime → 注册 dialog 插件 → **在 `.setup()` 里**解析数据目录（`app_local_data_dir()`）、执行一次性迁移、初始化 `AppContext`、接上插件通知出口并 `manage` → 启动事件消费者 → spawn 插件自启动 → 以 `generate_handler!` 注册全部 Command → 启动 Tauri App（退出时收尾全部插件）
 - `const WORKSPACE_SAVED_EVENT: &str = "workspace-saved"` — 工作区落盘事件的前端通道名，与 `src/bridge/workspace.bridge.ts` 的 `listen` 对应
 - `const ANNOUNCEMENTS_PUBLISHED_EVENT: &str = "announcements-published"` — 新公告事件的前端通道名，与 `src/bridge/announcement.bridge.ts` 的 `onAnnouncementsPublished` 对应
 - `const FRONTEND_BRIDGE_CONSUMER: &str = "tauri-frontend-bridge"` — 前端事件桥的消费者名（日志字段）
@@ -34,6 +34,7 @@
 - `hinina_lib::core::event::core_event_bus::CoreEventBus`
 - `hinina_lib::infra::audit::spawn_audit_consumer`
 - `hinina_lib::infra::data_dir::{self, DataDirPlan, DataDirSource, MigrateOutcome}`
+- `hinina_lib::infra::plugin_notification::TauriPluginNotifications`（插件通知的前端出口）
 - `tauri::{Emitter, Manager}`（`app.state::<AppContext>()` + `handle.emit`）
 - `serde_json`（事件载荷）
 - `tracing`（下发失败告警）
@@ -60,27 +61,44 @@
       （Logger（stderr + `{base_dir}/logs/hinina.log` 双路输出）→ Storage → CoreEventBus →
       SessionRepository → ConfigService → HttpClient（超时取自配置 `oj.timeout_secs`）→
       ProviderRegistry（按 `oj.instances` 实例注册全部内建 OJ，active 未注册回退首个已注册 OJ）→
-      WorkspaceManager → 五个 Service → PluginHost → AppContext）
+      WorkspaceManager → 五个 Service → PluginHost → `PluginManager`（装配文件仓库
+      `FsPluginRepository` 与 API 工厂 `FsPluginApiFactory` + `ServiceQueries`）→ AppContext）
    4. `report_data_dir(&plan, &migration)` —— **日志就绪后立刻汇报**：回退临时目录走
       `error` 级告警（数据随时会被系统清理）；迁移有失败项也走 `error` 并列出条目
-   5. `app.manage(ctx)` 注入 `AppContext` 到 State
-   6. `spawn_event_consumers(app.handle())` —— **消费者在 AppContext 就绪后启动**，
+   5. `ctx.plugin_manager.set_output(Arc<TauriPluginNotifications>)` —— 插件通知的
+      前端出口（emit 到 `plugin-notification` 通道）在 `manage` 之前接上
+   6. `app.manage(ctx)` 注入 `AppContext` 到 State
+   7. `spawn_event_consumers(app.handle())` —— **消费者在 AppContext 就绪后启动**，
       且必须在 `AppContext::init` 之后：它们从 `app.state::<AppContext>()` 取总线与插件宿主，
       并只观察事实、不参与任何业务动作
+   8. `tauri::async_runtime::spawn(plugins.autostart())` —— 异步扫描 `plugins.json`
+      并启动全部 enabled 插件；配置不可用时 `warn!`「automatic loading skipped」，
+      不阻断窗口启动
 4. `.invoke_handler(tauri::generate_handler![...])` 注册全部 IPC Command
    （**不是** `setup` 中手动注册，`commands::register_commands()` 不存在；
    commands/mod.rs 注释亦说明选用 generate_handler 以避免 setup 手动注册的兼容性问题）：
+   - `plugin_cmd`：plugin_list / plugin_start / plugin_stop / plugin_reload / plugin_resync
    - `auth_cmd`：login / logout / get_session / validate_session
    - `oj_cmd`：**switch_oj**（切换当前 OJ：补注册 → 校验已注册 → `set_current` → 显式清 contest/problem/submission 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）
    - `contest_cmd`：list_contests / select_contest / load_configured_contest / **get_contest_rank** / **list_contest_announcements** / **get_read_announcement_ids** / **mark_announcements_read**
    - `problem_cmd`：get_problem / **get_user_problem_status** / **get_contest_problem_limits**
    - `submission_cmd`：submit_code / get_judgement / **list_contest_submissions** / **get_submission_detail** / **get_submission_cases**
-   - `workspace_cmd`：load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / **set_workspace_language**
+   - `workspace_cmd`：load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / **set_workspace_language** / **delete_workspace_file**
    - `config_cmd`：get_config / reload_config / update_config / **get_storage_info**
    - `maintenance_cmd`：**reset_client**（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，清完不重拉）/ **local_data_usage**（清理前的体积预览）/ **purge_local_data**（不可逆：清日志内容与过期提交留档）
    - `data_dir_cmd`：**get_data_dir** / **set_data_dir** / **reset_data_dir** / **pick_data_dir**（设置页「数据目录」：改动重启后生效，见 `commands/data_dir_cmd.md`）
    - `theme_cmd`：get_theme / set_theme
-6. `.run(tauri::generate_context!())` 启动 Tauri 桌面应用
+5. `.build(tauri::generate_context!())` 构建应用，`.run(|app, event| …)` 进入事件循环：
+   `RunEvent::Exit` 时取 `AppContext` 调 `plugin_manager.cancel_all()` 收尾全部插件 worker
 
 
-插件宿主 start() 只启动一个消费者并拒绝重复启动，main 记录失败诊断；不扫描清单、不加载 JS。API Adapter/Runtime/文件仓库尚未装配。
+### 插件装配现状
+
+插件子系统已在组合根**完整装配**：`AppContext::init` 构造 `PluginHost` 与 `PluginManager`
+——文件仓库 `FsPluginRepository` 扫描 `plugins/` 目录读取 `manifest.json` 与入口 JS 源码，
+API 工厂 `FsPluginApiFactory` 提供存储 / HTTP 端口（通知出口由 `set_output` 注入 `PluginManager`，
+见 `infra/fs_plugin_repo.md`、`infra/plugin_api_factory.md`）。`main.rs` 接上通知出口后 `manage`，事件消费者含
+`plugin-host`（CoreEvent → PluginEvent 白名单投影），随后 spawn `autostart()`：扫描
+`plugins.json` 并逐个启动 enabled 插件（QuickJS worker 加载入口 JS）。默认不启用：
+`plugins.json` 不存在视为空配置，是否启用由用户配置决定；运行期控制走
+`commands/plugin_cmd` 五个命令（开发期另有 DEV-only `window.hininaPlugins`）。

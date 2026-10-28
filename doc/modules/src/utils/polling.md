@@ -22,7 +22,11 @@
 ## 被依赖
 
 - `stores/rankStore.ts` — `startLive()` 创建榜单轮询器（10s ± 2s）
+- `stores/announcementStore.ts` — 公告 60s ± 10s 轮询
+- `stores/submissionStore.ts` — 评测收敛轮询（终态/超时停止）
 - `views/ProblemSetView.vue` — 题目总览的状态轮询（切后台暂停，卸载时停止）
+- `views/SubmissionsView.vue` — 非终态行的 5s ± 1s 温和刷新
+- `views/SubmissionDetailView.vue` — 评测中配置驱动的详情轮询
 - `utils/__tests__/polling.spec.ts` — 单元测试（注入假定时器与随机源）
 
 ## 逻辑流程

@@ -19,7 +19,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - **请求入口（按通道分工）**：
   - `headers(inject_user) -> HeaderMap` — 组装 `Accept: application/json` + `Authorization: Bearer <sid>`（有会话时）+ 可选 `X-Hydro-Inject: UserContext`
   - `get_raw(path, inject_user)` / `get_value` / `get_json::<T>` — GET，走 infra raw 变体（保留 5xx 退避重试）
-  - `post_raw(path, body)` / `post_json::<T>(path, body)` — POST，走 infra raw 变体；无 body 时发 `{}`（Hydro 读 `this.request.body`，空对象等价于「无参数」，比 `null` 更不易触发解析歧义）- `probe_user_context()`（私有）— **严格版**用户探测，三态：`Ok(Some)` 服务端确认已登录 / `Ok(None)` 注入生效但 `_id == 0`（明确匿名）/ `Err(_)` 无法判定（网络异常、错误包络、**或响应里根本没有 `UserContext` 字段** = 部署不支持注入头）
+  - `post_raw(path, body)` / `post_json::<T>(path, body)` — POST，走 infra raw 变体；无 body 时发 `{}`（Hydro 读 `this.request.body`，空对象等价于「无参数」，比 `null` 更不易触发解析歧义）- `probe_user_context()`（私有）— 用户探测的**缓存层**（命中身份缓存直接返回，未命中走 `probe_user_context_uncached()`）；**严格版**三态探测在 `probe_user_context_uncached()`（绕过缓存，每次真实回访服务端，成功路径仍回写缓存）：`Ok(Some)` 服务端确认已登录 / `Ok(None)` 注入生效但 `_id == 0`（明确匿名）/ `Err(_)` 无法判定（网络异常、错误包络、**或响应里根本没有 `UserContext` 字段** = 部署不支持注入头）
 - `current_user()`（私有）— **宽松版**用户探测：把「无法判定」折成 `Ok(None)`，供登录与提交列表筛选使用（拿不到 uid 时走降级路径，不让主流程失败）
 - `contest_pids(tid)` / `cached_pids` / `store_pids` / `pids_of(tid, tdoc)`（私有）— 比赛题目顺序（`tdoc.pids`），带 60s TTL 缓存
 - `resolve_problem_id(contest_id, problem_id)`（私有）— **展示字母 → 真实 pid**：按 Hydro 自身规则 `tdoc.pids[parseInt(letter, 36) - 10]`（A→下标 0 … Z→下标 25）；非单字母入参原样返回；顺序表拿不到该下标时也原样返回并记 warn
@@ -31,7 +31,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 ### 四 trait 实现要点
 - `AuthProvider::login(username, password)` — `POST /login`（JSON body：`uname`/`password`/`rememberme: true`）。Hydro 的登录响应**体里没有 token**（只有 `{"url":"/"}`），会话靠 `Set-Cookie: sid=<32 位随机串>` 下发；带 `Accept: application/json` 时重定向被序列化为 HTTP 200 + `{"url":...}`（**不会 302**），Set-Cookie 因此留在同一次响应里。**密码原样发送**（服务端自行哈希比对）。登录后经 `probe_user_context` 取 uid/uname；探测失败则降级为「用输入的用户名 + 空 uid」并记 warn，不让一次探测失败否定已建立的会话
 - `AuthProvider::logout()` — `POST /logout`（`GET` 只渲染确认页，不做登出）；远端结果一律忽略，以清除本地身份为主
-- `AuthProvider::validate_session()` — 本地无 sid 直接 `Ok(false)`；否则 `probe_user_context()`：`Ok(Some)`→`Ok(true)`、`Ok(None)`→`Ok(false)`（并清身份）、`Err(Auth)`→`Ok(false)`、**其余 `Err` 一律上抛**（网络/5xx/解析失败/部署不支持注入头都属「无法判定」，折成 `Ok(false)` 会在赛前一次断网就把选手踢回登录页）
+- `AuthProvider::validate_session()` — 本地无 sid 直接 `Ok(false)`；否则 `probe_user_context_uncached()`（**必须绕过缓存**：校验的职责就是问服务器，命中缓存即恒真，服务器吊销 sid 在进程内不可见——评审 P0）：`Ok(Some)`→`Ok(true)`、`Ok(None)`→`Ok(false)`（并清身份）、`Err(Auth)`→`Ok(false)`、**其余 `Err` 一律上抛**（网络/5xx/解析失败/部署不支持注入头都属「无法判定」，折成 `Ok(false)` 会在赛前一次断网就把选手踢回登录页）
 - `AuthProvider::restore_token(token)` — 回注磁盘会话里的裸 sid；`send` 发送时补 `Bearer ` 前缀
 - `ContestProvider::list_contests()` — `GET /contest?page=N` 按 `tpcount` 翻页（页大小由服务端 `pagination.contest` 决定，客户端无法指定；上限 `MAX_CONTEST_PAGES = 20` 页防御）
 - `ContestProvider::get_contest(id)` — `GET /contest/:tid`，顺带刷新题目顺序缓存

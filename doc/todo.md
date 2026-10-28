@@ -134,11 +134,11 @@
 
 - [ ] **QDUOJ Adapter** — `adapter/qduoj/`
 - [ ] **HUSTOJ Adapter** — `adapter/hustoj/`
-- [ ] **ProviderRegistry 完善** — 支持多 OJ 动态注册与切换
+- [x] **ProviderRegistry 完善** — 支持多 OJ 动态注册与切换（`ensure_oj_registered` 按需补注册 + `switch_oj` 全链路切换，Hydro 已作为第二个实现接入）
 - [x] **Plugin 宿主（PR #40/#41）** — 契约 v2 + 最小可运行 QuickJS 宿主；架构/契约/施工见 [doc/plugin/](plugin/README.md)
 - [x] **Plugin 参考业务插件** — 首次 AC 气球派发参考实现（`sdk/examples/balloon`：封榜门控/跨页去重/幂等派发/不补派 + 逻辑测试（fake host 强制宿主规则，数量以 vitest 输出为准）+ 验收指南）
 - [ ] **Plugin 业务集成验证** — 真实 HOJ/Hydro + 外部服务联调：按 `sdk/examples/balloon/README.md` 验收清单人工执行（公网 HTTPS echo 端点 + 假队伍名）
-- [ ] **CI/CD 流水线** — M1 PR 门禁与 M2 测试补位已落地（必需检查含 frontend/rust-lint/rust-test，见 [doc/cicd/](cicd/README.md)）；待办：M3 集成/E2E → M4 Windows 草稿 Release → M5 签名跨平台 → M6 updater
+- [ ] **CI/CD 流水线** — M1 PR 门禁、M2 测试补位、M3 夜间集成/E2E、M4 Windows 草稿 Release 均已落地（必需检查含 frontend/rust-lint/rust-test，见 [doc/cicd/](cicd/README.md)）；待办：M5 签名跨平台 → M6 updater
 
 ### 插件系统后续（详见 [doc/plugin/roadmap.md](plugin/roadmap.md)）
 

@@ -4,21 +4,20 @@
 
 ## 职责
 
-题目领域业务逻辑的编排层：题目详情/列表获取、我的提交状态与题目 limits 的批量查询，屏蔽 IPC 细节并做入参短路与结果整形，是 Store 访问题目数据的唯一入口。
+题目领域业务逻辑的编排层：题目详情获取、我的提交状态与题目 limits 的批量查询，屏蔽 IPC 细节并做入参短路与结果整形，是 Store 访问题目数据的唯一入口（比赛题目列表属比赛领域，由 `contestStore.problems` 经 `contest.service` 持有）。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `ProblemService.getProblem` | `(contestId, problemId) => Promise<Problem>` | 获取单个题目详情 |
-| `ProblemService.listProblems` | `(contestId) => Promise<Problem[]>` | 列出比赛下所有题目 |
 | `ProblemService.getUserProblemStatus` | `(contestId, problemIds: string[]) => Promise<Record<pid, UserProblemStatus>>` | 批量获取我的提交状态（0=未提交 / 1=已AC / 2=尝试过）；空列表直接返回 `{}`，不发无意义 IPC |
 | `ProblemService.getProblemLimits` | `(contestId, displayIds: string[]) => Promise<Record<displayId, ProblemLimits>>` | 批量获取 limits（后端带双层缓存）；空列表短路；把后端返回的数组按 `displayId` 索引为 Record |
 | `problemService` | 单例 | 全局唯一实例 |
 
 ## 直接依赖
 
-- `@/bridge/problem.bridge`（四个桥接函数）
+- `@/bridge/problem.bridge`（三个桥接函数）
 - `@/types/problem`、`@/types/rank`（仅类型）
 
 ## 被依赖
@@ -28,7 +27,7 @@
 ## 逻辑流程
 
 ```
-getProblem / listProblems → 对应 bridge 函数原样透传
+getProblem → 对应 bridge 函数原样透传
 
 getUserProblemStatus(contestId, problemIds)
   → problemIds 为空 → {}（零 IPC）

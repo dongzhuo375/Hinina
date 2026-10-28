@@ -45,7 +45,7 @@
 
 ## 构建
 
-仓库根目录（Node.js ≥20.6）：
+仓库根目录（Node.js ≥22.14，即 package.json `engines` 的要求；`plugin:scaffold:build` 脚本自身另要求 ≥20.6 以使用 `import.meta.resolve`）：
 
 ```powershell
 npm run plugin:sdk:check      # 类型检查（含本示例）

@@ -4,7 +4,7 @@
 流式有界 JSON 编码：在序列化过程中逐片段检查累计 UTF-8 字节，保证超限数据在产生完整字符串之前即被拒绝，而不是编码后再量长度。
 
 ## 核心类型/函数
-- `CountingWriter`（内部）— 实现 `std::io::Write` 的计数器；serde_json 写入每个片段前检查累计字节，计数包含字符串转义和 JSON 语法开销
+- `Writer`（私有内部类型）— 实现 `std::io::Write` 的计数器；serde_json 写入每个片段前检查累计字节，计数包含字符串转义和 JSON 语法开销
 - `encoded_len(value, max) -> PluginResult<usize>` — 只计数、不保留输出
 - `to_string(value, max) -> PluginResult<String>` — 仅在预算内积累字节，最后构造 UTF-8 文本
 

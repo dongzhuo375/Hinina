@@ -941,23 +941,26 @@ GET /api/languages?all={all}
 
 ## 附录 A: Hinina HOJ Adapter 实现映射
 
+下表按 `src-tauri/src/adapter/hoj/mod.rs` 实际调用的端点逐一映射（2026-10 核对）。适配器不调用 `check-submissions-status` / `check-contest-submissions-status` 等批量端点，评测状态轮询走 `get-submission-detail`。
+
 | Hinina Trait | HOJ API | 对应的 Controller |
 |---|---|---|
 | `AuthProvider.login(username, password)` | `POST /api/login` | PassportController |
 | `AuthProvider.logout()` | `GET /api/logout` | PassportController |
-| `ContestProvider.get_contest_list(...)` | `GET /api/get-contest-list` | ContestController |
-| `ContestProvider.get_contest_info(cid)` | `GET /api/get-contest-info` | ContestController |
-| `ContestProvider.get_contest_problems(cid)` | `GET /api/get-contest-problem` | ContestController |
-| `ContestProvider.get_contest_ranking(cid)` | `POST /api/get-contest-rank` | ContestController |
-| `ProblemProvider.get_problem_list(...)` | `GET /api/get-problem-list` | ProblemController |
-| `ProblemProvider.get_problem_detail(problemId)` | `GET /api/get-problem-detail` | ProblemController |
-| `ProblemProvider.get_problem_tags()` | `GET /api/get-all-problem-tags` | ProblemController |
-| `SubmissionProvider.submit(...)` | `POST /api/submit-problem-judge` | JudgeController |
-| `SubmissionProvider.get_submission(submitId)` | `GET /api/get-submission-detail` | JudgeController |
-| `SubmissionProvider.get_submission_list(...)` | `GET /api/get-submission-list` | JudgeController |
-| `SubmissionProvider.check_status(submitIds)` | `POST /api/check-submissions-status` | JudgeController |
-| `SubmissionProvider.check_contest_status(submitIds, cid)` | `POST /api/check-contest-submissions-status` | JudgeController |
-| `SubmissionProvider.get_case_result(submitId)` | `GET /api/get-all-case-result` | JudgeController |
+| `AuthProvider.validate_session()` | `GET /api/get-user-auth-info` | — |
+| `ContestProvider.list_contests()` | `GET /api/get-contest-list?limit=1000` | ContestController |
+| `ContestProvider.get_contest(contest_id)` | `GET /api/get-contest-info?cid=` | ContestController |
+| `ContestProvider.list_contest_problems(contest_id)` | `GET /api/get-contest-problem?cid=` | ContestController |
+| `ContestProvider.get_contest_rank(contest_id, query)` | `POST /api/get-contest-rank` | ContestController |
+| `ContestProvider.list_announcements(contest_id, ...)` | `GET /api/get-contest-announcement?cid=&limit=&currentPage=` | — |
+| `ProblemProvider.get_problem(contest_id, problem_id)` | `GET /api/get-contest-problem-details?cid=&displayId=` | — |
+| `ProblemProvider.get_user_problem_status(contest_id, problem_ids)` | `POST /api/get-user-problem-status` | — |
+| `SubmissionProvider.submit(contest_id, problem_id, display_id, language, source_code)` | `POST /api/submit-problem-judge` | JudgeController |
+| `SubmissionProvider.get_judgement(submission_id)` | `GET /api/get-submission-detail?submitId=` | JudgeController |
+| `SubmissionProvider.list_contest_submissions(query)` | `GET /api/contest-submissions?contestID=&limit=&currentPage=&onlyMine=&beforeContestSubmit=false&completeProblemID=true` | — |
+| `SubmissionProvider.list_history_page(query)` | 复用 `GET /api/contest-submissions`（trait 默认实现，HOJ 未覆盖） | — |
+| `SubmissionProvider.get_submission_detail(submit_id)` | `GET /api/get-submission-detail?submitId=` | JudgeController |
+| `SubmissionProvider.get_submission_cases(submit_id)` | `GET /api/get-all-case-result?submitId=` | JudgeController |
 
 ---
 

@@ -31,8 +31,9 @@
 - `core::context`（`AppContext` 持有 `Arc<Storage>` 注入各模块）
 - `infra::fs_workspace_repo`（`FsWorkspaceRepository` 依赖 `Storage` 存取工作区文件）
 - `infra::fs_config_repo`（`FsConfigRepository` 依赖 `Storage` 存取配置文件）
-- `infra::fs_plugin_repo`（`FsPluginRepository` 依赖 `Storage` 存取插件文件）
 - `infra::fs_session_repo`（会话写入依赖 **`write_string_atomic`**）
+
+注：`infra::fs_plugin_repo` **不依赖** `Storage` —— `FsPluginRepository` 直接持有插件目录 `PathBuf` 并用 `std::fs` 读写（插件目录在 `plugins/` 下有独立的边界校验规则，见其模块文档）。
 
 ## 逻辑流程
 构造时接收 `base_dir` 路径并调用 `create_dir_all` 确保目录存在。所有文件操作通过 `resolve()` 方法将相对路径拼接到 `base_dir` 下，遍历 `Path::components()` 拒绝任何 `Component::ParentDir`（纯逻辑检查，不依赖文件系统）。write 系列方法自动创建不存在的父目录。`list()` 返回 `strip_prefix` 后的相对路径。

@@ -42,7 +42,7 @@
 - 正常停止最多等 5 秒，未退出报 timeout 并启动 reaper；stop_inner 超时与 start 超时一致（撤销、标 failed/timeout、启动 reaper）。每代次在锁内标记 reaping，重复 stop 超时只复用现有回收任务
 - 原生阻塞延迟退出时，异步 reaper 跟踪同一 worker 代次，线程完成后回收；轮询间隔从 100ms 指数退避到 2s 上限，原生调用永不返回也不会形成高频轮询。迟到退出不能覆盖已锁定的 failed/timeout 诊断；start_worker 替换已结束的 worker 前先把上一代最终状态写入历史，避免与 reaper 竞争时丢失失败诊断
 - worker 线程用 `catch_unwind` 隔离插件触发的 panic：记录 `worker.panic` 警告（只含 panic 类型 str/string/other，不格式化 payload），该次运行视为 unavailable 失败；`QuickJsRuntime` 的 Drop 兜底先释放 Persistent 句柄，避免 rquickjs 在引擎析构后 abort 整个进程
-- 日志：失败退出 warn 带稳定错误，正常退出 info，停止超时 warn；外部字符串按 Debug 转义，operation 日志限制 64 字符
+- 日志：失败退出 warn 带稳定错误，正常退出 info，停止超时 warn；外部字符串按 Debug 转义（operation 字段用固定枚举名，不透传插件输入；64 字符截断发生在 `execution_api` 的 `call_json` 审计日志，见 execution_api.md）
 
 ### 资源与注入
 - Manager 持有跨插件、跨重载的 Provider 查询总预算（120 次/分钟、并发 4），与每次激活的独立预算一起限制插件借宿主凭据访问 OJ，详见 [查询边界](query.md)

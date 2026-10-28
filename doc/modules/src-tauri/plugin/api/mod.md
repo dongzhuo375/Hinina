@@ -24,7 +24,7 @@
 | 事件 | `events.on(name, (event, envelope) => {})`，返回注销函数 | events.subscribe + 领域读取权限 |
 
 ## 直接依赖
-- 各能力子模块（contest/error/event/http/identity/log/notification/storage/submission/ui/workspace）
+- 各能力子模块（contest/error/event/http/identity/log/notification/problem/storage/submission/ui/workspace）
 - `async_trait`、`serde`
 
 ## 被依赖

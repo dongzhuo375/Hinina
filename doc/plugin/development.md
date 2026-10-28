@@ -47,7 +47,7 @@ npm run plugin:scaffold:build
 - `plugin:sdk:check`：TypeScript strict 类型检查与非法能力负例。
 - `plugin:scaffold:build`：用 Vite 锁定的 esbuild 离线打包为 ES module，输出到 `src-tauri/target/plugin-scaffold.js`。
 - 将产物复制到插件目录并命名为 `index.js`，与 `manifest.entry` 一致。
-- 需要 Node.js ≥20.6（脚本使用 `import.meta.resolve`）。
+- 需要 Node.js ≥22.14（package.json `engines` 的要求；`plugin:scaffold:build` 脚本自身另要求 ≥20.6 以使用 `import.meta.resolve`）。
 
 独立工程可安装成熟 esbuild（例如 `npm install --save-dev esbuild`）。
 
@@ -87,7 +87,7 @@ await window.hininaPlugins.reload('com.example.development')
 await window.hininaPlugins.stop('com.example.development')
 ```
 
-- `window.hininaPlugins` 仅在 DEV 提供；release 仍按批准配置自动启动插件（四个命令在 release 构建中依然注册，只是前端不暴露入口）。
+- `window.hininaPlugins` 仅在 DEV 提供；release 仍按批准配置自动启动插件（五个命令在 release 构建中依然注册，只是前端不暴露入口）。
 - 已在运行的插件再次 `start` 会报错（重复 start 只拒绝命令、不写失败历史）。
 - **`enabled` 只由 `plugins.json` 决定**：`stop` 是"本次停止"，不改变自动启用意图——重启应用后 enabled 插件仍会自动启动；持久禁用必须改 `plugins.json`。
 - **`reload` 是开发期便利**（免于重启 `tauri dev`）：旧 worker 真正退出后才加载新源码。**发布形态的语义是"改配置/改代码后重启应用生效"**。

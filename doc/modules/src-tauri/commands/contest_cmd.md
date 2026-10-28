@@ -11,7 +11,7 @@
 - `pub async fn load_configured_contest(ctx) -> AppResult<ContestBundle>` — 从 `oj.contest_ref` 读取当前比赛引用（不透明字符串：HOJ 为数字串，其它 OJ 可能是任意资源 ID），加载详情 + 题目列表；空串（trim 后）返回错误提示在 config.json 中设置 `oj.contestRef`
 - `pub async fn get_contest_rank(ctx, contest_id, current_page?, limit?, keyword?, remove_star?, contains_end?) -> AppResult<ContestRankPage>` — 获取比赛排行榜（分页）。前端 invoke 签名 `get_contest_rank`({ contestId, currentPage?, limit?, keyword?, removeStar?, containsEnd? })，除 contestId 外均可省略（默认第 1 页、每页 50 条、不过滤）；`current_page` 经 `.max(1)` 收敛。注意：返回的 `records` 可能含服务端前置的「当前用户/关注用户」副本，前端渲染前需按 `uid` 去重；`total` 含这些前置条目，不能当作真实参赛人数
 - `pub async fn list_contest_announcements(ctx, contest_id, current_page?, limit?) -> AppResult<AnnouncementPage>` — 获取比赛公告（分页）。前端 invoke 签名 `list_contest_announcements`({ contestId, currentPage?, limit? })，默认第 1 页、每页 50 条，页码/条数经 `.max(1)` 收敛。**不做缓存**：公告可能包含裁判组临场发布的规则变更
-- `fn session_uid(ctx) -> Option<String>`（私有） — 从当前会话解析公告已读状态使用的 uid：优先用 HOJ 的用户 UUID（`user_id`）；旧版会话文件可能缺失该字段，回退 `username`
+- `pub(crate) fn session_uid(ctx) -> Option<String>` — 从当前会话解析公告已读状态使用的 uid：优先用 HOJ 的用户 UUID（`user_id`）；旧版会话文件可能缺失该字段，回退 `username`
 - `pub async fn get_read_announcement_ids(ctx, contest_id) -> AppResult<Vec<String>>` — 获取当前用户在某比赛下已读的公告 ID 列表。前端 invoke 签名 `get_read_announcement_ids`({ contestId })。已读状态是客户端本地特性（HOJ 无对应接口），按会话 uid 隔离存储；**无会话时返回空列表而不是报错** —— 登录页也可能预渲染公告
 - `pub async fn mark_announcements_read(ctx, contest_id, ids: Vec<String>) -> AppResult<()>` — 标记公告为已读（与既有记录合并去重）。前端 invoke 签名 `mark_announcements_read`({ contestId, ids })。**无会话时静默跳过**（`warn!` 日志后返回 `Ok(())`）：已读状态是纯 UI 便利特性，不值得为此报错
 

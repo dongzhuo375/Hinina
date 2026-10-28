@@ -5,7 +5,7 @@
 
 ## 核心类型/函数
 - **`AppContext`** — 统一应用上下文 struct，持有所有基础设施和 Service 的 `Arc` 引用。
-  字段：`event_bus: Arc<CoreEventBus>`, `session_repo: Arc<dyn SessionRepository>`, `plugin_host: Arc<PluginHost>`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `default_data_dir: PathBuf`, `data_dir_source: DataDirSource`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
+  字段：`access: Arc<AccessRevision>`, `event_bus: Arc<CoreEventBus>`, `session_repo: Arc<dyn SessionRepository>`, `plugin_host: Arc<PluginHost>`, `plugin_manager: Arc<PluginManager>`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `default_data_dir: PathBuf`, `data_dir_source: DataDirSource`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
 
   `event_bus` 是**唯一事实通知源**（消费者不在此启动，见 `main.rs`）；`session_repo` 供应用层与适配器层共用（凭证轮换必须当场落盘）；`plugin_host` 只持有总线句柄（消费者同样在 `main.rs` 启动）。
   `default_data_dir` 与 `storage.base_dir()` 的区别：后者可能被用户改到别处（`data_dir.json` 指针），而前者是**位置指针文件所在处**与「恢复默认」的目标，永远不变。`data_dir_source` 供 `get_data_dir` 如实告诉界面「当前用哪个目录、为什么」。

@@ -84,7 +84,7 @@ sudo apt install -y \
 
 | Workflow | 触发 | Jobs（稳定名） |
 |---|---|---|
-| `ci.yml` | pull_request、push main、workflow_dispatch | `frontend`、`rust-lint`、`rust-test`（windows + ubuntu 矩阵）、`ci-required`（汇总） |
+| `ci.yml` | pull_request、push main、workflow_dispatch、workflow_call（M4 起，供 release.yml 复用） | `frontend`、`rust-lint`、`rust-test`（windows + ubuntu 矩阵）、`ci-required`（汇总） |
 | `integration.yml` | push main、每日定时、workflow_dispatch | `build`（windows + ubuntu + macos 矩阵）、`stress-repeat`、`rust-coverage`、`e2e`、`integration-summary`（M3 落地） |
 | `release.yml` | `v*.*.*` 标签 | M4 已落地（validate / test / build-windows / verify-artifact / draft-release；test 经 workflow_call 复用 ci.yml） |
 

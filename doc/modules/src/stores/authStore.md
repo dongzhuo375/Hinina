@@ -43,7 +43,7 @@
 login → authService.login → user + sessionResolved=true（失败：error + rethrow）
 
 logout（永不 reject）
-  → authService.logout()（后端 + localStorage；失败仅记录 backendCleared=false）
+  → authService.logout()（后端登出；失败仅记录 backendCleared=false。前端无 localStorage 持久化——P66 已移除，会话唯一存放处是后端会话文件）
   → user = null；sessionResolved = backendCleared
   → clearDomainState()（workspace 防抖取消 → submission/rank 轮询回收 → contest 定向清理 → problem 重置）
 

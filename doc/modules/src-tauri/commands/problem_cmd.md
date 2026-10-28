@@ -1,7 +1,7 @@
 # problem_cmd
 
 ## 职责
-题目相关 Tauri Command 模块。提供题目详情获取、题目列表查询、用户题目状态与题目 limits 批量查询，面向前端暴露 IPC 接口。
+题目相关 Tauri Command 模块。提供题目详情获取、用户题目状态与题目 limits 批量查询，面向前端暴露 IPC 接口（题目列表属比赛数据，由 `contest_cmd` 经 `ContestProvider` 提供）。
 
 ## 核心类型/函数
 - `pub async fn get_problem(ctx, contest_id, problem_id) -> AppResult<Problem>` — 获取指定题目详情（调 `ProblemService::open_problem`，同时发布 `CoreEvent::ProblemOpened` 事实通知，供审计 / 插件 / 前端其他页面感知）。**题面缓存开关由本层读取**：`ctx.config.get().oj.cache_problem_statement` 作为 `cache_enabled` 参数传入 —— 配置读取归命令层、Service 只接参数（与 `contest_cmd` 传 `cache_ttl_secs` 同款约定）
@@ -18,7 +18,7 @@
 
 ## 被依赖
 - `src-tauri/src/commands/mod.rs`（通过 `pub mod problem_cmd` 声明）
-- `src-tauri/src/main.rs`（`generate_handler!` 注册全部四个 command）
+- `src-tauri/src/main.rs`（`generate_handler!` 注册全部三个 command）
 
 ## 逻辑流程
 1. 前端调用 `invoke('get_problem', { contestId, problemId })` / `invoke('get_user_problem_status', { contestId, problemIds })` / `invoke('get_contest_problem_limits', { contestId, displayIds })`

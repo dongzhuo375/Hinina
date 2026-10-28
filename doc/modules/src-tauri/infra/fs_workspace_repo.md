@@ -19,6 +19,7 @@
 - **`delete_file(workspace_id, path)`** — 删除单个工作区文件（P62 旧代码文件清理）：经 `workspace_relative()` 路径穿越校验后委托 `Storage::remove()`；文件不存在时返回 `Ok(())`（幂等，清理路径可安全重试）
 - **`delete_workspace(workspace_id)`** — 递归删除整个工作区目录
 - **`exists(workspace_id)`** — 检查工作区目录是否存在
+- **`list_workspace_ids()`** — 扫描 `workspaces/` 目录列出全部工作区 ID（`WorkspaceManager::find_or_create` 的匹配输入；目录不存在返回空列表，仅收录子目录且目录名须为合法 UTF-8）
 
 ## 直接依赖
 - `std::path::{Component, Path, PathBuf}`
@@ -28,7 +29,7 @@
 - `infra::storage::Storage`
 
 ## 被依赖
-暂无（未被 infra 外部模块直接引用，预期由 `service::workspace` 通过 trait 使用）
+- `core::context`（`AppContext::init` 构造本实现并注入 `WorkspaceManager`，经 `core::repository::workspace_repo` trait 使用）
 
 ## 逻辑流程
 目录结构为 `{storage.base_dir}/workspaces/{workspace_id}/...`。构造函数接收 `Arc<Storage>` 作为底层存储。

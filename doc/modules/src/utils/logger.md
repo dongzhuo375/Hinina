@@ -25,6 +25,7 @@
 - `stores/authStore.ts` / `announcementStore.ts` / `problemStore.ts` / `submissionStore.ts` / `workspaceStore.ts`
 - `guards/sessionGuard.ts`
 - `views/ProblemSolveView.vue` / `SubmissionDetailView.vue`
+- `components/layout/StatusBar.vue`
 - `components/editor/CodeEditor.vue` / `EditorConsoleBar.vue`
 - `components/problem/ProblemStatement.vue` / `QuickSubmitDialog.vue`
 

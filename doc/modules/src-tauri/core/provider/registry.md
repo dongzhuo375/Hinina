@@ -14,6 +14,8 @@
   - `current_submission(&self) -> AppResult<Arc<dyn SubmissionProvider>>` — 当前 OJ 的 SubmissionProvider
   - `current_id(&self) -> OjId` — 当前选中的 OJ
   - `set_current(&self, oj_id: OjId)` — 切换当前 OJ
+  - `current_endpoint(&self) -> Option<String>`（默认 `None`）— 构造当前 Provider 时实际使用的服务端地址（非可变配置值，供作用域客户端读取）
+  - `set_instance_endpoint(&self, id: OjId, endpoint: String)`（默认空实现）— 组合根登记各实例的端点元数据；未登记的注册表对作用域客户端 fail closed
   - `list_available(&self) -> Vec<OjId>` — 列出所有已注册的 OJ
 
 ## 直接依赖

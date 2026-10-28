@@ -1,7 +1,7 @@
 # submission
 
 ## 职责
-定义提交 Provider trait `SubmissionProvider`，声明提交代码、评测结果轮询查询、比赛提交列表、提交详情与测试点结果五个异步方法。各 OJ Adapter 需实现此 trait。
+定义提交 Provider trait `SubmissionProvider`，声明提交代码、评测结果轮询查询、比赛提交列表、本人提交历史页、提交详情与测试点结果六个异步方法（`list_history_page` 有 trait 默认实现，复用 `list_contest_submissions` 推导 `has_more`/`total`，Hydro 侧有覆盖）。各 OJ Adapter 需实现此 trait。
 
 ## 核心类型/函数
 - **`SubmissionProvider`** — 提交 Provider trait（`#[async_trait]`），方法：
@@ -11,6 +11,7 @@
     - 不要在某一家里「猜」另一家的语义（Hydro 侧刻意不做字母换算：万一某题的 pid 恰好是 `"A"`，换算会把提交打到另一道题上）
   - `get_judgement(&self, submission_id) -> AppResult<JudgementResult>` — 查询评测结果（轮询用轻量投影）
   - `list_contest_submissions(&self, query: &SubmissionQuery) -> AppResult<SubmissionPage>` — 查询比赛提交列表（分页）
+  - `list_history_page(&self, query: &SubmissionQuery) -> AppResult<SubmissionHistoryPage>`（有默认实现） — 本人提交历史页（仅元数据：`records`/`total`/`has_more` 续传证据；默认实现复用 `list_contest_submissions` 的原生 total，Hydro 覆盖为无 total 的诚实续传）
   - `get_submission_detail(&self, submit_id) -> AppResult<SubmissionDetail>` — 查询提交详情（含源代码与错误信息）
   - `get_submission_cases(&self, submit_id) -> AppResult<SubmissionCases>` — 查询提交的全部测试点结果
 

@@ -4,7 +4,7 @@
 
 ## 职责
 
-前端应用入口与组合根：创建 Vue 应用，装配 Pinia 与 Router，注入四个全局观察者/握手（会话守卫、工作区落盘事件、新公告事件、关窗落盘握手），引入全局与赛场两套样式，挂载到 `#app`。所有「底层不感知上层」的装配关系集中在此 —— 入口自身不含业务逻辑。
+前端应用入口与组合根：创建 Vue 应用，装配 Pinia 与 Router，注入四个全局观察者/握手（会话守卫、工作区落盘事件、新公告事件、关窗落盘握手），引入全局与赛场两套样式，挂载到 `#app`；DEV 构建另注册插件控制台助手 `window.hininaPlugins`（动态 import `pluginStore`，暴露 list/start/stop/reload/resync 五个控制方法，发布构建不含）。所有「底层不感知上层」的装配关系集中在此 —— 入口自身不含业务逻辑。
 
 ## 核心类型/函数
 
@@ -21,6 +21,7 @@
 | `import '@/styles/contest.css'` | 赛场主题样式（`.contest-theme` 作用域下的令牌重写 + 通用类：页头/表格/正文/浮层/响应式密度 `--ui-step`）；在 global.css 之后导入，保证赛场令牌覆盖 `:root` 同名变量 |
 | `import 'katex/dist/katex.min.css'` | KaTeX 公式样式与字体（题面/公告/简介的 LaTeX 公式）；字体由 katex 包本地打包、不经 CDN，符合离线客户端约束 |
 | `app.mount('#app')` | 挂载 |
+| `if (import.meta.env.DEV) …` | **DEV-only 插件控制台助手**：动态 import `pluginStore`，`Object.defineProperty(window, 'hininaPlugins', …)` 冻结暴露 `list/start/stop/reload/resync`；跟随 Store → Service → Bridge 分层，发布构建不含此分支 |
 
 注：Naive UI **不在此处 `app.use`**——`App.vue` 直接按需引入 `NConfigProvider` / `NDialogProvider` 组件（tree-shaking 友好，无全量插件安装）。
 

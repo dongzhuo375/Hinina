@@ -4,13 +4,13 @@
 
 ## 职责
 
-持有当前比赛的题目列表、当前打开的题目详情，以及两类渐进补齐的辅助数据：题目 limits（时限/内存）与「我的提交状态」，驱动题目卡片与解题进度展示。
+持有当前打开的题目详情，以及两类渐进补齐的辅助数据：题目 limits（时限/内存）与「我的提交状态」，驱动题目卡片与解题进度展示（比赛题目列表由 `contestStore.problems` 持有）。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| state.`currentProblem` / `problems` / `isLoading` / `error` | — | 题目详情与列表 |
+| state.`currentProblem` / `isLoading` / `error` | — | 当前题目详情与加载状态 |
 | state.`limits` | `Record<displayId, ProblemLimits>` | 渐进填充：卡片先渲染，limits 到达后补齐 |
 | state.`isLimitsLoading` | `boolean` | limits 加载中标记 |
 | state.`myStatus` | `Record<pid, UserProblemStatus>` | 我的提交状态（0=未提交 / 1=已AC / 2=尝试过） |
@@ -61,7 +61,7 @@ loadMyStatus(contestId, problemIds)
 设计要点：
 
 - **loadLimits / loadMyStatus 失败不抛出**：两者只影响卡片上的一行信息或一个角标，
-  不应打断整页渲染；与 `openProblem` / `loadProblems`（主数据，失败必须让调用方感知）
+  不应打断整页渲染；与 `openProblem`（主数据，失败必须让调用方感知）
   的抛出策略刻意不同。认证类错误（401/403）已由全局会话守卫（`guards/sessionGuard`）
   统一处理，此处只记录日志，不重复应对。
 - **缺失 ≠ 零值**：后端对获取失败的题不产出条目（如 403 私有题），`limitsOf` 返回 null、
