@@ -13,7 +13,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `SubmissionEntry` | interface（模块内） | `{ id, problemId, status, time?, memory?, submittedAt, errorMessage? }` —— 本会话提交条目；`time`(ms)/`memory`(KB)/`errorMessage` 由轮询回填 |
-| state | `submissions` / `pendingSubmissions` / `isSubmitting` / `error` / `history` | 本地提交列表、重复发送保护表、请求状态、服务端提交历史子状态 |
+| state | `submissions` / `pendingSubmissions` / `isSubmitting` / `error` / `history` / `historySeq` | 本地提交列表、重复发送保护表、请求状态、服务端提交历史子状态、历史查询的同会话请求序号 |
 | `history` | 子对象 | `{ contestId, records, total, current, pageSize, pages, problemFilter, statusFilter, isLoading, error }` —— 评测页数据源（onlyMine 由后端强制） |
 | `pendingFor` | getter `(contestId, problemId, displayId, language, sourceCode) => SubmissionEntry \| null` | 按五元组匹配 `pendingSubmissions`；命中后**再要求对应 `submissions` 条目存在且 `!isTerminalStatus(status)`**，否则返回 null（终态/超时/清理后自动释放保护） |
 | `latestLocalFor` | getter `(problemId) => SubmissionEntry \| null` | 本题本会话最新一条提交 |
@@ -23,7 +23,7 @@
 | `pollOnce` | `(submissionId) => Promise<void>` | 超 deadline → warn + `invalidateMyStatus()` + **把非终态条目收敛为 `Unknown`** + 停止；否则查询一次，成功即 `failures = 0`，`isTerminalStatus` 命中即 `invalidateMyStatus()` + 停止；`catch` 里 `notePollFailure`（**计数点必须在这里**，见设计要点）。**会话代际守卫**：轮询返回后若会话已切换，直接返回（跳过 `invalidateMyStatus`/计数，评审五轮） |
 | `notePollFailure` | `(submissionId) => void` | 连续失败计数 +1；达 `POLL_ERROR_REPORT_THRESHOLD`(3) 时写 `error = \`评测结果查询连续失败 N 次（提交 #id），仍在重试\``；成功一次即清零 |
 | `stopPolling` / `stopAllPolling` | `(submissionId?) => void` | 停单个 / 停全部（登出经 `stores/session` 调用）；**两者都会清理对应的 `pendingSubmissions`**（保护随轮询生命周期结束而释放） |
-| `fetchHistory` | `(contestId, page?) => Promise<void>` | 拉一页提交历史，透传 `problemFilter`/`statusFilter`/`pageSize`；失败写 `history.error` 并抛出 |
+| `fetchHistory` | `(contestId, page?) => Promise<void>` | 拉一页提交历史，透传 `problemFilter`/`statusFilter`/`pageSize`；显式页码先同步 `history.current`，使翻页在途时的视图轮询仍读取目标页。请求序号 + 会话代际双守卫：过期成功/失败静默丢弃，只有最新请求写 `history.error`、抛出并收尾 loading |
 | `setHistoryProblemFilter` / `setHistoryStatusFilter` | `(contestId, value) => Promise<void>` | 设置筛选并回到第 1 页 |
 | `resetHistoryFilters` | `() => void` | 清空题目/状态筛选，**不发请求**——评测页无 `?problem=` 深链进入时清除上次访问残留（L2），首查由调用方随后的 `fetchHistory` 统一发出；与 setHistoryProblemFilter（用户改筛选、清空即重拉）语义不同 |
 | `setHistoryPage` | `(contestId, page) => Promise<void>` | 翻页（越界不发请求） |
@@ -77,6 +77,13 @@ pollOnce(id)
     isTerminalStatus → invalidateMyStatus() + stopPolling
   catch:                        // 网络抖动等瞬时错误：等下一周期
     notePollFailure(id)         // ← 计数点在这里，不在 poller.onError（见设计要点）
+
+fetchHistory(contestId, page?)
+  token = ++historySeq；显式 page 先同步 history.current
+  → listContestSubmissions({ currentPage, problemFilter, statusFilter, pageSize })
+  → 仅最新请求且同会话才写 records/total/current/pages
+  → 过期成功/失败静默丢弃；最新失败写 history.error + rethrow
+  → 仅最新请求清 history.isLoading
 ```
 
 设计要点：
@@ -118,5 +125,5 @@ pollOnce(id)
 
 - **轮询组**：提交后启动轮询、终态后停止（再推进 30s 不再请求）、终态触发 `problemStore.myStatusStale`、**轮询超时同样置 stale 且本地条目收敛为 `Unknown`、`pendingSubmissions` 清空**、memory/time 回填、瞬时失败静默且恢复后清 error（P69）、`stopAllPolling` 回收、重复 `startPolling` 幂等（同一提交只一个 poller）。
 - **重复提交保护组**：同一帧多次触发只发一个请求（第二次 rejects「正在提交」且 `error` 仍为 null，完成后 `isSubmitting=false`）；请求返回后相同内容在评测期间复用编号（改代码/改语言仍可提交，共 3 次请求）；**轮询初始化未完成（`getPollSchedule` 挂起）时也能识别已受理提交**；终态后释放保护（可再提交得新编号）；超时或会话清理后释放保护；提交请求失败时恢复按钮并允许重试。
-- **历史组**：`fetchHistory` 参数透传与错误、切筛选回第 1 页、`resetHistoryFilters`（清空筛选且不发请求）、翻页越界、`fetchProblemSummary`（latest + total、空提交、不污染 history）；另有 `latestLocalFor`、`submitCode` 原样透传 `displayId`。轮询用 `vi.useFakeTimers()` 推进。
+- **历史组**：`fetchHistory` 参数透传与错误、切筛选回第 1 页、旧筛选响应不得覆盖新结果、旧失败不得提前收尾新请求 loading、翻页在途时历史轮询读取目标页、`resetHistoryFilters`（清空筛选且不发请求）、翻页越界、`fetchProblemSummary`（latest + total、空提交、不污染 history）；另有 `latestLocalFor`、`submitCode` 原样透传 `displayId`。轮询用 `vi.useFakeTimers()` 推进。
 - **会话代际组（评审三轮 P1 / 四轮 #1#2）**：手动延迟 `submitCode` 响应，`请求在途 → clearDomainState() → 旧响应成功` 后 submissions/pendingSubmissions 保持为空、轮询不启动（变异验证复现 submissions=1/pending=1/polls=1）；旧请求的 `finally` 不得清掉新会话在途提交的 `isSubmitting`（变异验证：去掉守卫后该用例失败）。`fetchHistory` 的迟到写入落在 `$reset()` 替换前的旧 history 对象引用上（本身不泄漏），其代际守卫为纵深防御。
