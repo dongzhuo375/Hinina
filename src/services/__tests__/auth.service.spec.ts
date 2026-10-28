@@ -59,9 +59,10 @@ describe('checkSession', () => {
     await expect(authService.checkSession()).resolves.toBeNull()
   })
 
-  it('IPC 异常时吞掉错误返回 null（启动路径不应因会话查询失败而中断）', async () => {
+  it('IPC 异常记录日志并上抛，不得伪装成后端确认无会话', async () => {
     bridge.getSession.mockRejectedValue(new Error('boom'))
-    await expect(authService.checkSession()).resolves.toBeNull()
+    await expect(authService.checkSession()).rejects.toThrow('boom')
+    expect(console.error).toHaveBeenCalled()
   })
 })
 

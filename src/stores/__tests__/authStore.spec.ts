@@ -172,13 +172,23 @@ describe('checkSession', () => {
     expect(auth.sessionResolved).toBe(true)
   })
 
-  it('异常时返回 false 且不抛出', async () => {
-    authService.checkSession.mockRejectedValue(new Error('boom'))
+  it('传输异常保留用户并保持未确认，后续调用可重试恢复', async () => {
+    authService.checkSession.mockRejectedValueOnce(new Error('boom'))
     const auth = useAuthStore()
+    auth.user = user
+    auth.sessionResolved = true
 
     await expect(auth.checkSession()).resolves.toBe(false)
     expect(auth.error).toBe('boom')
+    expect(auth.user).toEqual(user)
+    expect(auth.sessionResolved).toBe(false)
+    expect(auth.isLoading).toBe(false)
+
+    authService.checkSession.mockResolvedValueOnce(user)
+    await expect(auth.checkSession()).resolves.toBe(true)
+    expect(auth.user).toEqual(user)
     expect(auth.sessionResolved).toBe(true)
+    expect(auth.error).toBeNull()
   })
 })
 

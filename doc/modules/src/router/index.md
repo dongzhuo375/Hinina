@@ -59,8 +59,8 @@ beforeEach(to):
   以简报为准（见 `utils/contest.md`）。
 - 守卫只做「有没有会话 + 比赛是否进行中」的粗判据；会话是否被服务端撤销由三态校验
   （赛前预检 `utils/session-check`）与全局 401 兜底（`guards/sessionGuard`）负责。
-- `checkSession` 无论成败都置 `sessionResolved = true`（见 authStore），守卫不会每次
-  导航重复发 IPC。
+- 只有取得明确会话结果才置 `sessionResolved = true`，守卫不会每次导航重复发 IPC；
+  传输失败保持 unresolved，后续导航或登录页挂载可重试（见 authStore）。
 - 视图全部懒加载：首屏（登录页）不背负 Monaco/榜单等代码体积。
 
 ## 测试
