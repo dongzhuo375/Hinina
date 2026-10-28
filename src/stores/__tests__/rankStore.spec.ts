@@ -931,4 +931,27 @@ describe('榜单同会话请求代际保护', () => {
     expect(store.fullFetchState).toBe('done')
     expect(store.isLoading).toBe(false)
   })
+
+  it('全量筛选中直接/去重加载都继续走快照，不发普通分页请求', async () => {
+    const fullFetch = deferred<ContestRankPage>()
+    rankService.getRank.mockImplementationOnce(() => fullFetch.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const full = store.setGroupFilter('star')
+    // 复刻全量拉取期间重新进入 RankView 的 bootstrap，以及快照未就位时的翻页入口
+    await store.loadRank(CONTEST_ID, MY_UID, 1)
+    await store.loadRankDeduped(1)
+    expect(rankService.getRank).toHaveBeenCalledTimes(1)
+    expect(store.isLoading).toBe(true)
+
+    fullFetch.resolve(makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1))
+    await full
+    expect(store.fullFetchState).toBe('done')
+    expect(store.current).toBe(1)
+    expect(store.pages).toBe(1)
+    expect(store.visibleRows.map((row) => row.uid)).toEqual(['star'])
+    expect(store.isLoading).toBe(false)
+  })
 })

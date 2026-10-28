@@ -173,6 +173,12 @@ export const useRankStore = defineStore('rank', {
      * 认证类错误（401）已由全局会话守卫统一处理，此处不重复应对。
      */
     async loadRank(contestId: string, uid: string | null, page?: number) {
+      // 重新进入榜单页时 RankView.bootstrap 也会直调本方法。仍处于全量筛选就必须
+      // 继续走快照链路，否则普通分页会覆写全量分页，并与在途快照共享 loading 收尾
+      if (isFullSnapshotFilter(this.groupFilter)) {
+        await this.fetchAllRows()
+        return
+      }
       // 轮询 refresh 绕过 dedup 直调本方法，与用户翻页并发时，后完成的旧请求会
       // 把榜单整体拉回旧页且不自愈 —— 过期响应一律丢弃（与 openProblemSeq 同款范式）
       const token = ++this.loadSeq
@@ -352,6 +358,12 @@ export const useRankStore = defineStore('rank', {
      * 连点分页/筛选/搜索会命中合并或 memo，避免服务端背靠背重算整榜。
      */
     async loadRankDeduped(page: number) {
+      // 快照尚未就位时 isFullMode=false，翻页可能落到这里；同样不得改走普通分页，
+      // 更不能让一次被重入保护短路的调用写入普通查询 memo
+      if (isFullSnapshotFilter(this.groupFilter)) {
+        await this.fetchAllRows()
+        return
+      }
       const key = rankQueryKey(this.contestId, this.uid, page, this.keyword, this.removeStar)
       const generation = getSessionGeneration()
 
