@@ -44,7 +44,7 @@
 ## 直接依赖
 
 - `vue`
-- `monaco-editor`（含 5 个 `?worker` 导入）
+- `monaco-editor`（明确使用包 `module` 字段对应的 `esm/vs/editor/editor.main.js` 入口，含 5 个 `?worker` 导入）
 - `@/components/editor/EditorSettingsPopover.vue`（工具条设置弹层）
 - `@/services/config.service`（编辑器偏好读写 + `EditorPrefs` 类型）
 - `@/utils/language`（语言值域/文件名识别）
@@ -61,8 +61,10 @@
 ## 逻辑流程
 
 ```
-onMounted → nextTick → applyLoadedPrefs(await configService.getEditorPrefs())
-                                  → emit prefs-change → monaco.editor.create(container, {...})
+onMounted → nextTick → 检查容器 → loadedPrefs = await configService.getEditorPrefs()
+                     → 再次读取并检查容器（配置等待期间可能已卸载）
+                     → applyLoadedPrefs(loadedPrefs) → emit prefs-change
+                     → monaco.editor.create(container, {...})
   onDidChangeModelContent → （非抑制时）emit update:modelValue → workspaceStore.updateCode
                              → 标脏 + 2s 防抖同步到 Rust 后端
   onDidChangeCursorPosition → emit cursor → 父级转发 EditorConsoleBar 状态行
@@ -103,6 +105,9 @@ onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补
   落盘失败不回滚，只提示「仅本次会话生效」。
 - **在途改动不丢**：卸载时若 debounce 未到期，补一次落盘 —— 调完字号立刻切题/离页
   不该丢设置。
+- **异步挂载有两个容器检查点**：首次 `nextTick` 后检查覆盖模板挂载窗口；偏好 IPC 返回后必须
+  重新读取并复查容器，覆盖秒开秒关窗口。若此处仍用 await 前的 ref，可能 `create(null)`，
+  或在卸载钩子已跑完后创建无人 dispose 的 editor 并重新挂上 keydown listener。
 - **语言菜单必须浮层化**（PR #36）：HOJ 的语言列表可能很长（十几项），原来 `absolute`
   挂在按钮下方的菜单会被编辑器容器的 `overflow-hidden` 与快捷提交卡片的裁切吃掉，
   表现为「菜单看不见 / 滚不动 / 选不到后面的语言」。现改为 **Teleport 到 `.contest-theme`
@@ -115,3 +120,9 @@ onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补
   整块覆盖会在「挂载读配置的 IPC 往返期间用户改了任一设置」或「读取失败走兜底值」时，
   把存量的 `fontSize: 20` / `editorTheme: vs-dark` 静默抹成默认值（配置可被设置页或
   手改文件维护，组件无权代其决定）。
+
+## 测试
+
+`src/components/editor/__tests__/CodeEditor.spec.ts`（Monaco/worker 轻量 mock）锁定：偏好读取在途时
+卸载，配置随后返回不得创建 Monaco 或补挂 keydown listener；正常挂载仍使用有效容器创建实例并
+注册内容/光标回调。
