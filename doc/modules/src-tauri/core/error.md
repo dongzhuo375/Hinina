@@ -35,7 +35,6 @@
 - `plugin::query`（插件作用域查询以 `AppError` 上抛服务端事实）
 - `plugin::host::api_error`（`redact_app_error` 把 `AppError` 归一为插件错误码，见其模块文档）
 - `infra::fs_config_repo`
-- `infra::fs_plugin_repo`
 - `infra::fs_workspace_repo`
 - `infra::http`（`status_error` 按 HTTP 状态码构造 `Auth`（401）/ `Network`（其余）变体；传输与读体失败构造 `Network`）
 - `infra::provider_registry_impl`
