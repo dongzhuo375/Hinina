@@ -41,11 +41,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/// 用户操作路径的查询 memo 与在途合并（模块级：非渲染状态，不进响应式系统）
-let queryMemo: { key: string; at: number } | null = null
+/// 用户操作路径的查询 memo 与在途合并（模块级：非渲染状态，不进响应式系统）。
+/// seq 是发起时的 loadSeq：出现更新的用户意图后，旧 memo/在途请求均不得再被复用
+let queryMemo: { key: string; at: number; seq: number } | null = null
 /// 在途合并记录代际与归属 token：跨会话不复用旧 promise，finally 只清自己的登记
 /// （评审六轮：与 contestStore 的在途去重同类问题）
-let queryInFlight: { key: string; promise: Promise<void>; generation: number; token: object } | null = null
+let queryInFlight: {
+  key: string
+  promise: Promise<void>
+  generation: number
+  token: object
+  seq: number
+} | null = null
 
 /// 查询指纹：同一比赛 + 同一用户 + 同一页 + 同一关键词 + 同一 removeStar
 /// 才算「同一查询」。含 uid 是为了避免换账号后误命中上一位用户的查询。
@@ -107,6 +114,8 @@ export const useRankStore = defineStore('rank', {
     /// 客户端分组筛选
     groupFilter: 'all' as RankGroupFilter,
     isLoading: false,
+    /// loadRank 请求序号：同会话内只认最新一次请求（含 dedup/memo 的复用归属）
+    loadSeq: 0,
     /// 实时刷新是否开启
     isLive: false,
     error: null as string | null,
@@ -158,18 +167,24 @@ export const useRankStore = defineStore('rank', {
 
   actions: {
     /**
-     * 加载一页榜单。
+     * 加载一页榜单（带过期响应保护：同会话内只认最新一次请求，参数页码同步落地）。
      *
-     * 失败时记录 error 并向上抛出，由调用方决定是否提示；
+     * 最新请求失败时记录 error 并向上抛出，由调用方决定是否提示；
      * 认证类错误（401）已由全局会话守卫统一处理，此处不重复应对。
      */
     async loadRank(contestId: string, uid: string | null, page?: number) {
+      // 轮询 refresh 绕过 dedup 直调本方法，与用户翻页并发时，后完成的旧请求会
+      // 把榜单整体拉回旧页且不自愈 —— 过期响应一律丢弃（与 openProblemSeq 同款范式）
+      const token = ++this.loadSeq
       // 会话代际：登出后旧会话的榜单响应不得写回新会话（评审四轮 #1）
       const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
       this.contestId = contestId
       this.uid = uid
+      // 页码同步落地：refresh 轮询读 this.current 发请求；若等响应落地才更新，
+      // 翻页在途期间触发的轮询会带着旧页号回来（序号更新反而把新页响应判过期）
+      if (page !== undefined) this.current = page
       try {
         const result = await rankService.getRank({
           contestId,
@@ -177,13 +192,16 @@ export const useRankStore = defineStore('rank', {
           keyword: this.keyword || null,
           removeStar: this.removeStar,
         })
-        if (sessionGen !== getSessionGeneration()) return
+        if (token !== this.loadSeq || sessionGen !== getSessionGeneration()) return
         this.applyPage(result, uid)
       } catch (e) {
-        if (sessionGen === getSessionGeneration()) this.error = errorMessage(e, '加载榜单失败')
+        // 调用方对过期加载早已放弃，重抛只会让视图把旧失败当成新失败提示
+        if (token !== this.loadSeq || sessionGen !== getSessionGeneration()) return
+        this.error = errorMessage(e, '加载榜单失败')
         throw e
       } finally {
-        if (sessionGen === getSessionGeneration()) this.isLoading = false
+        // 旧请求不得提前关掉新请求的加载态
+        if (token === this.loadSeq && sessionGen === getSessionGeneration()) this.isLoading = false
       }
     },
 
@@ -330,25 +348,39 @@ export const useRankStore = defineStore('rank', {
       const key = rankQueryKey(this.contestId, this.uid, page, this.keyword, this.removeStar)
       const generation = getSessionGeneration()
 
-      // 只复用同代际的在途查询（旧会话 promise 的结果会被守卫丢弃，复用 = 空结果）
-      if (queryInFlight?.key === key && queryInFlight.generation === generation) {
+      // 只复用同会话、且仍是最新意图的在途查询；直接 loadRank 也会推进 loadSeq，
+      // 因此旧登记即使在 key 相同的情况下也不能截获更新后的用户操作
+      if (
+        queryInFlight?.key === key &&
+        queryInFlight.generation === generation &&
+        queryInFlight.seq === this.loadSeq
+      ) {
         return queryInFlight.promise
       }
 
-      if (queryMemo?.key === key && Date.now() - queryMemo.at < RANK_QUERY_MEMO_TTL_MS) {
+      if (
+        queryMemo?.key === key &&
+        queryMemo.seq === this.loadSeq &&
+        Date.now() - queryMemo.at < RANK_QUERY_MEMO_TTL_MS
+      ) {
         return
       }
 
       const token = {}
-      const promise = this.loadRank(this.contestId, this.uid, page)
+      const request = this.loadRank(this.contestId, this.uid, page)
+      const seq = this.loadSeq
+      const promise = request
         .then(() => {
-          // 会话已切换时不写 memo（否则新会话会把旧会话的查询当成已命中）
-          if (generation === getSessionGeneration()) queryMemo = { key, at: Date.now() }
+          // 过期失败会被 loadRank 静默吞掉，因此 memo 必须以序号确认这次确实是最新成功；
+          // 会话已切换时同样不得给新会话留下「已命中」
+          if (seq === this.loadSeq && generation === getSessionGeneration()) {
+            queryMemo = { key, at: Date.now(), seq }
+          }
         })
         .finally(() => {
           if (queryInFlight?.token === token) queryInFlight = null
         })
-      queryInFlight = { key, promise, generation, token }
+      queryInFlight = { key, promise, generation, token, seq }
       return promise
     },
 

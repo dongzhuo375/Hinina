@@ -708,3 +708,155 @@ describe('会话代际（评审六轮：榜单去抖缓存）', () => {
     expect(rankService.getRank).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('loadRank 同会话过期响应保护', () => {
+  interface Deferred<T> {
+    promise: Promise<T>
+    resolve: (value: T) => void
+    reject: (reason: unknown) => void
+  }
+
+  function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void
+    let reject!: (reason: unknown) => void
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+
+  it('迟到的旧页成功响应不得覆盖新页', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const newPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => newPage.promise)
+    const store = useRankStore()
+
+    const first = store.loadRank(CONTEST_ID, MY_UID, 2)
+    const second = store.loadRank(CONTEST_ID, MY_UID, 3)
+    newPage.resolve(makePage([makeRow({ uid: 'page-3' })], 200, 3))
+    await second
+    oldPage.resolve(makePage([makeRow({ uid: 'page-2' })], 200, 2))
+    await first
+
+    expect(store.current).toBe(3)
+    expect(store.rows.map((row) => row.uid)).toEqual(['page-3'])
+    expect(store.error).toBeNull()
+  })
+
+  it('迟到的旧失败不占错误态、不重抛，也不提前关掉新请求 loading', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const newPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => newPage.promise)
+    const store = useRankStore()
+
+    const first = store.loadRank(CONTEST_ID, MY_UID, 2)
+    const second = store.loadRank(CONTEST_ID, MY_UID, 3)
+    oldPage.reject(new Error('late boom'))
+    await expect(first).resolves.toBeUndefined()
+
+    expect(store.error).toBeNull()
+    expect(store.isLoading).toBe(true)
+    newPage.resolve(makePage([makeRow({ uid: 'page-3' })], 200, 3))
+    await second
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('页码随请求同步落地：翻页在途时轮询读取目标页', async () => {
+    const paging = deferred<ContestRankPage>()
+    const polling = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => paging.promise)
+      .mockImplementationOnce(() => polling.promise)
+    const store = useRankStore()
+
+    const first = store.loadRank(CONTEST_ID, MY_UID, 2)
+    const second = store.refresh()
+    expect(rankService.getRank).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ currentPage: 2 }),
+    )
+
+    polling.resolve(makePage([makeRow({ uid: 'polled-page-2' })], 200, 2))
+    await second
+    paging.resolve(makePage([makeRow({ uid: 'stale-page-2' })], 200, 2))
+    await first
+    expect(store.current).toBe(2)
+    expect(store.rows.map((row) => row.uid)).toEqual(['polled-page-2'])
+  })
+
+  it('迟到的旧成功不得写 memo，再次进入该页仍会真实请求', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const newPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => newPage.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.loadRankDeduped(2)
+    const second = store.loadRankDeduped(3)
+    newPage.resolve(makePage([makeRow({ uid: 'page-3' })], 200, 3))
+    await second
+    oldPage.resolve(makePage([makeRow({ uid: 'stale-page-2' })], 200, 2))
+    await first
+
+    rankService.getRank.mockResolvedValueOnce(
+      makePage([makeRow({ uid: 'fresh-page-2' })], 200, 2),
+    )
+    await store.loadRankDeduped(2)
+    expect(rankService.getRank).toHaveBeenCalledTimes(3)
+    expect(store.rows.map((row) => row.uid)).toEqual(['fresh-page-2'])
+    expect(store.current).toBe(2)
+  })
+
+  it('被静默丢弃的旧失败不得进入 memo', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const newPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => newPage.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.loadRankDeduped(2)
+    const second = store.loadRankDeduped(3)
+    oldPage.reject(new Error('late boom'))
+    await expect(first).resolves.toBeUndefined()
+    newPage.resolve(makePage([makeRow({ uid: 'page-3' })], 200, 3))
+    await second
+
+    rankService.getRank.mockResolvedValueOnce(makePage([makeRow()], 200, 2))
+    await store.loadRankDeduped(2)
+    expect(rankService.getRank).toHaveBeenCalledTimes(3)
+  })
+
+  it('出现更新请求后，不再复用同 key 的旧在途登记', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const directPage = deferred<ContestRankPage>()
+    const latestPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => directPage.promise)
+      .mockImplementationOnce(() => latestPage.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.loadRankDeduped(2)
+    const direct = store.loadRank(CONTEST_ID, MY_UID, 3)
+    const latest = store.loadRankDeduped(2)
+    expect(rankService.getRank).toHaveBeenCalledTimes(3)
+
+    latestPage.resolve(makePage([makeRow({ uid: 'latest-page-2' })], 200, 2))
+    await latest
+    directPage.resolve(makePage([makeRow({ uid: 'stale-page-3' })], 200, 3))
+    oldPage.resolve(makePage([makeRow({ uid: 'stale-page-2' })], 200, 2))
+    await Promise.all([first, direct])
+    expect(store.rows.map((row) => row.uid)).toEqual(['latest-page-2'])
+    expect(store.current).toBe(2)
+  })
+})
