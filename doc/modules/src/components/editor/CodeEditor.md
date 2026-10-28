@@ -44,7 +44,7 @@
 ## 直接依赖
 
 - `vue`
-- `monaco-editor`（明确使用包 `module` 字段对应的 `esm/vs/editor/editor.main.js` 入口，含 5 个 `?worker` 导入）
+- `monaco-editor`（生产源码保持裸包导入；Vitest 在测试配置中用 alias 指向包自带 ESM 入口，含 5 个 `?worker` 导入）
 - `@/components/editor/EditorSettingsPopover.vue`（工具条设置弹层）
 - `@/services/config.service`（编辑器偏好读写 + `EditorPrefs` 类型）
 - `@/utils/language`（语言值域/文件名识别）

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { vFocusScope } from '@/utils/focus-scope'
 import { ref, reactive, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.main.js'
+import * as monaco from 'monaco-editor'
 import EditorSettingsPopover from '@/components/editor/EditorSettingsPopover.vue'
 import { configService } from '@/services/config.service'
 import type { EditorPrefs } from '@/services/config.service'

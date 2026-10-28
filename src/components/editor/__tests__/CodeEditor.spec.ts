@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   setTheme: vi.fn(),
 }))
 
-vi.mock('monaco-editor/esm/vs/editor/editor.main.js', () => ({
+vi.mock('monaco-editor', () => ({
   editor: {
     create: mocks.createEditor,
     setModelLanguage: mocks.setModelLanguage,
