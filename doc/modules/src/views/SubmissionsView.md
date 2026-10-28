@@ -19,7 +19,7 @@
 | `contestElapsed` | `(record) => string` | 赛时相对时间 = `submitTime − contest.startTime`（同为 epoch 秒），经 `formatDurationHms` 格式化；赛前提交钳制 `--:--:--` |
 | `TONE_CLASSES` / `toneClasses` | — | `StatusTone` → pill 样式类（ac 绿 / wa 红 / tle 琥珀 / pending 青 / system·neutral 灰） |
 | `isBootstrapping` / `isFatalError` / `fatalMessage` | computed | 首次加载（无记录）才铺满 spinner；致命错误 =（history.error 且无记录）或（contestStore.error 且无 contest） |
-| `pageItems` | computed | 页码窗口折叠：首尾页 + 当前页 ±1，其余 `…`（与榜单页同一算法；渲染由 `PagePager` 承担） |
+| `pageItems` | computed | 把 `history.current/pages` 传给共享纯函数 `utils/pagination.getPageItems`；视图不再持有窗口算法，渲染仍由 `PagePager` 承担 |
 | `bootstrap` / `retry` | — | 引导链 / 错误条与致命错误重试（无 contest 时重走 bootstrap） |
 | `onProblemFilterChange` / `onStatusFilterChange` | — | 下拉变更 → `setHistoryProblemFilter` / `setHistoryStatusFilter`（store 内部回到第 1 页） |
 | `refresh` / `goToPage` / `clearProblemFilter` | — | 重拉当前页 / 翻页（`setHistoryPage`）/ 清除题目筛选 |
@@ -34,6 +34,7 @@
 - `@/types/contest` / `@/types/submission`（仅类型）
 - `@/utils/submission`（`STATUS_OPTIONS` / `formatClock` / `formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `statusLabel` / `statusTone` + `StatusTone` 类型）
 - `@/utils/polling`（`createPoller` + `Poller` 类型）
+- `@/utils/pagination`（`getPageItems` 页码窗口纯函数）
 
 ## 被依赖
 
