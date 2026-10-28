@@ -173,6 +173,29 @@ export const useRankStore = defineStore('rank', {
      * 认证类错误（401）已由全局会话守卫统一处理，此处不重复应对。
      */
     async loadRank(contestId: string, uid: string | null, page?: number) {
+      // 跨比赛复用时 store 不会重建：旧榜单/快照/分页全属于上一场，必须在发起
+      // 新比赛请求前清空并作废旧普通/全量请求，否则全量分支只会沿用旧 contestId
+      const contestChanged = this.contestId !== '' && this.contestId !== contestId
+      this.contestId = contestId
+      this.uid = uid
+      if (contestChanged) {
+        fullFetchGeneration++
+        this.loadSeq++
+        this.rows = []
+        this.myRow = null
+        this.total = 0
+        this.size = 0
+        this.current = 1
+        this.pages = 0
+        this.participants = 0
+        this.error = null
+        this.lastUpdated = 0
+        this.fullRows = null
+        this.fullFetchState = 'idle'
+        this.fullPage = 1
+        this.fullLoadedRows = 0
+        this.isLoading = false
+      }
       // 重新进入榜单页时 RankView.bootstrap 也会直调本方法。仍处于全量筛选就必须
       // 继续走快照链路，否则普通分页会覆写全量分页，并与在途快照共享 loading 收尾
       if (isFullSnapshotFilter(this.groupFilter)) {
@@ -186,8 +209,6 @@ export const useRankStore = defineStore('rank', {
       const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
-      this.contestId = contestId
-      this.uid = uid
       // 页码同步落地：refresh 轮询读 this.current 发请求；若等响应落地才更新，
       // 翻页在途期间触发的轮询会带着旧页号回来（序号更新反而把新页响应判过期）
       const previousPage = this.current
@@ -247,6 +268,9 @@ export const useRankStore = defineStore('rank', {
      */
     async fetchAllRows() {
       if (!this.contestId || this.fullFetchState === 'loading') return
+      // 固定本次拉取的比赛上下文：循环中途换比赛时即使代际守卫失效，也不能逐页
+      // 读取可变的 this.contestId 而拼出 A/B 混合快照
+      const contestId = this.contestId
       // 记住拉取前状态：失败且仍有旧快照时回退到它（不能停在 loading，否则重入保护会永久锁死）
       const previousState = this.fullFetchState
       const generation = ++fullFetchGeneration
@@ -263,7 +287,7 @@ export const useRankStore = defineStore('rank', {
         let truncated = false
         for (let page = 1; ; page++) {
           const result = await rankService.getRank({
-            contestId: this.contestId,
+            contestId,
             currentPage: page,
             limit: DEFAULT_RANK_PAGE_SIZE,
             keyword: this.keyword || null,

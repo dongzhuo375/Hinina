@@ -955,6 +955,50 @@ describe('榜单同会话请求代际保护', () => {
     expect(store.isLoading).toBe(false)
   })
 
+  it('全量筛选切到另一场比赛：使用传入 contestId 重拉并清空旧比赛快照', async () => {
+    rankService.getRank
+      .mockResolvedValueOnce(makePage([makeRow({ uid: 'star-A', rank: -1 })], 1, 1))
+      .mockResolvedValueOnce(makePage([makeRow({ uid: 'star-B', rank: -1 })], 1, 1))
+    const store = useRankStore()
+    store.contestId = 'A'
+
+    await store.setGroupFilter('star')
+    await store.loadRank('B', MY_UID, 1)
+
+    expect(rankService.getRank).toHaveBeenLastCalledWith(
+      expect.objectContaining({ contestId: 'B', currentPage: 1 }),
+    )
+    expect(store.contestId).toBe('B')
+    expect(store.fullRows?.map((row) => row.uid)).toEqual(['star-B'])
+    expect(store.visibleRows.map((row) => row.uid)).toEqual(['star-B'])
+  })
+
+  it('A 的全量拉取在途时切到 B：旧 A 响应不得写回 B 快照', async () => {
+    const fetchA = deferred<ContestRankPage>()
+    const fetchB = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => fetchA.promise)
+      .mockImplementationOnce(() => fetchB.promise)
+    const store = useRankStore()
+    store.contestId = 'A'
+
+    const first = store.setGroupFilter('star')
+    const switched = store.loadRank('B', MY_UID, 1)
+    expect(rankService.getRank).toHaveBeenCalledTimes(2)
+    expect(rankService.getRank).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ contestId: 'B' }),
+    )
+
+    fetchA.resolve(makePage([makeRow({ uid: 'star-A', rank: -1 })], 1, 1))
+    await first
+    fetchB.resolve(makePage([makeRow({ uid: 'star-B', rank: -1 })], 1, 1))
+    await switched
+    expect(store.fullRows?.map((row) => row.uid)).toEqual(['star-B'])
+    expect(store.fullFetchState).toBe('done')
+    expect(store.isLoading).toBe(false)
+  })
+
   it('最新翻页失败恢复最后成功页，避免旧行数据配新页码', async () => {
     rankService.getRank
       .mockResolvedValueOnce(makePage([makeRow({ uid: 'page-1' })], 200, 1))
