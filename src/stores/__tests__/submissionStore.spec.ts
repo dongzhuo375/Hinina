@@ -365,6 +365,19 @@ describe('重复提交保护', () => {
 })
 
 describe('提交历史（评测页数据源）', () => {
+  interface Deferred<T> {
+    promise: Promise<T>
+    resolve: (value: T) => void
+    reject: (reason: unknown) => void
+  }
+
+  function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void
+    let reject!: (reason: unknown) => void
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+
   it('fetchHistory 透传分页与筛选参数并写入状态', async () => {
     submissionService.listContestSubmissions.mockResolvedValue(makePage([makeRecord()], 42, 2))
     const store = useSubmissionStore()
@@ -429,6 +442,85 @@ describe('提交历史（评测页数据源）', () => {
     await store.setHistoryPage(CONTEST_ID, 99)
     await store.setHistoryPage(CONTEST_ID, 0)
     expect(submissionService.listContestSubmissions).toHaveBeenCalledTimes(calls)
+  })
+
+  it('迟到的旧筛选响应不得覆盖新筛选结果', async () => {
+    const oldFilter = deferred<SubmissionPage>()
+    const newFilter = deferred<SubmissionPage>()
+    submissionService.listContestSubmissions
+      .mockImplementationOnce(() => oldFilter.promise)
+      .mockImplementationOnce(() => newFilter.promise)
+    const store = useSubmissionStore()
+
+    const first = store.setHistoryProblemFilter(CONTEST_ID, 'A')
+    const second = store.setHistoryStatusFilter(CONTEST_ID, 1)
+    newFilter.resolve(makePage([makeRecord({ submitId: 'new-filter' })], 1, 1))
+    await second
+    oldFilter.resolve(makePage([makeRecord({ submitId: 'old-filter' })], 1, 1))
+    await first
+
+    expect(store.history.records.map((record) => record.submitId)).toEqual(['new-filter'])
+    expect(store.history.problemFilter).toBe('A')
+    expect(store.history.statusFilter).toBe(1)
+    expect(store.history.error).toBeNull()
+  })
+
+  it('迟到的旧失败不占错误态、不重抛，也不提前结束新请求 loading', async () => {
+    const oldFilter = deferred<SubmissionPage>()
+    const newFilter = deferred<SubmissionPage>()
+    submissionService.listContestSubmissions
+      .mockImplementationOnce(() => oldFilter.promise)
+      .mockImplementationOnce(() => newFilter.promise)
+    const store = useSubmissionStore()
+
+    const first = store.setHistoryProblemFilter(CONTEST_ID, 'A')
+    const second = store.setHistoryStatusFilter(CONTEST_ID, 1)
+    oldFilter.reject(new Error('late history failure'))
+    await expect(first).resolves.toBeUndefined()
+
+    expect(store.history.error).toBeNull()
+    expect(store.history.isLoading).toBe(true)
+    newFilter.resolve(makePage([makeRecord({ submitId: 'new-filter' })], 1, 1))
+    await second
+    expect(store.history.isLoading).toBe(false)
+  })
+
+  it('目标页随请求同步落地：翻页在途时历史轮询仍读取新页', async () => {
+    const paging = deferred<SubmissionPage>()
+    const polling = deferred<SubmissionPage>()
+    submissionService.listContestSubmissions
+      .mockImplementationOnce(() => paging.promise)
+      .mockImplementationOnce(() => polling.promise)
+    const store = useSubmissionStore()
+
+    const first = store.fetchHistory(CONTEST_ID, 2)
+    // 复刻 SubmissionsView 历史轮询的调用方式
+    const second = store.fetchHistory(CONTEST_ID, store.history.current)
+    expect(submissionService.listContestSubmissions).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ currentPage: 2 }),
+    )
+
+    polling.resolve(makePage([makeRecord({ submitId: 'polled-page-2' })], 40, 2))
+    await second
+    paging.resolve(makePage([makeRecord({ submitId: 'stale-page-2' })], 40, 2))
+    await first
+    expect(store.history.current).toBe(2)
+    expect(store.history.records.map((record) => record.submitId)).toEqual(['polled-page-2'])
+  })
+
+  it('最新翻页失败恢复最后成功页，避免旧记录配新页码', async () => {
+    submissionService.listContestSubmissions
+      .mockResolvedValueOnce(makePage([makeRecord({ submitId: 'page-1' })], 40, 1))
+      .mockRejectedValueOnce(new Error('翻页失败'))
+    const store = useSubmissionStore()
+
+    await store.fetchHistory(CONTEST_ID, 1)
+    await expect(store.setHistoryPage(CONTEST_ID, 2)).rejects.toThrow('翻页失败')
+
+    expect(store.history.current).toBe(1)
+    expect(store.history.records.map((record) => record.submitId)).toEqual(['page-1'])
+    expect(store.history.error).toBe('翻页失败')
   })
 
   it('fetchProblemSummary 只取 1 条并返回 latest + total；无提交时 latest 为 null', async () => {

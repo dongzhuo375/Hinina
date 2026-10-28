@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CodeEditor from '@/components/editor/CodeEditor.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
@@ -46,11 +46,16 @@ const isLoading = ref(true)
 
 /// 组件已卸载标记：异步链路落地后不得再写状态
 let alive = true
+/// 路由切换代际：同一组件从提交 A 复用到 B 时，A 的详情/测试点/轮询一律失效
+let loadToken = 0
 /// 轮询器与截止时刻是副作用句柄，放普通变量（不进响应式系统）
 let poller: Poller | null = null
 let deadline = 0
 let pollIntervalMs = 5_000
 let pollJitterMs = 500
+let pollTimeoutMs = 0
+/// 初次配置读取共享给首载与路由 watch；切换发生在配置在途时也只等待同一份配置
+let scheduleReady: Promise<void> | null = null
 
 const judging = computed(() => (detail.value ? isJudging(detail.value.status) : false))
 
@@ -143,50 +148,76 @@ async function copyErrorMessage() {
 
 // ── 数据加载与收敛轮询 ──
 
+/// 只有当前路由、当前代际且组件仍存活时才允许异步链路写状态
+function isCurrentLoad(id: string, token: number): boolean {
+  return alive && token === loadToken && id === submitId.value
+}
+
+/// 首载、重试与路由参数切换的统一入口：旧提交的数据和轮询不得带入新提交
+async function reload(id: string): Promise<void> {
+  const token = ++loadToken
+  stopPoller()
+  detail.value = null
+  cases.value = null
+  casesError.value = null
+  loadError.value = null
+  isLoading.value = true
+  codeExpanded.value = false
+  copied.value = false
+  if (copiedTimer) {
+    clearTimeout(copiedTimer)
+    copiedTimer = null
+  }
+  if (!id) {
+    isLoading.value = false
+    return
+  }
+  if (scheduleReady) await scheduleReady
+  if (!isCurrentLoad(id, token)) return
+  deadline = Date.now() + pollTimeoutMs
+  await loadDetail(id, token)
+}
+
 /**
  * 拉取提交详情；到达终态后补拉一次测试点明细。
  *
  * 轮询周期只走本函数：评测中 `get-all-case-result` 尚无稳定结果，
  * 每周期重复拉取纯属浪费（终态判据命中后 cases 只请求一次）。
+ * id/token 在发起时固定，路由切换后旧响应不得覆盖新提交。
  */
-async function loadDetail(): Promise<void> {
-  const id = submitId.value
-  if (!id) return
+async function loadDetail(id: string, token: number): Promise<void> {
   try {
     const d = await submissionService.getSubmissionDetail(id)
-    if (!alive) return
+    if (!isCurrentLoad(id, token)) return
     detail.value = d
     loadError.value = null
   } catch (e) {
-    if (!alive) return
+    if (!isCurrentLoad(id, token)) return
     // 已有旧数据时瞬时失败不清空页面，只等下一周期
     if (!detail.value) {
       loadError.value = errorMessage(e, '加载提交详情失败')
     }
   }
   isLoading.value = false
-  syncPoller()
-  if (detail.value && isTerminalStatus(detail.value.status)) await loadCases()
+  syncPoller(id, token)
+  if (detail.value && isTerminalStatus(detail.value.status)) await loadCases(id, token)
 }
 
 /// 拉取测试点明细；失败不致命，降级为提示条（详情主体照常展示）
-async function loadCases(): Promise<void> {
-  const id = submitId.value
-  if (!id) return
+async function loadCases(id: string, token: number): Promise<void> {
   try {
     const c = await submissionService.getSubmissionCases(id)
-    if (!alive) return
+    if (!isCurrentLoad(id, token)) return
     cases.value = c
     casesError.value = null
   } catch {
-    if (!alive) return
+    if (!isCurrentLoad(id, token)) return
     casesError.value = '测试点明细加载失败'
   }
 }
 
 async function retry(): Promise<void> {
-  isLoading.value = true
-  await loadDetail()
+  await reload(submitId.value)
 }
 
 function stopPoller() {
@@ -195,18 +226,19 @@ function stopPoller() {
 }
 
 /// 非终态且未超总超时才轮询；到达终态或超过 deadline 立即停
-function syncPoller() {
+function syncPoller(id: string, token: number) {
+  if (!isCurrentLoad(id, token)) return
   const d = detail.value
   const shouldPoll = !!d && !isTerminalStatus(d.status) && Date.now() < deadline
   if (shouldPoll && !poller) {
     poller = createPoller({
       task: async () => {
-        if (!alive) return
+        if (!isCurrentLoad(id, token)) return
         if (Date.now() >= deadline) {
           stopPoller()
           return
         }
-        await loadDetail()
+        await loadDetail(id, token)
       },
       intervalMs: pollIntervalMs,
       jitterMs: pollJitterMs,
@@ -225,13 +257,18 @@ function syncPoller() {
 onMounted(async () => {
   // 比赛数据用于「题目」跳转与赛时相对时间；深链直接进入时可能尚未加载，失败静默
   contestStore.whenLoaded().catch(() => {})
-  const schedule = await configService.getPollSchedule()
-  if (!alive) return
-  pollIntervalMs = schedule.intervalMs
-  pollJitterMs = Math.min(JITTER_CAP_MS, Math.round(schedule.intervalMs * JITTER_RATIO))
-  deadline = Date.now() + schedule.timeoutMs
-  await loadDetail()
+  scheduleReady = (async () => {
+    const schedule = await configService.getPollSchedule()
+    if (!alive) return
+    pollIntervalMs = schedule.intervalMs
+    pollJitterMs = Math.min(JITTER_CAP_MS, Math.round(schedule.intervalMs * JITTER_RATIO))
+    pollTimeoutMs = schedule.timeoutMs
+  })()
+  await reload(submitId.value)
 })
+
+// 同一路由记录复用（/submissions/A → /submissions/B）不会重新触发 onMounted
+watch(submitId, (id) => { void reload(id) })
 
 onUnmounted(() => {
   alive = false

@@ -63,6 +63,16 @@ export default defineConfig({
   /// 测试文件置于各模块的 `__tests__/` 子目录（与 Rust 端 tests/ 分离约定一致）。
   test: {
     environment: "node",
+    alias: [
+      {
+        // Monaco 包没有 main 字段，Vitest 的 Node 解析无法命中 module 入口；
+        // 仅在测试解析层指向包自带的 ESM 入口，生产源码保持裸包导入
+        find: /^monaco-editor$/,
+        replacement: fileURLToPath(
+          new URL("./node_modules/monaco-editor/esm/vs/editor/editor.main.js", import.meta.url),
+        ),
+      },
+    ],
     include: [
       "src/**/__tests__/**/*.spec.ts",
       "doc/modules/**/__tests__/**/*.spec.ts",

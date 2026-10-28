@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-常量：`JITTER_RATIO`(0.2)、`JITTER_CAP_MS`(500) —— 抖动 ±20% 间隔封顶 500ms，与 submissionStore 同口径。普通变量：`alive`（卸载标记）、`poller` / `deadline` / `pollIntervalMs` / `pollJitterMs`（副作用句柄与轮询参数，不进响应式系统）。
+常量：`JITTER_RATIO`(0.2)、`JITTER_CAP_MS`(500) —— 抖动 ±20% 间隔封顶 500ms，与 submissionStore 同口径。普通变量：`alive`（卸载标记）、`loadToken`（路由切换代际）、`poller` / `deadline` / `pollIntervalMs` / `pollJitterMs` / `pollTimeoutMs` / `scheduleReady`（副作用句柄与轮询参数，不进响应式系统）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
@@ -21,8 +21,9 @@
 | `codeLanguage` | computed | `monacoIdOf(detail.language)`（`utils/language`）—— 服务端返回展示名，按前缀归一为 Monaco id |
 | `caseList` / `acCaseCount` / `hasSubTasks` / `showScoreColumn` / `modeBadge` | computed | 测试点表派生：通过计数、子任务制判定（`subTasks` 非空）、得分列仅在有 score 时出现、判题模式徽章（非 `default` 才显示，如 spj/subtask） |
 | `copyErrorMessage` | fn | 剪贴板复制 CE 信息；WebView API 不可用时兜底隐藏 textarea + `execCommand('copy')`；「已复制」1.5s 回弹 |
-| `loadDetail` / `loadCases` / `retry` | — | 详情与测试点分离拉取：轮询周期只走 `loadDetail`，终态命中后补拉一次 `loadCases`，见逻辑流程 |
-| `syncPoller` / `stopPoller` | — | 收敛轮询启停决策 |
+| `reload` / `watch(submitId)` | — | 首载、重试与路由参数切换统一入口：递增 `loadToken`、停旧 poller、重置提交级状态并重建 deadline；watch 非 immediate，首载仍由 onMounted 触发 |
+| `loadDetail` / `loadCases` / `retry` | — | 详情与测试点分离拉取：请求固定使用发起时的 `id + loadToken`，旧提交响应不得回写；轮询周期只走 `loadDetail`，终态命中后补拉一次 `loadCases` |
+| `syncPoller` / `stopPoller` | — | 收敛轮询启停决策；poller task 捕获同一 `id + loadToken`，不得随路由隐式改查另一提交 |
 | `goBack` / `openProblem` | — | 返回评测列表（`Submissions` 路由）/ 跳解题页 |
 
 ## 直接依赖
@@ -48,26 +49,32 @@
 ```
 onMounted:
   contestStore.whenLoaded().catch(静默)        // 深链直接进入时比赛数据可能未加载
-  schedule = configService.getPollSchedule()   // intervalMs / timeoutMs（服务内部有兜底值）
-  pollIntervalMs = schedule.intervalMs
-  pollJitterMs   = min(500, round(intervalMs × 0.2))
-  deadline       = now + schedule.timeoutMs
-  loadDetail()
+  scheduleReady = getPollSchedule() → 保存 intervalMs / jitterMs / pollTimeoutMs
+  reload(submitId)
 
-loadDetail():
+watch(submitId)（非 immediate）→ reload(新 id)  // 同路由记录复用时不会重跑 onMounted
+
+reload(id):
+  token = ++loadToken → stopPoller()
+  重置 detail/cases/两类 error/isLoading/codeExpanded/copied + copiedTimer
+  等待 scheduleReady（若配置在途）→ 仅当前 id/token 才继续
+  deadline = now + pollTimeoutMs → loadDetail(id, token)
+
+loadDetail(id, token):
   getSubmissionDetail(id)
-  成功 → 覆盖 detail、清 loadError
-  失败 → 仅当**无旧数据**时写 loadError（轮询期间瞬时失败不清空页面）
-  isLoading = false → syncPoller()
-  detail 已到终态 → loadCases()（只补拉一次；直接打开终态提交时同样走这里）
+  成功且当前 → 覆盖 detail、清 loadError；过期响应静默丢弃
+  失败且当前 → 仅当**无旧数据**时写 loadError（轮询期间瞬时失败不清空页面）
+  isLoading = false → syncPoller(id, token)
+  detail 已到终态 → loadCases(id, token)（只补拉一次；直接打开终态提交时同样走这里）
 
-loadCases():
+loadCases(id, token):
   getSubmissionCases(id)
-  成功 → 覆盖 cases、清 casesError
-  失败 → casesError 提示条（**不致命**，主体不受影响）
+  成功且当前 → 覆盖 cases、清 casesError；过期响应静默丢弃
+  失败且当前 → casesError 提示条（**不致命**，主体不受影响）
 
-syncPoller():
-  detail 非终态且 now < deadline 且无 poller → createPoller(task=loadDetail, 不配置 isPaused)
+syncPoller(id, token):
+  detail 非终态且 now < deadline 且无 poller
+    → createPoller(task 捕获 id/token 并调 loadDetail, 不配置 isPaused)
   终态或超时 → stopPoller()                    // 收敛即停
 
 onUnmounted: alive = false；stopPoller()；清理 copiedTimer
@@ -82,6 +89,9 @@ onUnmounted: alive = false；stopPoller()；清理 copiedTimer
   （`isTerminalStatus`）命中后测试点明细只请求一次，随后 syncPoller 停轮询。
 - **详情/测试点各自降级**：测试点明细在部分 OJ 配置下会被隐藏，终态无明细时
   提示「以最终判定为准」而非报错；详情瞬时失败不清空已有页面。
+- **路由复用必须同时换数据与请求代际**：`/submissions/A → /submissions/B` 只改参数时组件不重挂，
+  仅加 watch 会让 A 的迟到响应继续覆盖 B；因此 detail/cases/poller 全链固定 `id + loadToken`，
+  切换先清旧提交状态并为 B 重建 deadline，旧请求、旧错误与旧 loading 收尾一律失效。
 - 评测中且无明细时渲染 4 行脉冲骨架（渐进透明度），提示「测试点结果将自动刷新」。
 - 子任务制按 `subTasks[].groupNum` 分组渲染，每组独立表头与「N/M 通过」计数；
   平铺制直接一张表。得分列（OI）仅在任一测试点带 score 时出现。
@@ -99,3 +109,9 @@ onUnmounted: alive = false；stopPoller()；清理 copiedTimer
   `--color-error`、内容区放宽到 `max-w-[1400px]`（大窗口下测试点表不必挤在 1024px 内）；
   评测中的脉冲骨架去掉 `animate-pulse` 改用 `--bg-sidebar` 静态块 —— 常驻动画在赛场上是干扰，
   且判定 pill 上的脉冲会与「评测中」旋转圈重复表达同一状态。
+
+## 测试
+
+`src/views/__tests__/SubmissionDetailView.spec.ts`（响应式 route + service mock + `mountView`）锁定：
+A 详情在途切 B 后只渲染 B、迟到 A 不触发 A 测试点请求；切换先清旧详情，迟到 A 测试点不得覆盖 B；
+旧 poller 不再请求 A，且跨过 A 的旧 deadline 后 B 仍按新 deadline 继续轮询。

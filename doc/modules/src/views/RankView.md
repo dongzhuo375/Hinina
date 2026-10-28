@@ -24,6 +24,7 @@
 | `pageItems` | computed | 页码窗口：首尾页 + 当前页 ±1，其余折叠 `…`（≤7 页全量展示；渲染由 `PagePager` 承担） |
 | `ensureContest` | `() => Promise<void>` | 子视图 onMounted 先于外壳触发，直达本页时这里才是实际发起方；统一走 `contestStore.whenLoaded()`（P59：复用在途请求，原 100ms sleep 轮询写法已删除） |
 | `bootstrap` / `retry` / `manualRefresh` / `goToPage` | — | 引导链 / 错误条与致命错误重试（全量筛选态下错误来自快照拉取，重试走 `rankStore.refresh()` 重拉快照）/ 手动刷新按钮（`refresh` 内部按模式分流且吞异常）/ 翻页（失败静默，旧数据保留；全量模式为纯客户端切片） |
+| `watch(contestStore.contest?.id)` | — | 非首次挂载的比赛切换：外壳把缓存的比赛 A 刷新为 B 后，停旧轮询并按 B 重跑 `bootstrap`；不依赖子视图重新挂载 |
 
 ## 直接依赖
 
@@ -52,6 +53,11 @@ onUnmounted: alive = false；clearInterval(clock)；rankStore.stopLive()
               // 轮询器是模块级副作用句柄，离开榜单页必须回收，否则后台持续打 OJ
 
 watch(isEnded): 结束瞬间立即 stopLive()
+
+watch(contestStore.contest?.id, (id, previous)):
+  id 有值且 previous 有值且不同（排除首载）→ rankStore.stopLive() → bootstrap()
+  // 比赛结束回登录不会 clearDomainState，下一次进场时 contest 仍缓存上一场；
+  // 外壳在子视图挂载后才换成新比赛，本视图必须跟随比赛 ID 重新加载
 ```
 
 全量快照模式状态行（`isFullFilterActive` 时显示在错误条之下、表格之上）：
@@ -74,6 +80,9 @@ loading →「正在拉取全量榜单…」；error →「拉取失败，当前
 - **引导链竞态**：子视图 `onMounted` 先于父外壳触发，直达榜单页时本视图是比赛数据的
   实际发起方；外壳已在途则等待其落地（`contestStore.loadContest` 本身也有 in-flight 去重，
   双保险）。`alive` 标记防止卸载后的异步回调再写 store。
+- **比赛切换必须跟随 contest.id**：上一场结束回登录不会清理会话级 rank 状态，下一次进场时
+  `contestStore.contest` 仍缓存上一场，子视图首次 bootstrap 可能先按旧 ID 加载。外壳随后把
+  比赛换成新 ID 时，本视图停旧轮询并重新 bootstrap，不能等组件重新挂载。
 - 页码窗口折叠：50 条/页时几百人的比赛有十几页，全量页码会挤爆底栏。
 - **全量快照模式（打星/女生筛选）下视图只做「明示」**：跨页拉取与客户端分页归
   `rankStore`（`syncFullPaging` 已把 `pages`/`current` 同步为等效值，本视图的分页条
@@ -85,3 +94,9 @@ loading →「正在拉取全量榜单…」；error →「拉取失败，当前
   表格容器由「带边框圆角阴影的卡片」改为 `border-y` + `--bg-card`（页头已提供视觉分隔，
   再套一层卡片就是双层边框）；呼吸灯去掉 `animate-pulse` 改用主题色 —— 常驻动画
   在赛场上是干扰，颜色本身已足够表达状态。
+
+## 测试
+
+`src/views/__tests__/RankView.spec.ts`（真实 Pinia store + mock rank/contest service + 子组件桩）锁定：
+比赛 A 处于全量筛选时，外壳把 `contestStore.contest` 换成 B，视图停止旧轮询并按 B 重拉快照，
+切换后的请求全部携带 `contestId=B`，最终快照不残留 A 的行。

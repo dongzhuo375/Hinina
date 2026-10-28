@@ -708,3 +708,308 @@ describe('会话代际（评审六轮：榜单去抖缓存）', () => {
     expect(rankService.getRank).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('榜单同会话请求代际保护', () => {
+  interface Deferred<T> {
+    promise: Promise<T>
+    resolve: (value: T) => void
+    reject: (reason: unknown) => void
+  }
+
+  function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void
+    let reject!: (reason: unknown) => void
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+
+  it('迟到的旧页成功响应不得覆盖新页', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const newPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => newPage.promise)
+    const store = useRankStore()
+
+    const first = store.loadRank(CONTEST_ID, MY_UID, 2)
+    const second = store.loadRank(CONTEST_ID, MY_UID, 3)
+    newPage.resolve(makePage([makeRow({ uid: 'page-3' })], 200, 3))
+    await second
+    oldPage.resolve(makePage([makeRow({ uid: 'page-2' })], 200, 2))
+    await first
+
+    expect(store.current).toBe(3)
+    expect(store.rows.map((row) => row.uid)).toEqual(['page-3'])
+    expect(store.error).toBeNull()
+  })
+
+  it('迟到的旧失败不占错误态、不重抛，也不提前关掉新请求 loading', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const newPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => newPage.promise)
+    const store = useRankStore()
+
+    const first = store.loadRank(CONTEST_ID, MY_UID, 2)
+    const second = store.loadRank(CONTEST_ID, MY_UID, 3)
+    oldPage.reject(new Error('late boom'))
+    await expect(first).resolves.toBeUndefined()
+
+    expect(store.error).toBeNull()
+    expect(store.isLoading).toBe(true)
+    newPage.resolve(makePage([makeRow({ uid: 'page-3' })], 200, 3))
+    await second
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('页码随请求同步落地：翻页在途时轮询读取目标页', async () => {
+    const paging = deferred<ContestRankPage>()
+    const polling = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => paging.promise)
+      .mockImplementationOnce(() => polling.promise)
+    const store = useRankStore()
+
+    const first = store.loadRank(CONTEST_ID, MY_UID, 2)
+    const second = store.refresh()
+    expect(rankService.getRank).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ currentPage: 2 }),
+    )
+
+    polling.resolve(makePage([makeRow({ uid: 'polled-page-2' })], 200, 2))
+    await second
+    paging.resolve(makePage([makeRow({ uid: 'stale-page-2' })], 200, 2))
+    await first
+    expect(store.current).toBe(2)
+    expect(store.rows.map((row) => row.uid)).toEqual(['polled-page-2'])
+  })
+
+  it('迟到的旧成功不得写 memo，再次进入该页仍会真实请求', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const newPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => newPage.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.loadRankDeduped(2)
+    const second = store.loadRankDeduped(3)
+    newPage.resolve(makePage([makeRow({ uid: 'page-3' })], 200, 3))
+    await second
+    oldPage.resolve(makePage([makeRow({ uid: 'stale-page-2' })], 200, 2))
+    await first
+
+    rankService.getRank.mockResolvedValueOnce(
+      makePage([makeRow({ uid: 'fresh-page-2' })], 200, 2),
+    )
+    await store.loadRankDeduped(2)
+    expect(rankService.getRank).toHaveBeenCalledTimes(3)
+    expect(store.rows.map((row) => row.uid)).toEqual(['fresh-page-2'])
+    expect(store.current).toBe(2)
+  })
+
+  it('被静默丢弃的旧失败不得进入 memo', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const newPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => newPage.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.loadRankDeduped(2)
+    const second = store.loadRankDeduped(3)
+    oldPage.reject(new Error('late boom'))
+    await expect(first).resolves.toBeUndefined()
+    newPage.resolve(makePage([makeRow({ uid: 'page-3' })], 200, 3))
+    await second
+
+    rankService.getRank.mockResolvedValueOnce(makePage([makeRow()], 200, 2))
+    await store.loadRankDeduped(2)
+    expect(rankService.getRank).toHaveBeenCalledTimes(3)
+  })
+
+  it('出现更新请求后，不再复用同 key 的旧在途登记', async () => {
+    const oldPage = deferred<ContestRankPage>()
+    const directPage = deferred<ContestRankPage>()
+    const latestPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockImplementationOnce(() => directPage.promise)
+      .mockImplementationOnce(() => latestPage.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.loadRankDeduped(2)
+    const direct = store.loadRank(CONTEST_ID, MY_UID, 3)
+    const latest = store.loadRankDeduped(2)
+    expect(rankService.getRank).toHaveBeenCalledTimes(3)
+
+    latestPage.resolve(makePage([makeRow({ uid: 'latest-page-2' })], 200, 2))
+    await latest
+    directPage.resolve(makePage([makeRow({ uid: 'stale-page-3' })], 200, 3))
+    oldPage.resolve(makePage([makeRow({ uid: 'stale-page-2' })], 200, 2))
+    await Promise.all([first, direct])
+    expect(store.rows.map((row) => row.uid)).toEqual(['latest-page-2'])
+    expect(store.current).toBe(2)
+  })
+
+  it('被新全量拉取取代的旧失败不得覆盖新状态或收尾 loading', async () => {
+    const oldFetch = deferred<ContestRankPage>()
+    const newFetch = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldFetch.promise)
+      .mockResolvedValueOnce(makePage([makeRow({ uid: 'all' })], 200, 1))
+      .mockImplementationOnce(() => newFetch.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.setGroupFilter('star')
+    await store.setGroupFilter('all')
+    const second = store.setGroupFilter('star')
+    oldFetch.reject(new Error('stale full fetch'))
+    await expect(first).resolves.toBeUndefined()
+
+    expect(store.fullFetchState).toBe('loading')
+    expect(store.error).toBeNull()
+    expect(store.isLoading).toBe(true)
+    newFetch.resolve(makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1))
+    await second
+    expect(store.fullFetchState).toBe('done')
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('退出全量后，旧失败与 finally 不得污染普通分页', async () => {
+    const oldFetch = deferred<ContestRankPage>()
+    const normalPage = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => oldFetch.promise)
+      .mockImplementationOnce(() => normalPage.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const first = store.setGroupFilter('star')
+    const exiting = store.setGroupFilter('all')
+    oldFetch.reject(new Error('late full failure'))
+    await expect(first).resolves.toBeUndefined()
+
+    expect(store.fullFetchState).toBe('idle')
+    expect(store.error).toBeNull()
+    expect(store.isLoading).toBe(true)
+    normalPage.resolve(makePage([makeRow({ uid: 'normal' })], 200, 1))
+    await exiting
+    expect(store.rows.map((row) => row.uid)).toEqual(['normal'])
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('进入全量后，旧普通响应不得覆盖数据或关掉全量 loading', async () => {
+    const normalPage = deferred<ContestRankPage>()
+    const fullFetch = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => normalPage.promise)
+      .mockImplementationOnce(() => fullFetch.promise)
+    const store = useRankStore()
+
+    const normal = store.loadRank(CONTEST_ID, MY_UID, 1)
+    const full = store.setGroupFilter('star')
+    normalPage.resolve(makePage([makeRow({ uid: 'stale-normal' })], 200, 1))
+    await normal
+
+    expect(store.rows).toEqual([])
+    expect(store.fullFetchState).toBe('loading')
+    expect(store.isLoading).toBe(true)
+    fullFetch.resolve(makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1))
+    await full
+    expect(store.fullFetchState).toBe('done')
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('全量筛选中直接/去重加载都继续走快照，不发普通分页请求', async () => {
+    const fullFetch = deferred<ContestRankPage>()
+    rankService.getRank.mockImplementationOnce(() => fullFetch.promise)
+    const store = useRankStore()
+    store.contestId = CONTEST_ID
+    store.uid = MY_UID
+
+    const full = store.setGroupFilter('star')
+    // 复刻全量拉取期间重新进入 RankView 的 bootstrap，以及快照未就位时的翻页入口
+    await store.loadRank(CONTEST_ID, MY_UID, 1)
+    await store.loadRankDeduped(1)
+    expect(rankService.getRank).toHaveBeenCalledTimes(1)
+    expect(store.isLoading).toBe(true)
+
+    fullFetch.resolve(makePage([makeRow({ uid: 'star', rank: -1 })], 1, 1))
+    await full
+    expect(store.fullFetchState).toBe('done')
+    expect(store.current).toBe(1)
+    expect(store.pages).toBe(1)
+    expect(store.visibleRows.map((row) => row.uid)).toEqual(['star'])
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('全量筛选切到另一场比赛：使用传入 contestId 重拉并清空旧比赛快照', async () => {
+    rankService.getRank
+      .mockResolvedValueOnce(makePage([makeRow({ uid: 'star-A', rank: -1 })], 1, 1))
+      .mockResolvedValueOnce(makePage([makeRow({ uid: 'star-B', rank: -1 })], 1, 1))
+    const store = useRankStore()
+    store.contestId = 'A'
+
+    await store.setGroupFilter('star')
+    await store.loadRank('B', MY_UID, 1)
+
+    expect(rankService.getRank).toHaveBeenLastCalledWith(
+      expect.objectContaining({ contestId: 'B', currentPage: 1 }),
+    )
+    expect(store.contestId).toBe('B')
+    expect(store.fullRows?.map((row) => row.uid)).toEqual(['star-B'])
+    expect(store.visibleRows.map((row) => row.uid)).toEqual(['star-B'])
+  })
+
+  it('A 的全量拉取在途时切到 B：旧 A 响应不得写回 B 快照', async () => {
+    const fetchA = deferred<ContestRankPage>()
+    const fetchB = deferred<ContestRankPage>()
+    rankService.getRank
+      .mockImplementationOnce(() => fetchA.promise)
+      .mockImplementationOnce(() => fetchB.promise)
+    const store = useRankStore()
+    store.contestId = 'A'
+
+    const first = store.setGroupFilter('star')
+    const switched = store.loadRank('B', MY_UID, 1)
+    expect(rankService.getRank).toHaveBeenCalledTimes(2)
+    expect(rankService.getRank).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ contestId: 'B' }),
+    )
+
+    fetchA.resolve(makePage([makeRow({ uid: 'star-A', rank: -1 })], 1, 1))
+    await first
+    fetchB.resolve(makePage([makeRow({ uid: 'star-B', rank: -1 })], 1, 1))
+    await switched
+    expect(store.fullRows?.map((row) => row.uid)).toEqual(['star-B'])
+    expect(store.fullFetchState).toBe('done')
+    expect(store.isLoading).toBe(false)
+  })
+
+  it('最新翻页失败恢复最后成功页，避免旧行数据配新页码', async () => {
+    rankService.getRank
+      .mockResolvedValueOnce(makePage([makeRow({ uid: 'page-1' })], 200, 1))
+      .mockRejectedValueOnce(new Error('翻页失败'))
+    const store = useRankStore()
+
+    await store.loadRank(CONTEST_ID, MY_UID, 1)
+    await expect(store.setPage(2)).rejects.toThrow('翻页失败')
+
+    expect(store.current).toBe(1)
+    expect(store.rows.map((row) => row.uid)).toEqual(['page-1'])
+    expect(store.error).toBe('翻页失败')
+  })
+})

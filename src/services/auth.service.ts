@@ -32,12 +32,16 @@ export class AuthService {
 
   /**
    * 检查后端会话是否有效，返回当前用户或 null。
+   *
+   * null 专属「后端确认无会话」；IPC 自身异常记录日志并上抛，
+   * 由调用方保持 unresolved 并重试，不能把传输故障误判为已登出。
    */
   async checkSession(): Promise<User | null> {
     try {
       return await authBridge.getSession()
-    } catch {
-      return null
+    } catch (e) {
+      log.error('会话检查调用失败，按无法判定处理:', e)
+      throw e
     }
   }
 

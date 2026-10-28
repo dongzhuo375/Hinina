@@ -102,12 +102,18 @@ onMounted(async () => {
   if (!editorContainer.value) return
 
   // 编辑器偏好来自应用配置（设置页 / 编辑器设置弹层可调）；读取失败时服务内部已回退兜底值。
+  const loadedPrefs = await configService.getEditorPrefs()
+  // 配置等待期间组件可能已卸载；必须重新取容器，否则 create(null) 会抛错，
+  // 且卸载钩子已经执行，事后创建的 editor/keydown listener 将无人清理
+  const container = editorContainer.value
+  if (!container) return
+
   // 工具栏先于编辑器实例渲染：逐字段并入，已触碰字段保持用户当前值，
   // 未触碰字段采纳磁盘真值（整块覆盖会把存量的字号/主题抹成默认值）
-  applyLoadedPrefs(await configService.getEditorPrefs())
+  applyLoadedPrefs(loadedPrefs)
   emit('prefs-change', { ...prefs })
 
-  const ed = monaco.editor.create(editorContainer.value, {
+  const ed = monaco.editor.create(container, {
     value: props.modelValue,
     language: monacoIdOf(props.language),
     theme: prefs.editorTheme,

@@ -161,6 +161,17 @@ async function retry(): Promise<void> {
   }
 }
 
+/// 比赛切换：外壳在子视图挂载后才把缓存的比赛 A 刷新为 B，首次 bootstrap 可能
+/// 已按 A 发过请求；这里在 ID 真正变化时停止旧轮询并按 B 重新加载
+watch(
+  () => contestStore.contest?.id,
+  (id, previous) => {
+    if (!alive || !id || !previous || id === previous) return
+    rankStore.stopLive()
+    void bootstrap()
+  },
+)
+
 /// 手动刷新：常规模式重拉当前页，全量模式重拉整个快照（refresh 内部吞异常）
 function manualRefresh(): void {
   void rankStore.refresh()

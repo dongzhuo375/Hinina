@@ -99,19 +99,25 @@ export const useAuthStore = defineStore('auth', {
       this.sessionResolved = false
     },
 
-    /** 检查后端会话有效性 */
+    /**
+     * 检查后端会话有效性。
+     *
+     * 只有成功取得用户或后端明确返回 null 才算已确认；传输异常保留原用户并
+     * 保持 unresolved，后续路由守卫/登录页挂载可重试。调用方仍只收到 boolean。
+     */
     async checkSession(): Promise<boolean> {
       this.isLoading = true
       this.error = null
       try {
         const user = await authService.checkSession()
         this.user = user
+        this.sessionResolved = true
         return user !== null
       } catch (e) {
+        this.sessionResolved = false
         this.error = errorMessage(e, '会话检查失败')
         return false
       } finally {
-        this.sessionResolved = true
         this.isLoading = false
       }
     },

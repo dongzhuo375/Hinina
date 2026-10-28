@@ -41,11 +41,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/// 用户操作路径的查询 memo 与在途合并（模块级：非渲染状态，不进响应式系统）
-let queryMemo: { key: string; at: number } | null = null
+/// 用户操作路径的查询 memo 与在途合并（模块级：非渲染状态，不进响应式系统）。
+/// seq 是发起时的 loadSeq：出现更新的用户意图后，旧 memo/在途请求均不得再被复用
+let queryMemo: { key: string; at: number; seq: number } | null = null
 /// 在途合并记录代际与归属 token：跨会话不复用旧 promise，finally 只清自己的登记
 /// （评审六轮：与 contestStore 的在途去重同类问题）
-let queryInFlight: { key: string; promise: Promise<void>; generation: number; token: object } | null = null
+let queryInFlight: {
+  key: string
+  promise: Promise<void>
+  generation: number
+  token: object
+  seq: number
+} | null = null
 
 /// 查询指纹：同一比赛 + 同一用户 + 同一页 + 同一关键词 + 同一 removeStar
 /// 才算「同一查询」。含 uid 是为了避免换账号后误命中上一位用户的查询。
@@ -107,6 +114,8 @@ export const useRankStore = defineStore('rank', {
     /// 客户端分组筛选
     groupFilter: 'all' as RankGroupFilter,
     isLoading: false,
+    /// loadRank 请求序号：同会话内只认最新一次请求（含 dedup/memo 的复用归属）
+    loadSeq: 0,
     /// 实时刷新是否开启
     isLive: false,
     error: null as string | null,
@@ -158,18 +167,52 @@ export const useRankStore = defineStore('rank', {
 
   actions: {
     /**
-     * 加载一页榜单。
+     * 加载一页榜单（带过期响应保护：同会话内只认最新一次请求，参数页码同步落地）。
      *
-     * 失败时记录 error 并向上抛出，由调用方决定是否提示；
+     * 最新请求失败时记录 error 并向上抛出，由调用方决定是否提示；
      * 认证类错误（401）已由全局会话守卫统一处理，此处不重复应对。
      */
     async loadRank(contestId: string, uid: string | null, page?: number) {
+      // 跨比赛复用时 store 不会重建：旧榜单/快照/分页全属于上一场，必须在发起
+      // 新比赛请求前清空并作废旧普通/全量请求，否则全量分支只会沿用旧 contestId
+      const contestChanged = this.contestId !== '' && this.contestId !== contestId
+      this.contestId = contestId
+      this.uid = uid
+      if (contestChanged) {
+        fullFetchGeneration++
+        this.loadSeq++
+        this.rows = []
+        this.myRow = null
+        this.total = 0
+        this.size = 0
+        this.current = 1
+        this.pages = 0
+        this.participants = 0
+        this.error = null
+        this.lastUpdated = 0
+        this.fullRows = null
+        this.fullFetchState = 'idle'
+        this.fullPage = 1
+        this.fullLoadedRows = 0
+        this.isLoading = false
+      }
+      // 重新进入榜单页时 RankView.bootstrap 也会直调本方法。仍处于全量筛选就必须
+      // 继续走快照链路，否则普通分页会覆写全量分页，并与在途快照共享 loading 收尾
+      if (isFullSnapshotFilter(this.groupFilter)) {
+        await this.fetchAllRows()
+        return
+      }
+      // 轮询 refresh 绕过 dedup 直调本方法，与用户翻页并发时，后完成的旧请求会
+      // 把榜单整体拉回旧页且不自愈 —— 过期响应一律丢弃（与 openProblemSeq 同款范式）
+      const token = ++this.loadSeq
       // 会话代际：登出后旧会话的榜单响应不得写回新会话（评审四轮 #1）
       const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
-      this.contestId = contestId
-      this.uid = uid
+      // 页码同步落地：refresh 轮询读 this.current 发请求；若等响应落地才更新，
+      // 翻页在途期间触发的轮询会带着旧页号回来（序号更新反而把新页响应判过期）
+      const previousPage = this.current
+      if (page !== undefined) this.current = page
       try {
         const result = await rankService.getRank({
           contestId,
@@ -177,13 +220,19 @@ export const useRankStore = defineStore('rank', {
           keyword: this.keyword || null,
           removeStar: this.removeStar,
         })
-        if (sessionGen !== getSessionGeneration()) return
+        if (token !== this.loadSeq || sessionGen !== getSessionGeneration()) return
         this.applyPage(result, uid)
       } catch (e) {
-        if (sessionGen === getSessionGeneration()) this.error = errorMessage(e, '加载榜单失败')
+        // 调用方对过期加载早已放弃，重抛只会让视图把旧失败当成新失败提示
+        if (token !== this.loadSeq || sessionGen !== getSessionGeneration()) return
+        // 目标页请求失败时页面仍展示上一次成功数据，页码必须同步回退，
+        // 否则会出现「第 1 页的行 + 第 2 页的页码」且没有后续请求自愈
+        this.current = previousPage
+        this.error = errorMessage(e, '加载榜单失败')
         throw e
       } finally {
-        if (sessionGen === getSessionGeneration()) this.isLoading = false
+        // 旧请求不得提前关掉新请求的加载态
+        if (token === this.loadSeq && sessionGen === getSessionGeneration()) this.isLoading = false
       }
     },
 
@@ -219,9 +268,15 @@ export const useRankStore = defineStore('rank', {
      */
     async fetchAllRows() {
       if (!this.contestId || this.fullFetchState === 'loading') return
+      // 固定本次拉取的比赛上下文：循环中途换比赛时即使代际守卫失效，也不能逐页
+      // 读取可变的 this.contestId 而拼出 A/B 混合快照
+      const contestId = this.contestId
       // 记住拉取前状态：失败且仍有旧快照时回退到它（不能停在 loading，否则重入保护会永久锁死）
       const previousState = this.fullFetchState
       const generation = ++fullFetchGeneration
+      // 普通分页与全量拉取共享 isLoading：进入全量模式同时作废旧普通请求，
+      // 其迟到响应/finally 不得覆盖快照状态或提前结束全量加载
+      this.loadSeq++
       // 会话代际：登出后旧会话的全量快照不得写回新会话（评审四轮 #1）
       const sessionGen = getSessionGeneration()
       this.fullFetchState = 'loading'
@@ -232,7 +287,7 @@ export const useRankStore = defineStore('rank', {
         let truncated = false
         for (let page = 1; ; page++) {
           const result = await rankService.getRank({
-            contestId: this.contestId,
+            contestId,
             currentPage: page,
             limit: DEFAULT_RANK_PAGE_SIZE,
             keyword: this.keyword || null,
@@ -269,14 +324,18 @@ export const useRankStore = defineStore('rank', {
         this.lastUpdated = Date.now()
         this.syncFullPaging()
       } catch (e) {
+        // 已被新拉取取代或已退出全量模式：旧失败不得覆盖新状态，也不得重抛给
+        // 早已放弃这次加载的调用方；否则会把新拉取的 loading 覆盖成 error
+        if (generation !== fullFetchGeneration || sessionGen !== getSessionGeneration()) return
         // 有旧快照则保留并回退到拉取前状态供继续浏览；毫无快照才标记 error
-        if (sessionGen === getSessionGeneration()) {
-          this.fullFetchState = this.fullRows === null ? 'error' : previousState
-          this.error = errorMessage(e, '拉取全量榜单失败')
-        }
+        this.fullFetchState = this.fullRows === null ? 'error' : previousState
+        this.error = errorMessage(e, '拉取全量榜单失败')
         throw e
       } finally {
-        if (sessionGen === getSessionGeneration()) this.isLoading = false
+        // 只有当前代际负责收尾共享 loading（旧拉取不得关掉新普通/全量请求）
+        if (generation === fullFetchGeneration && sessionGen === getSessionGeneration()) {
+          this.isLoading = false
+        }
       }
     },
 
@@ -327,28 +386,48 @@ export const useRankStore = defineStore('rank', {
      * 连点分页/筛选/搜索会命中合并或 memo，避免服务端背靠背重算整榜。
      */
     async loadRankDeduped(page: number) {
+      // 快照尚未就位时 isFullMode=false，翻页可能落到这里；同样不得改走普通分页，
+      // 更不能让一次被重入保护短路的调用写入普通查询 memo
+      if (isFullSnapshotFilter(this.groupFilter)) {
+        await this.fetchAllRows()
+        return
+      }
       const key = rankQueryKey(this.contestId, this.uid, page, this.keyword, this.removeStar)
       const generation = getSessionGeneration()
 
-      // 只复用同代际的在途查询（旧会话 promise 的结果会被守卫丢弃，复用 = 空结果）
-      if (queryInFlight?.key === key && queryInFlight.generation === generation) {
+      // 只复用同会话、且仍是最新意图的在途查询；直接 loadRank 也会推进 loadSeq，
+      // 因此旧登记即使在 key 相同的情况下也不能截获更新后的用户操作
+      if (
+        queryInFlight?.key === key &&
+        queryInFlight.generation === generation &&
+        queryInFlight.seq === this.loadSeq
+      ) {
         return queryInFlight.promise
       }
 
-      if (queryMemo?.key === key && Date.now() - queryMemo.at < RANK_QUERY_MEMO_TTL_MS) {
+      if (
+        queryMemo?.key === key &&
+        queryMemo.seq === this.loadSeq &&
+        Date.now() - queryMemo.at < RANK_QUERY_MEMO_TTL_MS
+      ) {
         return
       }
 
       const token = {}
-      const promise = this.loadRank(this.contestId, this.uid, page)
+      const request = this.loadRank(this.contestId, this.uid, page)
+      const seq = this.loadSeq
+      const promise = request
         .then(() => {
-          // 会话已切换时不写 memo（否则新会话会把旧会话的查询当成已命中）
-          if (generation === getSessionGeneration()) queryMemo = { key, at: Date.now() }
+          // 过期失败会被 loadRank 静默吞掉，因此 memo 必须以序号确认这次确实是最新成功；
+          // 会话已切换时同样不得给新会话留下「已命中」
+          if (seq === this.loadSeq && generation === getSessionGeneration()) {
+            queryMemo = { key, at: Date.now(), seq }
+          }
         })
         .finally(() => {
           if (queryInFlight?.token === token) queryInFlight = null
         })
-      queryInFlight = { key, promise, generation, token }
+      queryInFlight = { key, promise, generation, token, seq }
       return promise
     },
 
@@ -384,6 +463,9 @@ export const useRankStore = defineStore('rank', {
       }
 
       const wasFullMode = isFullSnapshotFilter(previous)
+      // 退出本身也是一次“取代”：即使旧循环尚未走到下一个中止检查点，
+      // 其 catch/finally 也已失去写回资格，不能污染恢复后的普通分页
+      if (wasFullMode) fullFetchGeneration++
       this.fullRows = null
       this.fullFetchState = 'idle'
       this.fullPage = 1

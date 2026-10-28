@@ -107,6 +107,8 @@ export const useSubmissionStore = defineStore('submission', {
       isLoading: false,
       error: null as string | null,
     },
+    /// fetchHistory 请求序号：同会话内只认最新一次筛选/翻页/轮询查询
+    historySeq: 0,
   }),
 
   getters: {
@@ -323,9 +325,11 @@ export const useSubmissionStore = defineStore('submission', {
     /**
      * 拉取一页提交历史（本人；筛选条件取自 history state）。
      *
-     * 失败记录 history.error 并上抛，由调用方决定提示；轮询路径自行吞错。
+     * 同会话内只认最新请求；最新请求失败记录 history.error 并上抛，轮询路径自行吞错。
      */
     async fetchHistory(contestId: string, page?: number) {
+      // 快速连改筛选、翻页与历史轮询并发时，旧响应不得配着新筛选条件落表
+      const token = ++this.historySeq
       // 会话代际（评审四轮 #1）：history 是 state 内的嵌套对象，`$reset()` 会整体
       // 替换它，因此迟到的旧请求写的是被替换掉的旧对象引用 —— 实际不会泄漏。
       // 守卫保留为纵深防御（若将来 history 改为模块级句柄或浅重置，这层仍成立）
@@ -334,6 +338,10 @@ export const useSubmissionStore = defineStore('submission', {
       h.contestId = contestId
       h.isLoading = true
       h.error = null
+      // 视图轮询读取 history.current 发请求；目标页须在响应前落地，
+      // 否则翻页在途时轮询会用旧页号发起更新的请求，反过来使用户翻页失效
+      const previousPage = h.current
+      if (page !== undefined) h.current = page
       try {
         const result = await submissionService.listContestSubmissions({
           contestId,
@@ -342,18 +350,21 @@ export const useSubmissionStore = defineStore('submission', {
           problemDisplayId: h.problemFilter,
           status: h.statusFilter,
         })
-        if (sessionGen !== getSessionGeneration()) return
+        if (token !== this.historySeq || sessionGen !== getSessionGeneration()) return
         h.records = result.records
         h.total = result.total
         h.current = result.current
         h.pages = result.pages
       } catch (e) {
-        if (sessionGen !== getSessionGeneration()) return
+        // 过期失败不占错误态也不重抛；调用方对这次查询早已放弃
+        if (token !== this.historySeq || sessionGen !== getSessionGeneration()) return
+        // 失败时 records 仍是上一次成功页，页码同步回退以免旧记录配新页码且无自愈
+        h.current = previousPage
         h.error = errorMessage(e, '加载提交记录失败')
         throw e
       } finally {
-        // 旧会话的 finally 不得改动新会话的加载态
-        if (sessionGen === getSessionGeneration()) h.isLoading = false
+        // 旧请求不得提前结束新请求的加载态
+        if (token === this.historySeq && sessionGen === getSessionGeneration()) h.isLoading = false
       }
     },
 
