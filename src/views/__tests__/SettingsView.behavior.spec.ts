@@ -218,6 +218,33 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
   })
 
+  it('非法数字实时显示字段级错误，修正后消失', async () => {
+    const view = await render()
+    await setField(view.host, '请求超时（秒）', 'abc')
+    await settleView(2)
+    expect(view.host.textContent).toContain('请求超时须为非负整数')
+
+    await setField(view.host, '请求超时（秒）', '30')
+    await settleView(2)
+    expect(view.host.textContent).not.toContain('请求超时须为非负整数')
+  })
+
+  it('新实例保存后下拉 configured 标签随实例清单更新', async () => {
+    mocks.switchOj.mockRejectedValueOnce(new Error('切换失败'))
+    const view = await render()
+    await setField(view.host, '当前 OJ', 'Hydro')
+    expect((field(view.host, '当前 OJ') as HTMLSelectElement).selectedOptions[0]?.textContent)
+      .toContain('未配置')
+
+    await setField(view.host, '服务器地址', 'https://hydro.example')
+    button(view.host, '保存').click()
+    await vi.waitFor(() => expect(mocks.switchOj).toHaveBeenCalledWith('Hydro'))
+    await settleView(3)
+    const option = [...(field(view.host, '当前 OJ') as HTMLSelectElement).options]
+      .find((item) => item.value === 'Hydro')
+    expect(option?.textContent).not.toContain('未配置')
+  })
+
   it('已配置 OJ 切换失败：回滚下拉且不清会话、不导航', async () => {
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     mocks.switchOj.mockRejectedValueOnce(new Error('切换失败'))

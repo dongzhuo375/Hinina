@@ -11,19 +11,10 @@ const props = defineProps<{
   input: string
 }>()
 const emit = defineEmits<{ (event: 'update:form', patch: SettingsFormPatch): void }>()
-const { form, errors, inputClass, input: INPUT } = props
+const { form, inputClass, input: INPUT } = props
 const LANGUAGE_OPTIONS = DEFAULT_LANGUAGES
 const TAB_SIZES = EDITOR_TAB_SIZES
 
-function patch(field: keyof SettingsForm, event: Event): void {
-  const target = event.target as HTMLInputElement | HTMLSelectElement
-  const value = target.type === 'checkbox' ? target.checked : target.value
-  emit('update:form', { [field]: value } as SettingsFormPatch)
-}
-
-function patchNumber(field: keyof SettingsForm, event: Event): void {
-  emit('update:form', { [field]: Number((event.target as HTMLSelectElement).value) } as SettingsFormPatch)
-}
 </script>
 
 <template>
@@ -54,14 +45,14 @@ function patchNumber(field: keyof SettingsForm, event: Event): void {
                     字号
                   </span>
                   <input
-                    :value="form.fontSize" @input="patch('fontSize', $event)"
+                    v-model="form.fontSize"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
                     :class="inputClass('fontSize')"
                   />
-                  <span v-if="errors.fontSize" class="mt-1 block text-xs text-[var(--color-error)]">
-                    {{ errors.fontSize }}
+                  <span v-if="props.errors.fontSize" class="mt-1 block text-xs text-[var(--color-error)]">
+                    {{ props.errors.fontSize }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">8–32</span>
                 </label>
@@ -70,7 +61,7 @@ function patchNumber(field: keyof SettingsForm, event: Event): void {
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     Tab 宽度
                   </span>
-                  <select :value="form.tabSize" :class="INPUT" @change="patchNumber('tabSize', $event)">
+                  <select v-model.number="form.tabSize" :class="INPUT">
                     <option v-for="size in TAB_SIZES" :key="size" :value="size">
                       {{ size }} 空格
                     </option>
@@ -84,7 +75,7 @@ function patchNumber(field: keyof SettingsForm, event: Event): void {
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     默认语言
                   </span>
-                  <select :value="form.defaultLanguage" @change="patch('defaultLanguage', $event)" :class="INPUT">
+                  <select v-model="form.defaultLanguage" :class="INPUT">
                     <option v-for="lang in LANGUAGE_OPTIONS" :key="lang" :value="lang">
                       {{ lang }}
                     </option>
@@ -131,7 +122,7 @@ function patchNumber(field: keyof SettingsForm, event: Event): void {
                     自动保存间隔（秒）
                   </span>
                   <input
-                    :value="form.autoSaveIntervalSecs" @input="patch('autoSaveIntervalSecs', $event)"
+                    v-model="form.autoSaveIntervalSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
@@ -139,10 +130,10 @@ function patchNumber(field: keyof SettingsForm, event: Event): void {
                     :class="inputClass('autoSaveIntervalSecs')"
                   />
                   <span
-                    v-if="errors.autoSaveIntervalSecs"
+                    v-if="props.errors.autoSaveIntervalSecs"
                     class="mt-1 block text-xs text-[var(--color-error)]"
                   >
-                    {{ errors.autoSaveIntervalSecs }}
+                    {{ props.errors.autoSaveIntervalSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">5–300</span>
                 </label>

@@ -17,16 +17,9 @@ const emit = defineEmits<{
   (event: 'update:form', patch: SettingsFormPatch): void
   (event: 'switch-oj'): void
 }>()
-const { form, errors, options: ojOptions, inputClass, input: INPUT } = props
+const { form, inputClass, input: INPUT } = props
 
-function patch(field: keyof SettingsForm, event: Event): void {
-  const target = event.target as HTMLInputElement | HTMLSelectElement
-  const value = target.type === 'checkbox' ? target.checked : target.value
-  emit('update:form', { [field]: value } as SettingsFormPatch)
-}
-
-function onActiveOjChange(event: Event): void {
-  patch('activeOj', event)
+function onSwitchOj(): void {
   emit('switch-oj')
 }
 </script>
@@ -53,9 +46,9 @@ function onActiveOjChange(event: Event): void {
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     当前 OJ
                   </span>
-                  <select :value="form.activeOj" :class="INPUT" @change="onActiveOjChange">
+                  <select v-model="form.activeOj" :class="INPUT" @change="onSwitchOj">
                     <option
-                      v-for="o in ojOptions"
+                      v-for="o in props.options"
                       :key="o.id"
                       :value="o.id"
                       :disabled="o.disabled"
@@ -84,14 +77,14 @@ function onActiveOjChange(event: Event): void {
                     服务器地址
                   </span>
                   <input
-                    :value="form.ojUrl" @input="patch('ojUrl', $event)"
+                    v-model="form.ojUrl"
                     type="text"
                     spellcheck="false"
                     :placeholder="ojBaseUrlHint(form.activeOj)"
                     :class="inputClass('ojUrl')"
                   />
-                  <span v-if="errors.ojUrl" class="mt-1 block text-xs text-[var(--color-error)]">
-                    {{ errors.ojUrl }}
+                  <span v-if="props.errors.ojUrl" class="mt-1 block text-xs text-[var(--color-error)]">
+                    {{ props.errors.ojUrl }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
                     属于当前 OJ（{{ form.activeOj }}）；改动当前 OJ 的地址后需重启生效，新建实例保存后会自动切换
@@ -103,7 +96,7 @@ function onActiveOjChange(event: Event): void {
                     比赛 ID / 引用
                   </span>
                   <input
-                    :value="form.contestRef" @input="patch('contestRef', $event)"
+                    v-model="form.contestRef"
                     type="text"
                     spellcheck="false"
                     :class="inputClass('contestRef')"
@@ -118,7 +111,7 @@ function onActiveOjChange(event: Event): void {
                     比赛密码
                   </span>
                   <input
-                    :value="form.contestPassword" @input="patch('contestPassword', $event)"
+                    v-model="form.contestPassword"
                     type="password"
                     autocomplete="off"
                     placeholder="无私有赛密码可留空"
@@ -134,14 +127,14 @@ function onActiveOjChange(event: Event): void {
                     请求超时（秒）
                   </span>
                   <input
-                    :value="form.timeoutSecs" @input="patch('timeoutSecs', $event)"
+                    v-model="form.timeoutSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
                     :class="inputClass('timeoutSecs')"
                   />
-                  <span v-if="errors.timeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
-                    {{ errors.timeoutSecs }}
+                  <span v-if="props.errors.timeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
+                    {{ props.errors.timeoutSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
                     单次 HTTP 请求的超时，1–120
@@ -153,14 +146,14 @@ function onActiveOjChange(event: Event): void {
                     轮询间隔（秒）
                   </span>
                   <input
-                    :value="form.pollIntervalSecs" @input="patch('pollIntervalSecs', $event)"
+                    v-model="form.pollIntervalSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
                     :class="inputClass('pollIntervalSecs')"
                   />
-                  <span v-if="errors.pollIntervalSecs" class="mt-1 block text-xs text-[var(--color-error)]">
-                    {{ errors.pollIntervalSecs }}
+                  <span v-if="props.errors.pollIntervalSecs" class="mt-1 block text-xs text-[var(--color-error)]">
+                    {{ props.errors.pollIntervalSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
                     评测结果查询间隔，1–30
@@ -172,14 +165,14 @@ function onActiveOjChange(event: Event): void {
                     轮询总超时（秒）
                   </span>
                   <input
-                    :value="form.pollTimeoutSecs" @input="patch('pollTimeoutSecs', $event)"
+                    v-model="form.pollTimeoutSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
                     :class="inputClass('pollTimeoutSecs')"
                   />
-                  <span v-if="errors.pollTimeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
-                    {{ errors.pollTimeoutSecs }}
+                  <span v-if="props.errors.pollTimeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
+                    {{ props.errors.pollTimeoutSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
                     单次提交轮询的总时长上限，30–3600
@@ -191,14 +184,14 @@ function onActiveOjChange(event: Event): void {
                     列表缓存 TTL（秒）
                   </span>
                   <input
-                    :value="form.cacheTtlSecs" @input="patch('cacheTtlSecs', $event)"
+                    v-model="form.cacheTtlSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
                     :class="inputClass('cacheTtlSecs')"
                   />
-                  <span v-if="errors.cacheTtlSecs" class="mt-1 block text-xs text-[var(--color-error)]">
-                    {{ errors.cacheTtlSecs }}
+                  <span v-if="props.errors.cacheTtlSecs" class="mt-1 block text-xs text-[var(--color-error)]">
+                    {{ props.errors.cacheTtlSecs }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
                     0 表示禁用缓存，0–600
