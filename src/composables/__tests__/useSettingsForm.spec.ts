@@ -81,8 +81,58 @@ describe('useSettingsForm', () => {
 
     settings.form.autoSave = false
     settings.form.autoSaveIntervalSecs = '1'
-    expect(settings.errors.value.autoSaveIntervalSecs).not.toBeNull()
-    expect(settings.canSave.value).toBe(false)
+    expect(settings.errors.value.autoSaveIntervalSecs).toBeNull()
+    settings.form.contestRef = '2002'
+    expect(settings.canSave.value).toBe(true)
+  })
+
+  it('保存期间的新编辑不被误标为已保存，discard 回到提交快照', async () => {
+    let resolveSave!: (config: AppConfig) => void
+    mocks.updateConfig.mockImplementationOnce((mutator: (draft: AppConfig) => void) => {
+      const draft = structuredClone(currentConfig)
+      mutator(draft)
+      currentConfig = draft
+      return new Promise<AppConfig>((resolve) => { resolveSave = resolve })
+    })
+
+    settings.form.fontSize = '16'
+    const saving = settings.save()
+    await Promise.resolve()
+    settings.form.fontSize = '18'
+    resolveSave(currentConfig)
+    await saving
+
+    expect(settings.dirty.value).toBe(true)
+    settings.discard()
+    expect(settings.form.fontSize).toBe('16')
+  })
+
+  it('active 指向缺失实例时不借用其它实例地址', async () => {
+    currentConfig.oj.active = 'Hydro'
+    await settings.load()
+    expect(settings.form.ojUrl).toBe('')
+  })
+
+  it('保存无关字段不会重新启用已有禁用实例', async () => {
+    currentConfig.oj.instances[0].enabled = false
+    await settings.load()
+    settings.form.fontSize = '16'
+    await settings.save()
+    expect(currentConfig.oj.instances[0].enabled).toBe(false)
+  })
+
+  it('新实例自动切换失败回滚下拉，可重新选择重试并清除旧提示', async () => {
+    mocks.switchOj.mockRejectedValueOnce(new Error('切换失败'))
+    settings.form.activeOj = 'Hydro'
+    await settings.onSwitchOj()
+    settings.form.ojUrl = 'https://hydro.example'
+    await settings.save()
+
+    expect(settings.form.activeOj).toBe('HOJ')
+    expect(settings.switchNotice.value).toContain('实例已保存')
+    settings.discard()
+    expect(settings.switchError.value).toBeNull()
+    expect(settings.switchNotice.value).toBeNull()
   })
 
   it('保存写完整载荷但不写 active，成功后清 dirty', async () => {
@@ -127,7 +177,8 @@ describe('useSettingsForm', () => {
   })
 
   it('已配置 OJ 切换失败回滚下拉，不清会话、不导航', async () => {
-    settings.ojInstances.value.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
     settings.form.activeOj = 'Hydro'
     mocks.switchOj.mockRejectedValueOnce(new Error('切换失败'))
 

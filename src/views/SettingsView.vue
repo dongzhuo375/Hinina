@@ -48,7 +48,6 @@ const {
   discard,
   onSwitchOj,
   inputClass,
-  INPUT,
 } = useSettingsForm()
 
 function updateForm(patch: SettingsFormPatch): void {
@@ -64,7 +63,7 @@ const dataDirSettings = useDataDirSettings()
 const {
   activeSection,
   scrollerRef,
-  updateActiveSection,
+  scheduleActiveSection,
   scrollToSection,
   SECTION_LABELS,
 } = useSettingsScrollSpy(loading)
@@ -79,7 +78,7 @@ onMounted(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-body)]">
-    <div ref="scrollerRef" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="updateActiveSection">
+    <div ref="scrollerRef" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="scheduleActiveSection">
       <div class="settings-page mx-auto w-full max-w-[1250px] px-8 pb-8">
         <PageHeading title="环境设置" index="05" subtitle="PREFERENCES">
           <template #description>配置保存在本地客户端，仅影响当前设备</template>
@@ -107,7 +106,6 @@ onMounted(() => {
               :switch-error="switchError"
               :switch-notice="switchNotice"
               :input-class="inputClass"
-              :input="INPUT"
               @update:form="updateForm"
               @switch-oj="onSwitchOj"
             />
@@ -117,7 +115,6 @@ onMounted(() => {
               :form="form"
               :errors="errors"
               :input-class="inputClass"
-              :input="INPUT"
               @update:form="updateForm"
             />
 
@@ -150,7 +147,7 @@ onMounted(() => {
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0 text-xs">
                 <span
-                  v-if="showSaved"
+                  v-if="showSaved && !dirty"
                   class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--color-ac-border)] bg-[var(--color-ac-bg)] px-2.5 py-1 font-medium text-[var(--color-success)]"
                 >
                   <svg

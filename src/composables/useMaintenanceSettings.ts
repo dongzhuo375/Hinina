@@ -1,4 +1,5 @@
-import { onScopeDispose, ref } from 'vue'
+import { ref } from 'vue'
+import { useTransientValue } from '@/composables/useTransientValue'
 import { systemService } from '@/services/system.service'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
@@ -18,7 +19,11 @@ export function formatBytes(bytes: number): string {
 export function useMaintenanceSettings() {
   const resetting = ref(false)
   const resetConfirmOpen = ref(false)
-  const resetNotice = ref<{ text: string; warn: boolean } | null>(null)
+  const {
+    value: resetNotice,
+    show: showResetNotice,
+    clear: clearResetNotice,
+  } = useTransientValue<{ text: string; warn: boolean } | null>(null, 3_000)
   const resetError = ref<string | null>(null)
 
   const usage = ref<LocalDataUsage | null>(null)
@@ -27,16 +32,17 @@ export function useMaintenanceSettings() {
   const purgeSnapshots = ref(true)
   const purging = ref(false)
   const purgeConfirmOpen = ref(false)
-  const purgeNotice = ref<{ text: string; warn: boolean } | null>(null)
+  const {
+    value: purgeNotice,
+    show: showPurgeNotice,
+    clear: clearPurgeNotice,
+  } = useTransientValue<{ text: string; warn: boolean } | null>(null, 4_000)
   const purgeError = ref<string | null>(null)
-
-  let resetTimer: ReturnType<typeof setTimeout> | null = null
-  let purgeTimer: ReturnType<typeof setTimeout> | null = null
 
   async function resetClient(): Promise<void> {
     resetConfirmOpen.value = false
     resetting.value = true
-    resetNotice.value = null
+    clearResetNotice()
     resetError.value = null
     try {
       await systemService.resetClient()
@@ -51,14 +57,9 @@ export function useMaintenanceSettings() {
       useProblemStore().invalidateMyStatus()
       void useAnnouncementStore().refresh()
 
-      resetNotice.value = refreshed
+      showResetNotice(refreshed
         ? { text: '已重置，数据已重新拉取', warn: false }
-        : { text: '已重置，但数据重新拉取失败，请手动刷新', warn: true }
-      if (resetTimer) clearTimeout(resetTimer)
-      resetTimer = setTimeout(() => {
-        resetNotice.value = null
-        resetTimer = null
-      }, 3_000)
+        : { text: '已重置，但数据重新拉取失败，请手动刷新', warn: true })
     } catch (e) {
       resetError.value = errorMessage(e, '重置失败')
     } finally {
@@ -83,7 +84,7 @@ export function useMaintenanceSettings() {
     }
     purgeConfirmOpen.value = false
     purging.value = true
-    purgeNotice.value = null
+    clearPurgeNotice()
     purgeError.value = null
     try {
       const report = await systemService.purgeLocalData(purgeLogs.value, purgeSnapshots.value)
@@ -92,26 +93,14 @@ export function useMaintenanceSettings() {
       const logMissed = purgeLogs.value && !report.logCleared
       if (logMissed) parts.push('日志未清理（文件层不可用或写入失败）')
 
-      purgeNotice.value = { text: `已清理：${parts.join('，')}`, warn: logMissed }
+      showPurgeNotice({ text: `已清理：${parts.join('，')}`, warn: logMissed })
       await loadUsage()
-      if (purgeTimer) clearTimeout(purgeTimer)
-      purgeTimer = setTimeout(() => {
-        purgeNotice.value = null
-        purgeTimer = null
-      }, 4_000)
     } catch (e) {
       purgeError.value = errorMessage(e, '清理本地数据失败')
     } finally {
       purging.value = false
     }
   }
-
-  onScopeDispose(() => {
-    if (resetTimer) clearTimeout(resetTimer)
-    if (purgeTimer) clearTimeout(purgeTimer)
-    resetTimer = null
-    purgeTimer = null
-  })
 
   return {
     resetting,

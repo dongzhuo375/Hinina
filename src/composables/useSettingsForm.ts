@@ -1,8 +1,9 @@
-import { computed, onScopeDispose, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService } from '@/services/config.service'
 import { resetSessionForOjSwitch } from '@/stores/session'
-import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
+import { normalizeHojLanguage } from '@/utils/language'
 import { EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN, EDITOR_TAB_SIZES } from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
 import { ojSelectOptions } from '@/utils/oj'
@@ -87,8 +88,7 @@ export function useSettingsForm() {
 
   const saving = ref(false)
   const saveError = ref<string | null>(null)
-  const showSaved = ref(false)
-  let savedTimer: ReturnType<typeof setTimeout> | null = null
+  const { value: showSaved, show: markSaved, clear: clearSaved } = useTransientValue(false, 3_000)
 
   const errors = computed<Record<string, string | null>>(() => ({
     ojUrl: /^https?:\/\/\S+$/i.test(form.ojUrl.trim()) ? null : '须以 http:// 或 https:// 开头',
@@ -98,7 +98,10 @@ export function useSettingsForm() {
     pollTimeoutSecs: intError(form.pollTimeoutSecs, 30, 3600, '轮询总超时'),
     cacheTtlSecs: intError(form.cacheTtlSecs, 0, 600, '缓存 TTL'),
     fontSize: intError(form.fontSize, EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX, '字号'),
-    autoSaveIntervalSecs: intError(form.autoSaveIntervalSecs, 5, 300, '自动保存间隔'),
+    // 关闭自动保存时该字段被禁用，隐藏值不得阻止无关字段保存
+    autoSaveIntervalSecs: form.autoSave
+      ? intError(form.autoSaveIntervalSecs, 5, 300, '自动保存间隔')
+      : null,
   }))
   const isValid = computed(() => Object.values(errors.value).every((e) => e === null))
   const canSave = computed(() => dirty.value && isValid.value && !saving.value)
@@ -107,8 +110,6 @@ export function useSettingsForm() {
   const loadError = ref<string | null>(null)
   const router = useRouter()
 
-  const TAB_SIZES: readonly number[] = EDITOR_TAB_SIZES
-  const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
   const ojInstances = ref<OjInstance[]>([])
   const ojOptions = computed(() => ojSelectOptions(ojInstances.value))
   const persistedActive = ref('HOJ')
@@ -154,9 +155,8 @@ export function useSettingsForm() {
     switchError.value = null
     switchNotice.value = null
     ojInstances.value = config.oj.instances
-    form.ojUrl =
-      config.oj.instances.find((i) => i.id === config.oj.active)?.baseUrl
-      ?? configService.activeOjBaseUrl(config)
+    // active 无对应实例时保持空地址，绝不借用其它实例的 URL（否则保存会写错目标）
+    form.ojUrl = config.oj.instances.find((i) => i.id === config.oj.active)?.baseUrl ?? ''
     form.contestRef = config.oj.contestRef ?? ''
     form.contestPassword = config.oj.contestPassword ?? ''
     form.timeoutSecs = String(config.oj.timeoutSecs)
@@ -165,7 +165,7 @@ export function useSettingsForm() {
     form.cacheTtlSecs = String(config.oj.cacheTtlSecs)
     form.cacheProblemStatement = config.oj.cacheProblemStatement ?? true
     form.fontSize = String(config.editor.fontSize)
-    form.tabSize = TAB_SIZES.includes(config.editor.tabSize) ? config.editor.tabSize : 4
+    form.tabSize = EDITOR_TAB_SIZES.includes(config.editor.tabSize) ? config.editor.tabSize : 4
     form.defaultLanguage = normalizeHojLanguage(config.editor.defaultLanguage)
     form.autoSave = config.editor.autoSave
     form.autoSaveIntervalSecs = String(config.editor.autoSaveIntervalSecs)
@@ -190,49 +190,47 @@ export function useSettingsForm() {
     if (!canSave.value) return
     saving.value = true
     saveError.value = null
-    // 保存前固定目标与新建标记，失败不得把自动切换意图残留到下一次保存
-    const target = form.activeOj
+    // 固定提交快照：保存期间的后续编辑不进入本次落盘，也不得被误标为已保存
+    const submitted = { ...form }
+    const submittedSnapshot = snapshot()
+    const target = submitted.activeOj
     const isNewInstance = !ojInstances.value.some((i) => i.id === target)
     try {
       const saved = await configService.updateConfig((draft) => {
         // active 只由 switch_oj 改写；保存不能制造配置与运行中 Registry 的不一致
         const instance = draft.oj.instances.find((i) => i.id === target)
         if (instance) {
-          instance.baseUrl = form.ojUrl.trim()
-          instance.enabled = true
+          instance.baseUrl = submitted.ojUrl.trim()
         } else {
           draft.oj.instances.push({
             id: target,
-            baseUrl: form.ojUrl.trim(),
+            baseUrl: submitted.ojUrl.trim(),
             enabled: true,
             options: {},
           })
         }
-        draft.oj.contestRef = form.contestRef.trim()
-        draft.oj.contestPassword = form.contestPassword === '' ? null : form.contestPassword
-        draft.oj.timeoutSecs = Number(form.timeoutSecs)
-        draft.oj.pollIntervalSecs = Number(form.pollIntervalSecs)
-        draft.oj.pollTimeoutSecs = Number(form.pollTimeoutSecs)
-        draft.oj.cacheTtlSecs = Number(form.cacheTtlSecs)
-        draft.oj.cacheProblemStatement = form.cacheProblemStatement
-        draft.editor.fontSize = Number(form.fontSize)
-        draft.editor.tabSize = form.tabSize
-        draft.editor.defaultLanguage = form.defaultLanguage
-        draft.editor.autoSave = form.autoSave
-        draft.editor.autoSaveIntervalSecs = Number(form.autoSaveIntervalSecs)
-        draft.layout.splitRatio = form.splitRatio
+        draft.oj.contestRef = submitted.contestRef.trim()
+        draft.oj.contestPassword = submitted.contestPassword === '' ? null : submitted.contestPassword
+        draft.oj.timeoutSecs = Number(submitted.timeoutSecs)
+        draft.oj.pollIntervalSecs = Number(submitted.pollIntervalSecs)
+        draft.oj.pollTimeoutSecs = Number(submitted.pollTimeoutSecs)
+        draft.oj.cacheTtlSecs = Number(submitted.cacheTtlSecs)
+        draft.oj.cacheProblemStatement = submitted.cacheProblemStatement
+        draft.editor.fontSize = Number(submitted.fontSize)
+        draft.editor.tabSize = submitted.tabSize
+        draft.editor.defaultLanguage = submitted.defaultLanguage
+        draft.editor.autoSave = submitted.autoSave
+        draft.editor.autoSaveIntervalSecs = Number(submitted.autoSaveIntervalSecs)
+        draft.layout.splitRatio = submitted.splitRatio
       })
-      baseline.value = snapshot()
+      baseline.value = submittedSnapshot
       ojInstances.value = saved.oj.instances
-      showSaved.value = true
-      if (savedTimer) clearTimeout(savedTimer)
-      savedTimer = setTimeout(() => {
-        showSaved.value = false
-        savedTimer = null
-      }, 3_000)
+      markSaved(true)
 
       if (isNewInstance) {
         if (await performSwitch(target)) return
+        // 后端仍停留在旧 OJ：回滚下拉，用户重新选中目标即可再次触发切换
+        form.activeOj = persistedActive.value
         switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
       }
     } catch (e) {
@@ -246,21 +244,17 @@ export function useSettingsForm() {
     if (baseline.value === '') return
     Object.assign(form, JSON.parse(baseline.value) as SettingsForm)
     saveError.value = null
+    switchError.value = null
+    switchNotice.value = null
+    clearSaved()
   }
 
   function inputClass(field: string): string {
     return errors.value[field] ? `${INPUT} ${INPUT_ERROR}` : INPUT
   }
 
-  onScopeDispose(() => {
-    if (savedTimer) clearTimeout(savedTimer)
-    savedTimer = null
-  })
-
   return {
     form,
-    baseline,
-    snapshot,
     dirty,
     saving,
     saveError,
@@ -270,21 +264,13 @@ export function useSettingsForm() {
     canSave,
     loading,
     loadError,
-    ojInstances,
     ojOptions,
-    persistedActive,
     switchError,
     switchNotice,
-    populate,
     load,
     save,
     discard,
-    performSwitch,
     onSwitchOj,
-    clampRatio,
     inputClass,
-    INPUT,
-    LANGUAGE_OPTIONS,
-    TAB_SIZES,
   }
 }

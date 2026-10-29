@@ -19,9 +19,21 @@ export function useSettingsScrollSpy(loading: Readonly<Ref<boolean>>) {
   const scrollerRef = ref<HTMLElement | null>(null)
   let spyLockTarget: number | null = null
   let spyLockTimer: ReturnType<typeof setTimeout> | null = null
+  let scrollEndScroller: HTMLElement | null = null
+  let scrollEndHandler: (() => void) | null = null
+  let scheduledFrame: ReturnType<typeof setTimeout> | null = null
+
+  function detachScrollEnd(): void {
+    if (scrollEndScroller && scrollEndHandler) {
+      scrollEndScroller.removeEventListener('scrollend', scrollEndHandler)
+    }
+    scrollEndScroller = null
+    scrollEndHandler = null
+  }
 
   function releaseSpyLock(): void {
     spyLockTarget = null
+    detachScrollEnd()
     if (spyLockTimer) {
       clearTimeout(spyLockTimer)
       spyLockTimer = null
@@ -61,11 +73,30 @@ export function useSettingsScrollSpy(loading: Readonly<Ref<boolean>>) {
     activeSection.value = current
   }
 
+  /// 滚动事件只调度一次下一帧扫描，避免同帧多个事件重复读取 7 个分区布局
+  function scheduleActiveSection(): void {
+    if (scheduledFrame !== null) return
+    scheduledFrame = setTimeout(() => {
+      scheduledFrame = null
+      updateActiveSection()
+    }, 0)
+  }
+
   function scrollToSection(index: number): void {
+    releaseSpyLock()
     activeSection.value = index
     spyLockTarget = index
-    if (spyLockTimer) clearTimeout(spyLockTimer)
-    spyLockTimer = setTimeout(releaseSpyLock, 1_000)
+    // 平滑滚动可能超过 1s；锁必须持续到 scrollend 或目标停靠，不能按固定短超时提前释放
+    spyLockTimer = setTimeout(releaseSpyLock, 3_000)
+    const scroller = scrollerRef.value
+    if (scroller) {
+      scrollEndScroller = scroller
+      scrollEndHandler = () => {
+        releaseSpyLock()
+        updateActiveSection()
+      }
+      scroller.addEventListener('scrollend', scrollEndHandler, { once: true })
+    }
     const target = document.getElementById(`settings-${index}`)
     target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
     target?.focus({ preventScroll: true })
@@ -76,7 +107,18 @@ export function useSettingsScrollSpy(loading: Readonly<Ref<boolean>>) {
     if (!isLoading) void nextTick(updateActiveSection)
   })
 
-  onScopeDispose(releaseSpyLock)
+  onScopeDispose(() => {
+    if (scheduledFrame !== null) clearTimeout(scheduledFrame)
+    scheduledFrame = null
+    releaseSpyLock()
+  })
 
-  return { activeSection, scrollerRef, updateActiveSection, scrollToSection, SECTION_LABELS }
+  return {
+    activeSection,
+    scrollerRef,
+    updateActiveSection,
+    scheduleActiveSection,
+    scrollToSection,
+    SECTION_LABELS,
+  }
 }

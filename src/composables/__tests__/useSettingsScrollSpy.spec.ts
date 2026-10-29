@@ -70,7 +70,11 @@ describe('useSettingsScrollSpy', () => {
 
     vi.advanceTimersByTime(1_000)
     spy.updateActiveSection()
+    expect(spy.activeSection.value).toBe(2)
+
+    scroller.dispatchEvent(new Event('scrollend'))
     expect(spy.activeSection.value).toBe(6)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('目标到达 24px 停靠点立即释放锁并清理 timer', () => {

@@ -240,9 +240,14 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     button(view.host, '保存').click()
     await vi.waitFor(() => expect(mocks.switchOj).toHaveBeenCalledWith('Hydro'))
     await settleView(3)
-    const option = [...(field(view.host, '当前 OJ') as HTMLSelectElement).options]
-      .find((item) => item.value === 'Hydro')
+    const select = field(view.host, '当前 OJ') as HTMLSelectElement
+    const option = [...select.options].find((item) => item.value === 'Hydro')
     expect(option?.textContent).not.toContain('未配置')
+    expect(select.value).toBe('HOJ')
+
+    // 同一下拉重新选择 Hydro 即可重试切换
+    await setField(view.host, '当前 OJ', 'Hydro')
+    await vi.waitFor(() => expect(mocks.switchOj).toHaveBeenCalledTimes(2))
   })
 
   it('已配置 OJ 切换失败：回滚下拉且不清会话、不导航', async () => {
@@ -305,6 +310,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
       return element
     })
     scroller.dispatchEvent(new Event('scroll'))
+    await vi.advanceTimersByTimeAsync(0)
 
     const aboutLink = view.host.querySelector<HTMLAnchorElement>('a[href="#settings-6"]')!
     aboutLink.click()
@@ -315,11 +321,18 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
 
     await vi.advanceTimersByTimeAsync(1_000)
     scroller.dispatchEvent(new Event('scroll'))
+    await vi.advanceTimersByTimeAsync(0)
+    await settleView(2)
+    // 1s 后平滑滚动可能仍在继续，锁不得提前释放
+    expect(aboutLink.getAttribute('aria-current')).toBe('true')
+
+    scroller.dispatchEvent(new Event('scrollend'))
     await settleView(2)
     expect(view.host.querySelector('a[href="#settings-0"]')?.getAttribute('aria-current')).toBe('true')
 
     scroller.scrollTop = 1_500
     scroller.dispatchEvent(new Event('scroll'))
+    await vi.advanceTimersByTimeAsync(0)
     await settleView(2)
     expect(aboutLink.getAttribute('aria-current')).toBe('true')
   })

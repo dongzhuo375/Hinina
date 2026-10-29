@@ -2,6 +2,7 @@
 import SettingsSectionFrame from './SettingsSectionFrame.vue'
 import { ojBaseUrlHint } from '@/utils/oj'
 import { ojSelectOptions } from '@/utils/oj'
+import { SETTINGS_INPUT as INPUT } from '@/composables/useSettingsForm'
 import type { SettingsForm, SettingsFormPatch } from '@/composables/useSettingsForm'
 
 const props = defineProps<{
@@ -11,13 +12,11 @@ const props = defineProps<{
   switchError: string | null
   switchNotice: string | null
   inputClass: (field: string) => string
-  input: string
 }>()
 const emit = defineEmits<{
   (event: 'update:form', patch: SettingsFormPatch): void
   (event: 'switch-oj'): void
 }>()
-const { form, inputClass, input: INPUT } = props
 
 function onSwitchOj(): void {
   emit('switch-oj')
@@ -46,7 +45,7 @@ function onSwitchOj(): void {
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     当前 OJ
                   </span>
-                  <select v-model="form.activeOj" :class="INPUT" @change="onSwitchOj">
+                  <select v-model="props.form.activeOj" :class="INPUT" @change="onSwitchOj">
                     <option
                       v-for="o in props.options"
                       :key="o.id"
@@ -77,17 +76,17 @@ function onSwitchOj(): void {
                     服务器地址
                   </span>
                   <input
-                    v-model="form.ojUrl"
+                    v-model="props.form.ojUrl"
                     type="text"
                     spellcheck="false"
-                    :placeholder="ojBaseUrlHint(form.activeOj)"
-                    :class="inputClass('ojUrl')"
+                    :placeholder="ojBaseUrlHint(props.form.activeOj)"
+                    :class="props.inputClass('ojUrl')"
                   />
                   <span v-if="props.errors.ojUrl" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.ojUrl }}
                   </span>
                   <span v-else class="mt-1 block text-xs text-[var(--text-muted)]">
-                    属于当前 OJ（{{ form.activeOj }}）；改动当前 OJ 的地址后需重启生效，新建实例保存后会自动切换
+                    属于当前 OJ（{{ props.form.activeOj }}）；改动当前 OJ 的地址后需重启生效，新建实例保存后会自动切换
                   </span>
                 </label>
 
@@ -96,10 +95,10 @@ function onSwitchOj(): void {
                     比赛 ID / 引用
                   </span>
                   <input
-                    v-model="form.contestRef"
+                    v-model="props.form.contestRef"
                     type="text"
                     spellcheck="false"
-                    :class="inputClass('contestRef')"
+                    :class="props.inputClass('contestRef')"
                   />
                   <span class="mt-1 block text-xs text-[var(--text-muted)]">
                     HOJ 为数字 ID，其它 OJ 为资源引用；留空 = 不自动加载
@@ -111,7 +110,7 @@ function onSwitchOj(): void {
                     比赛密码
                   </span>
                   <input
-                    v-model="form.contestPassword"
+                    v-model="props.form.contestPassword"
                     type="password"
                     autocomplete="off"
                     placeholder="无私有赛密码可留空"
@@ -127,11 +126,11 @@ function onSwitchOj(): void {
                     请求超时（秒）
                   </span>
                   <input
-                    v-model="form.timeoutSecs"
+                    v-model="props.form.timeoutSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
-                    :class="inputClass('timeoutSecs')"
+                    :class="props.inputClass('timeoutSecs')"
                   />
                   <span v-if="props.errors.timeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.timeoutSecs }}
@@ -146,11 +145,11 @@ function onSwitchOj(): void {
                     轮询间隔（秒）
                   </span>
                   <input
-                    v-model="form.pollIntervalSecs"
+                    v-model="props.form.pollIntervalSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
-                    :class="inputClass('pollIntervalSecs')"
+                    :class="props.inputClass('pollIntervalSecs')"
                   />
                   <span v-if="props.errors.pollIntervalSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.pollIntervalSecs }}
@@ -165,11 +164,11 @@ function onSwitchOj(): void {
                     轮询总超时（秒）
                   </span>
                   <input
-                    v-model="form.pollTimeoutSecs"
+                    v-model="props.form.pollTimeoutSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
-                    :class="inputClass('pollTimeoutSecs')"
+                    :class="props.inputClass('pollTimeoutSecs')"
                   />
                   <span v-if="props.errors.pollTimeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.pollTimeoutSecs }}
@@ -184,11 +183,11 @@ function onSwitchOj(): void {
                     列表缓存 TTL（秒）
                   </span>
                   <input
-                    v-model="form.cacheTtlSecs"
+                    v-model="props.form.cacheTtlSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
-                    :class="inputClass('cacheTtlSecs')"
+                    :class="props.inputClass('cacheTtlSecs')"
                   />
                   <span v-if="props.errors.cacheTtlSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.cacheTtlSecs }}
@@ -206,20 +205,20 @@ function onSwitchOj(): void {
                     <button
                       type="button"
                       role="switch"
-                      :aria-checked="form.cacheProblemStatement"
+                      :aria-checked="props.form.cacheProblemStatement"
                       class="settings-switch relative h-6 w-11 shrink-0 transition-colors"
                       :class="
-                        form.cacheProblemStatement ? 'bg-[var(--color-primary)]' : 'bg-[var(--bg-sidebar)]'
+                        props.form.cacheProblemStatement ? 'bg-[var(--color-primary)]' : 'bg-[var(--bg-sidebar)]'
                       "
-                      @click="emit('update:form', { cacheProblemStatement: !form.cacheProblemStatement })"
+                      @click="emit('update:form', { cacheProblemStatement: !props.form.cacheProblemStatement })"
                     >
                       <span
                         class="settings-switch-knob absolute top-0.5 left-0.5 h-5 w-5 rounded-sm bg-[var(--bg-card)] transition-transform"
-                        :class="form.cacheProblemStatement ? 'translate-x-5' : ''"
+                        :class="props.form.cacheProblemStatement ? 'translate-x-5' : ''"
                       ></span>
                     </button>
                     <span class="text-xs text-[var(--text-secondary)]">
-                      {{ form.cacheProblemStatement ? '已开启' : '已关闭' }}
+                      {{ props.form.cacheProblemStatement ? '已开启' : '已关闭' }}
                     </span>
                   </div>
                   <span class="mt-1 block text-xs text-[var(--text-muted)]">

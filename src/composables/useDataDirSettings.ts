@@ -1,4 +1,5 @@
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useTransientValue } from '@/composables/useTransientValue'
 import { systemService } from '@/services/system.service'
 import { errorMessage } from '@/utils/error'
 import type { DataDirInfo } from '@/types/system'
@@ -10,9 +11,12 @@ export function useDataDirSettings() {
   const pendingDir = ref<string | null>(null)
   const migrateData = ref(true)
   const changingDir = ref(false)
-  const changeNotice = ref<string | null>(null)
+  const {
+    value: changeNotice,
+    show: showChangeNotice,
+    clear: clearChangeNotice,
+  } = useTransientValue<string | null>(null, 5_000)
   const changeError = ref<string | null>(null)
-  let changeTimer: ReturnType<typeof setTimeout> | null = null
 
   const dataDirSourceMeta = computed(() => {
     switch (dataDir.value?.source) {
@@ -41,7 +45,7 @@ export function useDataDirSettings() {
 
   async function chooseDataDir(): Promise<void> {
     changeError.value = null
-    changeNotice.value = null
+    clearChangeNotice()
     try {
       const picked = await systemService.pickDataDir()
       if (!picked) return
@@ -64,14 +68,9 @@ export function useDataDirSettings() {
       pendingDir.value = null
       migrateData.value = true
       await loadDataDir()
-      changeNotice.value = migrate
+      showChangeNotice(migrate
         ? '已记录，重启后生效并自动迁移现有数据'
-        : '已记录，重启后生效（未迁移现有数据）'
-      if (changeTimer) clearTimeout(changeTimer)
-      changeTimer = setTimeout(() => {
-        changeNotice.value = null
-        changeTimer = null
-      }, 5_000)
+        : '已记录，重启后生效（未迁移现有数据）')
     } catch (e) {
       changeError.value = errorMessage(e, '更改数据目录失败')
     } finally {
@@ -88,25 +87,15 @@ export function useDataDirSettings() {
       pendingDir.value = null
       migrateData.value = true
       await loadDataDir()
-      changeNotice.value = migrate
+      showChangeNotice(migrate
         ? '已记录，重启后回到默认目录并迁移现有数据'
-        : '已记录，重启后回到默认目录（未迁移现有数据）'
-      if (changeTimer) clearTimeout(changeTimer)
-      changeTimer = setTimeout(() => {
-        changeNotice.value = null
-        changeTimer = null
-      }, 5_000)
+        : '已记录，重启后回到默认目录（未迁移现有数据）')
     } catch (e) {
       changeError.value = errorMessage(e, '恢复默认目录失败')
     } finally {
       changingDir.value = false
     }
   }
-
-  onScopeDispose(() => {
-    if (changeTimer) clearTimeout(changeTimer)
-    changeTimer = null
-  })
 
   return {
     dataDir,

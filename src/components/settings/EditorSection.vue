@@ -2,16 +2,15 @@
 import SettingsSectionFrame from './SettingsSectionFrame.vue'
 import { DEFAULT_LANGUAGES } from '@/utils/language'
 import { EDITOR_TAB_SIZES } from '@/utils/editor'
+import { SETTINGS_INPUT as INPUT } from '@/composables/useSettingsForm'
 import type { SettingsForm, SettingsFormPatch } from '@/composables/useSettingsForm'
 
 const props = defineProps<{
   form: SettingsForm
   errors: Record<string, string | null>
   inputClass: (field: string) => string
-  input: string
 }>()
 const emit = defineEmits<{ (event: 'update:form', patch: SettingsFormPatch): void }>()
-const { form, inputClass, input: INPUT } = props
 const LANGUAGE_OPTIONS = DEFAULT_LANGUAGES
 const TAB_SIZES = EDITOR_TAB_SIZES
 
@@ -45,11 +44,11 @@ const TAB_SIZES = EDITOR_TAB_SIZES
                     字号
                   </span>
                   <input
-                    v-model="form.fontSize"
+                    v-model="props.form.fontSize"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
-                    :class="inputClass('fontSize')"
+                    :class="props.inputClass('fontSize')"
                   />
                   <span v-if="props.errors.fontSize" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.fontSize }}
@@ -61,7 +60,7 @@ const TAB_SIZES = EDITOR_TAB_SIZES
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     Tab 宽度
                   </span>
-                  <select v-model.number="form.tabSize" :class="INPUT">
+                  <select v-model.number="props.form.tabSize" :class="INPUT">
                     <option v-for="size in TAB_SIZES" :key="size" :value="size">
                       {{ size }} 空格
                     </option>
@@ -75,7 +74,7 @@ const TAB_SIZES = EDITOR_TAB_SIZES
                   <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                     默认语言
                   </span>
-                  <select v-model="form.defaultLanguage" :class="INPUT">
+                  <select v-model="props.form.defaultLanguage" :class="INPUT">
                     <option v-for="lang in LANGUAGE_OPTIONS" :key="lang" :value="lang">
                       {{ lang }}
                     </option>
@@ -93,18 +92,18 @@ const TAB_SIZES = EDITOR_TAB_SIZES
                     <button
                       type="button"
                       role="switch"
-                      :aria-checked="form.autoSave"
+                      :aria-checked="props.form.autoSave"
                       class="settings-switch relative h-6 w-11 shrink-0 transition-colors"
-                      :class="form.autoSave ? 'bg-[var(--color-primary)]' : 'bg-[var(--bg-sidebar)]'"
-                      @click="emit('update:form', { autoSave: !form.autoSave })"
+                      :class="props.form.autoSave ? 'bg-[var(--color-primary)]' : 'bg-[var(--bg-sidebar)]'"
+                      @click="emit('update:form', { autoSave: !props.form.autoSave })"
                     >
                       <span
                         class="settings-switch-knob absolute left-0.5 top-0.5 h-5 w-5 rounded-sm bg-[var(--bg-card)] transition-transform"
-                        :class="form.autoSave ? 'translate-x-5' : ''"
+                        :class="props.form.autoSave ? 'translate-x-5' : ''"
                       ></span>
                     </button>
                     <span class="text-xs text-[var(--text-secondary)]">
-                      {{ form.autoSave ? '已开启' : '已关闭' }}
+                      {{ props.form.autoSave ? '已开启' : '已关闭' }}
                     </span>
                   </div>
                   <span class="mt-1 block text-xs text-[var(--text-muted)]">
@@ -116,18 +115,18 @@ const TAB_SIZES = EDITOR_TAB_SIZES
                   <span
                     class="mb-1 block text-xs font-medium"
                     :class="
-                      form.autoSave ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'
+                      props.form.autoSave ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'
                     "
                   >
                     自动保存间隔（秒）
                   </span>
                   <input
-                    v-model="form.autoSaveIntervalSecs"
+                    v-model="props.form.autoSaveIntervalSecs"
                     type="text"
                     inputmode="numeric"
                     spellcheck="false"
-                    :disabled="!form.autoSave"
-                    :class="inputClass('autoSaveIntervalSecs')"
+                    :disabled="!props.form.autoSave"
+                    :class="props.inputClass('autoSaveIntervalSecs')"
                   />
                   <span
                     v-if="props.errors.autoSaveIntervalSecs"
