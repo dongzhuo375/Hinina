@@ -195,6 +195,10 @@ fn report_data_dir(plan: &DataDirPlan, migration: &MigrateOutcome) {
 }
 
 fn main() {
+    // panic 钩子最优先：越早安装，启动期 panic 越有迹可循。GUI 子系统下
+    // stderr 无处可去，崩溃必须能落 logs/hinina.log 才可追查。
+    hinina_lib::infra::panic_report::install();
+
     // 运行时在 setup 之前建好：AppContext::init 是 async，而 setup 是同步回调。
     // 在 setup 里 block_on 是安全的 —— 那时事件循环还没跑起来，不存在阻塞它的风险。
     // 注意：事件消费者**不**跑在这个运行时上（它在 setup 结束时随 `rt` 一起销毁），

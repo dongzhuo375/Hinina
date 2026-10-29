@@ -7,6 +7,7 @@ pub mod fs_session_repo;
 pub mod fs_workspace_repo;
 pub mod http;
 pub mod logger;
+pub mod panic_report;
 pub mod plugin_api_factory;
 pub(crate) mod plugin_diagnostics;
 pub mod plugin_http;

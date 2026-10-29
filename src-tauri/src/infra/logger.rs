@@ -40,6 +40,18 @@ const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
 #[cfg(not(test))]
 static ACTIVE_LOG_PATH: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 
+/// 全局订阅器是否已安装。
+///
+/// panic 钩子（`infra::panic_report`）据此分流：就绪后经 `tracing::error!`
+/// 双路输出；此前 stderr 直写兜底——避免订阅器就绪后 stderr 双写。测试构建
+/// 的 `init` 分支不装订阅器，故恒为 false，与「测试进程无全局订阅器」一致。
+static SUBSCRIBER_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 全局订阅器是否已安装（进程级）。
+pub fn ready() -> bool {
+    SUBSCRIBER_READY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// 日志追踪（基于 Tracing）。
 ///
 /// 双路输出：stderr（开发调试）+ 文件（现场排障，选手机器上没有控制台）。
@@ -142,6 +154,7 @@ impl Logger {
                         .with(file_layer)
                         .try_init();
                     let path = if installed.is_ok() {
+                        SUBSCRIBER_READY.store(true, std::sync::atomic::Ordering::Relaxed);
                         let p = base_dir.join(LOG_RELATIVE_PATH);
                         *ACTIVE_LOG_PATH.lock().unwrap_or_else(|e| e.into_inner()) =
                             Some(p.clone());
@@ -159,10 +172,14 @@ impl Logger {
                 }
                 None => {
                     // 文件层不可用：保持旧的单路 stderr 行为
-                    let _ = tracing_subscriber::registry()
+                    if tracing_subscriber::registry()
                         .with(filter)
                         .with(stderr_layer)
-                        .try_init();
+                        .try_init()
+                        .is_ok()
+                    {
+                        SUBSCRIBER_READY.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                     Self { log_path: None }
                 }
             }
