@@ -1,26 +1,17 @@
 <script setup lang="ts">
 import PageHeading from '@/components/common/PageHeading.vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
-import { resetSessionForOjSwitch } from '@/stores/session'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
-import { DEFAULT_LANGUAGES, normalizeHojLanguage } from '@/utils/language'
-import {
-  EDITOR_FONT_SIZE_MAX,
-  EDITOR_FONT_SIZE_MIN,
-  EDITOR_TAB_SIZES,
-} from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
-import { ojBaseUrlHint, ojSelectOptions } from '@/utils/oj'
-import type { AppConfig, OjInstance } from '@/types/config'
+import { ojBaseUrlHint } from '@/utils/oj'
 import type { DataDirInfo, LocalDataUsage, StorageInfo } from '@/types/system'
 import { useTransientValue } from '@/composables/useTransientValue'
+import { useSettingsForm } from '@/composables/useSettingsForm'
 
 /**
  * 设置页 —— 应用配置（AppConfig）的可视化编辑入口。
@@ -34,294 +25,30 @@ import { useTransientValue } from '@/composables/useTransientValue'
 // 数字字段保留**原始字符串**：输入过程中的中间态（空串/半截数字）不应被强转成
 // NaN 写回，只有校验通过的值才会进入保存载荷。
 
-interface SettingsForm {
-  /// 当前 OJ 实例 id（下拉选择，候选 = instances 清单）
-  activeOj: string
-  /// 当前 OJ 实例的服务端地址（保存时写回该实例的 baseUrl）
-  ojUrl: string
-  /// 当前比赛引用（不透明字符串：HOJ 数字 ID / 其它 OJ 资源引用；空 = 未配置）
-  contestRef: string
-  contestPassword: string
-  timeoutSecs: string
-  pollIntervalSecs: string
-  pollTimeoutSecs: string
-  cacheTtlSecs: string
-  cacheProblemStatement: boolean
-  fontSize: string
-  tabSize: number
-  defaultLanguage: string
-  autoSave: boolean
-  autoSaveIntervalSecs: string
-  splitRatio: number
-}
-
-const form = reactive<SettingsForm>({
-  activeOj: 'HOJ',
-  ojUrl: '',
-  contestRef: '',
-  contestPassword: '',
-  timeoutSecs: '30',
-  pollIntervalSecs: '2',
-  pollTimeoutSecs: '300',
-  cacheTtlSecs: '60',
-  cacheProblemStatement: true,
-  fontSize: '14',
-  tabSize: 4,
-  defaultLanguage: 'C++',
-  autoSave: true,
-  autoSaveIntervalSecs: '30',
-  splitRatio: 0.48,
-})
-
-/// 基线快照（上次加载/保存成功时的表单序列化），用于 dirty 判定与「放弃更改」
-const baseline = ref('')
-
-function snapshot(): string {
-  return JSON.stringify(form)
-}
-
-const dirty = computed(() => baseline.value !== '' && snapshot() !== baseline.value)
-
-// ── 保存状态 ──
-
-const saving = ref(false)
-const saveError = ref<string | null>(null)
-const showSaved = ref(false)
-let savedTimer: ReturnType<typeof setTimeout> | null = null
-
-// ── 校验 ──
-
-/// 严格非负整数解析：拒绝空串/小数/负号/科学计数法等 Number() 会宽容接受的形式
-function parseIntStrict(raw: string): number | null {
-  const trimmed = raw.trim()
-  if (!/^\d+$/.test(trimmed)) return null
-  const n = Number(trimmed)
-  return Number.isSafeInteger(n) ? n : null
-}
-
-function intError(raw: string, min: number, max: number, label: string): string | null {
-  const n = parseIntStrict(raw)
-  if (n === null) return `${label}须为非负整数`
-  if (n < min || n > max) return `${label}须在 ${min}–${max} 之间`
-  return null
-}
-
-const errors = computed<Record<string, string | null>>(() => ({
-  ojUrl: /^https?:\/\/\S+$/i.test(form.ojUrl.trim()) ? null : '须以 http:// 或 https:// 开头',
-  // 比赛引用是自由格式字符串（HOJ 数字 / 其它 OJ 资源 ID）；空串 = 未配置，合法
-  contestRef: null,
-  timeoutSecs: intError(form.timeoutSecs, 1, 120, '请求超时'),
-  pollIntervalSecs: intError(form.pollIntervalSecs, 1, 30, '轮询间隔'),
-  pollTimeoutSecs: intError(form.pollTimeoutSecs, 30, 3600, '轮询总超时'),
-  cacheTtlSecs: intError(form.cacheTtlSecs, 0, 600, '缓存 TTL'),
-  fontSize: intError(form.fontSize, EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX, '字号'),
-  autoSaveIntervalSecs: intError(form.autoSaveIntervalSecs, 5, 300, '自动保存间隔'),
-}))
-
-const isValid = computed(() => Object.values(errors.value).every((e) => e === null))
-const canSave = computed(() => dirty.value && isValid.value && !saving.value)
-
-// ── 加载 ──
-
-const loading = ref(true)
-const loadError = ref<string | null>(null)
-const router = useRouter()
-
-const TAB_SIZES: readonly number[] = EDITOR_TAB_SIZES
-/// 默认语言候选 = HOJ 显示名（值域权威见 utils/language；与提交契约同源）
-const LANGUAGE_OPTIONS: readonly string[] = DEFAULT_LANGUAGES
-
-/// OJ 实例清单（populate 时从配置刷新；切换后取新实例地址、渲染禁用态）
-const ojInstances = ref<OjInstance[]>([])
-/// 下拉候选 = 已知 OJ 枚举（含尚未配置者，选中即引导创建实例）+ 配置里的其它 id
-const ojOptions = computed(() => ojSelectOptions(ojInstances.value))
-/// 已持久化的当前 OJ（切换失败时回滚下拉显示，保持 UI 与后端一致）
-const persistedActive = ref('HOJ')
-/// 切换 OJ 的错误提示（独立于保存错误：两个不同意图）
-const switchError = ref<string | null>(null)
-/// 切换 OJ 的引导提示（尚未配置的 OJ：不是错误，只是告诉用户下一步做什么）
-const switchNotice = ref<string | null>(null)
-
-/// 切换的公共尾部：调用后端命令（后端会按需注册新实例）→ 重置会话上下文 → 回登录页。
-///
-/// 抽出来是因为有两条入口：下拉的显式切换、以及「保存新建实例后自动完成切换」
-/// （用户在选下拉时已表达切换意图，只是当时实例还不存在）。失败如实写 `switchError`，
-/// 由调用方决定是否回滚下拉显示。
-async function performSwitch(target: string): Promise<boolean> {
-  try {
-    await configService.switchOj(target)
-    persistedActive.value = target
-    // 旧 OJ 的用户/比赛/题面/提交对新 OJ 全部失效（解题页还会拿旧 contest.id
-    // 向新 OJ 提交）：与登出同款清理，但不打后端 logout（Registry 已切换，
-    // 那会误删新 OJ 自己的会话文件）
-    resetSessionForOjSwitch()
-    void router.replace({ name: 'Login' })
-    return true
-  } catch (e) {
-    switchError.value = errorMessage(e, '切换 OJ 失败')
-    return false
-  }
-}
-
-/// 切换当前 OJ：显式命令（即时生效 + 持久化 oj.active + 发布 OJSwitched）。
-/// 与「保存」解耦 —— 保存仍负责地址/比赛引用等其余字段。
-/// 切换成功 = 整个应用换了服务端：重置会话上下文并回登录页，由路由守卫按新 OJ
-/// 的会话文件恢复会话（该 OJ 登录过则无感续用，否则落在登录表单）。
-async function onSwitchOj(): Promise<void> {
-  switchError.value = null
-  switchNotice.value = null
-  const target = form.activeOj
-  // 尚未配置的 OJ（从枚举里挑出来的新类型）：**不切换**，引导先填地址保存。
-  // 直接切必然失败（无实例 → 后端无从注册），把用户丢进一个错误提示不如
-  // 明确告诉他下一步：填地址 → 保存（建实例并自动切换）。
-  const option = ojOptions.value.find((o) => o.id === target)
-  if (option && !option.configured) {
-    // 地址栏必须清空：它属于「当前选中的 OJ」，留着旧 OJ 的地址会让「保存」
-    // 把它写进新实例（数据损坏）。未保存的地址编辑随之丢弃 —— 与已配置实例的
-    // 切换同款语义，但这里显式告知，不静默。
-    const discarded = form.ojUrl !== ''
-    form.ojUrl = ''
-    switchNotice.value =
-      `${target} 尚未配置：填写服务器地址后点「保存」，将自动创建实例并切换` +
-      (discarded ? '（切换前未保存的地址编辑已丢弃）' : '')
-    return
-  }
-  if (await performSwitch(target)) {
-    // 地址栏跟随新实例：否则表单里仍是旧实例的地址，「保存」会把它写进
-    // 新实例的 baseUrl（数据损坏）。切换前未保存的地址编辑随之丢弃 ——
-    // 用户已切换编辑对象，这是预期行为。
-    form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
-  } else {
-    // 回滚下拉到已持久化值，避免 UI 停留在一个未生效的 OJ
-    form.activeOj = persistedActive.value
-  }
-}
-
-/// 分栏比例钳位到滑杆值域 [0.30, 0.70]，两位小数（与 step 0.01 对齐）
-function clampRatio(value: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 0.48
-  return Math.min(0.7, Math.max(0.3, Math.round(value * 100) / 100))
-}
-
-function populate(config: AppConfig): void {
-  form.activeOj = config.oj.active
-  persistedActive.value = config.oj.active
-  switchError.value = null
-  switchNotice.value = null
-  ojInstances.value = config.oj.instances
-  // 展示当前选中实例的地址（active 未命中时回退第一个启用实例，兜底竞态）
-  form.ojUrl =
-    config.oj.instances.find((i) => i.id === config.oj.active)?.baseUrl
-    ?? configService.activeOjBaseUrl(config)
-  form.contestRef = config.oj.contestRef ?? ''
-  form.contestPassword = config.oj.contestPassword ?? ''
-  form.timeoutSecs = String(config.oj.timeoutSecs)
-  form.pollIntervalSecs = String(config.oj.pollIntervalSecs)
-  form.pollTimeoutSecs = String(config.oj.pollTimeoutSecs)
-  form.cacheTtlSecs = String(config.oj.cacheTtlSecs)
-  form.cacheProblemStatement = config.oj.cacheProblemStatement ?? true
-  form.fontSize = String(config.editor.fontSize)
-  form.tabSize = TAB_SIZES.includes(config.editor.tabSize) ? config.editor.tabSize : 4
-  form.defaultLanguage = normalizeHojLanguage(config.editor.defaultLanguage)
-  form.autoSave = config.editor.autoSave
-  form.autoSaveIntervalSecs = String(config.editor.autoSaveIntervalSecs)
-  form.splitRatio = clampRatio(config.layout.splitRatio)
-  baseline.value = snapshot()
-}
-
-async function load(): Promise<void> {
-  loading.value = true
-  loadError.value = null
-  try {
-    // 设置页必须展示磁盘真值：先失效进程内缓存再读
-    configService.invalidate()
-    populate(await configService.getConfig())
-  } catch (e) {
-    loadError.value = errorMessage(e, '读取配置失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-// ── 保存 / 放弃 ──
-
-async function save(): Promise<void> {
-  if (!canSave.value) return
-  saving.value = true
-  saveError.value = null
-  // 目标 OJ 与「是否新建实例」在**保存前**定死：两者都用于保存后的自动切换，
-  // 绝不能从保存过程中的副作用里读 —— 保存失败时那个标记会残留，导致**下一次
-  // 无关保存**去切换一个从未落盘的 OJ（后端必然 ProviderNotFound）。
-  const target = form.activeOj
-  const isNewInstance = !ojInstances.value.some((i) => i.id === target)
-  try {
-    // 后端 update_config 是整体替换语义，updateConfig 内部已做读-改-写；
-    // 这里只把校验通过的表单值写入草稿
-    const saved = await configService.updateConfig((draft) => {
-      // active **不在这里写**：它只由 switch_oj 改写（切换是即时生效的独立意图）。
-      // 若保存也写 active，新建实例的场景会出现「配置说 Hydro、运行中的 Registry
-      // 仍是 HOJ」的静默不一致（保存不触发切换）。
-      //
-      // 地址写回目标实例；实例不存在则**创建**（设置页支持从枚举里挑一个尚未
-      // 配置的 OJ —— 保存即建实例，之后切换无需手改 config.json）
-      const instance = draft.oj.instances.find((i) => i.id === target)
-      if (instance) {
-        instance.baseUrl = form.ojUrl.trim()
-        // 保存地址即视为启用该 OJ（否则实例不会注册，切换必失败）
-        instance.enabled = true
-      } else {
-        draft.oj.instances.push({
-          id: target,
-          baseUrl: form.ojUrl.trim(),
-          enabled: true,
-          options: {},
-        })
-      }
-      draft.oj.contestRef = form.contestRef.trim()
-      draft.oj.contestPassword = form.contestPassword === '' ? null : form.contestPassword
-      draft.oj.timeoutSecs = Number(form.timeoutSecs)
-      draft.oj.pollIntervalSecs = Number(form.pollIntervalSecs)
-      draft.oj.pollTimeoutSecs = Number(form.pollTimeoutSecs)
-      draft.oj.cacheTtlSecs = Number(form.cacheTtlSecs)
-      draft.oj.cacheProblemStatement = form.cacheProblemStatement
-      draft.editor.fontSize = Number(form.fontSize)
-      draft.editor.tabSize = form.tabSize
-      draft.editor.defaultLanguage = form.defaultLanguage
-      draft.editor.autoSave = form.autoSave
-      draft.editor.autoSaveIntervalSecs = Number(form.autoSaveIntervalSecs)
-      draft.layout.splitRatio = form.splitRatio
-    })
-    baseline.value = snapshot()
-    // 实例清单已变（可能新增了当前 OJ）：同步给下拉，使「configured」状态即时正确 ——
-    // 否则刚创建的实例仍被当成未配置，用户重试切换会被拦下
-    ojInstances.value = saved.oj.instances
-    showSaved.value = true
-    if (savedTimer) clearTimeout(savedTimer)
-    savedTimer = setTimeout(() => {
-      showSaved.value = false
-      savedTimer = null
-    }, 3_000)
-
-    // 保存时新建了实例（从枚举里挑的未配置 OJ）→ 完成用户**已经表达过**的切换意图：
-    // 实例已落盘，后端 `switch_oj` 会按需注册它，无需重启客户端。
-    // 失败不吞：写提示让用户在上方重试（此时实例已 configured，重试可成功）。
-    if (isNewInstance) {
-      if (await performSwitch(target)) return
-      switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
-    }
-  } catch (e) {
-    saveError.value = errorMessage(e, '保存配置失败')
-  } finally {
-    saving.value = false
-  }
-}
-
-/// 放弃更改：回到基线（上次加载/保存成功时的值）
-function discard(): void {
-  if (baseline.value === '') return
-  Object.assign(form, JSON.parse(baseline.value) as SettingsForm)
-  saveError.value = null
-}
+const {
+  form,
+  dirty,
+  saving,
+  saveError,
+  showSaved,
+  errors,
+  isValid,
+  canSave,
+  loading,
+  loadError,
+  ojOptions,
+  switchError,
+  switchNotice,
+  load,
+  save,
+  discard,
+  onSwitchOj,
+  clampRatio,
+  inputClass,
+  INPUT,
+  LANGUAGE_OPTIONS,
+  TAB_SIZES,
+} = useSettingsForm()
 
 // ── 关于（存储信息）──
 
@@ -706,16 +433,6 @@ function onSplitInput(event: Event): void {
 
 const splitPercent = computed(() => Math.round(form.splitRatio * 100))
 
-// ── 样式常量 ──
-
-const INPUT =
-  'w-full rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] transition-colors placeholder-[var(--text-muted)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:bg-[var(--bg-sidebar)] disabled:text-[var(--text-muted)]'
-const INPUT_ERROR = 'border-[var(--color-wa-border)] focus:border-[var(--color-wa-border)] focus:ring-[var(--color-error)]'
-
-function inputClass(field: string): string {
-  return errors.value[field] ? `${INPUT} ${INPUT_ERROR}` : INPUT
-}
-
 onMounted(() => {
   void load()
   void loadStorage()
@@ -725,7 +442,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   releaseSpyLock()
-  if (savedTimer) clearTimeout(savedTimer)
   if (resetTimer) clearTimeout(resetTimer)
   if (purgeTimer) clearTimeout(purgeTimer)
   if (changeTimer) clearTimeout(changeTimer)

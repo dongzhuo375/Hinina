@@ -10,6 +10,8 @@
 
 ## 核心类型/函数
 
+配置草稿、校验、保存和 OJ 切换已抽取到 `composables/useSettingsForm`，本 View 通过该控制器暴露的同一 reactive 状态渲染；下列配置域 API 的所有权属于控制器而不是视图本地实现。
+
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `SettingsForm` | interface | 表单草稿；**数字字段保留原始字符串**——输入中间态（空串/半截数字）不应被强转成 NaN 写回，只有校验通过的值才进入保存载荷 |
@@ -55,7 +57,8 @@
 - `@/utils/editor`（`EDITOR_TAB_SIZES` / `EDITOR_FONT_SIZE_MIN` / `EDITOR_FONT_SIZE_MAX` —— 编辑器分组的值域唯一权威）
 - `@/utils/language`（`DEFAULT_LANGUAGES` / `normalizeHojLanguage` —— 语言候选与归一）
 - `@/utils/oj`（`ojSelectOptions` / `ojBaseUrlHint` —— OJ 下拉候选与地址占位）
-- `@/composables/useTransientValue`（About 复制反馈与 timer 生命周期；本分支不拆分 SettingsView 其它结构）
+- `@/composables/useTransientValue`（About 复制反馈与 timer 生命周期）
+- `@/composables/useSettingsForm`（配置草稿、校验、保存与 OJ 切换控制器）
 
 ## 被依赖
 
