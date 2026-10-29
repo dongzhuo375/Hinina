@@ -72,6 +72,13 @@ pub struct Logger {
 /// tracing 的 `MakeWriter` 每次事件都会取一个 `io::Write`，
 /// 而 `File` 不是 `Sync`，故用 `Arc<Mutex<File>>` 共享句柄并逐条加锁写入。
 /// 仅非测试构建使用（测试构建不装订阅器，见 `Logger::init`）。
+///
+/// **已知且接受的重入窗口**：若某线程在持有这把锁期间 panic，panic 钩子会
+/// 在同一线程经文件层再次 `lock()`——std Mutex 不可重入，崩溃路径会挂住。
+/// 能走到这里的 panic 只有字段 `Display` 实现 panic（本项目日志字段全是
+/// std 基础类型与 anyhow Error，无已知 panic 路径；`io::Write` 失败不 panic），
+/// 窗口纯理论。换 `try_lock` 会让正常多线程日志在争用时丢行，权衡后只注释
+/// 不改语义；`infra::panic_report` 的钩子注释有交叉引用。
 #[cfg(not(test))]
 struct SharedFileWriter(Arc<Mutex<File>>);
 

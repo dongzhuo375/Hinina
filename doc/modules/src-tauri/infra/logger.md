@@ -39,6 +39,7 @@
 
 ## 设计要点
 
+- **文件层锁的重入窗口（已知且接受）**：`SharedFileWriter` 的 `Mutex<File>` 不可重入——若某线程持锁期间 panic（本项目日志字段全是 std 基础类型与 anyhow Error，无已知 panic 路径；`io::Write` 失败不 panic），panic 钩子会在同一线程经文件层再次 `lock()`，崩溃路径会挂住。换 `try_lock` 会让正常多线程日志在争用时丢行，权衡后只注释不改语义（`infra::panic_report` 钩子注释有交叉引用）。
 - **GUI 子系统（release）下 stderr 句柄无效是常态，不是错误**：tracing-subscriber 0.3.23 的 fmt 层对写错误静默丢弃（`log_internal_errors` 默认 false，源码 `fmt_layer.rs` 的 `on_event` 取证），故双路输出在无控制台时安全降级为单路文件。本模块自身的报障出口（`stderr_line`）与 panic 钩子的兜底写同样容忍写失败——错误路径上绝不允许二次 panic（`eprintln!` 在写失败时恰恰会 panic）。
 - **运行期清理用「重开 + 截断」而不是句柄 `set_len`**：日志句柄是**追加模式**打开的（只有 `FILE_APPEND_DATA`，没有 `FILE_WRITE_DATA`），Windows 上 `set_len` 会被拒（实测 `Os code 5, PermissionDenied`）。新句柄带 `GENERIC_WRITE`，而两个句柄的共享模式都允许对方写入，故互不冲突；`append` 模式保证后续日志自动从 0 开始。这与启动时的截断式轮转是同一手法（`fs::write(path, [])`），两处不会漂移。
 - **只清内容、不删文件**：删了要等下次启动才重建，中间这段排障信息就彻底没了。

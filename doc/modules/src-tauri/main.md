@@ -4,7 +4,7 @@
 应用程序入口点与**组合根**。按顺序初始化所有子系统，构造 `AppContext`，启动全部事件消费者，启动 Tauri 桌面窗口。release 构建经 `#![windows_subsystem = "windows"]` 走 GUI 子系统（不带控制台，`--console` 启动参数可重新附加，见 `infra/console.md`）；崩溃经 panic 钩子落日志（见 `infra/panic_report.md`）。
 
 ## 核心类型/函数
-- `fn main()` — 程序入口：**先 `--console` 附加调试控制台（`infra::console::requested/attach`，幂等）→ 安装 panic 钩子（`infra::panic_report::install`，覆盖启动期 panic）→** 创建 Tokio runtime → 注册 dialog 插件 → **在 `.setup()` 里**解析数据目录（`app_local_data_dir()`）、执行一次性迁移、初始化 `AppContext`、接上插件通知出口并 `manage` → 启动事件消费者 → spawn 插件自启动 → 以 `generate_handler!` 注册全部 Command → 启动 Tauri App（退出时收尾全部插件）。控制台重绑与钩子安装都必须早于 `Logger::init` 与任何 stdio 使用
+- `fn main()` — 程序入口：**先安装 panic 钩子（`infra::panic_report::install`）→ `--console` 附加调试控制台（`infra::console::requested/attach`，幂等，`args_os()` 收集参数）→** 创建 Tokio runtime → 注册 dialog 插件 → **在 `.setup()` 里**解析数据目录（`app_local_data_dir()`）、执行一次性迁移、初始化 `AppContext`、接上插件通知出口并 `manage` → 启动事件消费者 → spawn 插件自启动 → 以 `generate_handler!` 注册全部 Command → 启动 Tauri App（退出时收尾全部插件）。控制台重绑必须早于 `Logger::init` 与任何 stdio 使用
 - `const WORKSPACE_SAVED_EVENT: &str = "workspace-saved"` — 工作区落盘事件的前端通道名，与 `src/bridge/workspace.bridge.ts` 的 `listen` 对应
 - `const ANNOUNCEMENTS_PUBLISHED_EVENT: &str = "announcements-published"` — 新公告事件的前端通道名，与 `src/bridge/announcement.bridge.ts` 的 `onAnnouncementsPublished` 对应
 - `const FRONTEND_BRIDGE_CONSUMER: &str = "tauri-frontend-bridge"` — 前端事件桥的消费者名（日志字段）
@@ -46,7 +46,7 @@
 - 无 — 顶层入口点，不被其他模块引用
 
 ## 逻辑流程
-0. **stdio 预备**：`--console` 附加调试控制台（release GUI 构建默认无控制台：从终端启动挂父控制台、双击启动新开窗口、已有控制台幂等跳过）→ 安装 panic 钩子（消息/线程/位置/强制堆栈经 `tracing::error!` 落 `logs/hinina.log`，订阅器未就绪时走写失败可忽略的 stderr 直写）。这一步必须在最前：重绑的 std 句柄要被钩子的兜底写与 Logger 的 stderr 层接住
+0. **panic 钩子最先安装**（此后包括参数解析在内的任何 panic 都有落点）→ `--console` 附加调试控制台（release GUI 构建默认无控制台：从终端启动挂父控制台、双击启动新开窗口、已有控制台幂等跳过；参数用 `args_os()` 收集，非 Unicode 参数不会 panic）→ 此后的 stderr 兜底与 Logger 的 stderr 层都接得住。**日志落盘保证只覆盖 `Logger::init` 之后的 panic**；就绪前的窗口由 bootstrap 崩溃文件 `%TEMP%/hinina-panic.log` 兜底（见 `infra/panic_report.md`）
 1. 创建 Tokio runtime（`tokio::runtime::Runtime::new()`）—— `AppContext::init` 是 async，
    而 `.setup()` 是同步回调，故 runtime 必须在 setup 之前建好。**注意：事件消费者不跑在这个
    运行时上**（它在 setup 结束时随 `rt` 一起销毁），而是由 `spawn_event_consumers` 投到
