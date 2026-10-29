@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   updateConfig: vi.fn(),
   invalidate: vi.fn(),
   switchOj: vi.fn(),
-  activeOjBaseUrl: vi.fn(),
   resetSessionForOjSwitch: vi.fn(),
   routerReplace: vi.fn(),
 }))
@@ -20,7 +19,6 @@ vi.mock('@/services/config.service', () => ({
     updateConfig: mocks.updateConfig,
     invalidate: mocks.invalidate,
     switchOj: mocks.switchOj,
-    activeOjBaseUrl: mocks.activeOjBaseUrl,
   },
 }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
@@ -57,7 +55,6 @@ beforeEach(async () => {
     return draft
   })
   mocks.switchOj.mockResolvedValue(undefined)
-  mocks.activeOjBaseUrl.mockImplementation((config: AppConfig) => config.oj.instances[0]?.baseUrl ?? '')
   scope = effectScope()
   settings = scope.run(() => useSettingsForm())!
   await settings.load()

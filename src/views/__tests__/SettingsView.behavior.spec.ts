@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   updateConfig: vi.fn(),
   invalidate: vi.fn(),
   switchOj: vi.fn(),
-  activeOjBaseUrl: vi.fn(),
   getStorageInfo: vi.fn(),
   localDataUsage: vi.fn(),
   getDataDir: vi.fn(),
@@ -31,7 +30,6 @@ vi.mock('@/services/config.service', () => ({
     updateConfig: mocks.updateConfig,
     invalidate: mocks.invalidate,
     switchOj: mocks.switchOj,
-    activeOjBaseUrl: mocks.activeOjBaseUrl,
   },
 }))
 vi.mock('@/services/system.service', () => ({
@@ -124,7 +122,6 @@ beforeEach(() => {
     return draft
   })
   mocks.switchOj.mockResolvedValue(undefined)
-  mocks.activeOjBaseUrl.mockImplementation((config: AppConfig) => config.oj.instances[0]?.baseUrl ?? '')
   mocks.getStorageInfo.mockResolvedValue({
     baseDir: 'D:\\hinina',
     logPath: 'D:\\hinina\\logs\\hinina.log',
