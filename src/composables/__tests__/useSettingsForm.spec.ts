@@ -86,6 +86,30 @@ describe('useSettingsForm', () => {
     expect(settings.canSave.value).toBe(true)
   })
 
+  it.each(['abc', '', '1e5'])(
+    '关闭自动保存后，隐藏的非法间隔 %j 不进入保存载荷（保留已存值）',
+    async (raw) => {
+      settings.form.autoSaveIntervalSecs = raw
+      expect(settings.errors.value.autoSaveIntervalSecs).not.toBeNull()
+      expect(settings.canSave.value).toBe(false)
+
+      // 关闭开关后错误隐藏、保存被放行：隐藏值仍不得写进载荷
+      settings.form.autoSave = false
+      expect(settings.errors.value.autoSaveIntervalSecs).toBeNull()
+      expect(settings.canSave.value).toBe(true)
+      await settings.save()
+
+      expect(currentConfig.editor.autoSave).toBe(false)
+      expect(currentConfig.editor.autoSaveIntervalSecs).toBe(30)
+    },
+  )
+
+  it('开启自动保存时把通过严格校验的间隔写入载荷', async () => {
+    settings.form.autoSaveIntervalSecs = '120'
+    await settings.save()
+    expect(currentConfig.editor.autoSaveIntervalSecs).toBe(120)
+  })
+
   it('保存期间的新编辑不被误标为已保存，discard 回到提交快照', async () => {
     let resolveSave!: (config: AppConfig) => void
     mocks.updateConfig.mockImplementationOnce((mutator: (draft: AppConfig) => void) => {

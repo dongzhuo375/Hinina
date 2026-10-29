@@ -220,7 +220,14 @@ export function useSettingsForm() {
         draft.editor.tabSize = submitted.tabSize
         draft.editor.defaultLanguage = submitted.defaultLanguage
         draft.editor.autoSave = submitted.autoSave
-        draft.editor.autoSaveIntervalSecs = Number(submitted.autoSaveIntervalSecs)
+        // 关闭自动保存时该字段被禁用且不参与校验：隐藏的原始输入不得进入载荷
+        // （NaN 会序列化成 null，Rust u64 反序列化失败会让整次保存失败），保留已存值
+        const autoSaveIntervalSecs = submitted.autoSave
+          ? parseIntStrict(submitted.autoSaveIntervalSecs)
+          : null
+        if (autoSaveIntervalSecs !== null) {
+          draft.editor.autoSaveIntervalSecs = autoSaveIntervalSecs
+        }
         draft.layout.splitRatio = submitted.splitRatio
       })
       baseline.value = submittedSnapshot
