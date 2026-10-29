@@ -54,6 +54,7 @@
 - `@/composables/useAboutSettings`（存储信息与 About 复制）
 - `@/composables/useMaintenanceSettings`（重置、清理及提示 timer）
 - `@/composables/useDataDirSettings`（目录候选、迁移与通知）
+- `@/composables/useSettingsScrollSpy`（导航高亮、点击锁、atBottom 与 scope 清理）
 - config/system service、类型和相关 store 由上述 controllers 持有，不再由 View 直接调用
 
 ## 被依赖
