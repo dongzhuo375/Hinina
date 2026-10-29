@@ -49,8 +49,9 @@ function intError(raw: string, min: number, max: number, label: string): string 
   return null
 }
 
-const INPUT =
+export const SETTINGS_INPUT =
   'w-full rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] transition-colors placeholder-[var(--text-muted)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:bg-[var(--bg-sidebar)] disabled:text-[var(--text-muted)]'
+const INPUT = SETTINGS_INPUT
 const INPUT_ERROR = 'border-[var(--color-wa-border)] focus:border-[var(--color-wa-border)] focus:ring-[var(--color-error)]'
 
 /**

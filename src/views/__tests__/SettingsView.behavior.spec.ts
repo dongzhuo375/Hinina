@@ -176,6 +176,14 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     expect(mocks.localDataUsage.mock.invocationCallOrder[0]).toBeLessThan(mocks.getDataDir.mock.invocationCallOrder[0])
   })
 
+  it('七个真实 section 的 id 与导航顺序保持不变', async () => {
+    const view = await render()
+    const ids = [...view.host.querySelectorAll('section.settings-section')].map((section) => section.id)
+    expect(ids).toEqual(Array.from({ length: 7 }, (_, index) => `settings-${index}`))
+    const hrefs = [...view.host.querySelectorAll('.settings-index a')].map((link) => link.getAttribute('href'))
+    expect(hrefs).toEqual(Array.from({ length: 7 }, (_, index) => `#settings-${index}`))
+  })
+
   it('真实编辑后保存完整配置：不得写 active，成功后推进 baseline', async () => {
     const view = await render()
     await setField(view.host, '比赛 ID / 引用', ' 2002 ')
@@ -220,7 +228,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     await settleView(2)
 
     expect(field(view.host, '当前 OJ').value).toBe('HOJ')
-    expect(view.host.textContent).toContain('切换失败')
+    await vi.waitFor(() => expect(view.host.textContent).toContain('切换失败'))
     expect(mocks.resetSessionForOjSwitch).not.toHaveBeenCalled()
     expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
