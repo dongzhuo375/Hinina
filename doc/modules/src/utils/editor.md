@@ -30,7 +30,7 @@
 - `components/editor/CodeEditor.vue` — 偏好初值（配置读取到达前的占位值）
 - `components/editor/EditorConsoleBar.vue` — 缩进状态行的 Tab 宽度兜底
 - `views/ProblemSolveView.vue` — 状态行 Tab 宽度兜底
-- `views/SettingsView.vue` — 编辑器分组的 Tab 档位与字号校验上下界
+- `composables/useSettingsForm.ts`（字号校验上下界）与 `components/settings/EditorSection.vue`（Tab 档位）
 
 ## 逻辑流程
 

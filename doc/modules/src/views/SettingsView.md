@@ -30,7 +30,6 @@
 - `composables/useSettingsForm`（控制器与 `SettingsFormPatch` 类型）
 - `composables/useAboutSettings` / `useMaintenanceSettings` / `useDataDirSettings`
 - `composables/useSettingsScrollSpy`
-- `@/utils/oj`（`ojBaseUrlHint`，OJ 地址占位）
 
 config/system service、相关 store 和 types 由对应 controllers 持有；View 不直接 import bridge。
 

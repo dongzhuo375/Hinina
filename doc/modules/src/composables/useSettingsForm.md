@@ -4,7 +4,7 @@
 
 ## 职责
 
-集中持有设置页中央 `SettingsForm` 草稿、加载/校验/保存/放弃，以及 OJ 实例清单与显式/自动切换。四个配置 section 编辑同一份 reactive 草稿；`baseline`、`dirty` 和保存载荷始终从该对象派生，避免父子双份表单。
+集中持有设置页中央 `SettingsForm` 草稿、加载/校验/保存/放弃，以及 OJ 实例清单与显式/自动切换。OJ/Editor/Layout 三个配置 section 编辑同一份 reactive 草稿（Theme 只读占位）；`baseline`、`dirty` 和保存载荷始终从该对象派生，避免父子双份表单。
 
 ## 核心类型/函数
 
@@ -34,7 +34,7 @@
 ## 被依赖
 
 - `views/SettingsView.vue`
-- `components/settings/OjServerSection.vue` / `EditorSection.vue` / `LayoutSection.vue`（后续 section 组合使用）
+- `components/settings/OjServerSection.vue` / `EditorSection.vue` / `LayoutSection.vue`（编辑草稿）与 `ThemeSection.vue`（复用 `SETTINGS_INPUT`）
 - `composables/__tests__/useSettingsForm.spec.ts`
 
 ## 逻辑流程

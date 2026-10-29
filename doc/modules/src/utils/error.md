@@ -19,7 +19,7 @@
 ## 被依赖
 
 - stores：`authStore` / `announcementStore` / `problemStore` / `contestStore` / `rankStore` / `submissionStore`（错误态 `error` 文案）
-- views：`ProblemSolveView`（编排错误）、`SettingsView`（读取/保存配置）、`SubmissionDetailView`（详情加载）
+- views/composables：`ProblemSolveView`（编排错误）、`useSettingsForm` / `useMaintenanceSettings` / `useDataDirSettings`（设置页各域错误）、`SubmissionDetailView`（详情加载）
 
 ## 逻辑流程
 

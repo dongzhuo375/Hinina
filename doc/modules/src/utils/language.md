@@ -35,7 +35,7 @@
 - `components/problem/ProblemStatement.vue`（经 `utils/limits`）
 - `services/config.service.ts` — `getDefaultLanguage` 归一
 - `utils/limits.ts` — `isCLikeLanguage` 倍率判定
-- `views/SettingsView.vue` / `views/SubmissionDetailView.vue`
+- `composables/useSettingsForm.ts` / `components/settings/EditorSection.vue` / `views/SubmissionDetailView.vue`
 
 ## 逻辑流程
 

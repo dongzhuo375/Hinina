@@ -10,10 +10,10 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `form` / `errors` | props | 中央草稿与字号/自动保存间隔错误 |
+| `form` / `errors` | props | 中央草稿与字号/自动保存间隔错误；模板直接读 `props.errors` |
 | `inputClass` / `input` | props | 共享输入框样式 |
 | `LANGUAGE_OPTIONS` / `TAB_SIZES` | 常量 | 直接取 `utils/language` / `utils/editor` 权威候选 |
-| `update:form` | emit `SettingsFormPatch` | 字段补丁；Tab 数值转换、autoSave 开关和文本/选择更新 |
+| `update:form` | emit `SettingsFormPatch` | autoSave switch 补丁；文本/选择用 `v-model` 直接编辑同一 reactive 草稿并保留 IME composition |
 
 ## 直接依赖
 

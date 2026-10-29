@@ -34,12 +34,12 @@ OJ 类型域的**唯一权威模块**：维护「已知 OJ 类型」枚举清单
 
 ## 被依赖
 
-- `views/SettingsView.vue` — OJ 分组的下拉候选（`ojSelectOptions`）与地址占位提示（`ojBaseUrlHint`）
+- `composables/useSettingsForm.ts`（下拉候选与保存/切换）与 `components/settings/OjServerSection.vue`（地址占位提示）
 
 ## 逻辑流程
 
 ```
-SettingsView 读配置 → ojSelectOptions(config.oj.instances)
+useSettingsForm 读配置 → ojSelectOptions(config.oj.instances)
   → 已知枚举（HOJ / Hydro）逐个判定 configured/disabled
   → 追加枚举外的实例 id（手改配置的私有部署）
   → 用户选中未配置类型 → 引导填地址 → 保存建实例 → 后端按需注册 → 自动切换
