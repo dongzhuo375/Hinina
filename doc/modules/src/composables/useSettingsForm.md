@@ -14,20 +14,21 @@
 | `parseIntStrict` | `(raw) => number \| null` | 严格非负整数解析，拒绝空串、小数、负号、科学计数法 |
 | `clampRatio` | `(value) => number` | 分栏比例钳位到 `[0.30,0.70]` 并保留两位小数 |
 | `form` / `baseline` / `dirty` | reactive / ref / computed | 中央草稿、上次加载或保存成功的 JSON 基线、dirty 判定 |
-| `errors` / `isValid` / `canSave` | computed | URL 与各整数字段实时校验；`autoSave=false` 时间隔仍参与校验 |
+| `errors` / `isValid` / `canSave` | computed | URL 与各整数字段实时校验；`autoSave=false` 时隐藏的间隔字段不参与校验、不阻止保存 |
 | `load` / `populate` | fn | 先 `configService.invalidate()` 再读取磁盘配置并回填表单和实例清单 |
-| `save` / `discard` | fn | 经 `configService.updateConfig` 整体读-改-写；成功后推进 baseline，放弃时恢复基线 |
-| `ojInstances` / `ojOptions` / `persistedActive` | ref/computed | 实例清单、下拉候选、已持久化 active（失败回滚） |
-| `performSwitch` / `onSwitchOj` | fn | 显式切换与保存新实例后的自动切换共用；成功后重置会话并导航 Login，失败写错误 |
-| `INPUT` / `inputClass` | 常量/fn | 配置输入框基础样式与错误态拼接 |
-| `LANGUAGE_OPTIONS` / `TAB_SIZES` | readonly 数组 | 来自语言/编辑器权威 utils 的展示候选 |
+| `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示 |
+| `ojOptions` | computed | 实时下拉候选；实例清单与 persistedActive 为 controller 内部状态 |
+| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试 |
+| `SETTINGS_INPUT` / `inputClass` | 常量/fn | 共享输入框基础样式与错误态拼接 |
+
 
 ## 直接依赖
 
-- `vue`（`reactive` / `ref` / `computed` / `onScopeDispose`）
+- `vue`（`reactive` / `ref` / `computed`）
 - `vue-router`（切换成功后 `replace(Login)`）
 - `@/services/config.service`
 - `@/stores/session`（`resetSessionForOjSwitch`）
+- `@/composables/useTransientValue`（已保存提示）
 - `@/utils/language` / `editor` / `error` / `oj`
 - `@/types/config`
 
@@ -41,11 +42,10 @@
 
 1. `load()` 失效缓存并读取完整 `AppConfig`，回填草稿、OJ 实例和 baseline。
 2. 编辑只改中央 reactive 草稿；`errors` 与 `dirty/canSave` 实时派生。
-3. `save()` 在首个 await 前固定 `target/isNewInstance`，经 `updateConfig` 写入完整配置；普通保存**不写 `draft.oj.active`**。
-4. 保存成功后才推进 baseline、更新实例清单并显示 3 秒反馈；新建实例随后调用 `performSwitch`。
-5. 保存失败保留草稿与错误，自动切换意图不得残留到下一次保存。`discard()` 从 baseline 恢复。
-6. `savedTimer` 由 `onScopeDispose` 清理。
+3. `save()` 在首个 await 前冻结表单、target/isNewInstance 与提交快照，经 `updateConfig` 写入该快照；普通保存**不写 `draft.oj.active`**，已有实例不被重新 enabled。
+4. 保存成功后才把 baseline 前移到提交快照，并用 `useTransientValue` 显示 3 秒反馈；保存期间的新编辑保持 dirty。
+5. 新建实例自动切换失败时回滚 activeOj；保存失败保留草稿与错误，切换意图不残留到下一次保存。`discard()` 恢复提交快照并清除 switch 提示。
 
 ## 测试
 
-`src/composables/__tests__/useSettingsForm.spec.ts` 覆盖：严格校验与 autoSave 禁用不豁免、完整保存载荷与 active 不变、新实例自动切换、保存失败无残留切换意图、已配置 OJ 失败回滚。`SettingsView.spec.ts` 与 `SettingsView.behavior.spec.ts` 继续提供真实组合根回归。
+`src/composables/__tests__/useSettingsForm.spec.ts` 覆盖：严格校验、隐藏字段校验豁免、保存期间编辑保持 dirty、缺失 active 实例不借用 URL、禁用实例不被重新启用、完整保存载荷与 active 不变、新实例自动切换及失败回滚重试、保存失败无残留切换意图、已配置 OJ 失败回滚。`SettingsView.spec.ts` 与 `SettingsView.behavior.spec.ts` 继续提供真实组合根回归。

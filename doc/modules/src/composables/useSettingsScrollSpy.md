@@ -14,7 +14,8 @@
 | `scrollerRef` | `ref<HTMLElement \| null>` | 页面纵向滚动容器引用，由父级模板绑定 |
 | `activeSection` | `ref<number>` | 当前分组下标，驱动导航 `active/aria-current` |
 | `updateActiveSection` | `() => void` | 96px 判定线、真实 scrollable/atBottom、锁释放与目标停靠判定 |
-| `scrollToSection` | `(index) => void` | 立即锁定目标，`scrollIntoView({ behavior:'smooth' })` + `focus({ preventScroll:true })` |
+| `scheduleActiveSection` | `() => void` | 滚动事件合并为一次下一 tick 扫描，避免同帧重复读取分区布局 |
+| `scrollToSection` | `(index) => void` | 立即锁定目标，`scrollIntoView({ behavior:'smooth' })` + `focus({ preventScroll:true })`；监听 `scrollend`，3s 兜底 |
 
 ## 直接依赖
 
@@ -28,9 +29,9 @@
 ## 逻辑流程
 
 1. 普通滚动取最后一个顶边越过 `scrollerTop + 96px` 的分组；仅实际可滚动时 atBottom 才直接选最后一组。
-2. 点击导航立即高亮并启动 1 秒锁。目标顶边到达 `scrollerTop + 24px ± 2px` 时释放。
+2. 点击导航立即高亮并启动锁。锁持续到目标顶边到达 `scrollerTop + 24px ± 2px`、`scrollend` 或 3 秒兜底，不能在平滑滚动途中提前释放。
 3. atBottom 只对目标本来就是最后一组算到位信号，防止从底部回点上方组时提前解锁。
-4. `loading` 结束后经 `nextTick` 再校正一次；scope dispose 释放锁和 timer。
+4. 普通滚动事件经 `scheduleActiveSection` 合并到下一 tick 执行；`loading` 结束后经 `nextTick` 校正；scope dispose 释放锁、滚动监听和 timer。
 
 ## 测试
 

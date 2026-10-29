@@ -13,7 +13,7 @@
 | 组成 | 职责 |
 |------|------|
 | `useSettingsForm` | 中央 reactive 草稿、baseline/dirty/errors/canSave、配置加载/保存/放弃、OJ 清单与显式/自动切换 |
-| `updateForm(patch)` | 将 section 的 `SettingsFormPatch` 合并进同一 reactive 草稿，不替换对象身份、不创建父子双份表单 |
+| `updateForm(patch)` | 将 section 的 `SettingsFormPatch` 合并进同一 reactive 草稿；保存成功后仅当没有新编辑时才显示“已保存” |
 | `useAboutSettings` | About 存储信息与复制反馈；模型以 `about` 传给 AboutSection |
 | `useMaintenanceSettings` | 重置、清理、占用预览与提示 timer；模型以 `maintenance` 传给 ResetPurgeSection |
 | `useDataDirSettings` | 数据目录候选、迁移与通知；模型以 `dataDirSettings` 传给 DataDirSection |

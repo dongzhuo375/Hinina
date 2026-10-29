@@ -31,6 +31,7 @@ useTransientValue<T>(initialValue: T, durationMs: number): {
 - `components/problem/ProblemStatement.vue` — 样例下标，1500ms；剪贴板失败仍记录日志
 - `views/SubmissionDetailView.vue` — boolean，1500ms；保留 execCommand fallback，路由切换调用 `clear`
 - `composables/useAboutSettings.ts` — About 复制 key，2000ms；剪贴板失败保持静默
+- `useSettingsForm` / `useMaintenanceSettings` / `useDataDirSettings` — 保存、重置、清理和目录提示的定时回弹
 - `composables/__tests__/useTransientValue.spec.ts`
 
 ## 逻辑流程

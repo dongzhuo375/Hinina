@@ -19,7 +19,8 @@
 
 ## 直接依赖
 
-- `vue`（`ref` / `computed` / `onScopeDispose`）
+- `vue`（`ref` / `computed`）
+- `@/composables/useTransientValue`（5s 目录提示）
 - `@/services/system.service`
 - `@/utils/error`
 - `@/types/system`
@@ -32,7 +33,7 @@
 
 ## 逻辑流程
 
-选择器只返回候选，确认才写指针。确认和恢复默认都先读取当时的 migrate 值，再复位共享勾选，避免通知与实参不一致。成功后重新读取目录信息并显示 5 秒提示；失败只显示后端错误。changeTimer 由 scope dispose 清理。
+选择器只返回候选，确认才写指针。确认和恢复默认都先读取当时的 migrate 值，再复位共享勾选，避免通知与实参不一致。成功后重新读取目录信息并显示 5 秒提示；失败只显示后端错误。5 秒目录提示复用 `useTransientValue`，由 scope dispose 清理。
 
 ## 测试
 

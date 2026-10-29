@@ -18,7 +18,8 @@
 
 ## 直接依赖
 
-- `vue`（`ref` / `onScopeDispose`）
+- `vue`（`ref`）
+- `@/composables/useTransientValue`（3s 重置提示 / 4s 清理提示）
 - `@/services/system.service`
 - `@/stores/contestStore` / `problemStore` / `announcementStore`
 - `@/utils/error`
@@ -32,7 +33,7 @@
 
 ## 逻辑流程
 
-重置服务成功后只等待 `contestStore.loadContest()` 的结果来决定提示是否降级；`announcementStore.refresh()` 保持 `void` 发出，不纳入成功判定。清理只在实际勾选日志且 `logCleared=false` 时追加“日志未清理”，随后必须重读占用。reset/purge timer 由 scope dispose 清理。
+重置服务成功后只等待 `contestStore.loadContest()` 的结果来决定提示是否降级；`announcementStore.refresh()` 保持 `void` 发出，不纳入成功判定。清理只在实际勾选日志且 `logCleared=false` 时追加“日志未清理”，随后必须重读占用。reset/purge 提示复用 `useTransientValue`，由 scope dispose 清理。
 
 ## 测试
 

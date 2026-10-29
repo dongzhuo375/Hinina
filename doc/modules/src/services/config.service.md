@@ -43,7 +43,7 @@
 - `components/problem/ProblemStatement.vue` — 题面图片基址
 - `components/editor/CodeEditor.vue` — 字号 / Tab 宽度 / 编辑器主题（读 + 弹层改动落盘）
 - `views/ProblemSolveView.vue` — 初始分栏比例读取与拖拽回写
-- `composables/useSettingsForm.ts` — 设置页配置读取与保存、当前 OJ 切换（`switchOj`）与实例地址展示（`activeOjBaseUrl`）；`views/SettingsView.vue` 仅作组合根
+- `composables/useSettingsForm.ts` — 设置页配置读取与保存、当前 OJ 切换（`switchOj`）；`views/SettingsView.vue` 仅作组合根
 
 ## 逻辑流程
 

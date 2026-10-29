@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `form` / `errors` | props | 中央草稿与字号/自动保存间隔错误；模板直接读 `props.errors` |
-| `inputClass` / `input` | props | 共享输入框样式 |
+| `inputClass` | prop | 共享输入框错误态样式；基础样式直接 import `SETTINGS_INPUT` |
 | `LANGUAGE_OPTIONS` / `TAB_SIZES` | 常量 | 直接取 `utils/language` / `utils/editor` 权威候选 |
 | `update:form` | emit `SettingsFormPatch` | autoSave switch 补丁；文本/选择用 `v-model` 直接编辑同一 reactive 草稿并保留 IME composition |
 
@@ -19,7 +19,7 @@
 
 - `SettingsSectionFrame`
 - `@/utils/language` / `editor`
-- `@/composables/useSettingsForm`（仅类型）
+- `@/composables/useSettingsForm`（`SETTINGS_INPUT` 常量和类型）
 
 ## 被依赖
 
