@@ -3,15 +3,11 @@ import PageHeading from '@/components/common/PageHeading.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import { systemService } from '@/services/system.service'
-import { useAnnouncementStore } from '@/stores/announcementStore'
-import { useContestStore } from '@/stores/contestStore'
-import { useProblemStore } from '@/stores/problemStore'
-import { errorMessage } from '@/utils/error'
 import { ojBaseUrlHint } from '@/utils/oj'
-import type { DataDirInfo, LocalDataUsage, StorageInfo } from '@/types/system'
-import { useTransientValue } from '@/composables/useTransientValue'
 import { useSettingsForm } from '@/composables/useSettingsForm'
+import { useAboutSettings } from '@/composables/useAboutSettings'
+import { useMaintenanceSettings } from '@/composables/useMaintenanceSettings'
+import { useDataDirSettings } from '@/composables/useDataDirSettings'
 
 /**
  * 设置页 —— 应用配置（AppConfig）的可视化编辑入口。
@@ -50,287 +46,48 @@ const {
   TAB_SIZES,
 } = useSettingsForm()
 
-// ── 关于（存储信息）──
+const {
+  storage,
+  storageFailed,
+  loadStorage,
+  copiedKey,
+  copyText,
+} = useAboutSettings()
 
-const storage = ref<StorageInfo | null>(null)
-const storageFailed = ref(false)
+const {
+  resetting,
+  resetConfirmOpen,
+  resetNotice,
+  resetError,
+  usage,
+  usageFailed,
+  purgeLogs,
+  purgeSnapshots,
+  purging,
+  purgeConfirmOpen,
+  purgeNotice,
+  purgeError,
+  resetClient,
+  loadUsage,
+  purgeLocalData,
+  formatBytes,
+} = useMaintenanceSettings()
 
-async function loadStorage(): Promise<void> {
-  try {
-    storage.value = await systemService.getStorageInfo()
-  } catch {
-    // 非致命：仅「关于」区块降级为「获取失败」
-    storageFailed.value = true
-  }
-}
-
-const { value: copiedKey, show: showCopied } = useTransientValue<string | null>(null, 2_000)
-
-async function copyText(key: string, text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    showCopied(key)
-  } catch {
-    // 剪贴板不可用（权限/环境）时静默忽略，复制不是关键路径
-  }
-}
-
-// ── 重置与清理 ──
-//
-// 两个动作的定位刻意分开（入口本身是隐藏的：连点状态栏版本号 5 下才出现设置项）：
-// - **重置客户端**：清掉一切可重新从服务端获取的东西。安全、可反复点，故只做一次确认。
-// - **清理本地数据**：删除不可重建的本地事实（日志内容、过期提交留档）。不可逆，
-//   故必须先展示确切范围与体积、由用户勾选、再二次确认。
-
-const resetting = ref(false)
-const resetConfirmOpen = ref(false)
-/// 重置结果提示。`warn=true` 表示「重置成功但补拉失败」—— 文案与配色都必须如实，
-/// 不能因为重置本身成功就宣称数据已是最新。
-const resetNotice = ref<{ text: string; warn: boolean } | null>(null)
-const resetError = ref<string | null>(null)
-
-const usage = ref<LocalDataUsage | null>(null)
-const usageFailed = ref(false)
-const purgeLogs = ref(true)
-const purgeSnapshots = ref(true)
-const purging = ref(false)
-const purgeConfirmOpen = ref(false)
-/// 清理结果提示。`warn=true` 表示有勾选项实际没被清掉（如日志文件层不可用）
-const purgeNotice = ref<{ text: string; warn: boolean } | null>(null)
-const purgeError = ref<string | null>(null)
-
-let resetTimer: ReturnType<typeof setTimeout> | null = null
-let purgeTimer: ReturnType<typeof setTimeout> | null = null
-
-/// 文件体积展示（自适应单位）。
-///
-/// 不复用 `formatCodeLength`：那是「代码长度」口径，恒定按 KB 展示（源码都是 KB 级）；
-/// 这里要覆盖字节级留档与 MB 级日志，单位必须自适应。
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '-'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
-}
-
-/// 重置客户端，并立刻补拉当前比赛数据。
-///
-/// **必须补拉**：后端缓存清空后，前端 store 里的内存副本仍是旧值（重置刻意不动
-/// 前端状态，避免把界面清成空白）。不补拉的话用户看到的是「已重置」却依旧是旧数据，
-/// 等于把「重置是否生效」变成不可验证的玄学。
-///
-/// 补拉范围只覆盖**可观察的差异**，不追求「全场刷新」：
-/// - 比赛元信息 + 题目列表 → `loadContest`（立刻重拉）
-/// - 我的题目状态 → `invalidateMyStatus`（标记过期，总览页下次可见时重拉）
-/// - 公告列表 + **已读集合** → `refresh`：已读状态已被后端清空，重拉后 readIds
-///   归零，红点随之复亮（这正是重置应有的表现）
-///
-/// 榜单 / 提交历史 / 题面 / limits 的前端副本不补拉：它们与服务端同源，且服务端
-/// 本就不缓存这几项，进入对应页面时自然刷新 —— 重置不该变成一次全场请求风暴。
-async function resetClient(): Promise<void> {
-  resetConfirmOpen.value = false
-  resetting.value = true
-  resetNotice.value = null
-  resetError.value = null
-  try {
-    await systemService.resetClient()
-
-    // 补拉失败必须如实告知：重置本身已成功，但「数据已重新拉取」这句话不能凭空说
-    let refreshed = true
-    await useContestStore()
-      .loadContest()
-      .catch(() => {
-        refreshed = false
-      })
-    useProblemStore().invalidateMyStatus()
-    void useAnnouncementStore().refresh()
-
-    resetNotice.value = refreshed
-      ? { text: '已重置，数据已重新拉取', warn: false }
-      : { text: '已重置，但数据重新拉取失败，请手动刷新', warn: true }
-    if (resetTimer) clearTimeout(resetTimer)
-    resetTimer = setTimeout(() => {
-      resetNotice.value = null
-      resetTimer = null
-    }, 3_000)
-  } catch (e) {
-    resetError.value = errorMessage(e, '重置失败')
-  } finally {
-    resetting.value = false
-  }
-}
-
-/// 读取可清理项的体积（进入设置页与每次清理后各读一次，保证预览不是陈旧的）
-async function loadUsage(): Promise<void> {
-  try {
-    usage.value = await systemService.localDataUsage()
-    usageFailed.value = false
-  } catch {
-    // 非致命：仅该区块降级为「获取失败」，不影响重置客户端
-    usageFailed.value = true
-  }
-}
-
-/// 清理本地数据（不可逆）。两个勾选项都空时不发请求（后端也如实处理为 no-op）。
-async function purgeLocalData(): Promise<void> {
-  if (!purgeLogs.value && !purgeSnapshots.value) {
-    purgeError.value = '请先选择要清理的内容'
-    purgeConfirmOpen.value = false
-    return
-  }
-  purgeConfirmOpen.value = false
-  purging.value = true
-  purgeNotice.value = null
-  purgeError.value = null
-  try {
-    const report = await systemService.purgeLocalData(purgeLogs.value, purgeSnapshots.value)
-
-    const parts = [`释放 ${formatBytes(report.freedBytes)}`]
-    if (report.removedSnapshots > 0) parts.push(`删除留档 ${report.removedSnapshots} 个`)
-    // 勾了日志却没清掉（文件层不可用 / 截断失败）必须如实说明 ——
-    // 否则界面只剩「释放 0 B」，用户看不出日志其实没被动过
-    const logMissed = purgeLogs.value && !report.logCleared
-    if (logMissed) parts.push('日志未清理（文件层不可用或写入失败）')
-
-    purgeNotice.value = { text: `已清理：${parts.join('，')}`, warn: logMissed }
-    // 清理后重读体积：预览必须反映真值，否则用户会以为没生效
-    await loadUsage()
-    if (purgeTimer) clearTimeout(purgeTimer)
-    purgeTimer = setTimeout(() => {
-      purgeNotice.value = null
-      purgeTimer = null
-    }, 4_000)
-  } catch (e) {
-    purgeError.value = errorMessage(e, '清理本地数据失败')
-  } finally {
-    purging.value = false
-  }
-}
-
-// ── 数据目录 ──
-//
-// 改动**一律重启后生效**：各 Service 都持有以 base_dir 为根的 Storage、日志还握着
-// 文件句柄，运行中热切等于重建整个 AppContext。故这里只「校验 + 记录 + 提示重启」，
-// 真正的搬运由下次启动完成（见 Rust `infra::data_dir`）。
-//
-// 默认目录是 `%LOCALAPPDATA%/{identifier}`（不随域漫游）。之所以要能改：默认落在
-// 系统盘，选手可能想放到数据盘；而**回退到临时目录**（`source === 'fallbackTemp'`）
-// 意味着数据随时会被系统清理，界面必须显眼告警。
-
-const dataDir = ref<DataDirInfo | null>(null)
-const dataDirFailed = ref(false)
-
-/// 选择器返回的候选路径（等待用户确认时才写指针）
-const pendingDir = ref<string | null>(null)
-/// 是否把现有数据搬到新目录（默认勾选：不迁移会让界面看起来像被重置）
-const migrateData = ref(true)
-const changingDir = ref(false)
-const changeNotice = ref<string | null>(null)
-const changeError = ref<string | null>(null)
-
-let changeTimer: ReturnType<typeof setTimeout> | null = null
-
-/// 数据目录来源的中文说明与配色（回退临时目录必须醒目）
-const dataDirSourceMeta = computed(() => {
-  switch (dataDir.value?.source) {
-    case 'custom':
-      return { text: '用户指定', cls: 'text-[var(--color-primary)]' }
-    case 'fallbackTemp':
-      return { text: '临时目录（数据可能被系统清理）', cls: 'text-[var(--color-error)]' }
-    default:
-      return { text: '默认位置', cls: 'text-[var(--text-muted)]' }
-  }
-})
-
-async function loadDataDir(): Promise<void> {
-  try {
-    dataDir.value = await systemService.getDataDir()
-    dataDirFailed.value = false
-  } catch {
-    // 非致命：仅该区块降级为「获取失败」，不影响其余分组
-    dataDirFailed.value = true
-  }
-}
-
-/// 取消候选目录：**必须复位 `migrateData`**。
-///
-/// 它是「更改目录」与「恢复默认」共用的状态。若用户在候选面板里取消了勾选后又取消
-/// 整个流程，`migrateData` 会停在 `false` —— 接着点「恢复默认」就会**静默不迁移**，
-/// 而用户以为自己什么都没改过。故取消即回到默认值。
-function cancelDataDirChoice(): void {
-  pendingDir.value = null
-  migrateData.value = true
-}
-
-/// 打开原生目录选择器；取消则什么都不做（不产生任何状态变更）
-async function chooseDataDir(): Promise<void> {
-  changeError.value = null
-  changeNotice.value = null
-  try {
-    const picked = await systemService.pickDataDir()
-    if (!picked) return
-    pendingDir.value = picked
-    migrateData.value = true
-  } catch (e) {
-    changeError.value = errorMessage(e, '打开目录选择器失败')
-  }
-}
-
-/// 确认更改：写位置指针（不搬运，重启后由启动流程完成）
-async function confirmDataDir(): Promise<void> {
-  const target = pendingDir.value
-  if (!target) return
-  // **先取快照**：下面要复位 `migrateData`，若在复位之后再读它，通知文案就会说谎
-  // （曾经如此 —— `else` 分支成了死代码，用户取消勾选后仍看到「并自动迁移现有数据」）
-  const migrate = migrateData.value
-  changingDir.value = true
-  changeError.value = null
-  try {
-    await systemService.setDataDir(target, migrate)
-    pendingDir.value = null
-    // 复位共用状态：下一次操作（无论「更改目录」还是「恢复默认」）都从默认值开始
-    migrateData.value = true
-    await loadDataDir()
-    changeNotice.value = migrate
-      ? '已记录，重启后生效并自动迁移现有数据'
-      : '已记录，重启后生效（未迁移现有数据）'
-    if (changeTimer) clearTimeout(changeTimer)
-    changeTimer = setTimeout(() => {
-      changeNotice.value = null
-      changeTimer = null
-    }, 5_000)
-  } catch (e) {
-    changeError.value = errorMessage(e, '更改数据目录失败')
-  } finally {
-    changingDir.value = false
-  }
-}
-
-/// 恢复默认数据目录（同样重启后生效）
-async function restoreDefaultDataDir(): Promise<void> {
-  // 同 `confirmDataDir`：先取快照再复位
-  const migrate = migrateData.value
-  changingDir.value = true
-  changeError.value = null
-  try {
-    await systemService.resetDataDir(migrate)
-    pendingDir.value = null
-    migrateData.value = true
-    await loadDataDir()
-    changeNotice.value = migrate
-      ? '已记录，重启后回到默认目录并迁移现有数据'
-      : '已记录，重启后回到默认目录（未迁移现有数据）'
-    if (changeTimer) clearTimeout(changeTimer)
-    changeTimer = setTimeout(() => {
-      changeNotice.value = null
-      changeTimer = null
-    }, 5_000)
-  } catch (e) {
-    changeError.value = errorMessage(e, '恢复默认目录失败')
-  } finally {
-    changingDir.value = false
-  }
-}
+const {
+  dataDir,
+  dataDirFailed,
+  pendingDir,
+  migrateData,
+  changingDir,
+  changeNotice,
+  changeError,
+  dataDirSourceMeta,
+  loadDataDir,
+  cancelDataDirChoice,
+  chooseDataDir,
+  confirmDataDir,
+  restoreDefaultDataDir,
+} = useDataDirSettings()
 
 // ── 分组导航 scroll-spy ──
 // 左侧索引导航与 sections 的顺序/数量一一对应；滚动时以「最后一个顶边越过
@@ -442,9 +199,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   releaseSpyLock()
-  if (resetTimer) clearTimeout(resetTimer)
-  if (purgeTimer) clearTimeout(purgeTimer)
-  if (changeTimer) clearTimeout(changeTimer)
 })
 </script>
 

@@ -428,7 +428,10 @@ src/
 │   ├── useTransientValue.ts               # 临时反馈值与唯一回弹 timer（复制反馈；scope dispose 清理）
 │   ├── useNowMs.ts                        # 响应式毫秒墙钟（每秒重读 Date.now；各实例独立 interval，scope dispose 清理）
 │   ├── useSettingsForm.ts                 # 设置页配置草稿、校验、保存与 OJ 显式/自动切换控制器
-│   └── __tests__/                         # useTransientValue / useNowMs / useSettingsForm .spec.ts（回弹与 dispose/多实例；墙钟初始值、时间跳变与清理；设置表单保存与切换事务）
+│   ├── useAboutSettings.ts                # 设置页 About 存储信息与复制反馈（复用 useTransientValue）
+│   ├── useMaintenanceSettings.ts          # 设置页重置/清理控制器与提示 timer
+│   ├── useDataDirSettings.ts              # 设置页数据目录候选、迁移与通知控制器
+│   └── __tests__/                         # useTransientValue / useNowMs / useSettingsForm / useAboutSettings / useMaintenanceSettings / useDataDirSettings .spec.ts（共享回弹与墙钟；设置页表单、维护、About 与目录事务）
 ├── utils/
 │   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白；剥离只为安全，表现性标记保真渲染）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / **getAuthoritativeSchedule**（认证赛程与匿名简报跨场时以简报为准），登录页、路由守卫与顶部栏共用；原 hasContestStarted 已删除）

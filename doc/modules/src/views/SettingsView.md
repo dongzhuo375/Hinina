@@ -10,7 +10,7 @@
 
 ## 核心类型/函数
 
-配置草稿、校验、保存和 OJ 切换已抽取到 `composables/useSettingsForm`，本 View 通过该控制器暴露的同一 reactive 状态渲染；下列配置域 API 的所有权属于控制器而不是视图本地实现。
+配置草稿、校验、保存和 OJ 切换已抽取到 `composables/useSettingsForm`，本 View 通过该控制器暴露的同一 reactive 状态渲染；下列配置域 API 的所有权属于控制器而不是视图本地实现。About、重置/清理和数据目录分别归 `useAboutSettings`、`useMaintenanceSettings`、`useDataDirSettings`；父级仍统一按原顺序启动四路加载。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
@@ -49,16 +49,12 @@
 
 - `vue`
 - 组件：`PageHeading`（页头，编号 `05` / `PREFERENCES`）/ `ErrorMessage` / `LoadingSpinner`
-- `@/services/config.service`（`configService`）、`@/services/system.service`（`systemService`）
-- `@/stores/contestStore` / `@/stores/problemStore` / `@/stores/announcementStore`（重置后补拉比赛数据与公告）
-- `@/stores/session`（`resetSessionForOjSwitch` —— 切换 OJ 后重置会话域状态）
-- `@/types/config` / `@/types/system`（仅类型）
-- `@/utils/error`（`errorMessage` —— 错误文案收敛）
-- `@/utils/editor`（`EDITOR_TAB_SIZES` / `EDITOR_FONT_SIZE_MIN` / `EDITOR_FONT_SIZE_MAX` —— 编辑器分组的值域唯一权威）
-- `@/utils/language`（`DEFAULT_LANGUAGES` / `normalizeHojLanguage` —— 语言候选与归一）
-- `@/utils/oj`（`ojSelectOptions` / `ojBaseUrlHint` —— OJ 下拉候选与地址占位）
-- `@/composables/useTransientValue`（About 复制反馈与 timer 生命周期）
+- `@/utils/oj`（`ojBaseUrlHint` —— OJ 地址占位；候选与保存逻辑归 `useSettingsForm`）
 - `@/composables/useSettingsForm`（配置草稿、校验、保存与 OJ 切换控制器）
+- `@/composables/useAboutSettings`（存储信息与 About 复制）
+- `@/composables/useMaintenanceSettings`（重置、清理及提示 timer）
+- `@/composables/useDataDirSettings`（目录候选、迁移与通知）
+- config/system service、类型和相关 store 由上述 controllers 持有，不再由 View 直接调用
 
 ## 被依赖
 
