@@ -254,7 +254,9 @@ impl Logger {
 /// 绝不能自己把启动炸掉。
 fn stderr_line(msg: &str) {
     use std::io::Write as _;
-    let _ = io::stderr().write_all(msg.as_bytes());
+    // writeln! 补上结尾换行：错误文本之后通常还有别的输出（如 panic 兜底），
+    // 少了换行会与后续日志粘连在同一行，妨害排障
+    let _ = writeln!(io::stderr(), "{msg}");
 }
 
 /// 把日志文件截断为 0，返回释放的字节数。
