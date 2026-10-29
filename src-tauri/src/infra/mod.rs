@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod cache;
+pub mod console;
 pub mod data_dir;
 pub mod fs_config_repo;
 pub mod fs_plugin_repo;

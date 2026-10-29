@@ -195,6 +195,14 @@ fn report_data_dir(plan: &DataDirPlan, migration: &MigrateOutcome) {
 }
 
 fn main() {
+    // --console：release GUI 构建重新附加调试控制台（dev 构建本就有控制台，
+    // 幂等）。必须最早执行：重绑的 std 句柄要被 panic 钩子的 stderr 兜底与
+    // Logger::init 的 stderr 层接住，晚于它们就晚了。
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if hinina_lib::infra::console::requested(&argv) {
+        hinina_lib::infra::console::attach();
+    }
+
     // panic 钩子最优先：越早安装，启动期 panic 越有迹可循。GUI 子系统下
     // stderr 无处可去，崩溃必须能落 logs/hinina.log 才可追查。
     hinina_lib::infra::panic_report::install();
