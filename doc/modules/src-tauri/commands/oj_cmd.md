@@ -30,7 +30,7 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 1. 前端 `invoke('switch_oj', { ojId })`（设置页「当前 OJ」下拉的显式动作）
 2. `OjId::new` 规整入参（trim）→ 补注册 → 注册校验 → `set_current` → `info!` 日志 → 三个 Service 的 `on_oj_switched()` → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`
 3. 错误以 `AppError` 返回（`ProviderNotFound` / `Config`），经 serde 序列化为 `{ Variant: msg }`，前端在 `bridge/index.ts` 归一化为 `IpcError`
-4. 前端在**调用点**编排切换后果（`SettingsView.onSwitchOj` 成功分支）：`resetSessionForOjSwitch()` 清空旧 OJ 的会话与领域状态 → 导航登录页 → 路由守卫按新 OJ 的会话文件恢复会话
+4. 前端在**调用点**编排切换后果（`useSettingsForm.onSwitchOj` 成功分支）：`resetSessionForOjSwitch()` 清空旧 OJ 的会话与领域状态 → 导航登录页 → 路由守卫按新 OJ 的会话文件恢复会话
 
 ## 设计要点
 - **清缓存是显式调用而不是事件订阅**：缓存清理属于「切换正确性的一部分」—— `switch_oj` 返回后新 OJ 的查询立刻可能进来，若清理要等异步事件消费者，就存在「旧 OJ 数据继续服务新 OJ 查询」的脏读窗口。旧实现靠同步投递把这件事做实，但那个保证建立在「发布方与订阅者同栈执行」的隐含前提上 —— 换成 `broadcast` 后该前提不再成立，因此改为显式调用，`OjSwitched` 只用来通知其他观察者。三个 Service 各自负责自己那批缓存（内存段同步清；磁盘段是空间回收，缓存键已带 OJ 维度，异步清理不影响正确性）。

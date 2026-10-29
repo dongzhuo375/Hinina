@@ -32,7 +32,7 @@
 ## 被依赖
 
 - `main.rs` — `generate_handler!` 注册 4 条命令
-- `src/bridge/system.bridge.ts` → `system.service.ts` → `views/SettingsView.vue`「数据目录」区块
+- `src/bridge/system.bridge.ts` → `system.service.ts` → `composables/useDataDirSettings.ts` → `components/settings/DataDirSection.vue`
 
 ## 逻辑流程
 

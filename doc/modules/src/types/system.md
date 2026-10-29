@@ -23,4 +23,4 @@
 
 ## 被依赖
 
-- `bridge/system.bridge.ts`、`services/system.service.ts`、`views/SettingsView.vue`
+- `bridge/system.bridge.ts`、`services/system.service.ts`、`composables/useAboutSettings.ts` / `useMaintenanceSettings.ts` / `useDataDirSettings.ts`

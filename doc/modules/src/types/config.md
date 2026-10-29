@@ -16,7 +16,7 @@
 | `OjConfig` | `{ active, instances, contestRef, contestPassword: string \| null, timeoutSecs, pollIntervalSecs, pollTimeoutSecs, cacheTtlSecs, cacheProblemStatement: boolean }` | `active` 为当前 OJ 实例 id（须指向 instances 中一条）；时长字段一律**秒**；`contestRef` 为**不透明字符串**的比赛引用（HOJ 为数字串，其它 OJ 可能是任意资源 ID），**空串 = 未配置**（简报链路据此走 `unconfigured` 态，后端 `load_configured_contest` 据此报错提示配置）；`contestPassword` 私有赛用，公开赛为 null；`cacheProblemStatement` 为题面缓存开关（Rust 侧默认 `true`，前端回填时 `?? true` 兜底旧配置） |
 | `EditorConfig` | `{ fontSize, tabSize, autoSave, autoSaveIntervalSecs, defaultLanguage }` | autoSaveIntervalSecs 秒；`defaultLanguage` 值域为 **HOJ 显示名**（默认 "C++"，与提交契约同源；历史 Monaco id 由 Rust `normalize_language_display_name` 与前端 `normalizeHojLanguage` 双向兜底归一），消费方为 workspaceStore 新建工作区的默认语言 |
 | `ThemeConfig` | `{ themeName, editorTheme }` | `editorTheme` 已被消费（`config.service.getEditorPrefs` 读取、`updateEditorPrefs` 落盘、`CodeEditor` 应用 vs/vs-dark；App.vue 全局壳仍固定浅色 `:theme="null"`）；`themeName` 仍为字段预留 |
-| `LayoutConfig` | `{ sidebarWidth, splitRatio }` | `splitRatio` 已被消费（`config.service.getSplitRatio` 读取、ProblemSolveView 初始化/拖拽回写、SettingsView 表单编辑）；`sidebarWidth` 仍为字段预留 |
+| `LayoutConfig` | `{ sidebarWidth, splitRatio }` | `splitRatio` 已被消费（`config.service.getSplitRatio` 读取、ProblemSolveView 初始化/拖拽回写、`useSettingsForm` 编辑/保存、`LayoutSection` 滑杆）；`sidebarWidth` 仍为字段预留 |
 
 ## 直接依赖
 
@@ -24,7 +24,7 @@
 
 ## 被依赖
 
-- `bridge/config.bridge.ts`、`services/config.service.ts`（派生 `getOjBaseUrl` / `activeOjBaseUrl` / `switchOj` / `getPollSchedule`）、`stores/submissionStore.ts` 与 `views/LoginView.vue`（间接经 config.service）、`views/SettingsView.vue`（OJ 实例表单）——均仅类型引用
+- `bridge/config.bridge.ts`、`services/config.service.ts`（派生 `getOjBaseUrl` / `activeOjBaseUrl` / `switchOj` / `getPollSchedule`）、`stores/submissionStore.ts` 与 `views/LoginView.vue`（间接经 config.service）、`composables/useSettingsForm.ts`（OJ 实例表单与保存事务）——均仅类型引用
 
 ## 逻辑流程
 

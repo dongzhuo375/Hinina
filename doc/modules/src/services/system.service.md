@@ -27,7 +27,7 @@
 
 ## 被依赖
 
-- `views/SettingsView.vue` — 「数据目录」（当前目录 / 来源 / 更改 / 恢复默认）、「重置与清理」（重置客户端 + 清理本地数据，均二次确认）与「关于」（版本 / 存储目录 / 日志路径 + 逐项复制）
+- `composables/useDataDirSettings.ts` / `useMaintenanceSettings.ts` / `useAboutSettings.ts` — 数据目录生命周期、重置清理与 About 存储信息；对应 section 组件只消费模型，View 不直接调用 service
 
 ## 逻辑流程
 

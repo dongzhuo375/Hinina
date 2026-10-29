@@ -12,11 +12,12 @@
 |---|---|
 | `playwright.config.ts` | [playwright.config.md](playwright.config.md) |
 | `e2e/fake-tauri.ts` | [fake-tauri.md](fake-tauri.md) |
-| `e2e/fixtures.ts` | 共享 test 入口：失败时把 `window.__e2e.calls` 写为 `test-results/**/ipc-calls.json` 附件（施工方案 §6.3 要求的 IPC 日志），随 artifact 上传；四个 spec 统一从这里 import `test`/`expect` |
+| `e2e/fixtures.ts` | 共享 test 入口：失败时把 `window.__e2e.calls` 写为 `test-results/**/ipc-calls.json` 附件（施工方案 §6.3 要求的 IPC 日志），随 artifact 上传；五个 spec 统一从这里 import `test`/`expect` |
 | `e2e/specs/auth.spec.ts` | [specs/auth.md](specs/auth.md) |
 | `e2e/specs/workspace.spec.ts` | [specs/workspace.md](specs/workspace.md) |
 | `e2e/specs/submission.spec.ts` | [specs/submission.md](specs/submission.md) |
 | `e2e/specs/session.spec.ts` | [specs/session.md](specs/session.md) |
+| `e2e/specs/settings.spec.ts` | [specs/settings.md](specs/settings.md) |
 
 ## Fake 的保真度规则（修改 fake 前必读）
 

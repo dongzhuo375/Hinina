@@ -314,7 +314,7 @@ Hinina/
 ├── RELEASE.md                            # 发布手册（版本准备/打标签/草稿验收/正式发布/回退，M4）
 ├── SECURITY.md                           # 安全策略（GitHub 私密漏洞报告渠道、响应约定）
 ├── playwright.config.ts                  # Playwright E2E 配置（chromium，webServer 起 vite dev @1420）
-├── e2e/                                  # 浏览器 E2E（fake-tauri.ts 注入 __TAURI_INTERNALS__；specs/ 首批 4 场景，见 doc/cicd/m3-integration.md）
+├── e2e/                                  # 浏览器 E2E（fake-tauri.ts 注入 __TAURI_INTERNALS__；auth/workspace/submission/session/settings 五组 spec，见 doc/cicd/m3-integration.md）
 ```
 
 ### Vue3 前端 — `src/`（阶段 7 已完成）
@@ -337,8 +337,8 @@ src/
 │   ├── SubmissionsView.vue               # 评测页（PageHeading 03 + 筛选工具条 + 全场提交表格 + 分页，onlyMine 后端强制；?problem= 自动预筛；非终态行 5s±1s 温和刷新）
 │   ├── SubmissionDetailView.vue          # 提交详情页（自有顶栏 + 判定横幅 + CE 面板 + 测试点表格/子任务分组 + Monaco 只读代码区，评测中轮询至终态）
 │   ├── AnnouncementsView.vue             # 公告页（PageHeading 04 + 卡片 feed：Grid 两列版式 + 长文折叠 + 未读圆点，进入即全部已读）
-│   ├── SettingsView.vue                  # 设置页（PageHeading 05；OJ（当前 OJ 下拉=显式 switch_oj + 实例地址 + 比赛 ID/引用）/编辑器/布局/主题置灰/数据目录/重置与清理/关于 分组，读改写 AppConfig + 生效性提示）
-│   └── __tests__/                        # ContestLayout.spec.ts（赛程闸门与退出延迟）/ LoginView.spec.ts（入口生命周期：自动进场、简报重试、预检）/ RankView.spec.ts（比赛切换后按新 contestId 重拉快照）/ SubmissionDetailView.spec.ts（路由参数切换、迟到响应与轮询 deadline）
+│   ├── SettingsView.vue                  # 设置页组合根（PageHeading 05 + 导航 + 七个 section + 保存栏；配置/维护/目录/About/scroll-spy 由 composables 与 settings 组件承担）
+│   └── __tests__/                        # ContestLayout.spec.ts（赛程闸门与退出延迟）/ LoginView.spec.ts（入口生命周期：自动进场、简报重试、预检）/ RankView.spec.ts（比赛切换后按新 contestId 重拉快照）/ SubmissionDetailView.spec.ts（路由参数切换、迟到响应与轮询 deadline）/ SettingsView.spec.ts + SettingsView.behavior.spec.ts（维护反馈与保存/OJ/目录/复制/scroll-spy 表征）
 ├── components/
 │   ├── PluginNotifications.vue           # 插件纯文本通知与订阅清理
 │   ├── layout/
@@ -364,6 +364,7 @@ src/
 │   │   ├── ProblemStatement.vue          # 题面分节展示（描述/输入/输出/样例+复制，Markdown 渲染 + 相对图片 URL 改写；容器查询 cqi 驱动排版、48em 行宽封顶）
 │   │   └── __tests__/
 │   │       └── QuickSubmitDialog.spec.ts # 提交重复防护（鼠标+Ctrl+Enter 只发一次、等待比赛数据前即上锁）、错误提示与解锁
+│   ├── settings/                           # 设置页七个 section 与共享 frame（SettingsSectionFrame 保留真实 id/focus/deep 样式；OJ/Editor/Layout/Theme/ResetPurge/DataDir/About）
 │   ├── rank/
 │   │   ├── RankToolbar.vue               # 榜单工具条（服务端 keyword 搜索 300ms 防抖 + 分组 tab + 赛制图例 + OI 计分规则徽章）
 │   │   ├── ScoreboardTable.vue           # 榜单表格（粘性表头/我的行/前两列，ACM 与 OI 分流渲染）
@@ -427,7 +428,12 @@ src/
 ├── composables/
 │   ├── useTransientValue.ts               # 临时反馈值与唯一回弹 timer（复制反馈；scope dispose 清理）
 │   ├── useNowMs.ts                        # 响应式毫秒墙钟（每秒重读 Date.now；各实例独立 interval，scope dispose 清理）
-│   └── __tests__/                         # useTransientValue / useNowMs .spec.ts（回弹与 dispose/多实例；墙钟初始值、时间跳变与清理）
+│   ├── useSettingsForm.ts                 # 设置页配置草稿、校验、保存与 OJ 显式/自动切换控制器
+│   ├── useAboutSettings.ts                # 设置页 About 存储信息与复制反馈（复用 useTransientValue）
+│   ├── useMaintenanceSettings.ts          # 设置页重置/清理控制器与提示 timer
+│   ├── useDataDirSettings.ts              # 设置页数据目录候选、迁移与通知控制器
+│   ├── useSettingsScrollSpy.ts            # 设置页分组导航高亮、点击锁、atBottom 与 scope 清理
+│   └── __tests__/                         # useTransientValue / useNowMs / useSettingsForm / useAboutSettings / useMaintenanceSettings / useDataDirSettings / useSettingsScrollSpy .spec.ts（共享回弹与墙钟；设置页表单、维护、About、目录与导航状态机）
 ├── utils/
 │   ├── markdown.ts                       # Markdown + LaTeX 公式渲染（marked，KaTeX 在 tokenizer 层接管 $/$$，中文无空格 nonStandard）+ Vditor ::: 排版容器（hljs-center 居中块）+ DOMPurify 出口统一消毒（P49/P63，mathMl/svg 档 + semantics/annotation 无障碍树补白；剥离只为安全，表现性标记保真渲染）+ 相对图片 URL 改写为 HOJ 绝对地址
 │   ├── contest.ts                        # 比赛阶段推导纯函数（getContestPhase / **getAuthoritativeSchedule**（认证赛程与匿名简报跨场时以简报为准），登录页、路由守卫与顶部栏共用；原 hasContestStarted 已删除）

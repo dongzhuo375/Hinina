@@ -46,7 +46,7 @@ export function clearDomainState(): void {
 }
 
 /**
- * OJ 切换的会话上下文重置（调用点：SettingsView「当前 OJ」下拉切换成功后）。
+ * OJ 切换的会话上下文重置（调用点：useSettingsForm「当前 OJ」切换成功后）。
  *
  * 切换 OJ = 整个应用换了一个服务端：旧 OJ 的用户、比赛、题面、提交与编辑器
  * 代码对新 OJ 全部失效，且解题页会拿旧 OJ 的 `contest.id` 向新 OJ 发提交 ——

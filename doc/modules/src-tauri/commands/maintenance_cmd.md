@@ -50,7 +50,7 @@
 ## 被依赖
 
 - `main.rs` — `generate_handler!` 注册为 `reset_client` / `local_data_usage` / `purge_local_data`
-- `src/bridge/system.bridge.ts` → `system.service.ts` → `views/SettingsView.vue`「重置与清理」区块
+- `src/bridge/system.bridge.ts` → `system.service.ts` → `composables/useMaintenanceSettings.ts` → `components/settings/ResetPurgeSection.vue`
 
 ## 逻辑流程
 

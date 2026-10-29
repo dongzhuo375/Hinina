@@ -17,7 +17,7 @@
 | `ConfigService.updateConfig` | `(mutate: (draft: AppConfig) => void) => Promise<AppConfig>` | **设置页保存唯一入口**：读当前配置 → structuredClone 副本上应用变更 → 整体写回后端（`update_config` 是整体替换语义）→ 失效缓存；写回失败同样失效缓存（避免缓存与磁盘漂移）并抛出 |
 | `ConfigService.getOjBaseUrl` | `() => Promise<string>` | OJ 基址，用于题面/简介/公告相对图片 URL 改写；取当前 OJ 实例（`oj.active` 匹配）的 `baseUrl`（经 `activeOjBaseUrl`）；失败返回空串 |
 | `ConfigService.activeOjBaseUrl` | `(config: AppConfig) => string` | 同步帮手：解析配置中当前 OJ 实例的服务端地址，供已持有配置的调用方复用。`active` 未命中启用实例列表时回退第一个启用实例（正常配置经 Rust 归一不会未命中，此回退仅兜底 IPC 写读竞态）；无启用实例返回空串 |
-| `ConfigService.switchOj` | `(ojId: string) => Promise<void>` | 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）：调 bridge `switchOj`（后端补注册 → 校验已注册 → 切 Registry → 显式清各 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）→ 本地缓存失效（后续读取拿到新 active）。失败原样上抛，调用方（SettingsView）据此回滚下拉显示 |
+| `ConfigService.switchOj` | `(ojId: string) => Promise<void>` | 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）：调 bridge `switchOj`（后端补注册 → 校验已注册 → 切 Registry → 显式清各 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）→ 本地缓存失效（后续读取拿到新 active）。失败原样上抛，调用方（`useSettingsForm`）据此回滚下拉显示 |
 | `ConfigService.getPollSchedule` | `() => Promise<PollSchedule>` | 轮询间隔与总超时；失败或非法配置回退 2s / 300s |
 | `ConfigService.getEditorPrefs` | `() => Promise<EditorPrefs>` | 字号 / Tab 宽度 / 编辑器主题（钳位上下界取自 `utils/editor`，越界与未知主题回退 14 / 4 / `'vs'`）；CodeEditor 挂载时消费 |
 | `ConfigService.updateEditorPrefs` | `(patch: Partial<EditorPrefs>) => Promise<void>` | **解题页编辑器设置弹层落盘入口**：只写传入字段（读-改-写保留其余配置）；主题落 `theme.editorTheme` 且**不触碰 `theme.themeName`**，落盘前经 `normalizeEditorTheme` 归一 |
@@ -43,7 +43,7 @@
 - `components/problem/ProblemStatement.vue` — 题面图片基址
 - `components/editor/CodeEditor.vue` — 字号 / Tab 宽度 / 编辑器主题（读 + 弹层改动落盘）
 - `views/ProblemSolveView.vue` — 初始分栏比例读取与拖拽回写
-- `views/SettingsView.vue` — 配置读取与保存、当前 OJ 切换（`switchOj`）与实例地址展示（`activeOjBaseUrl`）
+- `composables/useSettingsForm.ts` — 设置页配置读取与保存、当前 OJ 切换（`switchOj`）；`views/SettingsView.vue` 仅作组合根
 
 ## 逻辑流程
 
