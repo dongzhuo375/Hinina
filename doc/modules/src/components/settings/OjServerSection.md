@@ -30,7 +30,7 @@
 
 ## 逻辑流程
 
-输入只产生 `update:form` 补丁，父级 `Object.assign` 到同一 reactive 草稿。`activeOj` 变化先 emit 补丁，再 emit `switch-oj`；未配置 OJ 的引导、失败回滚和保存新建实例后的自动切换全部留在 `useSettingsForm`。
+文本/选择字段用 `v-model` 直接编辑同一 reactive 草稿：`activeOj` 落草稿后 `@change` 只 emit `switch-oj`，不发补丁；只有题面缓存开关 emit `update:form` 补丁。未配置 OJ 的引导、失败回滚和保存新建实例后的自动切换全部留在 `useSettingsForm`。
 
 ## 测试
 
