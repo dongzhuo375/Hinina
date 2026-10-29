@@ -27,7 +27,7 @@
 
 ## 逻辑流程
 
-`fontSize`、`autoSaveIntervalSecs` 保持原始字符串，autoSave=false 只禁用输入框而不豁免校验。`patchNumber` 只用于 Tab 数值字段；其余字段按原类型发补丁。
+`fontSize`、`autoSaveIntervalSecs` 保持原始字符串，autoSave=false 只禁用间隔输入框：隐藏值不参与校验，也不进入保存载荷（保留已存间隔），避免非法输入让整次保存失败。`patchNumber` 只用于 Tab 数值字段；其余字段按原类型发补丁。
 
 ## 测试
 
