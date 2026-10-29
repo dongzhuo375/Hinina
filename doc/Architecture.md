@@ -314,7 +314,7 @@ Hinina/
 ├── RELEASE.md                            # 发布手册（版本准备/打标签/草稿验收/正式发布/回退，M4）
 ├── SECURITY.md                           # 安全策略（GitHub 私密漏洞报告渠道、响应约定）
 ├── playwright.config.ts                  # Playwright E2E 配置（chromium，webServer 起 vite dev @1420）
-├── e2e/                                  # 浏览器 E2E（fake-tauri.ts 注入 __TAURI_INTERNALS__；specs/ 首批 4 场景，见 doc/cicd/m3-integration.md）
+├── e2e/                                  # 浏览器 E2E（fake-tauri.ts 注入 __TAURI_INTERNALS__；auth/workspace/submission/session/settings 五组 spec，见 doc/cicd/m3-integration.md）
 ```
 
 ### Vue3 前端 — `src/`（阶段 7 已完成）

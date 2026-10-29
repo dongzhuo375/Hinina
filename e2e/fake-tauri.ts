@@ -411,6 +411,29 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return null
       case 'reload_config':
         return null
+      case 'get_storage_info':
+        return {
+          baseDir: 'D:\\e2e\\hinina',
+          logPath: 'D:\\e2e\\hinina\\logs\\hinina.log',
+          version: '0.1.2',
+        }
+      case 'local_data_usage':
+        return {
+          logBytes: 4096,
+          logPath: 'D:\\e2e\\hinina\\logs\\hinina.log',
+          snapshotTotalCount: 5,
+          snapshotTotalBytes: 8192,
+          snapshotStaleCount: 2,
+          snapshotStaleBytes: 2048,
+          keepDays: 30,
+        }
+      case 'get_data_dir':
+        return {
+          currentDir: 'D:\\e2e\\hinina',
+          defaultDir: 'D:\\e2e\\hinina',
+          source: 'default',
+          restartRequired: false,
+        }
       case 'switch_oj': {
         // 真实命令会校验实例并切换活动 OJ、清缓存、更新配置（oj_cmd.rs）
         const ojId = String(args?.ojId)
