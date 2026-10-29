@@ -12,9 +12,11 @@
 /// argv（**不含 argv[0]**，调用方负责 `skip(1)`）是否请求调试控制台。
 ///
 /// 精确匹配 `--console`：`--console=x`、`-console` 等一律不算；其余参数
-/// 静默忽略，留给未来扩展（避免未知参数把启动炸掉）。
-pub fn requested(args: &[String]) -> bool {
-    args.iter().any(|arg| arg == "--console")
+/// 静默忽略，留给未来扩展（避免未知参数把启动炸掉）。入参用 `OsString`：
+/// `std::env::args()` 遇非 Unicode 参数会 panic，`args_os()` 不会。
+pub fn requested(args: &[std::ffi::OsString]) -> bool {
+    args.iter()
+        .any(|arg| arg.as_os_str() == std::ffi::OsStr::new("--console"))
 }
 
 /// 按需附加调试控制台。Windows 实现见下；其它平台 no-op。
