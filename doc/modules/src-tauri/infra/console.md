@@ -25,4 +25,4 @@
 
 ## 测试
 
-`src/infra/tests/console_tests.rs`：精确匹配、近形拒绝（`--consolex` / `-console` / `--console=1`）、混在其它参数中；非 Windows `attach` no-op 可编译。Windows 的 `attach` 涉及控制台 FFI 副作用，不进单测，由 release 人工验收覆盖（`doc/cicd/RELEASE.md` 清单）。
+`src/infra/tests/console_tests.rs`：精确匹配、近形拒绝（`--consolex` / `-console` / `--console=1`）、混在其它参数中；非 Windows `attach` no-op 可编译。Windows 的 `attach` 涉及控制台 FFI 副作用，不进单测，由 release 人工验收覆盖（仓库根 `RELEASE.md` 清单）。
