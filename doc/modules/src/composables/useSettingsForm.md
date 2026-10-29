@@ -44,7 +44,7 @@
 2. 编辑只改中央 reactive 草稿；`errors` 与 `dirty/canSave` 实时派生。
 3. `save()` 在首个 await 前冻结表单、target/isNewInstance 与提交快照，经 `updateConfig` 写入该快照；普通保存**不写 `draft.oj.active`**，已有实例不被重新 enabled。
 4. 保存成功后才把 baseline 前移到提交快照，并用 `useTransientValue` 显示 3 秒反馈；保存期间的新编辑保持 dirty。
-5. 新建实例自动切换失败时回滚 activeOj；保存失败保留草稿与错误，切换意图不残留到下一次保存。`discard()` 恢复提交快照并清除 switch 提示。
+5. 新建实例自动切换失败时同时回滚 activeOj 与该 OJ 的持久化地址，并把 baseline 更新为“已保存配置 + 回滚后的选择”；随后无关保存不会把新实例 URL 写入旧实例，也不产生假 dirty。保存失败保留草稿与错误，切换意图不残留到下一次保存。`discard()` 恢复提交快照并清除 switch 提示。
 
 ## 测试
 

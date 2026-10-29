@@ -244,6 +244,9 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     const option = [...select.options].find((item) => item.value === 'Hydro')
     expect(option?.textContent).not.toContain('未配置')
     expect(select.value).toBe('HOJ')
+    expect(field(view.host, '服务器地址').value).toBe('https://hoj.example')
+    expect(button(view.host, '保存').disabled).toBe(true)
+    expect(view.host.textContent).not.toContain('有未保存的更改')
 
     // 同一下拉重新选择 Hydro 即可重试切换
     await setField(view.host, '当前 OJ', 'Hydro')

@@ -229,8 +229,14 @@ export function useSettingsForm() {
 
       if (isNewInstance) {
         if (await performSwitch(target)) return
-        // 后端仍停留在旧 OJ：回滚下拉，用户重新选中目标即可再次触发切换
-        form.activeOj = persistedActive.value
+        // 后端仍停留在旧 OJ：下拉和地址必须一起回滚，否则下一次无关保存会把
+        // 新实例地址写进旧实例。baseline 同步到“已保存配置 + 回滚后的选择”，
+        // 避免产生用户未做任何编辑却显示未保存的假 dirty；保存期间的后续编辑仍保留。
+        const rollbackActive = persistedActive.value
+        const rollbackUrl = ojInstances.value.find((i) => i.id === rollbackActive)?.baseUrl ?? ''
+        form.activeOj = rollbackActive
+        form.ojUrl = rollbackUrl
+        baseline.value = JSON.stringify({ ...submitted, activeOj: rollbackActive, ojUrl: rollbackUrl })
         switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
       }
     } catch (e) {

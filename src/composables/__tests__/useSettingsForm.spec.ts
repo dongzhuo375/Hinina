@@ -129,7 +129,16 @@ describe('useSettingsForm', () => {
     await settings.save()
 
     expect(settings.form.activeOj).toBe('HOJ')
+    expect(settings.form.ojUrl).toBe('https://hoj.example')
+    expect(settings.dirty.value).toBe(false)
     expect(settings.switchNotice.value).toContain('实例已保存')
+
+    // 回滚后的下一次无关保存必须写回 HOJ 地址，不能把 Hydro 地址串进 HOJ
+    settings.form.fontSize = '16'
+    await settings.save()
+    expect(currentConfig.oj.instances.find((i) => i.id === 'HOJ')?.baseUrl)
+      .toBe('https://hoj.example')
+
     settings.discard()
     expect(settings.switchError.value).toBeNull()
     expect(settings.switchNotice.value).toBeNull()
