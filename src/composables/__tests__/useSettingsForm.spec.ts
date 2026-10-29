@@ -70,7 +70,7 @@ afterEach(() => {
 })
 
 describe('useSettingsForm', () => {
-  it('严格校验与放弃：autoSave=false 也不豁免无效间隔', () => {
+  it('严格校验与放弃：无效字号阻止保存，隐藏的自动保存间隔不阻止保存', () => {
     settings.form.fontSize = '1.5'
     expect(settings.errors.value.fontSize).not.toBeNull()
     expect(settings.canSave.value).toBe(false)

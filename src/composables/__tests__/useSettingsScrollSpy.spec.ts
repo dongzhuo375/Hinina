@@ -58,7 +58,7 @@ describe('useSettingsScrollSpy', () => {
     expect(spy.activeSection.value).toBe(6)
   })
 
-  it('非最后目标在 atBottom 时不得提前解锁，1 秒超时后才交还滚动驱动', () => {
+  it('非最后目标在 atBottom 时不提前解锁，scrollend 后才交还滚动驱动', () => {
     spy.scrollToSection(2)
     expect(spy.activeSection.value).toBe(2)
     expect(sections[2].scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
