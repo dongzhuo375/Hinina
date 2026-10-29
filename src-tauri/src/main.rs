@@ -1,3 +1,7 @@
+// release 构建走 GUI 子系统：不附控制台（用户可带 `--console` 重新附加，见
+// `infra::console`）。debug/dev 构建保持控制台，`npm run tauri dev` 不受影响。
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // Hinina 入口点
 //
 // 初始化顺序（实际执行在 `AppContext::init`，此处为速查，改动请同步 core/context.md）：
@@ -19,6 +23,7 @@
 // 为什么整个初始化在 `.setup()` 里而不是 `main()`：只有 setup 能拿到 AppHandle，
 // 也就只有那里能解析 `app_local_data_dir()`（数据根目录）。
 
+use std::io::Write as _;
 use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
@@ -205,8 +210,13 @@ fn main() {
             // AppContext 必须在这里初始化而不是 main()：只有 setup 能拿到 AppHandle，
             // 也就只有这里能解析 `app_local_data_dir()`。
             let default_dir = app.path().app_local_data_dir().unwrap_or_else(|e| {
-                // 拿不到默认目录时退到临时目录，让 resolve 继续走它的回退链
-                eprintln!("解析 app_local_data_dir 失败，回退临时目录: {e}");
+                // 拿不到默认目录时退到临时目录，让 resolve 继续走它的回退链。
+                // release 是 GUI 子系统、stderr 句柄无效：写失败必须忽略
+                // （`eprintln!` 在写失败时会 panic，让启动直接崩掉）
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "解析 app_local_data_dir 失败，回退临时目录: {e}"
+                );
                 data_dir::legacy_dir()
             });
             let legacy = data_dir::legacy_dir();

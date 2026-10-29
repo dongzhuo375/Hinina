@@ -205,7 +205,7 @@ impl Logger {
         let log_path = base_dir.join(LOG_RELATIVE_PATH);
         if let Some(parent) = log_path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("创建日志目录失败 {}: {}", parent.display(), e);
+                stderr_line(&format!("创建日志目录失败 {}: {}", parent.display(), e));
                 return None;
             }
         }
@@ -214,7 +214,7 @@ impl Logger {
         if let Ok(meta) = fs::metadata(&log_path) {
             if meta.len() > MAX_LOG_FILE_BYTES {
                 if let Err(e) = fs::write(&log_path, []) {
-                    eprintln!("截断日志文件失败 {}: {}", log_path.display(), e);
+                    stderr_line(&format!("截断日志文件失败 {}: {}", log_path.display(), e));
                 }
             }
         }
@@ -222,11 +222,22 @@ impl Logger {
         match OpenOptions::new().create(true).append(true).open(&log_path) {
             Ok(file) => Some(file),
             Err(e) => {
-                eprintln!("打开日志文件失败 {}: {}", log_path.display(), e);
+                stderr_line(&format!("打开日志文件失败 {}: {}", log_path.display(), e));
                 None
             }
         }
     }
+}
+
+/// 写一行到 stderr，写失败静默忽略。
+///
+/// `eprintln!` 在写失败时会 panic（"failed printing to stderr"），而
+/// `windows_subsystem = "windows"` 的 release 构建没有 stderr 句柄。
+/// `open_log_file` 的错误出口是日志系统自身失效时的最后报障途径，
+/// 绝不能自己把启动炸掉。
+fn stderr_line(msg: &str) {
+    use std::io::Write as _;
+    let _ = io::stderr().write_all(msg.as_bytes());
 }
 
 /// 把日志文件截断为 0，返回释放的字节数。
