@@ -16,6 +16,8 @@
 - **`Logger::clear_log_file(&self) -> AppResult<u64>`** — 清空日志内容并返回释放的字节数（文件层不可用时为 0）。**运行期**清理入口，供设置页「清理本地数据」调用
 - **`Logger::has_log_file(&self) -> bool`** — 文件层是否可用。用于区分「清空了日志」与「本来就没有文件层（磁盘只读等）」，让界面如实说明结果
 - **`truncate_log_file(path) -> io::Result<u64>`**（私有自由函数） — 把日志文件截断为 0 并返回释放字节数。抽成自由函数是为了可单测（`init` 会设置全局 subscriber，测试里不能调）
+- **`stderr_line(msg)`**（私有自由函数） — 写一行到 stderr，**写失败静默忽略**。`eprintln!` 在写失败时会 panic（"failed printing to stderr"），而 release 是 GUI 子系统、stderr 句柄无效；`open_log_file` 的报障出口绝不能自己把启动炸掉
+- **`ready() -> bool`**（模块级自由函数） — 全局订阅器是否已安装（`SUBSCRIBER_READY` 原子标志：`init` 两条装订阅器的分支成功时置位；测试构建不装订阅器恒 false）。`infra::panic_report` 的钩子据此分流：就绪走 `tracing::error!` 双路输出，未就绪 stderr 直写兜底——避免订阅器就绪后 stderr 双写
 
 ## 直接依赖
 - `std::fs` / `std::io` / `std::path::Path` / `std::sync::{Arc, Mutex}`
@@ -25,9 +27,10 @@
 - `core::context`（`AppContext::init()` 序列第一步调用 `Logger::init(&base_dir)` 并**持有返回的实例**（`AppContext.logger`），后续步骤才能记录日志）
 - `commands::maintenance_cmd`（`purge_local_data` → `clear_log_file` / `has_log_file`）
 - `commands::config_cmd`（`get_storage_info` 引用 `LOG_RELATIVE_PATH` 拼出日志展示路径）
+- `infra::panic_report`（`ready()` 分流 panic 报告的输出路径；panic 经 `tracing::error!` 落同一份日志文件）
 
 ## 逻辑流程
-`Logger::init(base_dir)` 在应用启动时最先调用：构造 `EnvFilter`（RUST_LOG 优先，否则按编译模式取默认级别）→ 构造 stderr 层 → `open_log_file(base_dir)` 尝试打开文件层（建目录 → 超限截断 → 追加打开）→ 成功则 `registry + filter + stderr 层 + 文件层` 三层组装 `init()`；失败则 `eprintln!` 留痕并退回单路 stderr。此后所有 `tracing` 宏事件同时写往两路。
+`Logger::init(base_dir)` 在应用启动时最先调用：构造 `EnvFilter`（RUST_LOG 优先，否则按编译模式取默认级别）→ 构造 stderr 层 → `open_log_file(base_dir)` 尝试打开文件层（建目录 → 超限截断 → 追加打开）→ 成功则 `registry + filter + stderr 层 + 文件层` 三层组装 `try_init()`（失败沿用已装订阅器；装成功置位 `SUBSCRIBER_READY`）；失败则经 `stderr_line` 留痕（写失败可忽略）并退回单路 stderr。此后所有 `tracing` 宏事件同时写往两路。
 
 ## 测试
 `src-tauri/src/infra/tests/logger_tests.rs`（由 `logger.rs` 底部 `#[cfg(test)] #[path = "tests/logger_tests.rs"] mod tests;` 引用）只测纯文件行为，**不测 `init`**（全局 subscriber 每进程只能设置一次，在测试运行时里 init 会与 cargo test 的输出捕获及其他测试冲突）。用例（各自建独立临时目录，用后清理）：自动创建 `logs/hinina.log`、未超限的既有日志追加而不清空、超过 5MB 的文件启动时截断为 0、恰好等于上限不截断（锁定 `>` 判据边界）。
@@ -36,6 +39,7 @@
 
 ## 设计要点
 
+- **GUI 子系统（release）下 stderr 句柄无效是常态，不是错误**：tracing-subscriber 0.3.23 的 fmt 层对写错误静默丢弃（`log_internal_errors` 默认 false，源码 `fmt_layer.rs` 的 `on_event` 取证），故双路输出在无控制台时安全降级为单路文件。本模块自身的报障出口（`stderr_line`）与 panic 钩子的兜底写同样容忍写失败——错误路径上绝不允许二次 panic（`eprintln!` 在写失败时恰恰会 panic）。
 - **运行期清理用「重开 + 截断」而不是句柄 `set_len`**：日志句柄是**追加模式**打开的（只有 `FILE_APPEND_DATA`，没有 `FILE_WRITE_DATA`），Windows 上 `set_len` 会被拒（实测 `Os code 5, PermissionDenied`）。新句柄带 `GENERIC_WRITE`，而两个句柄的共享模式都允许对方写入，故互不冲突；`append` 模式保证后续日志自动从 0 开始。这与启动时的截断式轮转是同一手法（`fs::write(path, [])`），两处不会漂移。
 - **只清内容、不删文件**：删了要等下次启动才重建，中间这段排障信息就彻底没了。
 
