@@ -63,7 +63,7 @@ Hinina/
     │   └── default.json                  # Tauri 2 默认权限集（窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽 + dialog:allow-open（数据目录选择器））
     │                                     # 注：**不声明 fs: / http: 授权** —— 本项目不注册 tauri-plugin-fs/-http，所有 I/O 都走 Rust（见「插件与 I/O 边界」）
     └── src/
-        ├── main.rs                       # Rust 入口点，12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
+        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最早期 --console 附加 + panic 钩子安装（崩溃消息/线程/位置/强制堆栈落 logs/hinina.log）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
         ├── lib.rs                        # 库根，公开模块树
         ├── test_support.rs               # 测试专用支撑（cfg(test)）：TempDir（Drop 时删除临时目录）+ Guarded<T>（Deref 转发，把目录生命周期绑到被测对象上）
         ├── core/
@@ -202,7 +202,9 @@ Hinina/
         │   ├── http.rs                   # HttpClient 封装（超时可注入 with_timeout —— 由 oj.timeout_secs 驱动、重试/UA/Cookie；请求头由调用方以 HeaderMap 注入 —— 认证方式是 Adapter 层概念；只返回原始响应体与响应头，不做反序列化）
         │   ├── storage.rs                # Storage 底层文件工具；`write_string_atomic`（tmp + sync_all + rename，写前清同目标 `{target}.{数字}.tmp` 残片）供会话等「重启后必须可恢复」的数据使用 —— 对进程崩溃安全，对掉电最坏回退旧的完整文件（目录 fsync 未做）
         │   ├── cache.rs                  # 缓存原语（TtlCache：TTL + 容量上限，近似 FIFO 淘汰；JsonDiskCache：cache/{ns}/{key}.json，条目带 fetchedAt 跨重启计时、损坏容忍、过期懒删除）
-        │   ├── logger.rs                 # Logger（Tracing 双路输出：stderr + {base_dir}/logs/hinina.log，启动时 >5MB 截断，运行期可截断清空；敏感信息不落日志靠调用点约束——IPC 日志不记参数）
+        │   ├── logger.rs                 # Logger（Tracing 双路输出：stderr + {base_dir}/logs/hinina.log，启动时 >5MB 截断，运行期可截断清空；GUI 子系统下 stderr 层静默丢弃（tracing-subscriber 内部默认不报写错误）；敏感信息不落日志靠调用点约束——IPC 日志不记参数）
+        │   ├── panic_report.rs           # 进程级 panic 钩子：消息/线程/位置/强制堆栈（无视 RUST_BACKTRACE）经 tracing error! 落 hinina.log；订阅器未就绪时 stderr 直写兜底（写失败忽略）。先于插件 catch_unwind 运行，崩溃先落日志再走既有恢复——「闪退可追查」的兜底
+        │   ├── console.rs                # --console 启动参数：release GUI 构建重新附加调试控制台（挂父控制台优先，失败 AllocConsole，重绑 std 句柄；幂等；非 Windows no-op）。只管窗口，日志级别仍由 RUST_LOG 控制
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
