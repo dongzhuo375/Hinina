@@ -1,6 +1,6 @@
 [package]
 name = "hinina"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2021"
 authors = ["dongzhuo375"]
 description = "Hinina：面向 ACM/ICPC 与 XCPC 场景的 OJ 桌面竞赛客户端"
