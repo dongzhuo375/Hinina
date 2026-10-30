@@ -47,7 +47,7 @@
 - 无 — 顶层入口点，不被其他模块引用
 
 ## 逻辑流程
-0. **panic 钩子最先安装**（此后包括参数解析在内的任何 panic 都有落点）→ `startup_dialog::arm()`（启用启动期错误框；测试进程不 arm）→ `--console` 附加调试控制台（release GUI 构建默认无控制台：从终端启动挂父控制台、双击启动新开窗口、已有控制台幂等跳过；参数用 `args_os()` 收集，非 Unicode 参数不会 panic）→ 此后的 stderr 兜底与 Logger 的 stderr 层都接得住。**每次 panic 都有持久落点**：无条件落 `%TEMP%/hinina-panic.log`（不经 tracing 过滤器，`RUST_LOG=off`、日志文件打不开都不影响）；日志未被 `RUST_LOG` 关闭时同一条报告另落 `logs/hinina.log`（见 `infra/panic_report.md`）。**启动期的 panic 还会弹一次错误框**：钩子在记录落盘后调用 `startup_dialog`（主线程、启动未完成、每进程一次），把「双击无反应」变成可读的失败原因
+0. **panic 钩子最先安装**（此后包括参数解析在内的任何 panic 都有落点）→ `startup_dialog::arm()`（启用启动期错误框；测试进程不 arm）→ `--console` 附加调试控制台（release GUI 构建默认无控制台：从终端启动挂父控制台、双击启动新开窗口、已有控制台幂等跳过；**只有新开的窗口**才切 UTF-8 输出代码页并打开 VT 处理（否则中文乱码、ANSI 以字面量刷屏），挂父控制台/dev 终端不改配置——那是用户日常会话的状态；参数用 `args_os()` 收集，非 Unicode 参数不会 panic）→ 此后的 stderr 兜底与 Logger 的 stderr 层都接得住。**每次 panic 都有持久落点**：无条件落 `%TEMP%/hinina-panic.log`（不经 tracing 过滤器，`RUST_LOG=off`、日志文件打不开都不影响）；日志未被 `RUST_LOG` 关闭时同一条报告另落 `logs/hinina.log`（见 `infra/panic_report.md`）。**启动期的 panic 还会弹一次错误框**：钩子在记录落盘后调用 `startup_dialog`（主线程、启动未完成、每进程一次），把「双击无反应」变成可读的失败原因
 1. 创建 Tokio runtime（`tokio::runtime::Runtime::new()`，失败时 `panic!("无法创建后台运行时：{e}")`）—— `AppContext::init` 是 async，
    而 `.setup()` 是同步回调，故 runtime 必须在 setup 之前建好。**注意：事件消费者不跑在这个
    运行时上**（它在 setup 结束时随 `rt` 一起销毁），而是由 `spawn_event_consumers` 投到
