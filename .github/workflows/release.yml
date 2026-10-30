@@ -78,8 +78,8 @@ jobs:
         # （本机实证）；但 runner 默认 pwsh 会把两个 `--` 都吞掉而失败（首次试跑
         # tag 实证）。故显式钉 shell: bash。失败模式是显式的，不会静默出包。
         # 发布主线只出裸 exe（target/release/hinina.exe），不打 NSIS 安装包。
-        # NSIS 线路保留——tauri.conf.json 的 bundle.targets 仍为 ["nsis"]，把
-        # --no-bundle 移回内层 `--` 之后即恢复安装包产物。
+        # NSIS 线路保留——tauri.conf.json 的 bundle.targets 仍为 ["nsis"]，
+        # 移除 --no-bundle（内层 `--` 之前不传任何 tauri 旗标）即恢复安装包产物。
         shell: bash
         run: npm run tauri -- build --no-bundle -- --locked
       - name: Collect build metadata
