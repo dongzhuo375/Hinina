@@ -127,7 +127,7 @@ doc/                  架构说明、开发手册和界面设计稿
 
 ## 启动参数
 
-正式版（release）启动时不带控制台窗口；需要现场排障时可以从终端带 `--console` 启动，日志与崩溃信息会同时输出到该控制台，并始终写入数据目录下的 `logs/hinina.log`。程序崩溃（panic）的消息与完整堆栈会自动落盘——绝大多数崩溃在 `logs/hinina.log`；日志系统初始化之前的极早期崩溃在临时目录的 `hinina-panic.log`。日志级别默认 info，可用环境变量 `RUST_LOG` 覆盖（如 `RUST_LOG=debug`）。
+正式版（release）启动时不带控制台窗口；需要现场排障时可以从终端带 `--console` 启动，日志与崩溃信息会同时输出到该控制台，并始终写入数据目录下的 `logs/hinina.log`。程序崩溃（panic）的消息与完整堆栈会自动落盘——日志文件正常时写在 `logs/hinina.log`；日志系统尚未就绪或日志文件不可写时写在临时目录的 `hinina-panic.log`。日志级别默认 info，可用环境变量 `RUST_LOG` 覆盖（如 `RUST_LOG=debug`）。
 
 ## 许可证
 
