@@ -18,10 +18,10 @@
 | `reset_client` | `async fn(State<'_, AppContext>) -> AppResult<()>` | 前端 invoke `reset_client`（无参数）。清缓存 → 忘公告基线 → 清公告已读 → 兜底清扫 `cache/` 根目录 |
 | `local_data_usage` | `async fn(State<'_, AppContext>) -> AppResult<LocalDataUsage>` | 前端 invoke `local_data_usage`。统计日志、崩溃记录文件（`%TEMP%/hinina-panic.log`）字节数与留档占用（总/过期），供**先看再删** |
 | `purge_local_data` | `async fn(State<'_, AppContext>, logs: bool, stale_snapshots: bool) -> AppResult<PurgeReport>` | 前端 invoke `purge_local_data`({ logs, staleSnapshots })。两个开关都由调用方显式传入；**逐项容错**（见下） |
-| `run_purge` | `pub(crate) fn(logs, stale_snapshots, clear_log, purge_snapshots) -> PurgeReport` | 逐项容错的编排（依赖以闭包注入，故可单测）。**两个勾选项互不牵连** |
+| `run_purge` | `pub(crate) fn(logs, stale_snapshots, clear_log, clear_crash, purge_snapshots) -> PurgeReport` | 逐项容错的编排（依赖以闭包注入，故可单测）。**两个勾选项互不牵连**；同一勾选项下的日志与崩溃记录也**各自独立回报**（任一失败只影响自己的 `*_cleared`，已成功项的字节数照常累计） |
 | `purge_local_data_with` | `pub(crate) fn(ctx, logs, stale_snapshots, clear_crash) -> PurgeReport` | 与 `purge_local_data_impl` 相同，但崩溃文件清理可注入：单测不得删除真实 `%TEMP%/hinina-panic.log`（可能含开发机上的真实崩溃记录） |
 | `LocalDataUsage` | VO（`Serialize`，camelCase） | `logBytes` / `logPath` / `crashBytes` / `crashPath` / `snapshotTotalCount` / `snapshotTotalBytes` / `snapshotStaleCount` / `snapshotStaleBytes` / `keepDays` |
-| `PurgeReport` | VO（`Serialize` / `Default`，camelCase） | `freedBytes` / `removedSnapshots` / `logCleared` |
+| `PurgeReport` | VO（`Serialize` / `Default`，camelCase） | `freedBytes` / `removedSnapshots` / `logCleared` / `crashCleared` |
 
 ### 重置清什么 / 不清什么
 
@@ -84,11 +84,11 @@ purge_local_data(logs, staleSnapshots)
 - **兜底清扫 `cache/` 根目录**：各 Service 只清自己那部分，清扫整个根目录才能保证**将来新增的 namespace 也会被重置覆盖**（否则重置会静默漏掉新缓存，用户以为干净了）。各 Service 的清理仍然保留 —— 它们要独立负责自己的内存缓存。
 - **公告基线的处理与「清缓存」相反**：`clear_caches` **保留**基线（清空后新发的公告要能报出来），重置则**忘掉**它（重置后一切皆未见，留着没有意义）。两者分成两个方法，各有单测锁定，避免语义漂移。
 - **日志用「重开 + 截断」而不是句柄 `set_len`**：日志句柄是追加模式打开的（只有 `FILE_APPEND_DATA`），Windows 上 `set_len` 会被拒（实测 `Os code 5, PermissionDenied`）。详见 `infra/logger.md`。
-- **日志只清内容、不删文件**：删了要等重启才重建，中间这段排障信息就彻底没了。**崩溃记录文件是删除而非截断**：它在数据目录之外，且可能含插件可控文本（全局钩子记录所有 panic 的 payload），不应成为永久残留；体积计入同一勾选项的预览。
+- **日志只清内容、不删文件**：删了要等重启才重建，中间这段排障信息就彻底没了。**崩溃记录文件是删除而非截断**：它在数据目录之外，且可能含插件可控文本（全局钩子记录所有 panic 的 payload），不应成为永久残留；体积计入同一勾选项的预览。Unix sticky 临时目录下若文件属于其他用户，`remove_file` 会 `EPERM`：此时 `crash_cleared=false` 并如实告警，不做额外提权（产品只发 Windows，记录为已知限制）。
 - **过期留档按 mtime 判定，不比对服务端列表**：后者要网络、要分页、还可能因赛制隐藏记录而误判；而留档价值本就随时间衰减。
 - **不可逆动作必须给预览**：`local_data_usage` 存在的唯一理由就是让用户在删除前看到确切范围与体积。
 - **两个勾选项互不牵连（逐项容错）**：日志清理失败（文件被占用、权限不足）只降级为 `log_cleared=false` 并继续，**不中断**留档清理 —— 用户勾了留档就该拿到留档的结果。曾用 `?` 冒泡，日志一失败整个命令报错返回、留档一条都没删。编排抽成 `run_purge` 纯函数正是为了锁定这条（命令本体依赖 `State` 测不了）。
-- **`log_cleared` 的四种 `false` 成因都要如实回报**：文件层不可用（`clear_log_file` 返回 `Ok(0)`，故用 `has_log_file()` 判定）、截断失败（`Err` 分支）、崩溃记录删除失败（`Err` 分支，整项按失败处理）、本次没勾选日志。界面据此提示「日志或崩溃记录未清理」，而不是笼统报「已清理：释放 0 B」。
+- **`log_cleared` 与 `crash_cleared` 分开回报**：前者 `false` 的成因是文件层不可用（`clear_log_file` 返回 `Ok(0)`，故用 `has_log_file()` 判定）、截断失败、或本次没勾选；后者 `false` 只表示崩溃记录删除失败（不存在视为已清理）。界面分别提示「日志未清理」/「崩溃记录未清理」并以警告色呈现，而不是笼统报「已清理：释放 0 B」。曾把两者合并成一个 `match`：崩溃删除失败会把日志已截断的字节数一起丢掉，显示「未清理 / 释放 0 B」，与实际不符。
 - **锁中毒统一 `into_inner` 取回内部数据**（与 `TtlCache` / `provider_registry_impl` 同款约定）：相关容器是 `Option` / `HashMap`，panic 不会让它们结构不一致，而「静默跳过」会让重置留下脏缓存 —— 那是比重置失败更糟的静默后果。
 
 ## 测试
