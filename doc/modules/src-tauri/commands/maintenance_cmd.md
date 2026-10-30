@@ -19,6 +19,7 @@
 | `local_data_usage` | `async fn(State<'_, AppContext>) -> AppResult<LocalDataUsage>` | 前端 invoke `local_data_usage`。统计日志、崩溃记录文件（`%TEMP%/hinina-panic.log`）字节数与留档占用（总/过期），供**先看再删** |
 | `purge_local_data` | `async fn(State<'_, AppContext>, logs: bool, stale_snapshots: bool) -> AppResult<PurgeReport>` | 前端 invoke `purge_local_data`({ logs, staleSnapshots })。两个开关都由调用方显式传入；**逐项容错**（见下） |
 | `run_purge` | `pub(crate) fn(logs, stale_snapshots, clear_log, clear_crash, purge_snapshots) -> PurgeReport` | 逐项容错的编排（依赖以闭包注入，故可单测）。**两个勾选项互不牵连**；同一勾选项下的日志与崩溃记录也**各自独立回报**（任一失败只影响自己的 `*_cleared`，已成功项的字节数照常累计） |
+| `local_data_usage_with` | `pub(crate) fn(ctx, crash_path: &Path) -> LocalDataUsage` | 与 `local_data_usage_impl` 相同，但崩溃记录路径可注入：单测只 stat 自己造的沙箱文件，不读取开发机上的真实崩溃记录元数据 |
 | `purge_local_data_with` | `pub(crate) fn(ctx, logs, stale_snapshots, clear_crash) -> PurgeReport` | 与 `purge_local_data_impl` 相同，但崩溃文件清理可注入：单测不得删除真实 `%TEMP%/hinina-panic.log`（可能含开发机上的真实崩溃记录） |
 | `LocalDataUsage` | VO（`Serialize`，camelCase） | `logBytes` / `logPath` / `crashBytes` / `crashPath` / `snapshotTotalCount` / `snapshotTotalBytes` / `snapshotStaleCount` / `snapshotStaleBytes` / `keepDays` |
 | `PurgeReport` | VO（`Serialize` / `Default`，camelCase） | `freedBytes` / `removedSnapshots` / `logCleared` / `crashCleared` |
