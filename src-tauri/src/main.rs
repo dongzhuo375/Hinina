@@ -195,17 +195,19 @@ fn report_data_dir(plan: &DataDirPlan, migration: &MigrateOutcome) {
 }
 
 fn main() {
+    // panic 钩子最先安装：此后任何 panic（参数解析、恢复、初始化）都有落点。
+    // 参数已改用 `args_os()` 收集，本身不会因非 Unicode 参数 panic；钩子先装
+    // 是**纵深防御** —— 历史上的 `env::args()` 会 panic 且 GUI 子系统下毫无输出。
+    hinina_lib::infra::panic_report::install();
+
     // --console：release GUI 构建重新附加调试控制台（dev 构建本就有控制台，
-    // 幂等）。必须最早执行：重绑的 std 句柄要被 panic 钩子的 stderr 兜底与
-    // Logger::init 的 stderr 层接住，晚于它们就晚了。
-    let argv: Vec<String> = std::env::args().skip(1).collect();
+    // 幂等）。必须早于 Logger::init 与任何 stdio 使用：重绑的 std 句柄要被
+    // panic 钩子的 stderr 兜底与 Logger::init 的 stderr 层接住，晚于它们就晚了。
+    // 参数用 args_os 收集：args() 遇非 Unicode 参数会 panic。
+    let argv: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     if hinina_lib::infra::console::requested(&argv) {
         hinina_lib::infra::console::attach();
     }
-
-    // panic 钩子最优先：越早安装，启动期 panic 越有迹可循。GUI 子系统下
-    // stderr 无处可去，崩溃必须能落 logs/hinina.log 才可追查。
-    hinina_lib::infra::panic_report::install();
 
     // 运行时在 setup 之前建好：AppContext::init 是 async，而 setup 是同步回调。
     // 在 setup 里 block_on 是安全的 —— 那时事件循环还没跑起来，不存在阻塞它的风险。

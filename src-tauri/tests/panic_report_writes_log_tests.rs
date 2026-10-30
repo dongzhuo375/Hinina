@@ -4,48 +4,29 @@
 //! 订阅器都是进程级单例，必须隔离验证。本二进制的 lib 以 `cfg(test)`=false
 //! 编译，`Logger::init` 走生产分支装真实订阅器；`install` 后触发 panic，
 //! 断言 `logs/hinina.log` 含 panic 消息、真实触发位置与真实堆栈段。
+//! 临时目录经 `tests/common` 隔离，真实 `%TEMP%/hinina-panic.log` 不被触碰。
+
+mod common;
 
 use std::fs;
-use std::path::PathBuf;
 
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "hinina-panic-report-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-/// panic 经钩子 → tracing error! → 文件层落盘：消息、位置、堆栈三要素齐全。
+/// panic 经钩子 → tracing error! → 文件层落盘：消息、位置、堆栈三要素齐全；
+/// 同时经独立出口写 bootstrap 文件（不依赖过滤器与文件层）。
 #[test]
 fn panic_message_lands_in_log_file_with_backtrace() {
-    let dir = TempDir::new("end-to-end");
+    let sandbox = common::SandboxTemp::new("writes-log");
+    let base_dir = sandbox.join("data");
+    fs::create_dir_all(&base_dir).unwrap();
     // EnvFilter 优先读 RUST_LOG：显式固定级别，宿主环境不得干扰（评审 #11 同款）
     std::env::set_var("RUST_LOG", "info");
-    let logger = hinina_lib::infra::logger::Logger::init(&dir.0);
+    let logger = hinina_lib::infra::logger::Logger::init(&base_dir);
     assert!(logger.has_log_file(), "订阅器空闲时应接管文件层");
 
     hinina_lib::infra::panic_report::install();
     let result = std::panic::catch_unwind(|| panic!("崩溃探针-boom-probe"));
     assert!(result.is_err(), "panic 应照常 unwind，由 catch_unwind 收口");
 
-    let log = fs::read_to_string(dir.0.join("logs/hinina.log")).expect("日志文件应存在");
+    let log = fs::read_to_string(base_dir.join("logs/hinina.log")).expect("日志文件应存在");
     assert!(
         log.contains("崩溃探针-boom-probe"),
         "panic 消息应落盘，实际日志：\n{log}"
@@ -60,5 +41,13 @@ fn panic_message_lands_in_log_file_with_backtrace() {
     assert!(
         log.contains("\n   0: "),
         "应含真实堆栈帧，实际日志：\n{log}"
+    );
+
+    // 独立持久出口同样有记录：日志层正常时不因此省略 bootstrap
+    let bootstrap =
+        fs::read_to_string(sandbox.join("hinina-panic.log")).expect("bootstrap 崩溃文件应同时存在");
+    assert!(
+        bootstrap.contains("崩溃探针-boom-probe"),
+        "bootstrap 应保存同一崩溃记录：\n{bootstrap}"
     );
 }
