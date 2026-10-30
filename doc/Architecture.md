@@ -63,7 +63,7 @@ Hinina/
     │   └── default.json                  # Tauri 2 默认权限集（窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽 + dialog:allow-open（数据目录选择器））
     │                                     # 注：**不声明 fs: / http: 授权** —— 本项目不注册 tauri-plugin-fs/-http，所有 I/O 都走 Rust（见「插件与 I/O 边界」）
     └── src/
-        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最先装 panic 钩子 → --console 附加（args_os 解析）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
+        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最先装 panic 钩子 → startup_dialog::arm（启动期错误框：三处 expect 与 Tauri 窗口创建失败的 panic 先落盘再弹框；RunEvent::Ready 时 mark_started）→ --console 附加（args_os 解析）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
         ├── lib.rs                        # 库根，公开模块树
         ├── test_support.rs               # 测试专用支撑（cfg(test)）：TempDir（Drop 时删除临时目录）+ Guarded<T>（Deref 转发，把目录生命周期绑到被测对象上）
         ├── core/
@@ -205,6 +205,7 @@ Hinina/
         │   ├── logger.rs                 # Logger（Tracing 双路输出：stderr + {base_dir}/logs/hinina.log，启动时 >5MB 截断，运行期可截断清空；GUI 子系统下 stderr 层静默丢弃（tracing-subscriber 内部默认不报写错误）；敏感信息不落日志靠调用点约束——IPC 日志不记参数）
         │   ├── panic_report.rs           # 进程级 panic 钩子（main 最先安装，早于参数解析）：消息/线程/位置/强制堆栈——每次 panic 无条件追加 %TEMP%/hinina-panic.log（unix_epoch_secs+pid 头、1MB 截断、进程内阻塞串行且不丢记录、Unix 拒绝符号链接，不经 tracing 过滤器——RUST_LOG=off 或日志文件打不开也保得住）；**先写 bootstrap、再输出 tracing/stderr**（后者存在 SharedFileWriter 重入阻塞窗口，持久出口不能排在它之后），日志未被 `RUST_LOG` 关闭时另落 hinina.log。先于插件 catch_unwind 运行，崩溃先落日志再走既有恢复——「闪退可追查」的兜底；该文件由「清理本地数据 → 日志与崩溃记录」删除
         │   ├── console.rs                # --console 启动参数（args_os 解析，非 Unicode 参数不 panic）：release GUI 构建重新附加调试控制台（挂父控制台优先，失败 AllocConsole，重绑 std 句柄；幂等；非 Windows no-op）。只管窗口，日志级别仍由 RUST_LOG 控制
+        │   ├── startup_dialog.rs         # 启动期致命错误对话框（panic 钩子的 UI 出口）：main 装钩子后 arm、RunEvent::Ready 时 mark_started；启动未完成的主线程 panic 在崩溃记录落盘后弹一次 MessageBoxW（三处 expect + Tauri 窗口/WebView2 创建失败），写入成功才展示崩溃路径；独立线程跑模态消息泵避免重入事件循环；测试不 arm、非 Windows no-op
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）

@@ -35,6 +35,7 @@ use hinina_lib::core::event::core_event::CoreEvent;
 use hinina_lib::core::event::core_event_bus::CoreEventBus;
 use hinina_lib::infra::audit::spawn_audit_consumer;
 use hinina_lib::infra::data_dir::{self, DataDirPlan, DataDirSource, MigrateOutcome};
+use hinina_lib::infra::startup_dialog;
 
 /// 工作区落盘事件的前端通道名（与 `src/bridge/workspace.bridge.ts` 的监听一致）。
 const WORKSPACE_SAVED_EVENT: &str = "workspace-saved";
@@ -200,6 +201,10 @@ fn main() {
     // 是**纵深防御** —— 历史上的 `env::args()` 会 panic 且 GUI 子系统下毫无输出。
     hinina_lib::infra::panic_report::install();
 
+    // 启动期对话框：钩子在崩溃记录落盘后弹一次系统错误框，覆盖三处启动
+    // expect 与 Tauri 自身创建窗口失败。测试进程不 arm，绝不弹窗。
+    startup_dialog::arm();
+
     // --console：release GUI 构建重新附加调试控制台（dev 构建本就有控制台，
     // 幂等）。必须早于 Logger::init 与任何 stdio 使用：重绑的 std 句柄要被
     // panic 钩子的 stderr 兜底与 Logger::init 的 stderr 层接住，晚于它们就晚了。
@@ -213,9 +218,10 @@ fn main() {
     // 在 setup 里 block_on 是安全的 —— 那时事件循环还没跑起来，不存在阻塞它的风险。
     // 注意：事件消费者**不**跑在这个运行时上（它在 setup 结束时随 `rt` 一起销毁），
     // 而是由 `spawn_event_consumers` 投到 Tauri 的运行时 —— 与异步命令同一个。
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let rt = tokio::runtime::Runtime::new()
+        .unwrap_or_else(|error| panic!("无法创建后台运行时：{error}"));
 
-    tauri::Builder::default()
+    let tauri_app = tauri::Builder::default()
         // 目录选择器（设置页「数据目录」）。本项目此前不注册任何 Tauri 插件
         // （fs/http 的依赖与 capability 存在但从未注册，全部 I/O 都走 Rust），
         // 故这里是**第一个真正注册的插件**。
@@ -246,7 +252,7 @@ fn main() {
                     plan.default_dir.clone(),
                     plan.source,
                 ))
-                .expect("Failed to initialize AppContext");
+                .unwrap_or_else(|error| panic!("无法初始化应用数据：{}", error.user_message()));
 
             // ② 迁移结果与数据目录来源必须**在日志就绪后**立刻汇报
             report_data_dir(&plan, &migration);
@@ -315,12 +321,21 @@ fn main() {
             commands::theme_cmd::set_theme,
         ])
         .build(tauri::generate_context!())
-        .expect("Failed to launch Hinina")
-        .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                if let Some(ctx) = app.try_state::<AppContext>() {
-                    ctx.plugin_manager.cancel_all();
-                }
+        .unwrap_or_else(|error| panic!("无法启动桌面应用：{error}"));
+
+    tauri_app.run(|app, event| match event {
+        tauri::RunEvent::Ready => {
+            // Tauri 的 setup 先按配置创建窗口（WebView2 在此初始化），再调用
+            // 用户的 setup 闭包；Ready 在 setup 返回后才发出（tauri app.rs 的
+            // `fn setup` / `make_run_event_loop_callback`）。因此窗口/WebView2
+            // 创建失败时本标志尚未置位，启动错误框仍会弹出。
+            startup_dialog::mark_started();
+        }
+        tauri::RunEvent::Exit => {
+            if let Some(ctx) = app.try_state::<AppContext>() {
+                ctx.plugin_manager.cancel_all();
             }
-        });
+        }
+        _ => {}
+    });
 }

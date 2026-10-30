@@ -83,8 +83,12 @@ unsafe fn attach_windows() {
     }
 }
 
+/// UTF-16 + NUL 编码，供 Win32 `*W` API 使用。
+///
+/// `startup_dialog` 的 `MessageBoxW` 与本模块的控制台句柄共用同一实现，
+/// 避免两份编码细节漂移。
 #[cfg(windows)]
-fn wide(value: &str) -> Vec<u16> {
+pub(crate) fn wide(value: &str) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
     std::ffi::OsStr::new(value)
         .encode_wide()

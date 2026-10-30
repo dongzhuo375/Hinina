@@ -10,6 +10,7 @@
 |------|------|------|
 | `requested` | `pub fn requested(args: &[std::ffi::OsString]) -> bool` | argv（**不含 argv[0]**，调用方用 `args_os().skip(1)` 收集）是否含精确的 `--console`；比较用 `OsString == "--console"`（std 提供 `PartialEq<str>`）。`--console=x` / `-console` 不算，其余参数静默忽略（未知参数不得炸掉启动） |
 | `attach` | `pub fn attach()` | Windows：已有控制台（dev 构建 / 重复带参，`GetConsoleWindow` 判定）幂等返回 → `AttachConsole(ATTACH_PARENT_PROCESS)`（从终端启动 → 输出进该终端）→ 失败（双击启动无父控制台）则 `AllocConsole()` 新开窗口 → 两者都失败（如服务会话）静默保持 GUI 启动 → `CreateFileW("CONOUT$"/"CONIN$")` + `SetStdHandle` 重绑 std 三句柄。非 Windows：no-op |
+| `wide` | `pub(crate) fn wide(value: &str) -> Vec<u16>`（`cfg(windows)`） | UTF-16 + NUL 编码，供本模块的控制台句柄与 `startup_dialog` 的 `MessageBoxW` 共用，避免两份编码细节漂移 |
 
 ## 直接依赖
 
