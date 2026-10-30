@@ -43,30 +43,14 @@ static ACTIVE_LOG_PATH: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync
 /// 全局订阅器是否已安装。
 ///
 /// panic 钩子（`infra::panic_report`）据此决定是否经 `tracing::error!` 输出；
-/// 但它**不保证文件层存在**——`Logger::init` 在日志文件打不开时仍会装上只含
-/// stderr 的订阅器（`None` 分支）。持久落点由 [`file_layer_ready`] 单独判定。
-/// 测试构建的 `init` 分支不装订阅器，故恒为 false，与「测试进程无全局订阅器」一致。
+/// 持久落点不依赖本标志——钩子无条件写 bootstrap 文件（`RUST_LOG=off` 会
+/// 过滤 `error!`，日志文件也可能根本打不开，见该模块注释）。测试构建的
+/// `init` 分支不装订阅器，故恒为 false，与「测试进程无全局订阅器」一致。
 static SUBSCRIBER_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// 本进程的日志文件层是否已接管（`logs/hinina.log` 真正在写）。
-///
-/// 与 [`ready`] 分开：订阅器在≠文件在。用原子量而不是读 `ACTIVE_LOG_PATH`
-/// 的锁——panic 钩子可能正好在 `Logger::init` 持锁时运行，钩子里再取锁会
-/// 重演 `SharedFileWriter` 的重入死锁；原子量无锁、无此风险。
-static FILE_LAYER_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 全局订阅器是否已安装（进程级）。
 pub fn ready() -> bool {
     SUBSCRIBER_READY.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-/// 日志文件层是否已接管（进程级）。
-///
-/// `ready() == true` 而本函数为 `false` 表示日志文件打不开、当前只有
-/// stderr 一路——panic 钩子必须额外写 bootstrap 文件，否则 GUI 构建下
-/// 崩溃信息无处可去。
-pub fn file_layer_ready() -> bool {
-    FILE_LAYER_READY.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// 日志追踪（基于 Tracing）。
@@ -179,7 +163,6 @@ impl Logger {
                         .try_init();
                     let path = if installed.is_ok() {
                         SUBSCRIBER_READY.store(true, std::sync::atomic::Ordering::Relaxed);
-                        FILE_LAYER_READY.store(true, std::sync::atomic::Ordering::Relaxed);
                         let p = base_dir.join(LOG_RELATIVE_PATH);
                         *ACTIVE_LOG_PATH.lock().unwrap_or_else(|e| e.into_inner()) =
                             Some(p.clone());
