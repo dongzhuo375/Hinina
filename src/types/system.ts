@@ -38,8 +38,10 @@ export interface PurgeReport {
   freedBytes: number
   /// 删除的留档条数
   removedSnapshots: number
-  /// 日志与崩溃记录是否确实清理（文件层不可用或删除失败时为 false）
+  /// 日志内容是否确实清空（文件层不可用或截断失败时为 false）
   logCleared: boolean
+  /// 崩溃记录文件是否确实删除（不存在视为已清理）
+  crashCleared: boolean
 }
 
 /// 数据目录来源，对应 Rust `infra::data_dir::DataDirSource`。

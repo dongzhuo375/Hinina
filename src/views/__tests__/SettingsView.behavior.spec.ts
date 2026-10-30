@@ -148,7 +148,7 @@ beforeEach(() => {
   mocks.setDataDir.mockResolvedValue(undefined)
   mocks.resetDataDir.mockResolvedValue(undefined)
   mocks.resetClient.mockResolvedValue(undefined)
-  mocks.purgeLocalData.mockResolvedValue({ freedBytes: 0, removedSnapshots: 0, logCleared: true })
+  mocks.purgeLocalData.mockResolvedValue({ freedBytes: 0, removedSnapshots: 0, logCleared: true, crashCleared: true })
   mocks.loadContest.mockResolvedValue(undefined)
   mocks.announcementRefresh.mockResolvedValue(undefined)
 })

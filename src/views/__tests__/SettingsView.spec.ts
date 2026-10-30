@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
     snapshotTotalCount: 5, snapshotTotalBytes: 8192,
     snapshotStaleCount: 2, snapshotStaleBytes: 2048, keepDays: 30,
   })),
-  purgeLocalData: vi.fn(async () => ({ freedBytes: 0, removedSnapshots: 0, logCleared: false })),
+  purgeLocalData: vi.fn(async () => ({ freedBytes: 0, removedSnapshots: 0, logCleared: false, crashCleared: true })),
   getStorageInfo: vi.fn(async () => ({ baseDir: 'D:\\hinina', logPath: 'D:\\hinina\\logs\\hinina.log', version: '0.1.0' })),
   getDataDir: vi.fn(async () => ({ currentDir: 'D:\\hinina', defaultDir: 'D:\\hinina', source: 'default', restartRequired: false })),
   // config.service
@@ -129,7 +129,7 @@ describe('SettingsView 清理本地数据（不可逆，反馈必须如实）', 
   })
 
   it('勾了日志但后端没清掉（logCleared=false）：warn 文案如实说明', async () => {
-    mocks.purgeLocalData.mockResolvedValueOnce({ freedBytes: 2048, removedSnapshots: 2, logCleared: false })
+    mocks.purgeLocalData.mockResolvedValueOnce({ freedBytes: 2048, removedSnapshots: 2, logCleared: false, crashCleared: true })
     await render()
     await settle()
 
@@ -139,7 +139,7 @@ describe('SettingsView 清理本地数据（不可逆，反馈必须如实）', 
     await settle()
 
     expect(mocks.purgeLocalData).toHaveBeenCalledWith(true, true)
-    expect(document.body.textContent).toContain('日志或崩溃记录未清理') // 不能笼统报已清理
+    expect(document.body.textContent).toContain('日志未清理') // 不能笼统报已清理
     expect(mocks.localDataUsage).toHaveBeenCalledTimes(2) // 清理后必须重读占用预览
   })
 })

@@ -83,7 +83,10 @@ pub fn clear_bootstrap_log() -> std::io::Result<u64> {
 /// 抽成纯函数是为了可单测：`clear_bootstrap_log` 走真实 `%TEMP%`，测试不得触碰
 /// 开发机上的真实崩溃记录（见 `tests/common` 的沙箱约定）。
 fn remove_file_and_size(path: &Path) -> std::io::Result<u64> {
-    let freed = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    // symlink_metadata：删除的是链接本身时，释放字节应取链接而非目标文件的大小
+    let freed = std::fs::symlink_metadata(path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
     match std::fs::remove_file(path) {
         Ok(()) => Ok(freed),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),

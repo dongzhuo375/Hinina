@@ -15,7 +15,7 @@ use tauri::State;
 use tracing::{info, warn};
 
 use crate::core::context::AppContext;
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::infra::cache::CACHE_ROOT_DIR;
 use crate::infra::logger::LOG_RELATIVE_PATH;
 use crate::service::submission::snapshot::{self, SNAPSHOT_KEEP_DAYS};
@@ -105,7 +105,9 @@ pub(crate) fn local_data_usage_impl(ctx: &AppContext) -> LocalDataUsage {
     let log_path = ctx.storage.base_dir().join(LOG_RELATIVE_PATH);
     let log_bytes = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
     let crash_path = crate::infra::panic_report::bootstrap_log_path();
-    let crash_bytes = std::fs::metadata(&crash_path).map(|m| m.len()).unwrap_or(0);
+    let crash_bytes = std::fs::symlink_metadata(&crash_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
     let usage = snapshot::inspect_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS);
 
     LocalDataUsage {
@@ -125,28 +127,37 @@ pub(crate) fn local_data_usage_impl(ctx: &AppContext) -> LocalDataUsage {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PurgeReport {
-    /// 释放的总字节数
+    /// 释放的总字节数（日志、崩溃记录、留档三处成功项之和）
     pub freed_bytes: u64,
     /// 删除的留档条数
     pub removed_snapshots: usize,
     /// 日志内容是否**确实**被清空。
     ///
-    /// `false` 有四种成因：文件层不可用（磁盘只读）、截断失败、崩溃记录文件
-    /// 删除失败、或本次没勾选日志。界面据此如实提示，而不是笼统报「已清理」。
+    /// `false` 有三种成因：文件层不可用（磁盘只读）、截断失败、或本次没勾选日志。
+    /// 崩溃记录文件是独立对象，失败记在 [`crash_cleared`](Self::crash_cleared)，
+    /// 不污染本字段——两者各自如实回报，而不是笼统报「已清理」。
     pub log_cleared: bool,
+    /// 崩溃记录文件是否**确实**被删除（不存在视为已清理）。
+    ///
+    /// 与 `log_cleared` 分开：日志已截断但崩溃文件删除失败时，界面仍应显示
+    /// 日志释放的字节数并单独提示崩溃记录未清理。
+    pub crash_cleared: bool,
 }
 
-/// 逐项容错地执行清理（**两个勾选项互不牵连**）。
+/// 逐项容错地执行清理（**两项勾选、三个清理对象互不牵连**）。
 ///
 /// 抽成纯函数是为了可单测（命令本体依赖 `tauri::State`，测试里拿不到）——
 /// 而「一项失败不该连带取消另一项」正是这里最需要锁定的行为。
 ///
-/// 日志清理失败（文件被占用、权限不足）时**降级为 `log_cleared=false` 并继续**，
-/// 而不是 `?` 冒泡中断整个命令：用户勾了留档清理，就该拿到留档清理的结果。
+/// 日志与崩溃记录是「日志与崩溃记录」同一勾选项下的两个独立对象：
+/// 任一失败只降级它自己的 `*_cleared` 并继续，**已成功的字节数照常累计**。
+/// 曾把两者包进同一个 `match`：崩溃文件删除失败会把日志已截断的字节数一起
+/// 丢掉，界面显示「未清理 / 释放 0 B」，与实际不符。
 pub(crate) fn run_purge(
     logs: bool,
     stale_snapshots: bool,
     clear_log: impl FnOnce() -> AppResult<(u64, bool)>,
+    clear_crash: impl FnOnce() -> AppResult<u64>,
     purge_snapshots: impl FnOnce() -> (usize, u64),
 ) -> PurgeReport {
     let mut report = PurgeReport::default();
@@ -159,6 +170,14 @@ pub(crate) fn run_purge(
                 info!(freed_bytes = freed, log_cleared = cleared, "日志内容已清空");
             }
             Err(e) => warn!(error = %e, "清空日志内容失败，继续执行其余清理项"),
+        }
+        match clear_crash() {
+            Ok(freed) => {
+                report.freed_bytes += freed;
+                report.crash_cleared = true;
+                info!(freed_bytes = freed, "崩溃记录文件已清理");
+            }
+            Err(e) => warn!(error = %e, "删除崩溃记录文件失败，继续执行其余清理项"),
         }
     }
 
@@ -221,27 +240,17 @@ pub(crate) fn purge_local_data_with(
     run_purge(
         logs,
         stale_snapshots,
+        // 日志文件：清空内容、保留文件。文件层不可用（磁盘只读等）时
+        // clear_log_file 返回 Ok(0)：此时并没有清掉任何东西，故用
+        // has_log_file 如实回报「是否真的清了」
         || {
-            // 「日志内容」包含两处：数据目录里的日志文件（清空内容、保留文件）
-            // 与临时目录里的崩溃记录（删除文件，可能含插件可控文本）。
-            // 文件层不可用（磁盘只读等）时 clear_log_file 返回 Ok(0)：此时并没有
-            // 清掉任何东西，故用 has_log_file 如实回报「是否真的清了」
-            let log = ctx
-                .logger
+            ctx.logger
                 .clear_log_file()
-                .map(|freed| (freed, ctx.logger.has_log_file()));
-            let crash = clear_crash();
-            match (log, crash) {
-                (Ok((log_freed, log_layer)), Ok(crash_freed)) => {
-                    Ok((log_freed + crash_freed, log_layer))
-                }
-                (Err(e), _) => Err(e),
-                (_, Err(e)) => Err(crate::core::error::AppError::Io(format!(
-                    "删除崩溃记录文件失败: {}",
-                    e
-                ))),
-            }
+                .map(|freed| (freed, ctx.logger.has_log_file()))
         },
+        // 崩溃记录文件：删除（可能含插件可控文本）。与日志分开回报，
+        // 任一失败不影响另一项的字节数与 cleared 状态
+        || clear_crash().map_err(|e| AppError::Io(format!("删除崩溃记录文件失败: {}", e))),
         || snapshot::purge_stale_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS),
     )
 }

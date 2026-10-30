@@ -129,6 +129,9 @@ async fn local_data_usage_reports_seeded_footprint() {
     assert_eq!(usage.snapshot_stale_bytes, stale_bytes);
     assert_eq!(usage.log_bytes, log_bytes);
     assert!(usage.log_path.ends_with("hinina.log"));
+    // 崩溃记录路径固定为临时目录下的 hinina-panic.log；字节数取决于开发机
+    // 是否留有真实崩溃记录，不做定量断言（测试不得读写真实文件）
+    assert!(usage.crash_path.ends_with("hinina-panic.log"));
 
     server.shutdown();
 }

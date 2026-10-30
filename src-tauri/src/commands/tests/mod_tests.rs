@@ -99,6 +99,7 @@ fn run_purge_continues_snapshot_cleanup_when_log_clearing_fails() {
         true,
         true,
         || Err(AppError::Io("日志文件被占用".into())),
+        || Ok(0),
         || (3, 1_400),
     );
 
@@ -108,6 +109,7 @@ fn run_purge_continues_snapshot_cleanup_when_log_clearing_fails() {
             freed_bytes: 1_400,
             removed_snapshots: 3,
             log_cleared: false,
+            crash_cleared: true,
         },
         "日志失败必须降级为 log_cleared=false，且不得吞掉留档清理的结果"
     );
@@ -121,10 +123,12 @@ fn run_purge_reports_log_not_cleared_when_file_layer_unavailable() {
         true,
         false,
         || Ok((0, false)),
+        || Ok(0),
         || unreachable!("未勾选留档"),
     );
 
     assert!(!report.log_cleared);
+    assert!(report.crash_cleared, "崩溃记录不存在也视为已清理");
     assert_eq!(report.freed_bytes, 0);
     assert_eq!(report.removed_snapshots, 0);
 }
@@ -132,16 +136,56 @@ fn run_purge_reports_log_not_cleared_when_file_layer_unavailable() {
 /// 两项都勾且都成功：数值如实汇总。
 #[test]
 fn run_purge_sums_both_items_on_success() {
-    let report = run_purge(true, true, || Ok((4_787_700, true)), || (3, 420));
+    let report = run_purge(
+        true,
+        true,
+        || Ok((4_787_700, true)),
+        || Ok(512),
+        || (3, 420),
+    );
 
     assert_eq!(
         report,
         PurgeReport {
-            freed_bytes: 4_788_120,
+            freed_bytes: 4_788_632,
             removed_snapshots: 3,
             log_cleared: true,
+            crash_cleared: true,
         }
     );
+}
+
+/// 回归：日志已截断、崩溃文件删除失败 —— 日志的字节数与 cleared 必须保留，
+/// 崩溃记录单独标记失败（曾把两者包进一个 match，失败时整项作废、显示 0 B）。
+#[test]
+fn run_purge_keeps_log_result_when_crash_removal_fails() {
+    let report = run_purge(
+        true,
+        false,
+        || Ok((4_096, true)),
+        || Err(AppError::Io("删除崩溃记录文件失败: 拒绝访问".into())),
+        || unreachable!("未勾选留档"),
+    );
+
+    assert_eq!(report.freed_bytes, 4_096, "日志已释放的字节数不得被吞掉");
+    assert!(report.log_cleared, "日志确实已清空");
+    assert!(!report.crash_cleared, "崩溃记录删除失败必须单独回报");
+}
+
+/// 回归：日志失败、崩溃文件删除成功 —— 崩溃记录的字节数照常累计。
+#[test]
+fn run_purge_keeps_crash_result_when_log_clearing_fails() {
+    let report = run_purge(
+        true,
+        false,
+        || Err(AppError::Io("日志文件被占用".into())),
+        || Ok(512),
+        || unreachable!("未勾选留档"),
+    );
+
+    assert_eq!(report.freed_bytes, 512, "崩溃记录已删除的字节数不得被吞掉");
+    assert!(!report.log_cleared);
+    assert!(report.crash_cleared);
 }
 
 /// 未勾选的那一项不得被执行（闭包 panic 即证明没被调用）。
@@ -151,6 +195,7 @@ fn run_purge_skips_unselected_items() {
         false,
         false,
         || unreachable!("未勾选日志却调用了清理"),
+        || unreachable!("未勾选日志却调用了崩溃记录清理"),
         || unreachable!("未勾选留档却调用了清理"),
     );
 
