@@ -40,7 +40,8 @@ export interface PurgeReport {
   removedSnapshots: number
   /// 日志内容是否确实清空（文件层不可用或截断失败时为 false）
   logCleared: boolean
-  /// 崩溃记录文件是否确实删除（不存在视为已清理）
+  /// 崩溃记录文件是否确实删除（不存在视为已清理）。
+  /// 未勾选日志清理时不执行删除，本字段恒为 false——界面只在勾选时读取。
   crashCleared: boolean
 }
 

@@ -102,10 +102,20 @@ pub async fn local_data_usage(ctx: State<'_, AppContext>) -> AppResult<LocalData
 
 /// `local_data_usage` 的统计实现（提取自命令本体，供命令与测试共用）。
 pub(crate) fn local_data_usage_impl(ctx: &AppContext) -> LocalDataUsage {
+    local_data_usage_with(ctx, &crate::infra::panic_report::bootstrap_log_path())
+}
+
+/// 与 [`local_data_usage_impl`] 相同，但崩溃记录路径可注入。
+///
+/// 单测必须走注入版本：真实路径指向 `%TEMP%/hinina-panic.log`，测试只应 stat
+/// 自己造的沙箱文件，不读取开发机上的真实崩溃记录元数据（见 `tests/common`）。
+pub(crate) fn local_data_usage_with(
+    ctx: &AppContext,
+    crash_path: &std::path::Path,
+) -> LocalDataUsage {
     let log_path = ctx.storage.base_dir().join(LOG_RELATIVE_PATH);
     let log_bytes = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
-    let crash_path = crate::infra::panic_report::bootstrap_log_path();
-    let crash_bytes = std::fs::symlink_metadata(&crash_path)
+    let crash_bytes = std::fs::symlink_metadata(crash_path)
         .map(|m| m.len())
         .unwrap_or(0);
     let usage = snapshot::inspect_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS);

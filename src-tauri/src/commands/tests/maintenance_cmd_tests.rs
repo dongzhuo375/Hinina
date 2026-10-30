@@ -109,6 +109,35 @@ async fn purge_clears_log_content_when_selected() {
     server.shutdown();
 }
 
+/// 崩溃记录删除失败：日志已释放的字节数与 `log_cleared` 必须保留，
+/// 只有 `crash_cleared` 降级——回归「合并 match 让整项作废、显示 0 B」。
+#[tokio::test]
+async fn purge_reports_crash_failure_without_losing_log_bytes() {
+    let server = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_hoj(server.url()).await;
+    let log_path = dir.join("logs/hinina.log");
+    // 写入已知字节：全局订阅器每进程只装一次，不能依赖 init 日志非空
+    let log_bytes = 4321u64;
+    std::fs::write(&log_path, vec![b'x'; log_bytes as usize]).unwrap();
+
+    let report = purge_local_data_with(&ctx, true, false, || {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "denied",
+        ))
+    });
+
+    assert!(report.log_cleared, "日志确实已清空");
+    assert!(!report.crash_cleared, "崩溃记录删除失败必须单独回报");
+    assert_eq!(
+        report.freed_bytes, log_bytes,
+        "日志已释放的字节数不得因崩溃记录失败被吞掉"
+    );
+    assert_eq!(std::fs::metadata(&log_path).unwrap().len(), 0);
+
+    server.shutdown();
+}
+
 #[tokio::test]
 async fn local_data_usage_reports_seeded_footprint() {
     let server = LoopbackServer::start(vec![]).await;
@@ -120,8 +149,12 @@ async fn local_data_usage_reports_seeded_footprint() {
     // 并行测试里本目录的文件层可能收不到事件，不能依赖 init 日志非空）
     let log_bytes = 1234u64;
     std::fs::write(dir.join("logs/hinina.log"), vec![b'x'; log_bytes as usize]).unwrap();
+    // 崩溃记录走注入路径：不在真实 %TEMP% 上 stat，也不依赖开发机残留
+    let crash_path = dir.join("hinina-panic.log");
+    let crash_bytes = 777u64;
+    std::fs::write(&crash_path, vec![b'c'; crash_bytes as usize]).unwrap();
 
-    let usage = local_data_usage_impl(&ctx);
+    let usage = local_data_usage_with(&ctx, &crash_path);
 
     assert_eq!(usage.snapshot_total_count, 2);
     assert_eq!(usage.snapshot_stale_count, 1);
@@ -129,9 +162,8 @@ async fn local_data_usage_reports_seeded_footprint() {
     assert_eq!(usage.snapshot_stale_bytes, stale_bytes);
     assert_eq!(usage.log_bytes, log_bytes);
     assert!(usage.log_path.ends_with("hinina.log"));
-    // 崩溃记录路径固定为临时目录下的 hinina-panic.log；字节数取决于开发机
-    // 是否留有真实崩溃记录，不做定量断言（测试不得读写真实文件）
-    assert!(usage.crash_path.ends_with("hinina-panic.log"));
+    assert_eq!(usage.crash_bytes, crash_bytes);
+    assert_eq!(usage.crash_path, crash_path.to_string_lossy());
 
     server.shutdown();
 }
