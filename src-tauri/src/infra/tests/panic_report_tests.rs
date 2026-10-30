@@ -66,6 +66,80 @@ fn appends_reports_and_separates_runs() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// 并发争用不得丢弃记录：后到的写入阻塞等锁，锁释放后照常落盘。
+///
+/// 回归 `try_lock` 实现：争用失败即 `return`，两个 panic 同时发生时后到那条
+/// 整条消失（即使文件远未到上限）。用例刻意由测试线程持锁，使旧实现必然留下
+/// 缺口、新实现必然补齐 —— 不是概率性并发用例。
+#[test]
+fn waits_for_the_lock_instead_of_skipping_the_record() {
+    let dir = temp_dir("contended");
+    let path = dir.join("hinina-panic.log");
+
+    let held = super::BOOTSTRAP_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (done, received) = std::sync::mpsc::channel();
+    let writer_path = path.clone();
+    let writer = std::thread::spawn(move || {
+        super::write_bootstrap_report(&writer_path, "contended-probe\n");
+        let _ = done.send(());
+    });
+
+    // 锁仍被持有：写入必须阻塞在此，不得提前返回（旧实现会立刻发信号并跳过记录）
+    assert!(
+        received
+            .recv_timeout(std::time::Duration::from_millis(150))
+            .is_err(),
+        "写入线程应在等锁，而不是跳过这条记录"
+    );
+    drop(held);
+    received
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("锁释放后写入应完成");
+    writer.join().expect("写入线程不应 panic");
+
+    let content = fs::read_to_string(&path).expect("bootstrap 文件应存在");
+    assert!(
+        content.contains("contended-probe"),
+        "争用不得丢弃记录：\n{content}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// 顺序契约：`report` 必须**先**写 bootstrap、**再**输出 tracing/stderr。
+///
+/// 无法在单测里制造 `SharedFileWriter` 的重入阻塞（该锁属非测试构建），故按
+/// 源码顺序锁定这条契约——与插件侧「比对 `api/http.rs` 请求头黑名单」同款源码
+/// 契约测试。回归的是「持久出口排在可阻塞路径之后」这一写法：worse case 下
+/// 钩子挂在 `error!` 里，bootstrap 永远不写，「每次 panic 都有记录」失效。
+#[test]
+fn report_persists_bootstrap_before_tracing_output() {
+    let source = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/infra/panic_report.rs"),
+    )
+    .expect("应能读取 panic_report.rs 源码");
+    let start = source
+        .find("fn report(info: &PanicHookInfo")
+        .expect("应能找到 report");
+    let end = source[start..]
+        .find("\n/// 把崩溃报告追加到 bootstrap 文件")
+        .map(|offset| start + offset)
+        .unwrap_or(source.len());
+    let body = &source[start..end];
+
+    let persist = body
+        .find("write_bootstrap_report(")
+        .expect("report 应调用 write_bootstrap_report");
+    let trace = body
+        .find("tracing::error!")
+        .expect("report 应包含 tracing 输出");
+    assert!(
+        persist < trace,
+        "bootstrap 必须先于 tracing 输出：持久出口不能排在可能因重入而阻塞的路径之后"
+    );
+}
+
 /// 超过上限先截断再追加（rotate-by-truncate）：反复早期崩溃不会无限膨胀。
 #[test]
 fn truncates_oversized_file_before_append() {
