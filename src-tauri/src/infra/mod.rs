@@ -15,4 +15,5 @@ pub mod plugin_http;
 pub mod plugin_notification;
 pub mod plugin_storage;
 pub mod provider_registry_impl;
+pub mod startup_dialog;
 pub mod storage;

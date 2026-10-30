@@ -46,8 +46,14 @@ fn appends_reports_and_separates_runs() {
     let dir = temp_dir("append");
     let path = dir.join("hinina-panic.log");
 
-    super::write_bootstrap_report(&path, "first-probe\n");
-    super::write_bootstrap_report(&path, "second-probe\n");
+    assert!(
+        super::write_bootstrap_report(&path, "first-probe\n"),
+        "第一次写入应成功"
+    );
+    assert!(
+        super::write_bootstrap_report(&path, "second-probe\n"),
+        "第二次写入应成功"
+    );
 
     let content = fs::read_to_string(&path).expect("bootstrap 文件应存在");
     assert!(
@@ -174,7 +180,10 @@ fn silently_ignores_unwritable_path() {
     let dir = temp_dir("unwritable");
     let missing = dir.join("no-such-parent").join("hinina-panic.log");
 
-    super::write_bootstrap_report(&missing, "should-not-panic\n");
+    assert!(
+        !super::write_bootstrap_report(&missing, "should-not-panic\n"),
+        "写失败必须返回 false（对话框不能展示不存在的路径）"
+    );
     assert!(!missing.exists());
 
     let _ = fs::remove_dir_all(&dir);
@@ -191,7 +200,10 @@ fn refuses_symlink_target() {
     let link = dir.join("hinina-panic.log");
     std::os::unix::fs::symlink(&victim, &link).expect("创建符号链接失败");
 
-    super::write_bootstrap_report(&link, "symlink-probe\n");
+    assert!(
+        !super::write_bootstrap_report(&link, "symlink-probe\n"),
+        "拒绝符号链接时也必须返回 false"
+    );
 
     assert_eq!(
         fs::read_to_string(&victim).expect("目标文件应可读"),

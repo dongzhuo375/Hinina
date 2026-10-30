@@ -19,7 +19,10 @@
 //!
 //! GUI 子系统（release 构建，见 main.rs 的 `windows_subsystem`）下 stderr 无处
 //! 可去，std 默认钩子的输出直接蒸发——竞赛客户端最怕「闪退且无迹可寻」，
-//! 本模块保证 panic 至少落一个持久文件。插件 worker 的 `catch_unwind`
+//! 本模块保证 panic 至少落一个持久文件。启动期（[`crate::infra::startup_dialog`]
+//! 已 arm 且启动未完成）的 panic 还会在持久记录之后弹一次系统错误框，让
+//! 「双击无反应」变成可读的失败原因；运行期 panic 只落日志，不弹窗。
+//! 插件 worker 的 `catch_unwind`
 //! （`plugin/manager.rs`）只兜插件 panic，主程序崩溃由此兜底；钩子先于捕获
 //! 运行，崩溃先落日志再走既有恢复路径。release 构建默认不带调试符号，堆栈
 //! 以帧地址为主；需要可读符号时给 release profile 开 `debug` 即可。
@@ -98,9 +101,12 @@ fn remove_file_and_size(path: &Path) -> std::io::Result<u64> {
 /// Builder / Logger）——越早安装，启动期 panic 越有迹可循。重复调用只是替换。
 ///
 /// 与插件 worker 的 `catch_unwind` 互补：钩子先于捕获运行，崩溃先落日志再走
-/// 既有恢复路径。钩子自身不做任何可能 panic 的操作（payload 取值用
-/// `payload_as_str`，stderr 与文件写失败一律忽略）；若钩子内仍发生 panic，
-/// std 会直接 abort——这是不可恢复的最后防线，立刻崩好过无限递归。
+/// 既有恢复路径。钩子自身的操作都以「失败即忽略」为约束（payload 取值用
+/// `payload_as_str`，stderr 与文件写失败一律忽略）；启动期还会在记录落盘后
+/// 调用 [`crate::infra::startup_dialog::present_startup_panic`]，那里线程创建或
+/// FFI 失败同样静默跳过，但对话框可能阻塞到用户关闭——持久记录已先写入。
+/// 若钩子内仍发生 panic，std 会直接 abort——这是不可恢复的最后防线，立刻崩
+/// 好过无限递归。
 pub fn install() {
     std::panic::set_hook(Box::new(report));
 }
@@ -108,18 +114,20 @@ pub fn install() {
 fn report(info: &PanicHookInfo<'_>) {
     // force_capture 无视 RUST_BACKTRACE：崩溃取证宁可全量，输出体积不敏感
     let backtrace = Backtrace::force_capture();
+    let payload = info.payload_as_str();
     let message = format_report(
-        info.payload_as_str(),
+        payload,
         std::thread::current().name(),
         info.location(),
         &backtrace.to_string(),
     );
+    let path = bootstrap_log_path();
     // **顺序是保证的一部分：先写 bootstrap，再走 tracing / stderr。**
     // tracing 文件层存在 SharedFileWriter 重入自死锁的理论窗口（见 logger.rs）：
     // 若本线程正持有那把锁（panic 发生在日志字段的 Display 里），`error!` 会阻塞，
     // 钩子永远走不到后面的语句。持久出口必须排在它之前——那条路径挂住最多丢掉
     // 日志副本，不会让唯一记录消失。各层写失败一律静默（崩溃路径不许二次 panic）。
-    write_bootstrap_report(&bootstrap_log_path(), &message);
+    let written = write_bootstrap_report(&path, &message);
     if crate::infra::logger::ready() {
         // 订阅器已装：error! 输出（stderr；过滤器允许时同时落 hinina.log）。
         // 上面已落盘，因此这里被 RUST_LOG 过滤或在重入窗口挂起，都不影响
@@ -129,6 +137,13 @@ fn report(info: &PanicHookInfo<'_>) {
         // Logger 尚未就绪：stderr 兜底。尚无文件层，不存在上述重入窗口。
         let _ = std::io::stderr().write_all(message.as_bytes());
     }
+    // 启动期对话框放在最后：它可能阻塞到用户点击，而记录已经落盘。
+    // 未 arm（测试）或启动已完成时直接返回。写失败时传 None，正文不展示
+    // 一个并不存在的崩溃文件路径。
+    crate::infra::startup_dialog::present_startup_panic(
+        payload.unwrap_or("<非字符串 panic payload>"),
+        if written { Some(path.as_path()) } else { None },
+    );
 }
 
 /// 把崩溃报告追加到 bootstrap 文件（**独立持久出口**）。
@@ -136,6 +151,8 @@ fn report(info: &PanicHookInfo<'_>) {
 /// 每次 panic 都写，不经 tracing 过滤器——`RUST_LOG=off` 会过滤 `error!`，
 /// 日志文件打不开时订阅器也只有 stderr，这两类情况下它是唯一的持久痕迹。
 /// 所有错误静默忽略：这是崩溃路径，写不进去也绝不允许二次 panic。
+/// 返回值只表示**本次追加是否成功**，供启动对话框决定是否展示文件路径；
+/// 它不改变「失败也静默」的约定。
 /// 每条报告以 unix 时间戳行开头，区分多次运行的崩溃记录。
 ///
 /// 调用位置：`report` 的**第一个**副作用（先于 tracing / stderr），顺序理由见
@@ -150,7 +167,7 @@ fn report(info: &PanicHookInfo<'_>) {
 ///   `fs::write` 仍会跟随检查与截断之间被换上的链接。产品只发 Windows，
 ///   Unix 风险主要存在于开发/CI 环境，这一残余窗口已知并接受；
 /// - Unix 上新文件以 `0600` 创建、已有文件收敛到 `0600`。
-fn write_bootstrap_report(path: &Path, message: &str) {
+fn write_bootstrap_report(path: &Path, message: &str) -> bool {
     // 阻塞等锁而非 try_lock：争用时跳过等于丢一条崩溃记录。临界区无 panic
     // 路径故不会自死锁（钩子内再 panic 会 abort，不会重新取锁）；中毒取回
     // 内部值继续写，避免一次中毒让后续所有记录被永久跳过。
@@ -158,7 +175,7 @@ fn write_bootstrap_report(path: &Path, message: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     if is_symlink(path) {
-        return;
+        return false;
     }
     // 超限先轮转（与 logger 共用同一判据与手法）；失败静默
     let _ = crate::infra::logger::truncate_if_oversized(path, MAX_BOOTSTRAP_FILE_BYTES);
@@ -176,14 +193,14 @@ fn write_bootstrap_report(path: &Path, message: &str) {
         Ok(file) => Ok(file),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             if is_symlink(path) {
-                return;
+                return false;
             }
             options.open(path)
         }
         Err(e) => Err(e),
     };
     let Ok(mut file) = opened else {
-        return;
+        return false;
     };
     #[cfg(unix)]
     {
@@ -200,7 +217,7 @@ fn write_bootstrap_report(path: &Path, message: &str) {
         // pid 用于多实例场景归因（跨进程写入不串行，只有这一行能区分是谁写的）
         std::process::id()
     );
-    let _ = file.write_all(entry.as_bytes());
+    file.write_all(entry.as_bytes()).is_ok()
 }
 
 /// 路径本身是否是符号链接（不跟随；不存在或读取失败一律视为「不是」）。

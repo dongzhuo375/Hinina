@@ -42,12 +42,14 @@ tauri-plugin-dialog = "2.7.3"
 # `infra::console` 的 `--console` 启动参数：release GUI 构建重新附加调试控制台。
 # 只在 Windows 目标编译；API 用途与签名取证自 windows-sys 0.59 源码
 # （SetStdHandle/STD_* 在 Win32::System::Console，CreateFileW/GENERIC_* 分布见模块内 use）。
+# `infra::startup_dialog` 的 MessageBoxW 在 Win32::UI::WindowsAndMessaging。
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [build-dependencies]
