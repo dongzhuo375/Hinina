@@ -56,7 +56,7 @@ Hinina/
 └── src-tauri/
     ├── Cargo.toml                        # Rust 项目清单（依赖、版本、feature flags）
     ├── tests/                             # 顶层集成测试二进制（刻意例外：Logger::init 的生产分支在单元测试不可达，见 doc/cicd/m2-tests.md；单元测试仍在各模块旁 tests/ 子目录）
-    ├── tauri.conf.json                   # Tauri 2 配置文件（含 bundle：NSIS 打包目标、publisher/版权/描述、图标清单）
+    ├── tauri.conf.json                   # Tauri 2 配置文件（含 bundle：NSIS 打包目标——线路保留但发布主线经 `--no-bundle` 只出裸 exe、publisher/版权/描述、图标清单）
     ├── build.rs                          # Tauri 构建脚本
     ├── icons/                            # 应用图标（源图 doc/icon/，tauri icon 生成 + 小尺寸优化版替换；icon.ico 为母版/小尺寸混合多帧）
     ├── capabilities/

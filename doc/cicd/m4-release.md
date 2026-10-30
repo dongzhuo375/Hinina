@@ -1,5 +1,7 @@
 # CI/CD M4 施工记录：Windows 发布 MVP
 
+> **编者注（2026-10-31）**：本文记录 M4 当时的 NSIS 安装包发布链路。此后发布主线改为**免安装裸 exe**（`Hinina_<版本>_x64.exe`，构建带 `--no-bundle`，见 feat/release-bare-exe 分支的 PR）；NSIS 线路保留在 `tauri.conf.json` 但发布不使用——现行口径见仓库根 `RELEASE.md`。以下正文按历史记录保留，不再更新。
+
 ## 一、落地范围（分支 chore/ci-m4-release，本 PR）
 
 - 版本一致性门禁：`scripts/check-release-versions.mjs` + `npm run release:check` + `scripts/__tests__/check-release-versions.spec.ts`。
