@@ -17,8 +17,7 @@
 - **`Logger::has_log_file(&self) -> bool`** — 文件层是否可用。用于区分「清空了日志」与「本来就没有文件层（磁盘只读等）」，让界面如实说明结果
 - **`truncate_log_file(path) -> io::Result<u64>`**（私有自由函数） — 把日志文件截断为 0 并返回释放字节数。抽成自由函数是为了可单测（`init` 会设置全局 subscriber，测试里不能调）
 - **`stderr_line(msg)`**（私有自由函数） — 写一行到 stderr，**写失败静默忽略**。`eprintln!` 在写失败时会 panic（"failed printing to stderr"），而 release 是 GUI 子系统、stderr 句柄无效；`open_log_file` 的报障出口绝不能自己把启动炸掉
-- **`ready() -> bool`**（模块级自由函数） — 全局订阅器是否已安装（`SUBSCRIBER_READY` 原子标志：`init` 两条装订阅器的分支成功时置位；测试构建不装订阅器恒 false）。**注意订阅器在 ≠ 文件在**：日志文件打不开时仍会装上只含 stderr 的订阅器。
-- **`file_layer_ready() -> bool`**（模块级自由函数） — 日志文件层是否已接管（`FILE_LAYER_READY` 原子标志，只在文件层随订阅器安装成功时置位）。panic 钩子据此判定：`ready()` 为 true 但本函数为 false 时必须补写 bootstrap 崩溃文件，否则 GUI 构建下 panic 只有 stderr、没有落点。用原子量而不是读 `ACTIVE_LOG_PATH` 的锁——钩子可能在 `init` 持锁时运行，再取锁会重演 `SharedFileWriter` 的重入死锁。
+- **`ready() -> bool`**（模块级自由函数） — 全局订阅器是否已安装（`SUBSCRIBER_READY` 原子标志：`init` 两条装订阅器的分支成功时置位；测试构建不装订阅器恒 false）。只表示「可以调用 `tracing` 宏」，**不表示日志一定落盘**：日志文件打不开时仍会装上只含 stderr 的订阅器，`RUST_LOG=off` 还会过滤掉包括 `error!` 在内的全部事件——panic 的持久记录由 `infra::panic_report` 的 bootstrap 文件独立保证。
 
 ## 直接依赖
 - `std::fs` / `std::io` / `std::path::Path` / `std::sync::{Arc, Mutex}`
@@ -28,10 +27,10 @@
 - `core::context`（`AppContext::init()` 序列第一步调用 `Logger::init(&base_dir)` 并**持有返回的实例**（`AppContext.logger`），后续步骤才能记录日志）
 - `commands::maintenance_cmd`（`purge_local_data` → `clear_log_file` / `has_log_file`）
 - `commands::config_cmd`（`get_storage_info` 引用 `LOG_RELATIVE_PATH` 拼出日志展示路径）
-- `infra::panic_report`（`ready()` / `file_layer_ready()` 分流 panic 报告的输出路径；文件层不可用时由钩子补写 bootstrap 文件）
+- `infra::panic_report`（`ready()` 决定 panic 报告走 `tracing::error!` 还是 stderr 直写；持久记录另由钩子无条件写 bootstrap 文件，见该模块文档）
 
 ## 逻辑流程
-`Logger::init(base_dir)` 在应用启动时最先调用：构造 `EnvFilter`（RUST_LOG 优先，否则按编译模式取默认级别）→ 构造 stderr 层 → `open_log_file(base_dir)` 尝试打开文件层（建目录 → 超限截断 → 追加打开）→ 成功则 `registry + filter + stderr 层 + 文件层` 三层组装 `try_init()`（失败沿用已装订阅器；装成功置位 `SUBSCRIBER_READY` 与 `FILE_LAYER_READY`）；失败则经 `stderr_line` 留痕（写失败可忽略）并退回单路 stderr——此分支只置位 `SUBSCRIBER_READY`（订阅器在、文件层不在）。此后所有 `tracing` 宏事件同时写往两路（文件层可用时）。
+`Logger::init(base_dir)` 在应用启动时最先调用：构造 `EnvFilter`（RUST_LOG 优先，否则按编译模式取默认级别）→ 构造 stderr 层 → `open_log_file(base_dir)` 尝试打开文件层（建目录 → 超限截断 → 追加打开）→ 成功则 `registry + filter + stderr 层 + 文件层` 三层组装 `try_init()`（失败沿用已装订阅器；装成功置位 `SUBSCRIBER_READY`）；失败则经 `stderr_line` 留痕（写失败可忽略）并退回单路 stderr。此后所有 `tracing` 宏事件同时写往两路（文件层可用时）。
 
 ## 测试
 `src-tauri/src/infra/tests/logger_tests.rs`（由 `logger.rs` 底部 `#[cfg(test)] #[path = "tests/logger_tests.rs"] mod tests;` 引用）只测纯文件行为，**不测 `init`**（全局 subscriber 每进程只能设置一次，在测试运行时里 init 会与 cargo test 的输出捕获及其他测试冲突）。用例（各自建独立临时目录，用后清理）：自动创建 `logs/hinina.log`、未超限的既有日志追加而不清空、超过 5MB 的文件启动时截断为 0、恰好等于上限不截断（锁定 `>` 判据边界）。

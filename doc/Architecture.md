@@ -203,7 +203,7 @@ Hinina/
         │   ├── storage.rs                # Storage 底层文件工具；`write_string_atomic`（tmp + sync_all + rename，写前清同目标 `{target}.{数字}.tmp` 残片）供会话等「重启后必须可恢复」的数据使用 —— 对进程崩溃安全，对掉电最坏回退旧的完整文件（目录 fsync 未做）
         │   ├── cache.rs                  # 缓存原语（TtlCache：TTL + 容量上限，近似 FIFO 淘汰；JsonDiskCache：cache/{ns}/{key}.json，条目带 fetchedAt 跨重启计时、损坏容忍、过期懒删除）
         │   ├── logger.rs                 # Logger（Tracing 双路输出：stderr + {base_dir}/logs/hinina.log，启动时 >5MB 截断，运行期可截断清空；GUI 子系统下 stderr 层静默丢弃（tracing-subscriber 内部默认不报写错误）；敏感信息不落日志靠调用点约束——IPC 日志不记参数）
-        │   ├── panic_report.rs           # 进程级 panic 钩子（main 最先安装，早于参数解析）：消息/线程/位置/强制堆栈——文件层正常时经 tracing error! 落 hinina.log；文件层未接管（init 之前或日志文件打不开，靠 logger::file_layer_ready 与 ready 分开判定）时追加 %TEMP%/hinina-panic.log（1MB 截断），每次 panic 必有持久落点。先于插件 catch_unwind 运行，崩溃先落日志再走既有恢复——「闪退可追查」的兜底
+        │   ├── panic_report.rs           # 进程级 panic 钩子（main 最先安装，早于参数解析）：消息/线程/位置/强制堆栈——每次 panic 无条件追加 %TEMP%/hinina-panic.log（1MB 截断，不经 tracing 过滤器——RUST_LOG=off 或日志文件打不开也保得住）；日志未被 `RUST_LOG` 关闭时另经 tracing error! 落 hinina.log。先于插件 catch_unwind 运行，崩溃先落日志再走既有恢复——「闪退可追查」的兜底
         │   ├── console.rs                # --console 启动参数（args_os 解析，非 Unicode 参数不 panic）：release GUI 构建重新附加调试控制台（挂父控制台优先，失败 AllocConsole，重绑 std 句柄；幂等；非 Windows no-op）。只管窗口，日志级别仍由 RUST_LOG 控制
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
