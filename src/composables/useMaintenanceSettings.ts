@@ -90,10 +90,13 @@ export function useMaintenanceSettings() {
       const report = await systemService.purgeLocalData(purgeLogs.value, purgeSnapshots.value)
       const parts = [`释放 ${formatBytes(report.freedBytes)}`]
       if (report.removedSnapshots > 0) parts.push(`删除留档 ${report.removedSnapshots} 个`)
+      // 两个清理对象分别如实回报，不合并成一个「日志未清理」
       const logMissed = purgeLogs.value && !report.logCleared
+      const crashMissed = purgeLogs.value && !report.crashCleared
       if (logMissed) parts.push('日志未清理（文件层不可用或写入失败）')
+      if (crashMissed) parts.push('崩溃记录未清理（文件删除失败）')
 
-      showPurgeNotice({ text: `已清理：${parts.join('，')}`, warn: logMissed })
+      showPurgeNotice({ text: `已清理：${parts.join('，')}`, warn: logMissed || crashMissed })
       await loadUsage()
     } catch (e) {
       purgeError.value = errorMessage(e, '清理本地数据失败')

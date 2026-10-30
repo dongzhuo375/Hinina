@@ -48,7 +48,7 @@ config/system service、相关 store 和 types 由对应 controllers 持有；Vi
 
 ## 测试
 
-- `__tests__/SettingsView.spec.ts`：维护区组合回归——双空拦截、日志未清 warning、重置补拉失败 warning。
+- `__tests__/SettingsView.spec.ts`：维护区组合回归——双空拦截、日志/崩溃记录未清分别 warning、重置补拉失败 warning。
 - `__tests__/SettingsView.behavior.spec.ts`：四路加载顺序、七组真实 section id/导航顺序、保存与 active、未配置 OJ 自动切换、已配置切换失败回滚、目录 migrate 快照、About 复制、scroll-spy 锁与 atBottom。
 - Controllers 各有独立 spec：`useSettingsForm`、`useAboutSettings`、`useMaintenanceSettings`、`useDataDirSettings`、`useSettingsScrollSpy`。
 - `e2e/specs/settings.spec.ts`：真实 Chromium 的分区样式、响应式导航/滚动与 fake IPC 保存验收；原生目录选择器、真实剪贴板权限和 WebView2 桌面表现另属人工验收。

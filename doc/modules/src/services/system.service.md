@@ -12,8 +12,8 @@
 |------|------|------|
 | `SystemService.getStorageInfo` | `() => Promise<StorageInfo>` | 存储信息（baseDir / logPath / version）；失败由调用方降级展示（设置页「关于」区块显示「获取失败」，不影响其余分组） |
 | `SystemService.resetClient` | `() => Promise<void>` | 重置客户端（三层缓存 + 公告基线 + 公告已读状态）；**不重拉**，补拉由调用方编排（设置页重置后立刻重拉当前比赛数据） |
-| `SystemService.localDataUsage` | `() => Promise<LocalDataUsage>` | 可清理项的体积预览（日志字节数 / 留档总与过期条数字节） |
-| `SystemService.purgeLocalData` | `(logs: boolean, staleSnapshots: boolean) => Promise<PurgeReport>` | 清理本地数据（**不可逆**）；范围由调用方显式传入，服务层不设默认值 |
+| `SystemService.localDataUsage` | `() => Promise<LocalDataUsage>` | 可清理项的体积预览（日志与崩溃记录字节数 / 留档总与过期条数字节） |
+| `SystemService.purgeLocalData` | `(logs: boolean, staleSnapshots: boolean) => Promise<PurgeReport>` | 清理本地数据（**不可逆**）：日志内容 + 崩溃记录文件 + 过期留档；范围由调用方显式传入，服务层不设默认值 |
 | `SystemService.getDataDir` | `() => Promise<DataDirInfo>` | 当前数据目录 / 默认目录 / 来源 / 是否待重启 |
 | `SystemService.setDataDir` | `(path: string, migrate: boolean) => Promise<DataDirChange>` | 更改数据目录（**重启后生效**）；只「校验 + 记下改动」，搬运由下次启动完成 |
 | `SystemService.resetDataDir` | `(migrate: boolean) => Promise<DataDirChange>` | 恢复默认数据目录（**重启后生效**） |

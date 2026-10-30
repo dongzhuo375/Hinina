@@ -31,10 +31,12 @@ beforeEach(() => {
   vi.useFakeTimers()
   mocks.resetClient.mockResolvedValue(undefined)
   mocks.localDataUsage.mockResolvedValue({
-    logBytes: 4096, logPath: 'D:\\hinina\\log.txt', snapshotTotalCount: 5,
+    logBytes: 4096, logPath: 'D:\\hinina\\log.txt',
+    crashBytes: 512, crashPath: 'C:\\Temp\\hinina-panic.log',
+    snapshotTotalCount: 5,
     snapshotTotalBytes: 8192, snapshotStaleCount: 2, snapshotStaleBytes: 2048, keepDays: 30,
   })
-  mocks.purgeLocalData.mockResolvedValue({ freedBytes: 2048, removedSnapshots: 2, logCleared: false })
+  mocks.purgeLocalData.mockResolvedValue({ freedBytes: 2048, removedSnapshots: 2, logCleared: false, crashCleared: true })
   mocks.loadContest.mockResolvedValue(undefined)
   mocks.announcementRefresh.mockResolvedValue(undefined)
   scope = effectScope()
@@ -81,5 +83,20 @@ describe('useMaintenanceSettings', () => {
     expect(maintenance.purgeNotice.value?.warn).toBe(true)
     expect(maintenance.purgeNotice.value?.text).toContain('日志未清理')
     expect(mocks.localDataUsage).toHaveBeenCalledTimes(1)
+  })
+
+  it('崩溃记录删除失败单独 warning：日志成功不背锅', async () => {
+    maintenance.purgeLogs.value = true
+    maintenance.purgeSnapshots.value = false
+    mocks.purgeLocalData.mockResolvedValueOnce({
+      freedBytes: 4096, removedSnapshots: 0, logCleared: true, crashCleared: false,
+    })
+
+    await maintenance.purgeLocalData()
+
+    const notice = maintenance.purgeNotice.value
+    expect(notice?.warn).toBe(true)
+    expect(notice?.text).toContain('崩溃记录未清理')
+    expect(notice?.text).not.toContain('日志未清理')
   })
 })

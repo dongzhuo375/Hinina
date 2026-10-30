@@ -5,7 +5,7 @@
 // - **重置客户端**（`reset_client`）：把客户端拉回「干净状态」—— 清掉一切**可以
 //   重新从服务端获取**的东西（三层缓存 + 公告基线 + 公告已读标记）。安全、可反复点。
 // - **清理本地数据**（`local_data_usage` / `purge_local_data`）：删除**不可重建**的
-//   本地事实（日志内容、过期提交留档）。不可逆，故先给预览、再由用户显式勾选确认。
+//   本地事实（日志内容、崩溃记录文件、过期提交留档）。不可逆，故先给预览、再由用户显式勾选确认。
 //
 // 两者都**不动**：工作区代码（`workspaces/`，选手唯一作品本体）、配置（`config.json`）、
 // 登录会话（`sessions/`，重置不该把选手踢回登录页 —— 换账号有独立的登出路径）。
@@ -15,7 +15,7 @@ use tauri::State;
 use tracing::{info, warn};
 
 use crate::core::context::AppContext;
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::infra::cache::CACHE_ROOT_DIR;
 use crate::infra::logger::LOG_RELATIVE_PATH;
 use crate::service::submission::snapshot::{self, SNAPSHOT_KEEP_DAYS};
@@ -76,6 +76,10 @@ pub struct LocalDataUsage {
     pub log_bytes: u64,
     /// 日志文件完整路径（展示用）
     pub log_path: String,
+    /// 崩溃记录文件字节数（`%TEMP%/hinina-panic.log`，随「日志内容」一并删除）
+    pub crash_bytes: u64,
+    /// 崩溃记录文件完整路径（展示用）
+    pub crash_path: String,
     /// 提交留档：总条数 / 总字节数 / 其中过期的条数与字节数
     pub snapshot_total_count: usize,
     pub snapshot_total_bytes: u64,
@@ -98,13 +102,29 @@ pub async fn local_data_usage(ctx: State<'_, AppContext>) -> AppResult<LocalData
 
 /// `local_data_usage` 的统计实现（提取自命令本体，供命令与测试共用）。
 pub(crate) fn local_data_usage_impl(ctx: &AppContext) -> LocalDataUsage {
+    local_data_usage_with(ctx, &crate::infra::panic_report::bootstrap_log_path())
+}
+
+/// 与 [`local_data_usage_impl`] 相同，但崩溃记录路径可注入。
+///
+/// 单测必须走注入版本：真实路径指向 `%TEMP%/hinina-panic.log`，测试只应 stat
+/// 自己造的沙箱文件，不读取开发机上的真实崩溃记录元数据（见 `tests/common`）。
+pub(crate) fn local_data_usage_with(
+    ctx: &AppContext,
+    crash_path: &std::path::Path,
+) -> LocalDataUsage {
     let log_path = ctx.storage.base_dir().join(LOG_RELATIVE_PATH);
     let log_bytes = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
+    let crash_bytes = std::fs::symlink_metadata(crash_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
     let usage = snapshot::inspect_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS);
 
     LocalDataUsage {
         log_bytes,
         log_path: log_path.to_string_lossy().into_owned(),
+        crash_bytes,
+        crash_path: crash_path.to_string_lossy().into_owned(),
         snapshot_total_count: usage.total_count,
         snapshot_total_bytes: usage.total_bytes,
         snapshot_stale_count: usage.stale_count,
@@ -117,28 +137,37 @@ pub(crate) fn local_data_usage_impl(ctx: &AppContext) -> LocalDataUsage {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PurgeReport {
-    /// 释放的总字节数
+    /// 释放的总字节数（日志、崩溃记录、留档三处成功项之和）
     pub freed_bytes: u64,
     /// 删除的留档条数
     pub removed_snapshots: usize,
     /// 日志内容是否**确实**被清空。
     ///
     /// `false` 有三种成因：文件层不可用（磁盘只读）、截断失败、或本次没勾选日志。
-    /// 界面据此如实提示，而不是笼统报「已清理」。
+    /// 崩溃记录文件是独立对象，失败记在 [`crash_cleared`](Self::crash_cleared)，
+    /// 不污染本字段——两者各自如实回报，而不是笼统报「已清理」。
     pub log_cleared: bool,
+    /// 崩溃记录文件是否**确实**被删除（不存在视为已清理）。
+    ///
+    /// 与 `log_cleared` 分开：日志已截断但崩溃文件删除失败时，界面仍应显示
+    /// 日志释放的字节数并单独提示崩溃记录未清理。
+    pub crash_cleared: bool,
 }
 
-/// 逐项容错地执行清理（**两个勾选项互不牵连**）。
+/// 逐项容错地执行清理（**两项勾选、三个清理对象互不牵连**）。
 ///
 /// 抽成纯函数是为了可单测（命令本体依赖 `tauri::State`，测试里拿不到）——
 /// 而「一项失败不该连带取消另一项」正是这里最需要锁定的行为。
 ///
-/// 日志清理失败（文件被占用、权限不足）时**降级为 `log_cleared=false` 并继续**，
-/// 而不是 `?` 冒泡中断整个命令：用户勾了留档清理，就该拿到留档清理的结果。
+/// 日志与崩溃记录是「日志与崩溃记录」同一勾选项下的两个独立对象：
+/// 任一失败只降级它自己的 `*_cleared` 并继续，**已成功的字节数照常累计**。
+/// 曾把两者包进同一个 `match`：崩溃文件删除失败会把日志已截断的字节数一起
+/// 丢掉，界面显示「未清理 / 释放 0 B」，与实际不符。
 pub(crate) fn run_purge(
     logs: bool,
     stale_snapshots: bool,
     clear_log: impl FnOnce() -> AppResult<(u64, bool)>,
+    clear_crash: impl FnOnce() -> AppResult<u64>,
     purge_snapshots: impl FnOnce() -> (usize, u64),
 ) -> PurgeReport {
     let mut report = PurgeReport::default();
@@ -151,6 +180,14 @@ pub(crate) fn run_purge(
                 info!(freed_bytes = freed, log_cleared = cleared, "日志内容已清空");
             }
             Err(e) => warn!(error = %e, "清空日志内容失败，继续执行其余清理项"),
+        }
+        match clear_crash() {
+            Ok(freed) => {
+                report.freed_bytes += freed;
+                report.crash_cleared = true;
+                info!(freed_bytes = freed, "崩溃记录文件已清理");
+            }
+            Err(e) => warn!(error = %e, "删除崩溃记录文件失败，继续执行其余清理项"),
         }
     }
 
@@ -168,11 +205,14 @@ pub(crate) fn run_purge(
 /// 前端 invoke 签名: `purge_local_data`({ logs, staleSnapshots })
 ///
 /// - `logs`：清空日志**内容**（不删文件 —— 删了要等重启才重建，中间这段排障信息
-///   就彻底没了；用「重开 + 截断」而非句柄 `set_len`，原因见 `infra/logger.rs`）
+///   就彻底没了；用「重开 + 截断」而非句柄 `set_len`，原因见 `infra/logger.rs`），
+///   并**删除**崩溃记录文件 `%TEMP%/hinina-panic.log`（它在数据目录之外且可能含
+///   插件可控文本，故删除而非截断；与日志各自独立回报，见 [`run_purge`]）
 /// - `staleSnapshots`：删除早于 `SNAPSHOT_KEEP_DAYS` 的提交源码留档
 ///
 /// **逐项容错**：任何一项失败都不影响另一项（见 [`run_purge`]），故本命令只在
-/// 参数层面之外几乎不会失败 —— `log_cleared=false` 如实表示「日志没被清掉」。
+/// 参数层面之外几乎不会失败 —— `log_cleared=false` 如实表示「日志没被清掉」；
+/// 崩溃记录删除失败只降级 `crash_cleared`，不影响日志已释放的字节数。
 /// 两个开关都关时是 no-op（前端不会这么调，此处仍如实处理）。
 /// **不动**工作区代码、配置、会话与公告已读状态。
 #[tauri::command]
@@ -190,18 +230,40 @@ pub(crate) fn purge_local_data_impl(
     logs: bool,
     stale_snapshots: bool,
 ) -> PurgeReport {
+    purge_local_data_with(
+        ctx,
+        logs,
+        stale_snapshots,
+        crate::infra::panic_report::clear_bootstrap_log,
+    )
+}
+
+/// 与 [`purge_local_data_impl`] 相同的编排，但崩溃文件清理可注入。
+///
+/// 单测必须走注入版本：真实实现会删除 `%TEMP%/hinina-panic.log`，而测试进程
+/// 的临时目录里可能有开发机上的真实崩溃记录（见 `tests/common` 的沙箱约定）。
+pub(crate) fn purge_local_data_with(
+    ctx: &AppContext,
+    logs: bool,
+    stale_snapshots: bool,
+    clear_crash: impl FnOnce() -> std::io::Result<u64>,
+) -> PurgeReport {
     info!(logs, stale_snapshots, "Command: 清理本地数据");
 
     run_purge(
         logs,
         stale_snapshots,
-        // 文件层不可用（磁盘只读等）时 clear_log_file 返回 Ok(0)：此时并没有清掉
-        // 任何东西，故用 has_log_file 如实回报「是否真的清了」
+        // 日志文件：清空内容、保留文件。文件层不可用（磁盘只读等）时
+        // clear_log_file 返回 Ok(0)：此时并没有清掉任何东西，故用
+        // has_log_file 如实回报「是否真的清了」
         || {
             ctx.logger
                 .clear_log_file()
                 .map(|freed| (freed, ctx.logger.has_log_file()))
         },
+        // 崩溃记录文件：删除（可能含插件可控文本）。与日志分开回报，
+        // 任一失败不影响另一项的字节数与 cleared 状态
+        || clear_crash().map_err(|e| AppError::Io(format!("删除崩溃记录文件失败: {}", e))),
         || snapshot::purge_stale_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS),
     )
 }

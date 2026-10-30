@@ -130,6 +130,8 @@ beforeEach(() => {
   mocks.localDataUsage.mockResolvedValue({
     logBytes: 4096,
     logPath: 'D:\\hinina\\logs\\hinina.log',
+    crashBytes: 512,
+    crashPath: 'C:\\Temp\\hinina-panic.log',
     snapshotTotalCount: 5,
     snapshotTotalBytes: 8192,
     snapshotStaleCount: 2,
@@ -146,7 +148,7 @@ beforeEach(() => {
   mocks.setDataDir.mockResolvedValue(undefined)
   mocks.resetDataDir.mockResolvedValue(undefined)
   mocks.resetClient.mockResolvedValue(undefined)
-  mocks.purgeLocalData.mockResolvedValue({ freedBytes: 0, removedSnapshots: 0, logCleared: true })
+  mocks.purgeLocalData.mockResolvedValue({ freedBytes: 0, removedSnapshots: 0, logCleared: true, crashCleared: true })
   mocks.loadContest.mockResolvedValue(undefined)
   mocks.announcementRefresh.mockResolvedValue(undefined)
 })

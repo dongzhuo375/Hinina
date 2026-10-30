@@ -104,12 +104,12 @@ const {
                           class="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--color-primary)]"
                         />
                         <span class="min-w-0">
-                          日志内容
+                          日志与崩溃记录
                           <span class="font-mono text-[var(--text-primary)]">
-                            {{ formatBytes(usage.logBytes) }}
+                            {{ formatBytes(usage.logBytes + usage.crashBytes) }}
                           </span>
                           <span class="text-[var(--text-muted)]">
-                            （只清空内容，保留日志文件本身）
+                            （日志只清空内容、保留文件；崩溃记录文件在临时目录，会被删除）
                           </span>
                         </span>
                       </label>

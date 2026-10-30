@@ -16,6 +16,10 @@ export interface LocalDataUsage {
   logBytes: number
   /// 日志文件完整路径
   logPath: string
+  /// 崩溃记录文件字节数（临时目录，随「日志与崩溃记录」一并删除）
+  crashBytes: number
+  /// 崩溃记录文件完整路径
+  crashPath: string
   /// 提交留档总条数
   snapshotTotalCount: number
   /// 提交留档总字节数
@@ -34,8 +38,11 @@ export interface PurgeReport {
   freedBytes: number
   /// 删除的留档条数
   removedSnapshots: number
-  /// 是否清空了日志内容（文件层不可用时为 false，不算失败）
+  /// 日志内容是否确实清空（文件层不可用或截断失败时为 false）
   logCleared: boolean
+  /// 崩溃记录文件是否确实删除（不存在视为已清理）。
+  /// 未勾选日志清理时不执行删除，本字段恒为 false——界面只在勾选时读取。
+  crashCleared: boolean
 }
 
 /// 数据目录来源，对应 Rust `infra::data_dir::DataDirSource`。
