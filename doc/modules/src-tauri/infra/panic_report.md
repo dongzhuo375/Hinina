@@ -10,8 +10,8 @@
 |------|------|------|
 | `install` | `pub fn install()` | `std::panic::set_hook` 安装进程级钩子。在 `main()` **最先**调用（早于参数解析、Runtime / Builder / Logger）——参数解析用 `args_os()` 也可能 panic，必须落在钩子之后。重复调用只是替换 |
 | `report` | `fn report(&PanicHookInfo)`（私有，钩子本体） | `payload_as_str()` 取消息（非字符串 payload 用 `<非字符串 panic payload>` 占位，不猜内容）+ 线程名 + panic 位置 + `Backtrace::force_capture()`（无视 RUST_BACKTRACE，崩溃取证要全量）。`logger::ready()` 为 true → `tracing::error!(target: "panic")`（过滤器可能丢弃它）；false → stderr 兜底（写失败忽略）。**两条路径最后都无条件**追加 bootstrap 文件——是否被过滤器拦下无法在钩子里判定，宁可重复不可丢失 |
-| `write_bootstrap_report` | `fn write_bootstrap_report(path, message)`（私有） | 追加崩溃报告到 bootstrap 文件（**独立持久出口**，每次 panic 都写）：每条以 `unix_epoch_secs` 头行区分运行轮次；超过 1 MiB 先截断（rotate-by-truncate，与 logger 启动轮转同源）；**所有写失败静默忽略**——崩溃路径绝不允许二次 panic |
-| `bootstrap_log_path` | `fn bootstrap_log_path() -> PathBuf`（私有） | 固定 `%TEMP%/hinina-panic.log`：钩子运行时数据目录解析尚未发生（那正是可能 panic 的环节之一），任何「先解析再写」都会把失败面拉进钩子；测试构建经 `set_bootstrap_path_override` 注入临时路径 |
+| `write_bootstrap_report` | `fn write_bootstrap_report(path, message)`（私有） | 追加崩溃报告到 bootstrap 文件（**独立持久出口**，每次 panic 都写）：进程内用 `BOOTSTRAP_WRITE_LOCK`（`try_lock`）串行化「检查-截断-追加」，并发 panic 不会互相抹掉记录；每条以 `unix_epoch_secs` 头行区分运行轮次；超过 1 MiB 先经 `logger::truncate_if_oversized` 轮转（与启动日志轮转共用同一份判据）；Unix 上拒绝符号链接目标、以 `0600` 创建并收敛已有文件权限；**所有写失败静默忽略**——崩溃路径绝不允许二次 panic |
+| `bootstrap_log_path` | `fn bootstrap_log_path() -> PathBuf`（私有） | 固定 `%TEMP%/hinina-panic.log`：钩子运行时数据目录解析尚未发生（那正是可能 panic 的环节之一），任何「先解析再写」都会把失败面拉进钩子；测试经重定向 `TMPDIR`/`TMP`/`TEMP` 隔离 |
 | `format_report` | `fn format_report(payload, thread, location, backtrace) -> String`（私有） | 纯函数格式化（`PanicHookInfo` 无公开构造器，抽出供单测） |
 
 ## 直接依赖
@@ -32,13 +32,13 @@
 4. **无论上一步走哪条**，都追加 `%TEMP%/hinina-panic.log`：`RUST_LOG=off` 或 `panic=off` 会过滤 `error!`，日志文件也可能打不开——bootstrap 是唯一不受这些配置影响的出口。只有临时目录也不可写时崩溃才真正不可追查。
 5. panic 照常 unwind：插件 worker 的 `catch_unwind`、tokio 的 `JoinError` 等既有恢复路径不受影响，只是先多了一份带堆栈的日志。
 
-钩子经 tracing 文件层写日志存在 `SharedFileWriter` 重入自死锁的理论窗口（见 `logger.md` 设计要点）；bootstrap 写不经过文件层，无此窗口。bootstrap 路径在每次调用时重新解析 `std::env::temp_dir()`，测试通过重定向 `TMPDIR`/`TMP`/`TEMP` 隔离，不读写真实路径。
+钩子经 tracing 文件层写日志的重入窗口已按源码排除：tracing-subscriber 先格式化进 thread-local 缓冲、再加锁写 writer（见 `logger.md` 设计要点）；bootstrap 写不经过文件层，无此窗口。bootstrap 路径在每次调用时重新解析 `std::env::temp_dir()`，测试通过重定向 `TMPDIR`/`TMP`/`TEMP` 隔离，不读写真实路径。
 
 release 构建默认不带调试符号，堆栈以帧地址为主；需要可读符号时给 release profile 开 `debug` 即可，本模块不负责符号化。
 
 ## 测试
 
-- `src/infra/tests/panic_report_tests.rs`：`format_report` 各段与占位；bootstrap 文件追加 + 时间戳头、超限截断、写失败静默；钩子全链路（经 `set_bootstrap_path_override` 注入临时路径，`ready()` 恒 false 的测试构建走 bootstrap 分支）落盘消息/时间戳/堆栈。
+- `src/infra/tests/panic_report_tests.rs`：`format_report` 各段与占位；bootstrap 文件追加 + 时间戳头、超限截断、写失败静默；Unix 下拒绝符号链接目标（不改写链接目标）。不在单测里安装钩子（全局钩子与 override 会泄漏到后续用例，端到端由独立集成二进制覆盖）。
 - `src-tauri/tests/panic_report_bootstrap_tests.rs`（独立二进制，不初始化 logger）：`std::env::temp_dir()/hinina-panic.log` 的端到端证明，临时目录经 `tests/common` 的 `SandboxTemp` 重定向到用例沙箱。
 - `src-tauri/tests/panic_report_no_file_layer_tests.rs`（独立二进制，模拟日志文件打不开）：用同名文件占住 `logs` 路径使 `open_log_file` 失败，断言 `ready()==true`、`has_log_file()==false`，且 panic 仍落 bootstrap 文件——GUI 构建下「无文件层就没有持久落点」的缺口回归。
 - `src-tauri/tests/panic_report_rust_log_off_tests.rs`（独立二进制，`RUST_LOG=off`）：断言 `error!` 被过滤器拦下（日志文件里没有该 panic）时 bootstrap 仍有完整记录——`RUST_LOG` 不得让崩溃记录消失。

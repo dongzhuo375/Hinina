@@ -15,6 +15,7 @@
 - **`Logger::open_log_file(base_dir) -> Option<File>`**（私有） — 打开日志文件（追加模式）：自动创建 `logs/` 目录；启动时检查大小，**超过 5MB 先截断清空**（rotate-by-truncate，判据是 `>` 而非 `>=`，恰好等于上限不截断）；任何一步失败返回 `None` 由调用方降级
 - **`Logger::clear_log_file(&self) -> AppResult<u64>`** — 清空日志内容并返回释放的字节数（文件层不可用时为 0）。**运行期**清理入口，供设置页「清理本地数据」调用
 - **`Logger::has_log_file(&self) -> bool`** — 文件层是否可用。用于区分「清空了日志」与「本来就没有文件层（磁盘只读等）」，让界面如实说明结果
+- **`truncate_if_oversized(path, max_bytes) -> io::Result<bool>`**（`pub(crate)` 自由函数） — 启动式轮转：超过上限即 `fs::write(path, [])`，返回是否截断；文件不存在返回 `Ok(false)`。**与 panic bootstrap 文件共用**，保证「`>` 判据 + 截断手法」只有一份实现，两处不会漂移
 - **`truncate_log_file(path) -> io::Result<u64>`**（私有自由函数） — 把日志文件截断为 0 并返回释放字节数。抽成自由函数是为了可单测（`init` 会设置全局 subscriber，测试里不能调）
 - **`stderr_line(msg)`**（私有自由函数） — 写一行到 stderr，**写失败静默忽略**。`eprintln!` 在写失败时会 panic（"failed printing to stderr"），而 release 是 GUI 子系统、stderr 句柄无效；`open_log_file` 的报障出口绝不能自己把启动炸掉
 - **`ready() -> bool`**（模块级自由函数） — 全局订阅器是否已安装（`SUBSCRIBER_READY` 原子标志：`init` 两条装订阅器的分支成功时置位；测试构建不装订阅器恒 false）。只表示「可以调用 `tracing` 宏」，**不表示日志一定落盘**：日志文件打不开时仍会装上只含 stderr 的订阅器，`RUST_LOG=off` 还会过滤掉包括 `error!` 在内的全部事件——panic 的持久记录由 `infra::panic_report` 的 bootstrap 文件独立保证。
