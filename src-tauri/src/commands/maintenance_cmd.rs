@@ -211,7 +211,8 @@ pub(crate) fn run_purge(
 /// - `staleSnapshots`：删除早于 `SNAPSHOT_KEEP_DAYS` 的提交源码留档
 ///
 /// **逐项容错**：任何一项失败都不影响另一项（见 [`run_purge`]），故本命令只在
-/// 参数层面之外几乎不会失败 —— `log_cleared=false` 如实表示「日志没被清掉」。
+/// 参数层面之外几乎不会失败 —— `log_cleared=false` 如实表示「日志没被清掉」；
+/// 崩溃记录删除失败只降级 `crash_cleared`，不影响日志已释放的字节数。
 /// 两个开关都关时是 no-op（前端不会这么调，此处仍如实处理）。
 /// **不动**工作区代码、配置、会话与公告已读状态。
 #[tauri::command]

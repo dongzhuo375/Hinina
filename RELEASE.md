@@ -45,7 +45,7 @@ git push origin vX.Y.Z
 
 - [ ] 在未安装 Hinina 的干净 Windows 环境安装并启动。
 - [ ] 应用内版本、安装包版本与关于信息一致。
-- [ ] 直接启动不出现控制台黑窗；从终端带 `--console` 启动出现调试控制台（崩溃信息始终写入 `%TEMP%\hinina-panic.log`，不受 `RUST_LOG` 与日志文件可用性影响；日志未被 `RUST_LOG` 关闭时同时写入 `logs/hinina.log`）。
+- [ ] 直接启动不出现控制台黑窗；从终端带 `--console` 启动出现调试控制台（崩溃信息写入 `%TEMP%\hinina-panic.log`，不经 `RUST_LOG` 过滤、不依赖日志文件是否可用，仅临时目录不可写时例外；日志文件可写且未被 `RUST_LOG` 关闭时同时写入 `logs/hinina.log`）。
 - [ ] 登录夹具、题目、编辑、保存、关窗 smoke 通过。
 - [ ] 覆盖旧版本升级安装（自第二个版本起适用）。
 - [ ] 卸载后用户数据行为符合发布说明。
