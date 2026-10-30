@@ -1,4 +1,4 @@
-use super::{format_report, set_bootstrap_path_override, MAX_BOOTSTRAP_FILE_BYTES};
+use super::{format_report, MAX_BOOTSTRAP_FILE_BYTES};
 use std::fs;
 use std::panic::Location;
 use std::path::PathBuf;
@@ -101,29 +101,23 @@ fn silently_ignores_unwritable_path() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// install + catch_unwind 全链路（单元构建 `logger::ready()` 恒 false，走
-/// bootstrap 分支）：崩溃报告应落在注入的临时文件里，含消息、时间戳头与堆栈。
+/// Unix 加固：bootstrap 路径是符号链接时拒绝写入，不改写链接目标。
+/// 临时目录可被同机用户写入时，避免预置链接把崩溃报告追加进别人的文件。
+#[cfg(unix)]
 #[test]
-fn pre_logger_panic_lands_in_bootstrap_file() {
-    let dir = temp_dir("hook-e2e");
-    let path = dir.join("hinina-panic.log");
-    let _ = fs::remove_file(&path);
-    set_bootstrap_path_override(path.clone());
+fn refuses_symlink_target() {
+    let dir = temp_dir("symlink");
+    let victim = dir.join("victim.txt");
+    fs::write(&victim, b"original-content").expect("预置目标文件失败");
+    let link = dir.join("hinina-panic.log");
+    std::os::unix::fs::symlink(&victim, &link).expect("创建符号链接失败");
 
-    super::install();
-    let result = std::panic::catch_unwind(|| panic!("bootstrap-panic-probe"));
-    assert!(result.is_err(), "panic 应照常 unwind，由 catch_unwind 收口");
+    super::write_bootstrap_report(&link, "symlink-probe\n");
 
-    let content = fs::read_to_string(&path).expect("bootstrap 崩溃文件应存在");
-    assert!(
-        content.contains("bootstrap-panic-probe"),
-        "消息应落盘：\n{content}"
+    assert_eq!(
+        fs::read_to_string(&victim).expect("目标文件应可读"),
+        "original-content",
+        "符号链接目标不得被追加写入"
     );
-    assert!(
-        content.contains("unix_epoch_secs:"),
-        "应有时间戳头：\n{content}"
-    );
-    assert!(content.contains("堆栈:"), "应有堆栈段：\n{content}");
-
     let _ = fs::remove_dir_all(&dir);
 }

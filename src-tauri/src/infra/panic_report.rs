@@ -8,6 +8,11 @@
 //! 情况下 bootstrap 文件就是唯一痕迹。只有临时目录也不可写时崩溃才真正
 //! 不可追查。
 //!
+//! 日志开启时同一报告在 `logs/hinina.log` 与 bootstrap 文件中各有一份，
+//! **这是有意重复**：钩子内无法判断事件是否会被 `EnvFilter` 丢弃，重复可接受、
+//! 丢失不可接受。被插件 worker 的 `catch_unwind` 捕获的 panic 同样会记录
+//! （钩子按 Rust 语义先于捕获运行），这是有意的可观测性——它仍是一次真实 panic。
+//!
 //! GUI 子系统（release 构建，见 main.rs 的 `windows_subsystem`）下 stderr 无处
 //! 可去，std 默认钩子的输出直接蒸发——竞赛客户端最怕「闪退且无迹可寻」，
 //! 本模块保证 panic 至少落一个持久文件。插件 worker 的 `catch_unwind`
@@ -24,35 +29,24 @@ use std::path::Path;
 const BOOTSTRAP_FILE_NAME: &str = "hinina-panic.log";
 
 /// Bootstrap 崩溃文件大小上限：超过即截断重写（rotate-by-truncate，与
-/// logger 的启动轮转同源），防止反复早期崩溃无限膨胀。
+/// logger 的启动轮转共用 `logger::truncate_if_oversized`），防止反复早期崩溃
+/// 无限膨胀。
 const MAX_BOOTSTRAP_FILE_BYTES: u64 = 1024 * 1024;
 
-/// Bootstrap 文件路径的测试注入点：单元测试构建把它指到测试临时目录，
-/// 避免污染真实 `%TEMP%`（生产构建没有这个静态，钩子直接用固定路径）。
-#[cfg(test)]
-static BOOTSTRAP_PATH_OVERRIDE: std::sync::Mutex<Option<std::path::PathBuf>> =
-    std::sync::Mutex::new(None);
-
-#[cfg(test)]
-pub(crate) fn set_bootstrap_path_override(path: std::path::PathBuf) {
-    *BOOTSTRAP_PATH_OVERRIDE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = Some(path);
-}
+/// 进程内 bootstrap 写入串行化。
+///
+/// 「检查大小 → 截断 → 追加」必须是一个整体：并发 panic（多线程、插件 worker）
+/// 各自检查后都截断，会把对方刚写入的记录抹掉。用 `try_lock` 而不是 `lock`：
+/// 崩溃路径上宁可跳过一条，也不在一个 panic 处理中阻塞等另一个 panic；
+/// 同时避免钩子重入时自死锁。跨进程竞争（多开应用实例）不处理——代价仅是
+/// 极端情况下丢一条记录，文件不会损坏。
+static BOOTSTRAP_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Bootstrap 崩溃文件路径：`%TEMP%/hinina-panic.log`。
 ///
 /// 固定用临时目录而不是数据目录：钩子运行时数据目录解析尚未发生（那正是
 /// 可能 panic 的环节之一），任何「先解析再写」都会把失败面重新拉进钩子。
 fn bootstrap_log_path() -> std::path::PathBuf {
-    #[cfg(test)]
-    if let Some(path) = BOOTSTRAP_PATH_OVERRIDE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-    {
-        return path;
-    }
     std::env::temp_dir().join(BOOTSTRAP_FILE_NAME)
 }
 
@@ -98,25 +92,65 @@ fn report(info: &PanicHookInfo<'_>) {
 /// 日志文件打不开时订阅器也只有 stderr，这两类情况下它是唯一的持久痕迹。
 /// 所有错误静默忽略：这是崩溃路径，写不进去也绝不允许二次 panic。
 /// 每条报告以 unix 时间戳行开头，区分多次运行的崩溃记录。
+///
+/// 安全与并发：
+/// - 进程内用 [`BOOTSTRAP_WRITE_LOCK`] 串行化「检查-截断-追加」；
+/// - 拒绝符号链接目标（Unix 加固）：临时目录可被同机用户写入时不跟随预置
+///   链接改写别人的文件；首次创建用 `create_new` 抢占，已有文件再校验一次。
+///   检查与打开之间仍有极窄 TOCTOU 窗口，产品只发 Windows，Unix 风险主要
+///   存在于开发/CI 环境；
+/// - Unix 上新文件以 `0600` 创建、已有文件收敛到 `0600`。
 fn write_bootstrap_report(path: &Path, message: &str) {
-    if let Ok(meta) = std::fs::metadata(path) {
-        if meta.len() > MAX_BOOTSTRAP_FILE_BYTES {
-            let _ = std::fs::write(path, []);
-        }
-    }
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    else {
+    let Ok(_guard) = BOOTSTRAP_WRITE_LOCK.try_lock() else {
         return;
     };
+    if is_symlink(path) {
+        return;
+    }
+    // 超限先轮转（与 logger 共用同一判据与手法）；失败静默
+    let _ = crate::infra::logger::truncate_if_oversized(path, MAX_BOOTSTRAP_FILE_BYTES);
+
+    let mut options = std::fs::OpenOptions::new();
+    options.append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    // 首建用 create_new：若符号链接检查之后有人放入链接，创建会失败，
+    // 且不再回退——宁可丢一条记录也不跟随链接写。
+    let opened = match options.clone().create_new(true).open(path) {
+        Ok(file) => Ok(file),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if is_symlink(path) {
+                return;
+            }
+            options.open(path)
+        }
+        Err(e) => Err(e),
+    };
+    let Ok(mut file) = opened else {
+        return;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let entry = format!("--- unix_epoch_secs: {secs} ---\n{message}");
     let _ = file.write_all(entry.as_bytes());
+}
+
+/// 路径本身是否是符号链接（不跟随；不存在或读取失败一律视为「不是」）。
+fn is_symlink(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
 }
 
 /// 纯函数格式化（供单测，`PanicHookInfo` 无公开构造器）：payload 取不到

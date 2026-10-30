@@ -15,8 +15,8 @@
 /// 静默忽略，留给未来扩展（避免未知参数把启动炸掉）。入参用 `OsString`：
 /// `std::env::args()` 遇非 Unicode 参数会 panic，`args_os()` 不会。
 pub fn requested(args: &[std::ffi::OsString]) -> bool {
-    args.iter()
-        .any(|arg| arg.as_os_str() == std::ffi::OsStr::new("--console"))
+    // OsString: PartialEq<str>：与非 Unicode 参数共存也不会 panic
+    args.iter().any(|arg| arg == "--console")
 }
 
 /// 按需附加调试控制台。Windows 实现见下；其它平台 no-op。

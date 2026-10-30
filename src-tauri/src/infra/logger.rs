@@ -76,10 +76,12 @@ pub struct Logger {
 ///
 /// **已知且接受的重入窗口**：若某线程在持有这把锁期间 panic，panic 钩子会
 /// 在同一线程经文件层再次 `lock()`——std Mutex 不可重入，崩溃路径会挂住。
-/// 能走到这里的 panic 只有字段 `Display` 实现 panic（本项目日志字段全是
-/// std 基础类型与 anyhow Error，无已知 panic 路径；`io::Write` 失败不 panic），
-/// 窗口纯理论。换 `try_lock` 会让正常多线程日志在争用时丢行，权衡后只注释
-/// 不改语义；`infra::panic_report` 的钩子注释有交叉引用。
+/// 能走到这里的 panic 只有字段 `Display` 实现 panic；而 tracing-subscriber
+/// 0.3.23 是**先格式化进 thread-local 缓冲（`fmt_layer.rs` 的 `format_event`），
+/// 再取 writer 并 `write_all`**，加锁发生在格式化之后——所以格式化期的 panic
+/// 不持锁。本项目日志字段全是 std 基础类型与 anyhow Error，无已知 panic 路径；
+/// `io::Write` 失败也不 panic。窗口纯理论，换 `try_lock` 会让正常多线程日志
+/// 在争用时丢行，权衡后只注释不改语义；`infra::panic_report` 的钩子注释有交叉引用。
 #[cfg(not(test))]
 struct SharedFileWriter(Arc<Mutex<File>>);
 
@@ -235,13 +237,10 @@ impl Logger {
             }
         }
 
-        // 启动时检查大小：超限即截断（rotate-by-truncate）
-        if let Ok(meta) = fs::metadata(&log_path) {
-            if meta.len() > MAX_LOG_FILE_BYTES {
-                if let Err(e) = fs::write(&log_path, []) {
-                    stderr_line(&format!("截断日志文件失败 {}: {}", log_path.display(), e));
-                }
-            }
+        // 启动时检查大小：超限即截断（rotate-by-truncate）。判据走 crate 内
+        // 共享函数，与 panic bootstrap 文件的轮转同源，避免两份判据漂移
+        if let Err(e) = truncate_if_oversized(&log_path, MAX_LOG_FILE_BYTES) {
+            stderr_line(&format!("截断日志文件失败 {}: {}", log_path.display(), e));
         }
 
         match OpenOptions::new().create(true).append(true).open(&log_path) {
@@ -265,6 +264,25 @@ fn stderr_line(msg: &str) {
     // writeln! 补上结尾换行：错误文本之后通常还有别的输出（如 panic 兜底），
     // 少了换行会与后续日志粘连在同一行，妨害排障
     let _ = writeln!(io::stderr(), "{msg}");
+}
+
+/// 启动式轮转：文件超过 `max_bytes` 即截断为 0（rotate-by-truncate）。
+///
+/// 抽成 crate 内共享函数而不是在两处各写一份：启动日志轮转
+/// （`MAX_LOG_FILE_BYTES`）与 panic bootstrap 文件（`MAX_BOOTSTRAP_FILE_BYTES`）
+/// 必须用同一判据（`>` 而非 `>=`）与同一手法（`fs::write(path, [])`），
+/// 否则两份实现会各自漂移。文件不存在返回 `Ok(false)`；写失败原样返回错误，
+/// 由调用方决定留痕还是静默（panic 路径必须静默）。
+pub(crate) fn truncate_if_oversized(path: &Path, max_bytes: u64) -> io::Result<bool> {
+    let len = match fs::metadata(path) {
+        Ok(meta) => meta.len(),
+        Err(_) => return Ok(false),
+    };
+    if len <= max_bytes {
+        return Ok(false);
+    }
+    fs::write(path, [])?;
+    Ok(true)
 }
 
 /// 把日志文件截断为 0，返回释放的字节数。
