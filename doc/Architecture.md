@@ -204,7 +204,7 @@ Hinina/
         │   ├── cache.rs                  # 缓存原语（TtlCache：TTL + 容量上限，近似 FIFO 淘汰；JsonDiskCache：cache/{ns}/{key}.json，条目带 fetchedAt 跨重启计时、损坏容忍、过期懒删除）
         │   ├── logger.rs                 # Logger（Tracing 双路输出：stderr + {base_dir}/logs/hinina.log，启动时 >5MB 截断，运行期可截断清空；GUI 子系统下 stderr 层静默丢弃（tracing-subscriber 内部默认不报写错误）；敏感信息不落日志靠调用点约束——IPC 日志不记参数）
         │   ├── panic_report.rs           # 进程级 panic 钩子（main 最先安装，早于参数解析）：消息/线程/位置/强制堆栈——每次 panic 无条件追加 %TEMP%/hinina-panic.log（unix_epoch_secs+pid 头、1MB 截断、进程内阻塞串行且不丢记录、Unix 拒绝符号链接，不经 tracing 过滤器——RUST_LOG=off 或日志文件打不开也保得住）；**先写 bootstrap、再输出 tracing/stderr**（后者存在 SharedFileWriter 重入阻塞窗口，持久出口不能排在它之后），日志未被 `RUST_LOG` 关闭时另落 hinina.log。先于插件 catch_unwind 运行，崩溃先落日志再走既有恢复——「闪退可追查」的兜底；该文件由「清理本地数据 → 日志与崩溃记录」删除
-        │   ├── console.rs                # --console 启动参数（args_os 解析，非 Unicode 参数不 panic）：release GUI 构建重新附加调试控制台（挂父控制台优先，失败 AllocConsole，重绑 std 句柄；幂等；非 Windows no-op）。只管窗口，日志级别仍由 RUST_LOG 控制
+        │   ├── console.rs                # --console 启动参数（args_os 解析，非 Unicode 参数不 panic）：release GUI 构建重新附加调试控制台（挂父控制台优先，失败 AllocConsole，重绑 std 句柄；幂等；非 Windows no-op）。**只有 AllocConsole 新开的窗口才配置 UTF-8 输出代码页 + VT 处理**（缺前者中文按 GBK 误解码成乱码，缺后者 ANSI 转义以字面量 `[32m` 刷屏）；挂父控制台/dev 终端不改配置——那是用户日常会话的状态，调试开关不得改变。日志级别仍由 RUST_LOG 控制
         │   ├── startup_dialog.rs         # 启动期致命错误对话框（panic 钩子的 UI 出口）：main 装钩子后 arm、RunEvent::Ready 时 mark_started；启动未完成的主线程 panic 在崩溃记录落盘后弹一次 MessageBoxW（三处 expect + Tauri 窗口/WebView2 创建失败），写入成功才展示崩溃路径；独立线程跑模态消息泵避免重入事件循环；测试不 arm、非 Windows no-op
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
