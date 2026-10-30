@@ -195,8 +195,9 @@ fn report_data_dir(plan: &DataDirPlan, migration: &MigrateOutcome) {
 }
 
 fn main() {
-    // panic 钩子最先安装：此后任何 panic（包括下面的参数解析——`env::args()`
-    // 遇非 Unicode 参数会 panic，GUI 子系统下无任何输出）都有落点。
+    // panic 钩子最先安装：此后任何 panic（参数解析、恢复、初始化）都有落点。
+    // 参数已改用 `args_os()` 收集，本身不会因非 Unicode 参数 panic；钩子先装
+    // 是**纵深防御** —— 历史上的 `env::args()` 会 panic 且 GUI 子系统下毫无输出。
     hinina_lib::infra::panic_report::install();
 
     // --console：release GUI 构建重新附加调试控制台（dev 构建本就有控制台，

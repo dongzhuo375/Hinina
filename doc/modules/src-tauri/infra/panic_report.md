@@ -8,7 +8,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `install` | `pub fn install()` | `std::panic::set_hook` 安装进程级钩子。在 `main()` **最先**调用（早于参数解析、Runtime / Builder / Logger）——参数解析用 `args_os()` 也可能 panic，必须落在钩子之后。重复调用只是替换 |
+| `install` | `pub fn install()` | `std::panic::set_hook` 安装进程级钩子。在 `main()` **最先**调用（早于参数解析、Runtime / Builder / Logger）——参数解析已改用 `args_os()`，本身**不会**因非 Unicode 参数 panic，钩子先装属**纵深防御**（历史上的 `env::args()` 会 panic，且 GUI 子系统下毫无输出）。重复调用只是替换 |
 | `report` | `fn report(&PanicHookInfo)`（私有，钩子本体） | `payload_as_str()` 取消息（非字符串 payload 用 `<非字符串 panic payload>` 占位，不猜内容）+ 线程名 + panic 位置 + `Backtrace::force_capture()`（无视 RUST_BACKTRACE，崩溃取证要全量）。**先**无条件追加 bootstrap 文件（不经过滤器、不受文件层影响），**再**按 `logger::ready()` 走 `tracing::error!(target: "panic")`（过滤器可能丢弃它）或 stderr 兜底（写失败忽略）。顺序有意：tracing 文件层存在 `SharedFileWriter` 重入自死锁的理论窗口，持久出口排在它之后就会依赖该路径不挂起；先写 bootstrap 后，重入最多丢掉日志副本。是否被过滤器拦下无法在钩子里判定，故不做「文件层在就跳过」的优化——宁可重复不可丢失 |
 | `write_bootstrap_report` | `fn write_bootstrap_report(path, message)`（私有） | 追加崩溃报告到 bootstrap 文件（**独立持久出口**，每次 panic 都写）：进程内用 `BOOTSTRAP_WRITE_LOCK`（**阻塞 `lock`**，中毒经 `into_inner` 取回）串行化「检查-截断-追加」——并发 panic **排队追加**，既不互相抹掉、也不因争用被跳过（`try_lock` 会在争用时整条丢弃，已移除；临界区无 panic 路径故不自死锁，代价是 I/O 挂起时 panic 线程等待）；每条以 `unix_epoch_secs` 头行区分运行轮次；超过 1 MiB 先经 `logger::truncate_if_oversized` 轮转（与启动日志轮转共用同一份判据）；Unix 上拒绝符号链接目标、以 `0600` 创建并收敛已有文件权限；**所有写失败静默忽略**——崩溃路径绝不允许二次 panic |
 | `bootstrap_log_path` | `fn bootstrap_log_path() -> PathBuf`（私有） | 固定 `%TEMP%/hinina-panic.log`：钩子运行时数据目录解析尚未发生（那正是可能 panic 的环节之一），任何「先解析再写」都会把失败面拉进钩子；测试经重定向 `TMPDIR`/`TMP`/`TEMP` 隔离 |
