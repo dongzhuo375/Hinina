@@ -2,7 +2,7 @@
 
 Hinina 是一个面向XCPC竞赛的桌面客户端。它把登录、题目、代码编辑、提交、榜单和公告放在同一个比赛工作台里，比赛时不用在浏览器标签页之间来回切换。
 
-项目目前仍在开发中，界面和配置格式可能继续调整。当前仓库没有发布稳定版安装包，想试用的话需要从源码构建。
+项目目前仍在开发中，界面和配置格式可能继续调整。当前仓库没有发布稳定版，想试用的话需要从源码构建；正式发布（GitHub Releases 草稿验收后公开）提供免安装的 Windows x64 裸 exe。
 
 ## 界面一览
 
@@ -103,7 +103,11 @@ npm test
 # Rust 单元测试
 cargo test --manifest-path src-tauri/Cargo.toml
 
-# 构建 Tauri 安装包（Windows 目标为 NSIS）
+# 构建 Windows 裸 exe（免安装，产物在 src-tauri/target/release/hinina.exe；
+# --no-bundle 是 tauri 的旗标，必须在内层 -- 之前）
+npm run tauri -- build --no-bundle
+
+# 构建 NSIS 安装包（线路保留；安装包在 src-tauri/target/release/bundle/nsis/）
 npm run tauri build
 ```
 

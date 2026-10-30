@@ -68,15 +68,20 @@ jobs:
         run: |
           npm ci
           npm run build
-      - name: Build desktop app (tauri build, NSIS bundle)
-        # --locked 必须经 tauri 的 [ARGS]... 透传给 cargo，而 `--` 在 npm 转发链上
-        # 会被逐层剥除：`npm run tauri build -- --locked` → npm 剥掉 `--` → tauri 自己
-        # 拒收（exit 2/1，永远到不了 cargo）。`npm run tauri -- build -- --locked` 在
-        # bash 下内层 `--` 存活、参数送达 cargo（本机实证）；但 runner 默认 pwsh 会把
-        # 两个 `--` 都吞掉，展开成 `tauri build --locked` 而失败（首次试跑 tag 实证）。
-        # 故显式钉 shell: bash。注意失败模式是显式的，不会静默用未锁定依赖出包。
+      - name: Build desktop app (tauri build, no bundle)
+        # 两类参数必须放对位置：--no-bundle 是 **tauri 的旗标**（放在内层 `--` 之前；
+        # 它在内层之后会被透传给 cargo，cargo 不认识该参数、构建必失败），--locked
+        # 是 **cargo 的旗标**（经 tauri 的 [ARGS]... 透传，必须在内层 `--` 之后）。
+        # 另外 `--` 在 npm 转发链上会被逐层剥除：`npm run tauri build -- --locked` →
+        # npm 剥掉 `--` → tauri 自己拒收（exit 2/1，永远到不了 cargo）；
+        # `npm run tauri -- build -- ...` 在 bash 下内层 `--` 存活、参数各归其位
+        # （本机实证）；但 runner 默认 pwsh 会把两个 `--` 都吞掉而失败（首次试跑
+        # tag 实证）。故显式钉 shell: bash。失败模式是显式的，不会静默出包。
+        # 发布主线只出裸 exe（target/release/hinina.exe），不打 NSIS 安装包。
+        # NSIS 线路保留——tauri.conf.json 的 bundle.targets 仍为 ["nsis"]，
+        # 移除 --no-bundle（内层 `--` 之前不传任何 tauri 旗标）即恢复安装包产物。
         shell: bash
-        run: npm run tauri -- build -- --locked
+        run: npm run tauri -- build --no-bundle -- --locked
       - name: Collect build metadata
         shell: bash
         run: |
@@ -93,22 +98,22 @@ jobs:
               rustc: v('rustc --version'),
               cargo: v('cargo --version'),
               target: 'x86_64-pc-windows-msvc',
-              bundle: 'nsis',
+              bundle: 'none',
               signed: false,
             }, null, 2) + '\n');
           "
       - name: Stage release files
-        # upload-artifact v4+ 以所有搜索路径的最小公共祖先为 artifact 根、通配符后的层级保留：
-        # 若直接同时上传 bundle 深路径与根目录的 build-metadata.json，exe 会被嵌到
-        # src-tauri/target/release/bundle/nsis/ 下，下载侧的 artifact/*.exe 断言必然落空。
-        # 先平铺进单一目录再单路径上传，artifact 根即该目录。
+        # 裸 exe 在 target/release 根上（无 bundle 深路径），但版本号从 tauri.conf.json
+        # 读取拼进产物名（Hinina_<版本>_x64.exe，与 verify-artifact 的断言同源）；
+        # 保留单一 staging 目录上传，artifact 根稳定、下载侧断言不变。
         shell: bash
         run: |
+          version="$(node scripts/check-release-versions.mjs --print-version)"
           mkdir -p release-staging
-          cp src-tauri/target/release/bundle/nsis/*.exe release-staging/
+          cp src-tauri/target/release/hinina.exe "release-staging/Hinina_${version}_x64.exe"
           cp build-metadata.json release-staging/
           ls -l release-staging/
-      - name: Upload installer artifact (unsigned)
+      - name: Upload executable artifact (unsigned)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-windows-unsigned
@@ -130,23 +135,23 @@ jobs:
           node-version-file: .nvmrc
       - name: Re-run version gate on the tagged tree
         run: node scripts/check-release-versions.mjs --tag "$GITHUB_REF_NAME" --changelog
-      - name: Download installer artifact
+      - name: Download executable artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: release-windows-unsigned
           path: artifact
-      - name: Verify installer name and file type
+      - name: Verify executable name and file type
         run: |
           version="$(node scripts/check-release-versions.mjs --print-version)"
-          expected="Hinina_${version}_x64-setup.exe"
+          expected="Hinina_${version}_x64.exe"
           set -- artifact/*.exe
           if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
-            echo "::error::expected exactly one installer file, found $#"
+            echo "::error::expected exactly one executable file, found $#"
             exit 1
           fi
           base="$(basename "$1")"
           if [ "$base" != "$expected" ]; then
-            echo "::error::unexpected installer name: $base (expected $expected)"
+            echo "::error::unexpected executable name: $base (expected $expected)"
             exit 1
           fi
           if ! file "$1" | grep -qi "ms windows"; then
@@ -155,8 +160,9 @@ jobs:
           fi
       - name: Compute SHA-256 checksums
         run: |
+          version="$(node scripts/check-release-versions.mjs --print-version)"
           cd artifact
-          sha256sum Hinina_*-setup.exe > SHA256SUMS.txt
+          sha256sum "Hinina_${version}_x64.exe" > SHA256SUMS.txt
       - name: Upload verified artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -190,7 +196,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -- artifact/Hinina_*-setup.exe artifact/SHA256SUMS.txt artifact/build-metadata.json
+          set -- artifact/Hinina_*_x64.exe artifact/SHA256SUMS.txt artifact/build-metadata.json
           title="Hinina $GITHUB_REF_NAME"
           # 先探状态：只有「确实不存在」才 create。把 stderr 一并吞掉会把认证/网络/
           # 限流故障误判为「无 release」，进而走 create 报出误导性错误，故保留 stderr
