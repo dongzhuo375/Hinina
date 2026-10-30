@@ -58,8 +58,37 @@ static BOOTSTRAP_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 ///
 /// 固定用临时目录而不是数据目录：钩子运行时数据目录解析尚未发生（那正是
 /// 可能 panic 的环节之一），任何「先解析再写」都会把失败面重新拉进钩子。
-fn bootstrap_log_path() -> std::path::PathBuf {
+///
+/// 公开给维护命令：`local_data_usage` 把体积纳入清理预览，`purge_local_data`
+/// 随「日志内容」一并删除（见 `commands/maintenance_cmd`）。
+pub fn bootstrap_log_path() -> std::path::PathBuf {
     std::env::temp_dir().join(BOOTSTRAP_FILE_NAME)
+}
+
+/// 删除 bootstrap 崩溃文件，返回释放的字节数（文件不存在为 0）。
+///
+/// 供「清理本地数据 → 日志内容」调用：该文件可能含插件可控文本（钩子记录
+/// 所有 panic 的 payload），不能成为永久残留。删除失败原样返回错误，由命令层
+/// 如实回报而不是假装已清理。
+pub fn clear_bootstrap_log() -> std::io::Result<u64> {
+    // 与写入共用同一把锁：避免删除与并发 panic 的「检查-截断-追加」交错
+    let _guard = BOOTSTRAP_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    remove_file_and_size(&bootstrap_log_path())
+}
+
+/// 删除文件并返回删除前的字节数（不存在为 0）。
+///
+/// 抽成纯函数是为了可单测：`clear_bootstrap_log` 走真实 `%TEMP%`，测试不得触碰
+/// 开发机上的真实崩溃记录（见 `tests/common` 的沙箱约定）。
+fn remove_file_and_size(path: &Path) -> std::io::Result<u64> {
+    let freed = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(freed),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(e) => Err(e),
+    }
 }
 
 /// 安装进程级 panic 钩子。在 `main()` 最早期调用（早于参数解析、Runtime /
@@ -114,8 +143,9 @@ fn report(info: &PanicHookInfo<'_>) {
 ///   争用时排队而不是跳过 —— 每条 panic 都必须留下记录）；
 /// - 拒绝符号链接目标（Unix 加固）：临时目录可被同机用户写入时不跟随预置
 ///   链接改写别人的文件；首次创建用 `create_new` 抢占，已有文件再校验一次。
-///   检查与打开之间仍有极窄 TOCTOU 窗口，产品只发 Windows，Unix 风险主要
-///   存在于开发/CI 环境；
+///   **`create_new` 只保护「追加打开」这一步**：`truncate_if_oversized` 的
+///   `fs::write` 仍会跟随检查与截断之间被换上的链接。产品只发 Windows，
+///   Unix 风险主要存在于开发/CI 环境，这一残余窗口已知并接受；
 /// - Unix 上新文件以 `0600` 创建、已有文件收敛到 `0600`。
 fn write_bootstrap_report(path: &Path, message: &str) {
     // 阻塞等锁而非 try_lock：争用时跳过等于丢一条崩溃记录。临界区无 panic
@@ -162,7 +192,11 @@ fn write_bootstrap_report(path: &Path, message: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let entry = format!("--- unix_epoch_secs: {secs} ---\n{message}");
+    let entry = format!(
+        "--- unix_epoch_secs: {secs} pid: {} ---\n{message}",
+        // pid 用于多实例场景归因（跨进程写入不串行，只有这一行能区分是谁写的）
+        std::process::id()
+    );
     let _ = file.write_all(entry.as_bytes());
 }
 

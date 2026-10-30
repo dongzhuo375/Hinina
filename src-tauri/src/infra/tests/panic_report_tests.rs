@@ -63,6 +63,11 @@ fn appends_reports_and_separates_runs() {
         2,
         "每条报告应各带一个时间戳头：\n{content}"
     );
+    assert_eq!(
+        content.matches("pid: ").count(),
+        2,
+        "每条报告应各带 pid（多实例归因）：\n{content}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -193,5 +198,29 @@ fn refuses_symlink_target() {
         "original-content",
         "符号链接目标不得被追加写入"
     );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// 清理崩溃文件：返回删除前字节数；不存在时返回 0 且不报错。
+/// 走 `remove_file_and_size` 而不是 `clear_bootstrap_log`：后者指向真实 `%TEMP%`，
+/// 测试不得删除开发机上的真实崩溃记录。
+#[test]
+fn remove_file_and_size_reports_freed_bytes_and_tolerates_missing() {
+    let dir = temp_dir("clear");
+    let path = dir.join("hinina-panic.log");
+    fs::write(&path, b"12345").expect("预置文件失败");
+
+    assert_eq!(
+        super::remove_file_and_size(&path).expect("删除应成功"),
+        5,
+        "应返回删除前的字节数"
+    );
+    assert!(!path.exists(), "文件应被删除");
+    assert_eq!(
+        super::remove_file_and_size(&path).expect("文件不存在不应报错"),
+        0,
+        "不存在时应报 0"
+    );
+
     let _ = fs::remove_dir_all(&dir);
 }
