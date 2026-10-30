@@ -1,13 +1,16 @@
 //! 进程级 panic 上报：panic 消息、线程、位置与完整堆栈写入持久文件。
 //!
-//! **保证边界**：`logs/hinina.log` 只覆盖 `Logger::init` 之后的 panic。输出按
-//! 订阅器状态分两期：
-//! - **就绪后**：`tracing::error!` 双路输出（stderr + `logs/hinina.log`）。
-//! - **就绪前**（`main` 开头到 `AppContext::init` 内 `Logger::init` 之间：
-//!   Tokio runtime / Builder 构建、数据目录解析与一次性迁移等）：stderr 兜底
-//!   （GUI 子系统下句柄无效时静默丢弃）+ **bootstrap 崩溃文件**
-//!   `%TEMP%/hinina-panic.log`——与数据目录解析完全解耦的固定落点，追加写、
-//!   超限截断。两者都失败时崩溃仍不可追查，但那需要「临时目录也不可写」。
+//! **保证**：每次 panic 都会尝试一个**持久落点**——
+//! - 日志文件层已接管（`logger::file_layer_ready()`）：`tracing::error!` 写
+//!   `logs/hinina.log`（同时 stderr）；
+//! - 否则（`Logger::init` 之前，或日志文件打不开、只有 stderr 的订阅器）：
+//!   追加写 **bootstrap 崩溃文件** `%TEMP%/hinina-panic.log`；订阅器尚未安装
+//!   时另加写失败可忽略的 stderr 直写。
+//!
+//! 只有「日志文件层不可用 **且** 临时目录不可写」时崩溃才真正不可追查。
+//! `logs/` 目录权限不足、数据目录被占用等都会让 `Logger::init` 走无文件层
+//! 分支，此时 bootstrap 文件是唯一持久痕迹——不要把「订阅器已装」当成
+//! 「日志在落盘」。
 //!
 //! GUI 子系统（release 构建，见 main.rs 的 `windows_subsystem`）下 stderr 无处
 //! 可去，std 默认钩子的输出直接蒸发——竞赛客户端最怕「闪退且无迹可寻」，
@@ -78,8 +81,13 @@ fn report(info: &PanicHookInfo<'_>) {
         &backtrace.to_string(),
     );
     if crate::infra::logger::ready() {
-        // 订阅器就绪：error! 双路输出（stderr + logs/hinina.log）。
+        // 订阅器已装：error! 输出（stderr；文件层在则同时落 hinina.log）。
         tracing::error!(target: "panic", "{message}");
+        // 订阅器在**不等于**文件在：日志文件打不开时只有 stderr 一路，
+        // GUI 构建下等于没有落点，必须补持久文件。文件层正常时不重复写。
+        if !crate::infra::logger::file_layer_ready() {
+            write_bootstrap_report(&bootstrap_log_path(), &message);
+        }
         return;
     }
     // Logger 尚未就绪：stderr 兜底 + bootstrap 崩溃文件。钩子经 tracing 文件
@@ -89,7 +97,7 @@ fn report(info: &PanicHookInfo<'_>) {
     write_bootstrap_report(&bootstrap_log_path(), &message);
 }
 
-/// 把崩溃报告追加到 bootstrap 文件（logger 就绪前的落点）。
+/// 把崩溃报告追加到 bootstrap 文件（无文件层时的持久落点）。
 ///
 /// 所有错误静默忽略：这是崩溃路径，写不进去也绝不允许二次 panic。
 /// 每条报告以 unix 时间戳行开头，区分多次运行的崩溃记录。
