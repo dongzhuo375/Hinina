@@ -16,6 +16,10 @@ export interface LocalDataUsage {
   logBytes: number
   /// 日志文件完整路径
   logPath: string
+  /// 崩溃记录文件字节数（临时目录，随「日志与崩溃记录」一并删除）
+  crashBytes: number
+  /// 崩溃记录文件完整路径
+  crashPath: string
   /// 提交留档总条数
   snapshotTotalCount: number
   /// 提交留档总字节数
@@ -34,7 +38,7 @@ export interface PurgeReport {
   freedBytes: number
   /// 删除的留档条数
   removedSnapshots: number
-  /// 是否清空了日志内容（文件层不可用时为 false，不算失败）
+  /// 日志与崩溃记录是否确实清理（文件层不可用或删除失败时为 false）
   logCleared: boolean
 }
 

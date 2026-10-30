@@ -76,6 +76,10 @@ pub struct LocalDataUsage {
     pub log_bytes: u64,
     /// 日志文件完整路径（展示用）
     pub log_path: String,
+    /// 崩溃记录文件字节数（`%TEMP%/hinina-panic.log`，随「日志内容」一并删除）
+    pub crash_bytes: u64,
+    /// 崩溃记录文件完整路径（展示用）
+    pub crash_path: String,
     /// 提交留档：总条数 / 总字节数 / 其中过期的条数与字节数
     pub snapshot_total_count: usize,
     pub snapshot_total_bytes: u64,
@@ -100,11 +104,15 @@ pub async fn local_data_usage(ctx: State<'_, AppContext>) -> AppResult<LocalData
 pub(crate) fn local_data_usage_impl(ctx: &AppContext) -> LocalDataUsage {
     let log_path = ctx.storage.base_dir().join(LOG_RELATIVE_PATH);
     let log_bytes = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
+    let crash_path = crate::infra::panic_report::bootstrap_log_path();
+    let crash_bytes = std::fs::metadata(&crash_path).map(|m| m.len()).unwrap_or(0);
     let usage = snapshot::inspect_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS);
 
     LocalDataUsage {
         log_bytes,
         log_path: log_path.to_string_lossy().into_owned(),
+        crash_bytes,
+        crash_path: crash_path.to_string_lossy().into_owned(),
         snapshot_total_count: usage.total_count,
         snapshot_total_bytes: usage.total_bytes,
         snapshot_stale_count: usage.stale_count,
@@ -123,8 +131,8 @@ pub struct PurgeReport {
     pub removed_snapshots: usize,
     /// 日志内容是否**确实**被清空。
     ///
-    /// `false` 有三种成因：文件层不可用（磁盘只读）、截断失败、或本次没勾选日志。
-    /// 界面据此如实提示，而不是笼统报「已清理」。
+    /// `false` 有四种成因：文件层不可用（磁盘只读）、截断失败、崩溃记录文件
+    /// 删除失败、或本次没勾选日志。界面据此如实提示，而不是笼统报「已清理」。
     pub log_cleared: bool,
 }
 
@@ -190,17 +198,49 @@ pub(crate) fn purge_local_data_impl(
     logs: bool,
     stale_snapshots: bool,
 ) -> PurgeReport {
+    purge_local_data_with(
+        ctx,
+        logs,
+        stale_snapshots,
+        crate::infra::panic_report::clear_bootstrap_log,
+    )
+}
+
+/// 与 [`purge_local_data_impl`] 相同的编排，但崩溃文件清理可注入。
+///
+/// 单测必须走注入版本：真实实现会删除 `%TEMP%/hinina-panic.log`，而测试进程
+/// 的临时目录里可能有开发机上的真实崩溃记录（见 `tests/common` 的沙箱约定）。
+pub(crate) fn purge_local_data_with(
+    ctx: &AppContext,
+    logs: bool,
+    stale_snapshots: bool,
+    clear_crash: impl FnOnce() -> std::io::Result<u64>,
+) -> PurgeReport {
     info!(logs, stale_snapshots, "Command: 清理本地数据");
 
     run_purge(
         logs,
         stale_snapshots,
-        // 文件层不可用（磁盘只读等）时 clear_log_file 返回 Ok(0)：此时并没有清掉
-        // 任何东西，故用 has_log_file 如实回报「是否真的清了」
         || {
-            ctx.logger
+            // 「日志内容」包含两处：数据目录里的日志文件（清空内容、保留文件）
+            // 与临时目录里的崩溃记录（删除文件，可能含插件可控文本）。
+            // 文件层不可用（磁盘只读等）时 clear_log_file 返回 Ok(0)：此时并没有
+            // 清掉任何东西，故用 has_log_file 如实回报「是否真的清了」
+            let log = ctx
+                .logger
                 .clear_log_file()
-                .map(|freed| (freed, ctx.logger.has_log_file()))
+                .map(|freed| (freed, ctx.logger.has_log_file()));
+            let crash = clear_crash();
+            match (log, crash) {
+                (Ok((log_freed, log_layer)), Ok(crash_freed)) => {
+                    Ok((log_freed + crash_freed, log_layer))
+                }
+                (Err(e), _) => Err(e),
+                (_, Err(e)) => Err(crate::core::error::AppError::Io(format!(
+                    "删除崩溃记录文件失败: {}",
+                    e
+                ))),
+            }
         },
         || snapshot::purge_stale_snapshots(&ctx.storage, SNAPSHOT_KEEP_DAYS),
     )

@@ -91,7 +91,7 @@ export function useMaintenanceSettings() {
       const parts = [`释放 ${formatBytes(report.freedBytes)}`]
       if (report.removedSnapshots > 0) parts.push(`删除留档 ${report.removedSnapshots} 个`)
       const logMissed = purgeLogs.value && !report.logCleared
-      if (logMissed) parts.push('日志未清理（文件层不可用或写入失败）')
+      if (logMissed) parts.push('日志或崩溃记录未清理（文件层不可用、删除失败或未勾选）')
 
       showPurgeNotice({ text: `已清理：${parts.join('，')}`, warn: logMissed })
       await loadUsage()

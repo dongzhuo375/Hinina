@@ -95,7 +95,9 @@ async fn purge_clears_log_content_when_selected() {
     // init 后 logger 已写入启动日志（文件必然存在且非空）
     assert!(log_path.exists(), "init 后日志文件应已存在");
 
-    let report = purge_local_data_impl(&ctx, true, false);
+    // 崩溃文件清理注入空实现：真实实现会删除 %TEMP%/hinina-panic.log，
+    // 测试不得触碰开发机上的真实崩溃记录（见 tests/common 的沙箱约定）
+    let report = purge_local_data_with(&ctx, true, false, || Ok(0));
 
     assert!(report.log_cleared, "日志文件存在且可写时应清空成功");
     assert_eq!(

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   resetClient: vi.fn(async () => {}),
   localDataUsage: vi.fn(async () => ({
     logBytes: 4096, logPath: 'D:\\hinina\\logs\\hinina.log',
+    crashBytes: 512, crashPath: 'C:\\Temp\\hinina-panic.log',
     snapshotTotalCount: 5, snapshotTotalBytes: 8192,
     snapshotStaleCount: 2, snapshotStaleBytes: 2048, keepDays: 30,
   })),
@@ -114,7 +115,7 @@ describe('SettingsView 清理本地数据（不可逆，反馈必须如实）', 
   it('两个勾选全空：不发清理请求，给出「请先选择」错误', async () => {
     await render()
     await settle()
-    setCheckbox('日志内容', false)
+    setCheckbox('日志与崩溃记录', false)
     setCheckbox('提交源码留档', false)
     await settle()
 
@@ -138,7 +139,7 @@ describe('SettingsView 清理本地数据（不可逆，反馈必须如实）', 
     await settle()
 
     expect(mocks.purgeLocalData).toHaveBeenCalledWith(true, true)
-    expect(document.body.textContent).toContain('日志未清理') // 不能笼统报已清理
+    expect(document.body.textContent).toContain('日志或崩溃记录未清理') // 不能笼统报已清理
     expect(mocks.localDataUsage).toHaveBeenCalledTimes(2) // 清理后必须重读占用预览
   })
 })

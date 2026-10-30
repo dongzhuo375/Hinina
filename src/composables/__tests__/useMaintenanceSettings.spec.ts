@@ -31,7 +31,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   mocks.resetClient.mockResolvedValue(undefined)
   mocks.localDataUsage.mockResolvedValue({
-    logBytes: 4096, logPath: 'D:\\hinina\\log.txt', snapshotTotalCount: 5,
+    logBytes: 4096, logPath: 'D:\\hinina\\log.txt',
+    crashBytes: 512, crashPath: 'C:\\Temp\\hinina-panic.log',
+    snapshotTotalCount: 5,
     snapshotTotalBytes: 8192, snapshotStaleCount: 2, snapshotStaleBytes: 2048, keepDays: 30,
   })
   mocks.purgeLocalData.mockResolvedValue({ freedBytes: 2048, removedSnapshots: 2, logCleared: false })
@@ -79,7 +81,7 @@ describe('useMaintenanceSettings', () => {
     maintenance.purgeSnapshots.value = true
     await maintenance.purgeLocalData()
     expect(maintenance.purgeNotice.value?.warn).toBe(true)
-    expect(maintenance.purgeNotice.value?.text).toContain('日志未清理')
+    expect(maintenance.purgeNotice.value?.text).toContain('日志或崩溃记录未清理')
     expect(mocks.localDataUsage).toHaveBeenCalledTimes(1)
   })
 })

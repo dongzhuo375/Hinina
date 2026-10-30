@@ -421,6 +421,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return {
           logBytes: 4096,
           logPath: 'D:\\e2e\\hinina\\logs\\hinina.log',
+          crashBytes: 512,
+          crashPath: 'C:\\Temp\\hinina-panic.log',
           snapshotTotalCount: 5,
           snapshotTotalBytes: 8192,
           snapshotStaleCount: 2,
