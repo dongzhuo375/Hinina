@@ -26,24 +26,41 @@ pub(crate) const MAX_MESSAGE_CHARS: usize = 2000;
 /// `workspaceStore`），64 字符远超实际用量。
 const MAX_SCOPE_CHARS: usize = 64;
 
-/// 会话级字节预算：`frontend_log` 全程最多向日志写入这么多**消息字节**。
+/// 会话级字节预算：**每个 60 秒滚动窗口**内 `frontend_log` 最多向日志写入这么多
+/// **消息字节**，窗口滚动即重置。
 ///
 /// 去重在前端按「完全相同的消息」进行，渲染循环里带变化计数器的消息每次都是
 /// 新串 —— 没有预算时一次循环就能以每条 2000 字符的速度刷满日志（5 MiB 上限
-/// 只在启动时生效）。预算按进程计（一次性，不随时间恢复）：64 KiB 对真实错误
-/// 绰绰有余（多数消息 < 200 字符），又把最坏失控压到约 30 条量级。预算耗尽后
-/// 静默丢弃并在**第一次丢弃时**告警一行（状态迁移值得看见，后续刷屏不值得）。
-const MAX_SESSION_BYTES: u64 = 64 * 1024;
+/// 只在启动时生效）。窗口制（而非进程一次性总量）：失控循环被压到每窗口 64 KiB
+/// （持续刷屏最坏约 3.8 MB/小时，对照 5 MiB 启动轮转），而**后续窗口里的真实
+/// 错误恢复预算**，不会因早期的失控一次性殃及整个会话。每个耗尽的窗口只在
+/// **第一次丢弃时**告警一行（状态迁移值得看见，后续静默计数）。
+const BUDGET_WINDOW_BYTES: u64 = 64 * 1024;
+const BUDGET_WINDOW_SECS: u64 = 60;
 
-static BUDGET_REMAINING: AtomicU64 = AtomicU64::new(MAX_SESSION_BYTES);
-static BUDGET_DROPPED: AtomicU64 = AtomicU64::new(0);
+static WINDOW_START: AtomicU64 = AtomicU64::new(0);
+static WINDOW_BYTES: AtomicU64 = AtomicU64::new(0);
+static WINDOW_DROPPED: AtomicU64 = AtomicU64::new(0);
+
+/// 预算判定结果。`Drop.first` 标记本窗口第一次丢弃（驱动那一行告警）。
+enum BudgetDecision {
+    Allow,
+    Drop { first: bool },
+}
 
 /// 前端日志入口（由 `commands/log_cmd.rs` 薄转发调用）。
 pub(crate) fn emit(level: &str, scope: &str, message: &str) {
     let scope = sanitize_scope(scope);
     let message = sanitize_message(message);
-    if !consume_budget(message.len() as u64) {
-        return;
+    match consume_budget(message.len() as u64) {
+        BudgetDecision::Allow => {}
+        BudgetDecision::Drop { first: true } => tracing::warn!(
+            target: "frontend",
+            budget_bytes = BUDGET_WINDOW_BYTES,
+            budget_window_secs = BUDGET_WINDOW_SECS,
+            "前端日志预算已用尽（本窗口内后续消息丢弃，下一窗口恢复）"
+        ),
+        BudgetDecision::Drop { first: false } => return,
     }
     match sanitize_level(level) {
         "error" => tracing::error!(target: "frontend", scope = %scope, "{message}"),
@@ -96,37 +113,66 @@ fn sanitize_message(message: &str) -> String {
     truncate_ellipsis(&owned, MAX_MESSAGE_CHARS)
 }
 
-/// 扣减会话预算；预算耗尽返回 `false`（消息被丢弃）。
-fn consume_budget(bytes: u64) -> bool {
-    let mut current = BUDGET_REMAINING.load(Ordering::Relaxed);
+/// 窗口过期则滚动（重置记账），随后扣减本窗口用量。
+fn consume_budget(bytes: u64) -> BudgetDecision {
+    roll_window_if_expired(unix_secs());
+    let mut used = WINDOW_BYTES.load(Ordering::Relaxed);
     loop {
-        if current == 0 {
-            let dropped = BUDGET_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
-            if dropped == 1 {
-                // 只在第一次丢弃时告警：预算已尽是状态迁移，值得一行；后续静默
-                tracing::warn!(
-                    target: "frontend",
-                    budget_bytes = MAX_SESSION_BYTES,
-                    "前端日志预算已用尽，本会话内后续消息不再落盘"
-                );
-            }
-            return false;
+        let next = used.saturating_add(bytes);
+        if next > BUDGET_WINDOW_BYTES {
+            let dropped = WINDOW_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
+            return BudgetDecision::Drop {
+                first: dropped == 1,
+            };
         }
-        let next = current.saturating_sub(bytes);
-        match BUDGET_REMAINING.compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed)
-        {
-            Ok(_) => return true,
+        match WINDOW_BYTES.compare_exchange(used, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return BudgetDecision::Allow,
             // 并发扣减失败：用最新值重试（CAS 循环）
-            Err(actual) => current = actual,
+            Err(actual) => used = actual,
         }
     }
 }
 
+/// 窗口起点已过期（距上次滚动 ≥ 60s）则把起点推到当前时间并清零记账。
+/// CAS 失败 = 别的线程刚滚动过：字节清零由它负责，这里不重复（重复清零会
+/// 复活已耗尽的预算）。竞态窗口内的记账是近似值 —— 预算是**闸门**而非精确计量。
+fn roll_window_if_expired(now: u64) {
+    let start = WINDOW_START.load(Ordering::Relaxed);
+    if now.saturating_sub(start) >= BUDGET_WINDOW_SECS
+        && WINDOW_START
+            .compare_exchange(start, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    {
+        WINDOW_BYTES.store(0, Ordering::Relaxed);
+        WINDOW_DROPPED.store(0, Ordering::Relaxed);
+    }
+}
+
+fn unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 /// 预算静态量按测试重置（仅测试编译；生产入口不暴露）。
-pub(crate) fn set_budget_for_tests(remaining: u64) {
-    BUDGET_REMAINING.store(remaining, Ordering::Relaxed);
-    BUDGET_DROPPED.store(0, Ordering::Relaxed);
+///
+/// `seconds_ago` 决定窗口起点距现在的秒数：0 = 新窗口（不滚动），
+/// `BUDGET_WINDOW_SECS` = 已过期（下一次 consume 先滚动清账）。
+pub(crate) fn set_budget_for_tests(seconds_ago: u64, used: u64, dropped: u64) {
+    WINDOW_START.store(unix_secs().saturating_sub(seconds_ago), Ordering::Relaxed);
+    WINDOW_BYTES.store(used, Ordering::Relaxed);
+    WINDOW_DROPPED.store(dropped, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+/// 快照（本窗口已用字节, 本窗口丢弃条数），供测试断言内部记账。
+pub(crate) fn budget_snapshot_for_tests() -> (u64, u64) {
+    (
+        WINDOW_BYTES.load(Ordering::Relaxed),
+        WINDOW_DROPPED.load(Ordering::Relaxed),
+    )
 }
 
 #[cfg(test)]

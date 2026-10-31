@@ -19,7 +19,7 @@
 | `report` | `(scope, error, detail?) => void`（模块内私有） | 核心上报：归一化 → 限频去重 → 转发，全段 try/catch —— **守卫自身绝不抛错**（报错的通道不允许自己成为新的错误源） |
 | `normalize` | `(error: unknown, detail?) => string`（模块内私有） | 归一化：`Error` → **message + stack**（V8 首行自带消息即直接用 stack；SpiderMonkey 不带消息头则补一行；栈由 2000 字符上限自然截取头部若干帧 —— Rust 端为保留 `
 `/`	` 做的处理由此真正生效）；IpcError 鸭子识别（`cmd`+`message`）→ `ipc:{cmd}: message`；空/null → `<empty error>`；其余 String 化；统一按**码点**截断 2000 字符（`Array.from`，UTF-16 码元 slice 会切出孤立代理项 → serde_json 拒收、整条日志丢弃；Rust 侧再兜底） |
-| 限频去重 | `lastSeen: Map<key, ts>`（模块内私有） | 同签名（scope + **完整归一化消息**——截前缀会把「同前缀 + 变化后缀」的不同错误误并成一条）1 秒内只转发一次；表容量 256，超限整表清空。**forward 同步抛错会撤销去重记录** —— 这条没送出去，同签名错误在窗口内可重试。**内容有变化的消息（如带变化计数器）不在此去重**，由 Rust 端 `frontend_log` 的 64 KiB 会话字节预算兜底（见 `infra/frontend_log.md`） |
+| 限频去重 | `lastSeen: Map<key, ts>`（模块内私有） | 同签名（scope + **完整归一化消息**——截前缀会把「同前缀 + 变化后缀」的不同错误误并成一条）1 秒内只转发一次；表容量 256，超限整表清空。**forward 同步抛错会撤销去重记录** —— 这条没送出去，同签名错误在窗口内可重试。**内容有变化的消息（如带变化计数器）不在此去重**，由 Rust 端 `frontend_log` 的滚动窗口字节预算兜底（64 KiB/60s，见 `infra/frontend_log.md`） |
 
 ## 直接依赖
 

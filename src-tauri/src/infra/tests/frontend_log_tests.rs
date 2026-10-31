@@ -1,4 +1,7 @@
-use super::{sanitize_level, sanitize_message, sanitize_scope, set_budget_for_tests};
+use super::{
+    budget_snapshot_for_tests, consume_budget, sanitize_level, sanitize_message, sanitize_scope,
+    set_budget_for_tests, BudgetDecision, BUDGET_WINDOW_BYTES, BUDGET_WINDOW_SECS,
+};
 
 #[test]
 fn level_whitelist_maps_unknown_to_warn() {
@@ -49,29 +52,48 @@ fn message_strips_control_chars_but_keeps_stack_shape() {
     assert_eq!(sanitize_message("line1\nline2\tend"), "line1\nline2\tend");
 }
 
-/// 会话预算：预算内放行、耗尽后丢弃并在**首次丢弃**时告警一行。
+/// 滚动窗口预算：记账、丢弃计数与首丢弃标记、窗口滚动恢复。
 /// 预算静态量是进程级单例 —— 全部预算断言收进一个用例串行执行，
 /// 不与并行测试争状态（sanitize 用例不触碰预算）。
 #[test]
-fn session_budget_gates_emit() {
-    // 预算归零：直接进入丢弃分支，第一条丢弃产生一条告警（经 tracing 落
-    // stderr；测试构建无订阅器，这里只验证不 panic 且后续静默）
-    set_budget_for_tests(0);
-    for _ in 0..3 {
-        super::emit("error", "vue", "budget probe");
-    }
+fn budget_window_accounts_resets_and_counts_drops() {
+    // 新窗口：放行并按消息字节数记账
+    set_budget_for_tests(0, 0, 0);
+    assert!(matches!(consume_budget(10), BudgetDecision::Allow));
+    assert_eq!(budget_snapshot_for_tests(), (10, 0));
 
-    // 小预算：小消息放行（扣减后清零）、下一条同大小被丢弃
-    set_budget_for_tests(4);
-    super::emit("error", "vue", "abcd"); // 恰好耗尽，放行
-    super::emit("error", "vue", "abcd"); // 预算 0，丢弃
-    super::emit("error", "vue", "x"); // 丢弃
+    // 窗口已满（新窗口，seconds_ago=0 不滚动）：丢弃，首次丢弃带 first 标记
+    set_budget_for_tests(0, BUDGET_WINDOW_BYTES, 0);
+    assert!(matches!(
+        consume_budget(1),
+        BudgetDecision::Drop { first: true }
+    ));
+    assert_eq!(budget_snapshot_for_tests().1, 1);
+    assert!(matches!(
+        consume_budget(1),
+        BudgetDecision::Drop { first: false }
+    ));
+    assert_eq!(budget_snapshot_for_tests().1, 2);
 
-    // 大消息（超过剩余预算）也放行直到预算触底：预算是近似闸门而非精确记账
-    set_budget_for_tests(10);
-    super::emit("error", "vue", "0123456789abcdef"); // 放行，预算清零
-    super::emit("error", "vue", "x"); // 丢弃
+    // 窗口滚动（起点已过期 ≥ 60s）：记账与丢弃计数清零，预算恢复
+    set_budget_for_tests(BUDGET_WINDOW_SECS, BUDGET_WINDOW_BYTES, 5);
+    assert!(matches!(consume_budget(10), BudgetDecision::Allow));
+    assert_eq!(budget_snapshot_for_tests(), (10, 0));
 
-    // 收尾恢复满预算（进程级，测试运行器共享静态量）
-    set_budget_for_tests(64 * 1024);
+    // 收尾恢复新窗口（进程级，测试运行器共享静态量）
+    set_budget_for_tests(0, 0, 0);
+}
+
+/// 窗口边界：恰好差 1 秒不过期（不滚动、沿用记账），恰好到 60 秒过期。
+#[test]
+fn budget_window_expiry_boundary() {
+    // 59 秒前开始的窗口：未过期，沿用记账
+    set_budget_for_tests(BUDGET_WINDOW_SECS - 1, 100, 0);
+    assert!(matches!(consume_budget(50), BudgetDecision::Allow));
+    assert_eq!(budget_snapshot_for_tests(), (150, 0));
+
+    // 60 秒前开始的窗口：过期，滚动后放行且清账
+    set_budget_for_tests(BUDGET_WINDOW_SECS, 100, 3);
+    assert!(matches!(consume_budget(50), BudgetDecision::Allow));
+    assert_eq!(budget_snapshot_for_tests(), (50, 0));
 }
