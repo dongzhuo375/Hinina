@@ -63,7 +63,7 @@ Hinina/
     │   └── default.json                  # Tauri 2 默认权限集（窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽 + dialog:allow-open（数据目录选择器））
     │                                     # 注：**不声明 fs: / http: 授权** —— 本项目不注册 tauri-plugin-fs/-http，所有 I/O 都走 Rust（见「插件与 I/O 边界」）
     └── src/
-        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最先装 panic 钩子 → startup_dialog::arm（启动期错误框：三处 expect 与 Tauri 窗口创建失败的 panic 先落盘再弹框；RunEvent::Ready 时 mark_started）→ --console 附加（args_os 解析）→ Builder 链首位注册单实例插件（重复启动退出并聚焦已有窗口，见 infra/single_instance.rs）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
+        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最先装 panic 钩子 → startup_dialog::arm（启动期错误框：三处 expect 与 Tauri 窗口创建失败的 panic 先落盘再弹框；RunEvent::Ready 时 mark_started）→ --console 附加（args_os 解析）→ --settings 固化启动标志（launch_args::init，管理方钥匙，经 launch_flags 命令交前端）→ Builder 链首位注册单实例插件（重复启动退出并聚焦已有窗口，见 infra/single_instance.rs）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
         ├── lib.rs                        # 库根，公开模块树
         ├── test_support.rs               # 测试专用支撑（cfg(test)）：TempDir（Drop 时删除临时目录）+ Guarded<T>（Deref 转发，把目录生命周期绑到被测对象上）
         ├── core/
@@ -208,6 +208,7 @@ Hinina/
         │   ├── frontend_log.rs           # 前端日志落 tracing（frontend_log 命令的全部收敛与落盘：级别/scope 白名单、消息 2000 字符截断、64KiB/60s 滚动窗口字节预算——防渲染循环刷满日志且后续窗口恢复真实错误预算；安全口径沿 plugin_diagnostics，无载荷参数）
         │   ├── text.rs                   # 按字符截断共享工具（truncate_ellipsis：超长加 …；http 错误摘录 / hydro 响应预览 / frontend_log 三处同形态收敛于此）
         │   ├── startup_dialog.rs         # 启动期致命错误对话框（panic 钩子的 UI 出口）：main 装钩子后 arm、RunEvent::Ready 时 mark_started；启动未完成的主线程 panic 在崩溃记录落盘后弹一次 MessageBoxW（三处 expect + Tauri 窗口/WebView2 创建失败），写入成功才展示崩溃路径；独立线程跑模态消息泵避免重入事件循环；测试不 arm、非 Windows no-op
+        │   ├── launch_args.rs            # --settings 启动参数（管理方钥匙）：精确匹配解析（沿 console 同款语义）固化为进程级 OnceLock<LaunchFlags>，经 launch_flags 命令交前端 —— 守卫初始直落设置页 + 设置页维护者层解锁；防误触护栏而非安全边界（config.json 明文可手改）；未 init（测试进程）读出全 false 默认值
         │   ├── single_instance.rs        # 单实例约束（tauri-plugin-single-instance 2.4.5，**Builder 链第一个注册的插件**）：第二实例在插件初始化阶段即被识别退出（早于 setup，不建 AppContext/不开日志），第一实例回调聚焦（必要时还原）已有主窗口；回调绝不 panic（会经钩子弹启动失败框）；dev/release 同 identifier 共享互斥体；无 npm 侧/capability；无单测（mock runtime 令本机测试二进制启动即崩 0xc0000139，取证见模块文档），行为由双开验证
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
@@ -284,6 +285,7 @@ Hinina/
         │       ├── bounded_json_tests.rs # 流式字节上限
         │       └── support.rs            # 直接挂载为 cfg(test) 的 test_support，跨模块夹具
         └── commands/                     # Tauri Command 薄封装
+            ├── app_cmd.rs                # launch_flags（**零状态薄转发** → infra/launch_args：--settings 管理方钥匙的线上出口）
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）

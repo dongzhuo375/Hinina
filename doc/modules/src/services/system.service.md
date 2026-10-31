@@ -4,12 +4,13 @@
 
 ## 职责
 
-客户端自身运行信息与维护操作（存储目录 / 日志路径 / 版本号 / 重置客户端 / 清理本地数据）的入口：透传 `system.bridge` 调用。不做缓存 —— 版本号构建期固定，但存储目录可能随用户数据迁移变化，设置页每次挂载都取实时值。
+客户端自身运行信息与维护操作（存储目录 / 日志路径 / 版本号 / 重置客户端 / 清理本地数据 / 启动标志）的入口：透传 `system.bridge` 调用。不做缓存 —— 版本号构建期固定，但存储目录可能随用户数据迁移变化，设置页每次挂载都取实时值。**唯一例外是 `getLaunchFlags`**：启动标志在一次进程生命周期内不可变，且守卫与设置页两处消费必须读到同一份，故在进程内 memoize。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
+| `SystemService.getLaunchFlags` | `() => Promise<LaunchFlags>` | 本次启动的启动标志（`--settings` 管理方钥匙）。**进程内 memoize**：守卫（初始直落/门禁豁免）与设置页（分层锁）两处消费同源。读取失败（旧二进制、桥异常）按「无参数」退化 `{settings:false}` —— 安全侧默认值，绝不让钥匙通道故障卡死启动或设置页 |
 | `SystemService.getStorageInfo` | `() => Promise<StorageInfo>` | 存储信息（baseDir / logPath / version）；失败由调用方降级展示（设置页「关于」区块显示「获取失败」，不影响其余分组） |
 | `SystemService.resetClient` | `() => Promise<void>` | 重置客户端（三层缓存 + 公告基线 + 公告已读状态）；**不重拉**，补拉由调用方编排（设置页重置后立刻重拉当前比赛数据） |
 | `SystemService.localDataUsage` | `() => Promise<LocalDataUsage>` | 可清理项的体积预览（日志与崩溃记录字节数 / 留档总与过期条数字节） |
@@ -22,16 +23,19 @@
 
 ## 直接依赖
 
-- `@/bridge/system.bridge`（`getStorageInfo` / `resetClient` / `localDataUsage` / `purgeLocalData` / `getDataDir` / `setDataDir` / `resetDataDir` / `pickDataDir`）
-- `@/types/system`（`StorageInfo` / `LocalDataUsage` / `PurgeReport` / `DataDirInfo` / `DataDirChange`）
+- `@/bridge/system.bridge`（`getLaunchFlags` / `getStorageInfo` / `resetClient` / `localDataUsage` / `purgeLocalData` / `getDataDir` / `setDataDir` / `resetDataDir` / `pickDataDir`）
+- `@/types/system`（`LaunchFlags` / `StorageInfo` / `LocalDataUsage` / `PurgeReport` / `DataDirInfo` / `DataDirChange`）
 
 ## 被依赖
 
 - `composables/useDataDirSettings.ts` / `useMaintenanceSettings.ts` / `useAboutSettings.ts` — 数据目录生命周期、重置清理与 About 存储信息；对应 section 组件只消费模型，View 不直接调用 service
+- `router/index.ts`（守卫的 `--settings` 初始直落判据）与 `views/SettingsView.vue`（分层锁）— 消费 `getLaunchFlags`
 
 ## 逻辑流程
 
 ```
+getLaunchFlags() → [memoize] systemBridge.getLaunchFlags() → ipcInvoke('launch_flags')
+                   → Rust commands::app_cmd::launch_flags（失败 catch → {settings:false}）
 getStorageInfo() → systemBridge.getStorageInfo() → ipcInvoke('get_storage_info')
                    → Rust commands::config_cmd::get_storage_info
 resetClient()    → systemBridge.resetClient()    → ipcInvoke('reset_client')
