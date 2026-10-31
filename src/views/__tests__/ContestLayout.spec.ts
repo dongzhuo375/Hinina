@@ -200,4 +200,25 @@ describe('--settings 无会话最小壳', () => {
     // 正常外壳的 TopBar / StatusBar 桩仍在
     expect(host.querySelector('footer')).toBeTruthy()
   })
+
+  it('钥匙启动下在比赛子路由登出（钥匙真 + 非设置路由 + 无会话）：保持正常外壳', async () => {
+    // 真实场景：--settings 启动 → 返回登录 → 登录进场 → 在比赛页登出。此刻
+    // 钥匙为真、路由是比赛子路由、会话缺失 —— 若 bareShell 漏掉路由条件，
+    // 外壳会在这里闪成最小壳。上面的「无钥匙 + 非设置路由」用例测的是钥匙
+    // 条件，路由条件只有本用例锁得住（评审指出条件互相遮蔽）。
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAuthStore().sessionResolved = true
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'ProblemSet'
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).not.toContain('Hinina 设置')
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
+    expect(host.querySelector('footer')).toBeTruthy()
+  })
 })
