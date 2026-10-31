@@ -16,6 +16,9 @@ let disposers: Array<() => void> = []
 
 beforeEach(() => {
   calls = []
+  // errorHandler 会补 console.error（Vue 设了 handler 后不再走默认输出）；
+  // 全文件静音，个别用例自行 spy 断言
+  vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
 afterEach(() => {
@@ -77,14 +80,56 @@ describe('installGlobalErrorGuard', () => {
     await router.push('/').catch(() => {})
 
     expect(calls.length).toBe(4)
+    // Error reason 带 stack（V8 首行含消息，环节后缀在整个栈之后），断言用包含
     expect(calls[0]).toMatchObject({
       level: 'error',
       scope: 'vue',
-      message: 'boom (vue:setup function)',
+      message: expect.stringContaining('boom'),
     })
-    expect(calls[1]).toMatchObject({ level: 'error', scope: 'window', message: 'boom' })
-    expect(calls[2]).toMatchObject({ level: 'error', scope: 'promise', message: 'rejected!' })
-    expect(calls[3]).toMatchObject({ level: 'error', scope: 'router', message: 'guard exploded' })
+    expect(calls[0]?.message.endsWith('(vue:setup function)')).toBe(true)
+    expect(calls[1]).toMatchObject({ level: 'error', scope: 'window', message: expect.stringContaining('boom') })
+    expect(calls[2]).toMatchObject({ level: 'error', scope: 'promise', message: expect.stringContaining('rejected!') })
+    expect(calls[3]).toMatchObject({ level: 'error', scope: 'router', message: expect.stringContaining('guard exploded') })
+  })
+
+  it('errorHandler 补发 console.error（Vue 设了 handler 后默认输出消失，DevTools 可见性自补）', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { app } = setup()
+
+    const boom = new Error('console passthrough')
+    app.config.errorHandler!(boom, null, 'setup function')
+
+    expect(errorSpy).toHaveBeenCalledWith(boom, 'setup function')
+    expect(calls[0]?.message).toContain('console passthrough')
+  })
+
+  it('Error 上报携带堆栈（只取头部若干帧，由 2000 字符上限自然截断）', () => {
+    setup()
+
+    emitRejection(new Error('with stack'))
+
+    expect(calls[0]?.message).toContain('with stack')
+    expect(calls[0]?.message).toContain('at ') // 至少一帧
+  })
+
+  it('按码点截断：边界处的 emoji 不产生孤立代理项（serde_json 拒收即整条丢失）', () => {
+    setup()
+
+    // 1999 个 a + 😀（2 码元）+ 10 个 b：码元截断会切在 😀 中间
+    emitRejection(`${'a'.repeat(1999)}😀${'b'.repeat(10)}`)
+
+    expect(calls[0]?.message).toContain('😀')
+  })
+
+  it('去重键用完整归一化消息：同前缀不同后缀的错误不被误并', () => {
+    setup()
+
+    emitRejection(new Error(`${'x'.repeat(300)}-tail-A`))
+    emitRejection(new Error(`${'x'.repeat(300)}-tail-B`))
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.message).toContain('tail-A')
+    expect(calls[1]?.message).toContain('tail-B')
   })
 
   it('拆卸后钩子不再转发（errorHandler 恢复 undefined、监听器移除）', () => {
@@ -118,32 +163,46 @@ describe('installGlobalErrorGuard', () => {
     // 若监听未注册在 capture 阶段，本用例必然失败（变异验证过）—— 伪造
     // event.target 后直接向 window 派发只会走 target 阶段，测不出传播路径。
     const img = document.createElement('img')
-    img.setAttribute('src', 'assets/missing.png')
+    img.setAttribute('src', 'https://cdn.example.com/gallery/missing.png?token=SECRET&x=1')
     document.body.appendChild(img)
     img.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
 
-    // jsdom 会把 src 解析成绝对 URL，断言文件名部分
+    // 只记标签名与路径末段文件名：完整 URL（含签名令牌查询参数）不得进日志
     expect(calls[0]).toMatchObject({
       level: 'error',
       scope: 'window',
-      message: expect.stringContaining('资源加载失败: '),
+      message: '资源加载失败: <img> missing.png',
     })
-    expect(calls[0]?.message).toContain('missing.png')
+    expect(calls[0]?.message).not.toContain('SECRET')
+    expect(calls[0]?.message).not.toContain('http')
+  })
+
+  it('相对地址的资源错误取末段文件名（URL 解析失败按分隔符兜底）', () => {
+    setup()
+
+    const script = document.createElement('script')
+    script.setAttribute('src', 'assets/chunk.abc123.js')
+    document.body.appendChild(script)
+    script.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
+
+    expect(calls[0]?.message).toBe('资源加载失败: <script> chunk.abc123.js')
   })
 
   it('同签名错误 1 秒内只转发一次；不同签名互不影响', () => {
     vi.useFakeTimers()
     setup()
 
-    emitRejection(new Error('same'))
-    emitRejection(new Error('same'))
-    emitRejection(new Error('other'))
+    // 字符串 reason：归一化后恰好就是原文（Error 的 stack 含构造行号，
+    // 两次构造天然不同键，不适合做去重窗口的判定载体）
+    emitRejection('same')
+    emitRejection('same')
+    emitRejection('other')
 
     expect(calls).toHaveLength(2)
     expect(calls.map((c) => c.message)).toEqual(['same', 'other'])
 
     vi.advanceTimersByTime(1001)
-    emitRejection(new Error('same'))
+    emitRejection('same')
     expect(calls).toHaveLength(3) // 窗口过后再次转发
   })
 

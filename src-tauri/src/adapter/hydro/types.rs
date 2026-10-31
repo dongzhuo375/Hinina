@@ -55,12 +55,9 @@ pub fn strip_nulls(value: &mut Value) {
 /// 截取响应体前 200 字符用于错误诊断。
 ///
 /// 按**字符**而非字节截断：响应含中文题面/用户名，按字节切会落在 UTF-8 序列中间。
+/// 截断原语共享 `infra::text::truncate_ellipsis`（与本模块此前实现同形态）。
 pub fn preview(body: &str) -> String {
-    const MAX_CHARS: usize = 200;
-    if body.chars().count() <= MAX_CHARS {
-        return body.to_string();
-    }
-    body.chars().take(MAX_CHARS).collect::<String>() + "…"
+    crate::infra::text::truncate_ellipsis(body, 200)
 }
 
 // ── 错误包络 ──

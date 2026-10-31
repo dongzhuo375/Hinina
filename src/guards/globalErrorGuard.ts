@@ -50,7 +50,9 @@ export function installGlobalErrorGuard(
   function report(scope: string, error: unknown, detail?: string): void {
     try {
       const message = normalize(error, detail)
-      const key = `${scope}|${message.slice(0, 200)}`
+      // 去重键用**完整归一化消息**：截前缀会把「同前缀 + 变化后缀」的不同错误
+      // 误并成一条（窗口内后到的直接丢失）。message 已截断至 2000 字符，键有界。
+      const key = `${scope}|${message}`
       const now = Date.now()
       const seen = lastSeen.get(key)
       if (seen !== undefined && now - seen < DEDUP_WINDOW_MS) return
@@ -71,12 +73,14 @@ export function installGlobalErrorGuard(
 
   // Vue 组件树内错误（渲染 / 生命周期 / watcher）。info 是 Vue 给出的出错环节
   // （如 "render function"），与消息一起落盘便于归因。
+  // **必须补 console.error**：设置了 errorHandler 后 Vue 不再走默认输出，不补
+  // 这一行，DevTools 里组件错误就消失（转发是持久化，console 是现场排障）。
   app.config.errorHandler = (err, _instance, info) => {
+    console.error(err, info)
     report('vue', err, `vue:${info}`)
   }
 
-  // 未捕获同步异常 + 资源加载失败。后者没有 error 对象，从事件目标的 src/href 取址
-  //（本地静态资源名，非敏感）。
+  // 未捕获同步异常 + 资源加载失败。
   const onWindowError = (event: ErrorEvent): void => {
     const source = event.error ?? event.message
     if (source) {
@@ -85,12 +89,21 @@ export function installGlobalErrorGuard(
     }
     const target = event.target
     if (target && target !== window) {
-      const asset = (target as { src?: string; href?: string }).src
-        ?? (target as { href?: string }).href
-        ?? 'unknown'
-      report('window', `资源加载失败: ${asset}`)
+      report('window', resourceFailureMessage(target))
     }
   }
+
+  /// 资源加载失败消息：**只记标签名与路径末段文件名，绝不记完整 URL** ——
+  /// Markdown 外链图片等绝对地址可能带签名令牌等查询参数，进入本地日志即成
+  /// 泄漏面（此前注释称「本地静态资源名，非敏感」对外链不成立）。
+  function resourceFailureMessage(target: EventTarget): string {
+    const tag = (target as { tagName?: unknown }).tagName
+    const name = typeof tag === 'string' ? tag.toLowerCase() : 'unknown'
+    const raw =
+      (target as { src?: unknown }).src ?? (target as { href?: unknown }).href
+    return `资源加载失败: <${name}> ${fileNameOf(raw)}`
+  }
+
   // **必须 capture 阶段**：资源加载失败的 error 事件派发在元素上且**不冒泡**
   //（HTML 规范），bubble 阶段的 window 监听永远收不到 —— 只有 capture 沿
   // window → document → … → target 的传播路径能拦住它。未捕获异常的 error
@@ -120,13 +133,13 @@ export function installGlobalErrorGuard(
   }
 }
 
-/// 错误归一：Error → message（附 detail 环节）；IpcError 鸭子识别 → `ipc:{cmd}`；
-/// 空/null → 占位；其余 String 化。统一截断到与 Rust 端一致的上限（Rust 侧还会
-/// 再兜底一次）。
+/// 错误归一：Error → message + 截断后的 stack（Rust 端为保留换行/制表所做的
+/// 处理因此真正生效）；IpcError 鸭子识别 → `ipc:{cmd}`；空/null → 占位；其余
+/// String 化。统一按**码点**截断到与 Rust 端一致的上限（Rust 侧还会再兜底一次）。
 function normalize(error: unknown, detail?: string): string {
   let message: string
   if (error instanceof Error) {
-    message = error.message
+    message = messageWithStack(error)
   } else if (
     error &&
     typeof error === 'object' &&
@@ -150,6 +163,36 @@ function normalize(error: unknown, detail?: string): string {
   if (message.length === 0) message = '<empty error>'
   const suffix = detail ? ` (${detail})` : ''
   const room = MESSAGE_MAX_CHARS - suffix.length
-  const body = message.length > room ? `${message.slice(0, room)}…` : message
+  const body = truncateByChars(message, room)
   return `${body}${suffix}`
+}
+
+/// Error → message + stack。V8 的 stack 首行自带消息（去重）；SpiderMonkey/
+/// JavaScriptCore 的 stack 不含消息头（补一行）。栈只取头部若干帧 —— 截断由
+/// 2000 字符上限自然完成，足够定位又不会把日志撑成单条巨行。
+function messageWithStack(error: Error): string {
+  const stack = typeof error.stack === 'string' ? error.stack : undefined
+  if (!stack) return error.message
+  if (error.message.length > 0 && !stack.includes(error.message)) {
+    return `${error.message}\n${stack}`
+  }
+  return stack
+}
+
+/// 按**码点**截断（Array.from 按码点迭代）：按 UTF-16 码元 slice 会切出孤立
+/// 代理项（emoji 等），JSON 序列化产生非法转义、serde_json 拒收，整条日志被丢。
+function truncateByChars(text: string, max: number): string {
+  const chars = Array.from(text)
+  return chars.length <= max ? text : `${chars.slice(0, max).join('')}…`
+}
+
+/// 从资源地址提取文件名：URL 解析取 pathname 末段（查询串/fragment 里的签名
+/// 令牌不进日志）；相对地址或解析失败按分隔符取末段兜底。
+function fileNameOf(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length === 0) return 'unknown'
+  try {
+    return new URL(raw).pathname.split('/').pop() || 'unknown'
+  } catch {
+    return raw.split(/[/?#]/).pop() || 'unknown'
+  }
 }

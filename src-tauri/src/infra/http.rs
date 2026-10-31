@@ -75,11 +75,7 @@ async fn read_error_excerpt(response: reqwest::Response) -> String {
         return String::new();
     };
     let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one_line.chars().count() <= ERROR_BODY_EXCERPT_LIMIT {
-        return one_line;
-    }
-    let truncated: String = one_line.chars().take(ERROR_BODY_EXCERPT_LIMIT).collect();
-    format!("{}…", truncated)
+    super::text::truncate_ellipsis(&one_line, ERROR_BODY_EXCERPT_LIMIT)
 }
 
 /// 带响应体摘录的状态码错误。
