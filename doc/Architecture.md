@@ -63,7 +63,7 @@ Hinina/
     │   └── default.json                  # Tauri 2 默认权限集（窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽 + dialog:allow-open（数据目录选择器））
     │                                     # 注：**不声明 fs: / http: 授权** —— 本项目不注册 tauri-plugin-fs/-http，所有 I/O 都走 Rust（见「插件与 I/O 边界」）
     └── src/
-        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最先装 panic 钩子 → startup_dialog::arm（启动期错误框：三处 expect 与 Tauri 窗口创建失败的 panic 先落盘再弹框；RunEvent::Ready 时 mark_started）→ --console 附加（args_os 解析）→ Builder 链首位注册单实例插件（重复启动退出并聚焦已有窗口，见 infra/single_instance.rs）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
+        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最先装 panic 钩子 → startup_dialog::arm（启动期错误框：三处 expect 与 Tauri 窗口创建失败的 panic 先落盘再弹框；RunEvent::Ready 时 mark_started）→ --console 附加（args_os 解析）→ --settings 固化启动标志（launch_args::init，管理方钥匙，经 launch_flags 命令交前端）→ Builder 链首位注册单实例插件（重复启动退出并聚焦已有窗口，见 infra/single_instance.rs）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
         ├── lib.rs                        # 库根，公开模块树
         ├── test_support.rs               # 测试专用支撑（cfg(test)）：TempDir（Drop 时删除临时目录）+ Guarded<T>（Deref 转发，把目录生命周期绑到被测对象上）
         ├── core/
@@ -208,6 +208,7 @@ Hinina/
         │   ├── frontend_log.rs           # 前端日志落 tracing（frontend_log 命令的全部收敛与落盘：级别/scope 白名单、消息 2000 字符截断、64KiB/60s 滚动窗口字节预算——防渲染循环刷满日志且后续窗口恢复真实错误预算；安全口径沿 plugin_diagnostics，无载荷参数）
         │   ├── text.rs                   # 按字符截断共享工具（truncate_ellipsis：超长加 …；http 错误摘录 / hydro 响应预览 / frontend_log 三处同形态收敛于此）
         │   ├── startup_dialog.rs         # 启动期致命错误对话框（panic 钩子的 UI 出口）：main 装钩子后 arm、RunEvent::Ready 时 mark_started；启动未完成的主线程 panic 在崩溃记录落盘后弹一次 MessageBoxW（三处 expect + Tauri 窗口/WebView2 创建失败），写入成功才展示崩溃路径；独立线程跑模态消息泵避免重入事件循环；测试不 arm、非 Windows no-op
+        │   ├── launch_args.rs            # --settings 启动参数（管理方钥匙）：精确匹配解析（沿 console 同款语义）固化为进程级 OnceLock<LaunchFlags>，经 launch_flags 命令交前端 —— 守卫初始直落设置页 + 设置页维护者层解锁；防误触护栏而非安全边界（config.json 明文可手改）；未 init（测试进程）读出全 false 默认值
         │   ├── single_instance.rs        # 单实例约束（tauri-plugin-single-instance 2.4.5，**Builder 链第一个注册的插件**）：第二实例在插件初始化阶段即被识别退出（早于 setup，不建 AppContext/不开日志），第一实例回调聚焦（必要时还原）已有主窗口；回调绝不 panic（会经钩子弹启动失败框）；dev/release 同 identifier 共享互斥体；无 npm 侧/capability；无单测（mock runtime 令本机测试二进制启动即崩 0xc0000139，取证见模块文档），行为由双开验证
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
@@ -284,6 +285,7 @@ Hinina/
         │       ├── bounded_json_tests.rs # 流式字节上限
         │       └── support.rs            # 直接挂载为 cfg(test) 的 test_support，跨模块夹具
         └── commands/                     # Tauri Command 薄封装
+            ├── app_cmd.rs                # launch_flags（**零状态薄转发** → infra/launch_args：--settings 管理方钥匙的线上出口）
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
@@ -525,7 +527,7 @@ src/
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（`sessionGuard` 会话失效兜底 + `globalErrorGuard` 全局错误转发）—— 前者需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）
 - **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
-- **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；**首次进入工作台（含深链）还要过赛程阶段闸门** —— 按 `getAuthoritativeSchedule`（认证比赛与匿名简报 ID 不同即视为换场，以简报为准）判阶段，非 `running` 一律退回登录页等待（已在 Contest 子树内时跳过闸门，避免结束瞬间的页面切换打断退出流程）；登录页依据同一阶段判据决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入，**已结束不进场**（`canEnter = isLoggedIn && phase === 'running'`）；登出时经 `stores/session.ts` 清空会话级领域状态
+- **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页；唯一例外是 `--settings` 进程对设置页的**条件豁免**——豁免在守卫判据里而非 meta 声明，见 `doc/modules/src/router/index.md`）；**首次进入工作台（含深链）还要过赛程阶段闸门** —— 按 `getAuthoritativeSchedule`（认证比赛与匿名简报 ID 不同即视为换场，以简报为准）判阶段，非 `running` 一律退回登录页等待（已在 Contest 子树内时跳过闸门，避免结束瞬间的页面切换打断退出流程）；登录页依据同一阶段判据决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入，**已结束不进场**（`canEnter = isLoggedIn && phase === 'running'`）；登出时经 `stores/session.ts` 清空会话级领域状态
 - **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Adapter → `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验，且反复重登可能触发 HOJ 暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。全局兜底由 `guards/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
 - **三态契约必须由 Adapter 兑现**：`AuthProvider::validate_session` 的返回值语义是 `Ok(true)` 有效 / `Ok(false)` 服务端**明确**判定失效 / `Err(_)` 无法判定。**绝不可把网络错误折成 `Ok(false)`** —— 那会让 `SessionValidity::Unknown` 分支成为死代码，一次赛前网络抖动就把选手踢回登录页。HOJ 侧的判据抽成纯函数 `session_validity_from_response` 以便测试锁定：仅 `AppError::Auth` 算明确失效，非 200 的其它状态码（400/500）归 `Unknown`，网络/超时/解析失败一律上抛。同理，评测查询（`SubmissionService::get_judgement`，单次查询）**不得吞掉认证错误**：必须原样上抛，否则前端收敛轮询会把 401 当瞬时抖动重试到超时，选手干等五分钟后只收到「评测超时」，守卫也拿不到 Auth 变体
 - **赛前预检错峰**：登录页等待开赛时按 `utils/session-check.ts` 的策略校验会话 —— 距开赛 >10min 每 5min±60s 周期复检，进入 [T-10min, T-3min] 窗口后在剩余区间随机取点做一次性预检，迟到启动则 0–3s 抖动后立即执行，距开赛 ≤30s 不再预检。目的是把全场客户端的校验请求散布开，避免开赛前形成同步尖峰；**进场（T-0 导航）不错峰**，准点进场是公平性要求

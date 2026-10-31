@@ -23,6 +23,7 @@ import type { AppConfig } from '../src/types/config'
 import type { Contest, ContestProblem } from '../src/types/contest'
 import type { Problem } from '../src/types/problem'
 import type { ContestRankPage, RankCell } from '../src/types/rank'
+import type { LaunchFlags } from '../src/types/system'
 import type { JudgementStatus, SubmissionPage, SubmissionRecord } from '../src/types/submission'
 import type { Workspace } from '../src/types/workspace'
 
@@ -34,6 +35,8 @@ export interface FakeOptions {
   failLogin?: { variant: string; message: string }
   /** 每次提交的评测状态序列：依次返回、停在最后一个；缺省 Pending→Running→Accepted */
   judgementSequence?: JudgementStatus[]
+  /** launch_flags 返回的启动标志；缺省 false（正常门禁 + 选手层），--settings 旅程传 true */
+  launchFlags?: LaunchFlags
 }
 
 /** 页面内 fake 控制面（经 window.__e2e 暴露） */
@@ -411,6 +414,10 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return null
       case 'reload_config':
         return null
+      case 'launch_flags':
+        // 缺省走正常门禁路径（无 --settings）：连接与缓存字段保持锁定；
+        // 钥匙旅程用例经 FakeOptions.launchFlags 打开
+        return options.launchFlags ?? { settings: false }
       case 'get_storage_info':
         return {
           baseDir: 'D:\\e2e\\hinina',

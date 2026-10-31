@@ -1,6 +1,7 @@
 import type {
   DataDirChange,
   DataDirInfo,
+  LaunchFlags,
   LocalDataUsage,
   PurgeReport,
   StorageInfo,
@@ -10,6 +11,11 @@ import { ipcInvoke } from '@/bridge'
 /** 获取客户端存储信息（存储目录 / 日志路径 / 版本号），设置页「关于」使用 */
 export async function getStorageInfo(): Promise<StorageInfo> {
   return ipcInvoke<StorageInfo>('get_storage_info')
+}
+
+/** 读取本次启动的启动标志（`--settings` 管理方钥匙），守卫与设置页各取一次 */
+export async function getLaunchFlags(): Promise<LaunchFlags> {
+  return ipcInvoke<LaunchFlags>('launch_flags')
 }
 
 /**

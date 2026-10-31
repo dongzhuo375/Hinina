@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import TopBar from '@/components/layout/TopBar.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
 import { useAnnouncementStore } from '@/stores/announcementStore'
+import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
+import { systemService } from '@/services/system.service'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import { useNowMs } from '@/composables/useNowMs'
 
 const router = useRouter()
+const route = useRoute()
+const auth = useAuthStore()
 const contestStore = useContestStore()
 const announcementStore = useAnnouncementStore()
 const nowMs = useNowMs()
@@ -17,6 +21,18 @@ const phase = computed(() => getContestPhase(
   getAuthoritativeSchedule(contestStore.contest, contestStore.brief),
   now.value,
 ))
+/// 最小壳：**四条件与** —— 钥匙启动（`--settings`）+ 无会话 + 当前路由是设置页。
+/// 绑路由防「正常登出/会话失效时比赛页外壳闪最小壳」（user 置空先于 replace 的
+/// 异步守卫完成）；绑钥匙防「普通启动在设置页上登出时闪最小壳」（已登录维护者
+/// 经隐藏入口进设置页后登出，路由同样是 Settings）—— 普通启动**永远**不进最小壳。
+/// 快照由守卫首航填充（早于本组件挂载），同步判定无闪帧。
+const bareShell = computed(
+  () =>
+    systemService.launchFlags.value.settings &&
+    auth.sessionResolved &&
+    !auth.isLoggedIn &&
+    route.name === 'Settings',
+)
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
@@ -35,8 +51,10 @@ watch(phase, (value) => {
 }, { immediate: true })
 
 /// 会话有效性已由路由守卫（meta.requiresAuth）保证；
-/// 外壳负责拉取一次比赛数据，TopBar / StatusBar 与各视图共享该状态
+/// 外壳负责拉取一次比赛数据，TopBar / StatusBar 与各视图共享该状态。
+/// 最小壳（--settings 直落设置页）时跳过：不发起任何面向 OJ 的请求。
 async function bootstrap(): Promise<void> {
+  if (bareShell.value) return
   try {
     // whenLoaded 复用在途请求（P59 统一入口），子视图先触发加载时也走同一条链路
     await contestStore.whenLoaded()
@@ -73,23 +91,52 @@ onUnmounted(() => {
   // 轮询器是模块级副作用句柄，离开工作台必须回收
   announcementStore.stopLive()
 })
+
+function backToLogin(): void {
+  void router.replace({ name: 'Login' })
+}
 </script>
 
 <template>
   <div class="contest-theme relative flex h-full flex-col overflow-hidden bg-[var(--bg-body)]">
-    <TopBar :navigation-disabled="phase === 'ended' || phase === 'upcoming'" />
-    <div class="flex min-h-0 flex-1 overflow-hidden" :inert="phase === 'ended' || phase === 'upcoming'">
-      <main class="workspace-main flex min-w-0 flex-1 flex-col overflow-hidden">
+    <!-- 最小壳：仅「无会话 + 设置路由」（--settings 直落）时渲染。自带拖动区 ——
+         App 的全局标题栏在 matched 含 Contest 时不渲染，decorations=false 下窗口
+         移动全靠它 -->
+    <template v-if="bareShell">
+      <header
+        data-tauri-drag-region
+        class="flex h-10 shrink-0 select-none items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-card)] pl-4 pr-3"
+      >
+        <span data-tauri-drag-region class="text-sm font-semibold text-[var(--text-primary)]">
+          Hinina 设置
+        </span>
+        <button
+          type="button"
+          class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
+          @click="backToLogin"
+        >
+          返回登录
+        </button>
+      </header>
+      <main class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <router-view />
       </main>
-    </div>
-    <StatusBar />
-    <div v-if="phase === 'ended'" class="absolute inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
-      <div role="alert" class="max-w-sm border border-[var(--border-color)] bg-[var(--bg-body)] px-12 py-10 text-center shadow-[0_24px_64px_rgba(46,48,51,0.08)]">
-        <p class="eyebrow">CONTEST CLOSED</p>
-        <h1 class="mt-4 text-2xl font-semibold tracking-wide text-[var(--text-primary)]">比赛已结束</h1>
-        <p class="mt-4 text-sm leading-6 text-[var(--text-secondary)]">感谢参赛，即将返回登录入口。</p>
+    </template>
+    <template v-else>
+      <TopBar :navigation-disabled="phase === 'ended' || phase === 'upcoming'" />
+      <div class="flex min-h-0 flex-1 overflow-hidden" :inert="phase === 'ended' || phase === 'upcoming'">
+        <main class="workspace-main flex min-w-0 flex-1 flex-col overflow-hidden">
+          <router-view />
+        </main>
       </div>
-    </div>
+      <StatusBar />
+      <div v-if="phase === 'ended'" class="absolute inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
+        <div role="alert" class="max-w-sm border border-[var(--border-color)] bg-[var(--bg-body)] px-12 py-10 text-center shadow-[0_24px_64px_rgba(46,48,51,0.08)]">
+          <p class="eyebrow">CONTEST CLOSED</p>
+          <h1 class="mt-4 text-2xl font-semibold tracking-wide text-[var(--text-primary)]">比赛已结束</h1>
+          <p class="mt-4 text-sm leading-6 text-[var(--text-secondary)]">感谢参赛，即将返回登录入口。</p>
+        </div>
+      </div>
+    </template>
   </div>
 </template>

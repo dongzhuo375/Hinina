@@ -69,3 +69,13 @@ export interface DataDirChange {
   /// 恒为 true：数据目录改动只能重启生效
   restartRequired: boolean
 }
+
+/// 本次启动的启动标志，对应 Rust `infra::launch_args::LaunchFlags`。
+///
+/// 管理方钥匙：`--settings` 启动时初始导航直落设置页并解锁维护者层字段；
+/// 普通启动全部 false（正常门禁 + 选手层）。定位是防误触护栏而非安全边界
+/// （config.json 明文可手改，无后端强制）。
+export interface LaunchFlags {
+  /// 以 `--settings` 启动
+  settings: boolean
+}

@@ -4,6 +4,7 @@ import { createApp, nextTick } from 'vue'
 import type { App } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useContestStore } from '@/stores/contestStore'
+import { useAuthStore } from '@/stores/authStore'
 import type { Contest } from '@/types/contest'
 import ContestLayout from '@/views/ContestLayout.vue'
 
@@ -12,8 +13,18 @@ const mocks = vi.hoisted(() => ({
   startLive: vi.fn(),
   stopLive: vi.fn(),
   loadConfiguredContest: vi.fn(),
+  // 当前路由名（最小壳判据的一部分）；默认非 Settings，模拟工作台子路由
+  routeName: { value: 'ProblemSet' as string | undefined },
+  // 启动标志响应式快照（systemService.launchFlags）：最小壳判据之一
+  launchFlags: { value: { settings: false } },
 }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.replace }) }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ replace: mocks.replace }),
+  useRoute: () => ({ name: mocks.routeName.value }),
+}))
+vi.mock('@/services/system.service', () => ({
+  systemService: { launchFlags: mocks.launchFlags },
+}))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => mocks }))
 vi.mock('@/services/contest.service', () => ({ contestService: { loadConfiguredContest: mocks.loadConfiguredContest } }))
 vi.mock('@/components/layout/TopBar.vue', () => ({ default: { template: '<header />' } }))
@@ -118,5 +129,96 @@ describe('contest exit lifecycle', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     expect(mocks.replace).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('--settings 无会话最小壳', () => {
+  it('无会话且当前路由是设置页：渲染最小壳，不出顶栏/状态条，不发起认证拉取，返回登录可用', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    // 钥匙启动 + 会话已判定但不存在（user=null）+ 当前在设置路由：--settings 直落的外壳形态
+    mocks.launchFlags.value = { settings: true }
+    useAuthStore().sessionResolved = true
+    mocks.routeName.value = 'Settings'
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).toContain('Hinina 设置')
+    // 裸壳自带拖动区标题栏（decorations=false 下窗口移动全靠它）
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeTruthy()
+    // bootstrap 必须跳过：无会话时认证拉取只会失败
+    expect(mocks.loadConfiguredContest).not.toHaveBeenCalled()
+    expect(mocks.startLive).not.toHaveBeenCalled()
+
+    const back = [...host.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('返回登录'),
+    )
+    expect(back).toBeTruthy()
+    back!.click()
+    await nextTick()
+    expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
+  it('无会话 + 设置路由但普通启动（无钥匙）：不进最小壳（登出过渡态在设置页上同样安全）', async () => {
+    // 普通启动永远不进最小壳（第三轮评审）：即使会话缺失且正停在设置路由——
+    // 例如已登录维护者经隐藏入口进设置页后登出的过渡态——也保持原外壳
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAuthStore().sessionResolved = true
+    mocks.launchFlags.value = { settings: false }
+    mocks.routeName.value = 'Settings'
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).not.toContain('Hinina 设置')
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
+    expect(host.querySelector('footer')).toBeTruthy()
+  })
+
+  it('无会话但路由非设置页（正常登出过渡态）：保持正常外壳，不闪最小壳', async () => {
+    // 登出把 user 置空而 sessionResolved 仍为 true：若最小壳只判会话，比赛页
+    // 外壳会在 replace(Login) 完成前闪成「Hinina 设置」并重挂子视图（评审抓出）
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAuthStore().sessionResolved = true
+    mocks.launchFlags.value = { settings: false }
+    mocks.routeName.value = 'ProblemSet'
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).not.toContain('Hinina 设置')
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
+    // 正常外壳的 TopBar / StatusBar 桩仍在
+    expect(host.querySelector('footer')).toBeTruthy()
+  })
+
+  it('钥匙启动下在比赛子路由登出（钥匙真 + 非设置路由 + 无会话）：保持正常外壳', async () => {
+    // 真实场景：--settings 启动 → 返回登录 → 登录进场 → 在比赛页登出。此刻
+    // 钥匙为真、路由是比赛子路由、会话缺失 —— 若 bareShell 漏掉路由条件，
+    // 外壳会在这里闪成最小壳。上面的「无钥匙 + 非设置路由」用例测的是钥匙
+    // 条件，路由条件只有本用例锁得住（评审指出条件互相遮蔽）。
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAuthStore().sessionResolved = true
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'ProblemSet'
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).not.toContain('Hinina 设置')
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
+    expect(host.querySelector('footer')).toBeTruthy()
   })
 })

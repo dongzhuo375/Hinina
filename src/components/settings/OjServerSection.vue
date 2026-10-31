@@ -12,6 +12,8 @@ const props = defineProps<{
   switchError: string | null
   switchNotice: string | null
   inputClass: (field: string) => string
+  /** 维护者层锁定（--settings 启动解锁）：连接与缓存调优字段禁用 + 提示；比赛 ID/密码不受影响 */
+  locked?: boolean
 }>()
 const emit = defineEmits<{
   (event: 'update:form', patch: SettingsFormPatch): void
@@ -39,13 +41,19 @@ function onSwitchOj(): void {
                   <path d="M7 7.5h.01M7 16.5h.01" stroke-linecap="round" />
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">OJ 服务器</h2>
+                <span v-if="props.locked" class="ml-auto text-xs text-[var(--text-muted)]">
+                  连接与缓存字段已锁定：完全退出应用后以 --settings 重新启动可修改
+                </span>
               </div>
               <div class="grid grid-cols-1 gap-x-4 gap-y-4 px-5 py-4 sm:grid-cols-2">
                 <label class="block">
-                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                  <span
+                    class="mb-1 block text-xs font-medium"
+                    :class="props.locked ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'"
+                  >
                     当前 OJ
                   </span>
-                  <select v-model="props.form.activeOj" :class="INPUT" @change="onSwitchOj">
+                  <select v-model="props.form.activeOj" :class="INPUT" :disabled="props.locked" @change="onSwitchOj">
                     <option
                       v-for="o in props.options"
                       :key="o.id"
@@ -72,7 +80,10 @@ function onSwitchOj(): void {
                 </label>
 
                 <label class="block">
-                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                  <span
+                    class="mb-1 block text-xs font-medium"
+                    :class="props.locked ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'"
+                  >
                     服务器地址
                   </span>
                   <input
@@ -81,6 +92,7 @@ function onSwitchOj(): void {
                     spellcheck="false"
                     :placeholder="ojBaseUrlHint(props.form.activeOj)"
                     :class="props.inputClass('ojUrl')"
+                    :disabled="props.locked"
                   />
                   <span v-if="props.errors.ojUrl" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.ojUrl }}
@@ -122,7 +134,10 @@ function onSwitchOj(): void {
                 </label>
 
                 <label class="block">
-                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                  <span
+                    class="mb-1 block text-xs font-medium"
+                    :class="props.locked ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'"
+                  >
                     请求超时（秒）
                   </span>
                   <input
@@ -131,6 +146,7 @@ function onSwitchOj(): void {
                     inputmode="numeric"
                     spellcheck="false"
                     :class="props.inputClass('timeoutSecs')"
+                    :disabled="props.locked"
                   />
                   <span v-if="props.errors.timeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.timeoutSecs }}
@@ -141,7 +157,10 @@ function onSwitchOj(): void {
                 </label>
 
                 <label class="block">
-                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                  <span
+                    class="mb-1 block text-xs font-medium"
+                    :class="props.locked ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'"
+                  >
                     轮询间隔（秒）
                   </span>
                   <input
@@ -150,6 +169,7 @@ function onSwitchOj(): void {
                     inputmode="numeric"
                     spellcheck="false"
                     :class="props.inputClass('pollIntervalSecs')"
+                    :disabled="props.locked"
                   />
                   <span v-if="props.errors.pollIntervalSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.pollIntervalSecs }}
@@ -160,7 +180,10 @@ function onSwitchOj(): void {
                 </label>
 
                 <label class="block">
-                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                  <span
+                    class="mb-1 block text-xs font-medium"
+                    :class="props.locked ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'"
+                  >
                     轮询总超时（秒）
                   </span>
                   <input
@@ -169,6 +192,7 @@ function onSwitchOj(): void {
                     inputmode="numeric"
                     spellcheck="false"
                     :class="props.inputClass('pollTimeoutSecs')"
+                    :disabled="props.locked"
                   />
                   <span v-if="props.errors.pollTimeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.pollTimeoutSecs }}
@@ -179,7 +203,10 @@ function onSwitchOj(): void {
                 </label>
 
                 <label class="block">
-                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                  <span
+                    class="mb-1 block text-xs font-medium"
+                    :class="props.locked ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'"
+                  >
                     列表缓存 TTL（秒）
                   </span>
                   <input
@@ -188,6 +215,7 @@ function onSwitchOj(): void {
                     inputmode="numeric"
                     spellcheck="false"
                     :class="props.inputClass('cacheTtlSecs')"
+                    :disabled="props.locked"
                   />
                   <span v-if="props.errors.cacheTtlSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.cacheTtlSecs }}
@@ -198,7 +226,10 @@ function onSwitchOj(): void {
                 </label>
 
                 <div class="block">
-                  <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                  <span
+                    class="mb-1 block text-xs font-medium"
+                    :class="props.locked ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'"
+                  >
                     题面缓存
                   </span>
                   <div class="flex items-center gap-3 py-1">
@@ -206,7 +237,8 @@ function onSwitchOj(): void {
                       type="button"
                       role="switch"
                       :aria-checked="props.form.cacheProblemStatement"
-                      class="settings-switch relative h-6 w-11 shrink-0 transition-colors"
+                      :disabled="props.locked"
+                      class="settings-switch relative h-6 w-11 shrink-0 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                       :class="
                         props.form.cacheProblemStatement ? 'bg-[var(--color-primary)]' : 'bg-[var(--bg-sidebar)]'
                       "
