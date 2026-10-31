@@ -23,7 +23,7 @@
 
 ## 被依赖
 
-- 全部桥接模块：`auth.bridge` / `contest.bridge` / `submission.bridge` / `config.bridge` / `problem.bridge` / `rank.bridge` / `workspace.bridge` / `announcement.bridge` / `system.bridge` / `plugin.bridge`
+- 全部桥接模块：`auth.bridge` / `contest.bridge` / `submission.bridge` / `config.bridge` / `problem.bridge` / `rank.bridge` / `workspace.bridge` / `announcement.bridge` / `system.bridge` / `plugin.bridge` / `diagnostics.bridge`
 - `main.ts` — 组合根注入观察者（`installSessionGuard`）
 - `bridge/__tests__/index.spec.ts`
 

@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-// main.ts 组合根装配（M2 工作包 C，轻量）：四个装配副作用必须发生，
+// main.ts 组合根装配（M2 工作包 C，轻量）：五个装配副作用必须发生，
 // 公告事件按 contestId 过滤（切比赛瞬间的在途事件不得刷新新比赛的公告）。
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   installSessionGuard: vi.fn(),
+  installGlobalErrorGuard: vi.fn(),
+  forwardFrontendLog: vi.fn(),
   installWorkspacePersistenceListener: vi.fn(),
   onAnnouncementsPublished: vi.fn<(cb: (p: { contestId: string }) => void) => Promise<() => void>>(
     async () => vi.fn() as unknown as () => void,
@@ -23,6 +25,12 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('@/router', () => ({ default: { install: vi.fn() } }))
 vi.mock('@/guards/sessionGuard', () => ({ installSessionGuard: mocks.installSessionGuard }))
+vi.mock('@/guards/globalErrorGuard', () => ({
+  installGlobalErrorGuard: mocks.installGlobalErrorGuard,
+}))
+vi.mock('@/bridge/diagnostics.bridge', () => ({
+  forwardFrontendLog: mocks.forwardFrontendLog,
+}))
 vi.mock('@/stores/workspaceStore', () => ({
   useWorkspaceStore: () => ({ saveWorkspace: vi.fn(), syncPending: false, isDirty: false }),
   installWorkspacePersistenceListener: mocks.installWorkspacePersistenceListener,
@@ -50,10 +58,15 @@ describe('main.ts 组合根装配', () => {
   /// 清空 mock 调用记录，而装配发生在 beforeAll 的导入期 —— 必须当场快照成普通值，
   /// 否则断言看到的永远是 0。
   const installed = {
+    globalErrorGuard: 0,
     sessionGuard: 0,
     workspaceListener: 0,
     announcements: 0,
     closeGuard: 0,
+    /// 装配先后（全局错误转发必须先于其余装配：首屏错误也要被捕获）。
+    /// clearMocks 会在测试间清空调用记录，这里与计数一样当场快照。
+    errorGuardOrder: 0,
+    sessionGuardOrder: 0,
     announcementHandler: null as ((p: { contestId: string }) => void) | null,
   }
 
@@ -65,7 +78,10 @@ describe('main.ts 组合根装配', () => {
     // 挂载发生在导入期：容器必须先于 import 存在（Vue 对缺失容器静默不挂）
     document.body.innerHTML = '<div id="app"></div>'
     await import('@/main')
+    installed.globalErrorGuard = mocks.installGlobalErrorGuard.mock.calls.length
     installed.sessionGuard = mocks.installSessionGuard.mock.calls.length
+    installed.errorGuardOrder = mocks.installGlobalErrorGuard.mock.invocationCallOrder[0] ?? 0
+    installed.sessionGuardOrder = mocks.installSessionGuard.mock.invocationCallOrder[0] ?? 0
     installed.workspaceListener =
       mocks.installWorkspacePersistenceListener.mock.calls.length
     installed.announcements = mocks.onAnnouncementsPublished.mock.calls.length
@@ -76,7 +92,11 @@ describe('main.ts 组合根装配', () => {
 
   // beforeEach 不重置 DOM：挂载只发生一次，重置会把被测事实清掉
 
-  it('四个装配副作用全部注册', async () => {
+  it('五个装配副作用全部注册', async () => {
+    // 全局错误转发必须先于其余装配（首屏渲染/早期 IPC 的错误也要被捕获）
+    expect(installed.errorGuardOrder).toBeGreaterThan(0)
+    expect(installed.errorGuardOrder).toBeLessThan(installed.sessionGuardOrder)
+    expect(installed.globalErrorGuard).toBe(1)
     expect(installed.sessionGuard).toBe(1)
     expect(installed.workspaceListener).toBe(1)
     expect(installed.announcements).toBe(1)

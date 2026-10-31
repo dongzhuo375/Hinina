@@ -310,6 +310,7 @@ fn main() {
             commands::config_cmd::reload_config,
             commands::config_cmd::update_config,
             commands::config_cmd::get_storage_info,
+            commands::log_cmd::frontend_log,
             commands::maintenance_cmd::reset_client,
             commands::maintenance_cmd::local_data_usage,
             commands::maintenance_cmd::purge_local_data,

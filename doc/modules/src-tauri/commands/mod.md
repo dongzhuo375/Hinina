@@ -9,6 +9,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 - `pub mod data_dir_cmd` — 数据目录：`get_data_dir` / `set_data_dir` / `reset_data_dir` / `pick_data_dir`（改动重启后生效）
 - `pub mod maintenance_cmd` — 重置客户端（`reset_client`：三层缓存 + 公告基线 + 公告已读状态）与清理本地数据（`local_data_usage` 预览 / `purge_local_data` 删日志内容与崩溃记录文件、过期留档）
 - `pub mod config_cmd` — 配置读取 / 热重载 / 更新 + `get_storage_info`（存储与版本信息）
+- `pub mod log_cmd` — `frontend_log`：前端全局错误转发的唯一 IPC 入口（**薄转发**，收敛/预算/落盘在 `infra/frontend_log.md`）
 - `pub mod contest_cmd` — 比赛列表 / 选中 / 加载配置比赛 / 榜单 / 公告与已读状态
 - `pub mod oj_cmd` — 切换当前 OJ（补注册 → 校验已注册 → 切 Registry → 显式清三个 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）
 - `pub mod problem_cmd` — 题目详情 / 用户题目状态 / 题目限制
@@ -22,7 +23,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 无外部依赖，仅声明子模块。
 
 ## 被依赖
-- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 45 个 Command：plugin 5 / auth 4 / oj 1 / contest 7 / problem 3 / submission 5 / workspace 7 / config 4 / maintenance 3 / data_dir 4 / theme 2）
+- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 46 个 Command：plugin 5 / auth 4 / oj 1 / contest 7 / problem 3 / submission 5 / workspace 7 / config 4 / **log 1** / maintenance 3 / data_dir 4 / theme 2）
 
 ## 逻辑流程
 无（仅模块声明）。
