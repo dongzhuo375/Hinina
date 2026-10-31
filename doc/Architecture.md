@@ -290,6 +290,7 @@ Hinina/
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
             ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
             ├── config_cmd.rs             # get_config / reload_config / update_config（落盘后**显式**同步 auto-save 启停与间隔）/ get_storage_info（存储目录/日志路径/版本，设置页「关于」）
+            ├── log_cmd.rs                # frontend_log（前端全局错误 → tracing 落 logs/hinina.log：级别/scope 白名单 + 消息截断与控制字符收敛，安全口径沿 plugin_diagnostics；panic 钩子的前端半边）
             ├── maintenance_cmd.rs          # reset_client（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，不重拉）/ local_data_usage（清理前体积预览，含临时目录崩溃记录）/ purge_local_data（不可逆：日志内容与崩溃记录文件 + 过期提交留档）
             ├── data_dir_cmd.rs           # get_data_dir / set_data_dir / reset_data_dir / pick_data_dir（设置页「数据目录」；改动重启后生效，只写位置指针不搬运）
             ├── theme_cmd.rs              # get_theme / set_theme
@@ -378,7 +379,8 @@ src/
 │       ├── LoadingSpinner.vue            # 通用加载动画（role=status）
 │       └── ErrorMessage.vue              # 通用错误提示（role=alert）+ 重试按钮
 ├── guards/
-│   └── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配；需 router + authStore，属跨层装配故不落在 stores/ 或 services/
+│   ├── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配；需 router + authStore，属跨层装配故不落在 stores/ 或 services/
+│   └── globalErrorGuard.ts               # 全局错误转发守卫（Vue errorHandler / window error / unhandledrejection / router.onError 四类 → frontend_log 命令 → Rust tracing；限频去重、守卫自身绝不抛错、必须先于 mount 装配）—— panic 钩子的前端半边：JS 世界的崩溃从此有持久落点
 ├── stores/
 │   ├── pluginStore.ts                    # 插件状态、短时通知与控制
 │   ├── authStore.ts                      # 用户认证状态（登录/登出/会话恢复/三态校验 + sessionResolved 守卫标记）
@@ -517,7 +519,7 @@ src/
 - **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。唯一的插件是 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为它的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**新增插件时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **依赖卫生：直接依赖必须被真正引用；不审批依赖的安装脚本**。`package.json` 的 `dependencies` 只放代码里实际 import 的包（曾出现 `approve` / `esbuild` / `vue-demi` 三个零引用的直接依赖 —— 其中 `esbuild` 还与 vite 嵌套的版本重复安装）。另外**刻意不写 `allowScripts`**：它是 npm 11.18 起的脚本审批字段，写上等于允许依赖的 postinstall 在每次安装时执行（供应链面）。实测不审批无影响：`vue-demi` 发布的默认就是 Vue 3 版（`isVue3 = true`，postinstall 只在检测到 Vue 2 时才切换），`esbuild` 的 postinstall 只是 optional platform 包的兜底。代价是 `npm install` 会提示「N packages have install scripts not yet covered by allowScripts」—— **这是预期的**，不要为消除提示而审批
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
-- **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（当前仅 `sessionGuard`）—— 它需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）
+- **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（`sessionGuard` 会话失效兜底 + `globalErrorGuard` 全局错误转发）—— 前者需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）
 - **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
 - **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页）；**首次进入工作台（含深链）还要过赛程阶段闸门** —— 按 `getAuthoritativeSchedule`（认证比赛与匿名简报 ID 不同即视为换场，以简报为准）判阶段，非 `running` 一律退回登录页等待（已在 Contest 子树内时跳过闸门，避免结束瞬间的页面切换打断退出流程）；登录页依据同一阶段判据决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入，**已结束不进场**（`canEnter = isLoggedIn && phase === 'running'`）；登出时经 `stores/session.ts` 清空会话级领域状态
 - **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Adapter → `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验，且反复重登可能触发 HOJ 暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。全局兜底由 `guards/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）

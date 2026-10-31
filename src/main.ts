@@ -4,6 +4,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import router from "@/router";
 import App from "@/App.vue";
 import { installSessionGuard } from "@/guards/sessionGuard";
+import { installGlobalErrorGuard } from "@/guards/globalErrorGuard";
+import { forwardFrontendLog } from "@/bridge/diagnostics.bridge";
 import {
   installWorkspacePersistenceListener,
   useWorkspaceStore,
@@ -11,16 +13,27 @@ import {
 import { useAnnouncementStore } from "@/stores/announcementStore";
 import { onAnnouncementsPublished } from "@/bridge/announcement.bridge";
 import { createCloseGuard } from "@/utils/close-guard";
+import { createLogger } from "@/utils/logger";
 import "@/styles/global.css";
 import "@/styles/contest.css";
 // KaTeX 样式与字体（题面/公告的 LaTeX 公式渲染）。字体由 katex 包本地打包，
 // 不经 CDN —— 符合离线客户端约束；全局引入使所有 renderMarkdown 消费方一致生效。
 import "katex/dist/katex.min.css";
 
+const log = createLogger('main')
+
 const app = createApp(App);
 
 app.use(createPinia());
 app.use(router);
+// 组合根装配：全局错误转发（Vue / window / promise / router 四类全局错误 → Rust
+// 日志）。**必须先于 mount 与其余装配**：首屏渲染、早期 IPC 的错误也要被捕获；
+// 转发失败只 console 告警 —— 报错的通道不允许自己成为新的错误源。
+installGlobalErrorGuard(app, router, (level, scope, message) => {
+  void forwardFrontendLog(level, scope, message).catch((e) => {
+    log.warn('错误转发失败:', e)
+  })
+});
 // 组合根装配：全局会话守卫（认证类 IPC 失败 → 判定会话失效 → 清理并回登录页）
 installSessionGuard(router);
 // 组合根装配：工作区落盘事件订阅（后台 auto-save 完成 → 清除「编辑中…」指示）
@@ -60,7 +73,7 @@ function installAnnouncementListener(): void {
     if (store.contestId && store.contestId !== contestId) return;
     void store.refresh();
   }).catch((e) => {
-    console.error("新公告事件订阅失败，红点将退化为轮询发现:", e);
+    log.error("新公告事件订阅失败，红点将退化为轮询发现:", e);
   });
 }
 
@@ -92,7 +105,7 @@ function installCloseFlushGuard(): void {
       if (guard.handleRequest()) event.preventDefault();
     })
     .catch((e) => {
-      console.error("关窗钩子注册失败，退出前可能不落盘:", e);
+      log.error("关窗钩子注册失败，退出前可能不落盘:", e);
     });
 }
 

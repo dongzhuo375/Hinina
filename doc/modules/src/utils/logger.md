@@ -4,7 +4,7 @@
 
 ## 职责
 
-前端日志的唯一入口：统一作用域前缀、按级别分流（`debug`/`info` 仅开发环境，`warn`/`error` 始终输出）。**不做上报与落盘** —— 客户端持久化日志由 Rust 侧 `tracing` 负责，前端 console 仅供开发与现场 DevTools 排障。
+前端日志的唯一入口：统一作用域前缀、按级别分流（`debug`/`info` 仅开发环境，`warn`/`error` 始终输出）。**自身不做上报与落盘** —— logger 只写 console；客户端持久化日志由 Rust 侧 `tracing` 负责，前端世界的错误进入该日志的唯一通道是 `guards/globalErrorGuard` → `bridge/diagnostics.bridge` 的 `frontend_log`（独立于本模块，见各文档）。
 
 ## 核心类型/函数
 
@@ -21,6 +21,8 @@
 ## 被依赖
 
 - `bridge/index.ts`（`ipc` —— IPC 失败单点日志）
+- `main.ts`（`main` —— 装配失败与错误转发失败的告警）
+- `guards/globalErrorGuard.md` 的消费方关系：错误转发不经 logger（独立通道 `bridge/diagnostics.bridge`），logger 只承担转发失败的本地告警
 - `services/auth.service.ts`、`services/config.service.ts`
 - `stores/authStore.ts` / `announcementStore.ts` / `problemStore.ts` / `submissionStore.ts` / `workspaceStore.ts`
 - `guards/sessionGuard.ts`
@@ -42,9 +44,11 @@ log.error(...)  → 恒 console.error('[workspaceStore]', ...)
 设计要点：
 
 - **warn/error 不按环境关闭**：现场排障时用户不会开 DevTools，Rust 侧 tracing 只覆盖后端；
-  前端能留下线索的只有这两级。
+  前端能留下线索的只有这两级。**全局错误的持久化**由 `guards/globalErrorGuard` 经
+  `frontend_log` 命令补上（见 `guards/globalErrorGuard.md`）—— 本模块保持 console-only，
+  转发通道独立于 logger 存在，避免「写日志的路径自己成为上报链路」的递归风险。
 - **不做日志上报**：客户端无日志服务端（项目边界明确不依赖服务器），加队列/上报只会引入
-  新的失败面。
+  新的失败面；通往本地文件的持久化通道收敛为 `frontend_log` 一条（受 Rust 端白名单与限长约束）。
 - **安全约束与 `bridge/ipcInvoke` 一致**：日志只记录命令名、错误消息与业务标识，
   **绝不记录敏感参数**（登录密码等）。
 - 作用域前缀由 logger 统一添加，调用点不再手写 `[模块名]`，避免同一模块出现两种前缀写法。

@@ -91,6 +91,7 @@
    - `submission_cmd`：submit_code / get_judgement / **list_contest_submissions** / **get_submission_detail** / **get_submission_cases**
    - `workspace_cmd`：load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / **set_workspace_language** / **delete_workspace_file**
    - `config_cmd`：get_config / reload_config / update_config / **get_storage_info**
+   - `log_cmd`：**frontend_log**（前端全局错误 → tracing 落 `logs/hinina.log`；级别/scope 白名单 + 消息收敛，见 `commands/log_cmd.md`）
    - `maintenance_cmd`：**reset_client**（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，清完不重拉）/ **local_data_usage**（清理前的体积预览）/ **purge_local_data**（不可逆：清日志内容与崩溃记录文件、过期提交留档）
    - `data_dir_cmd`：**get_data_dir** / **set_data_dir** / **reset_data_dir** / **pick_data_dir**（设置页「数据目录」：改动重启后生效，见 `commands/data_dir_cmd.md`）
    - `theme_cmd`：get_theme / set_theme
