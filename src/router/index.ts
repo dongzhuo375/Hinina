@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
+import { systemService } from '@/services/system.service'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 
 /// 路由元信息类型声明，避免 `to.meta.*` 退化为 any
@@ -12,7 +13,7 @@ declare module 'vue-router' {
   }
 }
 
-const routes: RouteRecordRaw[] = [
+export const routes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'Login',
@@ -65,11 +66,14 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '公告 - Hinina' },
       },
       {
-        // 设置属于工作台的一部分：放在外壳内，切换时不丢失顶栏/活动栏/状态条
+        // 设置属于工作台的一部分：放在外壳内，切换时不丢失顶栏/活动栏/状态条。
+        // requiresAuth: false 是「管理方钥匙」的另一半：守卫按合并后的 meta 取
+        // **最深路由**的值，子级 false 豁免父级 true —— 无会话时只有 --settings
+        // 的初始导航会落在这里（守卫直落）；隐藏入口只对已登录会话可见。
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/SettingsView.vue'),
-        meta: { title: '设置 - Hinina' },
+        meta: { title: '设置 - Hinina', requiresAuth: false },
       },
     ],
   },
@@ -92,13 +96,29 @@ const router = createRouter({
  *    也让登录页首帧就渲染出正确的会话状态，避免"先显示登录表单再跳转"的闪烁。
  * 2. `meta.requiresAuth` 路由必须持有有效会话，否则重定向登录页 ——
  *    保证登出后（即使组件自身跳转失败）也不会滞留在比赛页面。
- *    注意：子路由不会继承父路由的 meta，需检查整条匹配链（`to.matched`）。
+ *    判据是**合并后的 `to.meta`**：vue-router 沿匹配链把父级 meta 合并进子级
+ *    （子路由同键覆盖父路由），因此 `requiresAuth: true` 写在外壳父级即可保护
+ *    全部子级，而设置子级的 `requiresAuth: false` 能豁免父级 —— 判据取最深层
+ *    的值（`=== true`，未声明即不受保护）。合并矩阵由 `__tests__/index.spec.ts`
+ *    用真实 routes 锁定。
+ * 3. `--settings`（管理方钥匙）：**首次导航**落在登录页时直落设置页。无会话时
+ *    没有任何 UI 路径可达设置页（隐藏入口在比赛外壳内），钥匙必须在初始导航
+ *    就生效；仅对首次导航生效，「返回登录」不受影响。标志读取失败按「无参数」
+ *    退化（service 层兜底）。
  */
+let firstNavigation = true
+
 router.beforeEach(async (to) => {
+  const flags = await systemService.getLaunchFlags()
+  if (firstNavigation) {
+    firstNavigation = false
+    if (flags.settings && to.name === 'Login') return { name: 'Settings' }
+  }
+
   const auth = useAuthStore()
   if (!auth.sessionResolved) await auth.checkSession()
 
-  const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
+  const requiresAuth = to.meta.requiresAuth === true
   if (!requiresAuth) return true
   if (!auth.isLoggedIn) return { name: 'Login', replace: true }
 

@@ -214,6 +214,10 @@ fn main() {
         hinina_lib::infra::console::attach();
     }
 
+    // --settings：管理方钥匙（初始直落设置页 + 维护者层解锁）。解析结果由
+    // launch_flags 命令交给前端；解析语义沿 --console（精确匹配，未知参数忽略）。
+    hinina_lib::infra::launch_args::init(&argv);
+
     // 运行时在 setup 之前建好：AppContext::init 是 async，而 setup 是同步回调。
     // 在 setup 里 block_on 是安全的 —— 那时事件循环还没跑起来，不存在阻塞它的风险。
     // 注意：事件消费者**不**跑在这个运行时上（它在 setup 结束时随 `rt` 一起销毁），
@@ -277,6 +281,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app_cmd::launch_flags,
             commands::plugin_cmd::plugin_list,
             commands::plugin_cmd::plugin_start,
             commands::plugin_cmd::plugin_stop,

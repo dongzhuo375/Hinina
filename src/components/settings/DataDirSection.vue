@@ -2,7 +2,11 @@
 import SettingsSectionFrame from './SettingsSectionFrame.vue'
 import { useDataDirSettings } from '@/composables/useDataDirSettings'
 
-const props = defineProps<{ model: ReturnType<typeof useDataDirSettings> }>()
+const props = defineProps<{
+  model: ReturnType<typeof useDataDirSettings>
+  /** 维护者层锁定（--settings 启动解锁）：整节操作禁用 + 提示 */
+  locked?: boolean
+}>()
 const {
   dataDir, dataDirFailed, pendingDir, migrateData, changingDir, changeNotice, changeError,
   dataDirSourceMeta, loadDataDir, cancelDataDirChoice, chooseDataDir, confirmDataDir, restoreDefaultDataDir,
@@ -27,6 +31,9 @@ const {
                   />
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">数据目录</h2>
+                <span v-if="props.locked" class="ml-auto text-xs text-[var(--text-muted)]">
+                  维护者选项：管理方以 --settings 启动后可修改
+                </span>
               </div>
 
               <div class="flex flex-col gap-3 px-5 py-4">
@@ -94,6 +101,7 @@ const {
                         v-model="migrateData"
                         type="checkbox"
                         class="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--color-primary)]"
+                        :disabled="props.locked"
                       />
                       <span>
                         把现有数据迁移到新目录（工作区代码、提交留档、配置、会话）
@@ -119,15 +127,15 @@ const {
                         <button
                           type="button"
                           class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
-                          :disabled="changingDir"
+                          :disabled="changingDir || props.locked"
                           @click="cancelDataDirChoice"
                         >
                           取消
                         </button>
                         <button
                           type="button"
-                          class="rounded-sm bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-60"
-                          :disabled="changingDir"
+                          class="rounded-sm bg-[var(--color-primary)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                          :disabled="changingDir || props.locked"
                           @click="confirmDataDir"
                         >
                           {{ changingDir ? '记录中…' : '确认更改' }}
@@ -137,16 +145,16 @@ const {
                         <button
                           v-if="dataDir.source === 'custom'"
                           type="button"
-                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)] disabled:opacity-60"
-                          :disabled="changingDir"
+                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-60"
+                          :disabled="changingDir || props.locked"
                           @click="restoreDefaultDataDir"
                         >
                           恢复默认
                         </button>
                         <button
                           type="button"
-                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-sidebar)] disabled:opacity-60"
-                          :disabled="changingDir"
+                          class="rounded-sm border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-sidebar)] disabled:cursor-not-allowed disabled:opacity-60"
+                          :disabled="changingDir || props.locked"
                           @click="chooseDataDir"
                         >
                           更改目录…

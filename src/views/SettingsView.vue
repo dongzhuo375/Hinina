@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PageHeading from '@/components/common/PageHeading.vue'
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { useSettingsForm } from '@/composables/useSettingsForm'
@@ -8,6 +8,7 @@ import { useAboutSettings } from '@/composables/useAboutSettings'
 import { useMaintenanceSettings } from '@/composables/useMaintenanceSettings'
 import { useDataDirSettings } from '@/composables/useDataDirSettings'
 import { useSettingsScrollSpy } from '@/composables/useSettingsScrollSpy'
+import { systemService } from '@/services/system.service'
 import type { SettingsFormPatch } from '@/composables/useSettingsForm'
 import OjServerSection from '@/components/settings/OjServerSection.vue'
 import EditorSection from '@/components/settings/EditorSection.vue'
@@ -23,6 +24,11 @@ import AboutSection from '@/components/settings/AboutSection.vue'
  * 数据流：onMounted 先 `invalidate()` 再 `getConfig()`，保证页面展示的恒为磁盘真值
  * （其它页面可能已热改过配置，进程内缓存不可信）；编辑在本地草稿上进行，
  * 保存时经 `configService.updateConfig`（读-改-写整体替换）落盘并失效缓存。
+ *
+ * 分层锁：连接与缓存调优字段（OJ/地址/超时/轮询/TTL/数据目录）默认锁定，
+ * 唯一提权来源是 `--settings` 启动参数（管理方钥匙）；选手日常字段（比赛
+ * ID/引用、密码、编辑器、布局、重置与清理、关于）不受影响。护栏而非安全
+ * 边界 —— config.json 明文可手改，无后端强制。
  */
 
 // ── 表单草稿 ──
@@ -50,6 +56,10 @@ const {
   inputClass,
 } = useSettingsForm()
 
+/// 维护者层锁定（默认锁，`--settings` 解锁）。守卫在首次导航时已预热
+/// getLaunchFlags 的 memoized Promise，此处 await 即时完成，无可见闪烁。
+const locked = ref(true)
+
 function updateForm(patch: SettingsFormPatch): void {
   Object.assign(form, patch)
 }
@@ -69,6 +79,9 @@ const {
 } = useSettingsScrollSpy(loading)
 
 onMounted(() => {
+  void systemService.getLaunchFlags().then((flags) => {
+    locked.value = !flags.settings
+  })
   void load()
   void about.loadStorage()
   void maintenance.loadUsage()
@@ -106,6 +119,7 @@ onMounted(() => {
               :switch-error="switchError"
               :switch-notice="switchNotice"
               :input-class="inputClass"
+              :locked="locked"
               @update:form="updateForm"
               @switch-oj="onSwitchOj"
             />
@@ -128,7 +142,7 @@ onMounted(() => {
             <ResetPurgeSection :model="maintenance" />
 
             <!-- ── 数据目录 ── -->
-            <DataDirSection :model="dataDirSettings" />
+            <DataDirSection :model="dataDirSettings" :locked="locked" />
 
             <!-- ── 关于 ── -->
             <AboutSection :model="about" />

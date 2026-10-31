@@ -4,6 +4,7 @@ import { createApp, nextTick } from 'vue'
 import type { App } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useContestStore } from '@/stores/contestStore'
+import { useAuthStore } from '@/stores/authStore'
 import type { Contest } from '@/types/contest'
 import ContestLayout from '@/views/ContestLayout.vue'
 
@@ -118,5 +119,35 @@ describe('contest exit lifecycle', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     expect(mocks.replace).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('--settings 无会话最小壳', () => {
+  it('无已解析会话时渲染最小壳：不出顶栏/状态条，不发起认证拉取，返回登录可用', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    // 会话已判定但不存在（user=null）：--settings 直落设置页时的外壳形态
+    useAuthStore().sessionResolved = true
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).toContain('Hinina 设置')
+    // 裸壳自带拖动区标题栏（decorations=false 下窗口移动全靠它）
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeTruthy()
+    expect(host.querySelector('header')).toBeTruthy()
+    // bootstrap 必须跳过：无会话时认证拉取只会失败
+    expect(mocks.loadConfiguredContest).not.toHaveBeenCalled()
+    expect(mocks.startLive).not.toHaveBeenCalled()
+
+    const back = [...host.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('返回登录'),
+    )
+    expect(back).toBeTruthy()
+    back!.click()
+    await nextTick()
+    expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
   })
 })

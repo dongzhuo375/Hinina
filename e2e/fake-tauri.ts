@@ -411,6 +411,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return null
       case 'reload_config':
         return null
+      case 'launch_flags':
+        // e2e 走正常门禁路径（无 --settings）：连接与缓存字段保持锁定
+        return { settings: false }
       case 'get_storage_info':
         return {
           baseDir: 'D:\\e2e\\hinina',

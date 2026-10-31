@@ -14,7 +14,7 @@ const connected = computed(() => contestStore.contest !== null && !contestStore.
 /// 版本号构建期注入（vite define ← package.json），写死会与发布版本漂移
 const version = __APP_VERSION__
 
-/// 解锁瞬间的提示：连点 5 下本身没有任何视觉反馈，若设置项不在当前视野内，
+/// 显现瞬间的提示：连点 5 下本身没有任何视觉反馈，若设置入口不在当前视野内，
 /// 用户无法判断「到底生效没有」。给一次 3 秒提示，之后不再打扰。
 const unlockedHint = ref(false)
 let hintTimer: ReturnType<typeof setTimeout> | null = null
@@ -22,7 +22,7 @@ let hintTimer: ReturnType<typeof setTimeout> | null = null
 function onVersionClick() {
   if (!tapVersion()) return
 
-  log.info('设置入口已解锁（连点版本号）')
+  log.info('设置入口已显示（连点版本号）')
   unlockedHint.value = true
   if (hintTimer) clearTimeout(hintTimer)
   hintTimer = setTimeout(() => {
@@ -55,12 +55,13 @@ onUnmounted(() => {
 
     <div class="flex items-center gap-2">
       <span v-if="unlockedHint" class="font-mono text-xs text-[var(--color-primary)]">
-        设置已解锁
+        已显示设置入口
       </span>
       <!--
-        版本号即隐藏入口：连点 5 下解锁左侧活动栏的设置项（见 utils/settings-access）。
+        版本号即隐藏入口：连点 5 下显现左侧活动栏的设置项（见 utils/settings-access）。
         刻意**不给任何可点击的视觉暗示**（无 title、光标保持默认、hover 无变化）——
-        它要防的是误触，不是引导用户去点。
+        它要防的是误触，不是引导用户去点。入口打开的是选手层偏好；连接类字段
+        由分层锁保护，只有 --settings 启动的管理方能改。
       -->
       <button
         type="button"

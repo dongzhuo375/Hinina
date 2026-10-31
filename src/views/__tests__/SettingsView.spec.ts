@@ -38,6 +38,8 @@ vi.mock('@/services/system.service', () => ({
     purgeLocalData: mocks.purgeLocalData,
     getStorageInfo: mocks.getStorageInfo,
     getDataDir: mocks.getDataDir,
+    // 正常模式（无 --settings）：维护者层保持锁定
+    getLaunchFlags: vi.fn(async () => ({ settings: false })),
   },
 }))
 vi.mock('@/services/config.service', () => ({

@@ -1,6 +1,7 @@
 import type {
   DataDirChange,
   DataDirInfo,
+  LaunchFlags,
   LocalDataUsage,
   PurgeReport,
   StorageInfo,
@@ -9,16 +10,34 @@ import * as systemBridge from '@/bridge/system.bridge'
 
 /**
  * 系统服务 — 客户端自身运行信息与维护操作
- * （存储目录 / 日志路径 / 版本号 / 重置客户端 / 清理本地数据）。
+ * （存储目录 / 日志路径 / 版本号 / 重置客户端 / 清理本地数据 / 启动标志）。
  *
  * 分层约定：View / Store 不得直接调用 `system.bridge`，统一经本服务消费；
  * 不做缓存 —— 版本号构建期固定，但存储目录可能随用户数据迁移变化，设置页
- * 每次挂载都取实时值。
+ * 每次挂载都取实时值。**唯一例外是 `getLaunchFlags`**：启动标志在一次进程
+ * 生命周期内不可变，且守卫与设置页两处消费必须读到同一份，故在进程内
+ * memoize（含失败退化，见方法注释）。
  */
+
+/// `getLaunchFlags` 的进程内单飞 Promise（含失败退化结果）
+let launchFlagsOnce: Promise<LaunchFlags> | null = null
+
 export class SystemService {
   /** 获取客户端存储信息（设置页「关于」区块使用；失败由调用方降级展示） */
   async getStorageInfo(): Promise<StorageInfo> {
     return systemBridge.getStorageInfo()
+  }
+
+  /**
+   * 读取本次启动的启动标志（守卫做初始导航/门禁豁免、设置页做分层锁）。
+   *
+   * **进程内 memoize**：标志不可变，两处消费必须同源。读取失败（旧二进制、
+   * 桥异常）按「无参数」退化 —— 正常门禁 + 选手层，这是安全侧默认值，
+   * 绝不让钥匙通道故障把启动或设置页卡死。
+   */
+  getLaunchFlags(): Promise<LaunchFlags> {
+    launchFlagsOnce ??= systemBridge.getLaunchFlags().catch(() => ({ settings: false }))
+    return launchFlagsOnce
   }
 
   /**

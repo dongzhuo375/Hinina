@@ -4,6 +4,7 @@
 // 使用标准 `tauri::generate_handler!` + `invoke_handler()` 注册方式，
 // 避免在 `.setup()` 中手动注册引入的兼容性问题。
 
+pub mod app_cmd;
 pub mod auth_cmd;
 pub mod config_cmd;
 pub mod contest_cmd;

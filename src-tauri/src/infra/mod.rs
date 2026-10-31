@@ -8,6 +8,7 @@ pub mod fs_plugin_repo;
 pub mod fs_session_repo;
 pub mod fs_workspace_repo;
 pub mod http;
+pub mod launch_args;
 pub mod logger;
 pub mod panic_report;
 pub mod plugin_api_factory;
