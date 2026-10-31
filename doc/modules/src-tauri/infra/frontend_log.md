@@ -20,7 +20,7 @@
 
 - `super::text::truncate_ellipsis`（共享的按字符截断 + `…`，见 `infra/text.md`）
 - `tracing`（`target: "frontend"` 落现有 logger：stderr + `logs/hinina.log`，受 `RUST_LOG` 过滤 —— 尽力而为通道，日志关闭时前端错误不留痕）
-- `std::sync::atomic`（预算两个静态量；CAS 循环扣减）
+- `std::sync::atomic`（预算三个静态量：窗口起点 / 已用字节 / 窗口内是否已告警；CAS 循环扣减）
 
 ## 被依赖
 
@@ -43,4 +43,4 @@ tracing::{error,warn,info,debug}!(target: "frontend", scope, "{message}")
 
 ## 测试
 
-`src/infra/tests/frontend_log_tests.rs`：级别白名单真值表（未知/大小写/空 → warn）；scope 白名单（合法、非法字符、超长、恰好 64、空）；消息按字符截断（2000/2001 边界 + `…`，中文不炸字节边界）；控制字符剥离（`\r`/`\x01` 替换为空格，`\n`/`\t` 保留）；**滚动窗口预算**（`consume_budget` 直接断言 `BudgetDecision` 与内部记账快照 `budget_snapshot_for_tests`：新窗口记账、满窗口丢弃且首次丢弃 `first=true`/后续 `false`、过期窗口滚动清账恢复放行、59/60 秒过期边界）—— 预算静态量是进程级单例，全部预算断言收进**一个用例**（`budget_window_lifecycle`）串行执行并以 `set_budget_for_tests(seconds_ago, used, dropped)` 重置——预算静态量是进程级单例，而 Rust 测试在同一二进制内并行执行，两个用例各自 set→consume→snapshot 会互相踩状态（实测约 4.7% 失败率的竞态，评审抓出）。
+`src/infra/tests/frontend_log_tests.rs`：级别白名单真值表（未知/大小写/空 → warn）；scope 白名单（合法、非法字符、超长、恰好 64、空）；消息按字符截断（2000/2001 边界 + `…`，中文不炸字节边界）；控制字符剥离（`\r`/`\x01` 替换为空格，`\n`/`\t` 保留）；**滚动窗口预算**（`consume_budget` 直接断言 `BudgetDecision` 与内部记账快照 `budget_snapshot_for_tests`：新窗口记账、满窗口丢弃且首次丢弃 `first=true`/后续 `false`、过期窗口滚动清账恢复放行、59/60 秒过期边界）—— 预算静态量是进程级单例，全部预算断言收进**一个用例**（`budget_window_lifecycle`）串行执行并以 `set_budget_for_tests(seconds_ago, used, dropped)` 重置：Rust 测试在同一二进制内并行执行，两个用例各自 set→consume→snapshot 会互相踩状态（实测约 4.7% 失败率的竞态，评审抓出）。

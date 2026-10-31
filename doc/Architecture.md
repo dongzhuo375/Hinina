@@ -420,7 +420,8 @@ src/
 │   ├── system.bridge.ts                  # get_storage_info
 │   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile / setWorkspaceLanguage + onWorkspaceSaved（workspace-saved 事件订阅）
 │   ├── config.bridge.ts                  # get_config / update_config / reload_config
-│   └── __tests__/                        # index.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数）
+│   ├── diagnostics.bridge.ts             # frontend_log（前端全局错误三标量转发到 Rust tracing；唯一持久化日志通道）
+│   └── __tests__/                        # index.spec.ts / diagnostics.bridge.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数、frontend_log 命令名与三标量透传）
 ├── types/
 │   ├── plugin.ts                         # 插件状态、错误与通知DTO
 │   ├── user.ts                           # User 实体 + SessionValidity（valid/invalid/unknown 三态）
