@@ -42,7 +42,7 @@ function onSwitchOj(): void {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">OJ 服务器</h2>
                 <span v-if="props.locked" class="ml-auto text-xs text-[var(--text-muted)]">
-                  连接与缓存字段已锁定：管理方以 --settings 启动后可修改
+                  连接与缓存字段已锁定：完全退出应用后以 --settings 重新启动可修改
                 </span>
               </div>
               <div class="grid grid-cols-1 gap-x-4 gap-y-4 px-5 py-4 sm:grid-cols-2">

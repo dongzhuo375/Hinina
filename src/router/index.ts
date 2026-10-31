@@ -109,10 +109,17 @@ const router = createRouter({
 let firstNavigation = true
 
 router.beforeEach(async (to) => {
-  const flags = await systemService.getLaunchFlags()
+  // 钥匙通道故障不得炸掉导航：service 已 memoize + 失败退化，这里是导航路径上
+  // 的第二道防线（守卫抛错 = 整个路由系统卡死在当前页）
+  let settingsMode = false
+  try {
+    settingsMode = (await systemService.getLaunchFlags()).settings
+  } catch {
+    settingsMode = false
+  }
   if (firstNavigation) {
     firstNavigation = false
-    if (flags.settings && to.name === 'Login') return { name: 'Settings' }
+    if (settingsMode && to.name === 'Login') return { name: 'Settings' }
   }
 
   const auth = useAuthStore()

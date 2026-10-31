@@ -78,6 +78,10 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
   外壳以 `sessionless` 识别该形态并退化为最小壳，**不发起任何认证/OJ 请求**。
 - **最小壳必须自带拖动区**：App 的全局标题栏在 matched 含 Contest 时不渲染，
   窗口 `decorations: false`，无拖动区则窗口无法移动。
+- **最小壳刻意不含最小化/关闭按钮（评审 M1 的裁定）**：窗口控制在 TopBar，最小壳
+  不渲染 TopBar，设置页上只剩 Alt+F4 / 任务栏；点「返回登录」到登录页后 App 兜底
+  标题栏（含完整窗口控制）即恢复。维护场景临时且退出路径存在，不为一次性形态
+  抽共享 WindowControls 组件——若未来最小壳使用频率上升再议。
 - **跨场缓存刷新（PR #35 收尾）**：登录页的匿名简报可能已经切到下一场比赛，
   而 `contestStore.contest` 仍是上一场的缓存；此时 `whenLoaded()` 因 contest 非空直接返回，
   必须比对 `contest.id` 与 `brief.id` 并主动 `loadContest()` —— 否则题目、榜单、提交、

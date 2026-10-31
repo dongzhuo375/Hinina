@@ -32,7 +32,7 @@ const {
                 </svg>
                 <h2 class="text-sm font-semibold text-[var(--text-primary)]">数据目录</h2>
                 <span v-if="props.locked" class="ml-auto text-xs text-[var(--text-muted)]">
-                  维护者选项：管理方以 --settings 启动后可修改
+                  维护者选项：完全退出应用后以 --settings 重新启动可修改
                 </span>
               </div>
 

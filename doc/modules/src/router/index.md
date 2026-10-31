@@ -32,7 +32,8 @@
 
 ```
 beforeEach(to):
-  0. flags = await systemService.getLaunchFlags()（进程内 memoize，只真正发一次 IPC）
+  0. flags = await systemService.getLaunchFlags()（进程内 memoize，只真正发一次 IPC；
+     try/catch 包死 —— service 已兜底，这里是导航路径上的第二道防线，守卫抛错=路由卡死）
      首次导航（模块级 firstNavigation 标记）且 flags.settings 且 to 为登录页
        → { name: 'Settings' }   // 管理方钥匙：初始直落设置页；仅首次，「返回登录」不受影响
   1. !auth.sessionResolved → await auth.checkSession()
