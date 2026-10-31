@@ -13,9 +13,12 @@ function mergedMeta(name: string): Record<string, unknown> {
   return router.resolve({ name })['meta']
 }
 
-describe('requiresAuth 合并矩阵（--settings 豁免的基础）', () => {
-  it('设置子路由豁免外壳父级的保护（子级 false 覆盖父级 true）', () => {
-    expect(mergedMeta('Settings')['requiresAuth']).toBe(false)
+describe('requiresAuth 合并矩阵（设置页条件豁免的基础）', () => {
+  it('设置子路由继承外壳父级的保护（meta 不做无条件豁免）', () => {
+    // 免登录进设置页是守卫里的**条件豁免**（settingsMode && to.name === 'Settings'），
+    // 不是 meta 声明 —— 无条件豁免会让无钥匙访客直达设置页、且 401 时 sessionGuard
+    // 因 meta 为 false 不再回登录页（评审 P2）
+    expect(mergedMeta('Settings')['requiresAuth']).toBe(true)
   })
 
   it('工作台其余子路由继承外壳父级的保护', () => {

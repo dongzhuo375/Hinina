@@ -75,8 +75,9 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
 设计要点：
 
 - **会话有效性不在本组件校验**：由路由守卫（`meta.requiresAuth` + 赛程闸门）统一保证，
-  外壳只负责数据、布局与赛程退出。唯一例外是最小壳：守卫对设置路由豁免鉴权，
-  外壳以 `sessionless` 识别该形态并退化为最小壳，**不发起任何认证/OJ 请求**。
+  外壳只负责数据、布局与赛程退出。唯一例外是最小壳：守卫对「钥匙启动 + 设置路由」
+  条件豁免鉴权，外壳以 `bareShell` 识别该形态并退化为最小壳，**不发起任何认证/OJ
+  请求**。
 - **最小壳必须自带拖动区**：App 的全局标题栏在 matched 含 Contest 时不渲染，
   窗口 `decorations: false`，无拖动区则窗口无法移动。
 - **最小壳刻意不含最小化/关闭按钮（评审 M1 的裁定）**：窗口控制在 TopBar，最小壳
@@ -108,7 +109,9 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
   周期；公告页自身只声明 `isWatching`（「用户正在看」），标记已读由 `store.load` 在
   该标记为真且页面可见时统一完成（详见 `stores/announcementStore.md`）。
 - 设置页也放在外壳内（子路由），切换时不丢失顶栏/状态条。
-- 分层约束：View 只 import store 与组件，不触 `@/bridge` / `@/services`（本组件仅 store）。
+- 分层约束：View 只 import store 与组件，不触 `@/bridge`；`system.service` 的
+  `launchFlags` 快照是唯一的 View → Service 直连（属「路由级瞬态数据」许可，
+  最小壳判据需要同步值）。
 
 ## 测试
 

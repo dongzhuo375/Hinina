@@ -69,4 +69,13 @@ describe('contest route access', () => {
     expect((await openAt(1_500)).currentRoute.value.name).toBe('Login')
     expect(load).toHaveBeenCalledOnce()
   })
+  it('allows a mid-contest deep link to the settings page (hidden entry path)', async () => {
+    // 设置页 meta 继承父级保护（无钥匙时条件豁免不生效），但已登录 + 比赛进行中
+    // 的正常路径必须照常可达 —— 连点版本号后的隐藏入口走的就是这条
+    vi.spyOn(Date, 'now').mockReturnValue(1_500 * 1_000)
+    const { default: router } = await import('@/router')
+    await router.push({ name: 'Login' })
+    await router.push({ name: 'Settings' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+  })
 })

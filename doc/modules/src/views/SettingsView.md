@@ -21,19 +21,19 @@
 | `useMaintenanceSettings` | 重置、清理、占用预览与提示 timer；模型以 `maintenance` 传给 ResetPurgeSection |
 | `useDataDirSettings` | 数据目录候选、迁移与通知；模型以 `dataDirSettings` 传给 DataDirSection |
 | `useSettingsScrollSpy(loading)` | `activeSection/scrollerRef/updateActiveSection/scrollToSection/SECTION_LABELS`，驱动导航与滚动高亮 |
-| `onMounted` | 先按启动标志翻转 `locked`，再按原顺序 `void load()` → `about.loadStorage()` → `maintenance.loadUsage()` → `dataDirSettings.loadDataDir()`，不把首次加载推迟到配置成功后的子组件 mounted |
+| `onMounted` | 按原顺序 `void load()` → `about.loadStorage()` → `maintenance.loadUsage()` → `dataDirSettings.loadDataDir()`，不把首次加载推迟到配置成功后的子组件 mounted（`locked` 已是同步 computed，无需挂载期翻转） |
 
 七个 section 的顺序固定为：`settings-0` OJ 服务器、`settings-1` 编辑器、`settings-2` 布局、`settings-3` 主题、`settings-4` 重置与清理、`settings-5` 数据目录、`settings-6` 关于。每个真实 section 由 `SettingsSectionFrame` 输出，保留 `tabindex=-1` 和 scroll-margin 契约。
 
 ## 直接依赖
 
-- `vue`（`onMounted` / `ref`）
+- `vue`（`onMounted` / `computed`）
 - 通用组件：`PageHeading` / `ErrorMessage` / `LoadingSpinner`
 - `components/settings/`：OjServerSection、EditorSection、LayoutSection、ThemeSection、ResetPurgeSection、DataDirSection、AboutSection
 - `composables/useSettingsForm`（控制器与 `SettingsFormPatch` 类型）
 - `composables/useAboutSettings` / `useMaintenanceSettings` / `useDataDirSettings`
 - `composables/useSettingsScrollSpy`
-- `services/system.service`（`getLaunchFlags` —— 分层锁的提权判据）
+- `services/system.service`（`launchFlags` 同步快照 —— 分层锁的提权判据）
 
 config/system service、相关 store 和 types 由对应 controllers 持有；View 不直接 import bridge。
 

@@ -71,4 +71,24 @@ describe('--settings 初始直落（守卫行为）', () => {
     await router.push({ name: 'Login' })
     expect(router.currentRoute.value.name).toBe('Login')
   })
+
+  it('无钥匙 + 无会话直达设置页：回登录页（meta 继承保护，豁免仅钥匙模式）', async () => {
+    // 评审 P2 路径一：无条件豁免会让无钥匙访客直达设置页
+    launchFlags.mock.mockResolvedValue({ settings: false })
+    const { default: router } = await import('@/router')
+    await router.push({ name: 'Settings' })
+    expect(router.currentRoute.value.name).toBe('Login')
+  })
+
+  it('钥匙模式 + 无会话非首航直达设置页：放行（豁免不限首次）', async () => {
+    // 首航去别处后，--settings 进程里设置页仍可无会话直达（返回登录后想再修
+    // 一次地址的场景）
+    launchFlags.mock.mockResolvedValue({ settings: true })
+    const { default: router } = await import('@/router')
+    await router.push({ name: 'Login' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+    await router.push({ name: 'Login' })
+    await router.push({ name: 'Settings' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+  })
 })
