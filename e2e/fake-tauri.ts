@@ -34,6 +34,8 @@ export interface FakeOptions {
   failLogin?: { variant: string; message: string }
   /** 每次提交的评测状态序列：依次返回、停在最后一个；缺省 Pending→Running→Accepted */
   judgementSequence?: JudgementStatus[]
+  /** launch_flags 返回的启动标志；缺省 false（正常门禁 + 选手层），--settings 旅程传 true */
+  launchFlags?: { settings: boolean }
 }
 
 /** 页面内 fake 控制面（经 window.__e2e 暴露） */
@@ -412,8 +414,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       case 'reload_config':
         return null
       case 'launch_flags':
-        // e2e 走正常门禁路径（无 --settings）：连接与缓存字段保持锁定
-        return { settings: false }
+        // 缺省走正常门禁路径（无 --settings）：连接与缓存字段保持锁定；
+        // 钥匙旅程用例经 FakeOptions.launchFlags 打开
+        return options.launchFlags ?? { settings: false }
       case 'get_storage_info':
         return {
           baseDir: 'D:\\e2e\\hinina',

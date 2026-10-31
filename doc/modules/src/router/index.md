@@ -85,4 +85,6 @@ beforeEach(to):
 
 `src/router/__tests__/contest-access.spec.ts` 在真实 router 上锁定（mock `createWebHistory → createMemoryHistory`，赛程 `startTime=1000` / `endTime=2000`）：赛前深链被拦回 Login、开赛左边界放行、赛后拦回 Login、认证态 `status=1` 优先于匿名简报、认证比赛与简报 ID 不同时采用简报、无会话仍走原会话守卫、简报缺失时补调一次 `loadBrief` 且失败后停在 Login。
 
-`src/router/__tests__/index.spec.ts` 用真实 routes 的 `router.resolve()` 锁定 requiresAuth **合并矩阵**：Settings 子级 false 覆盖 Contest 父级 true（豁免）、其余工作台子路由继承父级 true、Login 无声明即不受保护 —— 判据本身是一行 `=== true`，会漂移的是「哪条路由声明了什么 meta」。
+`src/router/__tests__/index.spec.ts` 用真实 routes 的 `router.resolve()` 锁定 requiresAuth **合并矩阵**：Settings 继承父级 true（免登录是守卫的条件豁免，不是 meta 声明）、其余工作台子路由继承父级 true、Login 无声明即不受保护 —— 判据本身是一行 `=== true`，会漂移的是「哪条路由声明了什么 meta」。
+
+`src/router/__tests__/launch-redirect.spec.ts` 在真实 router 上锁定钥匙的**守卫行为**（mock `getLaunchFlags`，`resetModules` 保证每个用例拿到全新 `firstNavigation`）：带参首航直落、仅首航生效（再次回登录页不被重定向——不困死维护人员）、非登录页首航不直落、IPC 失败按「无参数」退化、无钥匙直达设置页回 Login（P2 路径一）、钥匙模式非首航直达设置页放行（豁免不限首次）。

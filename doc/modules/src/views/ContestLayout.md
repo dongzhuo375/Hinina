@@ -6,7 +6,7 @@
 
 比赛工作台的布局外壳：`TopBar`（顶栏，内嵌横向导航）+ `<router-view>` 子视图 + `StatusBar`（底栏）；挂载时拉取比赛数据、**按权威赛程刷新跨场缓存**、在比赛进行中启动公告轮询，并以每秒时钟驱动**赛程闸门**——赛程被移到未来时立即退回登录页，比赛结束时叠加结束覆盖层并在 2 秒后自动返回登录页。
 
-**无会话最小壳**：`--settings`（管理方钥匙）会在无会话时经守卫直落设置路由（守卫豁免其 `requiresAuth`），此时外壳退化为最小壳——自带 `data-tauri-drag-region` 拖动区标题栏（「Hinina 设置」+「返回登录」，`decorations: false` 下窗口移动全靠它）+ 内容区；**不渲染** TopBar/StatusBar（其数据全部依赖会话），`bootstrap` 直接跳过（无会话时认证拉取只会失败），不产生任何面向 OJ 的请求。判据是**四条件与**：钥匙启动 + 无会话 + 设置路由（`sessionResolved && !isLoggedIn && route === 'Settings'`）——绑路由防「正常登出/会话失效（`user` 置空而 `sessionResolved` 仍为 true）在 `replace(Login)` 异步守卫完成前闪最小壳、子视图重挂」（评审二），绑钥匙防「普通启动在设置页上登出时闪最小壳」（评审三）：普通启动**永远**不进最小壳。
+**无会话最小壳**：`--settings`（管理方钥匙）会在无会话时经守卫直落设置路由（守卫条件豁免其鉴权，见 `router/index.md`），此时外壳退化为最小壳——自带 `data-tauri-drag-region` 拖动区标题栏（「Hinina 设置」+「返回登录」，`decorations: false` 下窗口移动全靠它）+ 内容区；**不渲染** TopBar/StatusBar（其数据全部依赖会话），`bootstrap` 直接跳过（无会话时认证拉取只会失败），不产生任何面向 OJ 的请求。判据是**四条件与**：钥匙启动 + 无会话 + 设置路由（`launchFlags.settings && sessionResolved && !isLoggedIn && route === 'Settings'`）——绑路由防「正常登出/会话失效（`user` 置空而 `sessionResolved` 仍为 true）在 `replace(Login)` 异步守卫完成前闪最小壳、子视图重挂」（评审二），绑钥匙防「普通启动在设置页上登出时闪最小壳」（评审三）：普通启动**永远**不进最小壳。
 
 ## 核心类型/函数
 
@@ -17,7 +17,7 @@
 | `nowMs` / `now` | `useNowMs()` / computed（秒） | 共享毫秒墙钟派生秒，驱动 `phase` 跃迁；scope dispose 清理 interval |
 | `phase` | computed | `getContestPhase(getAuthoritativeSchedule(contestStore.contest, contestStore.brief), now)` |
 | `bareShell` | computed | `systemService.launchFlags.value.settings && auth.sessionResolved && !auth.isLoggedIn && route.name === 'Settings'` —— 最小壳判据（钥匙 + 会话缺失 + 设置路由，四条件与）；快照由守卫首航填充，同步判定无闪帧 |
-| `watch(phase, …, { immediate: true })` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。最小壳时 phase 恒为 `none`，两个分支都不触发 |
+| `watch(phase, …, { immediate: true })` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。最小壳时 phase **通常**为 `none`（钥匙模式下已登录维护者在设置页登出时匿名 brief 保留，phase 亦可能非 none）——即便触发，两分支的目标都是登录页，与登出/返回导航同向，无实际影响 |
 | `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → 启动公告轮询，见逻辑流程 |
 | `backToLogin` | `() => void` | 最小壳的「返回登录」按钮 → `replace(Login)`（正常登录页，含匿名简报与重试 UI） |
 | `exitTimer` | 定时器句柄 | 结束退出延迟；模块级普通变量，不进响应式系统（墙钟 interval 已归 `useNowMs`） |
