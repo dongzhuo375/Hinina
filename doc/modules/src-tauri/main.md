@@ -1,10 +1,10 @@
 # main
 
 ## 职责
-应用程序入口点与**组合根**。按顺序初始化所有子系统，构造 `AppContext`，启动全部事件消费者，启动 Tauri 桌面窗口。release 构建经 `#![windows_subsystem = "windows"]` 走 GUI 子系统（不带控制台，`--console` 启动参数可重新附加，见 `infra/console.md`）；崩溃经 panic 钩子落日志（见 `infra/panic_report.md`），启动期失败还会在记录落盘后弹一次系统错误框（见 `infra/startup_dialog.md`）。
+应用程序入口点与**组合根**。按顺序初始化所有子系统，构造 `AppContext`，启动全部事件消费者，启动 Tauri 桌面窗口。release 构建经 `#![windows_subsystem = "windows"]` 走 GUI 子系统（不带控制台，`--console` 启动参数可重新附加，见 `infra/console.md`）；崩溃经 panic 钩子落日志（见 `infra/panic_report.md`），启动期失败还会在记录落盘后弹一次系统错误框（见 `infra/startup_dialog.md`）；应用全局单实例，重复启动退出并聚焦已有窗口（见 `infra/single_instance.md`）。
 
 ## 核心类型/函数
-- `fn main()` — 程序入口：**先安装 panic 钩子（`infra::panic_report::install`）→ `startup_dialog::arm()`（启用启动期错误框，记主线程；测试进程不 arm）→ `--console` 附加调试控制台（`infra::console::requested/attach`，幂等，`args_os()` 收集参数）→** 创建 Tokio runtime → 注册 dialog 插件 → **在 `.setup()` 里**解析数据目录（`app_local_data_dir()`）、执行一次性迁移、初始化 `AppContext`、接上插件通知出口并 `manage` → 启动事件消费者 → spawn 插件自启动 → 以 `generate_handler!` 注册全部 Command → 启动 Tauri App；`run` 回调收到 `RunEvent::Ready` 时 `startup_dialog::mark_started()`（此后运行期 panic 只落日志），收到 `RunEvent::Exit` 时收尾全部插件。控制台重绑必须早于 `Logger::init` 与任何 stdio 使用。三处启动不可恢复点（Tokio runtime / Tauri Builder / `AppContext::init`）用 `unwrap_or_else(|e| panic!("中文上下文：{e}"))` 保留 panic 语义（钩子照常落盘），payload 会显示在启动期错误框里
+- `fn main()` — 程序入口：**先安装 panic 钩子（`infra::panic_report::install`）→ `startup_dialog::arm()`（启用启动期错误框，记主线程；测试进程不 arm）→ `--console` 附加调试控制台（`infra::console::requested/attach`，幂等，`args_os()` 收集参数）→** 创建 Tokio runtime → 注册单实例插件（`infra::single_instance::init`，**第一个注册**）→ 注册 dialog 插件 → **在 `.setup()` 里**解析数据目录（`app_local_data_dir()`）、执行一次性迁移、初始化 `AppContext`、接上插件通知出口并 `manage` → 启动事件消费者 → spawn 插件自启动 → 以 `generate_handler!` 注册全部 Command → 启动 Tauri App；`run` 回调收到 `RunEvent::Ready` 时 `startup_dialog::mark_started()`（此后运行期 panic 只落日志），收到 `RunEvent::Exit` 时收尾全部插件。控制台重绑必须早于 `Logger::init` 与任何 stdio 使用。三处启动不可恢复点（Tokio runtime / Tauri Builder / `AppContext::init`）用 `unwrap_or_else(|e| panic!("中文上下文：{e}"))` 保留 panic 语义（钩子照常落盘），payload 会显示在启动期错误框里
 - `const WORKSPACE_SAVED_EVENT: &str = "workspace-saved"` — 工作区落盘事件的前端通道名，与 `src/bridge/workspace.bridge.ts` 的 `listen` 对应
 - `const ANNOUNCEMENTS_PUBLISHED_EVENT: &str = "announcements-published"` — 新公告事件的前端通道名，与 `src/bridge/announcement.bridge.ts` 的 `onAnnouncementsPublished` 对应
 - `const FRONTEND_BRIDGE_CONSUMER: &str = "tauri-frontend-bridge"` — 前端事件桥的消费者名（日志字段）
@@ -36,6 +36,7 @@
 - `hinina_lib::infra::console::{requested, attach}`（`--console` 启动参数，见 `infra/console.md`）
 - `hinina_lib::infra::data_dir::{self, DataDirPlan, DataDirSource, MigrateOutcome}`
 - `hinina_lib::infra::panic_report::install`（panic 钩子，见 `infra/panic_report.md`）
+- `hinina_lib::infra::single_instance::init`（单实例约束，见 `infra/single_instance.md`）
 - `hinina_lib::infra::startup_dialog::{arm, mark_started}`（启动期错误框，见 `infra/startup_dialog.md`）
 - `hinina_lib::infra::plugin_notification::TauriPluginNotifications`（插件通知的前端出口）
 - `tauri::{Emitter, Manager}`（`app.state::<AppContext>()` + `handle.emit`）
@@ -52,9 +53,11 @@
    而 `.setup()` 是同步回调，故 runtime 必须在 setup 之前建好。**注意：事件消费者不跑在这个
    运行时上**（它在 setup 结束时随 `rt` 一起销毁），而是由 `spawn_event_consumers` 投到
    Tauri 的运行时 —— 与异步命令同一个
-2. `tauri::Builder::default().plugin(tauri_plugin_dialog::init())` 注册目录选择器插件
-   （本项目**第一个真正注册的插件**：`tauri-plugin-fs` / `-http` 的依赖与 capability
-   虽存在但从未注册，全部 I/O 都走 Rust）
+2. `tauri::Builder::default().plugin(hinina_lib::infra::single_instance::init())` 注册单实例
+   插件——**第一个注册**（官方要求检测早于其它插件初始化）：第二实例在此阶段即被识别
+   并退出，见 `infra/single_instance.md`；随后 `.plugin(tauri_plugin_dialog::init())` 注册
+   目录选择器插件（`tauri-plugin-fs` / `-http` 的依赖与 capability 虽存在但从未注册，
+   全部 I/O 都走 Rust）
 3. `.setup(move |app| { … })` —— **整个初始化都在这里**，因为只有 setup 能拿到
    `AppHandle`，也就只有那里能解析 `app_local_data_dir()`：
    1. `default_dir = app.path().app_local_data_dir()`（`%LOCALAPPDATA%/{identifier}`，
