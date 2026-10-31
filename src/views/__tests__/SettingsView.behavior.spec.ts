@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
   resetDataDir: vi.fn(),
   resetClient: vi.fn(),
   purgeLocalData: vi.fn(),
-  getLaunchFlags: vi.fn(),
+  // 启动标志响应式快照（systemService.launchFlags）：分层锁同步读取
+  launchFlags: { value: { settings: false } },
   loadContest: vi.fn(),
   invalidateMyStatus: vi.fn(),
   announcementRefresh: vi.fn(),
@@ -43,7 +44,7 @@ vi.mock('@/services/system.service', () => ({
     resetDataDir: mocks.resetDataDir,
     resetClient: mocks.resetClient,
     purgeLocalData: mocks.purgeLocalData,
-    getLaunchFlags: mocks.getLaunchFlags,
+    launchFlags: mocks.launchFlags,
   },
 }))
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
@@ -117,7 +118,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   currentConfig = baseConfig()
   // 默认正常模式（无 --settings）：维护者层锁定；维护者交互测试显式改写
-  mocks.getLaunchFlags.mockResolvedValue({ settings: false })
+  mocks.launchFlags.value = { settings: false }
   mocks.getConfig.mockImplementation(async () => structuredClone(currentConfig))
   mocks.updateConfig.mockImplementation(async (mutator: (draft: AppConfig) => void) => {
     const draft = structuredClone(currentConfig)
@@ -206,7 +207,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
 
   it('未配置 OJ：保存创建实例后自动切换，失败不得清会话或导航', async () => {
     // OJ 切换是维护者层操作：--settings 模式下运行（正常模式该下拉被锁）
-    mocks.getLaunchFlags.mockResolvedValue({ settings: true })
+    mocks.launchFlags.value = { settings: true }
     const view = await render()
     await setField(view.host, '当前 OJ', 'Hydro')
     expect(mocks.switchOj).not.toHaveBeenCalled()
@@ -236,7 +237,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
 
   it('新实例保存后下拉 configured 标签随实例清单更新', async () => {
     // 维护者层操作（OJ 下拉），--settings 模式下运行
-    mocks.getLaunchFlags.mockResolvedValue({ settings: true })
+    mocks.launchFlags.value = { settings: true }
     mocks.switchOj.mockRejectedValueOnce(new Error('切换失败'))
     const view = await render()
     await setField(view.host, '当前 OJ', 'Hydro')
@@ -262,7 +263,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
 
   it('已配置 OJ 切换失败：回滚下拉且不清会话、不导航', async () => {
     // 维护者层操作（OJ 下拉），--settings 模式下运行
-    mocks.getLaunchFlags.mockResolvedValue({ settings: true })
+    mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     mocks.switchOj.mockRejectedValueOnce(new Error('切换失败'))
     const view = await render()
@@ -279,7 +280,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
 
   it('数据目录确认使用点击前的 migrate 快照，并在成功后重读', async () => {
     // 维护者层操作（数据目录按钮），--settings 模式下运行（正常模式按钮被锁）
-    mocks.getLaunchFlags.mockResolvedValue({ settings: true })
+    mocks.launchFlags.value = { settings: true }
     const view = await render()
     button(view.host, '更改目录').click()
     await vi.waitFor(() => expect(mocks.pickDataDir).toHaveBeenCalledTimes(1))
@@ -310,7 +311,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     expect(mocks.pickDataDir).not.toHaveBeenCalled()
 
     // --settings（管理方钥匙）：全字段解锁，提示消失
-    mocks.getLaunchFlags.mockResolvedValue({ settings: true })
+    mocks.launchFlags.value = { settings: true }
     view = await render()
     expect((field(view.host, '当前 OJ') as HTMLSelectElement).disabled).toBe(false)
     expect((field(view.host, '服务器地址') as HTMLInputElement).disabled).toBe(false)

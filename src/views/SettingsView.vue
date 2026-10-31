@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PageHeading from '@/components/common/PageHeading.vue'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { useSettingsForm } from '@/composables/useSettingsForm'
@@ -56,9 +56,9 @@ const {
   inputClass,
 } = useSettingsForm()
 
-/// 维护者层锁定（默认锁，`--settings` 解锁）。守卫在首次导航时已预热
-/// getLaunchFlags 的 memoized Promise，此处 await 即时完成，无可见闪烁。
-const locked = ref(true)
+/// 维护者层锁定（默认锁，`--settings` 解锁）。启动标志快照由守卫首航填充
+///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
+const locked = computed(() => !systemService.launchFlags.value.settings)
 
 function updateForm(patch: SettingsFormPatch): void {
   Object.assign(form, patch)
@@ -79,9 +79,6 @@ const {
 } = useSettingsScrollSpy(loading)
 
 onMounted(() => {
-  void systemService.getLaunchFlags().then((flags) => {
-    locked.value = !flags.settings
-  })
   void load()
   void about.loadStorage()
   void maintenance.loadUsage()

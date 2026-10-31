@@ -1,3 +1,4 @@
+import { ref } from 'vue'
 import type {
   DataDirChange,
   DataDirInfo,
@@ -14,29 +15,48 @@ import * as systemBridge from '@/bridge/system.bridge'
  *
  * 分层约定：View / Store 不得直接调用 `system.bridge`，统一经本服务消费；
  * 不做缓存 —— 版本号构建期固定，但存储目录可能随用户数据迁移变化，设置页
- * 每次挂载都取实时值。**唯一例外是 `getLaunchFlags`**：启动标志在一次进程
- * 生命周期内不可变，且守卫与设置页两处消费必须读到同一份，故在进程内
- * memoize（含失败退化，见方法注释）。
+ * 每次挂载都取实时值。**唯一例外是启动标志**：一次进程生命周期内不可变，
+ * 且守卫与组件多处消费必须读到同一份，故 memoize 并维护响应式同步快照
+ * （`launchFlags`，见下）。
  */
 
-/// `getLaunchFlags` 的进程内单飞 Promise（含失败退化结果）
+/// 本次启动标志的响应式快照：`getLaunchFlags` 首次解析即填充（守卫在首次导航
+/// 时调用，**早于任何组件挂载**），此后同步可读。默认「无参数」= 安全侧
+///（正常门禁 + 选手层）。
+const launchFlagsSnapshot = ref<LaunchFlags>({ settings: false })
+
+/// `getLaunchFlags` 的进程内单飞 Promise（含失败退化：保持快照默认值）
 let launchFlagsOnce: Promise<LaunchFlags> | null = null
 
 export class SystemService {
+  /**
+   * 启动标志同步快照（响应式）。守卫首航 `await getLaunchFlags()` 之后即为
+   * 真值 —— 组件（ContestLayout 最小壳判据、SettingsView 分层锁）直接读这里，
+   * 无需再等 Promise：异步判据会把闪帧反转到钥匙启动的首帧。
+   */
+  readonly launchFlags = launchFlagsSnapshot
+
   /** 获取客户端存储信息（设置页「关于」区块使用；失败由调用方降级展示） */
   async getStorageInfo(): Promise<StorageInfo> {
     return systemBridge.getStorageInfo()
   }
 
   /**
-   * 读取本次启动的启动标志（守卫做初始导航/门禁豁免、设置页做分层锁）。
+   * 读取本次启动的启动标志（守卫做初始导航/门禁豁免的唯一 Promise 入口；
+   * 组件一律读同步快照 `launchFlags`）。
    *
-   * **进程内 memoize**：标志不可变，两处消费必须同源。读取失败（旧二进制、
-   * 桥异常）按「无参数」退化 —— 正常门禁 + 选手层，这是安全侧默认值，
-   * 绝不让钥匙通道故障把启动或设置页卡死。
+   * **进程内 memoize**：标志不可变，多处消费必须同源。读取失败（旧二进制、
+   * 桥异常）保持快照默认「无参数」—— 安全侧默认值，绝不让钥匙通道故障把
+   * 启动或设置页卡死；守卫另有 try/catch 二道防线。
    */
   getLaunchFlags(): Promise<LaunchFlags> {
-    launchFlagsOnce ??= systemBridge.getLaunchFlags().catch(() => ({ settings: false }))
+    launchFlagsOnce ??= systemBridge
+      .getLaunchFlags()
+      .then((flags) => {
+        launchFlagsSnapshot.value = flags
+        return flags
+      })
+      .catch(() => launchFlagsSnapshot.value)
     return launchFlagsOnce
   }
 

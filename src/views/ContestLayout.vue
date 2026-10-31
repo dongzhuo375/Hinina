@@ -6,6 +6,7 @@ import StatusBar from '@/components/layout/StatusBar.vue'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
+import { systemService } from '@/services/system.service'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import { useNowMs } from '@/composables/useNowMs'
 
@@ -20,13 +21,17 @@ const phase = computed(() => getContestPhase(
   getAuthoritativeSchedule(contestStore.contest, contestStore.brief),
   now.value,
 ))
-/// 最小壳：仅「无会话 + 当前路由是设置页」时启用 —— 这条组合只有 `--settings`
-///（管理方钥匙）直落才会出现（守卫豁免设置路由；无会话时没有任何 UI 路径可达）。
-/// **必须同时看路由**：正常登出/会话失效只把 user 置空（sessionResolved 仍为
-/// true），若只判会话，比赛页外壳会在 replace(Login) 的异步守卫完成前闪成最小
-/// 壳、当前子视图重挂并发出注定失败的认证请求（评审抓出）。
+/// 最小壳：**四条件与** —— 钥匙启动（`--settings`）+ 无会话 + 当前路由是设置页。
+/// 绑路由防「正常登出/会话失效时比赛页外壳闪最小壳」（user 置空先于 replace 的
+/// 异步守卫完成）；绑钥匙防「普通启动在设置页上登出时闪最小壳」（已登录维护者
+/// 经隐藏入口进设置页后登出，路由同样是 Settings）—— 普通启动**永远**不进最小壳。
+/// 快照由守卫首航填充（早于本组件挂载），同步判定无闪帧。
 const bareShell = computed(
-  () => auth.sessionResolved && !auth.isLoggedIn && route.name === 'Settings',
+  () =>
+    systemService.launchFlags.value.settings &&
+    auth.sessionResolved &&
+    !auth.isLoggedIn &&
+    route.name === 'Settings',
 )
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false

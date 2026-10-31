@@ -14,7 +14,7 @@
 
 | 组成 | 职责 |
 |------|------|
-| `locked` | `ref(true)` —— 维护者层锁定（默认锁，`--settings` 解锁）；守卫在首次导航已预热 `getLaunchFlags` 的 memoized Promise，onMounted 翻转无可见闪烁。以 `:locked` 传给 OjServerSection 与 DataDirSection |
+| `locked` | computed `!systemService.launchFlags.value.settings` —— 维护者层锁定（默认锁，`--settings` 解锁）；标志快照由守卫首航填充（早于本组件挂载），同步读取无闪烁。以 `:locked` 传给 OjServerSection 与 DataDirSection |
 | `useSettingsForm` | 中央 reactive 草稿、baseline/dirty/errors/canSave、配置加载/保存/放弃、OJ 清单与显式/自动切换 |
 | `updateForm(patch)` | 将 section 的 `SettingsFormPatch` 合并进同一 reactive 草稿；保存成功后仅当没有新编辑时才显示“已保存” |
 | `useAboutSettings` | About 存储信息与复制反馈；模型以 `about` 传给 AboutSection |

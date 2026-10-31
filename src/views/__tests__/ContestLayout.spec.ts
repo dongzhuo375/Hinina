@@ -15,10 +15,15 @@ const mocks = vi.hoisted(() => ({
   loadConfiguredContest: vi.fn(),
   // 当前路由名（最小壳判据的一部分）；默认非 Settings，模拟工作台子路由
   routeName: { value: 'ProblemSet' as string | undefined },
+  // 启动标志响应式快照（systemService.launchFlags）：最小壳判据之一
+  launchFlags: { value: { settings: false } },
 }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: mocks.replace }),
   useRoute: () => ({ name: mocks.routeName.value }),
+}))
+vi.mock('@/services/system.service', () => ({
+  systemService: { launchFlags: mocks.launchFlags },
 }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => mocks }))
 vi.mock('@/services/contest.service', () => ({ contestService: { loadConfiguredContest: mocks.loadConfiguredContest } }))
@@ -131,7 +136,8 @@ describe('--settings 无会话最小壳', () => {
   it('无会话且当前路由是设置页：渲染最小壳，不出顶栏/状态条，不发起认证拉取，返回登录可用', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    // 会话已判定但不存在（user=null）+ 当前在设置路由：--settings 直落的外壳形态
+    // 钥匙启动 + 会话已判定但不存在（user=null）+ 当前在设置路由：--settings 直落的外壳形态
+    mocks.launchFlags.value = { settings: true }
     useAuthStore().sessionResolved = true
     mocks.routeName.value = 'Settings'
     app = createApp(ContestLayout)
@@ -156,12 +162,32 @@ describe('--settings 无会话最小壳', () => {
     expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
   })
 
+  it('无会话 + 设置路由但普通启动（无钥匙）：不进最小壳（登出过渡态在设置页上同样安全）', async () => {
+    // 普通启动永远不进最小壳（第三轮评审）：即使会话缺失且正停在设置路由——
+    // 例如已登录维护者经隐藏入口进设置页后登出的过渡态——也保持原外壳
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAuthStore().sessionResolved = true
+    mocks.launchFlags.value = { settings: false }
+    mocks.routeName.value = 'Settings'
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).not.toContain('Hinina 设置')
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
+    expect(host.querySelector('footer')).toBeTruthy()
+  })
+
   it('无会话但路由非设置页（正常登出过渡态）：保持正常外壳，不闪最小壳', async () => {
     // 登出把 user 置空而 sessionResolved 仍为 true：若最小壳只判会话，比赛页
     // 外壳会在 replace(Login) 完成前闪成「Hinina 设置」并重挂子视图（评审抓出）
     const pinia = createPinia()
     setActivePinia(pinia)
     useAuthStore().sessionResolved = true
+    mocks.launchFlags.value = { settings: false }
     mocks.routeName.value = 'ProblemSet'
     app = createApp(ContestLayout)
     app.use(pinia)
