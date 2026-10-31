@@ -17,8 +17,7 @@
 | `installGlobalErrorGuard` | `(app: App, router: Router, forward: FrontendLogForward) => () => void` | 装四个钩子，返回清理函数（移除监听、`errorHandler` 复位、清去重表）—— 仅供测试拆卸；组合根不拆卸。**必须先于 mount 调用**：errorHandler 不在位时首屏渲染错误直接逃逸。window `error` 监听**必须注册在 capture 阶段**（注册与移除均传 `capture: true`）：资源加载失败的 error 事件派发在元素上且**不冒泡**，bubble 阶段的 window 监听永远收不到（未捕获异常的 error 事件派发在 window 自身，target 阶段，不受影响）。errorHandler **补发 `console.error(err, info)`** —— Vue 设了 handler 后不再走默认输出，不补这一行 DevTools 里组件错误就消失（转发是持久化，console 是现场排障） |
 | `FrontendLogForward` | `(level: FrontendLogLevel, scope: string, message: string) => void` | 注入的转发出口；组合根接到 `bridge/diagnostics.bridge` 的 `forwardFrontendLog` |
 | `report` | `(scope, error, detail?) => void`（模块内私有） | 核心上报：归一化 → 限频去重 → 转发，全段 try/catch —— **守卫自身绝不抛错**（报错的通道不允许自己成为新的错误源） |
-| `normalize` | `(error: unknown, detail?) => string`（模块内私有） | 归一化：`Error` → **message + stack**（V8 首行自带消息即直接用 stack；SpiderMonkey 不带消息头则补一行；栈由 2000 字符上限自然截取头部若干帧 —— Rust 端为保留 `
-`/`	` 做的处理由此真正生效）；IpcError 鸭子识别（`cmd`+`message`）→ `ipc:{cmd}: message`；空/null → `<empty error>`；其余 String 化；统一按**码点**截断 2000 字符（`Array.from`，UTF-16 码元 slice 会切出孤立代理项 → serde_json 拒收、整条日志丢弃；Rust 侧再兜底） |
+| `normalize` | `(error: unknown, detail?) => string`（模块内私有） | 归一化：**`IpcError` 先于 `Error` 判定**（`IpcError extends Error`，只按 `instanceof Error` 走会丢失 `ipc:{cmd}` 前缀——曾是死代码，评审抓出）→ `ipc:{cmd}: message`；`Error` → **message + stack**（V8 首行自带消息即直接用 stack；SpiderMonkey 不带消息头则补一行；栈由 2000 字符上限自然截取头部若干帧——Rust 端为保留换行与制表所做的处理由此真正生效）；空/null → `<empty error>`；其余 String 化；统一按**码点**截断 2000 字符（`Array.from`，UTF-16 码元 slice 会切出孤立代理项 → serde_json 拒收、整条日志丢弃；Rust 侧再兜底） |
 | 限频去重 | `lastSeen: Map<key, ts>`（模块内私有） | 同签名（scope + **完整归一化消息**——截前缀会把「同前缀 + 变化后缀」的不同错误误并成一条）1 秒内只转发一次；表容量 256，超限整表清空。**forward 同步抛错会撤销去重记录** —— 这条没送出去，同签名错误在窗口内可重试。**内容有变化的消息（如带变化计数器）不在此去重**，由 Rust 端 `frontend_log` 的滚动窗口字节预算兜底（64 KiB/60s，见 `infra/frontend_log.md`） |
 
 ## 直接依赖
@@ -26,7 +25,7 @@
 - `vue`（仅 `App` 类型）
 - `vue-router`（`Router` 类型 + `onError`）
 - `@/bridge/diagnostics.bridge`（仅 `FrontendLogLevel` 类型；转发函数由组合根注入，本模块不 import 其实现）
-- `@/bridge`（仅 `IpcError` 类型，鸭子识别用）
+- `@/bridge`（`IpcError` 类——**值导入**，`instanceof` 判定需要；非鸭子识别）
 
 ## 被依赖
 

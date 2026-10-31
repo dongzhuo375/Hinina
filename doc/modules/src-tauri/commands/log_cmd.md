@@ -23,7 +23,7 @@
 
 ## 逻辑流程
 
-前端守卫归一化错误 → `forwardFrontendLog` → `ipcInvoke('frontend_log')` → 本命令 → `infra::frontend_log::emit`（白名单收敛 + 会话预算 + tracing，`target: "frontend"`）。安全口径（白名单、限长、无载荷参数）见 `infra/frontend_log.md`。
+前端守卫归一化错误 → `forwardFrontendLog` → `ipcInvoke('frontend_log')` → 本命令 → `infra::frontend_log::emit`（白名单收敛 + 滚动窗口预算 + tracing，`target: "frontend"`）。安全口径（白名单、限长、无载荷参数）见 `infra/frontend_log.md`。
 
 ## 测试
 
