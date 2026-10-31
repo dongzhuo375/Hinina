@@ -91,7 +91,11 @@ export function installGlobalErrorGuard(
       report('window', `资源加载失败: ${asset}`)
     }
   }
-  window.addEventListener('error', onWindowError)
+  // **必须 capture 阶段**：资源加载失败的 error 事件派发在元素上且**不冒泡**
+  //（HTML 规范），bubble 阶段的 window 监听永远收不到 —— 只有 capture 沿
+  // window → document → … → target 的传播路径能拦住它。未捕获异常的 error
+  // 事件派发在 window 自身（target 阶段），不受此参数影响。
+  window.addEventListener('error', onWindowError, true)
 
   // 无人接的 Promise 拒绝。IpcError 鸭子类型识别（cmd + message）→ `ipc:{cmd}` 前缀，
   // 与 bridge 的单点日志互相印证。
@@ -106,7 +110,9 @@ export function installGlobalErrorGuard(
   })
 
   return () => {
-    window.removeEventListener('error', onWindowError)
+    // removeEventListener 按 type+listener+capture 匹配：必须与注册时的
+    // capture: true 一致才能真的移除
+    window.removeEventListener('error', onWindowError, true)
     window.removeEventListener('unhandledrejection', onUnhandledRejection)
     offRouterError()
     app.config.errorHandler = undefined

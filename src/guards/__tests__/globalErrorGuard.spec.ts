@@ -111,15 +111,20 @@ describe('installGlobalErrorGuard', () => {
     expect(calls[0]?.message).toBe('ipc:list_contests: 登录失败')
   })
 
-  it('无消息的资源加载错误从 src/href 取址', () => {
+  it('资源加载错误不冒泡 —— capture 阶段监听经真实 DOM 派发捕获（回归：无 capture 则为死代码）', () => {
     setup()
 
+    // 真实 DOM 形态：元素挂进文档、事件派发在**元素**上且不冒泡（HTML 规范）。
+    // 若监听未注册在 capture 阶段，本用例必然失败（变异验证过）—— 伪造
+    // event.target 后直接向 window 派发只会走 target 阶段，测不出传播路径。
     const img = document.createElement('img')
     img.setAttribute('src', 'assets/missing.png')
-    emitWindowError({ target: img })
+    document.body.appendChild(img)
+    img.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
 
     // jsdom 会把 src 解析成绝对 URL，断言文件名部分
     expect(calls[0]).toMatchObject({
+      level: 'error',
       scope: 'window',
       message: expect.stringContaining('资源加载失败: '),
     })

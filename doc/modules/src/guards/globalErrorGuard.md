@@ -14,7 +14,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `installGlobalErrorGuard` | `(app: App, router: Router, forward: FrontendLogForward) => () => void` | 装四个钩子，返回清理函数（移除监听、`errorHandler` 复位、清去重表）—— 仅供测试拆卸；组合根不拆卸。**必须先于 mount 调用**：errorHandler 不在位时首屏渲染错误直接逃逸 |
+| `installGlobalErrorGuard` | `(app: App, router: Router, forward: FrontendLogForward) => () => void` | 装四个钩子，返回清理函数（移除监听、`errorHandler` 复位、清去重表）—— 仅供测试拆卸；组合根不拆卸。**必须先于 mount 调用**：errorHandler 不在位时首屏渲染错误直接逃逸。window `error` 监听**必须注册在 capture 阶段**（注册与移除均传 `capture: true`）：资源加载失败的 error 事件派发在元素上且**不冒泡**，bubble 阶段的 window 监听永远收不到（未捕获异常的 error 事件派发在 window 自身，target 阶段，不受影响） |
 | `FrontendLogForward` | `(level: FrontendLogLevel, scope: string, message: string) => void` | 注入的转发出口；组合根接到 `bridge/diagnostics.bridge` 的 `forwardFrontendLog` |
 | `report` | `(scope, error, detail?) => void`（模块内私有） | 核心上报：归一化 → 限频去重 → 转发，全段 try/catch —— **守卫自身绝不抛错**（报错的通道不允许自己成为新的错误源） |
 | `normalize` | `(error: unknown, detail?) => string`（模块内私有） | 归一化：`Error` → message（附 `detail` 环节，如 `vue:setup function`）；IpcError 鸭子识别（`cmd`+`message`）→ `ipc:{cmd}: message`；空/null → `<empty error>`；其余 String 化；统一截断 2000 字符（与 Rust 端上限一致，Rust 侧再兜底） |
@@ -37,10 +37,10 @@
 ```
 四类钩子触发
   errorHandler(err, _instance, info)        → report('vue',     err, `vue:${info}`)
-  window 'error'（有 error/message）        → report('window',  source)
-  window 'error'（无消息 → 资源加载失败）    → report('window',  `资源加载失败: ${src|href}`)
+  window 'error'（capture 阶段；有 error/message）→ report('window', source)
+  window 'error'（capture 阶段；无消息 → 资源加载失败）→ report('window', `资源加载失败: ${src|href}`)
   unhandledrejection(reason)                → report('promise', reason)
-  router.onError(error)                     → report('router',  error)
+  router.onError(error)                     → report('router', error)
 → normalize（归一 + 截断）→ 限频去重 → forward('error', scope, message)
 → 组合根的 forward 包装 → forwardFrontendLog → Rust frontend_log → tracing → logs/hinina.log
 ```
@@ -53,4 +53,4 @@
 
 ## 测试
 
-`src/guards/__tests__/globalErrorGuard.spec.ts`（jsdom）：四类钩子触发 → forward 收到归一化消息（路由错误用「导航守卫抛错」确定性触发）；拆卸后不再转发；IpcError 归一；资源加载错误从 src 取址（jsdom 绝对 URL 断言文件名）；限频去重（fake timers + 1s 窗口 + 窗口后重放）；forward 同步抛错被吞且不产生二次 `console.error`、窗口后同签名可重试；空/非 Error reason 归一。每个用例自建 app+router 并在 afterEach 统一拆卸 —— 单个断言失败不得把监听器泄漏进后续用例。装配面由 `src/__tests__/main.spec.ts` 锁定（先于 sessionGuard 装配）。
+`src/guards/__tests__/globalErrorGuard.spec.ts`（jsdom）：四类钩子触发 → forward 收到归一化消息（路由错误用「导航守卫抛错」确定性触发）；拆卸后不再转发；IpcError 归一；**资源加载错误用真实 DOM 派发验证**（元素挂进文档、事件派发在元素上且 `bubbles: false` —— 无 capture 的实现下该用例必红，变异验证过；伪造 `event.target` 直接向 window 派发只会走 target 阶段，测不出传播路径）；限频去重（fake timers + 1s 窗口 + 窗口后重放）；forward 同步抛错被吞且不产生二次 `console.error`、窗口后同签名可重试；空/非 Error reason 归一。每个用例自建 app+router 并在 afterEach 统一拆卸 —— 单个断言失败不得把监听器泄漏进后续用例。装配面由 `src/__tests__/main.spec.ts` 锁定（先于 sessionGuard 装配）。
