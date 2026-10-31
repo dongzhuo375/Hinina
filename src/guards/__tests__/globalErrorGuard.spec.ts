@@ -93,7 +93,12 @@ describe('installGlobalErrorGuard', () => {
     disposer()
 
     expect(app.config.errorHandler).toBeUndefined()
-    emitWindowError({ error: makeError() })
+    // 不用 window 为 target 的 ErrorEvent 验证移除：jsdom 会把「无监听的 window
+    // error 事件（带 error 属性）」上报为 Uncaught Exception，污染 vitest 结果。
+    // 资源加载形态（target 非 window）与 rejection 无此副作用。
+    const img = document.createElement('img')
+    img.setAttribute('src', 'assets/after-dispose.png')
+    emitWindowError({ target: img })
     emitRejection(new Error('after dispose'))
     expect(calls).toHaveLength(0)
   })
