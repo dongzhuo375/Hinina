@@ -23,6 +23,7 @@ import type { AppConfig } from '../src/types/config'
 import type { Contest, ContestProblem } from '../src/types/contest'
 import type { Problem } from '../src/types/problem'
 import type { ContestRankPage, RankCell } from '../src/types/rank'
+import type { LaunchFlags } from '../src/types/system'
 import type { JudgementStatus, SubmissionPage, SubmissionRecord } from '../src/types/submission'
 import type { Workspace } from '../src/types/workspace'
 
@@ -35,7 +36,7 @@ export interface FakeOptions {
   /** 每次提交的评测状态序列：依次返回、停在最后一个；缺省 Pending→Running→Accepted */
   judgementSequence?: JudgementStatus[]
   /** launch_flags 返回的启动标志；缺省 false（正常门禁 + 选手层），--settings 旅程传 true */
-  launchFlags?: { settings: boolean }
+  launchFlags?: LaunchFlags
 }
 
 /** 页面内 fake 控制面（经 window.__e2e 暴露） */

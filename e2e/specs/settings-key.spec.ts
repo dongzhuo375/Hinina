@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../fixtures'
 import { installFakeTauri } from '../fake-tauri'
 
 // --settings 管理方钥匙的**跨层旅程**：守卫直落 → 最小壳 → 维护者层解锁 →
