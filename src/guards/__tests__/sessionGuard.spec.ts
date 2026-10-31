@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   setIpcErrorObserver: vi.fn(),
   logout: vi.fn(),
   replace: vi.fn().mockResolvedValue(undefined),
+  // 启动标志响应式快照（systemService.launchFlags）：钥匙旁路的判据
+  launchFlags: { value: { settings: false } },
+  routeName: { value: 'ProblemSet' as string | undefined },
 }))
 
 vi.mock('@/bridge', () => {
@@ -22,6 +25,9 @@ vi.mock('@/bridge', () => {
   return { setIpcErrorObserver: mocks.setIpcErrorObserver, IpcError }
 })
 vi.mock('@/services/auth.service', () => ({ authService: { logout: mocks.logout } }))
+vi.mock('@/services/system.service', () => ({
+  systemService: { launchFlags: mocks.launchFlags },
+}))
 
 import { installSessionGuard } from '@/guards/sessionGuard'
 
@@ -30,13 +36,20 @@ interface GuardHarness {
   observer: (error: { isAuthError: boolean; message: string }) => void
 }
 
-/// 装配守卫并取回注入 bridge 的观察者。`requiresAuth` 决定当前路由形态。
-function install(requiresAuth: boolean, loggedIn = true): GuardHarness {
+/// 装配守卫并取回注入 bridge 的观察者。`requiresAuth` 决定当前路由的 meta 形态；
+/// `opts.keyMode` / `opts.routeName` 供钥匙旁路（settingsMode && Settings）用例。
+function install(
+  requiresAuth: boolean,
+  loggedIn = true,
+  opts: { keyMode?: boolean; routeName?: string } = {},
+): GuardHarness {
   setActivePinia(createPinia())
   const auth = useAuthStore()
   if (loggedIn) auth.user = { id: 'u1', username: 'alice', token: 't' } as never
+  mocks.launchFlags.value = { settings: opts.keyMode === true }
+  mocks.routeName.value = opts.routeName
   const router = {
-    currentRoute: { value: { meta: { requiresAuth } } },
+    currentRoute: { value: { name: opts.routeName, meta: { requiresAuth } } },
     replace: mocks.replace,
   }
   installSessionGuard(router as never)
@@ -110,6 +123,30 @@ describe('sessionGuard 并发会话失效', () => {
     const onProtected = install(true)
     onProtected.observer(authError())
     await settle()
+    expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
+  it('评审四 P2-1：钥匙模式的设置页——清理会话但不跳转登录', async () => {
+    // --settings 的全部意义就是留在设置页修连接配置：firstNavigation 已消费、
+    // 登录页没有返回设置页的入口，踢回登录页等于把管理方重新锁死
+    mocks.logout.mockResolvedValue(undefined)
+    const { auth, observer } = install(true, true, { keyMode: true, routeName: 'Settings' })
+
+    observer(authError())
+    await settle()
+
+    expect(auth.user).toBeNull() // 会话清理照旧
+    expect(auth.error).toBe(SESSION_INVALID_MESSAGE)
+    expect(mocks.replace).not.toHaveBeenCalled() // 留在原地（最小壳接管）
+  })
+
+  it('钥匙旁路不外溢：钥匙模式下非设置路由的认证错误照常跳登录', async () => {
+    mocks.logout.mockResolvedValue(undefined)
+    const { observer } = install(true, true, { keyMode: true, routeName: 'ProblemSet' })
+
+    observer(authError())
+    await settle()
+
     expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
   })
 

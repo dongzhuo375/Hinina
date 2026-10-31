@@ -21,24 +21,32 @@ const phase = computed(() => getContestPhase(
   getAuthoritativeSchedule(contestStore.contest, contestStore.brief),
   now.value,
 ))
-/// 最小壳：**四条件与** —— 钥匙启动（`--settings`）+ 无会话 + 当前路由是设置页。
+/// 最小壳：**三条件与** —— 钥匙启动 + 无会话 + 当前路由是设置页。
 /// 绑路由防「正常登出/会话失效时比赛页外壳闪最小壳」（user 置空先于 replace 的
-/// 异步守卫完成）；绑钥匙防「普通启动在设置页上登出时闪最小壳」（已登录维护者
-/// 经隐藏入口进设置页后登出，路由同样是 Settings）—— 普通启动**永远**不进最小壳。
-/// 快照由守卫首航填充（早于本组件挂载），同步判定无闪帧。
+/// 异步守卫完成）；绑钥匙防「普通启动在设置页上登出时闪最小壳」—— 普通启动
+/// **永远**不进最小壳。
+/// **不含 `sessionResolved`**（评审四 P2-1）：钥匙 + 存量过期会话启动时，首个
+/// 认证请求 401 → invalidateSession 把 sessionResolved 复位为 false（后端登出
+/// 失败时 backendCleared=false）——此刻正是「钥匙 + 无会话 + 设置页」形态，最小
+/// 壳必须接管，否则正常外壳包着无会话设置页继续发注定失败的请求。守卫在导航前
+/// 已完成 checkSession，挂载时机不受影响；快照由守卫首航填充，同步判定无闪帧。
 const bareShell = computed(
   () =>
     systemService.launchFlags.value.settings &&
-    auth.sessionResolved &&
     !auth.isLoggedIn &&
     route.name === 'Settings',
 )
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
-watch(phase, (value) => {
+watch([phase, bareShell], ([value, shell]) => {
   if (exitTimer) clearTimeout(exitTimer)
   exitTimer = null
+  // 最小壳不参与赛程闸门：钥匙模式下保留的匿名简报可能让 phase 非 none
+  //（登出清理只清会话部分），此时维持者正停在设置页修配置——跳转登录页
+  // 会把钥匙场景重新锁死（评审四 P2-2）；bareShell 翻转时也重评并撤销
+  // 在途退出计时器。
+  if (shell) return
   if (value === 'upcoming') {
     void router.replace({ name: 'Login' })
   } else if (value === 'ended') {

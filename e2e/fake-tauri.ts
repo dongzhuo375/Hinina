@@ -37,6 +37,8 @@ export interface FakeOptions {
   judgementSequence?: JudgementStatus[]
   /** launch_flags 返回的启动标志；缺省 false（正常门禁 + 选手层），--settings 旅程传 true */
   launchFlags?: LaunchFlags
+  /** 注入后 load_configured_contest 恒以此失败（过期会话旅程：Auth → sessionGuard 旁路） */
+  failConfiguredContest?: { variant: string; message: string }
 }
 
 /** 页面内 fake 控制面（经 window.__e2e 暴露） */
@@ -455,6 +457,10 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return structuredClone([contest])
       case 'load_configured_contest': {
         // 真实命令读取并校验当前 contestRef（contest_cmd.rs），不是固定成功
+        if (options.failConfiguredContest) {
+          const { variant, message } = options.failConfiguredContest
+          throw { [variant]: message }
+        }
         const ref = config.oj.contestRef.trim()
         if (!ref) throw { Config: 'fake: 未配置比赛引用（oj.contestRef 为空）' }
         if (ref !== contest.id) throw { Contest: `fake: 比赛 ${ref} 不存在或不可见` }

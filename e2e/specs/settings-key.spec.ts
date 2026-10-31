@@ -35,4 +35,22 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await page.goto('/contest/settings')
     await expect(page.getByText('登录参赛系统')).toBeVisible()
   })
+
+  test('评审四 P2-1：钥匙 + 存量过期会话——首个认证请求 401 后留在设置页', async ({ page }) => {
+    await installFakeTauri(page, {
+      // 预置（已过期的）会话：get_session 本地恢复 → 先以正常外壳落设置页
+      user: { id: 'u1', username: 'maintainer', token: 'stale-token' },
+      launchFlags: { settings: true },
+      failConfiguredContest: { variant: 'Auth', message: 'fake: 会话已过期' },
+    })
+    await page.goto('/')
+
+    // bootstrap 的认证请求 401 → sessionGuard 清理会话但不跳转（钥匙旁路）
+    // → 最小壳接管，维护者层随会话失效而解锁；绝不被打回登录页
+    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByText('Hinina 设置')).toBeVisible()
+    const oj = page.getByRole('combobox', { name: /当前 OJ/ })
+    await expect(oj).toBeEnabled()
+    await expect(page.getByText('登录参赛系统')).toBeHidden()
+  })
 })

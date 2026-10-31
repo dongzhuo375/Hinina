@@ -16,8 +16,8 @@
 |------|------|------|
 | `nowMs` / `now` | `useNowMs()` / computed（秒） | 共享毫秒墙钟派生秒，驱动 `phase` 跃迁；scope dispose 清理 interval |
 | `phase` | computed | `getContestPhase(getAuthoritativeSchedule(contestStore.contest, contestStore.brief), now)` |
-| `bareShell` | computed | `systemService.launchFlags.value.settings && auth.sessionResolved && !auth.isLoggedIn && route.name === 'Settings'` —— 最小壳判据（钥匙 + 会话缺失 + 设置路由，四条件与）；快照由守卫首航填充，同步判定无闪帧 |
-| `watch(phase, …, { immediate: true })` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。最小壳时 phase **通常**为 `none`（钥匙模式下已登录维护者在设置页登出时匿名 brief 保留，phase 亦可能非 none）——即便触发，两分支的目标都是登录页，与登出/返回导航同向，无实际影响 |
+| `bareShell` | computed | `systemService.launchFlags.value.settings && !auth.isLoggedIn && route.name === 'Settings'` —— 最小壳判据（钥匙 + 会话缺失 + 设置路由，三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1） |
+| `watch([phase, bareShell], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**最小壳（bareShell）时整体短路**——登出清理保留匿名 brief，phase 可非 none（评审四 P2-2），跳转会把维护者从设置页踢走；bareShell 翻转也重评并撤销在途退出计时器 |
 | `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → 启动公告轮询，见逻辑流程 |
 | `backToLogin` | `() => void` | 最小壳的「返回登录」按钮 → `replace(Login)`（正常登录页，含匿名简报与重试 UI） |
 | `exitTimer` | 定时器句柄 | 结束退出延迟；模块级普通变量，不进响应式系统（墙钟 interval 已归 `useNowMs`） |
