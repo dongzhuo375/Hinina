@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-10-28 | 分支：`main`
+> 最后更新：2026-10-31 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -63,7 +63,7 @@ Hinina/
     │   └── default.json                  # Tauri 2 默认权限集（窗口控制含 allow-destroy（关窗守卫的兜底收尾）/拖拽 + dialog:allow-open（数据目录选择器））
     │                                     # 注：**不声明 fs: / http: 授权** —— 本项目不注册 tauri-plugin-fs/-http，所有 I/O 都走 Rust（见「插件与 I/O 边界」）
     └── src/
-        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最先装 panic 钩子 → startup_dialog::arm（启动期错误框：三处 expect 与 Tauri 窗口创建失败的 panic 先落盘再弹框；RunEvent::Ready 时 mark_started）→ --console 附加（args_os 解析）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
+        ├── main.rs                       # Rust 入口点（release 经 windows_subsystem=windows 走 GUI 子系统，--console 可重新附加控制台）：main() 最先装 panic 钩子 → startup_dialog::arm（启动期错误框：三处 expect 与 Tauri 窗口创建失败的 panic 先落盘再弹框；RunEvent::Ready 时 mark_started）→ --console 附加（args_os 解析）→ Builder 链首位注册单实例插件（重复启动退出并聚焦已有窗口，见 infra/single_instance.rs）→ 12 步初始化序列 + setup 装配：`spawn_event_consumers` 启动三个事件消费者（Tauri 前端桥 `workspace-saved` / `announcements-published`、审计、PluginHost）；**已删除**旧的三个 `install_*` 同步订阅桥（工作区落盘桥 / 新公告桥 / auto-save 配置同步 —— 后者的职责改由 `update_config` / `reload_config` 显式调用 `sync_auto_save_from_context`）
         ├── lib.rs                        # 库根，公开模块树
         ├── test_support.rs               # 测试专用支撑（cfg(test)）：TempDir（Drop 时删除临时目录）+ Guarded<T>（Deref 转发，把目录生命周期绑到被测对象上）
         ├── core/
@@ -208,6 +208,7 @@ Hinina/
         │   ├── frontend_log.rs           # 前端日志落 tracing（frontend_log 命令的全部收敛与落盘：级别/scope 白名单、消息 2000 字符截断、64KiB/60s 滚动窗口字节预算——防渲染循环刷满日志且后续窗口恢复真实错误预算；安全口径沿 plugin_diagnostics，无载荷参数）
         │   ├── text.rs                   # 按字符截断共享工具（truncate_ellipsis：超长加 …；http 错误摘录 / hydro 响应预览 / frontend_log 三处同形态收敛于此）
         │   ├── startup_dialog.rs         # 启动期致命错误对话框（panic 钩子的 UI 出口）：main 装钩子后 arm、RunEvent::Ready 时 mark_started；启动未完成的主线程 panic 在崩溃记录落盘后弹一次 MessageBoxW（三处 expect + Tauri 窗口/WebView2 创建失败），写入成功才展示崩溃路径；独立线程跑模态消息泵避免重入事件循环；测试不 arm、非 Windows no-op
+        │   ├── single_instance.rs        # 单实例约束（tauri-plugin-single-instance 2.4.5，**Builder 链第一个注册的插件**）：第二实例在插件初始化阶段即被识别退出（早于 setup，不建 AppContext/不开日志），第一实例回调聚焦（必要时还原）已有主窗口；回调绝不 panic（会经钩子弹启动失败框）；dev/release 同 identifier 共享互斥体；无 npm 侧/capability；无单测（mock runtime 令本机测试二进制启动即崩 0xc0000139，取证见模块文档），行为由双开验证
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
         │   ├── fs_config_repo.rs         # FsConfigRepository（阶段 2 完成）
@@ -519,7 +520,7 @@ src/
 - **三类消费者、一条事件流**：`Tauri 前端桥`（emit 到 webview，仅刷新触发）、`审计`（只读落日志）、`PluginHost`（→ `PluginEvent`）。内部 Service **不订阅任何事件**（旧实现的同步订阅表与延迟线程已删除 —— 它同时承担「事实通知」与「必须完成的核心动作」两种语义，导致 Token 轮换、OJ 切换、配置热生效三处出现隐式同步依赖）。
 - **事件载荷约束**：只放 ID / 修订号 / 状态摘要。禁止出现 Token、密码、完整 Session、认证头、源代码、内部文件路径、完整领域实体、内部缓存对象、未脱敏用户实体、内部错误栈。大数据由消费者收到事件后经 Service / IPC 查询。
 - **插件系统**：当前提供最小可运行的外围 JS 宿主（QuickJS）与文档侧参考业务插件（首次 AC 气球派发，doc/modules/src-tauri/plugin/sdk/examples/balloon，不构建进应用）。插件只能访问 `plugin/api/`，禁止直接调用内部 Service；插件事件经 `PluginEventAdapter` 白名单 + 脱敏 + 版本化（`PluginEventEnvelope{version,sequence,occurredAt,event}`）后投递，插件**不得**依赖 `CoreEvent` / 内部 Service / 领域实体 / `broadcast::Receiver`。设计、契约与路线图见 [doc/plugin/](plugin/README.md)
-- **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。唯一的插件是 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为它的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**新增插件时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
+- **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。注册的插件有两个：`tauri-plugin-single-instance`（单实例约束，**第一个注册**；纯 Rust 侧无 JS API——无 npm 包、无 capability，不适用 npm 对齐要求）与 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为 dialog 的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**带 JS API 的插件新增时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **依赖卫生：直接依赖必须被真正引用；不审批依赖的安装脚本**。`package.json` 的 `dependencies` 只放代码里实际 import 的包（曾出现 `approve` / `esbuild` / `vue-demi` 三个零引用的直接依赖 —— 其中 `esbuild` 还与 vite 嵌套的版本重复安装）。另外**刻意不写 `allowScripts`**：它是 npm 11.18 起的脚本审批字段，写上等于允许依赖的 postinstall 在每次安装时执行（供应链面）。实测不审批无影响：`vue-demi` 发布的默认就是 Vue 3 版（`isVue3 = true`，postinstall 只在检测到 Vue 2 时才切换），`esbuild` 的 postinstall 只是 optional platform 包的兜底。代价是 `npm install` 会提示「N packages have install scripts not yet covered by allowScripts」—— **这是预期的**，不要为消除提示而审批
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（`sessionGuard` 会话失效兜底 + `globalErrorGuard` 全局错误转发）—— 前者需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）

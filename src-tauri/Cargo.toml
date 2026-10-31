@@ -38,6 +38,15 @@ ipnet = "2"
 ip_network = "0.4"
 tokio-util = { version = "0.7", features = ["rt"] }
 tauri-plugin-dialog = "2.7.3"
+# 单实例约束：同一次只允许运行一个应用实例；重复启动时新进程退出并聚焦
+# 已有窗口。纯 Rust 侧插件 —— 无 JS API、无 npm 包、无 capability 声明
+# （区别于 dialog 的「npm 包与 Rust crate 对齐」要求，本插件无 npm 侧）。
+# 官方要求它**第一个注册**（检测须早于其它插件初始化，见 main.rs Builder
+# 链首位）。刻意 **=2.4.5 精确锁定（非 caret）**：2.5.x 起要求 tauri ^2.12，
+# caret 范围下任何 `cargo update` 都会静默挑到 2.5.5 并连带升级
+# tauri/tao/wry 整个运行栈（实测 42 包）——正是要避免的；等下次 tauri
+# 升级时一起抬。3.0.0-alpha 是 Tauri v3 线，不适用。
+tauri-plugin-single-instance = "=2.4.5"
 
 # `infra::console` 的 `--console` 启动参数：release GUI 构建重新附加调试控制台。
 # 只在 Windows 目标编译；API 用途与签名取证自 windows-sys 0.59 源码

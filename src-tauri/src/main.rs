@@ -222,9 +222,12 @@ fn main() {
         .unwrap_or_else(|error| panic!("无法创建后台运行时：{error}"));
 
     let tauri_app = tauri::Builder::default()
-        // 目录选择器（设置页「数据目录」）。本项目此前不注册任何 Tauri 插件
-        // （fs/http 的依赖与 capability 存在但从未注册，全部 I/O 都走 Rust），
-        // 故这里是**第一个真正注册的插件**。
+        // 单实例约束：同一次只允许运行一个实例，重复启动退出并聚焦已有窗口。
+        // 官方要求**第一个注册**（检测须早于其它插件初始化）；第二实例在此
+        // 阶段即退出，不进 setup，见 infra/single_instance。
+        .plugin(hinina_lib::infra::single_instance::init())
+        // 目录选择器（设置页「数据目录」）。本项目不注册 tauri-plugin-fs / -http
+        // （fs/http 的依赖与 capability 存在但从未注册，全部 I/O 都走 Rust）。
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             // AppContext 必须在这里初始化而不是 main()：只有 setup 能拿到 AppHandle，
