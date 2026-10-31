@@ -46,9 +46,17 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
             → authStore.invalidateSession(SESSION_INVALID_MESSAGE)
                  （复用 logout 清理链路：后端尽力清理 + 本地认证态 + 领域状态）
             → 当前路由 requiresAuth 时 replace 到登录页
+                 （唯一例外：`--settings` 管理方钥匙进程的设置页——清理照旧、
+                  **留在原地**。踢回登录页等于重新锁死：firstNavigation 已消费、
+                  登录页没有返回设置页的入口；判据 = launchFlags 快照 + 路由名）
 ```
 
 设计要点：
+
+- **钥匙旁路（评审四）**：`systemService.launchFlags.value.settings && currentRoute === 'Settings'`
+  时跳过登录重定向，其余路由不受旁路影响（钥匙模式下比赛页 401 照常回登录页）。
+  最小壳（ContestLayout 的 bareShell）随之接管——其判据同样不含 `sessionResolved`
+  （invalidateSession 会把它复位为 false，而此刻正是最小壳的形态）。
 
 - **依赖倒置**：Bridge 层只回调注入的观察者，不 import store/router；装配关系集中在组合根，
   避免"底层反向依赖上层"的循环依赖（`authStore → stores/session → 各领域 store` 仍为单向）。

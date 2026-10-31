@@ -1,6 +1,7 @@
 import type { Router } from 'vue-router'
 import { setIpcErrorObserver } from '@/bridge'
 import type { IpcError } from '@/bridge'
+import { systemService } from '@/services/system.service'
 import { SESSION_INVALID_MESSAGE, useAuthStore } from '@/stores/authStore'
 import { createLogger } from '@/utils/logger'
 
@@ -43,8 +44,14 @@ async function handleAuthFailure(error: IpcError, router: Router): Promise<void>
   try {
     log.warn(`${error.cmd} 返回认证错误，判定会话失效: ${error.message}`)
     await auth.invalidateSession(SESSION_INVALID_MESSAGE)
-    // 仅当停留在受保护页面时需要跳转；登录页本身就是失效后的落点
-    if (router.currentRoute.value.meta.requiresAuth) {
+    // 仅当停留在受保护页面时需要跳转；登录页本身就是失效后的落点。
+    // 例外：`--settings`（管理方钥匙）进程的设置页——清理会话但留在原地。
+    // 那是钥匙存在的全部意义（修连接配置）：踢回登录页等于重新锁死
+    //（firstNavigation 已消费、登录页没有返回设置页的入口，评审四 P2-1）。
+    const onKeyedSettings =
+      systemService.launchFlags.value.settings &&
+      router.currentRoute.value.name === 'Settings'
+    if (!onKeyedSettings && router.currentRoute.value.meta.requiresAuth) {
       await router.replace({ name: 'Login' })
     }
   } finally {

@@ -136,9 +136,9 @@ describe('--settings 无会话最小壳', () => {
   it('无会话且当前路由是设置页：渲染最小壳，不出顶栏/状态条，不发起认证拉取，返回登录可用', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    // 钥匙启动 + 会话已判定但不存在（user=null）+ 当前在设置路由：--settings 直落的外壳形态
+    // 钥匙启动 + 无会话 + 设置路由。刻意不设置 sessionResolved：bareShell 不读它
+    //（评审四 P2-1）——会话失效清理会把它复位为 false，最小壳必须照常接管
     mocks.launchFlags.value = { settings: true }
-    useAuthStore().sessionResolved = true
     mocks.routeName.value = 'Settings'
     app = createApp(ContestLayout)
     app.use(pinia)
@@ -220,5 +220,50 @@ describe('--settings 无会话最小壳', () => {
     expect(host.textContent).not.toContain('Hinina 设置')
     expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
     expect(host.querySelector('footer')).toBeTruthy()
+  })
+
+  it('评审四 P2-2：最小壳下保留的已结束简报不触发赛程跳转', async () => {
+    // 钥匙 + 无会话 + 设置路由，且登出清理只清会话部分（clearSessionData 保留
+    // 匿名简报）：若阶段 watcher 不看 bareShell，「已结束」简报会在 2 秒后把
+    // 维护者从设置页踢回登录页（评审四 P2-2 复现路径）
+    vi.useFakeTimers()
+    const now = Math.floor(Date.now() / 1000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const store = useContestStore()
+    store.brief = { ...schedule, startTime: now - 7_200, endTime: now - 3_600 }
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).toContain('Hinina 设置')
+    await vi.advanceTimersByTimeAsync(2_500)
+    expect(mocks.replace).not.toHaveBeenCalled() // 已结束简报不得踢出最小壳
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeTruthy()
+    vi.useRealTimers()
+  })
+
+  it('评审四 P2-2：最小壳下保留的未开始简报不触发立即跳转', async () => {
+    vi.useFakeTimers()
+    const now = Math.floor(Date.now() / 1000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const store = useContestStore()
+    store.brief = { ...schedule, startTime: now + 3_600, endTime: now + 14_400 }
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).toContain('Hinina 设置')
+    expect(mocks.replace).not.toHaveBeenCalled() // upcoming 的立即跳转被最小壳挡下
+    vi.useRealTimers()
   })
 })
