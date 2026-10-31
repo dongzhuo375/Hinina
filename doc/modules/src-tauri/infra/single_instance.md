@@ -13,7 +13,7 @@
 
 ## 直接依赖
 
-- `tauri-plugin-single-instance 2.4.5`（版本策略见 Cargo.toml 注释：2.5.x 起要求 tauri ^2.12，会连带升级 tauri/tao/wry 整个运行栈，等下次 tauri 升级一起抬；3.0.0-alpha 是 Tauri v3 线不适用。**纯 Rust 侧插件**：无 JS API、无 npm 包、无 capability 声明，不涉 dialog 那条的「npm 包与 Rust crate 对齐」要求）
+- `tauri-plugin-single-instance =2.4.5`（**精确锁定，非 caret**——2.5.x 起要求 tauri ^2.12，caret 下任何 `cargo update` 都会静默连带升级 tauri/tao/wry 整个运行栈，等下次 tauri 升级一起抬；版本策略详见 Cargo.toml 注释。3.0.0-alpha 是 Tauri v3 线不适用。**纯 Rust 侧插件**：无 JS API、无 npm 包、无 capability 声明，不涉 dialog 那条的「npm 包与 Rust crate 对齐」要求）
 - `tauri::Manager`（`get_webview_window`；句柄操作 `is_minimized` / `unminimize` / `set_focus`）
 
 ## 被依赖
