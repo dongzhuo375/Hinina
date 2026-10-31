@@ -11,7 +11,9 @@ export type FrontendLogLevel = 'debug' | 'info' | 'warn' | 'error'
  * 四类全局错误送进与 Rust panic 同一份日志文件。
  *
  * 安全约束与全链一致：只传 level / scope / message 三个标量，**不传 payload**；
- * 长度与白名单由 Rust 端收敛（scope 白名单、消息截断），前端不重复实现。
+ * 分工：scope 白名单、控制字符剥离与最终长度上限都在 Rust 端收敛；前端的
+ * 2000 字符预截断不是重复实现，是 **IPC 载荷大小预算** —— 避免把超大 payload
+ * （如被序列化进错误消息的对象）整段送过 IPC。
  *
  * 失败语义：返回的 Promise 可能拒绝（后端不可用、日志被 `RUST_LOG` 关闭不会导致
  * 失败但会静默）。调用方（全局守卫）必须吞掉拒绝 —— 转发是尽力而为，绝不允许

@@ -4,7 +4,7 @@
 
 ## 职责
 
-前端世界通往持久化日志的全部收敛与落盘逻辑：`commands/log_cmd.rs` 的 `frontend_log` 是薄转发，本模块完成「白名单收敛 → 会话级字节预算 → tracing 落盘」。前端守卫（`guards/globalErrorGuard`）把 Vue 渲染、window 未捕获异常与资源加载、未处理的 Promise 拒绝、路由错误四类错误送进来 —— panic 钩子的前端半边。
+前端世界通往持久化日志的全部收敛与落盘逻辑：`commands/log_cmd.rs` 的 `frontend_log` 是薄转发，本模块完成「白名单收敛 → 滚动窗口字节预算 → tracing 落盘」。前端守卫（`guards/globalErrorGuard`）把 Vue 渲染、window 未捕获异常与资源加载、未处理的 Promise 拒绝、路由错误四类错误送进来 —— panic 钩子的前端半边。
 
 ## 核心类型/函数
 

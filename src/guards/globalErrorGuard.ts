@@ -31,7 +31,7 @@ const DEDUP_TABLE_MAX = 256
  * 设计约束：
  * - **守卫自身绝不抛错**：所有钩子体包 try/catch；`forward` 抛错同样被吞
  *   （报错的通道不允许自己成为新的错误源）。
- * - **限频去重**：同签名（scope + 消息前 200 字符）1 秒内只转发一次。
+ * - **限频去重**：同签名（scope + 完整归一化消息，截前缀会误并同前缀不同后缀的错误）1 秒内只转发一次。
  * - **不 `preventDefault`** unhandledrejection：默认的 console 输出保留，
  *   DevTools 现场排障不受影响；本守卫是补一份持久化，不是接管输出。
  * - 依赖倒置同 `sessionGuard`：本模块不感知 bridge 实现与 Rust，转发函数注入。
@@ -158,7 +158,10 @@ function normalize(error: unknown, detail?: string): string {
   }
   if (message.length === 0) message = '<empty error>'
   const suffix = detail ? ` (${detail})` : ''
-  const room = MESSAGE_MAX_CHARS - suffix.length
+  // -1 为省略号预留：truncateByChars 截断时会追加一个字符，不预留则总长
+  // 变成 2001，Rust 端再截一次会把后缀末字符切掉并追加第二个省略号
+  //（长栈错误 + 环节后缀必然命中，评审复现 len=2001）
+  const room = MESSAGE_MAX_CHARS - suffix.length - 1
   const body = truncateByChars(message, room)
   return `${body}${suffix}`
 }
@@ -183,12 +186,15 @@ function truncateByChars(text: string, max: number): string {
 }
 
 /// 从资源地址提取文件名：URL 解析取 pathname 末段（查询串/fragment 里的签名
-/// 令牌不进日志）；相对地址或解析失败按分隔符取末段兜底。
+/// 令牌不进日志）；不可解析的地址先剥掉 `?`/`#` 再取 `/` 末段兜底 —— 直接对
+/// 原串按 `[/?#]` 切会返回查询串本身（`//?token=SECRET` → `token=SECRET`），
+/// 与「令牌不进日志」相反（评审抓出）。
 function fileNameOf(raw: unknown): string {
   if (typeof raw !== 'string' || raw.length === 0) return 'unknown'
   try {
     return new URL(raw).pathname.split('/').pop() || 'unknown'
   } catch {
-    return raw.split(/[/?#]/).pop() || 'unknown'
+    const withoutQuery = raw.split(/[?#]/)[0] ?? raw
+    return withoutQuery.split('/').pop() || 'unknown'
   }
 }

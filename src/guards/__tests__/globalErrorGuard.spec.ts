@@ -113,11 +113,22 @@ describe('installGlobalErrorGuard', () => {
     expect(calls[0]?.message).toContain('at ') // 至少一帧
   })
 
+  it('归一化总长（含省略号与环节后缀）不超过 2000 字符 —— 长栈 + 后缀必命中', () => {
+    const { app } = setup()
+
+    // 长栈错误 + 环节后缀：截断补省略号时若不为后缀预留 1 字符，总长会到 2001
+    app.config.errorHandler!(new Error('x'.repeat(3000)), null, 'setup function')
+
+    expect(calls[0]?.message.length).toBeLessThanOrEqual(2000)
+    expect(calls[0]?.message.endsWith('(vue:setup function)')).toBe(true) // 后缀完整
+  })
+
   it('按码点截断：边界处的 emoji 不产生孤立代理项（serde_json 拒收即整条丢失）', () => {
     setup()
 
-    // 1999 个 a + 😀（2 码元）+ 10 个 b：码元截断会切在 😀 中间
-    emitRejection(`${'a'.repeat(1999)}😀${'b'.repeat(10)}`)
+    // 码点计 2021 > 1999（2000 上限为省略号预留 1）：截到 1999 码点，
+    // 😀（第 1991 码点）必须完整存活；UTF-16 码元 slice 会切在 😀 中间
+    emitRejection(`${'a'.repeat(1990)}😀${'b'.repeat(30)}`)
 
     expect(calls[0]?.message).toContain('😀')
   })
@@ -180,15 +191,17 @@ describe('installGlobalErrorGuard', () => {
     expect(calls[0]?.message).not.toContain('http')
   })
 
-  it('相对地址的资源错误取末段文件名（URL 解析失败按分隔符兜底）', () => {
+  it('不可解析的 src 走兜底分支：先剥查询串再取末段（令牌不进日志）', () => {
     setup()
 
-    const script = document.createElement('script')
-    script.setAttribute('src', 'assets/chunk.abc123.js')
-    document.body.appendChild(script)
-    script.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
+    // 伪造 target 携带 URL 解析必然失败的 src（直接对原串按 [/?#] 切会返回
+    // 查询串本身，泄漏令牌 —— 评审抓出）；DOM 的 .src 属性总会被解析成绝对
+    // URL，兜底分支只能这样经公开路径触达
+    const fake = { src: '//?token=SECRET' }
+    emitWindowError({ target: fake as unknown as EventTarget })
 
-    expect(calls[0]?.message).toBe('资源加载失败: <script> chunk.abc123.js')
+    expect(calls[0]?.message).toBe('资源加载失败: <unknown> unknown')
+    expect(calls[0]?.message).not.toContain('SECRET')
   })
 
   it('同签名错误 1 秒内只转发一次；不同签名互不影响', () => {

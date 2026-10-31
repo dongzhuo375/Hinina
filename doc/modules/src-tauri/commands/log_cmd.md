@@ -4,7 +4,7 @@
 
 ## 职责
 
-承接前端全局错误转发的唯一 IPC 入口：`frontend_log` 命令把前端世界的错误（Vue 渲染、window 未捕获异常与资源加载、未处理的 Promise 拒绝、路由错误）写进与 Rust panic 同一份 `logs/hinina.log` —— panic 钩子的前端半边。**薄转发**（CLAUDE.md：commands 保持轻量、委托底层）：收敛（级别/scope 白名单、消息截断与控制字符剥离）、会话级字节预算与 tracing 落盘全部在 `infra/frontend_log.rs`，本命令一行委托。
+承接前端全局错误转发的唯一 IPC 入口：`frontend_log` 命令把前端世界的错误（Vue 渲染、window 未捕获异常与资源加载、未处理的 Promise 拒绝、路由错误）写进与 Rust panic 同一份 `logs/hinina.log` —— panic 钩子的前端半边。**薄转发**（CLAUDE.md：commands 保持轻量、委托底层）：收敛（级别/scope 白名单、消息截断与控制字符剥离）、滚动窗口字节预算与 tracing 落盘全部在 `infra/frontend_log.rs`，本命令一行委托。
 
 ## 核心类型/函数
 

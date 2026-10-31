@@ -24,7 +24,7 @@
 
 ## 逻辑流程
 
-`forwardFrontendLog(level, scope, message)` → `ipcInvoke('frontend_log', { level, scope, message })` → Rust `commands/log_cmd.rs` 白名单收敛 → tracing（`target: "frontend"`）。安全约束与全链一致：只传三个标量，**不传 payload**（密码、页面内容从一开始就不进入此通道）；长度与字符白名单由 Rust 端收敛，前端不重复实现。
+`forwardFrontendLog(level, scope, message)` → `ipcInvoke('frontend_log', { level, scope, message })` → Rust `commands/log_cmd.rs` 白名单收敛 → tracing（`target: "frontend"`）。安全约束与全链一致：只传三个标量，**不传 payload**（密码、页面内容从一开始就不进入此通道）。分工：scope 白名单、控制字符剥离与最终长度上限在 Rust 端收敛；前端的 2000 字符预截断不是重复实现，是 **IPC 载荷大小预算**（见 `guards/globalErrorGuard.md`）。
 
 ## 测试
 
