@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, defineComponent, h, type App } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { installGlobalErrorGuard } from '@/guards/globalErrorGuard'
+import { IpcError } from '@/bridge'
 import type { FrontendLogLevel } from '@/bridge/diagnostics.bridge'
 
 type ForwardCall = { level: FrontendLogLevel; scope: string; message: string }
@@ -148,10 +149,12 @@ describe('installGlobalErrorGuard', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('IpcError（cmd+message 鸭子识别）归一为 ipc:{cmd}: message', () => {
+  it('IpcError 归一为 ipc:{cmd}: message（须先于 instanceof Error 判定，否则被 stack 分支吞掉）', () => {
     setup()
 
-    emitRejection({ cmd: 'list_contests', message: '登录失败' })
+    // 真实类型：IpcError extends Error —— 用实例而非鸭子对象，
+    // 锁定「IpcError 判定先于 Error」的顺序（鸭子对象测不出这个回归）
+    emitRejection(new IpcError('list_contests', '登录失败', 'Auth'))
 
     expect(calls[0]?.message).toBe('ipc:list_contests: 登录失败')
   })

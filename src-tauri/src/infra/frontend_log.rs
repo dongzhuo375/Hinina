@@ -54,12 +54,17 @@ pub(crate) fn emit(level: &str, scope: &str, message: &str) {
     let message = sanitize_message(message);
     match consume_budget(message.len() as u64) {
         BudgetDecision::Allow => {}
-        BudgetDecision::Drop { first: true } => tracing::warn!(
-            target: "frontend",
-            budget_bytes = BUDGET_WINDOW_BYTES,
-            budget_window_secs = BUDGET_WINDOW_SECS,
-            "前端日志预算已用尽（本窗口内后续消息丢弃，下一窗口恢复）"
-        ),
+        BudgetDecision::Drop { first: true } => {
+            // 本窗口首次超限：只发那一行状态迁移告警，**消息本身照常丢弃**
+            //（缺 return 会把首条超预算消息泄漏进日志，评审抓出）
+            tracing::warn!(
+                target: "frontend",
+                budget_bytes = BUDGET_WINDOW_BYTES,
+                budget_window_secs = BUDGET_WINDOW_SECS,
+                "前端日志预算已用尽（本窗口内后续消息丢弃，下一窗口恢复）"
+            );
+            return;
+        }
         BudgetDecision::Drop { first: false } => return,
     }
     match sanitize_level(level) {

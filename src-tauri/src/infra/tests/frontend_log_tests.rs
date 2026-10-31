@@ -52,17 +52,19 @@ fn message_strips_control_chars_but_keeps_stack_shape() {
     assert_eq!(sanitize_message("line1\nline2\tend"), "line1\nline2\tend");
 }
 
-/// 滚动窗口预算：记账、丢弃计数与首丢弃标记、窗口滚动恢复。
-/// 预算静态量是进程级单例 —— 全部预算断言收进一个用例串行执行，
-/// 不与并行测试争状态（sanitize 用例不触碰预算）。
+/// 滚动窗口预算全生命周期：记账、丢弃计数与首丢弃标记、窗口滚动恢复、过期边界。
+///
+/// **全部预算断言必须收进这一个用例**：预算静态量是进程级单例，而 Rust 测试
+/// 在同一二进制内**并行**执行 —— 两个用例各自 set→consume→snapshot 会互相
+/// 踩状态（实测约 4.7% 失败率的并行竞态，评审抓出）。用例内部的断言天然串行。
 #[test]
-fn budget_window_accounts_resets_and_counts_drops() {
-    // 新窗口：放行并按消息字节数记账
+fn budget_window_lifecycle() {
+    // ── 新窗口：放行并按消息字节数记账 ──
     set_budget_for_tests(0, 0, 0);
     assert!(matches!(consume_budget(10), BudgetDecision::Allow));
     assert_eq!(budget_snapshot_for_tests(), (10, 0));
 
-    // 窗口已满（新窗口，seconds_ago=0 不滚动）：丢弃，首次丢弃带 first 标记
+    // ── 窗口已满（seconds_ago=0 不滚动）：丢弃，首丢弃带 first 标记 ──
     set_budget_for_tests(0, BUDGET_WINDOW_BYTES, 0);
     assert!(matches!(
         consume_budget(1),
@@ -75,25 +77,20 @@ fn budget_window_accounts_resets_and_counts_drops() {
     ));
     assert_eq!(budget_snapshot_for_tests().1, 2);
 
-    // 窗口滚动（起点已过期 ≥ 60s）：记账与丢弃计数清零，预算恢复
+    // ── 窗口滚动（起点已过期 ≥ 60s）：记账与丢弃计数清零，预算恢复 ──
     set_budget_for_tests(BUDGET_WINDOW_SECS, BUDGET_WINDOW_BYTES, 5);
     assert!(matches!(consume_budget(10), BudgetDecision::Allow));
     assert_eq!(budget_snapshot_for_tests(), (10, 0));
 
-    // 收尾恢复新窗口（进程级，测试运行器共享静态量）
-    set_budget_for_tests(0, 0, 0);
-}
-
-/// 窗口边界：恰好差 1 秒不过期（不滚动、沿用记账），恰好到 60 秒过期。
-#[test]
-fn budget_window_expiry_boundary() {
-    // 59 秒前开始的窗口：未过期，沿用记账
+    // ── 过期边界：59 秒未过期（沿用记账），60 秒过期（滚动清账）──
     set_budget_for_tests(BUDGET_WINDOW_SECS - 1, 100, 0);
     assert!(matches!(consume_budget(50), BudgetDecision::Allow));
     assert_eq!(budget_snapshot_for_tests(), (150, 0));
 
-    // 60 秒前开始的窗口：过期，滚动后放行且清账
     set_budget_for_tests(BUDGET_WINDOW_SECS, 100, 3);
     assert!(matches!(consume_budget(50), BudgetDecision::Allow));
     assert_eq!(budget_snapshot_for_tests(), (50, 0));
+
+    // 收尾恢复新窗口（进程级，测试运行器共享静态量）
+    set_budget_for_tests(0, 0, 0);
 }

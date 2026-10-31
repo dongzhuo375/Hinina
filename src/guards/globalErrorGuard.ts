@@ -1,7 +1,7 @@
 import type { App } from 'vue'
 import type { Router } from 'vue-router'
 import type { FrontendLogLevel } from '@/bridge/diagnostics.bridge'
-import type { IpcError } from '@/bridge'
+import { IpcError } from '@/bridge'
 
 /// 全局错误转发函数：由组合根注入（桥到 Rust `frontend_log`）。
 export type FrontendLogForward = (level: FrontendLogLevel, scope: string, message: string) => void
@@ -110,8 +110,8 @@ export function installGlobalErrorGuard(
   // 事件派发在 window 自身（target 阶段），不受此参数影响。
   window.addEventListener('error', onWindowError, true)
 
-  // 无人接的 Promise 拒绝。IpcError 鸭子类型识别（cmd + message）→ `ipc:{cmd}` 前缀，
-  // 与 bridge 的单点日志互相印证。
+  // 无人接的 Promise 拒绝。IpcError（ipcInvoke 的统一错误类型）归一为
+  // `ipc:{cmd}` 前缀 —— 哪个命令失败是排障的第一线索，与 bridge 的单点日志互相印证。
   const onUnhandledRejection = (event: PromiseRejectionEvent): void => {
     report('promise', event.reason)
   }
@@ -133,21 +133,17 @@ export function installGlobalErrorGuard(
   }
 }
 
-/// 错误归一：Error → message + 截断后的 stack（Rust 端为保留换行/制表所做的
-/// 处理因此真正生效）；IpcError 鸭子识别 → `ipc:{cmd}`；空/null → 占位；其余
-/// String 化。统一按**码点**截断到与 Rust 端一致的上限（Rust 侧还会再兜底一次）。
+/// 错误归一：**IpcError 先于 Error 判定**（IpcError extends Error，只按
+/// instanceof Error 走会丢失 `ipc:{cmd}` 前缀 —— 归一化曾是死代码，评审抓出）
+/// → message + 截断后的 stack（Rust 端为保留换行/制表所做的处理因此真正生效）；
+/// 空/null → 占位；其余 String 化。统一按**码点**截断到与 Rust 端一致的上限
+/// （Rust 侧还会再兜底一次）。
 function normalize(error: unknown, detail?: string): string {
   let message: string
-  if (error instanceof Error) {
+  if (error instanceof IpcError) {
+    message = `ipc:${error.cmd}: ${error.message}`
+  } else if (error instanceof Error) {
     message = messageWithStack(error)
-  } else if (
-    error &&
-    typeof error === 'object' &&
-    typeof (error as IpcError).cmd === 'string' &&
-    typeof (error as IpcError).message === 'string'
-  ) {
-    const ipc = error as IpcError
-    message = `ipc:${ipc.cmd}: ${ipc.message}`
   } else if (typeof error === 'string' && error.length > 0) {
     message = error
   } else if (error === null || error === undefined) {
