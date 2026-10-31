@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import TopBar from '@/components/layout/TopBar.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
 import { useAnnouncementStore } from '@/stores/announcementStore'
@@ -10,6 +10,7 @@ import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import { useNowMs } from '@/composables/useNowMs'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const contestStore = useContestStore()
 const announcementStore = useAnnouncementStore()
@@ -19,11 +20,14 @@ const phase = computed(() => getContestPhase(
   getAuthoritativeSchedule(contestStore.contest, contestStore.brief),
   now.value,
 ))
-/// 无会话外壳：只有 `--settings`（管理方钥匙）会在无会话时进入本外壳（守卫豁免
-/// 设置路由）。此时退化为最小壳 —— 正常外壳的 bootstrap 会发起认证 IPC（无会话
-/// 必失败）、TopBar/StatusBar 的数据也全部依赖会话，一概不渲染。守卫在导航前
-/// 已完成 checkSession，故进入时该值已定。
-const sessionless = computed(() => auth.sessionResolved && !auth.isLoggedIn)
+/// 最小壳：仅「无会话 + 当前路由是设置页」时启用 —— 这条组合只有 `--settings`
+///（管理方钥匙）直落才会出现（守卫豁免设置路由；无会话时没有任何 UI 路径可达）。
+/// **必须同时看路由**：正常登出/会话失效只把 user 置空（sessionResolved 仍为
+/// true），若只判会话，比赛页外壳会在 replace(Login) 的异步守卫完成前闪成最小
+/// 壳、当前子视图重挂并发出注定失败的认证请求（评审抓出）。
+const bareShell = computed(
+  () => auth.sessionResolved && !auth.isLoggedIn && route.name === 'Settings',
+)
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
@@ -43,9 +47,9 @@ watch(phase, (value) => {
 
 /// 会话有效性已由路由守卫（meta.requiresAuth）保证；
 /// 外壳负责拉取一次比赛数据，TopBar / StatusBar 与各视图共享该状态。
-/// 无会话（--settings 最小壳）时跳过：不发起任何面向 OJ 的请求。
+/// 最小壳（--settings 直落设置页）时跳过：不发起任何面向 OJ 的请求。
 async function bootstrap(): Promise<void> {
-  if (sessionless.value) return
+  if (bareShell.value) return
   try {
     // whenLoaded 复用在途请求（P59 统一入口），子视图先触发加载时也走同一条链路
     await contestStore.whenLoaded()
@@ -90,9 +94,10 @@ function backToLogin(): void {
 
 <template>
   <div class="contest-theme relative flex h-full flex-col overflow-hidden bg-[var(--bg-body)]">
-    <!-- 最小壳：仅无会话（--settings）时渲染。自带拖动区 —— App 的全局标题栏在
-         matched 含 Contest 时不渲染，decorations=false 下窗口移动全靠它 -->
-    <template v-if="sessionless">
+    <!-- 最小壳：仅「无会话 + 设置路由」（--settings 直落）时渲染。自带拖动区 ——
+         App 的全局标题栏在 matched 含 Contest 时不渲染，decorations=false 下窗口
+         移动全靠它 -->
+    <template v-if="bareShell">
       <header
         data-tauri-drag-region
         class="flex h-10 shrink-0 select-none items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-card)] pl-4 pr-3"

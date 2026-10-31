@@ -13,8 +13,13 @@ const mocks = vi.hoisted(() => ({
   startLive: vi.fn(),
   stopLive: vi.fn(),
   loadConfiguredContest: vi.fn(),
+  // 当前路由名（最小壳判据的一部分）；默认非 Settings，模拟工作台子路由
+  routeName: { value: 'ProblemSet' as string | undefined },
 }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.replace }) }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ replace: mocks.replace }),
+  useRoute: () => ({ name: mocks.routeName.value }),
+}))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => mocks }))
 vi.mock('@/services/contest.service', () => ({ contestService: { loadConfiguredContest: mocks.loadConfiguredContest } }))
 vi.mock('@/components/layout/TopBar.vue', () => ({ default: { template: '<header />' } }))
@@ -123,11 +128,12 @@ describe('contest exit lifecycle', () => {
 })
 
 describe('--settings 无会话最小壳', () => {
-  it('无已解析会话时渲染最小壳：不出顶栏/状态条，不发起认证拉取，返回登录可用', async () => {
+  it('无会话且当前路由是设置页：渲染最小壳，不出顶栏/状态条，不发起认证拉取，返回登录可用', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    // 会话已判定但不存在（user=null）：--settings 直落设置页时的外壳形态
+    // 会话已判定但不存在（user=null）+ 当前在设置路由：--settings 直落的外壳形态
     useAuthStore().sessionResolved = true
+    mocks.routeName.value = 'Settings'
     app = createApp(ContestLayout)
     app.use(pinia)
     app.component('RouterView', { template: '<div>settings content</div>' })
@@ -137,7 +143,6 @@ describe('--settings 无会话最小壳', () => {
     expect(host.textContent).toContain('Hinina 设置')
     // 裸壳自带拖动区标题栏（decorations=false 下窗口移动全靠它）
     expect(host.querySelector('header[data-tauri-drag-region]')).toBeTruthy()
-    expect(host.querySelector('header')).toBeTruthy()
     // bootstrap 必须跳过：无会话时认证拉取只会失败
     expect(mocks.loadConfiguredContest).not.toHaveBeenCalled()
     expect(mocks.startLive).not.toHaveBeenCalled()
@@ -149,5 +154,24 @@ describe('--settings 无会话最小壳', () => {
     back!.click()
     await nextTick()
     expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
+  it('无会话但路由非设置页（正常登出过渡态）：保持正常外壳，不闪最小壳', async () => {
+    // 登出把 user 置空而 sessionResolved 仍为 true：若最小壳只判会话，比赛页
+    // 外壳会在 replace(Login) 完成前闪成「Hinina 设置」并重挂子视图（评审抓出）
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAuthStore().sessionResolved = true
+    mocks.routeName.value = 'ProblemSet'
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).not.toContain('Hinina 设置')
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
+    // 正常外壳的 TopBar / StatusBar 桩仍在
+    expect(host.querySelector('footer')).toBeTruthy()
   })
 })
