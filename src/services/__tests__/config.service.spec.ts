@@ -10,6 +10,9 @@ const { getConfig, updateConfig, reloadConfig, switchOj } = vi.hoisted(() => ({
 }))
 vi.mock('@/bridge/config.bridge', () => ({ getConfig, updateConfig, reloadConfig, switchOj }))
 
+const { isKeyed } = vi.hoisted(() => ({ isKeyed: vi.fn() }))
+vi.mock('@/services/system.service', () => ({ systemService: { isKeyed } }))
+
 import { configService } from '@/services/config.service'
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
@@ -41,6 +44,8 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // 默认普通启动（维护者层锁定 → maintainerLocked 推导为 true）
+  isKeyed.mockReturnValue(false)
   // 单例服务的进程内缓存必须逐用例清空，否则相互串扰
   configService.invalidate()
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -253,6 +258,24 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     getConfig.mockResolvedValue(makeConfig())
     await configService.getConfig()
     expect(getConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it('评审二十七：未显式传参时按钥匙模式推导 maintainerLocked（普通启动=true）', async () => {
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockResolvedValue(undefined)
+
+    // 设置页之外的保存入口（编辑器偏好 / 分栏比例）都不传第二参数
+    await configService.updateEditorPrefs({ fontSize: 18 })
+    expect(updateConfig).toHaveBeenCalledWith(expect.any(Object), true)
+
+    // 钥匙模式：维护者层可编辑，锁定语义关闭
+    isKeyed.mockReturnValue(true)
+    configService.invalidate()
+    getConfig.mockResolvedValue(makeConfig())
+    await configService.updateConfig((draft) => {
+      draft.layout.splitRatio = 0.5
+    })
+    expect(updateConfig).toHaveBeenLastCalledWith(expect.any(Object), false)
   })
 
   it('评审二十六 P2：维护者层锁定把 maintainerLocked 透传给 bridge', async () => {

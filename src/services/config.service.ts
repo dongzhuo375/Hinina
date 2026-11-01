@@ -1,5 +1,6 @@
 import type { AppConfig } from '@/types/config'
 import * as configBridge from '@/bridge/config.bridge'
+import { systemService } from '@/services/system.service'
 import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
 import {
   DEFAULT_EDITOR_FONT_SIZE,
@@ -217,7 +218,11 @@ export class ConfigService {
     const draft: AppConfig = structuredClone(current)
     mutate(draft)
     try {
-      await configBridge.updateConfig(draft, options.maintainerLocked ?? false)
+      // 默认值由「本次启动是否钥匙模式」推导（评审二十七）：设置页之外的保存
+      // （解题页编辑器偏好、分栏比例）同样必须让后端保住锁定字段——`false`
+      // 会让普通启动被当成「可写锁定层」，手改的非法值被校验/钳制
+      const maintainerLocked = options.maintainerLocked ?? !systemService.isKeyed()
+      await configBridge.updateConfig(draft, maintainerLocked)
     } finally {
       // 无论成败都失效缓存：失败时下次读取重新拉后端真值，避免缓存与磁盘漂移
       this.invalidate()
