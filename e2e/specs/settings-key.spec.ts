@@ -53,4 +53,23 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await expect(oj).toBeEnabled()
     await expect(page.getByText('登录参赛系统')).toBeHidden()
   })
+
+  test('评审六：钥匙 + 会话有效 + 已结束赛程——设置页无遮罩无 inert 且可交互', async ({ page }) => {
+    await installFakeTauri(page, {
+      user: { id: 'u1', username: 'maintainer', token: 't' },
+      launchFlags: { settings: true },
+      contestWindow: { startOffsetSecs: -7_200, endOffsetSecs: -3_600 },
+    })
+    await page.goto('/')
+
+    // 有会话：完整外壳（无最小壳标题），但赛程已结束——闸门的遮罩与 inert
+    // 不得锁死钥匙设置页（真实浏览器断言：无 [inert] 属性、无 alert）
+    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.locator('[role="alert"]')).toHaveCount(0)
+    await expect(page.locator('[inert]')).toHaveCount(0)
+    // 可交互实证：fill 走 Playwright 的 hit-target 检查，inert 子树里必然失败
+    const addr = page.getByRole('textbox', { name: /服务器地址/ })
+    await addr.fill('https://repaired.example')
+    await expect(addr).toHaveValue('https://repaired.example')
+  })
 })

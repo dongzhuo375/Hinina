@@ -112,9 +112,10 @@ function backToLogin(): void {
 
 <template>
   <div class="contest-theme relative flex h-full flex-col overflow-hidden bg-[var(--bg-body)]">
-    <!-- 最小壳：仅「无会话 + 设置路由」（--settings 直落）时渲染。自带拖动区 ——
-         App 的全局标题栏在 matched 含 Contest 时不渲染，decorations=false 下窗口
-         移动全靠它 -->
+    <!-- 顶栏按形态切换（最小壳的拖动区标题 App 全局标题栏在 matched 含 Contest 时
+         不渲染，decorations=false 下窗口移动全靠它），内容区（router-view）**两形态
+         共享同一实例**：最小壳↔完整外壳翻转（会话失效/登出）时不重挂设置视图，
+         未保存草稿得以保留（评审六） -->
     <template v-if="bareShell">
       <header
         data-tauri-drag-region
@@ -131,25 +132,20 @@ function backToLogin(): void {
           返回登录
         </button>
       </header>
-      <main class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    </template>
+    <TopBar v-else :navigation-disabled="contestGated" />
+    <div class="flex min-h-0 flex-1 overflow-hidden" :inert="contestGated">
+      <main class="workspace-main flex min-w-0 flex-1 flex-col overflow-hidden">
         <router-view />
       </main>
-    </template>
-    <template v-else>
-      <TopBar :navigation-disabled="contestGated" />
-      <div class="flex min-h-0 flex-1 overflow-hidden" :inert="contestGated">
-        <main class="workspace-main flex min-w-0 flex-1 flex-col overflow-hidden">
-          <router-view />
-        </main>
+    </div>
+    <StatusBar v-if="!bareShell" />
+    <div v-if="contestGated && phase === 'ended'" class="absolute inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
+      <div role="alert" class="max-w-sm border border-[var(--border-color)] bg-[var(--bg-body)] px-12 py-10 text-center shadow-[0_24px_64px_rgba(46,48,51,0.08)]">
+        <p class="eyebrow">CONTEST CLOSED</p>
+        <h1 class="mt-4 text-2xl font-semibold tracking-wide text-[var(--text-primary)]">比赛已结束</h1>
+        <p class="mt-4 text-sm leading-6 text-[var(--text-secondary)]">感谢参赛，即将返回登录入口。</p>
       </div>
-      <StatusBar />
-      <div v-if="contestGated && phase === 'ended'" class="absolute inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
-        <div role="alert" class="max-w-sm border border-[var(--border-color)] bg-[var(--bg-body)] px-12 py-10 text-center shadow-[0_24px_64px_rgba(46,48,51,0.08)]">
-          <p class="eyebrow">CONTEST CLOSED</p>
-          <h1 class="mt-4 text-2xl font-semibold tracking-wide text-[var(--text-primary)]">比赛已结束</h1>
-          <p class="mt-4 text-sm leading-6 text-[var(--text-secondary)]">感谢参赛，即将返回登录入口。</p>
-        </div>
-      </div>
-    </template>
+    </div>
   </div>
 </template>

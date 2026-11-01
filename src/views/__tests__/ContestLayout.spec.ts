@@ -357,4 +357,30 @@ describe('--settings 无会话最小壳', () => {
     expect(mocks.replace).not.toHaveBeenCalled() // upcoming 的立即跳转被最小壳挡下
     vi.useRealTimers()
   })
+
+  it('评审六：最小壳↔完整外壳翻转不重挂内容区（未保存草稿得以保留）', async () => {
+    // 顶栏/状态条按形态切换，但 router-view 两形态共享同一实例：会话失效翻转
+    // bareShell 时，设置视图的 DOM 节点必须是同一个——重挂会丢未保存草稿
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const auth = useAuthStore()
+    auth.sessionResolved = true
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div data-test="rv">settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+    const before = host.querySelector('[data-test="rv"]')
+    expect(before).toBeTruthy()
+
+    // 会话失效（user 置空）触发 bareShell 翻转：chrome 换、内容区不换
+    auth.user = null
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).toContain('Hinina 设置') // 最小壳 chrome 已接管
+    expect(host.querySelector('[data-test="rv"]')).toBe(before) // 同一 DOM 节点
+  })
 })

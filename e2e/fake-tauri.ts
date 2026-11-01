@@ -39,6 +39,8 @@ export interface FakeOptions {
   launchFlags?: LaunchFlags
   /** 注入后 load_configured_contest 恒以此失败（过期会话旅程：Auth → sessionGuard 旁路） */
   failConfiguredContest?: { variant: string; message: string }
+  /** 比赛/简报时间窗偏移（秒，相对注入时刻）；缺省 -3600 / +8h（进行中），负 endOffset = 已结束 */
+  contestWindow?: { startOffsetSecs: number; endOffsetSecs: number }
 }
 
 /** 页面内 fake 控制面（经 window.__e2e 暴露） */
@@ -72,8 +74,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   const contest: Contest = {
     id: '1001',
     title: 'E2E 验证赛',
-    startTime: nowSecs - 3600,
-    endTime: nowSecs + 8 * 3600,
+    startTime: nowSecs + (options.contestWindow?.startOffsetSecs ?? -3_600),
+    endTime: nowSecs + (options.contestWindow?.endOffsetSecs ?? 8 * 3_600),
     description: '用于 Playwright E2E 的虚构比赛数据，不含真实比赛信息。',
     contestType: 0,
     status: 0,

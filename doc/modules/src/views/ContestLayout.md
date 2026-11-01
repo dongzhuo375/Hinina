@@ -65,9 +65,13 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
 
 模板：
   根 .contest-theme（启用赛场 CSS 令牌）
-  bareShell（最小壳分支：无会话 + 设置路由）：
-    header[data-tauri-drag-region]（「Hinina 设置」+「返回登录」按钮）
-    <main><router-view /></main>
+  bareShell（最小壳 chrome）：header[data-tauri-drag-region]（「Hinina 设置」+「返回登录」）
+  否则：TopBar（navigation-disabled=contestGated）
+  内容区两形态**共享同一 router-view 实例**（:inert="contestGated" 的容器 +
+  workspace-main）——最小壳↔完整外壳翻转（会话失效/登出）不重挂设置视图，
+  未保存草稿得以保留（评审六）
+  StatusBar 仅完整外壳渲染
+  contestGated 且 phase === 'ended' 时叠加覆盖层
   否则（正常外壳）：
   <TopBar :navigation-disabled="contestGated" />
   中间容器 :inert="contestGated"（禁点禁焦点，覆盖子视图）
@@ -115,6 +119,9 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
   防止在覆盖层下继续操作（提交、切题）造成「已结束还在提交」的错觉。三者统一由
   `contestGated`（= 非钥匙设置页 且 phase 为 ended/upcoming）驱动——**钥匙模式下
   设置页不受闸门锁死**（评审六：只短路跳转不修 inert，设置页照样不可用）。
+- **内容区跨形态共享实例（评审六）**：顶栏/状态条按形态切换，但 router-view 不进
+  分支——重挂设置视图会丢未保存草稿（维护者编辑中遇 401 翻转 bareShell 的场景）；
+  结构持久化由 spec 以 DOM 节点同一性锁定。
 - **jsdom 的 inert 反射怪癖（测试）**：`el.inert = false` 会留下 `inert="false"`
   属性（按 HTML 规范布尔属性「存在即生效」，真实浏览器里 Vue 对 false 是移除
   属性）——断言经 `contentInert` 判读（属性缺失或值为 "false" 都算未锁定）。
@@ -128,4 +135,4 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
 
 ## 测试
 
-`src/views/__tests__/ContestLayout.spec.ts`（jsdom，mock `useRouter` / `useRoute` / `announcementStore` / `contestService.loadConfiguredContest` / `systemService.launchFlags` 快照，stub 三个 layout 子组件，赛程 `startTime=900 / endTime=1002`）锁定：到点后出现 `role="alert"` 的结束卡片（父容器含 `top-10`）、存在 `[inert]`、`stopLive` 恰好一次、`replace` 未立即调用，2 秒后 `replace({ name: 'Login' })` 恰好一次；服务端 `status=1` 提前结束时同样处理；赛程被移到未来时立即 `replace(Login)` 且 `startLive` 未被调用；「旧 id 已结束 contest + 新 brief」以简报为准、不出覆盖层；brief 指向新比赛时 `loadConfiguredContest` 被调用一次且 `startLive` 用新 contestId；卸载后推进 5 秒 `replace` 未被调用且无残留定时器。最小壳用例（钥匙 + `user=null` 且**不设** `sessionResolved`，锁 bareShell 不读它）：渲染「Hinina 设置」拖动区标题与「返回登录」、不出 TopBar/StatusBar、`loadConfiguredContest` 与 `startLive` 均未被调用、点击返回登录 `replace(Login)`；普通启动（无钥匙）+ 设置路由/比赛子路由两种登出过渡态均保持正常外壳；保留的已结束/未开始简报在最小壳下不触发赛程跳转（评审四 P2-2）。
+`src/views/__tests__/ContestLayout.spec.ts`（jsdom，mock `useRouter` / `useRoute` / `announcementStore` / `contestService.loadConfiguredContest` / `systemService.launchFlags` 快照，stub 三个 layout 子组件，赛程 `startTime=900 / endTime=1002`）锁定：到点后出现 `role="alert"` 的结束卡片（父容器含 `top-10`）、存在 `[inert]`、`stopLive` 恰好一次、`replace` 未立即调用，2 秒后 `replace({ name: 'Login' })` 恰好一次；服务端 `status=1` 提前结束时同样处理；赛程被移到未来时立即 `replace(Login)` 且 `startLive` 未被调用；「旧 id 已结束 contest + 新 brief」以简报为准、不出覆盖层；brief 指向新比赛时 `loadConfiguredContest` 被调用一次且 `startLive` 用新 contestId；卸载后推进 5 秒 `replace` 未被调用且无残留定时器。最小壳用例（钥匙 + `user=null` 且**不设** `sessionResolved`，锁 bareShell 不读它）：渲染「Hinina 设置」拖动区标题与「返回登录」、不出 TopBar/StatusBar、`loadConfiguredContest` 与 `startLive` 均未被调用、点击返回登录 `replace(Login)`；普通启动（无钥匙）+ 设置路由/比赛子路由两种登出过渡态均保持正常外壳；保留的已结束/未开始简报在最小壳下不触发赛程跳转（评审四 P2-2）；最小壳↔完整外壳翻转时内容区 DOM 节点同一（评审六，草稿保留的结构锁定）。
