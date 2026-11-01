@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   switchOj: vi.fn(),
   resetSessionForOjSwitch: vi.fn(),
   routerReplace: vi.fn(),
+  // 启动标志响应式快照（systemService.launchFlags）：钥匙模式切换后留在设置页
+  launchFlags: { value: { settings: false } },
 }))
 
 vi.mock('@/services/config.service', () => ({
@@ -20,6 +22,9 @@ vi.mock('@/services/config.service', () => ({
     invalidate: mocks.invalidate,
     switchOj: mocks.switchOj,
   },
+}))
+vi.mock('@/services/system.service', () => ({
+  systemService: { launchFlags: mocks.launchFlags },
 }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.routerReplace }) }))
@@ -47,6 +52,8 @@ beforeEach(async () => {
   vi.resetAllMocks()
   vi.useFakeTimers()
   currentConfig = baseConfig()
+  // 默认正常模式（无 --settings）：切换成功照常回登录页；钥匙用例显式改写
+  mocks.launchFlags.value = { settings: false }
   mocks.getConfig.mockImplementation(async () => structuredClone(currentConfig))
   mocks.updateConfig.mockImplementation(async (mutator: (draft: AppConfig) => void) => {
     const draft = structuredClone(currentConfig)
@@ -189,6 +196,21 @@ describe('useSettingsForm', () => {
     expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
     expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
+  it('评审八 P2：钥匙模式切换成功后留在设置页（不导航），会话清理照旧', async () => {
+    // --settings 的核心修复动作就是「填新地址/切 OJ → 保存」——切换成功后
+    // 踢到登录页等于重新锁死；resetSessionForOjSwitch 照做，最小壳接管
+    //（内容区共享实例，草稿保留）
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    settings.form.activeOj = 'Hydro'
+    await settings.onSwitchOj()
+
+    expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
+    expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
+    expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
 
   it('新实例保存失败后，下一次普通保存不得沿用自动切换意图', async () => {

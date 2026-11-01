@@ -1,5 +1,5 @@
 import { expect, test } from '../fixtures'
-import { installFakeTauri } from '../fake-tauri'
+import { callCount, installFakeTauri } from '../fake-tauri'
 
 // --settings 管理方钥匙的**跨层旅程**：守卫直落 → 最小壳 → 维护者层解锁 →
 // 返回登录。各环节已被单测分别锁定（launch-redirect / ContestLayout /
@@ -18,9 +18,16 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await expect(back).toBeVisible()
     // 维护者层解锁：连接字段可编辑；选手层字段照常
     // （label 内含提示文本，可达名互相沾染 —— 一律用 role + 名字正则定位）
-    await expect(page.getByRole('combobox', { name: /当前 OJ/ })).toBeEnabled()
+    const oj = page.getByRole('combobox', { name: /当前 OJ/ })
+    await expect(oj).toBeEnabled()
     await expect(page.getByRole('textbox', { name: /比赛 ID \/ 引用/ })).toBeEnabled()
     await expect(page.getByRole('textbox', { name: /请求超时/ })).toBeEnabled()
+
+    // 评审八 P2：钥匙模式 OJ 切换成功后留在设置页（不踢回登录页，会话清理照旧）
+    await oj.selectOption('HOJ')
+    await expect.poll(async () => callCount(page, 'switch_oj')).toBeGreaterThanOrEqual(1)
+    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByText('Hinina 设置')).toBeVisible()
 
     // 旅程尾：返回登录 → 正常登录页
     await back.click()
@@ -90,6 +97,10 @@ test.describe('--settings 管理方钥匙旅程', () => {
     const addr = page.getByRole('textbox', { name: /服务器地址/ })
     await addr.fill('https://draft-kept.example')
     await expect(addr).toHaveValue('https://draft-kept.example')
+
+    // 评审八 P3 时序防伪绿：先断言**完整外壳专属标记**（StatusBar）仍在——
+    // 若 fill 已落在翻转之后，这里即刻红，而不是「全绿但没测到跨形态」
+    await expect(page.locator('footer')).toBeVisible()
 
     // bootstrap 的延迟 401 落地 → 会话失效 → 最小壳翻转（chrome 换、视图不换）
     await expect(page.getByText('Hinina 设置')).toBeVisible()

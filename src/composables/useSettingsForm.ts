@@ -2,6 +2,7 @@ import { computed, reactive, ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService } from '@/services/config.service'
+import { systemService } from '@/services/system.service'
 import { resetSessionForOjSwitch } from '@/stores/session'
 import { normalizeHojLanguage } from '@/utils/language'
 import { EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN, EDITOR_TAB_SIZES } from '@/utils/editor'
@@ -121,7 +122,13 @@ export function useSettingsForm() {
       await configService.switchOj(target)
       persistedActive.value = target
       resetSessionForOjSwitch()
-      void router.replace({ name: 'Login' })
+      // `--settings`（管理方钥匙）：切换成功**留在设置页**继续修配置——踢到
+      // 登录页等于重新锁死（firstNavigation 已消费、无 UI 回入口）。会话已由
+      // resetSessionForOjSwitch 清理，最小壳接管（内容区共享实例，草稿保留）。
+      // 第三处豁免导航源，与 sessionGuard/阶段闸门同理由（评审八 P2）。
+      if (!systemService.launchFlags.value.settings) {
+        void router.replace({ name: 'Login' })
+      }
       return true
     } catch (e) {
       switchError.value = errorMessage(e, '切换 OJ 失败')

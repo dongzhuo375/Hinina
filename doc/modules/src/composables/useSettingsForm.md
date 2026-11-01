@@ -18,15 +18,16 @@
 | `load` / `populate` | fn | 先 `configService.invalidate()` 再读取磁盘配置并回填表单和实例清单 |
 | `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示 |
 | `ojOptions` | computed | 实时下拉候选；实例清单与 persistedActive 为 controller 内部状态 |
-| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试 |
+| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）切换成功后留在设置页**（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2） |
 | `SETTINGS_INPUT` / `inputClass` | 常量/fn | 共享输入框基础样式与错误态拼接 |
 
 
 ## 直接依赖
 
 - `vue`（`reactive` / `ref` / `computed`）
-- `vue-router`（切换成功后 `replace(Login)`）
+- `vue-router`（普通模式切换成功后 `replace(Login)`；钥匙模式留在设置页）
 - `@/services/config.service`
+- `@/services/system.service`（`launchFlags` 快照 —— 钥匙模式判据）
 - `@/stores/session`（`resetSessionForOjSwitch`）
 - `@/composables/useTransientValue`（已保存提示）
 - `@/utils/language` / `editor` / `error` / `oj`

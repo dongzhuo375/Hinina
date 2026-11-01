@@ -221,7 +221,8 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
       id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {},
     })
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
-    expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
+    // 钥匙模式（评审八 P2）：切换成功后留在设置页——踢回登录页等于重新锁死
+    expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
 
   it('非法数字实时显示字段级错误，修正后消失', async () => {

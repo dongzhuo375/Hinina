@@ -53,13 +53,14 @@ bootstrap:
   └ 失败 → return（原因已由 store 写入 error，StatusBar 与各视图兜底）
   contestId 存在 且 phase === 'running' → announcementStore.startLive(contestId, () => contest.status === 1)
 
-watch([phase, bareShell], immediate):
-  bareShell → return（最小壳短路：撤销在途退出计时器；登出清理保留匿名 brief，
-               phase 可非 none，但赛程闸门不得把维护者从设置页踢走——评审四 P2-2）
+watch([phase, keyedSettings], immediate):
+  每次先清 exitTimer（避免 upcoming 之后又被旧的 ended 定时器踢走）
+  keyed → 评审四 P2-2 + 评审五：**跳转豁免，清理不豁免**
+          phase === 'ended' → announcementStore.stopLive()
+          （自然结束后公告请求会一直打，评审八 P2-1；upcoming 无轮询可停）
   upcoming → router.replace(Login)                  // 赛程被移到未来：立即回入口等待
   ended    → announcementStore.stopLive()
              2s 后 router.replace(Login)            // 保留会话与工作区，让离页保存链路落盘
-  两次分支前都先清 exitTimer（避免 upcoming 之后又被旧的 ended 定时器踢走）
 
 onUnmounted → disposed = true；清退出定时器；announcementStore.stopLive()（墙钟由 scope dispose 清理）
 
