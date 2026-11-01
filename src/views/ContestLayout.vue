@@ -47,11 +47,17 @@ let disposed = false
 watch([phase, keyedSettings], ([value, keyed]) => {
   if (exitTimer) clearTimeout(exitTimer)
   exitTimer = null
-  // 钥匙模式下正停在设置页（无论有无会话）不参与赛程闸门：登出清理保留的
-  // 匿名简报 / 已结束赛程都可能让 phase 非 none——跳回登录页会把钥匙场景
-  // 重新锁死（评审四 P2-2 + 评审五补齐有会话分支）；离开设置页时本监听
+  // 钥匙模式下正停在设置页（无论有无会话）不参与赛程闸门的**跳转**：登出清理
+  // 保留的匿名简报 / 已结束赛程都可能让 phase 非 none——跳回登录页会把钥匙
+  // 场景重新锁死（评审四 P2-2 + 评审五补齐有会话分支）；离开设置页时本监听
   // 重评，赛程闸门照常恢复。
-  if (keyed) return
+  // 但「ended 停公告轮询」是清理不是跳转，**不能被豁免吞掉**：进行中的比赛
+  // 自然结束（本地 endTime 到期、服务端 status 未变）后轮询若继续，公告请求
+  // 会一直打（评审八 P2-1）。upcoming 本就没有轮询要停。
+  if (keyed) {
+    if (value === 'ended') announcementStore.stopLive()
+    return
+  }
   if (value === 'upcoming') {
     void router.replace({ name: 'Login' })
   } else if (value === 'ended') {

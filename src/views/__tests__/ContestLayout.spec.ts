@@ -338,6 +338,41 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
+  it('评审八 P2-1：钥匙 + 有效会话 + 进行中比赛进设置页——自然结束停轮询但不跳转', async () => {
+    // bootstrap 启动公告轮询后，本地 endTime 到期（服务端 status 仍未变）：
+    // phase 进入 ended，watcher 的钥匙豁免只免「跳转」——ended 停轮询的清理
+    // 必须照常执行，否则公告请求会一直打（评审八 P2-1 复现路径）
+    vi.useFakeTimers()
+    vi.setSystemTime(900 * 1_000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const auth = useAuthStore()
+    auth.sessionResolved = true
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+    const store = useContestStore()
+    store.contest = { ...schedule } // startTime=900 / endTime=1002：此刻进行中
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    // bootstrap 启动了公告轮询
+    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+
+    // 本地 endTime 到期（服务端 status 未变）：ended → 停轮询 + 不跳转
+    //（赛程窗 900s–1002s：快进 120s 越过 endTime）
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(mocks.stopLive).toHaveBeenCalled()
+    expect(mocks.replace).not.toHaveBeenCalled()
+    // 仍停在设置页（完整外壳）
+    expect(host.querySelector('[data-tauri-drag-region]')).toBeNull()
+    expect(host.querySelector('footer')).toBeTruthy()
+    vi.useRealTimers()
+  })
+
   it('评审四 P2-2：最小壳下保留的未开始简报不触发立即跳转', async () => {
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)

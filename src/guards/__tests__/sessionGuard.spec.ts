@@ -150,6 +150,17 @@ describe('sessionGuard 并发会话失效', () => {
     expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
   })
 
+  it('评审八 P3：普通模式 + 设置路由——认证错误照常清理并跳转（旁路不得扩展到普通启动）', async () => {
+    mocks.logout.mockResolvedValue(undefined)
+    const { auth, observer } = install(true, true, { keyMode: false, routeName: 'Settings' })
+
+    observer(authError())
+    await settle()
+
+    expect(auth.user).toBeNull()
+    expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
   it('失效完成后的再次认证错误：已登出，直接短路', async () => {
     mocks.logout.mockResolvedValue(undefined)
     const { observer } = install(true)

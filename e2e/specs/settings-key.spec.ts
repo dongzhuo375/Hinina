@@ -63,16 +63,16 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await page.goto('/')
 
     // 有会话：完整外壳（无最小壳标题），但赛程已结束——闸门的遮罩与 inert
-    // 不得锁死钥匙设置页（真实浏览器断言：无 [inert] 属性、无 alert）
+    // 不得锁死钥匙设置页。先等赛程数据确已加载（StatusBar 连接态翻转），
+    // 再做遮罩/inert 断言——避免在 phase=none 的空窗期假绿（评审八 P2-2）
     await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByText('已连接比赛服务器')).toBeVisible()
     await expect(page.locator('[role="alert"]')).toHaveCount(0)
     await expect(page.locator('[inert]')).toHaveCount(0)
     // 可交互实证：fill 走 Playwright 的 hit-target 检查，inert 子树里必然失败
     const addr = page.getByRole('textbox', { name: /服务器地址/ })
     await addr.fill('https://repaired.example')
     await expect(addr).toHaveValue('https://repaired.example')
-    // 赛程数据确已加载（StatusBar 连接态翻转），inert/遮罩断言不是在空窗期碰巧通过
-    await expect(page.getByText('已连接比赛服务器')).toBeVisible()
   })
 
   test('评审七：钥匙 + 会话失效翻转外壳——未保存草稿跨形态保留', async ({ page }) => {

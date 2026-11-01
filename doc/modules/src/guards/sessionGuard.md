@@ -48,7 +48,8 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
             → 当前路由 requiresAuth 时 replace 到登录页
                  （唯一例外：`--settings` 管理方钥匙进程的设置页——清理照旧、
                   **留在原地**。踢回登录页等于重新锁死：firstNavigation 已消费、
-                  登录页没有返回设置页的入口；判据 = launchFlags 快照 + 路由名）
+                  登录页没有返回设置页的入口；判据 = launchFlags 快照 + 路由名。
+                  普通启动的设置页**不在豁免内**：认证错误照常清理并跳转）
 ```
 
 设计要点：
