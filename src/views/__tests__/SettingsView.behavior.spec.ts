@@ -51,7 +51,10 @@ vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest:
 vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMyStatus: mocks.invalidateMyStatus }) }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => ({ refresh: mocks.announcementRefresh }) }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.routerReplace }) }))
+vi.mock('vue-router', () => ({
+  // performSwitch 读 currentRoute 判断「是否仍在设置页」（评审九 P2-1）
+  useRouter: () => ({ replace: mocks.routerReplace, currentRoute: { value: { name: 'Settings' } } }),
+}))
 vi.mock('@/components/common/PageHeading.vue', () => ({ default: { template: '<header />' } }))
 vi.mock('@/components/common/ErrorMessage.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/common/LoadingSpinner.vue', () => ({ default: { template: '<div />' } }))

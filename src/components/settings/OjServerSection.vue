@@ -75,7 +75,9 @@ function onSwitchOj(): void {
                     v-if="!props.switchError && !props.switchNotice"
                     class="mt-1 block text-xs text-[var(--text-muted)]"
                   >
-                    切换即时生效并持久化，将离开本页并放弃所有未保存的修改；候选 = 已知 OJ 类型 + 配置里的其它实例
+                    {{ props.locked
+                      ? '切换即时生效并持久化，将离开本页并放弃所有未保存的修改'
+                      : '切换即时生效并持久化；管理方模式（--settings）下留在本页继续配置' }}；候选 = 已知 OJ 类型 + 配置里的其它实例
                   </span>
                 </label>
 

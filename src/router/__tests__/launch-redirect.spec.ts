@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '@/stores/authStore'
+import { useContestStore } from '@/stores/contestStore'
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -78,6 +79,39 @@ describe('--settings 初始直落（守卫行为）', () => {
     const { default: router } = await import('@/router')
     await router.push({ name: 'Settings' })
     expect(router.currentRoute.value.name).toBe('Login')
+  })
+
+  it('评审九 P2-2：导航中途会话失效——钥匙豁免不被在途的比赛导航继承', async () => {
+    // 时序：守卫批准 ProblemSet 后、路由确认前，401 把会话清掉。sessionGuard
+    // 此刻读到的 currentRoute 仍是设置页，钥匙豁免会跳过跳转——落地后的
+    // afterEach 不变量必须兜住（受保护路由 + 无会话 + 非设置页 → 回登录页）。
+    launchFlags.mock.mockResolvedValue({ settings: true })
+    const now = Math.floor(Date.now() / 1000)
+    const store = useContestStore()
+    store.brief = {
+      id: '1', title: '竞赛', startTime: now - 3_600, endTime: now + 3_600,
+      description: '', contestType: 0, status: 0, auth: 0,
+      rankShowName: 'username', sealRank: false, sealRankTime: null,
+      allowEndSubmit: false, oiRankScoreType: null,
+    }
+    const auth = useAuthStore()
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+
+    const { default: router } = await import('@/router')
+    // 首航：钥匙直落设置页（豁免路径的起点）
+    await router.push({ name: 'Login' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+
+    // 守卫批准后、确认前清掉会话（beforeResolve 介于 beforeEach 与落地之间）
+    const stop = router.beforeResolve(() => {
+      useAuthStore().user = null
+    })
+    await router.push({ name: 'ProblemSet' })
+    stop()
+
+    // 落地不变量：不留在无会话的比赛页（afterEach 的 replace 是 fire-and-forget，
+    // 等替换导航落地）
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('Login'))
   })
 
   it('钥匙模式 + 无会话非首航直达设置页：放行（豁免不限首次）', async () => {

@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   routerReplace: vi.fn(),
   // 启动标志响应式快照（systemService.launchFlags）：钥匙模式切换后留在设置页
   launchFlags: { value: { settings: false } },
+  // 当前路由（**活对象**：mock 的 currentRoute.value 直接引用它，测试中途可改）
+  route: { name: 'Settings' as string | undefined },
 }))
 
 vi.mock('@/services/config.service', () => ({
@@ -27,7 +29,12 @@ vi.mock('@/services/system.service', () => ({
   systemService: { launchFlags: mocks.launchFlags },
 }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.routerReplace }) }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    replace: mocks.routerReplace,
+    currentRoute: { value: mocks.route },
+  }),
+}))
 
 function baseConfig(): AppConfig {
   return {
@@ -54,6 +61,7 @@ beforeEach(async () => {
   currentConfig = baseConfig()
   // 默认正常模式（无 --settings）：切换成功照常回登录页；钥匙用例显式改写
   mocks.launchFlags.value = { settings: false }
+  mocks.route.name = 'Settings'
   mocks.getConfig.mockImplementation(async () => structuredClone(currentConfig))
   mocks.updateConfig.mockImplementation(async (mutator: (draft: AppConfig) => void) => {
     const draft = structuredClone(currentConfig)
@@ -211,6 +219,21 @@ describe('useSettingsForm', () => {
     expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
     expect(mocks.routerReplace).not.toHaveBeenCalled()
+  })
+
+  it('评审九 P2-1：切换期间已导航离开设置页——钥匙豁免不带走，照常回登录', async () => {
+    // switch_oj 是异步的：期间用户可能已跳到比赛页。若无条件「停留」，无会话
+    // 用户会被留在比赛页（豁免只属于设置页本身）
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    settings.form.activeOj = 'Hydro'
+    mocks.route.name = 'ProblemSet' // 慢切换落地前路由已变
+    await settings.onSwitchOj()
+
+    expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
+    expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
+    expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
   })
 
   it('新实例保存失败后，下一次普通保存不得沿用自动切换意图', async () => {

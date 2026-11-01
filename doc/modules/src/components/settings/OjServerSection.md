@@ -21,6 +21,8 @@
 | `update:form` | emit `SettingsFormPatch` | switch 按钮的局部草稿补丁；文本/选择用 `v-model` 直接编辑同一 reactive 草稿并保留 IME composition |
 | `switch-oj` | emit | `activeOj` v-model 更新后通知父级执行切换（locked 时 select disabled，不可达） |
 
+切换提示按模式分叉：`locked`（普通启动）→「将离开本页并放弃所有未保存的修改」；解锁（`--settings`）→「管理方模式下留在本页继续配置」——提示必须与 #87 的实际行为一致（评审九 P3）。
+
 ## 直接依赖
 
 - `SettingsSectionFrame`

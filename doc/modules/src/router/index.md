@@ -55,6 +55,22 @@ beforeEach(to):
      否则放行
 ```
 
+落地不变量（afterEach）：
+
+```
+afterEach(to):
+  to.meta.requiresAuth !== true → return（登录页/catch-all 不受保护，不成环）
+  已登录 → return
+  lastSettingsMode && to.name === 'Settings' → return（钥匙设置页豁免）
+  否则 → replace(Login)
+```
+**为什么需要**（评审九 P2-2）：beforeEach 只能看导航开始时的会话；守卫批准后、
+路由确认前，某个在途请求返回 401 → sessionGuard 清理会话——它读到的
+`currentRoute` 仍是**尚未确认**的旧路由（设置页），钥匙豁免会跳过跳转，豁免
+被这条在途的受保护导航继承，用户落到无会话的比赛页。afterEach 在确认后补一次
+同一判据（`lastSettingsMode` 由 beforeEach 记录），任何「导航中途会话失效」
+都兜得住；替换目标是登录页（不受保护），不会循环。
+
 设计要点：
 
 - **统一入口**：通配路由重定向 /login，由 LoginView 恢复会话并按比赛阶段决定是否进场

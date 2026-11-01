@@ -18,7 +18,7 @@
 | `load` / `populate` | fn | 先 `configService.invalidate()` 再读取磁盘配置并回填表单和实例清单 |
 | `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示 |
 | `ojOptions` | computed | 实时下拉候选；实例清单与 persistedActive 为 controller 内部状态 |
-| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）切换成功后留在设置页**（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2） |
+| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）且当前路由仍是设置页时**切换成功后留在设置页（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2）；`switch_oj` 是异步的，期间已导航离开则不再停留、照常回登录页（豁免只属于设置页本身，评审九 P2-1） |
 | `SETTINGS_INPUT` / `inputClass` | 常量/fn | 共享输入框基础样式与错误态拼接 |
 
 

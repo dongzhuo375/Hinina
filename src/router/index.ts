@@ -112,6 +112,8 @@ const router = createRouter({
  *    - 标志读取失败按「无参数」退化（service 层兜底 + 守卫 try/catch 二道防线）。
  */
 let firstNavigation = true
+/// 最近一次守卫跑出的启动标志（afterEach 的会话不变量要用）
+let lastSettingsMode = false
 
 router.beforeEach(async (to) => {
   // 钥匙通道故障不得炸掉导航：service 已 memoize + 失败退化，这里是导航路径上
@@ -122,6 +124,7 @@ router.beforeEach(async (to) => {
   } catch {
     settingsMode = false
   }
+  lastSettingsMode = settingsMode
   if (firstNavigation) {
     firstNavigation = false
     if (settingsMode && to.name === 'Login') return { name: 'Settings' }
@@ -149,6 +152,24 @@ router.beforeEach(async (to) => {
     }
   }
   return true
+})
+
+/**
+ * 导航**落地后**的会话不变量（评审九 P2-2）。
+ *
+ * `beforeEach` 只能检查导航开始时的会话；认证状态可能在导航中途变化：守卫
+ * 批准后、路由确认前，某个在途请求返回 401 → sessionGuard 清理会话。此时它
+ * 读到的 `currentRoute` 仍是**尚未确认**的旧路由——若旧路由是设置页，钥匙
+ * 豁免会跳过跳转，于是豁免被这条在途的受保护导航「继承」，用户落到无会话的
+ * 比赛页。这里在确认后补一次：受保护路由且无会话、又不是钥匙设置页 → 回登录页
+ *（与守卫同一判据，避免两处漂移）。登录页/catch-all 无 requiresAuth，不会成环。
+ */
+router.afterEach((to) => {
+  if (to.meta.requiresAuth !== true) return
+  const auth = useAuthStore()
+  if (auth.isLoggedIn) return
+  if (lastSettingsMode && to.name === 'Settings') return
+  void router.replace({ name: 'Login' })
 })
 
 export default router
