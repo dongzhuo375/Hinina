@@ -20,6 +20,7 @@ export type AppErrorVariant =
   | 'Network'
   | 'Config'
   | 'ProviderNotFound'
+  | 'OjSwitchPersistFailed'
   | 'Serialization'
   | 'Unknown'
 
@@ -33,6 +34,7 @@ const APP_ERROR_VARIANTS: readonly string[] = [
   'Network',
   'Config',
   'ProviderNotFound',
+  'OjSwitchPersistFailed',
   'Serialization',
   'Unknown',
 ]
@@ -94,7 +96,12 @@ function isPluginErrorPayload(raw: object): raw is { code: string; permission?: 
 }
 
 /** 解析 AppError 载荷 → { 变体名, 消息 }；非 AppError 形态返回 null 变体 */
-function parseAppError(raw: unknown): { variant: AppErrorVariant | null; message: string } {
+/**
+ * AppError 载荷 → `{ variant, message }`（外部标签 `{ Variant: msg }`，白名单外的
+ * 变体降级为 null 并保留消息）。导出供测试以**真实载荷**构造 IpcError，避免测试
+ * 里手写 variant 绕过白名单（评审二十五）。
+ */
+export function parseAppError(raw: unknown): { variant: AppErrorVariant | null; message: string } {
   if (raw instanceof Error) return { variant: null, message: raw.message }
   if (typeof raw === 'string') return { variant: null, message: raw }
   if (raw && typeof raw === 'object') {

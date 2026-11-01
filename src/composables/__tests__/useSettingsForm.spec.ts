@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, ref } from 'vue'
 import type { EffectScope } from 'vue'
+import { IpcError, parseAppError } from '@/bridge'
 import { useSettingsForm } from '@/composables/useSettingsForm'
 import type { AppConfig } from '@/types/config'
+
+/// 以真实 AppError 载荷构造 IpcError（与 ipcInvoke 的错误归一化同源）
+function makeIpcError(cmd: string, payload: unknown): IpcError {
+  const { variant, message } = parseAppError(payload)
+  return new IpcError(cmd, message, variant, payload)
+}
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -325,11 +332,11 @@ describe('useSettingsForm', () => {
     settings.form.activeOj = 'Hydro'
     // 后端 registry 已切换、仅持久化失败：命令以专用变体拒绝
     currentConfig.oj.active = 'Hydro'
-    mocks.switchOj.mockRejectedValueOnce(
-      Object.assign(new Error('OJ 切换已生效但保存配置失败: 磁盘满'), {
-        variant: 'OjSwitchPersistFailed',
-      }),
-    )
+    // 用**真实载荷**经 parseAppError 构造 IpcError（评审二十五：手写 variant
+    // 会绕过 bridge 白名单，生产上 variant 为 null、分支永不进入）
+    mocks.switchOj.mockRejectedValueOnce(makeIpcError('switch_oj', {
+      OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满',
+    }))
 
     await settings.onSwitchOj()
 
