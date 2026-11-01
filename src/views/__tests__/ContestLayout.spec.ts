@@ -8,6 +8,14 @@ import { useAuthStore } from '@/stores/authStore'
 import type { Contest } from '@/types/contest'
 import ContestLayout from '@/views/ContestLayout.vue'
 
+/// jsdom 的 `inert` 反射怪癖：`el.inert = false` 会留下 `inert="false"` 属性
+///（按 HTML 规范布尔属性「存在即生效」，真实浏览器里 Vue 对 false 是移除属性）。
+/// 断言一律经此判读：属性缺失或值为 "false" 都视为未锁定。
+function contentInert(host: HTMLElement): boolean {
+  const el = host.querySelector('[inert]')
+  return el !== null && el.getAttribute('inert') !== 'false'
+}
+
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   startLive: vi.fn(),
@@ -270,6 +278,9 @@ describe('--settings 无会话最小壳', () => {
     // 完整外壳（有会话）：TopBar/StatusBar 桩在，无最小壳
     expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
     expect(host.querySelector('footer')).toBeTruthy()
+    // 评审六：设置页不被赛程闸门锁死——无结束遮罩、内容区无 inert
+    expect(host.querySelector('[role="alert"]')).toBeNull()
+    expect(contentInert(host)).toBe(false)
     await vi.advanceTimersByTimeAsync(2_500)
     expect(mocks.replace).not.toHaveBeenCalled()
     vi.useRealTimers()
@@ -297,6 +308,33 @@ describe('--settings 无会话最小壳', () => {
 
     await vi.advanceTimersByTimeAsync(2_500)
     expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+    // 反向：比赛子路由的赛程闸门模板形态照旧（遮罩 + inert）
+    expect(host.querySelector('[role="alert"]')).toBeTruthy()
+    expect(contentInert(host)).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it('评审六：钥匙 + 会话有效 + 未开始简报 + 设置路由——内容区无 inert', async () => {
+    // upcoming 无遮罩但裸 phase 会给内容区加 inert——设置页同样必须可用
+    vi.useFakeTimers()
+    const now = Math.floor(Date.now() / 1000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const auth = useAuthStore()
+    auth.sessionResolved = true
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+    const store = useContestStore()
+    store.brief = { ...schedule, startTime: now + 3_600, endTime: now + 14_400 }
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(contentInert(host)).toBe(false)
+    expect(mocks.replace).not.toHaveBeenCalled()
     vi.useRealTimers()
   })
 

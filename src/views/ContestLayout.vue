@@ -34,6 +34,13 @@ const keyedSettings = computed(
 /// 设置页继续发注定失败的请求。守卫在导航前已完成 checkSession，挂载时机不受
 /// 影响；快照由守卫首航填充，同步判定无闪帧。
 const bareShell = computed(() => keyedSettings.value && !auth.isLoggedIn)
+/// 赛程闸门的**模板判定**：非钥匙设置页且赛程处于 ended/upcoming 时，结束遮罩、
+/// 内容区 inert 与顶栏导航禁用一并生效。评审六：3e30f16 只短路了 watcher 的
+/// 跳转，模板仍按裸 phase 判定——钥匙模式（有会话）的设置页被 inert 锁死、
+/// 已结束还叠着「即将返回登录」遮罩，设置页实际不可用。统一收敛到此一处。
+const contestGated = computed(
+  () => !keyedSettings.value && (phase.value === 'ended' || phase.value === 'upcoming'),
+)
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
@@ -129,14 +136,14 @@ function backToLogin(): void {
       </main>
     </template>
     <template v-else>
-      <TopBar :navigation-disabled="phase === 'ended' || phase === 'upcoming'" />
-      <div class="flex min-h-0 flex-1 overflow-hidden" :inert="phase === 'ended' || phase === 'upcoming'">
+      <TopBar :navigation-disabled="contestGated" />
+      <div class="flex min-h-0 flex-1 overflow-hidden" :inert="contestGated">
         <main class="workspace-main flex min-w-0 flex-1 flex-col overflow-hidden">
           <router-view />
         </main>
       </div>
       <StatusBar />
-      <div v-if="phase === 'ended'" class="absolute inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
+      <div v-if="contestGated && phase === 'ended'" class="absolute inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
         <div role="alert" class="max-w-sm border border-[var(--border-color)] bg-[var(--bg-body)] px-12 py-10 text-center shadow-[0_24px_64px_rgba(46,48,51,0.08)]">
           <p class="eyebrow">CONTEST CLOSED</p>
           <h1 class="mt-4 text-2xl font-semibold tracking-wide text-[var(--text-primary)]">比赛已结束</h1>

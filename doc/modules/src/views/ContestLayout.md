@@ -16,7 +16,8 @@
 |------|------|------|
 | `nowMs` / `now` | `useNowMs()` / computed（秒） | 共享毫秒墙钟派生秒，驱动 `phase` 跃迁；scope dispose 清理 interval |
 | `phase` | computed | `getContestPhase(getAuthoritativeSchedule(contestStore.contest, contestStore.brief), now)` |
-| `keyedSettings` | computed | `launchFlags.settings && route === 'Settings'` —— 设置页两项豁免的**共同判据**（阶段闸门短路、最小壳）。赛程闸门只防「滞留在过期赛场看旧数据」，设置页只碰本地配置不在其射程内 |
+| `keyedSettings` | computed | `launchFlags.settings && route === 'Settings'` —— 设置页各项豁免的**共同判据**（阶段闸门跳转与锁定的短路、最小壳）。赛程闸门只防「滞留在过期赛场看旧数据」，设置页只碰本地配置不在其射程内 |
+| `contestGated` | computed | `!keyedSettings && (phase === 'ended' \|\| phase === 'upcoming')` —— 赛程闸门的**模板判定**（结束遮罩 v-if、内容区 inert、TopBar navigation-disabled 三处同源）；钥匙模式设置页恒为 false（评审六） |
 | `bareShell` | computed | `keyedSettings && !auth.isLoggedIn` —— 最小壳判据（三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1） |
 | `watch([phase, keyedSettings], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**keyedSettings 时整体短路**——无会话（最小壳，评审四 P2-2）与有会话（评审五）两个分支都覆盖：登出清理保留匿名 brief 且已结束赛程会让 phase 非 none，跳转会把维护者从设置页踢走；离开设置页时本监听重评，闸门照常恢复 |
 | `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → 启动公告轮询，见逻辑流程 |
@@ -68,10 +69,10 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
     header[data-tauri-drag-region]（「Hinina 设置」+「返回登录」按钮）
     <main><router-view /></main>
   否则（正常外壳）：
-  <TopBar :navigation-disabled="phase === 'ended' || phase === 'upcoming'" />
-  中间容器同条件 :inert（禁点禁焦点，覆盖子视图）
+  <TopBar :navigation-disabled="contestGated" />
+  中间容器 :inert="contestGated"（禁点禁焦点，覆盖子视图）
   <StatusBar />
-  phase === 'ended' 时叠加覆盖层（absolute inset-x-0 bottom-0 top-10 z-50，半透明 + 背景模糊）
+  contestGated 且 phase === 'ended' 时叠加覆盖层（absolute inset-x-0 bottom-0 top-10 z-50，半透明 + 背景模糊）
     内含 role="alert" 卡片：CONTEST CLOSED / 「比赛已结束」/「感谢参赛，即将返回登录入口。」
 ```
 
@@ -111,7 +112,12 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
 - **`upcoming` 立即退出**：赛程被改到未来（组织者顺延）时留在工作台只会让选手看到
   一堆过期数据，直接回入口页等待，到点由 LoginView 自动进场。
 - **`inert` + `navigationDisabled` 双保险**：结束/未开始时子视图与导航同时不可交互，
-  防止在覆盖层下继续操作（提交、切题）造成「已结束还在提交」的错觉。
+  防止在覆盖层下继续操作（提交、切题）造成「已结束还在提交」的错觉。三者统一由
+  `contestGated`（= 非钥匙设置页 且 phase 为 ended/upcoming）驱动——**钥匙模式下
+  设置页不受闸门锁死**（评审六：只短路跳转不修 inert，设置页照样不可用）。
+- **jsdom 的 inert 反射怪癖（测试）**：`el.inert = false` 会留下 `inert="false"`
+  属性（按 HTML 规范布尔属性「存在即生效」，真实浏览器里 Vue 对 false 是移除
+  属性）——断言经 `contentInert` 判读（属性缺失或值为 "false" 都算未锁定）。
 - **公告轮询归外壳而非公告页**：未读红点徽标在所有页面可见，轮询必须与工作台同生命
   周期；公告页自身只声明 `isWatching`（「用户正在看」），标记已读由 `store.load` 在
   该标记为真且页面可见时统一完成（详见 `stores/announcementStore.md`）。
