@@ -18,6 +18,7 @@ fn variant_name(e: &AppError) -> &'static str {
         AppError::Network(_) => "Network",
         AppError::Config(_) => "Config",
         AppError::ProviderNotFound(_) => "ProviderNotFound",
+        AppError::OjSwitchPersistFailed(_) => "OjSwitchPersistFailed",
         AppError::Serialization(_) => "Serialization",
         AppError::Unknown(_) => "Unknown",
     }
@@ -35,6 +36,7 @@ fn context_preserves_variant_for_every_variant() {
         AppError::Network("HTTP 502".into()),
         AppError::Config("配置缺失".into()),
         AppError::ProviderNotFound("QDUOJ".into()),
+        AppError::OjSwitchPersistFailed("磁盘满".into()),
         AppError::Serialization("字段不匹配".into()),
         AppError::Unknown("?".into()),
     ];

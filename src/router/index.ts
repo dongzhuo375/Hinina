@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { systemService } from '@/services/system.service'
 import { markSettingsGateBlocked } from '@/utils/settings-gate-notice'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 
 /// 路由元信息类型声明，避免 `to.meta.*` 退化为 any
@@ -135,13 +136,13 @@ router.beforeEach(async (to, from) => {
   if (!requiresAuth) return true
   // 管理方钥匙的条件豁免：仅 --settings 进程中的设置页可无会话进入（不限首次
   // —— 返回登录后想再修一次地址仍可直达）。普通模式设置页照常受保护。
-  if (systemService.isKeyedSettings(to.name)) return true
+  if (isKeyedSettingsRoute(to.name)) return true
   // 钥匙设置页出发的导航：**任何失败都回设置页**（评审十九 #2 的同类路径，
   // 评审二十补漏）——无会话时点赛场页面若送去登录页，设置视图被卸载、草稿
   // 丢失，正是钥匙要避免的
   // 来源路由在**导航入口**一次性捕获（评审二十一 #5）：异步等待后不再读
   // `router.currentRoute`——那可能已被在途导航改写（评审九/十九的竞态根源）
-  const fromKeyedSettings = systemService.isKeyedSettings(from.name)
+  const fromKeyedSettings = isKeyedSettingsRoute(from.name)
   if (!auth.isLoggedIn) {
     if (fromKeyedSettings) {
       markSettingsGateBlocked('未登录，已留在设置页（登录后才能进入赛场页面）')
@@ -198,7 +199,7 @@ router.afterEach((to) => {
   if (to.meta.requiresAuth !== true) return
   const auth = useAuthStore()
   if (auth.isLoggedIn) return
-  if (systemService.isKeyedSettings(to.name)) return
+  if (isKeyedSettingsRoute(to.name)) return
   void router.replace({ name: 'Login' })
 })
 

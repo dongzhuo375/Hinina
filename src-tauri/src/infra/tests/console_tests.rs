@@ -1,4 +1,4 @@
-use super::requested;
+use super::*;
 use std::ffi::OsString;
 
 fn os(value: &str) -> OsString {

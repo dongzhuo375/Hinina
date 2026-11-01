@@ -9,6 +9,7 @@ import { useMaintenanceSettings } from '@/composables/useMaintenanceSettings'
 import { useDataDirSettings } from '@/composables/useDataDirSettings'
 import { useSettingsScrollSpy } from '@/composables/useSettingsScrollSpy'
 import { systemService } from '@/services/system.service'
+import { isKeyedProcess } from '@/guards/keyed-settings-policy'
 import { clearSettingsGateNotice, settingsGateNotice } from '@/utils/settings-gate-notice'
 import type { SettingsFormPatch } from '@/composables/useSettingsForm'
 import OjServerSection from '@/components/settings/OjServerSection.vue'
@@ -38,7 +39,7 @@ import AboutSection from '@/components/settings/AboutSection.vue'
 
 /// 维护者层锁定（默认锁，`--settings` 解锁）。启动标志快照由守卫首航填充
 ///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
-const locked = computed(() => !systemService.isKeyed())
+const locked = computed(() => !isKeyedProcess())
 
 // locked 传入表单控制器：锁定字段不参与校验、不写入保存载荷（评审十 #3）
 const {

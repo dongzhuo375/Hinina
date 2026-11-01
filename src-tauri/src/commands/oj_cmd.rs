@@ -83,8 +83,9 @@ pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<(
             draft.oj.active = id.to_string();
         })
         .map_err(|e| {
-            // 切换已生效但持久化失败：如实上报，前端可提示重启后回退
-            AppError::Config(format!("OJ 切换已生效但保存配置失败: {}", e))
+            // 切换已生效但持久化失败：用**专用变体**上报，前端据此承认已生效
+            // 而不是回滚 UI（评审二十四 #1）
+            AppError::OjSwitchPersistFailed(e.to_string())
         })?;
 
     ctx.event_bus.publish(CoreEvent::OjSwitched {

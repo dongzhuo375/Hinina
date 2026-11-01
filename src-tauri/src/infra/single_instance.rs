@@ -35,7 +35,12 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         // 静默聚焦会让维护者以为设置页已打开（评审十九 #6）——弹一次提示，
         // 明确「需完全退出后重启」。
         let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
-        if crate::infra::argv::has_flag(&args, "--settings") {
+        // 只有**当前实例不是钥匙启动**时提示才有意义：已在钥匙模式下运行、
+        // 再带 --settings 启动是幂等的，弹「请完全退出后重启」会误导
+        //（评审二十四 #2）
+        if crate::infra::argv::has_flag(&args, "--settings")
+            && !crate::infra::launch_args::get().settings
+        {
             crate::infra::startup_dialog::present_message(
                 "Hinina 已在运行",
                 // concat! 显式拼接：多行字面量会把源码缩进带进正文（评审二十一 #7）

@@ -8,6 +8,7 @@ import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { systemService } from '@/services/system.service'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import { useNowMs } from '@/composables/useNowMs'
 
@@ -25,7 +26,7 @@ const phase = computed(() => getContestPhase(
 /// 钥匙模式且正停在设置页：设置页两项豁免的**共同判据**（阶段闸门短路、最小壳）。
 /// 赛程闸门只防「滞留在过期赛场看旧数据」——设置页只碰本地配置，不在其射程内；
 /// 钥匙场景把维护者踢回登录页会打断维护、丢失当前草稿（登录页的「返回设置」是一次重新进入）。
-const keyedSettings = computed(() => systemService.isKeyedSettings(route.name))
+const keyedSettings = computed(() => isKeyedSettingsRoute(route.name))
 /// 最小壳：keyedSettings 再加无会话。**刻意不含 `sessionResolved`**（评审四
 /// P2-1）：钥匙 + 存量过期会话启动时，首个认证请求 401 → invalidateSession 把
 /// sessionResolved 复位为 false（后端登出失败时 backendCleared=false）——此刻

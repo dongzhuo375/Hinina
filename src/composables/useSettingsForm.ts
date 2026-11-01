@@ -4,6 +4,7 @@ import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService } from '@/services/config.service'
 import { systemService } from '@/services/system.service'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { resetSessionForOjSwitch } from '@/stores/session'
 import { normalizeHojLanguage } from '@/utils/language'
 import { EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN, EDITOR_TAB_SIZES } from '@/utils/editor'
@@ -50,6 +51,23 @@ function intError(raw: string, min: number, max: number, label: string): string 
   if (n === null) return `${label}须为非负整数`
   if (n < min || n > max) return `${label}须在 ${min}–${max} 之间`
   return null
+}
+
+/// **OJ 域字段清单（单一来源，评审二十四 #3）**：切换 OJ 时需要「以磁盘为准」
+/// 的全部字段。`ojDomainDirty`、`resetOjFieldsFromDisk`、重载失败的对齐分支都
+/// 从这里派生，新增字段只改一处。
+const OJ_DOMAIN_KEYS = [
+  'activeOj', 'ojUrl', 'contestRef', 'contestPassword',
+  'timeoutSecs', 'pollIntervalSecs', 'pollTimeoutSecs', 'cacheTtlSecs',
+  'cacheProblemStatement',
+] as const satisfies readonly (keyof SettingsForm)[]
+
+/// 把 `from` 的 OJ 域字段复制到 `to`（全局字段不动）
+function copyOjDomain(from: SettingsForm, to: SettingsForm): void {
+  // 键集合由 OJ_DOMAIN_KEYS 唯一维护；写入用宽松记录类型绕过「键并集不可写」
+  const source = from as unknown as Record<string, string | boolean>
+  const target = to as unknown as Record<string, string | boolean>
+  for (const key of OJ_DOMAIN_KEYS) target[key] = source[key]
 }
 
 export const SETTINGS_INPUT =
@@ -135,11 +153,27 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   function ojDomainDirty(): boolean {
     if (baseline.value === '') return false
     const base = JSON.parse(baseline.value) as SettingsForm
-    const fields = [
-      'ojUrl', 'contestRef', 'contestPassword', 'timeoutSecs',
-      'pollIntervalSecs', 'pollTimeoutSecs', 'cacheTtlSecs', 'cacheProblemStatement',
-    ] as const
-    return fields.some((key) => JSON.stringify(base[key]) !== JSON.stringify(form[key]))
+    // activeOj 由下拉 v-model 主动改变，不算「被覆盖的草稿」
+    return OJ_DOMAIN_KEYS.filter((key) => key !== 'activeOj').some(
+      (key) => JSON.stringify(base[key]) !== JSON.stringify(form[key]),
+    )
+  }
+
+  /// 切换**已生效**但后续步骤失败时的统一对齐（评审二十二/二十三/二十四 #1）：
+  /// OJ 域字段回到旧基线的磁盘值（不把旧 OJ 的草稿写进新 OJ），active/url 对齐
+  /// 到新 OJ，基线按「磁盘值 + 新 active/url」重算（不产生假 dirty），全局草稿保留。
+  function adoptEffectiveSwitch(target: string, notice: string): void {
+    const previous = baseline.value ? (JSON.parse(baseline.value) as SettingsForm) : null
+    persistedActive.value = target
+    // 无基线（理论不可达）：只把 active/url 对齐到新 OJ 的已知值
+    if (previous) copyOjDomain(previous, form)
+    form.activeOj = target
+    form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
+    if (previous) {
+      baseline.value = JSON.stringify({ ...previous, activeOj: target, ojUrl: form.ojUrl })
+    }
+    switchError.value = null
+    switchNotice.value = notice
   }
 
   async function performSwitch(target: string): Promise<boolean> {
@@ -157,7 +191,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // **豁免只属于设置页本身**：switch_oj 是异步的，期间用户可能已导航到
       // 比赛页——不查当前路由就把「停留」带过去，无会话用户会被留在比赛页
       //（评审九 P2-1）。判据与 sessionGuard 一致：钥匙 + 当前路由是设置页。
-      const stayOnSettings = systemService.isKeyedSettings(router.currentRoute.value?.name)
+      const stayOnSettings = isKeyedSettingsRoute(router.currentRoute.value?.name)
       if (!stayOnSettings) {
         persistedActive.value = target
         void router.replace({ name: 'Login' })
@@ -169,36 +203,33 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       try {
         await resetOjFieldsFromDisk()
       } catch {
-        // 切换**已经生效**（后端已写 config.oj.active=B、registry 已切、磁盘
-        // 也已是 B），只是重载失败——不能把 UI 回滚到 A，那会造成「界面显示
-        // A、实际跑 B」（评审二十二）。承认已生效：对齐到 B 的本地已知值。
-        // OJ 域草稿也回到磁盘值（评审二十三 #2：与成功路径一致，避免把 A 的
-        // 比赛引用/密码等草稿写进 B）；全局草稿保留。
-        const previous = baseline.value ? (JSON.parse(baseline.value) as SettingsForm) : null
-        persistedActive.value = target
-        form.activeOj = target
-        form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
-        if (previous) {
-          form.contestRef = previous.contestRef
-          form.contestPassword = previous.contestPassword
-          form.timeoutSecs = previous.timeoutSecs
-          form.pollIntervalSecs = previous.pollIntervalSecs
-          form.pollTimeoutSecs = previous.pollTimeoutSecs
-          form.cacheTtlSecs = previous.cacheTtlSecs
-          form.cacheProblemStatement = previous.cacheProblemStatement
-          // 基线 = 磁盘值 + 新的 active/url（评审二十三 #1）：否则 dirty 仍拿
-          // A 的基线比 B 的表单，出现假「未保存更改」
-          baseline.value = JSON.stringify({ ...previous, activeOj: target, ojUrl: form.ojUrl })
-        }
-        switchError.value = null
-        switchNotice.value =
-          '切换已生效，但配置刷新失败；连接与比赛相关的修改已重置，其余未保存修改保留。请重新打开设置页确认'
+        adoptEffectiveSwitch(
+          target,
+          '切换已生效，但配置刷新失败；连接与比赛相关的修改已重置，其余未保存修改保留。请重新打开设置页确认',
+        )
         lastSwitchStayed = true
         return true
       }
       lastSwitchStayed = true
       return true
     } catch (e) {
+      // 后端已切 registry、清缓存，只是持久化 oj.active 失败：切换**已生效**，
+      // 必须走「承认已生效」分支（并补做 resetSessionForOjSwitch——否则旧 OJ
+      // 的登录态会被带到新 OJ，评审二十四 #1）
+      if ((e as { variant?: string }).variant === 'OjSwitchPersistFailed') {
+        resetSessionForOjSwitch()
+        if (isKeyedSettingsRoute(router.currentRoute.value?.name)) {
+          adoptEffectiveSwitch(
+            target,
+            '切换已生效，但配置保存失败（重启后可能回退）；连接与比赛相关的修改已重置，其余未保存修改保留',
+          )
+          lastSwitchStayed = true
+          return true
+        }
+        // 非设置页（正常流程）：照旧回登录页；会话已重置
+        void router.replace({ name: 'Login' })
+        return true
+      }
       switchError.value = errorMessage(e, '切换 OJ 失败')
       return false
     }
@@ -262,15 +293,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     configService.invalidate()
     const config = await configService.getConfig()
     const disk = diskForm(config)
-    form.activeOj = disk.activeOj
-    form.ojUrl = disk.ojUrl
-    form.contestRef = disk.contestRef
-    form.contestPassword = disk.contestPassword
-    form.timeoutSecs = disk.timeoutSecs
-    form.pollIntervalSecs = disk.pollIntervalSecs
-    form.pollTimeoutSecs = disk.pollTimeoutSecs
-    form.cacheTtlSecs = disk.cacheTtlSecs
-    form.cacheProblemStatement = disk.cacheProblemStatement
+    copyOjDomain(disk, form)
     persistedActive.value = disk.activeOj
     switchError.value = null
     switchNotice.value = null

@@ -1,7 +1,7 @@
 import type { Router } from 'vue-router'
 import { setIpcErrorObserver } from '@/bridge'
 import type { IpcError } from '@/bridge'
-import { systemService } from '@/services/system.service'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { SESSION_INVALID_MESSAGE, useAuthStore } from '@/stores/authStore'
 import { createLogger } from '@/utils/logger'
 
@@ -48,7 +48,7 @@ async function handleAuthFailure(error: IpcError, router: Router): Promise<void>
     // 例外：`--settings`（管理方钥匙）进程的设置页——清理会话但留在原地。
     // 那是钥匙存在的全部意义（修连接配置）：踢回登录页会打断维护、丢失
     // 当前草稿——登录页虽有「返回设置」入口，但那已是一次重新进入（评审四 P2-1）。
-    const onKeyedSettings = systemService.isKeyedSettings(router.currentRoute.value.name)
+    const onKeyedSettings = isKeyedSettingsRoute(router.currentRoute.value.name)
     if (!onKeyedSettings && router.currentRoute.value.meta.requiresAuth) {
       await router.replace({ name: 'Login' })
     }

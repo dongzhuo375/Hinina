@@ -133,21 +133,8 @@ pub fn present_message(title: &str, text: &str) {
 
 #[cfg(windows)]
 fn show_info(title: &str, text: &str) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        MessageBoxW, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
-    };
-    let title = crate::infra::console::wide(title);
-    let body = crate::infra::console::wide(text);
-    // SAFETY: 两个 UTF-16 缓冲都以 NUL 结尾且在本调用期间存活；hwnd 为 null
-    // 表示无父窗口（复用启动框的调用约定，不依赖窗口句柄）
-    unsafe {
-        MessageBoxW(
-            std::ptr::null_mut(),
-            body.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST,
-        );
-    }
+    use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION;
+    show_message(title, text, MB_ICONINFORMATION);
 }
 
 #[cfg(windows)]
@@ -164,12 +151,14 @@ fn show_blocking(text: String) {
 #[cfg(not(windows))]
 fn show_blocking(_text: String) {}
 
+/// `MessageBoxW` 的唯一调用点：图标由调用方给出，`MB_OK | MB_SETFOREGROUND |
+/// MB_TOPMOST` 的窗口策略集中在这里维护（评审二十四 #8）。
 #[cfg(windows)]
-fn show(text: &str) {
+fn show_message(title: &str, text: &str, icon: u32) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        MessageBoxW, MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
+        MessageBoxW, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
     };
-    let title = crate::infra::console::wide(DIALOG_TITLE);
+    let title = crate::infra::console::wide(title);
     let body = crate::infra::console::wide(text);
     // SAFETY: 两个 UTF-16 缓冲都以 NUL 结尾且在本调用期间存活；hwnd 为 null
     // 表示无父窗口（启动失败时可能还没有窗口）。
@@ -178,9 +167,15 @@ fn show(text: &str) {
             std::ptr::null_mut(),
             body.as_ptr(),
             title.as_ptr(),
-            MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST,
+            MB_OK | icon | MB_SETFOREGROUND | MB_TOPMOST,
         );
     }
+}
+
+#[cfg(windows)]
+fn show(text: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR;
+    show_message(DIALOG_TITLE, text, MB_ICONERROR);
 }
 
 #[cfg(test)]

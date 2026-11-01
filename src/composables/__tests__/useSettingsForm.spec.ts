@@ -318,6 +318,30 @@ describe('useSettingsForm', () => {
     expect(settings.form.fontSize).toBe('18') // 全局草稿保留
   })
 
+  it('评审二十四 #1：切换已生效但持久化失败——承认生效、重置会话、对齐新 OJ', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    settings.form.activeOj = 'Hydro'
+    // 后端 registry 已切换、仅持久化失败：命令以专用变体拒绝
+    currentConfig.oj.active = 'Hydro'
+    mocks.switchOj.mockRejectedValueOnce(
+      Object.assign(new Error('OJ 切换已生效但保存配置失败: 磁盘满'), {
+        variant: 'OjSwitchPersistFailed',
+      }),
+    )
+
+    await settings.onSwitchOj()
+
+    expect(settings.form.activeOj).toBe('Hydro')
+    expect(settings.form.ojUrl).toBe('https://hydro.example')
+    expect(settings.switchError.value).toBeNull()
+    expect(settings.switchNotice.value).toContain('配置保存失败')
+    // 旧 OJ 的登录态不得带到新 OJ
+    expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
+    expect(settings.dirty.value).toBe(false)
+  })
+
   it('评审十五 C：锁定态 active 指向缺失实例——不创建、不切换、不谎报', async () => {
     // 手改配置让 oj.active 指向不存在的实例：锁定态载荷跳过实例写入，
     // 因此绝不能触发 performSwitch（否则会提示「实例已保存；切换未成功」）

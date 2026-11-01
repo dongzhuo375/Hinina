@@ -251,6 +251,8 @@ fn provider_error_category(error: &AppError) -> &'static str {
         AppError::Network(_) => "network",
         AppError::Config(_) => "config",
         AppError::ProviderNotFound(_) => "provider_not_found",
+        // 切换已生效只是持久化失败：对插件查询而言仍属配置类失败
+        AppError::OjSwitchPersistFailed(_) => "config",
         AppError::Serialization(_) => "serialization",
         AppError::Unknown(_) => "unknown",
     }

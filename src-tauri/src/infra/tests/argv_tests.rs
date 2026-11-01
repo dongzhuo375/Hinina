@@ -1,4 +1,4 @@
-use super::has_flag;
+use super::*;
 use std::ffi::OsString;
 
 fn os(value: &str) -> OsString {
