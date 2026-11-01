@@ -58,14 +58,17 @@ describe('getLaunchFlags 单飞与快照', () => {
     expect(mocks.getLaunchFlags).toHaveBeenCalledTimes(1)
   })
 
-  it('IPC 失败：按「无参数」退化，快照保持安全侧默认，且不再重试', async () => {
-    mocks.getLaunchFlags.mockRejectedValue(new Error('invoke failed'))
+  it('IPC 失败：本次按「无参数」退化，但不缓存失败——下次调用重试并填充快照', async () => {
+    // 评审十九 #7：一次瞬时失败不该让钥匙整个进程失效
+    mocks.getLaunchFlags.mockRejectedValueOnce(new Error('invoke failed'))
     const svc = await fresh()
     await expect(svc.getLaunchFlags()).resolves.toEqual({ settings: false })
     expect(svc.launchFlags.value.settings).toBe(false)
-    // 失败同样被 memoize：后续调用不重发 IPC（本进程内退化即定局，
-    // 不做「失败后重试翻转锁态」——中途解锁比保持锁定更危险）
-    await svc.getLaunchFlags()
-    expect(mocks.getLaunchFlags).toHaveBeenCalledTimes(1)
+
+    // 下一次调用重新发 IPC；成功后快照更新为真值
+    mocks.getLaunchFlags.mockResolvedValueOnce({ settings: true })
+    await expect(svc.getLaunchFlags()).resolves.toEqual({ settings: true })
+    expect(mocks.getLaunchFlags).toHaveBeenCalledTimes(2)
+    expect(svc.launchFlags.value.settings).toBe(true)
   })
 })

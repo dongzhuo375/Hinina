@@ -42,10 +42,13 @@ beforeEach(to):
   2. requiresAuth = to.meta.requiresAuth === true
      —— 判据是**合并后的 to.meta**：vue-router 沿匹配链把父级 meta 合并进子级
      （子路由同键覆盖父路由），取最深层的值；未声明即不受保护（login/catch-all）
-  3. 非受保护 → 放行；受保护但 settingsMode 且 to 是设置页 → 放行（**条件豁免**，
+  3. 非受保护 → 放行；受保护但 `systemService.isKeyedSettings(to.name)` → 放行（**条件豁免**，
      不限首次——返回登录后想再修一次地址仍可直达）；受保护但未登录 → Login
      普通模式（无钥匙）设置页照常受保护：无钥匙访客直达 → Login；页面上 401 →
      sessionGuard 读到 requiresAuth=true 照常回登录页
+  4a. loadBrief 期间会话失效：钥匙流程回 **Settings**（评审十九 #2，与后续闸门失败同向）；
+      简报缺失（服务器不可达，正是钥匙要修的场景）时提示「未能加载比赛信息」而非
+      「比赛未进行」（评审十九 #3）
   4. 受保护且已登录，且「当前不在 Contest 子树内」或「当前是钥匙设置页」
      （后者是评审十 #1：从设置页点题目/榜单也要过闸门，否则会落进被锁定的
       比赛页、随后被外壳踢回登录页且无回入口；闸门失败时回 **Settings**）

@@ -24,7 +24,7 @@
 
 ## 直接依赖
 
-- `@tauri-apps/api/window`（`getCurrentWindow`）
+- `@/bridge/window.bridge`（`minimizeWindow` / `toggleMaximizeWindow` / `closeWindow` 薄封装——CLAUDE.md 要求 bridge 是唯一接触 `@tauri-apps/api` 的地方，评审十九 #8）
 
 ## 被依赖
 

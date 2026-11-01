@@ -11,7 +11,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await page.goto('/')
 
     // 直落：首屏就是设置页（不闪登录表单）
-    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
     // 最小壳：拖动区标题 + 返回登录；无会话形态不出状态条连接信息
     await expect(page.getByText('Hinina 设置')).toBeVisible()
     const back = page.getByRole('button', { name: '返回登录' })
@@ -26,7 +26,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     // 评审八 P2：钥匙模式 OJ 切换成功后留在设置页（不踢回登录页，会话清理照旧）
     await oj.selectOption('HOJ')
     await expect.poll(async () => callCount(page, 'switch_oj')).toBeGreaterThanOrEqual(1)
-    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
     await expect(page.getByText('Hinina 设置')).toBeVisible()
 
     // 旅程尾：返回登录 → 正常登录页
@@ -38,7 +38,20 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await expect(toSettings).toBeVisible()
     await toSettings.click()
     await expect(page.getByText('Hinina 设置')).toBeVisible()
-    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
+  })
+
+  test('评审十九 #4：钥匙模式下登录进场后，壳层直接显示「环境设置」入口', async ({ page }) => {
+    await installFakeTauri(page, { launchFlags: { settings: true } })
+    await page.goto('/')
+    // 直落设置页 → 返回登录 → 正常登录进场：壳层不应再要求连点版本号 5 下
+    await page.getByRole('button', { name: '返回登录' }).click()
+    await expect(page.getByText('登录参赛系统')).toBeVisible()
+    await page.locator('#contest-username').fill('e2e_player')
+    await page.locator('#contest-password').fill('e2e_password')
+    await page.getByRole('button', { name: /登录/ }).first().click()
+    await expect(page).toHaveURL(/\/contest\/problems/)
+    await expect(page.getByRole('link', { name: '环境设置' })).toBeVisible()
   })
 
   test('普通启动（无钥匙）：首航停在登录页，永不进最小壳', async ({ page }) => {
@@ -61,7 +74,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
 
     // bootstrap 的认证请求 401 → sessionGuard 清理会话但不跳转（钥匙旁路）
     // → 最小壳接管，维护者层随会话失效而解锁；绝不被打回登录页
-    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
     await expect(page.getByText('Hinina 设置')).toBeVisible()
     const oj = page.getByRole('combobox', { name: /当前 OJ/ })
     await expect(oj).toBeEnabled()
@@ -79,7 +92,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     // 有会话：完整外壳（无最小壳标题），但赛程已结束——闸门的遮罩与 inert
     // 不得锁死钥匙设置页。先等赛程数据确已加载（StatusBar 连接态翻转），
     // 再做遮罩/inert 断言——避免在 phase=none 的空窗期假绿（评审八 P2-2）
-    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
     await expect(page.getByText('已连接比赛服务器')).toBeVisible()
     await expect(page.locator('[role="alert"]')).toHaveCount(0)
     await expect(page.locator('[inert]')).toHaveCount(0)
@@ -96,7 +109,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
       if (scroller) scroller.scrollTop = scroller.scrollHeight
     })
     await page.getByRole('link', { name: /题目/ }).click()
-    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
     const notice = page.getByRole('status').filter({ hasText: '比赛未进行' })
     await expect(notice).toBeVisible()
     const box = await notice.boundingBox()
@@ -125,7 +138,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
       delayConfiguredContestMs: 2_000,
     })
     await page.goto('/')
-    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
 
     // 翻转前输入草稿（此时会话仍在、完整外壳）
     const addr = page.getByRole('textbox', { name: /服务器地址/ })

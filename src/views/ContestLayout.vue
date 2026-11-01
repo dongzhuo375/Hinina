@@ -43,9 +43,25 @@ const contestGated = computed(
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
+/// 公告轮询只启动一次：bootstrap（挂载即 running）或阶段跃迁到 running
+/// （赛前打开、开赛后进入赛场——评审十九 #5）。contestId 来自 store，不额外请求
+let liveFor: string | null = null
+function ensureLive(): void {
+  const contestId = contestStore.contest?.id
+  if (!contestId || phase.value !== 'running') return
+  if (liveFor === contestId) return
+  // 跨场未刷新（认证 contest 与简报 id 不同）时不得用旧 id 起轮询：
+  // 等 bootstrap 的 loadContest 把 contest 换成新场后再启动
+  if (contestStore.brief?.id && contestStore.brief.id !== contestId) return
+  announcementStore.startLive(contestId, () => contestStore.contest?.status === 1)
+  liveFor = contestId
+}
+
 watch([phase, keyedSettings], ([value, keyed]) => {
   if (exitTimer) clearTimeout(exitTimer)
   exitTimer = null
+  // 跃迁到 running：补启公告轮询（upcoming 打开的外壳在开赛后不再重挂）
+  if (value === 'running') ensureLive()
   // 钥匙模式下正停在设置页（无论有无会话）不参与赛程闸门的**跳转**：登出清理
   // 保留的匿名简报 / 已结束赛程都可能让 phase 非 none——跳回登录页会把钥匙
   // 场景重新锁死（评审四 P2-2 + 评审五补齐有会话分支）；离开设置页时本监听
@@ -92,11 +108,10 @@ async function bootstrap(): Promise<void> {
     // 失败原因已由 store 写入 error，StatusBar 与各视图负责兜底展示
     return
   }
-  const contestId = contestStore.contest?.id
-  if (disposed || !contestId || phase.value !== 'running') return
+  if (disposed) return
   // 公告轮询由外壳统一持有，使 ActivityBar 未读红点在全部页面保持鲜活；
   // status === 1（比赛已结束）时暂停请求。刷新失败由 store.refresh 内部吞掉，不影响外壳
-  announcementStore.startLive(contestId, () => contestStore.contest?.status === 1)
+  ensureLive()
 }
 
 onMounted(() => {

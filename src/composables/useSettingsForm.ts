@@ -145,10 +145,10 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         void router.replace({ name: 'Login' })
         return true
       }
-      // 留在设置页时**重读配置并复位 baseline**（评审十 #4）：切换改了
-      // activeOj/ojUrl 却没动 baseline，dirty 会假真、Save 被误启用；且表单
-      // 其余字段仍是旧 OJ 的值，保存会写到新 OJ（语义错误）。
-      await load()
+      // 留在设置页时**只重置 OJ 域并按磁盘重算 baseline**（评审十 #4 防假
+      // dirty；评审十九 #1 保留全局草稿）：整体 load() 会把维护者刚改的字体/
+      // 超时也一并还原，与回滚分支的「保留编辑」行为不一致。
+      await resetOjFieldsFromDisk()
       return true
     } catch (e) {
       switchError.value = errorMessage(e, '切换 OJ 失败')
@@ -176,27 +176,58 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     }
   }
 
+  /// config → 完整表单值的映射（populate 与「切换后重置 OJ 域」共用）
+  function diskForm(config: AppConfig): SettingsForm {
+    const draft: SettingsForm = { ...form }
+    draft.activeOj = config.oj.active
+    draft.ojUrl = config.oj.instances.find((i) => i.id === config.oj.active)?.baseUrl ?? ''
+    draft.contestRef = config.oj.contestRef ?? ''
+    draft.contestPassword = config.oj.contestPassword ?? ''
+    draft.timeoutSecs = String(config.oj.timeoutSecs)
+    draft.pollIntervalSecs = String(config.oj.pollIntervalSecs)
+    draft.pollTimeoutSecs = String(config.oj.pollTimeoutSecs)
+    draft.cacheTtlSecs = String(config.oj.cacheTtlSecs)
+    draft.cacheProblemStatement = config.oj.cacheProblemStatement ?? true
+    draft.fontSize = String(config.editor.fontSize)
+    draft.tabSize = EDITOR_TAB_SIZES.includes(config.editor.tabSize) ? config.editor.tabSize : 4
+    draft.defaultLanguage = normalizeHojLanguage(config.editor.defaultLanguage)
+    draft.autoSave = config.editor.autoSave
+    draft.autoSaveIntervalSecs = String(config.editor.autoSaveIntervalSecs)
+    draft.splitRatio = clampRatio(config.layout.splitRatio)
+    return draft
+  }
+
+  /// 切换 OJ 后：OJ 域字段以磁盘新值为准，**编辑器/布局等全局草稿保留**
+  /// （评审十九 #1：整体 load() 会丢掉维护者刚改的字体/超时；回滚分支本就保留，
+  /// 两条路径对齐）。baseline 按「磁盘值 + 保留的全局草稿」计算——dirty 只反映
+  /// 真正未保存的全局编辑，且不会把旧 OJ 的 OJ 域草稿写到新 OJ。
+  async function resetOjFieldsFromDisk(): Promise<void> {
+    configService.invalidate()
+    const config = await configService.getConfig()
+    const disk = diskForm(config)
+    form.activeOj = disk.activeOj
+    form.ojUrl = disk.ojUrl
+    form.contestRef = disk.contestRef
+    form.contestPassword = disk.contestPassword
+    form.timeoutSecs = disk.timeoutSecs
+    form.pollIntervalSecs = disk.pollIntervalSecs
+    form.pollTimeoutSecs = disk.pollTimeoutSecs
+    form.cacheTtlSecs = disk.cacheTtlSecs
+    form.cacheProblemStatement = disk.cacheProblemStatement
+    persistedActive.value = disk.activeOj
+    switchError.value = null
+    switchNotice.value = null
+    ojInstances.value = config.oj.instances
+    // baseline = 磁盘全量值；form 的全局字段仍是草稿 → dirty 即「未保存的全局编辑」
+    baseline.value = JSON.stringify(disk)
+  }
+
   function populate(config: AppConfig): void {
-    form.activeOj = config.oj.active
+    Object.assign(form, diskForm(config))
     persistedActive.value = config.oj.active
     switchError.value = null
     switchNotice.value = null
     ojInstances.value = config.oj.instances
-    // active 无对应实例时保持空地址，绝不借用其它实例的 URL（否则保存会写错目标）
-    form.ojUrl = config.oj.instances.find((i) => i.id === config.oj.active)?.baseUrl ?? ''
-    form.contestRef = config.oj.contestRef ?? ''
-    form.contestPassword = config.oj.contestPassword ?? ''
-    form.timeoutSecs = String(config.oj.timeoutSecs)
-    form.pollIntervalSecs = String(config.oj.pollIntervalSecs)
-    form.pollTimeoutSecs = String(config.oj.pollTimeoutSecs)
-    form.cacheTtlSecs = String(config.oj.cacheTtlSecs)
-    form.cacheProblemStatement = config.oj.cacheProblemStatement ?? true
-    form.fontSize = String(config.editor.fontSize)
-    form.tabSize = EDITOR_TAB_SIZES.includes(config.editor.tabSize) ? config.editor.tabSize : 4
-    form.defaultLanguage = normalizeHojLanguage(config.editor.defaultLanguage)
-    form.autoSave = config.editor.autoSave
-    form.autoSaveIntervalSecs = String(config.editor.autoSaveIntervalSecs)
-    form.splitRatio = clampRatio(config.layout.splitRatio)
     baseline.value = snapshot()
   }
 

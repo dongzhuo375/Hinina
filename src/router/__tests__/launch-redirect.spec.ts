@@ -149,6 +149,41 @@ describe('--settings 初始直落（守卫行为）', () => {
     expect(settingsGateNotice.value).toContain('比赛未进行')
   })
 
+  it('评审十九 #2：守卫等待 loadBrief 期间会话失效——钥匙流程回设置页而非登录页', async () => {
+    launchFlags.state.settings = true
+    const auth = useAuthStore()
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+    const { default: router } = await import('@/router')
+    await router.push({ name: 'Login' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+
+    // brief 缺失 → 守卫 await loadBrief；期间会话被清（如一次 OJ 切换完成）
+    const store = useContestStore()
+    store.brief = null
+    vi.spyOn(store, 'loadBrief').mockImplementation(async () => {
+      auth.user = null
+    })
+    await router.push({ name: 'ProblemSet' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+  })
+
+  it('评审十九 #3：简报加载失败时提示说明「无法加载」，而不是「比赛未进行」', async () => {
+    launchFlags.state.settings = true
+    const auth = useAuthStore()
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+    const { default: router } = await import('@/router')
+    await router.push({ name: 'Login' })
+
+    const store = useContestStore()
+    store.brief = null
+    vi.spyOn(store, 'loadBrief').mockResolvedValue(undefined) // 失败：brief 仍为 null
+    await router.push({ name: 'ProblemSet' })
+
+    const { settingsGateNotice } = await import('@/utils/settings-gate-notice')
+    expect(settingsGateNotice.value).toContain('未能加载比赛信息')
+    expect(settingsGateNotice.value).not.toContain('比赛未进行')
+  })
+
   it('钥匙模式 + 无会话非首航直达设置页：放行（豁免不限首次）', async () => {
     // 首航去别处后，--settings 进程里设置页仍可无会话直达（返回登录后想再修
     // 一次地址的场景）

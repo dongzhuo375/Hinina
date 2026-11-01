@@ -150,12 +150,22 @@ router.beforeEach(async (to) => {
   if (enteringFromOutside) {
     const contest = useContestStore()
     if (!contest.brief) await contest.loadBrief()
-    if (!auth.isLoggedIn) return { name: 'Login', replace: true }
+    // 会话可能在 loadBrief 期间失效（例如一次 OJ 切换完成并清理了会话，
+    // 评审十九 #2）：钥匙流程同样回设置页，而不是送去登录页
+    if (!auth.isLoggedIn) {
+      return fromKeyedSettings ? { name: 'Settings' } : { name: 'Login', replace: true }
+    }
     const schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
     if (getContestPhase(schedule, Math.floor(Date.now() / 1000)) !== 'running') {
       if (fromKeyedSettings) {
-        // 拦回设置页时给一次可见反馈（NavigationFailure 本身静默，评审十五 B）
-        markSettingsGateBlocked('比赛未进行，已留在设置页（比赛期间才能进入赛场页面）')
+        // 拦回设置页时给一次可见反馈（NavigationFailure 本身静默，评审十五 B）。
+        // 简报缺失 = 服务器可能不可达——正是钥匙要修的场景，不能说「比赛未进行」
+        //（评审十九 #3）
+        markSettingsGateBlocked(
+          contest.brief
+            ? '比赛未进行，已留在设置页（比赛期间才能进入赛场页面）'
+            : '未能加载比赛信息（服务器可能不可达），已留在设置页',
+        )
         return { name: 'Settings' }
       }
       return { name: 'Login', replace: true }

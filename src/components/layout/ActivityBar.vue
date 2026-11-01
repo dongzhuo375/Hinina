@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { settingsRevealed } from '@/utils/settings-access'
+import { systemService } from '@/services/system.service'
 
 const route = useRoute()
 const announcementStore = useAnnouncementStore()
@@ -30,6 +31,10 @@ const links = [
   { key: 'submissions', name: 'Submissions', label: '评测', number: '03' },
   { key: 'announcements', name: 'Announcements', label: '公告', number: '04' },
 ]
+
+/// `--settings` 管理方钥匙：进入比赛壳层后恒显「环境设置」入口——钥匙本应授
+/// 予入口，reveal 门控（连点版本号）是选手侧的另一套机制（评审十九 #4）
+const keyedMode = computed(() => systemService.launchFlags.value.settings)
 </script>
 <template>
   <nav class="contest-navigation" aria-label="赛场导航">
@@ -39,7 +44,7 @@ const links = [
       <span class="navigation-number" aria-hidden="true">{{ link.number }}</span>{{ link.label }}
       <span v-if="link.key === 'announcements' && showAnnouncementDot" class="unread-mark" aria-label="有未读公告"></span>
     </router-link>
-    <router-link v-if="settingsRevealed" :to="{ name: 'Settings' }"
+    <router-link v-if="settingsRevealed || keyedMode" :to="{ name: 'Settings' }"
       :class="['navigation-link', { active: activeKey === 'settings' }]"
       :aria-current="activeKey === 'settings' ? 'page' : undefined">环境设置</router-link>
   </nav>

@@ -9,6 +9,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `init` | `pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry>` | 注册插件。**必须第一个注册**（官方要求：检测须早于其它插件初始化，main.rs Builder 链首位）。回调忽略 args/cwd（无深链/文件关联；未来引入时在此转发给第一实例） |
+| 第二实例带 `--settings` | 聚焦后弹一次系统提示框（`startup_dialog::present_message`，评審十九 #6） | 本进程标志已固化、参数无处可施——静默聚焦会让维护者误以为设置页已打开 |
 | `focus_main_window` | `fn focus_main_window(app: &tauri::AppHandle)`（私有） | 回调实体：按 label `main` 找窗口（tauri.conf.json 未配置 label，Tauri 默认 `main`），不存在（首实例尚在启动/已在退出）早退；最小化先 `unminimize` 再 `set_focus`。**所有窗口操作结果一律忽略**——回调跑在第一实例，panic 会经 panic 钩子写崩溃文件并弹启动失败框，把无害的重复双击变成致命故障，绝不 expect/unwrap |
 
 ## 直接依赖

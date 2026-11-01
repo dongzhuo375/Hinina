@@ -66,7 +66,13 @@ export class SystemService {
         launchFlagsSnapshot.value = flags
         return flags
       })
-      .catch(() => launchFlagsSnapshot.value)
+      .catch(() => {
+        // **不缓存 rejection**（评审十九 #7）：标志在进程内不变，下次调用重试
+        // 即可；一次瞬时失败不该让钥匙整个进程失效（否则维护者静默走普通门禁、
+        // 字段全锁且无从得知原因）。快照在成功前保持安全侧默认值。
+        launchFlagsOnce = null
+        return launchFlagsSnapshot.value
+      })
     return launchFlagsOnce
   }
 

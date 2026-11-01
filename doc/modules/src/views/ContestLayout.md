@@ -20,7 +20,8 @@
 | `contestGated` | computed | `!keyedSettings && (phase === 'ended' \|\| phase === 'upcoming')` —— 赛程闸门的**模板判定**（结束遮罩 v-if、内容区 inert、TopBar navigation-disabled 三处同源）；钥匙模式设置页恒为 false（评审六） |
 | `bareShell` | computed | `keyedSettings && !auth.isLoggedIn` —— 最小壳判据（三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1） |
 | `watch([phase, keyedSettings], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**keyedSettings 时只免跳转**——无会话（最小壳，评审四 P2-2）与有会话（评审五）两个分支都覆盖；`ended` 的 `stopLive()` 清理**不能被豁免吞掉**（自然结束后公告请求会一直打，评审八 P2-1），upcoming 无轮询可停 |
-| `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → 启动公告轮询，见逻辑流程 |
+| `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → `ensureLive()`，见逻辑流程 |
+| `ensureLive` | `() => void` | 公告轮询的唯一启动点：`phase === 'running'` 且 `contest.id` 存在、且不是跨场未刷新（brief.id ≠ contest.id）时 `startLive(id)`；按 id 幂等。**阶段跃迁到 running 时也调用**（评审十九 #5：赛前打开的外壳在开赛后无需重挂即可补启轮询） |
 | `backToLogin` | `() => void` | 最小壳的「返回登录」按钮 → `replace(Login)`（正常登录页，含匿名简报与重试 UI） |
 | `exitTimer` | 定时器句柄 | 结束退出延迟；模块级普通变量，不进响应式系统（墙钟 interval 已归 `useNowMs`） |
 | `disposed` | `boolean` | 卸载后阻断在途异步续跑 |

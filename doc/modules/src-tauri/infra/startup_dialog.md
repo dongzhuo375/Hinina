@@ -16,6 +16,7 @@
 | `should_present` | `fn should_present(started, on_main) -> bool`（私有） | 纯判定：启动未完成且在主线程。未 `arm` 时 `on_main` 必为 false，故不需要单独的 armed 标志 |
 | `claim_presentation` | `fn claim_presentation(&AtomicBool) -> bool`（私有） | 一次性领取弹窗权：并发 panic 只有一个线程弹出 |
 | `message` | `fn message(payload: &str, crash_log: Option<&Path>) -> String`（私有） | 正文格式化纯函数，供单测 |
+| `present_message` | `pub fn present_message(title: &str, text: &str)` | 非致命提示框（`MB_ICONINFORMATION`）：单实例回调复用，告知维护者「已在运行、需完全退出后以 --settings 重启」（评审十九 #6）。独立线程执行并 `join`，与崩溃框同款；非 Windows no-op |
 
 ## 直接依赖
 

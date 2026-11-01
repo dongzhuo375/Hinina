@@ -25,6 +25,7 @@
 ## 直接依赖
 
 - `std::ffi::OsString`（参数比较，兼容非 Unicode argv）
+- `crate::infra::argv::has_flag`（与 `--settings` 共用的精确整参匹配原语）
 - `windows-sys 0.59`（`cfg(windows)` only，Cargo.toml `[target.'cfg(windows)'.dependencies]`；features：`Win32_Foundation` / `Win32_Security` / `Win32_Storage_FileSystem` / `Win32_System_Console`。注意 `SetStdHandle` / `STD_*_HANDLE` / `SetConsoleOutputCP` / `GetConsoleMode` / `SetConsoleMode` 与 `ENABLE_*` 常量都在 `Win32::System::Console`，`CloseHandle` 在 `Win32::Foundation`；`CreateFileW` 签名引用 `SECURITY_ATTRIBUTES`，被 `Win32_Security` feature 门控——签名取证自 windows-sys 0.59 源码）
 
 ## 被依赖

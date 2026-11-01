@@ -19,6 +19,7 @@
 
 ## 直接依赖
 
+- `crate::infra::argv::has_flag`（与 `--console` 共用的精确整参匹配原语，评审十九 #9）
 - `std::sync::OnceLock`（进程级标志，随进程消亡）
 - `serde::Serialize`（线上形状）
 

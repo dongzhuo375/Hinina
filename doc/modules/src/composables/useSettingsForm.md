@@ -19,7 +19,7 @@
 | `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示。**锁定字段不参与校验也不写入载荷**（存量非法值不得阻塞可编辑字段保存，也不得被解析成 NaN 拖垮整次保存，评审十 #3） |
 | `ojOptions` | computed | 实时下拉候选；实例清单与 persistedActive 为 controller 内部状态 |
 | 签名 | `useSettingsForm(maintainerLocked?: Readonly<Ref<boolean>>)` | 维护者层是否锁定（普通启动 true）；默认 `ref(false)`（不锁）供独立使用 |
-| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）且当前路由仍是设置页时**切换成功后留在设置页（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2）；`switch_oj` 是异步的，期间已导航离开则不再停留、照常回登录页（豁免只属于设置页本身，评审九 P2-1）；停留时随后**重读配置并复位 baseline**——切换改了 activeOj/ojUrl 却没动 baseline 会出现假的「未保存更改」，且表单其余字段仍是旧 OJ 的值（评审十 #4） |
+| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）且当前路由仍是设置页时**切换成功后留在设置页（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2）；`switch_oj` 是异步的，期间已导航离开则不再停留、照常回登录页（豁免只属于设置页本身，评审九 P2-1）；停留时**只重置 OJ 域字段并按磁盘重算 baseline**（`resetOjFieldsFromDisk`）：编辑器/布局等全局草稿**保留**（评审十九 #1——整体 `load()` 会丢掉维护者刚改的字体/超时，与回滚分支的「保留编辑」不一致），dirty 只反映真正未保存的全局编辑，旧 OJ 的 OJ 域草稿不会写到新 OJ（评审十 #4） |
 | `SETTINGS_INPUT` / `inputClass` | 常量/fn | 共享输入框基础样式与错误态拼接 |
 
 

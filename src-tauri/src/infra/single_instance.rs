@@ -29,8 +29,20 @@ const MAIN_WINDOW_LABEL: &str = "main";
 /// 注册单实例插件。**必须第一个注册**（先于其它插件；官方要求检测尽早
 /// 发生，其它插件不得抢先初始化）。
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    tauri_plugin_single_instance::init(|app, args, _cwd| {
         focus_main_window(app);
+        // 第二实例带 `--settings`：本进程的启动标志已固化、参数无处可施，
+        // 静默聚焦会让维护者以为设置页已打开（评审十九 #6）——弹一次提示，
+        // 明确「需完全退出后重启」。
+        let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
+        if crate::infra::argv::has_flag(&args, "--settings") {
+            crate::infra::startup_dialog::present_message(
+                "Hinina 已在运行",
+                "当前实例不是以 --settings 启动的，设置页的维护者选项仍处于锁定状态。
+
+                 请完全退出 Hinina 后，再以 --settings 重新启动。",
+            );
+        }
     })
 }
 

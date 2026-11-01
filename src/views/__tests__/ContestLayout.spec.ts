@@ -381,6 +381,32 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
+  it('评审十九 #5：赛前打开的外壳，开赛后补启公告轮询（无需重挂）', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(890 * 1_000) // 赛程 900–1002：此刻 upcoming
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const auth = useAuthStore()
+    auth.sessionResolved = true
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+    const store = useContestStore()
+    store.contest = { ...schedule }
+    store.brief = { ...schedule }
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+    expect(mocks.startLive).not.toHaveBeenCalled() // 赛前不起轮询
+
+    // 越过 startTime（900）：阶段跃迁到 running → 补启
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(mocks.startLive).toHaveBeenCalledWith('1', expect.any(Function))
+    vi.useRealTimers()
+  })
+
   it('评审四 P2-2：最小壳下保留的未开始简报不触发立即跳转', async () => {
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)

@@ -109,6 +109,47 @@ fn message(payload: &str, crash_log: Option<&Path>) -> String {
     )
 }
 
+/// 非致命提示框：供单实例回调复用（第二实例带 `--settings` 被拦截时告知维护者
+/// 需完全退出后重启，评审十九 #6）。独立线程执行并 `join`，与崩溃框同款 ——
+/// 回调跑在第一实例的事件循环里，主线程上嵌套模态消息泵会重入。
+pub fn present_message(title: &str, text: &str) {
+    #[cfg(windows)]
+    {
+        let title = title.to_string();
+        let text = text.to_string();
+        let spawned = std::thread::Builder::new()
+            .name("info-dialog".into())
+            .spawn(move || show_info(&title, &text));
+        if let Ok(handle) = spawned {
+            let _ = handle.join();
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        // 非 Windows 没有产品面：开发/CI 的 stderr 已能看到提示内容
+        let _ = (title, text);
+    }
+}
+
+#[cfg(windows)]
+fn show_info(title: &str, text: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
+    };
+    let title = crate::infra::console::wide(title);
+    let body = crate::infra::console::wide(text);
+    // SAFETY: 两个 UTF-16 缓冲都以 NUL 结尾且在本调用期间存活；hwnd 为 null
+    // 表示无父窗口（复用启动框的调用约定，不依赖窗口句柄）
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            body.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST,
+        );
+    }
+}
+
 #[cfg(windows)]
 fn show_blocking(text: String) {
     let spawned = std::thread::Builder::new()

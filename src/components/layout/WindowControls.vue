@@ -5,20 +5,24 @@
  * 窗口 `decorations: false`，这些按钮是唯一的 UI 出口（Alt+F4/任务栏是系统
  * 兜底）。注意父容器要保留 `data-tauri-drag-region`：按钮点击不应触发拖动。
  */
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import {
+  closeWindow as closeWindowIpc,
+  minimizeWindow,
+  toggleMaximizeWindow,
+} from '@/bridge/window.bridge'
 
-const appWindow = getCurrentWindow()
-
+// 窗口 API 只经 bridge（CLAUDE.md：bridge 是唯一接触 @tauri-apps/api 的地方，
+// 评审十九 #8）；失败无补救动作，result 一律忽略
 function minimize(): void {
-  void appWindow.minimize()
+  void minimizeWindow()
 }
 
 function toggleMaximize(): void {
-  void appWindow.toggleMaximize()
+  void toggleMaximizeWindow()
 }
 
-function closeWindow(): void {
-  void appWindow.close()
+function closeAppWindow(): void {
+  void closeWindowIpc()
 }
 </script>
 
@@ -30,7 +34,7 @@ function closeWindow(): void {
     <button type="button" aria-label="最大化" @click="toggleMaximize">
       <svg viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1" /></svg>
     </button>
-    <button type="button" aria-label="关闭窗口" class="window-close" @click="closeWindow">
+    <button type="button" aria-label="关闭窗口" class="window-close" @click="closeAppWindow">
       <svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8" /></svg>
     </button>
   </div>

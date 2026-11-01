@@ -246,6 +246,28 @@ describe('useSettingsForm', () => {
     expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
   })
 
+  it('评审十九 #1：切换保留全局草稿、只重置 OJ 域，dirty 只反映未保存的全局编辑', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    // 全局草稿（字体）+ OJ 域草稿（超时）
+    settings.form.fontSize = '18'
+    settings.form.timeoutSecs = '99'
+    settings.form.activeOj = 'Hydro'
+    await settings.onSwitchOj()
+
+    expect(settings.form.fontSize).toBe('18') // 全局草稿保留
+    expect(settings.form.timeoutSecs).toBe('30') // OJ 域以磁盘为准
+    expect(settings.form.activeOj).toBe('Hydro')
+    expect(settings.dirty.value).toBe(true) // 未保存的全局编辑仍为 dirty
+
+    await settings.save()
+    expect(currentConfig.editor.fontSize).toBe(18)
+    expect(settings.dirty.value).toBe(false)
+    // OJ 域草稿（99）不得被写进新 OJ
+    expect(currentConfig.oj.timeoutSecs).toBe(30)
+  })
+
   it('评审十五 C：锁定态 active 指向缺失实例——不创建、不切换、不谎报', async () => {
     // 手改配置让 oj.active 指向不存在的实例：锁定态载荷跳过实例写入，
     // 因此绝不能触发 performSwitch（否则会提示「实例已保存；切换未成功」）
