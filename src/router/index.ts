@@ -136,14 +136,23 @@ router.beforeEach(async (to) => {
   // 管理方钥匙的条件豁免：仅 --settings 进程中的设置页可无会话进入（不限首次
   // —— 返回登录后想再修一次地址仍可直达）。普通模式设置页照常受保护。
   if (systemService.isKeyedSettings(to.name)) return true
-  if (!auth.isLoggedIn) return { name: 'Login', replace: true }
+  // 钥匙设置页出发的导航：**任何失败都回设置页**（评审十九 #2 的同类路径，
+  // 评审二十补漏）——无会话时点赛场页面若送去登录页，设置视图被卸载、草稿
+  // 丢失，正是钥匙要避免的
+  const fromKeyedSettings = systemService.isKeyedSettings(router.currentRoute.value.name)
+  if (!auth.isLoggedIn) {
+    if (fromKeyedSettings) {
+      markSettingsGateBlocked('未登录，已留在设置页（登录后才能进入赛场页面）')
+      return { name: 'Settings' }
+    }
+    return { name: 'Login', replace: true }
+  }
 
   // 首次进入工作台（含深链）先确认赛程；赛前/赛后在入口等待。
   // 工作台内切换页面由外壳的时钟处理，避免结束弹窗期间打断其退出流程。
   // **钥匙设置页出发的导航不跳过闸门**（评审十 #1）：否则赛前/赛后点题目/榜单
   // 会落进被闸门锁定的比赛页，随后外壳 watcher 把维护者踢回登录页——草稿丢失、
   // 维护被打断（登录页的「返回设置」是一次重新进入）。闸门失败时回**设置页**。
-  const fromKeyedSettings = systemService.isKeyedSettings(router.currentRoute.value.name)
   const enteringFromOutside =
     fromKeyedSettings ||
     !router.currentRoute.value.matched.some((r) => r.name === 'Contest')

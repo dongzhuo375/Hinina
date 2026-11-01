@@ -14,7 +14,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `settingsGateNotice` | `Ref<string \| null>` | 当前提示文案；null = 无 |
-| `markSettingsGateBlocked` | `(message: string) => void` | 记录提示并启动 4 秒自动清除（重复调用重置计时器）。文案由守卫按成因二选一：简报存在 → 「比赛未进行」；简报缺失（服务器不可达）→ 「未能加载比赛信息」（评审十九 #3） |
+| `markSettingsGateBlocked` | `(message: string) => void` | 记录提示并启动 4 秒自动清除（重复调用重置计时器）。文案由守卫按成因三选一：无会话 → 「未登录，已留在设置页」（评审二十）；简报存在 → 「比赛未进行」；简报缺失（服务器不可达）→ 「未能加载比赛信息」（评审十九 #3） |
 | `clearSettingsGateNotice` | `() => void` | 清空提示与计时器（SettingsView `onUnmounted` 调用——4 秒计时器不跨页残留） |
 
 模块级单例（与 `settings-access` 同先例）：无领域数据、不走 IPC，不值得一个

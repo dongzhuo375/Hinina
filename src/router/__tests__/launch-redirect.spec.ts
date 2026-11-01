@@ -167,6 +167,20 @@ describe('--settings 初始直落（守卫行为）', () => {
     expect(router.currentRoute.value.name).toBe('Settings')
   })
 
+  it('评审二十：钥匙设置页 + 无会话点赛场页面——留在设置页并提示，不去登录页', async () => {
+    // 无会话（最小壳）时点/历史回到 ProblemSet：无条件 Login 会卸载设置视图、
+    // 丢掉草稿——与「钥匙失败回设置页」的设计同向
+    launchFlags.state.settings = true
+    const { default: router } = await import('@/router')
+    await router.push({ name: 'Login' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+
+    await router.push({ name: 'ProblemSet' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+    const { settingsGateNotice } = await import('@/utils/settings-gate-notice')
+    expect(settingsGateNotice.value).toContain('未登录')
+  })
+
   it('评审十九 #3：简报加载失败时提示说明「无法加载」，而不是「比赛未进行」', async () => {
     launchFlags.state.settings = true
     const auth = useAuthStore()
