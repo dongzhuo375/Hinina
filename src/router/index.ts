@@ -68,7 +68,7 @@ export const routes: RouteRecordRaw[] = [
       {
         // 设置属于工作台的一部分：放在外壳内，切换时不丢失顶栏/活动栏/状态条。
         // meta **保持继承父级的 requiresAuth: true**（默认受保护）—— 免登录豁免
-        // 是守卫里的**条件豁免**（settingsMode && to.name === 'Settings'，管理方
+        // 是守卫里的**条件豁免**（systemService.isKeyedSettings(to.name)，管理方
         // 钥匙），不是 meta 声明：无条件豁免会让无钥匙访客直达设置页，且 401 时
         // sessionGuard 因 meta 为 false 不再回登录页（评审 P2）。
         path: 'settings',
@@ -105,7 +105,7 @@ const router = createRouter({
  *    - **首次导航**落在登录页时直落设置页。无会话时没有任何 UI 路径可达设置页
  *      （隐藏入口在比赛外壳内），钥匙必须在初始导航就生效；仅对首次导航生效，
  *      「返回登录」不受影响。
- *    - **设置页的条件豁免**：`settingsMode && to.name === 'Settings'` 时放行
+ *    - **设置页的条件豁免**：`systemService.isKeyedSettings(to.name)` 时放行
  *      无会话访问（且不限首次）。豁免在守卫里而不在 meta 里：meta 保持继承
  *      父级保护，普通模式下设置页照常受保护（无钥匙访客直达 → 登录页；页面
  *      上 401 → sessionGuard 读到 requiresAuth=true 照常回登录页）。
@@ -134,7 +134,7 @@ router.beforeEach(async (to) => {
   if (!requiresAuth) return true
   // 管理方钥匙的条件豁免：仅 --settings 进程中的设置页可无会话进入（不限首次
   // —— 返回登录后想再修一次地址仍可直达）。普通模式设置页照常受保护。
-  if (settingsMode && to.name === 'Settings') return true
+  if (systemService.isKeyedSettings(to.name)) return true
   if (!auth.isLoggedIn) return { name: 'Login', replace: true }
 
   // 首次进入工作台（含深链）先确认赛程；赛前/赛后在入口等待。

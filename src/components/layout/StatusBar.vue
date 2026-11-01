@@ -16,18 +16,18 @@ const version = __APP_VERSION__
 
 /// 显现瞬间的提示：连点 5 下本身没有任何视觉反馈，若设置入口不在当前视野内，
 /// 用户无法判断「到底生效没有」。给一次 3 秒提示，之后不再打扰。
-const unlockedHint = ref(false)
+const revealedHint = ref(false)
 let hintTimer: ReturnType<typeof setTimeout> | null = null
 
 function onVersionClick() {
   if (!tapVersion()) return
 
   log.info('设置入口已显示（连点版本号）')
-  unlockedHint.value = true
+  revealedHint.value = true
   if (hintTimer) clearTimeout(hintTimer)
   hintTimer = setTimeout(() => {
     hintTimer = null
-    unlockedHint.value = false
+    revealedHint.value = false
   }, 3_000)
 }
 
@@ -54,7 +54,7 @@ onUnmounted(() => {
     </div>
 
     <div class="flex items-center gap-2">
-      <span v-if="unlockedHint" class="font-mono text-xs text-[var(--color-primary)]">
+      <span v-if="revealedHint" class="font-mono text-xs text-[var(--color-primary)]">
         已显示设置入口
       </span>
       <!--

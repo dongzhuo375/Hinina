@@ -16,7 +16,7 @@
 | `SETTINGS_TAP_WINDOW_MS` | `2_000` | 相邻两次点击的最大间隔；超过即**从 1 重新计数**（而非继续累加，否则零散点击也能凑满） |
 | `createRevealGate(options?)` | `(options?: RevealGateOptions) => RevealGate` | 纯状态机（无 Vue 依赖）：`taps` / `windowMs` / `now` 均可注入 |
 | `RevealGate.tap()` | `() => boolean` | 记一次点击，返回**本次之后**是否已显现 |
-| `RevealGate.unlocked()` | `() => boolean` | 当前是否已显现 |
+| `RevealGate.revealed()` | `() => boolean` | 当前是否已显现 |
 | `settingsRevealed` | `Ref<boolean>` | 应用级单例状态，`ActivityBar` 据此决定是否渲染设置项 |
 | `tapVersion()` | `() => boolean` | `StatusBar` 的点击入口；返回「**刚刚**显现」（仅一次为 `true`，供一次性反馈） |
 
@@ -36,7 +36,7 @@
 ```
 版本号 click → tapVersion()
   ├─ gate.tap()（计数/判窗/显现）
-  ├─ settingsRevealed.value = gate.unlocked()
+  ├─ settingsRevealed.value = gate.revealed()
   └─ 返回「刚刚显现」→ StatusBar 给出 3 秒提示「已显示设置入口」
 ActivityBar 渲染时读 settingsRevealed → 决定设置 router-link 是否出现
 ```
