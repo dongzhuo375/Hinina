@@ -104,6 +104,16 @@ test.describe('--settings 管理方钥匙旅程', () => {
     expect(box).not.toBeNull()
     expect(box!.y).toBeGreaterThanOrEqual(0)
     expect(box!.y).toBeLessThan(viewport!.height)
+    // 横向不得压住左侧分组索引（评审十六视觉实测：整幅块级会盖住「01」首项）
+    const navBox = await page.locator('nav.settings-index').boundingBox()
+    if (navBox) {
+      const intersects =
+        box!.x < navBox.x + navBox.width &&
+        box!.x + box!.width > navBox.x &&
+        box!.y < navBox.y + navBox.height &&
+        box!.y + box!.height > navBox.y
+      expect(intersects).toBe(false)
+    }
   })
 
   test('评审七：钥匙 + 会话失效翻转外壳——未保存草稿跨形态保留', async ({ page }) => {

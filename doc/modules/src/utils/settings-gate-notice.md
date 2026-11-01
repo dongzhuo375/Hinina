@@ -36,7 +36,9 @@ store。
   → markSettingsGateBlocked('比赛未进行，已留在设置页…')
   → return { name: 'Settings' }
 SettingsView 读取 settingsGateNotice → 渲染提示条（`sticky top-2`：滚到底部改数据目录时也
-在视口内，评审十五实测普通定位会被滚出视口）
+在视口内，评审十五实测普通定位会被滚出视口）。提示条放在内容列 `.settings-sections`
+内（自动继承索引栏左距）——放在外层整幅块级会横跨 float 索引栏、压住「01」首项
+（评审十六视觉实测）
 4 秒后（或再次触发时重置）自动清空
 ```
 

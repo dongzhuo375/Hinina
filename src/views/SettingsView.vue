@@ -107,19 +107,21 @@ onMounted(() => {
             @click.prevent="scrollToSection(index)"
           ><span>{{ String(index + 1).padStart(2, '0') }}</span>{{ label }}</a>
         </nav>
-        <!-- 钥匙模式：赛前/赛后点赛场页面被守卫拦回时的可见反馈（评审十五 B） -->
-        <p
-          v-if="settingsGateNotice"
-          role="status"
-          class="sticky top-2 z-20 mb-4 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[var(--color-warning)] shadow-sm"
-        >
-          {{ settingsGateNotice }}
-        </p>
         <LoadingSpinner v-if="loading" message="正在加载配置…" />
         <ErrorMessage v-else-if="loadError" :message="loadError" :retry="load" />
 
         <template v-else>
           <div class="settings-sections flex flex-col gap-8">
+            <!-- 钥匙模式：赛前/赛后点赛场页面被守卫拦回时的可见反馈（评审十五 B）。
+                 放在内容列内（.settings-sections 自动继承索引栏左距）——整幅块级放在
+                 外层会横跨 float 索引栏、压住「01」首项 4 秒（评审十六视觉实测） -->
+            <p
+              v-if="settingsGateNotice"
+              role="status"
+              class="sticky top-2 z-20 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[var(--color-warning)] shadow-sm"
+            >
+              {{ settingsGateNotice }}
+            </p>
             <!-- ── OJ 服务器 ── -->
             <OjServerSection
               :form="form"
