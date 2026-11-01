@@ -221,12 +221,15 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     const submitted = { ...form }
     const submittedSnapshot = snapshot()
     const target = submitted.activeOj
-    const isNewInstance = !ojInstances.value.some((i) => i.id === target)
+    // 锁定字段：不可编辑，写回未改动值即可——但**不参与数字解析**（存量非法
+    // 字符串会变 NaN → JSON null → Rust u64 反序列化失败拖垮整次保存；
+    // 评审十 #3）。保持磁盘原值不动。
+    const lockAll = locked.value
+    // 锁定态不会创建实例（载荷里 `if (!lockAll)` 跳过写入），因此也**不得**
+    // 走自动切换：否则 switch_oj 对不存在的实例失败，会谎报「实例已保存；
+    // 切换未成功」（评审十五 C——手改 active 指向缺失实例时可达）
+    const isNewInstance = !lockAll && !ojInstances.value.some((i) => i.id === target)
     try {
-      // 锁定字段：不可编辑，写回未改动值即可——但**不参与数字解析**（存量非法
-      // 字符串会变 NaN → JSON null → Rust u64 反序列化失败拖垮整次保存；
-      // 评审十 #3）。保持磁盘原值不动。
-      const lockAll = locked.value
       const saved = await configService.updateConfig((draft) => {
         // active 只由 switch_oj 改写；保存不能制造配置与运行中 Registry 的不一致
         if (!lockAll) {

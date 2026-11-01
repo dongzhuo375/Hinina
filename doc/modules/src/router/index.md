@@ -4,7 +4,7 @@
 
 ## 职责
 
-定义全部路由（登录页 + 比赛工作台嵌套子树）与 `beforeEach` 守卫：首次导航统一恢复后端会话，受保护路由鉴权，并在**首次进入工作台（含深链）前校验比赛阶段**——赛前/赛后一律退回登录页等待。另承载 `--settings` 管理方钥匙的前端落点：首次导航落登录页时直落设置页，且设置页的免登录访问是守卫里的**条件豁免**（`settingsMode && to.name === 'Settings'`）——meta 保持继承父级保护，普通模式下无钥匙访客直达设置页会被送回登录页、页面 401 也照常回登录页。
+定义全部路由（登录页 + 比赛工作台嵌套子树）与 `beforeEach` 守卫：首次导航统一恢复后端会话，受保护路由鉴权，并在**首次进入工作台（含深链）前校验比赛阶段**——赛前/赛后一律退回登录页等待。另承载 `--settings` 管理方钥匙的前端落点：首次导航落登录页时直落设置页，且设置页的免登录访问是守卫里的**条件豁免**（`systemService.isKeyedSettings(to.name)`）——meta 保持继承父级保护，普通模式下无钥匙访客直达设置页会被送回登录页、页面 401 也照常回登录页。
 
 ## 核心类型/函数
 
@@ -49,7 +49,7 @@ beforeEach(to):
   4. 受保护且已登录，且「当前不在 Contest 子树内」或「当前是钥匙设置页」
      （后者是评审十 #1：从设置页点题目/榜单也要过闸门，否则会落进被锁定的
       比赛页、随后被外壳踢回登录页且无回入口；闸门失败时回 **Settings**）
-     （!router.currentRoute.matched 含 name === 'Contest'）时做赛程闸门：
+     （入闸条件 = 从钥匙设置页出发 ∨ 当前不在 Contest 子树内）时做赛程闸门：
        !contest.brief → await contest.loadBrief()    // 深链/首次进入补加载匿名简报
        期间会话可能失效 → !auth.isLoggedIn 则回 Login
        schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
@@ -63,14 +63,14 @@ beforeEach(to):
 afterEach(to):
   to.meta.requiresAuth !== true → return（登录页/catch-all 不受保护，不成环）
   已登录 → return
-  lastSettingsMode && to.name === 'Settings' → return（钥匙设置页豁免）
+  systemService.isKeyedSettings(to.name) → return（钥匙设置页豁免）
   否则 → replace(Login)
 ```
 **为什么需要**（评审九 P2-2）：beforeEach 只能看导航开始时的会话；守卫批准后、
 路由确认前，某个在途请求返回 401 → sessionGuard 清理会话——它读到的
 `currentRoute` 仍是**尚未确认**的旧路由（设置页），钥匙豁免会跳过跳转，豁免
 被这条在途的受保护导航继承，用户落到无会话的比赛页。afterEach 在确认后补一次
-同一判据（`lastSettingsMode` 由 beforeEach 记录），任何「导航中途会话失效」
+同一判据（判据为 `systemService.isKeyedSettings(to.name)`），任何「导航中途会话失效」
 都兜得住；替换目标是登录页（不受保护），不会循环。
 
 设计要点：

@@ -3,6 +3,7 @@ import '@fontsource-variable/noto-serif-sc/wght.css'
 import '@fontsource-variable/roboto-mono/wght.css'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { systemService } from '@/services/system.service'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import Countdown from '@/components/login/Countdown.vue'
@@ -36,6 +37,15 @@ const briefRetryScheduled = ref(false)
 
 /// 版本号构建期注入（vite define ← package.json），与 StatusBar 同源，避免写死后漂移
 const version = __APP_VERSION__
+
+/// `--settings` 管理方钥匙：登录页给出「返回设置」入口——否则从设置页点
+/// 「返回登录」就是单向门（无边框窗口没有地址栏，firstNavigation 已消费，
+/// 维护者只能重启带参，评审十五 A）。
+const keyedMode = computed(() => systemService.launchFlags.value.settings)
+
+function backToSettings(): void {
+  void router.replace({ name: 'Settings' })
+}
 
 /// 当前时间戳（共享毫秒墙钟派生秒，驱动倒计时）
 const nowMs = useNowMs()
@@ -268,6 +278,14 @@ onUnmounted(() => {
               : '等待连接比赛服务器'
             }}
           </span>
+          <button
+            v-if="keyedMode"
+            type="button"
+            class="font-sans text-[13px] text-[#8c6a43] underline-offset-2 hover:underline"
+            @click="backToSettings"
+          >
+            返回设置
+          </button>
           <span class="font-sans text-[9px] tracking-[1px]">Hinina v{{ version }}</span>
         </div>
         <p v-if="connState === 'failed' && briefError" class="mt-1 max-w-md break-words text-[13px] leading-5 text-[#a33b2a]" :title="briefError">

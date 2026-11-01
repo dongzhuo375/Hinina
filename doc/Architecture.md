@@ -208,7 +208,7 @@ Hinina/
         │   ├── frontend_log.rs           # 前端日志落 tracing（frontend_log 命令的全部收敛与落盘：级别/scope 白名单、消息 2000 字符截断、64KiB/60s 滚动窗口字节预算——防渲染循环刷满日志且后续窗口恢复真实错误预算；安全口径沿 plugin_diagnostics，无载荷参数）
         │   ├── text.rs                   # 按字符截断共享工具（truncate_ellipsis：超长加 …；http 错误摘录 / hydro 响应预览 / frontend_log 三处同形态收敛于此）
         │   ├── startup_dialog.rs         # 启动期致命错误对话框（panic 钩子的 UI 出口）：main 装钩子后 arm、RunEvent::Ready 时 mark_started；启动未完成的主线程 panic 在崩溃记录落盘后弹一次 MessageBoxW（三处 expect + Tauri 窗口/WebView2 创建失败），写入成功才展示崩溃路径；独立线程跑模态消息泵避免重入事件循环；测试不 arm、非 Windows no-op
-        │   ├── launch_args.rs            # --settings 启动参数（管理方钥匙）：精确匹配解析（沿 console 同款语义）固化为进程级 OnceLock<LaunchFlags>，经 launch_flags 命令交前端 —— 守卫初始直落设置页 + 设置页维护者层显现；防误触护栏而非安全边界（config.json 明文可手改）；未 init（测试进程）读出全 false 默认值
+        │   ├── launch_args.rs            # --settings 启动参数（管理方钥匙）：精确匹配解析（沿 console 同款语义）固化为进程级 OnceLock<LaunchFlags>，经 launch_flags 命令交前端 —— 守卫初始直落设置页 + 设置页维护者层解锁；防误触护栏而非安全边界（config.json 明文可手改）；未 init（测试进程）读出全 false 默认值
         │   ├── single_instance.rs        # 单实例约束（tauri-plugin-single-instance 2.4.5，**Builder 链第一个注册的插件**）：第二实例在插件初始化阶段即被识别退出（早于 setup，不建 AppContext/不开日志），第一实例回调聚焦（必要时还原）已有主窗口；回调绝不 panic（会经钩子弹启动失败框）；dev/release 同 identifier 共享互斥体；无 npm 侧/capability；无单测（mock runtime 令本机测试二进制启动即崩 0xc0000139，取证见模块文档），行为由双开验证
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）
@@ -353,7 +353,8 @@ src/
 │   ├── layout/
 │   │   ├── TopBar.vue                    # 顶栏（**两行式**：40px 窗口条=品牌 + 比赛标题 + 简介浮层 + 账号菜单 + 窗口控制；导航行=内嵌 ActivityBar + 阶段徽章 + 剩余时间 + 进度条；`:navigation-disabled` 驱动导航区 :inert）
 │   │   ├── ActivityBar.vue               # 赛场**横向**导航条（内嵌于 TopBar；题目/榜单/评测/公告 + 编号 01–04 + 末尾「环境设置」（默认隐藏，连点状态栏版本号 5 下才渲染）；公告项挂真实未读红点徽标）
-│   │   └── StatusBar.vue                 # 底部状态条（连接状态 + 客户端版本；版本号同时是设置入口的隐藏显现点）
+│   │   ├── StatusBar.vue                 # 底部状态条（连接状态 + 客户端版本；版本号同时是设置入口的隐藏显现点）
+│   │   └── WindowControls.vue            # 无边框窗口的最小化/最大化/关闭（TopBar 与 `--settings` 极简壳共用）
 │   ├── contest/
 │   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时或 OI 总得分，数据源=榜单我的行；无卡片外框，渲染在 PageHeading 的右侧插槽）
 │   ├── login/                            # 登录页专用组件（PR #35 拆分）
@@ -372,7 +373,7 @@ src/
 │   │   ├── ProblemTabStrip.vue           # 题目快速切换条（「← 总览」返回入口 + A/B/C… chips，标记已 AC / 已尝试）
 │   │   ├── ProblemStatement.vue          # 题面分节展示（描述/输入/输出/样例+复制，Markdown 渲染 + 相对图片 URL 改写；容器查询 cqi 驱动排版、48em 行宽封顶）
 │   │   └── __tests__/
-│   │       └── QuickSubmitDialog.spec.ts # 提交重复防护（鼠标+Ctrl+Enter 只发一次、等待比赛数据前即上锁）、错误提示与显现
+│   │       └── QuickSubmitDialog.spec.ts # 提交重复防护（鼠标+Ctrl+Enter 只发一次、等待比赛数据前即上锁）、错误提示与解锁
 │   ├── settings/                           # 设置页七个 section 与共享 frame（SettingsSectionFrame 保留真实 id/focus/deep 样式；OJ/Editor/Layout/Theme/ResetPurge/DataDir/About）
 │   ├── rank/
 │   │   ├── RankToolbar.vue               # 榜单工具条（服务端 keyword 搜索 300ms 防抖 + 分组 tab + 赛制图例 + OI 计分规则徽章）
@@ -455,6 +456,7 @@ src/
 │   ├── submission-tone.ts                # 提交状态 pill 默认类串与 neutral fallback（QuickSubmit 仅覆盖 pending 保留琥珀色）
 │   ├── close-guard.ts                    # 关窗守卫（状态机 idle/flushing/allowing + 时间上界 flushTimeout/hardTimeout + 收尾看门狗（destroy 悬挂时 close 兜底）+ 有界多轮重刷 shouldReflush/maxFlushRounds：每轮落盘后复查在途改动，握手窗口内到达的落键也纳入落盘；收尾用 destroy 兜底 close；依赖全注入故可穷尽单测）
 │   ├── settings-access.ts                # 设置入口的隐藏显现（连点状态栏版本号 5 下；注入式计数状态机 createRevealGate + 会话级单例 settingsRevealed/tapVersion；状态不落盘）
+│   ├── settings-gate-notice.ts           # 钥匙模式的阶段闸门提示（从设置页点赛场页面被拦回时给一次可见反馈，4 秒自动清除；评审十五 B）
 │   ├── focus-scope.ts                    # vFocusScope 指令（弹层焦点作用域：打开即聚焦首个可见控件 + Tab 循环陷阱 + Esc 关闭 + 卸载归还焦点；defaultPrevented 短路以不吞 Monaco 的 Tab 缩进）
 │   ├── session-check.ts                  # 赛前会话预检的错峰调度策略（窗口内随机取点 / 周期复检 ±60s 抖动 / 迟到启动抖动 / 临近开赛不再预检）
 │   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 存储域 1–8 与候选档位 2·4·8；前端各消费方一律取此处常量，Rust sanitize 同域）
@@ -528,7 +530,7 @@ src/
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（`sessionGuard` 会话失效兜底 + `globalErrorGuard` 全局错误转发）—— 前者需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）
 - **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
 - **前端会话与导航**：应用入口统一为 `/login`；`router.beforeEach` 在首次导航时恢复会话，并拦截 `meta.requiresAuth` 路由（未登录一律回登录页；唯一例外是 `--settings` 进程对设置页的**条件豁免**——豁免在守卫判据里而非 meta 声明，见 `doc/modules/src/router/index.md`）；**首次进入工作台（含深链）还要过赛程阶段闸门** —— 按 `getAuthoritativeSchedule`（认证比赛与匿名简报 ID 不同即视为换场，以简报为准）判阶段，非 `running` 一律退回登录页等待（已在 Contest 子树内时跳过闸门，避免结束瞬间的页面切换打断退出流程）；登录页依据同一阶段判据决定是否进入赛场 —— 比赛未开始时留在登录页等待，倒计时归零后自动进入，**已结束不进场**（`canEnter = isLoggedIn && phase === 'running'`）；登出时经 `stores/session.ts` 清空会话级领域状态
-- **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Adapter → `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验，且反复重登可能触发 HOJ 暴力破显现定（同 IP + 同用户名 30 分钟 20 次）。全局兜底由 `guards/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
+- **会话失效处理**：三态校验（`valid` / `invalid` / `unknown`）贯穿 Adapter → `AuthService::validate_session` → command → 前端 store；`unknown`（网络异常）一律**保留**登录态并重试，只有服务端明确判定失效才清理会话回登录页 —— 赛前误踢选手的代价远高于多等一轮校验，且反复重登可能触发 HOJ 暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）。全局兜底由 `guards/sessionGuard.ts` 承担：任何认证类 IPC 失败即判定失效（在组合根注入观察者，Bridge 不感知 store/router）
 - **三态契约必须由 Adapter 兑现**：`AuthProvider::validate_session` 的返回值语义是 `Ok(true)` 有效 / `Ok(false)` 服务端**明确**判定失效 / `Err(_)` 无法判定。**绝不可把网络错误折成 `Ok(false)`** —— 那会让 `SessionValidity::Unknown` 分支成为死代码，一次赛前网络抖动就把选手踢回登录页。HOJ 侧的判据抽成纯函数 `session_validity_from_response` 以便测试锁定：仅 `AppError::Auth` 算明确失效，非 200 的其它状态码（400/500）归 `Unknown`，网络/超时/解析失败一律上抛。同理，评测查询（`SubmissionService::get_judgement`，单次查询）**不得吞掉认证错误**：必须原样上抛，否则前端收敛轮询会把 401 当瞬时抖动重试到超时，选手干等五分钟后只收到「评测超时」，守卫也拿不到 Auth 变体
 - **赛前预检错峰**：登录页等待开赛时按 `utils/session-check.ts` 的策略校验会话 —— 距开赛 >10min 每 5min±60s 周期复检，进入 [T-10min, T-3min] 窗口后在剩余区间随机取点做一次性预检，迟到启动则 0–3s 抖动后立即执行，距开赛 ≤30s 不再预检。目的是把全场客户端的校验请求散布开，避免开赛前形成同步尖峰；**进场（T-0 导航）不错峰**，准点进场是公平性要求
 - **IPC 错误归一化**：Rust `AppError` 经 serde 序列化为 `{ Variant: msg }` 对象，`bridge/index.ts` 在唯一出口转换为 `IpcError extends Error`，保证上层 `e instanceof Error` 与 `e.message` 可用；日志不记录调用参数（含明文密码）

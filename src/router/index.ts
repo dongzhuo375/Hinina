@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { systemService } from '@/services/system.service'
+import { markSettingsGateBlocked } from '@/utils/settings-gate-notice'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 
 /// 路由元信息类型声明，避免 `to.meta.*` 退化为 any
@@ -152,7 +153,12 @@ router.beforeEach(async (to) => {
     if (!auth.isLoggedIn) return { name: 'Login', replace: true }
     const schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
     if (getContestPhase(schedule, Math.floor(Date.now() / 1000)) !== 'running') {
-      return fromKeyedSettings ? { name: 'Settings' } : { name: 'Login', replace: true }
+      if (fromKeyedSettings) {
+        // 拦回设置页时给一次可见反馈（NavigationFailure 本身静默，评审十五 B）
+        markSettingsGateBlocked('比赛未进行，已留在设置页（比赛期间才能进入赛场页面）')
+        return { name: 'Settings' }
+      }
+      return { name: 'Login', replace: true }
     }
   }
   return true

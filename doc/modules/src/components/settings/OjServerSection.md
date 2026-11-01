@@ -21,7 +21,7 @@
 | `update:form` | emit `SettingsFormPatch` | switch 按钮的局部草稿补丁；文本/选择用 `v-model` 直接编辑同一 reactive 草稿并保留 IME composition |
 | `switch-oj` | emit | `activeOj` v-model 更新后通知父级执行切换（locked 时 select disabled，不可达） |
 
-切换提示按模式分叉：`locked`（普通启动）→「将离开本页并放弃所有未保存的修改」；解锁（`--settings`）→「管理方模式下留在本页继续配置」——提示必须与 #87 的实际行为一致（评审九 P3）。
+切换提示按模式分叉：`locked`（普通启动）→「当前 OJ 由管理方锁定，普通启动下不可切换」（select 本身已禁用，提示不再承诺切换，评审十 #8）；解锁（`--settings`）→「管理方模式下留在本页继续配置」。
 
 ## 直接依赖
 
@@ -35,7 +35,7 @@
 
 ## 逻辑流程
 
-文本/选择字段用 `v-model` 直接编辑同一 reactive 草稿：`activeOj` 落草稿后 `@change` 只 emit `switch-oj`，不发补丁；只有题面缓存开关 emit `update:form` 补丁（locked 时按钮 disabled，不可达）。未配置 OJ 的引导、失败回滚和保存新建实例后的自动切换全部留在 `useSettingsForm`。锁定的字段不可变脏 → 保存事务整体写回等值无害，无需在事务层重复设防。
+文本/选择字段用 `v-model` 直接编辑同一 reactive 草稿：`activeOj` 落草稿后 `@change` 只 emit `switch-oj`，不发补丁；只有题面缓存开关 emit `update:form` 补丁（locked 时按钮 disabled，不可达）。未配置 OJ 的引导、失败回滚和保存新建实例后的自动切换全部留在 `useSettingsForm`。锁定的字段不可变脏；保存事务**跳过**这些字段的写入与数字解析（存量非法值不得变 NaN 拖垮整次保存，也不得阻塞可编辑字段——见 `useSettingsForm.md`，评审十 #3）。
 
 ## 测试
 

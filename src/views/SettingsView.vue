@@ -9,6 +9,7 @@ import { useMaintenanceSettings } from '@/composables/useMaintenanceSettings'
 import { useDataDirSettings } from '@/composables/useDataDirSettings'
 import { useSettingsScrollSpy } from '@/composables/useSettingsScrollSpy'
 import { systemService } from '@/services/system.service'
+import { settingsGateNotice } from '@/utils/settings-gate-notice'
 import type { SettingsFormPatch } from '@/composables/useSettingsForm'
 import OjServerSection from '@/components/settings/OjServerSection.vue'
 import EditorSection from '@/components/settings/EditorSection.vue'
@@ -104,6 +105,14 @@ onMounted(() => {
             @click.prevent="scrollToSection(index)"
           ><span>{{ String(index + 1).padStart(2, '0') }}</span>{{ label }}</a>
         </nav>
+        <!-- 钥匙模式：赛前/赛后点赛场页面被守卫拦回时的可见反馈（评审十五 B） -->
+        <p
+          v-if="settingsGateNotice"
+          role="status"
+          class="mb-4 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[var(--color-warning)]"
+        >
+          {{ settingsGateNotice }}
+        </p>
         <LoadingSpinner v-if="loading" message="正在加载配置…" />
         <ErrorMessage v-else-if="loadError" :message="loadError" :retry="load" />
 

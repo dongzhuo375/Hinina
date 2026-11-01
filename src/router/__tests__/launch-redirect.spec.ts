@@ -144,6 +144,9 @@ describe('--settings 初始直落（守卫行为）', () => {
 
     await router.push({ name: 'ProblemSet' })
     expect(router.currentRoute.value.name).toBe('Settings') // 回设置页，不是 Login
+    // 评审十五 B：拦回时给一次可见反馈（NavigationFailure 本身静默）
+    const { settingsGateNotice } = await import('@/utils/settings-gate-notice')
+    expect(settingsGateNotice.value).toContain('比赛未进行')
   })
 
   it('钥匙模式 + 无会话非首航直达设置页：放行（豁免不限首次）', async () => {

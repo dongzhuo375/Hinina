@@ -28,7 +28,7 @@
 ## 直接依赖
 
 - `vue`（`computed` / `onMounted` / `onUnmounted` / `ref` / `watch`）/ `vue-router`（`useRouter` / `useRoute`）
-- `@/components/layout/TopBar.vue` / `StatusBar.vue`
+- `@/components/layout/TopBar.vue` / `StatusBar.vue` / `WindowControls.vue`（极简壳头部的窗口控件）
 - `@/stores/authStore`（`isLoggedIn` —— 最小壳判据之一；`sessionResolved` 已不在判据内）
 - `@/stores/contestStore` / `@/stores/announcementStore`
 - `@/services/system.service`（`launchFlags` 同步快照 —— 最小壳判据之一；View → Service 直连属「路由级瞬态数据」许可）
@@ -72,13 +72,7 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
   workspace-main）——最小壳↔完整外壳翻转（会话失效/登出）不重挂设置视图，
   未保存草稿得以保留（评审六）
   StatusBar 仅完整外壳渲染
-  contestGated 且 phase === 'ended' 时叠加覆盖层
-  否则（正常外壳）：
-  <TopBar :navigation-disabled="contestGated" />
-  中间容器 :inert="contestGated"（禁点禁焦点，覆盖子视图）
-  <StatusBar />
-  contestGated 且 phase === 'ended' 时叠加覆盖层（absolute inset-x-0 bottom-0 top-10 z-50，半透明 + 背景模糊）
-    内含 role="alert" 卡片：CONTEST CLOSED / 「比赛已结束」/「感谢参赛，即将返回登录入口。」
+  contestGated 且 phase === 'ended' 时叠加覆盖层（role="alert" 卡片：CONTEST CLOSED / 比赛已结束 / 感谢参赛，即将返回登录入口）
 ```
 
 设计要点：

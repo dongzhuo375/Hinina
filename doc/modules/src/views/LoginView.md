@@ -2,6 +2,8 @@
 
 > 源文件：`src/views/LoginView.vue`
 
+**`--settings` 管理方钥匙**：钥匙模式下页脚出现「返回设置」入口（`systemService.launchFlags` 快照判据）。没有它，从设置页点「返回登录」就是单向门——无边框窗口没有地址栏、`firstNavigation` 已消费，维护者只能重启带参（评审十五 A）。
+
 ## 职责
 
 应用统一入口页：左侧登录卡片（`LoginForm`）承载表单 / 已登录欢迎态 / 切换账号，右侧氛围区由 `EventTitle`（比赛标题）与 `Countdown`（赛程时钟）组成，页脚为服务器连接状态与版本号；负责会话恢复、按比赛阶段决策进场导航、匿名简报的有界重试，以及等待开赛期间的错峰会话预检。
@@ -39,6 +41,7 @@
 - `vue` / `vue-router`
 - 组件：`@/components/login/EventTitle.vue` / `Countdown.vue` / `LoginForm.vue`
 - stores：`@/stores/authStore` / `@/stores/contestStore`
+- `@/services/system.service`（`launchFlags` 快照 —— 钥匙模式的「返回设置」入口）
 - `@/utils/markdown`（`renderMarkdown`）、`@/utils/contest`（`getAuthoritativeSchedule` / `getContestPhase`）、`@/utils/brief-retry`（`briefRetryDelayMs`）、`@/utils/session-check`（`planNextPrecheck` / `planRetryDelayMs` + `PrecheckReason` 类型）
 - `@/composables/useNowMs`（毫秒墙钟，派生秒）
 

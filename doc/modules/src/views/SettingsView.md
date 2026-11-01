@@ -14,6 +14,7 @@
 
 | 组成 | 职责 |
 |------|------|
+| `settingsGateNotice` | `@/utils/settings-gate-notice` 的提示文案：钥匙模式下从设置页点赛场页面被阶段闸门拦回时显示一行 warning（导航失败本身静默，评审十五 B）；4 秒自动清除 |
 | `locked` | computed `!systemService.launchFlags.value.settings` —— 维护者层锁定（默认锁，`--settings` 解锁）；标志快照由守卫首航填充（早于本组件挂载），同步读取无闪烁。以 `:locked` 传给 OjServerSection 与 DataDirSection |
 | `useSettingsForm` | 中央 reactive 草稿、baseline/dirty/errors/canSave、配置加载/保存/放弃、OJ 清单与显式/自动切换 |
 | `updateForm(patch)` | 将 section 的 `SettingsFormPatch` 合并进同一 reactive 草稿；保存成功后仅当没有新编辑时才显示“已保存” |

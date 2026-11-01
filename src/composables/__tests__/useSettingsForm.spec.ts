@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope } from 'vue'
+import { effectScope, ref } from 'vue'
 import type { EffectScope } from 'vue'
 import { useSettingsForm } from '@/composables/useSettingsForm'
 import type { AppConfig } from '@/types/config'
@@ -244,6 +244,19 @@ describe('useSettingsForm', () => {
     expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
     expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
+  it('评审十五 C：锁定态 active 指向缺失实例——不创建、不切换、不谎报', async () => {
+    // 手改配置让 oj.active 指向不存在的实例：锁定态载荷跳过实例写入，
+    // 因此绝不能触发 performSwitch（否则会提示「实例已保存；切换未成功」）
+    currentConfig.oj.active = 'Ghost'
+    const view = useSettingsForm(ref(true))
+    await view.load()
+    view.form.fontSize = '18'
+    await view.save()
+
+    expect(mocks.switchOj).not.toHaveBeenCalled()
+    expect(view.switchNotice.value).toBeNull()
   })
 
   it('新实例保存失败后，下一次普通保存不得沿用自动切换意图', async () => {
