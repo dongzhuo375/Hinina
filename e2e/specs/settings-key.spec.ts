@@ -71,5 +71,31 @@ test.describe('--settings 管理方钥匙旅程', () => {
     const addr = page.getByRole('textbox', { name: /服务器地址/ })
     await addr.fill('https://repaired.example')
     await expect(addr).toHaveValue('https://repaired.example')
+    // 赛程数据确已加载（StatusBar 连接态翻转），inert/遮罩断言不是在空窗期碰巧通过
+    await expect(page.getByText('已连接比赛服务器')).toBeVisible()
+  })
+
+  test('评审七：钥匙 + 会话失效翻转外壳——未保存草稿跨形态保留', async ({ page }) => {
+    await installFakeTauri(page, {
+      user: { id: 'u1', username: 'maintainer', token: 'stale-token' },
+      launchFlags: { settings: true },
+      failConfiguredContest: { variant: 'Auth', message: 'fake: 会话已过期' },
+      // 失败延迟落地：先在完整外壳里输入草稿，再等会话失效翻转最小壳
+      delayConfiguredContestMs: 2_000,
+    })
+    await page.goto('/')
+    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+
+    // 翻转前输入草稿（此时会话仍在、完整外壳）
+    const addr = page.getByRole('textbox', { name: /服务器地址/ })
+    await addr.fill('https://draft-kept.example')
+    await expect(addr).toHaveValue('https://draft-kept.example')
+
+    // bootstrap 的延迟 401 落地 → 会话失效 → 最小壳翻转（chrome 换、视图不换）
+    await expect(page.getByText('Hinina 设置')).toBeVisible()
+
+    // 草稿仍在输入框：若视图被重挂或表单被磁盘值覆盖，此处即红
+    await expect(addr).toHaveValue('https://draft-kept.example')
+    await expect(page.getByText('登录参赛系统')).toBeHidden()
   })
 })

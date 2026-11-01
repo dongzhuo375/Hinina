@@ -56,3 +56,4 @@ config/system service、相关 store 和 types 由对应 controllers 持有；Vi
 - `__tests__/SettingsView.behavior.spec.ts`：四路加载顺序、七组真实 section id/导航顺序、保存与 active、未配置 OJ 自动切换、已配置切换失败回滚、目录 migrate 快照、About 复制、scroll-spy 锁与 atBottom。**分层锁**：正常模式断言维护者字段 disabled + 锁提示可见 + 比赛 ID/密码可编辑 + 禁用按钮点击不触达选择器，`--settings` 模式全解锁；OJ 切换与数据目录交互用例显式以 `--settings` 模式运行（维护者层操作）。
 - Controllers 各有独立 spec：`useSettingsForm`、`useAboutSettings`、`useMaintenanceSettings`、`useDataDirSettings`、`useSettingsScrollSpy`。
 - `e2e/specs/settings.spec.ts`：真实 Chromium 的分区样式、响应式导航/滚动与 fake IPC 保存验收；原生目录选择器、真实剪贴板权限和 WebView2 桌面表现另属人工验收。
+- `e2e/specs/settings-key.spec.ts`：`--settings` 钥匙旅程（真实 Chromium）：首航直落、最小壳、维护者层解锁、返回登录；过期会话 401 后留在设置页；会话失效翻转外壳时未保存草稿跨形态保留（`FakeOptions.launchFlags` / `failConfiguredContest` / `delayConfiguredContestMs` / `contestWindow` 注入）。

@@ -39,6 +39,8 @@ export interface FakeOptions {
   launchFlags?: LaunchFlags
   /** 注入后 load_configured_contest 恒以此失败（过期会话旅程：Auth → sessionGuard 旁路） */
   failConfiguredContest?: { variant: string; message: string }
+  /** failConfiguredContest 的失败延迟毫秒数：给「先输入草稿、再等翻转」的旅程留窗口 */
+  delayConfiguredContestMs?: number
   /** 比赛/简报时间窗偏移（秒，相对注入时刻）；缺省 -3600 / +8h（进行中），负 endOffset = 已结束 */
   contestWindow?: { startOffsetSecs: number; endOffsetSecs: number }
 }
@@ -461,6 +463,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         // 真实命令读取并校验当前 contestRef（contest_cmd.rs），不是固定成功
         if (options.failConfiguredContest) {
           const { variant, message } = options.failConfiguredContest
+          if (options.delayConfiguredContestMs) {
+            await new Promise((resolve) => setTimeout(resolve, options.delayConfiguredContestMs))
+          }
           throw { [variant]: message }
         }
         const ref = config.oj.contestRef.trim()
