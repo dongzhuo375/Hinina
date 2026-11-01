@@ -35,6 +35,11 @@ import AboutSection from '@/components/settings/AboutSection.vue'
 // 数字字段保留**原始字符串**：输入过程中的中间态（空串/半截数字）不应被强转成
 // NaN 写回，只有校验通过的值才会进入保存载荷。
 
+/// 维护者层锁定（默认锁，`--settings` 解锁）。启动标志快照由守卫首航填充
+///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
+const locked = computed(() => !systemService.launchFlags.value.settings)
+
+// locked 传入表单控制器：锁定字段不参与校验、不写入保存载荷（评审十 #3）
 const {
   form,
   dirty,
@@ -54,11 +59,7 @@ const {
   discard,
   onSwitchOj,
   inputClass,
-} = useSettingsForm()
-
-/// 维护者层锁定（默认锁，`--settings` 解锁）。启动标志快照由守卫首航填充
-///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
-const locked = computed(() => !systemService.launchFlags.value.settings)
+} = useSettingsForm(locked)
 
 function updateForm(patch: SettingsFormPatch): void {
   Object.assign(form, patch)

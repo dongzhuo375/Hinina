@@ -26,7 +26,11 @@ vi.mock('@/services/config.service', () => ({
   },
 }))
 vi.mock('@/services/system.service', () => ({
-  systemService: { launchFlags: mocks.launchFlags },
+  systemService: {
+    launchFlags: mocks.launchFlags,
+    isKeyedSettings: (name?: string | symbol | null) =>
+      mocks.launchFlags.value.settings && name === 'Settings',
+  },
 }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
 vi.mock('vue-router', () => ({
@@ -69,7 +73,10 @@ beforeEach(async () => {
     currentConfig = draft
     return draft
   })
-  mocks.switchOj.mockResolvedValue(undefined)
+  // 与真实 switch_oj 一致：切换会改写配置的 oj.active（评审十 #4 的重读才有意义）
+  mocks.switchOj.mockImplementation(async (id: string) => {
+    currentConfig.oj.active = id
+  })
   scope = effectScope()
   settings = scope.run(() => useSettingsForm())!
   await settings.load()
@@ -219,6 +226,9 @@ describe('useSettingsForm', () => {
     expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
     expect(mocks.routerReplace).not.toHaveBeenCalled()
+    // 评审十 #4：切换后重读配置并复位 baseline——不得出现假的「未保存更改」
+    expect(settings.dirty.value).toBe(false)
+    expect(settings.canSave.value).toBe(false)
   })
 
   it('评审九 P2-1：切换期间已导航离开设置页——钥匙豁免不带走，照常回登录', async () => {

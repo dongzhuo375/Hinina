@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAnnouncementStore } from '@/stores/announcementStore'
-import { settingsUnlocked } from '@/utils/settings-access'
+import { settingsRevealed } from '@/utils/settings-access'
 
 const route = useRoute()
 const announcementStore = useAnnouncementStore()
@@ -39,7 +39,7 @@ const links = [
       <span class="navigation-number" aria-hidden="true">{{ link.number }}</span>{{ link.label }}
       <span v-if="link.key === 'announcements' && showAnnouncementDot" class="unread-mark" aria-label="有未读公告"></span>
     </router-link>
-    <router-link v-if="settingsUnlocked" :to="{ name: 'Settings' }"
+    <router-link v-if="settingsRevealed" :to="{ name: 'Settings' }"
       :class="['navigation-link', { active: activeKey === 'settings' }]"
       :aria-current="activeKey === 'settings' ? 'page' : undefined">环境设置</router-link>
   </nav>

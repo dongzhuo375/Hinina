@@ -17,16 +17,25 @@ vi.mock('@/views/ContestLayout.vue', () => ({ default: { template: '<div />' } }
 vi.mock('@/views/SettingsView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/views/ProblemSetView.vue', () => ({ default: { template: '<div />' } }))
 
-const launchFlags = vi.hoisted(() => ({ mock: vi.fn() }))
+// 启动标志状态：getLaunchFlags 返回它，isKeyedSettings 同步读它（与真实实现同判据）
+const launchFlags = vi.hoisted(() => ({ state: { settings: false, fail: false } }))
 vi.mock('@/services/system.service', () => ({
-  systemService: { getLaunchFlags: launchFlags.mock },
+  systemService: {
+    getLaunchFlags: async () => {
+      if (launchFlags.state.fail) throw new Error('invoke failed')
+      return { settings: launchFlags.state.settings }
+    },
+    isKeyedSettings: (name?: string | symbol | null) =>
+      launchFlags.state.settings && name === 'Settings',
+  },
 }))
 
 beforeEach(() => {
   // firstNavigation 是 router 模块的模块级状态：resetModules 让每个用例拿到
   // 全新 router 实例（首次导航语义才可独立断言）
   vi.resetModules()
-  launchFlags.mock.mockReset()
+  launchFlags.state.settings = false
+  launchFlags.state.fail = false
   setActivePinia(createPinia())
   // 会话已判定但不存在（--settings 的目标形态）；login 不受保护，守卫不拦
   const auth = useAuthStore()
@@ -36,14 +45,14 @@ beforeEach(() => {
 
 describe('--settings 初始直落（守卫行为）', () => {
   it('带参首次导航：登录页直落设置页', async () => {
-    launchFlags.mock.mockResolvedValue({ settings: true })
+    launchFlags.state.settings = true
     const { default: router } = await import('@/router')
     await router.push({ name: 'Login' })
     expect(router.currentRoute.value.name).toBe('Settings')
   })
 
   it('仅首次生效：再次前往登录页不被重定向（返回登录可用，不困死维护人员）', async () => {
-    launchFlags.mock.mockResolvedValue({ settings: true })
+    launchFlags.state.settings = true
     const { default: router } = await import('@/router')
     await router.push({ name: 'Login' })
     expect(router.currentRoute.value.name).toBe('Settings')
@@ -52,7 +61,7 @@ describe('--settings 初始直落（守卫行为）', () => {
   })
 
   it('首次导航不是登录页时不直落（深链照常走会话门禁）', async () => {
-    launchFlags.mock.mockResolvedValue({ settings: true })
+    launchFlags.state.settings = true
     const { default: router } = await import('@/router')
     await router.push({ name: 'ProblemSet' })
     // 无会话：受保护路由按原守卫回登录页，而不是被钥匙带去设置页
@@ -60,14 +69,14 @@ describe('--settings 初始直落（守卫行为）', () => {
   })
 
   it('flags IPC 失败按「无参数」退化：首航停留登录页，不炸守卫', async () => {
-    launchFlags.mock.mockRejectedValue(new Error('invoke failed'))
+    launchFlags.state.fail = true
     const { default: router } = await import('@/router')
     await router.push({ name: 'Login' })
     expect(router.currentRoute.value.name).toBe('Login')
   })
 
   it('无参启动：不重定向（正常门禁形态）', async () => {
-    launchFlags.mock.mockResolvedValue({ settings: false })
+    launchFlags.state.settings = false
     const { default: router } = await import('@/router')
     await router.push({ name: 'Login' })
     expect(router.currentRoute.value.name).toBe('Login')
@@ -75,7 +84,7 @@ describe('--settings 初始直落（守卫行为）', () => {
 
   it('无钥匙 + 无会话直达设置页：回登录页（meta 继承保护，豁免仅钥匙模式）', async () => {
     // 评审 P2 路径一：无条件豁免会让无钥匙访客直达设置页
-    launchFlags.mock.mockResolvedValue({ settings: false })
+    launchFlags.state.settings = false
     const { default: router } = await import('@/router')
     await router.push({ name: 'Settings' })
     expect(router.currentRoute.value.name).toBe('Login')
@@ -85,7 +94,7 @@ describe('--settings 初始直落（守卫行为）', () => {
     // 时序：守卫批准 ProblemSet 后、路由确认前，401 把会话清掉。sessionGuard
     // 此刻读到的 currentRoute 仍是设置页，钥匙豁免会跳过跳转——落地后的
     // afterEach 不变量必须兜住（受保护路由 + 无会话 + 非设置页 → 回登录页）。
-    launchFlags.mock.mockResolvedValue({ settings: true })
+    launchFlags.state.settings = true
     const now = Math.floor(Date.now() / 1000)
     const store = useContestStore()
     store.brief = {
@@ -114,10 +123,33 @@ describe('--settings 初始直落（守卫行为）', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('Login'))
   })
 
+  it('评审十 #1：钥匙设置页出发、赛前/赛后目标比赛页——回设置页而非登录页', async () => {
+    // 否则落进被闸门锁定的比赛页 → 外壳 watcher 踢回登录页 → 草稿丢失且无回入口
+    launchFlags.state.settings = true
+    const now = Math.floor(Date.now() / 1000)
+    const store = useContestStore()
+    // 已结束的简报：从设置页点题目/榜单应被拦回设置页
+    store.brief = {
+      id: '1', title: '竞赛', startTime: now - 7_200, endTime: now - 3_600,
+      description: '', contestType: 0, status: 0, auth: 0,
+      rankShowName: 'username', sealRank: false, sealRankTime: null,
+      allowEndSubmit: false, oiRankScoreType: null,
+    }
+    const auth = useAuthStore()
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+
+    const { default: router } = await import('@/router')
+    await router.push({ name: 'Login' })
+    expect(router.currentRoute.value.name).toBe('Settings')
+
+    await router.push({ name: 'ProblemSet' })
+    expect(router.currentRoute.value.name).toBe('Settings') // 回设置页，不是 Login
+  })
+
   it('钥匙模式 + 无会话非首航直达设置页：放行（豁免不限首次）', async () => {
     // 首航去别处后，--settings 进程里设置页仍可无会话直达（返回登录后想再修
     // 一次地址的场景）
-    launchFlags.mock.mockResolvedValue({ settings: true })
+    launchFlags.state.settings = true
     const { default: router } = await import('@/router')
     await router.push({ name: 'Login' })
     expect(router.currentRoute.value.name).toBe('Settings')

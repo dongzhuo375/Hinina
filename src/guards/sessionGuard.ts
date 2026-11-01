@@ -48,9 +48,7 @@ async function handleAuthFailure(error: IpcError, router: Router): Promise<void>
     // 例外：`--settings`（管理方钥匙）进程的设置页——清理会话但留在原地。
     // 那是钥匙存在的全部意义（修连接配置）：踢回登录页等于重新锁死
     //（firstNavigation 已消费、登录页没有返回设置页的入口，评审四 P2-1）。
-    const onKeyedSettings =
-      systemService.launchFlags.value.settings &&
-      router.currentRoute.value.name === 'Settings'
+    const onKeyedSettings = systemService.isKeyedSettings(router.currentRoute.value.name)
     if (!onKeyedSettings && router.currentRoute.value.meta.requiresAuth) {
       await router.replace({ name: 'Login' })
     }

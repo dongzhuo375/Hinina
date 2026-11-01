@@ -26,7 +26,11 @@ vi.mock('@/bridge', () => {
 })
 vi.mock('@/services/auth.service', () => ({ authService: { logout: mocks.logout } }))
 vi.mock('@/services/system.service', () => ({
-  systemService: { launchFlags: mocks.launchFlags },
+  systemService: {
+    launchFlags: mocks.launchFlags,
+    isKeyedSettings: (name?: string | symbol | null) =>
+      mocks.launchFlags.value.settings && name === 'Settings',
+  },
 }))
 
 import { installSessionGuard } from '@/guards/sessionGuard'

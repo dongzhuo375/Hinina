@@ -13,13 +13,13 @@
 | `activeKey` | computed | 由 `route.path` 前缀推导当前高亮项：`/contest/problem*`→`problems`、`/contest/rank`→`rank`、`/contest/submissions`→`submissions`、`/contest/announcements`→`announcements`、`/contest/settings`→`settings`（`/contest/problems` 与 `/contest/problem/:displayId` 均归属「题目」，解题页仍高亮题目入口） |
 | `showAnnouncementDot` | computed | `announcementStore.unreadCount > 0 && activeKey !== 'announcements'` —— 处于公告页时不显示（进入该页即全部已读，避免标记往返期间红点残留） |
 | `links` | 常量数组 | 四个主入口 `{ key, name, label, number }`（编号 `01`–`04` 等宽显示），模板 `v-for` 渲染 |
-| 设置项可见性 | `v-if="settingsUnlocked"` | 来自 `@/utils/settings-access` 的会话级单例；未解锁时**整个 router-link 不渲染**（不是 CSS 隐藏） |
+| 设置项可见性 | `v-if="settingsRevealed"` | 来自 `@/utils/settings-access` 的会话级单例；未显现时**整个 router-link 不渲染**（不是 CSS 隐藏） |
 
 ## 直接依赖
 
 - `vue`（`computed`）/ `vue-router`（`useRoute` + `router-link`，导航目标：ProblemSet / Rank / Submissions / Announcements / Settings）
 - `@/stores/announcementStore`（仅 `unreadCount` 只读消费）
-- `@/utils/settings-access`（`settingsUnlocked`）
+- `@/utils/settings-access`（`settingsRevealed`）
 
 ## 被依赖
 
@@ -30,7 +30,7 @@
 ```
 route.path 前缀匹配 → activeKey → 对应 router-link 高亮（底部 2px 边框指示 + aria-current="page"）
 announcementStore.unreadCount > 0 且不在公告页 → 公告项渲染 5px 红点（.unread-mark）
-settingsUnlocked（连点状态栏版本号 5 下解锁，见 utils/settings-access）→ 末尾「环境设置」渲染/移除
+settingsRevealed（连点状态栏版本号 5 下显现，见 utils/settings-access）→ 末尾「环境设置」渲染/移除
 ```
 
 设计要点：

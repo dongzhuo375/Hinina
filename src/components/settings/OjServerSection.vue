@@ -76,7 +76,7 @@ function onSwitchOj(): void {
                     class="mt-1 block text-xs text-[var(--text-muted)]"
                   >
                     {{ props.locked
-                      ? '切换即时生效并持久化，将离开本页并放弃所有未保存的修改'
+                      ? '当前 OJ 由管理方锁定，普通启动下不可切换'
                       : '切换即时生效并持久化；管理方模式（--settings）下留在本页继续配置' }}；候选 = 已知 OJ 类型 + 配置里的其它实例
                   </span>
                 </label>

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TopBar from '@/components/layout/TopBar.vue'
+import WindowControls from '@/components/layout/WindowControls.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -24,9 +25,7 @@ const phase = computed(() => getContestPhase(
 /// 钥匙模式且正停在设置页：设置页两项豁免的**共同判据**（阶段闸门短路、最小壳）。
 /// 赛程闸门只防「滞留在过期赛场看旧数据」——设置页只碰本地配置，不在其射程内；
 /// 钥匙场景把维护者踢回登录页等于重新锁死（firstNavigation 已消费、无 UI 回入口）。
-const keyedSettings = computed(
-  () => systemService.launchFlags.value.settings && route.name === 'Settings',
-)
+const keyedSettings = computed(() => systemService.isKeyedSettings(route.name))
 /// 最小壳：keyedSettings 再加无会话。**刻意不含 `sessionResolved`**（评审四
 /// P2-1）：钥匙 + 存量过期会话启动时，首个认证请求 401 → invalidateSession 把
 /// sessionResolved 复位为 false（后端登出失败时 backendCleared=false）——此刻
@@ -130,13 +129,17 @@ function backToLogin(): void {
         <span data-tauri-drag-region class="text-sm font-semibold text-[var(--text-primary)]">
           Hinina 设置
         </span>
-        <button
-          type="button"
-          class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
-          @click="backToLogin"
-        >
-          返回登录
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
+            @click="backToLogin"
+          >
+            返回登录
+          </button>
+          <!-- 评审十 #2：无边框窗口在极简壳下也要有最小化/关闭（与 TopBar 共享） -->
+          <WindowControls />
+        </div>
       </header>
     </template>
     <TopBar v-else :navigation-disabled="contestGated" />

@@ -45,6 +45,8 @@ vi.mock('@/services/system.service', () => ({
     resetClient: mocks.resetClient,
     purgeLocalData: mocks.purgeLocalData,
     launchFlags: mocks.launchFlags,
+    isKeyedSettings: (name?: string | symbol | null) =>
+      mocks.launchFlags.value.settings && name === 'Settings',
   },
 }))
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
@@ -229,6 +231,8 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
   })
 
   it('非法数字实时显示字段级错误，修正后消失', async () => {
+    // 请求超时属维护者层字段：--settings 模式（锁定态该字段不可编辑、不参与校验）
+    mocks.launchFlags.value = { settings: true }
     const view = await render()
     await setField(view.host, '请求超时（秒）', 'abc')
     await settleView(2)
@@ -237,6 +241,25 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     await setField(view.host, '请求超时（秒）', '30')
     await settleView(2)
     expect(view.host.textContent).not.toContain('请求超时须为非负整数')
+  })
+
+  it('评审十 #3：锁定层存量非法值不阻塞可编辑字段保存', async () => {
+    // 手改过、值越界的 config.json（普通启动）：锁定字段不可编辑 → 不参与校验，
+    // 字号等可编辑字段必须能保存；保存载荷不得把非法值解析成 NaN
+    currentConfig.oj.timeoutSecs = 999 // 越界（1–120）
+    currentConfig.oj.instances[0].baseUrl = 'not-a-url'
+    const view = await render()
+    expect(view.host.textContent).not.toContain('请求超时须在')
+    expect(view.host.textContent).toContain('连接与缓存字段已锁定')
+
+    await setField(view.host, '字号', '18')
+    await settleView(2)
+    const save = [...view.host.querySelectorAll('button')].find((b) => b.textContent?.includes('保存'))
+    expect(save?.disabled).toBe(false)
+    save!.click()
+    await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalled())
+    expect(currentConfig.oj.timeoutSecs).toBe(999) // 锁定值原样保留，未被 NaN 覆盖
+    expect(currentConfig.editor.fontSize).toBe(18)
   })
 
   it('新实例保存后下拉 configured 标签随实例清单更新', async () => {

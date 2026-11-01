@@ -112,8 +112,6 @@ const router = createRouter({
  *    - 标志读取失败按「无参数」退化（service 层兜底 + 守卫 try/catch 二道防线）。
  */
 let firstNavigation = true
-/// 最近一次守卫跑出的启动标志（afterEach 的会话不变量要用）
-let lastSettingsMode = false
 
 router.beforeEach(async (to) => {
   // 钥匙通道故障不得炸掉导航：service 已 memoize + 失败退化，这里是导航路径上
@@ -124,7 +122,6 @@ router.beforeEach(async (to) => {
   } catch {
     settingsMode = false
   }
-  lastSettingsMode = settingsMode
   if (firstNavigation) {
     firstNavigation = false
     if (settingsMode && to.name === 'Login') return { name: 'Settings' }
@@ -142,13 +139,20 @@ router.beforeEach(async (to) => {
 
   // 首次进入工作台（含深链）先确认赛程；赛前/赛后在入口等待。
   // 工作台内切换页面由外壳的时钟处理，避免结束弹窗期间打断其退出流程。
-  if (!router.currentRoute.value.matched.some((r) => r.name === 'Contest')) {
+  // **钥匙设置页出发的导航不跳过闸门**（评审十 #1）：否则赛前/赛后点题目/榜单
+  // 会落进被闸门锁定的比赛页，随后外壳 watcher 把维护者踢回登录页——草稿丢失
+  // 且没有回设置页的入口。闸门失败时回**设置页**（不是登录页）。
+  const fromKeyedSettings = systemService.isKeyedSettings(router.currentRoute.value.name)
+  const enteringFromOutside =
+    fromKeyedSettings ||
+    !router.currentRoute.value.matched.some((r) => r.name === 'Contest')
+  if (enteringFromOutside) {
     const contest = useContestStore()
     if (!contest.brief) await contest.loadBrief()
     if (!auth.isLoggedIn) return { name: 'Login', replace: true }
     const schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
     if (getContestPhase(schedule, Math.floor(Date.now() / 1000)) !== 'running') {
-      return { name: 'Login', replace: true }
+      return fromKeyedSettings ? { name: 'Settings' } : { name: 'Login', replace: true }
     }
   }
   return true
@@ -168,7 +172,7 @@ router.afterEach((to) => {
   if (to.meta.requiresAuth !== true) return
   const auth = useAuthStore()
   if (auth.isLoggedIn) return
-  if (lastSettingsMode && to.name === 'Settings') return
+  if (systemService.isKeyedSettings(to.name)) return
   void router.replace({ name: 'Login' })
 })
 

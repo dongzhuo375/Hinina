@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { readonly, ref } from 'vue'
 import type {
   DataDirChange,
   DataDirInfo,
@@ -34,7 +34,17 @@ export class SystemService {
    * 真值 —— 组件（ContestLayout 最小壳判据、SettingsView 分层锁）直接读这里，
    * 无需再等 Promise：异步判据会把闪帧反转到钥匙启动的首帧。
    */
-  readonly launchFlags = launchFlagsSnapshot
+  /// 只读视图（评审十 #6）：快照的「进程内不可变」由类型强制，外部拿不到写入口
+  readonly launchFlags = readonly(launchFlagsSnapshot)
+
+  /**
+   * 钥匙模式 + 指定路由是否为设置页（评审十 #5）：**唯一判据**，四处消费
+   *（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，
+   * 避免注释声称一致、实现各自内联的漂移。
+   */
+  isKeyedSettings(routeName: string | symbol | null | undefined): boolean {
+    return launchFlagsSnapshot.value.settings && routeName === 'Settings'
+  }
 
   /** 获取客户端存储信息（设置页「关于」区块使用；失败由调用方降级展示） */
   async getStorageInfo(): Promise<StorageInfo> {

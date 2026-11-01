@@ -4,7 +4,7 @@
 
 ## 职责
 
-实现「设置入口默认隐藏，连点底部版本号 5 下才出现」：提供可注入时间源的显现状态机（`createUnlockGate`）+ 应用级单例（`settingsUnlocked` / `tapVersion`）。
+实现「设置入口默认隐藏，连点底部版本号 5 下才出现」：提供可注入时间源的显现状态机（`createRevealGate`）+ 应用级单例（`settingsRevealed` / `tapVersion`）。
 
 **语义边界（分层锁落地后收窄）**：本模块只管入口**可见性** —— 5 连点显现的入口打开的是选手层偏好（编辑器/布局/比赛信息/重置清理）；连接与缓存字段由页内分层锁保护，唯一提权来源是 `--settings` 启动参数（管理方钥匙）。页内锁管字段，入口隐藏管「根本不出现」，两层互不替代。
 
@@ -12,12 +12,12 @@
 
 | 名称 | 签名 | 说明 |
 |------|------|------|
-| `SETTINGS_UNLOCK_TAPS` | `5` | 显现入口所需连点次数 |
+| `SETTINGS_REVEAL_TAPS` | `5` | 显现入口所需连点次数 |
 | `SETTINGS_TAP_WINDOW_MS` | `2_000` | 相邻两次点击的最大间隔；超过即**从 1 重新计数**（而非继续累加，否则零散点击也能凑满） |
-| `createUnlockGate(options?)` | `(options?: UnlockGateOptions) => UnlockGate` | 纯状态机（无 Vue 依赖）：`taps` / `windowMs` / `now` 均可注入 |
-| `UnlockGate.tap()` | `() => boolean` | 记一次点击，返回**本次之后**是否已显现 |
-| `UnlockGate.unlocked()` | `() => boolean` | 当前是否已显现 |
-| `settingsUnlocked` | `Ref<boolean>` | 应用级单例状态，`ActivityBar` 据此决定是否渲染设置项 |
+| `createRevealGate(options?)` | `(options?: RevealGateOptions) => RevealGate` | 纯状态机（无 Vue 依赖）：`taps` / `windowMs` / `now` 均可注入 |
+| `RevealGate.tap()` | `() => boolean` | 记一次点击，返回**本次之后**是否已显现 |
+| `RevealGate.unlocked()` | `() => boolean` | 当前是否已显现 |
+| `settingsRevealed` | `Ref<boolean>` | 应用级单例状态，`ActivityBar` 据此决定是否渲染设置项 |
 | `tapVersion()` | `() => boolean` | `StatusBar` 的点击入口；返回「**刚刚**显现」（仅一次为 `true`，供一次性反馈） |
 
 计数规则：间隔在窗口内则累加，超窗从 1 重新开始；达到 `taps` 即显现。显现后 `tap()` 直接返回 `true` 且不再计数（幂等）。
@@ -29,16 +29,16 @@
 ## 被依赖
 
 - `components/layout/StatusBar.vue` — 版本号按钮调用 `tapVersion()`
-- `components/layout/ActivityBar.vue` — `v-if="settingsUnlocked"` 控制设置项渲染
+- `components/layout/ActivityBar.vue` — `v-if="settingsRevealed"` 控制设置项渲染
 
 ## 逻辑流程
 
 ```
 版本号 click → tapVersion()
   ├─ gate.tap()（计数/判窗/显现）
-  ├─ settingsUnlocked.value = gate.unlocked()
+  ├─ settingsRevealed.value = gate.unlocked()
   └─ 返回「刚刚显现」→ StatusBar 给出 3 秒提示「已显示设置入口」
-ActivityBar 渲染时读 settingsUnlocked → 决定设置 router-link 是否出现
+ActivityBar 渲染时读 settingsRevealed → 决定设置 router-link 是否出现
 ```
 
 设计要点：

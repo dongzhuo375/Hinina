@@ -46,7 +46,9 @@ beforeEach(to):
      不限首次——返回登录后想再修一次地址仍可直达）；受保护但未登录 → Login
      普通模式（无钥匙）设置页照常受保护：无钥匙访客直达 → Login；页面上 401 →
      sessionGuard 读到 requiresAuth=true 照常回登录页
-  4. 受保护且已登录，且当前不在 Contest 子树内
+  4. 受保护且已登录，且「当前不在 Contest 子树内」或「当前是钥匙设置页」
+     （后者是评审十 #1：从设置页点题目/榜单也要过闸门，否则会落进被锁定的
+      比赛页、随后被外壳踢回登录页且无回入口；闸门失败时回 **Settings**）
      （!router.currentRoute.matched 含 name === 'Contest'）时做赛程闸门：
        !contest.brief → await contest.loadBrief()    // 深链/首次进入补加载匿名简报
        期间会话可能失效 → !auth.isLoggedIn 则回 Login

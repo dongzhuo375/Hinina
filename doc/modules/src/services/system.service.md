@@ -10,8 +10,9 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），组件/computed 直接读。默认 `{settings:false}` = 安全侧 |
+| `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式，`readonly()` 包装——「进程内不可变」由类型强制，评审十 #6）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），组件/computed 直接读。默认 `{settings:false}` = 安全侧 |
 | `SystemService.getLaunchFlags` | `() => Promise<LaunchFlags>` | 启动标志的 Promise 入口（**仅守卫消费**）：进程内 memoize，解析成功填充快照；读取失败（旧二进制、桥异常）保持快照默认「无参数」—— 安全侧默认值，绝不让钥匙通道故障卡死启动或设置页；守卫另有 try/catch 二道防线 |
+| `SystemService.isKeyedSettings` | `(routeName) => boolean` | **钥匙设置页的唯一判据**（评审十 #5）：四处消费（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，避免各自内联漂移 |
 | `SystemService.getStorageInfo` | `() => Promise<StorageInfo>` | 存储信息（baseDir / logPath / version）；失败由调用方降级展示（设置页「关于」区块显示「获取失败」，不影响其余分组） |
 | `SystemService.resetClient` | `() => Promise<void>` | 重置客户端（三层缓存 + 公告基线 + 公告已读状态）；**不重拉**，补拉由调用方编排（设置页重置后立刻重拉当前比赛数据） |
 | `SystemService.localDataUsage` | `() => Promise<LocalDataUsage>` | 可清理项的体积预览（日志与崩溃记录字节数 / 留档总与过期条数字节） |

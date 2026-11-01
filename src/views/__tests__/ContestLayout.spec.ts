@@ -31,11 +31,17 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ name: mocks.routeName.value }),
 }))
 vi.mock('@/services/system.service', () => ({
-  systemService: { launchFlags: mocks.launchFlags },
+  systemService: {
+    launchFlags: mocks.launchFlags,
+    // 与真实实现同判据（读取快照 + 路由名）
+    isKeyedSettings: (name?: string | symbol | null) =>
+      mocks.launchFlags.value.settings && name === 'Settings',
+  },
 }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => mocks }))
 vi.mock('@/services/contest.service', () => ({ contestService: { loadConfiguredContest: mocks.loadConfiguredContest } }))
 vi.mock('@/components/layout/TopBar.vue', () => ({ default: { template: '<header />' } }))
+vi.mock('@/components/layout/WindowControls.vue', () => ({ default: { template: '<div data-test="wc" />' } }))
 vi.mock('@/components/layout/StatusBar.vue', () => ({ default: { template: '<footer />' } }))
 vi.mock('@/components/layout/ActivityBar.vue', () => ({ default: { template: '<aside />' } }))
 
@@ -157,6 +163,8 @@ describe('--settings 无会话最小壳', () => {
     expect(host.textContent).toContain('Hinina 设置')
     // 裸壳自带拖动区标题栏（decorations=false 下窗口移动全靠它）
     expect(host.querySelector('header[data-tauri-drag-region]')).toBeTruthy()
+    // 评审十 #2：极简壳也有窗口控件（最小化/关闭），不只 Alt+F4
+    expect(host.querySelector('[data-test="wc"]')).toBeTruthy()
     // bootstrap 必须跳过：无会话时认证拉取只会失败
     expect(mocks.loadConfiguredContest).not.toHaveBeenCalled()
     expect(mocks.startLive).not.toHaveBeenCalled()

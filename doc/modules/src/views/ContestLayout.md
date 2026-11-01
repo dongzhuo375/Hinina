@@ -89,10 +89,10 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
   请求**。
 - **最小壳必须自带拖动区**：App 的全局标题栏在 matched 含 Contest 时不渲染，
   窗口 `decorations: false`，无拖动区则窗口无法移动。
-- **最小壳刻意不含最小化/关闭按钮（评审 M1 的裁定）**：窗口控制在 TopBar，最小壳
-  不渲染 TopBar，设置页上只剩 Alt+F4 / 任务栏；点「返回登录」到登录页后 App 兜底
-  标题栏（含完整窗口控制）即恢复。维护场景临时且退出路径存在，不为一次性形态
-  抽共享 WindowControls 组件——若未来最小壳使用频率上升再议。
+- **最小壳含窗口控件（评审十 #2 反转了 M1 的「不加 UI」裁定）**：窗口
+  `decorations: false`，只靠 Alt+F4/任务栏关闭在维护场景不可接受。抽出共享
+  `components/layout/WindowControls.vue`（最小化/最大化/关闭），TopBar 与最小壳
+  共用同一实现，消除重复。
 - **赛程闸门的钥匙短路覆盖两种会话形态（评审五补齐）**：短路由判据是
   `keyedSettings`（钥匙 ∧ 设置路由）而非 `bareShell`——后者要求无会话，漏掉
   「钥匙 + 会话有效 + 已结束/未开始赛程」的有会话分支（探针实测两种形态都被

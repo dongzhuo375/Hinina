@@ -1,4 +1,5 @@
 import { computed, reactive, ref } from 'vue'
+import type { Ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService } from '@/services/config.service'
@@ -62,7 +63,12 @@ const INPUT_ERROR = 'border-[var(--color-wa-border)] focus:border-[var(--color-w
  * 四个配置 section 只编辑这一份 reactive 草稿；baseline/dirty/save/discard 始终读取
  * 同一对象。保存新建实例后的自动切换也留在这里，避免跨控制器回读事务状态。
  */
-export function useSettingsForm() {
+export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(false)) {
+  // 维护者层是否锁定（普通启动 = true）。锁定字段禁用且不可编辑，它们的**非法
+  // 存量值不得阻塞可编辑字段的保存**（评审十 #3：手改越界 config.json 时字体/
+  // 布局也存不了、只能 --settings 重启——与 autoSaveIntervalSecs 的既有规则
+  // 「禁用字段不参与校验」矛盾）。
+  const locked = maintainerLocked
   const form = reactive<SettingsForm>({
     activeOj: 'HOJ',
     ojUrl: '',
@@ -92,12 +98,17 @@ export function useSettingsForm() {
   const { value: showSaved, show: markSaved, clear: clearSaved } = useTransientValue(false, 3_000)
 
   const errors = computed<Record<string, string | null>>(() => ({
-    ojUrl: /^https?:\/\/\S+$/i.test(form.ojUrl.trim()) ? null : '须以 http:// 或 https:// 开头',
+    // 锁定字段（不可编辑）不参与校验：与 autoSaveIntervalSecs 同一规则
+    ojUrl: locked.value
+      ? null
+      : /^https?:\/\/\S+$/i.test(form.ojUrl.trim())
+        ? null
+        : '须以 http:// 或 https:// 开头',
     contestRef: null,
-    timeoutSecs: intError(form.timeoutSecs, 1, 120, '请求超时'),
-    pollIntervalSecs: intError(form.pollIntervalSecs, 1, 30, '轮询间隔'),
-    pollTimeoutSecs: intError(form.pollTimeoutSecs, 30, 3600, '轮询总超时'),
-    cacheTtlSecs: intError(form.cacheTtlSecs, 0, 600, '缓存 TTL'),
+    timeoutSecs: locked.value ? null : intError(form.timeoutSecs, 1, 120, '请求超时'),
+    pollIntervalSecs: locked.value ? null : intError(form.pollIntervalSecs, 1, 30, '轮询间隔'),
+    pollTimeoutSecs: locked.value ? null : intError(form.pollTimeoutSecs, 30, 3600, '轮询总超时'),
+    cacheTtlSecs: locked.value ? null : intError(form.cacheTtlSecs, 0, 600, '缓存 TTL'),
     fontSize: intError(form.fontSize, EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX, '字号'),
     // 关闭自动保存时该字段被禁用，隐藏值不得阻止无关字段保存
     autoSaveIntervalSecs: form.autoSave
@@ -129,12 +140,15 @@ export function useSettingsForm() {
       // **豁免只属于设置页本身**：switch_oj 是异步的，期间用户可能已导航到
       // 比赛页——不查当前路由就把「停留」带过去，无会话用户会被留在比赛页
       //（评审九 P2-1）。判据与 sessionGuard 一致：钥匙 + 当前路由是设置页。
-      const stayOnSettings =
-        systemService.launchFlags.value.settings &&
-        router.currentRoute.value?.name === 'Settings'
+      const stayOnSettings = systemService.isKeyedSettings(router.currentRoute.value?.name)
       if (!stayOnSettings) {
         void router.replace({ name: 'Login' })
+        return true
       }
+      // 留在设置页时**重读配置并复位 baseline**（评审十 #4）：切换改了
+      // activeOj/ojUrl 却没动 baseline，dirty 会假真、Save 被误启用；且表单
+      // 其余字段仍是旧 OJ 的值，保存会写到新 OJ（语义错误）。
+      await load()
       return true
     } catch (e) {
       switchError.value = errorMessage(e, '切换 OJ 失败')
@@ -209,26 +223,34 @@ export function useSettingsForm() {
     const target = submitted.activeOj
     const isNewInstance = !ojInstances.value.some((i) => i.id === target)
     try {
+      // 锁定字段：不可编辑，写回未改动值即可——但**不参与数字解析**（存量非法
+      // 字符串会变 NaN → JSON null → Rust u64 反序列化失败拖垮整次保存；
+      // 评审十 #3）。保持磁盘原值不动。
+      const lockAll = locked.value
       const saved = await configService.updateConfig((draft) => {
         // active 只由 switch_oj 改写；保存不能制造配置与运行中 Registry 的不一致
-        const instance = draft.oj.instances.find((i) => i.id === target)
-        if (instance) {
-          instance.baseUrl = submitted.ojUrl.trim()
-        } else {
-          draft.oj.instances.push({
-            id: target,
-            baseUrl: submitted.ojUrl.trim(),
-            enabled: true,
-            options: {},
-          })
+        if (!lockAll) {
+          const instance = draft.oj.instances.find((i) => i.id === target)
+          if (instance) {
+            instance.baseUrl = submitted.ojUrl.trim()
+          } else {
+            draft.oj.instances.push({
+              id: target,
+              baseUrl: submitted.ojUrl.trim(),
+              enabled: true,
+              options: {},
+            })
+          }
         }
         draft.oj.contestRef = submitted.contestRef.trim()
         draft.oj.contestPassword = submitted.contestPassword === '' ? null : submitted.contestPassword
-        draft.oj.timeoutSecs = Number(submitted.timeoutSecs)
-        draft.oj.pollIntervalSecs = Number(submitted.pollIntervalSecs)
-        draft.oj.pollTimeoutSecs = Number(submitted.pollTimeoutSecs)
-        draft.oj.cacheTtlSecs = Number(submitted.cacheTtlSecs)
-        draft.oj.cacheProblemStatement = submitted.cacheProblemStatement
+        if (!lockAll) {
+          draft.oj.timeoutSecs = Number(submitted.timeoutSecs)
+          draft.oj.pollIntervalSecs = Number(submitted.pollIntervalSecs)
+          draft.oj.pollTimeoutSecs = Number(submitted.pollTimeoutSecs)
+          draft.oj.cacheTtlSecs = Number(submitted.cacheTtlSecs)
+          draft.oj.cacheProblemStatement = submitted.cacheProblemStatement
+        }
         draft.editor.fontSize = Number(submitted.fontSize)
         draft.editor.tabSize = submitted.tabSize
         draft.editor.defaultLanguage = submitted.defaultLanguage

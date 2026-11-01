@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useNowMs } from '@/composables/useNowMs'
+import WindowControls from '@/components/layout/WindowControls.vue'
 import { useRouter } from 'vue-router'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { getContestPhase } from '@/utils/contest'
@@ -14,7 +14,6 @@ import { configService } from '@/services/config.service'
 const router = useRouter()
 const auth = useAuthStore()
 const contestStore = useContestStore()
-const appWindow = getCurrentWindow()
 defineProps<{ navigationDisabled?: boolean }>()
 
 /// 当前时间戳（秒），共享毫秒墙钟派生；每秒驱动倒计时与比赛阶段跃迁
@@ -116,17 +115,7 @@ async function handleLogout() {
   }
 }
 
-// ── 窗口控制 ──
-
-function minimize() {
-  appWindow.minimize()
-}
-function toggleMaximize() {
-  appWindow.toggleMaximize()
-}
-function close() {
-  appWindow.close()
-}
+// ── 窗口控制 ── 走共享 WindowControls（与 --settings 极简壳同一实现）
 </script>
 
 <template>
@@ -158,11 +147,7 @@ function close() {
             </div>
           </template>
         </div>
-        <div class="window-controls">
-          <button aria-label="最小化" @click="minimize"><svg viewBox="0 0 16 16"><path d="M3 8h10" /></svg></button>
-          <button aria-label="最大化" @click="toggleMaximize"><svg viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1" /></svg></button>
-          <button aria-label="关闭窗口" class="window-close" @click="close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8" /></svg></button>
-        </div>
+        <WindowControls />
       </div>
     </div>
     <div class="navigation-deck" :inert="navigationDisabled">
@@ -198,12 +183,7 @@ function close() {
 .brand-word { font-size: 12px; letter-spacing: .12em; font-weight: 600; }
 .brand-divider { height: 12px; width: 1px; background: var(--border-color); margin: 0 8px; flex-shrink: 0; }
 .window-event { font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.window-actions, .window-controls { display: flex; align-items: center; flex-shrink: 0; gap: 5px; }
-.window-controls { margin-left: 10px; }
-.window-controls button { width: 32px; height: 30px; display: grid; place-items: center; color: var(--text-secondary); }
-.window-controls button:hover { background: var(--bg-sidebar); }
-.window-controls .window-close:hover { background: #a33b2a; color: white; }
-.window-controls svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.window-actions { display: flex; align-items: center; flex-shrink: 0; gap: 5px; }
 .account-button { display: flex; align-items: center; gap: 8px; font-size: var(--text-xs); padding: 4px 10px; }
 .account-initial { font-family: var(--font-mono); color: #8c6a43; }
 .navigation-deck { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 var(--page-gutter); border-bottom: 1px solid var(--border-color); }
