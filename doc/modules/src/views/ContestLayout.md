@@ -6,7 +6,7 @@
 
 比赛工作台的布局外壳：`TopBar`（顶栏，内嵌横向导航）+ `<router-view>` 子视图 + `StatusBar`（底栏）；挂载时拉取比赛数据、**按权威赛程刷新跨场缓存**、在比赛进行中启动公告轮询，并以每秒时钟驱动**赛程闸门**——赛程被移到未来时立即退回登录页，比赛结束时叠加结束覆盖层并在 2 秒后自动返回登录页。
 
-**无会话最小壳**：`--settings`（管理方钥匙）会在无会话时经守卫直落设置路由（守卫条件豁免其鉴权，见 `router/index.md`），此时外壳退化为最小壳——自带 `data-tauri-drag-region` 拖动区标题栏（「Hinina 设置」+「返回登录」，`decorations: false` 下窗口移动全靠它）+ 内容区；**不渲染** TopBar/StatusBar（其数据全部依赖会话），`bootstrap` 直接跳过（无会话时认证拉取只会失败），不产生任何面向 OJ 的请求。判据是**四条件与**：钥匙启动 + 无会话 + 设置路由（`launchFlags.settings && sessionResolved && !isLoggedIn && route === 'Settings'`）——绑路由防「正常登出/会话失效（`user` 置空而 `sessionResolved` 仍为 true）在 `replace(Login)` 异步守卫完成前闪最小壳、子视图重挂」（评审二），绑钥匙防「普通启动在设置页上登出时闪最小壳」（评审三）：普通启动**永远**不进最小壳。
+**无会话最小壳**：`--settings`（管理方钥匙）会在无会话时经守卫直落设置路由（守卫条件豁免其鉴权，见 `router/index.md`），此时外壳退化为最小壳——自带 `data-tauri-drag-region` 拖动区标题栏（「Hinina 设置」+「返回登录」，`decorations: false` 下窗口移动全靠它）+ 内容区；**不渲染** TopBar/StatusBar（其数据全部依赖会话），`bootstrap` 直接跳过（无会话时认证拉取只会失败），不产生任何面向 OJ 的请求。判据是**三条件与**：钥匙启动 + 无会话 + 设置路由（`launchFlags.settings && !isLoggedIn && route === 'Settings'`）——绑路由防「正常登出/会话失效在 `replace(Login)` 异步守卫完成前闪最小壳、子视图重挂」（评审二），绑钥匙防「普通启动在设置页上登出时闪最小壳」（评审三），**刻意不含 `sessionResolved`**：存量过期会话的首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1）——普通启动**永远**不进最小壳。
 
 ## 核心类型/函数
 
@@ -27,7 +27,7 @@
 
 - `vue`（`computed` / `onMounted` / `onUnmounted` / `ref` / `watch`）/ `vue-router`（`useRouter` / `useRoute`）
 - `@/components/layout/TopBar.vue` / `StatusBar.vue`
-- `@/stores/authStore`（`sessionResolved` / `isLoggedIn` —— 最小壳判据之一）
+- `@/stores/authStore`（`isLoggedIn` —— 最小壳判据之一；`sessionResolved` 已不在判据内）
 - `@/stores/contestStore` / `@/stores/announcementStore`
 - `@/services/system.service`（`launchFlags` 同步快照 —— 最小壳判据之一；View → Service 直连属「路由级瞬态数据」许可）
 - `@/utils/contest`（`getAuthoritativeSchedule` / `getContestPhase`）
@@ -51,7 +51,9 @@ bootstrap:
   └ 失败 → return（原因已由 store 写入 error，StatusBar 与各视图兜底）
   contestId 存在 且 phase === 'running' → announcementStore.startLive(contestId, () => contest.status === 1)
 
-watch(phase, immediate):
+watch([phase, bareShell], immediate):
+  bareShell → return（最小壳短路：撤销在途退出计时器；登出清理保留匿名 brief，
+               phase 可非 none，但赛程闸门不得把维护者从设置页踢走——评审四 P2-2）
   upcoming → router.replace(Login)                  // 赛程被移到未来：立即回入口等待
   ended    → announcementStore.stopLive()
              2s 后 router.replace(Login)            // 保留会话与工作区，让离页保存链路落盘
@@ -115,4 +117,4 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
 
 ## 测试
 
-`src/views/__tests__/ContestLayout.spec.ts`（jsdom，mock `useRouter` / `announcementStore` / `contestService.loadConfiguredContest`，stub 三个 layout 子组件，赛程 `startTime=900 / endTime=1002`）锁定：到点后出现 `role="alert"` 的结束卡片（父容器含 `top-10`）、存在 `[inert]`、`stopLive` 恰好一次、`replace` 未立即调用，2 秒后 `replace({ name: 'Login' })` 恰好一次；服务端 `status=1` 提前结束时同样处理；赛程被移到未来时立即 `replace(Login)` 且 `startLive` 未被调用；「旧 id 已结束 contest + 新 brief」以简报为准、不出覆盖层；brief 指向新比赛时 `loadConfiguredContest` 被调用一次且 `startLive` 用新 contestId；卸载后推进 5 秒 `replace` 未被调用且无残留定时器。最小壳用例（`sessionResolved=true` 且 `user=null`）：渲染「Hinina 设置」拖动区标题与「返回登录」、不出 TopBar/StatusBar、`loadConfiguredContest` 与 `startLive` 均未被调用、点击返回登录 `replace(Login)`。
+`src/views/__tests__/ContestLayout.spec.ts`（jsdom，mock `useRouter` / `useRoute` / `announcementStore` / `contestService.loadConfiguredContest` / `systemService.launchFlags` 快照，stub 三个 layout 子组件，赛程 `startTime=900 / endTime=1002`）锁定：到点后出现 `role="alert"` 的结束卡片（父容器含 `top-10`）、存在 `[inert]`、`stopLive` 恰好一次、`replace` 未立即调用，2 秒后 `replace({ name: 'Login' })` 恰好一次；服务端 `status=1` 提前结束时同样处理；赛程被移到未来时立即 `replace(Login)` 且 `startLive` 未被调用；「旧 id 已结束 contest + 新 brief」以简报为准、不出覆盖层；brief 指向新比赛时 `loadConfiguredContest` 被调用一次且 `startLive` 用新 contestId；卸载后推进 5 秒 `replace` 未被调用且无残留定时器。最小壳用例（钥匙 + `user=null` 且**不设** `sessionResolved`，锁 bareShell 不读它）：渲染「Hinina 设置」拖动区标题与「返回登录」、不出 TopBar/StatusBar、`loadConfiguredContest` 与 `startLive` 均未被调用、点击返回登录 `replace(Login)`；普通启动（无钥匙）+ 设置路由/比赛子路由两种登出过渡态均保持正常外壳；保留的已结束/未开始简报在最小壳下不触发赛程跳转（评审四 P2-2）。
