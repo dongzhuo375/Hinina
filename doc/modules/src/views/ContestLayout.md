@@ -16,8 +16,9 @@
 |------|------|------|
 | `nowMs` / `now` | `useNowMs()` / computed（秒） | 共享毫秒墙钟派生秒，驱动 `phase` 跃迁；scope dispose 清理 interval |
 | `phase` | computed | `getContestPhase(getAuthoritativeSchedule(contestStore.contest, contestStore.brief), now)` |
-| `bareShell` | computed | `systemService.launchFlags.value.settings && !auth.isLoggedIn && route.name === 'Settings'` —— 最小壳判据（钥匙 + 会话缺失 + 设置路由，三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1） |
-| `watch([phase, bareShell], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**最小壳（bareShell）时整体短路**——登出清理保留匿名 brief，phase 可非 none（评审四 P2-2），跳转会把维护者从设置页踢走；bareShell 翻转也重评并撤销在途退出计时器 |
+| `keyedSettings` | computed | `launchFlags.settings && route === 'Settings'` —— 设置页两项豁免的**共同判据**（阶段闸门短路、最小壳）。赛程闸门只防「滞留在过期赛场看旧数据」，设置页只碰本地配置不在其射程内 |
+| `bareShell` | computed | `keyedSettings && !auth.isLoggedIn` —— 最小壳判据（三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1） |
+| `watch([phase, keyedSettings], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**keyedSettings 时整体短路**——无会话（最小壳，评审四 P2-2）与有会话（评审五）两个分支都覆盖：登出清理保留匿名 brief 且已结束赛程会让 phase 非 none，跳转会把维护者从设置页踢走；离开设置页时本监听重评，闸门照常恢复 |
 | `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → 启动公告轮询，见逻辑流程 |
 | `backToLogin` | `() => void` | 最小壳的「返回登录」按钮 → `replace(Login)`（正常登录页，含匿名简报与重试 UI） |
 | `exitTimer` | 定时器句柄 | 结束退出延迟；模块级普通变量，不进响应式系统（墙钟 interval 已归 `useNowMs`） |
@@ -86,6 +87,10 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
   不渲染 TopBar，设置页上只剩 Alt+F4 / 任务栏；点「返回登录」到登录页后 App 兜底
   标题栏（含完整窗口控制）即恢复。维护场景临时且退出路径存在，不为一次性形态
   抽共享 WindowControls 组件——若未来最小壳使用频率上升再议。
+- **赛程闸门的钥匙短路覆盖两种会话形态（评审五补齐）**：短路由判据是
+  `keyedSettings`（钥匙 ∧ 设置路由）而非 `bareShell`——后者要求无会话，漏掉
+  「钥匙 + 会话有效 + 已结束/未开始赛程」的有会话分支（探针实测两种形态都被
+  踢回登录页）。离开设置页时监听重评，闸门对比赛子路由照常生效（反向用例锁定）。
 - **最小壳判据必须含路由条件（评审二抓出）**：`logout()` 成功后 `sessionResolved`
   保持 true、`user` 置空是同步的，重渲染先于 `replace(Login)` 的异步守卫完成——
   只判会话会让比赛页外壳在登出瞬间闪成最小壳并重挂子视图。绑定 Settings 路由

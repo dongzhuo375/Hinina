@@ -21,32 +21,30 @@ const phase = computed(() => getContestPhase(
   getAuthoritativeSchedule(contestStore.contest, contestStore.brief),
   now.value,
 ))
-/// 最小壳：**三条件与** —— 钥匙启动 + 无会话 + 当前路由是设置页。
-/// 绑路由防「正常登出/会话失效时比赛页外壳闪最小壳」（user 置空先于 replace 的
-/// 异步守卫完成）；绑钥匙防「普通启动在设置页上登出时闪最小壳」—— 普通启动
-/// **永远**不进最小壳。
-/// **不含 `sessionResolved`**（评审四 P2-1）：钥匙 + 存量过期会话启动时，首个
-/// 认证请求 401 → invalidateSession 把 sessionResolved 复位为 false（后端登出
-/// 失败时 backendCleared=false）——此刻正是「钥匙 + 无会话 + 设置页」形态，最小
-/// 壳必须接管，否则正常外壳包着无会话设置页继续发注定失败的请求。守卫在导航前
-/// 已完成 checkSession，挂载时机不受影响；快照由守卫首航填充，同步判定无闪帧。
-const bareShell = computed(
-  () =>
-    systemService.launchFlags.value.settings &&
-    !auth.isLoggedIn &&
-    route.name === 'Settings',
+/// 钥匙模式且正停在设置页：设置页两项豁免的**共同判据**（阶段闸门短路、最小壳）。
+/// 赛程闸门只防「滞留在过期赛场看旧数据」——设置页只碰本地配置，不在其射程内；
+/// 钥匙场景把维护者踢回登录页等于重新锁死（firstNavigation 已消费、无 UI 回入口）。
+const keyedSettings = computed(
+  () => systemService.launchFlags.value.settings && route.name === 'Settings',
 )
+/// 最小壳：keyedSettings 再加无会话。**刻意不含 `sessionResolved`**（评审四
+/// P2-1）：钥匙 + 存量过期会话启动时，首个认证请求 401 → invalidateSession 把
+/// sessionResolved 复位为 false（后端登出失败时 backendCleared=false）——此刻
+/// 正是「钥匙 + 无会话 + 设置页」形态，最小壳必须接管，否则正常外壳包着无会话
+/// 设置页继续发注定失败的请求。守卫在导航前已完成 checkSession，挂载时机不受
+/// 影响；快照由守卫首航填充，同步判定无闪帧。
+const bareShell = computed(() => keyedSettings.value && !auth.isLoggedIn)
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
-watch([phase, bareShell], ([value, shell]) => {
+watch([phase, keyedSettings], ([value, keyed]) => {
   if (exitTimer) clearTimeout(exitTimer)
   exitTimer = null
-  // 最小壳不参与赛程闸门：钥匙模式下保留的匿名简报可能让 phase 非 none
-  //（登出清理只清会话部分），此时维持者正停在设置页修配置——跳转登录页
-  // 会把钥匙场景重新锁死（评审四 P2-2）；bareShell 翻转时也重评并撤销
-  // 在途退出计时器。
-  if (shell) return
+  // 钥匙模式下正停在设置页（无论有无会话）不参与赛程闸门：登出清理保留的
+  // 匿名简报 / 已结束赛程都可能让 phase 非 none——跳回登录页会把钥匙场景
+  // 重新锁死（评审四 P2-2 + 评审五补齐有会话分支）；离开设置页时本监听
+  // 重评，赛程闸门照常恢复。
+  if (keyed) return
   if (value === 'upcoming') {
     void router.replace({ name: 'Login' })
   } else if (value === 'ended') {

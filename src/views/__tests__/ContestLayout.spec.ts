@@ -247,6 +247,59 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
+  it('评审五：钥匙 + 会话有效 + 已结束简报 + 设置路由——不跳转（完整外壳保持）', async () => {
+    // P2-2 的有会话分支：bareShell 为 false（正常外壳），但赛程闸门的钥匙短路
+    // 看 keyedSettings —— 已结束简报不得把维护者从设置页踢回登录页
+    vi.useFakeTimers()
+    const now = Math.floor(Date.now() / 1000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const auth = useAuthStore()
+    auth.sessionResolved = true
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+    const store = useContestStore()
+    store.brief = { ...schedule, startTime: now - 7_200, endTime: now - 3_600 }
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    // 完整外壳（有会话）：TopBar/StatusBar 桩在，无最小壳
+    expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
+    expect(host.querySelector('footer')).toBeTruthy()
+    await vi.advanceTimersByTimeAsync(2_500)
+    expect(mocks.replace).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('评审五反向：同条件但在比赛子路由——赛程闸门照常生效', async () => {
+    // 短路只属于设置页：离开设置页回到比赛子路由后，已结束赛程照常退出
+    //（防止滞留在过期赛场看旧数据——闸门的原始职责）
+    vi.useFakeTimers()
+    const now = Math.floor(Date.now() / 1000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'ProblemSet'
+    const auth = useAuthStore()
+    auth.sessionResolved = true
+    auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
+    const store = useContestStore()
+    store.brief = { ...schedule, startTime: now - 7_200, endTime: now - 3_600 }
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    await vi.advanceTimersByTimeAsync(2_500)
+    expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+    vi.useRealTimers()
+  })
+
   it('评审四 P2-2：最小壳下保留的未开始简报不触发立即跳转', async () => {
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)
