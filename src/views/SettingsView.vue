@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PageHeading from '@/components/common/PageHeading.vue'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { useSettingsForm } from '@/composables/useSettingsForm'
@@ -9,7 +9,7 @@ import { useMaintenanceSettings } from '@/composables/useMaintenanceSettings'
 import { useDataDirSettings } from '@/composables/useDataDirSettings'
 import { useSettingsScrollSpy } from '@/composables/useSettingsScrollSpy'
 import { systemService } from '@/services/system.service'
-import { settingsGateNotice } from '@/utils/settings-gate-notice'
+import { clearSettingsGateNotice, settingsGateNotice } from '@/utils/settings-gate-notice'
 import type { SettingsFormPatch } from '@/composables/useSettingsForm'
 import OjServerSection from '@/components/settings/OjServerSection.vue'
 import EditorSection from '@/components/settings/EditorSection.vue'
@@ -80,6 +80,8 @@ const {
   SECTION_LABELS,
 } = useSettingsScrollSpy(loading)
 
+onUnmounted(clearSettingsGateNotice)
+
 onMounted(() => {
   void load()
   void about.loadStorage()
@@ -109,7 +111,7 @@ onMounted(() => {
         <p
           v-if="settingsGateNotice"
           role="status"
-          class="mb-4 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[var(--color-warning)]"
+          class="sticky top-2 z-20 mb-4 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[var(--color-warning)] shadow-sm"
         >
           {{ settingsGateNotice }}
         </p>

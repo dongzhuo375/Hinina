@@ -16,6 +16,34 @@ async function fresh() {
   return (await import('@/services/system.service')).systemService
 }
 
+describe('isKeyedSettings（唯一判据，评审十五 P1）', () => {
+  it('钥匙模式 + Settings → true；其余组合一律 false', async () => {
+    mocks.getLaunchFlags.mockResolvedValue({ settings: true })
+    const svc = await fresh()
+    await svc.getLaunchFlags() // 填充快照
+
+    expect(svc.isKeyedSettings('Settings')).toBe(true)
+    expect(svc.isKeyedSettings('ProblemSet')).toBe(false)
+    expect(svc.isKeyedSettings('Login')).toBe(false)
+    expect(svc.isKeyedSettings(undefined)).toBe(false)
+    expect(svc.isKeyedSettings(null)).toBe(false)
+    // 符号路由名（命名路由的 name 也可能是 symbol）不算 Settings
+    expect(svc.isKeyedSettings(Symbol('Settings'))).toBe(false)
+  })
+
+  it('普通启动下即使是 Settings 也不豁免', async () => {
+    mocks.getLaunchFlags.mockResolvedValue({ settings: false })
+    const svc = await fresh()
+    await svc.getLaunchFlags()
+    expect(svc.isKeyedSettings('Settings')).toBe(false)
+  })
+
+  it('快照未填充（IPC 尚未返回）时按「无参数」处理', async () => {
+    const svc = await fresh()
+    expect(svc.isKeyedSettings('Settings')).toBe(false)
+  })
+})
+
 describe('getLaunchFlags 单飞与快照', () => {
   it('并发与先后多次调用只发一次 IPC，并填充同步快照', async () => {
     mocks.getLaunchFlags.mockResolvedValue({ settings: true })

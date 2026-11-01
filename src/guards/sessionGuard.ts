@@ -46,8 +46,8 @@ async function handleAuthFailure(error: IpcError, router: Router): Promise<void>
     await auth.invalidateSession(SESSION_INVALID_MESSAGE)
     // 仅当停留在受保护页面时需要跳转；登录页本身就是失效后的落点。
     // 例外：`--settings`（管理方钥匙）进程的设置页——清理会话但留在原地。
-    // 那是钥匙存在的全部意义（修连接配置）：踢回登录页等于重新锁死
-    //（firstNavigation 已消费、登录页没有返回设置页的入口，评审四 P2-1）。
+    // 那是钥匙存在的全部意义（修连接配置）：踢回登录页会打断维护、丢失
+    // 当前草稿——登录页虽有「返回设置」入口，但那已是一次重新进入（评审四 P2-1）。
     const onKeyedSettings = systemService.isKeyedSettings(router.currentRoute.value.name)
     if (!onKeyedSettings && router.currentRoute.value.meta.requiresAuth) {
       await router.replace({ name: 'Login' })

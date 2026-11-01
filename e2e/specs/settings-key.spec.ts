@@ -32,6 +32,13 @@ test.describe('--settings 管理方钥匙旅程', () => {
     // 旅程尾：返回登录 → 正常登录页
     await back.click()
     await expect(page.getByText('登录参赛系统')).toBeVisible()
+
+    // 评审十五 A：登录页在钥匙模式下有「返回设置」入口——返回登录不是单向门
+    const toSettings = page.getByRole('button', { name: '返回设置' })
+    await expect(toSettings).toBeVisible()
+    await toSettings.click()
+    await expect(page.getByText('Hinina 设置')).toBeVisible()
+    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
   })
 
   test('普通启动（无钥匙）：首航停在登录页，永不进最小壳', async ({ page }) => {
@@ -80,6 +87,23 @@ test.describe('--settings 管理方钥匙旅程', () => {
     const addr = page.getByRole('textbox', { name: /服务器地址/ })
     await addr.fill('https://repaired.example')
     await expect(addr).toHaveValue('https://repaired.example')
+
+    // 评审十五 B：滚到底部再点赛场页面（维护者常改的正是底部数据目录/关于）——
+    // 被闸门拦回时的提示必须**在视口内**可见（toBeVisible 只看 CSS 可见性，
+    // 这里断言几何位置），且仍停在设置页
+    await page.evaluate(() => {
+      const scroller = document.querySelector('.settings-page')?.parentElement
+      if (scroller) scroller.scrollTop = scroller.scrollHeight
+    })
+    await page.getByRole('link', { name: /题目/ }).click()
+    await expect(page.getByText('环境设置', { exact: true })).toBeVisible()
+    const notice = page.getByRole('status').filter({ hasText: '比赛未进行' })
+    await expect(notice).toBeVisible()
+    const box = await notice.boundingBox()
+    const viewport = page.viewportSize()
+    expect(box).not.toBeNull()
+    expect(box!.y).toBeGreaterThanOrEqual(0)
+    expect(box!.y).toBeLessThan(viewport!.height)
   })
 
   test('评审七：钥匙 + 会话失效翻转外壳——未保存草稿跨形态保留', async ({ page }) => {

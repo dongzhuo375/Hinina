@@ -15,7 +15,7 @@
 |------|------|------|
 | `settingsGateNotice` | `Ref<string \| null>` | 当前提示文案；null = 无 |
 | `markSettingsGateBlocked` | `(message: string) => void` | 记录提示并启动 4 秒自动清除（重复调用重置计时器） |
-| `clearSettingsGateNotice` | `() => void` | 清空提示与计时器（测试/卸载用） |
+| `clearSettingsGateNotice` | `() => void` | 清空提示与计时器（SettingsView `onUnmounted` 调用——4 秒计时器不跨页残留） |
 
 模块级单例（与 `settings-access` 同先例）：无领域数据、不走 IPC，不值得一个
 store。
@@ -35,7 +35,8 @@ store。
 守卫：fromKeyedSettings 且 phase !== running
   → markSettingsGateBlocked('比赛未进行，已留在设置页…')
   → return { name: 'Settings' }
-SettingsView 读取 settingsGateNotice → 渲染提示条
+SettingsView 读取 settingsGateNotice → 渲染提示条（`sticky top-2`：滚到底部改数据目录时也
+在视口内，评审十五实测普通定位会被滚出视口）
 4 秒后（或再次触发时重置）自动清空
 ```
 

@@ -134,7 +134,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       persistedActive.value = target
       resetSessionForOjSwitch()
       // `--settings`（管理方钥匙）：切换成功**留在设置页**继续修配置——踢到
-      // 登录页等于重新锁死（firstNavigation 已消费、无 UI 回入口）。会话已由
+      // 登录页会打断维护、丢失当前草稿（登录页的「返回设置」是一次重新进入）。会话已由
       // resetSessionForOjSwitch 清理，最小壳接管（内容区共享实例，草稿保留）。
       // 第三处豁免导航源，与 sessionGuard/阶段闸门同理由（评审八 P2）。
       // **豁免只属于设置页本身**：switch_oj 是异步的，期间用户可能已导航到

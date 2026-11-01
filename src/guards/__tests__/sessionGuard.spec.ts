@@ -131,8 +131,8 @@ describe('sessionGuard 并发会话失效', () => {
   })
 
   it('评审四 P2-1：钥匙模式的设置页——清理会话但不跳转登录', async () => {
-    // --settings 的全部意义就是留在设置页修连接配置：firstNavigation 已消费、
-    // 登录页没有返回设置页的入口，踢回登录页等于把管理方重新锁死
+    // --settings 的全部意义就是留在设置页修连接配置：踢回登录页会打断维护、
+    // 丢失当前草稿（登录页虽有「返回设置」入口，那已是一次重新进入）
     mocks.logout.mockResolvedValue(undefined)
     const { auth, observer } = install(true, true, { keyMode: true, routeName: 'Settings' })
 
