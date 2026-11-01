@@ -76,18 +76,47 @@ pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 ///
 /// 主题字段的切换效果由前端本地应用（`set_theme` 另有命令）；此处不做额外广播。
 #[tauri::command]
-pub async fn update_config(ctx: State<'_, AppContext>, config: AppConfig) -> AppResult<()> {
+pub async fn update_config(
+    ctx: State<'_, AppContext>,
+    config: AppConfig,
+    // 维护者层锁定（普通启动）：锁定字段取旧值、不参与校验与钳制
+    maintainer_locked: Option<bool>,
+) -> AppResult<()> {
     info!("Command: 更新配置");
-    let mut config = config;
-    config.validate().map_err(AppError::Config)?;
-    if config.sanitize() {
-        warn!("配置存在越界字段，已按取值域钳制后持久化: {:?}", config);
+    apply_config_update(&ctx, config, maintainer_locked.unwrap_or(false))
+}
+
+/// `update_config` 的真实编排（提取供测试直接调用，`#[tauri::command]` 只做薄转发）。
+///
+/// `maintainer_locked` 为真时走「锁定字段不动」语义（评审二十六 #2）：先
+/// `preserve_locked_fields` 用旧配置覆盖锁定字段，再用放宽后的校验/净化 ——
+/// 手改出的非法锁定值（地址、越界数值）不得阻塞选手层字段的保存，也不得被
+/// 静默钳制/改写。
+pub(crate) fn apply_config_update(
+    ctx: &AppContext,
+    mut config: AppConfig,
+    maintainer_locked: bool,
+) -> AppResult<()> {
+    if maintainer_locked {
+        let previous = ctx.config.get();
+        config.preserve_locked_fields(&previous);
+        config
+            .validate_preserving_locked()
+            .map_err(AppError::Config)?;
+        if config.sanitize_editable() {
+            warn!("配置存在可编辑层越界字段，已钳制后持久化");
+        }
+    } else {
+        config.validate().map_err(AppError::Config)?;
+        if config.sanitize() {
+            warn!("配置存在越界字段，已按取值域钳制后持久化: {:?}", config);
+        }
     }
     ctx.config.update(|cfg| {
         *cfg = config;
     })?;
 
     // 显式同步（幂等）：间隔未变时不重启计时器，关掉后也能停
-    crate::commands::workspace_cmd::sync_auto_save_from_context(&ctx);
+    crate::commands::workspace_cmd::sync_auto_save_from_context(ctx);
     Ok(())
 }

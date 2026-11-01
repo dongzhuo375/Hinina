@@ -51,14 +51,13 @@ beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不�
   4a. loadBrief 期间会话失效：钥匙流程回 **Settings**（评审十九 #2，与后续闸门失败同向）；
       简报缺失（服务器不可达，正是钥匙要修的场景）时提示「未能加载比赛信息」而非
       「比赛未进行」（评审十九 #3）
-  4. 受保护且已登录，且「当前不在 Contest 子树内」或「当前是钥匙设置页」
-     （后者是评审十 #1：从设置页点题目/榜单也要过闸门，否则会落进被锁定的
-      比赛页、随后被外壳踢回登录页且无回入口；闸门失败时回 **Settings**）
-     （入闸条件 = 从钥匙设置页出发 ∨ 当前不在 Contest 子树内）时做赛程闸门：
+  4. 受保护且已登录，且「从钥匙设置页出发」或「当前不在 Contest 子树内」时
+     做赛程闸门（前者是评审十 #1：从设置页点题目/榜单也要过闸门，否则会落进
+     被锁定的比赛页、随后被外壳踢回登录页）：
        !contest.brief → await contest.loadBrief()    // 深链/首次进入补加载匿名简报
-       期间会话可能失效 → !auth.isLoggedIn 则回 Login
+       期间会话可能失效 → 钥匙流程回 Settings（并提示「会话已失效」），其它回 Login
        schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
-       getContestPhase(schedule, floor(Date.now()/1000)) !== 'running' → 回 Login
+       非 running → 钥匙流程回 Settings（提示按成因区分），其它回 Login
      否则放行
 ```
 

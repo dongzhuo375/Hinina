@@ -378,7 +378,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
           draft.editor.autoSaveIntervalSecs = autoSaveIntervalSecs
         }
         draft.layout.splitRatio = submitted.splitRatio
-      })
+      }, { maintainerLocked: lockAll })
       baseline.value = submittedSnapshot
       ojInstances.value = saved.oj.instances
       markSaved(true)

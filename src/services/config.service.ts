@@ -64,7 +64,17 @@ export class ConfigService {
    * `OJSwitched`。本地缓存在切换后失效，后续读取拿到新 active。
    */
   async switchOj(ojId: string): Promise<void> {
-    await configBridge.switchOj(ojId)
+    try {
+      await configBridge.switchOj(ojId)
+    } catch (e) {
+      // 切换已生效但持久化失败：后端 registry 与内存已是新 OJ，**陈旧缓存必须
+      // 失效**——否则后续读取/保存会把旧 active 再写回去，造成 register=新、
+      // 配置=旧 的再次分叉（评审二十六 P1）
+      if ((e as { variant?: string | null }).variant === 'OjSwitchPersistFailed') {
+        this.invalidate()
+      }
+      throw e
+    }
     this.invalidate()
   }
 
@@ -199,12 +209,15 @@ export class ConfigService {
    * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
    * 避免局部字段把其余配置冲掉。返回写入后的配置供调用方直接使用。
    */
-  async updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
+  async updateConfig(
+    mutate: (draft: AppConfig) => void,
+    options: { maintainerLocked?: boolean } = {},
+  ): Promise<AppConfig> {
     const current = await this.getConfig()
     const draft: AppConfig = structuredClone(current)
     mutate(draft)
     try {
-      await configBridge.updateConfig(draft)
+      await configBridge.updateConfig(draft, options.maintainerLocked ?? false)
     } finally {
       // 无论成败都失效缓存：失败时下次读取重新拉后端真值，避免缓存与磁盘漂移
       this.invalidate()

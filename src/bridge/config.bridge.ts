@@ -7,8 +7,11 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 /** 整体替换应用配置（Rust 端持久化到 config.json 并更新内存值） */
-export async function updateConfig(config: AppConfig): Promise<void> {
-  return ipcInvoke<void>('update_config', { config })
+export async function updateConfig(
+  config: AppConfig,
+  maintainerLocked = false,
+): Promise<void> {
+  return ipcInvoke<void>('update_config', { config, maintainerLocked })
 }
 
 /** 触发后端从磁盘重载配置（发布 ConfigReloaded 事件） */

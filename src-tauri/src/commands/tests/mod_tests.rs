@@ -376,3 +376,48 @@ fn rank_default_page_size_matches_frontend_contract() {
     );
     assert_eq!(RankQuery::default().current_page, 1, "默认第 1 页");
 }
+
+// ── update_config 的「维护者层锁定」语义（评审二十六 #2） ──
+
+#[tokio::test]
+async fn locked_update_preserves_invalid_locked_fields_and_saves_editable_ones() {
+    use super::super::commands::config_cmd::apply_config_update;
+    use crate::test_support::app_ctx::context_with_hoj;
+
+    let (ctx, _dir) = context_with_hoj("https://hoj.example").await;
+    // 手改出的非法锁定值：地址非法 + 超时越界
+    ctx.config
+        .update(|cfg| {
+            cfg.oj.instances[0].base_url = "not-a-url".into();
+            cfg.oj.timeout_secs = 999;
+        })
+        .expect("注入非法配置");
+
+    // 选手层修改字号；锁定字段按「旧值」提交（前端会原样带回）
+    let mut payload = ctx.config.get();
+    payload.editor.font_size = 20;
+    payload.oj.timeout_secs = 999;
+    payload.oj.instances[0].base_url = "tampered".into(); // 锁定层的新值必须被旧值覆盖
+
+    apply_config_update(&ctx, payload, true).expect("锁定模式不得因非法锁定值拒绝保存");
+
+    let saved = ctx.config.get();
+    assert_eq!(saved.editor.font_size, 20, "可编辑字段应保存");
+    assert_eq!(saved.oj.timeout_secs, 999, "越界锁定值不得被钳制");
+    assert_eq!(
+        saved.oj.instances[0].base_url, "not-a-url",
+        "锁定地址必须保持旧值（不 trim、不改写）"
+    );
+}
+
+#[tokio::test]
+async fn unlocked_update_still_rejects_invalid_url_and_clamps() {
+    use super::super::commands::config_cmd::apply_config_update;
+    use crate::test_support::app_ctx::context_with_hoj;
+
+    let (ctx, _dir) = context_with_hoj("https://hoj.example").await;
+    let mut payload = ctx.config.get();
+    payload.oj.instances[0].base_url = "not-a-url".into();
+    let err = apply_config_update(&ctx, payload, false).expect_err("普通路径仍拒绝非法地址");
+    assert!(err.to_string().contains("http"), "应提示地址非法: {err}");
+}

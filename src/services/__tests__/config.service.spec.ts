@@ -211,6 +211,22 @@ describe('switchOj — 显式切换当前 OJ', () => {
     expect(getConfig).toHaveBeenCalledTimes(2)
   })
 
+  it('评审二十六 P1：切换已生效但持久化失败也失效缓存（否则旧 active 会被写回）', async () => {
+    getConfig.mockResolvedValue(makeConfig())
+    await configService.getConfig() // 预热缓存（旧 active）
+    switchOj.mockRejectedValue(
+      Object.assign(new Error('OJ 切换已生效但保存配置失败: 磁盘满'), {
+        variant: 'OjSwitchPersistFailed',
+      }),
+    )
+
+    await expect(configService.switchOj('X')).rejects.toThrow('保存配置失败')
+
+    // 缓存必须已失效：下一次读取重新拉后端（内存中 active 已是新 OJ）
+    await configService.getConfig()
+    expect(getConfig).toHaveBeenCalledTimes(2)
+  })
+
   it('bridge 失败时原样上抛（设置页据此回滚下拉显示）', async () => {
     switchOj.mockRejectedValue(new Error('OJ X 未注册'))
     await expect(configService.switchOj('X')).rejects.toThrow('未注册')
@@ -237,6 +253,17 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     getConfig.mockResolvedValue(makeConfig())
     await configService.getConfig()
     expect(getConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it('评审二十六 P2：维护者层锁定把 maintainerLocked 透传给 bridge', async () => {
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockResolvedValue(undefined)
+
+    await configService.updateConfig((draft) => {
+      draft.editor.fontSize = 18
+    }, { maintainerLocked: true })
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.any(Object), true)
   })
 
   it('写回失败同样失效缓存（避免缓存与磁盘漂移）并向上抛错', async () => {

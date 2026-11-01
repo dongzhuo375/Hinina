@@ -164,7 +164,12 @@ router.beforeEach(async (to, from) => {
     // 会话可能在 loadBrief 期间失效（例如一次 OJ 切换完成并清理了会话，
     // 评审十九 #2）：钥匙流程同样回设置页，而不是送去登录页
     if (!auth.isLoggedIn) {
-      return fromKeyedSettings ? { name: 'Settings' } : { name: 'Login', replace: true }
+      if (fromKeyedSettings) {
+        // 与未登录分支一致：拦回时给一次可见反馈（评审二十六 P3）
+        markSettingsGateBlocked('会话已失效，已留在设置页（请重新登录后进入赛场页面）')
+        return { name: 'Settings' }
+      }
+      return { name: 'Login', replace: true }
     }
     const schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
     if (getContestPhase(schedule, Math.floor(Date.now() / 1000)) !== 'running') {

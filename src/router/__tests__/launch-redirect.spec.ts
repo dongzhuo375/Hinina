@@ -165,6 +165,9 @@ describe('--settings 初始直落（守卫行为）', () => {
     })
     await router.push({ name: 'ProblemSet' })
     expect(router.currentRoute.value.name).toBe('Settings')
+    // 评审二十六 P3：拦回时必须有可见反馈（与未登录分支一致）
+    const { settingsGateNotice } = await import('@/utils/settings-gate-notice')
+    expect(settingsGateNotice.value).toContain('会话已失效')
   })
 
   it('评审二十：钥匙设置页 + 无会话点赛场页面——留在设置页并提示，不去登录页', async () => {
