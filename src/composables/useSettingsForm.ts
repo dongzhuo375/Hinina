@@ -166,7 +166,22 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // 留在设置页时**只重置 OJ 域并按磁盘重算 baseline**（评审十 #4 防假
       // dirty；评审十九 #1 保留全局草稿）：整体 load() 会把维护者刚改的字体/
       // 超时也一并还原，与回滚分支的「保留编辑」行为不一致。
-      await resetOjFieldsFromDisk()
+      try {
+        await resetOjFieldsFromDisk()
+      } catch {
+        // 切换**已经生效**（后端已写 config.oj.active=B、registry 已切、磁盘
+        // 也已是 B），只是重载失败——不能把 UI 回滚到 A，那会造成「界面显示
+        // A、实际跑 B」（评审二十二）。承认已生效：对齐到 B 的本地已知值
+        //（实例地址来自 ojInstances；其余 OJ 域字段是全局配置、切换未改动），
+        // 并如实提示刷新失败。
+        persistedActive.value = target
+        form.activeOj = target
+        form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
+        switchError.value = null
+        switchNotice.value = '切换已生效，但配置刷新失败；请重新打开设置页确认'
+        lastSwitchStayed = true
+        return true
+      }
       lastSwitchStayed = true
       return true
     } catch (e) {
@@ -191,7 +206,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     const ojDirty = ojDomainDirty()
     if (await performSwitch(target)) {
       form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
-      if (lastSwitchStayed && ojDirty) {
+      if (lastSwitchStayed && ojDirty && switchNotice.value === null) {
         // 评审二十一 #2：OJ 域草稿被磁盘值覆盖是设计（换服务端后旧值无意义），
         // 但不能静默——给一次说明，并点明全局草稿仍保留
         switchNotice.value =

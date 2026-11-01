@@ -268,7 +268,7 @@ describe('useSettingsForm', () => {
     expect(currentConfig.oj.timeoutSecs).toBe(30)
   })
 
-  it('评审二十一 #1：切换后端成功但重载失败——id 与地址一起回滚到旧 OJ', async () => {
+  it('评审二十二：切换后端成功但重载失败——承认已生效（对齐 B），不假装失败', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -278,9 +278,11 @@ describe('useSettingsForm', () => {
 
     await settings.onSwitchOj()
 
-    expect(settings.switchError.value).toContain('失败')
-    expect(settings.form.activeOj).toBe('HOJ') // 不回滚就会出现「B 的 id + A 的地址」
-    expect(settings.form.ojUrl).toBe(currentConfig.oj.instances.find((i) => i.id === 'HOJ')?.baseUrl)
+    // switch_oj 已写盘并切 registry：UI 必须对齐 B，否则「界面 A、实际 B」
+    expect(settings.form.activeOj).toBe('Hydro')
+    expect(settings.form.ojUrl).toBe('https://hydro.example')
+    expect(settings.switchError.value).toBeNull()
+    expect(settings.switchNotice.value).toContain('切换已生效')
   })
 
   it('评审二十一 #2：OJ 域草稿被磁盘值覆盖时给出说明（全局草稿保留）', async () => {
