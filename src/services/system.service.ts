@@ -39,12 +39,7 @@ export class SystemService {
   readonly launchFlags = readonly(launchFlagsSnapshot)
 
   /**
-   * 钥匙模式 + 指定路由是否为设置页（评审十 #5）：**唯一判据**，四处消费
-   *（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，
-   * 避免注释声称一致、实现各自内联的漂移。
-   */
-  /**
-   * 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。
+   * 本次启动是否为 `--settings` 管理方钥匙（**进程级**判据，无路由维度）。
    * 组件里判断「钥匙模式」一律走这里，不要直接读 `launchFlags.value.settings`
    *（评审二十一 #4：判据要单一来源）。
    */
@@ -52,6 +47,11 @@ export class SystemService {
     return launchFlagsSnapshot.value.settings
   }
 
+  /**
+   * 钥匙模式 + 指定路由是否为设置页（评审十 #5）：**路由级唯一判据**，四处消费
+   *（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，
+   * 避免注释声称一致、实现各自内联的漂移。进程级判断用 `isKeyed()`。
+   */
   isKeyedSettings(routeName: string | symbol | null | undefined): boolean {
     return launchFlagsSnapshot.value.settings && routeName === 'Settings'
   }
