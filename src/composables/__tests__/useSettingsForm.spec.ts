@@ -283,6 +283,25 @@ describe('useSettingsForm', () => {
     expect(settings.form.ojUrl).toBe('https://hydro.example')
     expect(settings.switchError.value).toBeNull()
     expect(settings.switchNotice.value).toContain('切换已生效')
+    // 评审二十三 #1：基线同步重算——不得出现假「未保存更改」
+    expect(settings.dirty.value).toBe(false)
+  })
+
+  it('评审二十三：重载失败时 A 的 OJ 域草稿也被重置，全局草稿仍保留', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    settings.form.contestRef = 'draft-for-A' // OJ 域草稿
+    settings.form.fontSize = '18' // 全局草稿
+    settings.form.activeOj = 'Hydro'
+    mocks.getConfig.mockRejectedValueOnce(new Error('读取配置失败'))
+
+    await settings.onSwitchOj()
+
+    expect(settings.form.activeOj).toBe('Hydro')
+    expect(settings.form.contestRef).toBe(currentConfig.oj.contestRef) // A 的草稿不得带进 B
+    expect(settings.form.fontSize).toBe('18') // 全局草稿保留
+    expect(settings.dirty.value).toBe(true) // 仅剩未保存的全局编辑
   })
 
   it('评审二十一 #2：OJ 域草稿被磁盘值覆盖时给出说明（全局草稿保留）', async () => {

@@ -171,14 +171,28 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       } catch {
         // 切换**已经生效**（后端已写 config.oj.active=B、registry 已切、磁盘
         // 也已是 B），只是重载失败——不能把 UI 回滚到 A，那会造成「界面显示
-        // A、实际跑 B」（评审二十二）。承认已生效：对齐到 B 的本地已知值
-        //（实例地址来自 ojInstances；其余 OJ 域字段是全局配置、切换未改动），
-        // 并如实提示刷新失败。
+        // A、实际跑 B」（评审二十二）。承认已生效：对齐到 B 的本地已知值。
+        // OJ 域草稿也回到磁盘值（评审二十三 #2：与成功路径一致，避免把 A 的
+        // 比赛引用/密码等草稿写进 B）；全局草稿保留。
+        const previous = baseline.value ? (JSON.parse(baseline.value) as SettingsForm) : null
         persistedActive.value = target
         form.activeOj = target
         form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
+        if (previous) {
+          form.contestRef = previous.contestRef
+          form.contestPassword = previous.contestPassword
+          form.timeoutSecs = previous.timeoutSecs
+          form.pollIntervalSecs = previous.pollIntervalSecs
+          form.pollTimeoutSecs = previous.pollTimeoutSecs
+          form.cacheTtlSecs = previous.cacheTtlSecs
+          form.cacheProblemStatement = previous.cacheProblemStatement
+          // 基线 = 磁盘值 + 新的 active/url（评审二十三 #1）：否则 dirty 仍拿
+          // A 的基线比 B 的表单，出现假「未保存更改」
+          baseline.value = JSON.stringify({ ...previous, activeOj: target, ojUrl: form.ojUrl })
+        }
         switchError.value = null
-        switchNotice.value = '切换已生效，但配置刷新失败；请重新打开设置页确认'
+        switchNotice.value =
+          '切换已生效，但配置刷新失败；连接与比赛相关的修改已重置，其余未保存修改保留。请重新打开设置页确认'
         lastSwitchStayed = true
         return true
       }
