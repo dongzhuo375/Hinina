@@ -38,9 +38,11 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         if crate::infra::argv::has_flag(&args, "--settings") {
             crate::infra::startup_dialog::present_message(
                 "Hinina 已在运行",
-                "当前实例不是以 --settings 启动的，设置页的维护者选项仍处于锁定状态。
-
-                 请完全退出 Hinina 后，再以 --settings 重新启动。",
+                // concat! 显式拼接：多行字面量会把源码缩进带进正文（评审二十一 #7）
+                concat!(
+                    "当前实例不是以 --settings 启动的，设置页的维护者选项仍处于锁定状态。\n\n",
+                    "请完全退出 Hinina 后，再以 --settings 重新启动。",
+                ),
             );
         }
     })

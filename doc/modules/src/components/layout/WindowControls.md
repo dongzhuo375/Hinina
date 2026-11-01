@@ -24,7 +24,7 @@
 
 ## 直接依赖
 
-- `@/bridge/window.bridge`（`minimizeWindow` / `toggleMaximizeWindow` / `closeWindow` 薄封装——CLAUDE.md 要求 bridge 是唯一接触 `@tauri-apps/api` 的地方，评审十九 #8）
+- `@/services/system.service`（`minimizeWindow` / `toggleMaximizeWindow` / `closeWindow`）——View 只经 Service；Service 再转发 `bridge/window.bridge`（bridge 是唯一接触 `@tauri-apps/api` 的地方，评审十九 #8 / 二十一 #6）
 
 ## 被依赖
 

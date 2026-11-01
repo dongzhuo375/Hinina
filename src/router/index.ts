@@ -114,7 +114,7 @@ const router = createRouter({
  */
 let firstNavigation = true
 
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
   // 钥匙通道故障不得炸掉导航：service 已 memoize + 失败退化，这里是导航路径上
   // 的第二道防线（守卫抛错 = 整个路由系统卡死在当前页）
   let settingsMode = false
@@ -139,7 +139,9 @@ router.beforeEach(async (to) => {
   // 钥匙设置页出发的导航：**任何失败都回设置页**（评审十九 #2 的同类路径，
   // 评审二十补漏）——无会话时点赛场页面若送去登录页，设置视图被卸载、草稿
   // 丢失，正是钥匙要避免的
-  const fromKeyedSettings = systemService.isKeyedSettings(router.currentRoute.value.name)
+  // 来源路由在**导航入口**一次性捕获（评审二十一 #5）：异步等待后不再读
+  // `router.currentRoute`——那可能已被在途导航改写（评审九/十九的竞态根源）
+  const fromKeyedSettings = systemService.isKeyedSettings(from.name)
   if (!auth.isLoggedIn) {
     if (fromKeyedSettings) {
       markSettingsGateBlocked('未登录，已留在设置页（登录后才能进入赛场页面）')
@@ -154,8 +156,7 @@ router.beforeEach(async (to) => {
   // 会落进被闸门锁定的比赛页，随后外壳 watcher 把维护者踢回登录页——草稿丢失、
   // 维护被打断（登录页的「返回设置」是一次重新进入）。闸门失败时回**设置页**。
   const enteringFromOutside =
-    fromKeyedSettings ||
-    !router.currentRoute.value.matched.some((r) => r.name === 'Contest')
+    fromKeyedSettings || !from.matched.some((r) => r.name === 'Contest')
   if (enteringFromOutside) {
     const contest = useContestStore()
     if (!contest.brief) await contest.loadBrief()

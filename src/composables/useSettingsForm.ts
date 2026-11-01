@@ -128,10 +128,27 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   const switchError = ref<string | null>(null)
   const switchNotice = ref<string | null>(null)
 
+  /// 最近一次自动/显式切换后是否停留在设置页（决定是否给出「未保存修改已重载」提示）
+  let lastSwitchStayed = false
+
+  /// OJ 域字段是否相对 baseline 有未保存修改（全局字段不算——它们被保留）
+  function ojDomainDirty(): boolean {
+    if (baseline.value === '') return false
+    const base = JSON.parse(baseline.value) as SettingsForm
+    const fields = [
+      'ojUrl', 'contestRef', 'contestPassword', 'timeoutSecs',
+      'pollIntervalSecs', 'pollTimeoutSecs', 'cacheTtlSecs', 'cacheProblemStatement',
+    ] as const
+    return fields.some((key) => JSON.stringify(base[key]) !== JSON.stringify(form[key]))
+  }
+
   async function performSwitch(target: string): Promise<boolean> {
+    lastSwitchStayed = false
     try {
       await configService.switchOj(target)
-      persistedActive.value = target
+      // persistedActive 在**重置成功之后**才提交（评审二十一 #1）：重载失败时
+      // 表单与 persistedActive 必须一起回滚到旧 OJ，否则「B 的 id + A 的地址」
+      // 会被下一次保存写坏
       resetSessionForOjSwitch()
       // `--settings`（管理方钥匙）：切换成功**留在设置页**继续修配置——踢到
       // 登录页会打断维护、丢失当前草稿（登录页的「返回设置」是一次重新进入）。会话已由
@@ -142,6 +159,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       //（评审九 P2-1）。判据与 sessionGuard 一致：钥匙 + 当前路由是设置页。
       const stayOnSettings = systemService.isKeyedSettings(router.currentRoute.value?.name)
       if (!stayOnSettings) {
+        persistedActive.value = target
         void router.replace({ name: 'Login' })
         return true
       }
@@ -149,6 +167,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // dirty；评审十九 #1 保留全局草稿）：整体 load() 会把维护者刚改的字体/
       // 超时也一并还原，与回滚分支的「保留编辑」行为不一致。
       await resetOjFieldsFromDisk()
+      lastSwitchStayed = true
       return true
     } catch (e) {
       switchError.value = errorMessage(e, '切换 OJ 失败')
@@ -169,10 +188,19 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         (discarded ? '（切换前未保存的地址编辑已丢弃）' : '')
       return
     }
+    const ojDirty = ojDomainDirty()
     if (await performSwitch(target)) {
       form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
+      if (lastSwitchStayed && ojDirty) {
+        // 评审二十一 #2：OJ 域草稿被磁盘值覆盖是设计（换服务端后旧值无意义），
+        // 但不能静默——给一次说明，并点明全局草稿仍保留
+        switchNotice.value =
+          '切换已完成；连接与比赛相关的未保存修改已从磁盘重新加载（编辑器/布局等修改保留）'
+      }
     } else {
+      // 切换失败：id 与地址一起回滚（重载失败时 persistedActive 仍是旧 OJ）
       form.activeOj = persistedActive.value
+      form.ojUrl = ojInstances.value.find((i) => i.id === form.activeOj)?.baseUrl ?? ''
     }
   }
 

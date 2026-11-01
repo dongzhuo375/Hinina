@@ -5,24 +5,20 @@
  * 窗口 `decorations: false`，这些按钮是唯一的 UI 出口（Alt+F4/任务栏是系统
  * 兜底）。注意父容器要保留 `data-tauri-drag-region`：按钮点击不应触发拖动。
  */
-import {
-  closeWindow as closeWindowIpc,
-  minimizeWindow,
-  toggleMaximizeWindow,
-} from '@/bridge/window.bridge'
+import { systemService } from '@/services/system.service'
 
-// 窗口 API 只经 bridge（CLAUDE.md：bridge 是唯一接触 @tauri-apps/api 的地方，
-// 评审十九 #8）；失败无补救动作，result 一律忽略
+// 分层：View 只经 Service，不直接 import bridge（评审二十一 #6；窗口 API 本身
+// 由 bridge/window.bridge 封装，bridge 仍是唯一接触 @tauri-apps/api 的地方）
 function minimize(): void {
-  void minimizeWindow()
+  void systemService.minimizeWindow()
 }
 
 function toggleMaximize(): void {
-  void toggleMaximizeWindow()
+  void systemService.toggleMaximizeWindow()
 }
 
 function closeAppWindow(): void {
-  void closeWindowIpc()
+  void systemService.closeWindow()
 }
 </script>
 

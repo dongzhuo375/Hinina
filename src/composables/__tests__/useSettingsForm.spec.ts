@@ -268,6 +268,35 @@ describe('useSettingsForm', () => {
     expect(currentConfig.oj.timeoutSecs).toBe(30)
   })
 
+  it('评审二十一 #1：切换后端成功但重载失败——id 与地址一起回滚到旧 OJ', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    settings.form.activeOj = 'Hydro'
+    // switch_oj 成功，但随即的重载失败
+    mocks.getConfig.mockRejectedValueOnce(new Error('读取配置失败'))
+
+    await settings.onSwitchOj()
+
+    expect(settings.switchError.value).toContain('失败')
+    expect(settings.form.activeOj).toBe('HOJ') // 不回滚就会出现「B 的 id + A 的地址」
+    expect(settings.form.ojUrl).toBe(currentConfig.oj.instances.find((i) => i.id === 'HOJ')?.baseUrl)
+  })
+
+  it('评审二十一 #2：OJ 域草稿被磁盘值覆盖时给出说明（全局草稿保留）', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    settings.form.contestRef = 'draft-ref' // OJ 域草稿
+    settings.form.fontSize = '18' // 全局草稿
+    settings.form.activeOj = 'Hydro'
+    await settings.onSwitchOj()
+
+    expect(settings.switchNotice.value).toContain('未保存修改已从磁盘重新加载')
+    expect(settings.form.contestRef).toBe(currentConfig.oj.contestRef) // 被磁盘值覆盖
+    expect(settings.form.fontSize).toBe('18') // 全局草稿保留
+  })
+
   it('评审十五 C：锁定态 active 指向缺失实例——不创建、不切换、不谎报', async () => {
     // 手改配置让 oj.active 指向不存在的实例：锁定态载荷跳过实例写入，
     // 因此绝不能触发 performSwitch（否则会提示「实例已保存；切换未成功」）

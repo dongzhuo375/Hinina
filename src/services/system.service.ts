@@ -8,6 +8,7 @@ import type {
   StorageInfo,
 } from '@/types/system'
 import * as systemBridge from '@/bridge/system.bridge'
+import * as windowBridge from '@/bridge/window.bridge'
 
 /**
  * 系统服务 — 客户端自身运行信息与维护操作
@@ -42,6 +43,15 @@ export class SystemService {
    *（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，
    * 避免注释声称一致、实现各自内联的漂移。
    */
+  /**
+   * 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。
+   * 组件里判断「钥匙模式」一律走这里，不要直接读 `launchFlags.value.settings`
+   *（评审二十一 #4：判据要单一来源）。
+   */
+  isKeyed(): boolean {
+    return launchFlagsSnapshot.value.settings
+  }
+
   isKeyedSettings(routeName: string | symbol | null | undefined): boolean {
     return launchFlagsSnapshot.value.settings && routeName === 'Settings'
   }
@@ -118,6 +128,21 @@ export class SystemService {
   /** 恢复默认数据目录（**重启后生效**） */
   async resetDataDir(migrate: boolean): Promise<DataDirChange> {
     return systemBridge.resetDataDir(migrate)
+  }
+
+  /** 最小化窗口（无边框窗口的 UI 出口，失败无补救动作、由调用方忽略） */
+  async minimizeWindow(): Promise<void> {
+    return windowBridge.minimizeWindow()
+  }
+
+  /** 切换最大化 */
+  async toggleMaximizeWindow(): Promise<void> {
+    return windowBridge.toggleMaximizeWindow()
+  }
+
+  /** 关闭窗口（经 Tauri 关闭请求，由 close-guard 落盘后再退出） */
+  async closeWindow(): Promise<void> {
+    return windowBridge.closeWindow()
   }
 
   /** 弹出原生目录选择器（用户取消返回 null） */

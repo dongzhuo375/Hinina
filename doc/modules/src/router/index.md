@@ -31,7 +31,7 @@
 ## 逻辑流程
 
 ```
-beforeEach(to):
+beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不再读 currentRoute（评审二十一 #5）
   0. flags = await systemService.getLaunchFlags()（进程内 memoize，只真正发一次 IPC；
      try/catch 包死 —— service 已兜底，这里是导航路径上的第二道防线，守卫抛错=路由卡死）
      首次导航（模块级 firstNavigation 标记）且 flags.settings 且 to 为登录页

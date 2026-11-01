@@ -38,7 +38,7 @@ import AboutSection from '@/components/settings/AboutSection.vue'
 
 /// 维护者层锁定（默认锁，`--settings` 解锁）。启动标志快照由守卫首航填充
 ///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
-const locked = computed(() => !systemService.launchFlags.value.settings)
+const locked = computed(() => !systemService.isKeyed())
 
 // locked 传入表单控制器：锁定字段不参与校验、不写入保存载荷（评审十 #3）
 const {
