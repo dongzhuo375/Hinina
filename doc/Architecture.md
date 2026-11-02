@@ -209,7 +209,7 @@ Hinina/
         │   ├── text.rs                   # 按字符截断共享工具（truncate_ellipsis：超长加 …；http 错误摘录 / hydro 响应预览 / frontend_log 三处同形态收敛于此）
         │   ├── startup_dialog.rs         # 启动期致命错误对话框（panic 钩子的 UI 出口）：main 装钩子后 arm、RunEvent::Ready 时 mark_started；启动未完成的主线程 panic 在崩溃记录落盘后弹一次 MessageBoxW（三处 expect + Tauri 窗口/WebView2 创建失败），写入成功才展示崩溃路径；独立线程跑模态消息泵避免重入事件循环；测试不 arm、非 Windows no-op
         │   ├── argv.rs                     # 启动参数匹配原语（has_flag：精确整参、未知忽略、OsString 不 panic；--console/--settings 共用，评审十九 #9）
-│   ├── launch_args.rs            # --settings 启动参数（管理方钥匙）：精确匹配解析（沿 console 同款语义）固化为进程级 OnceLock<LaunchFlags>，经 launch_flags 命令交前端 —— 守卫初始直落设置页 + 设置页维护者层解锁；防误触护栏而非安全边界（config.json 明文可手改）；未 init（测试进程）读出全 false 默认值
+        │   ├── launch_args.rs            # --settings 启动参数（管理方钥匙）：精确匹配解析（沿 console 同款语义）固化为进程级 OnceLock<LaunchFlags>，经 launch_flags 命令交前端 —— 守卫初始直落设置页 + 设置页维护者层解锁；防误触护栏而非安全边界（config.json 明文可手改）；未 init（测试进程）读出全 false 默认值
         │   ├── single_instance.rs        # 单实例约束（tauri-plugin-single-instance 2.4.5，**Builder 链第一个注册的插件**）：第二实例在插件初始化阶段即被识别退出（早于 setup，不建 AppContext/不开日志），第一实例回调聚焦（必要时还原）已有主窗口；回调绝不 panic（会经钩子弹启动失败框）；dev/release 同 identifier 共享互斥体；无 npm 侧/capability；无单测（mock runtime 令本机测试二进制启动即崩 0xc0000139，取证见模块文档），行为由双开验证
         │   ├── data_dir.rs               # 数据目录解析 + 位置指针（data_dir.json 固定放默认目录）+ 一次性迁移（清单不含 logs；旧目录只删空目录，绝不递归删掉未迁移的条目）
         │   ├── fs_workspace_repo.rs      # FsWorkspaceRepository（阶段 2 完成）

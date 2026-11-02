@@ -421,3 +421,22 @@ async fn unlocked_update_still_rejects_invalid_url_and_clamps() {
     let err = apply_config_update(&ctx, payload, false).expect_err("普通路径仍拒绝非法地址");
     assert!(err.to_string().contains("http"), "应提示地址非法: {err}");
 }
+
+/// 锁定模式刻意保留的结构性检查：active 指向缺失实例时仍拒绝保存
+///（手改配置的该场景由 `--settings` 修复，评审二十七观察项）。
+#[tokio::test]
+async fn locked_update_still_rejects_active_pointing_at_missing_instance() {
+    use super::super::commands::config_cmd::apply_config_update;
+    use crate::test_support::app_ctx::context_with_hoj;
+
+    let (ctx, _dir) = context_with_hoj("https://hoj.example").await;
+    ctx.config
+        .update(|cfg| {
+            cfg.oj.active = "Ghost".into();
+        })
+        .expect("注入缺失实例");
+
+    let payload = ctx.config.get();
+    let err = apply_config_update(&ctx, payload, true).expect_err("结构性检查仍应拒绝");
+    assert!(err.to_string().contains("不在已启用的实例列表"), "{err}");
+}
