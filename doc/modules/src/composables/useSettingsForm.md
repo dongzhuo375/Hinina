@@ -15,11 +15,12 @@
 | `clampRatio` | `(value) => number` | 分栏比例钳位到 `[0.30,0.70]` 并保留两位小数 |
 | `form` / `baseline` / `dirty` | reactive / ref / computed | 中央草稿、上次加载或保存成功的 JSON 基线、dirty 判定 |
 | `errors` / `isValid` / `canSave` | computed | URL 与各整数字段实时校验；`autoSave=false` 时隐藏的间隔字段不参与校验、不阻止保存，也不进入保存载荷（保留已存值） |
-| `load` / `populate` | fn | `load` 先等共享保存落地（`whenSaveSettled`），再经 `readSettledConfig` 读取磁盘配置并回填表单和实例清单：撞上在途 OJ 切换时同样先等它落地再读，避免把保存/切换前的旧值展示出来；读完后若又有保存开始则重读 |
+| `load` / `populate` | fn | `load` 先等共享保存落地（`whenSaveSettled`；等待结束后再捕获 `saveEpoch`，避免保存结束的 +1 造成固定双读），再经 `readSettledConfig` 读取磁盘配置并回填表单和实例清单：撞上在途 OJ 切换时同样先等它落地再读，避免把保存/切换前的旧值展示出来；读完后若又有保存开始则重读。加载后按 `lastEffectiveSwitch` 恢复历史持久化失败警告 |
 | `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示。**锁定字段不参与前端校验、也不按表单值改写**：保存载荷仍是完整 AppConfig（未改动字段保持读入值，数字字段不做 `Number()` 转换以免 NaN 拖垮保存），锁定语义由后端 `maintainer_locked` 用旧配置覆盖锁定字段落实（评审十 #3、评审二十九 #7）。`saving` **模块级共享**并覆盖 `save → 自动切换` 整段（评审三十四 #2）：新挂载控制器在旧控制器保存完成前不得保存/切换，避免较旧的保存意图覆盖用户较新的显式选择。结算期间 `switching=true`：`canSave` 需 `!switching`，保存与在途切换互斥（评审二十九 #1）；切换失败只回滚选择、保留地址草稿（#3）。保存/切换在途时 **OJ 域输入由 `OjServerSection` 整体禁用**（评审三十三 #3：完成后的磁盘重置会覆盖该域）；控制器卸载后不再回写表单，但保存新建实例触发的自动切换仍执行 |
 | `switching`（模块级共享） | `Ref<boolean>` | 跨控制器共享：设置页卸载重挂后，新控制器也能看到旧控制器在途的切换并禁用保存/切换（评审三十三 #4）。**发起者会 await 其它控制器的 foreign reload 后才解除本标志**（评审三十四 #1）——重读期间输入保持禁用，`copyOjDomain` 不会覆盖用户输入；foreign reload 失败时用切换代际（`ojSwitchEpoch`）确认目标仍是当前代际，否则不执行旧目标对齐 |
 | `saving`（模块级共享） | `Ref<boolean>` | 跨控制器共享的保存状态；`save → 自动切换` 是一个操作，整段持有（评审三十四 #2） |
-| `SwitchOutcome`（内部类型） | `'success' \| 'persist-failed'` | 切换结果随观察者通知传递；`persist-failed`（已生效但持久化失败）在其它控制器重读后仍会设置「重启后可能回退」警告（评审三十四 #3） |
+| `lastEffectiveSwitch`（模块级） | `{ target, outcome, epoch } \| null` | 最近一次已生效切换的共享结果（评审三十五 #1）：切换可能在无观察者时完成，晚挂载控制器由 `load` 据此恢复 persist-failed 警告；后续成功切换覆盖为 `success`，更晚挂载者不再提示；普通失败不覆盖 |
+| `SwitchOutcome`（内部类型） | `'success' \| 'persist-failed'` | 切换结果随观察者通知与 `lastEffectiveSwitch` 传递；`persist-failed`（已生效但持久化失败）在其它控制器重读后仍会设置「重启后可能回退」警告（评审三十四 #3） |
 | `readSettledConfig`（内部） | `() => Promise<AppConfig>` | 先等 `configService.whenOjSwitchSettled()`（无在途时同步通过），再用 `ojSwitchEpoch` 复核读取期间是否发生切换；变了就重读。保证新控制器在事务完成后拿到新配置 |
 | `ojOptions` | computed | 实时下拉候选；实例清单与 persistedActive 为 controller 内部状态 |
 | 签名 | `useSettingsForm(maintainerLocked?: Readonly<Ref<boolean>>)` | 维护者层是否锁定（普通启动 true）；默认 `ref(false)`（不锁）供独立使用 |
@@ -54,4 +55,4 @@
 
 ## 测试
 
-`src/composables/__tests__/useSettingsForm.spec.ts` 覆盖：严格校验、隐藏字段校验豁免与隐藏非法间隔不进入载荷（保留已存值）、有效间隔写入、保存期间编辑保持 dirty、缺失 active 实例不借用 URL、禁用实例不被重新启用、完整保存载荷与 active 不变、新实例自动切换及失败回滚重试、保存失败无残留切换意图、已配置 OJ 失败回滚，以及**跨控制器卸载/重挂**（新控制器等待在途切换/保存后读到新值、旧控制器不再回写表单、foreign reload 在共享 busy 内完成、失败对齐遵守切换代际、持久化失败警告跨控制器保留（含切换在途时新挂载的 load 不清掉警告）、旧保存的自动切换不被新选择覆盖）。`SettingsView.spec.ts` 与 `SettingsView.behavior.spec.ts` 继续提供真实组合根回归（含保存/切换在途时整个 OJ 域禁用的正向与失败恢复）。
+`src/composables/__tests__/useSettingsForm.spec.ts` 覆盖：严格校验、隐藏字段校验豁免与隐藏非法间隔不进入载荷（保留已存值）、有效间隔写入、保存期间编辑保持 dirty、缺失 active 实例不借用 URL、禁用实例不被重新启用、完整保存载荷与 active 不变、新实例自动切换及失败回滚重试、保存失败无残留切换意图、已配置 OJ 失败回滚，以及**跨控制器卸载/重挂**（新控制器等待在途切换/保存后读到新值、旧控制器不再回写表单、foreign reload 在共享 busy 内完成、失败对齐遵守切换代际、持久化失败警告跨控制器保留（含切换在途时新挂载的 load 不清掉警告、无观察者完成时晚挂载控制器从共享结果恢复警告、成功切换后不再提示）、等待保存落地只读一次、旧保存的自动切换不被新选择覆盖）。`SettingsView.spec.ts` 与 `SettingsView.behavior.spec.ts` 继续提供真实组合根回归（含保存/切换在途时整个 OJ 域禁用的正向与失败恢复）。

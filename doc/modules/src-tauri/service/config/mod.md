@@ -13,7 +13,9 @@
   - `fn update_locked<F>(&self, updater)`（`pub(crate)`）— 写事务本体，**调用方必须已持有** [`lock_write_txn`]；`switch_oj` 在同一把锁内完成 Registry 切换 + `oj.active` 落盘
   - `fn lock_write_txn(&self) -> MutexGuard<'_, ()>`（`pub(crate)`）— 写事务锁的唯一获取点；锁序固定「写事务锁 → config RwLock」，持有期间不得再调 `update`/`update_checked`（Mutex 不可重入）
   - `fn reload(&self) -> AppResult<AppConfig>` — 强制从磁盘重新加载，覆盖内存副本；**与 `new()` 同一归一入口**：手改磁盘文件后 reload 同样要修正旧值；加载成功后发布 `CoreEvent::ConfigChanged`
-  - `fn reload_locked(&self)`（`pub(crate)`）— 重载本体，调用方必须已持有写事务锁；`reload_config` 在同一事务内继续把 Registry 同步到磁盘 `oj.active`（评审三十四）
+  - `fn reload_locked(&self)`（`pub(crate)`）— 重载本体（`load_normalized` + `commit_reloaded`），调用方必须已持有写事务锁
+  - `fn load_normalized(&self)`（`pub(crate)`）— 读盘并归一，但**不提交内存、不发事件**；`reload_config` 用它做提交前预检（评审三十五 #2），失败时内存/事件保持原样
+  - `fn commit_reloaded(&self, config)`（`pub(crate)`）— 提交已加载配置：替换内存并发布 `ConfigChanged`；`reload_config` 只在预检通过后调用
   - `fn write_txn_is_held(&self) -> bool`（`#[cfg(test)]`）— `try_lock` 探测写事务是否被另一个线程持有，供并发回归在取锁前做确定性握手，不依赖 sleep
   - `fn repo(&self) -> &Arc<R>` — 返回底层 ConfigRepository 引用
 - **字段**：`repo: Arc<R>`, `event_bus: Arc<CoreEventBus>`, `config: RwLock<AppConfig>`, `write_txn: Mutex<()>`
