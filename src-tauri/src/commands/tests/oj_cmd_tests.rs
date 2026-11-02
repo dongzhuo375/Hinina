@@ -187,3 +187,55 @@ async fn switch_oj_to_same_target_is_idempotent() {
     hoj.shutdown();
     hydro.shutdown();
 }
+
+/// 评审三十三 #1：并发切换不得让 Registry 与持久化 active 分叉。
+///
+/// 强制交错：T1 在事务内（Registry 已切 Hydro、尚未落盘）暂停，T2 随即发起切回
+/// HOJ。旧实现只锁落盘，T2 会在暂停窗口内完成（Registry/磁盘=HOJ），T1 恢复后
+/// 再把 Hydro 写盘 —— 最终 Registry=HOJ、内存/磁盘=Hydro，两次调用却都成功。
+/// 现在整段切换共用配置写事务锁，T2 被挡在事务外，两个切换串行落地。
+#[tokio::test]
+async fn concurrent_switches_stay_consistent_across_registry_memory_and_disk() {
+    let hoj = LoopbackServer::start(vec![]).await;
+    let hydro = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
+
+    let (scope_tx, scope_rx) = std::sync::mpsc::channel::<()>();
+    let (attempt_tx, attempt_rx) = std::sync::mpsc::channel::<()>();
+    let handle = tokio::runtime::Handle::current();
+
+    std::thread::scope(|scope| {
+        let ctx_ref = &ctx;
+        let t1 = scope.spawn(move || {
+            switch_oj_with_hook(ctx_ref, "Hydro", || {
+                // 已切 Registry、写事务仍持有：通知 T2 发起，再暂停
+                scope_tx.send(()).unwrap();
+                attempt_rx.recv().unwrap();
+                // 给旧实现足够时间完成第二个切换；新实现里 T2 会一直等这把锁
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            })
+        });
+        // 等 T1 进入事务内暂停点，再让 T2 发起切换
+        scope_rx.recv().unwrap();
+        let t2 = scope.spawn(move || {
+            attempt_tx.send(()).unwrap();
+            handle.block_on(switch_oj_impl(ctx_ref, "HOJ"))
+        });
+        t1.join().unwrap().expect("T1 切换 Hydro 应成功");
+        t2.join().unwrap().expect("T2 切换 HOJ 应成功");
+    });
+
+    // 三者一致：最后完成的切换（HOJ）同时是 Registry、内存与磁盘的值
+    assert_eq!(ctx.provider_registry.current_id().as_str(), "HOJ");
+    let memory = ctx.config.get();
+    assert_eq!(memory.oj.active, "HOJ", "内存 active 必须与 Registry 一致");
+    let disk: crate::core::entity::config::AppConfig =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("config.json")).unwrap()).unwrap();
+    assert_eq!(
+        disk.oj.active, memory.oj.active,
+        "磁盘 active 必须与内存一致（旧实现会在这里留下 Hydro）"
+    );
+
+    hoj.shutdown();
+    hydro.shutdown();
+}

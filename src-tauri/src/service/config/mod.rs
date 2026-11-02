@@ -69,6 +69,16 @@ impl<R: ConfigRepository> ConfigService<R> {
             .clone()
     }
 
+    /// 获取**写事务锁**。调用方在同一把锁内完成「读最新配置 → 合并/校验 →
+    /// 落盘 → 发布事件」，与 [`Self::update`] / [`Self::reload`] 共享同一互斥域。
+    ///
+    /// 锁序固定：先写事务锁，再取 `config` 的写锁（反过来会让读配置的 `get`
+    /// 与写事务互等）。持有本锁时只能调用 [`Self::update_locked`]，
+    /// 不能再调 `update` / `update_checked`（`Mutex` 不可重入）。
+    pub(crate) fn lock_write_txn(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.write_txn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// 通过闭包修改配置，修改后自动保存并发布 `CoreEvent::ConfigChanged`。
     ///
     /// 先调用 updater 闭包修改内存中的配置，然后持久化到磁盘。
@@ -87,20 +97,46 @@ impl<R: ConfigRepository> ConfigService<R> {
     where
         F: FnOnce(&mut AppConfig),
     {
-        // 整个事务（改内存 → 落盘 → 发事件）串行化：落盘在锁外进行时，先克隆
-        // 的旧快照可能后写回磁盘（评审三十一 P2）
-        let _txn = self.write_txn.lock().unwrap_or_else(|e| e.into_inner());
+        self.update_checked(|cfg| {
+            updater(cfg);
+            Ok(())
+        })
+    }
+
+    /// 可失败的写事务：`updater` 返回 `Err` 时**不改内存、不落盘、不发事件**。
+    ///
+    /// 需要「读锁内最新值 → 校验最终候选 → 整体替换」的调用方（`update_config`）
+    /// 用这个入口；校验失败不会留下半改的内存状态（候选在副本上修改，成功才提交）。
+    pub(crate) fn update_checked<F>(&self, updater: F) -> AppResult<AppConfig>
+    where
+        F: FnOnce(&mut AppConfig) -> AppResult<()>,
+    {
+        let _txn = self.lock_write_txn();
+        self.update_locked(updater)
+    }
+
+    /// 写事务本体；**调用方必须已持有 [`Self::lock_write_txn`]**。
+    ///
+    /// 整个事务（改内存 → 落盘 → 发事件）串行化：落盘在锁外进行时，先克隆
+    /// 的旧快照可能后写回磁盘（评审三十一 P2）。候选配置在副本上修改，
+    /// `updater` 失败时原配置一动不动（评审三十三 #2）。
+    pub(crate) fn update_locked<F>(&self, updater: F) -> AppResult<AppConfig>
+    where
+        F: FnOnce(&mut AppConfig) -> AppResult<()>,
+    {
         let new_config = {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
-            let before = serde_json::to_value(&cfg.oj).ok();
+            let mut next = cfg.clone();
+            let before = serde_json::to_value(&next.oj).ok();
             // The write guard hides these edits from scope readers until cancellation is
             // published below. Cached readers can only see the previous scope during the
             // updater; they are revoked before any reader can observe the new config.
             // Keep unrelated editor changes from invalidating plugin contexts.
-            updater(&mut cfg);
+            updater(&mut next)?;
             let _transition =
-                (before != serde_json::to_value(&cfg.oj).ok()).then(|| self.access.begin());
-            cfg.clone()
+                (before != serde_json::to_value(&next.oj).ok()).then(|| self.access.begin());
+            *cfg = next.clone();
+            next
         };
 
         // 持久化到磁盘，失败时保留内存修改但上报错误
@@ -120,7 +156,7 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 任何「配置已变更」的路径都要通知订阅者）。
     pub fn reload(&self) -> AppResult<AppConfig> {
         // 与 update 共用写事务：reload 也写内存，不能与在途保存交错
-        let _txn = self.write_txn.lock().unwrap_or_else(|e| e.into_inner());
+        let _txn = self.lock_write_txn();
         let new_config = self.repo.load_config::<AppConfig>().map_err(|e| {
             warn!(error = %e, "配置重新加载失败");
             AppError::Config(format!("配置重新加载失败: {}", e))

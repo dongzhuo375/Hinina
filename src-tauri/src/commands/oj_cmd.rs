@@ -28,13 +28,19 @@ pub(crate) fn switch_scope(
 ///
 /// 前端 invoke 签名: `switch_oj`({ ojId })
 ///
-/// 编排四件事（顺序有意）：
+/// 编排四件事（顺序有意，**整段在配置写事务锁内**）：
 /// 0. **按需补注册**（`ensure_oj_registered`）：设置页允许从枚举里挑一个尚未配置的
 ///    OJ、填地址保存后立即切换，而注册只在启动时发生 —— 不补注册就得重启客户端；
-/// 1. 校验目标 OJ 已注册（未注册直接报错，不静默回退 —— 显式命令要显式结果）；
+/// 1. 校验目标 OJ 已注册**且仍在当前配置的启用实例列表中**（注册表不会因配置
+///    删除/禁用而反注册；未注册直接报错，不静默回退 —— 显式命令要显式结果）；
 /// 2. 切换 Registry 当前 OJ，**紧接着显式清理各 Service 的 OJ 相关缓存**；
 /// 3. 持久化 `oj.active` —— 失败如实上报（切换已生效，重启后回退），但不影响第 2 步；
 /// 4. 最后发布 `CoreEvent::OjSwitched` —— **纯事实通知**。
+///
+/// **为什么整段共用写事务锁**（评审三十三 #1）：只锁落盘会留下「switch_scope
+/// 已切 Registry、尚未落盘」的窗口，两个并发切换可在其中交错出
+/// 「Registry=B、内存/磁盘=A」的永久分叉；与 `update_config`/`reload` 共用
+/// 同一把锁后，切换与保存也串行，保存的最终校验不会看到半途的 active。
 ///
 /// # 为什么清缓存是显式调用而不是事件订阅
 ///
@@ -50,12 +56,48 @@ pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<(
 
 /// `switch_oj` 的真实编排（提取自命令本体，供命令与测试共用同一实现）。
 pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<()> {
-    let id = OjId::new(oj_id);
+    switch_oj_transaction(ctx, &OjId::new(oj_id), || {})
+}
+
+/// 切换事务本体（同步）：**整段**——补注册、可用性检查、Registry 切换、缓存
+/// 清理、`oj.active` 落盘、事件发布——都在 `ConfigService` 的写事务锁内完成。
+///
+/// 为什么必须整段加锁（评审三十三 #1）：只把落盘包进 `ConfigService::update`
+/// 的锁里仍留出「`switch_scope` 已切 Registry、尚未落盘」的窗口。两个并发切换
+/// 在这个窗口交错时（T1 切 A → T2 切 B 并落盘 B → T1 落盘 A），会得到
+/// Registry=B、内存/磁盘=A 的**永久分叉**，而两次调用都返回成功。前端单飞
+/// 不能替代后端约束（旧控制器/多窗口/直接 IPC 都可能绕过它）。
+///
+/// 锁序固定为「写事务锁 → config 的 RwLock」（`ensure_oj_registered` 与本次
+/// 配置检查只读 `config`），与 `update_config`/`reload` 同序。
+fn switch_oj_transaction<F>(ctx: &AppContext, id: &OjId, after_scope: F) -> AppResult<()>
+where
+    F: FnOnce(),
+{
+    let _txn = ctx.config.lock_write_txn();
+
     // 新配置的实例可能尚未注册（注册只在启动时发生）——先补注册，再校验
     ctx.ensure_oj_registered(id.as_str());
-    if !ctx.provider_registry.list_available().contains(&id) {
+    if !ctx.provider_registry.list_available().contains(id) {
         return Err(AppError::ProviderNotFound(format!(
             "OJ {} 未注册（需在 config.json 的 oj.instances 中启用对应实例）",
+            id
+        )));
+    }
+    // **配置是「哪些 OJ 可用」的权威来源**：注册表不会因配置里删除/禁用实例而
+    // 反注册。只查注册表会允许切到刚被保存移除的实例，落盘出的 `oj.active`
+    // 指向不存在/禁用实例——正是 `AppConfig::validate()` 拒绝的形态
+    //（评审三十三 #2 的交错序列需要这道检查才能闭合）。
+    if !ctx
+        .config
+        .get()
+        .oj
+        .instances
+        .iter()
+        .any(|instance| instance.enabled && instance.id == id.as_str())
+    {
+        return Err(AppError::ProviderNotFound(format!(
+            "OJ {} 未在已启用的实例列表中（需在 config.json 的 oj.instances 中启用对应实例）",
             id
         )));
     }
@@ -78,9 +120,14 @@ pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<(
     );
     info!(oj_id = %id, "已切换当前 OJ");
 
+    // 测试注入点：此刻 Registry 已切换、写事务仍持有；测试用它强制第二个
+    // 切换在「落盘之前」发起，验证它被挡在事务外（评审三十三 #1 的复现序列）
+    after_scope();
+
     ctx.config
-        .update(|draft| {
+        .update_locked(|draft| {
             draft.oj.active = id.to_string();
+            Ok(())
         })
         .map_err(|e| {
             // 切换已生效但持久化失败：用**专用变体**上报，前端据此承认已生效
@@ -93,6 +140,15 @@ pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<(
     });
 
     Ok(())
+}
+
+/// 仅测试使用：在 `switch_oj` 事务内、Registry 切换后注入暂停点。
+#[cfg(test)]
+pub(crate) fn switch_oj_with_hook<F>(ctx: &AppContext, oj_id: &str, after_scope: F) -> AppResult<()>
+where
+    F: FnOnce(),
+{
+    switch_oj_transaction(ctx, &OjId::new(oj_id), after_scope)
 }
 
 #[cfg(test)]
