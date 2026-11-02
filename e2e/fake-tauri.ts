@@ -436,7 +436,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
           }
         }
         Object.assign(config, incoming)
-        return null
+        // 与真实命令一致：返回实际提交的配置（ConfigService 据此判定 active）
+        return structuredClone(config)
       }
       case 'reload_config':
         return null
