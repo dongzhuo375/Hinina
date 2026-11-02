@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { settingsRevealed } from '@/utils/settings-access'
-import { systemService } from '@/services/system.service'
 import { isKeyedProcess } from '@/guards/keyed-settings-policy'
 
 const route = useRoute()

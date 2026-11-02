@@ -33,7 +33,7 @@ contestStore.contest / error 变化 → connected 重算 → 绿点脉冲「已�
                                                     或红点「连接异常」
 版本号 click → tapVersion()（连点 5 下解锁，见 utils/settings-access）
   ├─ 未解锁 → 无任何反馈（刻意）
-  └─ 刚刚解锁 → 显示「设置已解锁」3 秒 + 记日志
+  └─ 刚刚解锁 → 显示「已显示设置入口」3 秒 + 记日志
 ```
 
 设计要点：

@@ -29,7 +29,7 @@
 ## 被依赖
 
 - `components/layout/StatusBar.vue` — 版本号按钮调用 `tapVersion()`
-- `components/layout/ActivityBar.vue` — `v-if="settingsRevealed"` 控制设置项渲染
+- `components/layout/ActivityBar.vue` — 设置项条件 `settingsRevealed || keyedMode` 控制渲染（钥匙模式入口恒显）
 
 ## 逻辑流程
 

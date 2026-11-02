@@ -34,7 +34,7 @@
 
 - `composables/useDataDirSettings.ts` / `useMaintenanceSettings.ts` / `useAboutSettings.ts` — 数据目录生命周期、重置清理与 About 存储信息；对应 section 组件只消费模型，View 不直接调用 service
 - `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据）
-- `views/SettingsView.vue`（分层锁）与 `views/ContestLayout.vue`（最小壳判据）— 读 `launchFlags` 同步快照
+- `guards/keyed-settings-policy` — `isKeyed()` / `isKeyedSettings()` 的唯一消费入口；SettingsView（分层锁）、ContestLayout（最小壳）、sessionGuard、useSettingsForm、LoginView、ActivityBar 均经该策略模块取判据，不直接读 `launchFlags`
 
 ## 逻辑流程
 

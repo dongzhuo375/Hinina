@@ -15,7 +15,7 @@
 | 组成 | 职责 |
 |------|------|
 | `settingsGateNotice` | `@/utils/settings-gate-notice` 的提示文案：钥匙模式下从设置页点赛场页面被阶段闸门拦回时显示一行 warning（导航失败本身静默，评审十五 B）；4 秒自动清除；`sticky top-2` 保证滚到底部时仍在视口内；位于内容列 `.settings-sections` 内（不压左侧索引栏，评审十六）；卸载时 `clearSettingsGateNotice` 清计时器 |
-| `locked` | computed `!systemService.launchFlags.value.settings` —— 维护者层锁定（默认锁，`--settings` 解锁）；标志快照由守卫首航填充（早于本组件挂载），同步读取无闪烁。以 `:locked` 传给 OjServerSection 与 DataDirSection |
+| `locked` | computed `!isKeyedProcess()`（`guards/keyed-settings-policy`）—— 维护者层锁定（默认锁，`--settings` 解锁）；判据委托 `systemService` 的启动标志快照（守卫首航已填充，同步读取无闪烁）。以 `:locked` 传给 OjServerSection 与 DataDirSection |
 | `switching` / `saving` | 来自 `useSettingsForm`，以同名 prop 传给 OjServerSection：保存/切换在途时**整个 OJ 域**禁用（完成后的磁盘重置会覆盖该域，评审三十三 #3） |
 | `useSettingsForm` | 中央 reactive 草稿、baseline/dirty/errors/canSave、配置加载/保存/放弃、OJ 清单与显式/自动切换 |
 | `updateForm(patch)` | 将 section 的 `SettingsFormPatch` 合并进同一 reactive 草稿；保存成功后仅当没有新编辑时才显示“已保存” |
@@ -35,7 +35,7 @@
 - `composables/useSettingsForm`（控制器与 `SettingsFormPatch` 类型）
 - `composables/useAboutSettings` / `useMaintenanceSettings` / `useDataDirSettings`
 - `composables/useSettingsScrollSpy`
-- `services/system.service`（`launchFlags` 同步快照 —— 分层锁的提权判据）
+- `guards/keyed-settings-policy`（`isKeyedProcess` —— 分层锁的提权判据）
 
 config/system service、相关 store 和 types 由对应 controllers 持有；View 不直接 import bridge。
 
