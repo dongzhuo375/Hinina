@@ -14,7 +14,7 @@ export async function updateConfig(
   return ipcInvoke<void>('update_config', { config, maintainerLocked })
 }
 
-/** 触发后端从磁盘重载配置（发布 ConfigReloaded 事件） */
+/** 触发后端从磁盘重载配置（发布 `ConfigChanged`；磁盘 active 与 Registry 不同时同步切换并发布 `OjSwitched`） */
 export async function reloadConfig(): Promise<void> {
   return ipcInvoke<void>('reload_config')
 }
