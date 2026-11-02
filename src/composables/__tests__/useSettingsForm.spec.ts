@@ -757,9 +757,14 @@ describe('useSettingsForm', () => {
     await formB.onSwitchOj()
     expect(mocks.switchOj).not.toHaveBeenCalled()
 
+    const readsBeforeRelease = mocks.getConfig.mock.calls.length
     releaseSave()
     await savingA
     await loadingB
+
+    // 等待保存落地后只读一次（A 的切换重置 + B 的 foreign reload + B 的 load）；
+    // 若沿用等待前的 saveEpoch，load 会固定多读一次
+    expect(mocks.getConfig.mock.calls.length - readsBeforeRelease).toBe(3)
 
     // 只有旧保存的自动切换（C），没有较新的 Hydro 选择被覆盖
     expect(mocks.switchOj).toHaveBeenCalledTimes(1)
@@ -800,5 +805,49 @@ describe('useSettingsForm', () => {
     expect(formB.switchNotice.value).toContain('配置保存失败')
     expect(formB.switchNotice.value).toContain('重启后可能回退')
     scopeB.stop()
+  })
+
+  it('评审三十五 #1：无观察者时持久化失败，晚挂载控制器恢复警告；成功切换后清除', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+
+    let rejectSwitch!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      (id: string) => new Promise<void>((_resolve, reject) => {
+        rejectSwitch = () => {
+          currentConfig.oj.active = id
+          reject(makeIpcError('switch_oj', {
+            OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满',
+          }))
+        }
+      }),
+    )
+    settings.form.activeOj = 'Hydro'
+    const pendingA = settings.onSwitchOj()
+    await Promise.resolve()
+    // 旧控制器卸载后**没有任何观察者**，切换结果只能落在模块级共享结果里
+    scope.stop()
+    rejectSwitch()
+    await pendingA
+
+    const scopeB = effectScope()
+    const formB = scopeB.run(() => useSettingsForm())!
+    await formB.load()
+    expect(formB.form.activeOj).toBe('Hydro')
+    expect(formB.switchNotice.value).toContain('配置保存失败')
+
+    // 后续成功切换把共享结果覆盖为 success：更晚挂载的控制器不再提示
+    formB.form.activeOj = 'HOJ'
+    await formB.onSwitchOj()
+    expect(formB.form.activeOj).toBe('HOJ')
+    scopeB.stop()
+
+    const scopeC = effectScope()
+    const formC = scopeC.run(() => useSettingsForm())!
+    await formC.load()
+    expect(formC.form.activeOj).toBe('HOJ')
+    expect(formC.switchNotice.value).toBeNull()
+    scopeC.stop()
   })
 })

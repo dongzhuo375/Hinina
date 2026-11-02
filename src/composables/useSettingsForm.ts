@@ -106,6 +106,13 @@ type SwitchObserver = (
 const switchObservers = new Set<SwitchObserver>()
 let controllerSeq = 0
 
+/// **最近一次已生效切换的共享结果**（评审三十五 #1）：切换可能在没有任何观察者
+/// 时完成（旧控制器已卸载、新控制器尚未挂载），也可能在通知快照之后才注册。
+/// 持久化失败是「当前 OJ 已生效但重启可能回退」的既存事实，模块级保留；晚挂载
+/// 的控制器在加载后据此恢复警告。后续**成功**切换会把结果覆盖为 success（警告
+/// 不再出现）；普通失败不覆盖（切换未生效，风险事实未变）。
+let lastEffectiveSwitch: { target: string; outcome: SwitchOutcome; epoch: number } | null = null
+
 const PERSIST_FAILED_NOTICE =
   '切换已生效，但配置保存失败（重启后可能回退）；连接与比赛相关的修改已重置，其余未保存修改保留'
 const FOREIGN_RELOAD_FAILED_NOTICE =
@@ -369,6 +376,8 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         // 已在上面完成重置/对齐。
         if (outcome) {
           const epoch = configService.ojSwitchEpoch
+          // 先落共享结果，再通知快照：通知期间才挂载的控制器从 load 读取该结果
+          lastEffectiveSwitch = { target, outcome, epoch }
           const listeners = [...switchObservers]
           await Promise.allSettled(
             listeners.map((listen) => listen(target, controllerId, outcome!, epoch)),
@@ -467,6 +476,15 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     baseline.value = snapshot()
   }
 
+  /// 晚挂载控制器恢复历史持久化失败警告（评审三十五 #1）：仅在共享结果仍是
+  /// persist-failed 且当前 active 正是该目标时提示；成功切换已覆盖结果为 success。
+  function restoreHistoricalSwitchNotice(config: AppConfig): void {
+    const last = lastEffectiveSwitch
+    if (!last || last.outcome !== 'persist-failed') return
+    if (config.oj.active !== last.target) return
+    switchNotice.value = PERSIST_FAILED_NOTICE
+  }
+
   async function load(): Promise<void> {
     loading.value = true
     loadError.value = null
@@ -477,14 +495,16 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // 的启动顺序（SettingsView 行为用例锁定）；读完后若又有保存开始，重读。
       let config: AppConfig
       for (;;) {
-        const epoch = saveEpoch
         if (saving.value) await whenSaveSettled()
+        // 等待结束后再捕获代际：保存结束必然 +1，若沿用等待前的值会固定多读一次
+        const epoch = saveEpoch
         config = await readSettledConfig()
         // 读取期间若有保存开始/结束（epoch 变化）或仍有保存在途，重读
         if (!saving.value && epoch === saveEpoch) break
       }
       if (disposed) return
       populate(config)
+      restoreHistoricalSwitchNotice(config)
     } catch (e) {
       if (!disposed) loadError.value = errorMessage(e, '读取配置失败')
     } finally {
