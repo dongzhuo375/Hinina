@@ -77,6 +77,26 @@ impl DataDirSource {
     }
 }
 
+/// 订阅器就绪前产生的诊断条目（[`DataDirPlan::warnings`] / [`MigrateOutcome::diagnostics`]）。
+///
+/// `prepare_startup` 跑在 [`crate::infra::logger::Logger`] 初始化**之前**，此阶段的
+/// `warn!`/`info!` 会被整体丢弃 —— 排障者因此看不到「自定义数据目录为什么失效」。
+/// 各函数把本该打日志的内容记入缓冲，`report_data_dir`（main.rs）在日志就绪后经
+/// [`replay`] 统一重放。消息为**已插值**的成品文案，重放不再拼装字段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EarlyDiagnostic {
+    pub level: EarlyLevel,
+    pub message: String,
+}
+
+/// 重放级别（与 `tracing` 级别一一对应）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EarlyLevel {
+    Info,
+    Warn,
+    Error,
+}
+
 /// 启动时解析出的数据目录方案。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataDirPlan {
@@ -85,6 +105,21 @@ pub struct DataDirPlan {
     /// 默认数据目录（设置页「恢复默认」的目标，也是指针文件所在处）
     pub default_dir: PathBuf,
     pub source: DataDirSource,
+    /// 订阅器就绪前的诊断（指针解析失败、候选目录因何不可用、启动期指针写失败），
+    /// 由 `report_data_dir` 重放。**回退决策本身**不在此列 —— `source` 已如实承载，
+    /// 重复叙述只会制造两份真相。
+    pub warnings: Vec<EarlyDiagnostic>,
+}
+
+/// 重放诊断到 `tracing`（`report_data_dir` 在日志就绪后调用）。
+pub fn replay(diagnostics: &[EarlyDiagnostic]) {
+    for d in diagnostics {
+        match d.level {
+            EarlyLevel::Info => tracing::info!("{}", d.message),
+            EarlyLevel::Warn => tracing::warn!("{}", d.message),
+            EarlyLevel::Error => tracing::error!("{}", d.message),
+        }
+    }
 }
 
 /// 位置指针文件结构。
@@ -129,6 +164,9 @@ pub struct MigrateOutcome {
     /// `logs/` 按约定不迁移，故通常为 `false`（旧目录留下一个 logs 子目录）。
     /// 也正因如此，这个字段不能用来判断「迁移是否成功」—— 那要看 [`MigrateOutcome::failed`]。
     pub legacy_removed: bool,
+    /// 订阅器就绪前的诊断（每失败项的具体错误，`failed` 只有条目名），
+    /// 与 [`MigrateOutcome::failed`] 同序，由 `report_data_dir` 重放。
+    pub diagnostics: Vec<EarlyDiagnostic>,
 }
 
 impl MigrateOutcome {
@@ -148,6 +186,7 @@ impl MigrateOutcome {
         self.skipped.extend(other.skipped);
         self.failed.extend(other.failed);
         self.legacy_removed |= other.legacy_removed;
+        self.diagnostics.extend(other.diagnostics);
     }
 }
 
@@ -174,6 +213,28 @@ pub fn read_pointer(default_dir: &Path) -> DataDirPointer {
         Ok(pointer) => pointer,
         Err(e) => {
             warn!(path = %path.display(), error = %e, "数据目录指针解析失败，按默认目录处理");
+            DataDirPointer::default()
+        }
+    }
+}
+
+/// [`read_pointer`] 的启动期变体：订阅器尚未就绪，`warn!` 会被整体丢弃，
+/// 解析失败改记入 `early` 供 `report_data_dir` 重放。
+fn read_pointer_early(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) -> DataDirPointer {
+    let path = pointer_path(default_dir);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return DataDirPointer::default();
+    };
+    match serde_json::from_str::<DataDirPointer>(&raw) {
+        Ok(pointer) => pointer,
+        Err(e) => {
+            early.push(EarlyDiagnostic {
+                level: EarlyLevel::Warn,
+                message: format!(
+                    "数据目录指针解析失败，按默认目录处理（path={}，error={e}）",
+                    path.display()
+                ),
+            });
             DataDirPointer::default()
         }
     }
@@ -212,15 +273,17 @@ pub fn write_pointer(default_dir: &Path, pointer: &DataDirPointer) -> AppResult<
 /// 只做**最小可用性验证**（创建 + 写一个探针文件），不尝试判断磁盘配额：
 /// 目标是「启动时就能发现目录不可用并回退」，而不是精确预测未来是否写得下。
 pub fn dir_is_usable(dir: &Path) -> bool {
-    if std::fs::create_dir_all(dir).is_err() {
-        return false;
-    }
+    dir_is_usable_result(dir).is_ok()
+}
+
+/// [`dir_is_usable`] 的带原因变体：启动期回退诊断需要「为什么不可用」，
+/// 布尔返回值说不清这一点。
+fn dir_is_usable_result(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
     let probe = dir.join(PROBE_FILE);
-    if std::fs::write(&probe, b"probe").is_err() {
-        return false;
-    }
+    std::fs::write(&probe, b"probe")?;
     let _ = std::fs::remove_file(&probe);
-    true
+    Ok(())
 }
 
 /// 目录是否不存在或为空（迁移的前置条件）。
@@ -360,45 +423,80 @@ fn is_absolute_path(path: &Path) -> bool {
 /// 解析启动时的数据目录（不含迁移，供测试与「只想看方案」的场景使用）。
 ///
 /// 优先级：指针指定的目录（且可用）→ 默认目录（且可用）→ 临时目录（回退 + 告警）。
+///
+/// 本函数只服务启动期（订阅器未就绪），回退原因**不直接打日志**而是记入
+/// [`DataDirPlan::warnings`]，由 `report_data_dir` 统一重放。
 pub fn resolve(default_dir: &Path, legacy: &Path) -> DataDirPlan {
-    let pointer = read_pointer(default_dir);
+    let mut warnings = Vec::new();
+    let pointer = read_pointer_early(default_dir, &mut warnings);
 
     if let Some(custom) = pointer.data_dir.as_deref().filter(|s| !s.trim().is_empty()) {
         let path = PathBuf::from(custom);
-        if is_absolute_path(&path) && dir_is_usable(&path) {
-            return DataDirPlan {
-                base_dir: path,
-                default_dir: default_dir.to_path_buf(),
-                source: DataDirSource::Custom,
-            };
+        if is_absolute_path(&path) {
+            if let Ok(()) = dir_is_usable_result(&path) {
+                return DataDirPlan {
+                    base_dir: path,
+                    default_dir: default_dir.to_path_buf(),
+                    source: DataDirSource::Custom,
+                    warnings,
+                };
+            }
+            let reason = dir_unusable_reason(&path);
+            warnings.push(EarlyDiagnostic {
+                level: EarlyLevel::Warn,
+                message: format!(
+                    "指定的数据目录不可用（{reason}），回退默认目录: {}",
+                    path.display()
+                ),
+            });
+        } else {
+            warnings.push(EarlyDiagnostic {
+                level: EarlyLevel::Warn,
+                message: format!(
+                    "指定的数据目录不是绝对路径，忽略并回退默认目录: {}",
+                    path.display()
+                ),
+            });
         }
-        warn!(
-            dir = %path.display(),
-            "指定的数据目录不可用，回退默认目录"
-        );
     }
 
-    if dir_is_usable(default_dir) {
+    if let Ok(()) = dir_is_usable_result(default_dir) {
         return DataDirPlan {
             base_dir: default_dir.to_path_buf(),
             default_dir: default_dir.to_path_buf(),
             source: DataDirSource::Default,
+            warnings,
         };
     }
 
     // 默认目录都不可用（权限策略锁定 AppData / 磁盘满）：回退临时目录。
     // **能打完比赛**优先于「数据位置绝对干净」—— 调用方必须据此强告警，
     // 并在界面上让选手看到真实路径（见 `get_data_dir` 命令）。
-    warn!(
-        default_dir = %default_dir.display(),
-        fallback = %legacy.display(),
-        "默认数据目录不可用，回退临时目录（数据随时可能被系统清理）"
-    );
+    let reason = dir_unusable_reason(default_dir);
+    warnings.push(EarlyDiagnostic {
+        level: EarlyLevel::Error,
+        message: format!(
+            "默认数据目录不可用（{reason}），回退临时目录（数据随时可能被系统清理）: {} → {}",
+            default_dir.display(),
+            legacy.display()
+        ),
+    });
     let _ = std::fs::create_dir_all(legacy);
     DataDirPlan {
         base_dir: legacy.to_path_buf(),
         default_dir: default_dir.to_path_buf(),
         source: DataDirSource::FallbackTemp,
+        warnings,
+    }
+}
+
+/// 目录不可用的原因（探测步骤重放一次并保留首个错误）。
+///
+/// 供启动期诊断文案使用；运行时校验走 [`validate_target`]，错误直接返回给设置页。
+fn dir_unusable_reason(dir: &Path) -> String {
+    match dir_is_usable_result(dir) {
+        Ok(()) => "未知（复检时已可用）".to_string(),
+        Err(e) => format!("{}", e),
     }
 }
 
@@ -417,8 +515,14 @@ pub fn resolve(default_dir: &Path, legacy: &Path) -> DataDirPlan {
 /// 迁移失败**不阻断启动**：调用方继续用解析出的 `base_dir`（数据仍在原处，
 /// 客户端能正常工作），但必须强告警 —— 这正是「回退仍可用」优于「启动失败」的场景。
 pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, MigrateOutcome) {
-    let pointer = read_pointer(default_dir);
+    let mut pointer_diagnostics = Vec::new();
+    let pointer = read_pointer_early(default_dir, &mut pointer_diagnostics);
     let plan = resolve(default_dir, legacy);
+
+    // 诊断缓冲按时间顺序合并：本函数指针读取 → resolve 内部（候选目录因何被否）；
+    // 之后迁移与写指针的诊断继续追加到尾部。
+    let mut warnings = pointer_diagnostics;
+    warnings.extend(plan.warnings);
     let mut outcome = MigrateOutcome::default();
 
     // ① 显式要求的迁移（设置页改目录）
@@ -433,13 +537,13 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
             // 无失败项才清除标记：有失败项时保留，下次启动重试（已搬过去的条目
             // 会因「目标已存在」被跳过，故重试是幂等的，不会重复搬运）
             if should_clear_pending(&step) {
-                clear_migrate_from(default_dir);
+                clear_migrate_from(default_dir, &mut warnings);
             }
             outcome.merge(step);
         } else {
             // 来源不存在或与目标相同：标记已无意义，清掉避免每次启动都尝试
             debug!(from = %from.display(), "待迁移来源不存在或与目标相同，清除标记");
-            clear_migrate_from(default_dir);
+            clear_migrate_from(default_dir, &mut warnings);
         }
     }
 
@@ -447,11 +551,11 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
     if should_attempt_legacy(&pointer, plan.source, legacy) {
         let step = migrate(legacy, &plan.base_dir);
         // 成功 → Some(true)（永不重试）；失败 → Some(false)（**换个目录也继续重试**）
-        mark_legacy_migrated(default_dir, step.is_ok());
+        mark_legacy_migrated(default_dir, &mut warnings, step.is_ok());
         outcome.merge(step);
     }
 
-    (plan, outcome)
+    (DataDirPlan { warnings, ..plan }, outcome)
 }
 
 /// 是否该尝试把临时目录的旧数据搬到当前数据目录。
@@ -472,17 +576,24 @@ fn should_attempt_legacy(pointer: &DataDirPointer, source: DataDirSource, legacy
     pointer.legacy_migrated == Some(false) || source == DataDirSource::Default
 }
 
-/// 读-改-写位置指针（写失败只告警：下次启动会重试，不影响正确性）。
+/// 读-改-写位置指针（写失败记入 `early`：下次启动会重试，不影响正确性）。
 ///
 /// **必须重新读盘**，不能用启动时读到的内存副本 `..pointer.clone()` 去写：同一次启动里
 /// 可能连续改指针（先清 `migrate_from`、再置 `legacy_migrated`），拿陈旧副本写会把前一步
 /// 刚清掉的字段**复活** —— 测试抓到过：清掉的 `migrate_from` 被后一次写入带回来，
 /// 于是「迁移已完成」的标记永远清不掉。
-fn update_pointer(default_dir: &Path, mutate: impl FnOnce(&mut DataDirPointer)) {
+fn update_pointer(
+    default_dir: &Path,
+    early: &mut Vec<EarlyDiagnostic>,
+    mutate: impl FnOnce(&mut DataDirPointer),
+) {
     let mut pointer = read_pointer(default_dir);
     mutate(&mut pointer);
     if let Err(e) = write_pointer(default_dir, &pointer) {
-        warn!(error = %e, "更新数据目录指针失败（下次启动会重试，不影响正确性）");
+        early.push(EarlyDiagnostic {
+            level: EarlyLevel::Warn,
+            message: format!("更新数据目录指针失败（下次启动会重试，不影响正确性）: {e}"),
+        });
     }
 }
 
@@ -490,8 +601,8 @@ fn update_pointer(default_dir: &Path, mutate: impl FnOnce(&mut DataDirPointer)) 
 ///
 /// 成功写 `Some(true)`（一次性标记，永不重试）；失败写 `Some(false)`（下次启动重试，
 /// 且**不因用户改目录而放弃** —— 见 [`should_attempt_legacy`]）。
-fn mark_legacy_migrated(default_dir: &Path, succeeded: bool) {
-    update_pointer(default_dir, |pointer| {
+fn mark_legacy_migrated(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>, succeeded: bool) {
+    update_pointer(default_dir, early, |pointer| {
         pointer.legacy_migrated = Some(succeeded);
     });
 }
@@ -506,8 +617,8 @@ fn should_clear_pending(outcome: &MigrateOutcome) -> bool {
 }
 
 /// 清除指针里的「待迁移来源」字段。
-fn clear_migrate_from(default_dir: &Path) {
-    update_pointer(default_dir, |pointer| {
+fn clear_migrate_from(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) {
+    update_pointer(default_dir, early, |pointer| {
         pointer.migrate_from = None;
     });
 }
@@ -519,9 +630,15 @@ fn clear_migrate_from(default_dir: &Path) {
 pub fn migrate(from: &Path, to: &Path) -> MigrateOutcome {
     let mut outcome = MigrateOutcome::default();
 
-    if std::fs::create_dir_all(to).is_err() {
-        warn!(to = %to.display(), "创建目标数据目录失败，迁移放弃");
+    if let Err(e) = std::fs::create_dir_all(to) {
         outcome.failed.push("(目标目录)".to_string());
+        outcome.diagnostics.push(EarlyDiagnostic {
+            level: EarlyLevel::Error,
+            message: format!(
+                "创建目标数据目录失败，迁移放弃（to={}，error={e}）",
+                to.display()
+            ),
+        });
         return outcome;
     }
 
@@ -539,7 +656,15 @@ pub fn migrate(from: &Path, to: &Path) -> MigrateOutcome {
         match move_entry(&src, &dst) {
             Ok(()) => outcome.moved.push((*entry).to_string()),
             Err(e) => {
-                warn!(entry, from = %src.display(), to = %dst.display(), error = %e, "迁移条目失败");
+                // 具体错误只进诊断缓冲（failed 只有条目名，排障需要知道败在哪一步）
+                outcome.diagnostics.push(EarlyDiagnostic {
+                    level: EarlyLevel::Warn,
+                    message: format!(
+                        "迁移条目失败（entry={entry}，from={}，to={}，error={e}）",
+                        src.display(),
+                        dst.display()
+                    ),
+                });
                 outcome.failed.push((*entry).to_string());
             }
         }

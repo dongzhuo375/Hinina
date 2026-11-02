@@ -17,25 +17,27 @@
 | `MIGRATED_ENTRIES` | `&[&str]` | 迁移清单：`config.json` / `sessions` / `workspaces` / `submissions` / `announcements_read` / `cache`（**不含 `logs`**） |
 | `PROBE_FILE` | `".hinina-write-probe"` | 写盘可用性探针（写完即删） |
 | `DataDirSource` | enum：`Default` / `Custom` / `FallbackTemp` | 数据目录来源，`Serialize` 为 `default` / `custom` / `fallbackTemp` |
-| `DataDirPlan` | `{ base_dir, default_dir, source }` | 启动时解析出的方案 |
+| `EarlyDiagnostic` / `EarlyLevel` | `{ level, message }` | 订阅器就绪前的诊断条目（消息为已插值成品文案）；`replay()` 重放到 `tracing` |
+| `DataDirPlan` | `{ base_dir, default_dir, source, warnings }` | 启动时解析出的方案；`warnings` 为启动期诊断缓冲（指针解析失败、候选目录因何不可用、启动期指针写失败） |
 | `DataDirPointer` | `{ data_dir, migrate_from, legacy_migrated }` | 指针文件结构（字段全部 `skip_serializing_if`，未设置时不落盘） |
-| `MigrateOutcome` | `{ moved, skipped, failed, legacy_removed }` | 迁移结果；`is_noop()` / `is_ok()` |
+| `MigrateOutcome` | `{ moved, skipped, failed, legacy_removed, diagnostics }` | 迁移结果；`is_noop()` / `is_ok()`；`diagnostics` 与 `failed` 同序，携带失败项的错误原文 |
 | `legacy_dir()` | `() -> PathBuf` | `%TEMP%/hinina` |
 | `pointer_path(default_dir)` | `(&Path) -> PathBuf` | 指针文件路径 |
-| `read_pointer` / `write_pointer` | — | 读写指针；**损坏或缺失一律按「未指定」处理**（绝不阻断启动） |
-| `dir_is_usable` | `(&Path) -> bool` | 能创建 + 能写入（探针文件写后即删） |
+| `read_pointer` / `write_pointer` | — | 读写指针；**损坏或缺失一律按「未指定」处理**（绝不阻断启动）。启动期读指针走 `read_pointer_early`（失败记入诊断缓冲而非直接 `warn!`） |
+| `dir_is_usable` | `(&Path) -> bool` | 能创建 + 能写入（探针文件写后即删）；内部 `dir_is_usable_result` 带回失败原因供启动诊断 |
 | `dir_is_empty` | `(&Path) -> bool` | 不存在或为空（读不了时按「非空」保守处理）。**注意：不可用于默认目录的校验**，见 `conflicting_entries_in` |
 | `conflicting_entries` | `() -> impl Iterator<Item = &'static str>` | [`MIGRATED_ENTRIES`] 去掉 `cache`（派生，避免两处漂移） |
 | `conflicting_entries_in` | `(&Path) -> Vec<&'static str>` | `dir` 中已存在的**冲突条目**（迁移会跳过 → 陈旧数据被静默采用）。「恢复默认 + 迁移」的校验判据 |
 | `validate_target` | `(&Path, legacy) -> AppResult<PathBuf>` | 设置页「更改目录」的校验（见下） |
-| `resolve` | `(default_dir, legacy) -> DataDirPlan` | 解析优先级：指针指定（可用）→ 默认（可用）→ 临时目录（回退 + 告警） |
-| `prepare_startup` | `(default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 启动用：解析 + 一次性迁移 |
-| `migrate` | `(from, to) -> MigrateOutcome` | 逐项容错搬运；目标已存在则**跳过不覆盖**；单项走 `move_entry` |
+| `resolve` | `(default_dir, legacy) -> DataDirPlan` | 解析优先级：指针指定（可用）→ 默认（可用）→ 临时目录（回退）。**仅启动期使用**：回退原因记入 `plan.warnings`，不直接打日志 |
+| `prepare_startup` | `(default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 启动用：解析 + 一次性迁移；诊断按时间顺序合并进 `plan.warnings` |
+| `migrate` | `(from, to) -> MigrateOutcome` | 逐项容错搬运；目标已存在则**跳过不覆盖**；单项走 `move_entry`；失败详情进 `outcome.diagnostics` |
 | `move_entry` / `copy_recursive` | 私有 | `rename` 优先；失败则**复制到 `{to}.hinina-partial` 暂存名再改名**（见下） |
 | `staging_path` / `remove_any` / `remove_source` | 私有 | 暂存路径 / 安全删除 / 复制后删源（均只告警） |
+| `replay` | `(&[EarlyDiagnostic])` | 把缓冲诊断按级别重放到 `tracing`（`report_data_dir` 在日志就绪后调用） |
 | `should_clear_pending` | `(&MigrateOutcome) -> bool` | 迁移后是否清除「待迁移来源」标记（= 无失败项） |
 | `should_attempt_legacy` | `(&DataDirPointer, DataDirSource, legacy) -> bool` | 是否该重试临时目录搬家（三态语义，见下） |
-| `update_pointer` | `(&Path, impl FnOnce(&mut DataDirPointer))` | **读-改-写**指针（见下） |
+| `update_pointer` | `(&Path, &mut Vec<EarlyDiagnostic>, impl FnOnce(&mut DataDirPointer))` | **读-改-写**指针（见下）；写失败记入诊断缓冲 |
 | `is_absolute_path` / `is_same_or_inside` | 私有 | Windows 下要求盘符前缀；路径包含判定按大小写不敏感 |
 
 ### `validate_target` 拒绝的情形
@@ -81,11 +83,15 @@
   default_dir = app.path().app_local_data_dir()   // %LOCALAPPDATA%/{identifier}
   legacy      = %TEMP%/hinina
   prepare_startup(default_dir, legacy)
-    ├ resolve: 指针指定(可用) → 默认(可用) → 临时目录(回退 + error 告警)
+    ├ resolve: 指针指定(可用) → 默认(可用) → 临时目录(回退)；回退原因记入 plan.warnings
     ├ ① 指针带 migrate_from（设置页改目录）→ migrate(from → base_dir)；无失败项才清标记
     └ ② 首次搬家：source==Default && legacy_migrated != Some(true) && legacy 存在
          → migrate(legacy → base_dir)；无失败项才置位 legacy_migrated
-  → 之后才 AppContext::init（会打开日志文件）
+  → 之后才 AppContext::init（会打开日志文件，订阅器此时才就绪）
+  → report_data_dir(&plan, &migration)：
+      data_dir::replay(&plan.warnings) + replay(&migration.diagnostics)
+      // 订阅器就绪前被丢弃的 warn!/error! 在此重放 ——「自定义目录为何失效」的唯一线索
+      → 数据目录来源汇报（Default/Custom/FallbackTemp）+ 迁移结果汇总
 
 migrate(from, to):
   逐项：源不存在 → 跳过；目标已存在 → **skipped（不覆盖）**；rename 失败 → 复制 + 删源

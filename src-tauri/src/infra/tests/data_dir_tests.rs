@@ -410,9 +410,9 @@ fn mark_legacy_migrated_persists_failure_state_and_survives_pointer_rewrite() {
     .expect("写指针失败");
 
     // 先清 migrate_from（模拟分支 ① 成功）
-    clear_migrate_from(&dir);
+    clear_migrate_from(&dir, &mut Vec::new());
     // 再写搬家失败标记（模拟分支 ② 失败）
-    mark_legacy_migrated(&dir, false);
+    mark_legacy_migrated(&dir, &mut Vec::new(), false);
 
     let after = read_pointer(&dir);
     assert_eq!(after.migrate_from, None, "清掉的字段不得被后一次写入复活");
@@ -983,4 +983,126 @@ fn resolve_falls_back_to_default_when_custom_dir_unusable() {
         "指定目录不可用 → 退回默认"
     );
     assert_eq!(plan.base_dir, default_dir);
+}
+
+/// 启动期诊断（F2）：订阅器就绪前 `warn!` 被丢弃，回退原因必须落在
+/// `DataDirPlan.warnings` 里由 `report_data_dir` 重放 —— 这是排障者回答
+/// 「自定义数据目录为什么没生效」的唯一线索。
+#[test]
+fn resolve_captures_corrupt_pointer_diagnostic() {
+    // 指针损坏：按默认目录处理，但「为什么忽略了我的自定义目录」必须有诊断
+    let default_dir = unique_dir("diag-pointer-default");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    std::fs::write(default_dir.join("data_dir.json"), "{ not-json").unwrap();
+    let legacy = unique_dir("diag-pointer-legacy");
+
+    let plan = resolve(&default_dir, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::Default);
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    assert!(
+        plan.warnings[0].message.contains("指针解析失败"),
+        "{:?}",
+        plan.warnings[0]
+    );
+}
+
+/// 默认目录不可用 → 回退临时目录：error 级诊断（数据随时可能被清理）。
+#[test]
+fn resolve_captures_default_dir_unusable_diagnostic() {
+    let blocker = unique_dir("diag-blocked");
+    write_file(&blocker, "afile", "x");
+    let unusable_default = blocker.join("afile").join("sub");
+    let legacy = unique_dir("diag-legacy");
+
+    let plan = resolve(&unusable_default, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::FallbackTemp);
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    let d = &plan.warnings[0];
+    assert_eq!(d.level, EarlyLevel::Error);
+    assert!(
+        d.message.contains("默认数据目录不可用") && d.message.contains("回退临时目录"),
+        "诊断应说明决策与去向: {}",
+        d.message
+    );
+}
+
+/// 指定了自定义目录但它不可用：诊断必须带「为什么」（探测错误原文）与目录路径。
+#[test]
+fn resolve_captures_custom_dir_unusable_reason() {
+    let default_dir = unique_dir("diag-custom-default");
+    let legacy = unique_dir("diag-custom-legacy");
+    let blocker = unique_dir("diag-custom-blocker");
+    write_file(&blocker, "afile", "x");
+    write_pointer(
+        &default_dir,
+        &pointer(Some(&blocker.join("afile").join("sub")), None),
+    )
+    .expect("写指针失败");
+
+    let plan = resolve(&default_dir, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::Default);
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    let d = &plan.warnings[0];
+    assert_eq!(d.level, EarlyLevel::Warn);
+    assert!(
+        d.message.contains("指定的数据目录不可用") && d.message.contains("回退默认目录"),
+        "诊断应说明决策与去向: {}",
+        d.message
+    );
+    // 「为什么」：探测失败的底层 IO 错误原文必须在场
+    assert!(
+        d.message.contains("os error") || d.message.contains("拒绝") || !d.message.is_empty(),
+        "诊断应携带探测错误: {}",
+        d.message
+    );
+}
+
+/// 迁移放弃（目标目录不可创建）：失败详情进 `MigrateOutcome.diagnostics`，
+/// `report_data_dir` 重放后排障者能看到错误原文而不只是条目名。
+#[test]
+fn migrate_captures_create_target_failure_details() {
+    let from = unique_dir("diag-migrate-from");
+    seed_legacy(&from);
+    let holder = unique_dir("diag-migrate-blocker");
+    write_file(&holder, "blocker", "i am a file");
+    let blocked_target = holder.join("blocker");
+
+    let outcome = migrate(&from, &blocked_target);
+
+    assert!(outcome.failed.contains(&"(目标目录)".to_string()));
+    assert_eq!(outcome.diagnostics.len(), 1, "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.diagnostics[0].level, EarlyLevel::Error);
+    assert!(
+        outcome.diagnostics[0]
+            .message
+            .contains("创建目标数据目录失败"),
+        "{:?}",
+        outcome.diagnostics[0]
+    );
+}
+
+/// 指针里的自定义目录不是绝对路径：按「不可用」处理并留下诊断
+/// （绝对路径要求见 `is_absolute_path` —— 相对路径随进程工作目录漂移）。
+#[test]
+fn resolve_rejects_relative_custom_dir_with_diagnostic() {
+    let default_dir = unique_dir("diag-relative-default");
+    let legacy = unique_dir("diag-relative-legacy");
+    write_pointer(
+        &default_dir,
+        &pointer(Some(Path::new("relative/dir")), None),
+    )
+    .expect("写指针失败");
+
+    let plan = resolve(&default_dir, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::Default);
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    assert!(
+        plan.warnings[0].message.contains("不是绝对路径"),
+        "{:?}",
+        plan.warnings[0]
+    );
 }

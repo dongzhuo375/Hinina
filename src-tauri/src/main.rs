@@ -154,11 +154,15 @@ fn emit_or_warn(app: &tauri::AppHandle, channel: &str, payload: serde_json::Valu
 
 /// 汇报数据目录方案与迁移结果（在日志就绪后调用）。
 ///
-/// 三件事必须说清楚，因为它们都影响「我的数据到底在哪、会不会丢」：
+/// 四件事必须说清楚，因为它们都影响「我的数据到底在哪、会不会丢」：
+/// - **订阅器就绪前的诊断**（指针解析失败、候选目录因何不可用）→ `replay` 重放，
+///   这是排障者回答「为什么我的自定义目录没生效」的唯一线索；
 /// - **回退到临时目录** → `error` 级告警（数据随时可能被系统清理，这是本次修复要消除的状态）；
 /// - **迁移有失败项** → `error` 级告警并列出条目（下次启动会自动重试）；
 /// - **迁移成功** → `info` 记录去向。
 fn report_data_dir(plan: &DataDirPlan, migration: &MigrateOutcome) {
+    data_dir::replay(&plan.warnings);
+    data_dir::replay(&migration.diagnostics);
     match plan.source {
         DataDirSource::Default => {
             tracing::info!(dir = %plan.base_dir.display(), "数据目录（默认）");
@@ -274,8 +278,12 @@ fn main() {
             // ③ 消费者在 AppContext 就绪后启动：它们只观察事实，不参与任何业务动作
             spawn_event_consumers(app.handle());
             tauri::async_runtime::spawn(async move {
-                if plugins.autostart().await.is_err() {
-                    tracing::warn!("Plugin configuration unavailable; automatic loading skipped");
+                if let Err(error) = plugins.autostart().await {
+                    // 与上方 host.start 同一形状：插件域宿主级操作，无具体插件可归属
+                    // （plugin_id/plugin_version 留空）；error 已是白名单化的 PluginError
+                    tracing::warn!(plugin_id = "", plugin_version = "", runtime = "js", event = "",
+                        operation = "host.autostart", permission = "", request_id = "", error = ?error,
+                        "插件配置不可用，自动加载已跳过");
                 }
             });
             Ok(())
