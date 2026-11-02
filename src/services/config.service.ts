@@ -29,6 +29,15 @@ export interface PollSchedule {
   timeoutMs: number
 }
 
+/** 切换结果：成功 / 已生效但持久化失败（前端据此决定是否提示重启回退） */
+export type OjSwitchOutcome = 'success' | 'persist-failed'
+
+/** 最近一次已生效切换的共享结果 */
+export interface OjSwitchResult {
+  target: string
+  outcome: OjSwitchOutcome
+}
+
 /**
  * 配置服务 — 前端读取 Rust 端 `AppConfig` 的唯一入口，并提供派生参数。
  *
@@ -47,6 +56,15 @@ export class ConfigService {
   /// 切换代际：每次切换**开始与结束**各 +1。读配置的调用方据此检测
   /// 「读取期间发生过切换」，从而在事务落地后重读，而不是把旧 active 展出。
   private switchEpoch = 0
+  /// 最近一次**已生效**切换的共享结果（评审三十五/三十六）：持久化失败是
+  /// 「已生效但重启可能回退」的既存事实，设置页晚挂载也要据此提示；后续
+  /// 成功切换或任意一次把同一 active 成功落盘的 `updateConfig` 会解除它。
+  private lastSwitchResult: OjSwitchResult | null = null
+
+  /** 最近一次已生效切换的结果（未发生生效切换时为 null） */
+  latestOjSwitchResult(): OjSwitchResult | null {
+    return this.lastSwitchResult
+  }
 
   /** 当前切换代际（只读；语义见 `switchEpoch`） */
   get ojSwitchEpoch(): number {
@@ -89,7 +107,7 @@ export class ConfigService {
    * 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）。
    *
    * 后端编排（整段在配置写事务内）：校验已注册且在启用实例列表 → 切 Registry
-   * → 清各 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `OJSwitched`。
+   * → 清各 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `OjSwitched`。
    * 本地缓存在切换后失效，后续读取拿到新 active。
    *
    * **并发调用排队**而不是并行发出：后一次切换等前一次落地再执行。后端已有
@@ -106,12 +124,15 @@ export class ConfigService {
       } catch (e) {
         // 切换已生效但持久化失败：后端 registry 与内存已是新 OJ，**陈旧缓存必须
         // 失效**——否则后续读取/保存会把旧 active 再写回去，造成 register=新、
-        // 配置=旧 的再次分叉（评审二十六 P1）
+        // 配置=旧 的再次分叉（评审二十六 P1）。结果同时留给设置页晚挂载提示。
         if ((e as { variant?: string | null }).variant === 'OjSwitchPersistFailed') {
           this.invalidate()
+          this.lastSwitchResult = { target: ojId, outcome: 'persist-failed' }
         }
+        // 普通失败（切换未生效）不覆盖既存的生效结果
         throw e
       }
+      this.lastSwitchResult = { target: ojId, outcome: 'success' }
       this.invalidate()
     })()
     this.pendingSwitch = run
@@ -267,11 +288,23 @@ export class ConfigService {
       // 会让普通启动被当成「可写锁定层」，手改的非法值被校验/钳制
       const maintainerLocked = options.maintainerLocked ?? !systemService.isKeyed()
       await configBridge.updateConfig(draft, maintainerLocked)
+      // 任意一次成功保存都会把运行时 active 整体落盘（后端在写锁内钉住当前值）：
+      // 若此前是同一目标的持久化失败，回退风险已解除——不限于设置页保存
+      //（解题页编辑器偏好/分栏比例也走这里，评审三十六）。
+      this.resolvePersistedSwitch(current.oj.active)
     } finally {
       // 无论成败都失效缓存：失败时下次读取重新拉后端真值，避免缓存与磁盘漂移
       this.invalidate()
     }
     return draft
+  }
+
+  /// 成功保存同一 active 后解除持久化失败的共享结果。
+  private resolvePersistedSwitch(active: string): void {
+    const last = this.lastSwitchResult
+    if (last?.outcome === 'persist-failed' && last.target === active) {
+      this.lastSwitchResult = { target: active, outcome: 'success' }
+    }
   }
 }
 

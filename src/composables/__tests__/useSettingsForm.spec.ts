@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
 const switchState = vi.hoisted(() => ({
   pending: null as Promise<void> | null,
   epoch: 0,
+  last: null as { target: string; outcome: 'success' | 'persist-failed' } | null,
 }))
 
 function settleSwitch(run: Promise<void>): void {
@@ -37,21 +38,44 @@ function settleSwitch(run: Promise<void>): void {
   switchState.epoch += 1
 }
 
+/// 与真实 ConfigService 一致：成功保存同一 active 会解除 persist-failed
+function resolvePersisted(active: string): void {
+  if (switchState.last?.outcome === 'persist-failed' && switchState.last.target === active) {
+    switchState.last = { target: active, outcome: 'success' }
+  }
+}
+
 vi.mock('@/services/config.service', () => ({
   configService: {
     getConfig: mocks.getConfig,
-    updateConfig: mocks.updateConfig,
+    updateConfig: async (
+      mutate: (draft: AppConfig) => void,
+      options?: { maintainerLocked?: boolean },
+    ) => {
+      const saved = await mocks.updateConfig(mutate, options)
+      resolvePersisted(saved.oj.active)
+      return saved
+    },
     invalidate: mocks.invalidate,
     switchOj: (id: string) => {
       switchState.epoch += 1
       const run = mocks.switchOj(id) as Promise<void>
       switchState.pending = run
       run.then(
-        () => settleSwitch(run),
-        () => settleSwitch(run),
+        () => {
+          switchState.last = { target: id, outcome: 'success' }
+          settleSwitch(run)
+        },
+        (e: { variant?: string }) => {
+          if (e?.variant === 'OjSwitchPersistFailed') {
+            switchState.last = { target: id, outcome: 'persist-failed' }
+          }
+          settleSwitch(run)
+        },
       )
       return run
     },
+    latestOjSwitchResult: () => switchState.last,
     get ojSwitchEpoch() {
       return switchState.epoch
     },
@@ -103,6 +127,7 @@ beforeEach(async () => {
   vi.useFakeTimers()
   switchState.pending = null
   switchState.epoch = 0
+  switchState.last = null
   currentConfig = baseConfig()
   // 默认正常模式（无 --settings）：切换成功照常回登录页；钥匙用例显式改写
   mocks.launchFlags.value = { settings: false }

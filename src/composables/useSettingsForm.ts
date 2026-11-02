@@ -106,13 +106,6 @@ type SwitchObserver = (
 const switchObservers = new Set<SwitchObserver>()
 let controllerSeq = 0
 
-/// **最近一次已生效切换的共享结果**（评审三十五 #1）：切换可能在没有任何观察者
-/// 时完成（旧控制器已卸载、新控制器尚未挂载），也可能在通知快照之后才注册。
-/// 持久化失败是「当前 OJ 已生效但重启可能回退」的既存事实，模块级保留；晚挂载
-/// 的控制器在加载后据此恢复警告。后续**成功**切换会把结果覆盖为 success（警告
-/// 不再出现）；普通失败不覆盖（切换未生效，风险事实未变）。
-let lastEffectiveSwitch: { target: string; outcome: SwitchOutcome; epoch: number } | null = null
-
 const PERSIST_FAILED_NOTICE =
   '切换已生效，但配置保存失败（重启后可能回退）；连接与比赛相关的修改已重置，其余未保存修改保留'
 const FOREIGN_RELOAD_FAILED_NOTICE =
@@ -376,8 +369,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         // 已在上面完成重置/对齐。
         if (outcome) {
           const epoch = configService.ojSwitchEpoch
-          // 先落共享结果，再通知快照：通知期间才挂载的控制器从 load 读取该结果
-          lastEffectiveSwitch = { target, outcome, epoch }
+          // 共享结果已由 ConfigService.switchOj 记录；这里只通知仍挂载的控制器
           const listeners = [...switchObservers]
           await Promise.allSettled(
             listeners.map((listen) => listen(target, controllerId, outcome!, epoch)),
@@ -476,24 +468,24 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     baseline.value = snapshot()
   }
 
-  /// 晚挂载控制器恢复历史持久化失败警告（评审三十五 #1）：仅在共享结果仍是
-  /// persist-failed 且当前 active 正是该目标时提示；成功切换已覆盖结果为 success。
+  /// 晚挂载控制器恢复历史持久化失败警告（评审三十五 #1）：共享结果由
+  /// `ConfigService` 持有（任意 updateConfig 成功也能解除，评审三十六），
+  /// 这里只在仍是同一目标的 persist-failed 时提示。
   function restoreHistoricalSwitchNotice(config: AppConfig): void {
-    const last = lastEffectiveSwitch
+    const last = configService.latestOjSwitchResult()
     if (!last || last.outcome !== 'persist-failed') return
     if (config.oj.active !== last.target) return
     switchNotice.value = PERSIST_FAILED_NOTICE
   }
 
-  /// 普通保存成功后解除“重启可能回退”警告（评审三十六）：保存把包含当前
-  /// active 的完整配置写入了磁盘，持久化失败的旧事实已被覆盖。仅当共享结果
-  /// 仍是 persist-failed 且**保存的 active 正是该目标**时解除；随后成功切换
-  /// 也会覆盖结果，但普通保存不经过 `performSwitch`。
-  function resolvePersistedSwitchWarning(persistedActiveId: string): void {
-    const last = lastEffectiveSwitch
-    if (!last || last.outcome !== 'persist-failed' || last.target !== persistedActiveId) return
-    lastEffectiveSwitch = { ...last, outcome: 'success' }
-    if (switchNotice.value === PERSIST_FAILED_NOTICE) switchNotice.value = null
+  /// 普通保存成功后清除本控制器可见的“重启可能回退”警告：解除判定已由
+  /// `ConfigService.updateConfig` 统一完成（覆盖设置页之外的保存入口）。
+  function clearResolvedPersistedWarning(persistedActiveId: string): void {
+    if (switchNotice.value !== PERSIST_FAILED_NOTICE) return
+    const last = configService.latestOjSwitchResult()
+    if (last?.outcome === 'success' && last.target === persistedActiveId) {
+      switchNotice.value = null
+    }
   }
 
   async function load(): Promise<void> {
@@ -579,9 +571,10 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         }
         draft.layout.splitRatio = submitted.splitRatio
       }, { maintainerLocked: lockAll })
-      // 保存已把当前 active 落盘：若此前是「切换生效但持久化失败」，回退风险解除。
-      // 即便控制器已卸载也要更新共享结果（晚挂载者据此不再提示）。
-      resolvePersistedSwitchWarning(saved.oj.active)
+      // 保存已把当前 active 落盘：若此前是「切换生效但持久化失败」，回退风险
+      // 已由 ConfigService.updateConfig 解除；这里只清本控制器可见的警告
+      //（即便控制器已卸载也不会影响服务级共享结果）。
+      clearResolvedPersistedWarning(saved.oj.active)
       // 已卸载的旧控制器不再回写表单（评审三十三 #4）；自动切换仍执行——
       // 那是保存新建实例的既定后果，且切换本身与视图生命周期无关
       if (!disposed) {

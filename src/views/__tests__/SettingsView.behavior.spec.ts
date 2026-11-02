@@ -32,6 +32,7 @@ vi.mock('@/services/config.service', () => ({
     updateConfig: mocks.updateConfig,
     invalidate: mocks.invalidate,
     switchOj: mocks.switchOj,
+    latestOjSwitchResult: () => null,
     ojSwitchEpoch: 0,
     ojSwitchInFlight: false,
     whenOjSwitchSettled: async () => {},
