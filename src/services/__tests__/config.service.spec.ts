@@ -352,6 +352,24 @@ describe('switchOj — 真实排队与代际', () => {
 
     expect(svc.latestOjSwitchResult()).toEqual({ target: 'X', outcome: 'persist-failed' })
   })
+
+  it('以后端实际提交的 active 为准（可能与保存前快照不同）', async () => {
+    const svc = new ConfigService()
+    const payload = { OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满' }
+    const { variant, message } = parseAppError(payload)
+    switchOj.mockRejectedValueOnce(new IpcError('switch_oj', message, variant, payload))
+    await expect(svc.switchOj('Hydro')).rejects.toThrow('保存配置失败')
+
+    getConfig.mockResolvedValue(makeConfig()) // 快照 active=HOJ
+    const persisted = makeConfig()
+    persisted.oj.active = 'Hydro'
+    updateConfig.mockResolvedValue(persisted)
+    const saved = await svc.updateConfig(() => {})
+
+    // 后端写锁内实际落盘的是 Hydro：返回值与警告解除都按它判定
+    expect(saved.oj.active).toBe('Hydro')
+    expect(svc.latestOjSwitchResult()).toEqual({ target: 'Hydro', outcome: 'success' })
+  })
 })
 
 describe('updateConfig — 设置页保存唯一入口', () => {

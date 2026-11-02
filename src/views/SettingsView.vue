@@ -29,7 +29,8 @@ import AboutSection from '@/components/settings/AboutSection.vue'
  * 分层锁：连接与缓存调优字段（OJ/地址/超时/轮询/TTL/数据目录）默认锁定，
  * 唯一提权来源是 `--settings` 启动参数（管理方钥匙）；选手日常字段（比赛
  * ID/引用、密码、编辑器、布局、重置与清理、关于）不受影响。护栏而非安全
- * 边界 —— config.json 明文可手改，无后端强制。
+ * 边界 —— IPC 更新路径由后端按 maintainer_locked 原样保留锁定字段；直接手改
+ * config.json 不受该护栏限制。
  */
 
 // ── 表单草稿 ──

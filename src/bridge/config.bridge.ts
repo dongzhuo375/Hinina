@@ -6,12 +6,12 @@ export async function getConfig(): Promise<AppConfig> {
   return ipcInvoke<AppConfig>('get_config')
 }
 
-/** 整体替换应用配置（Rust 端持久化到 config.json 并更新内存值） */
+/** 整体替换应用配置（Rust 端持久化并更新内存值，返回实际提交的配置） */
 export async function updateConfig(
   config: AppConfig,
   maintainerLocked = false,
-): Promise<void> {
-  return ipcInvoke<void>('update_config', { config, maintainerLocked })
+): Promise<AppConfig> {
+  return ipcInvoke<AppConfig>('update_config', { config, maintainerLocked })
 }
 
 /** 触发后端从磁盘重载配置（发布 `ConfigChanged`；磁盘 active 与 Registry 不同时同步切换并发布 `OjSwitched`） */

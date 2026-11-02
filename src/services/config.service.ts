@@ -282,21 +282,24 @@ export class ConfigService {
     const current = await this.getConfig()
     const draft: AppConfig = structuredClone(current)
     mutate(draft)
+    // 后端返回实际提交的配置（active 在写锁内钉住、可能为钳制后的值）；
+    // 旧后端/测试桩返回空时退回 draft
+    let persisted: AppConfig = draft
     try {
       // 默认值由「本次启动是否钥匙模式」推导（评审二十七）：设置页之外的保存
       // （解题页编辑器偏好、分栏比例）同样必须让后端保住锁定字段——`false`
       // 会让普通启动被当成「可写锁定层」，手改的非法值被校验/钳制
       const maintainerLocked = options.maintainerLocked ?? !systemService.isKeyed()
-      await configBridge.updateConfig(draft, maintainerLocked)
-      // 任意一次成功保存都会把运行时 active 整体落盘（后端在写锁内钉住当前值）：
-      // 若此前是同一目标的持久化失败，回退风险已解除——不限于设置页保存
-      //（解题页编辑器偏好/分栏比例也走这里，评审三十六）。
-      this.resolvePersistedSwitch(current.oj.active)
+      persisted = (await configBridge.updateConfig(draft, maintainerLocked)) ?? draft
+      // 用**实际落盘**的 active 判定（评审三十六 P3）：保存与切换在服务层
+      // 可能交错，后端写锁内的 active 才是权威值；按旧快照判定会留下陈旧警告
+      // 或返回过期 active。任意保存入口（含解题页偏好/分栏比例）都算解除。
+      this.resolvePersistedSwitch(persisted.oj.active)
     } finally {
       // 无论成败都失效缓存：失败时下次读取重新拉后端真值，避免缓存与磁盘漂移
       this.invalidate()
     }
-    return draft
+    return persisted
   }
 
   /// 成功保存同一 active 后解除持久化失败的共享结果。
