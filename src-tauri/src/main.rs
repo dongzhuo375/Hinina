@@ -15,7 +15,7 @@
 //   6. HttpClient       — Reqwest 客户端
 //   7. ProviderRegistry — 注册各 OJ Adapter（默认 HOJ，基址取自配置）
 //   8. WorkspaceManager — 工作区生命周期（按需创建/恢复，启动时不扫描磁盘）
-//   9. Service 层       — theme / auth / contest / problem / submission
+//   9. Service 层       — auth / contest / problem / submission
 //  10. PluginHost       — 插件事件边界（只持总线句柄，消费者在下面启动）
 //  11. AppContext       — 装配上述所有
 //  12. Tauri App        — manage(AppContext) + 启动消费者 + generate_handler! 注册 Command
