@@ -116,35 +116,26 @@ Hinina/
         │   ├── mod.rs
         │   ├── config/
         │   │   ├── mod.rs                # ConfigService：加载/保存/变更检测/热重载（加载路径统一过 normalize_legacy_values）
-        │   │   └── error.rs              # ConfigError
-        │   ├── theme/
-        │   │   ├── mod.rs                # ThemeService：主题切换/配色方案管理
-        │   │   └── error.rs              # ThemeError
         │   ├── auth/
         │   │   ├── mod.rs                # AuthService：登录编排/会话持久化/登出/凭证轮换回写/三态会话校验（SessionValidity）
-        │   │   ├── error.rs              # AuthError
         │   │   └── tests/
         │   │       └── auth_tests.rs     # AuthService 单元测试（会话持久化/轮换回写/失效清理）
         │   ├── contest/
         │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存（TTL 来自配置）/比赛元信息缓存（内存+磁盘，固定 TTL 120s，题面总览页轮询请求减半）/比赛切换/get_rank（榜单不缓存）/list_problems（插件路径：只读题目列表，不选中比赛、不落缓存）/list_announcements（公告不缓存；按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`，首次拉取只建基线不发事件）+ 公告已读状态持久化（announcements_read/{cid}_{uid}.json，合并去重、损坏降级为空+warn）；`on_oj_switched()` 供 `switch_oj` 显式清 OJ 域缓存
-        │   │   ├── error.rs              # ContestError
         │   │   └── tests/
         │   │       └── contest_tests.rs  # ContestService 单元测试（错误变体穿透 + TTL 缓存语义：命中零请求/过期重取/refresh 强制/失败不留 stale + 元信息缓存：命中跳过 get_contest 而题目列表仍实时/磁盘跨实例命中/按比赛隔离/refresh 清两层/错误不入缓存 + 公告已读读写与损坏降级 + 新公告检测：首次不发/新 ID 发一次/重复不发/基线按比赛隔离/失败保留基线）
         │   ├── problem/
         │   │   ├── mod.rs                # ProblemService：题目获取/打开题目（题面内存+磁盘缓存，TTL 30min，受 oj.cacheProblemStatement 开关控制）/我的题目状态/load_problem_limits（内存+磁盘双层缓存、并发上限 4、部分失败跳过）
-        │   │   ├── error.rs              # ProblemError
         │   │   └── tests/
         │   │       └── problem_tests.rs  # limits 与题面缓存测试（首次落盘/二次命中零请求/开关关闭直连且不落盘/跨实例命中/键隔离/错误不入缓存/401 不回退默认值）
         │   ├── submission/
         │   │   ├── mod.rs                # SubmissionService：代码提交（下传 problem_id + display_id；成功后落盘源码快照，best-effort）/评测轮询/超时（认证错误立即上抛）+ 提交历史/详情/测试点查询（列表不缓存；终态详情与测试点走仅内存 TTL 缓存，评测中永不缓存；详情在 OJ 未回吐代码时回落到本地快照；clear_user_caches 由登出编排）
         │   │   ├── snapshot.rs           # 提交源码快照：submissions/{oj_id}/{submit_id}.{ext}（本地留档「当时交的代码」；扩展名由语言推导，与前端 sourceFileNameOf 同源，未知语言回退 .txt；读取时支持按 submit_id 扫描回退；落盘失败只告警不阻断提交）
-        │   │   ├── error.rs              # SubmissionError
         │   │   └── tests/
         │   │       ├── submission_tests.rs  # SubmissionService 单元测试（变体穿透、认证错误短路、瞬时抖动仍重试、超时语义、历史/详情/测试点穿透）
         │   │       └── snapshot_tests.rs    # 快照测试（扩展名与前端 sourceFileNameOf 对齐、部署变体归一、C#/JavaScript 不被前缀吞并、未知语言回退 txt、路径越权拒绝、落盘读取往返、语言变更后扫描回退、跨 OJ 不撞号、非法 ID 不 panic）
         │   └── workspace/
         │       ├── mod.rs
-        │       ├── error.rs              # WorkspaceError
         │       ├── manager.rs            # WorkspaceManager：完整生命周期 + set_language/persist_meta（语言与 active_file 等元数据随保存落盘）；落盘语义=debounce-to-memory（update_file 只写内存并记 active_file，落盘仅经 save() 与 auto-save；替换 current 前先落盘旧的；auto-save 以修订号判定能否清脏；auto_save_interval_secs 记录运行状态供「按配置同步」幂等判断）
         │       └── tests/
         │           └── manager_tests.rs  # 工作区生命周期测试（含语言跨实例持久化）
@@ -220,7 +211,6 @@ Hinina/
         │   ├── plugin_api_factory.rs     # 组合根选择的存储/HTTP能力工厂
         │   ├── plugin_http.rs            # 固定DNS、连接池、速率/并发/超时
         │   ├── plugin_storage.rs         # 原子JSON/CAS、配额与操作限流
-        │   ├── plugin_notification.rs    # 纯文本通知
         │   ├── fs_plugin_repo.rs         # FsPluginRepository（宿主审批、目录/入口校验与有限读取）
         │   ├── provider_registry_impl.rs # ProviderRegistryImpl（单表 HashMap<OjId, ProviderSet> + capability() 能力取件帮手）
         │   └── tests/
@@ -299,7 +289,6 @@ Hinina/
             ├── log_cmd.rs                # frontend_log（**薄转发** → infra/frontend_log：panic 钩子的前端半边）
             ├── maintenance_cmd.rs          # reset_client（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，不重拉）/ local_data_usage（清理前体积预览，含临时目录崩溃记录）/ purge_local_data（不可逆：日志内容与崩溃记录文件 + 过期提交留档）
             ├── data_dir_cmd.rs           # get_data_dir / set_data_dir / reset_data_dir / pick_data_dir（设置页「数据目录」；改动重启后生效，只写位置指针不搬运）
-            ├── theme_cmd.rs              # get_theme / set_theme
             └── tests/
                 └── mod_tests.rs          # Command 层关键路径测试（P40 + 分页默认值/StorageInfo 序列化/uid 回退/空筛选归一；#87 扩展：维护者层锁定语义（锁定字段保留/放宽校验/active 结构检查）、保存与切换并发一致性（确定性交错握手）、update_config 锁内最终校验、reload 全禁用拒绝、auto-save 同步与配置提交串行、reload 提交+Registry 切换访问栅栏）
 ```
@@ -528,6 +517,9 @@ src/
 - **插件系统**：当前提供最小可运行的外围 JS 宿主（QuickJS）与文档侧参考业务插件（首次 AC 气球派发，doc/modules/src-tauri/plugin/sdk/examples/balloon，不构建进应用）。插件只能访问 `plugin/api/`，禁止直接调用内部 Service；插件事件经 `PluginEventAdapter` 白名单 + 脱敏 + 版本化（`PluginEventEnvelope{version,sequence,occurredAt,event}`）后投递，插件**不得**依赖 `CoreEvent` / 内部 Service / 领域实体 / `broadcast::Receiver`。设计、契约与路线图见 [doc/plugin/](plugin/README.md)
 - **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。注册的插件有两个：`tauri-plugin-single-instance`（单实例约束，**第一个注册**；纯 Rust 侧无 JS API——无 npm 包、无 capability，不适用 npm 对齐要求）与 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为 dialog 的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**带 JS API 的插件新增时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **依赖卫生：直接依赖必须被真正引用；不审批依赖的安装脚本**。`package.json` 的 `dependencies` 只放代码里实际 import 的包（曾出现 `approve` / `esbuild` / `vue-demi` 三个零引用的直接依赖 —— 其中 `esbuild` 还与 vite 嵌套的版本重复安装）。另外**刻意不写 `allowScripts`**：它是 npm 11.18 起的脚本审批字段，写上等于允许依赖的 postinstall 在每次安装时执行（供应链面）。实测不审批无影响：`vue-demi` 发布的默认就是 Vue 3 版（`isVue3 = true`，postinstall 只在检测到 Vue 2 时才切换），`esbuild` 的 postinstall 只是 optional platform 包的兜底。代价是 `npm install` 会提示「N packages have install scripts not yet covered by allowScripts」—— **这是预期的**，不要为消除提示而审批
+- **豁免：`@tauri-apps/plugin-dialog` 前端零 import 但保留**：它是「带 JS API 的插件」的 npm 对齐伴生包 —— 上条规则的 CLI 版本检查要求 npm 包与 Rust crate 同步，删掉它会让 `tauri-plugin-dialog` 的 crate 升级失去对齐锚点。属**文档化的刻意例外**，不要按依赖卫生规则误删（分层审计 F8）
+- **窗口控制 API 直入视图层是合法边界**：`main.ts` / `App.vue` / `TopBar.vue` 直接用 `@tauri-apps/api/window` 的 `getCurrentWindow`（拖拽、最小化/最大化、close/destroy、`onCloseRequested` 关窗握手）。这属**表现层窗口管理**，与「I/O 全在 Rust」的 fs/http 红线不冲突；capabilities 已声明 `core:window:*`；关窗落盘走依赖注入（`main.ts` 注入 close/destroy，`utils/close-guard` 可测试）。不要把这类调用误判为需要绕行 bridge 的违规（分层审计 F10）
+- **前端通知是单一路径**：前端可见事件只有一条装配路径 —— `CoreEvent → main.rs 事件桥`；插件通知的 `NotificationOutput` 实现同样住在组合根 `main.rs`（原 `infra/plugin_notification`，因成为 infra 层唯一框架依赖而上移，2026-11 清理）。infra 层零 tauri 依赖是红线现状，不是目标（分层审计 F2）
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（`sessionGuard` 会话失效兜底 + `globalErrorGuard` 全局错误转发）—— 前者需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）
 - **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
@@ -594,7 +586,7 @@ src/
 
 当前交付最小可运行的外围 JavaScript 宿主：Manifest / API / 事件均为 v2，QuickJS 独立 worker，只读身份 / 比赛 / 本人提交历史，私有 JSON/CAS，受限 HTTP，纯文本通知，以及 start / stop / reload / resync 开发命令。未交付管理 UI、配置写入、安装/更新、业务插件和真实 OJ 联调。
 
-分层：`core/access` 提供显式 `AccessRevision`；`service` 提供只读查询并显式撤销；`plugin/api|permission|query|execution_api` 提供安全 DTO、授权交集、作用域句柄/游标和有限 JSON 桥；`plugin/host` 是唯一 `CoreEventBus` 插件消费者（128 有界队列）；`plugin/runtime|manager` 持有 QuickJS worker 与生命周期；`infra/fs_plugin_repo|plugin_storage|plugin_http|plugin_notification` 实现仓库、存储、网络、通知端口。依赖方向 `infra → plugin`，`core/service` 不依赖 plugin（组合根 `core/context.rs` 除外）。
+分层：`core/access` 提供显式 `AccessRevision`；`service` 提供只读查询并显式撤销；`plugin/api|permission|query|execution_api` 提供安全 DTO、授权交集、作用域句柄/游标和有限 JSON 桥；`plugin/host` 是唯一 `CoreEventBus` 插件消费者（128 有界队列）；`plugin/runtime|manager` 持有 QuickJS worker 与生命周期；`infra/fs_plugin_repo|plugin_storage|plugin_http` 实现仓库、存储、网络端口（通知端口实现在组合根 `main.rs`，infra 不触框架）。依赖方向 `infra → plugin`，`core/service` 不依赖 plugin（组合根 `core/context.rs` 除外）。
 
 关键不变量：
 
