@@ -4,6 +4,7 @@ import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService } from '@/services/config.service'
 import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
+import { useAuthStore } from '@/stores/authStore'
 import { resetSessionForOjSwitch } from '@/stores/session'
 import { normalizeHojLanguage } from '@/utils/language'
 import { EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN, EDITOR_TAB_SIZES } from '@/utils/editor'
@@ -310,14 +311,16 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     try {
       await configService.switchOj(target)
       outcome = 'success'
-      // 会话上下文先清理；persistedActive 与 OJ 域在重置/对齐成功后才提交
+      // 会话上下文先清理（领域状态 + 认证态，两者分离见各自文档）；
+      // persistedActive 与 OJ 域在重置/对齐成功后才提交
       //（表单与 persistedActive 必须一起变化，否则「B 的 id +
       // A 的地址」会被下一次保存写坏。注意重载失败**不回滚到旧 OJ**——
       // 切换已生效，由 adoptEffectiveSwitch 对齐新 OJ）
       resetSessionForOjSwitch()
+      useAuthStore().resetForOjSwitch()
       // `--settings`（管理方钥匙）：切换成功**留在设置页**继续修配置——踢到
       // 登录页会打断维护、丢失当前草稿（登录页的「返回设置」是一次重新进入）。会话已由
-      // resetSessionForOjSwitch 清理，最小壳接管（内容区共享实例，草稿保留）。
+      // resetSessionForOjSwitch + resetForOjSwitch 清理，最小壳接管（内容区共享实例，草稿保留）。
       // 第三处豁免导航源，与 sessionGuard/阶段闸门同理由。
       // **豁免只属于设置页本身**：switch_oj 是异步的，期间用户可能已导航到
       // 比赛页——不查当前路由就把「停留」带过去，无会话用户会被留在比赛页
@@ -350,6 +353,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       if ((e as { variant?: string }).variant === 'OjSwitchPersistFailed') {
         outcome = 'persist-failed'
         resetSessionForOjSwitch()
+        useAuthStore().resetForOjSwitch()
         if (isKeyedSettingsRoute(router.currentRoute.value?.name)) {
           adoptEffectiveSwitch(target, PERSIST_FAILED_NOTICE)
           lastSwitchStayed = true

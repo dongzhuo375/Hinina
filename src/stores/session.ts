@@ -1,5 +1,4 @@
 import { useAnnouncementStore } from '@/stores/announcementStore'
-import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useRankStore } from '@/stores/rankStore'
@@ -48,15 +47,13 @@ export function clearDomainState(): void {
 /**
  * OJ 切换的会话上下文重置（调用点：useSettingsForm「当前 OJ」切换成功后）。
  *
- * 切换 OJ = 整个应用换了一个服务端：旧 OJ 的用户、比赛、题面、提交与编辑器
- * 代码对新 OJ 全部失效，且解题页会拿旧 OJ 的 `contest.id` 向新 OJ 发提交 ——
- * 必须与登出同款清理。区别于登出的三点：
- * - **不调用 `authStore.logout()`**：Registry 已切到新 OJ，后端 logout 会拿
- *   新 OJ 的无凭证会话打它的登出端点，还会误删新 OJ 自己的会话文件；
- * - `sessionResolved` 复位为 false，下次导航由路由守卫 `checkSession`
- *   （后端 `get_session` 读新 OJ 的 `sessions/{id}.json`）自动恢复会话 ——
- *   之前在该 OJ 登录过则无感续用，否则落回登录表单；
- * - 各 OJ 的会话文件按 id 隔离，**旧 OJ 的登录态保留**：切回去仍免登录。
+ * 只负责**领域状态**：清空旧 OJ 的比赛/题面/提交/编辑器代码，并作废旧 OJ 的
+ * 匿名简报。认证态的复位由 `authStore.resetForOjSwitch()` 承担（调用方需
+ * 一并调用；两者分离是为了消除 session ↔ authStore 的模块环）。
+ *
+ * 切换 OJ = 整个应用换了一个服务端：旧 OJ 的比赛、题面、提交与编辑器代码
+ * 对新 OJ 全部失效，且解题页会拿旧 OJ 的 `contest.id` 向新 OJ 发提交 ——
+ * 必须与登出同款清理。
  */
 export function resetSessionForOjSwitch(): void {
   clearDomainState()
@@ -66,9 +63,4 @@ export function resetSessionForOjSwitch(): void {
   // LoginView 的 canEnter 侦听器（immediate）会先按旧 OJ 的时间窗计算阶段，
   // 在新 OJ 有会话时立即自动推进赛场 —— 而新 OJ 可能未配置比赛。
   useContestStore().invalidateBrief()
-
-  const auth = useAuthStore()
-  auth.user = null
-  auth.error = null
-  auth.sessionResolved = false
 }

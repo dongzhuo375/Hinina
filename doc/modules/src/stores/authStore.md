@@ -17,6 +17,7 @@
 | `isLoggedIn` / `username` | getters | `user !== null` / 用户名 |
 | `login` | `(username, password) => Promise<void>` | 成功写入 user 并置 `sessionResolved = true`；失败记录 error 并**抛出**（登录表单需要感知失败；OJ 切换不经由登录，走 `configService.switchOj`） |
 | `logout` | `() => Promise<void>` | **永不 reject**：后端登出失败也一律清理本地（user=null + `clearDomainState()`），保证 UI 不停留在需认证页面；失败时 `sessionResolved` 复位 false（下次进受保护路由重新校验） |
+| `resetForOjSwitch` | `() => void` | OJ 切换的认证态复位（`user`/`error` 清零 + `sessionResolved = false`，强制下次导航按新 OJ 恢复会话）。与 `logout` 的区别：**不调后端**（Registry 已切换，logout 会误删新 OJ 的会话文件）、不清理领域状态（由 `resetSessionForOjSwitch` 负责）；调用点 `useSettingsForm`（与领域清理成对调用） |
 | `validateSession` | `() => Promise<SessionValidity>` | 三态校验；`invalid` 且已登录 → 就地 `invalidateSession(SESSION_INVALID_MESSAGE)`；**`unknown` 保持登录态不变**（赛前误踢回登录页的代价远大于多等一轮校验） |
 | `invalidateSession` | `(reason: string) => Promise<void>` | 复用 logout 清理链路，随后 `error = reason`（供登录页展示）+ `sessionResolved = false`（强制下次重新校验）；由全局会话守卫调用 |
 | `checkSession` | `() => Promise<boolean>` | 启动/首导航时恢复后端会话；成功取得用户或后端明确返回 null 才置 `sessionResolved = true`。传输异常保留原 `user`、置 unresolved、记录 error 并返回 false（不向调用方抛出），后续路由守卫/登录页挂载可重试；`finally` 只收尾 `isLoading` |

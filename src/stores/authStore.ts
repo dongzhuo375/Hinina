@@ -100,6 +100,21 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /**
+     * OJ 切换的认证态复位（调用点：useSettingsForm 切换成功后，紧随
+     * `resetSessionForOjSwitch()`）。区别于 `logout` 的三点：**不调后端**
+     * （Registry 已切到新 OJ，后端 logout 会拿新 OJ 的无凭证会话打它的
+     * 登出端点，还会误删新 OJ 自己的会话文件）；`sessionResolved` 复位为
+     * false，下次导航由路由守卫 `checkSession`（后端读新 OJ 的会话文件）
+     * 自动恢复 —— 之前在该 OJ 登录过则无感续用，否则落回登录表单；
+     * 各 OJ 的会话文件按 id 隔离，**旧 OJ 的登录态保留**：切回去仍免登录。
+     */
+    resetForOjSwitch() {
+      this.user = null
+      this.error = null
+      this.sessionResolved = false
+    },
+
+    /**
      * 检查后端会话有效性。
      *
      * 只有成功取得用户或后端明确返回 null 才算已确认；传输异常保留原用户并

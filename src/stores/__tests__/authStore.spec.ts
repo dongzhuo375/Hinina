@@ -95,6 +95,28 @@ describe('login', () => {
   })
 })
 
+describe('resetForOjSwitch', () => {
+  it('只复位认证态并强制下次导航重新恢复会话，不触碰领域状态与后端', () => {
+    const auth = useAuthStore()
+    auth.user = user
+    auth.error = '上一次失败'
+    auth.sessionResolved = true
+    seedDomainState()
+
+    auth.resetForOjSwitch()
+
+    expect(auth.user).toBeNull()
+    expect(auth.error).toBeNull()
+    expect(auth.sessionResolved).toBe(false)
+    // 与 logout 的区别：领域状态由 resetSessionForOjSwitch 负责，这里不碰
+    expect(useContestStore().contest).not.toBeNull()
+    expect(useSubmissionStore().submissions).not.toHaveLength(0)
+    // 与 logout 的区别：不调后端（Registry 已切换，logout 会误删新 OJ 的会话文件）
+    expect(authService.logout).not.toHaveBeenCalled()
+    expect(authService.checkSession).not.toHaveBeenCalled()
+  })
+})
+
 describe('logout', () => {
   it('成功后清理认证态与会话级领域状态，并保留匿名比赛简报', async () => {
     authService.logout.mockResolvedValue(undefined)

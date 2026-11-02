@@ -35,6 +35,7 @@
 - `@/services/config.service`
 - `@/guards/keyed-settings-policy`（`isKeyedSettingsRoute` —— 切换后的「停留设置页」判据）
 - `@/stores/session`（`resetSessionForOjSwitch`）
+- `@/stores/authStore`（`resetForOjSwitch`，与领域清理成对调用）
 - `@/composables/useTransientValue`（已保存提示）
 - `@/utils/language` / `editor` / `error` / `oj`
 - `@/types/config`
