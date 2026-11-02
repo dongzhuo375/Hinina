@@ -633,3 +633,147 @@ async fn reload_config_rejects_unknown_active_without_committing() {
     hoj.shutdown();
     hydro.shutdown();
 }
+
+/// 评审三十六 P2：Registry 未变（HOJ）时也不能跳过 active 的结构检查。
+///
+/// 归一化在「零启用实例」时会回退默认 HOJ（即使 HOJ 被禁用），若只在
+/// registry_changed 时预检，会提交一份 `AppConfig::validate()` 拒绝的配置。
+#[tokio::test]
+async fn reload_config_rejects_all_disabled_instances_even_if_registry_unchanged() {
+    use super::super::commands::config_cmd::reload_config_impl;
+    use crate::test_support::app_ctx::context_with_two_ojs;
+    use crate::test_support::loopback::LoopbackServer;
+
+    let hoj = LoopbackServer::start(vec![]).await;
+    let hydro = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
+    let before = ctx.config.get();
+    let mut events = ctx.event_bus.subscribe();
+
+    let mut disk_config = ctx.config.get();
+    for instance in &mut disk_config.oj.instances {
+        instance.enabled = false;
+    }
+    disk_config.oj.active = "HOJ".into(); // 与 Registry 相同，registry_changed=false
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string(&disk_config).unwrap(),
+    )
+    .unwrap();
+
+    let err = reload_config_impl(&ctx).expect_err("全禁用配置必须拒绝重载");
+    assert!(
+        matches!(err, crate::core::error::AppError::Config(_)),
+        "应为 Config，实得 {:?}",
+        err
+    );
+
+    let memory = ctx.config.get();
+    memory.validate().expect("内存配置必须保持有效");
+    assert_eq!(memory, before, "内存不得被提交");
+    assert_eq!(ctx.provider_registry.current_id().as_str(), "HOJ");
+    assert!(events.try_recv().is_err(), "失败不得发布任何配置事件");
+
+    hoj.shutdown();
+    hydro.shutdown();
+}
+
+/// 评审三十六 P2：`commit + auto-save 同步` 必须在同一写事务内。
+///
+/// U1 保存 autoSave=false，同步读取旧值后在 hook 暂停；U2 保存 autoSave=true
+/// 并启动任务。若同步在锁外，U2 先完成后 U1 会用旧值 stop，最终磁盘开启而
+/// 管理器停止。锁内同步使 U1 持锁完成 stop 后 U2 才提交，最终任务按 U2 启动。
+#[tokio::test]
+async fn auto_save_sync_is_serialised_with_config_commit() {
+    use super::super::commands::config_cmd::{
+        apply_config_update, apply_config_update_with_sync_hook,
+    };
+    use crate::test_support::app_ctx::context_with_hoj;
+
+    let (ctx, _dir) = context_with_hoj("https://hoj.example").await;
+    let mut off = ctx.config.get();
+    off.editor.auto_save = false;
+    let mut on = ctx.config.get();
+    on.editor.auto_save = true;
+    on.editor.auto_save_interval_secs = 7;
+
+    let (start_tx, start_rx) = std::sync::mpsc::channel::<()>();
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<bool>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let mut after_sync_read = || {
+        // 同步已读取配置（autoSave=false），此刻若在锁外，U2 可以抢跑
+        start_tx.send(()).unwrap();
+        let held = held_rx.recv().unwrap();
+        if !held {
+            done_rx.recv().expect("无锁路径下 U2 应先完成");
+        }
+    };
+
+    let (r1, r2) = std::thread::scope(|scope| {
+        let ctx_ref = &ctx;
+        let handle = tokio::runtime::Handle::current();
+        let u2 = scope.spawn(move || {
+            start_rx.recv().unwrap();
+            // start_auto_save 内部 tokio::spawn 需要 runtime 上下文
+            let _enter = handle.enter();
+            let held = ctx_ref.config.write_txn_is_held();
+            held_tx.send(held).unwrap();
+            let result = apply_config_update(ctx_ref, on, false);
+            if !held {
+                let _ = done_tx.send(());
+            }
+            result
+        });
+        let r1 = apply_config_update_with_sync_hook(&ctx, off, false, &mut after_sync_read);
+        (r1, u2.join().unwrap())
+    });
+
+    r1.expect("U1 保存成功");
+    r2.expect("U2 保存成功");
+    let wm = ctx
+        .workspace_manager
+        .as_ref()
+        .expect("测试上下文应有工作区管理器");
+    assert_eq!(
+        wm.auto_save_interval_secs(),
+        Some(7),
+        "最终 auto-save 必须按最后落盘的配置运行"
+    );
+    let saved = ctx.config.get();
+    assert!(saved.editor.auto_save);
+    assert_eq!(saved.editor.auto_save_interval_secs, 7);
+}
+
+/// 评审三十六 P2：reload 的配置提交与 Registry 切换必须在同一访问栅栏内。
+#[tokio::test]
+async fn reload_holds_access_fence_across_commit_and_registry_switch() {
+    use super::super::commands::config_cmd::reload_config_impl_with_hook;
+    use crate::test_support::app_ctx::context_with_two_ojs;
+    use crate::test_support::loopback::LoopbackServer;
+
+    let hoj = LoopbackServer::start(vec![]).await;
+    let hydro = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
+    let mut disk_config = ctx.config.get();
+    disk_config.oj.active = "Hydro".into();
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string(&disk_config).unwrap(),
+    )
+    .unwrap();
+
+    let mut fenced_between_commit_and_switch = false;
+    let reloaded = reload_config_impl_with_hook(&ctx, || {
+        fenced_between_commit_and_switch = ctx.access.snapshot().is_none();
+    })
+    .expect("重载应成功");
+    assert_eq!(reloaded.oj.active, "Hydro");
+    assert!(
+        fenced_between_commit_and_switch,
+        "提交与 Registry 切换之间必须保持访问栅栏"
+    );
+    assert!(ctx.access.snapshot().is_some(), "重载结束后必须释放栅栏");
+
+    hoj.shutdown();
+    hydro.shutdown();
+}

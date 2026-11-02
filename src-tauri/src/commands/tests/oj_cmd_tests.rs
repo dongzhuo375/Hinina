@@ -259,3 +259,46 @@ async fn concurrent_switches_stay_consistent_across_registry_memory_and_disk() {
     hoj.shutdown();
     hydro.shutdown();
 }
+
+/// 评审三十六 P2：落盘失败时 `OjSwitched` 仍须发布（事实已发生），
+/// `ConfigChanged` 仍只在落盘成功后发布。
+#[tokio::test]
+async fn persist_failure_still_publishes_oj_switched_but_not_config_changed() {
+    let hoj = LoopbackServer::start(vec![]).await;
+    let hydro = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
+    let mut events = ctx.event_bus.subscribe();
+
+    // 构造必然失败的落盘：删掉 config.json 并占位成目录
+    std::fs::remove_file(dir.join("config.json")).unwrap();
+    std::fs::create_dir_all(dir.join("config.json")).unwrap();
+
+    let err = switch_oj_impl(&ctx, "Hydro")
+        .await
+        .expect_err("持久化失败必须上报");
+    assert!(
+        matches!(err, AppError::OjSwitchPersistFailed(_)),
+        "应为 OjSwitchPersistFailed，实得 {:?}",
+        err
+    );
+    assert_eq!(ctx.provider_registry.current_id().as_str(), "Hydro");
+    assert_eq!(ctx.config.get().oj.active, "Hydro", "内存已切换");
+
+    let mut switched = 0;
+    let mut config_changed = 0;
+    while let Ok(event) = events.try_recv() {
+        match event {
+            CoreEvent::OjSwitched { oj_id } => {
+                assert_eq!(oj_id, "Hydro");
+                switched += 1;
+            }
+            CoreEvent::ConfigChanged => config_changed += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(switched, 1, "落盘失败也必须发布 OjSwitched");
+    assert_eq!(config_changed, 0, "落盘失败不得发布 ConfigChanged");
+
+    hoj.shutdown();
+    hydro.shutdown();
+}

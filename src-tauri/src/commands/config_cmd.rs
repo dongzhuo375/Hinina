@@ -69,17 +69,50 @@ pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 /// 磁盘指向一个没有适配器的已启用实例（如 Ghost）时，校验失败返回错误，但
 /// 内存/磁盘已是 Ghost、Registry 仍是旧 OJ，且事件已发出。
 ///
-/// 现在 `load_normalized` 只读盘+归一（不提交），用**磁盘配置**补注册并做可用性
-/// 预检；失败时内存、Registry、事件全部保持原样。通过后提交内存/`ConfigChanged`，
-/// 再在同一事务内切 Registry/发 `OjSwitched`——不会与在途保存/切换交错。
+/// 现在 `load_normalized` 只读盘+归一（不提交），先做 **active 指向已启用实例**
+/// 的结构检查（与 `registry_changed` 无关，评审三十六 P2），再用磁盘配置补注册
+/// 并做可用性预检；失败时内存、Registry、事件全部保持原样。通过后用**外层访问
+/// 栅栏**覆盖「提交内存/ConfigChanged + 切 Registry/清 OJ 缓存/OjSwitched」整段，
+/// 插件读者不会看到「新配置 + 旧 Registry」的半提交态。
 pub(crate) fn reload_config_impl(ctx: &AppContext) -> AppResult<AppConfig> {
+    reload_config_impl_inner(ctx, || {})
+}
+
+/// 测试专用：在配置已提交、Registry 尚未切换的窗口内注入观察点。
+#[cfg(test)]
+pub(crate) fn reload_config_impl_with_hook<F>(
+    ctx: &AppContext,
+    after_commit: F,
+) -> AppResult<AppConfig>
+where
+    F: FnOnce(),
+{
+    reload_config_impl_inner(ctx, after_commit)
+}
+
+fn reload_config_impl_inner<F>(ctx: &AppContext, after_commit: F) -> AppResult<AppConfig>
+where
+    F: FnOnce(),
+{
     let _txn = ctx.config.lock_write_txn();
     let config = ctx.config.load_normalized()?;
     let active = config.oj.active.clone();
+    // 归一化在「零启用实例」时会回退默认 HOJ（即使 HOJ 被禁用/不存在），
+    // 因此不能把「active 已启用」当作归一化的保证；必须无条件检查。
+    if !config
+        .oj
+        .instances
+        .iter()
+        .any(|instance| instance.enabled && instance.id == active)
+    {
+        return Err(AppError::Config(format!(
+            "当前 OJ（{}）不在已启用的实例列表中",
+            active
+        )));
+    }
     let registry_changed = ctx.provider_registry.current_id().as_str() != active;
     if registry_changed {
-        // 用磁盘配置预检（此时尚未提交内存）：归一化保证 active 指向已启用实例，
-        // 但该实例可能没有适配器工厂；补注册失败即拒绝，不留半提交状态。
+        // 用磁盘配置预检（此时尚未提交内存）：目标可能没有适配器工厂。
         ctx.ensure_oj_registered_from(&config, &active);
         if !ctx
             .provider_registry
@@ -93,8 +126,12 @@ pub(crate) fn reload_config_impl(ctx: &AppContext) -> AppResult<AppConfig> {
         }
     }
 
+    // 外层访问栅栏：配置提交与 Registry 同步是一个访问变更，读者不得观察到
+    // 「新配置 + 旧 Registry」的混合态（评审三十六 P2）。
+    let _transition = ctx.access.begin();
     // 预检通过：提交内存并发布 ConfigChanged
     ctx.config.commit_reloaded(&config);
+    after_commit();
     if registry_changed {
         switch_scope(
             &ctx.access,
@@ -145,7 +182,7 @@ pub async fn update_config(
     config: AppConfig,
     // 维护者层锁定（普通启动）：锁定字段取旧值、不参与校验与钳制
     maintainer_locked: Option<bool>,
-) -> AppResult<()> {
+) -> AppResult<AppConfig> {
     info!("Command: 更新配置");
     apply_config_update(&ctx, config, maintainer_locked.unwrap_or(false))
 }
@@ -160,27 +197,35 @@ pub(crate) fn apply_config_update(
     ctx: &AppContext,
     config: AppConfig,
     maintainer_locked: bool,
-) -> AppResult<()> {
-    apply_config_update_with_hook(ctx, config, maintainer_locked, &mut || {})
+) -> AppResult<AppConfig> {
+    apply_config_update_inner(
+        ctx,
+        config,
+        maintainer_locked,
+        &mut || {},
+        &mut crate::commands::workspace_cmd::sync_auto_save_from_context,
+    )
 }
 
-/// `apply_config_update` 的真实实现；`before_validate` 只供测试注入强制交错。
+/// `apply_config_update` 的真实实现；`before_validate`/`sync` 只供测试注入。
 ///
-/// **整个「读最新活 → 合并/锁定 → 固定 active → 最终校验 → 整体替换」都在
-/// `ConfigService` 的写事务锁内完成**（评审三十三 #2）：旧实现先用载荷里的
-/// 旧 active 校验、再在写锁内换成最新 active 后直接落盘——若交错切换把 active
-/// 指向载荷中已删除/禁用的实例，就会保存一份 `AppConfig::validate()` 拒绝的配置。
-/// 校验必须看到**最终候选**，并与 `switch_oj` 共用同一把锁。
-pub(crate) fn apply_config_update_with_hook(
+/// **整个「读最新活 → 合并/锁定 → 固定 active → 最终校验 → 整体替换 → 同步
+/// auto-save」都在 `ConfigService` 的写事务锁内完成**（评审三十三 #2、
+/// 三十六 P2）：同步若在锁外，U1 保存 `autoSave=false` 与 U2 保存 `true`
+/// 可以交错成「磁盘开启、管理器停止」（或反向）；把同步纳入同一串行域后，
+/// 最后一次写入与它触发的启停严格同序。
+pub(crate) fn apply_config_update_inner(
     ctx: &AppContext,
     mut config: AppConfig,
     maintainer_locked: bool,
     before_validate: &mut dyn FnMut(),
-) -> AppResult<()> {
-    ctx.config.update_checked(|cfg| {
-        // `oj.active` **只由 switch_oj 改写**（评审二十九 #1）：调用方带来的 active
-        // 可能是保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去。
-        // 这里在写锁闭包内取**锁内最新值**，两种模式一律以它为准。
+    sync: &mut dyn FnMut(&AppContext),
+) -> AppResult<AppConfig> {
+    let _txn = ctx.config.lock_write_txn();
+    // `oj.active` **只由 switch_oj 改写**（评审二十九 #1）：调用方带来的 active
+    // 可能是保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去。
+    // 这里在写锁闭包内取**锁内最新值**，两种模式一律以它为准。
+    let saved = ctx.config.update_locked(|cfg| {
         let previous = cfg.clone();
         config.oj.active = previous.oj.active.clone();
         // 测试注入点：此刻写事务已持有，并发的 switch_oj 必须被挡在事务外
@@ -205,7 +250,40 @@ pub(crate) fn apply_config_update_with_hook(
         Ok(())
     })?;
 
-    // 显式同步（幂等）：间隔未变时不重启计时器，关掉后也能停
-    crate::commands::workspace_cmd::sync_auto_save_from_context(ctx);
-    Ok(())
+    // 同步仍在事务内：与本次提交严格同序
+    sync(ctx);
+    Ok(saved)
+}
+
+/// 测试专用：保留 `before_validate` 注入点（并发保存/切换回归）。
+#[cfg(test)]
+pub(crate) fn apply_config_update_with_hook(
+    ctx: &AppContext,
+    config: AppConfig,
+    maintainer_locked: bool,
+    before_validate: &mut dyn FnMut(),
+) -> AppResult<AppConfig> {
+    apply_config_update_inner(
+        ctx,
+        config,
+        maintainer_locked,
+        before_validate,
+        &mut crate::commands::workspace_cmd::sync_auto_save_from_context,
+    )
+}
+
+/// 测试专用：在 auto-save 同步**读取配置之后、执行启停之前**注入暂停点，
+/// 用于确定性地复现「旧快照的同步反向覆盖新配置」（评审三十六 P2）。
+#[cfg(test)]
+pub(crate) fn apply_config_update_with_sync_hook(
+    ctx: &AppContext,
+    config: AppConfig,
+    maintainer_locked: bool,
+    after_sync_read: &mut dyn FnMut(),
+) -> AppResult<AppConfig> {
+    apply_config_update_inner(ctx, config, maintainer_locked, &mut || {}, &mut |ctx| {
+        crate::commands::workspace_cmd::sync_auto_save_from_context_with_hook(ctx, || {
+            after_sync_read()
+        });
+    })
 }

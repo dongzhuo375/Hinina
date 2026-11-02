@@ -102,10 +102,28 @@ pub fn sync_auto_save_with_config(
 /// 「判空 + 取 editor 配置」这段样板收敛在一处，避免各命令各写一遍而漂移。
 /// `WorkspaceManager` 未初始化时静默跳过（与 `load_workspace` 的降级一致）。
 pub fn sync_auto_save_from_context(ctx: &AppContext) {
+    sync_auto_save_from_context_with(ctx, || {})
+}
+
+/// 测试专用：在**读取配置之后、执行启停之前**注入观察点。
+#[cfg(test)]
+pub(crate) fn sync_auto_save_from_context_with_hook<F>(ctx: &AppContext, after_read: F)
+where
+    F: FnOnce(),
+{
+    sync_auto_save_from_context_with(ctx, after_read)
+}
+
+fn sync_auto_save_from_context_with<F>(ctx: &AppContext, after_read: F)
+where
+    F: FnOnce(),
+{
     let Some(wm) = ctx.workspace_manager.as_ref() else {
         return;
     };
-    sync_auto_save_with_config(&ctx.config.get().editor, wm);
+    let editor = ctx.config.get().editor;
+    after_read();
+    sync_auto_save_with_config(&editor, wm);
 }
 
 /// 持久化当前工作区到磁盘（脏时全量写入文件 + 元数据）。

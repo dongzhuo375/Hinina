@@ -146,14 +146,19 @@ where
             // 而不是回滚 UI（评审二十四 #1）
             AppError::OjSwitchPersistFailed(e.to_string())
         });
+
+    // Registry 与内存都已切换——`OjSwitched` 是**已发生的事实**，无论落盘
+    // 成败都要发布，否则插件宿主/审计观察者不知道切换发生（评审三十六 P2）。
+    // `ConfigChanged` 仍只由 update_locked 在落盘成功后发布。
+    ctx.event_bus.publish(CoreEvent::OjSwitched {
+        oj_id: id.to_string(),
+    });
+
+    // 持久化失败：事件已发，返回专用错误
     save_result?;
     // 测试注入点：**持久化已完成后**执行（评审三十五）。并发回归用它在旧实现
     // 下等第二个切换真正落盘，而不是在落盘前发信号造成假绿。
     after_persist();
-
-    ctx.event_bus.publish(CoreEvent::OjSwitched {
-        oj_id: id.to_string(),
-    });
 
     Ok(())
 }
