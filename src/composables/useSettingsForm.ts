@@ -485,6 +485,17 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     switchNotice.value = PERSIST_FAILED_NOTICE
   }
 
+  /// 普通保存成功后解除“重启可能回退”警告（评审三十六）：保存把包含当前
+  /// active 的完整配置写入了磁盘，持久化失败的旧事实已被覆盖。仅当共享结果
+  /// 仍是 persist-failed 且**保存的 active 正是该目标**时解除；随后成功切换
+  /// 也会覆盖结果，但普通保存不经过 `performSwitch`。
+  function resolvePersistedSwitchWarning(persistedActiveId: string): void {
+    const last = lastEffectiveSwitch
+    if (!last || last.outcome !== 'persist-failed' || last.target !== persistedActiveId) return
+    lastEffectiveSwitch = { ...last, outcome: 'success' }
+    if (switchNotice.value === PERSIST_FAILED_NOTICE) switchNotice.value = null
+  }
+
   async function load(): Promise<void> {
     loading.value = true
     loadError.value = null
@@ -568,6 +579,9 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         }
         draft.layout.splitRatio = submitted.splitRatio
       }, { maintainerLocked: lockAll })
+      // 保存已把当前 active 落盘：若此前是「切换生效但持久化失败」，回退风险解除。
+      // 即便控制器已卸载也要更新共享结果（晚挂载者据此不再提示）。
+      resolvePersistedSwitchWarning(saved.oj.active)
       // 已卸载的旧控制器不再回写表单（评审三十三 #4）；自动切换仍执行——
       // 那是保存新建实例的既定后果，且切换本身与视图生命周期无关
       if (!disposed) {

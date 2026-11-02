@@ -850,4 +850,39 @@ describe('useSettingsForm', () => {
     expect(formC.switchNotice.value).toBeNull()
     scopeC.stop()
   })
+
+  it('评审三十六：persist-failed 后普通保存成功解除警告，晚挂载不再提示', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+
+    // 切换已生效但落盘失败：Registry/内存=Hydro，磁盘仍是 HOJ
+    mocks.switchOj.mockImplementationOnce(
+      (id: string) => new Promise<void>((_resolve, reject) => {
+        currentConfig.oj.active = id
+        reject(makeIpcError('switch_oj', {
+          OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满',
+        }))
+      }),
+    )
+    settings.form.activeOj = 'Hydro'
+    await settings.onSwitchOj()
+    expect(settings.switchNotice.value).toContain('配置保存失败')
+
+    // 普通保存把包含 active=Hydro 的完整配置写入磁盘：回退风险解除
+    settings.form.fontSize = '16'
+    await settings.save()
+    expect(currentConfig.oj.active).toBe('Hydro')
+    expect(currentConfig.editor.fontSize).toBe(16)
+    expect(settings.switchNotice.value).toBeNull()
+
+    // 晚挂载控制器：共享结果已视为解决，不再提示
+    scope.stop()
+    const scopeB = effectScope()
+    const formB = scopeB.run(() => useSettingsForm())!
+    await formB.load()
+    expect(formB.form.activeOj).toBe('Hydro')
+    expect(formB.switchNotice.value).toBeNull()
+    scopeB.stop()
+  })
 })
