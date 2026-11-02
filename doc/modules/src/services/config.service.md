@@ -57,9 +57,10 @@ getConfig()
                  ├─ 成功 → 写入缓存
                  └─ 失败 → 清空缓存（下次调用重试）并抛出
 
-updateConfig(mutate)
+updateConfig(mutate, options)
   getConfig() → structuredClone 副本 → mutate(draft)
-  → bridge.updateConfig(draft)（整体替换）
+  → maintainerLocked = options.maintainerLocked ?? !systemService.isKeyed()
+  → bridge.updateConfig(draft, maintainerLocked)（整体替换）
   → finally invalidate()（成败都失效，防缓存与磁盘漂移）
 
 updateEditorPrefs(patch)
