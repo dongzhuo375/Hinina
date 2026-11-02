@@ -14,12 +14,15 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
 import { usePluginStore } from '@/stores/pluginStore'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('plugin-notification')
 const store = usePluginStore()
 let unlisten: (() => void) | undefined
 let disposed = false
 onMounted(() => {
   void store.subscribe().then(stop => { if (disposed) stop(); else unlisten = stop })
-    .catch(() => console.error('插件通知订阅失败'))
+    .catch((e) => log.error('插件通知订阅失败:', e))
 })
 onUnmounted(() => { disposed = true; unlisten?.() })
 </script>
