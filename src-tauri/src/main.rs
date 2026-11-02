@@ -35,7 +35,46 @@ use hinina_lib::core::event::core_event::CoreEvent;
 use hinina_lib::core::event::core_event_bus::CoreEventBus;
 use hinina_lib::infra::audit::spawn_audit_consumer;
 use hinina_lib::infra::data_dir::{self, DataDirPlan, DataDirSource, MigrateOutcome};
+use hinina_lib::infra::plugin_diagnostics;
 use hinina_lib::infra::startup_dialog;
+use hinina_lib::plugin::{
+    api::notification::{validate_message, PluginNotificationLevel},
+    api::{PluginError, PluginResult},
+    execution_api::NotificationOutput,
+};
+
+/// 插件通知的前端出口（组合根唯一的前端通知路径）。
+///
+/// 原住在 `infra::plugin_notification` —— 那让它成为 infra 层**唯一的**框架
+/// （tauri）依赖，与「infra 传输无关」的红线相抵（分层审计 F2）。端口
+/// `NotificationOutput`（`plugin::execution_api`）本身是干净的，脏的只是
+/// 实现的位置：本类型只被 main.rs 的 `set_output` 使用，理应与前端事件桥
+/// 同住组合根。宿主级通知失败经 `plugin_diagnostics::failure` 走统一形状。
+struct TauriPluginNotifications(tauri::AppHandle);
+
+impl NotificationOutput for TauriPluginNotifications {
+    fn emit(
+        &self,
+        plugin_id: &str,
+        level: PluginNotificationLevel,
+        message: &str,
+    ) -> PluginResult<()> {
+        validate_message(message)?;
+        if self.0.webview_windows().is_empty() {
+            plugin_diagnostics::failure(Some(plugin_id), "notification.emit", "no_window");
+            return Err(PluginError::Unavailable);
+        }
+        self.0
+            .emit(
+                "plugin-notification",
+                serde_json::json!({"pluginId":plugin_id,"level":level,"message":message}),
+            )
+            .map_err(|_| {
+                plugin_diagnostics::failure(Some(plugin_id), "notification.emit", "emit_failed");
+                PluginError::Unavailable
+            })
+    }
+}
 
 /// 工作区落盘事件的前端通道名（与 `src/bridge/workspace.bridge.ts` 的监听一致）。
 const WORKSPACE_SAVED_EVENT: &str = "workspace-saved";
@@ -268,11 +307,10 @@ fn main() {
             // ② 迁移结果与数据目录来源必须**在日志就绪后**立刻汇报
             report_data_dir(&plan, &migration);
 
-            ctx.plugin_manager.set_output(std::sync::Arc::new(
-                hinina_lib::infra::plugin_notification::TauriPluginNotifications(
+            ctx.plugin_manager
+                .set_output(std::sync::Arc::new(TauriPluginNotifications(
                     app.handle().clone(),
-                ),
-            ));
+                )));
             let plugins = ctx.plugin_manager.clone();
             app.manage(ctx);
             // ③ 消费者在 AppContext 就绪后启动：它们只观察事实，不参与任何业务动作

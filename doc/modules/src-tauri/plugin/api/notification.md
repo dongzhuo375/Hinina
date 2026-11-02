@@ -15,7 +15,7 @@
 
 ## 被依赖
 - `plugin::execution_api`（实现：`notification` 权限检查 + 10/min 预算 + `NotificationOutput` 输出）
-- `infra::plugin_notification`、前端 Bridge → Service → Store → `PluginNotifications`
+- 组合根 `main.rs` 的 `TauriPluginNotifications`（原 `infra::plugin_notification`，上移以保 infra 零框架依赖）、前端 Bridge → Service → Store → `PluginNotifications`
 
 ## 逻辑流程
 - 需要 `notification` 权限；每插件 10 条/分钟；Tauri 输出不存在则 `unavailable`

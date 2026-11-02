@@ -14,7 +14,7 @@ fn safe_id(id: Option<&str>) -> &str {
         None => "<host>",
     }
 }
-pub(crate) fn failure(id: Option<&str>, operation: &'static str, category: &'static str) {
+pub fn failure(id: Option<&str>, operation: &'static str, category: &'static str) {
     tracing::warn!(plugin_id=?safe_id(id), runtime="js", operation, category, "Plugin infrastructure failure");
 }
 pub(crate) fn io(id: Option<&str>, operation: &'static str, error: &std::io::Error) {

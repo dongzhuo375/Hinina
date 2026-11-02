@@ -24,6 +24,7 @@
   - 其余事件（OJ 切换、配置变更、提交创建/判定……）**不桥接**：前端都能从 IPC 返回值直接得到，转发只会制造「前端靠事件拿状态」的错误预期 —— 刷新触发之外的一切真实状态仍必须经 IPC 查询（评测状态、榜单、公告内容、工作区真值）
 - `fn emit_or_warn(app, channel, payload, what)` — `emit` 失败只 `warn!`：前端事件是刷新触发，丢了不影响正确性（轮询会补齐）
 - `fn report_data_dir(plan, migration)` — 汇报数据目录方案与迁移结果（在日志就绪后调用），见「逻辑流程」
+- `struct TauriPluginNotifications(AppHandle)` + `impl NotificationOutput` — **插件通知的前端出口**（原住 `infra::plugin_notification`，因成为 infra 层唯一框架依赖而上移组合根，与前端事件桥同址——分层审计 F2）。`emit` 做消息校验（`validate_message`）→ 无 webview 窗口或 `emit` 失败时经 `plugin_diagnostics::failure` 记诊断并返回 `PluginError::Unavailable`；`.setup()` 里经 `plugin_manager.set_output` 注入
 - **已删除的三个安装函数**：`install_workspace_event_bridge` / `install_announcement_event_bridge`（旧 `EventBus` 的同步订阅桥）与 `install_auto_save_config_sync`（订阅 `SystemEvent::ConfigReloaded` 同步 auto-save）—— 前两者被单个 `spawn_event_consumers` + 前端桥取代；后者改为命令层**显式**调用 `commands::workspace_cmd::sync_auto_save_from_context`（见 `commands/config_cmd.md`）
 
 ## 直接依赖
@@ -38,7 +39,8 @@
 - `hinina_lib::infra::panic_report::install`（panic 钩子，见 `infra/panic_report.md`）
 - `hinina_lib::infra::single_instance::init`（单实例约束，见 `infra/single_instance.md`）
 - `hinina_lib::infra::startup_dialog::{arm, mark_started}`（启动期错误框，见 `infra/startup_dialog.md`）
-- `hinina_lib::infra::plugin_notification::TauriPluginNotifications`（插件通知的前端出口）
+- `hinina_lib::infra::plugin_diagnostics::failure`（插件通知失败诊断，统一形状）
+- `hinina_lib::plugin::api::{PluginError, PluginResult}` / `plugin::api::notification::{validate_message, PluginNotificationLevel}` / `plugin::execution_api::NotificationOutput`（通知出口端口）
 - `tauri::{Emitter, Manager}`（`app.state::<AppContext>()` + `handle.emit`）
 - `serde_json`（事件载荷）
 - `tracing`（下发失败告警）
