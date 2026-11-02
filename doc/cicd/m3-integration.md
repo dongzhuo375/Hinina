@@ -148,6 +148,8 @@
 
 | 发现 | 核验与处置 |
 |---|---|
+| stress-repeat 过滤串随 #87 扩充（2026-11-03，`fix/audit-leftovers`） | 新增 `serialised_with_config`（命中 2：save/reload/load_workspace 与配置提交的串行化回归）与 `access_fence`（命中 1：跨提交+注册表切换的访问栅栏回归）——#87 的写事务并发回归（握手式 try_lock 确定性时序）是最需要抖动验证的新并发面；N=0 防假绿守卫对新增过滤串同样生效（本地预演命中 2/1 > 0） |
+
 | stress-repeat 过滤 0 匹配时 `cargo test` 退出码为 0 → 阻塞 job 假绿 | **实测确认**（`cargo test --lib zzz_nonexistent` 退出码 0）。每轮改为解析 `test result: ok. N passed` 的 N，N=0 即 `::error` + 失败；本地用同一函数验证：空过滤串返回 1、`concurrent` 返回 7 |
 | Swatinem/rust-cache 未覆盖 `src-tauri/target`（根无 Cargo.toml，探测失败） | 属实（action 默认 `workspaces: ". -> target"`；macOS 日志注解即探测失败）。5 处 rust-cache 全部加 `workspaces: "src-tauri -> target"`（integration build/stress/coverage + ci rust-lint/rust-test）；runner 实证见下 |
 | fake 保真度：limits 忽略 displayIds 并默认兜底；submit 不校验 displayId↔problemId/语言；工作区允许删活动文件、update 不设 activeFile/isDirty、虚构初始代码 | 全部修复：limits 只返回请求过且已知的 id；submit 校验展示题号、真实 pid、语言列表；`update_workspace_file` 与 Rust `update_file` 一致（写内容 + 设 activeFile + 置 dirty）；`delete_workspace_file` 与 Rust `delete_file` 一致（拒绝活动文件与 workspace.json）；新建工作区无预置文件（与 `Workspace::new` 一致），workspace.spec 相应改为先输入再断言 |
