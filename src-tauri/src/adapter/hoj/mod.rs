@@ -102,22 +102,21 @@ impl HOJAdapter {
     }
 
     /// 获取当前存储的 token。
+    ///
+    /// 锁中毒时取回内部值继续（全仓 `into_inner()` 惯例）—— 中毒只说明曾有
+    /// 持有者 panic，静默返回 None 会让认证态看起来「已登出」而非「锁损坏」。
     fn get_token(&self) -> Option<String> {
-        self.token.read().ok()?.clone()
+        self.token.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// 存储 token。
+    /// 存储 token（中毒时取回内部值继续写，静默丢弃会让轮换后的凭证丢失）。
     fn set_token(&self, token: String) {
-        if let Ok(mut t) = self.token.write() {
-            *t = Some(token);
-        }
+        *self.token.write().unwrap_or_else(|e| e.into_inner()) = Some(token);
     }
 
     /// 清除 token。
     fn clear_token(&self) {
-        if let Ok(mut t) = self.token.write() {
-            *t = None;
-        }
+        *self.token.write().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// HOJ 认证头组装（infra 不感知认证方式，由本层负责）。

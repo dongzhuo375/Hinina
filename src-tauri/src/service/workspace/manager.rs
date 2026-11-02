@@ -653,8 +653,14 @@ impl WorkspaceManager {
     }
 
     /// 获取当前活动工作区。
+    ///
+    /// 锁中毒时取回内部值继续（与全仓 `into_inner()` 惯例一致）：中毒只说明
+    /// 曾有持有者 panic，「无工作区」与「锁损坏」返回同值会掩盖后者。
     pub fn current(&self) -> Option<Workspace> {
-        self.current.read().ok()?.clone()
+        self.current
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// 按 `contest_id` + `problem_id` 查找或创建工作区（修复 P36）。

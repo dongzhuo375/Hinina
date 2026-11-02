@@ -234,24 +234,25 @@ impl HydroAdapter {
 
     // ── 身份状态 ──
 
+    /// 锁中毒时取回内部值继续（全仓 `into_inner()` 惯例）—— 中毒只说明曾有
+    /// 持有者 panic，静默返回 None / 丢弃写入会把「锁损坏」伪装成「已登出」。
     fn session(&self) -> Option<String> {
-        self.session.read().ok()?.clone()
+        self.session
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn set_session(&self, sid: Option<String>) {
-        if let Ok(mut guard) = self.session.write() {
-            *guard = sid;
-        }
+        *self.session.write().unwrap_or_else(|e| e.into_inner()) = sid;
     }
 
     fn cached_user(&self) -> Option<HydroUser> {
-        self.user.read().ok()?.clone()
+        self.user.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn set_user(&self, user: Option<HydroUser>) {
-        if let Ok(mut guard) = self.user.write() {
-            *guard = user;
-        }
+        *self.user.write().unwrap_or_else(|e| e.into_inner()) = user;
     }
 
     /// 清空内存身份（登出 / 服务端判定会话失效）
