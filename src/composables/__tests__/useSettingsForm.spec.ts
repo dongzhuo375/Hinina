@@ -3,6 +3,7 @@ import { effectScope, ref } from 'vue'
 import type { EffectScope } from 'vue'
 import { IpcError, parseAppError } from '@/bridge'
 import { useSettingsForm } from '@/composables/useSettingsForm'
+import { configService } from '@/services/config.service'
 import type { AppConfig } from '@/types/config'
 
 /// 以真实 AppError 载荷构造 IpcError（与 ipcInvoke 的错误归一化同源）
@@ -573,5 +574,231 @@ describe('useSettingsForm', () => {
     expect(settings.switchError.value).toBe('切换失败')
     expect(mocks.resetSessionForOjSwitch).not.toHaveBeenCalled()
     expect(mocks.routerReplace).not.toHaveBeenCalled()
+  })
+
+  it('评审三十四 #1：foreign reload 仍处于共享 busy，完成后才解除', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+
+    // 新控制器在 A 的切换期间已经挂载（观察者已注册）
+    const scopeB = effectScope()
+    const formB = scopeB.run(() => useSettingsForm())!
+    await formB.load()
+    expect(formB.form.activeOj).toBe('HOJ')
+
+    let releaseSwitch!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      (id: string) => new Promise<void>((resolve) => {
+        releaseSwitch = () => {
+          currentConfig.oj.active = id
+          resolve()
+        }
+      }),
+    )
+    settings.form.activeOj = 'Hydro'
+    const pendingA = settings.onSwitchOj()
+    await Promise.resolve()
+
+    // A 卸载；B 继续挂载，A 的事务完成时会在 finally 里通知 B
+    scope.stop()
+    let releaseAReload!: () => void
+    mocks.getConfig.mockImplementationOnce(
+      () => new Promise<AppConfig>((resolve) => {
+        releaseAReload = () => resolve(structuredClone(currentConfig))
+      }),
+    )
+    let releaseBReload!: () => void
+    let aDone = false
+    void pendingA.then(() => { aDone = true })
+
+    releaseSwitch()
+    await vi.waitFor(() => expect(releaseAReload).toBeTypeOf('function'))
+    // A（已卸载）自己的重读放行后，下一个 getConfig 才是 B 的 foreign reload
+    mocks.getConfig.mockImplementationOnce(
+      () => new Promise<AppConfig>((resolve) => {
+        releaseBReload = () => resolve(structuredClone(currentConfig))
+      }),
+    )
+    releaseAReload()
+    await vi.waitFor(() => expect(releaseBReload).toBeTypeOf('function'))
+
+    // B 的第二次读仍在途：A 的事务不得结束、共享 busy 不得解除
+    expect(aDone).toBe(false)
+    expect(formB.switching.value).toBe(true)
+
+    releaseBReload()
+    await pendingA
+    expect(formB.form.activeOj).toBe('Hydro')
+    expect(formB.switching.value).toBe(false)
+    scopeB.stop()
+  })
+
+  it('评审三十四 #1：foreign reload 失败时已发生新切换，不回写旧目标', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push(
+      { id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} },
+      { id: 'C', baseUrl: 'https://c.example', enabled: true, options: {} },
+    )
+    await settings.load()
+    const scopeB = effectScope()
+    const formB = scopeB.run(() => useSettingsForm())!
+    await formB.load()
+
+    let releaseSwitch!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      (id: string) => new Promise<void>((resolve) => {
+        releaseSwitch = () => {
+          currentConfig.oj.active = id
+          resolve()
+        }
+      }),
+    )
+    settings.form.activeOj = 'Hydro'
+    const pendingA = settings.onSwitchOj()
+    await Promise.resolve()
+    scope.stop()
+
+    let releaseAReload!: () => void
+    mocks.getConfig.mockImplementationOnce(
+      () => new Promise<AppConfig>((resolve) => {
+        releaseAReload = () => resolve(structuredClone(currentConfig))
+      }),
+    )
+    let rejectBReload!: (e: Error) => void
+    releaseSwitch()
+    await vi.waitFor(() => expect(releaseAReload).toBeTypeOf('function'))
+    mocks.getConfig.mockImplementationOnce(
+      () => new Promise<AppConfig>((_resolve, reject) => {
+        rejectBReload = reject
+      }),
+    )
+    releaseAReload()
+    await vi.waitFor(() => expect(rejectBReload).toBeTypeOf('function'))
+
+    // B 的 foreign reload 读取期间，另一条路径完成了切到 C（直接走服务层）
+    await configService.switchOj('C')
+    rejectBReload(new Error('读取配置失败'))
+    await pendingA
+
+    // 旧目标 Hydro 的失败对齐不得覆盖新状态
+    expect(formB.form.activeOj).not.toBe('Hydro')
+    expect(formB.switchNotice.value).toBeNull()
+    scopeB.stop()
+  })
+
+  it('评审三十四 #3：切换期间新挂载的控制器加载后仍保留持久化失败警告', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+
+    let rejectSwitch!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      (id: string) => new Promise<void>((_resolve, reject) => {
+        rejectSwitch = () => {
+          currentConfig.oj.active = id
+          reject(makeIpcError('switch_oj', {
+            OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满',
+          }))
+        }
+      }),
+    )
+    settings.form.activeOj = 'Hydro'
+    const pendingA = settings.onSwitchOj()
+    await Promise.resolve()
+    scope.stop() // 旧控制器卸载
+
+    // 新控制器在切换在途时挂载（load 等待事务落地后读取）
+    const scopeB = effectScope()
+    const formB = scopeB.run(() => useSettingsForm())!
+    const loadingB = formB.load()
+
+    rejectSwitch()
+    await pendingA
+    await loadingB
+
+    // 载入后（会清空普通提示）仍保留持久化失败警告
+    expect(formB.form.activeOj).toBe('Hydro')
+    expect(formB.switchNotice.value).toContain('配置保存失败')
+    expect(formB.switchNotice.value).toContain('重启后可能回退')
+    scopeB.stop()
+  })
+
+  it('评审三十四 #2：旧控制器保存在途时新控制器的切换被忽略', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+
+    let releaseSave!: () => void
+    mocks.updateConfig.mockImplementationOnce(
+      (mutator: (draft: AppConfig) => void) => new Promise<AppConfig>((resolve) => {
+        releaseSave = () => {
+          const draft = structuredClone(currentConfig)
+          mutator(draft)
+          currentConfig = draft
+          resolve(draft)
+        }
+      }),
+    )
+    settings.form.activeOj = 'C'
+    settings.form.ojUrl = 'https://c.example'
+    const savingA = settings.save()
+    await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledTimes(1))
+
+    // A 卸载，B 挂载：共享 saving 使 B 的 load 等待保存整段完成
+    scope.stop()
+    const scopeB = effectScope()
+    const formB = scopeB.run(() => useSettingsForm())!
+    const loadingB = formB.load()
+    expect(formB.saving.value).toBe(true)
+
+    // 新控制器的显式切换被共享 saving 拦下，不会发出第二个 switch
+    formB.form.activeOj = 'Hydro'
+    await formB.onSwitchOj()
+    expect(mocks.switchOj).not.toHaveBeenCalled()
+
+    releaseSave()
+    await savingA
+    await loadingB
+
+    // 只有旧保存的自动切换（C），没有较新的 Hydro 选择被覆盖
+    expect(mocks.switchOj).toHaveBeenCalledTimes(1)
+    expect(mocks.switchOj).toHaveBeenCalledWith('C')
+    expect(formB.form.activeOj).toBe('C')
+    expect(formB.saving.value).toBe(false)
+    scopeB.stop()
+  })
+
+  it('评审三十四 #3：跨控制器保留「已生效但持久化失败」警告', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    const scopeB = effectScope()
+    const formB = scopeB.run(() => useSettingsForm())!
+    await formB.load()
+
+    let rejectSwitch!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      (id: string) => new Promise<void>((_resolve, reject) => {
+        rejectSwitch = () => {
+          currentConfig.oj.active = id
+          reject(makeIpcError('switch_oj', {
+            OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满',
+          }))
+        }
+      }),
+    )
+    settings.form.activeOj = 'Hydro'
+    const pendingA = settings.onSwitchOj()
+    await Promise.resolve()
+    scope.stop() // 旧控制器卸载后无法设置警告，必须由共享事务结果传给 B
+
+    rejectSwitch()
+    await pendingA
+
+    expect(formB.form.activeOj).toBe('Hydro')
+    expect(formB.switchNotice.value).toContain('配置保存失败')
+    expect(formB.switchNotice.value).toContain('重启后可能回退')
+    scopeB.stop()
   })
 })

@@ -75,10 +75,41 @@ function copyOjDomain(from: SettingsForm, to: SettingsForm): void {
 /// 单飞互相看不见。
 const sharedSwitching = ref(false)
 
+/// **跨控制器的保存状态**（评审三十四 #2）：`save → 新建实例自动切换` 是**一个**
+/// 用户操作，必须整段互斥。只共享 `switching` 时，旧控制器在途的保存仍可在新
+/// 控制器完成显式切换之后执行自动切换，用较旧的意图覆盖较新的选择。
+const sharedSaving = ref(false)
+
+/// 保存代际：开始/结束各 +1。新控制器读取配置时用它检测「读取期间有保存开始
+/// 或结束」，避免在同步检查与异步读取之间漏掉一次保存（评审三十四 #2 同类窗口）。
+let saveEpoch = 0
+
+/// 等待在途保存落地（新控制器挂载时用：先等旧控制器把配置写完，再读取）
+const saveWaiters: Array<() => void> = []
+function whenSaveSettled(): Promise<void> {
+  if (!sharedSaving.value) return Promise.resolve()
+  return new Promise((resolve) => saveWaiters.push(resolve))
+}
+
+/// 切换结果：成功 / **已生效但持久化失败**（评审三十四 #3）。后者必须跨控制器
+/// 传递——旧控制器卸载后无法设置警告，新控制器重读后仍要提示重启可能回退。
+type SwitchOutcome = 'success' | 'persist-failed'
+
 /// 切换完成通知：让**仍挂载的其它控制器**重读 OJ 域（发起者自己已处理）。
-type SwitchObserver = (target: string, initiator: number) => void
+/// 返回 Promise：发起者会 await 全部观察者，期间共享 busy 不解除（评审三十四 #1）。
+type SwitchObserver = (
+  target: string,
+  initiator: number,
+  outcome: SwitchOutcome,
+  epoch: number,
+) => Promise<void> | void
 const switchObservers = new Set<SwitchObserver>()
 let controllerSeq = 0
+
+const PERSIST_FAILED_NOTICE =
+  '切换已生效，但配置保存失败（重启后可能回退）；连接与比赛相关的修改已重置，其余未保存修改保留'
+const FOREIGN_RELOAD_FAILED_NOTICE =
+  'OJ 已在另一处完成切换；配置刷新失败，请重新打开设置页确认'
 
 export const SETTINGS_INPUT =
   'w-full rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] transition-colors placeholder-[var(--text-muted)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:bg-[var(--bg-sidebar)] disabled:text-[var(--text-muted)]'
@@ -121,7 +152,10 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
   const dirty = computed(() => baseline.value !== '' && snapshot() !== baseline.value)
 
-  const saving = ref(false)
+  /// 保存进行中（跨控制器共享，评审三十四 #2）：覆盖 `save → 自动切换` 整段，
+  /// 新挂载的控制器在旧控制器保存完成前不得发起切换/保存（否则旧意图可覆盖
+  /// 用户较新的选择）。
+  const saving = sharedSaving
   const saveError = ref<string | null>(null)
   const { value: showSaved, show: markSaved, clear: clearSaved } = useTransientValue(false, 3_000)
 
@@ -157,9 +191,9 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   /// 在途 Promise 等待事务落地后重读。
   const controllerId = ++controllerSeq
   let disposed = false
-  const observer: SwitchObserver = (target, initiator) => {
+  const observer: SwitchObserver = (target, initiator, outcome, epoch) => {
     if (initiator === controllerId) return
-    void adoptForeignSwitch(target)
+    return adoptForeignSwitch(target, outcome, epoch)
   }
   if (getCurrentScope()) {
     onScopeDispose(() => {
@@ -214,14 +248,31 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
 
   /// 另一个控制器完成了切换（本实例仍挂载）：OJ 域以磁盘为准重读。
   /// 刷新失败时至少把 active/url 对齐到已知目标，不让界面停在旧 OJ。
-  async function adoptForeignSwitch(target: string): Promise<void> {
+  ///
+  /// **代际检查**（评审三十四 #1）：`epoch` 是发起切换落地时的切换代际；若重读
+  /// 期间又发生了切换，旧结果（尤其是旧目标的失败对齐）不得覆盖新状态——新
+  /// 切换自己的通知会负责对齐与提示。
+  async function adoptForeignSwitch(
+    target: string,
+    outcome: SwitchOutcome,
+    epoch: number,
+  ): Promise<void> {
     if (disposed) return
     try {
       await resetOjFieldsFromDisk()
+      if (
+        outcome === 'persist-failed' &&
+        !disposed &&
+        configService.ojSwitchEpoch === epoch
+      ) {
+        // 重读成功会清空提示；持久化失败的事实必须保留（评审三十四 #3）
+        switchNotice.value = PERSIST_FAILED_NOTICE
+      }
     } catch {
+      if (disposed || configService.ojSwitchEpoch !== epoch) return
       adoptEffectiveSwitch(
         target,
-        'OJ 已在另一处完成切换；配置刷新失败，请重新打开设置页确认',
+        outcome === 'persist-failed' ? PERSIST_FAILED_NOTICE : FOREIGN_RELOAD_FAILED_NOTICE,
       )
     }
   }
@@ -254,11 +305,11 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     }
     switching.value = true
     lastSwitchStayed = false
-    // 切换是否**已生效**（成功或仅持久化失败）：决定要不要通知其它控制器重读
-    let effective = false
+    // 切换结果（成功 / 已生效但持久化失败）：决定是否/如何通知其它控制器
+    let outcome: SwitchOutcome | null = null
     try {
       await configService.switchOj(target)
-      effective = true
+      outcome = 'success'
       // 会话上下文先清理；persistedActive 与 OJ 域在重置/对齐成功后才提交
       //（评审二十一 #1：表单与 persistedActive 必须一起变化，否则「B 的 id +
       // A 的地址」会被下一次保存写坏。注意重载失败**不回滚到旧 OJ**——
@@ -297,13 +348,10 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // 必须走「承认已生效」分支（并补做 resetSessionForOjSwitch——否则旧 OJ
       // 的登录态会被带到新 OJ，评审二十四 #1）
       if ((e as { variant?: string }).variant === 'OjSwitchPersistFailed') {
-        effective = true
+        outcome = 'persist-failed'
         resetSessionForOjSwitch()
         if (isKeyedSettingsRoute(router.currentRoute.value?.name)) {
-          adoptEffectiveSwitch(
-            target,
-            '切换已生效，但配置保存失败（重启后可能回退）；连接与比赛相关的修改已重置，其余未保存修改保留',
-          )
+          adoptEffectiveSwitch(target, PERSIST_FAILED_NOTICE)
           lastSwitchStayed = true
           return true
         }
@@ -314,11 +362,20 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       switchError.value = errorMessage(e, '切换 OJ 失败')
       return false
     } finally {
-      switching.value = false
-      // 仍挂载的其它控制器（例如切换期间重新进入设置页的新实例）重读 OJ 域；
-      // 发起者自己已在上面完成重置/对齐
-      if (effective) {
-        for (const listen of [...switchObservers]) listen(target, controllerId)
+      try {
+        // 仍挂载的其它控制器（例如切换期间重新进入设置页的新实例）重读 OJ 域；
+        // **等待它们完成**再解除共享 busy（评审三十四 #1）——否则重读期间输入
+        // 已重新启用，`copyOjDomain` 会再次覆盖用户刚输入的内容。发起者自己
+        // 已在上面完成重置/对齐。
+        if (outcome) {
+          const epoch = configService.ojSwitchEpoch
+          const listeners = [...switchObservers]
+          await Promise.allSettled(
+            listeners.map((listen) => listen(target, controllerId, outcome!, epoch)),
+          )
+        }
+      } finally {
+        switching.value = false
       }
     }
   }
@@ -403,7 +460,9 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     Object.assign(form, diskForm(config))
     persistedActive.value = config.oj.active
     switchError.value = null
-    switchNotice.value = null
+    // 持久化失败警告描述的是「当前已生效但重启可能回退」的事实；加载/重读不得
+    // 把它吞掉（评审三十四 #3）。成功切换会经 resetOjFieldsFromDisk 清空。
+    if (switchNotice.value !== PERSIST_FAILED_NOTICE) switchNotice.value = null
     ojInstances.value = config.oj.instances
     baseline.value = snapshot()
   }
@@ -412,8 +471,18 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     loading.value = true
     loadError.value = null
     try {
-      // 新挂载的控制器若撞上旧控制器的在途切换，必须等事务落地再读
-      const config = await readSettledConfig()
+      // 新挂载的控制器若撞上旧控制器的在途保存（含自动切换），先等它落地：
+      // 否则读到的是保存前的配置，而普通保存不会发切换通知来刷新本页。
+      // 无保存时**同步**通过，保持既有「invalidate → getConfig → 其它读取」
+      // 的启动顺序（SettingsView 行为用例锁定）；读完后若又有保存开始，重读。
+      let config: AppConfig
+      for (;;) {
+        const epoch = saveEpoch
+        if (saving.value) await whenSaveSettled()
+        config = await readSettledConfig()
+        // 读取期间若有保存开始/结束（epoch 变化）或仍有保存在途，重读
+        if (!saving.value && epoch === saveEpoch) break
+      }
       if (disposed) return
       populate(config)
     } catch (e) {
@@ -426,6 +495,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   async function save(): Promise<void> {
     if (!canSave.value || switching.value) return
     saving.value = true
+    saveEpoch += 1
     saveError.value = null
     // 固定提交快照：保存期间的后续编辑不进入本次落盘，也不得被误标为已保存
     const submitted = { ...form }
@@ -504,6 +574,9 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       if (!disposed) saveError.value = errorMessage(e, '保存配置失败')
     } finally {
       saving.value = false
+      saveEpoch += 1
+      // 释放等待「旧控制器保存落地」的新控制器 load()
+      for (const resolve of saveWaiters.splice(0)) resolve()
     }
   }
 
