@@ -415,9 +415,29 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return currentUser ? 'valid' : 'invalid'
       case 'get_config':
         return structuredClone(config)
-      case 'update_config':
-        Object.assign(config, structuredClone(args?.config))
+      case 'update_config': {
+        // 复刻后端语义（评审二十九 #6）：maintainerLocked 必填；active 只由
+        // switch_oj 改写；锁定模式用旧值覆盖锁定字段，并保留结构性检查
+        const incoming = structuredClone(args?.config) as typeof config
+        const locked = args?.maintainerLocked
+        if (typeof locked !== 'boolean') {
+          throw { Config: 'fake: update_config 缺少 maintainerLocked 参数' }
+        }
+        incoming.oj.active = config.oj.active
+        if (locked) {
+          incoming.oj.instances = structuredClone(config.oj.instances)
+          incoming.oj.timeoutSecs = config.oj.timeoutSecs
+          incoming.oj.pollIntervalSecs = config.oj.pollIntervalSecs
+          incoming.oj.pollTimeoutSecs = config.oj.pollTimeoutSecs
+          incoming.oj.cacheTtlSecs = config.oj.cacheTtlSecs
+          incoming.oj.cacheProblemStatement = config.oj.cacheProblemStatement
+          if (!incoming.oj.instances.some((i) => i.enabled && i.id === incoming.oj.active)) {
+            throw { Config: 'fake: 当前 OJ 不在已启用的实例列表中' }
+          }
+        }
+        Object.assign(config, incoming)
         return null
+      }
       case 'reload_config':
         return null
       case 'launch_flags':

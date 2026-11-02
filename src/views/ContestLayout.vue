@@ -71,13 +71,17 @@ watch([phase, keyedSettings], ([value, keyed]) => {
   // 自然结束（本地 endTime 到期、服务端 status 未变）后轮询若继续，公告请求
   // 会一直打（评审八 P2-1）。upcoming 本就没有轮询要停。
   if (keyed) {
-    if (value === 'ended') announcementStore.stopLive()
+    if (value === 'ended') {
+      announcementStore.stopLive()
+      liveFor = null // 结束后再回到 running（赛程延长/重置重拉）要能重启（评审二十九 #4）
+    }
     return
   }
   if (value === 'upcoming') {
     void router.replace({ name: 'Login' })
   } else if (value === 'ended') {
     announcementStore.stopLive()
+    liveFor = null // 同上：ended→running 时 ensureLive 需重新启动
     // 保留会话与工作区，让现有离页保存链路处理代码落盘。
     exitTimer = setTimeout(() => {
       void router.replace({ name: 'Login' })

@@ -133,7 +133,12 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       : null,
   }))
   const isValid = computed(() => Object.values(errors.value).every((e) => e === null))
-  const canSave = computed(() => dirty.value && isValid.value && !saving.value)
+  /// OJ 切换进行中（单飞，评审二十九 #1）：切换期间禁止保存/再次切换——
+  /// 否则保存会用旧缓存构造带旧 active 的整份配置，与在途 switch_oj 交错写盘
+  const switching = ref(false)
+  const canSave = computed(
+    () => dirty.value && isValid.value && !saving.value && !switching.value,
+  )
 
   const loading = ref(true)
   const loadError = ref<string | null>(null)
@@ -235,6 +240,12 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   async function onSwitchOj(): Promise<void> {
+    // 单飞：切换未完成前的再次选择直接忽略并回退下拉（评审二十九 #1/#2：
+    // 并发切换会让迟到完成的那次覆盖表单，拼出「C 的 id + B 的地址」）
+    if (switching.value) {
+      form.activeOj = persistedActive.value
+      return
+    }
     switchError.value = null
     switchNotice.value = null
     const target = form.activeOj
@@ -248,7 +259,14 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       return
     }
     const ojDirty = ojDomainDirty()
-    if (await performSwitch(target)) {
+    switching.value = true
+    let switched = false
+    try {
+      switched = await performSwitch(target)
+    } finally {
+      switching.value = false
+    }
+    if (switched) {
       form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
       if (lastSwitchStayed && ojDirty && switchNotice.value === null) {
         // 评审二十一 #2：OJ 域草稿被磁盘值覆盖是设计（换服务端后旧值无意义），
@@ -257,9 +275,10 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
           '切换已完成；连接与比赛相关的未保存修改已从磁盘重新加载（编辑器/布局等修改保留）'
       }
     } else {
-      // 切换失败：id 与地址一起回滚（重载失败时 persistedActive 仍是旧 OJ）
+      // 切换失败（未生效）：只回滚**选择**，不动地址草稿（评审二十九 #3：
+      // 用磁盘地址覆盖会静默丢掉用户刚编辑的 A 地址）；持久化失败/重载失败
+      // 的「已生效」分支在 performSwitch 内部已完成对齐
       form.activeOj = persistedActive.value
-      form.ojUrl = ojInstances.value.find((i) => i.id === form.activeOj)?.baseUrl ?? ''
     }
   }
 
@@ -324,7 +343,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   async function save(): Promise<void> {
-    if (!canSave.value) return
+    if (!canSave.value || switching.value) return
     saving.value = true
     saveError.value = null
     // 固定提交快照：保存期间的后续编辑不进入本次落盘，也不得被误标为已保存
@@ -428,6 +447,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     ojOptions,
     switchError,
     switchNotice,
+    switching,
     load,
     save,
     discard,

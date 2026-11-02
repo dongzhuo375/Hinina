@@ -440,3 +440,22 @@ async fn locked_update_still_rejects_active_pointing_at_missing_instance() {
     let err = apply_config_update(&ctx, payload, true).expect_err("结构性检查仍应拒绝");
     assert!(err.to_string().contains("不在已启用的实例列表"), "{err}");
 }
+
+/// 普通保存不得改写 `oj.active`（评审二十九 #1）：active 只由 switch_oj 改写，
+/// 旧快照与在途切换交错时不能把新 active 覆盖回去。
+#[tokio::test]
+async fn update_config_never_overwrites_active() {
+    use super::super::commands::config_cmd::apply_config_update;
+    use crate::test_support::app_ctx::context_with_hoj;
+
+    let (ctx, _dir) = context_with_hoj("https://hoj.example").await;
+    let mut payload = ctx.config.get();
+    payload.oj.active = "Ghost".into(); // 陈旧/伪造快照
+    payload.editor.font_size = 20;
+
+    apply_config_update(&ctx, payload, false).expect("普通保存应成功");
+
+    let saved = ctx.config.get();
+    assert_eq!(saved.oj.active, "HOJ", "active 必须保持内存当前值");
+    assert_eq!(saved.editor.font_size, 20);
+}

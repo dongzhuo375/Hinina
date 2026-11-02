@@ -62,11 +62,20 @@ pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 
 /// 更新配置并持久化。
 ///
-/// 前端 invoke 签名: `update_config`({ config })
+/// 前端 invoke 签名: `update_config`({ config, maintainerLocked })
 ///
-/// 持久化前做后端兜底校验（config.json 可被手改，前端不是唯一防线）：
-/// 先 `validate()` 拒绝不可钳制项（服务器地址非法），再 `sanitize()`
-/// 把越界字段钳制到与前端 SettingsView 一致的取值域。
+/// **`oj.active` 无论哪种模式都只由 `switch_oj` 改写**：载荷里的 active 可能是
+/// 保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去（评审二十九 #1），
+/// 这里一律以内存当前值为准。
+///
+/// 持久化前做后端兜底校验（config.json 可被手改，前端不是唯一防线），两条路径：
+/// - **普通模式**（`maintainer_locked=false`，钥匙视图）：先 `validate()` 拒绝
+///   不可钳制项（服务器地址非法），再 `sanitize()` 把越界字段钳制到与前端
+///   SettingsView 一致的取值域。
+/// - **锁定模式**（`maintainer_locked=true`，普通启动）：先用旧配置覆盖锁定字段
+///   （`preserve_locked_fields`），再 `validate_preserving_locked`（只查 active
+///   指向已启用实例）与 `sanitize_editable`（只钳制可编辑层）——手改出的非法
+///   锁定值既不阻塞可编辑字段保存，也不被改写。
 ///
 /// **配置变更后的必要动作在此显式完成**：`ConfigService::update` 落盘成功后，
 /// 本命令立即按新配置同步 auto-save 的启停与间隔 —— 不依赖事件消费者。
@@ -97,6 +106,11 @@ pub(crate) fn apply_config_update(
     mut config: AppConfig,
     maintainer_locked: bool,
 ) -> AppResult<()> {
+    // `oj.active` **只由 switch_oj 改写**（评审二十九 #1）：调用方带来的 active
+    // 可能是保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去。两种
+    // 模式一律以内存当前值为准。
+    let current_active = ctx.config.get().oj.active;
+    config.oj.active = current_active;
     if maintainer_locked {
         let previous = ctx.config.get();
         config.preserve_locked_fields(&previous);

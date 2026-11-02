@@ -2,6 +2,7 @@ import type { Router } from 'vue-router'
 import { setIpcErrorObserver } from '@/bridge'
 import type { IpcError } from '@/bridge'
 import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
+import { markSettingsGateBlocked } from '@/utils/settings-gate-notice'
 import { SESSION_INVALID_MESSAGE, useAuthStore } from '@/stores/authStore'
 import { createLogger } from '@/utils/logger'
 
@@ -49,6 +50,11 @@ async function handleAuthFailure(error: IpcError, router: Router): Promise<void>
     // 那是钥匙存在的全部意义（修连接配置）：踢回登录页会打断维护、丢失
     // 当前草稿——登录页虽有「返回设置」入口，但那已是一次重新进入（评审四 P2-1）。
     const onKeyedSettings = isKeyedSettingsRoute(router.currentRoute.value.name)
+    if (onKeyedSettings) {
+      // 留在设置页必须给一次可见反馈（评审二十九 #5）：auth.error 只进登录表单，
+      // 设置页没有它的渲染路径，静默清理会让维护者不知道会话已失效
+      markSettingsGateBlocked('会话已失效，已留在设置页（请重新登录后进入赛场页面）')
+    }
     if (!onKeyedSettings && router.currentRoute.value.meta.requiresAuth) {
       await router.replace({ name: 'Login' })
     }

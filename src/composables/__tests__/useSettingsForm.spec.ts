@@ -349,6 +349,47 @@ describe('useSettingsForm', () => {
     expect(settings.dirty.value).toBe(false)
   })
 
+  it('评审二十九 #1/#2：切换单飞——进行中禁止保存、再次选择被忽略', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    // 让 switch_oj 悬停，模拟慢切换
+    let release!: () => void
+    mocks.switchOj.mockReturnValueOnce(new Promise<void>((resolve) => { release = resolve }))
+
+    settings.form.activeOj = 'Hydro'
+    settings.form.fontSize = '18' // 让 dirty=true（切换中用户改了可编辑字段）
+    const pending = settings.onSwitchOj()
+    await Promise.resolve()
+
+    expect(settings.switching.value).toBe(true)
+    expect(settings.canSave.value).toBe(false) // 保存不得与在途切换交错
+    await settings.save()
+    expect(mocks.updateConfig).not.toHaveBeenCalled()
+
+    // 切换进行中再次选择：忽略并回退下拉，不会发出第二个 switch_oj
+    settings.form.activeOj = 'HOJ'
+    await settings.onSwitchOj()
+    expect(mocks.switchOj).toHaveBeenCalledTimes(1)
+
+    release()
+    await pending
+    expect(settings.switching.value).toBe(false)
+  })
+
+  it('评审二十九 #3：普通切换失败只回滚选择，保留地址草稿', async () => {
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    settings.form.ojUrl = 'https://draft-hoj.example' // A 的地址草稿（未保存）
+    settings.form.activeOj = 'Hydro'
+    mocks.switchOj.mockRejectedValueOnce(new Error('切换失败'))
+
+    await settings.onSwitchOj()
+
+    expect(settings.form.activeOj).toBe('HOJ') // 选择回滚
+    expect(settings.form.ojUrl).toBe('https://draft-hoj.example') // 草稿保留
+  })
+
   it('评审十五 C：锁定态 active 指向缺失实例——不创建、不切换、不谎报', async () => {
     // 手改配置让 oj.active 指向不存在的实例：锁定态载荷跳过实例写入，
     // 因此绝不能触发 performSwitch（否则会提示「实例已保存；切换未成功」）

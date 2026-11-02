@@ -34,6 +34,7 @@ vi.mock('@/services/system.service', () => ({
 }))
 
 import { installSessionGuard } from '@/guards/sessionGuard'
+import * as settingsGateNoticeModule from '@/utils/settings-gate-notice'
 
 interface GuardHarness {
   auth: ReturnType<typeof useAuthStore>
@@ -142,6 +143,10 @@ describe('sessionGuard 并发会话失效', () => {
     expect(auth.user).toBeNull() // 会话清理照旧
     expect(auth.error).toBe(SESSION_INVALID_MESSAGE)
     expect(mocks.replace).not.toHaveBeenCalled() // 留在原地（最小壳接管）
+    // 评审二十九 #5：留在设置页必须给可见反馈（设置页不渲染 auth.error）
+    const { settingsGateNotice, clearSettingsGateNotice } = settingsGateNoticeModule
+    expect(settingsGateNotice.value).toContain('会话已失效')
+    clearSettingsGateNotice()
   })
 
   it('钥匙旁路不外溢：钥匙模式下非设置路由的认证错误照常跳登录', async () => {

@@ -14,6 +14,8 @@ const props = defineProps<{
   inputClass: (field: string) => string
   /** 维护者层锁定（--settings 启动解锁）：连接与缓存调优字段禁用 + 提示；比赛 ID/密码不受影响 */
   locked?: boolean
+  /** OJ 切换进行中（单飞）：下拉临时禁用，避免并发切换（评审二十九 #1/#2） */
+  switching?: boolean
 }>()
 const emit = defineEmits<{
   (event: 'update:form', patch: SettingsFormPatch): void
@@ -53,7 +55,7 @@ function onSwitchOj(): void {
                   >
                     当前 OJ
                   </span>
-                  <select v-model="props.form.activeOj" :class="INPUT" :disabled="props.locked" @change="onSwitchOj">
+                  <select v-model="props.form.activeOj" :class="INPUT" :disabled="props.locked || props.switching" @change="onSwitchOj">
                     <option
                       v-for="o in props.options"
                       :key="o.id"

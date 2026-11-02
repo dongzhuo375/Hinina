@@ -41,7 +41,8 @@ import AboutSection from '@/components/settings/AboutSection.vue'
 ///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
 const locked = computed(() => !isKeyedProcess())
 
-// locked 传入表单控制器：锁定字段不参与校验、不写入保存载荷（评审十 #3）
+// locked 传入表单控制器：锁定字段不参与**前端**校验；保存载荷仍是完整 AppConfig，
+// 由后端按 maintainerLocked 用旧配置覆盖锁定字段（评审二十九 #7 修正旧表述）
 const {
   form,
   dirty,
@@ -56,6 +57,7 @@ const {
   ojOptions,
   switchError,
   switchNotice,
+  switching,
   load,
   save,
   discard,
@@ -132,6 +134,7 @@ onMounted(() => {
               :switch-notice="switchNotice"
               :input-class="inputClass"
               :locked="locked"
+              :switching="switching"
               @update:form="updateForm"
               @switch-oj="onSwitchOj"
             />

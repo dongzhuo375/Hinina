@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `getConfig` | `() => Promise<AppConfig>` | invoke `get_config`，返回完整应用配置（user/oj/editor/theme/layout 五组） |
-| `updateConfig` | `(config: AppConfig) => Promise<void>` | invoke `update_config`，**整体替换**语义（Rust 端持久化到 config.json 并更新内存值）——调用方必须先读当前值再改（由 `config.service.updateConfig` 编排） |
+| `updateConfig` | `(config: AppConfig, maintainerLocked?: boolean) => Promise<void>` | invoke `update_config`，**整体替换**语义（Rust 端持久化到 config.json 并更新内存值）——调用方必须先读当前值再改（由 `config.service.updateConfig` 编排）。`maintainerLocked=true` 时后端用旧配置覆盖锁定字段（并保留 active 结构检查）；`oj.active` 无论哪种模式都**只由 switch_oj 改写** |
 | `reloadConfig` | `() => Promise<void>` | invoke `reload_config`，触发后端从磁盘重载（发布 `CoreEvent::ConfigChanged`，并显式同步 auto-save 的启停与间隔） |
 | `switchOj` | `(ojId: string) => Promise<void>` | invoke `switch_oj`：后端补注册 → 校验目标 OJ 已注册 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`；未注册的 OJ 报 ProviderNotFound |
 

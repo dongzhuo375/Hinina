@@ -407,6 +407,31 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
+  it('评审二十九 #4：同一比赛 ended→running（赛程延长/重置重拉）后轮询重启', async () => {
+    vi.useFakeTimers()
+    const now = Math.floor(Date.now() / 1000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const store = useContestStore()
+    store.contest = { ...schedule, startTime: now - 7_200, endTime: now - 3_600 } // 已结束
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+    expect(mocks.startLive).not.toHaveBeenCalled()
+    expect(mocks.stopLive).toHaveBeenCalled()
+
+    // 组织者延长赛程：同一比赛回到 running
+    store.contest = { ...schedule, startTime: now - 7_200, endTime: now + 3_600 }
+    await vi.advanceTimersByTimeAsync(1_500)
+
+    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
   it('评审四 P2-2：最小壳下保留的未开始简报不触发立即跳转', async () => {
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)
