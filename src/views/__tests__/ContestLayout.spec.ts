@@ -322,8 +322,36 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
+  it('非钥匙 + 未开始简报 + 比赛子路由——遮罩说明「尚未开始」且内容区 inert', async () => {
+    // upcoming 也要有「为什么」：跳转是异步的，窗口期里灰屏无解释=「灰了但
+    // 不知道为什么」（B4）。遮罩文案随相位分叉，inert 与 ended 一致。
+    vi.useFakeTimers()
+    const now = Math.floor(Date.now() / 1000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: false }
+    mocks.routeName.value = 'ProblemSet'
+    const auth = useAuthStore()
+    auth.sessionResolved = true
+    auth.user = { id: 'u1', username: 'player', token: 't' } as never
+    const store = useContestStore()
+    store.brief = { ...schedule, startTime: now + 3_600, endTime: now + 14_400 }
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(host.textContent).toContain('比赛尚未开始')
+    expect(host.querySelector('[role="alert"]')).toBeTruthy()
+    expect(contentInert(host)).toBe(true)
+    // upcoming 立即回登录页（watcher 无 2 秒延迟），遮罩只是异步窗口期的解释层
+    expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+    vi.useRealTimers()
+  })
+
   it('钥匙 + 会话有效 + 未开始简报 + 设置路由——内容区无 inert', async () => {
-    // upcoming 无遮罩但裸 phase 会给内容区加 inert——设置页同样必须可用
+    // 赛程闸门（遮罩 + inert）对钥匙设置页整体豁免——设置页必须可用
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)
     const pinia = createPinia()
