@@ -15,17 +15,19 @@
 | `clampRatio` | `(value) => number` | 分栏比例钳位到 `[0.30,0.70]` 并保留两位小数 |
 | `form` / `baseline` / `dirty` | reactive / ref / computed | 中央草稿、上次加载或保存成功的 JSON 基线、dirty 判定 |
 | `errors` / `isValid` / `canSave` | computed | URL 与各整数字段实时校验；`autoSave=false` 时隐藏的间隔字段不参与校验、不阻止保存，也不进入保存载荷（保留已存值） |
-| `load` / `populate` | fn | 先 `configService.invalidate()` 再读取磁盘配置并回填表单和实例清单 |
-| `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示。**锁定字段不参与前端校验、也不按表单值改写**：保存载荷仍是完整 AppConfig（未改动字段保持读入值，数字字段不做 `Number()` 转换以免 NaN 拖垮保存），锁定语义由后端 `maintainer_locked` 用旧配置覆盖锁定字段落实（评审十 #3、评审二十九 #7）。结算期间 `switching=true`：`canSave` 需 `!switching`，保存与在途切换互斥（评审二十九 #1）；切换失败只回滚选择、保留地址草稿（#3） |
+| `load` / `populate` | fn | `load` 经 `readSettledConfig` 读取磁盘配置并回填表单和实例清单：撞上在途 OJ 切换时先等它落地再读，避免把切换前的旧 active 展示出来 |
+| `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示。**锁定字段不参与前端校验、也不按表单值改写**：保存载荷仍是完整 AppConfig（未改动字段保持读入值，数字字段不做 `Number()` 转换以免 NaN 拖垮保存），锁定语义由后端 `maintainer_locked` 用旧配置覆盖锁定字段落实（评审十 #3、评审二十九 #7）。结算期间 `switching=true`：`canSave` 需 `!switching`，保存与在途切换互斥（评审二十九 #1）；切换失败只回滚选择、保留地址草稿（#3）。保存/切换在途时 **OJ 域输入由 `OjServerSection` 整体禁用**（评审三十三 #3：完成后的磁盘重置会覆盖该域）；控制器卸载后不再回写表单，但保存新建实例触发的自动切换仍执行 |
+| `switching`（模块级共享） | `Ref<boolean>` | 跨控制器共享：设置页卸载重挂后，新控制器也能看到旧控制器在途的切换并禁用保存/切换（评审三十三 #4）；旧控制器完成后经 `switchObservers` 通知仍挂载的控制器重读 OJ 域 |
+| `readSettledConfig`（内部） | `() => Promise<AppConfig>` | 先等 `configService.whenOjSwitchSettled()`（无在途时同步通过），再用 `ojSwitchEpoch` 复核读取期间是否发生切换；变了就重读。保证新控制器在事务完成后拿到新配置 |
 | `ojOptions` | computed | 实时下拉候选；实例清单与 persistedActive 为 controller 内部状态 |
 | 签名 | `useSettingsForm(maintainerLocked?: Readonly<Ref<boolean>>)` | 维护者层是否锁定（普通启动 true）；默认 `ref(false)`（不锁）供独立使用 |
-| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）且当前路由仍是设置页时**切换成功后留在设置页（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2）；`switch_oj` 是异步的，期间已导航离开则不再停留、照常回登录页（豁免只属于设置页本身，评审九 P2-1）；`persistedActive` 在重载成功后提交；重载失败时**承认切换已生效**（后端/registry/磁盘均已是新 OJ）——表单对齐新 OJ 的已知地址、OJ 域字段清单单一来源 `OJ_DOMAIN_KEYS`（脏判定/重置/对齐三处共用，评审二十四 #3）、OJ 域草稿回到磁盘值（避免 A 的比赛引用等写进 B）、基线按「磁盘值 + 新 active/url」重算（不出现假 dirty），提示「切换已生效，但配置刷新失败…」，绝不把 UI 回滚成「界面 A、实际 B」（评审二十二/#1、评审二十三）；停留时**只重置 OJ 域字段并按磁盘重算 baseline**（`resetOjFieldsFromDisk`）：编辑器/布局等全局草稿**保留**（评审十九 #1——整体 `load()` 会丢掉维护者刚改的字体/超时，与回滚分支的「保留编辑」不一致），dirty 只反映真正未保存的全局编辑，旧 OJ 的 OJ 域草稿不会写到新 OJ（评审十 #4）；OJ 域有未保存修改时给一次「已从磁盘重新加载」说明，不再静默丢弃（评审二十一 #2） |
+| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）且当前路由仍是设置页时**切换成功后留在设置页（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2）；`switch_oj` 是异步的，期间已导航离开则不再停留、照常回登录页（豁免只属于设置页本身，评审九 P2-1）；成功后重置/对齐 OJ 域并重算 baseline；重载失败时**承认切换已生效**（后端/registry/磁盘均已是新 OJ）——表单对齐新 OJ 的已知地址、OJ 域字段清单单一来源 `OJ_DOMAIN_KEYS`（脏判定/重置/对齐三处共用，评审二十四 #3）、OJ 域草稿回到磁盘值（避免 A 的比赛引用等写进 B）、基线按「磁盘值 + 新 active/url」重算（不出现假 dirty），提示「切换已生效，但配置刷新失败…」，绝不把 UI 回滚成「界面 A、实际 B」（评审二十二/#1、评审二十三）；停留时**只重置 OJ 域字段并按磁盘重算 baseline**（`resetOjFieldsFromDisk`）：编辑器/布局等全局草稿**保留**（评审十九 #1——整体 `load()` 会丢掉维护者刚改的字体/超时，与回滚分支的「保留编辑」不一致），dirty 只反映真正未保存的全局编辑，旧 OJ 的 OJ 域草稿不会写到新 OJ（评审十 #4）；OJ 域有未保存修改时给一次「已从磁盘重新加载」说明，不再静默丢弃（评审二十一 #2）。**卸载后的控制器不写回表单**（评审三十三 #4）；切换生效后通知其它仍挂载的控制器重读 |
 | `SETTINGS_INPUT` / `inputClass` | 常量/fn | 共享输入框基础样式与错误态拼接 |
 
 
 ## 直接依赖
 
-- `vue`（`reactive` / `ref` / `computed`）
+- `vue`（`reactive` / `ref` / `computed` / `getCurrentScope` / `onScopeDispose`）
 - `vue-router`（普通模式切换成功后 `replace(Login)`；钥匙模式留在设置页）
 - `@/services/config.service`
 - `@/services/system.service`（`launchFlags` 快照 —— 钥匙模式判据）
@@ -50,4 +52,4 @@
 
 ## 测试
 
-`src/composables/__tests__/useSettingsForm.spec.ts` 覆盖：严格校验、隐藏字段校验豁免与隐藏非法间隔不进入载荷（保留已存值）、有效间隔写入、保存期间编辑保持 dirty、缺失 active 实例不借用 URL、禁用实例不被重新启用、完整保存载荷与 active 不变、新实例自动切换及失败回滚重试、保存失败无残留切换意图、已配置 OJ 失败回滚。`SettingsView.spec.ts` 与 `SettingsView.behavior.spec.ts` 继续提供真实组合根回归。
+`src/composables/__tests__/useSettingsForm.spec.ts` 覆盖：严格校验、隐藏字段校验豁免与隐藏非法间隔不进入载荷（保留已存值）、有效间隔写入、保存期间编辑保持 dirty、缺失 active 实例不借用 URL、禁用实例不被重新启用、完整保存载荷与 active 不变、新实例自动切换及失败回滚重试、保存失败无残留切换意图、已配置 OJ 失败回滚，以及**跨控制器卸载/重挂**（新控制器等待在途切换后读到新 active、旧控制器不再回写表单）。`SettingsView.spec.ts` 与 `SettingsView.behavior.spec.ts` 继续提供真实组合根回归（含保存/切换在途时整个 OJ 域禁用的正向与失败恢复）。

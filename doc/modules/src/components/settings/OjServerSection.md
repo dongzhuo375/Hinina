@@ -8,6 +8,8 @@
 
 **字段级分层锁**：`locked` 时禁用连接与缓存调优字段（当前 OJ 下拉、服务器地址、请求超时、轮询间隔、轮询总超时、列表缓存 TTL、题面缓存开关），并在区块头部显示一行锁提示；**比赛 ID/引用与比赛密码不受影响**（公开分发模式下这是自助装机用户唯一能填这两个值的地方，锁了选手连比赛都进不去）。提权唯一来源是 `--settings` 启动参数。
 
+**事务期禁用（评审三十三 #3）**：`switching` 或 `saving` 为真时，**整个 OJ 域**（含比赛 ID/密码）全部禁用。切换成功后的 `resetOjFieldsFromDisk` 会整体覆盖这批字段；若请求期间仍可编辑，新输入会被磁盘值静默替换（提示还按请求前的 dirty 判定，可能完全不提示）。锁住输入比「完成时重放编辑」简单且无歧义。
+
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
@@ -18,6 +20,7 @@
 | `switchError` / `switchNotice` | prop `string \| null` | 切换错误与引导提示，直接读 `props` 保持响应式 |
 | `inputClass` | prop fn | 共享输入框错误态样式；基础样式直接 import `SETTINGS_INPUT` |
 | `locked` | prop `boolean`（默认 false） | 维护者层锁定：7 个连接/缓存字段 `:disabled` + 标签置灰（沿自动保存间隔的 disabled 先例）+ 头部锁提示 |
+| `switching` / `saving` | prop `boolean`（默认 false） | 保存/切换在途：整个 OJ 域（含比赛 ID/密码）`disabled`（完成后的磁盘重置会覆盖该域，评审三十三 #3） |
 | `update:form` | emit `SettingsFormPatch` | switch 按钮的局部草稿补丁；文本/选择用 `v-model` 直接编辑同一 reactive 草稿并保留 IME composition |
 | `switch-oj` | emit | `activeOj` v-model 更新后通知父级执行切换（locked 时 select disabled，不可达） |
 
@@ -35,7 +38,7 @@
 
 ## 逻辑流程
 
-文本/选择字段用 `v-model` 直接编辑同一 reactive 草稿：`activeOj` 落草稿后 `@change` 只 emit `switch-oj`，不发补丁；只有题面缓存开关 emit `update:form` 补丁（locked 时按钮 disabled，不可达）。未配置 OJ 的引导、失败回滚和保存新建实例后的自动切换全部留在 `useSettingsForm`。锁定的字段不可变脏；保存事务**跳过**这些字段的写入与数字解析（存量非法值不得变 NaN 拖垮整次保存，也不得阻塞可编辑字段——见 `useSettingsForm.md`，评审十 #3）。
+文本/选择字段用 `v-model` 直接编辑同一 reactive 草稿：`activeOj` 落草稿后 `@change` 只 emit `switch-oj`，不发补丁；只有题面缓存开关 emit `update:form` 补丁（locked 时按钮 disabled，不可达）。未配置 OJ 的引导、失败回滚和保存新建实例后的自动切换全部留在 `useSettingsForm`。锁定的字段不可变脏；保存事务**跳过**这些字段的写入与数字解析（存量非法值不得变 NaN 拖垮整次保存，也不得阻塞可编辑字段——见 `useSettingsForm.md`，评审十 #3）。保存/切换在途时 `ojDomainBusy` 一并禁用整域，避免完成后的重置覆盖请求期间的新输入。
 
 ## 测试
 

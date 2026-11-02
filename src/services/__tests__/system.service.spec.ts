@@ -1,6 +1,6 @@
 // system.service 的启动标志管线：单飞 IPC、快照填充、失败退化。
 // 守卫用例（launch-redirect.spec）把本服务整体 mock 掉，测到的只是守卫的第二道
-// try/catch —— 这里锁主防线：.catch 退化与「只发一次 IPC」的单飞语义。
+// try/catch —— 这里锁主防线：.catch 退化、成功只发一次 IPC、失败后下次调用重试。
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ getLaunchFlags: vi.fn() }))
