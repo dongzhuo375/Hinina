@@ -777,3 +777,61 @@ async fn reload_holds_access_fence_across_commit_and_registry_switch() {
     hoj.shutdown();
     hydro.shutdown();
 }
+
+/// 评审三十八 P2：`load_workspace` 的「读配置 + 同步 auto-save」也必须与
+/// 配置保存共用同一串行域，否则仍可复现「load 按旧快照 stop 覆盖新 save」。
+#[tokio::test]
+async fn workspace_load_sync_is_serialised_with_config_save() {
+    use super::super::commands::config_cmd::apply_config_update;
+    use super::super::commands::workspace_cmd::load_workspace_sync_auto_save_with_hook;
+    use crate::test_support::app_ctx::context_with_hoj;
+
+    let (ctx, _dir) = context_with_hoj("https://hoj.example").await;
+    // 初始关闭 auto-save，让 load 读到旧值 false
+    ctx.config
+        .update(|cfg| cfg.editor.auto_save = false)
+        .expect("注入关闭状态");
+    let mut on = ctx.config.get();
+    on.editor.auto_save = true;
+    on.editor.auto_save_interval_secs = 7;
+
+    let (start_tx, start_rx) = std::sync::mpsc::channel::<()>();
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<bool>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let after_read = || {
+        start_tx.send(()).unwrap();
+        let held = held_rx.recv().unwrap();
+        if !held {
+            done_rx.recv().expect("无锁路径下 U2 应先完成");
+        }
+    };
+
+    std::thread::scope(|scope| {
+        let ctx_ref = &ctx;
+        let handle = tokio::runtime::Handle::current();
+        let u2 = scope.spawn(move || {
+            start_rx.recv().unwrap();
+            let _enter = handle.enter();
+            let held = ctx_ref.config.write_txn_is_held();
+            held_tx.send(held).unwrap();
+            let result = apply_config_update(ctx_ref, on, false);
+            if !held {
+                let _ = done_tx.send(());
+            }
+            result
+        });
+        load_workspace_sync_auto_save_with_hook(&ctx, after_read);
+        u2.join().unwrap().expect("U2 保存成功");
+    });
+
+    let wm = ctx
+        .workspace_manager
+        .as_ref()
+        .expect("测试上下文应有工作区管理器");
+    assert_eq!(
+        wm.auto_save_interval_secs(),
+        Some(7),
+        "load_workspace 不得用旧快照覆盖并发保存后的启停"
+    );
+    assert!(ctx.config.get().editor.auto_save);
+}

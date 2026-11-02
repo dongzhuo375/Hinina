@@ -27,9 +27,34 @@ pub async fn load_workspace(
         .as_ref()
         .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
 
-    sync_auto_save_with_config(&ctx.config.get().editor, wm);
+    // 与配置写入共用同一串行域：否则 load 读到旧 autoSave 后，并发 update_config
+    // 已提交新值并启停，load 再按旧快照启停会反向覆盖（评审三十八 P2）。
+    // 锁只覆盖「读配置 + 同步启停」，不覆盖后续 find_or_create。
+    load_workspace_sync_auto_save(&ctx);
 
     wm.find_or_create(&contest_id, &problem_id, "")
+}
+
+/// 读取配置并同步 auto-save；整个「读 + 启停」在配置写事务锁内完成。
+pub(crate) fn load_workspace_sync_auto_save(ctx: &AppContext) {
+    load_workspace_sync_auto_save_with(ctx, || {})
+}
+
+/// 测试专用：在 auto-save 读取配置之后、执行启停之前注入暂停点。
+#[cfg(test)]
+pub(crate) fn load_workspace_sync_auto_save_with_hook<F>(ctx: &AppContext, after_read: F)
+where
+    F: FnOnce(),
+{
+    load_workspace_sync_auto_save_with(ctx, after_read)
+}
+
+fn load_workspace_sync_auto_save_with<F>(ctx: &AppContext, after_read: F)
+where
+    F: FnOnce(),
+{
+    let _txn = ctx.config.lock_write_txn();
+    sync_auto_save_from_context_with(ctx, after_read);
 }
 
 /// auto-save 的期望动作（由配置与当前运行状态决定）。
