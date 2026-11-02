@@ -459,3 +459,72 @@ async fn update_config_never_overwrites_active() {
     assert_eq!(saved.oj.active, "HOJ", "active 必须保持内存当前值");
     assert_eq!(saved.editor.font_size, 20);
 }
+
+/// 评审三十三 #2：保存与切换交错不得落盘一份 `AppConfig::validate()` 拒绝的配置。
+///
+/// 载荷删除 Hydro、active 仍是保存开始时的陈旧值 Hydro。保存进入写事务后
+/// （`before_validate` 注入点）另一线程发起切到 Hydro：
+/// - 旧实现先按旧 active 校验、再在锁内把 active 换成最新值，交错下会保存
+///   「active=Hydro 但实例已删除」的非法配置；
+/// - 现在校验发生在写锁内、针对固定 active 后的**最终候选**，且切换被同一把
+///   事务锁挡到保存之后——切换会因「Hydro 不在启用实例列表」而失败。
+#[tokio::test]
+async fn concurrent_switch_cannot_make_saved_config_invalid() {
+    use super::super::commands::config_cmd::apply_config_update_with_hook;
+    use crate::commands::oj_cmd::switch_oj_impl;
+    use crate::core::entity::config::AppConfig;
+    use crate::test_support::app_ctx::context_with_two_ojs;
+    use crate::test_support::loopback::LoopbackServer;
+
+    let hoj = LoopbackServer::start(vec![]).await;
+    let hydro = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
+
+    let mut payload = ctx.config.get();
+    payload
+        .oj
+        .instances
+        .retain(|instance| instance.id != "Hydro");
+    payload.oj.active = "Hydro".into(); // 陈旧快照：真正的 active 仍是 HOJ
+    payload.editor.font_size = 18;
+
+    let (attempt_tx, attempt_rx) = std::sync::mpsc::channel::<()>();
+    let handle = tokio::runtime::Handle::current();
+    let mut before_validate = || {
+        // 保存已持有写事务：此刻放切换线程进来，它必须被挡在事务外
+        attempt_rx.recv().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+
+    let (saved, switched) = std::thread::scope(|scope| {
+        let ctx_ref = &ctx;
+        let enqueued = scope.spawn(move || {
+            attempt_tx.send(()).unwrap();
+            handle.block_on(switch_oj_impl(ctx_ref, "Hydro"))
+        });
+        let saved = apply_config_update_with_hook(&ctx, payload, false, &mut before_validate);
+        (saved, enqueued.join().unwrap())
+    });
+
+    saved.expect("保存应成功：最终 active 指向仍启用的 HOJ");
+    assert!(
+        switched.is_err(),
+        "目标已被本次保存删除，切换必须失败，实得 {:?}",
+        switched
+    );
+
+    let memory = ctx.config.get();
+    memory
+        .validate()
+        .expect("内存配置必须通过 AppConfig::validate");
+    let disk: AppConfig =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("config.json")).unwrap()).unwrap();
+    disk.validate()
+        .expect("磁盘配置必须通过 AppConfig::validate");
+    assert_eq!(disk.oj.active, memory.oj.active);
+    assert_eq!(memory.oj.active, "HOJ");
+    assert_eq!(memory.editor.font_size, 18, "可编辑字段仍应保存");
+
+    hoj.shutdown();
+    hydro.shutdown();
+}

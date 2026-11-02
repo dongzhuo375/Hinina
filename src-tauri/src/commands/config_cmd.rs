@@ -103,34 +103,51 @@ pub async fn update_config(
 /// 静默钳制/改写。
 pub(crate) fn apply_config_update(
     ctx: &AppContext,
-    mut config: AppConfig,
+    config: AppConfig,
     maintainer_locked: bool,
 ) -> AppResult<()> {
-    // `oj.active` **只由 switch_oj 改写**（评审二十九 #1）：调用方带来的 active
-    // 可能是保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去。两种
-    // 模式一律以内存当前值为准；**写锁内还会再钉一次**（见下方 update 闭包），
-    // 因为「读 active」与「整体写入」之间仍有窗口（评审三十 #1）。
-    let previous = ctx.config.get();
-    config.oj.active = previous.oj.active.clone();
-    if maintainer_locked {
-        config.preserve_locked_fields(&previous);
-        config
-            .validate_preserving_locked()
-            .map_err(AppError::Config)?;
-        if config.sanitize_editable() {
-            warn!("配置存在可编辑层越界字段，已钳制后持久化");
+    apply_config_update_with_hook(ctx, config, maintainer_locked, &mut || {})
+}
+
+/// `apply_config_update` 的真实实现；`before_validate` 只供测试注入强制交错。
+///
+/// **整个「读最新活 → 合并/锁定 → 固定 active → 最终校验 → 整体替换」都在
+/// `ConfigService` 的写事务锁内完成**（评审三十三 #2）：旧实现先用载荷里的
+/// 旧 active 校验、再在写锁内换成最新 active 后直接落盘——若交错切换把 active
+/// 指向载荷中已删除/禁用的实例，就会保存一份 `AppConfig::validate()` 拒绝的配置。
+/// 校验必须看到**最终候选**，并与 `switch_oj` 共用同一把锁。
+pub(crate) fn apply_config_update_with_hook(
+    ctx: &AppContext,
+    mut config: AppConfig,
+    maintainer_locked: bool,
+    before_validate: &mut dyn FnMut(),
+) -> AppResult<()> {
+    ctx.config.update_checked(|cfg| {
+        // `oj.active` **只由 switch_oj 改写**（评审二十九 #1）：调用方带来的 active
+        // 可能是保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去。
+        // 这里在写锁闭包内取**锁内最新值**，两种模式一律以它为准。
+        let previous = cfg.clone();
+        config.oj.active = previous.oj.active.clone();
+        // 测试注入点：此刻写事务已持有，并发的 switch_oj 必须被挡在事务外
+        before_validate();
+        if maintainer_locked {
+            config.preserve_locked_fields(&previous);
+            config
+                .validate_preserving_locked()
+                .map_err(AppError::Config)?;
+            if config.sanitize_editable() {
+                warn!("配置存在可编辑层越界字段，已钳制后持久化");
+            }
+        } else {
+            config.validate().map_err(AppError::Config)?;
+            if config.sanitize() {
+                warn!("配置存在越界字段，已按取值域钳制后持久化: {:?}", config);
+            }
         }
-    } else {
-        config.validate().map_err(AppError::Config)?;
-        if config.sanitize() {
-            warn!("配置存在越界字段，已按取值域钳制后持久化: {:?}", config);
-        }
-    }
-    ctx.config.update(|cfg| {
-        // 与读取放在同一次写锁内：即便此刻已有切换落地，写入仍用**锁内**的
-        // active，而不是校验时读到的旧值
-        config.oj.active = cfg.oj.active.clone();
+        // 校验/净化针对的是**固定 active 之后的最终候选**；失败时事务回滚，
+        // 内存与磁盘都保持原样
         *cfg = config;
+        Ok(())
     })?;
 
     // 显式同步（幂等）：间隔未变时不重启计时器，关掉后也能停
