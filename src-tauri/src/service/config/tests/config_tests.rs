@@ -279,7 +279,6 @@ impl ConfigRepository for DelayedSaveRepo {
 /// 有锁时 T2 必须等 T1 整个事务结束，最终磁盘是 B。
 #[test]
 fn stale_update_cannot_overwrite_disk_after_a_concurrent_switch() {
-    use crate::core::repository::config_repo::ConfigRepository as _;
     let dir = TempDir::unique("config-write-txn");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let (started_tx, started_rx) = std::sync::mpsc::channel();
