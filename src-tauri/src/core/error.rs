@@ -32,7 +32,7 @@ pub enum AppError {
     ProviderNotFound(String),
 
     /// OJ 切换**已经生效**（registry 已切、缓存已清），但持久化 `oj.active` 失败。
-    /// 前端据此走「承认已生效」分支，而不是回滚 UI（评审二十四 #1）。
+    /// 前端据此走「承认已生效」分支，而不是回滚 UI。
     #[error("OJ 切换已生效但保存配置失败: {0}")]
     OjSwitchPersistFailed(String),
 

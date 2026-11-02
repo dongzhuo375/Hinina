@@ -229,7 +229,7 @@ fn update_failure_does_not_publish_config_changed_event() {
 }
 
 /// 可延迟的配置仓库：第一次 `save_config` 阻塞到测试放行，用于构造
-/// 「旧快照后落盘」的时序（评审三十一 P2 回归）。
+/// 「旧快照后落盘」的时序回归。
 struct DelayedSaveRepo {
     inner: FsConfigRepository,
     started: std::sync::mpsc::Sender<()>,
@@ -275,7 +275,7 @@ impl ConfigRepository for DelayedSaveRepo {
 /// 写事务锁：先克隆的旧配置不得后于新配置落盘（内存/磁盘/Registry 三者一致）。
 ///
 /// 时序：T1 的 updater 先跑（active 仍为 A），其 save 被仓库阻塞；T2 随后尝试
-/// 把 active 切到 B。**确定性握手**（评审三十六 P2）：T2 在调用 update 前用
+/// 把 active 切到 B。**确定性握手**：T2 在调用 update 前用
 /// `write_txn_is_held` 探测 T1 是否持有写事务；持有则 T2 必然阻塞，主线程直接
 /// 放行 T1；未持有（移除锁的变异）则等 T2 真正写完 B 后再放行 T1，让旧交错
 /// 必然发生——不再依赖 50ms sleep 猜调度。

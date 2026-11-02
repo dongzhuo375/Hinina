@@ -217,7 +217,7 @@ describe('switchOj — 显式切换当前 OJ', () => {
     expect(getConfig).toHaveBeenCalledTimes(2)
   })
 
-  it('评审二十六 P1：切换已生效但持久化失败也失效缓存（否则旧 active 会被写回）', async () => {
+  it('切换已生效但持久化失败也失效缓存（否则旧 active 会被写回）', async () => {
     getConfig.mockResolvedValue(makeConfig())
     await configService.getConfig() // 预热缓存（旧 active）
     // 用真实 AppError 载荷经 parseAppError 构造 IpcError（与生产 IPC 出口同源）：
@@ -239,7 +239,7 @@ describe('switchOj — 显式切换当前 OJ', () => {
   })
 })
 
-/// 并发基座的真实服务测试（评审三十六 P2）：useSettingsForm 的 mock 复刻了
+/// 并发基座的真实服务测试：useSettingsForm 的 mock 复刻了
 /// epoch/pending，若只测 mock，删掉真实排队/代际仍会全绿。这里用独立实例与
 /// 延迟 bridge promise 直接锁定 ConfigService 的行为。
 describe('switchOj — 真实排队与代际', () => {
@@ -394,7 +394,7 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     expect(getConfig).toHaveBeenCalledTimes(2)
   })
 
-  it('评审二十七：未显式传参时按钥匙模式推导 maintainerLocked（普通启动=true）', async () => {
+  it('未显式传参时按钥匙模式推导 maintainerLocked（普通启动=true）', async () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockResolvedValue(undefined)
 
@@ -412,7 +412,7 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     expect(updateConfig).toHaveBeenLastCalledWith(expect.any(Object), false)
   })
 
-  it('评审二十六 P2：维护者层锁定把 maintainerLocked 透传给 bridge', async () => {
+  it('维护者层锁定把 maintainerLocked 透传给 bridge', async () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockResolvedValue(undefined)
 

@@ -416,7 +416,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       case 'get_config':
         return structuredClone(config)
       case 'update_config': {
-        // 复刻后端语义（评审二十九 #6）：maintainerLocked 必填；active 只由
+        // 复刻后端语义：maintainerLocked 必填；active 只由
         // switch_oj 改写；锁定模式用旧值覆盖锁定字段，并保留结构性检查
         const incoming = structuredClone(args?.config) as typeof config
         const locked = args?.maintainerLocked

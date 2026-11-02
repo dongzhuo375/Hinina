@@ -1,10 +1,10 @@
 import { ref } from 'vue'
 
 /**
- * 钥匙模式的阶段闸门提示（评审十五 B）。
+ * 钥匙模式的阶段闸门提示。
  *
  * 赛前/赛后从设置页点题目/榜单会被守卫拦回设置页——vue-router 只 resolve 一个
- * NavigationFailure，用户看不到任何反馈（导航又不能禁用：那正是评审六修的
+ * NavigationFailure，用户看不到任何反馈（导航又不能禁用：那会把设置页
  * inert）。守卫写入这里，SettingsView 渲染一行提示并自动清除。
  *
  * 模块级单例（与 settings-access 同先例）：没有领域数据、不走 IPC，不值得一个

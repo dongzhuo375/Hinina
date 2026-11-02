@@ -83,14 +83,14 @@ describe('--settings 初始直落（守卫行为）', () => {
   })
 
   it('无钥匙 + 无会话直达设置页：回登录页（meta 继承保护，豁免仅钥匙模式）', async () => {
-    // 评审 P2 路径一：无条件豁免会让无钥匙访客直达设置页
+    // 无条件豁免会让无钥匙访客直达设置页
     launchFlags.state.settings = false
     const { default: router } = await import('@/router')
     await router.push({ name: 'Settings' })
     expect(router.currentRoute.value.name).toBe('Login')
   })
 
-  it('评审九 P2-2：导航中途会话失效——钥匙豁免不被在途的比赛导航继承', async () => {
+  it('导航中途会话失效——钥匙豁免不被在途的比赛导航继承', async () => {
     // 时序：守卫批准 ProblemSet 后、路由确认前，401 把会话清掉。sessionGuard
     // 此刻读到的 currentRoute 仍是设置页，钥匙豁免会跳过跳转——落地后的
     // afterEach 不变量必须兜住（受保护路由 + 无会话 + 非设置页 → 回登录页）。
@@ -123,7 +123,7 @@ describe('--settings 初始直落（守卫行为）', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('Login'))
   })
 
-  it('评审十 #1：钥匙设置页出发、赛前/赛后目标比赛页——回设置页而非登录页', async () => {
+  it('钥匙设置页出发、赛前/赛后目标比赛页——回设置页而非登录页', async () => {
     // 否则落进被闸门锁定的比赛页 → 外壳 watcher 踢回登录页 → 草稿丢失且无回入口
     launchFlags.state.settings = true
     const now = Math.floor(Date.now() / 1000)
@@ -144,12 +144,12 @@ describe('--settings 初始直落（守卫行为）', () => {
 
     await router.push({ name: 'ProblemSet' })
     expect(router.currentRoute.value.name).toBe('Settings') // 回设置页，不是 Login
-    // 评审十五 B：拦回时给一次可见反馈（NavigationFailure 本身静默）
+    // 拦回时给一次可见反馈（NavigationFailure 本身静默）
     const { settingsGateNotice } = await import('@/utils/settings-gate-notice')
     expect(settingsGateNotice.value).toContain('比赛未进行')
   })
 
-  it('评审十九 #2：守卫等待 loadBrief 期间会话失效——钥匙流程回设置页而非登录页', async () => {
+  it('守卫等待 loadBrief 期间会话失效——钥匙流程回设置页而非登录页', async () => {
     launchFlags.state.settings = true
     const auth = useAuthStore()
     auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never
@@ -165,12 +165,12 @@ describe('--settings 初始直落（守卫行为）', () => {
     })
     await router.push({ name: 'ProblemSet' })
     expect(router.currentRoute.value.name).toBe('Settings')
-    // 评审二十六 P3：拦回时必须有可见反馈（与未登录分支一致）
+    // 拦回时必须有可见反馈（与未登录分支一致）
     const { settingsGateNotice } = await import('@/utils/settings-gate-notice')
     expect(settingsGateNotice.value).toContain('会话已失效')
   })
 
-  it('评审二十：钥匙设置页 + 无会话点赛场页面——留在设置页并提示，不去登录页', async () => {
+  it('钥匙设置页 + 无会话点赛场页面——留在设置页并提示，不去登录页', async () => {
     // 无会话（最小壳）时点/历史回到 ProblemSet：无条件 Login 会卸载设置视图、
     // 丢掉草稿——与「钥匙失败回设置页」的设计同向
     launchFlags.state.settings = true
@@ -184,7 +184,7 @@ describe('--settings 初始直落（守卫行为）', () => {
     expect(settingsGateNotice.value).toContain('未登录')
   })
 
-  it('评审十九 #3：简报加载失败时提示说明「无法加载」，而不是「比赛未进行」', async () => {
+  it('简报加载失败时提示说明「无法加载」，而不是「比赛未进行」', async () => {
     launchFlags.state.settings = true
     const auth = useAuthStore()
     auth.user = { id: 'u1', username: 'maintainer', token: 't' } as never

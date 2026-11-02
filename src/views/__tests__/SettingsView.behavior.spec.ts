@@ -59,7 +59,7 @@ vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMy
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => ({ refresh: mocks.announcementRefresh }) }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
 vi.mock('vue-router', () => ({
-  // performSwitch 读 currentRoute 判断「是否仍在设置页」（评审九 P2-1）
+  // performSwitch 读 currentRoute 判断「是否仍在设置页」
   useRouter: () => ({ replace: mocks.routerReplace, currentRoute: { value: { name: 'Settings' } } }),
 }))
 vi.mock('@/components/common/PageHeading.vue', () => ({ default: { template: '<header />' } }))
@@ -231,7 +231,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
       id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {},
     })
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
-    // 钥匙模式（评审八 P2）：切换成功后留在设置页——踢回登录页等于重新锁死
+    // 钥匙模式：切换成功后留在设置页——踢回登录页等于重新锁死
     expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
 
@@ -248,7 +248,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     expect(view.host.textContent).not.toContain('请求超时须为非负整数')
   })
 
-  it('评审十 #3：锁定层存量非法值不阻塞可编辑字段保存', async () => {
+  it('锁定层存量非法值不阻塞可编辑字段保存', async () => {
     // 手改过、值越界的 config.json（普通启动）：锁定字段不可编辑 → 不参与校验，
     // 字号等可编辑字段必须能保存；保存载荷不得把非法值解析成 NaN
     currentConfig.oj.timeoutSecs = 999 // 越界（1–120）
@@ -263,7 +263,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     expect(save?.disabled).toBe(false)
     save!.click()
     await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalled())
-    // 锁定语义由后端落实（评审二十六 P2）：前端必须把 maintainerLocked 透传
+    // 锁定语义由后端落实：前端必须把 maintainerLocked 透传
     expect(mocks.updateConfig).toHaveBeenCalledWith(expect.any(Function), { maintainerLocked: true })
     expect(currentConfig.oj.timeoutSecs).toBe(999) // 该 mock 不模拟钳制；真实语义由 Rust 测试锁定
     expect(currentConfig.editor.fontSize).toBe(18)
@@ -312,7 +312,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
 
-  it('评审三十三 #3：切换在途整个 OJ 域禁用，失败后恢复且地址草稿未被覆盖', async () => {
+  it('切换在途整个 OJ 域禁用，失败后恢复且地址草稿未被覆盖', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     const view = await render()
@@ -352,7 +352,7 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     )
   })
 
-  it('评审三十三 #3：保存在途同样禁用整个 OJ 域，完成后恢复', async () => {
+  it('保存在途同样禁用整个 OJ 域，完成后恢复', async () => {
     const view = await render()
     let release!: (config: AppConfig) => void
     mocks.updateConfig.mockImplementationOnce(

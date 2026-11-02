@@ -1,7 +1,7 @@
 import { systemService } from '@/services/system.service'
 
 /**
- * 「管理方钥匙」（`--settings`）豁免策略的**唯一判定点**（评审二十四 #4）。
+ * 「管理方钥匙」（`--settings`）豁免策略的**唯一判定点**。
  *
  * 钥匙模式有两条互不相同的判据，消费方一律经这里取，不要各自读
  * `launchFlags` 或重复拼 `route.name === 'Settings'`：
@@ -14,7 +14,7 @@ import { systemService } from '@/services/system.service'
  *
  * 协议：**豁免只属于设置页**。任何「钥匙模式下某处也照做」的新逻辑，先在这里
  * 加一个具名函数或复用已有函数，并在注释里写清与豁免的关系——避免同一规则
- * 散落在路由/守卫/视图里各自漂移（历史上有 7 处内联，靠多轮评审才收敛）。
+ * 散落在路由/守卫/视图里各自漂移（历史上有 7 处内联，后来才收敛到这里）。
  */
 export function isKeyedProcess(): boolean {
   return systemService.isKeyed()

@@ -37,7 +37,7 @@ pub(crate) fn switch_scope(
 /// 3. 持久化 `oj.active` —— 失败如实上报（切换已生效，重启后回退），但不影响第 2 步；
 /// 4. 最后发布 `CoreEvent::OjSwitched` —— **纯事实通知**。
 ///
-/// **为什么整段共用写事务锁**（评审三十三 #1）：只锁落盘会留下「switch_scope
+/// **为什么整段共用写事务锁**：只锁落盘会留下「switch_scope
 /// 已切 Registry、尚未落盘」的窗口，两个并发切换可在其中交错出
 /// 「Registry=B、内存/磁盘=A」的永久分叉；与 `update_config`/`reload` 共用
 /// 同一把锁后，切换与保存也串行，保存的最终校验不会看到半途的 active。
@@ -62,7 +62,7 @@ pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<(
 /// 切换事务本体（同步）：**整段**——补注册、可用性检查、Registry 切换、缓存
 /// 清理、`oj.active` 落盘、事件发布——都在 `ConfigService` 的写事务锁内完成。
 ///
-/// 为什么必须整段加锁（评审三十三 #1）：只把落盘包进 `ConfigService::update`
+/// 为什么必须整段加锁：只把落盘包进 `ConfigService::update`
 /// 的锁里仍留出「`switch_scope` 已切 Registry、尚未落盘」的窗口。两个并发切换
 /// 在这个窗口交错时（T1 切 A → T2 切 B 并落盘 B → T1 落盘 A），会得到
 /// Registry=B、内存/磁盘=A 的**永久分叉**，而两次调用都返回成功。前端单飞
@@ -83,7 +83,7 @@ where
     AfterPersist: FnOnce(),
 {
     // 测试注入点（生产为 no-op）：在**尝试取锁之前**执行。并发回归用它探测
-    // 「另一个线程是否已持有写事务」，从而不靠 sleep 猜测调度（评审三十四）。
+    // 「另一个线程是否已持有写事务」，从而不靠 sleep 猜测调度。
     before_lock(ctx);
     let _txn = ctx.config.lock_write_txn();
 
@@ -98,7 +98,7 @@ where
     // **配置是「哪些 OJ 可用」的权威来源**：注册表不会因配置里删除/禁用实例而
     // 反注册。只查注册表会允许切到刚被保存移除的实例，落盘出的 `oj.active`
     // 指向不存在/禁用实例——正是 `AppConfig::validate()` 拒绝的形态
-    //（评审三十三 #2 的交错序列需要这道检查才能闭合）。
+    //（并发切换/保存的交错序列需要这道检查才能闭合）。
     if !ctx
         .config
         .get()
@@ -132,7 +132,7 @@ where
     info!(oj_id = %id, "已切换当前 OJ");
 
     // 测试注入点：此刻 Registry 已切换、写事务仍持有；测试用它强制第二个
-    // 切换在「落盘之前」发起，验证它被挡在事务外（评审三十三 #1 的复现序列）
+    // 切换在「落盘之前」发起，验证它被挡在事务外（并发一致性的复现序列）
     after_scope();
 
     let save_result = ctx
@@ -143,12 +143,12 @@ where
         })
         .map_err(|e| {
             // 切换已生效但持久化失败：用**专用变体**上报，前端据此承认已生效
-            // 而不是回滚 UI（评审二十四 #1）
+            // 而不是回滚 UI（前端据此承认已生效）
             AppError::OjSwitchPersistFailed(e.to_string())
         });
 
     // Registry 与内存都已切换——`OjSwitched` 是**已发生的事实**，无论落盘
-    // 成败都要发布，否则插件宿主/审计观察者不知道切换发生（评审三十六 P2）。
+    // 成败都要发布，否则插件宿主/审计观察者不知道切换发生。
     // `ConfigChanged` 仍只由 update_locked 在落盘成功后发布。
     ctx.event_bus.publish(CoreEvent::OjSwitched {
         oj_id: id.to_string(),
@@ -156,7 +156,7 @@ where
 
     // 持久化失败：事件已发，返回专用错误
     save_result?;
-    // 测试注入点：**持久化已完成后**执行（评审三十五）。并发回归用它在旧实现
+    // 测试注入点：**持久化已完成后**执行。并发回归用它在旧实现
     // 下等第二个切换真正落盘，而不是在落盘前发信号造成假绿。
     after_persist();
 

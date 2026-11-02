@@ -23,7 +23,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await expect(page.getByRole('textbox', { name: /比赛 ID \/ 引用/ })).toBeEnabled()
     await expect(page.getByRole('textbox', { name: /请求超时/ })).toBeEnabled()
 
-    // 评审八 P2：钥匙模式 OJ 切换成功后留在设置页（不踢回登录页，会话清理照旧）
+    // 钥匙模式 OJ 切换成功后留在设置页（不踢回登录页，会话清理照旧）
     await oj.selectOption('HOJ')
     await expect.poll(async () => callCount(page, 'switch_oj')).toBeGreaterThanOrEqual(1)
     await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
@@ -33,7 +33,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await back.click()
     await expect(page.getByText('登录参赛系统')).toBeVisible()
 
-    // 评审十五 A：登录页在钥匙模式下有「返回设置」入口——返回登录不是单向门
+    // 登录页在钥匙模式下有「返回设置」入口——返回登录不是单向门
     const toSettings = page.getByRole('button', { name: '返回设置' })
     await expect(toSettings).toBeVisible()
     await toSettings.click()
@@ -41,7 +41,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
   })
 
-  test('评审十九 #4：钥匙模式下登录进场后，壳层直接显示「环境设置」入口', async ({ page }) => {
+  test('钥匙模式下登录进场后，壳层直接显示「环境设置」入口', async ({ page }) => {
     await installFakeTauri(page, { launchFlags: { settings: true } })
     await page.goto('/')
     // 直落设置页 → 返回登录 → 正常登录进场：壳层不应再要求连点版本号 5 下
@@ -63,7 +63,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await expect(page.getByText('登录参赛系统')).toBeVisible()
   })
 
-  test('评审四 P2-1：钥匙 + 存量过期会话——首个认证请求 401 后留在设置页', async ({ page }) => {
+  test('钥匙 + 存量过期会话——首个认证请求 401 后留在设置页', async ({ page }) => {
     await installFakeTauri(page, {
       // 预置（已过期的）会话：get_session 本地恢复 → 先以正常外壳落设置页
       user: { id: 'u1', username: 'maintainer', token: 'stale-token' },
@@ -81,7 +81,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await expect(page.getByText('登录参赛系统')).toBeHidden()
   })
 
-  test('评审六：钥匙 + 会话有效 + 已结束赛程——设置页无遮罩无 inert 且可交互', async ({ page }) => {
+  test('钥匙 + 会话有效 + 已结束赛程——设置页无遮罩无 inert 且可交互', async ({ page }) => {
     await installFakeTauri(page, {
       user: { id: 'u1', username: 'maintainer', token: 't' },
       launchFlags: { settings: true },
@@ -91,7 +91,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
 
     // 有会话：完整外壳（无最小壳标题），但赛程已结束——闸门的遮罩与 inert
     // 不得锁死钥匙设置页。先等赛程数据确已加载（StatusBar 连接态翻转），
-    // 再做遮罩/inert 断言——避免在 phase=none 的空窗期假绿（评审八 P2-2）
+    // 再做遮罩/inert 断言——避免在 phase=none 的空窗期假绿
     await expect(page.getByRole('heading', { name: '环境设置' })).toBeVisible()
     await expect(page.getByText('已连接比赛服务器')).toBeVisible()
     await expect(page.locator('[role="alert"]')).toHaveCount(0)
@@ -101,7 +101,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await addr.fill('https://repaired.example')
     await expect(addr).toHaveValue('https://repaired.example')
 
-    // 评审十五 B：滚到底部再点赛场页面（维护者常改的正是底部数据目录/关于）——
+    // 滚到底部再点赛场页面（维护者常改的正是底部数据目录/关于）——
     // 被闸门拦回时的提示必须**在视口内**可见（toBeVisible 只看 CSS 可见性，
     // 这里断言几何位置），且仍停在设置页
     await page.evaluate(() => {
@@ -117,7 +117,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     expect(box).not.toBeNull()
     expect(box!.y).toBeGreaterThanOrEqual(0)
     expect(box!.y).toBeLessThan(viewport!.height)
-    // 横向不得压住左侧分组索引（评审十六视觉实测：整幅块级会盖住「01」首项）
+    // 横向不得压住左侧分组索引（整幅块级会盖住「01」首项）
     const navBox = await page.locator('nav.settings-index').boundingBox()
     if (navBox) {
       const intersects =
@@ -129,7 +129,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     }
   })
 
-  test('评审七：钥匙 + 会话失效翻转外壳——未保存草稿跨形态保留', async ({ page }) => {
+  test('钥匙 + 会话失效翻转外壳——未保存草稿跨形态保留', async ({ page }) => {
     await installFakeTauri(page, {
       user: { id: 'u1', username: 'maintainer', token: 'stale-token' },
       launchFlags: { settings: true },
@@ -145,7 +145,7 @@ test.describe('--settings 管理方钥匙旅程', () => {
     await addr.fill('https://draft-kept.example')
     await expect(addr).toHaveValue('https://draft-kept.example')
 
-    // 评审八 P3 时序防伪绿：先断言**完整外壳专属标记**（StatusBar）仍在——
+    // 时序防伪绿：先断言**完整外壳专属标记**（StatusBar）仍在——
     // 若 fill 已落在翻转之后，这里即刻红，而不是「全绿但没测到跨形态」
     await expect(page.locator('footer')).toBeVisible()
 

@@ -72,7 +72,7 @@ export const routes: RouteRecordRaw[] = [
         // meta **保持继承父级的 requiresAuth: true**（默认受保护）—— 免登录豁免
         // 是守卫里的**条件豁免**（isKeyedSettingsRoute(to.name)，管理方
         // 钥匙），不是 meta 声明：无条件豁免会让无钥匙访客直达设置页，且 401 时
-        // sessionGuard 因 meta 为 false 不再回登录页（评审 P2）。
+        // sessionGuard 因 meta 为 false 不再回登录页。
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/SettingsView.vue'),
@@ -137,12 +137,11 @@ router.beforeEach(async (to, from) => {
   // 管理方钥匙的条件豁免：仅 --settings 进程中的设置页可无会话进入（不限首次
   // —— 返回登录后想再修一次地址仍可直达）。普通模式设置页照常受保护。
   if (isKeyedSettingsRoute(to.name)) return true
-  // 钥匙设置页出发的导航：**未登录与赛程闸门失败**拦回设置页（评审十九 #2、
-  // 评审二十补漏）——无会话时点赛场页面若送去登录页，设置视图被卸载、草稿
+  // 钥匙设置页出发的导航：**未登录与赛程闸门失败**拦回设置页——无会话时点赛场页面若送去登录页，设置视图被卸载、草稿
   // 丢失，正是钥匙要避免的。导航**中途**会话失效不在此列：那种情况由
   // `afterEach` 的落地不变量回登录页（有意的安全兜底，见下），不在这里回设置页。
-  // 来源路由在**导航入口**一次性捕获（评审二十一 #5）：异步等待后不再读
-  // `router.currentRoute`——那可能已被在途导航改写（评审九/十九的竞态根源）
+  // 来源路由在**导航入口**一次性捕获：异步等待后不再读
+  // `router.currentRoute`——那可能已被在途导航改写（历史竞态根源）
   const fromKeyedSettings = isKeyedSettingsRoute(from.name)
   if (!auth.isLoggedIn) {
     if (fromKeyedSettings) {
@@ -154,7 +153,7 @@ router.beforeEach(async (to, from) => {
 
   // 首次进入工作台（含深链）先确认赛程；赛前/赛后在入口等待。
   // 工作台内切换页面由外壳的时钟处理，避免结束弹窗期间打断其退出流程。
-  // **钥匙设置页出发的导航不跳过闸门**（评审十 #1）：否则赛前/赛后点题目/榜单
+  // **钥匙设置页出发的导航不跳过闸门**：否则赛前/赛后点题目/榜单
   // 会落进被闸门锁定的比赛页，随后外壳 watcher 把维护者踢回登录页——草稿丢失、
   // 维护被打断（登录页的「返回设置」是一次重新进入）。闸门失败时回**设置页**。
   const enteringFromOutside =
@@ -162,11 +161,11 @@ router.beforeEach(async (to, from) => {
   if (enteringFromOutside) {
     const contest = useContestStore()
     if (!contest.brief) await contest.loadBrief()
-    // 会话可能在 loadBrief 期间失效（例如一次 OJ 切换完成并清理了会话，
-    // 评审十九 #2）：钥匙流程同样回设置页，而不是送去登录页
+    // 会话可能在 loadBrief 期间失效（例如一次 OJ 切换完成并清理了会话）：
+    // 钥匙流程同样回设置页，而不是送去登录页
     if (!auth.isLoggedIn) {
       if (fromKeyedSettings) {
-        // 与未登录分支一致：拦回时给一次可见反馈（评审二十六 P3）
+        // 与未登录分支一致：拦回时给一次可见反馈
         markSettingsGateBlocked('会话已失效，已留在设置页（请重新登录后进入赛场页面）')
         return { name: 'Settings' }
       }
@@ -175,9 +174,8 @@ router.beforeEach(async (to, from) => {
     const schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
     if (getContestPhase(schedule, Math.floor(Date.now() / 1000)) !== 'running') {
       if (fromKeyedSettings) {
-        // 拦回设置页时给一次可见反馈（NavigationFailure 本身静默，评审十五 B）。
+        // 拦回设置页时给一次可见反馈（NavigationFailure 本身静默）。
         // 简报缺失 = 服务器可能不可达——正是钥匙要修的场景，不能说「比赛未进行」
-        //（评审十九 #3）
         markSettingsGateBlocked(
           contest.brief
             ? '比赛未进行，已留在设置页（比赛期间才能进入赛场页面）'
@@ -192,7 +190,7 @@ router.beforeEach(async (to, from) => {
 })
 
 /**
- * 导航**落地后**的会话不变量（评审九 P2-2）。
+ * 导航**落地后**的会话不变量。
  *
  * `beforeEach` 只能检查导航开始时的会话；认证状态可能在导航中途变化：守卫
  * 批准后、路由确认前，某个在途请求返回 401 → sessionGuard 清理会话。此时它

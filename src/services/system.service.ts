@@ -35,20 +35,20 @@ export class SystemService {
    * 真值 —— 组件（ContestLayout 最小壳判据、SettingsView 分层锁）直接读这里，
    * 无需再等 Promise：异步判据会把闪帧反转到钥匙启动的首帧。
    */
-  /// 只读视图（评审十 #6）：快照的「进程内不可变」由类型强制，外部拿不到写入口
+  /// 只读视图：快照的「进程内不可变」由类型强制，外部拿不到写入口
   readonly launchFlags = readonly(launchFlagsSnapshot)
 
   /**
    * 本次启动是否为 `--settings` 管理方钥匙（**进程级**判据，无路由维度）。
    * 组件里判断「钥匙模式」一律走这里，不要直接读 `launchFlags.value.settings`
-   *（评审二十一 #4：判据要单一来源）。
+   *（判据要单一来源）。
    */
   isKeyed(): boolean {
     return launchFlagsSnapshot.value.settings
   }
 
   /**
-   * 钥匙模式 + 指定路由是否为设置页（评审十 #5）：**路由级唯一判据**，四处消费
+   * 钥匙模式 + 指定路由是否为设置页：**路由级唯一判据**，各消费方
    *（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，
    * 避免注释声称一致、实现各自内联的漂移。进程级判断用 `isKeyed()`。
    */
@@ -77,7 +77,7 @@ export class SystemService {
         return flags
       })
       .catch(() => {
-        // **不缓存 rejection**（评审十九 #7）：标志在进程内不变，下次调用重试
+        // **不缓存 rejection**：标志在进程内不变，下次调用重试
         // 即可；一次瞬时失败不该让钥匙整个进程失效（否则维护者静默走普通门禁、
         // 字段全锁且无从得知原因）。快照在成功前保持安全侧默认值。
         launchFlagsOnce = null

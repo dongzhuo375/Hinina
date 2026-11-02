@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   route: { name: 'Settings' as string | undefined },
 }))
 
-/// 模拟真实 ConfigService 的在途切换/代际（评审三十三 #4）：composable 的
+/// 模拟真实 ConfigService 的在途切换/代际：composable 的
 /// `readSettledConfig` 依赖这两个成员，裸 vi.fn 无法表达「等待在途切换」。
 const switchState = vi.hoisted(() => ({
   pending: null as Promise<void> | null,
@@ -139,7 +139,7 @@ beforeEach(async () => {
     currentConfig = draft
     return draft
   })
-  // 与真实 switch_oj 一致：切换会改写配置的 oj.active（评审十 #4 的重读才有意义）
+  // 与真实 switch_oj 一致：切换会改写配置的 oj.active（切换后重读才有意义）
   mocks.switchOj.mockImplementation(async (id: string) => {
     currentConfig.oj.active = id
   })
@@ -279,7 +279,7 @@ describe('useSettingsForm', () => {
     expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
   })
 
-  it('评审八 P2：钥匙模式切换成功后留在设置页（不导航），会话清理照旧', async () => {
+  it('钥匙模式切换成功后留在设置页（不导航），会话清理照旧', async () => {
     // --settings 的核心修复动作就是「填新地址/切 OJ → 保存」——切换成功后
     // 踢到登录页等于重新锁死；resetSessionForOjSwitch 照做，最小壳接管
     //（内容区共享实例，草稿保留）
@@ -292,12 +292,12 @@ describe('useSettingsForm', () => {
     expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
     expect(mocks.routerReplace).not.toHaveBeenCalled()
-    // 评审十 #4：切换后重读配置并复位 baseline——不得出现假的「未保存更改」
+    // 切换后重读配置并复位 baseline——不得出现假的「未保存更改」
     expect(settings.dirty.value).toBe(false)
     expect(settings.canSave.value).toBe(false)
   })
 
-  it('评审九 P2-1：切换期间已导航离开设置页——钥匙豁免不带走，照常回登录', async () => {
+  it('切换期间已导航离开设置页——钥匙豁免不带走，照常回登录', async () => {
     // switch_oj 是异步的：期间用户可能已跳到比赛页。若无条件「停留」，无会话
     // 用户会被留在比赛页（豁免只属于设置页本身）
     mocks.launchFlags.value = { settings: true }
@@ -312,7 +312,7 @@ describe('useSettingsForm', () => {
     expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
   })
 
-  it('评审十九 #1：切换保留全局草稿、只重置 OJ 域，dirty 只反映未保存的全局编辑', async () => {
+  it('切换保留全局草稿、只重置 OJ 域，dirty 只反映未保存的全局编辑', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -334,7 +334,7 @@ describe('useSettingsForm', () => {
     expect(currentConfig.oj.timeoutSecs).toBe(30)
   })
 
-  it('评审二十二：切换后端成功但重载失败——承认已生效（对齐 B），不假装失败', async () => {
+  it('切换后端成功但重载失败——承认已生效（对齐 B），不假装失败', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -349,11 +349,11 @@ describe('useSettingsForm', () => {
     expect(settings.form.ojUrl).toBe('https://hydro.example')
     expect(settings.switchError.value).toBeNull()
     expect(settings.switchNotice.value).toContain('切换已生效')
-    // 评审二十三 #1：基线同步重算——不得出现假「未保存更改」
+    // 基线同步重算——不得出现假「未保存更改」
     expect(settings.dirty.value).toBe(false)
   })
 
-  it('评审二十三：重载失败时 A 的 OJ 域草稿也被重置，全局草稿仍保留', async () => {
+  it('重载失败时 A 的 OJ 域草稿也被重置，全局草稿仍保留', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -370,7 +370,7 @@ describe('useSettingsForm', () => {
     expect(settings.dirty.value).toBe(true) // 仅剩未保存的全局编辑
   })
 
-  it('评审二十一 #2：OJ 域草稿被磁盘值覆盖时给出说明（全局草稿保留）', async () => {
+  it('OJ 域草稿被磁盘值覆盖时给出说明（全局草稿保留）', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -384,14 +384,14 @@ describe('useSettingsForm', () => {
     expect(settings.form.fontSize).toBe('18') // 全局草稿保留
   })
 
-  it('评审二十四 #1：切换已生效但持久化失败——承认生效、重置会话、对齐新 OJ', async () => {
+  it('切换已生效但持久化失败——承认生效、重置会话、对齐新 OJ', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
     settings.form.activeOj = 'Hydro'
     // 后端 registry 已切换、仅持久化失败：命令以专用变体拒绝
     currentConfig.oj.active = 'Hydro'
-    // 用**真实载荷**经 parseAppError 构造 IpcError（评审二十五：手写 variant
+    // 用**真实载荷**经 parseAppError 构造 IpcError（手写 variant
     // 会绕过 bridge 白名单，生产上 variant 为 null、分支永不进入）
     mocks.switchOj.mockRejectedValueOnce(makeIpcError('switch_oj', {
       OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满',
@@ -408,7 +408,7 @@ describe('useSettingsForm', () => {
     expect(settings.dirty.value).toBe(false)
   })
 
-  it('评审二十九 #1/#2：切换单飞——进行中禁止保存、再次选择被忽略', async () => {
+  it('切换单飞——进行中禁止保存、再次选择被忽略', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -436,7 +436,7 @@ describe('useSettingsForm', () => {
     expect(settings.switching.value).toBe(false)
   })
 
-  it('评审三十 #1：自动切换（保存新建实例）也进入单飞，期间不可再次选择', async () => {
+  it('自动切换（保存新建实例）也进入单飞，期间不可再次选择', async () => {
     mocks.launchFlags.value = { settings: true }
     await settings.load()
     let release!: () => void
@@ -458,7 +458,7 @@ describe('useSettingsForm', () => {
     expect(settings.switching.value).toBe(false)
   })
 
-  it('评审三十 #1：保存进行中禁止显式切换（反向互斥）', async () => {
+  it('保存进行中禁止显式切换（反向互斥）', async () => {
     await settings.load()
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -478,7 +478,7 @@ describe('useSettingsForm', () => {
     await saving
   })
 
-  it('评审三十三 #4：旧控制器卸载后完成切换，新控制器等待事务并读到新 active', async () => {
+  it('旧控制器卸载后完成切换，新控制器等待事务并读到新 active', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -519,7 +519,7 @@ describe('useSettingsForm', () => {
     expect(next.dirty.value).toBe(false)
   })
 
-  it('评审三十三 #4：旧控制器卸载后的完成回调不再回写表单', async () => {
+  it('旧控制器卸载后的完成回调不再回写表单', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -547,7 +547,7 @@ describe('useSettingsForm', () => {
   })
 
 
-  it('评审二十九 #3：普通切换失败只回滚选择，保留地址草稿', async () => {
+  it('普通切换失败只回滚选择，保留地址草稿', async () => {
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
     settings.form.ojUrl = 'https://draft-hoj.example' // A 的地址草稿（未保存）
@@ -560,7 +560,7 @@ describe('useSettingsForm', () => {
     expect(settings.form.ojUrl).toBe('https://draft-hoj.example') // 草稿保留
   })
 
-  it('评审十五 C：锁定态 active 指向缺失实例——不创建、不切换、不谎报', async () => {
+  it('锁定态 active 指向缺失实例——不创建、不切换、不谎报', async () => {
     // 手改配置让 oj.active 指向不存在的实例：锁定态载荷跳过实例写入，
     // 因此绝不能触发 performSwitch（否则会提示「实例已保存；切换未成功」）
     currentConfig.oj.active = 'Ghost'
@@ -601,7 +601,7 @@ describe('useSettingsForm', () => {
     expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
 
-  it('评审三十四 #1：foreign reload 仍处于共享 busy，完成后才解除', async () => {
+  it('foreign reload 仍处于共享 busy，完成后才解除', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -659,7 +659,7 @@ describe('useSettingsForm', () => {
     scopeB.stop()
   })
 
-  it('评审三十四 #1：foreign reload 失败时已发生新切换，不回写旧目标', async () => {
+  it('foreign reload 失败时已发生新切换，不回写旧目标', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push(
       { id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} },
@@ -712,7 +712,7 @@ describe('useSettingsForm', () => {
     scopeB.stop()
   })
 
-  it('评审三十四 #3：切换期间新挂载的控制器加载后仍保留持久化失败警告', async () => {
+  it('切换期间新挂载的控制器加载后仍保留持久化失败警告', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -749,7 +749,7 @@ describe('useSettingsForm', () => {
     scopeB.stop()
   })
 
-  it('评审三十四 #2：旧控制器保存在途时新控制器的切换被忽略', async () => {
+  it('旧控制器保存在途时新控制器的切换被忽略', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -799,7 +799,7 @@ describe('useSettingsForm', () => {
     scopeB.stop()
   })
 
-  it('评审三十四 #3：跨控制器保留「已生效但持久化失败」警告', async () => {
+  it('跨控制器保留「已生效但持久化失败」警告', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -832,7 +832,7 @@ describe('useSettingsForm', () => {
     scopeB.stop()
   })
 
-  it('评审三十五 #1：无观察者时持久化失败，晚挂载控制器恢复警告；成功切换后清除', async () => {
+  it('无观察者时持久化失败，晚挂载控制器恢复警告；成功切换后清除', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -876,7 +876,7 @@ describe('useSettingsForm', () => {
     scopeC.stop()
   })
 
-  it('评审三十六：persist-failed 后普通保存成功解除警告，晚挂载不再提示', async () => {
+  it('persist-failed 后普通保存成功解除警告，晚挂载不再提示', async () => {
     mocks.launchFlags.value = { settings: true }
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()

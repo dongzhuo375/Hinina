@@ -15,9 +15,9 @@ const props = defineProps<{
   inputClass: (field: string) => string
   /** 维护者层锁定（--settings 启动解锁）：连接与缓存调优字段禁用 + 提示；比赛 ID/密码不受影响 */
   locked?: boolean
-  /** OJ 切换进行中（单飞）：下拉临时禁用，避免并发切换（评审二十九 #1/#2） */
+  /** OJ 切换进行中（单飞）：下拉临时禁用，避免并发切换 */
   switching?: boolean
-  /** 保存进行中：下拉同样禁用——保存与切换双向互斥（评审三十 #1） */
+  /** 保存进行中：下拉同样禁用——保存与切换双向互斥 */
   saving?: boolean
 }>()
 const emit = defineEmits<{
@@ -25,7 +25,7 @@ const emit = defineEmits<{
   (event: 'switch-oj'): void
 }>()
 
-/// 保存/切换在途：**整个 OJ 域**都不可编辑（评审三十三 #3）。切换完成后的
+/// 保存/切换在途：**整个 OJ 域**都不可编辑。切换完成后的
 /// `resetOjFieldsFromDisk` 会整体覆盖地址/比赛/超时等字段，请求期间的新输入
 /// 会被静默丢弃（提示还按请求前的 dirty 判定，可能完全不提示）。锁住输入
 /// 比「完成时重放编辑」简单且无歧义：这两段时间用户本就不该改同一批字段。

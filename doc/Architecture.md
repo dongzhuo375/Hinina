@@ -89,7 +89,7 @@ Hinina/
         │   │   └── tests/
         │   │       ├── workspace_tests.rs     # Workspace 单元测试
         │   │       ├── session_tests.rs       # 会话 schema 兼容测试（旧 oj_type 键、缺 user_id 降级、键名锁定）
-        │   │       └── config_tests.rs        # normalize_legacy_values 归一化测试（旧默认值才归一，用户自设值不动）
+        │   │       └── config_tests.rs        # normalize_legacy_values 归一化测试（旧默认值才归一，用户自设值不动）+ 配置写事务锁回归（可延迟仓库：旧快照不得后于新配置落盘）
         │   ├── provider/
         │   │   ├── mod.rs
         │   │   ├── auth.rs               # AuthProvider trait
@@ -301,7 +301,7 @@ Hinina/
             ├── data_dir_cmd.rs           # get_data_dir / set_data_dir / reset_data_dir / pick_data_dir（设置页「数据目录」；改动重启后生效，只写位置指针不搬运）
             ├── theme_cmd.rs              # get_theme / set_theme
             └── tests/
-                └── mod_tests.rs          # Command 层关键路径测试（P40 + 分页默认值/StorageInfo 序列化/uid 回退/空筛选归一）
+                └── mod_tests.rs          # Command 层关键路径测试（P40 + 分页默认值/StorageInfo 序列化/uid 回退/空筛选归一；#87 扩展：维护者层锁定语义（锁定字段保留/放宽校验/active 结构检查）、保存与切换并发一致性（确定性交错握手）、update_config 锁内最终校验、reload 全禁用拒绝、auto-save 同步与配置提交串行、reload 提交+Registry 切换访问栅栏）
 ```
 
 ---

@@ -42,7 +42,7 @@ import AboutSection from '@/components/settings/AboutSection.vue'
 const locked = computed(() => !isKeyedProcess())
 
 // locked 传入表单控制器：锁定字段不参与**前端**校验；保存载荷仍是完整 AppConfig，
-// 由后端按 maintainerLocked 用旧配置覆盖锁定字段（评审二十九 #7 修正旧表述）
+// 由后端按 maintainerLocked 用旧配置覆盖锁定字段
 const {
   form,
   dirty,
@@ -115,9 +115,9 @@ onMounted(() => {
 
         <template v-else>
           <div class="settings-sections flex flex-col gap-8">
-            <!-- 钥匙模式：赛前/赛后点赛场页面被守卫拦回时的可见反馈（评审十五 B）。
+            <!-- 钥匙模式：赛前/赛后点赛场页面被守卫拦回时的可见反馈。
                  放在内容列内（.settings-sections 自动继承索引栏左距）——整幅块级放在
-                 外层会横跨 float 索引栏、压住「01」首项 4 秒（评审十六视觉实测） -->
+                 外层会横跨 float 索引栏、压住「01」首项 4 秒（几何实测） -->
             <p
               v-if="settingsGateNotice"
               role="status"

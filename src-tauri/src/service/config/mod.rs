@@ -18,7 +18,7 @@ pub struct ConfigService<R: ConfigRepository> {
     event_bus: Arc<CoreEventBus>,
     /// 当前内存中的配置副本
     config: RwLock<AppConfig>,
-    /// **写事务锁**（评审三十一 P2）：覆盖「updater → save_config → 发布事件」的
+    /// **写事务锁**：覆盖「updater → save_config → 发布事件」的
     /// 完整区间。只扩 `RwLock` 的持锁区间会把落盘串进读取路径；单独的这把锁
     /// 让「克隆出来的旧快照」不可能后于新配置落盘（内存/磁盘/Registry 三者一致）。
     /// 锁序固定：先写事务锁，再取 `config` 的写锁。
@@ -118,8 +118,8 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 写事务本体；**调用方必须已持有 [`Self::lock_write_txn`]**。
     ///
     /// 整个事务（改内存 → 落盘 → 发事件）串行化：落盘在锁外进行时，先克隆
-    /// 的旧快照可能后写回磁盘（评审三十一 P2）。候选配置在副本上修改，
-    /// `updater` 失败时原配置一动不动（评审三十三 #2）。
+    /// 的旧快照可能后写回磁盘。候选配置在副本上修改，
+    /// `updater` 失败时原配置一动不动。
     pub(crate) fn update_locked<F>(&self, updater: F) -> AppResult<AppConfig>
     where
         F: FnOnce(&mut AppConfig) -> AppResult<()>,
@@ -167,7 +167,7 @@ impl<R: ConfigRepository> ConfigService<R> {
         Ok(new_config)
     }
 
-    /// 读盘并归一，但**不提交内存、不发事件**（评审三十五 #2）。
+    /// 读盘并归一，但**不提交内存、不发事件**。
     ///
     /// `reload_config` 先用它在事务内做「目标能否注册/可用」的预检；预检失败时
     /// 内存与事件都保持原样，不会出现「配置已提交但 Registry 没切」的分叉。
@@ -202,7 +202,7 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 仅测试：写事务锁当前是否被持有（`try_lock` 探测；成功会立即释放）。
     ///
     /// 供并发回归在**进入锁之前**判定「另一个线程是否已持有事务」，
-    /// 不依赖 sleep 猜测调度（评审三十四）。
+    /// 不依赖 sleep 猜测调度。
     #[cfg(test)]
     pub(crate) fn write_txn_is_held(&self) -> bool {
         match self.write_txn.try_lock() {

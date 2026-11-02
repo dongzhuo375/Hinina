@@ -4,7 +4,7 @@
 // 配置落盘 → OjSwitched 事件）完全没有测试：命令签名依赖 `tauri::State`，
 // 旧测试只能复制等价逻辑。现在经 `*_impl` 提取 + loopback 上下文直接验证生产行为。
 //
-// 评审 P2 修订：切换测试使用**双 OJ 上下文**做真实切换（HOJ → Hydro → HOJ）。
+// 切换测试使用**双 OJ 上下文**做真实切换（HOJ → Hydro → HOJ）。
 // 单 OJ 上下文里「切到自己」无法证明注册表切换发生过，substring 断言也无法
 // 证明配置持久化生效 —— 现以解析后的 `oj.active` 全值与「切回后缓存已清」的
 // 请求计数观察为准。
@@ -104,7 +104,7 @@ async fn real_switch_moves_registry_persists_config_and_clears_caches() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("config.json")).unwrap()).unwrap();
     assert_eq!(persisted["oj"]["active"], "HOJ");
 
-    // 缓存清理观察（评审 #7：三个服务的 on_oj_switched 必须都被调用）：
+    // 缓存清理观察（三个服务的 on_oj_switched 必须都被调用）：
     // TTL（60s）内再次查询，若切换时未清内存缓存则直接命中；实测各自收到
     // 第 2 次请求 = contest / submission 内存缓存确实被清。
     // problem 的题面磁盘缓存键带 OJ 维度（设计如此，磁盘命中不发请求），
@@ -129,11 +129,11 @@ async fn real_switch_moves_registry_persists_config_and_clears_caches() {
         "提交详情必须重新拉取（submission 用户域缓存已清，status=2 终态在预热时入缓存）"
     );
 
-    // problem 内存 statement_cache 的清理断言（评审 #7 补严）：
+    // problem 内存 statement_cache 的清理断言（补严）：
     // 磁盘题面缓存键带 OJ 维度、切 OJ 时刻意保留（空间回收由异步任务做），
     // 因此先删除磁盘层排除其干扰——此后 open_problem 是否打网络**只**取决于
     // 内存 statement_cache 是否已被 on_oj_switched 清空。
-    // problem 内存 statement_cache 的清理断言（评审 #7 补严）：
+    // problem 内存 statement_cache 的清理断言（补严）：
     // on_oj_switched 会**异步 spawn** 清理磁盘题面缓存（键带 OJ 维度，属空间
     // 回收）——轮询等清理落地；若超时仍在则显式删除兜底。此后 open_problem
     // 是否打网络**只**取决于内存 statement_cache 是否已被切换清空。
@@ -188,14 +188,14 @@ async fn switch_oj_to_same_target_is_idempotent() {
     hydro.shutdown();
 }
 
-/// 评审三十三 #1：并发切换不得让 Registry 与持久化 active 分叉。
+/// 并发切换不得让 Registry 与持久化 active 分叉。
 ///
 /// 强制交错：T1 在事务内（Registry 已切 Hydro、尚未落盘）暂停，T2 随即发起切回
 /// HOJ。旧实现只锁落盘，T2 会在暂停窗口内完成（Registry/磁盘=HOJ），T1 恢复后
 /// 再把 Hydro 写盘 —— 最终 Registry=HOJ、内存/磁盘=Hydro，两次调用却都成功。
 /// 现在整段切换共用配置写事务锁，T2 被挡在事务外，两个切换串行落地。
 ///
-/// **确定性握手**（评审三十四）：T2 在**尝试取锁之前**用 `try_lock` 探测写事务
+/// **确定性握手**：T2 在**尝试取锁之前**用 `try_lock` 探测写事务
 /// 是否已被 T1 持有，并把结果回传给 T1——不靠 sleep 猜测调度。
 /// - 探测结果 `true`（正确实现）：T2 将阻塞；T1 直接落盘释放，T2 随后完成。
 /// - 探测结果 `false`（移除了事务锁的变异）：T1 等 T2 **完整落盘**后再写
@@ -235,7 +235,7 @@ async fn concurrent_switches_stay_consistent_across_registry_memory_and_disk() {
                 },
                 || {},
                 || {
-                    // **持久化完成之后**才通知（评审三十五）：变异路径下 T1 等的是
+                    // **持久化完成之后**才通知：变异路径下 T1 等的是
                     // 「T2 已落盘」，而不是落盘前的 after_scope 信号
                     let _ = done_tx.send(());
                 },
@@ -260,7 +260,7 @@ async fn concurrent_switches_stay_consistent_across_registry_memory_and_disk() {
     hydro.shutdown();
 }
 
-/// 评审三十六 P2：落盘失败时 `OjSwitched` 仍须发布（事实已发生），
+/// 落盘失败时 `OjSwitched` 仍须发布（事实已发生），
 /// `ConfigChanged` 仍只在落盘成功后发布。
 #[tokio::test]
 async fn persist_failure_still_publishes_oj_switched_but_not_config_changed() {

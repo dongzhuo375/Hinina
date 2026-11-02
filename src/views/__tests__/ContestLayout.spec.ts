@@ -151,7 +151,7 @@ describe('--settings 无会话最小壳', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     // 钥匙启动 + 无会话 + 设置路由。刻意不设置 sessionResolved：bareShell 不读它
-    //（评审四 P2-1）——会话失效清理会把它复位为 false，最小壳必须照常接管
+    // ——会话失效清理会把它复位为 false，最小壳必须照常接管
     mocks.launchFlags.value = { settings: true }
     mocks.routeName.value = 'Settings'
     app = createApp(ContestLayout)
@@ -163,7 +163,7 @@ describe('--settings 无会话最小壳', () => {
     expect(host.textContent).toContain('Hinina 设置')
     // 裸壳自带拖动区标题栏（decorations=false 下窗口移动全靠它）
     expect(host.querySelector('header[data-tauri-drag-region]')).toBeTruthy()
-    // 评审十 #2：极简壳也有窗口控件（最小化/关闭），不只 Alt+F4
+    // 极简壳也有窗口控件（最小化/关闭），不只 Alt+F4
     expect(host.querySelector('[data-test="wc"]')).toBeTruthy()
     // bootstrap 必须跳过：无会话时认证拉取只会失败
     expect(mocks.loadConfiguredContest).not.toHaveBeenCalled()
@@ -179,7 +179,7 @@ describe('--settings 无会话最小壳', () => {
   })
 
   it('无会话 + 设置路由但普通启动（无钥匙）：不进最小壳（登出过渡态在设置页上同样安全）', async () => {
-    // 普通启动永远不进最小壳（第三轮评审）：即使会话缺失且正停在设置路由——
+    // 普通启动永远不进最小壳：即使会话缺失且正停在设置路由——
     // 例如已登录维护者经隐藏入口进设置页后登出的过渡态——也保持原外壳
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -199,7 +199,7 @@ describe('--settings 无会话最小壳', () => {
 
   it('无会话但路由非设置页（正常登出过渡态）：保持正常外壳，不闪最小壳', async () => {
     // 登出把 user 置空而 sessionResolved 仍为 true：若最小壳只判会话，比赛页
-    // 外壳会在 replace(Login) 完成前闪成「Hinina 设置」并重挂子视图（评审抓出）
+    // 外壳会在 replace(Login) 完成前闪成「Hinina 设置」并重挂子视图
     const pinia = createPinia()
     setActivePinia(pinia)
     useAuthStore().sessionResolved = true
@@ -221,7 +221,7 @@ describe('--settings 无会话最小壳', () => {
     // 真实场景：--settings 启动 → 返回登录 → 登录进场 → 在比赛页登出。此刻
     // 钥匙为真、路由是比赛子路由、会话缺失 —— 若 bareShell 漏掉路由条件，
     // 外壳会在这里闪成最小壳。上面的「无钥匙 + 非设置路由」用例测的是钥匙
-    // 条件，路由条件只有本用例锁得住（评审指出条件互相遮蔽）。
+    // 条件，路由条件只有本用例锁得住（条件互相遮蔽）。
     const pinia = createPinia()
     setActivePinia(pinia)
     useAuthStore().sessionResolved = true
@@ -238,10 +238,10 @@ describe('--settings 无会话最小壳', () => {
     expect(host.querySelector('footer')).toBeTruthy()
   })
 
-  it('评审四 P2-2：最小壳下保留的已结束简报不触发赛程跳转', async () => {
+  it('最小壳下保留的已结束简报不触发赛程跳转', async () => {
     // 钥匙 + 无会话 + 设置路由，且登出清理只清会话部分（clearSessionData 保留
     // 匿名简报）：若阶段 watcher 不看 bareShell，「已结束」简报会在 2 秒后把
-    // 维护者从设置页踢回登录页（评审四 P2-2 复现路径）
+    // 维护者从设置页踢回登录页
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)
     const pinia = createPinia()
@@ -263,7 +263,7 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审五：钥匙 + 会话有效 + 已结束简报 + 设置路由——不跳转（完整外壳保持）', async () => {
+  it('钥匙 + 会话有效 + 已结束简报 + 设置路由——不跳转（完整外壳保持）', async () => {
     // P2-2 的有会话分支：bareShell 为 false（正常外壳），但赛程闸门的钥匙短路
     // 看 keyedSettings —— 已结束简报不得把维护者从设置页踢回登录页
     vi.useFakeTimers()
@@ -286,7 +286,7 @@ describe('--settings 无会话最小壳', () => {
     // 完整外壳（有会话）：TopBar/StatusBar 桩在，无最小壳
     expect(host.querySelector('header[data-tauri-drag-region]')).toBeNull()
     expect(host.querySelector('footer')).toBeTruthy()
-    // 评审六：设置页不被赛程闸门锁死——无结束遮罩、内容区无 inert
+    // 设置页不被赛程闸门锁死——无结束遮罩、内容区无 inert
     expect(host.querySelector('[role="alert"]')).toBeNull()
     expect(contentInert(host)).toBe(false)
     await vi.advanceTimersByTimeAsync(2_500)
@@ -294,7 +294,7 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审五反向：同条件但在比赛子路由——赛程闸门照常生效', async () => {
+  it('同条件但在比赛子路由——赛程闸门照常生效', async () => {
     // 短路只属于设置页：离开设置页回到比赛子路由后，已结束赛程照常退出
     //（防止滞留在过期赛场看旧数据——闸门的原始职责）
     vi.useFakeTimers()
@@ -322,7 +322,7 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审六：钥匙 + 会话有效 + 未开始简报 + 设置路由——内容区无 inert', async () => {
+  it('钥匙 + 会话有效 + 未开始简报 + 设置路由——内容区无 inert', async () => {
     // upcoming 无遮罩但裸 phase 会给内容区加 inert——设置页同样必须可用
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)
@@ -346,10 +346,10 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审八 P2-1：钥匙 + 有效会话 + 进行中比赛进设置页——自然结束停轮询但不跳转', async () => {
+  it('钥匙 + 有效会话 + 进行中比赛进设置页——自然结束停轮询但不跳转', async () => {
     // bootstrap 启动公告轮询后，本地 endTime 到期（服务端 status 仍未变）：
     // phase 进入 ended，watcher 的钥匙豁免只免「跳转」——ended 停轮询的清理
-    // 必须照常执行，否则公告请求会一直打（评审八 P2-1 复现路径）
+    // 必须照常执行，否则公告请求会一直打
     vi.useFakeTimers()
     vi.setSystemTime(900 * 1_000)
     const pinia = createPinia()
@@ -381,7 +381,7 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审十九 #5：赛前打开的外壳，开赛后补启公告轮询（无需重挂）', async () => {
+  it('赛前打开的外壳，开赛后补启公告轮询（无需重挂）', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(890 * 1_000) // 赛程 900–1002：此刻 upcoming
     const pinia = createPinia()
@@ -407,10 +407,10 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审二十九 #4：同一比赛 running→ended→running 后轮询重启', async () => {
+  it('同一比赛 running→ended→running 后轮询重启', async () => {
     // 必须完整走 running 起步（liveFor=id）→ ended（stopLive 并清 liveFor）→
     // running（第二次 startLive）；直接从 ended 挂载时 liveFor 本就是 null，
-    // 测不出「停止时未清 liveFor」这个缺陷（评审三十 #2）
+    // 测不出「停止时未清 liveFor」这个缺陷
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)
     const pinia = createPinia()
@@ -438,7 +438,7 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审三十三 #5：钥匙设置页 running→upcoming 也停轮询并清 liveFor，回到 running 重启', async () => {
+  it('钥匙设置页 running→upcoming 也停轮询并清 liveFor，回到 running 重启', async () => {
     // 组织者把进行中比赛的开始时间改到未来：不跳转是对的，但轮询器自身只查
     // 页面隐藏与 contest.status，不会因阶段回退自停——必须由外壳清理
     vi.useFakeTimers()
@@ -469,7 +469,7 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审四 P2-2：最小壳下保留的未开始简报不触发立即跳转', async () => {
+  it('最小壳下保留的未开始简报不触发立即跳转', async () => {
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)
     const pinia = createPinia()
@@ -489,7 +489,7 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审六：最小壳↔完整外壳翻转不重挂内容区（未保存草稿得以保留）', async () => {
+  it('最小壳↔完整外壳翻转不重挂内容区（未保存草稿得以保留）', async () => {
     // 顶栏/状态条按形态切换，但 router-view 两形态共享同一实例：会话失效翻转
     // bareShell 时，设置视图的 DOM 节点必须是同一个——重挂会丢未保存草稿
     const pinia = createPinia()

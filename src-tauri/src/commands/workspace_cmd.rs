@@ -28,7 +28,7 @@ pub async fn load_workspace(
         .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
 
     // 与配置写入共用同一串行域：否则 load 读到旧 autoSave 后，并发 update_config
-    // 已提交新值并启停，load 再按旧快照启停会反向覆盖（评审三十八 P2）。
+    // 已提交新值并启停，load 再按旧快照启停会反向覆盖。
     // 锁只覆盖「读配置 + 同步启停」，不覆盖后续 find_or_create。
     load_workspace_sync_auto_save(&ctx);
 

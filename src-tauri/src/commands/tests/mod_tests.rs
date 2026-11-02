@@ -377,7 +377,7 @@ fn rank_default_page_size_matches_frontend_contract() {
     assert_eq!(RankQuery::default().current_page, 1, "默认第 1 页");
 }
 
-// ── update_config 的「维护者层锁定」语义（评审二十六 #2） ──
+// ── update_config 的「维护者层锁定」语义 ──
 
 #[tokio::test]
 async fn locked_update_preserves_invalid_locked_fields_and_saves_editable_ones() {
@@ -423,7 +423,7 @@ async fn unlocked_update_still_rejects_invalid_url_and_clamps() {
 }
 
 /// 锁定模式刻意保留的结构性检查：active 指向缺失实例时仍拒绝保存
-///（手改配置的该场景由 `--settings` 修复，评审二十七观察项）。
+///（手改配置的该场景由 `--settings` 修复）。
 #[tokio::test]
 async fn locked_update_still_rejects_active_pointing_at_missing_instance() {
     use super::super::commands::config_cmd::apply_config_update;
@@ -441,7 +441,7 @@ async fn locked_update_still_rejects_active_pointing_at_missing_instance() {
     assert!(err.to_string().contains("不在已启用的实例列表"), "{err}");
 }
 
-/// 普通保存不得改写 `oj.active`（评审二十九 #1）：active 只由 switch_oj 改写，
+/// 普通保存不得改写 `oj.active`：active 只由 switch_oj 改写，
 /// 旧快照与在途切换交错时不能把新 active 覆盖回去。
 #[tokio::test]
 async fn update_config_never_overwrites_active() {
@@ -460,7 +460,7 @@ async fn update_config_never_overwrites_active() {
     assert_eq!(saved.editor.font_size, 20);
 }
 
-/// 评审三十三 #2：保存与切换交错不得落盘一份 `AppConfig::validate()` 拒绝的配置。
+/// 保存与切换交错不得落盘一份 `AppConfig::validate()` 拒绝的配置。
 ///
 /// 载荷删除 Hydro、active 仍是保存开始时的陈旧值 Hydro。保存进入写事务后
 /// （`before_validate` 注入点）另一线程发起切到 Hydro：
@@ -490,7 +490,7 @@ async fn concurrent_switch_cannot_make_saved_config_invalid() {
     let (start_tx, start_rx) = std::sync::mpsc::channel::<()>();
     let (held_tx, held_rx) = std::sync::mpsc::channel::<bool>();
     let mut before_validate = || {
-        // **时序握手**（评审三十四/三十五）：保存此刻已持有写事务，再放切换
+        // **时序握手**：保存此刻已持有写事务，再放切换
         // 线程进来。切换在**事务入口、取锁之前**用 try_lock 回报「锁已被保存
         // 持有」，保证它只能在保存提交后继续读到最终候选——不再靠 spawn 抢跑
         // 或 sleep 猜顺序。该回报是「进入竞争窗口」的证据，不证明切换自身随后
@@ -541,7 +541,7 @@ async fn concurrent_switch_cannot_make_saved_config_invalid() {
     hydro.shutdown();
 }
 
-/// 评审三十四残余：`reload_config` 必须把 Registry 同步到磁盘 `oj.active`。
+/// `reload_config` 必须把 Registry 同步到磁盘 `oj.active`。
 ///
 /// 旧实现只替换内存配置：磁盘写着 Hydro、内存也读成 Hydro，但 Registry 仍是
 /// HOJ——之后所有查询继续打旧 OJ，配置却声称已切新 OJ。现在重载与 Registry
@@ -579,7 +579,7 @@ async fn reload_config_synchronises_registry_with_disk_active() {
     hydro.shutdown();
 }
 
-/// 评审三十五 #2：reload 的目标预检失败时，不得先提交内存/事件。
+/// reload 的目标预检失败时，不得先提交内存/事件。
 ///
 /// 磁盘包含已启用但没有适配器的 Ghost 且 active=Ghost：归一化会保留它（实例确实
 /// enabled）。旧实现先 `reload_locked` 提交内存并发布 ConfigChanged，再发现
@@ -634,7 +634,7 @@ async fn reload_config_rejects_unknown_active_without_committing() {
     hydro.shutdown();
 }
 
-/// 评审三十六 P2：Registry 未变（HOJ）时也不能跳过 active 的结构检查。
+/// Registry 未变（HOJ）时也不能跳过 active 的结构检查。
 ///
 /// 归一化在「零启用实例」时会回退默认 HOJ（即使 HOJ 被禁用），若只在
 /// registry_changed 时预检，会提交一份 `AppConfig::validate()` 拒绝的配置。
@@ -678,7 +678,7 @@ async fn reload_config_rejects_all_disabled_instances_even_if_registry_unchanged
     hydro.shutdown();
 }
 
-/// 评审三十六 P2：`commit + auto-save 同步` 必须在同一写事务内。
+/// `commit + auto-save 同步` 必须在同一写事务内。
 ///
 /// U1 保存 autoSave=false，同步读取旧值后在 hook 暂停；U2 保存 autoSave=true
 /// 并启动任务。若同步在锁外，U2 先完成后 U1 会用旧值 stop，最终磁盘开启而
@@ -744,7 +744,7 @@ async fn auto_save_sync_is_serialised_with_config_commit() {
     assert_eq!(saved.editor.auto_save_interval_secs, 7);
 }
 
-/// 评审三十六 P2：reload 的配置提交与 Registry 切换必须在同一访问栅栏内。
+/// reload 的配置提交与 Registry 切换必须在同一访问栅栏内。
 #[tokio::test]
 async fn reload_holds_access_fence_across_commit_and_registry_switch() {
     use super::super::commands::config_cmd::reload_config_impl_with_hook;
@@ -778,7 +778,7 @@ async fn reload_holds_access_fence_across_commit_and_registry_switch() {
     hydro.shutdown();
 }
 
-/// 评审三十八 P2：`load_workspace` 的「读配置 + 同步 auto-save」也必须与
+/// `load_workspace` 的「读配置 + 同步 auto-save」也必须与
 /// 配置保存共用同一串行域，否则仍可复现「load 按旧快照 stop 覆盖新 save」。
 #[tokio::test]
 async fn workspace_load_sync_is_serialised_with_config_save() {

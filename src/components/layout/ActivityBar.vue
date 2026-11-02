@@ -33,7 +33,7 @@ const links = [
 ]
 
 /// `--settings` 管理方钥匙：进入比赛壳层后恒显「环境设置」入口——钥匙本应授
-/// 予入口，reveal 门控（连点版本号）是选手侧的另一套机制（评审十九 #4）
+/// 予入口，reveal 门控（连点版本号）是选手侧的另一套机制
 const keyedMode = computed(() => isKeyedProcess())
 </script>
 <template>

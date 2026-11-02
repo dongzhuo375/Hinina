@@ -64,13 +64,13 @@ pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 
 /// `reload_config` 的真实编排（提取供测试直接调用）。
 ///
-/// **先在事务内预检、通过后才提交内存与事件**（评审三十五 #2）：旧顺序先
+/// **先在事务内预检、通过后才提交内存与事件**：旧顺序先
 /// `reload_locked` 替换内存并发布 `ConfigChanged`，再校验 active 能否注册/可用；
 /// 磁盘指向一个没有适配器的已启用实例（如 Ghost）时，校验失败返回错误，但
 /// 内存/磁盘已是 Ghost、Registry 仍是旧 OJ，且事件已发出。
 ///
 /// 现在 `load_normalized` 只读盘+归一（不提交），先做 **active 指向已启用实例**
-/// 的结构检查（与 `registry_changed` 无关，评审三十六 P2），再用磁盘配置补注册
+/// 的结构检查（与 `registry_changed` 无关——归一化可能回退默认值），再用磁盘配置补注册
 /// 并做可用性预检；失败时内存、Registry、事件全部保持原样。通过后用**外层访问
 /// 栅栏**覆盖「提交内存/ConfigChanged + 切 Registry/清 OJ 缓存/OjSwitched」整段，
 /// 插件读者不会看到「新配置 + 旧 Registry」的半提交态。
@@ -127,7 +127,7 @@ where
     }
 
     // 外层访问栅栏：配置提交与 Registry 同步是一个访问变更，读者不得观察到
-    // 「新配置 + 旧 Registry」的混合态（评审三十六 P2）。
+    // 「新配置 + 旧 Registry」的混合态。
     let _transition = ctx.access.begin();
     // 预检通过：提交内存并发布 ConfigChanged
     ctx.config.commit_reloaded(&config);
@@ -157,7 +157,7 @@ where
 /// 前端 invoke 签名: `update_config`({ config, maintainerLocked })
 ///
 /// **`oj.active` 无论哪种模式都只由 `switch_oj` 改写**：载荷里的 active 可能是
-/// 保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去（评审二十九 #1），
+/// 保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去，
 /// 这里一律以内存当前值为准。
 ///
 /// 持久化前做后端兜底校验（config.json 可被手改，前端不是唯一防线），两条路径：
@@ -189,7 +189,7 @@ pub async fn update_config(
 
 /// `update_config` 的真实编排（提取供测试直接调用，`#[tauri::command]` 只做薄转发）。
 ///
-/// `maintainer_locked` 为真时走「锁定字段不动」语义（评审二十六 #2）：先
+/// `maintainer_locked` 为真时走「锁定字段不动」语义：先
 /// `preserve_locked_fields` 用旧配置覆盖锁定字段，再用放宽后的校验/净化 ——
 /// 手改出的非法锁定值（地址、越界数值）不得阻塞选手层字段的保存，也不得被
 /// 静默钳制/改写。
@@ -210,7 +210,7 @@ pub(crate) fn apply_config_update(
 /// `apply_config_update` 的真实实现；`before_validate`/`sync` 只供测试注入。
 ///
 /// **整个「读最新活 → 合并/锁定 → 固定 active → 最终校验 → 整体替换 → 同步
-/// auto-save」都在 `ConfigService` 的写事务锁内完成**（评审三十三 #2、
+/// auto-save」都在 `ConfigService` 的写事务锁内完成**（
 /// 三十六 P2）：同步若在锁外，U1 保存 `autoSave=false` 与 U2 保存 `true`
 /// 可以交错成「磁盘开启、管理器停止」（或反向）；把同步纳入同一串行域后，
 /// 最后一次写入与它触发的启停严格同序。
@@ -222,7 +222,7 @@ pub(crate) fn apply_config_update_inner(
     sync: &mut dyn FnMut(&AppContext),
 ) -> AppResult<AppConfig> {
     let _txn = ctx.config.lock_write_txn();
-    // `oj.active` **只由 switch_oj 改写**（评审二十九 #1）：调用方带来的 active
+    // `oj.active` **只由 switch_oj 改写**（保存载荷的 active 是开始时的快照）：调用方带来的 active
     // 可能是保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去。
     // 这里在写锁闭包内取**锁内最新值**，两种模式一律以它为准。
     let saved = ctx.config.update_locked(|cfg| {
@@ -273,7 +273,7 @@ pub(crate) fn apply_config_update_with_hook(
 }
 
 /// 测试专用：在 auto-save 同步**读取配置之后、执行启停之前**注入暂停点，
-/// 用于确定性地复现「旧快照的同步反向覆盖新配置」（评审三十六 P2）。
+/// 用于确定性地复现「旧快照的同步反向覆盖新配置」。
 #[cfg(test)]
 pub(crate) fn apply_config_update_with_sync_hook(
     ctx: &AppContext,

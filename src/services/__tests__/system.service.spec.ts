@@ -16,7 +16,7 @@ async function fresh() {
   return (await import('@/services/system.service')).systemService
 }
 
-describe('isKeyedSettings（唯一判据，评审十五 P1）', () => {
+describe('isKeyedSettings', () => {
   it('钥匙模式 + Settings → true；其余组合一律 false', async () => {
     mocks.getLaunchFlags.mockResolvedValue({ settings: true })
     const svc = await fresh()
@@ -59,7 +59,7 @@ describe('getLaunchFlags 单飞与快照', () => {
   })
 
   it('IPC 失败：本次按「无参数」退化，但不缓存失败——下次调用重试并填充快照', async () => {
-    // 评审十九 #7：一次瞬时失败不该让钥匙整个进程失效
+    // 一次瞬时失败不该让钥匙整个进程失效
     mocks.getLaunchFlags.mockRejectedValueOnce(new Error('invoke failed'))
     const svc = await fresh()
     await expect(svc.getLaunchFlags()).resolves.toEqual({ settings: false })

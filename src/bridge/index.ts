@@ -99,7 +99,7 @@ function isPluginErrorPayload(raw: object): raw is { code: string; permission?: 
 /**
  * AppError 载荷 → `{ variant, message }`（外部标签 `{ Variant: msg }`，白名单外的
  * 变体降级为 null 并保留消息）。导出供测试以**真实载荷**构造 IpcError，避免测试
- * 里手写 variant 绕过白名单（评审二十五）。
+ * 里手写 variant 会绕过白名单，与生产载荷形态不符。
  */
 export function parseAppError(raw: unknown): { variant: AppErrorVariant | null; message: string } {
   if (raw instanceof Error) return { variant: null, message: raw.message }

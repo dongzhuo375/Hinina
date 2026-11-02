@@ -26,15 +26,14 @@ const phase = computed(() => getContestPhase(
 /// 赛程闸门只防「滞留在过期赛场看旧数据」——设置页只碰本地配置，不在其射程内；
 /// 钥匙场景把维护者踢回登录页会打断维护、丢失当前草稿（登录页的「返回设置」是一次重新进入）。
 const keyedSettings = computed(() => isKeyedSettingsRoute(route.name))
-/// 最小壳：keyedSettings 再加无会话。**刻意不含 `sessionResolved`**（评审四
-/// P2-1）：钥匙 + 存量过期会话启动时，首个认证请求 401 → invalidateSession 把
+/// 最小壳：keyedSettings 再加无会话。**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时，首个认证请求 401 → invalidateSession 把
 /// sessionResolved 复位为 false（后端登出失败时 backendCleared=false）——此刻
 /// 正是「钥匙 + 无会话 + 设置页」形态，最小壳必须接管，否则正常外壳包着无会话
 /// 设置页继续发注定失败的请求。守卫在导航前已完成 checkSession，挂载时机不受
 /// 影响；快照由守卫首航填充，同步判定无闪帧。
 const bareShell = computed(() => keyedSettings.value && !auth.isLoggedIn)
 /// 赛程闸门的**模板判定**：非钥匙设置页且赛程处于 ended/upcoming 时，结束遮罩、
-/// 内容区 inert 与顶栏导航禁用一并生效。评审六：3e30f16 只短路了 watcher 的
+/// 内容区 inert 与顶栏导航禁用一并生效。历史上只短路了 watcher 的
 /// 跳转，模板仍按裸 phase 判定——钥匙模式（有会话）的设置页被 inert 锁死、
 /// 已结束还叠着「即将返回登录」遮罩，设置页实际不可用。统一收敛到此一处。
 const contestGated = computed(
@@ -44,7 +43,7 @@ let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
 /// 公告轮询只启动一次：bootstrap（挂载即 running）或阶段跃迁到 running
-/// （赛前打开、开赛后进入赛场——评审十九 #5）。contestId 来自 store，不额外请求
+/// （赛前打开、开赛后进入赛场）。contestId 来自 store，不额外请求
 let liveFor: string | null = null
 function ensureLive(): void {
   const contestId = contestStore.contest?.id
@@ -64,18 +63,17 @@ watch([phase, keyedSettings], ([value, keyed]) => {
   if (value === 'running') ensureLive()
   // 钥匙模式下正停在设置页（无论有无会话）不参与赛程闸门的**跳转**：登出清理
   // 保留的匿名简报 / 已结束赛程都可能让 phase 非 none——跳回登录页会把钥匙
-  // 场景重新锁死（评审四 P2-2 + 评审五补齐有会话分支）；离开设置页时本监听
+  // 场景重新锁死；离开设置页时本监听
   // 重评，赛程闸门照常恢复。
   // 但「停公告轮询」是清理不是跳转，**不能被豁免吞掉**：进行中的比赛自然结束
   // 或组织者把开始时间改到未来（running→upcoming）后，轮询器自身只检查页面
-  // 隐藏与 contest.status，不会因阶段回退自停，公告请求会一直打（评审八 P2-1、
-  // 评审三十三 #5）。ended 与 upcoming 都停并清 liveFor；回到 running 时
+  // 隐藏与 contest.status，不会因阶段回退自停，公告请求会一直打。ended 与 upcoming 都停并清 liveFor；回到 running 时
   // 上面的 ensureLive 负责重启。注释「upcoming 本就没有轮询要停」只适用于
   // 初始挂载，不适用于阶段回退。
   if (keyed) {
     if (value === 'ended' || value === 'upcoming') {
       announcementStore.stopLive()
-      liveFor = null // 回到 running（赛程延长/重置重拉）要能重启（评审二十九 #4）
+      liveFor = null // 回到 running（赛程延长/重置重拉）要能重启
     }
     return
   }
@@ -142,7 +140,7 @@ function backToLogin(): void {
     <!-- 顶栏按形态切换（最小壳的拖动区标题 App 全局标题栏在 matched 含 Contest 时
          不渲染，decorations=false 下窗口移动全靠它），内容区（router-view）**两形态
          共享同一实例**：最小壳↔完整外壳翻转（会话失效/登出）时不重挂设置视图，
-         未保存草稿得以保留（评审六） -->
+         未保存草稿得以保留 -->
     <template v-if="bareShell">
       <header
         data-tauri-drag-region
@@ -159,7 +157,7 @@ function backToLogin(): void {
           >
             返回登录
           </button>
-          <!-- 评审十 #2：无边框窗口在极简壳下也要有最小化/关闭（与 TopBar 共享） -->
+          <!-- 无边框窗口在极简壳下也要有最小化/关闭（与 TopBar 共享） -->
           <WindowControls />
         </div>
       </header>
