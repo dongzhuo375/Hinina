@@ -18,7 +18,6 @@ import { ConfigService, configService } from '@/services/config.service'
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
-    user: { lastUsername: 'team01' },
     oj: {
       active: 'HOJ',
       instances: [{ id: 'HOJ', baseUrl: 'https://hoj.example.com', enabled: true, options: {} }],

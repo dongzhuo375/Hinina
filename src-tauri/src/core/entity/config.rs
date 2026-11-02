@@ -26,12 +26,12 @@ pub struct AppConfig {
 
 // ── 用户偏好 ──
 
+/// 用户偏好段。`lastUsername`（登录用户名自动填充）从未有生产读写路径，
+/// 已删除（旧配置文件里的 `lastUsername` 键被 serde 忽略）；本段现在只为
+/// 旧版迁移字段存在。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UserConfig {
-    /// 登录用户名（用于自动填充）
-    #[serde(default)]
-    pub last_username: String,
     /// 旧版「上次登录的 OJ 类型」，已迁移至 `oj.active`（OJ 选择是应用级状态，
     /// 决定全部 Provider 行为，不属于用户偏好）。`skip_serializing` 保证
     /// 读取迁移后不再写回（见 `normalize_legacy_values`）。

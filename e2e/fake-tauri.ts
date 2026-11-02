@@ -121,7 +121,6 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   }
 
   const configDefaults: AppConfig = {
-    user: { lastUsername: 'e2e_player' },
     oj: {
       active: 'HOJ',
       instances: [{ id: 'HOJ', baseUrl: 'https://e2e.invalid', enabled: true, options: {} }],

@@ -67,7 +67,6 @@ vi.mock('@/components/common/LoadingSpinner.vue', () => ({ default: { template: 
 import SettingsView from '@/views/SettingsView.vue'
 
 const baseConfig = (): AppConfig => ({
-  user: { lastUsername: '' },
   oj: {
     active: 'HOJ',
     instances: [{ id: 'HOJ', baseUrl: 'https://hoj.example', enabled: true, options: {} }],

@@ -111,7 +111,6 @@ vi.mock('vue-router', () => ({
 
 function baseConfig(): AppConfig {
   return {
-    user: { lastUsername: '' },
     oj: {
       active: 'HOJ',
       instances: [{ id: 'HOJ', baseUrl: 'https://hoj.example', enabled: true, options: {} }],

@@ -14,7 +14,7 @@
 - `layout: LayoutConfig` — 布局偏好
 
 ### UserConfig
-- `last_username: String`（默认 `""`）— 用于自动填充登录用户名
+- ~~`last_username`~~（已删除）— 登录用户名自动填充从未有生产读写路径；旧配置文件里的 `lastUsername` 键被 serde 忽略。该段现仅存旧版迁移字段
 - `legacy_last_oj_type: Option<String>` — 旧版「上次登录的 OJ 类型」，已迁移至 `oj.active`（OJ 选择是应用级状态，决定全部 Provider 行为，不属于用户偏好）。`#[serde(default, skip_serializing, rename = "lastOjType")]`：仅读取用于 `normalize_legacy_values` 迁移，迁移后不再写回
 
 ### OjInstance（OJ 配置 v2 新增）
