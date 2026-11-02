@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { readonly, ref } from 'vue'
 import type {
   DataDirChange,
   DataDirInfo,
@@ -8,6 +8,7 @@ import type {
   StorageInfo,
 } from '@/types/system'
 import * as systemBridge from '@/bridge/system.bridge'
+import * as windowBridge from '@/bridge/window.bridge'
 
 /**
  * 系统服务 — 客户端自身运行信息与维护操作
@@ -34,7 +35,26 @@ export class SystemService {
    * 真值 —— 组件（ContestLayout 最小壳判据、SettingsView 分层锁）直接读这里，
    * 无需再等 Promise：异步判据会把闪帧反转到钥匙启动的首帧。
    */
-  readonly launchFlags = launchFlagsSnapshot
+  /// 只读视图：快照的「进程内不可变」由类型强制，外部拿不到写入口
+  readonly launchFlags = readonly(launchFlagsSnapshot)
+
+  /**
+   * 本次启动是否为 `--settings` 管理方钥匙（**进程级**判据，无路由维度）。
+   * 组件里判断「钥匙模式」一律走这里，不要直接读 `launchFlags.value.settings`
+   *（判据要单一来源）。
+   */
+  isKeyed(): boolean {
+    return launchFlagsSnapshot.value.settings
+  }
+
+  /**
+   * 钥匙模式 + 指定路由是否为设置页：**路由级唯一判据**，各消费方
+   *（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，
+   * 避免注释声称一致、实现各自内联的漂移。进程级判断用 `isKeyed()`。
+   */
+  isKeyedSettings(routeName: string | symbol | null | undefined): boolean {
+    return launchFlagsSnapshot.value.settings && routeName === 'Settings'
+  }
 
   /** 获取客户端存储信息（设置页「关于」区块使用；失败由调用方降级展示） */
   async getStorageInfo(): Promise<StorageInfo> {
@@ -56,7 +76,13 @@ export class SystemService {
         launchFlagsSnapshot.value = flags
         return flags
       })
-      .catch(() => launchFlagsSnapshot.value)
+      .catch(() => {
+        // **不缓存 rejection**：标志在进程内不变，下次调用重试
+        // 即可；一次瞬时失败不该让钥匙整个进程失效（否则维护者静默走普通门禁、
+        // 字段全锁且无从得知原因）。快照在成功前保持安全侧默认值。
+        launchFlagsOnce = null
+        return launchFlagsSnapshot.value
+      })
     return launchFlagsOnce
   }
 
@@ -102,6 +128,21 @@ export class SystemService {
   /** 恢复默认数据目录（**重启后生效**） */
   async resetDataDir(migrate: boolean): Promise<DataDirChange> {
     return systemBridge.resetDataDir(migrate)
+  }
+
+  /** 最小化窗口（无边框窗口的 UI 出口，失败无补救动作、由调用方忽略） */
+  async minimizeWindow(): Promise<void> {
+    return windowBridge.minimizeWindow()
+  }
+
+  /** 切换最大化 */
+  async toggleMaximizeWindow(): Promise<void> {
+    return windowBridge.toggleMaximizeWindow()
+  }
+
+  /** 关闭窗口（经 Tauri 关闭请求，由 close-guard 落盘后再退出） */
+  async closeWindow(): Promise<void> {
+    return windowBridge.closeWindow()
   }
 
   /** 弹出原生目录选择器（用户取消返回 null） */

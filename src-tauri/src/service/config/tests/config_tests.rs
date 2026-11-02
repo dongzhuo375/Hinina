@@ -227,3 +227,119 @@ fn update_failure_does_not_publish_config_changed_event() {
     assert!(service.update(|cfg| cfg.editor.auto_save = false).is_err());
     assert!(rx.try_recv().is_err(), "持久化失败不得发布 ConfigChanged");
 }
+
+/// 可延迟的配置仓库：第一次 `save_config` 阻塞到测试放行，用于构造
+/// 「旧快照后落盘」的时序回归。
+struct DelayedSaveRepo {
+    inner: FsConfigRepository,
+    started: std::sync::mpsc::Sender<()>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    saves: std::sync::Mutex<Vec<AppConfig>>,
+    /// 武装后才延迟：`ConfigService::new` 在首次启动时会立即保存默认配置，
+    /// 构造期不能阻塞
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl DelayedSaveRepo {
+    fn arm(&self) {
+        self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl ConfigRepository for DelayedSaveRepo {
+    fn load_config<T: serde::de::DeserializeOwned>(&self) -> AppResult<T> {
+        self.inner.load_config()
+    }
+
+    fn save_config<T: serde::Serialize>(&self, config: &T) -> AppResult<()> {
+        if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let _ = self.started.send(());
+            let release = self.release.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = release.recv();
+        }
+        let value: AppConfig =
+            serde_json::from_value(serde_json::to_value(config).expect("序列化配置"))
+                .expect("配置可反序列化");
+        self.saves
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(value);
+        self.inner.save_config(config)
+    }
+
+    fn config_exists(&self) -> bool {
+        self.inner.config_exists()
+    }
+}
+
+/// 写事务锁：先克隆的旧配置不得后于新配置落盘（内存/磁盘/Registry 三者一致）。
+///
+/// 时序：T1 的 updater 先跑（active 仍为 A），其 save 被仓库阻塞；T2 随后尝试
+/// 把 active 切到 B。**确定性握手**：T2 在调用 update 前用
+/// `write_txn_is_held` 探测 T1 是否持有写事务；持有则 T2 必然阻塞，主线程直接
+/// 放行 T1；未持有（移除锁的变异）则等 T2 真正写完 B 后再放行 T1，让旧交错
+/// 必然发生——不再依赖 50ms sleep 猜调度。
+#[test]
+fn stale_update_cannot_overwrite_disk_after_a_concurrent_switch() {
+    let dir = TempDir::unique("config-write-txn");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let (probe_tx, probe_rx) = std::sync::mpsc::channel::<bool>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let repo = Arc::new(DelayedSaveRepo {
+        inner: FsConfigRepository::new(Arc::clone(&storage), "config.json"),
+        started: started_tx,
+        release: std::sync::Mutex::new(release_rx),
+        saves: std::sync::Mutex::new(Vec::new()),
+        armed: std::sync::atomic::AtomicBool::new(false),
+    });
+    let service = Arc::new(ConfigService::new(
+        repo.clone(),
+        Arc::new(CoreEventBus::new()),
+        Arc::default(),
+    ));
+
+    repo.arm(); // 只延迟下一次保存（构造期的默认配置保存不受影响）
+
+    // T1：普通保存（旧 active=A），落盘被阻塞
+    let t1 = {
+        let service = Arc::clone(&service);
+        std::thread::spawn(move || service.update(|cfg| cfg.editor.font_size = 20))
+    };
+    started_rx.recv().expect("T1 的保存应已开始并阻塞");
+
+    // T2：切换 active=B（模拟 switch_oj 的持久化）
+    let t2 = {
+        let service = Arc::clone(&service);
+        std::thread::spawn(move || {
+            let held = service.write_txn_is_held();
+            probe_tx.send(held).expect("回报写事务持有状态");
+            let result = service.update(|cfg| cfg.oj.active = "B".into());
+            if !held {
+                // 锁缺失：T2 已完整落盘，通知主线程再放行 T1
+                let _ = done_tx.send(());
+            }
+            result
+        })
+    };
+    let held = probe_rx.recv().expect("T2 应已发起 update");
+    if !held {
+        done_rx.recv().expect("无锁路径下 T2 应先完成落盘");
+    }
+    // 放行 T1
+    let _ = release_tx.send(());
+
+    t1.join().unwrap().expect("T1 保存成功");
+    t2.join().unwrap().expect("T2 保存成功");
+
+    let saves = repo.saves.lock().unwrap_or_else(|e| e.into_inner());
+    // 构造期默认配置 + T1 + T2
+    assert_eq!(saves.len(), 3);
+    assert_eq!(
+        saves.last().unwrap().oj.active,
+        "B",
+        "磁盘最后写入必须是新 active"
+    );
+    assert_eq!(service.get().oj.active, "B", "内存与磁盘一致");
+}

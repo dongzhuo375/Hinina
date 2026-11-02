@@ -8,13 +8,15 @@
 
 入口仍默认隐藏：连点状态栏版本号 5 下才在导航末尾出现设置项（`utils/settings-access`）。
 
-**分层锁（一页两层）**：连接与缓存调优字段默认锁定，唯一提权来源是 `--settings` 启动参数（管理方钥匙，经 `systemService.getLaunchFlags` 读取）。选手层（永远可编辑）：比赛 ID/引用、比赛密码、编辑器全部、布局滑杆、重置客户端 + 清理本地数据、About；维护者层（禁用 + 锁提示，不隐藏）：当前 OJ 下拉、服务器地址、请求超时/轮询/缓存 TTL、题面缓存、数据目录。定位是防误触护栏而非安全边界 —— config.json 明文可手改，无后端强制。
+**分层锁（一页两层）**：连接与缓存调优字段默认锁定，唯一提权来源是 `--settings` 启动参数（管理方钥匙，经 `guards/keyed-settings-policy` 的 `isKeyedProcess` 读取）。选手层（永远可编辑）：比赛 ID/引用、比赛密码、编辑器全部、布局滑杆、重置客户端 + 清理本地数据、About；维护者层（禁用 + 锁提示，不隐藏）：当前 OJ 下拉、服务器地址、请求超时/轮询/缓存 TTL、题面缓存、数据目录。定位是防误触护栏而非安全边界 —— IPC 更新路径由后端按 `maintainer_locked` 原样保留锁定字段；直接手改 config.json 不受该护栏限制。
 
 ## 核心类型/函数
 
 | 组成 | 职责 |
 |------|------|
-| `locked` | computed `!systemService.launchFlags.value.settings` —— 维护者层锁定（默认锁，`--settings` 解锁）；标志快照由守卫首航填充（早于本组件挂载），同步读取无闪烁。以 `:locked` 传给 OjServerSection 与 DataDirSection |
+| `settingsGateNotice` | `@/utils/settings-gate-notice` 的提示文案：钥匙模式下从设置页点赛场页面被阶段闸门拦回时显示一行 warning（导航失败本身静默，评审十五 B）；4 秒自动清除；`sticky top-2` 保证滚到底部时仍在视口内；位于内容列 `.settings-sections` 内（不压左侧索引栏，评审十六）；卸载时 `clearSettingsGateNotice` 清计时器 |
+| `locked` | computed `!isKeyedProcess()`（`guards/keyed-settings-policy`）—— 维护者层锁定（默认锁，`--settings` 解锁）；判据委托 `systemService` 的启动标志快照（守卫首航已填充，同步读取无闪烁）。以 `:locked` 传给 OjServerSection 与 DataDirSection |
+| `switching` / `saving` | 来自 `useSettingsForm`，以同名 prop 传给 OjServerSection：保存/切换在途时**整个 OJ 域**禁用（完成后的磁盘重置会覆盖该域，评审三十三 #3） |
 | `useSettingsForm` | 中央 reactive 草稿、baseline/dirty/errors/canSave、配置加载/保存/放弃、OJ 清单与显式/自动切换 |
 | `updateForm(patch)` | 将 section 的 `SettingsFormPatch` 合并进同一 reactive 草稿；保存成功后仅当没有新编辑时才显示“已保存” |
 | `useAboutSettings` | About 存储信息与复制反馈；模型以 `about` 传给 AboutSection |
@@ -33,7 +35,7 @@
 - `composables/useSettingsForm`（控制器与 `SettingsFormPatch` 类型）
 - `composables/useAboutSettings` / `useMaintenanceSettings` / `useDataDirSettings`
 - `composables/useSettingsScrollSpy`
-- `services/system.service`（`launchFlags` 同步快照 —— 分层锁的提权判据）
+- `guards/keyed-settings-policy`（`isKeyedProcess` —— 分层锁的提权判据）
 
 config/system service、相关 store 和 types 由对应 controllers 持有；View 不直接 import bridge。
 
@@ -56,3 +58,4 @@ config/system service、相关 store 和 types 由对应 controllers 持有；Vi
 - `__tests__/SettingsView.behavior.spec.ts`：四路加载顺序、七组真实 section id/导航顺序、保存与 active、未配置 OJ 自动切换、已配置切换失败回滚、目录 migrate 快照、About 复制、scroll-spy 锁与 atBottom。**分层锁**：正常模式断言维护者字段 disabled + 锁提示可见 + 比赛 ID/密码可编辑 + 禁用按钮点击不触达选择器，`--settings` 模式全解锁；OJ 切换与数据目录交互用例显式以 `--settings` 模式运行（维护者层操作）。
 - Controllers 各有独立 spec：`useSettingsForm`、`useAboutSettings`、`useMaintenanceSettings`、`useDataDirSettings`、`useSettingsScrollSpy`。
 - `e2e/specs/settings.spec.ts`：真实 Chromium 的分区样式、响应式导航/滚动与 fake IPC 保存验收；原生目录选择器、真实剪贴板权限和 WebView2 桌面表现另属人工验收。
+- `e2e/specs/settings-key.spec.ts`：`--settings` 钥匙旅程（真实 Chromium）：首航直落、最小壳、维护者层解锁、返回登录；过期会话 401 后留在设置页；会话失效翻转外壳时未保存草稿跨形态保留（`FakeOptions.launchFlags` / `failConfiguredContest` / `delayConfiguredContestMs` / `contestWindow` 注入）。

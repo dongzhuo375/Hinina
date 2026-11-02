@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import SettingsSectionFrame from './SettingsSectionFrame.vue'
 import { ojBaseUrlHint } from '@/utils/oj'
 import { ojSelectOptions } from '@/utils/oj'
@@ -14,11 +15,21 @@ const props = defineProps<{
   inputClass: (field: string) => string
   /** 维护者层锁定（--settings 启动解锁）：连接与缓存调优字段禁用 + 提示；比赛 ID/密码不受影响 */
   locked?: boolean
+  /** OJ 切换进行中（单飞）：下拉临时禁用，避免并发切换 */
+  switching?: boolean
+  /** 保存进行中：下拉同样禁用——保存与切换双向互斥 */
+  saving?: boolean
 }>()
 const emit = defineEmits<{
   (event: 'update:form', patch: SettingsFormPatch): void
   (event: 'switch-oj'): void
 }>()
+
+/// 保存/切换在途：**整个 OJ 域**都不可编辑。切换完成后的
+/// `resetOjFieldsFromDisk` 会整体覆盖地址/比赛/超时等字段，请求期间的新输入
+/// 会被静默丢弃（提示还按请求前的 dirty 判定，可能完全不提示）。锁住输入
+/// 比「完成时重放编辑」简单且无歧义：这两段时间用户本就不该改同一批字段。
+const ojDomainBusy = computed(() => props.switching === true || props.saving === true)
 
 function onSwitchOj(): void {
   emit('switch-oj')
@@ -53,7 +64,7 @@ function onSwitchOj(): void {
                   >
                     当前 OJ
                   </span>
-                  <select v-model="props.form.activeOj" :class="INPUT" :disabled="props.locked" @change="onSwitchOj">
+                  <select v-model="props.form.activeOj" :class="INPUT" :disabled="props.locked || ojDomainBusy" @change="onSwitchOj">
                     <option
                       v-for="o in props.options"
                       :key="o.id"
@@ -75,7 +86,9 @@ function onSwitchOj(): void {
                     v-if="!props.switchError && !props.switchNotice"
                     class="mt-1 block text-xs text-[var(--text-muted)]"
                   >
-                    切换即时生效并持久化，将离开本页并放弃所有未保存的修改；候选 = 已知 OJ 类型 + 配置里的其它实例
+                    {{ props.locked
+                      ? '当前 OJ 由管理方锁定，普通启动下不可切换'
+                      : '切换即时生效并持久化；管理方模式（--settings）下留在本页继续配置' }}；候选 = 已知 OJ 类型 + 配置里的其它实例
                   </span>
                 </label>
 
@@ -92,7 +105,7 @@ function onSwitchOj(): void {
                     spellcheck="false"
                     :placeholder="ojBaseUrlHint(props.form.activeOj)"
                     :class="props.inputClass('ojUrl')"
-                    :disabled="props.locked"
+                    :disabled="props.locked || ojDomainBusy"
                   />
                   <span v-if="props.errors.ojUrl" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.ojUrl }}
@@ -111,6 +124,7 @@ function onSwitchOj(): void {
                     type="text"
                     spellcheck="false"
                     :class="props.inputClass('contestRef')"
+                    :disabled="ojDomainBusy"
                   />
                   <span class="mt-1 block text-xs text-[var(--text-muted)]">
                     HOJ 为数字 ID，其它 OJ 为资源引用；留空 = 不自动加载
@@ -127,6 +141,7 @@ function onSwitchOj(): void {
                     autocomplete="off"
                     placeholder="无私有赛密码可留空"
                     :class="INPUT"
+                    :disabled="ojDomainBusy"
                   />
                   <span class="mt-1 block text-xs text-[var(--text-muted)]">
                     仅用于进入私有赛，保存在本地
@@ -146,7 +161,7 @@ function onSwitchOj(): void {
                     inputmode="numeric"
                     spellcheck="false"
                     :class="props.inputClass('timeoutSecs')"
-                    :disabled="props.locked"
+                    :disabled="props.locked || ojDomainBusy"
                   />
                   <span v-if="props.errors.timeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.timeoutSecs }}
@@ -169,7 +184,7 @@ function onSwitchOj(): void {
                     inputmode="numeric"
                     spellcheck="false"
                     :class="props.inputClass('pollIntervalSecs')"
-                    :disabled="props.locked"
+                    :disabled="props.locked || ojDomainBusy"
                   />
                   <span v-if="props.errors.pollIntervalSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.pollIntervalSecs }}
@@ -192,7 +207,7 @@ function onSwitchOj(): void {
                     inputmode="numeric"
                     spellcheck="false"
                     :class="props.inputClass('pollTimeoutSecs')"
-                    :disabled="props.locked"
+                    :disabled="props.locked || ojDomainBusy"
                   />
                   <span v-if="props.errors.pollTimeoutSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.pollTimeoutSecs }}
@@ -215,7 +230,7 @@ function onSwitchOj(): void {
                     inputmode="numeric"
                     spellcheck="false"
                     :class="props.inputClass('cacheTtlSecs')"
-                    :disabled="props.locked"
+                    :disabled="props.locked || ojDomainBusy"
                   />
                   <span v-if="props.errors.cacheTtlSecs" class="mt-1 block text-xs text-[var(--color-error)]">
                     {{ props.errors.cacheTtlSecs }}
@@ -237,7 +252,7 @@ function onSwitchOj(): void {
                       type="button"
                       role="switch"
                       :aria-checked="props.form.cacheProblemStatement"
-                      :disabled="props.locked"
+                      :disabled="props.locked || ojDomainBusy"
                       class="settings-switch relative h-6 w-11 shrink-0 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                       :class="
                         props.form.cacheProblemStatement ? 'bg-[var(--color-primary)]' : 'bg-[var(--bg-sidebar)]'

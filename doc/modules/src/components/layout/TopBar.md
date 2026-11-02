@@ -22,13 +22,13 @@
 | `toggleBrief` | `() => Promise<void>` | 打开简介浮层时异步读 `configService.getOjBaseUrl()`，把描述中相对图片地址改写为绝对地址后 `renderMarkdown` |
 | `handleLogout` | `() => Promise<void>` | `isLoggingOut` 防重复点击；`authStore.logout()` 不会 reject（后端失败也清理本地），`finally` 中必然 `router.replace(Login)`，不会滞留比赛页 |
 | `userInitial` | computed | 账号首字母（大写），账号菜单头像位 |
-| `minimize` / `toggleMaximize` / `close` | fn | `getCurrentWindow()`（@tauri-apps/api/window）自绘窗口控制 |
+| `WindowControls` | 子组件 | 窗口控制（最小化/最大化/关闭）走共享组件 `components/layout/WindowControls.vue`——与 `--settings` 极简壳同一实现（评审十 #2），窗口 API 不再由本组件持有 |
 
 ## 直接依赖
 
 - `vue` / `vue-router`
-- `@tauri-apps/api/window`（`getCurrentWindow`，窗口控制）
 - `@/components/layout/ActivityBar.vue`（内嵌横向导航）
+- `@/components/layout/WindowControls.vue`（窗口控制按钮）
 - `@/stores/authStore` / `@/stores/contestStore`
 - `@/utils/contest`（`getContestPhase`）、`@/utils/markdown`（`renderMarkdown`）、`@/utils/focus-scope`（`vFocusScope` —— 简介浮层/账号菜单的焦点陷阱与 Esc 关闭）
 - `@/services/config.service`（OJ 基址，用于简介图片改写）

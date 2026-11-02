@@ -8,7 +8,8 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `init` | `pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry>` | 注册插件。**必须第一个注册**（官方要求：检测须早于其它插件初始化，main.rs Builder 链首位）。回调忽略 args/cwd（无深链/文件关联；未来引入时在此转发给第一实例） |
+| `init` | `pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry>` | 注册插件。**必须第一个注册**（官方要求：检测须早于其它插件初始化，main.rs Builder 链首位）。回调检查 args 中的 `--settings`（用于第二实例提示，见下行）；cwd 仍忽略（无深链/文件关联，未来引入时在此转发给第一实例） |
+| 第二实例带 `--settings` | 聚焦后弹一次系统提示框（`startup_dialog::present_message`，评审十九 #6） | 仅当**本进程不是钥匙启动**（`!launch_args::get().settings`）时提示——已在钥匙模式下运行是幂等的，弹「需完全退出」会误导（评审二十四 #2） |
 | `focus_main_window` | `fn focus_main_window(app: &tauri::AppHandle)`（私有） | 回调实体：按 label `main` 找窗口（tauri.conf.json 未配置 label，Tauri 默认 `main`），不存在（首实例尚在启动/已在退出）早退；最小化先 `unminimize` 再 `set_focus`。**所有窗口操作结果一律忽略**——回调跑在第一实例，panic 会经 panic 钩子写崩溃文件并弹启动失败框，把无害的重复双击变成致命故障，绝不 expect/unwrap |
 
 ## 直接依赖

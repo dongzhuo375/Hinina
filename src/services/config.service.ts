@@ -1,5 +1,6 @@
 import type { AppConfig } from '@/types/config'
 import * as configBridge from '@/bridge/config.bridge'
+import { isKeyedProcess } from '@/guards/keyed-settings-policy'
 import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
 import {
   DEFAULT_EDITOR_FONT_SIZE,
@@ -28,6 +29,15 @@ export interface PollSchedule {
   timeoutMs: number
 }
 
+/** 切换结果：成功 / 已生效但持久化失败（前端据此决定是否提示重启回退） */
+export type OjSwitchOutcome = 'success' | 'persist-failed'
+
+/** 最近一次已生效切换的共享结果 */
+export interface OjSwitchResult {
+  target: string
+  outcome: OjSwitchOutcome
+}
+
 /**
  * 配置服务 — 前端读取 Rust 端 `AppConfig` 的唯一入口，并提供派生参数。
  *
@@ -40,6 +50,42 @@ export interface PollSchedule {
  */
 export class ConfigService {
   private cache: Promise<AppConfig> | null = null
+  /// 在途 OJ 切换（跨控制器共享）：设置页可能被卸载重挂，
+  /// 单实例的 `switching` 既拦不住新控制器并发切换，也无法让新控制器等待。
+  private pendingSwitch: Promise<void> | null = null
+  /// 切换代际：每次切换**开始与结束**各 +1。读配置的调用方据此检测
+  /// 「读取期间发生过切换」，从而在事务落地后重读，而不是把旧 active 展出。
+  private switchEpoch = 0
+  /// 最近一次**已生效**切换的共享结果：持久化失败是
+  /// 「已生效但重启可能回退」的既存事实，设置页晚挂载也要据此提示；后续
+  /// 成功切换或任意一次把同一 active 成功落盘的 `updateConfig` 会解除它。
+  private lastSwitchResult: OjSwitchResult | null = null
+
+  /** 最近一次已生效切换的结果（未发生生效切换时为 null） */
+  latestOjSwitchResult(): OjSwitchResult | null {
+    return this.lastSwitchResult
+  }
+
+  /** 当前切换代际（只读；语义见 `switchEpoch`） */
+  get ojSwitchEpoch(): number {
+    return this.switchEpoch
+  }
+
+  /** 是否有 OJ 切换在途（跨控制器） */
+  get ojSwitchInFlight(): boolean {
+    return this.pendingSwitch !== null
+  }
+
+  /**
+   * 等待在途 OJ 切换落地（不向等待者抛出切换错误）。
+   *
+   * 新挂载的设置页控制器在读取配置前必须等它：否则读到的可能是切换前的
+   * 旧 active，而旧控制器的完成回调不会再刷新新控制器。
+   */
+  whenOjSwitchSettled(): Promise<void> {
+    const pending = this.pendingSwitch
+    return pending ? pending.catch(() => {}) : Promise.resolve()
+  }
 
   /** 读取应用配置（进程内缓存；失败时清空缓存以便下次重试） */
   getConfig(): Promise<AppConfig> {
@@ -60,12 +106,42 @@ export class ConfigService {
   /**
    * 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）。
    *
-   * 后端编排：校验已注册 → 切 Registry → 持久化 `oj.active` → 发布
-   * `OJSwitched`。本地缓存在切换后失效，后续读取拿到新 active。
+   * 后端编排（整段在配置写事务内）：校验已注册且在启用实例列表 → 切 Registry
+   * → 清各 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `OjSwitched`。
+   * 本地缓存在切换后失效，后续读取拿到新 active。
+   *
+   * **并发调用排队**而不是并行发出：后一次切换等前一次落地再执行。后端已有
+   * 写事务保证最终一致，这里保证 `whenOjSwitchSettled` 覆盖全部排队工作
+   *（设置页新控制器等待时不会漏掉队尾的切换）。
    */
   async switchOj(ojId: string): Promise<void> {
-    await configBridge.switchOj(ojId)
-    this.invalidate()
+    this.switchEpoch += 1
+    const previous = this.pendingSwitch
+    const run = (async () => {
+      if (previous) await previous.catch(() => {})
+      try {
+        await configBridge.switchOj(ojId)
+      } catch (e) {
+        // 切换已生效但持久化失败：后端 registry 与内存已是新 OJ，**陈旧缓存必须
+        // 失效**——否则后续读取/保存会把旧 active 再写回去，造成 register=新、
+        // 配置=旧 的再次分叉。结果同时留给设置页晚挂载提示。
+        if ((e as { variant?: string | null }).variant === 'OjSwitchPersistFailed') {
+          this.invalidate()
+          this.lastSwitchResult = { target: ojId, outcome: 'persist-failed' }
+        }
+        // 普通失败（切换未生效）不覆盖既存的生效结果
+        throw e
+      }
+      this.lastSwitchResult = { target: ojId, outcome: 'success' }
+      this.invalidate()
+    })()
+    this.pendingSwitch = run
+    try {
+      await run
+    } finally {
+      if (this.pendingSwitch === run) this.pendingSwitch = null
+      this.switchEpoch += 1
+    }
   }
 
   /**
@@ -199,17 +275,39 @@ export class ConfigService {
    * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
    * 避免局部字段把其余配置冲掉。返回写入后的配置供调用方直接使用。
    */
-  async updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
+  async updateConfig(
+    mutate: (draft: AppConfig) => void,
+    options: { maintainerLocked?: boolean } = {},
+  ): Promise<AppConfig> {
     const current = await this.getConfig()
     const draft: AppConfig = structuredClone(current)
     mutate(draft)
+    // 后端返回实际提交的配置（active 在写锁内钉住、可能为钳制后的值）；
+    // 旧后端/测试桩返回空时退回 draft
+    let persisted: AppConfig = draft
     try {
-      await configBridge.updateConfig(draft)
+      // 默认值由「本次启动是否钥匙模式」推导：设置页之外的保存
+      // （解题页编辑器偏好、分栏比例）同样必须让后端保住锁定字段——`false`
+      // 会让普通启动被当成「可写锁定层」，手改的非法值被校验/钳制
+      const maintainerLocked = options.maintainerLocked ?? !isKeyedProcess()
+      persisted = (await configBridge.updateConfig(draft, maintainerLocked)) ?? draft
+      // 用**实际落盘**的 active 判定：保存与切换在服务层
+      // 可能交错，后端写锁内的 active 才是权威值；按旧快照判定会留下陈旧警告
+      // 或返回过期 active。任意保存入口（含解题页偏好/分栏比例）都算解除。
+      this.resolvePersistedSwitch(persisted.oj.active)
     } finally {
       // 无论成败都失效缓存：失败时下次读取重新拉后端真值，避免缓存与磁盘漂移
       this.invalidate()
     }
-    return draft
+    return persisted
+  }
+
+  /// 成功保存同一 active 后解除持久化失败的共享结果。
+  private resolvePersistedSwitch(active: string): void {
+    const last = this.lastSwitchResult
+    if (last?.outcome === 'persist-failed' && last.target === active) {
+      this.lastSwitchResult = { target: active, outcome: 'success' }
+    }
   }
 }
 

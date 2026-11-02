@@ -14,10 +14,14 @@
 | `EditorPrefs` | `{ fontSize: number; tabSize: number; editorTheme: string }` | 编辑器偏好（字号 / Tab 宽度 / Monaco 主题） |
 | `ConfigService.getConfig` | `() => Promise<AppConfig>` | 读取配置（进程内缓存，并发共享同一次 IPC） |
 | `ConfigService.invalidate` | `() => void` | 使缓存失效（设置页保存后 / 需要磁盘真值时） |
-| `ConfigService.updateConfig` | `(mutate: (draft: AppConfig) => void) => Promise<AppConfig>` | **设置页保存唯一入口**：读当前配置 → structuredClone 副本上应用变更 → 整体写回后端（`update_config` 是整体替换语义）→ 失效缓存；写回失败同样失效缓存（避免缓存与磁盘漂移）并抛出 |
+| `ConfigService.updateConfig` | `(mutate: (draft: AppConfig) => void, options?: { maintainerLocked?: boolean }) => Promise<AppConfig>` | **设置页保存唯一入口**：读当前配置 → structuredClone 副本上应用变更 → 整体写回后端（`update_config` 是整体替换语义）→ **返回后端实际提交的配置**（active 取后端写锁内值）→ 失效缓存；写回失败同样失效缓存（避免缓存与磁盘漂移）并抛出；第二个参数 `{ maintainerLocked }` 透传给 `update_config`（锁定模式的「锁定字段不动」语义由后端落实，评审二十六 #2）。**缺省值由 `guards/keyed-settings-policy` 的 `isKeyedProcess()` 推导**（普通启动 = 锁定）——设置页之外的保存入口（`updateEditorPrefs`、解题页分栏比例）不传该参数，也能让后端保住锁定字段（评审二十七）。**成功写回后按后端实际提交的 active 判定**：若与最近一次 `persist-failed` 切换目标相同，会解除该共享结果（评审三十六：任意保存入口都算回退风险解除；保存与切换交错时不会按旧快照误判） |
 | `ConfigService.getOjBaseUrl` | `() => Promise<string>` | OJ 基址，用于题面/简介/公告相对图片 URL 改写；取当前 OJ 实例（`oj.active` 匹配）的 `baseUrl`（经 `activeOjBaseUrl`）；失败返回空串 |
 | `ConfigService.activeOjBaseUrl` | `(config: AppConfig) => string` | 同步帮手：解析配置中当前 OJ 实例的服务端地址，供已持有配置的调用方复用。`active` 未命中启用实例列表时回退第一个启用实例（正常配置经 Rust 归一不会未命中，此回退仅兜底 IPC 写读竞态）；无启用实例返回空串 |
-| `ConfigService.switchOj` | `(ojId: string) => Promise<void>` | 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）：调 bridge `switchOj`（后端补注册 → 校验已注册 → 切 Registry → 显式清各 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）→ 本地缓存失效（后续读取拿到新 active）。失败原样上抛，调用方（`useSettingsForm`）据此回滚下拉显示 |
+| `ConfigService.switchOj` | `(ojId: string) => Promise<void>` | 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）：调 bridge `switchOj`（后端在**单一写事务**内：补注册 → 校验已注册且在启用实例列表 → 切 Registry → 显式清各 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）→ 本地缓存失效（后续读取拿到新 active）。并发调用**排队**执行。失败原样上抛；**`OjSwitchPersistFailed` 失败也先失效缓存**（后端已切 registry/内存，陈旧缓存会把旧 active 写回，评审二十六 P1）。其余失败由调用方按「未切换」处理 |
+| `ConfigService.ojSwitchEpoch` | `number`（getter） | 切换代际：开始与结束各 +1；设置页读取配置时据此检测「读取期间发生过切换」并重读（评审三十三 #4） |
+| `ConfigService.ojSwitchInFlight` | `boolean`（getter） | 是否有切换在途（跨控制器） |
+| `ConfigService.whenOjSwitchSettled` | `() => Promise<void>` | 等待在途切换落地；切换失败也视为落地（不向等待者抛出切换错误） |
+| `ConfigService.latestOjSwitchResult` | `() => { target, outcome: 'success' \| 'persist-failed' } \| null` | 最近一次**已生效**切换的共享结果：`persist-failed` 让晚挂载设置页恢复「重启可能回退」警告；后续成功切换或任意 `updateConfig` 成功落盘同一 active 时解除（评审三十五/三十六） |
 | `ConfigService.getPollSchedule` | `() => Promise<PollSchedule>` | 轮询间隔与总超时；失败或非法配置回退 2s / 300s |
 | `ConfigService.getEditorPrefs` | `() => Promise<EditorPrefs>` | 字号 / Tab 宽度 / 编辑器主题（钳位上下界取自 `utils/editor`，越界与未知主题回退 14 / 4 / `'vs'`）；CodeEditor 挂载时消费 |
 | `ConfigService.updateEditorPrefs` | `(patch: Partial<EditorPrefs>) => Promise<void>` | **解题页编辑器设置弹层落盘入口**：只写传入字段（读-改-写保留其余配置）；主题落 `theme.editorTheme` 且**不触碰 `theme.themeName`**，落盘前经 `normalizeEditorTheme` 归一 |
@@ -30,6 +34,7 @@
 ## 直接依赖
 
 - `@/bridge/config.bridge`（`get_config` / `update_config`）
+- `@/guards/keyed-settings-policy`（`isKeyedProcess()` —— `updateConfig` 缺省 `maintainerLocked` 的推导）
 - `@/types/config`（仅类型）
 - `@/utils/language`（`normalizeHojLanguage`）、`@/utils/editor`（偏好默认值、钳位上下界与主题归一）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
@@ -54,9 +59,10 @@ getConfig()
                  ├─ 成功 → 写入缓存
                  └─ 失败 → 清空缓存（下次调用重试）并抛出
 
-updateConfig(mutate)
+updateConfig(mutate, options)
   getConfig() → structuredClone 副本 → mutate(draft)
-  → bridge.updateConfig(draft)（整体替换）
+  → maintainerLocked = options.maintainerLocked ?? !isKeyedProcess()（guards/keyed-settings-policy）
+  → bridge.updateConfig(draft, maintainerLocked)（整体替换）
   → finally invalidate()（成败都失效，防缓存与磁盘漂移）
 
 updateEditorPrefs(patch)
@@ -64,8 +70,15 @@ updateEditorPrefs(patch)
       fontSize/tabSize → editor.*；editorTheme → theme.editorTheme（先 normalizeEditorTheme）
 
 switchOj(ojId)
-  → bridge.switchOj(ojId)（后端补注册 → 校验已注册 → 切 Registry → 清各 Service 的 OJ 域缓存 → 持久化 oj.active → 发 CoreEvent::OjSwitched）
-  → invalidate()（下次读取拿到新 active；失败原样上抛，由调用方回滚 UI）
+  → bridge.switchOj(ojId)（后端在**单一写事务**内：补注册 → 校验已注册且在启用实例
+    列表中 → 切 Registry → 清各 Service 的 OJ 域缓存 → 持久化 oj.active → 发
+    CoreEvent::OjSwitched；与 update_config/reload 共用配置写事务锁）
+  → 成功 invalidate()（下次读取拿到新 active）
+  → OjSwitchPersistFailed：先 invalidate() 再抛出（否则旧 active 会被后续读取/保存
+    写回；调用方按「已生效」对齐新 OJ，不回滚 UI）
+  → 其它失败原样上抛（调用方回滚下拉选择）
+  → 并发调用**排队**执行；`ojSwitchEpoch` / `whenOjSwitchSettled()` 供设置页跨控制器
+    等待在途切换后再读配置（评审三十三 #4）
 
 getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / getSplitRatio()
   └─ 内部吞掉异常并返回安全兜底值：派生参数缺失只影响局部展示/节奏，不阻断主流程
@@ -89,4 +102,4 @@ getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / g
 
 ## 测试
 
-`src/services/__tests__/config.service.spec.ts`：缓存并发去重与失败重试、派生参数透传/越界回退/读取失败兜底（含 `editorTheme` 未知值回退 `vs`）、updateConfig 整体写回 + 缓存失效 + 副本隔离 + 失败仍失效缓存、updateEditorPrefs 只写传入字段 + 主题落 `theme.editorTheme` 且不动 `themeName` + 非法主题名归一后落盘。OJ 实例化新增：`getOjBaseUrl`/`activeOjBaseUrl` 取 active 实例地址、active 未命中回退第一个启用实例、禁用实例不参与匹配与回退（enabled = 后端不注册）、读取失败返回空串；`switchOj` 调 bridge 且切换后本地缓存失效（下次读取重新拉后端真值）、bridge 失败原样上抛（设置页据此回滚下拉显示）。
+`src/services/__tests__/config.service.spec.ts`：缓存并发去重与失败重试、派生参数透传/越界回退/读取失败兜底（含 `editorTheme` 未知值回退 `vs`）、updateConfig 整体写回 + 缓存失效 + 副本隔离 + 失败仍失效缓存、updateEditorPrefs 只写传入字段 + 主题落 `theme.editorTheme` 且不动 `themeName` + 非法主题名归一后落盘。OJ 实例化新增：`getOjBaseUrl`/`activeOjBaseUrl` 取 active 实例地址、active 未命中回退第一个启用实例、禁用实例不参与匹配与回退（enabled = 后端不注册）、读取失败返回空串；`switchOj` 调 bridge 且切换后本地缓存失效（下次读取重新拉后端真值）、bridge 失败原样上抛（设置页据此回滚下拉显示）。并发基座：真实 `ConfigService` 的并发切换串行（第二次等第一次落地）、`whenOjSwitchSettled` 覆盖队尾且队尾失败也解除、代际开始/结束各 +1、最近生效结果记录（普通失败不覆盖）与 `updateConfig` 成功且 active 匹配时解除 persist-failed。

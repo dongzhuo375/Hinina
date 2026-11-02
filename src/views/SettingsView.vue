@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PageHeading from '@/components/common/PageHeading.vue'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { useSettingsForm } from '@/composables/useSettingsForm'
@@ -8,7 +8,8 @@ import { useAboutSettings } from '@/composables/useAboutSettings'
 import { useMaintenanceSettings } from '@/composables/useMaintenanceSettings'
 import { useDataDirSettings } from '@/composables/useDataDirSettings'
 import { useSettingsScrollSpy } from '@/composables/useSettingsScrollSpy'
-import { systemService } from '@/services/system.service'
+import { isKeyedProcess } from '@/guards/keyed-settings-policy'
+import { clearSettingsGateNotice, settingsGateNotice } from '@/utils/settings-gate-notice'
 import type { SettingsFormPatch } from '@/composables/useSettingsForm'
 import OjServerSection from '@/components/settings/OjServerSection.vue'
 import EditorSection from '@/components/settings/EditorSection.vue'
@@ -28,13 +29,20 @@ import AboutSection from '@/components/settings/AboutSection.vue'
  * 分层锁：连接与缓存调优字段（OJ/地址/超时/轮询/TTL/数据目录）默认锁定，
  * 唯一提权来源是 `--settings` 启动参数（管理方钥匙）；选手日常字段（比赛
  * ID/引用、密码、编辑器、布局、重置与清理、关于）不受影响。护栏而非安全
- * 边界 —— config.json 明文可手改，无后端强制。
+ * 边界 —— IPC 更新路径由后端按 maintainer_locked 原样保留锁定字段；直接手改
+ * config.json 不受该护栏限制。
  */
 
 // ── 表单草稿 ──
 // 数字字段保留**原始字符串**：输入过程中的中间态（空串/半截数字）不应被强转成
 // NaN 写回，只有校验通过的值才会进入保存载荷。
 
+/// 维护者层锁定（默认锁，`--settings` 解锁）。启动标志快照由守卫首航填充
+///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
+const locked = computed(() => !isKeyedProcess())
+
+// locked 传入表单控制器：锁定字段不参与**前端**校验；保存载荷仍是完整 AppConfig，
+// 由后端按 maintainerLocked 用旧配置覆盖锁定字段
 const {
   form,
   dirty,
@@ -49,16 +57,13 @@ const {
   ojOptions,
   switchError,
   switchNotice,
+  switching,
   load,
   save,
   discard,
   onSwitchOj,
   inputClass,
-} = useSettingsForm()
-
-/// 维护者层锁定（默认锁，`--settings` 解锁）。启动标志快照由守卫首航填充
-///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
-const locked = computed(() => !systemService.launchFlags.value.settings)
+} = useSettingsForm(locked)
 
 function updateForm(patch: SettingsFormPatch): void {
   Object.assign(form, patch)
@@ -77,6 +82,8 @@ const {
   scrollToSection,
   SECTION_LABELS,
 } = useSettingsScrollSpy(loading)
+
+onUnmounted(clearSettingsGateNotice)
 
 onMounted(() => {
   void load()
@@ -108,6 +115,16 @@ onMounted(() => {
 
         <template v-else>
           <div class="settings-sections flex flex-col gap-8">
+            <!-- 钥匙模式：赛前/赛后点赛场页面被守卫拦回时的可见反馈。
+                 放在内容列内（.settings-sections 自动继承索引栏左距）——整幅块级放在
+                 外层会横跨 float 索引栏、压住「01」首项 4 秒（几何实测） -->
+            <p
+              v-if="settingsGateNotice"
+              role="status"
+              class="sticky top-2 z-20 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[var(--color-warning)] shadow-sm"
+            >
+              {{ settingsGateNotice }}
+            </p>
             <!-- ── OJ 服务器 ── -->
             <OjServerSection
               :form="form"
@@ -117,6 +134,8 @@ onMounted(() => {
               :switch-notice="switchNotice"
               :input-class="inputClass"
               :locked="locked"
+              :switching="switching"
+              :saving="saving"
               @update:form="updateForm"
               @switch-oj="onSwitchOj"
             />

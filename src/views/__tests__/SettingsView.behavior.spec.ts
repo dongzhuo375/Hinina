@@ -32,6 +32,10 @@ vi.mock('@/services/config.service', () => ({
     updateConfig: mocks.updateConfig,
     invalidate: mocks.invalidate,
     switchOj: mocks.switchOj,
+    latestOjSwitchResult: () => null,
+    ojSwitchEpoch: 0,
+    ojSwitchInFlight: false,
+    whenOjSwitchSettled: async () => {},
   },
 }))
 vi.mock('@/services/system.service', () => ({
@@ -45,13 +49,19 @@ vi.mock('@/services/system.service', () => ({
     resetClient: mocks.resetClient,
     purgeLocalData: mocks.purgeLocalData,
     launchFlags: mocks.launchFlags,
+    isKeyedSettings: (name?: string | symbol | null) =>
+      mocks.launchFlags.value.settings && name === 'Settings',
+    isKeyed: () => mocks.launchFlags.value.settings,
   },
 }))
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
 vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMyStatus: mocks.invalidateMyStatus }) }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => ({ refresh: mocks.announcementRefresh }) }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.routerReplace }) }))
+vi.mock('vue-router', () => ({
+  // performSwitch 读 currentRoute 判断「是否仍在设置页」
+  useRouter: () => ({ replace: mocks.routerReplace, currentRoute: { value: { name: 'Settings' } } }),
+}))
 vi.mock('@/components/common/PageHeading.vue', () => ({ default: { template: '<header />' } }))
 vi.mock('@/components/common/ErrorMessage.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/common/LoadingSpinner.vue', () => ({ default: { template: '<div />' } }))
@@ -221,10 +231,13 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
       id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {},
     })
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
-    expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
+    // 钥匙模式：切换成功后留在设置页——踢回登录页等于重新锁死
+    expect(mocks.routerReplace).not.toHaveBeenCalled()
   })
 
   it('非法数字实时显示字段级错误，修正后消失', async () => {
+    // 请求超时属维护者层字段：--settings 模式（锁定态该字段不可编辑、不参与校验）
+    mocks.launchFlags.value = { settings: true }
     const view = await render()
     await setField(view.host, '请求超时（秒）', 'abc')
     await settleView(2)
@@ -233,6 +246,27 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     await setField(view.host, '请求超时（秒）', '30')
     await settleView(2)
     expect(view.host.textContent).not.toContain('请求超时须为非负整数')
+  })
+
+  it('锁定层存量非法值不阻塞可编辑字段保存', async () => {
+    // 手改过、值越界的 config.json（普通启动）：锁定字段不可编辑 → 不参与校验，
+    // 字号等可编辑字段必须能保存；保存载荷不得把非法值解析成 NaN
+    currentConfig.oj.timeoutSecs = 999 // 越界（1–120）
+    currentConfig.oj.instances[0].baseUrl = 'not-a-url'
+    const view = await render()
+    expect(view.host.textContent).not.toContain('请求超时须在')
+    expect(view.host.textContent).toContain('连接与缓存字段已锁定')
+
+    await setField(view.host, '字号', '18')
+    await settleView(2)
+    const save = [...view.host.querySelectorAll('button')].find((b) => b.textContent?.includes('保存'))
+    expect(save?.disabled).toBe(false)
+    save!.click()
+    await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalled())
+    // 锁定语义由后端落实：前端必须把 maintainerLocked 透传
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.any(Function), { maintainerLocked: true })
+    expect(currentConfig.oj.timeoutSecs).toBe(999) // 该 mock 不模拟钳制；真实语义由 Rust 测试锁定
+    expect(currentConfig.editor.fontSize).toBe(18)
   })
 
   it('新实例保存后下拉 configured 标签随实例清单更新', async () => {
@@ -276,6 +310,66 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     await vi.waitFor(() => expect(view.host.textContent).toContain('切换失败'))
     expect(mocks.resetSessionForOjSwitch).not.toHaveBeenCalled()
     expect(mocks.routerReplace).not.toHaveBeenCalled()
+  })
+
+  it('切换在途整个 OJ 域禁用，失败后恢复且地址草稿未被覆盖', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    const view = await render()
+    await setField(view.host, '服务器地址', 'https://draft-hoj.example')
+
+    let reject!: (e: Error) => void
+    mocks.switchOj.mockImplementationOnce(
+      () => new Promise<void>((_resolve, rejectPromise) => { reject = rejectPromise }),
+    )
+    await setField(view.host, '当前 OJ', 'Hydro')
+    await vi.waitFor(() => expect(mocks.switchOj).toHaveBeenCalledWith('Hydro'))
+
+    // 在途：整个 OJ 域禁用（完成后的磁盘重置会整体覆盖这批字段）
+    for (const label of [
+      '当前 OJ',
+      '服务器地址',
+      '比赛 ID / 引用',
+      '比赛密码',
+      '请求超时（秒）',
+      '轮询间隔（秒）',
+      '轮询总超时（秒）',
+      '列表缓存 TTL（秒）',
+    ]) {
+      expect((field(view.host, label) as HTMLInputElement).disabled, label).toBe(true)
+    }
+    // 全局字段不属 OJ 域，照常可编辑
+    expect((field(view.host, '字号') as HTMLInputElement).disabled).toBe(false)
+
+    reject(new Error('切换失败'))
+    await vi.waitFor(() => expect(view.host.textContent).toContain('切换失败'))
+    await vi.waitFor(() =>
+      expect((field(view.host, '服务器地址') as HTMLInputElement).disabled).toBe(false),
+    )
+    expect((field(view.host, '当前 OJ') as HTMLSelectElement).value).toBe('HOJ')
+    expect((field(view.host, '服务器地址') as HTMLInputElement).value).toBe(
+      'https://draft-hoj.example',
+    )
+  })
+
+  it('保存在途同样禁用整个 OJ 域，完成后恢复', async () => {
+    const view = await render()
+    let release!: (config: AppConfig) => void
+    mocks.updateConfig.mockImplementationOnce(
+      () => new Promise<AppConfig>((resolve) => { release = resolve }),
+    )
+    await setField(view.host, '比赛 ID / 引用', '2002')
+    button(view.host, '保存').click()
+    await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledTimes(1))
+
+    expect((field(view.host, '比赛 ID / 引用') as HTMLInputElement).disabled).toBe(true)
+    expect((field(view.host, '服务器地址') as HTMLInputElement).disabled).toBe(true)
+    expect((field(view.host, '字号') as HTMLInputElement).disabled).toBe(false)
+
+    release(structuredClone(currentConfig))
+    await vi.waitFor(() =>
+      expect((field(view.host, '比赛 ID / 引用') as HTMLInputElement).disabled).toBe(false),
+    )
   })
 
   it('数据目录确认使用点击前的 migrate 快照，并在成功后重读', async () => {

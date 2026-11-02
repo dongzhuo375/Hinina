@@ -31,6 +31,11 @@ pub enum AppError {
     #[error("Provider 未找到: {0}")]
     ProviderNotFound(String),
 
+    /// OJ 切换**已经生效**（registry 已切、缓存已清），但持久化 `oj.active` 失败。
+    /// 前端据此走「承认已生效」分支，而不是回滚 UI。
+    #[error("OJ 切换已生效但保存配置失败: {0}")]
+    OjSwitchPersistFailed(String),
+
     #[error("序列化错误: {0}")]
     Serialization(String),
 
@@ -72,6 +77,7 @@ impl AppError {
             AppError::Network(msg) => msg,
             AppError::Config(msg) => msg,
             AppError::ProviderNotFound(msg) => msg,
+            AppError::OjSwitchPersistFailed(msg) => msg,
             AppError::Serialization(msg) => msg,
             AppError::Unknown(msg) => msg,
         }
@@ -104,6 +110,9 @@ impl AppError {
             AppError::Network(msg) => AppError::Network(prepend(ctx, msg)),
             AppError::Config(msg) => AppError::Config(prepend(ctx, msg)),
             AppError::ProviderNotFound(msg) => AppError::ProviderNotFound(prepend(ctx, msg)),
+            AppError::OjSwitchPersistFailed(msg) => {
+                AppError::OjSwitchPersistFailed(prepend(ctx, msg))
+            }
             AppError::Serialization(msg) => AppError::Serialization(prepend(ctx, msg)),
             AppError::Unknown(msg) => AppError::Unknown(prepend(ctx, msg)),
         }

@@ -62,7 +62,7 @@ export function resetSessionForOjSwitch(): void {
   clearDomainState()
 
   // 匿名简报属于**旧 OJ**（换服务端），一并作废：`invalidateBrief()` 递增简报
-  // 失效世代（在途旧请求的回写被丢弃，评审八轮）并复位为 idle —— 若沿用，
+  // 失效世代（在途旧请求的回写被丢弃）并复位为 idle —— 若沿用，
   // LoginView 的 canEnter 侦听器（immediate）会先按旧 OJ 的时间窗计算阶段，
   // 在新 OJ 有会话时立即自动推进赛场 —— 而新 OJ 可能未配置比赛。
   useContestStore().invalidateBrief()

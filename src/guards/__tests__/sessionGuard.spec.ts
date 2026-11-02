@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   setIpcErrorObserver: vi.fn(),
   logout: vi.fn(),
   replace: vi.fn().mockResolvedValue(undefined),
+  // 启动标志响应式快照（systemService.launchFlags）：钥匙旁路的判据
+  launchFlags: { value: { settings: false } },
+  routeName: { value: 'ProblemSet' as string | undefined },
 }))
 
 vi.mock('@/bridge', () => {
@@ -22,21 +25,36 @@ vi.mock('@/bridge', () => {
   return { setIpcErrorObserver: mocks.setIpcErrorObserver, IpcError }
 })
 vi.mock('@/services/auth.service', () => ({ authService: { logout: mocks.logout } }))
+vi.mock('@/services/system.service', () => ({
+  systemService: {
+    launchFlags: mocks.launchFlags,
+    isKeyedSettings: (name?: string | symbol | null) =>
+      mocks.launchFlags.value.settings && name === 'Settings',
+  },
+}))
 
 import { installSessionGuard } from '@/guards/sessionGuard'
+import * as settingsGateNoticeModule from '@/utils/settings-gate-notice'
 
 interface GuardHarness {
   auth: ReturnType<typeof useAuthStore>
   observer: (error: { isAuthError: boolean; message: string }) => void
 }
 
-/// 装配守卫并取回注入 bridge 的观察者。`requiresAuth` 决定当前路由形态。
-function install(requiresAuth: boolean, loggedIn = true): GuardHarness {
+/// 装配守卫并取回注入 bridge 的观察者。`requiresAuth` 决定当前路由的 meta 形态；
+/// `opts.keyMode` / `opts.routeName` 供钥匙旁路（settingsMode && Settings）用例。
+function install(
+  requiresAuth: boolean,
+  loggedIn = true,
+  opts: { keyMode?: boolean; routeName?: string } = {},
+): GuardHarness {
   setActivePinia(createPinia())
   const auth = useAuthStore()
   if (loggedIn) auth.user = { id: 'u1', username: 'alice', token: 't' } as never
+  mocks.launchFlags.value = { settings: opts.keyMode === true }
+  mocks.routeName.value = opts.routeName
   const router = {
-    currentRoute: { value: { meta: { requiresAuth } } },
+    currentRoute: { value: { name: opts.routeName, meta: { requiresAuth } } },
     replace: mocks.replace,
   }
   installSessionGuard(router as never)
@@ -110,6 +128,45 @@ describe('sessionGuard 并发会话失效', () => {
     const onProtected = install(true)
     onProtected.observer(authError())
     await settle()
+    expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
+  it('钥匙模式的设置页——清理会话但不跳转登录', async () => {
+    // --settings 的全部意义就是留在设置页修连接配置：踢回登录页会打断维护、
+    // 丢失当前草稿（登录页虽有「返回设置」入口，那已是一次重新进入）
+    mocks.logout.mockResolvedValue(undefined)
+    const { auth, observer } = install(true, true, { keyMode: true, routeName: 'Settings' })
+
+    observer(authError())
+    await settle()
+
+    expect(auth.user).toBeNull() // 会话清理照旧
+    expect(auth.error).toBe(SESSION_INVALID_MESSAGE)
+    expect(mocks.replace).not.toHaveBeenCalled() // 留在原地（最小壳接管）
+    // 留在设置页必须给可见反馈（设置页不渲染 auth.error）
+    const { settingsGateNotice, clearSettingsGateNotice } = settingsGateNoticeModule
+    expect(settingsGateNotice.value).toContain('会话已失效')
+    clearSettingsGateNotice()
+  })
+
+  it('钥匙旁路不外溢：钥匙模式下非设置路由的认证错误照常跳登录', async () => {
+    mocks.logout.mockResolvedValue(undefined)
+    const { observer } = install(true, true, { keyMode: true, routeName: 'ProblemSet' })
+
+    observer(authError())
+    await settle()
+
+    expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
+  it('普通模式 + 设置路由——认证错误照常清理并跳转（旁路不得扩展到普通启动）', async () => {
+    mocks.logout.mockResolvedValue(undefined)
+    const { auth, observer } = install(true, true, { keyMode: false, routeName: 'Settings' })
+
+    observer(authError())
+    await settle()
+
+    expect(auth.user).toBeNull()
     expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
   })
 

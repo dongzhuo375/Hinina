@@ -37,6 +37,12 @@ export interface FakeOptions {
   judgementSequence?: JudgementStatus[]
   /** launch_flags 返回的启动标志；缺省 false（正常门禁 + 选手层），--settings 旅程传 true */
   launchFlags?: LaunchFlags
+  /** 注入后 load_configured_contest 恒以此失败（过期会话旅程：Auth → sessionGuard 旁路） */
+  failConfiguredContest?: { variant: string; message: string }
+  /** failConfiguredContest 的失败延迟毫秒数：给「先输入草稿、再等翻转」的旅程留窗口 */
+  delayConfiguredContestMs?: number
+  /** 比赛/简报时间窗偏移（秒，相对注入时刻）；缺省 -3600 / +8h（进行中），负 endOffset = 已结束 */
+  contestWindow?: { startOffsetSecs: number; endOffsetSecs: number }
 }
 
 /** 页面内 fake 控制面（经 window.__e2e 暴露） */
@@ -70,8 +76,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   const contest: Contest = {
     id: '1001',
     title: 'E2E 验证赛',
-    startTime: nowSecs - 3600,
-    endTime: nowSecs + 8 * 3600,
+    startTime: nowSecs + (options.contestWindow?.startOffsetSecs ?? -3_600),
+    endTime: nowSecs + (options.contestWindow?.endOffsetSecs ?? 8 * 3_600),
     description: '用于 Playwright E2E 的虚构比赛数据，不含真实比赛信息。',
     contestType: 0,
     status: 0,
@@ -409,9 +415,30 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return currentUser ? 'valid' : 'invalid'
       case 'get_config':
         return structuredClone(config)
-      case 'update_config':
-        Object.assign(config, structuredClone(args?.config))
-        return null
+      case 'update_config': {
+        // 复刻后端语义：maintainerLocked 必填；active 只由
+        // switch_oj 改写；锁定模式用旧值覆盖锁定字段，并保留结构性检查
+        const incoming = structuredClone(args?.config) as typeof config
+        const locked = args?.maintainerLocked
+        if (typeof locked !== 'boolean') {
+          throw { Config: 'fake: update_config 缺少 maintainerLocked 参数' }
+        }
+        incoming.oj.active = config.oj.active
+        if (locked) {
+          incoming.oj.instances = structuredClone(config.oj.instances)
+          incoming.oj.timeoutSecs = config.oj.timeoutSecs
+          incoming.oj.pollIntervalSecs = config.oj.pollIntervalSecs
+          incoming.oj.pollTimeoutSecs = config.oj.pollTimeoutSecs
+          incoming.oj.cacheTtlSecs = config.oj.cacheTtlSecs
+          incoming.oj.cacheProblemStatement = config.oj.cacheProblemStatement
+          if (!incoming.oj.instances.some((i) => i.enabled && i.id === incoming.oj.active)) {
+            throw { Config: 'fake: 当前 OJ 不在已启用的实例列表中' }
+          }
+        }
+        Object.assign(config, incoming)
+        // 与真实命令一致：返回实际提交的配置（ConfigService 据此判定 active）
+        return structuredClone(config)
+      }
       case 'reload_config':
         return null
       case 'launch_flags':
@@ -455,6 +482,13 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return structuredClone([contest])
       case 'load_configured_contest': {
         // 真实命令读取并校验当前 contestRef（contest_cmd.rs），不是固定成功
+        if (options.failConfiguredContest) {
+          const { variant, message } = options.failConfiguredContest
+          if (options.delayConfiguredContestMs) {
+            await new Promise((resolve) => setTimeout(resolve, options.delayConfiguredContestMs))
+          }
+          throw { [variant]: message }
+        }
         const ref = config.oj.contestRef.trim()
         if (!ref) throw { Config: 'fake: 未配置比赛引用（oj.contestRef 为空）' }
         if (ref !== contest.id) throw { Contest: `fake: 比赛 ${ref} 不存在或不可见` }

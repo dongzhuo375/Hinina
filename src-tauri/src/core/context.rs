@@ -118,7 +118,7 @@ impl AppContext {
         // 6. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
         let timeout_secs = config.get().oj.timeout_secs;
         // 测试构建禁用环境代理：全真上下文测试把 OJ 实例指向 loopback，
-        // 宿主环境代理会劫持 127.0.0.1 请求（评审第三轮 flaky 根因）
+        // 宿主环境代理会劫持 127.0.0.1 请求（曾导致测试 flaky）
         #[cfg(test)]
         let http_client = Arc::new(
             HttpClient::with_timeout_no_proxy(std::time::Duration::from_secs(timeout_secs.max(1)))
@@ -273,6 +273,16 @@ impl AppContext {
     /// 与 [`register_instance`]）：不能凭空激活一个未配置的 OJ，否则 `switch_oj`
     /// 会绕过配置成为后门。
     pub fn ensure_oj_registered(&self, oj_id: &str) -> bool {
+        let config = self.config.get();
+        self.ensure_oj_registered_from(&config, oj_id)
+    }
+
+    /// 与 [`Self::ensure_oj_registered`] 同源，但使用调用方提供的配置快照。
+    ///
+    /// `reload_config` 需要在**提交内存之前**用磁盘配置做预检：若等提交后再
+    /// 补注册，未知 active 会让内存/事件已被改写、Registry 却仍是旧 OJ
+    /// 其余行为完全一致（已注册则短路，不替换活适配器）。
+    pub(crate) fn ensure_oj_registered_from(&self, config: &AppConfig, oj_id: &str) -> bool {
         let id = OjId::new(oj_id);
         // Existing endpoints change only after restart, as advertised in SettingsView.
         // Do not replace a live adapter (and its credentials/caches) or retag its endpoint.
@@ -281,8 +291,7 @@ impl AppContext {
             return false;
         }
 
-        let config = self.config.get();
-        let Some(instance) = enabled_instance(&config, id.as_str()) else {
+        let Some(instance) = enabled_instance(config, id.as_str()) else {
             return false;
         };
         let deps = crate::adapter::AdapterDeps {

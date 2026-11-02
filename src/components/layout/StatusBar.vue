@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useContestStore } from '@/stores/contestStore'
+import { useTransientValue } from '@/composables/useTransientValue'
 import { tapVersion } from '@/utils/settings-access'
 import { createLogger } from '@/utils/logger'
 
@@ -16,24 +17,16 @@ const version = __APP_VERSION__
 
 /// 显现瞬间的提示：连点 5 下本身没有任何视觉反馈，若设置入口不在当前视野内，
 /// 用户无法判断「到底生效没有」。给一次 3 秒提示，之后不再打扰。
-const unlockedHint = ref(false)
-let hintTimer: ReturnType<typeof setTimeout> | null = null
+/// 用 `useTransientValue`（与设置页「已保存」同一实现，评审二十四 #7）：timer
+/// 与 scope 清理都在那里统一处理。
+const { value: revealedHint, show: showRevealedHint } = useTransientValue(false, 3_000)
 
 function onVersionClick() {
   if (!tapVersion()) return
 
   log.info('设置入口已显示（连点版本号）')
-  unlockedHint.value = true
-  if (hintTimer) clearTimeout(hintTimer)
-  hintTimer = setTimeout(() => {
-    hintTimer = null
-    unlockedHint.value = false
-  }, 3_000)
+  showRevealedHint(true)
 }
-
-onUnmounted(() => {
-  if (hintTimer) clearTimeout(hintTimer)
-})
 </script>
 
 <template>
@@ -54,7 +47,7 @@ onUnmounted(() => {
     </div>
 
     <div class="flex items-center gap-2">
-      <span v-if="unlockedHint" class="font-mono text-xs text-[var(--color-primary)]">
+      <span v-if="revealedHint" class="font-mono text-xs text-[var(--color-primary)]">
         已显示设置入口
       </span>
       <!--

@@ -10,7 +10,7 @@
  * 状态**仅本次运行有效、不落盘**：显现是「我现在要用设置」的临时意图，不是配置。
  * 重启后重新隐藏 —— 否则一次误触会永久暴露设置入口，闸门形同虚设。
  *
- * 判定逻辑抽成注入式状态机（`createUnlockGate`，时间源可注入）以便穷尽单测：
+ * 判定逻辑抽成注入式状态机（`createRevealGate`，时间源可注入）以便穷尽单测：
  * 「间隔超窗重新计数」「连点满 N 次显现」「显现后不再计数」这些边界靠真实点击
  * 测不出来。
  */
@@ -18,7 +18,7 @@
 import { ref } from 'vue'
 
 /** 显现入口所需的连点次数。 */
-export const SETTINGS_UNLOCK_TAPS = 5
+export const SETTINGS_REVEAL_TAPS = 5
 
 /**
  * 相邻两次点击的最大间隔（毫秒）。
@@ -28,15 +28,15 @@ export const SETTINGS_UNLOCK_TAPS = 5
  */
 export const SETTINGS_TAP_WINDOW_MS = 2_000
 
-export interface UnlockGate {
-  /** 记录一次点击；返回**本次之后**是否已解锁。 */
+export interface RevealGate {
+  /** 记录一次点击；返回**本次之后**是否已显现。 */
   tap(): boolean
-  /** 当前是否已解锁。 */
-  unlocked(): boolean
+  /** 当前是否已显现。 */
+  revealed(): boolean
 }
 
-export interface UnlockGateOptions {
-  /** 解锁所需连点次数（默认 [`SETTINGS_UNLOCK_TAPS`]） */
+export interface RevealGateOptions {
+  /** 显现所需连点次数（默认 [`SETTINGS_REVEAL_TAPS`]） */
   taps?: number
   /** 相邻点击的最大间隔毫秒（默认 [`SETTINGS_TAP_WINDOW_MS`]） */
   windowMs?: number
@@ -45,23 +45,23 @@ export interface UnlockGateOptions {
 }
 
 /**
- * 创建解锁闸门（纯状态机，无 Vue 依赖）。
+ * 创建显现闸门（纯状态机，无 Vue 依赖）。
  *
- * 计数规则：间隔在窗口内则累加，超窗则从 1 重新开始；达到 `taps` 次即解锁。
- * 解锁后 `tap()` 直接返回 `true` 且不再计数（幂等，重复点击无副作用）。
+ * 计数规则：间隔在窗口内则累加，超窗则从 1 重新开始；达到 `taps` 次即显现。
+ * 显现后 `tap()` 直接返回 `true` 且不再计数（幂等，重复点击无副作用）。
  */
-export function createUnlockGate(options: UnlockGateOptions = {}): UnlockGate {
-  const taps = options.taps ?? SETTINGS_UNLOCK_TAPS
+export function createRevealGate(options: RevealGateOptions = {}): RevealGate {
+  const taps = options.taps ?? SETTINGS_REVEAL_TAPS
   const windowMs = options.windowMs ?? SETTINGS_TAP_WINDOW_MS
   const now = options.now ?? (() => Date.now())
 
   let count = 0
   let lastTapAt = 0
-  let isUnlocked = false
+  let isRevealed = false
 
   return {
     tap(): boolean {
-      if (isUnlocked) return true
+      if (isRevealed) return true
 
       const at = now()
       // 首次点击时 lastTapAt 为 0，差值必然超窗 → 计数为 1，与「从 1 开始」一致
@@ -70,12 +70,12 @@ export function createUnlockGate(options: UnlockGateOptions = {}): UnlockGate {
 
       if (count >= taps) {
         count = 0
-        isUnlocked = true
+        isRevealed = true
       }
-      return isUnlocked
+      return isRevealed
     },
-    unlocked(): boolean {
-      return isUnlocked
+    revealed(): boolean {
+      return isRevealed
     },
   }
 }
@@ -86,10 +86,10 @@ export function createUnlockGate(options: UnlockGateOptions = {}): UnlockGate {
 // 设置项）。这里刻意**不引入 Pinia store**：它没有领域数据、不走 IPC、不参与
 // 数据流分层，一个会话级布尔量不值得为它多一个 store 文件。
 
-const gate = createUnlockGate()
+const gate = createRevealGate()
 
 /** 设置入口是否已显现（响应式；供模板直接消费）。 */
-export const settingsUnlocked = ref(false)
+export const settingsRevealed = ref(false)
 
 /**
  * 记录一次版本号点击。
@@ -97,8 +97,8 @@ export const settingsUnlocked = ref(false)
  * @returns 本次点击是否**刚刚**显现入口（`true` 仅出现一次，供调用方给出一次性反馈）
  */
 export function tapVersion(): boolean {
-  const wasUnlocked = gate.unlocked()
+  const wasRevealed = gate.revealed()
   gate.tap()
-  settingsUnlocked.value = gate.unlocked()
-  return !wasUnlocked && settingsUnlocked.value
+  settingsRevealed.value = gate.revealed()
+  return !wasRevealed && settingsRevealed.value
 }

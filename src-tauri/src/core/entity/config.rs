@@ -465,6 +465,54 @@ impl AppConfig {
 
         *self != before
     }
+
+    /// **维护者层锁定时的合并**：把「锁定字段」整体取回旧配置，
+    /// 只让选手层字段取新值。锁定字段 = OJ 选择、实例清单（含地址）、超时/轮询/
+    /// 缓存 TTL、题面缓存开关；比赛引用/密码与编辑器/布局/主题属可编辑层。
+    pub fn preserve_locked_fields(&mut self, previous: &Self) {
+        self.oj.active = previous.oj.active.clone();
+        self.oj.instances = previous.oj.instances.clone();
+        self.oj.timeout_secs = previous.oj.timeout_secs;
+        self.oj.poll_interval_secs = previous.oj.poll_interval_secs;
+        self.oj.poll_timeout_secs = previous.oj.poll_timeout_secs;
+        self.oj.cache_ttl_secs = previous.oj.cache_ttl_secs;
+        self.oj.cache_problem_statement = previous.oj.cache_problem_statement;
+    }
+
+    /// 锁定模式的校验：锁定字段来自旧配置（可能本就是手改的非法值），
+    /// **不得因它们阻塞可编辑字段的保存**；只保留结构性要求（active 必须指向
+    /// 已启用实例）。实例 id/地址的唯一性与格式不再检查（值未变）。
+    pub fn validate_preserving_locked(&self) -> Result<(), String> {
+        if !self
+            .oj
+            .instances
+            .iter()
+            .any(|i| i.enabled && i.id == self.oj.active)
+        {
+            return Err(format!(
+                "当前 OJ（{}）不在已启用的实例列表中",
+                self.oj.active
+            ));
+        }
+        Ok(())
+    }
+
+    /// 锁定模式的净化：只钳制**可编辑层**（比赛引用、编辑器、主题、布局），
+    /// 锁定字段保持字节不动（不 trim 地址、不钳制超时——它们不归选手改）。
+    pub fn sanitize_editable(&mut self) -> bool {
+        let before = self.clone();
+        self.oj.contest_ref = self.oj.contest_ref.trim().to_string();
+        self.editor.font_size = self.editor.font_size.clamp(8, 32);
+        self.editor.tab_size = self.editor.tab_size.clamp(1, 8);
+        self.editor.auto_save_interval_secs = self.editor.auto_save_interval_secs.clamp(5, 300);
+        self.editor.default_language = sanitize_language_id(&self.editor.default_language);
+        self.theme.editor_theme = sanitize_editor_theme(&self.theme.editor_theme);
+        if !self.layout.split_ratio.is_finite() {
+            self.layout.split_ratio = default_split_ratio();
+        }
+        self.layout.split_ratio = self.layout.split_ratio.clamp(0.30, 0.70);
+        *self != before
+    }
 }
 
 /// 是否为合法 http(s) 地址（判据见 `AppConfig::validate` 文档）。

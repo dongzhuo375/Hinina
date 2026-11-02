@@ -6,19 +6,22 @@ export async function getConfig(): Promise<AppConfig> {
   return ipcInvoke<AppConfig>('get_config')
 }
 
-/** 整体替换应用配置（Rust 端持久化到 config.json 并更新内存值） */
-export async function updateConfig(config: AppConfig): Promise<void> {
-  return ipcInvoke<void>('update_config', { config })
+/** 整体替换应用配置（Rust 端持久化并更新内存值，返回实际提交的配置） */
+export async function updateConfig(
+  config: AppConfig,
+  maintainerLocked = false,
+): Promise<AppConfig> {
+  return ipcInvoke<AppConfig>('update_config', { config, maintainerLocked })
 }
 
-/** 触发后端从磁盘重载配置（发布 ConfigReloaded 事件） */
+/** 触发后端从磁盘重载配置（发布 `ConfigChanged`；磁盘 active 与 Registry 不同时同步切换并发布 `OjSwitched`） */
 export async function reloadConfig(): Promise<void> {
   return ipcInvoke<void>('reload_config')
 }
 
 /**
  * 切换当前 OJ：后端校验目标 OJ 已注册 → 切换 Registry → 持久化 `oj.active`
- * → 发布 `OJSwitched` 事件。未注册的 OJ 报 ProviderNotFound。
+ * → 发布 `OjSwitched` 事件。未注册的 OJ 报 ProviderNotFound。
  */
 export async function switchOj(ojId: string): Promise<void> {
   return ipcInvoke<void>('switch_oj', { ojId })

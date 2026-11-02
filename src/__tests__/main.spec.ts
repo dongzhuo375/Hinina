@@ -88,7 +88,9 @@ describe('main.ts 组合根装配', () => {
     installed.closeGuard = mocks.onCloseRequested.mock.calls.length
     installed.announcementHandler =
       mocks.onAnnouncementsPublished.mock.calls[0]?.[0] ?? null
-  })
+    // 该钩子挂载整个应用（导入 main.ts 即 mount + 首航）：并行跑全量时
+    // 逼近默认 10s 钩子上限（单文件约 5–7s），显式放宽
+  }, 30_000)
 
   // beforeEach 不重置 DOM：挂载只发生一次，重置会把被测事实清掉
 

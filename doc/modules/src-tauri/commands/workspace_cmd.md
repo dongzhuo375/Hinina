@@ -4,7 +4,7 @@
 工作区相关 Tauri Command 模块。管理代码编辑工作区的加载、保存、切换、状态查询、文件内容同步与语言设置，面向前端暴露 IPC 接口（invoke 名与函数同名，无命名空间前缀）。
 
 ## 核心类型/函数
-- `pub async fn load_workspace(ctx, contest_id, problem_id) -> AppResult<Workspace>` — 加载或创建指定比赛/题目的工作区（`find_or_create`：按 contest_id + problem_id 匹配已有工作区，命中恢复代码，未命中新建）；加载前调用 `sync_auto_save_with_config` 按当前配置同步 auto-save（P39：确保 `tokio::spawn` 运行在正确 runtime 上；P48：不再用一次性 static 标记）
+- `pub async fn load_workspace(ctx, contest_id, problem_id) -> AppResult<Workspace>` — 加载或创建指定比赛/题目的工作区（`find_or_create`：按 contest_id + problem_id 匹配已有工作区，命中恢复代码，未命中新建）；加载前在**配置写事务锁内**读取配置并同步 auto-save（`load_workspace_sync_auto_save`，评审三十八：与 update_config/reload 串行，避免按旧快照 stop 覆盖并发保存；锁不覆盖后续 find_or_create）。P39：确保 `tokio::spawn` 运行在正确 runtime 上；P48：不再用一次性 static 标记
 - `pub async fn save_workspace(ctx) -> AppResult<()>` — 持久化当前工作区（脏时全量写文件 + 元数据）；**本命令返回 `Ok` 即表示内容已落盘**（未脏时是无操作且不发布事件），成功落盘时 `WorkspaceManager` 发布 `CoreEvent::WorkspaceSaved`，经 `main.rs` 的前端事件桥转为前端的 `workspace-saved`，驱动「已自动备份」指示 —— 事件只是通知，保存的成败由本命令的返回值决定
 - `pub async fn switch_workspace(ctx, workspace_id) -> AppResult<Workspace>` — 保存当前 → 加载目标，返回新 Workspace。旧工作区的落盘由 `WorkspaceManager::switch` **显式**完成（返回即已保存），其 `WorkspaceSaved` 事件仅用于前端清脏（按 `workspace_id` / `revision` 过滤过期事件）；切换本身**不发布事件**
 - `pub async fn current_workspace(ctx) -> AppResult<Option<Workspace>>` — 获取当前活动工作区（`None` = 无）；WorkspaceManager 未初始化时也返回 `Ok(None)` 而非错误

@@ -4,7 +4,7 @@
 
 ## 职责
 
-定义全部路由（登录页 + 比赛工作台嵌套子树）与 `beforeEach` 守卫：首次导航统一恢复后端会话，受保护路由鉴权，并在**首次进入工作台（含深链）前校验比赛阶段**——赛前/赛后一律退回登录页等待。另承载 `--settings` 管理方钥匙的前端落点：首次导航落登录页时直落设置页，且设置页的免登录访问是守卫里的**条件豁免**（`settingsMode && to.name === 'Settings'`）——meta 保持继承父级保护，普通模式下无钥匙访客直达设置页会被送回登录页、页面 401 也照常回登录页。
+钥匙豁免的判定一律经 `guards/keyed-settings-policy`（`isKeyedSettingsRoute`），不在守卫内联。定义全部路由（登录页 + 比赛工作台嵌套子树）与 `beforeEach` 守卫：首次导航统一恢复后端会话，受保护路由鉴权，并在**首次进入工作台（含深链）前校验比赛阶段**——赛前/赛后一律退回登录页等待。另承载 `--settings` 管理方钥匙的前端落点：首次导航落登录页时直落设置页，且设置页的免登录访问是守卫里的**条件豁免**（`isKeyedSettingsRoute(to.name)`）——meta 保持继承父级保护，普通模式下无钥匙访客直达设置页会被送回登录页、页面 401 也照常回登录页。
 
 ## 核心类型/函数
 
@@ -31,8 +31,9 @@
 ## 逻辑流程
 
 ```
-beforeEach(to):
-  0. flags = await systemService.getLaunchFlags()（进程内 memoize，只真正发一次 IPC；
+beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不再读 currentRoute（评审二十一 #5）
+  0. flags = await systemService.getLaunchFlags()（进程内 memoize：成功后不再发 IPC；
+     失败不缓存 rejection，下次调用重试并保持安全侧快照；
      try/catch 包死 —— service 已兜底，这里是导航路径上的第二道防线，守卫抛错=路由卡死）
      首次导航（模块级 firstNavigation 标记）且 flags.settings 且 to 为登录页
        → { name: 'Settings' }   // 管理方钥匙：初始直落设置页；仅首次，「返回登录」不受影响
@@ -42,18 +43,40 @@ beforeEach(to):
   2. requiresAuth = to.meta.requiresAuth === true
      —— 判据是**合并后的 to.meta**：vue-router 沿匹配链把父级 meta 合并进子级
      （子路由同键覆盖父路由），取最深层的值；未声明即不受保护（login/catch-all）
-  3. 非受保护 → 放行；受保护但 settingsMode 且 to 是设置页 → 放行（**条件豁免**，
+  3. 非受保护 → 放行；受保护但 `isKeyedSettingsRoute(to.name)` → 放行（**条件豁免**，
      不限首次——返回登录后想再修一次地址仍可直达）；受保护但未登录 → Login
      普通模式（无钥匙）设置页照常受保护：无钥匙访客直达 → Login；页面上 401 →
      sessionGuard 读到 requiresAuth=true 照常回登录页
-  4. 受保护且已登录，且当前不在 Contest 子树内
-     （!router.currentRoute.matched 含 name === 'Contest'）时做赛程闸门：
+  3a. 钥匙设置页出发、无会话：回 **Settings** 并提示「未登录」（评审二十——无条件 Login 会
+      卸载设置视图、丢草稿）；
+  4a. loadBrief 期间会话失效：钥匙流程回 **Settings**（评审十九 #2，与后续闸门失败同向）；
+      简报缺失（服务器不可达，正是钥匙要修的场景）时提示「未能加载比赛信息」而非
+      「比赛未进行」（评审十九 #3）
+  4. 受保护且已登录，且「从钥匙设置页出发」或「当前不在 Contest 子树内」时
+     做赛程闸门（前者是评审十 #1：从设置页点题目/榜单也要过闸门，否则会落进
+     被锁定的比赛页、随后被外壳踢回登录页）：
        !contest.brief → await contest.loadBrief()    // 深链/首次进入补加载匿名简报
-       期间会话可能失效 → !auth.isLoggedIn 则回 Login
+       期间会话可能失效 → 钥匙流程回 Settings（并提示「会话已失效」），其它回 Login
        schedule = getAuthoritativeSchedule(contest.contest, contest.brief)
-       getContestPhase(schedule, floor(Date.now()/1000)) !== 'running' → 回 Login
+       非 running → 钥匙流程回 Settings（提示按成因区分），其它回 Login
      否则放行
 ```
+
+落地不变量（afterEach）：
+
+```
+afterEach(to):
+  to.meta.requiresAuth !== true → return（登录页/catch-all 不受保护，不成环）
+  已登录 → return
+  isKeyedSettingsRoute(to.name) → return（钥匙设置页豁免）
+  否则 → replace(Login)
+```
+**为什么需要**（评审九 P2-2）：beforeEach 只能看导航开始时的会话；守卫批准后、
+路由确认前，某个在途请求返回 401 → sessionGuard 清理会话——它读到的
+`currentRoute` 仍是**尚未确认**的旧路由（设置页），钥匙豁免会跳过跳转，豁免
+被这条在途的受保护导航继承，用户落到无会话的比赛页。afterEach 在确认后补一次
+同一判据（判据为 `isKeyedSettingsRoute(to.name)`），任何「导航中途会话失效」
+都兜得住；替换目标是登录页（不受保护），不会循环。
 
 设计要点：
 

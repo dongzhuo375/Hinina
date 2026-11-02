@@ -2,11 +2,12 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TopBar from '@/components/layout/TopBar.vue'
+import WindowControls from '@/components/layout/WindowControls.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
-import { systemService } from '@/services/system.service'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import { useNowMs } from '@/composables/useNowMs'
 
@@ -21,28 +22,66 @@ const phase = computed(() => getContestPhase(
   getAuthoritativeSchedule(contestStore.contest, contestStore.brief),
   now.value,
 ))
-/// 最小壳：**四条件与** —— 钥匙启动（`--settings`）+ 无会话 + 当前路由是设置页。
-/// 绑路由防「正常登出/会话失效时比赛页外壳闪最小壳」（user 置空先于 replace 的
-/// 异步守卫完成）；绑钥匙防「普通启动在设置页上登出时闪最小壳」（已登录维护者
-/// 经隐藏入口进设置页后登出，路由同样是 Settings）—— 普通启动**永远**不进最小壳。
-/// 快照由守卫首航填充（早于本组件挂载），同步判定无闪帧。
-const bareShell = computed(
-  () =>
-    systemService.launchFlags.value.settings &&
-    auth.sessionResolved &&
-    !auth.isLoggedIn &&
-    route.name === 'Settings',
+/// 钥匙模式且正停在设置页：设置页两项豁免的**共同判据**（阶段闸门短路、最小壳）。
+/// 赛程闸门只防「滞留在过期赛场看旧数据」——设置页只碰本地配置，不在其射程内；
+/// 钥匙场景把维护者踢回登录页会打断维护、丢失当前草稿（登录页的「返回设置」是一次重新进入）。
+const keyedSettings = computed(() => isKeyedSettingsRoute(route.name))
+/// 最小壳：keyedSettings 再加无会话。**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时，首个认证请求 401 → invalidateSession 把
+/// sessionResolved 复位为 false（后端登出失败时 backendCleared=false）——此刻
+/// 正是「钥匙 + 无会话 + 设置页」形态，最小壳必须接管，否则正常外壳包着无会话
+/// 设置页继续发注定失败的请求。守卫在导航前已完成 checkSession，挂载时机不受
+/// 影响；快照由守卫首航填充，同步判定无闪帧。
+const bareShell = computed(() => keyedSettings.value && !auth.isLoggedIn)
+/// 赛程闸门的**模板判定**：非钥匙设置页且赛程处于 ended/upcoming 时，结束遮罩、
+/// 内容区 inert 与顶栏导航禁用一并生效。历史上只短路了 watcher 的
+/// 跳转，模板仍按裸 phase 判定——钥匙模式（有会话）的设置页被 inert 锁死、
+/// 已结束还叠着「即将返回登录」遮罩，设置页实际不可用。统一收敛到此一处。
+const contestGated = computed(
+  () => !keyedSettings.value && (phase.value === 'ended' || phase.value === 'upcoming'),
 )
 let exitTimer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
-watch(phase, (value) => {
+/// 公告轮询只启动一次：bootstrap（挂载即 running）或阶段跃迁到 running
+/// （赛前打开、开赛后进入赛场）。contestId 来自 store，不额外请求
+let liveFor: string | null = null
+function ensureLive(): void {
+  const contestId = contestStore.contest?.id
+  if (!contestId || phase.value !== 'running') return
+  if (liveFor === contestId) return
+  // 跨场未刷新（认证 contest 与简报 id 不同）时不得用旧 id 起轮询：
+  // 等 bootstrap 的 loadContest 把 contest 换成新场后再启动
+  if (contestStore.brief?.id && contestStore.brief.id !== contestId) return
+  announcementStore.startLive(contestId, () => contestStore.contest?.status === 1)
+  liveFor = contestId
+}
+
+watch([phase, keyedSettings], ([value, keyed]) => {
   if (exitTimer) clearTimeout(exitTimer)
   exitTimer = null
+  // 跃迁到 running：补启公告轮询（upcoming 打开的外壳在开赛后不再重挂）
+  if (value === 'running') ensureLive()
+  // 钥匙模式下正停在设置页（无论有无会话）不参与赛程闸门的**跳转**：登出清理
+  // 保留的匿名简报 / 已结束赛程都可能让 phase 非 none——跳回登录页会把钥匙
+  // 场景重新锁死；离开设置页时本监听
+  // 重评，赛程闸门照常恢复。
+  // 但「停公告轮询」是清理不是跳转，**不能被豁免吞掉**：进行中的比赛自然结束
+  // 或组织者把开始时间改到未来（running→upcoming）后，轮询器自身只检查页面
+  // 隐藏与 contest.status，不会因阶段回退自停，公告请求会一直打。ended 与 upcoming 都停并清 liveFor；回到 running 时
+  // 上面的 ensureLive 负责重启。注释「upcoming 本就没有轮询要停」只适用于
+  // 初始挂载，不适用于阶段回退。
+  if (keyed) {
+    if (value === 'ended' || value === 'upcoming') {
+      announcementStore.stopLive()
+      liveFor = null // 回到 running（赛程延长/重置重拉）要能重启
+    }
+    return
+  }
   if (value === 'upcoming') {
     void router.replace({ name: 'Login' })
   } else if (value === 'ended') {
     announcementStore.stopLive()
+    liveFor = null // 同上：ended→running 时 ensureLive 需重新启动
     // 保留会话与工作区，让现有离页保存链路处理代码落盘。
     exitTimer = setTimeout(() => {
       void router.replace({ name: 'Login' })
@@ -74,11 +113,10 @@ async function bootstrap(): Promise<void> {
     // 失败原因已由 store 写入 error，StatusBar 与各视图负责兜底展示
     return
   }
-  const contestId = contestStore.contest?.id
-  if (disposed || !contestId || phase.value !== 'running') return
+  if (disposed) return
   // 公告轮询由外壳统一持有，使 ActivityBar 未读红点在全部页面保持鲜活；
   // status === 1（比赛已结束）时暂停请求。刷新失败由 store.refresh 内部吞掉，不影响外壳
-  announcementStore.startLive(contestId, () => contestStore.contest?.status === 1)
+  ensureLive()
 }
 
 onMounted(() => {
@@ -99,9 +137,10 @@ function backToLogin(): void {
 
 <template>
   <div class="contest-theme relative flex h-full flex-col overflow-hidden bg-[var(--bg-body)]">
-    <!-- 最小壳：仅「无会话 + 设置路由」（--settings 直落）时渲染。自带拖动区 ——
-         App 的全局标题栏在 matched 含 Contest 时不渲染，decorations=false 下窗口
-         移动全靠它 -->
+    <!-- 顶栏按形态切换（最小壳的拖动区标题 App 全局标题栏在 matched 含 Contest 时
+         不渲染，decorations=false 下窗口移动全靠它），内容区（router-view）**两形态
+         共享同一实例**：最小壳↔完整外壳翻转（会话失效/登出）时不重挂设置视图，
+         未保存草稿得以保留 -->
     <template v-if="bareShell">
       <header
         data-tauri-drag-region
@@ -110,33 +149,32 @@ function backToLogin(): void {
         <span data-tauri-drag-region class="text-sm font-semibold text-[var(--text-primary)]">
           Hinina 设置
         </span>
-        <button
-          type="button"
-          class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
-          @click="backToLogin"
-        >
-          返回登录
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-sidebar)]"
+            @click="backToLogin"
+          >
+            返回登录
+          </button>
+          <!-- 无边框窗口在极简壳下也要有最小化/关闭（与 TopBar 共享） -->
+          <WindowControls />
+        </div>
       </header>
-      <main class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    </template>
+    <TopBar v-else :navigation-disabled="contestGated" />
+    <div class="flex min-h-0 flex-1 overflow-hidden" :inert="contestGated">
+      <main class="workspace-main flex min-w-0 flex-1 flex-col overflow-hidden">
         <router-view />
       </main>
-    </template>
-    <template v-else>
-      <TopBar :navigation-disabled="phase === 'ended' || phase === 'upcoming'" />
-      <div class="flex min-h-0 flex-1 overflow-hidden" :inert="phase === 'ended' || phase === 'upcoming'">
-        <main class="workspace-main flex min-w-0 flex-1 flex-col overflow-hidden">
-          <router-view />
-        </main>
+    </div>
+    <StatusBar v-if="!bareShell" />
+    <div v-if="contestGated && phase === 'ended'" class="absolute inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
+      <div role="alert" class="max-w-sm border border-[var(--border-color)] bg-[var(--bg-body)] px-12 py-10 text-center shadow-[0_24px_64px_rgba(46,48,51,0.08)]">
+        <p class="eyebrow">CONTEST CLOSED</p>
+        <h1 class="mt-4 text-2xl font-semibold tracking-wide text-[var(--text-primary)]">比赛已结束</h1>
+        <p class="mt-4 text-sm leading-6 text-[var(--text-secondary)]">感谢参赛，即将返回登录入口。</p>
       </div>
-      <StatusBar />
-      <div v-if="phase === 'ended'" class="absolute inset-x-0 bottom-0 top-10 z-50 flex items-center justify-center bg-[#f7f6f1]/85 backdrop-blur-sm">
-        <div role="alert" class="max-w-sm border border-[var(--border-color)] bg-[var(--bg-body)] px-12 py-10 text-center shadow-[0_24px_64px_rgba(46,48,51,0.08)]">
-          <p class="eyebrow">CONTEST CLOSED</p>
-          <h1 class="mt-4 text-2xl font-semibold tracking-wide text-[var(--text-primary)]">比赛已结束</h1>
-          <p class="mt-4 text-sm leading-6 text-[var(--text-secondary)]">感谢参赛，即将返回登录入口。</p>
-        </div>
-      </div>
-    </template>
+    </div>
   </div>
 </template>

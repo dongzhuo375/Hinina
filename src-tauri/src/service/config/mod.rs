@@ -18,6 +18,11 @@ pub struct ConfigService<R: ConfigRepository> {
     event_bus: Arc<CoreEventBus>,
     /// 当前内存中的配置副本
     config: RwLock<AppConfig>,
+    /// **写事务锁**：覆盖「updater → save_config → 发布事件」的
+    /// 完整区间。只扩 `RwLock` 的持锁区间会把落盘串进读取路径；单独的这把锁
+    /// 让「克隆出来的旧快照」不可能后于新配置落盘（内存/磁盘/Registry 三者一致）。
+    /// 锁序固定：先写事务锁，再取 `config` 的写锁。
+    write_txn: std::sync::Mutex<()>,
 }
 
 impl<R: ConfigRepository> ConfigService<R> {
@@ -52,6 +57,7 @@ impl<R: ConfigRepository> ConfigService<R> {
             repo,
             event_bus,
             config: RwLock::new(config),
+            write_txn: std::sync::Mutex::new(()),
         }
     }
 
@@ -61,6 +67,16 @@ impl<R: ConfigRepository> ConfigService<R> {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// 获取**写事务锁**。调用方在同一把锁内完成「读最新配置 → 合并/校验 →
+    /// 落盘 → 发布事件」，与 [`Self::update`] / [`Self::reload`] 共享同一互斥域。
+    ///
+    /// 锁序固定：先写事务锁，再取 `config` 的写锁（反过来会让读配置的 `get`
+    /// 与写事务互等）。持有本锁时只能调用 [`Self::update_locked`]，
+    /// 不能再调 `update` / `update_checked`（`Mutex` 不可重入）。
+    pub(crate) fn lock_write_txn(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.write_txn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// 通过闭包修改配置，修改后自动保存并发布 `CoreEvent::ConfigChanged`。
@@ -81,17 +97,46 @@ impl<R: ConfigRepository> ConfigService<R> {
     where
         F: FnOnce(&mut AppConfig),
     {
+        self.update_checked(|cfg| {
+            updater(cfg);
+            Ok(())
+        })
+    }
+
+    /// 可失败的写事务：`updater` 返回 `Err` 时**不改内存、不落盘、不发事件**。
+    ///
+    /// 需要「读锁内最新值 → 校验最终候选 → 整体替换」的调用方（`update_config`）
+    /// 用这个入口；校验失败不会留下半改的内存状态（候选在副本上修改，成功才提交）。
+    pub(crate) fn update_checked<F>(&self, updater: F) -> AppResult<AppConfig>
+    where
+        F: FnOnce(&mut AppConfig) -> AppResult<()>,
+    {
+        let _txn = self.lock_write_txn();
+        self.update_locked(updater)
+    }
+
+    /// 写事务本体；**调用方必须已持有 [`Self::lock_write_txn`]**。
+    ///
+    /// 整个事务（改内存 → 落盘 → 发事件）串行化：落盘在锁外进行时，先克隆
+    /// 的旧快照可能后写回磁盘。候选配置在副本上修改，
+    /// `updater` 失败时原配置一动不动。
+    pub(crate) fn update_locked<F>(&self, updater: F) -> AppResult<AppConfig>
+    where
+        F: FnOnce(&mut AppConfig) -> AppResult<()>,
+    {
         let new_config = {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
-            let before = serde_json::to_value(&cfg.oj).ok();
+            let mut next = cfg.clone();
+            let before = serde_json::to_value(&next.oj).ok();
             // The write guard hides these edits from scope readers until cancellation is
             // published below. Cached readers can only see the previous scope during the
             // updater; they are revoked before any reader can observe the new config.
             // Keep unrelated editor changes from invalidating plugin contexts.
-            updater(&mut cfg);
+            updater(&mut next)?;
             let _transition =
-                (before != serde_json::to_value(&cfg.oj).ok()).then(|| self.access.begin());
-            cfg.clone()
+                (before != serde_json::to_value(&next.oj).ok()).then(|| self.access.begin());
+            *cfg = next.clone();
+            next
         };
 
         // 持久化到磁盘，失败时保留内存修改但上报错误
@@ -110,6 +155,23 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 加载成功后发布 `CoreEvent::ConfigChanged`（与 [`Self::update`] 同款语义：
     /// 任何「配置已变更」的路径都要通知订阅者）。
     pub fn reload(&self) -> AppResult<AppConfig> {
+        // 与 update 共用写事务：reload 也写内存，不能与在途保存交错
+        let _txn = self.lock_write_txn();
+        self.reload_locked()
+    }
+
+    /// 重载本体；**调用方必须已持有 [`Self::lock_write_txn`]**。
+    pub(crate) fn reload_locked(&self) -> AppResult<AppConfig> {
+        let new_config = self.load_normalized()?;
+        self.commit_reloaded(&new_config);
+        Ok(new_config)
+    }
+
+    /// 读盘并归一，但**不提交内存、不发事件**。
+    ///
+    /// `reload_config` 先用它在事务内做「目标能否注册/可用」的预检；预检失败时
+    /// 内存与事件都保持原样，不会出现「配置已提交但 Registry 没切」的分叉。
+    pub(crate) fn load_normalized(&self) -> AppResult<AppConfig> {
         let new_config = self.repo.load_config::<AppConfig>().map_err(|e| {
             warn!(error = %e, "配置重新加载失败");
             AppError::Config(format!("配置重新加载失败: {}", e))
@@ -117,7 +179,14 @@ impl<R: ConfigRepository> ConfigService<R> {
         // 与 new() 同一归一入口：手改磁盘文件后 reload 同样要修正旧值
         let mut new_config = new_config;
         normalize_legacy_values(&mut new_config);
+        Ok(new_config)
+    }
 
+    /// 提交已加载配置：替换内存并发布 `CoreEvent::ConfigChanged`。
+    ///
+    /// **调用方必须已持有 [`Self::lock_write_txn`]**；`reload_config` 只在预检
+    /// 通过后调用它，因此失败路径不会留下半提交状态。
+    pub(crate) fn commit_reloaded(&self, new_config: &AppConfig) {
         {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
             let _transition = self.access.begin();
@@ -128,7 +197,18 @@ impl<R: ConfigRepository> ConfigService<R> {
         self.event_bus.publish(CoreEvent::ConfigChanged);
 
         debug!("CoreEvent::ConfigChanged 已发布");
-        Ok(new_config)
+    }
+
+    /// 仅测试：写事务锁当前是否被持有（`try_lock` 探测；成功会立即释放）。
+    ///
+    /// 供并发回归在**进入锁之前**判定「另一个线程是否已持有事务」，
+    /// 不依赖 sleep 猜测调度。
+    #[cfg(test)]
+    pub(crate) fn write_txn_is_held(&self) -> bool {
+        match self.write_txn.try_lock() {
+            Ok(_guard) => false,
+            Err(_) => true,
+        }
     }
 
     /// 返回底层 ConfigRepository 引用。

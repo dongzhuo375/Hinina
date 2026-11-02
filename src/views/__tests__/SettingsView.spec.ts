@@ -40,10 +40,20 @@ vi.mock('@/services/system.service', () => ({
     getDataDir: mocks.getDataDir,
     // 正常模式（无 --settings）：维护者层保持锁定
     launchFlags: { value: { settings: false } },
+    isKeyedSettings: () => false,
+    isKeyed: () => false,
   },
 }))
 vi.mock('@/services/config.service', () => ({
-  configService: { getConfig: mocks.getConfig, updateConfig: mocks.updateConfig, invalidate: mocks.invalidate },
+  configService: {
+    getConfig: mocks.getConfig,
+    updateConfig: mocks.updateConfig,
+    invalidate: mocks.invalidate,
+    latestOjSwitchResult: () => null,
+    ojSwitchEpoch: 0,
+    ojSwitchInFlight: false,
+    whenOjSwitchSettled: async () => {},
+  },
 }))
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
 vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMyStatus: mocks.invalidateMyStatus }) }))
@@ -74,7 +84,7 @@ const baseConfig = (): AppConfig => ({
   layout: { sidebarWidth: 240, splitRatio: 0.48 },
 })
 
-/// 登记挂载实例，afterEach 统一卸载（评审第三轮 #10）：失败用例不残留挂载
+/// 登记挂载实例，afterEach 统一卸载：失败用例不残留挂载
 /// 实例，避免后续用例经全局 document 查询误触旧实例产生连带失败。
 const mounted: Mounted[] = []
 async function render() {

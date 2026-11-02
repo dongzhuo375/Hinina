@@ -91,6 +91,18 @@ describe('ipcInvoke — 错误归一化（Rust AppError ↔ 前端跨端契约�
     expect(error.isAuthError).toBe(false)
   })
 
+  it('OjSwitchPersistFailed 载荷 → variant 保留（切换已生效的专用变体，评审二十五）', async () => {
+    const payload = appError('OjSwitchPersistFailed', 'OJ 切换已生效但保存配置失败: 磁盘满')
+    invoke.mockRejectedValue(payload)
+
+    const error = await captureError('switch_oj')
+    expect(error).toBeInstanceOf(IpcError)
+    expect(error.variant).toBe('OjSwitchPersistFailed')
+    // 属于配置类失败，不得被会话守卫误判为认证失效
+    expect(error.isAuthError).toBe(false)
+    expect(error.message).toContain('保存配置失败')
+  })
+
   it('未知变体降级为 variant=null，但仍保留消息', async () => {
     // Rust 端新增 AppError 变体时前端列表会滞后，必须优雅降级而非丢消息
     invoke.mockRejectedValue(appError('SomeFutureVariant', '新错误'))
