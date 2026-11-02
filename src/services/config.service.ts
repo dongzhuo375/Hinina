@@ -1,6 +1,6 @@
 import type { AppConfig } from '@/types/config'
 import * as configBridge from '@/bridge/config.bridge'
-import { systemService } from '@/services/system.service'
+import { isKeyedProcess } from '@/guards/keyed-settings-policy'
 import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
 import {
   DEFAULT_EDITOR_FONT_SIZE,
@@ -289,7 +289,7 @@ export class ConfigService {
       // 默认值由「本次启动是否钥匙模式」推导（评审二十七）：设置页之外的保存
       // （解题页编辑器偏好、分栏比例）同样必须让后端保住锁定字段——`false`
       // 会让普通启动被当成「可写锁定层」，手改的非法值被校验/钳制
-      const maintainerLocked = options.maintainerLocked ?? !systemService.isKeyed()
+      const maintainerLocked = options.maintainerLocked ?? !isKeyedProcess()
       persisted = (await configBridge.updateConfig(draft, maintainerLocked)) ?? draft
       // 用**实际落盘**的 active 判定（评审三十六 P3）：保存与切换在服务层
       // 可能交错，后端写锁内的 active 才是权威值；按旧快照判定会留下陈旧警告

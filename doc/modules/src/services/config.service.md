@@ -34,7 +34,7 @@
 ## 直接依赖
 
 - `@/bridge/config.bridge`（`get_config` / `update_config`）
-- `@/services/system.service`（`isKeyed()` —— `updateConfig` 缺省 `maintainerLocked` 的推导）
+- `@/guards/keyed-settings-policy`（`isKeyedProcess()` —— `updateConfig` 缺省 `maintainerLocked` 的推导）
 - `@/types/config`（仅类型）
 - `@/utils/language`（`normalizeHojLanguage`）、`@/utils/editor`（偏好默认值、钳位上下界与主题归一）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
