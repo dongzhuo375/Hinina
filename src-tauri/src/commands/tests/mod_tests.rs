@@ -471,7 +471,6 @@ async fn update_config_never_overwrites_active() {
 #[tokio::test]
 async fn concurrent_switch_cannot_make_saved_config_invalid() {
     use super::super::commands::config_cmd::apply_config_update_with_hook;
-    use crate::commands::oj_cmd::switch_oj_impl;
     use crate::core::entity::config::AppConfig;
     use crate::test_support::app_ctx::context_with_two_ojs;
     use crate::test_support::loopback::LoopbackServer;
@@ -489,22 +488,31 @@ async fn concurrent_switch_cannot_make_saved_config_invalid() {
     payload.editor.font_size = 18;
 
     let (start_tx, start_rx) = std::sync::mpsc::channel::<()>();
-    let (attempt_tx, attempt_rx) = std::sync::mpsc::channel::<()>();
-    let handle = tokio::runtime::Handle::current();
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<bool>();
     let mut before_validate = || {
-        // **时序握手**（评审三十四）：保存此刻已持有写事务，再放切换线程进来。
-        // 若先 spawn 抢跑，切换可能先完成，正确实现会让保存因最终候选删除
-        // active 实例而失败——测试就变成靠调度运气。
+        // **时序握手**（评审三十四/三十五）：保存此刻已持有写事务，再放切换
+        // 线程进来。切换在**事务入口、取锁之前**用 try_lock 回报「锁已被保存
+        // 持有」，保证它只能在保存提交后继续读到最终候选——不再靠 spawn 抢跑
+        // 或 sleep 猜顺序。该回报是「进入竞争窗口」的证据，不证明切换自身随后
+        // 一定拿到锁（那由 switch/switch 用例单独覆盖）。
         start_tx.send(()).unwrap();
-        attempt_rx.recv().unwrap();
+        let held = held_rx.recv().unwrap();
+        assert!(held, "切换进入事务时，写事务必须已被保存持有");
     };
 
     let (saved, switched) = std::thread::scope(|scope| {
         let ctx_ref = &ctx;
         let enqueued = scope.spawn(move || {
             start_rx.recv().unwrap();
-            attempt_tx.send(()).unwrap();
-            handle.block_on(switch_oj_impl(ctx_ref, "Hydro"))
+            crate::commands::oj_cmd::switch_oj_with_hooks(
+                ctx_ref,
+                "Hydro",
+                |ctx_probe| {
+                    held_tx.send(ctx_probe.config.write_txn_is_held()).unwrap();
+                },
+                || {},
+                || {},
+            )
         });
         let saved = apply_config_update_with_hook(&ctx, payload, false, &mut before_validate);
         (saved, enqueued.join().unwrap())
@@ -565,6 +573,61 @@ async fn reload_config_synchronises_registry_with_disk_active() {
         ctx.provider_registry.current_id().as_str(),
         "Hydro",
         "Registry 必须同步到磁盘 active，不得留分叉"
+    );
+
+    hoj.shutdown();
+    hydro.shutdown();
+}
+
+/// 评审三十五 #2：reload 的目标预检失败时，不得先提交内存/事件。
+///
+/// 磁盘包含已启用但没有适配器的 Ghost 且 active=Ghost：归一化会保留它（实例确实
+/// enabled）。旧实现先 `reload_locked` 提交内存并发布 ConfigChanged，再发现
+/// Ghost 不可用而返回错误——留下内存/磁盘=Ghost、Registry=旧 OJ 的分叉。
+/// 现在预检在提交前完成：内存、Registry、事件全部保持原样。
+#[tokio::test]
+async fn reload_config_rejects_unknown_active_without_committing() {
+    use super::super::commands::config_cmd::reload_config_impl;
+    use crate::core::entity::config::OjInstance;
+    use crate::test_support::app_ctx::context_with_two_ojs;
+    use crate::test_support::loopback::LoopbackServer;
+
+    let hoj = LoopbackServer::start(vec![]).await;
+    let hydro = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
+    let before = ctx.config.get();
+    let mut events = ctx.event_bus.subscribe();
+
+    let mut disk_config = ctx.config.get();
+    disk_config.oj.instances.push(OjInstance {
+        id: "Ghost".into(),
+        base_url: "https://ghost.example".into(),
+        enabled: true,
+        options: serde_json::Map::new(),
+    });
+    disk_config.oj.active = "Ghost".into();
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string(&disk_config).unwrap(),
+    )
+    .unwrap();
+
+    let err = reload_config_impl(&ctx).expect_err("未知 active 必须拒绝重载");
+    assert!(
+        matches!(err, crate::core::error::AppError::ProviderNotFound(_)),
+        "应为 ProviderNotFound，实得 {:?}",
+        err
+    );
+
+    assert_eq!(ctx.config.get(), before, "内存配置不得被提交");
+    assert_eq!(
+        ctx.provider_registry.current_id().as_str(),
+        "HOJ",
+        "Registry 不得改变"
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "失败的重载不得发布 ConfigChanged / OjSwitched"
     );
 
     hoj.shutdown();

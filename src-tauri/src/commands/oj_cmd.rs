@@ -56,7 +56,7 @@ pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<(
 
 /// `switch_oj` 的真实编排（提取自命令本体，供命令与测试共用同一实现）。
 pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<()> {
-    switch_oj_transaction(ctx, &OjId::new(oj_id), |_| {}, || {})
+    switch_oj_transaction(ctx, &OjId::new(oj_id), |_| {}, || {}, || {})
 }
 
 /// 切换事务本体（同步）：**整段**——补注册、可用性检查、Registry 切换、缓存
@@ -70,15 +70,17 @@ pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<(
 ///
 /// 锁序固定为「写事务锁 → config 的 RwLock」（`ensure_oj_registered` 与本次
 /// 配置检查只读 `config`），与 `update_config`/`reload` 同序。
-fn switch_oj_transaction<BeforeLock, AfterScope>(
+fn switch_oj_transaction<BeforeLock, AfterScope, AfterPersist>(
     ctx: &AppContext,
     id: &OjId,
     before_lock: BeforeLock,
     after_scope: AfterScope,
+    after_persist: AfterPersist,
 ) -> AppResult<()>
 where
     BeforeLock: FnOnce(&AppContext),
     AfterScope: FnOnce(),
+    AfterPersist: FnOnce(),
 {
     // 测试注入点（生产为 no-op）：在**尝试取锁之前**执行。并发回归用它探测
     // 「另一个线程是否已持有写事务」，从而不靠 sleep 猜测调度（评审三十四）。
@@ -133,7 +135,8 @@ where
     // 切换在「落盘之前」发起，验证它被挡在事务外（评审三十三 #1 的复现序列）
     after_scope();
 
-    ctx.config
+    let save_result = ctx
+        .config
         .update_locked(|draft| {
             draft.oj.active = id.to_string();
             Ok(())
@@ -142,7 +145,11 @@ where
             // 切换已生效但持久化失败：用**专用变体**上报，前端据此承认已生效
             // 而不是回滚 UI（评审二十四 #1）
             AppError::OjSwitchPersistFailed(e.to_string())
-        })?;
+        });
+    save_result?;
+    // 测试注入点：**持久化已完成后**执行（评审三十五）。并发回归用它在旧实现
+    // 下等第二个切换真正落盘，而不是在落盘前发信号造成假绿。
+    after_persist();
 
     ctx.event_bus.publish(CoreEvent::OjSwitched {
         oj_id: id.to_string(),
@@ -157,22 +164,30 @@ pub(crate) fn switch_oj_with_hook<F>(ctx: &AppContext, oj_id: &str, after_scope:
 where
     F: FnOnce(),
 {
-    switch_oj_transaction(ctx, &OjId::new(oj_id), |_| {}, after_scope)
+    switch_oj_transaction(ctx, &OjId::new(oj_id), |_| {}, after_scope, || {})
 }
 
-/// 仅测试使用：同时注入「取锁前」与「Registry 切换后」两个探针。
+/// 仅测试使用：注入「取锁前」「Registry 切换后」「持久化完成后」三个探针。
 #[cfg(test)]
-pub(crate) fn switch_oj_with_hooks<B, A>(
+pub(crate) fn switch_oj_with_hooks<B, S, P>(
     ctx: &AppContext,
     oj_id: &str,
     before_lock: B,
-    after_scope: A,
+    after_scope: S,
+    after_persist: P,
 ) -> AppResult<()>
 where
     B: FnOnce(&AppContext),
-    A: FnOnce(),
+    S: FnOnce(),
+    P: FnOnce(),
 {
-    switch_oj_transaction(ctx, &OjId::new(oj_id), before_lock, after_scope)
+    switch_oj_transaction(
+        ctx,
+        &OjId::new(oj_id),
+        before_lock,
+        after_scope,
+        after_persist,
+    )
 }
 
 #[cfg(test)]

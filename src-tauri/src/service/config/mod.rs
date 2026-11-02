@@ -161,10 +161,17 @@ impl<R: ConfigRepository> ConfigService<R> {
     }
 
     /// 重载本体；**调用方必须已持有 [`Self::lock_write_txn`]**。
-    ///
-    /// `reload_config` 在同一事务里还要把 Registry 同步到磁盘 `oj.active`
-    /// （评审三十四残余）：只替换内存会让内存/磁盘与运行中 Registry 分叉。
     pub(crate) fn reload_locked(&self) -> AppResult<AppConfig> {
+        let new_config = self.load_normalized()?;
+        self.commit_reloaded(&new_config);
+        Ok(new_config)
+    }
+
+    /// 读盘并归一，但**不提交内存、不发事件**（评审三十五 #2）。
+    ///
+    /// `reload_config` 先用它在事务内做「目标能否注册/可用」的预检；预检失败时
+    /// 内存与事件都保持原样，不会出现「配置已提交但 Registry 没切」的分叉。
+    pub(crate) fn load_normalized(&self) -> AppResult<AppConfig> {
         let new_config = self.repo.load_config::<AppConfig>().map_err(|e| {
             warn!(error = %e, "配置重新加载失败");
             AppError::Config(format!("配置重新加载失败: {}", e))
@@ -172,7 +179,14 @@ impl<R: ConfigRepository> ConfigService<R> {
         // 与 new() 同一归一入口：手改磁盘文件后 reload 同样要修正旧值
         let mut new_config = new_config;
         normalize_legacy_values(&mut new_config);
+        Ok(new_config)
+    }
 
+    /// 提交已加载配置：替换内存并发布 `CoreEvent::ConfigChanged`。
+    ///
+    /// **调用方必须已持有 [`Self::lock_write_txn`]**；`reload_config` 只在预检
+    /// 通过后调用它，因此失败路径不会留下半提交状态。
+    pub(crate) fn commit_reloaded(&self, new_config: &AppConfig) {
         {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
             let _transition = self.access.begin();
@@ -183,7 +197,6 @@ impl<R: ConfigRepository> ConfigService<R> {
         self.event_bus.publish(CoreEvent::ConfigChanged);
 
         debug!("CoreEvent::ConfigChanged 已发布");
-        Ok(new_config)
     }
 
     /// 仅测试：写事务锁当前是否被持有（`try_lock` 探测；成功会立即释放）。

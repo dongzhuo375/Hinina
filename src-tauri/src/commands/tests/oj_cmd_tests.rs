@@ -233,8 +233,10 @@ async fn concurrent_switches_stay_consistent_across_registry_memory_and_disk() {
                     // 取锁前探测：true = T1 持有写事务，本线程随后必然阻塞
                     held_tx.send(ctx_probe.config.write_txn_is_held()).unwrap();
                 },
+                || {},
                 || {
-                    // 仅在变异路径被 T1 等待；固定路径无人接收，忽略发送错误
+                    // **持久化完成之后**才通知（评审三十五）：变异路径下 T1 等的是
+                    // 「T2 已落盘」，而不是落盘前的 after_scope 信号
                     let _ = done_tx.send(());
                 },
             )

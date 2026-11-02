@@ -64,18 +64,23 @@ pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 
 /// `reload_config` 的真实编排（提取供测试直接调用）。
 ///
-/// **重载与 Registry 同步在同一配置写事务内完成**（评审三十四残余）：只替换
-/// 内存配置会让内存/磁盘的 `oj.active` 与运行中 Registry 分叉——之后所有查询
-/// 仍走旧 OJ，而配置声称已切新 OJ。与 `update_config`/`switch_oj` 共用一把锁，
-/// 重载也不会与在途保存/切换交错。
+/// **先在事务内预检、通过后才提交内存与事件**（评审三十五 #2）：旧顺序先
+/// `reload_locked` 替换内存并发布 `ConfigChanged`，再校验 active 能否注册/可用；
+/// 磁盘指向一个没有适配器的已启用实例（如 Ghost）时，校验失败返回错误，但
+/// 内存/磁盘已是 Ghost、Registry 仍是旧 OJ，且事件已发出。
+///
+/// 现在 `load_normalized` 只读盘+归一（不提交），用**磁盘配置**补注册并做可用性
+/// 预检；失败时内存、Registry、事件全部保持原样。通过后提交内存/`ConfigChanged`，
+/// 再在同一事务内切 Registry/发 `OjSwitched`——不会与在途保存/切换交错。
 pub(crate) fn reload_config_impl(ctx: &AppContext) -> AppResult<AppConfig> {
     let _txn = ctx.config.lock_write_txn();
-    let config = ctx.config.reload_locked()?;
+    let config = ctx.config.load_normalized()?;
     let active = config.oj.active.clone();
-    if ctx.provider_registry.current_id().as_str() != active {
-        // 归一化保证 active 指向已启用实例；这里仍按 switch 的同一防线补注册并
-        // 校验（手改磁盘把 active 指向未知 OJ 时显式报错，不静默留分叉）
-        ctx.ensure_oj_registered(&active);
+    let registry_changed = ctx.provider_registry.current_id().as_str() != active;
+    if registry_changed {
+        // 用磁盘配置预检（此时尚未提交内存）：归一化保证 active 指向已启用实例，
+        // 但该实例可能没有适配器工厂；补注册失败即拒绝，不留半提交状态。
+        ctx.ensure_oj_registered_from(&config, &active);
         if !ctx
             .provider_registry
             .list_available()
@@ -86,6 +91,11 @@ pub(crate) fn reload_config_impl(ctx: &AppContext) -> AppResult<AppConfig> {
                 active
             )));
         }
+    }
+
+    // 预检通过：提交内存并发布 ConfigChanged
+    ctx.config.commit_reloaded(&config);
+    if registry_changed {
         switch_scope(
             &ctx.access,
             ctx.provider_registry.as_ref(),
