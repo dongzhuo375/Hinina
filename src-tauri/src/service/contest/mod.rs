@@ -12,7 +12,6 @@
 // 判定会话失效的唯一依据（见 `core/error.rs` 的 `context()` 文档）。
 // `get_rank` 尤其关键：它是全场最高频的认证调用（每 10s 一次），
 // 变体被改写会让 token 过期时榜单静默 stale、选手永远回不到登录页。
-pub mod error;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};

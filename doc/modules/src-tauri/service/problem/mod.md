@@ -6,7 +6,6 @@
 **OJ 切换后的缓存清理走 `on_oj_switched()` 显式调用**（由 `commands/oj_cmd::switch_oj` 编排），**不订阅任何事件**。
 
 ## 核心类型/函数
-- `pub mod error` — 题目错误类型模块声明
 - 常量：`LIMITS_CACHE_DIR = "cache/problem_limits"`（磁盘缓存目录，limits 只能从题目详情接口取得且对同一题基本不变，跨重启复用可省掉整批详情请求）、`LIMITS_CONCURRENCY = 4`（并发扇出上限：既要让首屏尽快补齐，也不能让单客户端瞬间打爆 OJ）
 - 常量（公开）：`PROBLEM_CACHE_TTL = 30min`（题面缓存 TTL —— 题面在比赛期间基本不变但并非永不变化，管理员可能中途修正，30 分钟是「切题来回/重进应用几乎总能命中」与「修正最多滞后半小时」的折中）、`PROBLEM_CACHE_CAPACITY = 200`、`PROBLEM_CACHE_NAMESPACE = "cache/problem_statement"`
 - 私有函数：`statement_key(oj_id, contest_id, display_id) -> String` — 题面缓存键 `{oj}/{contest_id}/{display_id}`（三重作用域：OJ / 比赛 / 题目；磁盘按目录分层；键的安全性由 `JsonDiskCache::key_path` 统一把关）

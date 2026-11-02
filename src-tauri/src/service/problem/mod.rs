@@ -8,7 +8,6 @@
 // 不得重新包装成 `AppError::Problem` —— 变体是前端 `sessionGuard` 判定会话失效的依据
 // （见 `core/error.rs`）。`load_problem_limits` 同样遵守：401/403 原样上抛，
 // 既不回退默认值，也不改写成 Problem 变体。
-pub mod error;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};

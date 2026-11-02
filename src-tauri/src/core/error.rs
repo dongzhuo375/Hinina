@@ -83,12 +83,6 @@ impl AppError {
         }
     }
 
-    /// 是否应向用户展示此错误
-    #[must_use]
-    pub fn is_user_facing(&self) -> bool {
-        true
-    }
-
     /// 补上「哪个环节失败」的上下文，**保留原始变体**。
     ///
     /// 为什么不用 `AppError::Network(format!("xx 请求失败: {}", e))` 重新包装：

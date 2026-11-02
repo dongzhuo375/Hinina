@@ -6,7 +6,6 @@
 **OJ 切换后的缓存清理走 `on_oj_switched()` 显式调用**（由 `commands/oj_cmd::switch_oj` 编排），**不订阅任何事件**。
 
 ## 核心类型/函数
-- `pub mod error` — 比赛错误类型模块声明
 - **`ContestCache`**（内部 struct） — 比赛列表缓存（`contests: Vec<Contest>`, `fetched_at: Instant`）。**保留自持实现**：其 TTL 由配置 `oj.cacheTtlSecs` 逐调用传入（可变），而 `TtlCache` 的 TTL 在构造期固定
 - **常量 `CONTEST_META_TTL = 120s`** — 比赛元信息缓存 TTL（覆盖总览页 30s 轮询的 4 个周期；把「管理员改时间/封榜设置」的滞后压到 2 分钟内。比赛是否结束由前端依 `endTime` 推导，不受影响）
 - **常量 `CONTEST_META_CAPACITY = 8`** — 元信息内存缓存容量上限

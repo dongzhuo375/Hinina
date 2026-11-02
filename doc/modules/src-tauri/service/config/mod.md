@@ -4,7 +4,6 @@
 配置服务模块入口。负责用户配置、OJ 配置、编辑器偏好、主题、布局的统一管理。`ConfigService` 以 JSON 格式持久化配置，支持运行时读取、更新和热重载。泛型 `R` 为底层持久化实现（当前为 `FsConfigRepository`），可按需替换存储后端。
 
 ## 核心类型/函数
-- `pub mod error` — 配置错误类型模块声明
 - **`ConfigService<R: ConfigRepository>`** — 统一配置管理服务
   - `fn new(repo, event_bus, access) -> Self` — 创建实例并立即加载配置；加载成功后先经 `normalize_legacy_values` 归一旧默认值（P55，见下）；首次启动时配置文件不存在则自动使用默认值并持久化
   - `fn get(&self) -> AppConfig` — 获取当前配置的不可变副本
