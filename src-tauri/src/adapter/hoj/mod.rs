@@ -660,9 +660,16 @@ impl AuthProvider for HOJAdapter {
             return Ok(());
         }
 
-        // 忽略远端响应（可能失败），以清除 token 为主
+        // 忽略远端响应（可能失败），以清除 token 为主 —— 但失败必须留痕：
+        // 远端会话仍在（表现为排障难的「顶号」现象），静默丢弃连这条线索都没有
         let headers = Self::auth_headers(token.as_deref());
-        let _ = self.http.client().get(&url).headers(headers).send().await;
+        if let Err(e) = self.http.client().get(&url).headers(headers).send().await {
+            warn!(
+                url = %url,
+                error = %e,
+                "HOJ 远端登出请求失败（本地 token 已清除，服务端会话可能仍在）"
+            );
+        }
 
         self.clear_token();
         info!("HOJ 已登出");

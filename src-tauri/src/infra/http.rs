@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use serde::Serialize;
+use tracing::warn;
 
 use crate::core::error::AppResult;
 
@@ -318,6 +319,15 @@ impl HttpClient {
                         }
                         StatusDecision::Retry => {
                             let delay = retry_delay(attempt);
+                            // 重试决策必须可归因（审计 F8）：3 秒级延迟静默吞掉，
+                            // 排障时只会看到「突然变慢」而不知道在重试
+                            warn!(
+                                url = %url,
+                                status = %status,
+                                attempt = attempt + 1,
+                                delay_ms = delay.as_millis() as u64,
+                                "服务端错误，稍后重试"
+                            );
                             tokio::time::sleep(delay).await;
                             last_error = Some(crate::core::error::AppError::Network(format!(
                                 "服务端错误 {} (status: {})，第 {} 次重试",
@@ -332,6 +342,13 @@ impl HttpClient {
                 Err(e) => {
                     if attempt < MAX_RETRIES {
                         let delay = retry_delay(attempt);
+                        warn!(
+                            url = %url,
+                            error = %e,
+                            attempt = attempt + 1,
+                            delay_ms = delay.as_millis() as u64,
+                            "请求失败，稍后重试"
+                        );
                         tokio::time::sleep(delay).await;
                         last_error = Some(crate::core::error::AppError::Network(format!(
                             "请求失败 {}: {}，第 {} 次重试",
