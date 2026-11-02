@@ -7,7 +7,6 @@
 - 常量：`DEFAULT_RANK_LIMIT: i64 = 50`（`pub(crate)`）— 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）。**唯一取值点在前端 `rank.service.ts` 的 `DEFAULT_RANK_PAGE_SIZE`**，此处是「绕过前端直接调命令」的防御值（P71）；提为 `pub(crate)` 以便用例锁定三处同值
 - 常量：`DEFAULT_ANNOUNCEMENT_LIMIT: i64 = 50` — 公告默认分页大小
 - `pub async fn list_contests(ctx) -> AppResult<Vec<Contest>>` — 获取比赛列表（TTL 从 `oj.cache_ttl_secs` 读取，默认 60 秒）
-- `pub async fn select_contest(ctx, contest_id: String) -> AppResult<()>` — 选中指定比赛，发布 `CoreEvent::ContestSelected { contest_id }`（事实通知，供审计 / 插件 / 前端刷新）；真实数据（题目列表等）仍由调用方经 IPC 查询获得
 - `pub async fn load_configured_contest(ctx) -> AppResult<ContestBundle>` — 从 `oj.contest_ref` 读取当前比赛引用（不透明字符串：HOJ 为数字串，其它 OJ 可能是任意资源 ID），加载详情 + 题目列表；空串（trim 后）返回错误提示在 config.json 中设置 `oj.contestRef`
 - `pub async fn get_contest_rank(ctx, contest_id, current_page?, limit?, keyword?, remove_star?, contains_end?) -> AppResult<ContestRankPage>` — 获取比赛排行榜（分页）。前端 invoke 签名 `get_contest_rank`({ contestId, currentPage?, limit?, keyword?, removeStar?, containsEnd? })，除 contestId 外均可省略（默认第 1 页、每页 50 条、不过滤）；`current_page` 经 `.max(1)` 收敛。注意：返回的 `records` 可能含服务端前置的「当前用户/关注用户」副本，前端渲染前需按 `uid` 去重；`total` 含这些前置条目，不能当作真实参赛人数
 - `pub async fn list_contest_announcements(ctx, contest_id, current_page?, limit?) -> AppResult<AnnouncementPage>` — 获取比赛公告（分页）。前端 invoke 签名 `list_contest_announcements`({ contestId, currentPage?, limit? })，默认第 1 页、每页 50 条，页码/条数经 `.max(1)` 收敛。**不做缓存**：公告可能包含裁判组临场发布的规则变更
@@ -28,7 +27,7 @@
 - `src-tauri/src/main.rs`（`generate_handler!` 注册）
 
 ## 逻辑流程
-1. 前端调用 `invoke('list_contests')` / `invoke('select_contest', { contestId })` / `invoke('load_configured_contest')` / `invoke('get_contest_rank', { contestId, ... })` / `invoke('list_contest_announcements', { contestId, ... })` / `invoke('get_read_announcement_ids', { contestId })` / `invoke('mark_announcements_read', { contestId, ids })`
+1. 前端调用 `invoke('list_contests')` / `invoke('load_configured_contest')`（「选中比赛」的 `select_contest` 已删除：配置比赛引用走 `update_config` 的 `oj.contestRef`，`ContestService::select_contest` 仍被服务层内部复用） / `invoke('get_contest_rank', { contestId, ... })` / `invoke('list_contest_announcements', { contestId, ... })` / `invoke('get_read_announcement_ids', { contestId })` / `invoke('mark_announcements_read', { contestId, ids })`
 2. 各 command 接收 `AppContext`，调用 `ContestService` 对应方法
 3. `load_configured_contest` 校验 `contest_ref` 非空（trim）后调用 `load_contest_with_problems`，返回 `ContestBundle`（对象 `{ contest, problems }`，供前端直接解构）
 4. `get_contest_rank` 把可选参数收敛为 `RankQuery`（缺省第 1 页 / 50 条 / 不过滤）后调用 `ContestService::get_rank`，透传 `ContestRankPage`

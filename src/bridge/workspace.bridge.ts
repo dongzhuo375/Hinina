@@ -14,10 +14,6 @@ export async function saveWorkspace(): Promise<void> {
 }
 
 /** 获取当前工作区 */
-export async function currentWorkspace(): Promise<Workspace | null> {
-  return ipcInvoke<Workspace | null>('current_workspace')
-}
-
 /**
  * 更新工作区文件内容（前端编辑器同步到后端）。
  *

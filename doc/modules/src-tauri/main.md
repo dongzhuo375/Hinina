@@ -91,10 +91,10 @@
    - `plugin_cmd`：plugin_list / plugin_start / plugin_stop / plugin_reload / plugin_resync
    - `auth_cmd`：login / logout / get_session / validate_session
    - `oj_cmd`：**switch_oj**（切换当前 OJ：补注册 → 校验已注册 → `set_current` → 显式清 contest/problem/submission 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）
-   - `contest_cmd`：list_contests / select_contest / load_configured_contest / **get_contest_rank** / **list_contest_announcements** / **get_read_announcement_ids** / **mark_announcements_read**
+   - `contest_cmd`：list_contests / load_configured_contest / **get_contest_rank** / **list_contest_announcements** / **get_read_announcement_ids** / **mark_announcements_read**
    - `problem_cmd`：get_problem / **get_user_problem_status** / **get_contest_problem_limits**
    - `submission_cmd`：submit_code / get_judgement / **list_contest_submissions** / **get_submission_detail** / **get_submission_cases**
-   - `workspace_cmd`：load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / **set_workspace_language** / **delete_workspace_file**
+   - `workspace_cmd`：load_workspace / save_workspace / update_workspace_file / **set_workspace_language** / **delete_workspace_file**
    - `config_cmd`：get_config / reload_config / update_config / **get_storage_info**
    - `log_cmd`：**frontend_log**（前端全局错误 → tracing 落 `logs/hinina.log`；薄转发，收敛与预算在 `infra/frontend_log.md`）
    - `maintenance_cmd`：**reset_client**（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，清完不重拉）/ **local_data_usage**（清理前的体积预览）/ **purge_local_data**（不可逆：清日志内容与崩溃记录文件、过期提交留档）

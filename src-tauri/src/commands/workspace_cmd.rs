@@ -169,43 +169,6 @@ pub async fn save_workspace(ctx: State<'_, AppContext>) -> AppResult<()> {
     wm.save()
 }
 
-/// 切换活动工作区。
-///
-/// 前端 invoke 签名: `switch_workspace`({ workspaceId })
-///
-/// 保存当前工作区 → 加载目标工作区 → 返回新 Workspace。
-/// 旧工作区的落盘由 `WorkspaceManager::switch` **显式**完成（返回即已保存），
-/// 其 `WorkspaceSaved` 事件仅用于前端清脏（按 workspace_id / revision 过滤过期事件）。
-#[tauri::command]
-pub async fn switch_workspace(
-    ctx: State<'_, AppContext>,
-    workspace_id: String,
-) -> AppResult<Workspace> {
-    info!(workspace_id = %workspace_id, "Command: 切换工作区");
-
-    let wm = ctx
-        .workspace_manager
-        .as_ref()
-        .ok_or_else(|| AppError::Workspace("WorkspaceManager 未初始化".into()))?;
-
-    wm.switch(&workspace_id, "")
-}
-
-/// 获取当前活动工作区。
-///
-/// 前端 invoke 签名: `current_workspace`
-///
-/// 返回 `None` 表示当前无活动工作区。
-#[tauri::command]
-pub async fn current_workspace(ctx: State<'_, AppContext>) -> AppResult<Option<Workspace>> {
-    let wm = match ctx.workspace_manager.as_ref() {
-        Some(wm) => wm,
-        None => return Ok(None),
-    };
-
-    Ok(wm.current())
-}
-
 /// 更新工作区中的文件内容（前端的 Monaco 编辑器同步到后端）。
 ///
 /// 前端 invoke 签名: `update_workspace_file`({ fileName, content })

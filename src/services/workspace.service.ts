@@ -22,10 +22,6 @@ export class WorkspaceService {
   /**
    * 获取当前活跃的工作区（可能为 null）。
    */
-  async currentWorkspace(): Promise<Workspace | null> {
-    return workspaceBridge.currentWorkspace()
-  }
-
   /**
    * 更新工作区文件内容（前端编辑器同步到后端）。
    *

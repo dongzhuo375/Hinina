@@ -291,10 +291,10 @@ Hinina/
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
             ├── oj_cmd.rs                 # switch_oj（显式切换，**整段持配置写事务锁**：校验已注册且在启用实例列表 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 oj.active → 发布 OjSwitched；并发切换串行，不会 Registry/内存/磁盘分叉）
-            ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest（读 oj.contest_ref，不透明字符串引用）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
+            ├── contest_cmd.rs            # list_contests / load_configured_contest（读 oj.contest_ref，不透明字符串引用）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
             ├── problem_cmd.rs            # get_problem / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
-            ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
+            ├── workspace_cmd.rs          # load_workspace / save_workspace / update_workspace_file / set_workspace_language
             ├── config_cmd.rs             # get_config / reload_config（事务内预检通过后才提交内存/事件，并同步 Registry）/ update_config（锁内固定 active 后对最终候选校验；落盘后**显式**同步 auto-save 启停与间隔）/ get_storage_info（存储目录/日志路径/版本，设置页「关于」）
             ├── log_cmd.rs                # frontend_log（**薄转发** → infra/frontend_log：panic 钩子的前端半边）
             ├── maintenance_cmd.rs          # reset_client（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，不重拉）/ local_data_usage（清理前体积预览，含临时目录崩溃记录）/ purge_local_data（不可逆：日志内容与崩溃记录文件 + 过期提交留档）
@@ -424,7 +424,7 @@ src/
 │   ├── announcement.bridge.ts            # list_contest_announcements / get_read_announcement_ids / mark_announcements_read + onAnnouncementsPublished（announcements-published 事件订阅）
 │   ├── window.bridge.ts                  # 无边框窗口控制（最小化/最大化/关闭）薄封装——bridge 是唯一接触 @tauri-apps/api 的地方（评审十九 #8）
 │   ├── system.bridge.ts                  # get_storage_info
-│   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile / setWorkspaceLanguage + onWorkspaceSaved（workspace-saved 事件订阅）
+│   ├── workspace.bridge.ts               # load_workspace / save_workspace / updateWorkspaceFile / setWorkspaceLanguage + onWorkspaceSaved（workspace-saved 事件订阅）
 │   ├── config.bridge.ts                  # get_config / update_config / reload_config
 │   ├── diagnostics.bridge.ts             # frontend_log（前端全局错误三标量转发到 Rust tracing；唯一持久化日志通道）
 │   └── __tests__/                        # index.spec.ts / diagnostics.bridge.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数、frontend_log 命令名与三标量透传）

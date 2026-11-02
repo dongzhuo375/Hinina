@@ -6,7 +6,6 @@ const { workspaceService, configService } = vi.hoisted(() => ({
   workspaceService: {
     loadWorkspace: vi.fn(),
     saveWorkspace: vi.fn(),
-    currentWorkspace: vi.fn(),
     updateWorkspaceFile: vi.fn(),
     setLanguage: vi.fn(),
     deleteWorkspaceFile: vi.fn(),
