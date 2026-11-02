@@ -67,13 +67,16 @@ watch([phase, keyedSettings], ([value, keyed]) => {
   // 保留的匿名简报 / 已结束赛程都可能让 phase 非 none——跳回登录页会把钥匙
   // 场景重新锁死（评审四 P2-2 + 评审五补齐有会话分支）；离开设置页时本监听
   // 重评，赛程闸门照常恢复。
-  // 但「ended 停公告轮询」是清理不是跳转，**不能被豁免吞掉**：进行中的比赛
-  // 自然结束（本地 endTime 到期、服务端 status 未变）后轮询若继续，公告请求
-  // 会一直打（评审八 P2-1）。upcoming 本就没有轮询要停。
+  // 但「停公告轮询」是清理不是跳转，**不能被豁免吞掉**：进行中的比赛自然结束
+  // 或组织者把开始时间改到未来（running→upcoming）后，轮询器自身只检查页面
+  // 隐藏与 contest.status，不会因阶段回退自停，公告请求会一直打（评审八 P2-1、
+  // 评审三十三 #5）。ended 与 upcoming 都停并清 liveFor；回到 running 时
+  // 上面的 ensureLive 负责重启。注释「upcoming 本就没有轮询要停」只适用于
+  // 初始挂载，不适用于阶段回退。
   if (keyed) {
-    if (value === 'ended') {
+    if (value === 'ended' || value === 'upcoming') {
       announcementStore.stopLive()
-      liveFor = null // 结束后再回到 running（赛程延长/重置重拉）要能重启（评审二十九 #4）
+      liveFor = null // 回到 running（赛程延长/重置重拉）要能重启（评审二十九 #4）
     }
     return
   }

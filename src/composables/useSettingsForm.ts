@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, reactive, ref } from 'vue'
 import type { Ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
@@ -69,6 +69,17 @@ function copyOjDomain(from: SettingsForm, to: SettingsForm): void {
   for (const key of OJ_DOMAIN_KEYS) target[key] = source[key]
 }
 
+/// **跨控制器的 OJ 切换状态**（评审三十三 #4）。设置页可卸载重挂：旧控制器的
+/// 慢切换完成时，新控制器已经读到了旧 active；旧控制器只重置自己的表单，
+/// 新控制器不会收到刷新。`switching` 必须是共享的，否则两个控制器各自的
+/// 单飞互相看不见。
+const sharedSwitching = ref(false)
+
+/// 切换完成通知：让**仍挂载的其它控制器**重读 OJ 域（发起者自己已处理）。
+type SwitchObserver = (target: string, initiator: number) => void
+const switchObservers = new Set<SwitchObserver>()
+let controllerSeq = 0
+
 export const SETTINGS_INPUT =
   'w-full rounded-sm border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] transition-colors placeholder-[var(--text-muted)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:bg-[var(--bg-sidebar)] disabled:text-[var(--text-muted)]'
 const INPUT = SETTINGS_INPUT
@@ -133,12 +144,30 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       : null,
   }))
   const isValid = computed(() => Object.values(errors.value).every((e) => e === null))
-  /// OJ 切换进行中（单飞，评审二十九 #1）：切换期间禁止保存/再次切换——
-  /// 否则保存会用旧缓存构造带旧 active 的整份配置，与在途 switch_oj 交错写盘
-  const switching = ref(false)
+  /// OJ 切换进行中（跨控制器共享，评审二十九 #1 / 三十三 #4）：切换期间禁止
+  /// 保存/再次切换——否则保存会用旧缓存构造带旧 active 的整份配置，与在途
+  /// switch_oj 交错写盘。共享使**新挂载的控制器**也看见旧控制器在途的切换。
+  const switching = sharedSwitching
   const canSave = computed(
     () => dirty.value && isValid.value && !saving.value && !switching.value,
   )
+
+  /// 控制器所有权（评审三十三 #4）：设置视图卸载后，旧控制器的异步完成回调
+  /// 不得再回写表单（视图已销毁，回写只会让状态机更难推理）；新控制器经共享
+  /// 在途 Promise 等待事务落地后重读。
+  const controllerId = ++controllerSeq
+  let disposed = false
+  const observer: SwitchObserver = (target, initiator) => {
+    if (initiator === controllerId) return
+    void adoptForeignSwitch(target)
+  }
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      disposed = true
+      switchObservers.delete(observer)
+    })
+    switchObservers.add(observer)
+  }
 
   const loading = ref(true)
   const loadError = ref<string | null>(null)
@@ -167,6 +196,9 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   /// OJ 域字段回到旧基线的磁盘值（不把旧 OJ 的草稿写进新 OJ），active/url 对齐
   /// 到新 OJ，基线按「磁盘值 + 新 active/url」重算（不产生假 dirty），全局草稿保留。
   function adoptEffectiveSwitch(target: string, notice: string): void {
+    // 已卸载的旧控制器不再回写（评审三十三 #4）；仍挂载的控制器由
+    // adoptForeignSwitch 走同一对齐逻辑
+    if (disposed) return
     const previous = baseline.value ? (JSON.parse(baseline.value) as SettingsForm) : null
     persistedActive.value = target
     // 无基线（理论不可达）：只把 active/url 对齐到新 OJ 的已知值
@@ -180,17 +212,57 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     switchNotice.value = notice
   }
 
+  /// 另一个控制器完成了切换（本实例仍挂载）：OJ 域以磁盘为准重读。
+  /// 刷新失败时至少把 active/url 对齐到已知目标，不让界面停在旧 OJ。
+  async function adoptForeignSwitch(target: string): Promise<void> {
+    if (disposed) return
+    try {
+      await resetOjFieldsFromDisk()
+    } catch {
+      adoptEffectiveSwitch(
+        target,
+        'OJ 已在另一处完成切换；配置刷新失败，请重新打开设置页确认',
+      )
+    }
+  }
+
+  /// 读取**切换落地后**的配置（评审三十三 #4）：等待在途切换，并用代际检测
+  /// 「读取期间新开始的切换」——否则新控制器可能把切换前的旧 active 读进表单，
+  /// 而旧控制器的完成回调不会再刷新它。失败由调用方处理。
+  async function readSettledConfig(): Promise<AppConfig> {
+    for (;;) {
+      const epoch = configService.ojSwitchEpoch
+      // 无在途切换时**同步**走到 invalidate/getConfig：设置页其余读取的启动
+      // 顺序被既有用例锁定（invalidate → config → 其它），不能平白多一个微任务
+      if (configService.ojSwitchInFlight) {
+        await configService.whenOjSwitchSettled()
+        if (epoch !== configService.ojSwitchEpoch) continue
+      }
+      configService.invalidate()
+      const config = await configService.getConfig()
+      if (epoch === configService.ojSwitchEpoch) return config
+    }
+  }
+
   async function performSwitch(target: string): Promise<boolean> {
     // 单飞放在这里而非 onSwitchOj：保存新建实例后的**自动切换**也走本函数
-    //（评审三十 #1）——只包显式切换会让 auto-switch 绕开门禁
-    if (switching.value) return false
+    //（评审三十 #1）——只包显式切换会让 auto-switch 绕开门禁。
+    // 共享的 `switching` 覆盖跨控制器（旧设置页的切换在途时新页面也不得再发）。
+    if (switching.value) {
+      await configService.whenOjSwitchSettled()
+      return false
+    }
     switching.value = true
     lastSwitchStayed = false
+    // 切换是否**已生效**（成功或仅持久化失败）：决定要不要通知其它控制器重读
+    let effective = false
     try {
       await configService.switchOj(target)
-      // persistedActive 在**重置成功之后**才提交（评审二十一 #1）：重载失败时
-      // 表单与 persistedActive 必须一起回滚到旧 OJ，否则「B 的 id + A 的地址」
-      // 会被下一次保存写坏
+      effective = true
+      // 会话上下文先清理；persistedActive 与 OJ 域在重置/对齐成功后才提交
+      //（评审二十一 #1：表单与 persistedActive 必须一起变化，否则「B 的 id +
+      // A 的地址」会被下一次保存写坏。注意重载失败**不回滚到旧 OJ**——
+      // 切换已生效，由 adoptEffectiveSwitch 对齐新 OJ，评审二十二/二十四 #1）
       resetSessionForOjSwitch()
       // `--settings`（管理方钥匙）：切换成功**留在设置页**继续修配置——踢到
       // 登录页会打断维护、丢失当前草稿（登录页的「返回设置」是一次重新进入）。会话已由
@@ -225,6 +297,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // 必须走「承认已生效」分支（并补做 resetSessionForOjSwitch——否则旧 OJ
       // 的登录态会被带到新 OJ，评审二十四 #1）
       if ((e as { variant?: string }).variant === 'OjSwitchPersistFailed') {
+        effective = true
         resetSessionForOjSwitch()
         if (isKeyedSettingsRoute(router.currentRoute.value?.name)) {
           adoptEffectiveSwitch(
@@ -242,6 +315,11 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       return false
     } finally {
       switching.value = false
+      // 仍挂载的其它控制器（例如切换期间重新进入设置页的新实例）重读 OJ 域；
+      // 发起者自己已在上面完成重置/对齐
+      if (effective) {
+        for (const listen of [...switchObservers]) listen(target, controllerId)
+      }
     }
   }
 
@@ -307,9 +385,10 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   /// （评审十九 #1：整体 load() 会丢掉维护者刚改的字体/超时；回滚分支本就保留，
   /// 两条路径对齐）。baseline 按「磁盘值 + 保留的全局草稿」计算——dirty 只反映
   /// 真正未保存的全局编辑，且不会把旧 OJ 的 OJ 域草稿写到新 OJ。
+  /// 读取前等待在途切换落地（`readSettledConfig`）；卸载后不再回写。
   async function resetOjFieldsFromDisk(): Promise<void> {
-    configService.invalidate()
-    const config = await configService.getConfig()
+    const config = await readSettledConfig()
+    if (disposed) return
     const disk = diskForm(config)
     copyOjDomain(disk, form)
     persistedActive.value = disk.activeOj
@@ -333,10 +412,12 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     loading.value = true
     loadError.value = null
     try {
-      configService.invalidate()
-      populate(await configService.getConfig())
+      // 新挂载的控制器若撞上旧控制器的在途切换，必须等事务落地再读
+      const config = await readSettledConfig()
+      if (disposed) return
+      populate(config)
     } catch (e) {
-      loadError.value = errorMessage(e, '读取配置失败')
+      if (!disposed) loadError.value = errorMessage(e, '读取配置失败')
     } finally {
       loading.value = false
     }
@@ -397,24 +478,30 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         }
         draft.layout.splitRatio = submitted.splitRatio
       }, { maintainerLocked: lockAll })
-      baseline.value = submittedSnapshot
-      ojInstances.value = saved.oj.instances
-      markSaved(true)
+      // 已卸载的旧控制器不再回写表单（评审三十三 #4）；自动切换仍执行——
+      // 那是保存新建实例的既定后果，且切换本身与视图生命周期无关
+      if (!disposed) {
+        baseline.value = submittedSnapshot
+        ojInstances.value = saved.oj.instances
+        markSaved(true)
+      }
 
       if (isNewInstance) {
         if (await performSwitch(target)) return
         // 后端仍停留在旧 OJ：下拉和地址必须一起回滚，否则下一次无关保存会把
         // 新实例地址写进旧实例。baseline 同步到“已保存配置 + 回滚后的选择”，
         // 避免产生用户未做任何编辑却显示未保存的假 dirty；保存期间的后续编辑仍保留。
-        const rollbackActive = persistedActive.value
-        const rollbackUrl = ojInstances.value.find((i) => i.id === rollbackActive)?.baseUrl ?? ''
-        form.activeOj = rollbackActive
-        form.ojUrl = rollbackUrl
-        baseline.value = JSON.stringify({ ...submitted, activeOj: rollbackActive, ojUrl: rollbackUrl })
-        switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
+        if (!disposed) {
+          const rollbackActive = persistedActive.value
+          const rollbackUrl = ojInstances.value.find((i) => i.id === rollbackActive)?.baseUrl ?? ''
+          form.activeOj = rollbackActive
+          form.ojUrl = rollbackUrl
+          baseline.value = JSON.stringify({ ...submitted, activeOj: rollbackActive, ojUrl: rollbackUrl })
+          switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
+        }
       }
     } catch (e) {
-      saveError.value = errorMessage(e, '保存配置失败')
+      if (!disposed) saveError.value = errorMessage(e, '保存配置失败')
     } finally {
       saving.value = false
     }

@@ -45,7 +45,14 @@ vi.mock('@/services/system.service', () => ({
   },
 }))
 vi.mock('@/services/config.service', () => ({
-  configService: { getConfig: mocks.getConfig, updateConfig: mocks.updateConfig, invalidate: mocks.invalidate },
+  configService: {
+    getConfig: mocks.getConfig,
+    updateConfig: mocks.updateConfig,
+    invalidate: mocks.invalidate,
+    ojSwitchEpoch: 0,
+    ojSwitchInFlight: false,
+    whenOjSwitchSettled: async () => {},
+  },
 }))
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
 vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMyStatus: mocks.invalidateMyStatus }) }))

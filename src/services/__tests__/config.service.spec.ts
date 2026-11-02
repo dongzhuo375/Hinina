@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { IpcError, parseAppError } from '@/bridge'
 import type { AppConfig } from '@/types/config'
 
 /// Bridge 层打桩：service 测试不触达 IPC（逐层隔离约定）
@@ -219,11 +220,11 @@ describe('switchOj — 显式切换当前 OJ', () => {
   it('评审二十六 P1：切换已生效但持久化失败也失效缓存（否则旧 active 会被写回）', async () => {
     getConfig.mockResolvedValue(makeConfig())
     await configService.getConfig() // 预热缓存（旧 active）
-    switchOj.mockRejectedValue(
-      Object.assign(new Error('OJ 切换已生效但保存配置失败: 磁盘满'), {
-        variant: 'OjSwitchPersistFailed',
-      }),
-    )
+    // 用真实 AppError 载荷经 parseAppError 构造 IpcError（与生产 IPC 出口同源）：
+    // 手写 variant 会绕过白名单，生产上 variant 为 null、分支永不进入
+    const payload = { OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满' }
+    const { variant, message } = parseAppError(payload)
+    switchOj.mockRejectedValue(new IpcError('switch_oj', message, variant, payload))
 
     await expect(configService.switchOj('X')).rejects.toThrow('保存配置失败')
 

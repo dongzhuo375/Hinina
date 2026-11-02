@@ -24,12 +24,43 @@ const mocks = vi.hoisted(() => ({
   route: { name: 'Settings' as string | undefined },
 }))
 
+/// 模拟真实 ConfigService 的在途切换/代际（评审三十三 #4）：composable 的
+/// `readSettledConfig` 依赖这两个成员，裸 vi.fn 无法表达「等待在途切换」。
+const switchState = vi.hoisted(() => ({
+  pending: null as Promise<void> | null,
+  epoch: 0,
+}))
+
+function settleSwitch(run: Promise<void>): void {
+  if (switchState.pending === run) switchState.pending = null
+  switchState.epoch += 1
+}
+
 vi.mock('@/services/config.service', () => ({
   configService: {
     getConfig: mocks.getConfig,
     updateConfig: mocks.updateConfig,
     invalidate: mocks.invalidate,
-    switchOj: mocks.switchOj,
+    switchOj: (id: string) => {
+      switchState.epoch += 1
+      const run = mocks.switchOj(id) as Promise<void>
+      switchState.pending = run
+      run.then(
+        () => settleSwitch(run),
+        () => settleSwitch(run),
+      )
+      return run
+    },
+    get ojSwitchEpoch() {
+      return switchState.epoch
+    },
+    get ojSwitchInFlight() {
+      return switchState.pending !== null
+    },
+    whenOjSwitchSettled: () => {
+      const pending = switchState.pending
+      return pending ? pending.catch(() => {}) : Promise.resolve()
+    },
   },
 }))
 vi.mock('@/services/system.service', () => ({
@@ -69,6 +100,8 @@ let settings: ReturnType<typeof useSettingsForm>
 beforeEach(async () => {
   vi.resetAllMocks()
   vi.useFakeTimers()
+  switchState.pending = null
+  switchState.epoch = 0
   currentConfig = baseConfig()
   // 默认正常模式（无 --settings）：切换成功照常回登录页；钥匙用例显式改写
   mocks.launchFlags.value = { settings: false }
@@ -418,6 +451,75 @@ describe('useSettingsForm', () => {
     releaseSave()
     await saving
   })
+
+  it('评审三十三 #4：旧控制器卸载后完成切换，新控制器等待事务并读到新 active', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    let release!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      (id: string) => new Promise<void>((resolve) => {
+        release = () => {
+          currentConfig.oj.active = id
+          resolve()
+        }
+      }),
+    )
+    settings.form.activeOj = 'Hydro'
+    const pending = settings.onSwitchOj()
+    await Promise.resolve()
+    expect(settings.switching.value).toBe(true)
+
+    // 离开设置页（旧控制器销毁）→ 重新进入（新控制器挂载，读到仍是旧 active 的磁盘）。
+    // 新控制器**不建 scope**：不注册切换完成观察者，从而把断言隔离到
+    // 「挂载时等待在途切换」这一条路径上（观察者会掩盖缺失的等待）。
+    scope.stop()
+    const next = useSettingsForm()
+    const loading = next.load()
+    let loaded = false
+    void loading.then(() => { loaded = true })
+    await Promise.resolve()
+    // 在途切换未落地前新控制器不得完成加载（否则展示旧 active，且旧控制器
+    // 已销毁、没有回调会再来刷新它）
+    expect(loaded).toBe(false)
+    expect(next.switching.value).toBe(true)
+
+    release()
+    await pending
+    await loading
+
+    expect(next.form.activeOj).toBe('Hydro')
+    expect(next.form.ojUrl).toBe('https://hydro.example')
+    expect(next.dirty.value).toBe(false)
+  })
+
+  it('评审三十三 #4：旧控制器卸载后的完成回调不再回写表单', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    settings.form.contestRef = 'draft-before-leave'
+    let release!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      (id: string) => new Promise<void>((resolve) => {
+        release = () => {
+          currentConfig.oj.active = id
+          resolve()
+        }
+      }),
+    )
+    settings.form.activeOj = 'Hydro'
+    const pending = settings.onSwitchOj()
+    await Promise.resolve()
+
+    scope.stop() // 视图卸载：旧控制器失去表单所有权
+    release()
+    await pending
+
+    // 回写被跳过：表单保持离开时的草稿，而不是切换后的磁盘值
+    expect(settings.form.contestRef).toBe('draft-before-leave')
+    expect(settings.form.activeOj).toBe('Hydro') // onSwitchOj 的选择回填（非磁盘对齐）
+  })
+
 
   it('评审二十九 #3：普通切换失败只回滚选择，保留地址草稿', async () => {
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })

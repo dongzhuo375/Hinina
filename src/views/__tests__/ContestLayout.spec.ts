@@ -438,6 +438,37 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
+  it('评审三十三 #5：钥匙设置页 running→upcoming 也停轮询并清 liveFor，回到 running 重启', async () => {
+    // 组织者把进行中比赛的开始时间改到未来：不跳转是对的，但轮询器自身只查
+    // 页面隐藏与 contest.status，不会因阶段回退自停——必须由外壳清理
+    vi.useFakeTimers()
+    const now = Math.floor(Date.now() / 1000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const store = useContestStore()
+    store.contest = { ...schedule, startTime: now - 3_600, endTime: now + 3_600 } // 进行中
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(1) // liveFor=id
+
+    // running → upcoming：停轮询、清 liveFor、不跳转
+    store.contest = { ...schedule, startTime: now + 3_600, endTime: now + 7_200 }
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(mocks.stopLive).toHaveBeenCalled()
+    expect(mocks.replace).not.toHaveBeenCalled()
+
+    // upcoming → running：轮询必须重启（证明 liveFor 已被清空）
+    store.contest = { ...schedule, startTime: now - 3_600, endTime: now + 3_600 }
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(mocks.startLive).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
   it('评审四 P2-2：最小壳下保留的未开始简报不触发立即跳转', async () => {
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)

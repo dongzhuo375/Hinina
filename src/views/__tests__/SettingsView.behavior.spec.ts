@@ -32,6 +32,9 @@ vi.mock('@/services/config.service', () => ({
     updateConfig: mocks.updateConfig,
     invalidate: mocks.invalidate,
     switchOj: mocks.switchOj,
+    ojSwitchEpoch: 0,
+    ojSwitchInFlight: false,
+    whenOjSwitchSettled: async () => {},
   },
 }))
 vi.mock('@/services/system.service', () => ({
@@ -306,6 +309,66 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     await vi.waitFor(() => expect(view.host.textContent).toContain('切换失败'))
     expect(mocks.resetSessionForOjSwitch).not.toHaveBeenCalled()
     expect(mocks.routerReplace).not.toHaveBeenCalled()
+  })
+
+  it('评审三十三 #3：切换在途整个 OJ 域禁用，失败后恢复且地址草稿未被覆盖', async () => {
+    mocks.launchFlags.value = { settings: true }
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    const view = await render()
+    await setField(view.host, '服务器地址', 'https://draft-hoj.example')
+
+    let reject!: (e: Error) => void
+    mocks.switchOj.mockImplementationOnce(
+      () => new Promise<void>((_resolve, rejectPromise) => { reject = rejectPromise }),
+    )
+    await setField(view.host, '当前 OJ', 'Hydro')
+    await vi.waitFor(() => expect(mocks.switchOj).toHaveBeenCalledWith('Hydro'))
+
+    // 在途：整个 OJ 域禁用（完成后的磁盘重置会整体覆盖这批字段）
+    for (const label of [
+      '当前 OJ',
+      '服务器地址',
+      '比赛 ID / 引用',
+      '比赛密码',
+      '请求超时（秒）',
+      '轮询间隔（秒）',
+      '轮询总超时（秒）',
+      '列表缓存 TTL（秒）',
+    ]) {
+      expect((field(view.host, label) as HTMLInputElement).disabled, label).toBe(true)
+    }
+    // 全局字段不属 OJ 域，照常可编辑
+    expect((field(view.host, '字号') as HTMLInputElement).disabled).toBe(false)
+
+    reject(new Error('切换失败'))
+    await vi.waitFor(() => expect(view.host.textContent).toContain('切换失败'))
+    await vi.waitFor(() =>
+      expect((field(view.host, '服务器地址') as HTMLInputElement).disabled).toBe(false),
+    )
+    expect((field(view.host, '当前 OJ') as HTMLSelectElement).value).toBe('HOJ')
+    expect((field(view.host, '服务器地址') as HTMLInputElement).value).toBe(
+      'https://draft-hoj.example',
+    )
+  })
+
+  it('评审三十三 #3：保存在途同样禁用整个 OJ 域，完成后恢复', async () => {
+    const view = await render()
+    let release!: (config: AppConfig) => void
+    mocks.updateConfig.mockImplementationOnce(
+      () => new Promise<AppConfig>((resolve) => { release = resolve }),
+    )
+    await setField(view.host, '比赛 ID / 引用', '2002')
+    button(view.host, '保存').click()
+    await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledTimes(1))
+
+    expect((field(view.host, '比赛 ID / 引用') as HTMLInputElement).disabled).toBe(true)
+    expect((field(view.host, '服务器地址') as HTMLInputElement).disabled).toBe(true)
+    expect((field(view.host, '字号') as HTMLInputElement).disabled).toBe(false)
+
+    release(structuredClone(currentConfig))
+    await vi.waitFor(() =>
+      expect((field(view.host, '比赛 ID / 引用') as HTMLInputElement).disabled).toBe(false),
+    )
   })
 
   it('数据目录确认使用点击前的 migrate 快照，并在成功后重读', async () => {
