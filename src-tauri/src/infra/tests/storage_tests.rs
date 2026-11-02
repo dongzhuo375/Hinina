@@ -22,6 +22,36 @@ fn resolve_rejects_parent_dir() {
     assert!(s.resolve("a/../b/../c").is_err());
 }
 
+/// 绝对路径形态（根目录 / Windows 盘符前缀）会在 `join` 时**整体替换 base_dir**，
+/// 必须在 `resolve` 就拒绝 —— 防线不能单点压在 `fs_workspace_repo` 的白名单上。
+#[test]
+fn resolve_rejects_absolute_paths() {
+    let s = storage();
+    // RootDir：`/x` 在 Windows 上是「当前盘根」，同样会替换 base
+    assert!(s.resolve("/evil").is_err());
+    assert!(s.resolve("/etc/passwd").is_err());
+}
+
+/// Windows 盘符前缀（`Prefix` 组件）：`C:\x`（带根）与 `C:x`（盘符相对路径）
+/// 都会让 `join` 逃出 base_dir；verbatim（`\\?\C:\...`）同拒。
+#[cfg(windows)]
+#[test]
+fn resolve_rejects_windows_prefix_paths() {
+    let s = storage();
+    assert!(s.resolve("C:\\evil").is_err());
+    assert!(s.resolve("C:evil").is_err());
+    assert!(s.resolve("\\\\?\\C:\\evil").is_err());
+}
+
+/// 原子写对绝对路径形态同样拒绝（与普通写同一道 `resolve` 防线）。
+#[test]
+fn write_string_atomic_rejects_absolute_paths() {
+    let dir = TempDir::named("hinina-storage-atomic-absolute");
+    let s = Storage::new(dir.to_path_buf());
+
+    assert!(s.write_string_atomic("/evil.json", "x").is_err());
+}
+
 #[test]
 fn resolve_deep_nested() {
     let s = storage();

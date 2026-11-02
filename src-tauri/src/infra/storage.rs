@@ -23,7 +23,11 @@ fn is_atomic_tmp(target: &str, name: &str) -> bool {
 /// 本地文件存储工具。
 ///
 /// 提供底层的文件读写能力，不包含业务语义。
-/// 所有路径相对于 `base_dir`，防止目录穿越攻击。
+/// 所有路径必须是 `base_dir` 的相对路径：[`Storage::resolve`] 只放行
+/// `Normal`/`CurDir` 组件，拒绝 `..`（穿越）与盘符/根目录等绝对形态
+/// （`PathBuf::join` 对带 prefix/root 的路径会**整体替换 base_dir**）。
+/// workspace 文件名的更严白名单在 `fs_workspace_repo::workspace_relative`，
+/// 本函数是所有 Storage 调用的公共底线。
 /// 业务层应通过 Repository trait 间接使用，不要直接依赖此模块。
 pub struct Storage {
     base_dir: PathBuf,
@@ -31,7 +35,9 @@ pub struct Storage {
 
 impl Storage {
     pub fn new(base_dir: PathBuf) -> Self {
-        // 确保存储根目录存在
+        // 数据目录由 `data_dir::resolve` 保证已创建（可用性探针与回退路径都会
+        // create_dir_all）；此处 best-effort 兜底，失败不阻断 —— 后续读写会以
+        // 明确的 Io 错误暴露真实原因，不在此吞掉后无从追查。
         let _ = fs::create_dir_all(&base_dir);
         Self { base_dir }
     }
@@ -42,15 +48,23 @@ impl Storage {
 
     // ── 路径解析 ──
 
-    /// 将相对路径解析为 `base_dir` 下的绝对路径，并拒绝任何 `..` 越权路径。
+    /// 将相对路径解析为 `base_dir` 下的绝对路径，并拒绝一切越权形态。
+    ///
+    /// 只放行 `Normal`/`CurDir` 组件：
+    /// - `ParentDir`（`..`）：经典目录穿越；
+    /// - `Prefix`/`RootDir`（`C:\x`、`/x`、`C:x`）：`PathBuf::join` 遇到带
+    ///   prefix/root 的路径会**整体替换 base_dir**，等于沙箱外任意读写。
     ///
     /// 纯逻辑检查（遍历 `Path::components()`），不依赖文件系统状态，
     /// 因此对尚不存在的路径也能正确判断。
     fn resolve(&self, relative_path: &str) -> AppResult<PathBuf> {
         let path = Path::new(relative_path);
         for component in path.components() {
-            if matches!(component, Component::ParentDir) {
-                return Err(AppError::Io(format!("目录穿越攻击: {}", relative_path)));
+            if !matches!(component, Component::Normal(_) | Component::CurDir) {
+                return Err(AppError::Io(format!(
+                    "非法路径（必须是 base_dir 的相对路径）: {}",
+                    relative_path
+                )));
             }
         }
         Ok(self.base_dir.join(relative_path))
