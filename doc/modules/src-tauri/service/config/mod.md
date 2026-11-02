@@ -27,7 +27,7 @@
 ## 逻辑流程
 - **初始化**：`new()` 从 Repo 加载配置，成功则调用 `normalize_legacy_values(&mut cfg)` 一次性归一历史旧默认值（`"C++"`→`"cpp"`、整机 `dark`→`light`（含随之写入的 `vs-dark`→`vs`）、`splitRatio 0.45`→`0.48`，只修正恰好等于旧默认值的项，详见 `core/entity/config.md`）；失败时回退到 `AppConfig::default()` 并尝试写回磁盘
 - **读取**：`get()` 从 `RwLock<AppConfig>` 中 clone 返回，无副作用
-- **更新**：`update(f)` 先通过闭包修改内存 → 持久化磁盘 → 返回新配置；磁盘写入失败时保留内存修改、上报错误
+- **更新**：`update(f)` 先通过闭包修改内存 → 持久化磁盘 → 发布事件 → 返回新配置；磁盘写入失败时保留内存修改、上报错误。**整个更新是一个写事务**（独立 `write_txn` 互斥锁覆盖「updater → save → 发布事件」，不扩大 `RwLock` 的持锁区间）：克隆出来的旧配置不可能后于新配置落盘，内存/磁盘/Registry 的 `oj.active` 保持一致（评审三十一 P2；`reload` 共用该锁）
 - **热重载**：`reload()` 从磁盘读最新配置 → 同样经 `normalize_legacy_values` 归一（用户手改磁盘文件塞回旧值也会被修正）→ 覆盖内存 → 发布 `CoreEvent::ConfigChanged`
 - **`update` 与 `reload` 都要发布 `ConfigChanged`**：生产链路的配置变更入口是 `update`（`update_config` 命令、主题切换、`switch_oj` 的持久化），而 `reload_config` 命令在前端**没有调用方** —— 只在 `reload` 里发布会让观察者（审计、插件）永远等不到通知。两条路径的语义统一为「配置已变更即通知」；**持久化失败时不发布**（磁盘与内存已不一致，让观察者按「新配置已生效」行动会掩盖问题）。两处均有用例锁定
 - **`ConfigChanged` 只是完成事实通知**：需要「配置变更后必须完成的动作」（如按新间隔同步 auto-save）由命令层在 `update` 返回后**显式调用** `commands::workspace_cmd::sync_auto_save_from_context` —— 不得依赖事件消费者（消费者可能落后、可能不存在）。旧实现把这件事挂在 `ConfigReloaded` 的订阅者上，订阅者内部还要 `tauri::async_runtime::spawn` 才拿得到 tokio 上下文

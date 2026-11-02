@@ -227,3 +227,104 @@ fn update_failure_does_not_publish_config_changed_event() {
     assert!(service.update(|cfg| cfg.editor.auto_save = false).is_err());
     assert!(rx.try_recv().is_err(), "持久化失败不得发布 ConfigChanged");
 }
+
+/// 可延迟的配置仓库：第一次 `save_config` 阻塞到测试放行，用于构造
+/// 「旧快照后落盘」的时序（评审三十一 P2 回归）。
+struct DelayedSaveRepo {
+    inner: FsConfigRepository,
+    started: std::sync::mpsc::Sender<()>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    saves: std::sync::Mutex<Vec<AppConfig>>,
+    /// 武装后才延迟：`ConfigService::new` 在首次启动时会立即保存默认配置，
+    /// 构造期不能阻塞
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl DelayedSaveRepo {
+    fn arm(&self) {
+        self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl ConfigRepository for DelayedSaveRepo {
+    fn load_config<T: serde::de::DeserializeOwned>(&self) -> AppResult<T> {
+        self.inner.load_config()
+    }
+
+    fn save_config<T: serde::Serialize>(&self, config: &T) -> AppResult<()> {
+        if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let _ = self.started.send(());
+            let release = self.release.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = release.recv();
+        }
+        let value: AppConfig =
+            serde_json::from_value(serde_json::to_value(config).expect("序列化配置"))
+                .expect("配置可反序列化");
+        self.saves
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(value);
+        self.inner.save_config(config)
+    }
+
+    fn config_exists(&self) -> bool {
+        self.inner.config_exists()
+    }
+}
+
+/// 写事务锁：先克隆的旧配置不得后于新配置落盘（内存/磁盘/Registry 三者一致）。
+///
+/// 时序：T1 的 updater 先跑（active 仍为 A），其 save 被仓库阻塞；T2 随后把
+/// active 切到 B。没有写事务锁时 T2 的保存先完成、T1 放行后把 A 写回磁盘；
+/// 有锁时 T2 必须等 T1 整个事务结束，最终磁盘是 B。
+#[test]
+fn stale_update_cannot_overwrite_disk_after_a_concurrent_switch() {
+    use crate::core::repository::config_repo::ConfigRepository as _;
+    let dir = TempDir::unique("config-write-txn");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let repo = Arc::new(DelayedSaveRepo {
+        inner: FsConfigRepository::new(Arc::clone(&storage), "config.json"),
+        started: started_tx,
+        release: std::sync::Mutex::new(release_rx),
+        saves: std::sync::Mutex::new(Vec::new()),
+        armed: std::sync::atomic::AtomicBool::new(false),
+    });
+    let service = Arc::new(ConfigService::new(
+        repo.clone(),
+        Arc::new(CoreEventBus::new()),
+        Arc::default(),
+    ));
+
+    repo.arm(); // 只延迟下一次保存（构造期的默认配置保存不受影响）
+
+    // T1：普通保存（旧 active=A），落盘被阻塞
+    let t1 = {
+        let service = Arc::clone(&service);
+        std::thread::spawn(move || service.update(|cfg| cfg.editor.font_size = 20))
+    };
+    started_rx.recv().expect("T1 的保存应已开始并阻塞");
+
+    // T2：切换 active=B（模拟 switch_oj 的持久化）
+    let t2 = {
+        let service = Arc::clone(&service);
+        std::thread::spawn(move || service.update(|cfg| cfg.oj.active = "B".into()))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    // 放行 T1
+    let _ = release_tx.send(());
+
+    t1.join().unwrap().expect("T1 保存成功");
+    t2.join().unwrap().expect("T2 保存成功");
+
+    let saves = repo.saves.lock().unwrap_or_else(|e| e.into_inner());
+    // 构造期默认配置 + T1 + T2
+    assert_eq!(saves.len(), 3);
+    assert_eq!(
+        saves.last().unwrap().oj.active,
+        "B",
+        "磁盘最后写入必须是新 active"
+    );
+    assert_eq!(service.get().oj.active, "B", "内存与磁盘一致");
+}

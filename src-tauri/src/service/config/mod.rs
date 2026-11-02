@@ -18,6 +18,11 @@ pub struct ConfigService<R: ConfigRepository> {
     event_bus: Arc<CoreEventBus>,
     /// 当前内存中的配置副本
     config: RwLock<AppConfig>,
+    /// **写事务锁**（评审三十一 P2）：覆盖「updater → save_config → 发布事件」的
+    /// 完整区间。只扩 `RwLock` 的持锁区间会把落盘串进读取路径；单独的这把锁
+    /// 让「克隆出来的旧快照」不可能后于新配置落盘（内存/磁盘/Registry 三者一致）。
+    /// 锁序固定：先写事务锁，再取 `config` 的写锁。
+    write_txn: std::sync::Mutex<()>,
 }
 
 impl<R: ConfigRepository> ConfigService<R> {
@@ -52,6 +57,7 @@ impl<R: ConfigRepository> ConfigService<R> {
             repo,
             event_bus,
             config: RwLock::new(config),
+            write_txn: std::sync::Mutex::new(()),
         }
     }
 
@@ -81,6 +87,9 @@ impl<R: ConfigRepository> ConfigService<R> {
     where
         F: FnOnce(&mut AppConfig),
     {
+        // 整个事务（改内存 → 落盘 → 发事件）串行化：落盘在锁外进行时，先克隆
+        // 的旧快照可能后写回磁盘（评审三十一 P2）
+        let _txn = self.write_txn.lock().unwrap_or_else(|e| e.into_inner());
         let new_config = {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
             let before = serde_json::to_value(&cfg.oj).ok();
@@ -110,6 +119,8 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 加载成功后发布 `CoreEvent::ConfigChanged`（与 [`Self::update`] 同款语义：
     /// 任何「配置已变更」的路径都要通知订阅者）。
     pub fn reload(&self) -> AppResult<AppConfig> {
+        // 与 update 共用写事务：reload 也写内存，不能与在途保存交错
+        let _txn = self.write_txn.lock().unwrap_or_else(|e| e.into_inner());
         let new_config = self.repo.load_config::<AppConfig>().map_err(|e| {
             warn!(error = %e, "配置重新加载失败");
             AppError::Config(format!("配置重新加载失败: {}", e))
