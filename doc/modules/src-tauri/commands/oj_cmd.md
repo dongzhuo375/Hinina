@@ -30,11 +30,13 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 1. 前端 `invoke('switch_oj', { ojId })`（设置页「当前 OJ」下拉的显式动作）
 2. `OjId::new` 规整入参（trim）→ **取得配置写事务锁** → 补注册 → 注册/配置校验 → `set_current` → `info!` 日志 → 三个 Service 的 `on_oj_switched()` → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched` → 释放事务锁
 3. 错误以 `AppError` 返回（`ProviderNotFound` / `Config`），经 serde 序列化为 `{ Variant: msg }`，前端在 `bridge/index.ts` 归一化为 `IpcError`
-4. 前端在**调用点**编排切换后果（`useSettingsForm.onSwitchOj` 成功分支）：`resetSessionForOjSwitch()` 清空旧 OJ 的会话与领域状态 → 导航登录页 → 路由守卫按新 OJ 的会话文件恢复会话
+4. 前端在**调用点**编排切换后果（`useSettingsForm.performSwitch` 成功分支）：`resetSessionForOjSwitch()` 清空旧 OJ 的会话与领域状态后按路由分岔——
+   - **普通路径**：导航登录页，路由守卫按新 OJ 的会话文件恢复会话；
+   - **钥匙模式且当前路由仍是设置页**（`isKeyedSettingsRoute(currentRoute)`）：**留在设置页**，OJ 域字段按磁盘重载、baseline 重算，维护不被打断（踢回登录页等于重新锁死）。切换是异步的，期间用户可能已离开设置页——此时照常回登录页（豁免只属于设置页本身）。落盘失败（`OjSwitchPersistFailed`）视为已生效，同样走上述分岔并提示重启可能回退。
 
 ## 设计要点
 - **清缓存是显式调用而不是事件订阅**：缓存清理属于「切换正确性的一部分」—— `switch_oj` 返回后新 OJ 的查询立刻可能进来，若清理要等异步事件消费者，就存在「旧 OJ 数据继续服务新 OJ 查询」的脏读窗口。旧实现靠同步投递把这件事做实，但那个保证建立在「发布方与订阅者同栈执行」的隐含前提上 —— 换成 `broadcast` 后该前提不再成立，因此改为显式调用，`OjSwitched` 只用来通知其他观察者。三个 Service 各自负责自己那批缓存（内存段同步清；磁盘段是空间回收，缓存键已带 OJ 维度，异步清理不影响正确性）。
-- **前端状态由调用点直接重置**：切换是前端发起的命令，发起方编排后果（与登出同款模式），**不为 `OjSwitched` 引入 Tauri 事件桥**（`app.emit` + `@tauri-apps/api/event` 监听）。若未来出现非前端发起的切换（如配置热重载改 `oj.active`），再补事件桥把 `OjSwitched` 下发到 webview。
+- **前端状态由调用点直接重置**：切换是前端发起的命令，发起方编排后果（与登出同款模式），**不为 `OjSwitched` 引入 Tauri 事件桥**（`app.emit` + `@tauri-apps/api/event` 监听）。唯一非前端发起的切换是 `reload_config` 的 Registry 同步（磁盘 `oj.active` 与 Registry 不同时切 Registry 并发布 `OjSwitched`，见 `commands/config_cmd.md`）；前端目前不消费该事件，出现消费需求时再补事件桥。
 - **会话文件按 OJ 隔离是特性**：`sessions/{id}.json` 各自独立，切换不清旧 OJ 的登录态 —— 切回旧 OJ 免登录。也因此前端重置**不能走 `authStore.logout()`**（它会让已切换的 Registry 删新 OJ 的会话文件）。
 
 统一AccessTransition覆盖Registry切换与比赛/其他Service清理；switch_scope组合发布与reset，且只覆盖这一段有效作用域变更。持久化`oj.active`与发布`OjSwitched`在access guard释放之后执行，不再把插件查询挡在写盘/广播期间；`OjSwitched` 在持久化结果之前发布，落盘失败也照发（ConfigChanged 不补发）。整段切换仍持有**配置写事务锁**（与 `update_config`/`reload` 同锁、锁序固定为「写事务锁 → config RwLock」），因此并发切换只能串行落地，不会出现「Registry=B、内存/磁盘=A」的永久分叉。回归用例 `concurrent_switches_stay_consistent_across_registry_memory_and_disk` 用事务内暂停点强制交错，并同时断言 Registry、内存与磁盘。
