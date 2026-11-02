@@ -15,7 +15,6 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 - `pub mod oj_cmd` — 切换当前 OJ（补注册 → 校验已注册 → 切 Registry → 显式清三个 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）
 - `pub mod problem_cmd` — 题目详情 / 用户题目状态 / 题目限制
 - `pub mod submission_cmd` — 提交 / 评测结果单次查询 / 提交列表 / 详情 / 测试点
-- `pub mod theme_cmd` — 主题读取 / 设置
 - `pub mod workspace_cmd` — 工作区加载 / 保存 / 切换 / 当前 / 文件更新 / 语言设置 / 文件删除
 - `pub mod plugin_cmd` — 插件控制：`plugin_list` / `plugin_start` / `plugin_stop` / `plugin_reload` / `plugin_resync`（`PluginManager` 薄转发）
 - `#[cfg(test)] #[path = "tests/mod_tests.rs"] mod tests` — 本层单元测试
@@ -24,7 +23,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 无外部依赖，仅声明子模块。
 
 ## 被依赖
-- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 47 个 Command：**app 1** / plugin 5 / auth 4 / oj 1 / contest 7 / problem 3 / submission 5 / workspace 7 / config 4 / **log 1** / maintenance 3 / data_dir 4 / theme 2）
+- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 45 个 Command：**app 1** / plugin 5 / auth 4 / oj 1 / contest 7 / problem 3 / submission 5 / workspace 7 / config 4 / **log 1** / maintenance 3 / data_dir 4）
 
 ## 逻辑流程
 无（仅模块声明）。

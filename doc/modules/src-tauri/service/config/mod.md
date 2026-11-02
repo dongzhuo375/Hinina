@@ -29,7 +29,6 @@
 
 ## 被依赖
 - `core::context`（`AppContext` 持有 `Arc<ConfigService<FsConfigRepository>>`）
-- `service::theme::ThemeService`（通过 `ConfigService` 读写主题配置）
 
 ## 逻辑流程
 - **初始化**：`new()` 从 Repo 加载配置，成功则调用 `normalize_legacy_values(&mut cfg)` 一次性归一历史旧默认值（`"C++"`→`"cpp"`、整机 `dark`→`light`（含随之写入的 `vs-dark`→`vs`）、`splitRatio 0.45`→`0.48`，只修正恰好等于旧默认值的项，详见 `core/entity/config.md`）；失败时回退到 `AppConfig::default()` 并尝试写回磁盘

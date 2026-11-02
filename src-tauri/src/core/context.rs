@@ -21,7 +21,6 @@ use crate::service::config::ConfigService;
 use crate::service::contest::ContestService;
 use crate::service::problem::ProblemService;
 use crate::service::submission::SubmissionService;
-use crate::service::theme::ThemeService;
 use crate::service::workspace::manager::WorkspaceManager;
 
 /// 统一应用上下文。
@@ -56,7 +55,6 @@ pub struct AppContext {
     /// 回退临时目录时必须让选手看见（数据随时可能被系统清理）。
     pub data_dir_source: DataDirSource,
     // ── Service 层 ──
-    pub theme: Arc<ThemeService<FsConfigRepository>>,
     pub auth: Arc<AuthService>,
     pub contest: Arc<ContestService>,
     pub problem: Arc<ProblemService>,
@@ -76,7 +74,7 @@ impl AppContext {
     /// 6. HttpClient — 网络客户端
     /// 7. ProviderRegistry — OJ 适配器注册中心（默认 HOJ，Provider 在阶段 5 注册）
     /// 8. WorkspaceManager
-    /// 9. Service 层 — theme / auth / contest / problem / submission
+    /// 9. Service 层 — auth / contest / problem / submission
     /// 10. PluginHost — 插件事件边界（消费者在 `main.rs` 启动）
     /// 11. 装配 AppContext
     ///
@@ -187,11 +185,6 @@ impl AppContext {
             Arc::clone(&event_bus),
         )));
 
-        // 7.5 装配 Service 层
-        let theme = Arc::new(ThemeService::new(
-            Arc::clone(&config),
-            Arc::clone(&event_bus),
-        ));
         let auth = Arc::new(AuthService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&session_repo),
@@ -255,7 +248,6 @@ impl AppContext {
             logger: Arc::new(logger),
             default_data_dir,
             data_dir_source: source,
-            theme,
             auth,
             contest,
             problem,

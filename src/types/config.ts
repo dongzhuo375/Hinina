@@ -48,7 +48,11 @@ export interface EditorConfig {
 }
 
 export interface ThemeConfig {
-  themeName: string
+  /**
+   * 编辑器主题（Monaco 主题名，vs / vs-dark），由解题页编辑器设置切换。
+   * Rust 端另有旧版迁移字段 `themeName`（`legacy_theme_name`，读入即消费、
+   * 永不写回），前端从不读写，不在本镜像中。
+   */
   editorTheme: string
 }
 

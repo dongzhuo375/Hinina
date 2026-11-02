@@ -228,9 +228,15 @@ fn default_language() -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeConfig {
-    /// 当前主题名称（取值域：light；dark 尚未实现，加载时会被归一为 light）
-    #[serde(default = "default_theme_name")]
-    pub theme_name: String,
+    /// 旧版整机主题名（`light`/`dark`；dark 界面从未实现）。
+    ///
+    /// 唯一写入方 ThemeService 已删除（死代码清理——主题切换从未接入前端），
+    /// 字段仅为迁移保留：旧版切换器会把 `themeName: "dark"` 与
+    /// `editorTheme: "vs-dark"` **成对写入**（见 `normalize_legacy_values`），
+    /// 读取旧文件时把被它带歪的编辑器主题复位。`skip_serializing` 保证
+    /// 迁移后不再写回。
+    #[serde(default, skip_serializing, rename = "themeName")]
+    pub legacy_theme_name: Option<String>,
     /// 编辑器主题（Monaco 主题名，取值域：vs / vs-dark；由解题页编辑器设置切换，
     /// **只作用于编辑器区域** —— 客户端界面仍只有浅色）
     #[serde(default = "default_editor_theme")]
@@ -240,15 +246,12 @@ pub struct ThemeConfig {
 impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
-            theme_name: default_theme_name(),
+            legacy_theme_name: None,
             editor_theme: default_editor_theme(),
         }
     }
 }
 
-fn default_theme_name() -> String {
-    "light".into()
-}
 fn default_editor_theme() -> String {
     "vs".into()
 }
@@ -310,15 +313,16 @@ pub fn normalize_legacy_values(cfg: &mut AppConfig) {
         cfg.editor.default_language = name.to_string();
     }
 
-    // dark 主题未实现：整机主题归一到浅色，并把它一并写入的编辑器主题也归位。
-    // **仅在 theme_name == "dark" 时**才动 editor_theme —— 编辑器主题已是用户可选
-    // 项（解题页编辑器设置），`theme_name = light` + `editor_theme = vs-dark`
-    // 是合法组合，无条件重置会把选手刚选的深色编辑器悄悄改回浅色。
-    if cfg.theme.theme_name == "dark" {
-        cfg.theme.theme_name = default_theme_name();
-        if cfg.theme.editor_theme == "vs-dark" {
-            cfg.theme.editor_theme = default_editor_theme();
-        }
+    // 旧版整机主题迁移：ThemeService 的切换器把 `themeName: "dark"` 与
+    // `editorTheme: "vs-dark"` 成对写入（dark 界面从未实现）。读取旧文件时
+    // 把被它带歪的编辑器主题复位；字段本身 take 掉（skip_serializing，
+    // 下一次写配置自然收敛）。**仅 editor_theme == "vs-dark"（切换器的自动值）
+    // 才复位** —— 用户后来自己选的深色编辑器不该动；「dark + 用户显式 vs-dark」
+    // 与「light + 显式 vs-dark」无法区分，复位代价是老用户重选一次，可接受。
+    if cfg.theme.legacy_theme_name.take().as_deref() == Some("dark")
+        && cfg.theme.editor_theme == "vs-dark"
+    {
+        cfg.theme.editor_theme = default_editor_theme();
     }
 
     // ── OJ 配置 v2 迁移（hojUrl/contestId/lastOjType → instances/contestRef/active）──

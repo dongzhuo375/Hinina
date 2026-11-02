@@ -79,7 +79,7 @@ const baseConfig = (): AppConfig => ({
     cacheProblemStatement: true,
   },
   editor: { fontSize: 14, tabSize: 4, autoSave: true, autoSaveIntervalSecs: 30, defaultLanguage: 'C++' },
-  theme: { themeName: 'light', editorTheme: 'vs' },
+  theme: { editorTheme: 'vs' },
   layout: { sidebarWidth: 240, splitRatio: 0.48 },
 })
 

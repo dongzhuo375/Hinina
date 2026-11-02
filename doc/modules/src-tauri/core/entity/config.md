@@ -44,7 +44,7 @@
 - `default_language: String`（默认 `"C++"`）— 默认编程语言（**值域 = HOJ 语言显示名**，与提交契约一致；Monaco 高亮 id 由前端派生。上一版曾把值域归一为 Monaco id `'cpp'`，现由 `normalize_legacy_values` 重新映射回显示名）
 
 ### ThemeConfig
-- `theme_name: String`（默认 `"light"`）— 当前主题名称（取值域：light；dark 尚未实现，加载时会被归一为 light）
+- `legacy_theme_name: Option<String>`（`skip_serializing`，JSON 键 `themeName`）— 旧版整机主题名，仅为迁移保留：唯一写入方 ThemeService 已删除（主题切换从未接入前端），读取时把与 `dark` 成对写入的 `editorTheme = "vs-dark"` 复位为 `"vs"` 后清空
 - `editor_theme: String`（默认 `"vs"`）— Monaco 编辑器主题名（取值域：`vs` / `vs-dark`；由解题页编辑器设置切换，**只作用于编辑器区域**，客户端界面仍只有浅色。未知值由 `sanitize` 收敛回默认 —— `monaco.editor.setTheme` 收到未知主题名会静默保留上一主题）
 
 ### LayoutConfig
@@ -57,7 +57,7 @@
 ## 旧值归一（P55）
 - **`normalize_legacy_values(cfg: &mut AppConfig)`**（公开纯函数）— 一次性归一历史配置文件中的旧默认值，由 `ConfigService::new()` 与 `reload()` 两条加载路径调用。背景：`editor.defaultLanguage` 的值域已翻转为 HOJ 语言显示名（与提交契约一致）—— 被上一版归一成 Monaco id（`'cpp'` 等）的配置在此重新映射回显示名；另有 `theme = dark`（整机深色 UI 尚未实现，前端只有浅色）、`splitRatio = 0.45`（旧默认，现默认 0.48）仍按旧规则修正。**只修正恰好等于旧默认值的项，用户显式设置的其他值一律不动**：
   - 语言：经私有 `normalize_language_display_name` 把旧 Monaco id 映射为显示名（大小写不敏感：`cpp→"C++"` / `c→"C"` / `java→"Java"` / `python→"Python"`）；已是显示名或其他非空值（OJ 可能提供 Go/Rust 等）原样保留，仅空串回退默认 `"C++"`
-  - 主题：`theme_name == "dark"` → `"light"`，并把它一并写入的 `editor_theme == "vs-dark"` 归位为 `"vs"`（整机深色配置 → 全浅色）。**仅在 `theme_name == "dark"` 时才动 `editor_theme`**：编辑器主题已是解题页可选项，`theme_name = light` + `editor_theme = vs-dark` 是合法组合，无条件重置会把选手刚选的深色编辑器悄悄改回浅色
+  - 主题（legacy）：`legacy_theme_name.take() == Some("dark")` 且 `editor_theme == "vs-dark"`（旧切换器的成对写入）→ 编辑器主题归位 `"vs"`。编辑器主题是解题页可选项，浅色界面 + 深色编辑器是合法组合，非成对值不动
   - 分栏比例：`split_ratio == 0.45` → `0.48`。浮点精确比较是刻意的：只有原样落盘的旧默认值才会二进制相等
   - **OJ 配置 v2 迁移**（`hojUrl` / `contestId` / `lastOjType` → `instances` / `contestRef` / `active`，旧字段经 serde 过渡字段读入）：
     - `instances` 为空 → 以旧 `legacy_hoj_url`（缺省用默认地址）建立单 HOJ 实例（id `"HOJ"`、enabled、空 options）
@@ -82,7 +82,6 @@
 ## 被依赖
 - `service::config::ConfigService`（通过 `ConfigRepository` 加载/保存 `AppConfig`，并在 `new()` / `reload()` 加载路径调用 `normalize_legacy_values`）
 - `commands::config_cmd`（`update_config` 持久化前调用 `validate()` + `sanitize()` 做后端兜底）
-- `service::theme::ThemeService`（读取/写入 `ThemeConfig`）
 - `service::contest::ContestService`（通过 `OjConfig::cache_ttl_secs` 控制比赛列表缓存 TTL）
 - `commands::problem_cmd`（`get_problem` 读取 `OjConfig::cache_problem_statement` 后传给 `ProblemService::open_problem` —— 配置读取归命令层，Service 只接参数，与 `contest_cmd` 传 `cache_ttl_secs` 同款约定）
 - `commands::contest_cmd`（`load_configured_contest` 读取 `OjConfig::contest_ref`，空串报错提示配置）

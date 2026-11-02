@@ -372,8 +372,6 @@ fn main() {
             commands::data_dir_cmd::set_data_dir,
             commands::data_dir_cmd::reset_data_dir,
             commands::data_dir_cmd::pick_data_dir,
-            commands::theme_cmd::get_theme,
-            commands::theme_cmd::set_theme,
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|error| panic!("无法启动桌面应用：{error}"));

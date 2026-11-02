@@ -141,7 +141,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       autoSaveIntervalSecs: 10,
       defaultLanguage: 'C++',
     },
-    theme: { themeName: 'light', editorTheme: 'vs' },
+    theme: { editorTheme: 'vs' },
     layout: { sidebarWidth: 240, splitRatio: 0.48 },
   }
   let config: AppConfig = configDefaults

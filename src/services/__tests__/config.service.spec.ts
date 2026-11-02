@@ -36,7 +36,7 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
       autoSaveIntervalSecs: 30,
       defaultLanguage: 'C++',
     },
-    theme: { themeName: 'light', editorTheme: 'vs' },
+    theme: { editorTheme: 'vs' },
     layout: { sidebarWidth: 280, splitRatio: 0.48 },
     ...over,
   }
@@ -145,7 +145,7 @@ describe('updateEditorPrefs — 解题页编辑器设置落盘入口', () => {
     expect(written.oj.instances[0].baseUrl).toBe('https://hoj.example.com')
   })
 
-  it('编辑器主题落在 theme.editorTheme，且不触碰 themeName（界面仍只有浅色）', async () => {
+  it('编辑器主题落在 theme.editorTheme（界面仍只有浅色）', async () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockResolvedValue(undefined)
 
@@ -153,7 +153,6 @@ describe('updateEditorPrefs — 解题页编辑器设置落盘入口', () => {
 
     const written = updateConfig.mock.calls[0][0] as AppConfig
     expect(written.theme.editorTheme).toBe('vs-dark')
-    expect(written.theme.themeName).toBe('light')
     expect(written.editor.tabSize).toBe(2)
   })
 

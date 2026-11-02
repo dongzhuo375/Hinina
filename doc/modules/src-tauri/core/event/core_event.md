@@ -6,7 +6,7 @@
 ## 核心类型/函数
 - **`CoreEvent`** — `Clone + Debug + PartialEq + Eq` 的轻量枚举，变体按领域分组：
   - 认证：`LoggedIn { oj_id, user_id }`、`LoggedOut { oj_id }`、`SessionExpired { oj_id }`、`TokenRotated { oj_id }`
-  - 系统：`ConfigChanged`、`ThemeChanged`、`OjSwitched { oj_id }`
+  - 系统：`ConfigChanged`、`ThemeChanged`（**当前无生产发布方**：唯一发布方 ThemeService 已随死代码清理删除；变体保留——插件事件契约 `system.theme_changed` 对插件可见，消费端测试亦以其作通用夹具）、`OjSwitched { oj_id }`
   - 比赛/题目：`ContestSelected { contest_id }`、`AnnouncementChanged { contest_id, new_ids }`、`ProblemOpened { contest_id, problem_id }`
   - 提交：`SubmissionCreated { submission_id }`、`SubmissionJudged { submission_id, status }`
   - 工作区：`WorkspaceSaved { workspace_id, revision, automatic }`

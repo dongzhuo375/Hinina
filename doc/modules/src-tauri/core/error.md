@@ -24,7 +24,6 @@
 - `commands::contest_cmd`
 - `commands::problem_cmd`
 - `commands::submission_cmd`
-- `commands::theme_cmd`
 - `commands::workspace_cmd`
 - `core::provider::auth`
 - `core::provider::contest`

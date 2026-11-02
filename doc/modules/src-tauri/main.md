@@ -99,7 +99,6 @@
    - `log_cmd`：**frontend_log**（前端全局错误 → tracing 落 `logs/hinina.log`；薄转发，收敛与预算在 `infra/frontend_log.md`）
    - `maintenance_cmd`：**reset_client**（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，清完不重拉）/ **local_data_usage**（清理前的体积预览）/ **purge_local_data**（不可逆：清日志内容与崩溃记录文件、过期提交留档）
    - `data_dir_cmd`：**get_data_dir** / **set_data_dir** / **reset_data_dir** / **pick_data_dir**（设置页「数据目录」：改动重启后生效，见 `commands/data_dir_cmd.md`）
-   - `theme_cmd`：get_theme / set_theme
 5. `.build(tauri::generate_context!())` 构建应用（失败时 `panic!("无法启动桌面应用：{e}")`，触发启动期错误框），`.run(|app, event| …)` 进入事件循环：
    - `RunEvent::Ready` → `startup_dialog::mark_started()`。Tauri 的 `fn setup` 先按配置创建窗口（WebView2 在此初始化）、再调用用户的 setup 闭包，Ready 在 setup 返回后发出；因此窗口/WebView2 创建失败时标志尚未置位，启动错误框仍会弹出。
    - `RunEvent::Exit` 时取 `AppContext` 调 `plugin_manager.cancel_all()` 收尾全部插件 worker
