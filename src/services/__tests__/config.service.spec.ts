@@ -14,7 +14,7 @@ vi.mock('@/bridge/config.bridge', () => ({ getConfig, updateConfig, reloadConfig
 const { isKeyed } = vi.hoisted(() => ({ isKeyed: vi.fn() }))
 vi.mock('@/services/system.service', () => ({ systemService: { isKeyed } }))
 
-import { configService } from '@/services/config.service'
+import { ConfigService, configService } from '@/services/config.service'
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -236,6 +236,121 @@ describe('switchOj — 显式切换当前 OJ', () => {
   it('bridge 失败时原样上抛（设置页据此回滚下拉显示）', async () => {
     switchOj.mockRejectedValue(new Error('OJ X 未注册'))
     await expect(configService.switchOj('X')).rejects.toThrow('未注册')
+  })
+})
+
+/// 并发基座的真实服务测试（评审三十六 P2）：useSettingsForm 的 mock 复刻了
+/// epoch/pending，若只测 mock，删掉真实排队/代际仍会全绿。这里用独立实例与
+/// 延迟 bridge promise 直接锁定 ConfigService 的行为。
+describe('switchOj — 真实排队与代际', () => {
+  function deferred<T = void>() {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  it('并发切换串行：第二次在第一次落地后才发 bridge；代际开始/结束各 +1', async () => {
+    const svc = new ConfigService()
+    const first = deferred()
+    const second = deferred()
+    switchOj.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    expect(svc.ojSwitchEpoch).toBe(0)
+    const p1 = svc.switchOj('A')
+    const p2 = svc.switchOj('B')
+    expect(svc.ojSwitchEpoch).toBe(2) // 两次「开始」各 +1
+    await Promise.resolve()
+    expect(switchOj).toHaveBeenCalledTimes(1)
+    expect(switchOj).toHaveBeenNthCalledWith(1, 'A')
+
+    first.resolve()
+    await p1
+    expect(svc.ojSwitchEpoch).toBe(3)
+    await Promise.resolve()
+    expect(switchOj).toHaveBeenCalledTimes(2)
+    expect(switchOj).toHaveBeenNthCalledWith(2, 'B')
+    expect(svc.ojSwitchInFlight).toBe(true)
+
+    second.resolve()
+    await p2
+    expect(svc.ojSwitchEpoch).toBe(4)
+    expect(svc.ojSwitchInFlight).toBe(false)
+  })
+
+  it('whenOjSwitchSettled 覆盖队尾；队尾失败也解除等待', async () => {
+    const svc = new ConfigService()
+    const first = deferred()
+    const second = deferred()
+    switchOj.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    const p1 = svc.switchOj('A')
+    const p2 = svc.switchOj('B')
+    let settled = false
+    const waiting = svc.whenOjSwitchSettled().then(() => {
+      settled = true
+    })
+
+    first.resolve()
+    await p1
+    await Promise.resolve()
+    expect(settled).toBe(false) // 队尾 B 仍在途
+
+    second.reject(new Error('第二次失败'))
+    await expect(p2).rejects.toThrow('第二次失败')
+    await waiting
+    expect(settled).toBe(true)
+    expect(svc.ojSwitchInFlight).toBe(false)
+  })
+
+  it('记录最近一次生效结果；普通失败不覆盖 persist-failed', async () => {
+    const svc = new ConfigService()
+    switchOj.mockResolvedValueOnce(undefined)
+    await svc.switchOj('A')
+    expect(svc.latestOjSwitchResult()).toEqual({ target: 'A', outcome: 'success' })
+
+    const payload = { OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满' }
+    const { variant, message } = parseAppError(payload)
+    switchOj.mockRejectedValueOnce(new IpcError('switch_oj', message, variant, payload))
+    await expect(svc.switchOj('B')).rejects.toThrow('保存配置失败')
+    expect(svc.latestOjSwitchResult()).toEqual({ target: 'B', outcome: 'persist-failed' })
+
+    switchOj.mockRejectedValueOnce(new Error('普通失败'))
+    await expect(svc.switchOj('C')).rejects.toThrow('普通失败')
+    expect(svc.latestOjSwitchResult()).toEqual({ target: 'B', outcome: 'persist-failed' })
+  })
+
+  it('任意 updateConfig 成功且 active 匹配时解除 persist-failed', async () => {
+    const svc = new ConfigService()
+    const payload = { OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满' }
+    const { variant, message } = parseAppError(payload)
+    switchOj.mockRejectedValueOnce(new IpcError('switch_oj', message, variant, payload))
+    await expect(svc.switchOj('X')).rejects.toThrow('保存配置失败')
+
+    const config = makeConfig()
+    config.oj.active = 'X'
+    getConfig.mockResolvedValue(config)
+    updateConfig.mockResolvedValue(undefined)
+    await svc.updateConfig(() => {})
+
+    expect(svc.latestOjSwitchResult()).toEqual({ target: 'X', outcome: 'success' })
+  })
+
+  it('保存的 active 不匹配时保留 persist-failed', async () => {
+    const svc = new ConfigService()
+    const payload = { OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满' }
+    const { variant, message } = parseAppError(payload)
+    switchOj.mockRejectedValueOnce(new IpcError('switch_oj', message, variant, payload))
+    await expect(svc.switchOj('X')).rejects.toThrow('保存配置失败')
+
+    getConfig.mockResolvedValue(makeConfig()) // active=HOJ
+    updateConfig.mockResolvedValue(undefined)
+    await svc.updateConfig(() => {})
+
+    expect(svc.latestOjSwitchResult()).toEqual({ target: 'X', outcome: 'persist-failed' })
   })
 })
 

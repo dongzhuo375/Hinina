@@ -274,15 +274,19 @@ impl ConfigRepository for DelayedSaveRepo {
 
 /// 写事务锁：先克隆的旧配置不得后于新配置落盘（内存/磁盘/Registry 三者一致）。
 ///
-/// 时序：T1 的 updater 先跑（active 仍为 A），其 save 被仓库阻塞；T2 随后把
-/// active 切到 B。没有写事务锁时 T2 的保存先完成、T1 放行后把 A 写回磁盘；
-/// 有锁时 T2 必须等 T1 整个事务结束，最终磁盘是 B。
+/// 时序：T1 的 updater 先跑（active 仍为 A），其 save 被仓库阻塞；T2 随后尝试
+/// 把 active 切到 B。**确定性握手**（评审三十六 P2）：T2 在调用 update 前用
+/// `write_txn_is_held` 探测 T1 是否持有写事务；持有则 T2 必然阻塞，主线程直接
+/// 放行 T1；未持有（移除锁的变异）则等 T2 真正写完 B 后再放行 T1，让旧交错
+/// 必然发生——不再依赖 50ms sleep 猜调度。
 #[test]
 fn stale_update_cannot_overwrite_disk_after_a_concurrent_switch() {
     let dir = TempDir::unique("config-write-txn");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     let (started_tx, started_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let (probe_tx, probe_rx) = std::sync::mpsc::channel::<bool>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
     let repo = Arc::new(DelayedSaveRepo {
         inner: FsConfigRepository::new(Arc::clone(&storage), "config.json"),
         started: started_tx,
@@ -308,9 +312,21 @@ fn stale_update_cannot_overwrite_disk_after_a_concurrent_switch() {
     // T2：切换 active=B（模拟 switch_oj 的持久化）
     let t2 = {
         let service = Arc::clone(&service);
-        std::thread::spawn(move || service.update(|cfg| cfg.oj.active = "B".into()))
+        std::thread::spawn(move || {
+            let held = service.write_txn_is_held();
+            probe_tx.send(held).expect("回报写事务持有状态");
+            let result = service.update(|cfg| cfg.oj.active = "B".into());
+            if !held {
+                // 锁缺失：T2 已完整落盘，通知主线程再放行 T1
+                let _ = done_tx.send(());
+            }
+            result
+        })
     };
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    let held = probe_rx.recv().expect("T2 应已发起 update");
+    if !held {
+        done_rx.recv().expect("无锁路径下 T2 应先完成落盘");
+    }
     // 放行 T1
     let _ = release_tx.send(());
 
