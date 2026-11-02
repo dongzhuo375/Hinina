@@ -24,7 +24,7 @@
 | `app.mount('#app')` | 挂载 |
 | `if (import.meta.env.DEV) …` | **DEV-only 插件控制台助手**：动态 import `pluginStore`，`Object.defineProperty(window, 'hininaPlugins', …)` 冻结暴露 `list/start/stop/reload/resync`；跟随 Store → Service → Bridge 分层，发布构建不含此分支 |
 
-注：Naive UI **不在此处 `app.use`**——`App.vue` 直接按需引入 `NConfigProvider` / `NDialogProvider` 组件（tree-shaking 友好，无全量插件安装）。
+注：Naive UI **不在此处 `app.use`**——`App.vue` 直接按需引入 `NConfigProvider` 组件（tree-shaking 友好，无全量插件安装）。
 
 ## 直接依赖
 
