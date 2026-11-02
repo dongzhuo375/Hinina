@@ -2,9 +2,12 @@ use serde::Serialize;
 use tauri::State;
 use tracing::{info, warn};
 
+use crate::commands::oj_cmd::switch_scope;
 use crate::core::context::AppContext;
 use crate::core::entity::config::AppConfig;
 use crate::core::error::{AppError, AppResult};
+use crate::core::event::core_event::CoreEvent;
+use crate::core::provider::oj_id::OjId;
 use crate::infra::logger::LOG_RELATIVE_PATH;
 
 /// 存储与版本信息（排障用：前端「关于/诊断」面板展示日志位置与客户端版本）。
@@ -55,8 +58,50 @@ pub async fn get_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
 #[tauri::command]
 pub async fn reload_config(ctx: State<'_, AppContext>) -> AppResult<AppConfig> {
     info!("Command: 重新加载配置");
-    let config = ctx.config.reload()?;
-    crate::commands::workspace_cmd::sync_auto_save_from_context(&ctx);
+    let config = reload_config_impl(&ctx)?;
+    Ok(config)
+}
+
+/// `reload_config` 的真实编排（提取供测试直接调用）。
+///
+/// **重载与 Registry 同步在同一配置写事务内完成**（评审三十四残余）：只替换
+/// 内存配置会让内存/磁盘的 `oj.active` 与运行中 Registry 分叉——之后所有查询
+/// 仍走旧 OJ，而配置声称已切新 OJ。与 `update_config`/`switch_oj` 共用一把锁，
+/// 重载也不会与在途保存/切换交错。
+pub(crate) fn reload_config_impl(ctx: &AppContext) -> AppResult<AppConfig> {
+    let _txn = ctx.config.lock_write_txn();
+    let config = ctx.config.reload_locked()?;
+    let active = config.oj.active.clone();
+    if ctx.provider_registry.current_id().as_str() != active {
+        // 归一化保证 active 指向已启用实例；这里仍按 switch 的同一防线补注册并
+        // 校验（手改磁盘把 active 指向未知 OJ 时显式报错，不静默留分叉）
+        ctx.ensure_oj_registered(&active);
+        if !ctx
+            .provider_registry
+            .list_available()
+            .contains(&OjId::new(&active))
+        {
+            return Err(AppError::ProviderNotFound(format!(
+                "配置的当前 OJ {} 未注册（需在 config.json 的 oj.instances 中启用对应实例）",
+                active
+            )));
+        }
+        switch_scope(
+            &ctx.access,
+            ctx.provider_registry.as_ref(),
+            OjId::new(&active),
+            || {
+                ctx.contest.on_oj_switched();
+                ctx.problem.on_oj_switched();
+                ctx.submission.on_oj_switched();
+            },
+        );
+        info!(oj_id = %active, "配置重载：Registry 已同步到磁盘 active");
+        ctx.event_bus
+            .publish(CoreEvent::OjSwitched { oj_id: active });
+    }
+    // 显式同步（幂等）
+    crate::commands::workspace_cmd::sync_auto_save_from_context(ctx);
     Ok(config)
 }
 

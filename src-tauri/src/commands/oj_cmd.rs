@@ -56,7 +56,7 @@ pub async fn switch_oj(ctx: State<'_, AppContext>, oj_id: String) -> AppResult<(
 
 /// `switch_oj` 的真实编排（提取自命令本体，供命令与测试共用同一实现）。
 pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<()> {
-    switch_oj_transaction(ctx, &OjId::new(oj_id), || {})
+    switch_oj_transaction(ctx, &OjId::new(oj_id), |_| {}, || {})
 }
 
 /// 切换事务本体（同步）：**整段**——补注册、可用性检查、Registry 切换、缓存
@@ -70,10 +70,19 @@ pub(crate) async fn switch_oj_impl(ctx: &AppContext, oj_id: &str) -> AppResult<(
 ///
 /// 锁序固定为「写事务锁 → config 的 RwLock」（`ensure_oj_registered` 与本次
 /// 配置检查只读 `config`），与 `update_config`/`reload` 同序。
-fn switch_oj_transaction<F>(ctx: &AppContext, id: &OjId, after_scope: F) -> AppResult<()>
+fn switch_oj_transaction<BeforeLock, AfterScope>(
+    ctx: &AppContext,
+    id: &OjId,
+    before_lock: BeforeLock,
+    after_scope: AfterScope,
+) -> AppResult<()>
 where
-    F: FnOnce(),
+    BeforeLock: FnOnce(&AppContext),
+    AfterScope: FnOnce(),
 {
+    // 测试注入点（生产为 no-op）：在**尝试取锁之前**执行。并发回归用它探测
+    // 「另一个线程是否已持有写事务」，从而不靠 sleep 猜测调度（评审三十四）。
+    before_lock(ctx);
     let _txn = ctx.config.lock_write_txn();
 
     // 新配置的实例可能尚未注册（注册只在启动时发生）——先补注册，再校验
@@ -148,7 +157,22 @@ pub(crate) fn switch_oj_with_hook<F>(ctx: &AppContext, oj_id: &str, after_scope:
 where
     F: FnOnce(),
 {
-    switch_oj_transaction(ctx, &OjId::new(oj_id), after_scope)
+    switch_oj_transaction(ctx, &OjId::new(oj_id), |_| {}, after_scope)
+}
+
+/// 仅测试使用：同时注入「取锁前」与「Registry 切换后」两个探针。
+#[cfg(test)]
+pub(crate) fn switch_oj_with_hooks<B, A>(
+    ctx: &AppContext,
+    oj_id: &str,
+    before_lock: B,
+    after_scope: A,
+) -> AppResult<()>
+where
+    B: FnOnce(&AppContext),
+    A: FnOnce(),
+{
+    switch_oj_transaction(ctx, &OjId::new(oj_id), before_lock, after_scope)
 }
 
 #[cfg(test)]

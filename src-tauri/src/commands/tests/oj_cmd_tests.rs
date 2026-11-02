@@ -194,32 +194,50 @@ async fn switch_oj_to_same_target_is_idempotent() {
 /// HOJ。旧实现只锁落盘，T2 会在暂停窗口内完成（Registry/磁盘=HOJ），T1 恢复后
 /// 再把 Hydro 写盘 —— 最终 Registry=HOJ、内存/磁盘=Hydro，两次调用却都成功。
 /// 现在整段切换共用配置写事务锁，T2 被挡在事务外，两个切换串行落地。
+///
+/// **确定性握手**（评审三十四）：T2 在**尝试取锁之前**用 `try_lock` 探测写事务
+/// 是否已被 T1 持有，并把结果回传给 T1——不靠 sleep 猜测调度。
+/// - 探测结果 `true`（正确实现）：T2 将阻塞；T1 直接落盘释放，T2 随后完成。
+/// - 探测结果 `false`（移除了事务锁的变异）：T1 等 T2 **完整落盘**后再写
+///   Hydro，旧交错必然出现，断言必红——慢调度也不会假绿。
 #[tokio::test]
 async fn concurrent_switches_stay_consistent_across_registry_memory_and_disk() {
     let hoj = LoopbackServer::start(vec![]).await;
     let hydro = LoopbackServer::start(vec![]).await;
     let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
 
-    let (scope_tx, scope_rx) = std::sync::mpsc::channel::<()>();
-    let (attempt_tx, attempt_rx) = std::sync::mpsc::channel::<()>();
-    let handle = tokio::runtime::Handle::current();
+    let (start_tx, start_rx) = std::sync::mpsc::channel::<()>();
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<bool>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
 
     std::thread::scope(|scope| {
         let ctx_ref = &ctx;
+        // T1：切 Hydro，在事务内（Registry 已切、尚未落盘）暂停
         let t1 = scope.spawn(move || {
             switch_oj_with_hook(ctx_ref, "Hydro", || {
-                // 已切 Registry、写事务仍持有：通知 T2 发起，再暂停
-                scope_tx.send(()).unwrap();
-                attempt_rx.recv().unwrap();
-                // 给旧实现足够时间完成第二个切换；新实现里 T2 会一直等这把锁
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                start_tx.send(()).unwrap();
+                let held = held_rx.recv().unwrap();
+                if !held {
+                    // 没有事务锁：等 T2 完整落地，复现「T1 后写」的旧交错
+                    done_rx.recv().unwrap();
+                }
             })
         });
-        // 等 T1 进入事务内暂停点，再让 T2 发起切换
-        scope_rx.recv().unwrap();
+        // T2：等 T1 到暂停点后发起切回 HOJ
         let t2 = scope.spawn(move || {
-            attempt_tx.send(()).unwrap();
-            handle.block_on(switch_oj_impl(ctx_ref, "HOJ"))
+            start_rx.recv().unwrap();
+            switch_oj_with_hooks(
+                ctx_ref,
+                "HOJ",
+                |ctx_probe| {
+                    // 取锁前探测：true = T1 持有写事务，本线程随后必然阻塞
+                    held_tx.send(ctx_probe.config.write_txn_is_held()).unwrap();
+                },
+                || {
+                    // 仅在变异路径被 T1 等待；固定路径无人接收，忽略发送错误
+                    let _ = done_tx.send(());
+                },
+            )
         });
         t1.join().unwrap().expect("T1 切换 Hydro 应成功");
         t2.join().unwrap().expect("T2 切换 HOJ 应成功");

@@ -488,17 +488,21 @@ async fn concurrent_switch_cannot_make_saved_config_invalid() {
     payload.oj.active = "Hydro".into(); // 陈旧快照：真正的 active 仍是 HOJ
     payload.editor.font_size = 18;
 
+    let (start_tx, start_rx) = std::sync::mpsc::channel::<()>();
     let (attempt_tx, attempt_rx) = std::sync::mpsc::channel::<()>();
     let handle = tokio::runtime::Handle::current();
     let mut before_validate = || {
-        // 保存已持有写事务：此刻放切换线程进来，它必须被挡在事务外
+        // **时序握手**（评审三十四）：保存此刻已持有写事务，再放切换线程进来。
+        // 若先 spawn 抢跑，切换可能先完成，正确实现会让保存因最终候选删除
+        // active 实例而失败——测试就变成靠调度运气。
+        start_tx.send(()).unwrap();
         attempt_rx.recv().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(100));
     };
 
     let (saved, switched) = std::thread::scope(|scope| {
         let ctx_ref = &ctx;
         let enqueued = scope.spawn(move || {
+            start_rx.recv().unwrap();
             attempt_tx.send(()).unwrap();
             handle.block_on(switch_oj_impl(ctx_ref, "Hydro"))
         });
@@ -524,6 +528,44 @@ async fn concurrent_switch_cannot_make_saved_config_invalid() {
     assert_eq!(disk.oj.active, memory.oj.active);
     assert_eq!(memory.oj.active, "HOJ");
     assert_eq!(memory.editor.font_size, 18, "可编辑字段仍应保存");
+
+    hoj.shutdown();
+    hydro.shutdown();
+}
+
+/// 评审三十四残余：`reload_config` 必须把 Registry 同步到磁盘 `oj.active`。
+///
+/// 旧实现只替换内存配置：磁盘写着 Hydro、内存也读成 Hydro，但 Registry 仍是
+/// HOJ——之后所有查询继续打旧 OJ，配置却声称已切新 OJ。现在重载与 Registry
+/// 切换在同一配置写事务内完成。
+#[tokio::test]
+async fn reload_config_synchronises_registry_with_disk_active() {
+    use super::super::commands::config_cmd::reload_config_impl;
+    use crate::test_support::app_ctx::context_with_two_ojs;
+    use crate::test_support::loopback::LoopbackServer;
+
+    let hoj = LoopbackServer::start(vec![]).await;
+    let hydro = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_two_ojs(hoj.url(), hydro.url()).await;
+    assert_eq!(ctx.provider_registry.current_id().as_str(), "HOJ");
+
+    // 运行中直接改盘：active 指向 Hydro（模拟手改 config.json / 外部写入）
+    let mut disk_config = ctx.config.get();
+    disk_config.oj.active = "Hydro".into();
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string(&disk_config).unwrap(),
+    )
+    .unwrap();
+
+    let reloaded = reload_config_impl(&ctx).expect("重载应成功");
+    assert_eq!(reloaded.oj.active, "Hydro");
+    assert_eq!(ctx.config.get().oj.active, "Hydro", "内存跟随磁盘");
+    assert_eq!(
+        ctx.provider_registry.current_id().as_str(),
+        "Hydro",
+        "Registry 必须同步到磁盘 active，不得留分叉"
+    );
 
     hoj.shutdown();
     hydro.shutdown();

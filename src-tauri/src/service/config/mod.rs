@@ -157,6 +157,14 @@ impl<R: ConfigRepository> ConfigService<R> {
     pub fn reload(&self) -> AppResult<AppConfig> {
         // 与 update 共用写事务：reload 也写内存，不能与在途保存交错
         let _txn = self.lock_write_txn();
+        self.reload_locked()
+    }
+
+    /// 重载本体；**调用方必须已持有 [`Self::lock_write_txn`]**。
+    ///
+    /// `reload_config` 在同一事务里还要把 Registry 同步到磁盘 `oj.active`
+    /// （评审三十四残余）：只替换内存会让内存/磁盘与运行中 Registry 分叉。
+    pub(crate) fn reload_locked(&self) -> AppResult<AppConfig> {
         let new_config = self.repo.load_config::<AppConfig>().map_err(|e| {
             warn!(error = %e, "配置重新加载失败");
             AppError::Config(format!("配置重新加载失败: {}", e))
@@ -176,6 +184,18 @@ impl<R: ConfigRepository> ConfigService<R> {
 
         debug!("CoreEvent::ConfigChanged 已发布");
         Ok(new_config)
+    }
+
+    /// 仅测试：写事务锁当前是否被持有（`try_lock` 探测；成功会立即释放）。
+    ///
+    /// 供并发回归在**进入锁之前**判定「另一个线程是否已持有事务」，
+    /// 不依赖 sleep 猜测调度（评审三十四）。
+    #[cfg(test)]
+    pub(crate) fn write_txn_is_held(&self) -> bool {
+        match self.write_txn.try_lock() {
+            Ok(_guard) => false,
+            Err(_) => true,
+        }
     }
 
     /// 返回底层 ConfigRepository 引用。
