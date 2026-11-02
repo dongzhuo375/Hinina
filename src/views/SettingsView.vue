@@ -135,6 +135,7 @@ onMounted(() => {
               :input-class="inputClass"
               :locked="locked"
               :switching="switching"
+              :saving="saving"
               @update:form="updateForm"
               @switch-oj="onSwitchOj"
             />

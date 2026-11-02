@@ -407,7 +407,10 @@ describe('--settings 无会话最小壳', () => {
     vi.useRealTimers()
   })
 
-  it('评审二十九 #4：同一比赛 ended→running（赛程延长/重置重拉）后轮询重启', async () => {
+  it('评审二十九 #4：同一比赛 running→ended→running 后轮询重启', async () => {
+    // 必须完整走 running 起步（liveFor=id）→ ended（stopLive 并清 liveFor）→
+    // running（第二次 startLive）；直接从 ended 挂载时 liveFor 本就是 null，
+    // 测不出「停止时未清 liveFor」这个缺陷（评审三十 #2）
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)
     const pinia = createPinia()
@@ -415,20 +418,23 @@ describe('--settings 无会话最小壳', () => {
     mocks.launchFlags.value = { settings: true }
     mocks.routeName.value = 'Settings'
     const store = useContestStore()
-    store.contest = { ...schedule, startTime: now - 7_200, endTime: now - 3_600 } // 已结束
+    store.contest = { ...schedule, startTime: now - 3_600, endTime: now + 3_600 } // 进行中
     app = createApp(ContestLayout)
     app.use(pinia)
     app.component('RouterView', { template: '<div>settings content</div>' })
     app.mount(host)
     for (let i = 0; i < 5; i++) await nextTick()
-    expect(mocks.startLive).not.toHaveBeenCalled()
+    expect(mocks.startLive).toHaveBeenCalledTimes(1) // liveFor=id
+
+    // 结束：停止轮询
+    store.contest = { ...schedule, startTime: now - 7_200, endTime: now - 3_600 }
+    await vi.advanceTimersByTimeAsync(1_500)
     expect(mocks.stopLive).toHaveBeenCalled()
 
-    // 组织者延长赛程：同一比赛回到 running
+    // 组织者延长赛程：同一比赛回到 running → 轮询必须重启
     store.contest = { ...schedule, startTime: now - 7_200, endTime: now + 3_600 }
     await vi.advanceTimersByTimeAsync(1_500)
-
-    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+    expect(mocks.startLive).toHaveBeenCalledTimes(2)
     vi.useRealTimers()
   })
 

@@ -108,11 +108,11 @@ pub(crate) fn apply_config_update(
 ) -> AppResult<()> {
     // `oj.active` **只由 switch_oj 改写**（评审二十九 #1）：调用方带来的 active
     // 可能是保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去。两种
-    // 模式一律以内存当前值为准。
-    let current_active = ctx.config.get().oj.active;
-    config.oj.active = current_active;
+    // 模式一律以内存当前值为准；**写锁内还会再钉一次**（见下方 update 闭包），
+    // 因为「读 active」与「整体写入」之间仍有窗口（评审三十 #1）。
+    let previous = ctx.config.get();
+    config.oj.active = previous.oj.active.clone();
     if maintainer_locked {
-        let previous = ctx.config.get();
         config.preserve_locked_fields(&previous);
         config
             .validate_preserving_locked()
@@ -127,6 +127,9 @@ pub(crate) fn apply_config_update(
         }
     }
     ctx.config.update(|cfg| {
+        // 与读取放在同一次写锁内：即便此刻已有切换落地，写入仍用**锁内**的
+        // active，而不是校验时读到的旧值
+        config.oj.active = cfg.oj.active.clone();
         *cfg = config;
     })?;
 

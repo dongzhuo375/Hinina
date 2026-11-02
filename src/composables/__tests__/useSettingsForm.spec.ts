@@ -377,6 +377,48 @@ describe('useSettingsForm', () => {
     expect(settings.switching.value).toBe(false)
   })
 
+  it('评审三十 #1：自动切换（保存新建实例）也进入单飞，期间不可再次选择', async () => {
+    mocks.launchFlags.value = { settings: true }
+    await settings.load()
+    let release!: () => void
+    mocks.switchOj.mockReturnValueOnce(new Promise<void>((resolve) => { release = resolve }))
+    settings.form.activeOj = 'Hydro'
+    settings.form.ojUrl = 'https://hydro.example'
+
+    const saving = settings.save() // 新建实例 → 保存成功后自动切换
+    await vi.waitFor(() => expect(mocks.switchOj).toHaveBeenCalledTimes(1))
+    expect(settings.switching.value).toBe(true)
+
+    // 自动切换在途：下拉选择被忽略，不会发起第二个 switch_oj
+    settings.form.activeOj = 'HOJ'
+    await settings.onSwitchOj()
+    expect(mocks.switchOj).toHaveBeenCalledTimes(1)
+
+    release()
+    await saving
+    expect(settings.switching.value).toBe(false)
+  })
+
+  it('评审三十 #1：保存进行中禁止显式切换（反向互斥）', async () => {
+    await settings.load()
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    let releaseSave!: () => void
+    mocks.updateConfig.mockReturnValueOnce(new Promise<AppConfig>((resolve) => {
+      releaseSave = () => resolve(structuredClone(currentConfig))
+    }))
+    settings.form.fontSize = '18'
+
+    const saving = settings.save()
+    await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledTimes(1))
+    // 保存中：切换请求被忽略
+    settings.form.activeOj = 'Hydro'
+    await settings.onSwitchOj()
+    expect(mocks.switchOj).not.toHaveBeenCalled()
+    releaseSave()
+    await saving
+  })
+
   it('评审二十九 #3：普通切换失败只回滚选择，保留地址草稿', async () => {
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()

@@ -27,7 +27,7 @@
 
 ## 逻辑流程
 1. 前端调用 `invoke('get_config')` 获取当前配置用于设置页面展示
-2. 用户修改设置后，前端调用 `invoke('update_config', { config })` 持久化新配置：后端先 `validate()`（地址非法直接拒绝）再 `sanitize()`（越界钳制 + warn 留痕），落盘成功后**显式**同步 auto-save（`sync_auto_save_from_context`，幂等）
+2. 用户修改设置后，前端调用 `invoke('update_config', { config, maintainerLocked })` 持久化新配置：`oj.active` 始终以内存当前值为准（只有 switch_oj 能改）；普通模式先 `validate()`（地址非法直接拒绝）再 `sanitize()`（越界钳制 + warn 留痕），锁定模式改为 `preserve_locked_fields` + `validate_preserving_locked` + `sanitize_editable`；active 的保留在**同一次写锁**内完成；落盘成功后**显式**同步 auto-save（`sync_auto_save_from_context`，幂等）
 3. `invoke('reload_config')` 强制从磁盘重读（手改配置文件后使用），归一旧值后覆盖内存、发布 `ConfigChanged`，并同样显式同步 auto-save
 4. 排障时前端调用 `invoke('get_storage_info')` 展示数据目录、日志文件路径与客户端版本，指导选手取日志
 5. `AppConfig` / `StorageInfo` 通过 serde 序列化在前后端间传递（均 camelCase）

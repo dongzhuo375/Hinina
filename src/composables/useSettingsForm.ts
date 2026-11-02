@@ -181,6 +181,10 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   async function performSwitch(target: string): Promise<boolean> {
+    // 单飞放在这里而非 onSwitchOj：保存新建实例后的**自动切换**也走本函数
+    //（评审三十 #1）——只包显式切换会让 auto-switch 绕开门禁
+    if (switching.value) return false
+    switching.value = true
     lastSwitchStayed = false
     try {
       await configService.switchOj(target)
@@ -236,13 +240,15 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       }
       switchError.value = errorMessage(e, '切换 OJ 失败')
       return false
+    } finally {
+      switching.value = false
     }
   }
 
   async function onSwitchOj(): Promise<void> {
-    // 单飞：切换未完成前的再次选择直接忽略并回退下拉（评审二十九 #1/#2：
-    // 并发切换会让迟到完成的那次覆盖表单，拼出「C 的 id + B 的地址」）
-    if (switching.value) {
+    // 单飞：切换进行中、或正在保存时，再次选择直接忽略并回退下拉
+    //（评审二十九 #1/#2、评审三十 #1：两条写路径必须双向互斥）
+    if (switching.value || saving.value) {
       form.activeOj = persistedActive.value
       return
     }
@@ -259,13 +265,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       return
     }
     const ojDirty = ojDomainDirty()
-    switching.value = true
-    let switched = false
-    try {
-      switched = await performSwitch(target)
-    } finally {
-      switching.value = false
-    }
+    const switched = await performSwitch(target)
     if (switched) {
       form.ojUrl = ojInstances.value.find((i) => i.id === target)?.baseUrl ?? ''
       if (lastSwitchStayed && ojDirty && switchNotice.value === null) {

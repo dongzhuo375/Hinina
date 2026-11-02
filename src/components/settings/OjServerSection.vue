@@ -16,6 +16,8 @@ const props = defineProps<{
   locked?: boolean
   /** OJ 切换进行中（单飞）：下拉临时禁用，避免并发切换（评审二十九 #1/#2） */
   switching?: boolean
+  /** 保存进行中：下拉同样禁用——保存与切换双向互斥（评审三十 #1） */
+  saving?: boolean
 }>()
 const emit = defineEmits<{
   (event: 'update:form', patch: SettingsFormPatch): void
@@ -55,7 +57,7 @@ function onSwitchOj(): void {
                   >
                     当前 OJ
                   </span>
-                  <select v-model="props.form.activeOj" :class="INPUT" :disabled="props.locked || props.switching" @change="onSwitchOj">
+                  <select v-model="props.form.activeOj" :class="INPUT" :disabled="props.locked || props.switching || props.saving" @change="onSwitchOj">
                     <option
                       v-for="o in props.options"
                       :key="o.id"
