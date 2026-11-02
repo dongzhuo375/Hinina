@@ -102,4 +102,4 @@ getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / g
 
 ## 测试
 
-`src/services/__tests__/config.service.spec.ts`：缓存并发去重与失败重试、派生参数透传/越界回退/读取失败兜底（含 `editorTheme` 未知值回退 `vs`）、updateConfig 整体写回 + 缓存失效 + 副本隔离 + 失败仍失效缓存、updateEditorPrefs 只写传入字段 + 主题落 `theme.editorTheme` 且不动 `themeName` + 非法主题名归一后落盘。OJ 实例化新增：`getOjBaseUrl`/`activeOjBaseUrl` 取 active 实例地址、active 未命中回退第一个启用实例、禁用实例不参与匹配与回退（enabled = 后端不注册）、读取失败返回空串；`switchOj` 调 bridge 且切换后本地缓存失效（下次读取重新拉后端真值）、bridge 失败原样上抛（设置页据此回滚下拉显示）。
+`src/services/__tests__/config.service.spec.ts`：缓存并发去重与失败重试、派生参数透传/越界回退/读取失败兜底（含 `editorTheme` 未知值回退 `vs`）、updateConfig 整体写回 + 缓存失效 + 副本隔离 + 失败仍失效缓存、updateEditorPrefs 只写传入字段 + 主题落 `theme.editorTheme` 且不动 `themeName` + 非法主题名归一后落盘。OJ 实例化新增：`getOjBaseUrl`/`activeOjBaseUrl` 取 active 实例地址、active 未命中回退第一个启用实例、禁用实例不参与匹配与回退（enabled = 后端不注册）、读取失败返回空串；`switchOj` 调 bridge 且切换后本地缓存失效（下次读取重新拉后端真值）、bridge 失败原样上抛（设置页据此回滚下拉显示）。并发基座：真实 `ConfigService` 的并发切换串行（第二次等第一次落地）、`whenOjSwitchSettled` 覆盖队尾且队尾失败也解除、代际开始/结束各 +1、最近生效结果记录（普通失败不覆盖）与 `updateConfig` 成功且 active 匹配时解除 persist-failed。
