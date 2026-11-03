@@ -1021,9 +1021,15 @@ fn resolve_captures_default_dir_unusable_diagnostic() {
     let plan = resolve(&unusable_default, &legacy);
 
     assert_eq!(plan.source, DataDirSource::FallbackTemp);
-    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
-    let d = &plan.warnings[0];
-    assert_eq!(d.level, EarlyLevel::Error);
+    // 不按条数断言：指针路径 `default_dir/data_dir.json` 本身不可读时，P2-1 的
+    // 「指针读取失败」诊断是否出现**取决于平台错误种类**——Linux 报 ENOTDIR
+    // （非 NotFound，会多一条 Warn），Windows 把同路径归一为 NotFound（静默）。
+    // 两条诊断都属实，这里只钉「回退决策与其 error 级原因」。
+    let d = plan
+        .warnings
+        .iter()
+        .find(|d| d.level == EarlyLevel::Error)
+        .unwrap_or_else(|| panic!("缺少 error 级诊断: {:?}", plan.warnings));
     assert!(
         d.message.contains("默认数据目录不可用") && d.message.contains("回退临时目录"),
         "诊断应说明决策与去向: {}",
