@@ -279,22 +279,34 @@ fn main() {
         .setup(move |app| {
             // AppContext 必须在这里初始化而不是 main()：只有 setup 能拿到 AppHandle，
             // 也就只有这里能解析 `app_local_data_dir()`。
-            let default_dir = app.path().app_local_data_dir().unwrap_or_else(|e| {
-                // 拿不到默认目录时退到临时目录，让 resolve 继续走它的回退链。
-                // release 是 GUI 子系统、stderr 句柄无效：写失败必须忽略
-                // （`eprintln!` 在写失败时会 panic，让启动直接崩掉）
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "解析 app_local_data_dir 失败，回退临时目录: {e}"
-                );
-                data_dir::legacy_dir()
-            });
+            //
+            // 解析失败**不静默顶替**：把原因交给 prepare_startup 显式降级为
+            // FallbackTemp（临时目录可用也不会被误报成 Default，强告警不丢）。
+            // release 是 GUI 子系统、stderr 句柄无效：写失败必须忽略
+            // （`eprintln!` 在写失败时会 panic，让启动直接崩掉）。
+            let (default_dir, default_dir_error) = match app.path().app_local_data_dir() {
+                Ok(dir) => (dir, None),
+                Err(e) => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "解析 app_local_data_dir 失败，回退临时目录: {e}"
+                    );
+                    (
+                        data_dir::legacy_dir(),
+                        Some(format!("app_local_data_dir 解析失败: {e}")),
+                    )
+                }
+            };
             let legacy = data_dir::legacy_dir();
 
             // ① 一次性数据迁移必须在 `AppContext::init` **之前**：init 会打开日志文件，
             //    之后旧目录里的 logs/ 就被占住（虽然迁移清单不含 logs，但把顺序固定下来
             //    能让「谁在什么时候动文件」保持可推理）。
-            let (plan, migration) = data_dir::prepare_startup(&default_dir, &legacy);
+            let (plan, migration) = data_dir::prepare_startup_with_default_error(
+                default_dir_error.as_deref(),
+                &default_dir,
+                &legacy,
+            );
 
             let ctx = rt
                 .block_on(AppContext::init(

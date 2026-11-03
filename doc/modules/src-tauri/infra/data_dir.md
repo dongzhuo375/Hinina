@@ -20,24 +20,25 @@
 | `EarlyDiagnostic` / `EarlyLevel` | `{ level, message }` | 订阅器就绪前的诊断条目（消息为已插值成品文案）；`replay()` 重放到 `tracing` |
 | `DataDirPlan` | `{ base_dir, default_dir, source, warnings }` | 启动时解析出的方案；`warnings` 为启动期诊断缓冲（指针解析失败、候选目录因何不可用、启动期指针写失败） |
 | `DataDirPointer` | `{ data_dir, migrate_from, legacy_migrated }` | 指针文件结构（字段全部 `skip_serializing_if`，未设置时不落盘） |
-| `MigrateOutcome` | `{ moved, skipped, failed, legacy_removed, diagnostics }` | 迁移结果；`is_noop()` / `is_ok()`；`diagnostics` 与 `failed` 同序，携带失败项的错误原文 |
+| `MigrateOutcome` | `{ moved, skipped, failed, legacy_removed, diagnostics }` | 迁移结果；`is_noop()` / `is_ok()`；`diagnostics` 携带失败/清理/删源等诊断原文，**与 `failed` 不保证一一对应**（清理暂存、复制成功后删源失败也会产生诊断） |
 | `legacy_dir()` | `() -> PathBuf` | `%TEMP%/hinina` |
 | `pointer_path(default_dir)` | `(&Path) -> PathBuf` | 指针文件路径 |
-| `read_pointer` / `write_pointer` | — | 读写指针；**损坏或缺失一律按「未指定」处理**（绝不阻断启动）。启动期读指针走 `read_pointer_early`（失败记入诊断缓冲而非直接 `warn!`） |
+| `read_pointer` / `write_pointer` | — | 读写指针；**内容损坏一律按「未指定」处理**（绝不阻断启动）。**读取失败按种类分流**：只有 `NotFound` 静默（正常「未指定」）；权限拒绝/非 UTF-8/其他 I/O 错误打 `warn!`（路径+原始错误）——静默会让自定义目录无声失效。启动期走 `read_pointer_early`（同样分流，非 NotFound 记入诊断缓冲）；`update_pointer` 的再读走 `read_pointer_early_silent`（首次已报告，重复读不上报） |
 | `dir_is_usable` | `(&Path) -> bool` | 能创建 + 能写入（探针文件写后即删）；内部 `dir_is_usable_result` 带回失败原因供启动诊断 |
 | `dir_is_empty` | `(&Path) -> bool` | 不存在或为空（读不了时按「非空」保守处理）。**注意：不可用于默认目录的校验**，见 `conflicting_entries_in` |
 | `conflicting_entries` | `() -> impl Iterator<Item = &'static str>` | [`MIGRATED_ENTRIES`] 去掉 `cache`（派生，避免两处漂移） |
 | `conflicting_entries_in` | `(&Path) -> Vec<&'static str>` | `dir` 中已存在的**冲突条目**（迁移会跳过 → 陈旧数据被静默采用）。「恢复默认 + 迁移」的校验判据 |
 | `validate_target` | `(&Path, legacy) -> AppResult<PathBuf>` | 设置页「更改目录」的校验（见下） |
 | `resolve` | `(default_dir, legacy) -> DataDirPlan` | 解析优先级：指针指定（可用）→ 默认（可用）→ 临时目录（回退）。**`#[cfg(test)]` 测试专用**（生产走 `prepare_startup → resolve_with_pointer`，见下）；回退原因记入 `plan.warnings`，不直接打日志 |
-| `prepare_startup` | `(default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 启动用：解析 + 一次性迁移；诊断按时间顺序合并进 `plan.warnings` |
+| `prepare_startup` | `(default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 启动用：解析 + 一次性迁移；诊断按时间顺序合并进 `plan.warnings`。等于 `prepare_startup_with_default_error(None, …)` |
+| `prepare_startup_with_default_error` | `(Option<&str>, default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 默认目录**解析失败**的降级入口（`app_local_data_dir()` 失败时由 `main.rs` 传入原因）：直接返回 `FallbackTemp` + error 级诊断（临时目录「可用」不得误报为 `Default`，强告警不能丢）；该分支跳过指针与迁移（指针位置不可知、无迁移锚点） |
 | `migrate` | `(from, to) -> MigrateOutcome` | 逐项容错搬运；目标已存在则**跳过不覆盖**；单项走 `move_entry`；失败详情（含暂存清理失败、复制成功后删源失败）一律进 `outcome.diagnostics`——**本函数只在启动期（订阅器就绪前）执行，内部不打任何 `tracing`**，summary 由 `report_data_dir` 汇报 |
 | `move_entry` / `copy_recursive` | 私有 | `rename` 优先；失败则**复制到 `{to}.hinina-partial` 暂存名再改名**（见下）；`move_entry` 接收诊断缓冲并透传给清理/删源 |
 | `staging_path` / `remove_any` / `remove_source` | 私有 | 暂存路径 / 安全删除 / 复制后删源（失败**记诊断缓冲**而非 `warn!`；删源失败即「旧副本残留」，必须可查） |
 | `replay` | `(&[EarlyDiagnostic])` | 把缓冲诊断按级别重放到 `tracing`（`report_data_dir` 在日志就绪后调用） |
 | `should_clear_pending` | `(&MigrateOutcome) -> bool` | 迁移后是否清除「待迁移来源」标记（= 无失败项） |
 | `should_attempt_legacy` | `(&DataDirPointer, DataDirSource, legacy) -> bool` | 是否该重试临时目录搬家（三态语义，见下） |
-| `update_pointer` | `(&Path, &mut Vec<EarlyDiagnostic>, impl FnOnce(&mut DataDirPointer))` | **读-改-写**指针（见下）；读走 `read_pointer_early`、写失败记入诊断缓冲（本函数只在启动期执行） |
+| `update_pointer` | `(&Path, &mut Vec<EarlyDiagnostic>, impl FnOnce(&mut DataDirPointer))` | **读-改-写**指针（见下）；再读静默（`read_pointer_early_silent`，首次解析失败已入缓冲，同启动序列重复读不上报）、写失败记入诊断缓冲（本函数只在启动期执行） |
 | `is_absolute_path` / `is_same_or_inside` | 私有 | Windows 下要求盘符前缀；路径包含判定按大小写不敏感 |
 
 ### `validate_target` 拒绝的情形
@@ -72,7 +73,7 @@
 
 ## 被依赖
 
-- `main.rs` — `.setup()` 里调 `prepare_startup`（**在 `AppContext::init` 之前**）
+- `main.rs` — `.setup()` 里调 `prepare_startup_with_default_error`（**在 `AppContext::init` 之前**；默认目录解析失败时传原因，强制 `FallbackTemp`）
 - `core::context::AppContext` — 持有 `default_data_dir` 与 `data_dir_source`
 - `commands::data_dir_cmd` — `read_pointer` / `write_pointer` / `validate_target` / `dir_is_usable` / `legacy_dir`
 

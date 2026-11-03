@@ -1134,3 +1134,83 @@ fn prepare_startup_records_corrupt_pointer_exactly_once() {
         .collect();
     assert_eq!(pointer_diags.len(), 1, "{:?}", plan.warnings);
 }
+
+/// P2-1 回归：指针文件存在但非 UTF-8（或读不了）不能被当成「没有指针」静默
+/// 回退——诊断必须带路径与原始错误。仅 NotFound 才允许静默。
+#[test]
+fn read_pointer_records_non_utf8_failure() {
+    let default_dir = unique_dir("pointer-non-utf8");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    // 0xFF 0xFE 不是合法 UTF-8
+    std::fs::write(default_dir.join("data_dir.json"), [0xFFu8, 0xFE, 0x00]).unwrap();
+
+    let mut early = Vec::new();
+    let pointer = read_pointer_early(&default_dir, &mut early);
+
+    assert_eq!(pointer, DataDirPointer::default(), "保守回退默认目录");
+    assert_eq!(early.len(), 1, "{early:?}");
+    assert!(
+        early[0].message.contains("指针读取失败") && early[0].message.contains("data_dir.json"),
+        "诊断须带路径与原因: {}",
+        early[0].message
+    );
+}
+
+/// P2-1 互补：文件不存在（NotFound）保持静默——「未指定」是正常状态。
+#[test]
+fn read_pointer_missing_file_is_silent() {
+    let default_dir = unique_dir("pointer-missing");
+    let mut early = Vec::new();
+    assert_eq!(
+        read_pointer_early(&default_dir, &mut early),
+        DataDirPointer::default()
+    );
+    assert!(early.is_empty(), "NotFound 不应产生诊断: {early:?}");
+}
+
+/// P2-2 回归：默认目录解析失败必须显式降级为 FallbackTemp + error 级诊断
+/// （临时目录「可用」不得被误报为 Default，否则强告警丢失）。
+#[test]
+fn prepare_startup_forces_fallback_when_default_resolution_failed() {
+    let legacy = unique_dir("default-failure-legacy");
+
+    let (plan, outcome) = prepare_startup_with_default_error(
+        Some("app_local_data_dir 解析失败: policy"),
+        &legacy,
+        &legacy,
+    );
+
+    assert_eq!(plan.source, DataDirSource::FallbackTemp);
+    assert_eq!(plan.base_dir, legacy);
+    assert!(outcome.is_noop(), "降级分支不做迁移");
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    assert_eq!(plan.warnings[0].level, EarlyLevel::Error);
+    assert!(
+        plan.warnings[0].message.contains("默认数据目录解析失败")
+            && plan.warnings[0].message.contains("随时可能被系统清理"),
+        "{}",
+        plan.warnings[0].message
+    );
+}
+
+/// 低-2 回归：损坏指针 + 存在 legacy 目录（会走 mark_legacy_migrated 的指针
+/// 再读）时，指针读取/解析诊断仍只能出现一次——`update_pointer` 的再读是静默的。
+#[test]
+fn corrupt_pointer_with_legacy_migration_reports_once() {
+    let default_dir = unique_dir("corrupt-pointer-legacy-default");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    std::fs::write(default_dir.join("data_dir.json"), "{ not-json").unwrap();
+    let legacy = unique_dir("corrupt-pointer-legacy-src");
+    seed_legacy(&legacy);
+
+    let (plan, outcome) = prepare_startup(&default_dir, &legacy);
+
+    // legacy 目录存在 → 走搬家分支（会 update_pointer 再读指针）
+    assert!(!outcome.moved.is_empty(), "应完成搬家: {outcome:?}");
+    let pointer_diags: Vec<&EarlyDiagnostic> = plan
+        .warnings
+        .iter()
+        .filter(|d| d.message.contains("指针解析失败"))
+        .collect();
+    assert_eq!(pointer_diags.len(), 1, "{:?}", plan.warnings);
+}

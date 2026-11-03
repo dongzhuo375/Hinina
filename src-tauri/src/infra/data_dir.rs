@@ -172,8 +172,10 @@ pub struct MigrateOutcome {
     /// `logs/` 按约定不迁移，故通常为 `false`（旧目录留下一个 logs 子目录）。
     /// 也正因如此，这个字段不能用来判断「迁移是否成功」—— 那要看 [`MigrateOutcome::failed`]。
     pub legacy_removed: bool,
-    /// 订阅器就绪前的诊断（每失败项的具体错误，`failed` 只有条目名），
-    /// 与 [`MigrateOutcome::failed`] 同序，由 `report_data_dir` 重放。
+    /// 订阅器就绪前的诊断（失败详情 / 清理与删源失败等），由
+    /// `report_data_dir` 重放。**与 [`MigrateOutcome::failed`] 不保证一一对应**：
+    /// 清理暂存、复制成功后删源失败等「不影响迁移成败但值得可查」的事件也会
+    /// 产生诊断。
     pub diagnostics: Vec<EarlyDiagnostic>,
 }
 
@@ -208,14 +210,28 @@ pub fn pointer_path(default_dir: &Path) -> PathBuf {
     default_dir.join(POINTER_FILE)
 }
 
-/// 读取位置指针；文件不存在或损坏一律按「未指定」处理（保守回退默认目录）。
+/// 读取位置指针；文件不存在或内容损坏一律按「未指定」处理（保守回退默认目录）。
 ///
 /// 指针损坏**绝不阻断启动**：它只是「用户想去哪个目录」的提示，回退默认目录仍能
 /// 正常工作；报错反而会让客户端打不开。
+///
+/// 但**读取失败不能一律当「没指针」**：只有 `NotFound` 是正常的「未指定」；
+/// 权限拒绝、非 UTF-8、其他 I/O 错误都是异常——静默回退默认目录会让用户的
+/// 自定义目录无声失效且无从排障（评审 P2-1）。非 NotFound 打 warn 并带路径与
+/// 原始错误。
 pub fn read_pointer(default_dir: &Path) -> DataDirPointer {
     let path = pointer_path(default_dir);
-    let Ok(raw) = std::fs::read_to_string(&path) else {
-        return DataDirPointer::default();
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return DataDirPointer::default(),
+        Err(e) => {
+            warn!(
+                path = %path.display(),
+                error = %e,
+                "数据目录指针读取失败（按默认目录处理）"
+            );
+            return DataDirPointer::default();
+        }
     };
     match serde_json::from_str::<DataDirPointer>(&raw) {
         Ok(pointer) => pointer,
@@ -230,8 +246,21 @@ pub fn read_pointer(default_dir: &Path) -> DataDirPointer {
 /// 解析失败改记入 `early` 供 `report_data_dir` 重放。
 fn read_pointer_early(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) -> DataDirPointer {
     let path = pointer_path(default_dir);
-    let Ok(raw) = std::fs::read_to_string(&path) else {
-        return DataDirPointer::default();
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return DataDirPointer::default(),
+        Err(e) => {
+            // 非 NotFound（权限拒绝 / 非 UTF-8 / 其他 I/O 错误）必须可查：
+            // 静默回退默认目录会让自定义目录无声失效（评审 P2-1）
+            early.push(EarlyDiagnostic {
+                level: EarlyLevel::Warn,
+                message: format!(
+                    "数据目录指针读取失败，按默认目录处理（path={}，error={e}）",
+                    path.display()
+                ),
+            });
+            return DataDirPointer::default();
+        }
     };
     match serde_json::from_str::<DataDirPointer>(&raw) {
         Ok(pointer) => pointer,
@@ -245,6 +274,19 @@ fn read_pointer_early(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) -> D
             });
             DataDirPointer::default()
         }
+    }
+}
+
+/// [`read_pointer_early`] 的**静默**变体：读/解析失败都不入诊断缓冲。
+///
+/// 只供 `update_pointer`（启动序列内对同一指针文件的再次读取）使用：首次读取
+/// 已把损坏诊断写进缓冲，此处重复上报只会让重放出现两条相同警告；而同一次启动
+/// 里指针文件只由我们写，再读失败不会带来新信息。
+fn read_pointer_early_silent(default_dir: &Path) -> DataDirPointer {
+    let path = pointer_path(default_dir);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<DataDirPointer>(&raw).unwrap_or_default(),
+        Err(_) => DataDirPointer::default(),
     }
 }
 
@@ -534,6 +576,43 @@ fn resolve_with_pointer(
 /// 迁移失败**不阻断启动**：调用方继续用解析出的 `base_dir`（数据仍在原处，
 /// 客户端能正常工作），但必须强告警 —— 这正是「回退仍可用」优于「启动失败」的场景。
 pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, MigrateOutcome) {
+    prepare_startup_with_default_error(None, default_dir, legacy)
+}
+
+/// [`prepare_startup`] 的完整形态：调用方解析默认目录失败时把原因传进来。
+///
+/// `app_local_data_dir()` 失败（策略锁定 / 环境变量缺失）时，组合根只能拿临时
+/// 目录顶替——若按普通路径解析，临时目录「可用」会让 `source` 变成 `Default`，
+/// `report_data_dir` 只记 Info，**丢掉「临时数据随时可能被清理」的强告警**
+/// （评审 P2-2）。这里把失败原因显式升级为 `FallbackTemp` + error 级诊断。
+///
+/// 该分支**跳过指针与迁移**：指针文件固定放在默认目录下，而默认目录已不可解析
+/// ——没有可读的指针位置，也没有可作为迁移来源/目标的锚点。降级模式下
+/// `default_dir` 记为临时目录（位置指针随之落在那里，设置页如实展示）。
+pub fn prepare_startup_with_default_error(
+    default_error: Option<&str>,
+    default_dir: &Path,
+    legacy: &Path,
+) -> (DataDirPlan, MigrateOutcome) {
+    if let Some(reason) = default_error {
+        let _ = std::fs::create_dir_all(legacy);
+        return (
+            DataDirPlan {
+                base_dir: legacy.to_path_buf(),
+                default_dir: legacy.to_path_buf(),
+                source: DataDirSource::FallbackTemp,
+                warnings: vec![EarlyDiagnostic {
+                    level: EarlyLevel::Error,
+                    message: format!(
+                        "默认数据目录解析失败（{reason}），回退临时目录（数据随时可能被系统清理）: {}",
+                        legacy.display()
+                    ),
+                }],
+            },
+            MigrateOutcome::default(),
+        );
+    }
+
     // 指针只读一次：诊断缓冲与指针数据（migrate_from / legacy 标记）共用这一次
     // 读取。resolve 的内部变体把**指针诊断 + 候选目录诊断**一并收进
     // `plan.warnings`（返回时 `mem::take` 收拢共享缓冲），因此启动期的全部诊断
@@ -609,9 +688,11 @@ fn update_pointer(
     early: &mut Vec<EarlyDiagnostic>,
     mutate: impl FnOnce(&mut DataDirPointer),
 ) {
-    // 读也走启动期变体：本函数只在 prepare_startup（订阅器就绪前）执行，用
-    // `read_pointer` 的话指针损坏的诊断会落到空订阅器、整条丢失
-    let mut pointer = read_pointer_early(default_dir, early);
+    // 再读一次**静默**：本函数只在 prepare_startup（订阅器就绪前）执行，指针
+    // 在本次启动已被首读过一次——若它损坏，首读已把诊断写进缓冲，此处再报同
+    // 一条只会重放两遍（评审低-2）。指针文件在启动序列内只由我们写，这次再读
+    // 结构上不会产生新信息；写侧失败仍照常入缓冲。
+    let mut pointer = read_pointer_early_silent(default_dir);
     mutate(&mut pointer);
     if let Err(e) = write_pointer(default_dir, &pointer) {
         early.push(EarlyDiagnostic {
