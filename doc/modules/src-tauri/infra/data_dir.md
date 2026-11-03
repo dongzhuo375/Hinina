@@ -29,15 +29,15 @@
 | `conflicting_entries` | `() -> impl Iterator<Item = &'static str>` | [`MIGRATED_ENTRIES`] 去掉 `cache`（派生，避免两处漂移） |
 | `conflicting_entries_in` | `(&Path) -> Vec<&'static str>` | `dir` 中已存在的**冲突条目**（迁移会跳过 → 陈旧数据被静默采用）。「恢复默认 + 迁移」的校验判据 |
 | `validate_target` | `(&Path, legacy) -> AppResult<PathBuf>` | 设置页「更改目录」的校验（见下） |
-| `resolve` | `(default_dir, legacy) -> DataDirPlan` | 解析优先级：指针指定（可用）→ 默认（可用）→ 临时目录（回退）。**仅启动期使用**：回退原因记入 `plan.warnings`，不直接打日志 |
+| `resolve` | `(default_dir, legacy) -> DataDirPlan` | 解析优先级：指针指定（可用）→ 默认（可用）→ 临时目录（回退）。**`#[cfg(test)]` 测试专用**（生产走 `prepare_startup → resolve_with_pointer`，见下）；回退原因记入 `plan.warnings`，不直接打日志 |
 | `prepare_startup` | `(default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 启动用：解析 + 一次性迁移；诊断按时间顺序合并进 `plan.warnings` |
-| `migrate` | `(from, to) -> MigrateOutcome` | 逐项容错搬运；目标已存在则**跳过不覆盖**；单项走 `move_entry`；失败详情进 `outcome.diagnostics` |
-| `move_entry` / `copy_recursive` | 私有 | `rename` 优先；失败则**复制到 `{to}.hinina-partial` 暂存名再改名**（见下） |
-| `staging_path` / `remove_any` / `remove_source` | 私有 | 暂存路径 / 安全删除 / 复制后删源（均只告警） |
+| `migrate` | `(from, to) -> MigrateOutcome` | 逐项容错搬运；目标已存在则**跳过不覆盖**；单项走 `move_entry`；失败详情（含暂存清理失败、复制成功后删源失败）一律进 `outcome.diagnostics`——**本函数只在启动期（订阅器就绪前）执行，内部不打任何 `tracing`**，summary 由 `report_data_dir` 汇报 |
+| `move_entry` / `copy_recursive` | 私有 | `rename` 优先；失败则**复制到 `{to}.hinina-partial` 暂存名再改名**（见下）；`move_entry` 接收诊断缓冲并透传给清理/删源 |
+| `staging_path` / `remove_any` / `remove_source` | 私有 | 暂存路径 / 安全删除 / 复制后删源（失败**记诊断缓冲**而非 `warn!`；删源失败即「旧副本残留」，必须可查） |
 | `replay` | `(&[EarlyDiagnostic])` | 把缓冲诊断按级别重放到 `tracing`（`report_data_dir` 在日志就绪后调用） |
 | `should_clear_pending` | `(&MigrateOutcome) -> bool` | 迁移后是否清除「待迁移来源」标记（= 无失败项） |
 | `should_attempt_legacy` | `(&DataDirPointer, DataDirSource, legacy) -> bool` | 是否该重试临时目录搬家（三态语义，见下） |
-| `update_pointer` | `(&Path, &mut Vec<EarlyDiagnostic>, impl FnOnce(&mut DataDirPointer))` | **读-改-写**指针（见下）；写失败记入诊断缓冲 |
+| `update_pointer` | `(&Path, &mut Vec<EarlyDiagnostic>, impl FnOnce(&mut DataDirPointer))` | **读-改-写**指针（见下）；读走 `read_pointer_early`、写失败记入诊断缓冲（本函数只在启动期执行） |
 | `is_absolute_path` / `is_same_or_inside` | 私有 | Windows 下要求盘符前缀；路径包含判定按大小写不敏感 |
 
 ### `validate_target` 拒绝的情形
@@ -83,7 +83,7 @@
   default_dir = app.path().app_local_data_dir()   // %LOCALAPPDATA%/{identifier}
   legacy      = %TEMP%/hinina
   prepare_startup(default_dir, legacy)
-    ├ resolve: 指针指定(可用) → 默认(可用) → 临时目录(回退)；回退原因记入 plan.warnings
+    ├ resolve_with_pointer（指针单读共用同一诊断缓冲）: 指针指定(可用) → 默认(可用) → 临时目录(回退)；回退原因记入 plan.warnings
     ├ ① 指针带 migrate_from（设置页改目录）→ migrate(from → base_dir)；无失败项才清标记
     └ ② 首次搬家：source==Default && legacy_migrated != Some(true) && legacy 存在
          → migrate(legacy → base_dir)；无失败项才置位 legacy_migrated

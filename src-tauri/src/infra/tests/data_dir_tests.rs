@@ -649,7 +649,10 @@ fn failed_move_leaves_nothing_behind_so_retry_actually_retries() {
     write_file(&dir, "blocker", "i am a file");
     let dst = blocker.join("sub");
 
-    assert!(move_entry(&dir.join("src"), &dst).is_err(), "复制必须失败");
+    assert!(
+        move_entry(&dir.join("src"), &dst, &mut Vec::new()).is_err(),
+        "复制必须失败"
+    );
     assert!(
         !dst.exists(),
         "失败后不得留下目标（否则会被当成「已完成」）"
@@ -659,7 +662,7 @@ fn failed_move_leaves_nothing_behind_so_retry_actually_retries() {
 
     // 换到可用目标重试 → 必须真的搬过去（证明「不会自解除」）
     let retry_dst = dir.join("retry");
-    move_entry(&dir.join("src"), &retry_dst).expect("重试应成功");
+    move_entry(&dir.join("src"), &retry_dst, &mut Vec::new()).expect("重试应成功");
     assert_eq!(
         std::fs::read_to_string(retry_dst.join("a.txt")).unwrap(),
         "payload"
@@ -677,7 +680,7 @@ fn migrate_retries_entry_that_failed_before_instead_of_skipping() {
     let blocker = to.join("blocker");
     write_file(&to, "blocker", "file");
     let blocked = blocker.join("sub");
-    assert!(move_entry(&from.join("config.json"), &blocked).is_err());
+    assert!(move_entry(&from.join("config.json"), &blocked, &mut Vec::new()).is_err());
 
     // 修好目标后重试：应搬成功，且**不是** skipped
     let outcome = migrate(&from, &to);
@@ -698,7 +701,7 @@ fn move_entry_cleans_stale_staging_before_retry() {
     let dst = dir.join("dst");
     write_file(&dir, "dst.hinina-partial/old.txt", "stale");
 
-    move_entry(&dir.join("src"), &dst).expect("正常搬运应成功");
+    move_entry(&dir.join("src"), &dst, &mut Vec::new()).expect("正常搬运应成功");
 
     assert!(dst.join("new.txt").exists(), "新内容应就位");
     assert!(!dst.join("old.txt").exists(), "旧残片不得混入目标");
