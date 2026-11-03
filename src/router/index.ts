@@ -4,7 +4,6 @@ import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { systemService } from '@/services/system.service'
 import { markSettingsGateBlocked } from '@/utils/settings-gate-notice'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 
 /// 路由元信息类型声明，避免 `to.meta.*` 退化为 any
@@ -70,7 +69,7 @@ export const routes: RouteRecordRaw[] = [
       {
         // 设置属于工作台的一部分：放在外壳内，切换时不丢失顶栏/活动栏/状态条。
         // meta **保持继承父级的 requiresAuth: true**（默认受保护）—— 免登录豁免
-        // 是守卫里的**条件豁免**（isKeyedSettingsRoute(to.name)，管理方
+        // 是守卫里的**条件豁免**（systemService.isKeyedSettings(to.name)，管理方
         // 钥匙），不是 meta 声明：无条件豁免会让无钥匙访客直达设置页，且 401 时
         // sessionGuard 因 meta 为 false 不再回登录页。
         path: 'settings',
@@ -107,7 +106,7 @@ const router = createRouter({
  *    - **首次导航**落在登录页时直落设置页。无会话时隐藏入口在比赛外壳内不可达，
  *      登录页的「返回设置」也要点一次——钥匙在初始导航就落位，省一步且意图明确；
  *      仅对首次导航生效，「返回登录」不受影响。
- *    - **设置页的条件豁免**：`isKeyedSettingsRoute(to.name)` 时放行
+ *    - **设置页的条件豁免**：`systemService.isKeyedSettings(to.name)` 时放行
  *      无会话访问（且不限首次）。豁免在守卫里而不在 meta 里：meta 保持继承
  *      父级保护，普通模式下设置页照常受保护（无钥匙访客直达 → 登录页；页面
  *      上 401 → sessionGuard 读到 requiresAuth=true 照常回登录页）。
@@ -136,13 +135,13 @@ router.beforeEach(async (to, from) => {
   if (!requiresAuth) return true
   // 管理方钥匙的条件豁免：仅 --settings 进程中的设置页可无会话进入（不限首次
   // —— 返回登录后想再修一次地址仍可直达）。普通模式设置页照常受保护。
-  if (isKeyedSettingsRoute(to.name)) return true
+  if (systemService.isKeyedSettings(to.name)) return true
   // 钥匙设置页出发的导航：**未登录与赛程闸门失败**拦回设置页——无会话时点赛场页面若送去登录页，设置视图被卸载、草稿
   // 丢失，正是钥匙要避免的。导航**中途**会话失效不在此列：那种情况由
   // `afterEach` 的落地不变量回登录页（有意的安全兜底，见下），不在这里回设置页。
   // 来源路由在**导航入口**一次性捕获：异步等待后不再读
   // `router.currentRoute`——那可能已被在途导航改写（历史竞态根源）
-  const fromKeyedSettings = isKeyedSettingsRoute(from.name)
+  const fromKeyedSettings = systemService.isKeyedSettings(from.name)
   if (!auth.isLoggedIn) {
     if (fromKeyedSettings) {
       markSettingsGateBlocked('未登录，已留在设置页（登录后才能进入赛场页面）')
@@ -203,7 +202,7 @@ router.afterEach((to) => {
   if (to.meta.requiresAuth !== true) return
   const auth = useAuthStore()
   if (auth.isLoggedIn) return
-  if (isKeyedSettingsRoute(to.name)) return
+  if (systemService.isKeyedSettings(to.name)) return
   void router.replace({ name: 'Login' })
 })
 

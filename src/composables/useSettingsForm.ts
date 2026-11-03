@@ -1,9 +1,9 @@
 import { computed, getCurrentScope, onScopeDispose, reactive, ref } from 'vue'
+import { systemService } from '@/services/system.service'
 import type { Ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService } from '@/services/config.service'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { useAuthStore } from '@/stores/authStore'
 import { resetSessionForOjSwitch } from '@/stores/session'
 import { normalizeHojLanguage } from '@/utils/language'
@@ -325,7 +325,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // **豁免只属于设置页本身**：switch_oj 是异步的，期间用户可能已导航到
       // 比赛页——不查当前路由就把「停留」带过去，无会话用户会被留在比赛页
       //。判据与 sessionGuard 一致：钥匙 + 当前路由是设置页。
-      const stayOnSettings = isKeyedSettingsRoute(router.currentRoute.value?.name)
+      const stayOnSettings = systemService.isKeyedSettings(router.currentRoute.value?.name)
       if (!stayOnSettings) {
         persistedActive.value = target
         void router.replace({ name: 'Login' })
@@ -354,7 +354,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         outcome = 'persist-failed'
         resetSessionForOjSwitch()
         useAuthStore().resetForOjSwitch()
-        if (isKeyedSettingsRoute(router.currentRoute.value?.name)) {
+        if (systemService.isKeyedSettings(router.currentRoute.value?.name)) {
           adoptEffectiveSwitch(target, PERSIST_FAILED_NOTICE)
           lastSwitchStayed = true
           return true

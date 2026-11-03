@@ -1,6 +1,5 @@
 import type { AppConfig } from '@/types/config'
 import * as configBridge from '@/bridge/config.bridge'
-import { isKeyedProcess } from '@/guards/keyed-settings-policy'
 import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
 import {
   DEFAULT_EDITOR_FONT_SIZE,
@@ -13,6 +12,7 @@ import {
   normalizeEditorTheme,
 } from '@/utils/editor'
 import { createLogger } from '@/utils/logger'
+import { systemService } from '@/services/system.service'
 
 /// 配置读取失败只影响局部展示/节奏，故一律 warn + 兜底值，不向上抛
 const log = createLogger('configService')
@@ -289,7 +289,7 @@ export class ConfigService {
       // 默认值由「本次启动是否钥匙模式」推导：设置页之外的保存
       // （解题页编辑器偏好、分栏比例）同样声明锁定意图。**对账字段**：后端
       // 以 launch_args 自持真值执行锁定，此处推导不一致只会触发对账告警
-      const maintainerLocked = options.maintainerLocked ?? !isKeyedProcess()
+      const maintainerLocked = options.maintainerLocked ?? !systemService.isKeyed()
       persisted = (await configBridge.updateConfig(draft, maintainerLocked)) ?? draft
       // 用**实际落盘**的 active 判定：保存与切换在服务层
       // 可能交错，后端写锁内的 active 才是权威值；按旧快照判定会留下陈旧警告

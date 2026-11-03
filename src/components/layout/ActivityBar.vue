@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { systemService } from '@/services/system.service'
 import { useRoute } from 'vue-router'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { settingsRevealed } from '@/utils/settings-access'
-import { isKeyedProcess } from '@/guards/keyed-settings-policy'
 
 const route = useRoute()
 const announcementStore = useAnnouncementStore()
@@ -34,7 +34,7 @@ const links = [
 
 /// `--settings` 管理方钥匙：进入比赛壳层后恒显「环境设置」入口——钥匙本应授
 /// 予入口，reveal 门控（连点版本号）是选手侧的另一套机制
-const keyedMode = computed(() => isKeyedProcess())
+const keyedMode = computed(() => systemService.isKeyed())
 </script>
 <template>
   <nav class="contest-navigation" aria-label="赛场导航">
