@@ -204,8 +204,10 @@ impl PluginManager {
         self.start_worker(id).await.inspect_err(|error| {
             // PluginError only contains stable, redacted diagnostics. Loading may fail
             // before a worker exists, so worker.exit alone cannot report these failures.
+            // plugin_version 留空：失败可能发生在清单加载之前，版本无从得知（形状约定
+            // 见 doc/modules/src-tauri/plugin/mod.md）。
             tracing::warn!(plugin_id = ?if id.len() <= 128 { id } else { "<invalid>" },
-                runtime = "js", operation = "worker.start", error = ?error,
+                plugin_version = "", runtime = "js", operation = "worker.start", error = ?error,
                 "Plugin start failed");
             if id.len() <= 128 {
                 self.remember_status(PluginStatus {
@@ -474,7 +476,7 @@ impl PluginManager {
                 }
                 let cleanup = self.stop_inner(id).await;
                 if let Err(error) = cleanup {
-                    tracing::warn!(plugin_id=?id,operation="start.cleanup",error=?error,"Plugin cleanup pending");
+                    tracing::warn!(plugin_id=?id,plugin_version="",runtime="js",operation="start.cleanup",error=?error,"Plugin cleanup pending");
                 }
                 Err(PluginError::Timeout)
             }
@@ -518,7 +520,7 @@ impl PluginManager {
                 break;
             }
             if start.elapsed() > self.stop_timeout {
-                tracing::warn!(plugin_id=?id,operation="worker.stop",error=?PluginError::Timeout,"Plugin stop timed out");
+                tracing::warn!(plugin_id=?id,plugin_version="",runtime="js",operation="worker.stop",error=?PluginError::Timeout,"Plugin stop timed out");
                 return self.stop_timed_out(id);
             }
             tokio::time::sleep(Duration::from_millis(10)).await;

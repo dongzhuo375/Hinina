@@ -15,12 +15,12 @@
 | `themeOverrides` | `GlobalThemeOverrides` | 入口页主题：primary `#7C5CFF` 系 + info/success/warning/error 语义色 |
 | `minimize` / `toggleMaximize` / `close` | fn | `getCurrentWindow()`（@tauri-apps/api/window）自绘窗口控制（无边框窗口） |
 
-模板结构：`n-config-provider(:theme="null" + :theme-overrides="showGlobalTitleBar ? themeOverrides : contestThemeOverrides")` → `n-dialog-provider` → **插件通知出口 `<PluginNotifications />`**（纯文本通知渲染，挂在 dialog 层内、根 div 之前）→ 根 div（`:class="{ 'contest-theme': !showGlobalTitleBar }"`）→ 条件渲染的兜底 header（`.entry-titlebar` + `data-tauri-drag-region`）→ `router-view`。
+模板结构：`n-config-provider(:theme="null" + :theme-overrides="showGlobalTitleBar ? themeOverrides : contestThemeOverrides")` → **插件通知出口 `<PluginNotifications />`**（纯文本通知渲染，挂在 provider 内、根 div 之前）→ 根 div（`:class="{ 'contest-theme': !showGlobalTitleBar }"`）→ 条件渲染的兜底 header（`.entry-titlebar` + `data-tauri-drag-region`）→ `router-view`。
 
 ## 直接依赖
 
 - `vue`（`computed`）/ `vue-router`（`useRoute`）
-- `naive-ui`（`NConfigProvider` / `NDialogProvider` 组件 + `GlobalThemeOverrides` 类型；按需引入，非插件安装）
+- `naive-ui`（`NConfigProvider` 组件 + `GlobalThemeOverrides` 类型；按需引入，非插件安装。曾挂载 `NDialogProvider`，全仓无 `useDialog` 消费方，属死装配，已移除——分层审计 F9）
 - `@tauri-apps/api/window`（`getCurrentWindow`）
 - `@/components/PluginNotifications.vue`（插件通知出口组件）
 

@@ -6,7 +6,6 @@
 **本服务不订阅任何事件**：它承担的每一项工作（落盘、清理）都必须显式完成，不能交给异步消费者。`LoggedIn` / `LoggedOut` / `SessionExpired` 只是「这些动作已经做完」的事实通知。
 
 ## 核心类型/函数
-- `pub mod error` — 认证错误类型模块声明
 - **`Session`** — 本地会话记录，**由 `core::entity::session` re-export**（`pub use crate::core::entity::session::Session;`）：领域层与适配器层共用同一份 schema，本模块不再自带一份定义。字段与兼容别名见 `core/entity/session.md`
 - **`SessionValidity`** — 会话校验三态结果（`Valid` / `Invalid` / `Unknown`），`#[serde(rename_all = "snake_case")]` 序列化为 `valid` / `invalid` / `unknown`，属跨端契约。区分"服务端明确失效"与"无法判定"至关重要：后者若按失效处理，会在赛前把选手踢回登录页，反复重登还可能触发 HOJ 的暴力破解锁定（同 IP + 同用户名 30 分钟 20 次）
 - **`AuthService`** — 认证服务

@@ -4,7 +4,6 @@
 提交服务模块入口。负责代码提交（本地留档源码快照）、评测结果单次查询，以及比赛提交列表、提交详情、测试点结果三类查询。提交从当前 Workspace 获取代码（由调用方传入）。评测轮询的节拍与总超时由前端 `submissionStore` 的 createPoller 拥有（配置 `oj.pollIntervalSecs` / `oj.pollTimeoutSecs` 经 get_config 由前端消费）；后端只做单次查询与终态事件发布，不循环、不睡眠、不设 deadline。终态提交的详情/测试点带**仅内存**的 TTL 缓存（用户域数据不落盘，登出清空；**切 OJ 亦清空** —— 由 `switch_oj` 命令显式调用 `on_oj_switched()`，换 OJ 即换用户上下文）。
 
 ## 核心类型/函数
-- `pub mod error` — 提交错误类型模块声明
 - `pub mod snapshot` — 提交源码快照（`submissions/{oj_id}/{submit_id}.{ext}`，见 `snapshot.md`）
 - 常量：`SUBMISSION_CACHE_TTL = 2h`（终态结果不可变，长 TTL 只为最终回收；内存上界由容量保证）、`SUBMISSION_DETAIL_CAPACITY = 200`、`SUBMISSION_CASES_CAPACITY = 100`
 - **`SubmissionService`** — 提交服务

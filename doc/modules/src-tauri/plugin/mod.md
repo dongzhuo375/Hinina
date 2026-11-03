@@ -33,3 +33,16 @@
 - 内部 [limits](limits.md) 统一执行期限与响应/游标预算，[bounded_json](bounded_json.md) 以流式编码实施字节上限
 - 测试挂载：manager/query 各自在所属模块用 `#[cfg(test)]` + `#[path = "tests/{module}_tests.rs"]` 引入，不经 tests/mod.rs 聚合；`tests/support.rs` 由 plugin/mod.rs 直接挂载为仅测试可用的 `test_support`，供跨模块夹具复用
 - 业务规则（首 AC 判断、幂等重试、外部去重）不在宿主：参考实现见 [sdk/examples/balloon](sdk/examples/balloon/README.md)
+
+## 日志字段形状约定
+
+插件域日志分两类，字段集不可混用（形状由 infra/plugin_diagnostics 与各日志点共同固化）：
+
+- **插件基础设施诊断**（`infra::plugin_diagnostics`）：消息固定英文 `Plugin infrastructure failure`，
+  字段 `plugin_id`（经 `safe_id` 清洗：非空/≤128/小写数字点横线，否则 `<invalid>`；宿主级为 `<host>`）、
+  `runtime="js"`、`operation`、`category`（+ 按类补充 `panic_kind`/`error_kind`/`stage`）。
+  **源头错误绝不格式化进消息**——只记错误分类，凭证/URL/路径不出现在日志里。
+- **插件生命周期/宿主操作日志**（manager.rs、plugin_host.rs、main.rs）：字段
+  `plugin_id`、`plugin_version`、`runtime="js"`、`operation`（+ API 事件补 `event`/`permission`/`request_id`，
+  失败补 `error`）。值缺失时留**空串**而非省略字段（如宿主级 `host.start`/`host.autostart` 无具体插件归属、
+  `worker.start` 失败可能发生在清单加载之前），保证同前缀日志可按字段过滤。

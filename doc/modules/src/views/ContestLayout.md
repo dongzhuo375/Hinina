@@ -17,7 +17,7 @@
 | `nowMs` / `now` | `useNowMs()` / computed（秒） | 共享毫秒墙钟派生秒，驱动 `phase` 跃迁；scope dispose 清理 interval |
 | `phase` | computed | `getContestPhase(getAuthoritativeSchedule(contestStore.contest, contestStore.brief), now)` |
 | `keyedSettings` | computed | `isKeyedSettingsRoute(route.name)`（`guards/keyed-settings-policy`）—— 设置页各项豁免的**共同判据**（阶段闸门跳转与锁定的短路、最小壳）。赛程闸门只防「滞留在过期赛场看旧数据」，设置页只碰本地配置不在其射程内 |
-| `contestGated` | computed | `!keyedSettings && (phase === 'ended' \|\| phase === 'upcoming')` —— 赛程闸门的**模板判定**（结束遮罩 v-if、内容区 inert、TopBar navigation-disabled 三处同源）；钥匙模式设置页恒为 false（评审六） |
+| `contestGated` | computed | `!keyedSettings && (phase === 'ended' \|\| phase === 'upcoming')` —— 赛程闸门的**模板判定**（赛程遮罩 v-if、内容区 inert、TopBar navigation-disabled 三处同源）；钥匙模式设置页恒为 false（评审六） |
 | `bareShell` | computed | `keyedSettings && !auth.isLoggedIn` —— 最小壳判据（三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1） |
 | `watch([phase, keyedSettings], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**keyedSettings 时只免跳转**——无会话（最小壳，评审四 P2-2）与有会话（评审五）两个分支都覆盖；`ended` 与 `upcoming` 的 `stopLive()` 清理**不能被豁免吞掉**（自然结束或 `running→upcoming` 回退后公告请求会一直打，评审八 P2-1、评审三十三 #5），并清 `liveFor` 以便回到 running 重启 |
 | `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → `ensureLive()`，见逻辑流程 |
@@ -74,7 +74,7 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
   workspace-main）——最小壳↔完整外壳翻转（会话失效/登出）不重挂设置视图，
   未保存草稿得以保留（评审六）
   StatusBar 仅完整外壳渲染
-  contestGated 且 phase === 'ended' 时叠加覆盖层（role="alert" 卡片：CONTEST CLOSED / 比赛已结束 / 感谢参赛，即将返回登录入口）
+  contestGated 时叠加覆盖层（role="alert" 卡片，文案随相位分叉）：ended → CONTEST CLOSED / 比赛已结束 / 感谢参赛，即将返回登录入口；upcoming → CONTEST NOT STARTED / 比赛尚未开始 / 比赛开始前暂不开放，即将返回登录入口。**upcoming 也要遮罩**：跳转是异步的，窗口期里灰屏无解释就是「灰了但不知道为什么」（阶段回退与导航延迟时窗口更长）
 ```
 
 设计要点：

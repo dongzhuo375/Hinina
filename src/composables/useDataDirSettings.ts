@@ -64,13 +64,15 @@ export function useDataDirSettings() {
     changingDir.value = true
     changeError.value = null
     try {
-      await systemService.setDataDir(target, migrate)
+      const result = await systemService.setDataDir(target, migrate)
       pendingDir.value = null
       migrateData.value = true
       await loadDataDir()
-      showChangeNotice(migrate
+      // 附加风险提示（降级模式下指针也在临时目录）优先于普通成功文案：
+      // 「已记录」不能盖住「这个记录本身可能被清理」
+      showChangeNotice(result?.warning ?? (migrate
         ? '已记录，重启后生效并自动迁移现有数据'
-        : '已记录，重启后生效（未迁移现有数据）')
+        : '已记录，重启后生效（未迁移现有数据）'))
     } catch (e) {
       changeError.value = errorMessage(e, '更改数据目录失败')
     } finally {
@@ -83,13 +85,13 @@ export function useDataDirSettings() {
     changingDir.value = true
     changeError.value = null
     try {
-      await systemService.resetDataDir(migrate)
+      const result = await systemService.resetDataDir(migrate)
       pendingDir.value = null
       migrateData.value = true
       await loadDataDir()
-      showChangeNotice(migrate
+      showChangeNotice(result?.warning ?? (migrate
         ? '已记录，重启后回到默认目录并迁移现有数据'
-        : '已记录，重启后回到默认目录（未迁移现有数据）')
+        : '已记录，重启后回到默认目录（未迁移现有数据）'))
     } catch (e) {
       changeError.value = errorMessage(e, '恢复默认目录失败')
     } finally {

@@ -21,7 +21,6 @@ use crate::service::config::ConfigService;
 use crate::service::contest::ContestService;
 use crate::service::problem::ProblemService;
 use crate::service::submission::SubmissionService;
-use crate::service::theme::ThemeService;
 use crate::service::workspace::manager::WorkspaceManager;
 
 /// 统一应用上下文。
@@ -56,7 +55,6 @@ pub struct AppContext {
     /// 回退临时目录时必须让选手看见（数据随时可能被系统清理）。
     pub data_dir_source: DataDirSource,
     // ── Service 层 ──
-    pub theme: Arc<ThemeService<FsConfigRepository>>,
     pub auth: Arc<AuthService>,
     pub contest: Arc<ContestService>,
     pub problem: Arc<ProblemService>,
@@ -69,16 +67,17 @@ impl AppContext {
     /// # 初始化序列
     ///
     /// 1. Logger — 日志系统
-    /// 2. Storage — 文件系统（`base_dir` 由调用方传入，来自 `infra::data_dir` 的解析结果）
-    /// 3. CoreEventBus — 事件总线（消费者不在此启动，见 `main.rs`）
-    /// 4. SessionRepository — 会话持久化（应用层与适配器层共用）
-    /// 5. ConfigService — 配置管理（通过 FsConfigRepository 持久化）
-    /// 6. HttpClient — 网络客户端
-    /// 7. ProviderRegistry — OJ 适配器注册中心（默认 HOJ，Provider 在阶段 5 注册）
-    /// 8. WorkspaceManager
-    /// 9. Service 层 — theme / auth / contest / problem / submission
-    /// 10. PluginHost — 插件事件边界（消费者在 `main.rs` 启动）
-    /// 11. 装配 AppContext
+    /// 2. 确保 `base_dir` 存在（`create_dir_all`）
+    /// 3. Storage — 文件系统（`base_dir` 由调用方传入，来自 `infra::data_dir` 的解析结果）
+    /// 4. CoreEventBus — 事件总线（消费者不在此启动，见 `main.rs`）
+    /// 5. SessionRepository — 会话持久化（应用层与适配器层共用）
+    /// 6. ConfigService — 配置管理（通过 FsConfigRepository 持久化）
+    /// 7. HttpClient — 网络客户端（超时取自配置）
+    /// 8. ProviderRegistry — OJ 适配器注册中心（按配置实例注册全部内建 OJ）
+    /// 9. WorkspaceManager
+    /// 10. Service 层 — auth / contest / problem / submission
+    /// 11. PluginHost — 插件事件边界（消费者在 `main.rs` 启动）
+    /// 12. 装配 AppContext
     ///
     /// `default_data_dir` / `source` 来自 [`crate::infra::data_dir::prepare_startup`]，
     /// 调用方（`main.rs` 的 `.setup()`）必须在调用本函数**之前**完成一次性数据迁移 ——
@@ -93,21 +92,21 @@ impl AppContext {
         let logger = Logger::init(&base_dir);
         tracing::info!("Hinina 启动中... base_dir={}", base_dir.display());
 
-        // 确保 base_dir 存在
+        // 2. 确保 base_dir 存在
         std::fs::create_dir_all(&base_dir)
             .map_err(|e| crate::core::error::AppError::Io(format!("创建 base_dir 失败: {}", e)))?;
 
-        // 2. 初始化文件存储
+        // 3. 初始化文件存储
         let storage = Arc::new(Storage::new(base_dir));
 
-        // 3. 创建事件总线
+        // 4. 创建事件总线
         let event_bus = Arc::new(CoreEventBus::new());
 
-        // 4. 会话仓库（AuthService 与 HOJ 适配器的凭证轮换共用）
+        // 5. 会话仓库（AuthService 与 HOJ 适配器的凭证轮换共用）
         let session_repo: Arc<dyn SessionRepository> =
             Arc::new(FsSessionRepository::new(Arc::clone(&storage)));
 
-        // 5. 加载配置（通过 FsConfigRepository）
+        // 6. 加载配置（通过 FsConfigRepository）
         let config_repo = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
         let config = Arc::new(ConfigService::new(
             config_repo,
@@ -115,7 +114,7 @@ impl AppContext {
             access.clone(),
         ));
 
-        // 6. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
+        // 7. 初始化 HTTP 客户端（超时取自配置 oj.timeout_secs，不再硬编码）
         let timeout_secs = config.get().oj.timeout_secs;
         // 测试构建禁用环境代理：全真上下文测试把 OJ 实例指向 loopback，
         // 宿主环境代理会劫持 127.0.0.1 请求（曾导致测试 flaky）
@@ -133,7 +132,7 @@ impl AppContext {
             )?,
         );
 
-        // 7. 创建 Provider 注册中心 + 按配置实例注册全部内建 OJ（工厂数据化）。
+        // 8. 创建 Provider 注册中心 + 按配置实例注册全部内建 OJ（工厂数据化）。
         //
         // 当前 OJ 取自 `oj.active`；实例清单来自 `oj.instances`（enabled 的才注册），
         // 与工厂按 id 匹配 —— 接一个新 OJ = 配置加一条实例 + 工厂清单加一行。
@@ -180,18 +179,14 @@ impl AppContext {
             }
         }
 
-        // 7. 创建 WorkspaceManager
+        // 9. 创建 WorkspaceManager
         let workspace_repo = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
         let workspace_manager = Some(Arc::new(WorkspaceManager::new(
             workspace_repo,
             Arc::clone(&event_bus),
         )));
 
-        // 7.5 装配 Service 层
-        let theme = Arc::new(ThemeService::new(
-            Arc::clone(&config),
-            Arc::clone(&event_bus),
-        ));
+        // 10. 装配 Service 层
         let auth = Arc::new(AuthService::new(
             Arc::clone(&provider_registry) as Arc<dyn ProviderRegistry>,
             Arc::clone(&session_repo),
@@ -215,7 +210,7 @@ impl AppContext {
             Arc::clone(&storage),
         ));
 
-        // 8. 插件宿主（只持有总线句柄；消费者由 `main.rs` 启动）
+        // 11. 插件宿主（只持有总线句柄；消费者由 `main.rs` 启动）
         let plugin_host = Arc::new(PluginHost::new(Arc::clone(&event_bus)));
 
         let queries = Arc::new(crate::plugin::query::ServiceQueries {
@@ -240,7 +235,7 @@ impl AppContext {
             access.clone(),
         ));
 
-        // 9. 装配
+        // 12. 装配
         Ok(Self {
             access,
             event_bus,
@@ -255,7 +250,6 @@ impl AppContext {
             logger: Arc::new(logger),
             default_data_dir,
             data_dir_source: source,
-            theme,
             auth,
             contest,
             problem,

@@ -116,35 +116,26 @@ Hinina/
         │   ├── mod.rs
         │   ├── config/
         │   │   ├── mod.rs                # ConfigService：加载/保存/变更检测/热重载（加载路径统一过 normalize_legacy_values）
-        │   │   └── error.rs              # ConfigError
-        │   ├── theme/
-        │   │   ├── mod.rs                # ThemeService：主题切换/配色方案管理
-        │   │   └── error.rs              # ThemeError
         │   ├── auth/
         │   │   ├── mod.rs                # AuthService：登录编排/会话持久化/登出/凭证轮换回写/三态会话校验（SessionValidity）
-        │   │   ├── error.rs              # AuthError
         │   │   └── tests/
         │   │       └── auth_tests.rs     # AuthService 单元测试（会话持久化/轮换回写/失效清理）
         │   ├── contest/
         │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存（TTL 来自配置）/比赛元信息缓存（内存+磁盘，固定 TTL 120s，题面总览页轮询请求减半）/比赛切换/get_rank（榜单不缓存）/list_problems（插件路径：只读题目列表，不选中比赛、不落缓存）/list_announcements（公告不缓存；按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`，首次拉取只建基线不发事件）+ 公告已读状态持久化（announcements_read/{cid}_{uid}.json，合并去重、损坏降级为空+warn）；`on_oj_switched()` 供 `switch_oj` 显式清 OJ 域缓存
-        │   │   ├── error.rs              # ContestError
         │   │   └── tests/
         │   │       └── contest_tests.rs  # ContestService 单元测试（错误变体穿透 + TTL 缓存语义：命中零请求/过期重取/refresh 强制/失败不留 stale + 元信息缓存：命中跳过 get_contest 而题目列表仍实时/磁盘跨实例命中/按比赛隔离/refresh 清两层/错误不入缓存 + 公告已读读写与损坏降级 + 新公告检测：首次不发/新 ID 发一次/重复不发/基线按比赛隔离/失败保留基线）
         │   ├── problem/
         │   │   ├── mod.rs                # ProblemService：题目获取/打开题目（题面内存+磁盘缓存，TTL 30min，受 oj.cacheProblemStatement 开关控制）/我的题目状态/load_problem_limits（内存+磁盘双层缓存、并发上限 4、部分失败跳过）
-        │   │   ├── error.rs              # ProblemError
         │   │   └── tests/
         │   │       └── problem_tests.rs  # limits 与题面缓存测试（首次落盘/二次命中零请求/开关关闭直连且不落盘/跨实例命中/键隔离/错误不入缓存/401 不回退默认值）
         │   ├── submission/
         │   │   ├── mod.rs                # SubmissionService：代码提交（下传 problem_id + display_id；成功后落盘源码快照，best-effort）/评测轮询/超时（认证错误立即上抛）+ 提交历史/详情/测试点查询（列表不缓存；终态详情与测试点走仅内存 TTL 缓存，评测中永不缓存；详情在 OJ 未回吐代码时回落到本地快照；clear_user_caches 由登出编排）
         │   │   ├── snapshot.rs           # 提交源码快照：submissions/{oj_id}/{submit_id}.{ext}（本地留档「当时交的代码」；扩展名由语言推导，与前端 sourceFileNameOf 同源，未知语言回退 .txt；读取时支持按 submit_id 扫描回退；落盘失败只告警不阻断提交）
-        │   │   ├── error.rs              # SubmissionError
         │   │   └── tests/
         │   │       ├── submission_tests.rs  # SubmissionService 单元测试（变体穿透、认证错误短路、瞬时抖动仍重试、超时语义、历史/详情/测试点穿透）
         │   │       └── snapshot_tests.rs    # 快照测试（扩展名与前端 sourceFileNameOf 对齐、部署变体归一、C#/JavaScript 不被前缀吞并、未知语言回退 txt、路径越权拒绝、落盘读取往返、语言变更后扫描回退、跨 OJ 不撞号、非法 ID 不 panic）
         │   └── workspace/
         │       ├── mod.rs
-        │       ├── error.rs              # WorkspaceError
         │       ├── manager.rs            # WorkspaceManager：完整生命周期 + set_language/persist_meta（语言与 active_file 等元数据随保存落盘）；落盘语义=debounce-to-memory（update_file 只写内存并记 active_file，落盘仅经 save() 与 auto-save；替换 current 前先落盘旧的；auto-save 以修订号判定能否清脏；auto_save_interval_secs 记录运行状态供「按配置同步」幂等判断）
         │       └── tests/
         │           └── manager_tests.rs  # 工作区生命周期测试（含语言跨实例持久化）
@@ -220,7 +211,6 @@ Hinina/
         │   ├── plugin_api_factory.rs     # 组合根选择的存储/HTTP能力工厂
         │   ├── plugin_http.rs            # 固定DNS、连接池、速率/并发/超时
         │   ├── plugin_storage.rs         # 原子JSON/CAS、配额与操作限流
-        │   ├── plugin_notification.rs    # 纯文本通知
         │   ├── fs_plugin_repo.rs         # FsPluginRepository（宿主审批、目录/入口校验与有限读取）
         │   ├── provider_registry_impl.rs # ProviderRegistryImpl（单表 HashMap<OjId, ProviderSet> + capability() 能力取件帮手）
         │   └── tests/
@@ -291,15 +281,14 @@ Hinina/
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
             ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
             ├── oj_cmd.rs                 # switch_oj（显式切换，**整段持配置写事务锁**：校验已注册且在启用实例列表 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 oj.active → 发布 OjSwitched；并发切换串行，不会 Registry/内存/磁盘分叉）
-            ├── contest_cmd.rs            # list_contests / select_contest / load_configured_contest（读 oj.contest_ref，不透明字符串引用）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
+            ├── contest_cmd.rs            # list_contests / load_configured_contest（读 oj.contest_ref，不透明字符串引用）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
             ├── problem_cmd.rs            # get_problem / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
-            ├── workspace_cmd.rs          # load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / set_workspace_language
+            ├── workspace_cmd.rs          # load_workspace / save_workspace / update_workspace_file / set_workspace_language
             ├── config_cmd.rs             # get_config / reload_config（事务内预检通过后才提交内存/事件，并同步 Registry）/ update_config（锁内固定 active 后对最终候选校验；落盘后**显式**同步 auto-save 启停与间隔）/ get_storage_info（存储目录/日志路径/版本，设置页「关于」）
             ├── log_cmd.rs                # frontend_log（**薄转发** → infra/frontend_log：panic 钩子的前端半边）
             ├── maintenance_cmd.rs          # reset_client（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，不重拉）/ local_data_usage（清理前体积预览，含临时目录崩溃记录）/ purge_local_data（不可逆：日志内容与崩溃记录文件 + 过期提交留档）
             ├── data_dir_cmd.rs           # get_data_dir / set_data_dir / reset_data_dir / pick_data_dir（设置页「数据目录」；改动重启后生效，只写位置指针不搬运）
-            ├── theme_cmd.rs              # get_theme / set_theme
             └── tests/
                 └── mod_tests.rs          # Command 层关键路径测试（P40 + 分页默认值/StorageInfo 序列化/uid 回退/空筛选归一；#87 扩展：维护者层锁定语义（锁定字段保留/放宽校验/active 结构检查）、保存与切换并发一致性（确定性交错握手）、update_config 锁内最终校验、reload 全禁用拒绝、auto-save 同步与配置提交串行、reload 提交+Registry 切换访问栅栏）
 ```
@@ -332,7 +321,7 @@ Hinina/
 ```
 src/
 ├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 全局会话守卫装配 + 工作区落盘事件订阅 + 新公告事件订阅 + 关窗前落盘握手（装配 utils/close-guard）+ KaTeX 公式样式全局引入 + styles/contest.css 赛场主题引入 + DEV-only 插件控制台助手 window.hininaPlugins（发布构建不含），字体本地打包不经 CDN）
-├── App.vue                               # 根组件（n-config-provider + n-dialog-provider，其内挂插件通知出口 PluginNotifications；按路由分区切换主题：比赛外壳内挂 .contest-theme 并用赛场 themeOverrides，入口页用紫系 themeOverrides）
+├── App.vue                               # 根组件（n-config-provider，其内挂插件通知出口 PluginNotifications；按路由分区切换主题：比赛外壳内挂 .contest-theme 并用赛场 themeOverrides，入口页用紫系 themeOverrides）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
 │   ├── index.ts                          # Vue Router（/login + /contest 嵌套子树：problems / problem/:displayId / rank / submissions / submissions/:submitId / announcements / settings）+ requiresAuth 认证守卫 + **赛程阶段闸门**（首次进入工作台/深链时按权威赛程判 `running`，赛前赛后退回登录页）
@@ -424,7 +413,7 @@ src/
 │   ├── announcement.bridge.ts            # list_contest_announcements / get_read_announcement_ids / mark_announcements_read + onAnnouncementsPublished（announcements-published 事件订阅）
 │   ├── window.bridge.ts                  # 无边框窗口控制（最小化/最大化/关闭）薄封装——bridge 是唯一接触 @tauri-apps/api 的地方（评审十九 #8）
 │   ├── system.bridge.ts                  # get_storage_info
-│   ├── workspace.bridge.ts               # load_workspace / save_workspace / current_workspace / updateWorkspaceFile / setWorkspaceLanguage + onWorkspaceSaved（workspace-saved 事件订阅）
+│   ├── workspace.bridge.ts               # load_workspace / save_workspace / updateWorkspaceFile / setWorkspaceLanguage + onWorkspaceSaved（workspace-saved 事件订阅）
 │   ├── config.bridge.ts                  # get_config / update_config / reload_config
 │   ├── diagnostics.bridge.ts             # frontend_log（前端全局错误三标量转发到 Rust tracing；唯一持久化日志通道）
 │   └── __tests__/                        # index.spec.ts / diagnostics.bridge.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数、frontend_log 命令名与三标量透传）
@@ -528,6 +517,9 @@ src/
 - **插件系统**：当前提供最小可运行的外围 JS 宿主（QuickJS）与文档侧参考业务插件（首次 AC 气球派发，doc/modules/src-tauri/plugin/sdk/examples/balloon，不构建进应用）。插件只能访问 `plugin/api/`，禁止直接调用内部 Service；插件事件经 `PluginEventAdapter` 白名单 + 脱敏 + 版本化（`PluginEventEnvelope{version,sequence,occurredAt,event}`）后投递，插件**不得**依赖 `CoreEvent` / 内部 Service / 领域实体 / `broadcast::Receiver`。设计、契约与路线图见 [doc/plugin/](plugin/README.md)
 - **I/O 全在 Rust，不注册 Tauri 插件**：网络走 `infra/http.rs` 的 reqwest、文件走 `infra/storage.rs`，前端经 IPC 命令消费 —— 因此**不注册** `tauri-plugin-fs` / `-http`，capabilities 里也不声明它们的授权（此前这两个依赖与 `fs:*` / `http:*` 授权一直挂着但从未生效，还会让 Tauri CLI 报「NPM 包与 Rust crate 版本不匹配」，已移除）。注册的插件有两个：`tauri-plugin-single-instance`（单实例约束，**第一个注册**；纯 Rust 侧无 JS API——无 npm 包、无 capability，不适用 npm 对齐要求）与 `tauri-plugin-dialog`（设置页「数据目录」的原生目录选择器，`dialog:allow-open`）；`tauri-plugin-fs` 仍作为 dialog 的**传递依赖**留在依赖树里（dialog 复用了 `FilePath` 类型），属正常。**带 JS API 的插件新增时必须同时对齐 npm 包与 Rust crate 的 major.minor**，否则 CLI 会在构建前报错
 - **依赖卫生：直接依赖必须被真正引用；不审批依赖的安装脚本**。`package.json` 的 `dependencies` 只放代码里实际 import 的包（曾出现 `approve` / `esbuild` / `vue-demi` 三个零引用的直接依赖 —— 其中 `esbuild` 还与 vite 嵌套的版本重复安装）。另外**刻意不写 `allowScripts`**：它是 npm 11.18 起的脚本审批字段，写上等于允许依赖的 postinstall 在每次安装时执行（供应链面）。实测不审批无影响：`vue-demi` 发布的默认就是 Vue 3 版（`isVue3 = true`，postinstall 只在检测到 Vue 2 时才切换），`esbuild` 的 postinstall 只是 optional platform 包的兜底。代价是 `npm install` 会提示「N packages have install scripts not yet covered by allowScripts」—— **这是预期的**，不要为消除提示而审批
+- **豁免：`@tauri-apps/plugin-dialog` 前端零 import 但保留**：它是「带 JS API 的插件」的 npm 对齐伴生包 —— 上条规则的 CLI 版本检查要求 npm 包与 Rust crate 同步，删掉它会让 `tauri-plugin-dialog` 的 crate 升级失去对齐锚点。属**文档化的刻意例外**，不要按依赖卫生规则误删（分层审计 F8）
+- **窗口控制 API 直入视图层是合法边界**：`main.ts` / `App.vue` / `TopBar.vue` 直接用 `@tauri-apps/api/window` 的 `getCurrentWindow`（拖拽、最小化/最大化、close/destroy、`onCloseRequested` 关窗握手）。这属**表现层窗口管理**，与「I/O 全在 Rust」的 fs/http 红线不冲突；capabilities 已声明 `core:window:*`；关窗落盘走依赖注入（`main.ts` 注入 close/destroy，`utils/close-guard` 可测试）。不要把这类调用误判为需要绕行 bridge 的违规（分层审计 F10）
+- **前端通知是单一路径**：前端可见事件只有一条装配路径 —— `CoreEvent → main.rs 事件桥`；插件通知的 `NotificationOutput` 实现同样住在组合根 `main.rs`（原 `infra/plugin_notification`，因成为 infra 层唯一**非单实例类**框架依赖而上移，2026-11 清理）。infra 的**传输/存储类模块**（http/storage/cache/仓库实现）保持零 tauri 依赖；`infra/single_instance` 是 Tauri 插件属**设计内例外**（分层审计 F2）
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
 - **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（`sessionGuard` 会话失效兜底 + `globalErrorGuard` 全局错误转发）—— 前者需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）
 - **View → Service 直连判据**（M1 成文）：红线只有一条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）。在此之上按数据生命周期分流：**跨视图共享或需跨视图存活的状态**（比赛、榜单、提交历史、公告与已读、工作区）必须走 Store；**路由级瞬态数据**（随视图销毁即丢弃的一次性查询，如提交详情的 detail/cases、设置页表单初值、存储信息）允许 View/component 直连 Service，本地 `ref` 承载 —— 为瞬态数据建 store 只会带来 store 膨胀与清理义务，零共享收益。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）；判据存疑时问一句「第二个视图会读它吗」，会 → Store，不会 → Service 直连
@@ -547,7 +539,7 @@ src/
 - **注册侧聚合、查询侧按能力**：一个 OJ 的能力集合是 `ProviderSet`（字段 Option×4 —— 保住「新 Adapter 可先只实现部分接口」的扩展路径，缺能力报 `ProviderNotFound` 而非注册失败），组合根对每个 OJ 一次 `register(id, set)`；Service 查询只拿单项能力（`current_contest()?` 等一行转发），**禁止提供返回聚合体的 `current()`** —— 那会让 Service 拿到它不需要的三个能力，接口隔离从接口层面退化成约定层面
 - **`AdapterDeps` 只准 infra 依赖**：适配器工厂构造签名只接收 http_client / event_bus / **session_repo** / storage，**禁止把 Service 塞进 `AdapterDeps`**（与「插件只能访问 `plugin/api`、禁止直调内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界彻底糊掉）。`session_repo` 是**仓库（infra 侧）**而非 Service：Provider 侧凭证轮换必须在拿到新 token 的当场显式落盘（见下一条），因此它需要的是「会话持久化能力」，不是认证业务逻辑。`AdapterFactory { id, build }` 的形状即 v1.0 插件 manifest 的雏形：将来把编译期工厂清单换成运行时扫描插件目录，上层（registry / context / Service）不用再改
 - **凭证轮换必须显式落盘，且 token 绝不进事件流**：HOJ 的 Refresh-Token 协议会在响应头里轮换凭证。旧实现让适配器发布**带真实 token** 的 `TokenRefreshed` 事件、由 `AuthService` 的同步订阅者代劳写盘 —— 既把凭证塞进公共事件流，又把持久性保证挂在事件投递时序上（消费者可能落后、可能不存在）。现在由适配器经 `SessionRepository::rotate_token` 在**当场显式写盘**（所有会话变更共用一把锁串行化，会话不存在返回 `Ok(false)` 不凭空创建；写入走 `write_string_atomic`），**仅在落盘成功后**才发布**只带 OJ 标识**的 `TokenRotated`（`Ok(false)`/`Err` 都不发布 —— 该事件的语义是「已轮换且已落盘」）；落盘失败只告警（HTTP 请求本身已成功，不能因落盘失败把它变成错误）
-- **接入新 OJ = 1 个子目录 + `factories()` 一行 + `oj.instances` 一条配置**：`OjConfig` 按 `OjInstance{ id, baseUrl, enabled, options }` 实例清单组织（`options` 刻意弱类型 Map —— 强类型枚举会让「新 OJ 要改 core」原样复活）；`contest_ref` 是**不透明字符串引用**（HOJ 数字串 / 其它 OJ 任意资源 ID，装得下 Hydro 的 hex ObjectId），空串 = 未配置；旧格式（hojUrl / contestId / lastOjType）经 serde 过渡字段在 `normalize_legacy_values` 一次性迁移、永不写回。OJ 切换走显式 `switch_oj` 命令（**整段持配置写事务锁**：校验已注册且在配置启用列表中 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 `oj.active` → 发布 `OjSwitched`），**不是 login 的副作用**；与 `update_config`/`reload` 共锁使并发切换串行落地，且保存与切换交错不会产出 `validate()` 拒绝的配置。切换的后果按端分工：Rust 侧由 `switch_oj` **显式调用** `contest/problem/submission` 三个 Service 的 `on_oj_switched()`（内存段同步清、磁盘段空间回收可后台），返回即已干净 —— 不再依赖 `OjSwitched` 订阅者（那会把切换正确性挂在事件投递时机上）；前端在**调用点**重置会话上下文（`resetSessionForOjSwitch`：领域状态清零 + `sessionResolved` 复位 + 回登录页由守卫按新 OJ 会话文件恢复）—— 切换是前端发起的命令，发起方编排后果（与登出同款模式），不引入 Tauri 事件桥；各 OJ 会话文件按 id 隔离，切换保留旧 OJ 登录态（切回免登录），故前端重置不得走 `authStore.logout()`（会误删新 OJ 的会话文件）
+- **接入新 OJ = 1 个子目录 + `factories()` 一行 + `oj.instances` 一条配置**：`OjConfig` 按 `OjInstance{ id, baseUrl, enabled, options }` 实例清单组织（`options` 刻意弱类型 Map —— 强类型枚举会让「新 OJ 要改 core」原样复活）；`contest_ref` 是**不透明字符串引用**（HOJ 数字串 / 其它 OJ 任意资源 ID，装得下 Hydro 的 hex ObjectId），空串 = 未配置；旧格式（hojUrl / contestId / lastOjType）经 serde 过渡字段在 `normalize_legacy_values` 一次性迁移、永不写回。OJ 切换走显式 `switch_oj` 命令（**整段持配置写事务锁**：校验已注册且在配置启用列表中 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 `oj.active` → 发布 `OjSwitched`），**不是 login 的副作用**；与 `update_config`/`reload` 共锁使并发切换串行落地，且保存与切换交错不会产出 `validate()` 拒绝的配置。切换的后果按端分工：Rust 侧由 `switch_oj` **显式调用** `contest/problem/submission` 三个 Service 的 `on_oj_switched()`（内存段同步清、磁盘段空间回收可后台），返回即已干净 —— 不再依赖 `OjSwitched` 订阅者（那会把切换正确性挂在事件投递时机上）；前端在**调用点**重置会话上下文（`resetSessionForOjSwitch`：领域状态清零；认证态经 `authStore.resetForOjSwitch()` 复位 `user`/`error`/`sessionResolved`；回登录页由守卫按新 OJ 会话文件恢复）—— 切换是前端发起的命令，发起方编排后果（与登出同款模式），不引入 Tauri 事件桥；各 OJ 会话文件按 id 隔离，切换保留旧 OJ 登录态（切回免登录），故前端重置不得走 `authStore.logout()`（会误删新 OJ 的会话文件）
 - **OJ 状态码表必须照抄服务端枚举，不得凭直觉推排**：HOJ 的 `Constants.Judge` 是**含负数**的码表（`-10` Not Submitted / `-4` Cancelled / `-3` PE / `-2` CE / `-1` WA / `0` Accepted / `1` TLE / … / `5` Pending / `6` Compiling / `7` Judging / `8` PA / `9` Submitting / `10` SF / `15` No Status），**不是「0 起顺排」**。曾按「0 开头即排队中」把它整体错位（`0→Pending`、`5→Accepted`、`13→PA`），后果是所有 AC 提交被显示为 Pending 并无限轮询（实测：提交 1166 服务端 `status:0` + `time:2ms`/`memory:532KB` 是 AC，界面却永远转圈），评测页状态筛选选「Accepted」实际筛的是 HOJ 的 Pending。终态判据与之绑定：**非终态 = 5/6/7/9**。`map_status` 与 `is_terminal_status` 两张表必须等价（有测试逐码锁定），前端 `STATUS_META`/`STATUS_OPTIONS`/`NON_TERMINAL_STATUSES` 同源。同一码表还驱动「我的题目状态」（服务端回的是评测码而非 0/1/2 三态，需归一）与 Hydro 的状态筛选翻译
 - **提交接口的题目标识各 OJ 不同，两个都要传**：`SubmissionProvider::submit` 同时收 `problem_id`（题目真实 ID：工作区隔离与状态查询的键）与 `display_id`（比赛内展示题号，如 `"A"`）。HOJ 的 `POST /submit-problem-judge` 收的是**展示题号** —— 服务端拿它查 `contest_problem.display_id`，查不到直接 NPE 返回 **HTTP 500**（实测传数字 pid 必 500，日志里十条一模一样的「HTTP 500」）；Hydro 的 `/p/{id}/submit` 收的则是真实 ID。由 Adapter 各取所需，不要在某一家里「猜」另一家的语义
 - **非 2xx 的响应体必须带进错误信息**：`infra/http.rs` 的非 raw 变体在状态码判定失败时读取响应体、压成单行并截断后附进 `AppError`（`HTTP 500 … | {"status":500,"msg":"…"}`）。此前直接丢弃响应体，调用方只拿到一句 `HTTP 500 Internal Server Error`，排障时完全看不出服务端说了什么。**401 例外**：该变体是会话守卫的判据，且服务端可能在 401 响应里回显凭证，故不附带正文
@@ -586,7 +578,7 @@ src/
 - **弹层一律经 `utils/focus-scope` 的 `vFocusScope` 指令获得键盘可访问性**：打开即聚焦首个可见控件、Tab 在作用域内循环、Esc 关闭、卸载把焦点归还给打开者。三条硬约定：① **`defaultPrevented` 必须短路** —— Monaco 用 Tab 做缩进，无条件拦截会让编辑器里按 Tab 变成跳焦点；② 可见性用 `getClientRects().length > 0` 判断（覆盖 `v-if` / `hidden` / 被父级裁切），而非 CSS 类名；③ 清理函数存 `WeakMap`，元素反复创建销毁不残留监听器。当前消费方：编辑器语言菜单与清空确认、编辑器设置弹层、快捷提交对话框、TopBar 的简介浮层与账号菜单
 - **语言菜单必须浮层化**：HOJ 的语言列表可能十几项，`absolute` 挂在按钮下方会被编辑器容器的 `overflow-hidden` 与快捷提交卡片的裁切吃掉（表现为菜单看不见 / 滚不动 / 选不到后面的语言）。`CodeEditor` 改为 **Teleport 到 `.contest-theme` 外壳 + `position: fixed` + 动态 `maxHeight`（≤320px）与上下翻转**，超出部分 `overflow-y-auto overscroll-contain` 滚动承接，`window resize` 重定位（分栏拖拽后不会错位）
 - **赛场视觉是一套独立令牌，入口页保持自己的气质**（PR #36）：`styles/contest.css` 在 `.contest-theme` 作用域下重写整套 CSS 变量（中性灰底 `#f7f6f1` / 近黑主色 `#2e3033` / 木色强调 `#8c6a43` / 低饱和语义色 / `--radius: 3px`）与通用类，并由 `App.vue` 按路由**同一判据**切换「CSS 变量」与「Naive UI `themeOverrides`」两套主题（比赛外壳内用赛场中性色，入口页用紫系）—— 两套主题若各自切换就会漂移。**响应式密度**由 `--ui-step = clamp(0px, min((100vw - 1280px)/320, (100vh - 800px)/140), 2px)` 统一驱动字号与间距：按可用**宽高共同**放大，最大化窗口下不会「字小得像没适配」。主视图页头统一由 `components/common/PageHeading.vue` 承担（编号 `01`–`05` 眉标 + 主标题 + 描述/操作插槽，样式外置到 contest.css），避免五个页面各自拼标题导致版式漂移；题面与公告正文用容器查询单位 `cqi` + `48em` 行宽封顶，分栏拖窄后字号跟随左栏宽度而不是视口
-- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG）。**字体例外且只走本地打包**：正文字体经 `@fontsource-variable/inter` / `jetbrains-mono` / `noto-sans-sc`（`global.css` 顶部 `@import`），登录页标题与等宽另用 `noto-serif-sc` / `roboto-mono`（`LoginView.vue` 局部引入）—— 全部随构建打进 dist，**不经 CDN**，离线可用；图标与状态符号仍是内联 SVG，不新增图标字体依赖。客户端界面只做浅色主题（dark UI 未实现，`theme.themeName` 恒为 `light`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）
+- **离线客户端约束**：不引入外部字体与图标字体（设计稿的 Google Fonts / Material Symbols 一律改内联 SVG）。**字体例外且只走本地打包**：正文字体经 `@fontsource-variable/inter` / `jetbrains-mono` / `noto-sans-sc`（`global.css` 顶部 `@import`），登录页标题与等宽另用 `noto-serif-sc` / `roboto-mono`（`LoginView.vue` 局部引入）—— 全部随构建打进 dist，**不经 CDN**，离线可用；图标与状态符号仍是内联 SVG，不新增图标字体依赖。客户端界面只做浅色主题（dark UI 未实现；旧版 `themeName` 字段已随 theme 域删除转为 legacy 迁移字段，见 `normalize_legacy_values`），**编辑器区域例外**：解题页编辑器设置可在 Monaco 内置 `vs` / `vs-dark` 间切换（落在 `theme.editorTheme`，两者互不干扰）。依赖例外有二：安全依赖 `dompurify`（`renderMarkdown` 出口统一消毒——题面/简介/公告等全部 `v-html` 内容来自 OJ 服务端，编辑者面较宽，不按「服务端完全可信」假设，见 P49/P63）与公式依赖 `katex` + `marked-katex-extension`（题面 LaTeX 数学公式渲染；字体随 katex 包本地打包进 dist、**不经 CDN**，离线安全）
 
 
 
@@ -594,7 +586,7 @@ src/
 
 当前交付最小可运行的外围 JavaScript 宿主：Manifest / API / 事件均为 v2，QuickJS 独立 worker，只读身份 / 比赛 / 本人提交历史，私有 JSON/CAS，受限 HTTP，纯文本通知，以及 start / stop / reload / resync 开发命令。未交付管理 UI、配置写入、安装/更新、业务插件和真实 OJ 联调。
 
-分层：`core/access` 提供显式 `AccessRevision`；`service` 提供只读查询并显式撤销；`plugin/api|permission|query|execution_api` 提供安全 DTO、授权交集、作用域句柄/游标和有限 JSON 桥；`plugin/host` 是唯一 `CoreEventBus` 插件消费者（128 有界队列）；`plugin/runtime|manager` 持有 QuickJS worker 与生命周期；`infra/fs_plugin_repo|plugin_storage|plugin_http|plugin_notification` 实现仓库、存储、网络、通知端口。依赖方向 `infra → plugin`，`core/service` 不依赖 plugin（组合根 `core/context.rs` 除外）。
+分层：`core/access` 提供显式 `AccessRevision`；`service` 提供只读查询并显式撤销；`plugin/api|permission|query|execution_api` 提供安全 DTO、授权交集、作用域句柄/游标和有限 JSON 桥；`plugin/host` 是唯一 `CoreEventBus` 插件消费者（128 有界队列）；`plugin/runtime|manager` 持有 QuickJS worker 与生命周期；`infra/fs_plugin_repo|plugin_storage|plugin_http` 实现仓库、存储、网络端口（通知端口实现在组合根 `main.rs`，infra 不触框架）。依赖方向 `infra → plugin`，`core/service` 不依赖 plugin（组合根 `core/context.rs` 除外）。
 
 关键不变量：
 

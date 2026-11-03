@@ -51,13 +51,11 @@ fn new_loads_existing_config() {
 
     // save a custom config to disk before creating the service
     let mut custom = AppConfig::default();
-    custom.theme.theme_name = "light".into();
     custom.editor.font_size = 18;
     repo.save_config(&custom).unwrap();
 
     let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()), Arc::default());
     let loaded = service.get();
-    assert_eq!(loaded.theme.theme_name, "light");
     assert_eq!(loaded.editor.font_size, 18);
 }
 
@@ -66,7 +64,6 @@ fn new_uses_defaults_when_no_config() {
     let (service, _storage) = test_config_service("defaults");
 
     let cfg = service.get();
-    assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.editor.font_size, 14);
     assert_eq!(cfg.editor.default_language, "C++");
     // OJ 选择是应用级状态（oj.active），默认 HOJ；实例清单默认单 HOJ
@@ -95,7 +92,9 @@ fn new_normalizes_legacy_config_from_disk() {
     let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()), Arc::default());
     let cfg = service.get();
     assert_eq!(cfg.editor.default_language, "C++");
-    assert_eq!(cfg.theme.theme_name, "light");
+    // themeName=dark + editorTheme=vs-dark 是旧切换器的成对写入：编辑器主题复位，
+    // legacy 字段迁移后不残留（skip_serializing，下次落盘自然收敛）
+    assert_eq!(cfg.theme.legacy_theme_name, None);
     assert_eq!(cfg.theme.editor_theme, "vs");
     assert_eq!(cfg.layout.split_ratio, 0.48);
 }
@@ -110,7 +109,6 @@ fn update_persists_changes() {
         let service = ConfigService::new(repo, Arc::new(CoreEventBus::new()), Arc::default());
         service
             .update(|cfg| {
-                cfg.theme.theme_name = "light".into();
                 cfg.editor.tab_size = 2;
             })
             .unwrap();
@@ -120,7 +118,6 @@ fn update_persists_changes() {
     let repo2 = Arc::new(FsConfigRepository::new(Arc::clone(&storage), "config.json"));
     let service2 = ConfigService::new(repo2, Arc::new(CoreEventBus::new()), Arc::default());
     let cfg = service2.get();
-    assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.editor.tab_size, 2);
 }
 
@@ -129,20 +126,20 @@ fn reload_from_disk_overwrites_memory() {
     let (service, storage) = test_config_service("reload");
 
     // service loads defaults
-    assert_eq!(service.get().theme.theme_name, "light");
+    assert_eq!(service.get().editor.font_size, 14);
 
     // modify config directly on disk, bypassing the service
     let repo = FsConfigRepository::new(Arc::clone(&storage), "config.json");
     let mut disk_cfg = AppConfig::default();
-    disk_cfg.theme.theme_name = "high-contrast".into();
+    disk_cfg.theme.editor_theme = "vs-dark".into();
     disk_cfg.layout.sidebar_width = 320;
     repo.save_config(&disk_cfg).unwrap();
 
     // reload should overwrite in-memory config from disk
     let reloaded = service.reload().unwrap();
-    assert_eq!(reloaded.theme.theme_name, "high-contrast");
+    assert_eq!(reloaded.theme.editor_theme, "vs-dark");
     assert_eq!(reloaded.layout.sidebar_width, 320);
-    assert_eq!(service.get().theme.theme_name, "high-contrast");
+    assert_eq!(service.get().theme.editor_theme, "vs-dark");
 }
 
 #[test]
@@ -164,7 +161,7 @@ fn reload_publishes_config_changed_event() {
 
 /// `update` 也必须发布 `ConfigChanged`（2026-09-21 复核发现的生产断链）。
 ///
-/// 生产链路的配置变更入口是 `update`（`update_config` 命令、主题切换、`switch_oj`
+/// 生产链路的配置变更入口是 `update`（`update_config` 命令、`switch_oj`
 /// 的持久化都走它），而 `reload_config` 命令在前端**没有任何调用方**（只有 spec 的
 /// mock）。只在 `reload` 里发布事件，观察者永远等不到。
 ///

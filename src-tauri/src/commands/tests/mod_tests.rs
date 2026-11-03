@@ -204,7 +204,9 @@ fn run_purge_skips_unselected_items() {
 
 // ── 数据目录：VO 线上形状锁定 ──
 
-use super::super::commands::data_dir_cmd::{DataDirChange, DataDirInfo};
+use super::super::commands::data_dir_cmd::{
+    degraded_pointer_warning, pointer_in_temp, DataDirChange, DataDirInfo,
+};
 use crate::infra::data_dir::DataDirSource;
 
 /// `get_data_dir` 返回值的 JSON 形状（前端按 camelCase 键读取）。
@@ -215,6 +217,7 @@ fn data_dir_info_serializes_camel_case() {
         default_dir: r"C:\Users\u\AppData\Local\com.hinina.app".into(),
         source: DataDirSource::Default,
         restart_required: false,
+        pointer_in_temp: false,
     };
     let json = serde_json::to_value(&info).expect("序列化失败");
     assert_eq!(
@@ -226,6 +229,8 @@ fn data_dir_info_serializes_camel_case() {
         r"C:\Users\u\AppData\Local\com.hinina.app"
     );
     assert_eq!(json["restartRequired"], false);
+    // 指针落在临时目录的告警与 source 正交：降级 + 自定义目录时 source=custom
+    assert_eq!(json["pointerInTemp"], false);
     // source 是枚举字符串：前端据此区分「默认 / 用户指定 / 回退临时目录」
     assert_eq!(json["source"], "default");
 }
@@ -245,12 +250,36 @@ fn data_dir_change_serializes_camel_case_and_nullable_migrate_from() {
         target_dir: r"D:\hinina-data".into(),
         migrate_from: None,
         restart_required: true,
+        warning: None,
     };
     let json = serde_json::to_value(&change).expect("序列化失败");
     assert_eq!(json["targetDir"], r"D:\hinina-data");
     assert_eq!(json["restartRequired"], true);
     // 不迁移时为 null（前端据此不显示「将从 X 迁移」）
     assert!(json["migrateFrom"].is_null());
+    // 普通模式无附加风险提示
+    assert!(json["warning"].is_null());
+
+    // 降级模式：提示随返回值下发，前端必须替换成功文案
+    let degraded = DataDirChange {
+        warning: Some("位置指针也保存在临时目录".into()),
+        ..change
+    };
+    assert_eq!(
+        serde_json::to_value(&degraded).unwrap()["warning"],
+        "位置指针也保存在临时目录"
+    );
+}
+
+/// 降级判据看**指针所在处**（`default_data_dir == %TEMP%/hinina`），不是 source：
+/// 降级 + 已保存的自定义目录生效时 source 是 Custom，但指针仍在临时目录。
+#[test]
+fn degraded_pointer_warning_detects_temp_fallback_location() {
+    let legacy = crate::infra::data_dir::legacy_dir();
+    assert!(pointer_in_temp(&legacy));
+    assert!(degraded_pointer_warning(&legacy).is_some());
+    assert!(!pointer_in_temp(std::path::Path::new(r"D:\hinina-data")));
+    assert!(degraded_pointer_warning(std::path::Path::new(r"D:\hinina-data")).is_none());
 }
 
 // ── 恢复默认数据目录：校验决策（HIGH 缺陷曾漏网的地方） ──

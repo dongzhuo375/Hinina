@@ -19,7 +19,7 @@
 
 ## 被依赖
 
-- `main.rs` 的 `generate_handler!`（命令清单首位，47 个 Command 之一）
+- `main.rs` 的 `generate_handler!`（命令清单首位，注册命令之一）
 - 前端 `src/bridge/system.bridge.ts` 的 `getLaunchFlags()`（唯一消费方，经 `system.service` 的 memoize 供守卫与设置页共用）
 
 ## 逻辑流程

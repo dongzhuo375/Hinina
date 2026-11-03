@@ -12,7 +12,6 @@
 // 不得重新包装成 `AppError::Submission` —— 变体是前端 `sessionGuard` 判定会话失效的依据
 // （见 `core/error.rs`）。token 过期时提交若被改写成 Submission 变体，
 // 选手只会看到一条错误文案而不会被带回登录页，反复重试也全部失败。
-pub mod error;
 pub mod snapshot;
 
 use std::sync::Arc;

@@ -48,7 +48,7 @@ font_size/tab_size 钳制）。前端消费方一律 import 本模块常量，�
 
 - **主题必须归一**：`monaco.editor.setTheme` 收到未知主题名会静默保留上一个主题，
   配置与界面就此不一致且用户无从察觉 —— 归一放在 service 入口，弹层不承担校验。
-- **`vs-dark` 只影响编辑器**：`theme.themeName` 恒为 `light`（整机深色 UI 未实现），
+- **`vs-dark` 只影响编辑器**：整机深色 UI 未实现（旧版 `themeName` 字段已删除，仅存 Rust 侧 legacy 迁移），
   深色偏好落在 `theme.editorTheme`，两条配置互不干扰。
 - **存储域 ≠ 候选集**：Tab 宽度存储域是 1–8（与 Rust `sanitize` 同域，手改配置的 6 合法），
   候选档位只是弹层/设置页的快捷按钮 —— 弹层对非候选值补一枚档位呈现（见

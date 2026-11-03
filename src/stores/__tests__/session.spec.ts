@@ -69,13 +69,16 @@ describe('resetSessionForOjSwitch — OJ 切换的会话上下文重置', () => 
     seedOldOjState()
   })
 
-  it('清空认证态并强制下次导航重新恢复会话（sessionResolved = false）', () => {
+  it('只清理领域状态，认证态不动（认证复位归 authStore.resetForOjSwitch，消除模块环）', () => {
+    // seedOldOjState 已预置 user 与 sessionResolved
+    const auth = useAuthStore()
+
     resetSessionForOjSwitch()
 
-    const auth = useAuthStore()
-    expect(auth.user).toBeNull()
-    expect(auth.error).toBeNull()
-    expect(auth.sessionResolved).toBe(false)
+    // 解耦回归：resetSessionForOjSwitch 若再碰认证态，说明 session ↔ authStore 的
+    // 模块环回来了（认证复位由 useSettingsForm 显式调用 authStore.resetForOjSwitch）
+    expect(auth.user).not.toBeNull()
+    expect(auth.sessionResolved).toBe(true)
   })
 
   it('清空旧 OJ 的领域状态（比赛/题目状态/提交记录）', () => {

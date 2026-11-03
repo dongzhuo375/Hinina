@@ -4,21 +4,23 @@
 
 // Hinina 入口点
 //
-// 初始化顺序（实际执行在 `AppContext::init`，此处为速查，改动请同步 core/context.md）：
-//   0. 数据目录         — `infra::data_dir::prepare_startup`：解析 base_dir + 一次性迁移
+// 初始化顺序（1–12 与 `core/context.rs` 的步骤编号一致，改动请同步 core/context.md；
+// 0 与 13 是本文件相对 init 的前置/收尾步骤）：
+//   0. 数据目录         — `infra::data_dir::prepare_startup_with_default_error`：解析 base_dir + 一次性迁移
 //                         （**必须最先**，日志一旦打开就会占住旧目录）
 //   1. Logger           — 最先初始化，后续步骤才能记录日志
-//   2. Storage          — 文件系统根目录（base_dir），配置、会话与工作区都依赖它
-//   3. CoreEventBus     — 进程内事实总线（`tokio::sync::broadcast` 封装）
-//   4. SessionRepository— 会话持久化（AuthService 与 Provider 凭证轮换共用）
-//   5. ConfigService    — 经 FsConfigRepository 读 config.json，决定 OJ 基址等后续行为
-//   6. HttpClient       — Reqwest 客户端
-//   7. ProviderRegistry — 注册各 OJ Adapter（默认 HOJ，基址取自配置）
-//   8. WorkspaceManager — 工作区生命周期（按需创建/恢复，启动时不扫描磁盘）
-//   9. Service 层       — theme / auth / contest / problem / submission
-//  10. PluginHost       — 插件事件边界（只持总线句柄，消费者在下面启动）
-//  11. AppContext       — 装配上述所有
-//  12. Tauri App        — manage(AppContext) + 启动消费者 + generate_handler! 注册 Command
+//   2. 确保 base_dir    — `create_dir_all`
+//   3. Storage          — 文件系统根目录（base_dir），配置、会话与工作区都依赖它
+//   4. CoreEventBus     — 进程内事实总线（`tokio::sync::broadcast` 封装）
+//   5. SessionRepository— 会话持久化（AuthService 与 Provider 凭证轮换共用）
+//   6. ConfigService    — 经 FsConfigRepository 读 config.json，决定 OJ 基址等后续行为
+//   7. HttpClient       — Reqwest 客户端（超时取自配置）
+//   8. ProviderRegistry — 注册各 OJ Adapter（默认 HOJ，基址取自配置）
+//   9. WorkspaceManager — 工作区生命周期（按需创建/恢复，启动时不扫描磁盘）
+//  10. Service 层       — auth / contest / problem / submission
+//  11. PluginHost       — 插件事件边界（只持总线句柄，消费者在下面启动）
+//  12. AppContext       — 装配上述所有
+//  13. Tauri App        — manage(AppContext) + 启动消费者 + generate_handler! 注册 Command
 //
 // 为什么整个初始化在 `.setup()` 里而不是 `main()`：只有 setup 能拿到 AppHandle，
 // 也就只有那里能解析 `app_local_data_dir()`（数据根目录）。
@@ -35,7 +37,46 @@ use hinina_lib::core::event::core_event::CoreEvent;
 use hinina_lib::core::event::core_event_bus::CoreEventBus;
 use hinina_lib::infra::audit::spawn_audit_consumer;
 use hinina_lib::infra::data_dir::{self, DataDirPlan, DataDirSource, MigrateOutcome};
+use hinina_lib::infra::plugin_diagnostics;
 use hinina_lib::infra::startup_dialog;
+use hinina_lib::plugin::{
+    api::notification::{validate_message, PluginNotificationLevel},
+    api::{PluginError, PluginResult},
+    execution_api::NotificationOutput,
+};
+
+/// 插件通知的前端出口（组合根唯一的前端通知路径）。
+///
+/// 原住在 `infra::plugin_notification` —— 那让它成为 infra 层**唯一的**框架
+/// （tauri）依赖，与「infra 传输无关」的红线相抵（分层审计 F2）。端口
+/// `NotificationOutput`（`plugin::execution_api`）本身是干净的，脏的只是
+/// 实现的位置：本类型只被 main.rs 的 `set_output` 使用，理应与前端事件桥
+/// 同住组合根。宿主级通知失败经 `plugin_diagnostics::failure` 走统一形状。
+struct TauriPluginNotifications(tauri::AppHandle);
+
+impl NotificationOutput for TauriPluginNotifications {
+    fn emit(
+        &self,
+        plugin_id: &str,
+        level: PluginNotificationLevel,
+        message: &str,
+    ) -> PluginResult<()> {
+        validate_message(message)?;
+        if self.0.webview_windows().is_empty() {
+            plugin_diagnostics::failure(Some(plugin_id), "notification.emit", "no_window");
+            return Err(PluginError::Unavailable);
+        }
+        self.0
+            .emit(
+                "plugin-notification",
+                serde_json::json!({"pluginId":plugin_id,"level":level,"message":message}),
+            )
+            .map_err(|_| {
+                plugin_diagnostics::failure(Some(plugin_id), "notification.emit", "emit_failed");
+                PluginError::Unavailable
+            })
+    }
+}
 
 /// 工作区落盘事件的前端通道名（与 `src/bridge/workspace.bridge.ts` 的监听一致）。
 const WORKSPACE_SAVED_EVENT: &str = "workspace-saved";
@@ -154,11 +195,18 @@ fn emit_or_warn(app: &tauri::AppHandle, channel: &str, payload: serde_json::Valu
 
 /// 汇报数据目录方案与迁移结果（在日志就绪后调用）。
 ///
-/// 三件事必须说清楚，因为它们都影响「我的数据到底在哪、会不会丢」：
+/// 四件事必须说清楚，因为它们都影响「我的数据到底在哪、会不会丢」：
+/// - **订阅器就绪前的诊断**（指针解析失败、候选目录因何不可用、迁移条目失败等）
+///   → `replay` 重放（`prepare_startup` 已把迁移诊断按发生顺序并入
+///   `plan.warnings`），这是排障者回答「为什么我的自定义目录没生效」的唯一线索；
 /// - **回退到临时目录** → `error` 级告警（数据随时可能被系统清理，这是本次修复要消除的状态）；
 /// - **迁移有失败项** → `error` 级告警并列出条目（下次启动会自动重试）；
 /// - **迁移成功** → `info` 记录去向。
 fn report_data_dir(plan: &DataDirPlan, migration: &MigrateOutcome) {
+    data_dir::replay(&plan.warnings);
+    // 启动路径的迁移诊断已在 plan.warnings 中按序重放；这里兼容直接构造
+    // MigrateOutcome 的调用方（当前为空）
+    data_dir::replay(&migration.diagnostics);
     match plan.source {
         DataDirSource::Default => {
             tracing::info!(dir = %plan.base_dir.display(), "数据目录（默认）");
@@ -236,22 +284,34 @@ fn main() {
         .setup(move |app| {
             // AppContext 必须在这里初始化而不是 main()：只有 setup 能拿到 AppHandle，
             // 也就只有这里能解析 `app_local_data_dir()`。
-            let default_dir = app.path().app_local_data_dir().unwrap_or_else(|e| {
-                // 拿不到默认目录时退到临时目录，让 resolve 继续走它的回退链。
-                // release 是 GUI 子系统、stderr 句柄无效：写失败必须忽略
-                // （`eprintln!` 在写失败时会 panic，让启动直接崩掉）
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "解析 app_local_data_dir 失败，回退临时目录: {e}"
-                );
-                data_dir::legacy_dir()
-            });
+            //
+            // 解析失败**不静默顶替**：把原因交给 prepare_startup 显式降级为
+            // FallbackTemp（临时目录可用也不会被误报成 Default，强告警不丢）。
+            // release 是 GUI 子系统、stderr 句柄无效：写失败必须忽略
+            // （`eprintln!` 在写失败时会 panic，让启动直接崩掉）。
+            let (default_dir, default_dir_error) = match app.path().app_local_data_dir() {
+                Ok(dir) => (dir, None),
+                Err(e) => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "解析 app_local_data_dir 失败，回退临时目录: {e}"
+                    );
+                    (
+                        data_dir::legacy_dir(),
+                        Some(format!("app_local_data_dir 解析失败: {e}")),
+                    )
+                }
+            };
             let legacy = data_dir::legacy_dir();
 
             // ① 一次性数据迁移必须在 `AppContext::init` **之前**：init 会打开日志文件，
             //    之后旧目录里的 logs/ 就被占住（虽然迁移清单不含 logs，但把顺序固定下来
             //    能让「谁在什么时候动文件」保持可推理）。
-            let (plan, migration) = data_dir::prepare_startup(&default_dir, &legacy);
+            let (plan, migration) = data_dir::prepare_startup_with_default_error(
+                default_dir_error.as_deref(),
+                &default_dir,
+                &legacy,
+            );
 
             let ctx = rt
                 .block_on(AppContext::init(
@@ -259,23 +319,34 @@ fn main() {
                     plan.default_dir.clone(),
                     plan.source,
                 ))
-                .unwrap_or_else(|error| panic!("无法初始化应用数据：{}", error.user_message()));
+                .unwrap_or_else(|error| {
+                    // init 失败仍走 panic（钩子落盘 + 启动错误框语义不变），但**先**
+                    // 汇报数据目录诊断：Logger::init 是 init 的第 1 步且不失败，走到
+                    // 这里订阅器基本已就绪，汇报能落日志——失败路径不能把「为什么」
+                    // 一起带走（若未来 init 在 Logger 之前就可能失败，此调用落不到
+                    // 任何输出，无害）
+                    report_data_dir(&plan, &migration);
+                    panic!("无法初始化应用数据：{}", error.user_message())
+                });
 
             // ② 迁移结果与数据目录来源必须**在日志就绪后**立刻汇报
             report_data_dir(&plan, &migration);
 
-            ctx.plugin_manager.set_output(std::sync::Arc::new(
-                hinina_lib::infra::plugin_notification::TauriPluginNotifications(
+            ctx.plugin_manager
+                .set_output(std::sync::Arc::new(TauriPluginNotifications(
                     app.handle().clone(),
-                ),
-            ));
+                )));
             let plugins = ctx.plugin_manager.clone();
             app.manage(ctx);
             // ③ 消费者在 AppContext 就绪后启动：它们只观察事实，不参与任何业务动作
             spawn_event_consumers(app.handle());
             tauri::async_runtime::spawn(async move {
-                if plugins.autostart().await.is_err() {
-                    tracing::warn!("Plugin configuration unavailable; automatic loading skipped");
+                if let Err(error) = plugins.autostart().await {
+                    // 与上方 host.start 同一形状：插件域宿主级操作，无具体插件可归属
+                    // （plugin_id/plugin_version 留空）；error 已是白名单化的 PluginError
+                    tracing::warn!(plugin_id = "", plugin_version = "", runtime = "js", event = "",
+                        operation = "host.autostart", permission = "", request_id = "", error = ?error,
+                        "插件配置不可用，自动加载已跳过");
                 }
             });
             Ok(())
@@ -293,7 +364,6 @@ fn main() {
             commands::auth_cmd::validate_session,
             commands::oj_cmd::switch_oj,
             commands::contest_cmd::list_contests,
-            commands::contest_cmd::select_contest,
             commands::contest_cmd::load_configured_contest,
             commands::contest_cmd::get_contest_rank,
             commands::contest_cmd::list_contest_announcements,
@@ -309,8 +379,6 @@ fn main() {
             commands::submission_cmd::get_submission_cases,
             commands::workspace_cmd::load_workspace,
             commands::workspace_cmd::save_workspace,
-            commands::workspace_cmd::switch_workspace,
-            commands::workspace_cmd::current_workspace,
             commands::workspace_cmd::update_workspace_file,
             commands::workspace_cmd::set_workspace_language,
             commands::workspace_cmd::delete_workspace_file,
@@ -326,8 +394,6 @@ fn main() {
             commands::data_dir_cmd::set_data_dir,
             commands::data_dir_cmd::reset_data_dir,
             commands::data_dir_cmd::pick_data_dir,
-            commands::theme_cmd::get_theme,
-            commands::theme_cmd::set_theme,
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|error| panic!("无法启动桌面应用：{error}"));

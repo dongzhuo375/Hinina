@@ -15,6 +15,17 @@ const log = createLogger('authStore')
  */
 export const SESSION_INVALID_MESSAGE = '登录状态已失效（该账号可能已在其他设备登录），请重新登录'
 
+/**
+ * 认证代际：登录 / 登出 / OJ 切换 / 发起会话检查都会递增。
+ *
+ * `checkSession` 在 await 前捕获代际、写回前比对——`resetForOjSwitch()` 只清
+ * 状态并不取消已发出的 IPC，旧 OJ 的迟到响应若直接写回，会把旧用户标成
+ * 「已在新 OJ 上解析」，路由守卫与登录页随后都跳过检查，界面一直显示旧用户，
+ * 直到某个业务请求 401（评审：OJ 切换认证竞态）。登录/登出同样递增，避免
+ * 在途检查覆盖刚完成的状态转换；每个新检查也递增，并发检查以最后发起的为准。
+ */
+let authEpoch = 0
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null as User | null,
@@ -33,12 +44,30 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
-    /** 登录并更新状态 */
+    /**
+     * 登录并更新状态。
+     *
+     * 认证代际机制的最后一个缺口补齐：`checkSession` / `validateSession` /
+     * `resetForOjSwitch` 都已做「await 前捕获代际、写回前比对」，唯独 login 在
+     * await 后无条件写 `user` —— 登录请求在途时发生 OJ 切换/登出（代际递增），
+     * 旧上下文发起的登录响应会把 `user` 写进新会话，直到下一次 401 才自愈。
+     */
     async login(username: string, password: string) {
+      // 作废在途的会话检查；成功后再递增一次，避免登录期间发起的检查覆盖结果
+      authEpoch += 1
       this.isLoading = true
       this.error = null
+      // 代际在 await 前捕获（与 checkSession/validateSession 同口径）
+      const epochAtStart = authEpoch
       try {
-        this.user = await authService.login(username, password)
+        const user = await authService.login(username, password)
+        if (epochAtStart !== authEpoch) {
+          // 会话上下文已切换：丢弃迟到结果，给出可执行反馈而非静默吞掉。
+          // 登录表单可能已不在屏上，error 写入 store 是无害兜底
+          throw new Error('登录已被中断，请重试')
+        }
+        authEpoch += 1
+        this.user = user
         this.sessionResolved = true
       } catch (e) {
         this.error = errorMessage(e, '登录失败')
@@ -56,6 +85,8 @@ export const useAuthStore = defineStore('auth', {
      * 使下一次进入受保护路由时重新向后端校验会话。
      */
     async logout() {
+      // 作废在途的会话检查：登出期间的迟到响应不得把用户重新写回来
+      authEpoch += 1
       this.isLoading = true
       this.error = null
       let backendCleared = true
@@ -66,6 +97,8 @@ export const useAuthStore = defineStore('auth', {
         this.error = errorMessage(e, '登出失败')
         log.error('后端登出失败，已强制清理本地会话:', e)
       }
+      // 清理提交前再递增一次：登出期间发起的检查同样作废
+      authEpoch += 1
       this.user = null
       this.sessionResolved = backendCleared
       clearDomainState()
@@ -79,7 +112,11 @@ export const useAuthStore = defineStore('auth', {
      * 赛前把选手误踢回登录页的代价，远大于多等一轮校验。
      */
     async validateSession(): Promise<SessionValidity> {
+      const epoch = authEpoch
       const validity = await authService.validateSession()
+      // 期间发生登录/登出/OJ 切换/新检查：这是旧上下文的结果，不得据此清理
+      // 新会话（invalidateSession 会走 logout，可能误删新 OJ 的会话文件）
+      if (epoch !== authEpoch) return 'unknown'
       if (validity === 'invalid' && this.isLoggedIn) {
         await this.invalidateSession(SESSION_INVALID_MESSAGE)
       }
@@ -100,25 +137,48 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /**
+     * OJ 切换的认证态复位（调用点：useSettingsForm 切换成功后，紧随
+     * `resetSessionForOjSwitch()`）。区别于 `logout` 的三点：**不调后端**
+     * （Registry 已切到新 OJ，后端 logout 会拿新 OJ 的无凭证会话打它的
+     * 登出端点，还会误删新 OJ 自己的会话文件）；`sessionResolved` 复位为
+     * false，下次导航由路由守卫 `checkSession`（后端读新 OJ 的会话文件）
+     * 自动恢复 —— 之前在该 OJ 登录过则无感续用，否则落回登录表单；
+     * 各 OJ 的会话文件按 id 隔离，**旧 OJ 的登录态保留**：切回去仍免登录。
+     */
+    resetForOjSwitch() {
+      // 作废在途的 checkSession：旧 OJ 的迟到响应不得写回旧用户（认证竞态）
+      authEpoch += 1
+      this.user = null
+      this.error = null
+      this.sessionResolved = false
+      this.isLoading = false
+    },
+
+    /**
      * 检查后端会话有效性。
      *
      * 只有成功取得用户或后端明确返回 null 才算已确认；传输异常保留原用户并
      * 保持 unresolved，后续路由守卫/登录页挂载可重试。调用方仍只收到 boolean。
      */
     async checkSession(): Promise<boolean> {
+      // 新检查成为「最新」：更早发起的检查在写回前会见代际不符而放弃
+      const epoch = ++authEpoch
       this.isLoading = true
       this.error = null
       try {
         const user = await authService.checkSession()
+        // 登录/登出/OJ 切换/更新的检查已发生：这份结果属于旧上下文，丢弃
+        if (epoch !== authEpoch) return false
         this.user = user
         this.sessionResolved = true
         return user !== null
       } catch (e) {
+        if (epoch !== authEpoch) return false
         this.sessionResolved = false
         this.error = errorMessage(e, '会话检查失败')
         return false
       } finally {
-        this.isLoading = false
+        if (epoch === authEpoch) this.isLoading = false
       }
     },
   },

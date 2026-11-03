@@ -169,3 +169,23 @@ fn invalid_unrelated_approvals_do_not_block_loading_a_valid_plugin() {
         Err(PluginError::InvalidInput)
     ));
 }
+
+/// minAppVersion 来自插件可控的磁盘清单：非法版本串必须落错（InvalidInput）
+/// 而不是 panic 宿主。首道防线是 load 路径的 `manifest.validate()`，
+/// 本用例锁定可观测行为，不区分哪一层拒绝。
+#[test]
+fn malformed_min_app_version_is_rejected_not_panic() {
+    let dir = crate::test_support::TempDir::unique("plugin-repo-badsemver");
+    let repo = setup(&dir);
+    let mut m = manifest("test.repo");
+    m.min_app_version = Some("not-a-version".into());
+    std::fs::write(
+        dir.join("plugins/test.repo/manifest.json"),
+        serde_json::to_vec(&m).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        repo.load("test.repo"),
+        Err(PluginError::InvalidInput)
+    ));
+}

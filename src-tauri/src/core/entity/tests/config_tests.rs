@@ -9,8 +9,6 @@ fn defaults_are_in_value_domain() {
     let cfg = AppConfig::default();
     // HOJ 语言显示名（与提交契约一致），而不是 Monaco id "cpp"
     assert_eq!(cfg.editor.default_language, "C++");
-    // 深色主题尚未实现，默认必须是浅色
-    assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.theme.editor_theme, "vs");
     assert_eq!(cfg.layout.split_ratio, 0.48);
     // 题面缓存默认开启（关闭只影响性能，不影响正确性）
@@ -62,23 +60,23 @@ fn normalize_falls_back_to_default_language_for_empty() {
 }
 
 #[test]
-fn normalize_maps_dark_theme_to_light() {
+fn normalize_resets_editor_theme_paired_with_legacy_dark_theme() {
+    // 旧版切换器成对写入 themeName=dark + editorTheme=vs-dark（dark 界面从未实现）：
+    // 读取时把被它带歪的编辑器主题复位，legacy 字段消费后清空
     let mut cfg = AppConfig::default();
-    cfg.theme.theme_name = "dark".into();
+    cfg.theme.legacy_theme_name = Some("dark".into());
     cfg.theme.editor_theme = "vs-dark".into();
     normalize_legacy_values(&mut cfg);
-    // 整机深色主题未实现：theme_name 与随它一并写入的编辑器主题一起归位
-    assert_eq!(cfg.theme.theme_name, "light");
+    assert_eq!(cfg.theme.legacy_theme_name, None, "legacy 字段一次性消费");
     assert_eq!(cfg.theme.editor_theme, "vs");
 }
 
 #[test]
 fn normalize_keeps_light_theme_untouched() {
     let mut cfg = AppConfig::default();
-    cfg.theme.theme_name = "light".into();
+    cfg.theme.legacy_theme_name = Some("light".into());
     cfg.theme.editor_theme = "vs".into();
     normalize_legacy_values(&mut cfg);
-    assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.theme.editor_theme, "vs");
 }
 
@@ -87,10 +85,9 @@ fn normalize_keeps_user_chosen_dark_editor_theme() {
     // 编辑器主题是解题页可选项：浅色界面 + 深色编辑器是**合法组合**，
     // 归一不得把用户选择改回浅色（曾无条件重置 vs-dark）
     let mut cfg = AppConfig::default();
-    cfg.theme.theme_name = "light".into();
+    cfg.theme.legacy_theme_name = Some("light".into());
     cfg.theme.editor_theme = "vs-dark".into();
     normalize_legacy_values(&mut cfg);
-    assert_eq!(cfg.theme.theme_name, "light");
     assert_eq!(cfg.theme.editor_theme, "vs-dark");
 }
 
@@ -116,14 +113,15 @@ fn normalize_is_idempotent() {
     // 归一后的配置再过一遍不应有任何变化（每次加载都会执行）
     let mut cfg = AppConfig::default();
     cfg.editor.default_language = "cpp".into();
-    cfg.theme.theme_name = "dark".into();
+    cfg.theme.legacy_theme_name = Some("dark".into());
     cfg.theme.editor_theme = "vs-dark".into();
     cfg.layout.split_ratio = 0.45;
     normalize_legacy_values(&mut cfg);
     let once = cfg.clone();
     normalize_legacy_values(&mut cfg);
     assert_eq!(cfg.editor.default_language, once.editor.default_language);
-    assert_eq!(cfg.theme.theme_name, once.theme.theme_name);
+    // legacy_theme_name 被 take 一次性消费后为 None，幂等性对 editor_theme 成立
+    assert_eq!(cfg.theme.legacy_theme_name, once.theme.legacy_theme_name);
     assert_eq!(cfg.theme.editor_theme, once.theme.editor_theme);
     assert_eq!(cfg.layout.split_ratio, once.layout.split_ratio);
 }
@@ -139,7 +137,7 @@ fn normalize_fixes_legacy_json_from_disk() {
     let mut cfg: AppConfig = serde_json::from_str(legacy).expect("旧配置应能解析");
     normalize_legacy_values(&mut cfg);
     assert_eq!(cfg.editor.default_language, "C++");
-    assert_eq!(cfg.theme.theme_name, "light");
+    assert_eq!(cfg.theme.legacy_theme_name, None, "legacy 字段迁移后不残留");
     assert_eq!(cfg.theme.editor_theme, "vs");
     assert_eq!(cfg.layout.split_ratio, 0.48);
 }

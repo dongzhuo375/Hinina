@@ -258,8 +258,8 @@ export class ConfigService {
    * 保存编辑器偏好（字号 / Tab 宽度 / 编辑器主题）—— 解题页编辑器设置弹层的落盘入口。
    *
    * 只写传入的字段，其余配置经 `updateConfig` 读-改-写保留。编辑器主题落在
-   * `theme.editorTheme`（Monaco 主题），**不触碰 `theme.themeName`**：
-   * 客户端界面仍只有浅色，深色只作用于编辑器区域。
+   * `theme.editorTheme`（Monaco 主题）：客户端界面仍只有浅色，深色只作用于
+   * 编辑器区域（旧版整机主题字段 themeName 已随 ThemeService 删除）。
    */
   async updateEditorPrefs(patch: Partial<EditorPrefs>): Promise<void> {
     await this.updateConfig((draft) => {

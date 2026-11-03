@@ -28,6 +28,7 @@ import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { Contest } from '@/types/contest'
+import type { SessionValidity } from '@/types/user'
 import type { User } from '@/types/user'
 
 const user: User = { id: 'u1', username: 'team01', token: 'tk' }
@@ -91,6 +92,53 @@ describe('login', () => {
     expect(auth.user).toBeNull()
     expect(auth.error).toBe('登录失败: 密码错误')
     expect(auth.sessionResolved).toBe(false)
+    expect(auth.isLoading).toBe(false)
+  })
+})
+
+describe('resetForOjSwitch', () => {
+  it('只复位认证态并强制下次导航重新恢复会话，不触碰领域状态与后端', () => {
+    const auth = useAuthStore()
+    auth.user = user
+    auth.error = '上一次失败'
+    auth.sessionResolved = true
+    seedDomainState()
+
+    auth.resetForOjSwitch()
+
+    expect(auth.user).toBeNull()
+    expect(auth.error).toBeNull()
+    expect(auth.sessionResolved).toBe(false)
+    // 与 logout 的区别：领域状态由 resetSessionForOjSwitch 负责，这里不碰
+    expect(useContestStore().contest).not.toBeNull()
+    expect(useSubmissionStore().submissions).not.toHaveLength(0)
+    // 与 logout 的区别：不调后端（Registry 已切换，logout 会误删新 OJ 的会话文件）
+    expect(authService.logout).not.toHaveBeenCalled()
+    expect(authService.checkSession).not.toHaveBeenCalled()
+  })
+})
+
+describe('login — 认证代际守卫', () => {
+  it('登录在途发生 OJ 切换（authEpoch 递增）时丢弃迟到响应并给出中断反馈', async () => {
+    let resolveLogin: (u: User) => void = () => {}
+    authService.login.mockImplementation(
+      () =>
+        new Promise<User>((resolve) => {
+          resolveLogin = resolve
+        }),
+    )
+    const auth = useAuthStore()
+    const pending = auth.login('team01', 'pw-not-real')
+    // 请求在途：OJ 切换（resetForOjSwitch 递增 authEpoch 并清空认证态）
+    auth.resetForOjSwitch()
+    resolveLogin(user)
+
+    await expect(pending).rejects.toThrow('登录已被中断')
+    // 迟到的 user 不得写回新会话
+    expect(auth.user).toBeNull()
+    expect(auth.sessionResolved).toBe(false)
+    expect(auth.error).toContain('登录已被中断')
+    // isLoading 正常收尾
     expect(auth.isLoading).toBe(false)
   })
 })
@@ -163,6 +211,43 @@ describe('checkSession', () => {
     expect(auth.sessionResolved).toBe(true)
   })
 
+  /// 回归：OJ 切换只清状态并不取消已发出的 IPC —— 旧 OJ 的迟到响应不得写回。
+  /// 否则旧用户被标成「已在新 OJ 上解析」，守卫/登录页都跳过检查，直到 401。
+  it('切换 OJ 后迟到的 checkSession 不写回旧用户，且不标记已解析', async () => {
+    let resolveCheck!: (value: User | null) => void
+    authService.checkSession.mockImplementation(
+      () => new Promise<User | null>(resolve => { resolveCheck = resolve }),
+    )
+    const auth = useAuthStore()
+
+    const pending = auth.checkSession()
+    auth.resetForOjSwitch()
+    resolveCheck(user)
+
+    await expect(pending).resolves.toBe(false)
+    expect(auth.user).toBeNull()
+    expect(auth.sessionResolved).toBe(false)
+    expect(auth.isLoading).toBe(false)
+  })
+
+  it('登出后迟到的 checkSession 同样作废', async () => {
+    let resolveCheck!: (value: User | null) => void
+    authService.checkSession.mockImplementation(
+      () => new Promise<User | null>(resolve => { resolveCheck = resolve }),
+    )
+    authService.logout.mockResolvedValue(undefined)
+    const auth = useAuthStore()
+    auth.user = user
+
+    const pending = auth.checkSession()
+    await auth.logout()
+    resolveCheck(user)
+
+    await expect(pending).resolves.toBe(false)
+    expect(auth.user).toBeNull()
+    expect(auth.sessionResolved).toBe(true) // 后端登出成功 → 已确认「无会话」
+  })
+
   it('后端无会话时返回 false 但仍标记已确认（守卫无需重复 IPC）', async () => {
     authService.checkSession.mockResolvedValue(null)
     const auth = useAuthStore()
@@ -229,6 +314,27 @@ describe('validateSession', () => {
     expect(auth.error).toBe(SESSION_INVALID_MESSAGE)
     expect(auth.sessionResolved).toBe(false)
     expect(useContestStore().contest).toBeNull()
+  })
+
+  /// 回归：validateSession 的 invalid 会走 logout（对**当前** OJ 后端登出）。
+  /// OJ 切换后旧 OJ 的迟到 invalid 不得执行它，否则会误删新 OJ 的会话文件。
+  it('OJ 切换后迟到的 validateSession 不得清理新会话', async () => {
+    let resolveValidity!: (value: SessionValidity) => void
+    authService.validateSession.mockImplementation(
+      () => new Promise<SessionValidity>(resolve => { resolveValidity = resolve }),
+    )
+    const auth = useAuthStore()
+    auth.user = user
+    auth.sessionResolved = true
+
+    const pending = auth.validateSession()
+    auth.resetForOjSwitch()
+    resolveValidity('invalid')
+
+    await expect(pending).resolves.toBe('unknown')
+    expect(authService.logout).not.toHaveBeenCalled()
+    expect(auth.user).toBeNull()
+    expect(auth.sessionResolved).toBe(false)
   })
 
   it('未登录时 invalid 不触发清理，也不覆盖已有错误信息', async () => {

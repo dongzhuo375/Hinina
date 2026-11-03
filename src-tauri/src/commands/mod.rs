@@ -15,7 +15,6 @@ pub mod oj_cmd;
 pub mod plugin_cmd;
 pub mod problem_cmd;
 pub mod submission_cmd;
-pub mod theme_cmd;
 pub mod workspace_cmd;
 
 #[cfg(test)]

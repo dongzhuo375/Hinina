@@ -8,7 +8,6 @@
 // 登录时 `AuthService::login` 落盘、Provider 轮换时由适配器经 `SessionRepository`
 // 落盘。旧实现让 Provider 发布带真实 token 的 `TokenRefreshed` 事件、由本服务的
 // 同步订阅者代劳写盘，既把凭证带进事件流，又把持久性保证挂在异步投递上。
-pub mod error;
 
 use std::{
     collections::HashSet,

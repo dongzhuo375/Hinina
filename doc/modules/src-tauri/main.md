@@ -24,6 +24,7 @@
   - 其余事件（OJ 切换、配置变更、提交创建/判定……）**不桥接**：前端都能从 IPC 返回值直接得到，转发只会制造「前端靠事件拿状态」的错误预期 —— 刷新触发之外的一切真实状态仍必须经 IPC 查询（评测状态、榜单、公告内容、工作区真值）
 - `fn emit_or_warn(app, channel, payload, what)` — `emit` 失败只 `warn!`：前端事件是刷新触发，丢了不影响正确性（轮询会补齐）
 - `fn report_data_dir(plan, migration)` — 汇报数据目录方案与迁移结果（在日志就绪后调用），见「逻辑流程」
+- `struct TauriPluginNotifications(AppHandle)` + `impl NotificationOutput` — **插件通知的前端出口**（原住 `infra::plugin_notification`，因成为 infra 层唯一框架依赖而上移组合根，与前端事件桥同址——分层审计 F2）。`emit` 做消息校验（`validate_message`）→ 无 webview 窗口或 `emit` 失败时经 `plugin_diagnostics::failure` 记诊断并返回 `PluginError::Unavailable`；`.setup()` 里经 `plugin_manager.set_output` 注入
 - **已删除的三个安装函数**：`install_workspace_event_bridge` / `install_announcement_event_bridge`（旧 `EventBus` 的同步订阅桥）与 `install_auto_save_config_sync`（订阅 `SystemEvent::ConfigReloaded` 同步 auto-save）—— 前两者被单个 `spawn_event_consumers` + 前端桥取代；后者改为命令层**显式**调用 `commands::workspace_cmd::sync_auto_save_from_context`（见 `commands/config_cmd.md`）
 
 ## 直接依赖
@@ -38,7 +39,8 @@
 - `hinina_lib::infra::panic_report::install`（panic 钩子，见 `infra/panic_report.md`）
 - `hinina_lib::infra::single_instance::init`（单实例约束，见 `infra/single_instance.md`）
 - `hinina_lib::infra::startup_dialog::{arm, mark_started}`（启动期错误框，见 `infra/startup_dialog.md`）
-- `hinina_lib::infra::plugin_notification::TauriPluginNotifications`（插件通知的前端出口）
+- `hinina_lib::infra::plugin_diagnostics::failure`（插件通知失败诊断，统一形状）
+- `hinina_lib::plugin::api::{PluginError, PluginResult}` / `plugin::api::notification::{validate_message, PluginNotificationLevel}` / `plugin::execution_api::NotificationOutput`（通知出口端口）
 - `tauri::{Emitter, Manager}`（`app.state::<AppContext>()` + `handle.emit`）
 - `serde_json`（事件载荷）
 - `tracing`（下发失败告警）
@@ -60,15 +62,16 @@
    全部 I/O 都走 Rust）
 3. `.setup(move |app| { … })` —— **整个初始化都在这里**，因为只有 setup 能拿到
    `AppHandle`，也就只有那里能解析 `app_local_data_dir()`：
-   1. `default_dir = app.path().app_local_data_dir()`（`%LOCALAPPDATA%/{identifier}`，
-      解析失败时退到 `data_dir::legacy_dir()` 让回退链继续）
-   2. `data_dir::prepare_startup(&default_dir, &legacy)` → 解析 base_dir + **一次性迁移**
+   1. `default_dir = app.path().app_local_data_dir()`（`%LOCALAPPDATA%/{identifier}`）：
+      **解析失败不静默顶替**——失败原因保留并交给下一步，降级为显式 `FallbackTemp`
+   2. `data_dir::prepare_startup_with_default_error(default_error, &default_dir, &legacy)` → 解析 base_dir + **一次性迁移**
+      （降级模式下仍读指针、尊重已保存的自定义目录与待迁移请求）
       （**必须在 `AppContext::init` 之前**：init 会打开日志文件，之后旧目录就被占住）
    3. `rt.block_on(AppContext::init(base_dir, default_dir, source))` 装配上下文
       （Logger（stderr + `{base_dir}/logs/hinina.log` 双路输出）→ Storage → CoreEventBus →
       SessionRepository → ConfigService → HttpClient（超时取自配置 `oj.timeout_secs`）→
       ProviderRegistry（按 `oj.instances` 实例注册全部内建 OJ，active 未注册回退首个已注册 OJ）→
-      WorkspaceManager → 五个 Service → PluginHost → `PluginManager`（装配文件仓库
+      WorkspaceManager → 四个 Service → PluginHost → `PluginManager`（装配文件仓库
       `FsPluginRepository` 与 API 工厂 `FsPluginApiFactory` + `ServiceQueries`）→ AppContext）。
       失败时 `panic!("无法初始化应用数据：{}", error.user_message())`——最常见的是
       `%TEMP%/hinina` 回退目录也建不出来（`create_dir_all(base_dir)`）
@@ -81,7 +84,7 @@
       且必须在 `AppContext::init` 之后：它们从 `app.state::<AppContext>()` 取总线与插件宿主，
       并只观察事实、不参与任何业务动作
    8. `tauri::async_runtime::spawn(plugins.autostart())` —— 异步扫描 `plugins.json`
-      并启动全部 enabled 插件；配置不可用时 `warn!`「automatic loading skipped」，
+      并启动全部 enabled 插件；配置不可用时 `warn!`「插件配置不可用，自动加载已跳过」（结构化字段 `operation=host.autostart`），
       不阻断窗口启动
 4. `.invoke_handler(tauri::generate_handler![...])` 注册全部 IPC Command
    （**不是** `setup` 中手动注册，`commands::register_commands()` 不存在；
@@ -89,15 +92,14 @@
    - `plugin_cmd`：plugin_list / plugin_start / plugin_stop / plugin_reload / plugin_resync
    - `auth_cmd`：login / logout / get_session / validate_session
    - `oj_cmd`：**switch_oj**（切换当前 OJ：补注册 → 校验已注册 → `set_current` → 显式清 contest/problem/submission 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）
-   - `contest_cmd`：list_contests / select_contest / load_configured_contest / **get_contest_rank** / **list_contest_announcements** / **get_read_announcement_ids** / **mark_announcements_read**
+   - `contest_cmd`：list_contests / load_configured_contest / **get_contest_rank** / **list_contest_announcements** / **get_read_announcement_ids** / **mark_announcements_read**
    - `problem_cmd`：get_problem / **get_user_problem_status** / **get_contest_problem_limits**
    - `submission_cmd`：submit_code / get_judgement / **list_contest_submissions** / **get_submission_detail** / **get_submission_cases**
-   - `workspace_cmd`：load_workspace / save_workspace / switch_workspace / current_workspace / update_workspace_file / **set_workspace_language** / **delete_workspace_file**
+   - `workspace_cmd`：load_workspace / save_workspace / update_workspace_file / **set_workspace_language** / **delete_workspace_file**
    - `config_cmd`：get_config / reload_config / update_config / **get_storage_info**
    - `log_cmd`：**frontend_log**（前端全局错误 → tracing 落 `logs/hinina.log`；薄转发，收敛与预算在 `infra/frontend_log.md`）
    - `maintenance_cmd`：**reset_client**（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，清完不重拉）/ **local_data_usage**（清理前的体积预览）/ **purge_local_data**（不可逆：清日志内容与崩溃记录文件、过期提交留档）
    - `data_dir_cmd`：**get_data_dir** / **set_data_dir** / **reset_data_dir** / **pick_data_dir**（设置页「数据目录」：改动重启后生效，见 `commands/data_dir_cmd.md`）
-   - `theme_cmd`：get_theme / set_theme
 5. `.build(tauri::generate_context!())` 构建应用（失败时 `panic!("无法启动桌面应用：{e}")`，触发启动期错误框），`.run(|app, event| …)` 进入事件循环：
    - `RunEvent::Ready` → `startup_dialog::mark_started()`。Tauri 的 `fn setup` 先按配置创建窗口（WebView2 在此初始化）、再调用用户的 setup 闭包，Ready 在 setup 返回后发出；因此窗口/WebView2 创建失败时标志尚未置位，启动错误框仍会弹出。
    - `RunEvent::Exit` 时取 `AppContext` 调 `plugin_manager.cancel_all()` 收尾全部插件 worker

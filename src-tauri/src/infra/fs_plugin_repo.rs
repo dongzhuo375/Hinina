@@ -224,10 +224,18 @@ impl PluginRepository for FsPluginRepository {
                 PluginError::NotFound
             });
         };
-        if manifest.min_app_version.as_ref().is_some_and(|v| {
-            semver::Version::parse(v).unwrap()
-                > semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()
-        }) {
+        // minAppVersion 来自插件目录的磁盘清单（插件可控输入），解析失败必须落错
+        // 而不是 panic。首道防线是上方 `manifest.validate()`（非局部不变量）；
+        // 此处独立解析是第二道防线，不依赖「validate 已跑过」这一调用序约定。
+        // 本 crate 自身版本是编译期常量，恒可解析。
+        let min_version = manifest
+            .min_app_version
+            .as_ref()
+            .map(|v| semver::Version::parse(v).map_err(|_| PluginError::InvalidInput))
+            .transpose()?;
+        if min_version
+            .is_some_and(|min| min > semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap())
+        {
             return Err(PluginError::Unsupported);
         }
         let entry = directory

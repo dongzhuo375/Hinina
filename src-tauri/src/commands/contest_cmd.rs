@@ -31,18 +31,6 @@ pub async fn list_contests(ctx: State<'_, AppContext>) -> AppResult<Vec<Contest>
     ctx.contest.list_contests(ttl).await
 }
 
-/// 选中比赛。
-///
-/// 前端 invoke 签名: `select_contest`({ contestId })
-///
-/// 选中后发布 `CoreEvent::ContestSelected`（事实通知，供审计/插件/前端刷新）；
-/// 真实数据（题目列表等）仍由调用方经 IPC 查询获得。
-#[tauri::command]
-pub async fn select_contest(ctx: State<'_, AppContext>, contest_id: String) -> AppResult<()> {
-    info!(contest_id = %contest_id, "Command: 选中比赛");
-    ctx.contest.select_contest(&contest_id)
-}
-
 /// 从配置文件加载默认比赛（阶段 7 单比赛模式入口）。
 ///
 /// 前端 invoke 签名: `load_configured_contest`

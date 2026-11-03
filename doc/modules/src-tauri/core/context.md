@@ -5,7 +5,7 @@
 
 ## 核心类型/函数
 - **`AppContext`** — 统一应用上下文 struct，持有所有基础设施和 Service 的 `Arc` 引用。
-  字段：`access: Arc<AccessRevision>`, `event_bus: Arc<CoreEventBus>`, `session_repo: Arc<dyn SessionRepository>`, `plugin_host: Arc<PluginHost>`, `plugin_manager: Arc<PluginManager>`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `default_data_dir: PathBuf`, `data_dir_source: DataDirSource`, `theme: Arc<ThemeService<FsConfigRepository>>`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
+  字段：`access: Arc<AccessRevision>`, `event_bus: Arc<CoreEventBus>`, `session_repo: Arc<dyn SessionRepository>`, `plugin_host: Arc<PluginHost>`, `plugin_manager: Arc<PluginManager>`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `default_data_dir: PathBuf`, `data_dir_source: DataDirSource`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
 
   `event_bus` 是**唯一事实通知源**（消费者不在此启动，见 `main.rs`）；`session_repo` 供应用层与适配器层共用（凭证轮换必须当场落盘）；`plugin_host` 只持有总线句柄（消费者同样在 `main.rs` 启动）。
   `default_data_dir` 与 `storage.base_dir()` 的区别：后者可能被用户改到别处（`data_dir.json` 指针），而前者是**位置指针文件所在处**与「恢复默认」的目标，永远不变。`data_dir_source` 供 `get_data_dir` 如实告诉界面「当前用哪个目录、为什么」。
@@ -21,7 +21,7 @@
   7. HttpClient — 网络客户端，**超时取自配置 `oj.timeout_secs`**（`HttpClient::with_timeout`，`.max(1)` 防 0 值，不再硬编码 30s）
   8. ProviderRegistry — 初始当前 OJ 取 `OjId::new(&oj.active)`；随后按配置实例注册全部内建 OJ（工厂数据化，约 8 行 for 循环）：组装 `AdapterDeps`（http_client / event_bus / **session_repo** / storage，仅 infra）→ 遍历 `oj.instances` 中 enabled 的实例并与 `adapter::factories()` 按 id 匹配（无对应适配器 `warn!` 跳过）→ `factory.build(&deps, &instance.base_url)` 得 `ProviderSet` 后 `register`（HOJAdapter 经 deps 注入 `event_bus` 与 `session_repo`：凭证轮换**显式落盘成功后**才发布 `CoreEvent::TokenRotated { oj_id }`，token 不进事件流）。注册完成后校验当前 OJ 已注册，未注册（配置手改/拼写错误）`warn!` 并**回退首个已注册 OJ**（不硬编码 HOJ —— HOJ 实例可能被禁用/移除，那是死路；一个都没注册时仅告警，首次查询以 `ProviderNotFound` 如实暴露）
   9. WorkspaceManager — 通过 `FsWorkspaceRepository` 创建，包装为 `Some(Arc<...>)`；注入 `Arc<CoreEventBus>`（落盘成功后发布 `WorkspaceSaved`）
-  10. 装配 5 个 Service：ThemeService → AuthService（注入 `session_repo`，**不再注入 storage**）→ ContestService（注入 `Arc<Storage>`，供公告已读状态持久化 `announcements_read/`）→ ProblemService（注入 `Arc<Storage>`，供题目 limits / 题面磁盘缓存）→ SubmissionService
+  10. 装配 4 个 Service：AuthService（注入 `session_repo`，**不再注入 storage**）→ ContestService（注入 `Arc<Storage>`，供公告已读状态持久化 `announcements_read/`）→ ProblemService（注入 `Arc<Storage>`，供题目 limits / 题面磁盘缓存）→ SubmissionService
   11. PluginHost — 只持总线句柄（订阅表由自身管理，消费者由 `main.rs` 启动）
   12. 装配 AppContext 并返回
 
@@ -48,7 +48,6 @@
 - `infra::provider_registry_impl::ProviderRegistryImpl`
 - `plugin::host::plugin_host::PluginHost`
 - `service::config::ConfigService`
-- `service::theme::ThemeService`
 - `service::auth::AuthService`
 - `service::contest::ContestService`
 - `service::problem::ProblemService`
@@ -63,11 +62,10 @@
 - `commands::oj_cmd`
 - `commands::problem_cmd`
 - `commands::submission_cmd`
-- `commands::theme_cmd`
 - `commands::workspace_cmd`
 
 ## 逻辑流程
-`AppContext::init(base_dir, default_data_dir, source)` 按依赖顺序初始化：Logger（双路输出，日志文件落在 base_dir 下，故最先拿到 base_dir）→ Storage → CoreEventBus → SessionRepository → ConfigService → HttpClient（超时由配置注入）→ ProviderRegistry（当前 OJ 取 `oj.active`，按 `oj.instances` 的 enabled 实例匹配工厂注册全部内建 OJ，active 未注册回退**首个已注册 OJ**并告警）→ WorkspaceManager → 逐个装配 Service（theme → auth → contest → problem → submission）→ PluginHost → 装配 AppContext。所有 Service 通过 Arc 共享 CoreEventBus、ConfigService、ProviderRegistry 和 Storage（ContestService 用于公告已读状态，ProblemService 用于 limits / 题面磁盘缓存）；AuthService 改持 `session_repo` 而非 Storage（会话读写归仓库层）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
+`AppContext::init(base_dir, default_data_dir, source)` 按依赖顺序初始化：Logger（双路输出，日志文件落在 base_dir 下，故最先拿到 base_dir）→ Storage → CoreEventBus → SessionRepository → ConfigService → HttpClient（超时由配置注入）→ ProviderRegistry（当前 OJ 取 `oj.active`，按 `oj.instances` 的 enabled 实例匹配工厂注册全部内建 OJ，active 未注册回退**首个已注册 OJ**并告警）→ WorkspaceManager → 逐个装配 Service（auth → contest → problem → submission）→ PluginHost → 装配 AppContext。所有 Service 通过 Arc 共享 CoreEventBus、ConfigService、ProviderRegistry 和 Storage（ContestService 用于公告已读状态，ProblemService 用于 limits / 题面磁盘缓存）；AuthService 改持 `session_repo` 而非 Storage（会话读写归仓库层）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
 
 **事件消费者不在此启动**：`init` 只创建总线与宿主，三个消费者（前端桥 / 审计 / 插件宿主）由 `main.rs` 的 `spawn_event_consumers` 在 Tauri 运行时内启动 —— `init` 跑在 `rt.block_on` 里，那个运行时在 `setup` 结束时随 `rt` 一起销毁，把长期消费者挂上去等于开机即死。
 

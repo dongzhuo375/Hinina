@@ -8,7 +8,6 @@
 // 不得重新包装成 `AppError::Problem` —— 变体是前端 `sessionGuard` 判定会话失效的依据
 // （见 `core/error.rs`）。`load_problem_limits` 同样遵守：401/403 原样上抛，
 // 既不回退默认值，也不改写成 Problem 变体。
-pub mod error;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -99,9 +98,11 @@ impl ProblemService {
     ///   跨 OJ 撞号在结构上不可能，延迟清理不影响正确性。
     ///   无 tokio 上下文时（纯同步调用 / 单元测试）退化为同步执行。
     pub fn on_oj_switched(&self) {
-        if let Ok(mut m) = self.limits_cache.write() {
-            m.clear();
-        }
+        // 中毒也必须完成清理（into_inner）：跳过会让旧 OJ 的 limits 缓存跨切换存活
+        self.limits_cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         self.statement_cache.clear();
         info!("OJ 已切换：清空题面与 limits 内存缓存");
 
@@ -124,9 +125,10 @@ impl ProblemService {
     /// 与 `on_oj_switched` 的清理同源（同一批缓存），区别只是**磁盘段也同步执行** ——
     /// 用户显式点了按钮就该等到真清完再看到「已清空」，而不是投进后台任务后立即返回。
     pub fn clear_caches(&self) {
-        if let Ok(mut limits) = self.limits_cache.write() {
-            limits.clear();
-        }
+        self.limits_cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         self.statement_cache.clear();
         let (statement_disk, limits_disk) =
             clear_problem_disk_caches(&self.statement_disk, &self.storage);

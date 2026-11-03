@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   })),
   purgeLocalData: vi.fn(async () => ({ freedBytes: 0, removedSnapshots: 0, logCleared: false, crashCleared: true })),
   getStorageInfo: vi.fn(async () => ({ baseDir: 'D:\\hinina', logPath: 'D:\\hinina\\logs\\hinina.log', version: '0.1.0' })),
-  getDataDir: vi.fn(async () => ({ currentDir: 'D:\\hinina', defaultDir: 'D:\\hinina', source: 'default', restartRequired: false })),
+  getDataDir: vi.fn(async () => ({ currentDir: 'D:\\hinina', defaultDir: 'D:\\hinina', source: 'default', restartRequired: false, pointerInTemp: false })),
   // config.service
   getConfig: vi.fn(async () => ({})),
   updateConfig: vi.fn(async () => {}),
@@ -67,7 +67,6 @@ vi.mock('@/components/common/LoadingSpinner.vue', () => ({ default: { template: 
 import SettingsView from '@/views/SettingsView.vue'
 
 const baseConfig = (): AppConfig => ({
-  user: { lastUsername: '' },
   oj: {
     active: 'HOJ',
     instances: [{ id: 'HOJ', baseUrl: 'https://hoj.example', enabled: true, options: {} }],
@@ -80,7 +79,7 @@ const baseConfig = (): AppConfig => ({
     cacheProblemStatement: true,
   },
   editor: { fontSize: 14, tabSize: 4, autoSave: true, autoSaveIntervalSecs: 30, defaultLanguage: 'C++' },
-  theme: { themeName: 'light', editorTheme: 'vs' },
+  theme: { editorTheme: 'vs' },
   layout: { sidebarWidth: 240, splitRatio: 0.48 },
 })
 

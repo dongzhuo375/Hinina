@@ -87,7 +87,7 @@ impl<R: ConfigRepository> ConfigService<R> {
     /// 让订阅者按「新配置已生效」行动会掩盖问题）。
     ///
     /// **为什么在这里发布**：`update` 才是生产链路的配置变更入口（`update_config`、
-    /// 主题切换、`switch_oj` 的持久化都走它）；只有 `reload` 发布的话，订阅者永远
+    /// `switch_oj` 的持久化都走它）；只有 `reload` 发布的话，订阅者永远
     /// 等不到事件 —— `reload_config` 命令在前端没有调用方（2026-09-21 复核）。
     ///
     /// **`ConfigChanged` 只是完成事实通知**：需要「配置变更后必须完成的动作」

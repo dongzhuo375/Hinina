@@ -83,6 +83,45 @@ fn missing_or_corrupt_pointer_degrades_to_default() {
     assert_eq!(read_pointer(&dir), DataDirPointer::default());
 }
 
+/// 严格读取（设置页读-改-写基线）：损坏/不可读必须报错，不能退化成默认值。
+/// 否则写回会把 `legacy_migrated: Some(true)` 抹成 None，下次启动重新搬旧数据。
+#[test]
+fn strict_pointer_read_refuses_corrupt_or_unreadable_file() {
+    let dir = unique_dir("pointer-strict-bad");
+    write_file(&dir, "data_dir.json", "not-json{{{");
+    assert!(
+        matches!(read_pointer_strict(&dir), Err(AppError::Serialization(_))),
+        "损坏 JSON 必须落 Serialization 错误"
+    );
+
+    let non_utf8 = unique_dir("pointer-strict-non-utf8");
+    std::fs::create_dir_all(non_utf8.path()).unwrap();
+    std::fs::write(non_utf8.join("data_dir.json"), [0xFF, 0xFE, 0x00]).unwrap();
+    assert!(
+        matches!(read_pointer_strict(&non_utf8), Err(AppError::Io(_))),
+        "非 UTF-8 必须落 Io 错误"
+    );
+}
+
+/// 严格读取的正常路径：缺失 = 未指定；有效指针（含一次性迁移标记）原样读回。
+#[test]
+fn strict_pointer_read_keeps_legacy_marker() {
+    let dir = unique_dir("pointer-strict-ok");
+    assert_eq!(
+        read_pointer_strict(&dir).expect("缺失指针应视为未指定"),
+        DataDirPointer::default()
+    );
+
+    write_pointer(&dir, &pointer_with_legacy(None, Some(true))).expect("写指针失败");
+    assert_eq!(
+        read_pointer_strict(&dir)
+            .expect("有效指针应读回")
+            .legacy_migrated,
+        Some(true),
+        "读-改-写基线必须保留一次性搬家标记"
+    );
+}
+
 #[test]
 fn pointer_omits_absent_fields() {
     // skip_serializing_if：未指定目录时文件里不该出现 null 字段
@@ -159,6 +198,35 @@ fn validate_target_rejects_legacy_temp_dir_and_its_children() {
         validate_target(&child, &legacy, false).is_err(),
         "临时目录的子目录也应被拒"
     );
+}
+
+/// 回归：字符串前缀判据会被 `..` 绕过 —— `temp/decoy/../hinina` 文本上不以
+/// 临时目录开头，解析后却正是它。拒绝未规范化组件必须发生在任何 I/O 之前。
+#[test]
+fn validate_target_rejects_unresolved_dot_components() {
+    let legacy = unique_dir("validate-dotdot-legacy");
+    std::fs::create_dir_all(legacy.path()).unwrap();
+    let decoy = unique_dir("validate-dotdot-decoy");
+    std::fs::create_dir_all(decoy.path()).unwrap();
+
+    let legacy_name = legacy.path().file_name().expect("legacy 应有文件名");
+    let sneaky = decoy.path().join("..").join(legacy_name);
+    assert!(
+        !sneaky.starts_with(legacy.path()),
+        "前置条件：文本上确实绕开了临时目录前缀"
+    );
+    let err = validate_target(&sneaky, legacy.path(), false)
+        .expect_err("含 .. 的路径必须拒绝（否则可把数据目录设回临时目录）");
+    assert!(err.to_string().contains("规范化"), "{err}");
+
+    // 显式 `.` 同样拒绝——必须用 legacy **之外**的路径：components() 会把绝对路径
+    // 中间/末尾的 `.` 归一掉，旧实现靠 components 只能拦 `..`；而 legacy 内的
+    // dotted 路径会被 is_same_or_inside 抢先拒绝，测不到 dot 分支（假绿）。
+    // 现按原始分隔段检查，`decoy/sub/.`（absolute、不在 legacy 内）直接命中。
+    let dotted = decoy.path().join("sub").join(".");
+    let err = validate_target(&dotted, legacy.path(), false)
+        .expect_err("含 . 的路径必须拒绝（与文案/文档一致）");
+    assert!(err.to_string().contains("规范化"), "{err}");
 }
 
 #[test]
@@ -410,9 +478,9 @@ fn mark_legacy_migrated_persists_failure_state_and_survives_pointer_rewrite() {
     .expect("写指针失败");
 
     // 先清 migrate_from（模拟分支 ① 成功）
-    clear_migrate_from(&dir);
+    clear_migrate_from(&dir, &mut Vec::new());
     // 再写搬家失败标记（模拟分支 ② 失败）
-    mark_legacy_migrated(&dir, false);
+    mark_legacy_migrated(&dir, &mut Vec::new(), false);
 
     let after = read_pointer(&dir);
     assert_eq!(after.migrate_from, None, "清掉的字段不得被后一次写入复活");
@@ -438,30 +506,35 @@ fn should_attempt_legacy_retries_failed_migration_regardless_of_source() {
     assert!(!should_attempt_legacy(
         &pointer(None, None),
         DataDirSource::Custom,
+        &_custom,
         &legacy
     ));
     // 从未尝试 + 默认目录 → 搬（全新升级场景）
     assert!(should_attempt_legacy(
         &pointer(None, None),
         DataDirSource::Default,
+        &default,
         &legacy
     ));
     // **试过但失败 + 自定义目录 → 仍要搬**（本缺陷的核心）
     assert!(should_attempt_legacy(
         &pointer_with_legacy(None, Some(false)),
         DataDirSource::Custom,
+        &_custom,
         &legacy
     ));
     // 已成功 + 任意目录 → 永不重试（否则用户删掉的旧工作区会复活）
     assert!(!should_attempt_legacy(
         &pointer_with_legacy(None, Some(true)),
         DataDirSource::Default,
+        &default,
         &legacy
     ));
     // 旧目录不存在 → 无事可做
     assert!(!should_attempt_legacy(
         &pointer(None, None),
         DataDirSource::Default,
+        &default,
         &default.join("nope")
     ));
 }
@@ -649,7 +722,10 @@ fn failed_move_leaves_nothing_behind_so_retry_actually_retries() {
     write_file(&dir, "blocker", "i am a file");
     let dst = blocker.join("sub");
 
-    assert!(move_entry(&dir.join("src"), &dst).is_err(), "复制必须失败");
+    assert!(
+        move_entry(&dir.join("src"), &dst, &mut Vec::new()).is_err(),
+        "复制必须失败"
+    );
     assert!(
         !dst.exists(),
         "失败后不得留下目标（否则会被当成「已完成」）"
@@ -659,7 +735,7 @@ fn failed_move_leaves_nothing_behind_so_retry_actually_retries() {
 
     // 换到可用目标重试 → 必须真的搬过去（证明「不会自解除」）
     let retry_dst = dir.join("retry");
-    move_entry(&dir.join("src"), &retry_dst).expect("重试应成功");
+    move_entry(&dir.join("src"), &retry_dst, &mut Vec::new()).expect("重试应成功");
     assert_eq!(
         std::fs::read_to_string(retry_dst.join("a.txt")).unwrap(),
         "payload"
@@ -677,7 +753,7 @@ fn migrate_retries_entry_that_failed_before_instead_of_skipping() {
     let blocker = to.join("blocker");
     write_file(&to, "blocker", "file");
     let blocked = blocker.join("sub");
-    assert!(move_entry(&from.join("config.json"), &blocked).is_err());
+    assert!(move_entry(&from.join("config.json"), &blocked, &mut Vec::new()).is_err());
 
     // 修好目标后重试：应搬成功，且**不是** skipped
     let outcome = migrate(&from, &to);
@@ -698,7 +774,7 @@ fn move_entry_cleans_stale_staging_before_retry() {
     let dst = dir.join("dst");
     write_file(&dir, "dst.hinina-partial/old.txt", "stale");
 
-    move_entry(&dir.join("src"), &dst).expect("正常搬运应成功");
+    move_entry(&dir.join("src"), &dst, &mut Vec::new()).expect("正常搬运应成功");
 
     assert!(dst.join("new.txt").exists(), "新内容应就位");
     assert!(!dst.join("old.txt").exists(), "旧残片不得混入目标");
@@ -983,4 +1059,343 @@ fn resolve_falls_back_to_default_when_custom_dir_unusable() {
         "指定目录不可用 → 退回默认"
     );
     assert_eq!(plan.base_dir, default_dir);
+}
+
+/// 启动期诊断（F2）：订阅器就绪前 `warn!` 被丢弃，回退原因必须落在
+/// `DataDirPlan.warnings` 里由 `report_data_dir` 重放 —— 这是排障者回答
+/// 「自定义数据目录为什么没生效」的唯一线索。
+#[test]
+fn resolve_captures_corrupt_pointer_diagnostic() {
+    // 指针损坏：按默认目录处理，但「为什么忽略了我的自定义目录」必须有诊断
+    let default_dir = unique_dir("diag-pointer-default");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    std::fs::write(default_dir.join("data_dir.json"), "{ not-json").unwrap();
+    let legacy = unique_dir("diag-pointer-legacy");
+
+    let plan = resolve(&default_dir, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::Default);
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    assert!(
+        plan.warnings[0].message.contains("指针解析失败"),
+        "{:?}",
+        plan.warnings[0]
+    );
+}
+
+/// 默认目录不可用 → 回退临时目录：warnings 记 Warn 级原因（回退决策的强告警
+/// 由 `report_data_dir` 按 source 统一发一条 error）。
+#[test]
+fn resolve_captures_default_dir_unusable_diagnostic() {
+    let blocker = unique_dir("diag-blocked");
+    write_file(&blocker, "afile", "x");
+    let unusable_default = blocker.join("afile").join("sub");
+    let legacy = unique_dir("diag-legacy");
+
+    let plan = resolve(&unusable_default, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::FallbackTemp);
+    // 不按条数断言：指针路径 `default_dir/data_dir.json` 本身不可读时，P2-1 的
+    // 「指针读取失败」诊断是否出现**取决于平台错误种类**——Linux 报 ENOTDIR
+    // （非 NotFound，会多一条 Warn），Windows 把同路径归一为 NotFound（静默）。
+    // 两条诊断都属实，这里只钉「回退决策与其 error 级原因」。
+    // 回退决策由 source（FallbackTemp）承载，强告警由 report_data_dir 统一发一条
+    // error；warnings 只写原因（Warn），避免同一决策两行 error
+    let d = plan
+        .warnings
+        .iter()
+        .find(|d| d.message.contains("默认数据目录不可用"))
+        .unwrap_or_else(|| panic!("缺少原因诊断: {:?}", plan.warnings));
+    assert_eq!(d.level, EarlyLevel::Warn);
+    assert!(
+        d.message.contains(&unusable_default.display().to_string()),
+        "原因诊断应带失败的目录路径: {}",
+        d.message
+    );
+    assert!(
+        !d.message.contains("回退临时目录"),
+        "warnings 不得重复决策文本（归 report_data_dir）: {}",
+        d.message
+    );
+}
+
+/// 指定了自定义目录但它不可用：诊断必须带「为什么」（探测错误原文）与目录路径。
+#[test]
+fn resolve_captures_custom_dir_unusable_reason() {
+    let default_dir = unique_dir("diag-custom-default");
+    let legacy = unique_dir("diag-custom-legacy");
+    let blocker = unique_dir("diag-custom-blocker");
+    write_file(&blocker, "afile", "x");
+    write_pointer(
+        &default_dir,
+        &pointer(Some(&blocker.join("afile").join("sub")), None),
+    )
+    .expect("写指针失败");
+
+    let plan = resolve(&default_dir, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::Default);
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    let d = &plan.warnings[0];
+    assert_eq!(d.level, EarlyLevel::Warn);
+    // **P3-1 的实际锁定点**：路径必须出现在「回退默认目录」**之前**（原因位），
+    // 而不是紧随其后被读成回退目标。旧文案「不可用（{e}），回退默认目录: {path}」
+    // 末尾同样含路径——只断言「路径在场」区分不出方向，把文案改回旧形态仍会绿
+    // （已用变异验证确认）。
+    let failed_path = blocker.join("afile").join("sub");
+    assert!(
+        d.message
+            .contains(&format!(": {}，回退默认目录", failed_path.display())),
+        "失败目录路径必须写在原因位（「: {{path}}，回退默认目录」）: {}",
+        d.message
+    );
+    assert!(
+        !d.message.contains("回退默认目录: "),
+        "「回退默认目录」之后不得再跟路径（那是被读成回退目标的旧形态）: {}",
+        d.message
+    );
+    assert!(
+        d.message.contains("指定的数据目录不可用") && d.message.contains("回退默认目录"),
+        "诊断应说明原因与去向: {}",
+        d.message
+    );
+    // 「为什么」：探测失败的底层原因必须在场（OS 错误的 Display 恒带
+    // 「(os error N)」后缀，两端平台一致）
+    assert!(
+        d.message.contains("(os error"),
+        "诊断应携带探测错误原文: {}",
+        d.message
+    );
+}
+
+/// 迁移放弃（目标目录不可创建）：失败详情进 `MigrateOutcome.diagnostics`，
+/// `report_data_dir` 重放后排障者能看到错误原文而不只是条目名。
+#[test]
+fn migrate_captures_create_target_failure_details() {
+    let from = unique_dir("diag-migrate-from");
+    seed_legacy(&from);
+    let holder = unique_dir("diag-migrate-blocker");
+    write_file(&holder, "blocker", "i am a file");
+    let blocked_target = holder.join("blocker");
+
+    // 启动路径：诊断直接写进调用方缓冲（plan.warnings），outcome 不再另存一份
+    let mut diagnostics = Vec::new();
+    let outcome = migrate_into(&from, &blocked_target, &mut diagnostics);
+    assert!(outcome.failed.contains(&"(目标目录)".to_string()));
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "启动路径的诊断只进缓冲，避免两处重放"
+    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].level, EarlyLevel::Error);
+    assert!(
+        diagnostics[0].message.contains("创建目标数据目录失败"),
+        "{:?}",
+        diagnostics[0]
+    );
+
+    // 直接调用 migrate 的调用方仍从 outcome 取诊断（向后兼容）
+    let direct = migrate(&from, &blocked_target);
+    assert_eq!(direct.diagnostics.len(), 1, "{:?}", direct.diagnostics);
+}
+
+/// 指针里的自定义目录不是绝对路径：按「不可用」处理并留下诊断
+/// （绝对路径要求见 `is_absolute_path` —— 相对路径随进程工作目录漂移）。
+#[test]
+fn resolve_rejects_relative_custom_dir_with_diagnostic() {
+    let default_dir = unique_dir("diag-relative-default");
+    let legacy = unique_dir("diag-relative-legacy");
+    write_pointer(
+        &default_dir,
+        &pointer(Some(Path::new("relative/dir")), None),
+    )
+    .expect("写指针失败");
+
+    let plan = resolve(&default_dir, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::Default);
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    assert!(
+        plan.warnings[0].message.contains("不是绝对路径"),
+        "{:?}",
+        plan.warnings[0]
+    );
+}
+
+/// 聚合路径回归（评审修复）：损坏指针经 prepare_startup 只记**一条**诊断。
+/// prepare_startup 与 resolve 各自读一次指针会把同一损坏记成两条、重放两遍
+/// —— 指针单读共用后该场景只允许出现一次「指针解析失败」。
+#[test]
+fn prepare_startup_records_corrupt_pointer_exactly_once() {
+    let default_dir = unique_dir("startup-corrupt-pointer");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    std::fs::write(default_dir.join("data_dir.json"), "{ not-json").unwrap();
+    let legacy = unique_dir("startup-corrupt-pointer-legacy");
+
+    let (plan, outcome) = prepare_startup(&default_dir, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::Default);
+    assert!(outcome.is_noop());
+    let pointer_diags: Vec<&EarlyDiagnostic> = plan
+        .warnings
+        .iter()
+        .filter(|d| d.message.contains("指针解析失败"))
+        .collect();
+    assert_eq!(pointer_diags.len(), 1, "{:?}", plan.warnings);
+}
+
+/// P2-1 回归：指针文件存在但非 UTF-8（或读不了）不能被当成「没有指针」静默
+/// 回退——诊断必须带路径与原始错误。仅 NotFound 才允许静默。
+#[test]
+fn read_pointer_records_non_utf8_failure() {
+    let default_dir = unique_dir("pointer-non-utf8");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    // 0xFF 0xFE 不是合法 UTF-8
+    std::fs::write(default_dir.join("data_dir.json"), [0xFFu8, 0xFE, 0x00]).unwrap();
+
+    let mut early = Vec::new();
+    let pointer = read_pointer_early(&default_dir, &mut early);
+
+    assert_eq!(pointer, DataDirPointer::default(), "保守回退默认目录");
+    assert_eq!(early.len(), 1, "{early:?}");
+    assert!(
+        early[0].message.contains("指针读取失败") && early[0].message.contains("data_dir.json"),
+        "诊断须带路径与原因: {}",
+        early[0].message
+    );
+}
+
+/// P2-1 互补：文件不存在（NotFound）保持静默——「未指定」是正常状态。
+#[test]
+fn read_pointer_missing_file_is_silent() {
+    let default_dir = unique_dir("pointer-missing");
+    let mut early = Vec::new();
+    assert_eq!(
+        read_pointer_early(&default_dir, &mut early),
+        DataDirPointer::default()
+    );
+    assert!(early.is_empty(), "NotFound 不应产生诊断: {early:?}");
+}
+
+/// P2-2 回归：默认目录解析失败必须显式降级为 FallbackTemp（临时目录「可用」
+/// 不得被误报为 Default）；warnings 记 Warn 级原因，决策 error 由 report_data_dir 发。
+#[test]
+fn prepare_startup_forces_fallback_when_default_resolution_failed() {
+    let legacy = unique_dir("default-failure-legacy");
+
+    let (plan, outcome) = prepare_startup_with_default_error(
+        Some("app_local_data_dir 解析失败: policy"),
+        &legacy,
+        &legacy,
+    );
+
+    assert_eq!(plan.source, DataDirSource::FallbackTemp);
+    assert_eq!(plan.base_dir, legacy);
+    assert!(outcome.is_noop(), "降级分支不做迁移");
+    assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
+    assert_eq!(
+        plan.warnings[0].level,
+        EarlyLevel::Warn,
+        "原因级；决策强告警归 report_data_dir"
+    );
+    assert!(
+        plan.warnings[0].message.contains("默认数据目录解析失败"),
+        "{}",
+        plan.warnings[0].message
+    );
+}
+
+/// 低-2 回归：损坏指针 + 存在 legacy 目录（会走 mark_legacy_migrated 的指针
+/// 再读）时，指针读取/解析诊断仍只能出现一次——`update_pointer` 的再读是静默的。
+#[test]
+fn corrupt_pointer_with_legacy_migration_reports_once() {
+    let default_dir = unique_dir("corrupt-pointer-legacy-default");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    std::fs::write(default_dir.join("data_dir.json"), "{ not-json").unwrap();
+    let legacy = unique_dir("corrupt-pointer-legacy-src");
+    seed_legacy(&legacy);
+
+    let (plan, outcome) = prepare_startup(&default_dir, &legacy);
+
+    // legacy 目录存在 → 走搬家分支（会 update_pointer 再读指针）
+    assert!(!outcome.moved.is_empty(), "应完成搬家: {outcome:?}");
+    let pointer_diags: Vec<&EarlyDiagnostic> = plan
+        .warnings
+        .iter()
+        .filter(|d| d.message.contains("指针解析失败"))
+        .collect();
+    assert_eq!(pointer_diags.len(), 1, "{:?}", plan.warnings);
+}
+
+/// P2-1 回归：默认目录解析失败（降级模式）时，设置页写在**降级默认位置**的
+/// 指针必须继续生效——用户选的自定义目录不能被无视（否则会被永久困在临时目录）。
+#[test]
+fn degraded_mode_still_honors_saved_custom_dir() {
+    // 降级模式下 default_dir == 临时目录（main.rs 同口径）：指针就落在那里
+    let degraded_default = unique_dir("degraded-custom-pointer");
+    let custom = unique_dir("degraded-custom-target");
+    write_pointer(&degraded_default, &pointer(Some(&custom), None)).expect("写指针失败");
+
+    let (plan, _) = prepare_startup_with_default_error(
+        Some("app_local_data_dir 解析失败: policy"),
+        &degraded_default,
+        &degraded_default,
+    );
+
+    assert_eq!(plan.source, DataDirSource::Custom, "自定义目录必须生效");
+    assert_eq!(plan.base_dir, custom);
+    // 失败原因仍如实上报（原因级 Warn；决策强告警由 report_data_dir 发布）
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|d| d.message.contains("默认数据目录解析失败")),
+        "{:?}",
+        plan.warnings
+    );
+}
+
+/// P2-2 回归：`update_pointer` 的再读遇到**新的 I/O 错误**（非 NotFound）时，
+/// 必须放弃写回并记诊断——不能拿默认指针当基线把磁盘上的字段抹掉。
+#[test]
+fn update_pointer_aborts_on_io_error_instead_of_overwriting() {
+    let dir = unique_dir("update-pointer-io-error");
+    // 用目录冒充指针文件：read_to_string 得到非 NotFound 的 I/O 错误
+    std::fs::create_dir_all(pointer_path(&dir)).unwrap();
+
+    let mut early = Vec::new();
+    update_pointer(&dir, &mut early, |p| p.legacy_migrated = Some(true));
+
+    assert!(
+        early
+            .iter()
+            .any(|d| d.message.contains("重读失败") && d.message.contains("放弃本次写回")),
+        "{early:?}"
+    );
+    // 写回被放弃：占位目录原样保留（若拿默认指针写回，会变成文件）
+    assert!(pointer_path(&dir).is_dir(), "指针位置不得被覆盖成文件");
+}
+
+/// 观察项回归：当前就落在临时目录（降级态，base_dir == legacy）时不得尝试
+/// 「临时目录搬家」——自我搬运会全 skipped、被误判成功并写 `Some(true)`，
+/// 之后默认目录恢复也永不搬家，数据可能永久留在临时目录。
+#[test]
+fn degraded_mode_does_not_self_migrate_legacy() {
+    let legacy = unique_dir("self-migrate-legacy");
+    seed_legacy(&legacy);
+    // 降级模式下 default_dir 就是临时目录本身（main.rs 同口径），上次搬家失败过
+    write_pointer(&legacy, &pointer_with_legacy(None, Some(false))).expect("写指针失败");
+
+    let (plan, outcome) = prepare_startup_with_default_error(
+        Some("app_local_data_dir 解析失败: policy"),
+        &legacy,
+        &legacy,
+    );
+    assert_eq!(plan.base_dir, legacy, "降级态 base_dir 即临时目录");
+    assert!(outcome.is_noop(), "不得执行自我搬运: {outcome:?}");
+    // 关键：不得把失败标记改写成成功（否则默认目录恢复后也不再搬家）
+    assert_eq!(
+        read_pointer(&legacy).legacy_migrated,
+        Some(false),
+        "自我搬运被误判成功会永久阻断后续搬家"
+    );
 }

@@ -10,7 +10,32 @@ fn resolve_normal_path() {
     let s = storage();
     assert!(s.resolve("foo/bar/baz").is_ok());
     assert!(s.resolve("a").is_ok());
-    assert!(s.resolve("a/b/./c").is_ok());
+    assert!(s.resolve("foo/bar/").is_ok());
+}
+
+/// 空路径 / 纯点路径会解析为 `base_dir` 本身或其子目录：`remove_all("")`
+/// 足以删掉数据根目录，`remove_all("workspaces/.")` 足以删掉全部工作区。
+/// 防线放在 `resolve`（所有 Storage 调用的公共入口），不靠调用方自律。
+#[test]
+fn resolve_rejects_empty_or_dot_only_paths() {
+    let s = storage();
+    assert!(s.resolve("").is_err());
+    assert!(s.resolve(".").is_err());
+    assert!(s.resolve("workspaces/.").is_err());
+    // 内嵌 `./` 同样拒绝：白名单只放行 Normal，规则简单可穷举
+    assert!(s.resolve("a/b/./c").is_err());
+}
+
+#[test]
+fn remove_all_rejects_empty_path() {
+    let dir = TempDir::named("hinina-storage-empty-remove");
+    std::fs::create_dir_all(dir.path()).unwrap();
+    std::fs::write(dir.join("keep.txt"), "x").unwrap();
+    let s = Storage::new(dir.to_path_buf());
+
+    assert!(s.remove_all("").is_err(), "空路径不得删到数据根目录");
+    assert!(s.remove_all(".").is_err());
+    assert!(dir.join("keep.txt").exists(), "数据必须原样保留");
 }
 
 #[test]
@@ -20,6 +45,36 @@ fn resolve_rejects_parent_dir() {
     assert!(s.resolve("../etc").is_err());
     assert!(s.resolve("foo/../../../etc/passwd").is_err());
     assert!(s.resolve("a/../b/../c").is_err());
+}
+
+/// 绝对路径形态（根目录 / Windows 盘符前缀）会在 `join` 时**整体替换 base_dir**，
+/// 必须在 `resolve` 就拒绝 —— 防线不能单点压在 `fs_workspace_repo` 的白名单上。
+#[test]
+fn resolve_rejects_absolute_paths() {
+    let s = storage();
+    // RootDir：`/x` 在 Windows 上是「当前盘根」，同样会替换 base
+    assert!(s.resolve("/evil").is_err());
+    assert!(s.resolve("/etc/passwd").is_err());
+}
+
+/// Windows 盘符前缀（`Prefix` 组件）：`C:\x`（带根）与 `C:x`（盘符相对路径）
+/// 都会让 `join` 逃出 base_dir；verbatim（`\\?\C:\...`）同拒。
+#[cfg(windows)]
+#[test]
+fn resolve_rejects_windows_prefix_paths() {
+    let s = storage();
+    assert!(s.resolve("C:\\evil").is_err());
+    assert!(s.resolve("C:evil").is_err());
+    assert!(s.resolve("\\\\?\\C:\\evil").is_err());
+}
+
+/// 原子写对绝对路径形态同样拒绝（与普通写同一道 `resolve` 防线）。
+#[test]
+fn write_string_atomic_rejects_absolute_paths() {
+    let dir = TempDir::named("hinina-storage-atomic-absolute");
+    let s = Storage::new(dir.to_path_buf());
+
+    assert!(s.write_string_atomic("/evil.json", "x").is_err());
 }
 
 #[test]

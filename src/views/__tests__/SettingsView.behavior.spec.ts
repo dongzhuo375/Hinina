@@ -70,7 +70,6 @@ import SettingsView from '@/views/SettingsView.vue'
 
 function baseConfig(): AppConfig {
   return {
-    user: { lastUsername: '' },
     oj: {
       active: 'HOJ',
       instances: [{ id: 'HOJ', baseUrl: 'https://hoj.example', enabled: true, options: {} }],
@@ -83,7 +82,7 @@ function baseConfig(): AppConfig {
       cacheProblemStatement: true,
     },
     editor: { fontSize: 14, tabSize: 4, autoSave: true, autoSaveIntervalSecs: 30, defaultLanguage: 'C++' },
-    theme: { themeName: 'light', editorTheme: 'vs' },
+    theme: { editorTheme: 'vs' },
     layout: { sidebarWidth: 240, splitRatio: 0.48 },
   }
 }
@@ -158,9 +157,10 @@ beforeEach(() => {
     defaultDir: 'D:\\hinina',
     source: 'default',
     restartRequired: false,
+    pointerInTemp: false,
   })
   mocks.pickDataDir.mockResolvedValue('D:\\new-data')
-  mocks.setDataDir.mockResolvedValue(undefined)
+  mocks.setDataDir.mockResolvedValue({ targetDir: 'D:\\new-data', migrateFrom: null, restartRequired: true, warning: null })
   mocks.resetDataDir.mockResolvedValue(undefined)
   mocks.resetClient.mockResolvedValue(undefined)
   mocks.purgeLocalData.mockResolvedValue({ freedBytes: 0, removedSnapshots: 0, logCleared: true, crashCleared: true })

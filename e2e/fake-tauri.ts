@@ -18,13 +18,19 @@ import { expect } from '@playwright/test'
  * 类型仅编译期使用；注入脚本（`fakeTauriBootstrap`）经 addInitScript 序列化执行，
  * **不得闭包任何模块级运行时值**。
  */
-import type { AnnouncementPage } from '../src/types/announcement'
+import type { Announcement, AnnouncementPage } from '../src/types/announcement'
 import type { AppConfig } from '../src/types/config'
 import type { Contest, ContestProblem } from '../src/types/contest'
 import type { Problem } from '../src/types/problem'
-import type { ContestRankPage, RankCell } from '../src/types/rank'
+import type { ContestRankPage, ContestRankRow, RankCell } from '../src/types/rank'
 import type { LaunchFlags } from '../src/types/system'
-import type { JudgementStatus, SubmissionPage, SubmissionRecord } from '../src/types/submission'
+import type {
+  JudgementStatus,
+  SubmissionCases,
+  SubmissionDetail,
+  SubmissionPage,
+  SubmissionRecord,
+} from '../src/types/submission'
 import type { Workspace } from '../src/types/workspace'
 
 /** E2E fake 的初始化选项（按用例覆盖） */
@@ -43,6 +49,10 @@ export interface FakeOptions {
   delayConfiguredContestMs?: number
   /** 比赛/简报时间窗偏移（秒，相对注入时刻）；缺省 -3600 / +8h（进行中），负 endOffset = 已结束 */
   contestWindow?: { startOffsetSecs: number; endOffsetSecs: number }
+  /** 榜单参赛队数（缺省 1）：>1 时按 50/页分页，team_01..team_N（第 13 队为打星行） */
+  rankTeams?: number
+  /** 榜单封榜形态：sealRank=true 且 sealRankTime 已过 → 封榜横幅 + tryNum 形态 */
+  sealRank?: boolean
 }
 
 /** 页面内 fake 控制面（经 window.__e2e 暴露） */
@@ -54,6 +64,8 @@ export interface FakeControl {
   delayNext(cmd: string, ms: number): void
   /** 后端状态快照（只读断言用；如 reload 后当前工作区是否仍在） */
   backendState(): { lastWorkspaceId: string | null }
+  /** 追加一条新公告（红点旅程用；配合 emitEvent('announcements-published', …) 触发刷新） */
+  pushAnnouncement(): void
 }
 
 declare global {
@@ -83,8 +95,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     status: 0,
     auth: 1,
     rankShowName: 'username',
-    sealRank: false,
-    sealRankTime: null,
+    sealRank: options.sealRank === true,
+    sealRankTime: options.sealRank === true ? nowSecs - 600 : null,
     allowEndSubmit: false,
     oiRankScoreType: null,
   }
@@ -121,7 +133,6 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   }
 
   const configDefaults: AppConfig = {
-    user: { lastUsername: 'e2e_player' },
     oj: {
       active: 'HOJ',
       instances: [{ id: 'HOJ', baseUrl: 'https://e2e.invalid', enabled: true, options: {} }],
@@ -142,10 +153,31 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       autoSaveIntervalSecs: 10,
       defaultLanguage: 'C++',
     },
-    theme: { themeName: 'light', editorTheme: 'vs' },
+    theme: { editorTheme: 'vs' },
     layout: { sidebarWidth: 240, splitRatio: 0.48 },
   }
   let config: AppConfig = configDefaults
+
+  // 榜单参赛队（rankTeams>1 时多页分页；第 13 队为打星行 rank=-1，女生筛选无数据行）
+  const rankTeamCount = options.rankTeams ?? 1
+  const allRankRecords: ContestRankRow[] = Array.from({ length: rankTeamCount }, (_, i) => {
+    const n0 = i + 1
+    const cellA: RankCell = options.sealRank === true
+      ? { errorNum: 0, tryNum: 2, isAc: false, isFirstAc: false, acTime: null, isAfterContest: false, score: null }
+      : { errorNum: 0, tryNum: null, isAc: true, isFirstAc: n0 === 1, acTime: 300 + n0 * 10, isAfterContest: false, score: null }
+    return {
+      rank: n0 === 13 ? -1 : n0,
+      uid: String(n0),
+      username: n0 === 1 ? 'e2e_player' : `team_${String(n0).padStart(2, '0')}`,
+      realname: '', nickname: '', school: '', gender: '', avatar: '',
+      ac: options.sealRank === true ? 0 : 1,
+      total: options.sealRank === true ? 2 : 1,
+      totalTime: 300 + n0 * 10,
+      totalScore: null,
+      submissionInfo: { A: cellA },
+      timeInfo: {},
+    }
+  })
 
   // 工作区按题目真实 ID（pid）隔离，内存态跨切题保留（对应 Rust 磁盘 + 内存双层）。
   // 新建工作区与真实后端一致：**无预置文件**（files 为空、activeFile null、language 空），
@@ -164,6 +196,16 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   // Rust 进程）相反。把**后端侧状态**序列化到 sessionStorage（同一 tab 的
   // reload 会保留），模拟 Rust 侧的持久会话/工作区/提交；`calls`（IPC 日志）、
   // `failQueue`、事件回调属文档生命周期，不持久化。
+  // 公告与已读集合是后端状态：跨 reload 持久化（真实 Tauri 的 Rust 进程不会因
+  // WebView reload 重建）——与工作区/会话同一模式
+  let announcements: Announcement[] = [
+    { id: '701', title: '比赛须知', content: '请勿交流题目解法。', author: 'admin', createdAt: nowSecs - 1800, updatedAt: nowSecs - 1800 },
+  ]
+  // 已读集合**有状态且按 (contestId, uid) 隔离**：生产实现由 contest_cmd 按
+  // 会话 uid 键控（无会话读空、写跳过）。单集合的 fake 会让跨账号/跨比赛/
+  // 无会话的回归假绿（评审 P2-3）。键形如 `1001:1`。
+  let readAnnouncementIdsByScope: Record<string, string[]> = {}
+
   const BACKEND_STORAGE_KEY = '__e2e_backend_v1__'
   interface PersistedBackend {
     workspaces: [string, Workspace][]
@@ -175,6 +217,10 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     /** 当前工作区：真实后端的 WorkspaceManager 存活于 Rust 进程，WebView reload 不会丢失
      *（评审四轮 #5——不持久化会让 reload 后的 update_workspace_file 错误地报「无工作区」） */
     lastWorkspaceId: string | null
+    /** 公告与已读集合：真实后端同样存活于 Rust 进程（评审 2026-11-03） */
+    announcements: Announcement[]
+    /** 按 `contestId:uid` 键控的已读集合（与生产隔离口径一致） */
+    readAnnouncementIdsByScope: Record<string, string[]>
   }
   function persistBackend(): void {
     const snapshot: PersistedBackend = {
@@ -185,6 +231,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       submitSeq,
       config,
       lastWorkspaceId,
+      announcements,
+      readAnnouncementIdsByScope,
     }
     sessionStorage.setItem(BACKEND_STORAGE_KEY, JSON.stringify(snapshot))
   }
@@ -200,6 +248,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       submitSeq = saved.submitSeq
       config = saved.config
       lastWorkspaceId = saved.lastWorkspaceId
+      announcements = saved.announcements
+      // 兼容旧快照（字段改名前的 sessionStorage 内容）
+      readAnnouncementIdsByScope = saved.readAnnouncementIdsByScope ?? {}
       return true
     } catch {
       return false
@@ -213,7 +264,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   const PERSIST_CMDS = new Set([
     'login', 'logout', 'update_config', 'switch_oj',
     'load_workspace', 'update_workspace_file', 'set_workspace_language', 'delete_workspace_file',
-    'submit_code', 'get_judgement',
+    'submit_code', 'get_judgement', 'mark_announcements_read',
   ])
 
   function getWorkspace(problemId: string): Workspace {
@@ -247,27 +298,12 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     return lastWorkspaceId.replace('ws-', '')
   }
 
-  const announcements = [
-    { id: '701', title: '比赛须知', content: '请勿交流题目解法。', author: 'admin', createdAt: nowSecs - 1800, updatedAt: nowSecs - 1800 },
-  ]
-
-  const emptyCell: RankCell = {
-    errorNum: 0, tryNum: null, isAc: false, isFirstAc: false, acTime: null, isAfterContest: false, score: null,
-  }
-  const rankPage: ContestRankPage = {
-    records: [{
-      rank: 1, uid: '1', username: 'e2e_player', realname: '', nickname: '', school: '', gender: '', avatar: '',
-      ac: 0, total: 0, totalTime: 0, totalScore: null,
-      submissionInfo: { A: { ...emptyCell } },
-      timeInfo: {},
-    }],
-    total: 1, size: 20, current: 1, pages: 1,
-  }
-
   // ── 会话内提交与评测序列 ────────────────────────────────────────────
 
   interface SessionSubmission {
     record: SubmissionRecord
+    /** 提交源码原文：详情页 get_submission_detail 的 code 来源（只存内存，不落 artifact） */
+    sourceCode: string
     sequence: JudgementStatus[]
     seqIndex: number
   }
@@ -312,6 +348,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     submit_code: ['contestId', 'problemId', 'displayId', 'language', 'sourceCode'],
     get_judgement: ['submissionId'],
     list_contest_submissions: ['contestId'],
+    get_submission_detail: ['submissionId'],
+    get_submission_cases: ['submissionId'],
     load_workspace: ['contestId', 'problemId'],
     update_workspace_file: ['fileName', 'content'],
     set_workspace_language: ['language'],
@@ -469,6 +507,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
           defaultDir: 'D:\\e2e\\hinina',
           source: 'default',
           restartRequired: false,
+          pointerInTemp: false,
         }
       case 'switch_oj': {
         // 真实命令会校验实例并切换活动 OJ、清缓存、更新配置（oj_cmd.rs）
@@ -521,8 +560,69 @@ function fakeTauriBootstrap(options: FakeOptions): void {
             memoryLimit: problemDetails[p.displayId].memoryLimit,
           }))
       }
-      case 'get_contest_rank':
-        return structuredClone(rankPage)
+      case 'get_contest_rank': {
+        // 真实服务端契约（P57 核对点 3）：每页前置「当前用户 + 关注列表」的副本，
+        // total 相应偏大——前端的跨页去重（dedupeRankRows / mergeRankPages）与
+        // 参与人数修正（total − 本页重复数 − 未去重的我的前置副本）只有在这种
+        // 形态下才会被 E2E 观测到（评审 P2-4）。fake 逐页前置当前用户行。
+        const page = Math.max(1, Number(args?.currentPage ?? 1))
+        const size = Math.max(1, Number(args?.limit ?? 20))
+        const start = (page - 1) * size
+        const uniquePage = allRankRecords.slice(start, start + size)
+        const meRow = currentUser
+          ? allRankRecords.find((row) => row.uid === currentUser!.id)
+          : undefined
+        const total = allRankRecords.length + (meRow ? 1 : 0)
+        return {
+          records: structuredClone(meRow ? [meRow, ...uniquePage] : uniquePage),
+          total,
+          size,
+          current: page,
+          pages: Math.ceil(total / size),
+        } satisfies ContestRankPage
+      }
+      case 'get_submission_detail': {
+        // 详情按会话内提交构造：code 取提交原文，错误信息仅 CE 有，评测机只在终态分配
+        const entry = submissions.find((s) => s.record.submitId === String(args?.submissionId ?? ''))
+        if (!entry) throw { Submission: `fake 无此提交 ${String(args?.submissionId)}` }
+        const r = entry.record
+        const terminal = r.status !== 'Pending' && r.status !== 'Compiling' && r.status !== 'Running'
+        const detail: SubmissionDetail = {
+          submitId: r.submitId,
+          pid: r.pid,
+          displayPid: r.displayPid,
+          username: r.username,
+          submitTime: r.submitTime,
+          status: r.status,
+          timeMs: r.timeMs,
+          memoryKb: r.memoryKb,
+          score: r.score,
+          length: r.length,
+          language: r.language,
+          code: entry.sourceCode,
+          errorMessage: r.status === 'CompilationError' ? 'fake: compilation error' : null,
+          judger: terminal ? 'e2e-judger-01' : null,
+          oiRankScore: null,
+        }
+        return structuredClone(detail)
+      }
+      case 'get_submission_cases': {
+        const entry = submissions.find((s) => s.record.submitId === String(args?.submissionId ?? ''))
+        if (!entry) throw { Submission: `fake 无此提交 ${String(args?.submissionId)}` }
+        const ac: SubmissionCases = {
+          cases: [1, 2, 3].map((seq) => ({
+            caseId: seq, seq, status: 'Accepted', timeMs: 8 + seq, memoryKb: 2040 + seq * 4, score: null, groupNum: null,
+          })),
+          subTasks: [],
+          mode: 'default',
+        }
+        const wa: SubmissionCases = {
+          cases: [{ caseId: 1, seq: 1, status: 'WrongAnswer', timeMs: 8, memoryKb: 1990, score: null, groupNum: null }],
+          subTasks: [],
+          mode: 'default',
+        }
+        return structuredClone(entry.record.status === 'Accepted' ? ac : wa)
+      }
       case 'load_workspace': {
         const ws = getWorkspace(String(args?.problemId ?? ''))
         lastWorkspaceId = ws.id
@@ -532,8 +632,6 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         emitEvent('workspace-saved', { workspaceId: lastWorkspaceId, revision: revisionCounter, auto: false })
         return null
       }
-      case 'current_workspace':
-        return lastWorkspaceId ? structuredClone(getWorkspace(lastWorkspaceId.replace('ws-', ''))) : null
       case 'update_workspace_file': {
         const ws = getWorkspace(requireLoadedProblemId())
         const fileName = String(args?.fileName)
@@ -583,6 +681,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         submitSeq += 1
         const id = String(submitSeq)
         submissions.push({
+          sourceCode: String(args?.sourceCode ?? ''),
           record: {
             submitId: id,
             pid: problemId,
@@ -649,16 +748,34 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       }
       case 'list_contest_announcements':
         return {
-          records: announcements,
+          // 克隆而非活引用：与其它命令一致（pushAnnouncement 事后追加不得
+          // 影响已返回的页对象——评审中 3）
+          records: structuredClone(announcements),
           total: announcements.length,
           size: Math.max(1, Number(args?.limit ?? 20)),
           current: Math.max(1, Number(args?.currentPage ?? 1)),
           pages: 1,
         } satisfies AnnouncementPage
-      case 'get_read_announcement_ids':
-        return []
-      case 'mark_announcements_read':
+      case 'get_read_announcement_ids': {
+        // 生产语义：按 contestId + 会话 uid 隔离；无会话返回空列表（登录页也会
+        // 预渲染公告，不报错）
+        const uid = currentUser?.id
+        if (!uid) return []
+        return structuredClone(
+          readAnnouncementIdsByScope[`${String(args?.contestId)}:${uid}`] ?? [],
+        )
+      }
+      case 'mark_announcements_read': {
+        // 生产语义：无会话静默跳过（已读是纯 UI 便利特性，不值得报错）；
+        // 有会话则与既有记录合并去重后落盘
+        const uid = currentUser?.id
+        if (!uid) return null
+        const key = `${String(args?.contestId)}:${uid}`
+        const ids = new Set(readAnnouncementIdsByScope[key] ?? [])
+        for (const id of (args?.ids as string[] | undefined) ?? []) ids.add(String(id))
+        readAnnouncementIdsByScope[key] = [...ids]
         return null
+      }
       default:
         console.error(`[fake-tauri] 未实现的命令: ${cmd}`, args)
         throw { Unknown: `fake-tauri: 未实现的命令 ${cmd}` }
@@ -739,6 +856,18 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     },
     backendState(): { lastWorkspaceId: string | null } {
       return { lastWorkspaceId }
+    },
+    pushAnnouncement(): void {
+      announcements.push({
+        id: `70${announcements.length + 1}`,
+        title: `补充说明 ${announcements.length + 1}`,
+        content: '这是一条测试期间追加的虚构公告。',
+        author: 'admin',
+        createdAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+      })
+      // 追加即后端状态变更：立即落盘（与 PERSIST_CMDS 同语义，控制面不走命令表）
+      persistBackend()
     },
   }
 

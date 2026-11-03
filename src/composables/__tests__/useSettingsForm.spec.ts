@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   invalidate: vi.fn(),
   switchOj: vi.fn(),
   resetSessionForOjSwitch: vi.fn(),
+  resetAuthForOjSwitch: vi.fn(),
   routerReplace: vi.fn(),
   // 启动标志响应式快照（systemService.launchFlags）：钥匙模式切换后留在设置页
   launchFlags: { value: { settings: false } },
@@ -96,6 +97,11 @@ vi.mock('@/services/system.service', () => ({
   },
 }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
+/// OJ 切换的认证态复位（与 resetSessionForOjSwitch 成对调用；纯 composable 测试
+/// 无活动 pinia，打桩同 session 模块）
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: () => ({ resetForOjSwitch: mocks.resetAuthForOjSwitch }),
+}))
 vi.mock('vue-router', () => ({
   useRouter: () => ({
     replace: mocks.routerReplace,
@@ -105,7 +111,6 @@ vi.mock('vue-router', () => ({
 
 function baseConfig(): AppConfig {
   return {
-    user: { lastUsername: '' },
     oj: {
       active: 'HOJ',
       instances: [{ id: 'HOJ', baseUrl: 'https://hoj.example', enabled: true, options: {} }],
@@ -113,7 +118,7 @@ function baseConfig(): AppConfig {
       pollIntervalSecs: 5, pollTimeoutSecs: 300, cacheTtlSecs: 60, cacheProblemStatement: true,
     },
     editor: { fontSize: 14, tabSize: 4, autoSave: true, autoSaveIntervalSecs: 30, defaultLanguage: 'C++' },
-    theme: { themeName: 'light', editorTheme: 'vs' },
+    theme: { editorTheme: 'vs' },
     layout: { sidebarWidth: 240, splitRatio: 0.48 },
   }
 }
@@ -276,6 +281,8 @@ describe('useSettingsForm', () => {
     })
     expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
     expect(mocks.resetSessionForOjSwitch).toHaveBeenCalledTimes(1)
+    // 认证态复位与领域清理成对出现（断环后拆到 authStore）
+    expect(mocks.resetAuthForOjSwitch).toHaveBeenCalledTimes(1)
     expect(mocks.routerReplace).toHaveBeenCalledWith({ name: 'Login' })
   })
 

@@ -12,7 +12,6 @@
 // 判定会话失效的唯一依据（见 `core/error.rs` 的 `context()` 文档）。
 // `get_rank` 尤其关键：它是全场最高频的认证调用（每 10s 一次），
 // 变体被改写会让 token 过期时榜单静默 stale、选手永远回不到登录页。
-pub mod error;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -129,9 +128,8 @@ impl ContestService {
             .current_contest
             .write()
             .unwrap_or_else(|e| e.into_inner()) = None;
-        if let Ok(mut c) = self.cache.write() {
-            *c = None;
-        }
+        // 中毒也必须完成失效（into_inner）：跳过会让旧 OJ 的榜单缓存跨切换存活
+        *self.cache.write().unwrap_or_else(|e| e.into_inner()) = None;
         self.meta_cache.clear();
         info!("OJ 已切换：清空比赛列表与元信息内存缓存");
 

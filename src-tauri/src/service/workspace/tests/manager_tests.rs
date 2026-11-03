@@ -422,7 +422,7 @@ fn destroy_removes_workspace() {
 }
 
 #[test]
-fn switch_saves_current_and_loads_target() {
+fn load_preserves_target_workspace_file() {
     let mgr = test_manager("switch");
 
     let ws1 = mgr.create("contest-8", "problem-I", "/ws").unwrap();
@@ -431,8 +431,8 @@ fn switch_saves_current_and_loads_target() {
 
     mgr.create("contest-9", "problem-J", "/ws").unwrap();
 
-    // switch back to ws1 — should preserve its file
-    mgr.switch(&ws1_id, "/ws").unwrap();
+    // load back to ws1 — should preserve its file
+    mgr.load(&ws1_id, "/ws").unwrap();
 
     let content = mgr.get_file("main.cpp").unwrap();
     assert_eq!(content, "// workspace one");
@@ -1039,12 +1039,13 @@ fn save_failure_does_not_publish_workspace_saved() {
     );
 }
 
-/// 切换工作区前**显式保存旧工作区**，且事件带的是**旧**工作区 id。
+/// 加载目标工作区前**显式保存旧工作区**，且事件带的是**旧**工作区 id
+/// （原 `switch` 方法的回归，随方法删除迁移到存活的 `load()` 路径）。
 ///
 /// 前端按 workspace_id 过滤过期事件：不带 id 就无从分辨「刚保存的是旧工作区」，
 /// 会误清新工作区的脏标记。
 #[test]
-fn switch_workspace_saves_old_workspace_before_replacing() {
+fn load_saves_old_workspace_before_replacing() {
     let (mgr, _storage, bus) = test_manager_with_bus("switch-saves-old");
     // create 会把 current 切到新工作区，因此两个都建好后再切回 old
     let target = mgr.create("c", "p2", "/ws").expect("创建目标工作区失败");
@@ -1054,7 +1055,7 @@ fn switch_workspace_saves_old_workspace_before_replacing() {
         .expect("写入失败");
     let mut rx = bus.subscribe();
 
-    mgr.switch(&target.id, "/ws").expect("切换失败");
+    mgr.load(&target.id, "/ws").expect("加载目标失败");
 
     assert_eq!(
         rx.try_recv().expect("切换前应显式保存旧工作区并发布事件"),
