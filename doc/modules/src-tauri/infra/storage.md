@@ -7,6 +7,7 @@
 - **`Storage`** — 文件存储 struct，持有基础目录 `base_dir: PathBuf`
 - **`Storage::new(base_dir: PathBuf)`** — 构造函数，指定存储根目录
 - **`Storage::base_dir()`** — 返回基础目录的不可变引用
+- **`Storage::stat(relative_path) -> AppResult<std::fs::Metadata>`** — 读取文件元数据（大小/修改时间/is_file 等不可变快照值）；供 service 层做 stat 类查询而不必绕过抽象直用 `std::fs` 或感知 `base_dir` 布局（2026-11-04，F5）
 - **`Storage::read(relative_path) -> AppResult<Vec<u8>>`** — 读取二进制文件
 - **`Storage::read_to_string(relative_path) -> AppResult<String>`** — 读取 UTF-8 文件
 - **`Storage::write(relative_path, data) -> AppResult<()>`** — 写入二进制数据，自动创建父目录

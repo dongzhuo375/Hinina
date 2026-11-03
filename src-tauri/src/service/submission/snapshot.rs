@@ -240,7 +240,7 @@ fn walk_snapshots(storage: &Storage) -> Vec<(String, u64, std::time::SystemTime)
         };
         for file in files {
             let relative = file.to_string_lossy().replace('\\', "/");
-            let Ok(meta) = std::fs::metadata(storage.base_dir().join(&relative)) else {
+            let Ok(meta) = storage.stat(&relative) else {
                 continue;
             };
             if !meta.is_file() {

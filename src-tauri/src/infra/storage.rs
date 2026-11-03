@@ -203,6 +203,19 @@ impl Storage {
         }
     }
 
+    /// 读取文件元数据（大小、修改时间、是否文件等不可变快照值）。
+    ///
+    /// 供 service 层做「stat 类」查询（如留档体积/过期预览）而无需绕过本抽象
+    /// 直用 `std::fs` 或感知 `base_dir` 布局。
+    ///
+    /// # Errors
+    /// 路径不安全或元数据读取失败时返回 `AppError::Io`。
+    pub fn stat(&self, relative_path: &str) -> AppResult<std::fs::Metadata> {
+        let path = self.resolve(relative_path)?;
+        fs::metadata(&path)
+            .map_err(|e| AppError::Io(format!("读取文件元数据失败 {}: {}", relative_path, e)))
+    }
+
     /// 检查文件或目录是否存在。
     pub fn exists(&self, relative_path: &str) -> bool {
         self.resolve(relative_path)

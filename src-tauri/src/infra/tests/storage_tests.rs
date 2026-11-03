@@ -176,3 +176,20 @@ fn write_string_atomic_cleans_stale_temps_of_same_target() {
         "其他目标不误伤"
     );
 }
+
+/// stat：存在文件返回元数据，缺失/穿越路径报 Io 错误。
+#[test]
+fn stat_reads_metadata_and_rejects_invalid_paths() {
+    let dir = TempDir::named("hinina-storage-stat");
+    let s = Storage::new(dir.to_path_buf());
+    s.write_string("sessions/HOJ.json", "{\"token\":\"t\"}")
+        .unwrap();
+
+    let meta = s.stat("sessions/HOJ.json").unwrap();
+    assert!(meta.is_file());
+    assert_eq!(meta.len(), 13);
+    assert!(meta.modified().is_ok());
+
+    assert!(s.stat("sessions/missing.json").is_err());
+    assert!(s.stat("../evil").is_err());
+}
