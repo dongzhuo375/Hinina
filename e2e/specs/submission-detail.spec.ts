@@ -62,8 +62,9 @@ test.describe('提交详情', () => {
     // judging 形态：状态标签 Judging + 明细区自动刷新占位（终态才拉 get_submission_cases）
     await expect(page.getByText('Judging').first()).toBeVisible()
     await expect(page.getByText('评测进行中，测试点结果将自动刷新…')).toBeVisible()
-    await expect.poll(async () => callCount(page, 'get_submission_cases')).toBe(0)
-    // 详情页自身维持轮询（非终态不停止）
+    // 先确认详情页自身至少完成两次轮询，再断言 cases 恒 0——顺序颠倒时
+    // cases==0 会在任何后续轮询发生前即刻通过，第二次起的回归测不出来
     await expect.poll(async () => callCount(page, 'get_submission_detail')).toBeGreaterThanOrEqual(2)
+    await expect.poll(async () => callCount(page, 'get_submission_cases')).toBe(0)
   })
 })
