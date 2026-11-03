@@ -303,9 +303,15 @@ fn normalize_language_display_name(raw: &str) -> Option<&'static str> {
 /// 背景：`editor.defaultLanguage` 的值域已翻转为 HOJ 语言显示名（与提交契约一致）——
 /// 被上一版归一成 Monaco id（'cpp' 等）的配置在此映射回显示名；
 /// 已是显示名或其他非空值（OJ 可能提供 Go/Rust 等）原样保留，仅空串回退默认 "C++"。
-/// 另外 `theme = dark`（深色 UI 尚未实现，前端只有浅色）、
-/// `splitRatio = 0.45`（旧默认，现默认 0.48）仍按旧规则修正。
-/// 只修正**恰好等于旧默认值**的项，用户显式设置的其他值一律不动。
+/// 另外两处旧值修正：
+/// - `themeName`（旧版整机主题，唯一写入方 ThemeService 已删除）：**与旧切换器
+///   成对写入**的 `editorTheme = "vs-dark"` 会被复位为 `"vs"`——只有
+///   `legacy_theme_name == "dark"` 且 `editor_theme == "vs-dark"` 同时成立才动，
+///   用户自己选的深色编辑器（`light` + `vs-dark`）不受影响；`legacy_theme_name`
+///   本身 `take` 掉（`skip_serializing`，下次落盘自然收敛）；
+/// - `splitRatio = 0.45`（旧默认，现默认 0.48）。
+///
+/// 只修正**恰好等于旧默认值/旧切换器成对值**的项，用户显式设置的其他值一律不动。
 pub fn normalize_legacy_values(cfg: &mut AppConfig) {
     if cfg.editor.default_language.is_empty() {
         cfg.editor.default_language = default_language();
