@@ -302,7 +302,15 @@ fn main() {
                     plan.default_dir.clone(),
                     plan.source,
                 ))
-                .unwrap_or_else(|error| panic!("无法初始化应用数据：{}", error.user_message()));
+                .unwrap_or_else(|error| {
+                    // init 失败仍走 panic（钩子落盘 + 启动错误框语义不变），但**先**
+                    // 汇报数据目录诊断：Logger::init 是 init 的第 1 步且不失败，走到
+                    // 这里订阅器基本已就绪，汇报能落日志——失败路径不能把「为什么」
+                    // 一起带走（若未来 init 在 Logger 之前就可能失败，此调用落不到
+                    // 任何输出，无害）
+                    report_data_dir(&plan, &migration);
+                    panic!("无法初始化应用数据：{}", error.user_message())
+                });
 
             // ② 迁移结果与数据目录来源必须**在日志就绪后**立刻汇报
             report_data_dir(&plan, &migration);
