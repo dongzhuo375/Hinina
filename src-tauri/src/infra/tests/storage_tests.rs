@@ -10,7 +10,32 @@ fn resolve_normal_path() {
     let s = storage();
     assert!(s.resolve("foo/bar/baz").is_ok());
     assert!(s.resolve("a").is_ok());
-    assert!(s.resolve("a/b/./c").is_ok());
+    assert!(s.resolve("foo/bar/").is_ok());
+}
+
+/// 空路径 / 纯点路径会解析为 `base_dir` 本身或其子目录：`remove_all("")`
+/// 足以删掉数据根目录，`remove_all("workspaces/.")` 足以删掉全部工作区。
+/// 防线放在 `resolve`（所有 Storage 调用的公共入口），不靠调用方自律。
+#[test]
+fn resolve_rejects_empty_or_dot_only_paths() {
+    let s = storage();
+    assert!(s.resolve("").is_err());
+    assert!(s.resolve(".").is_err());
+    assert!(s.resolve("workspaces/.").is_err());
+    // 内嵌 `./` 同样拒绝：白名单只放行 Normal，规则简单可穷举
+    assert!(s.resolve("a/b/./c").is_err());
+}
+
+#[test]
+fn remove_all_rejects_empty_path() {
+    let dir = TempDir::named("hinina-storage-empty-remove");
+    std::fs::create_dir_all(dir.path()).unwrap();
+    std::fs::write(dir.join("keep.txt"), "x").unwrap();
+    let s = Storage::new(dir.to_path_buf());
+
+    assert!(s.remove_all("").is_err(), "空路径不得删到数据根目录");
+    assert!(s.remove_all(".").is_err());
+    assert!(dir.join("keep.txt").exists(), "数据必须原样保留");
 }
 
 #[test]
