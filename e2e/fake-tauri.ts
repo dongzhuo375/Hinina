@@ -18,7 +18,7 @@ import { expect } from '@playwright/test'
  * 类型仅编译期使用；注入脚本（`fakeTauriBootstrap`）经 addInitScript 序列化执行，
  * **不得闭包任何模块级运行时值**。
  */
-import type { AnnouncementPage } from '../src/types/announcement'
+import type { Announcement, AnnouncementPage } from '../src/types/announcement'
 import type { AppConfig } from '../src/types/config'
 import type { Contest, ContestProblem } from '../src/types/contest'
 import type { Problem } from '../src/types/problem'
@@ -196,6 +196,15 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   // Rust 进程）相反。把**后端侧状态**序列化到 sessionStorage（同一 tab 的
   // reload 会保留），模拟 Rust 侧的持久会话/工作区/提交；`calls`（IPC 日志）、
   // `failQueue`、事件回调属文档生命周期，不持久化。
+  // 公告与已读集合是后端状态：跨 reload 持久化（真实 Tauri 的 Rust 进程不会因
+  // WebView reload 重建）——与工作区/会话同一模式
+  let announcements: Announcement[] = [
+    { id: '701', title: '比赛须知', content: '请勿交流题目解法。', author: 'admin', createdAt: nowSecs - 1800, updatedAt: nowSecs - 1800 },
+  ]
+  // 已读集合**有状态**：mark 写入、get 读出（真实后端语义）——无条件返回 [] 会让
+  // 「进入即标已读」在重进页面后假性变成全部未读
+  let readAnnouncementIds = new Set<string>()
+
   const BACKEND_STORAGE_KEY = '__e2e_backend_v1__'
   interface PersistedBackend {
     workspaces: [string, Workspace][]
@@ -207,6 +216,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     /** 当前工作区：真实后端的 WorkspaceManager 存活于 Rust 进程，WebView reload 不会丢失
      *（评审四轮 #5——不持久化会让 reload 后的 update_workspace_file 错误地报「无工作区」） */
     lastWorkspaceId: string | null
+    /** 公告与已读集合：真实后端同样存活于 Rust 进程（评审 2026-11-03） */
+    announcements: Announcement[]
+    readAnnouncementIds: string[]
   }
   function persistBackend(): void {
     const snapshot: PersistedBackend = {
@@ -217,6 +229,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       submitSeq,
       config,
       lastWorkspaceId,
+      announcements,
+      readAnnouncementIds: [...readAnnouncementIds],
     }
     sessionStorage.setItem(BACKEND_STORAGE_KEY, JSON.stringify(snapshot))
   }
@@ -232,6 +246,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       submitSeq = saved.submitSeq
       config = saved.config
       lastWorkspaceId = saved.lastWorkspaceId
+      announcements = saved.announcements
+      readAnnouncementIds = new Set(saved.readAnnouncementIds)
       return true
     } catch {
       return false
@@ -245,7 +261,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   const PERSIST_CMDS = new Set([
     'login', 'logout', 'update_config', 'switch_oj',
     'load_workspace', 'update_workspace_file', 'set_workspace_language', 'delete_workspace_file',
-    'submit_code', 'get_judgement',
+    'submit_code', 'get_judgement', 'mark_announcements_read',
   ])
 
   function getWorkspace(problemId: string): Workspace {
@@ -278,13 +294,6 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     if (!lastWorkspaceId) throw { Workspace: 'fake: 尚无已加载的工作区（先 load_workspace）' }
     return lastWorkspaceId.replace('ws-', '')
   }
-
-  const announcements = [
-    { id: '701', title: '比赛须知', content: '请勿交流题目解法。', author: 'admin', createdAt: nowSecs - 1800, updatedAt: nowSecs - 1800 },
-  ]
-  // 已读集合**有状态**：mark 写入、get 读出（真实后端语义）——无条件返回 [] 会让
-  // 「进入即标已读」在重进页面后假性变成全部未读
-  const readAnnouncementIds = new Set<string>()
 
   // ── 会话内提交与评测序列 ────────────────────────────────────────────
 
@@ -612,8 +621,6 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         emitEvent('workspace-saved', { workspaceId: lastWorkspaceId, revision: revisionCounter, auto: false })
         return null
       }
-      case 'current_workspace':
-        return lastWorkspaceId ? structuredClone(getWorkspace(lastWorkspaceId.replace('ws-', ''))) : null
       case 'update_workspace_file': {
         const ws = getWorkspace(requireLoadedProblemId())
         const fileName = String(args?.fileName)
@@ -832,6 +839,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         createdAt: Math.floor(Date.now() / 1000),
         updatedAt: Math.floor(Date.now() / 1000),
       })
+      // 追加即后端状态变更：立即落盘（与 PERSIST_CMDS 同语义，控制面不走命令表）
+      persistBackend()
     },
   }
 
