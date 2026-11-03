@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// Workspace 管理器。
 ///
 /// 管理 Workspace 完整生命周期：
-/// create → load → save → auto-save → switch → destroy → recover
+/// create → load → save → auto-save → destroy → recover
 ///
 /// ## 生命周期状态机
 /// ```text
@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 ///          │ load / recover
 ///          ▼
 ///   ┌──────────────────┐
-///   │     Active        │◄──── switch
+///   │     Active        │◄──── load
 ///   │  (auto-saving)    │
 ///   └──────┬───────────┘
 ///          │
@@ -509,21 +509,6 @@ impl WorkspaceManager {
             .unwrap_or_else(|e| e.into_inner())
     }
 
-    /// 切换工作区：保存当前 → 加载目标。
-    ///
-    /// **不发布事件**：切换由前端经 IPC 发起，返回值即真值；切换前对旧工作区的
-    /// 显式保存本身会发布 `WorkspaceSaved`（前端据此清脏，并按 workspace_id /
-    /// revision 过滤掉不属于当前工作区的过期事件）。
-    pub fn switch(&self, workspace_id: &str, root_path: &str) -> AppResult<Workspace> {
-        // 保存当前工作区（内存是唯一权威副本，替换前必须先落盘）
-        self.save_current_if_dirty();
-
-        // 加载目标工作区
-        let workspace = self.load(workspace_id, root_path)?;
-
-        Ok(workspace)
-    }
-
     /// 销毁工作区：删除所有文件并从内存清除。
     pub fn destroy(&self, workspace_id: &str) -> AppResult<()> {
         self.repo.delete_workspace(workspace_id)?;
@@ -654,8 +639,14 @@ impl WorkspaceManager {
 
     /// 获取当前活动工作区。
     ///
+    /// **无生产调用**：`current_workspace` 命令已随死 IPC 清理删除（2026-11），
+    /// 切题/切工作区一律经 `load_workspace` 返回值即真值。保留为**测试专用**
+    /// 断言入口（`#[cfg(test)]` 不进生产构建）——它比经 `load()` 回读更直接，
+    /// 且锁中毒语义（into_inner）需要可观测。不要新增生产代码依赖它。
+    ///
     /// 锁中毒时取回内部值继续（与全仓 `into_inner()` 惯例一致）：中毒只说明
     /// 曾有持有者 panic，「无工作区」与「锁损坏」返回同值会掩盖后者。
+    #[cfg(test)]
     pub fn current(&self) -> Option<Workspace> {
         self.current
             .read()

@@ -27,7 +27,7 @@
 1. 进入解题页 → `load_workspace`（find_or_create 恢复/新建 + 按配置同步 auto-save）
 2. 编辑过程中前端 2s 防抖推送 `update_workspace_file`（**只进后端内存**）；落盘由两条路径负责：后台 auto-save 周期、前端在切题/失焦/离开页面/关窗时编排的 `save_workspace`
 3. 切换语言 → `set_workspace_language` → `WorkspaceManager::set_language`（更新内存 + 立即持久化 `workspace.json` 元数据）；前端随后对旧扩展名文件逐个调 `delete_workspace_file` 清理（P62：单代码文件约束）
-4. 切题 → 再次 `load_workspace`（替换当前工作区前先落盘旧的；`WorkspaceManager::switch` 仍由 OJ 切换路径内部使用）
+4. 切题 → 再次 `load_workspace`（替换当前工作区前先落盘旧的）。原 `switch_workspace` 命令与 `WorkspaceManager::switch()` 均已删除（前端与内部均零调用）；`current()` 降为 `#[cfg(test)]` 测试断言入口
 5. 各 command 从 `ctx.workspace_manager`（`Option<Arc<WorkspaceManager>>`）取管理器，未初始化时返回 `AppError::Workspace`
 
 设计要点：
