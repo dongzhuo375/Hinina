@@ -28,7 +28,7 @@ app.use(createPinia());
 app.use(router);
 // 组合根装配：全局错误转发（Vue / window / promise / router 四类全局错误 → Rust
 // 日志）。**必须先于 mount 与其余装配**：首屏渲染、早期 IPC 的错误也要被捕获；
-// 转发失败只 console 告警 —— 报错的通道不允许自己成为新的错误源。
+// 转发失败经 log.warn 告警 —— 报错的通道不允许自己成为新的错误源。
 installGlobalErrorGuard(app, router, (level, scope, message) => {
   void forwardFrontendLog(level, scope, message).catch((e) => {
     log.warn('错误转发失败:', e)
