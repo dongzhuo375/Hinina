@@ -83,7 +83,7 @@ const {
                     class="rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
                   >
                     位置指针保存在<strong class="font-semibold">临时目录</strong>：系统清理临时文件后，
-                    你设置的自定义数据目录会失效（当前数据仍在上面显示的目录中）。
+                    你在此保存的数据目录设置也会一起丢失。
                   </p>
 
                   <!-- 待重启提示：改动已记录但尚未生效，必须说清「现在仍在用旧目录」 -->

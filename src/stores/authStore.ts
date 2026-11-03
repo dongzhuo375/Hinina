@@ -64,7 +64,7 @@ export const useAuthStore = defineStore('auth', {
         if (epochAtStart !== authEpoch) {
           // 会话上下文已切换：丢弃迟到结果，给出可执行反馈而非静默吞掉。
           // 登录表单可能已不在屏上，error 写入 store 是无害兜底
-          throw new Error('登录已被中断（OJ 或数据目录已切换），请重试')
+          throw new Error('登录已被中断，请重试')
         }
         authEpoch += 1
         this.user = user
