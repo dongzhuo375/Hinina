@@ -277,19 +277,6 @@ fn read_pointer_early(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) -> D
     }
 }
 
-/// [`read_pointer_early`] 的**静默**变体：读/解析失败都不入诊断缓冲。
-///
-/// 只供 `update_pointer`（启动序列内对同一指针文件的再次读取）使用：首次读取
-/// 已把损坏诊断写进缓冲，此处重复上报只会让重放出现两条相同警告；而同一次启动
-/// 里指针文件只由我们写，再读失败不会带来新信息。
-fn read_pointer_early_silent(default_dir: &Path) -> DataDirPointer {
-    let path = pointer_path(default_dir);
-    match std::fs::read_to_string(&path) {
-        Ok(raw) => serde_json::from_str::<DataDirPointer>(&raw).unwrap_or_default(),
-        Err(_) => DataDirPointer::default(),
-    }
-}
-
 /// 写入位置指针（自动创建默认目录）。
 ///
 /// **原子写**（temp + rename）：直接 `fs::write` 是 truncate-in-place，写到一半掉电/
@@ -584,42 +571,39 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
 /// `app_local_data_dir()` 失败（策略锁定 / 环境变量缺失）时，组合根只能拿临时
 /// 目录顶替——若按普通路径解析，临时目录「可用」会让 `source` 变成 `Default`，
 /// `report_data_dir` 只记 Info，**丢掉「临时数据随时可能被清理」的强告警**
-/// （评审 P2-2）。这里把失败原因显式升级为 `FallbackTemp` + error 级诊断。
+/// （评审 P2-2）。这里把失败原因显式升级为 error 级诊断，并在无可用自定义目录时
+/// 把 `source` 强制为 `FallbackTemp`。
 ///
-/// 该分支**跳过指针与迁移**：指针文件固定放在默认目录下，而默认目录已不可解析
-/// ——没有可读的指针位置，也没有可作为迁移来源/目标的锚点。降级模式下
-/// `default_dir` 记为临时目录（位置指针随之落在那里，设置页如实展示）。
+/// 降级模式下**仍完整读指针并尊重用户选择**（评审 P2-1）：客户端会把临时目录
+/// 当作 `default_dir`（`get_data_dir` 同口径），设置页写入的位置指针就落在那里
+/// ——用户选的自定义目录与待迁移请求必须继续生效，否则「设置自定义目录 →
+/// 默认目录仍解析失败 → 指针被无视」会把人永久困在临时目录。
 pub fn prepare_startup_with_default_error(
     default_error: Option<&str>,
     default_dir: &Path,
     legacy: &Path,
 ) -> (DataDirPlan, MigrateOutcome) {
-    if let Some(reason) = default_error {
-        let _ = std::fs::create_dir_all(legacy);
-        return (
-            DataDirPlan {
-                base_dir: legacy.to_path_buf(),
-                default_dir: legacy.to_path_buf(),
-                source: DataDirSource::FallbackTemp,
-                warnings: vec![EarlyDiagnostic {
-                    level: EarlyLevel::Error,
-                    message: format!(
-                        "默认数据目录解析失败（{reason}），回退临时目录（数据随时可能被系统清理）: {}",
-                        legacy.display()
-                    ),
-                }],
-            },
-            MigrateOutcome::default(),
-        );
-    }
-
     // 指针只读一次：诊断缓冲与指针数据（migrate_from / legacy 标记）共用这一次
     // 读取。resolve 的内部变体把**指针诊断 + 候选目录诊断**一并收进
     // `plan.warnings`（返回时 `mem::take` 收拢共享缓冲），因此启动期的全部诊断
     // 以 plan.warnings 为唯一载体，之后迁移与写指针的诊断继续追加到它的尾部。
     let mut early = Vec::new();
+    if let Some(reason) = default_error {
+        let _ = std::fs::create_dir_all(legacy);
+        early.push(EarlyDiagnostic {
+            level: EarlyLevel::Error,
+            message: format!(
+                "默认数据目录解析失败（{reason}）；临时目录作为默认位置（数据随时可能被系统清理），                 此前保存的自定义数据目录仍会生效: {}",
+                default_dir.display()
+            ),
+        });
+    }
     let pointer = read_pointer_early(default_dir, &mut early);
     let mut plan = resolve_with_pointer(default_dir, legacy, &pointer, &mut early);
+    if default_error.is_some() && plan.source == DataDirSource::Default {
+        // 降级模式：临时目录「可用」不能算 Default（强告警不能丢）
+        plan.source = DataDirSource::FallbackTemp;
+    }
     let mut outcome = MigrateOutcome::default();
 
     // ① 显式要求的迁移（设置页改目录）
@@ -688,11 +672,26 @@ fn update_pointer(
     early: &mut Vec<EarlyDiagnostic>,
     mutate: impl FnOnce(&mut DataDirPointer),
 ) {
-    // 再读一次**静默**：本函数只在 prepare_startup（订阅器就绪前）执行，指针
-    // 在本次启动已被首读过一次——若它损坏，首读已把诊断写进缓冲，此处再报同
-    // 一条只会重放两遍（评审低-2）。指针文件在启动序列内只由我们写，这次再读
-    // 结构上不会产生新信息；写侧失败仍照常入缓冲。
-    let mut pointer = read_pointer_early_silent(default_dir);
+    // 再读（读-改-写必须基于磁盘最新值），但按错误种类处理（评审 P2-2）：
+    // - NotFound：无文件 → 默认指针是安全基线；
+    // - 解析失败：首读已把诊断写进缓冲（同一启动内指针只由我们写，文件未变），
+    //   此处不重复上报；按默认指针继续写回等同「修复损坏的指针」；
+    // - 其他 I/O 错误（权限/占用等）：**不能**拿默认指针当可写基线 —— 写回会抹掉
+    //   磁盘上的 data_dir 等字段。记录诊断并放弃本次写回（下次启动重试）。
+    let mut pointer = match std::fs::read_to_string(pointer_path(default_dir)) {
+        Ok(raw) => serde_json::from_str::<DataDirPointer>(&raw).unwrap_or_default(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DataDirPointer::default(),
+        Err(e) => {
+            early.push(EarlyDiagnostic {
+                level: EarlyLevel::Warn,
+                message: format!(
+                    "更新数据目录指针前重读失败，放弃本次写回（下次启动会重试）: path={}，error={e}",
+                    pointer_path(default_dir).display()
+                ),
+            });
+            return;
+        }
+    };
     mutate(&mut pointer);
     if let Err(e) = write_pointer(default_dir, &pointer) {
         early.push(EarlyDiagnostic {

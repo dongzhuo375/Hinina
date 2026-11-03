@@ -1214,3 +1214,51 @@ fn corrupt_pointer_with_legacy_migration_reports_once() {
         .collect();
     assert_eq!(pointer_diags.len(), 1, "{:?}", plan.warnings);
 }
+
+/// P2-1 回归：默认目录解析失败（降级模式）时，设置页写在**降级默认位置**的
+/// 指针必须继续生效——用户选的自定义目录不能被无视（否则会被永久困在临时目录）。
+#[test]
+fn degraded_mode_still_honors_saved_custom_dir() {
+    // 降级模式下 default_dir == 临时目录（main.rs 同口径）：指针就落在那里
+    let degraded_default = unique_dir("degraded-custom-pointer");
+    let custom = unique_dir("degraded-custom-target");
+    write_pointer(&degraded_default, &pointer(Some(&custom), None)).expect("写指针失败");
+
+    let (plan, _) = prepare_startup_with_default_error(
+        Some("app_local_data_dir 解析失败: policy"),
+        &degraded_default,
+        &degraded_default,
+    );
+
+    assert_eq!(plan.source, DataDirSource::Custom, "自定义目录必须生效");
+    assert_eq!(plan.base_dir, custom);
+    // 失败原因仍如实上报（error 级）
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|d| d.level == EarlyLevel::Error && d.message.contains("默认数据目录解析失败")),
+        "{:?}",
+        plan.warnings
+    );
+}
+
+/// P2-2 回归：`update_pointer` 的再读遇到**新的 I/O 错误**（非 NotFound）时，
+/// 必须放弃写回并记诊断——不能拿默认指针当基线把磁盘上的字段抹掉。
+#[test]
+fn update_pointer_aborts_on_io_error_instead_of_overwriting() {
+    let dir = unique_dir("update-pointer-io-error");
+    // 用目录冒充指针文件：read_to_string 得到非 NotFound 的 I/O 错误
+    std::fs::create_dir_all(pointer_path(&dir)).unwrap();
+
+    let mut early = Vec::new();
+    update_pointer(&dir, &mut early, |p| p.legacy_migrated = Some(true));
+
+    assert!(
+        early
+            .iter()
+            .any(|d| d.message.contains("重读失败") && d.message.contains("放弃本次写回")),
+        "{early:?}"
+    );
+    // 写回被放弃：占位目录原样保留（若拿默认指针写回，会变成文件）
+    assert!(pointer_path(&dir).is_dir(), "指针位置不得被覆盖成文件");
+}
