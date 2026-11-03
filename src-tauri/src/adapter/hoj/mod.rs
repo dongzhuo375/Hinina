@@ -661,14 +661,27 @@ impl AuthProvider for HOJAdapter {
         }
 
         // 忽略远端响应（可能失败），以清除 token 为主 —— 但失败必须留痕：
-        // 远端会话仍在（表现为排障难的「顶号」现象），静默丢弃连这条线索都没有
+        // 远端会话仍在（表现为排障难的「顶号」现象），静默丢弃连这条线索都没有。
+        // 传输失败与非成功状态码都记 warn：登出端点的状态码语义未经真实联调
+        // 确认（P57 核对点之一，如过期 token 登出可能回 401），宁可多记一条
+        // 可过滤的 warn，不可让「顶号」无线索
         let headers = Self::auth_headers(token.as_deref());
-        if let Err(e) = self.http.client().get(&url).headers(headers).send().await {
-            warn!(
-                url = %url,
-                error = %e,
-                "HOJ 远端登出请求失败（本地 token 已清除，服务端会话可能仍在）"
-            );
+        match self.http.client().get(&url).headers(headers).send().await {
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) => {
+                warn!(
+                    url = %url,
+                    status = %response.status(),
+                    "HOJ 远端登出未成功（本地 token 已清除，服务端会话可能仍在）"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    url = %url,
+                    error = %e,
+                    "HOJ 远端登出请求失败（本地 token 已清除，服务端会话可能仍在）"
+                );
+            }
         }
 
         self.clear_token();
