@@ -664,10 +664,18 @@ impl AuthProvider for HOJAdapter {
         // 远端会话仍在（表现为排障难的「顶号」现象），静默丢弃连这条线索都没有。
         // 传输失败与非成功状态码都记 warn：登出端点的状态码语义未经真实联调
         // 确认（P57 核对点之一，如过期 token 登出可能回 401），宁可多记一条
-        // 可过滤的 warn，不可让「顶号」无线索
+        // 可过滤的 warn，不可让「顶号」无线索。
+        //
+        // 成功日志只在远端确实成功时打印：失败分支紧接着再打一句「HOJ 已登出」
+        // 会让同一次登出在日志里自相矛盾（评审）。本地 token 在任何分支都已清除，
+        // 失败文案如实说明了这一点。
         let headers = Self::auth_headers(token.as_deref());
-        match self.http.client().get(&url).headers(headers).send().await {
-            Ok(response) if response.status().is_success() => {}
+        let result = self.http.client().get(&url).headers(headers).send().await;
+        self.clear_token();
+        match result {
+            Ok(response) if response.status().is_success() => {
+                info!("HOJ 已登出");
+            }
             Ok(response) => {
                 warn!(
                     url = %url,
@@ -684,8 +692,6 @@ impl AuthProvider for HOJAdapter {
             }
         }
 
-        self.clear_token();
-        info!("HOJ 已登出");
         Ok(())
     }
 
