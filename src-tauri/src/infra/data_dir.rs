@@ -466,10 +466,15 @@ pub fn validate_target(path: &Path, legacy: &Path, migrate: bool) -> AppResult<P
             path.display()
         )));
     }
-    if path
-        .components()
-        .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
-    {
+    // 原始分隔段检查（错误文案与文档声称「拒 . 与 ..」，必须说到做到）：
+    // `Path::components()` 会把绝对路径中间/末尾的 `.` **归一掉**（`C:\x\.\y`、
+    // `C:\x\y\.` 都没有 CurDir 组件），靠它只能拦 `..`，显式 `.` 会漏——
+    // 与 Storage::resolve 的相对段白名单同一口径，按原始分隔符切分检查。
+    let has_dot_segment = path
+        .to_string_lossy()
+        .split(['/', '\\'])
+        .any(|seg| seg == "." || seg == "..");
+    if has_dot_segment {
         return Err(AppError::Config(format!(
             "数据目录必须是规范化路径（不得包含 . 或 ..）: {}",
             path.display()
@@ -811,6 +816,11 @@ fn clear_migrate_from(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) {
 ///
 /// 诊断写入 [`MigrateOutcome::diagnostics`]；启动路径用 `migrate_into` 把同一条
 /// 诊断按**发生顺序**直接写进 `plan.warnings`，避免两个缓冲分批回放导致因果颠倒。
+/// **仅测试使用**（`#[cfg(test)]`）：生产启动路径走 `prepare_startup →
+/// migrate_into`（诊断直接进 `plan.warnings`）。保留本包装是让「纯搬运」用例
+/// 不必构造启动夹具——与 `resolve` 的降测试专用同一口径，避免下一轮死代码
+/// 审计再把它翻出来。
+#[cfg(test)]
 pub fn migrate(from: &Path, to: &Path) -> MigrateOutcome {
     let mut diagnostics = Vec::new();
     let mut outcome = migrate_into(from, to, &mut diagnostics);

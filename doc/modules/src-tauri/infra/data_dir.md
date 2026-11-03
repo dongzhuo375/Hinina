@@ -30,11 +30,11 @@
 | `dir_is_empty` | `(&Path) -> bool` | 不存在或为空（读不了时按「非空」保守处理）。**`#[cfg(test)]` 测试专用**——生产校验已改用 `conflicting_entries_in`（用「目录为空」当判据会在真机上永远失败，见其文档） |
 | `conflicting_entries` | `() -> impl Iterator<Item = &'static str>` | [`MIGRATED_ENTRIES`] 去掉 `cache`（派生，避免两处漂移） |
 | `conflicting_entries_in` | `(&Path) -> Vec<&'static str>` | `dir` 中已存在的**冲突条目**（迁移会跳过 → 陈旧数据被静默采用）。「恢复默认 + 迁移」的校验判据 |
-| `validate_target` | `(&Path, legacy) -> AppResult<PathBuf>` | 设置页「更改目录」的校验（见下） |
+| `validate_target` | `(&Path, legacy, migrate) -> AppResult<PathBuf>` | 设置页「更改目录」的校验（见下） |
 | `resolve` | `(default_dir, legacy) -> DataDirPlan` | 解析优先级：指针指定（可用）→ 默认（可用）→ 临时目录（回退）。**`#[cfg(test)]` 测试专用**（生产走 `prepare_startup → resolve_with_pointer`，见下）；回退原因记入 `plan.warnings`，不直接打日志 |
 | `prepare_startup` | `(default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 启动用：解析 + 一次性迁移。启动期诊断以 **`plan.warnings` 为唯一载体**：解析期原因之外，迁移过程诊断由 `migrate_into` 按发生顺序追加，`report_data_dir` 顺序重放（`MigrateOutcome.diagnostics` 为空）。等于 `prepare_startup_with_default_error(None, …)` |
 | `prepare_startup_with_default_error` | `(Option<&str>, default_dir, legacy) -> (DataDirPlan, MigrateOutcome)` | 默认目录**解析失败**的降级入口（`app_local_data_dir()` 失败时由 `main.rs` 传入原因）：**仍完整读指针并尊重用户选择**（降级模式下 default_dir 即实时目录，设置页写入的指针落在此处）——可用的自定义目录与待迁移请求继续生效；只有在无可用自定义目录时才把 `source` 从 `Default` 强制改为 `FallbackTemp`（临时目录「可用」不得误报为默认）。warnings 只写原因（Warn 级），回退决策的强告警由 `report_data_dir` 按 source 统一发一条 error |
-| `migrate` / `migrate_into`（后者私有） | `(from, to) -> MigrateOutcome` | 逐项容错搬运；目标已存在则**跳过不覆盖**；单项走 `move_entry`；失败详情（含暂存清理失败、复制成功后删源失败）进诊断缓冲。`migrate` 把诊断放进 `outcome.diagnostics`（直接调用方用）；`migrate_into` 直接追加到调用方缓冲，启动路径因此**按发生顺序**汇入 `plan.warnings`。**本函数只在启动期（订阅器就绪前）执行，内部不打任何 `tracing`** |
+| `migrate`（`#[cfg(test)]`） / `migrate_into`（私有） | `(from, to) -> MigrateOutcome` | 逐项容错搬运；目标已存在则**跳过不覆盖**；单项走 `move_entry`；失败详情（含暂存清理失败、复制成功后删源失败）进诊断缓冲。`migrate` 是**测试专用包装**（诊断放 `outcome.diagnostics`，纯搬运用例不必构造启动夹具）；生产启动路径走 `migrate_into`（诊断按发生顺序直接汇入 `plan.warnings`）。**内部不打任何 `tracing`** |
 | `should_attempt_legacy` | `(&DataDirPointer, DataDirSource, base_dir, legacy) -> bool` | 是否该重试临时目录搬家（三态语义，见下）。`base_dir == legacy`（降级态）时**不搬**：自我搬运会全部 skipped、被误判成功并写 `Some(true)`，永久阻断后续搬家 |
 | `move_entry` / `copy_recursive` | 私有 | `rename` 优先；失败则**复制到 `{to}.hinina-partial` 暂存名再改名**（见下）；`move_entry` 接收诊断缓冲并透传给清理/删源 |
 | `staging_path` / `remove_any` / `remove_source` | 私有 | 暂存路径 / 安全删除 / 复制后删源（失败**记诊断缓冲**而非 `warn!`；删源失败即「旧副本残留」，必须可查） |

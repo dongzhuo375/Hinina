@@ -219,9 +219,14 @@ fn validate_target_rejects_unresolved_dot_components() {
         .expect_err("含 .. 的路径必须拒绝（否则可把数据目录设回临时目录）");
     assert!(err.to_string().contains("规范化"), "{err}");
 
-    // 显式 `.` 同样拒绝（`dir_is_usable` 会把它解析成上级目录）
-    let dotted = legacy.path().join("sub").join(".");
-    assert!(validate_target(&dotted, legacy.path(), false).is_err());
+    // 显式 `.` 同样拒绝——必须用 legacy **之外**的路径：components() 会把绝对路径
+    // 中间/末尾的 `.` 归一掉，旧实现靠 components 只能拦 `..`；而 legacy 内的
+    // dotted 路径会被 is_same_or_inside 抢先拒绝，测不到 dot 分支（假绿）。
+    // 现按原始分隔段检查，`decoy/sub/.`（absolute、不在 legacy 内）直接命中。
+    let dotted = decoy.path().join("sub").join(".");
+    let err = validate_target(&dotted, legacy.path(), false)
+        .expect_err("含 . 的路径必须拒绝（与文案/文档一致）");
+    assert!(err.to_string().contains("规范化"), "{err}");
 }
 
 #[test]
