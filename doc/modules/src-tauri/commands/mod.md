@@ -11,11 +11,11 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 - `pub mod maintenance_cmd` — 重置客户端（`reset_client`：三层缓存 + 公告基线 + 公告已读状态）与清理本地数据（`local_data_usage` 预览 / `purge_local_data` 删日志内容与崩溃记录文件、过期留档）
 - `pub mod config_cmd` — 配置读取 / 热重载 / 更新 + `get_storage_info`（存储与版本信息）
 - `pub mod log_cmd` — `frontend_log`：前端全局错误转发的唯一 IPC 入口（**薄转发**，收敛/预算/落盘在 `infra/frontend_log.md`）
-- `pub mod contest_cmd` — 比赛列表 / 选中 / 加载配置比赛 / 榜单 / 公告与已读状态
+- `pub mod contest_cmd` — 比赛列表 / 加载配置比赛 / 榜单 / 公告与已读状态（「选中」命令已删，比赛引用由 `oj.contestRef` 配置驱动）
 - `pub mod oj_cmd` — 切换当前 OJ（补注册 → 校验已注册 → 切 Registry → 显式清三个 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）
 - `pub mod problem_cmd` — 题目详情 / 用户题目状态 / 题目限制
 - `pub mod submission_cmd` — 提交 / 评测结果单次查询 / 提交列表 / 详情 / 测试点
-- `pub mod workspace_cmd` — 工作区加载 / 保存 / 切换 / 当前 / 文件更新 / 语言设置 / 文件删除
+- `pub mod workspace_cmd` — 工作区加载 / 保存 / 文件更新 / 语言设置 / 文件删除（切换/当前命令已删）
 - `pub mod plugin_cmd` — 插件控制：`plugin_list` / `plugin_start` / `plugin_stop` / `plugin_reload` / `plugin_resync`（`PluginManager` 薄转发）
 - `#[cfg(test)] #[path = "tests/mod_tests.rs"] mod tests` — 本层单元测试
 

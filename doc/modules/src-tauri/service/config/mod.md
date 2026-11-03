@@ -7,7 +7,7 @@
 - **`ConfigService<R: ConfigRepository>`** — 统一配置管理服务
   - `fn new(repo, event_bus, access) -> Self` — 创建实例并立即加载配置；加载成功后先经 `normalize_legacy_values` 归一旧默认值（P55，见下）；首次启动时配置文件不存在则自动使用默认值并持久化
   - `fn get(&self) -> AppConfig` — 获取当前配置的不可变副本
-  - `fn update<F>(&self, updater: F) -> AppResult<AppConfig>` — 通过闭包修改配置后自动保存到磁盘（持久化失败时保留内存修改，返回错误供调用方回滚，且**不发布事件**），成功后发布 `CoreEvent::ConfigChanged`。**为什么在这里发布**：`update` 才是生产链路的配置变更入口（`update_config`、主题切换、`switch_oj` 的持久化都走它）；只有 `reload` 发布的话，观察者永远等不到通知 —— `reload_config` 命令在前端没有调用方（2026-09-21 复核）
+  - `fn update<F>(&self, updater: F) -> AppResult<AppConfig>` — 通过闭包修改配置后自动保存到磁盘（持久化失败时保留内存修改，返回错误供调用方回滚，且**不发布事件**），成功后发布 `CoreEvent::ConfigChanged`。**为什么在这里发布**：`update` 才是生产链路的配置变更入口（`update_config`、`switch_oj` 的持久化都走它）；只有 `reload` 发布的话，观察者永远等不到通知 —— `reload_config` 命令在前端没有调用方（2026-09-21 复核）
   - `fn update_checked<F>(&self, updater) -> AppResult<AppConfig>`（`pub(crate)`）— 可失败的写事务：先取写事务锁，在**候选副本**上执行 updater；返回 `Err` 时不改内存、不落盘、不发事件（评审三十三 #2）。`update_config` 用它把「读锁内最新 active → 合并/校验 → 整体替换」做成一个原子事务
   - `fn update_locked<F>(&self, updater)`（`pub(crate)`）— 写事务本体，**调用方必须已持有** [`lock_write_txn`]；`switch_oj` 在同一把锁内完成 Registry 切换 + `oj.active` 落盘
   - `fn lock_write_txn(&self) -> MutexGuard<'_, ()>`（`pub(crate)`）— 写事务锁的唯一获取点；锁序固定「写事务锁 → config RwLock」，持有期间不得再调 `update`/`update_checked`（Mutex 不可重入）
@@ -34,7 +34,7 @@
 - **读取**：`get()` 从 `RwLock<AppConfig>` 中 clone 返回，无副作用
 - **更新**：`update(f)` 先获取写事务锁 → 在内存副本上执行闭包 → 提交内存 → 持久化磁盘 → 发布事件 → 返回新配置；磁盘写入失败时保留内存修改、上报错误。**整个更新是一个写事务**（独立 `write_txn` 互斥锁覆盖「updater → save → 发布事件」，不扩大 `RwLock` 的持锁区间）：克隆出来的旧配置不可能后于新配置落盘，内存/磁盘/Registry 的 `oj.active` 保持一致（评审三十一 P2；`reload` 与 `switch_oj` 共用该锁，评审三十三 #1）。`update_checked` 的 updater 返回 `Err` 时内存保持原样（候选在副本上修改），校验失败的保存不会留下半改状态（评审三十三 #2）
 - **热重载**：`reload()` 从磁盘读最新配置 → 同样经 `normalize_legacy_values` 归一（用户手改磁盘文件塞回旧值也会被修正）→ 覆盖内存 → 发布 `CoreEvent::ConfigChanged`
-- **`update` 与 `reload` 都要发布 `ConfigChanged`**：生产链路的配置变更入口是 `update`（`update_config` 命令、主题切换、`switch_oj` 的持久化），而 `reload_config` 命令在前端**没有调用方** —— 只在 `reload` 里发布会让观察者（审计、插件）永远等不到通知。两条路径的语义统一为「配置已变更即通知」；**持久化失败时不发布**（磁盘与内存已不一致，让观察者按「新配置已生效」行动会掩盖问题）。两处均有用例锁定
+- **`update` 与 `reload` 都要发布 `ConfigChanged`**：生产链路的配置变更入口是 `update`（`update_config` 命令、`switch_oj` 的持久化），而 `reload_config` 命令在前端**没有调用方** —— 只在 `reload` 里发布会让观察者（审计、插件）永远等不到通知。两条路径的语义统一为「配置已变更即通知」；**持久化失败时不发布**（磁盘与内存已不一致，让观察者按「新配置已生效」行动会掩盖问题）。两处均有用例锁定
 - **`ConfigChanged` 只是完成事实通知**：需要「配置变更后必须完成的动作」（如按新间隔同步 auto-save）由命令层在 `update` 返回后**显式调用** `commands::workspace_cmd::sync_auto_save_from_context` —— 不得依赖事件消费者（消费者可能落后、可能不存在）。旧实现把这件事挂在 `ConfigReloaded` 的订阅者上，订阅者内部还要 `tauri::async_runtime::spawn` 才拿得到 tokio 上下文
 - **归一只在加载路径**：`update()` 不做归一 —— 前端写回的配置本就来自已归一的内存副本，重复归一反而可能吞掉用户显式设置的合法值
 

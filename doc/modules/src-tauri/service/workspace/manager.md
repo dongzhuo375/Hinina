@@ -1,7 +1,7 @@
 # manager
 
 ## 职责
-Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换、保存、自动保存、销毁，是工作区服务的核心组件。
+Workspace 生命周期管理器。负责 Workspace 的创建、加载、保存、自动保存、销毁，是工作区服务的核心组件（原 `switch()` 已删除，其「保存旧 → 加载目标」语义由 `load()` 承担）。
 
 **落盘语义（debounce-to-memory）**：内存副本是唯一权威源 —— `update_file` 只写内存并标脏，磁盘写入只有两条路径：显式 `save()`（前端在切题 / 失焦 / 离开解题页 / 关窗时编排）与后台 auto-save 周期。因此「自动保存间隔」真正决定落盘频率，且**任何替换 `current` 的操作都必须先把旧工作区落盘**（`save_current_if_dirty`）。
 
@@ -28,7 +28,7 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换�
   - `fn update_file(&self, file_name, content) -> AppResult<u64>` — 更新当前工作区文件：**只写内存** HashMap + **把该文件记为 `active_file`（当前代码文件的权威源）** + mark_dirty + 在写锁内递增修订号（`revision`），**不落盘**（落盘由 `save` / auto-save 负责）。**返回本次内容被赋予的修订号**（`fetch_add(1) + 1`），供命令层原样回传前端：前端把它记为 `lastPushedRevision`，用于判断落盘事件是否落后于编辑器已推送的内容（落后则不清脏，避免假「已自动备份」）。写入路径的权威源由它承担后，调用方不必再按语言派生文件名（派生会让语言切换后的写入落到别的文件上）
   - `fn get_file(&self, file_name) -> AppResult<String>` — 获取文件内容：优先内存 HashMap，未命中回退磁盘读取
   - `fn delete_file(&self, file_name) -> AppResult<()>` — 删除当前工作区中的文件（P62：按文件删除能力，供旧代码文件清理）。**守卫**（比较一律经 `guard_equivalent` 归一 —— 小写化 + 剥离尾随点/空格：Windows 把 "Workspace.json" / "MAIN.JAVA" 等变体名解析到同一文件，精确字符串比较会被绕过）：拒绝删除 `active_file`（选手当前代码，清理只针对过期文件）与 `workspace.json`（元数据被删会让工作区无法加载）。**顺序刻意为先删磁盘、成功后再移除内存**：磁盘删除失败时内存保持原样、`save()` 仍会写出该文件，内存与磁盘始终一致（反序会出现「内存已无、磁盘残留」的幽灵文件，下次加载时复活）。不递增修订号、不置脏（删除是即时持久化操作，无待落盘内容）、不发布事件（与 create / load 同一先例：前端发起、返回值即真值）；无当前工作区时报 `AppError::Workspace`
-  - `fn current(&self) -> Option<Workspace>` — 获取当前活动工作区 clone
+  - `fn current(&self) -> Option<Workspace>` — 获取当前活动工作区 clone。**`#[cfg(test)]` 测试专用**（`current_workspace` 命令已删，无生产调用；生产以 `load_workspace` 返回值为真值）
 - **字段**：`repo: Arc<dyn WorkspaceRepository>`, `event_bus: Arc<CoreEventBus>`, `current: Arc<RwLock<Option<Workspace>>>`, `revision: Arc<AtomicU64>`（内容修订号，auto-save 判据）, `auto_save_handle: Mutex<Option<JoinHandle<()>>>`, `auto_save_interval_secs: Mutex<Option<u64>>`（`None` = 未运行）
 - **`WorkspaceMeta`**（内部 struct） — 持久化在 `workspace.json` 中的元数据（contest_id, problem_id, root_path, language, created_at, updated_at）
 - `impl Drop` — 析构时自动调用 `stop_auto_save()`
