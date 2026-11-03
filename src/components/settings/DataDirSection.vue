@@ -64,19 +64,22 @@ const {
                     </div>
                   </div>
 
-                  <!-- 回退临时目录必须显眼：这正是本次要消除的状态 -->
+                  <!-- 回退临时目录必须显眼：这正是本次要消除的状态。
+                       文案只讲「数据在临时目录」——指针位置是另一件事：fallbackTemp
+                       有两条来源（降级态 / 普通回退），普通回退下指针仍在默认目录，
+                       「指针也在临时目录」在那种情况下是假的，拆到下面的独立段落 -->
                   <p
                     v-if="dataDir.source === 'fallbackTemp'"
                     class="rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
                   >
                     默认数据目录不可用，当前数据存在<strong class="font-semibold">临时目录</strong>中
-                    —— 系统清理临时文件时会连带删除你的代码与提交留档，请尽快更改数据目录；
-                    位置指针也保存在临时目录，清理后自定义目录设置会一并丢失。
+                    —— 系统清理临时文件时会连带删除你的代码与提交留档，请尽快更改数据目录。
                   </p>
-                  <!-- 指针在临时目录但数据已用自定义目录：source=custom，上面的告警不渲染，
-                       但「自定义目录设置会丢」的风险仍在，必须持续可见 -->
+                  <!-- 指针在临时目录：与 source **正交**的独立信号，独立 v-if（非 else-if）——
+                       降级态两段同时渲染、自定义目录生效时也单独提示「设置会随临时目录
+                       清理丢失」的风险 -->
                   <p
-                    v-else-if="dataDir.pointerInTemp"
+                    v-if="dataDir.pointerInTemp"
                     class="rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
                   >
                     位置指针保存在<strong class="font-semibold">临时目录</strong>：系统清理临时文件后，
