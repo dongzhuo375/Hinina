@@ -593,7 +593,7 @@ pub fn prepare_startup_with_default_error(
         early.push(EarlyDiagnostic {
             level: EarlyLevel::Error,
             message: format!(
-                "默认数据目录解析失败（{reason}）；临时目录作为默认位置（数据随时可能被系统清理），                 此前保存的自定义数据目录仍会生效: {}",
+                "默认数据目录解析失败（{reason}）；临时目录作为默认位置（数据随时可能被系统清理），此前保存的自定义数据目录仍会生效: {}",
                 default_dir.display()
             ),
         });
