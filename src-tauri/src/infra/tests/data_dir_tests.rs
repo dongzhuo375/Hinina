@@ -1052,10 +1052,13 @@ fn resolve_captures_custom_dir_unusable_reason() {
         "诊断应说明决策与去向: {}",
         d.message
     );
-    // 「为什么」：探测失败的底层 IO 错误原文必须在场
+    // 「为什么」：诊断必须携带**真实探测原因**，而不是「未知」占位。
+    // `dir_unusable_reason` 只在复检已可用时返回「未知」——本夹具的目录由
+    // 「父路径是文件」确定性不可用，出现占位即说明原因没能被捕获。
+    // （旧断言用 `|| !d.message.is_empty()` 兜底，恒真，测不出任何东西）
     assert!(
-        d.message.contains("os error") || d.message.contains("拒绝") || !d.message.is_empty(),
-        "诊断应携带探测错误: {}",
+        d.message.contains("指定的数据目录不可用（") && !d.message.contains("未知"),
+        "诊断应携带探测错误而非占位: {}",
         d.message
     );
 }
