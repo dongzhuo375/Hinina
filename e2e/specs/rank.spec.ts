@@ -18,7 +18,9 @@ test.describe('实时榜单', () => {
     await expect(page.getByText('team_02')).toBeVisible()
     await expect(page.getByRole('heading', { name: /实时榜单/ })).toBeVisible()
     await expect(page.getByText('实时刷新中')).toBeVisible()
-    await expect(page.getByText(/共 \d+ 队/)).toBeVisible()
+    // 服务端 total 含 1 条前置副本（fake 复刻），前端修正后必须恰为 55 队——
+    // 「共 0 队」之类的修正回归会在这里变红
+    await expect(page.getByText('共 55 队')).toBeVisible()
     expect(await callCount(page, 'get_contest_rank')).toBeGreaterThanOrEqual(1)
   })
 
@@ -29,8 +31,12 @@ test.describe('实时榜单', () => {
 
     await expect(page.getByText('榜单已封榜，仅显示尝试次数')).toBeVisible()
     await expect(page.getByText('封榜时段内的提交结果将在赛后统一揭晓')).toBeVisible()
-    // 封榜不是禁用页面：表格照常渲染，轮询继续
-    await expect(page.getByText('e2e_player').first()).toBeVisible()
+    // 封榜不是禁用页面：表格照常渲染。断言必须落在**表格内**并命中封榜专属
+    // 形态（`errorNum+tryNum tries`）——`getByText('e2e_player')` 会先命中顶栏
+    // 用户名，表格没渲染也可能假绿（评审低-1）
+    const table = page.getByRole('table')
+    await expect(table.getByText('e2e_player').first()).toBeVisible()
+    await expect(table.getByText('0+2 tries').first()).toBeVisible()
   })
 
   test('翻页与失败回滚：页码同步退回、旧数据保留、错误条可见', async ({ page }) => {
@@ -41,6 +47,8 @@ test.describe('实时榜单', () => {
     await page.getByRole('link', { name: /榜单/ }).click()
     await page.waitForURL('**/contest/rank')
     await expect(page.getByText('team_02')).toBeVisible()
+    // 第 1 页：我的行在前置副本与本页原行中各出现一次 → 去重后参与人数 = 105
+    await expect(page.getByText('共 105 队')).toBeVisible()
 
     const pager = page.getByRole('navigation', { name: '分页' })
     await pager.getByRole('button', { name: '2', exact: true }).click()
@@ -48,6 +56,9 @@ test.describe('实时榜单', () => {
     await pager.getByRole('button', { name: '3', exact: true }).click()
     await expect(page.getByText('team_101').first()).toBeVisible()
     await expect(pager.locator('[aria-current="page"]')).toHaveText('3')
+    // 第 3 页：我的前置副本不在本页唯一行中 → 走「未被去重捕获的前置副本」
+    // 修正项，人数仍是 105
+    await expect(page.getByText('共 105 队')).toBeVisible()
 
     // 让第 2 页的查询 memo 过期后注入失败并折返第 2 页：请求真发、真失败
     await page.waitForTimeout(3_200)

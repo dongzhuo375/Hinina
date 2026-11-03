@@ -201,9 +201,10 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   let announcements: Announcement[] = [
     { id: '701', title: '比赛须知', content: '请勿交流题目解法。', author: 'admin', createdAt: nowSecs - 1800, updatedAt: nowSecs - 1800 },
   ]
-  // 已读集合**有状态**：mark 写入、get 读出（真实后端语义）——无条件返回 [] 会让
-  // 「进入即标已读」在重进页面后假性变成全部未读
-  let readAnnouncementIds = new Set<string>()
+  // 已读集合**有状态且按 (contestId, uid) 隔离**：生产实现由 contest_cmd 按
+  // 会话 uid 键控（无会话读空、写跳过）。单集合的 fake 会让跨账号/跨比赛/
+  // 无会话的回归假绿（评审 P2-3）。键形如 `1001:1`。
+  let readAnnouncementIdsByScope: Record<string, string[]> = {}
 
   const BACKEND_STORAGE_KEY = '__e2e_backend_v1__'
   interface PersistedBackend {
@@ -218,7 +219,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     lastWorkspaceId: string | null
     /** 公告与已读集合：真实后端同样存活于 Rust 进程（评审 2026-11-03） */
     announcements: Announcement[]
-    readAnnouncementIds: string[]
+    /** 按 `contestId:uid` 键控的已读集合（与生产隔离口径一致） */
+    readAnnouncementIdsByScope: Record<string, string[]>
   }
   function persistBackend(): void {
     const snapshot: PersistedBackend = {
@@ -230,7 +232,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       config,
       lastWorkspaceId,
       announcements,
-      readAnnouncementIds: [...readAnnouncementIds],
+      readAnnouncementIdsByScope,
     }
     sessionStorage.setItem(BACKEND_STORAGE_KEY, JSON.stringify(snapshot))
   }
@@ -247,7 +249,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       config = saved.config
       lastWorkspaceId = saved.lastWorkspaceId
       announcements = saved.announcements
-      readAnnouncementIds = new Set(saved.readAnnouncementIds)
+      // 兼容旧快照（字段改名前的 sessionStorage 内容）
+      readAnnouncementIdsByScope = saved.readAnnouncementIdsByScope ?? {}
       return true
     } catch {
       return false
@@ -557,17 +560,24 @@ function fakeTauriBootstrap(options: FakeOptions): void {
           }))
       }
       case 'get_contest_rank': {
-        // 真实命令按 currentPage/limit 分页（MyBatis-Plus IPage 形态），fake 同样
-        // 不再无条件返回整榜 —— 分页回归在 E2E 可观测（翻页/全量快照跨页聚合）
+        // 真实服务端契约（P57 核对点 3）：每页前置「当前用户 + 关注列表」的副本，
+        // total 相应偏大——前端的跨页去重（dedupeRankRows / mergeRankPages）与
+        // 参与人数修正（total − 本页重复数 − 未去重的我的前置副本）只有在这种
+        // 形态下才会被 E2E 观测到（评审 P2-4）。fake 逐页前置当前用户行。
         const page = Math.max(1, Number(args?.currentPage ?? 1))
         const size = Math.max(1, Number(args?.limit ?? 20))
         const start = (page - 1) * size
+        const uniquePage = allRankRecords.slice(start, start + size)
+        const meRow = currentUser
+          ? allRankRecords.find((row) => row.uid === currentUser!.id)
+          : undefined
+        const total = allRankRecords.length + (meRow ? 1 : 0)
         return {
-          records: structuredClone(allRankRecords.slice(start, start + size)),
-          total: allRankRecords.length,
+          records: structuredClone(meRow ? [meRow, ...uniquePage] : uniquePage),
+          total,
           size,
           current: page,
-          pages: Math.ceil(allRankRecords.length / size),
+          pages: Math.ceil(total / size),
         } satisfies ContestRankPage
       }
       case 'get_submission_detail': {
@@ -745,10 +755,24 @@ function fakeTauriBootstrap(options: FakeOptions): void {
           current: Math.max(1, Number(args?.currentPage ?? 1)),
           pages: 1,
         } satisfies AnnouncementPage
-      case 'get_read_announcement_ids':
-        return structuredClone([...readAnnouncementIds])
+      case 'get_read_announcement_ids': {
+        // 生产语义：按 contestId + 会话 uid 隔离；无会话返回空列表（登录页也会
+        // 预渲染公告，不报错）
+        const uid = currentUser?.id
+        if (!uid) return []
+        return structuredClone(
+          readAnnouncementIdsByScope[`${String(args?.contestId)}:${uid}`] ?? [],
+        )
+      }
       case 'mark_announcements_read': {
-        for (const id of (args?.ids as string[] | undefined) ?? []) readAnnouncementIds.add(String(id))
+        // 生产语义：无会话静默跳过（已读是纯 UI 便利特性，不值得报错）；
+        // 有会话则与既有记录合并去重后落盘
+        const uid = currentUser?.id
+        if (!uid) return null
+        const key = `${String(args?.contestId)}:${uid}`
+        const ids = new Set(readAnnouncementIdsByScope[key] ?? [])
+        for (const id of (args?.ids as string[] | undefined) ?? []) ids.add(String(id))
+        readAnnouncementIdsByScope[key] = [...ids]
         return null
       }
       default:
