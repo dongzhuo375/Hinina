@@ -1,6 +1,5 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import router from "@/router";
 import App from "@/App.vue";
 import { installSessionGuard } from "@/guards/sessionGuard";
@@ -13,6 +12,7 @@ import {
 import { useAnnouncementStore } from "@/stores/announcementStore";
 import { onAnnouncementsPublished } from "@/bridge/announcement.bridge";
 import { createCloseGuard } from "@/utils/close-guard";
+import { systemService } from "@/services/system.service";
 import { createLogger } from "@/utils/logger";
 import "@/styles/global.css";
 import "@/styles/contest.css";
@@ -84,7 +84,6 @@ function installAnnouncementListener(): void {
  * 此处只负责把真实窗口操作注入进去。
  */
 function installCloseFlushGuard(): void {
-  const appWindow = getCurrentWindow();
   const guard = createCloseGuard({
     flush: () => useWorkspaceStore().saveWorkspace(),
     // PR21-7：每轮落盘完成后复查在途改动 —— 关窗握手窗口内到达的落键也纳入落盘。
@@ -94,13 +93,13 @@ function installCloseFlushGuard(): void {
       const store = useWorkspaceStore();
       return store.syncPending || store.isDirty;
     },
-    close: () => appWindow.close(),
+    close: () => systemService.closeWindow(),
     // 收尾用 destroy：落盘已完成，不需要再走一遍 close-requested 往返
     //（那个往返正是原实现「窗口关不掉」的失效点）
-    destroy: () => appWindow.destroy(),
+    destroy: () => systemService.destroyWindow(),
   });
 
-  void appWindow
+  void systemService
     .onCloseRequested((event) => {
       if (guard.handleRequest()) event.preventDefault();
     })

@@ -145,6 +145,18 @@ export class SystemService {
     return windowBridge.closeWindow()
   }
 
+  /** 销毁窗口（close-guard 落盘完成后的收尾动作） */
+  async destroyWindow(): Promise<void> {
+    return windowBridge.destroyWindow()
+  }
+
+  /** 订阅关闭请求（close-guard 的事件源；失败即「钩子没挂上」，由调用方记日志） */
+  onCloseRequested(
+    handler: (event: { preventDefault(): void }) => void,
+  ): Promise<() => void> {
+    return windowBridge.onCloseRequested(handler)
+  }
+
   /** 弹出原生目录选择器（用户取消返回 null） */
   async pickDataDir(): Promise<string | null> {
     return systemBridge.pickDataDir()
