@@ -51,12 +51,6 @@ impl From<std::io::Error> for AppError {
     }
 }
 
-impl From<reqwest::Error> for AppError {
-    fn from(e: reqwest::Error) -> Self {
-        AppError::Network(e.to_string())
-    }
-}
-
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
         AppError::Serialization(e.to_string())
