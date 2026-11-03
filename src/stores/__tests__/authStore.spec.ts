@@ -118,6 +118,31 @@ describe('resetForOjSwitch', () => {
   })
 })
 
+describe('login — 认证代际守卫', () => {
+  it('登录在途发生 OJ 切换（authEpoch 递增）时丢弃迟到响应并给出中断反馈', async () => {
+    let resolveLogin: (u: User) => void = () => {}
+    authService.login.mockImplementation(
+      () =>
+        new Promise<User>((resolve) => {
+          resolveLogin = resolve
+        }),
+    )
+    const auth = useAuthStore()
+    const pending = auth.login('team01', 'pw-not-real')
+    // 请求在途：OJ 切换（resetForOjSwitch 递增 authEpoch 并清空认证态）
+    auth.resetForOjSwitch()
+    resolveLogin(user)
+
+    await expect(pending).rejects.toThrow('登录已被中断')
+    // 迟到的 user 不得写回新会话
+    expect(auth.user).toBeNull()
+    expect(auth.sessionResolved).toBe(false)
+    expect(auth.error).toContain('登录已被中断')
+    // isLoading 正常收尾
+    expect(auth.isLoading).toBe(false)
+  })
+})
+
 describe('logout', () => {
   it('成功后清理认证态与会话级领域状态，并保留匿名比赛简报', async () => {
     authService.logout.mockResolvedValue(undefined)

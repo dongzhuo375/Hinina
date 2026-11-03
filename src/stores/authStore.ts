@@ -44,14 +44,28 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
-    /** 登录并更新状态 */
+    /**
+     * 登录并更新状态。
+     *
+     * 认证代际机制的最后一个缺口补齐：`checkSession` / `validateSession` /
+     * `resetForOjSwitch` 都已做「await 前捕获代际、写回前比对」，唯独 login 在
+     * await 后无条件写 `user` —— 登录请求在途时发生 OJ 切换/登出（代际递增），
+     * 旧上下文发起的登录响应会把 `user` 写进新会话，直到下一次 401 才自愈。
+     */
     async login(username: string, password: string) {
       // 作废在途的会话检查；成功后再递增一次，避免登录期间发起的检查覆盖结果
       authEpoch += 1
       this.isLoading = true
       this.error = null
+      // 代际在 await 前捕获（与 checkSession/validateSession 同口径）
+      const epochAtStart = authEpoch
       try {
         const user = await authService.login(username, password)
+        if (epochAtStart !== authEpoch) {
+          // 会话上下文已切换：丢弃迟到结果，给出可执行反馈而非静默吞掉。
+          // 登录表单可能已不在屏上，error 写入 store 是无害兜底
+          throw new Error('登录已被中断（OJ 或数据目录已切换），请重试')
+        }
         authEpoch += 1
         this.user = user
         this.sessionResolved = true
