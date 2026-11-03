@@ -83,7 +83,7 @@
 - [x] **workspace_cmd** — `commands/workspace_cmd.rs`：load / save / switch / current。**后注**：switch/current 已于 2026-11 删除（前端零调用；`WorkspaceManager::switch` 同步删除、`current` 降为 `#[cfg(test)]` 测试入口）
 - [x] **config_cmd** — `commands/config_cmd.rs`：get_config / reload_config / update_config
 - [x] **theme_cmd** — `commands/theme_cmd.rs`：get_theme / set_theme。**后注**：2026-11 已删除（前端零调用）
-- [x] **register_commands** — `commands/mod.rs` + `main.rs`：通过 `tauri::generate_handler!` + `invoke_handler()` 注册所有 18 个 Command
+- [x] **register_commands** — `commands/mod.rs` + `main.rs`：通过 `tauri::generate_handler!` + `invoke_handler()` 注册所有 18 个 Command。**后注**：`register_commands` 抽象从未落地（`main.rs` 直接 `generate_handler!`）；Command 现为 42 个（theme 2 与 workspace switch/current 等死命令已删，见 `commands/mod.md`）
 
 ---
 

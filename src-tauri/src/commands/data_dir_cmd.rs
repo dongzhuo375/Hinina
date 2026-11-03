@@ -184,13 +184,19 @@ pub async fn reset_data_dir(ctx: State<'_, AppContext>, migrate: bool) -> AppRes
     info!(target = %default_dir.display(), migrate, "恢复默认数据目录（重启后生效）");
     write_target(&ctx, None, migrate.then(|| current.clone()))?;
 
+    // 降级模式（default_dir 即实时目录）下要区分两个子情形：
+    // - default==current 已被 validate_reset 拒绝（无意义操作）；
+    // - **当前正用着自定义目录**：本次恢复默认 + 勾迁移的 migrate_from 记录随
+    //   临时目录里的指针一起可被清理——丢的是「迁移指令」而非数据（数据仍在
+    //   自定义目录），但用户的意图会无声消失，同样需要提示（评审）。
+    // 与 set_data_dir 同走 degraded_pointer_warning。
+    let warning = degraded_pointer_warning(&ctx.default_data_dir);
+
     Ok(DataDirChange {
         target_dir: default_dir.to_string_lossy().into_owned(),
         migrate_from: migrate.then(|| current.to_string_lossy().into_owned()),
         restart_required: true,
-        // 恢复默认的目标就是默认目录本身；降级态下 default==current 已被
-        // validate_reset 拒绝，这里不存在「指针仍落临时目录」的新增风险
-        warning: None,
+        warning,
     })
 }
 
