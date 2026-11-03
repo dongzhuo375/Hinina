@@ -30,7 +30,7 @@
 - `core::context`（`AppContext` 持有 `Arc<ConfigService<FsConfigRepository>>`）
 
 ## 逻辑流程
-- **初始化**：`new()` 从 Repo 加载配置，成功则调用 `normalize_legacy_values(&mut cfg)` 一次性归一历史旧默认值（`"C++"`→`"cpp"`、整机 `dark`→`light`（含随之写入的 `vs-dark`→`vs`）、`splitRatio 0.45`→`0.48`，只修正恰好等于旧默认值的项，详见 `core/entity/config.md`）；失败时回退到 `AppConfig::default()` 并尝试写回磁盘
+- **初始化**：`new()` 从 Repo 加载配置，成功则调用 `normalize_legacy_values(&mut cfg)` 一次性归一历史旧默认值（旧 Monaco id `cpp`→显示名 `"C++"`；旧版 `themeName` 与切换器成对写入的 `editorTheme "vs-dark"`→`"vs"`，仅 `legacy_theme_name == "dark"` 且 `editor_theme == "vs-dark"` 时复位并消费该字段；`splitRatio 0.45`→`0.48`。只修正恰好等于旧默认值/旧切换器成对值的项，详见 `core/entity/config.md`）；失败时回退到 `AppConfig::default()` 并尝试写回磁盘
 - **读取**：`get()` 从 `RwLock<AppConfig>` 中 clone 返回，无副作用
 - **更新**：`update(f)` 先获取写事务锁 → 在内存副本上执行闭包 → 提交内存 → 持久化磁盘 → 发布事件 → 返回新配置；磁盘写入失败时保留内存修改、上报错误。**整个更新是一个写事务**（独立 `write_txn` 互斥锁覆盖「updater → save → 发布事件」，不扩大 `RwLock` 的持锁区间）：克隆出来的旧配置不可能后于新配置落盘，内存/磁盘/Registry 的 `oj.active` 保持一致（评审三十一 P2；`reload` 与 `switch_oj` 共用该锁，评审三十三 #1）。`update_checked` 的 updater 返回 `Err` 时内存保持原样（候选在副本上修改），校验失败的保存不会留下半改状态（评审三十三 #2）
 - **热重载**：`reload()` 从磁盘读最新配置 → 同样经 `normalize_legacy_values` 归一（用户手改磁盘文件塞回旧值也会被修正）→ 覆盖内存 → 发布 `CoreEvent::ConfigChanged`

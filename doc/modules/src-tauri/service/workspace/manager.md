@@ -48,7 +48,7 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、切换�
 
 ## 被依赖
 - `core::context`（`AppContext` 持有 `Option<Arc<WorkspaceManager>>`）
-- `commands::workspace_cmd`（七个 Command 经 `ctx.workspace_manager` 调用生命周期与文件方法）
+- `commands::workspace_cmd`（五个 Command 经 `ctx.workspace_manager` 调用生命周期与文件方法）
 
 ## 逻辑流程
 Workspace 生命周期状态机：

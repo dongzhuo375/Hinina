@@ -21,7 +21,7 @@
 
 ## 被依赖
 - `src-tauri/src/commands/mod.rs`（通过 `pub mod workspace_cmd` 声明）
-- `src-tauri/src/main.rs`（`generate_handler!` 注册全部七个 command）
+- `src-tauri/src/main.rs`（`generate_handler!` 注册全部五个 command）
 
 ## 逻辑流程
 1. 进入解题页 → `load_workspace`（find_or_create 恢复/新建 + 按配置同步 auto-save）

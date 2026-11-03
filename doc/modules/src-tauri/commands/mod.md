@@ -23,7 +23,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 无外部依赖，仅声明子模块。
 
 ## 被依赖
-- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 42 个 Command：**app 1** / plugin 5 / auth 4 / oj 1 / contest 6 / problem 3 / submission 5 / workspace 5 / config 4 / **log 1** / maintenance 3 / data_dir 4（contest 7→6：`select_contest` 前端零调用已删，服务层方法保留内部复用；workspace 7→5：`switch_workspace`/`current_workspace` 前端零调用已删，`WorkspaceManager::switch`/`current` 保留））
+- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 42 个 Command：**app 1** / plugin 5 / auth 4 / oj 1 / contest 6 / problem 3 / submission 5 / workspace 5 / config 4 / **log 1** / maintenance 3 / data_dir 4（contest 7→6：`select_contest` 前端零调用已删，服务层方法保留内部复用；workspace 7→5：`switch_workspace`/`current_workspace` 已删，`WorkspaceManager::switch` 同步删除、`current` 降为 `#[cfg(test)]` 测试入口））
 
 ## 逻辑流程
 无（仅模块声明）。
