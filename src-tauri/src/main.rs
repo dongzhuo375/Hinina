@@ -4,21 +4,23 @@
 
 // Hinina 入口点
 //
-// 初始化顺序（实际执行在 `AppContext::init`，此处为速查，改动请同步 core/context.md）：
-//   0. 数据目录         — `infra::data_dir::prepare_startup`：解析 base_dir + 一次性迁移
+// 初始化顺序（1–12 与 `core/context.rs` 的步骤编号一致，改动请同步 core/context.md；
+// 0 与 13 是本文件相对 init 的前置/收尾步骤）：
+//   0. 数据目录         — `infra::data_dir::prepare_startup_with_default_error`：解析 base_dir + 一次性迁移
 //                         （**必须最先**，日志一旦打开就会占住旧目录）
 //   1. Logger           — 最先初始化，后续步骤才能记录日志
-//   2. Storage          — 文件系统根目录（base_dir），配置、会话与工作区都依赖它
-//   3. CoreEventBus     — 进程内事实总线（`tokio::sync::broadcast` 封装）
-//   4. SessionRepository— 会话持久化（AuthService 与 Provider 凭证轮换共用）
-//   5. ConfigService    — 经 FsConfigRepository 读 config.json，决定 OJ 基址等后续行为
-//   6. HttpClient       — Reqwest 客户端
-//   7. ProviderRegistry — 注册各 OJ Adapter（默认 HOJ，基址取自配置）
-//   8. WorkspaceManager — 工作区生命周期（按需创建/恢复，启动时不扫描磁盘）
-//   9. Service 层       — auth / contest / problem / submission
-//  10. PluginHost       — 插件事件边界（只持总线句柄，消费者在下面启动）
-//  11. AppContext       — 装配上述所有
-//  12. Tauri App        — manage(AppContext) + 启动消费者 + generate_handler! 注册 Command
+//   2. 确保 base_dir    — `create_dir_all`
+//   3. Storage          — 文件系统根目录（base_dir），配置、会话与工作区都依赖它
+//   4. CoreEventBus     — 进程内事实总线（`tokio::sync::broadcast` 封装）
+//   5. SessionRepository— 会话持久化（AuthService 与 Provider 凭证轮换共用）
+//   6. ConfigService    — 经 FsConfigRepository 读 config.json，决定 OJ 基址等后续行为
+//   7. HttpClient       — Reqwest 客户端（超时取自配置）
+//   8. ProviderRegistry — 注册各 OJ Adapter（默认 HOJ，基址取自配置）
+//   9. WorkspaceManager — 工作区生命周期（按需创建/恢复，启动时不扫描磁盘）
+//  10. Service 层       — auth / contest / problem / submission
+//  11. PluginHost       — 插件事件边界（只持总线句柄，消费者在下面启动）
+//  12. AppContext       — 装配上述所有
+//  13. Tauri App        — manage(AppContext) + 启动消费者 + generate_handler! 注册 Command
 //
 // 为什么整个初始化在 `.setup()` 里而不是 `main()`：只有 setup 能拿到 AppHandle，
 // 也就只有那里能解析 `app_local_data_dir()`（数据根目录）。

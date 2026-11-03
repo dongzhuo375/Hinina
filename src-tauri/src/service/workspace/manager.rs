@@ -602,7 +602,7 @@ impl WorkspaceManager {
     /// 磁盘残留」的幽灵文件，下次加载时复活）。
     ///
     /// 不递增修订号、不置脏：删除是**即时持久化**的操作，没有待落盘的内容；
-    /// 也不发布事件 —— 与 create / load / switch 同一先例（前端发起、返回值即真值）。
+    /// 也不发布事件 —— 与 create / load 同一先例（前端发起、返回值即真值）。
     pub fn delete_file(&self, file_name: &str) -> AppResult<()> {
         let mut current = self.current.write().unwrap_or_else(|e| e.into_inner());
         let ws = current

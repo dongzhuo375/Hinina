@@ -25,15 +25,15 @@
 
 ## 被依赖
 
-- 无（叶子 spec）
-
-## 逻辑流程
-
 3. **跨 reload 持久化**：进入即标已读 → 题目页 pushAnnouncement + 事件 → reload
    → 公告列表仍 2 条（追加存活）、reload 后 mark 载荷恰为 `['702']`（已读集不回退；
    `calls` 为文档级、reload 清零，载荷即 reload 后的全部 mark）。
 
-## 逻辑流程（更新）
+## 被依赖
+
+- 无（叶子 spec）
+
+## 逻辑流程
 
 `main.ts` 的公告事件订阅 → `announcementStore.refresh()`（事件只是刷新触发）；
 未读计数 = 列表 − 已读集合；进入公告页（isWatching）→ load 落地即 markAllRead。

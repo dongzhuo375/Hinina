@@ -142,8 +142,9 @@ jobs:
       # `concurrent` 恰好命中 7 个并发用例；`auto_save` 命中 auto-save 组 8 个
       # （与前者重叠 1 个——恰是最需要重复的 orphan-task 概率用例，接受重复跑）。
       # #87 的写事务并发回归（握手式 try_lock 确定性时序）也要进夜间重复：
-      # `serialised_with_config` 命中 save/reload/load_workspace 与配置提交的
-      # 串行化用例组，`access_fence` 命中跨提交+注册表切换的访问栅栏用例。
+      # `serialised_with_config` 实测命中 2 条（auto_save 同步与配置提交、workspace
+      # 加载与配置保存的串行化），`access_fence` 命中 1 条（reload 提交 + Registry
+      # 切换的访问栅栏）。
       # --lib 跳过 src-tauri/tests/ 下两个 logger 集成二进制（进程级订阅器单例设计）。
       # 过滤串匹配不到用例时 cargo test 退出码仍为 0（阻塞 job 会假绿），因此每轮
       # 解析 test result 的 passed 数并要求 > 0（评审六轮）。

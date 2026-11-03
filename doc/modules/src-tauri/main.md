@@ -62,15 +62,16 @@
    全部 I/O 都走 Rust）
 3. `.setup(move |app| { … })` —— **整个初始化都在这里**，因为只有 setup 能拿到
    `AppHandle`，也就只有那里能解析 `app_local_data_dir()`：
-   1. `default_dir = app.path().app_local_data_dir()`（`%LOCALAPPDATA%/{identifier}`，
-      解析失败时退到 `data_dir::legacy_dir()` 让回退链继续）
-   2. `data_dir::prepare_startup(&default_dir, &legacy)` → 解析 base_dir + **一次性迁移**
+   1. `default_dir = app.path().app_local_data_dir()`（`%LOCALAPPDATA%/{identifier}`）：
+      **解析失败不静默顶替**——失败原因保留并交给下一步，降级为显式 `FallbackTemp`
+   2. `data_dir::prepare_startup_with_default_error(default_error, &default_dir, &legacy)` → 解析 base_dir + **一次性迁移**
+      （降级模式下仍读指针、尊重已保存的自定义目录与待迁移请求）
       （**必须在 `AppContext::init` 之前**：init 会打开日志文件，之后旧目录就被占住）
    3. `rt.block_on(AppContext::init(base_dir, default_dir, source))` 装配上下文
       （Logger（stderr + `{base_dir}/logs/hinina.log` 双路输出）→ Storage → CoreEventBus →
       SessionRepository → ConfigService → HttpClient（超时取自配置 `oj.timeout_secs`）→
       ProviderRegistry（按 `oj.instances` 实例注册全部内建 OJ，active 未注册回退首个已注册 OJ）→
-      WorkspaceManager → 五个 Service → PluginHost → `PluginManager`（装配文件仓库
+      WorkspaceManager → 四个 Service → PluginHost → `PluginManager`（装配文件仓库
       `FsPluginRepository` 与 API 工厂 `FsPluginApiFactory` + `ServiceQueries`）→ AppContext）。
       失败时 `panic!("无法初始化应用数据：{}", error.user_message())`——最常见的是
       `%TEMP%/hinina` 回退目录也建不出来（`create_dir_all(base_dir)`）
@@ -83,7 +84,7 @@
       且必须在 `AppContext::init` 之后：它们从 `app.state::<AppContext>()` 取总线与插件宿主，
       并只观察事实、不参与任何业务动作
    8. `tauri::async_runtime::spawn(plugins.autostart())` —— 异步扫描 `plugins.json`
-      并启动全部 enabled 插件；配置不可用时 `warn!`「automatic loading skipped」，
+      并启动全部 enabled 插件；配置不可用时 `warn!`「插件配置不可用，自动加载已跳过」（结构化字段 `operation=host.autostart`），
       不阻断窗口启动
 4. `.invoke_handler(tauri::generate_handler![...])` 注册全部 IPC Command
    （**不是** `setup` 中手动注册，`commands::register_commands()` 不存在；

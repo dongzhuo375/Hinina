@@ -80,7 +80,7 @@
 - [x] **contest_cmd** — `commands/contest_cmd.rs`：list_contests / select_contest。**后注**：select_contest 已于 2026-11 删除（前端零调用；`ContestService::select_contest` 保留内部复用）
 - [x] **problem_cmd** — `commands/problem_cmd.rs`：get_problem / list_problems
 - [x] **submission_cmd** — `commands/submission_cmd.rs`：submit_code / get_judgement
-- [x] **workspace_cmd** — `commands/workspace_cmd.rs`：load / save / switch / current
+- [x] **workspace_cmd** — `commands/workspace_cmd.rs`：load / save / switch / current。**后注**：switch/current 已于 2026-11 删除（前端零调用；`WorkspaceManager::switch` 同步删除、`current` 降为 `#[cfg(test)]` 测试入口）
 - [x] **config_cmd** — `commands/config_cmd.rs`：get_config / reload_config / update_config
 - [x] **theme_cmd** — `commands/theme_cmd.rs`：get_theme / set_theme。**后注**：2026-11 已删除（前端零调用）
 - [x] **register_commands** — `commands/mod.rs` + `main.rs`：通过 `tauri::generate_handler!` + `invoke_handler()` 注册所有 18 个 Command
