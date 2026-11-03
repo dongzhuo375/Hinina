@@ -15,8 +15,8 @@
 | `LocalDataUsage` | `{ logBytes, logPath, crashBytes, crashPath, snapshotTotalCount, snapshotTotalBytes, snapshotStaleCount, snapshotStaleBytes, keepDays }` | 可清理项的体积预览。`crashBytes`/`crashPath` 是临时目录崩溃记录文件（`%TEMP%/hinina-panic.log`），随「日志与崩溃记录」一并删除；`keepDays` 是留档保留窗口，早于它的留档计入 `snapshotStale*` |
 | `PurgeReport` | `{ freedBytes, removedSnapshots, logCleared, crashCleared }` | 清理结果。`logCleared` 为 `false` 有三种成因：文件层不可用（磁盘只读）、日志截断失败、或本次没勾选日志；`crashCleared` 为 `false` 只表示崩溃记录文件删除失败（不存在视为已清理）。界面分别提示「日志未清理」/「崩溃记录未清理」并以警告色呈现，而不是笼统报「已清理」 |
 | `DataDirSource` | `'default' \| 'custom' \| 'fallbackTemp'` | 数据目录来源。`fallbackTemp` 表示回退到临时目录（数据随时可能被系统清理，界面必须显眼告警） |
-| `DataDirInfo` | `{ currentDir, defaultDir, source, restartRequired }` | 当前生效目录 / 默认目录 / 来源 / 是否有改动待重启 |
-| `DataDirChange` | `{ targetDir, migrateFrom, restartRequired }` | 更改结果。`migrateFrom` 为 `null` 表示不迁移；`restartRequired` 恒为 `true`（数据目录改动只能重启生效） |
+| `DataDirInfo` | `{ currentDir, defaultDir, source, restartRequired, pointerInTemp }` | 当前生效目录 / 默认目录 / 来源 / 是否有改动待重启 / **位置指针是否在临时目录**（与 `source` 正交：降级 + 自定义目录时 source=custom 但指针仍会随临时目录清理丢失） |
+| `DataDirChange` | `{ targetDir, migrateFrom, restartRequired, warning }` | 更改结果。`migrateFrom` 为 `null` 表示不迁移；`restartRequired` 恒为 `true`（数据目录改动只能重启生效）；`warning` 非 `null` 时界面必须用它替换普通成功文案（降级模式下位置指针也在临时目录，临时目录被清理后本次设置会丢失） |
 
 ## 直接依赖
 

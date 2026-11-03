@@ -157,9 +157,10 @@ beforeEach(() => {
     defaultDir: 'D:\\hinina',
     source: 'default',
     restartRequired: false,
+    pointerInTemp: false,
   })
   mocks.pickDataDir.mockResolvedValue('D:\\new-data')
-  mocks.setDataDir.mockResolvedValue(undefined)
+  mocks.setDataDir.mockResolvedValue({ targetDir: 'D:\\new-data', migrateFrom: null, restartRequired: true, warning: null })
   mocks.resetDataDir.mockResolvedValue(undefined)
   mocks.resetClient.mockResolvedValue(undefined)
   mocks.purgeLocalData.mockResolvedValue({ freedBytes: 0, removedSnapshots: 0, logCleared: true, crashCleared: true })

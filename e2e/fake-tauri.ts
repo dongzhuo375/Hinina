@@ -507,6 +507,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
           defaultDir: 'D:\\e2e\\hinina',
           source: 'default',
           restartRequired: false,
+          pointerInTemp: false,
         }
       case 'switch_oj': {
         // 真实命令会校验实例并切换活动 OJ、清缓存、更新配置（oj_cmd.rs）

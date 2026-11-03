@@ -196,13 +196,16 @@ fn emit_or_warn(app: &tauri::AppHandle, channel: &str, payload: serde_json::Valu
 /// 汇报数据目录方案与迁移结果（在日志就绪后调用）。
 ///
 /// 四件事必须说清楚，因为它们都影响「我的数据到底在哪、会不会丢」：
-/// - **订阅器就绪前的诊断**（指针解析失败、候选目录因何不可用）→ `replay` 重放，
-///   这是排障者回答「为什么我的自定义目录没生效」的唯一线索；
+/// - **订阅器就绪前的诊断**（指针解析失败、候选目录因何不可用、迁移条目失败等）
+///   → `replay` 重放（`prepare_startup` 已把迁移诊断按发生顺序并入
+///   `plan.warnings`），这是排障者回答「为什么我的自定义目录没生效」的唯一线索；
 /// - **回退到临时目录** → `error` 级告警（数据随时可能被系统清理，这是本次修复要消除的状态）；
 /// - **迁移有失败项** → `error` 级告警并列出条目（下次启动会自动重试）；
 /// - **迁移成功** → `info` 记录去向。
 fn report_data_dir(plan: &DataDirPlan, migration: &MigrateOutcome) {
     data_dir::replay(&plan.warnings);
+    // 启动路径的迁移诊断已在 plan.warnings 中按序重放；这里兼容直接构造
+    // MigrateOutcome 的调用方（当前为空）
     data_dir::replay(&migration.diagnostics);
     match plan.source {
         DataDirSource::Default => {

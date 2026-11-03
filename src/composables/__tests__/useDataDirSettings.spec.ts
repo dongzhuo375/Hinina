@@ -27,10 +27,15 @@ beforeEach(async () => {
   vi.useFakeTimers()
   mocks.getDataDir.mockResolvedValue({
     currentDir: 'D:\\hinina', defaultDir: 'D:\\hinina', source: 'default', restartRequired: false,
+    pointerInTemp: false,
   })
   mocks.pickDataDir.mockResolvedValue('D:\\new-data')
-  mocks.setDataDir.mockResolvedValue(undefined)
-  mocks.resetDataDir.mockResolvedValue(undefined)
+  mocks.setDataDir.mockResolvedValue({
+    targetDir: 'D:\\new-data', migrateFrom: null, restartRequired: true, warning: null,
+  })
+  mocks.resetDataDir.mockResolvedValue({
+    targetDir: 'D:\\hinina', migrateFrom: null, restartRequired: true, warning: null,
+  })
   scope = effectScope()
   dataDir = scope.run(() => useDataDirSettings())!
   await dataDir.loadDataDir()
@@ -67,5 +72,19 @@ describe('useDataDirSettings', () => {
     expect(mocks.resetDataDir).toHaveBeenCalledWith(true)
     expect(dataDir.changeNotice.value).toContain('迁移现有数据')
     expect(mocks.getDataDir).toHaveBeenCalledTimes(2)
+  })
+
+  /// 回归：降级模式下指针也保存在临时目录——后端下发的风险提示必须覆盖
+  /// 「已记录」成功文案，否则用户以为已经换到安全位置。
+  it('降级模式的风险提示替换普通成功文案', async () => {
+    const warning = '当前处于临时目录降级模式：位置指针也保存在临时目录'
+    mocks.setDataDir.mockResolvedValueOnce({
+      targetDir: 'D:\\new-data', migrateFrom: null, restartRequired: true, warning,
+    })
+    await dataDir.chooseDataDir()
+
+    await dataDir.confirmDataDir()
+
+    expect(dataDir.changeNotice.value).toBe(warning)
   })
 })

@@ -30,6 +30,12 @@ pub struct DataDirInfo {
     pub source: DataDirSource,
     /// 是否有改动待重启生效（指针指向的目录 ≠ 当前生效目录，或有待迁移来源）
     pub restart_required: bool,
+    /// 位置指针是否落在临时目录（`app_local_data_dir()` 解析失败的降级态）。
+    ///
+    /// 与 `source` 正交：降级 + 已保存的自定义目录生效时 `source == custom`，
+    /// 但指针仍在临时目录，临时目录被清理后自定义目录设置会丢失。界面据此
+    /// **持续**告警，而不是只在用户改目录的那一刻提示。
+    pub pointer_in_temp: bool,
 }
 
 /// 更改结果（供界面提示「已记录，重启后生效」）。
@@ -42,6 +48,14 @@ pub struct DataDirChange {
     pub migrate_from: Option<String>,
     /// 恒为 `true`：数据目录改动只能重启生效（见文件头注释）
     pub restart_required: bool,
+    /// 附加风险提示（`Some` 时界面必须替换成功文案展示）。
+    ///
+    /// 目前唯一的来源是**降级模式**（`default_data_dir == %TEMP%/hinina`，即
+    /// `app_local_data_dir()` 解析失败、指针也落在临时目录）：系统清理临时文件后
+    /// 本次自定义目录设置会一起丢失。不提示就等于「用户以为已经换到安全位置，
+    /// 实际只改了一个随时会消失的标记」。注意判据不是 `source`：降级 + 已保存的
+    /// 自定义目录生效时 `source == Custom`，但指针仍在临时目录。
+    pub warning: Option<String>,
 }
 
 /// 读取当前数据目录信息。
@@ -65,6 +79,7 @@ pub async fn get_data_dir(ctx: State<'_, AppContext>) -> AppResult<DataDirInfo> 
         default_dir: ctx.default_data_dir.to_string_lossy().into_owned(),
         source: ctx.data_dir_source,
         restart_required,
+        pointer_in_temp: pointer_in_temp(&ctx.default_data_dir),
     })
 }
 
@@ -98,10 +113,15 @@ pub async fn set_data_dir(
     info!(target = %target.display(), migrate, "记录新的数据目录（重启后生效）");
     write_target(&ctx, Some(target.clone()), migrate.then(|| current.clone()))?;
 
+    // 降级模式下指针本身落在临时目录：临时目录被清理后本次设置会丢失。
+    // 当前界面已有「数据在临时目录」的告警，但**不覆盖「新设置也会丢」**这一层。
+    let warning = degraded_pointer_warning(&ctx.default_data_dir);
+
     Ok(DataDirChange {
         target_dir: target.to_string_lossy().into_owned(),
         migrate_from: migrate.then(|| current.to_string_lossy().into_owned()),
         restart_required: true,
+        warning,
     })
 }
 
@@ -168,6 +188,9 @@ pub async fn reset_data_dir(ctx: State<'_, AppContext>, migrate: bool) -> AppRes
         target_dir: default_dir.to_string_lossy().into_owned(),
         migrate_from: migrate.then(|| current.to_string_lossy().into_owned()),
         restart_required: true,
+        // 恢复默认的目标就是默认目录本身；降级态下 default==current 已被
+        // validate_reset 拒绝，这里不存在「指针仍落临时目录」的新增风险
+        warning: None,
     })
 }
 
@@ -210,17 +233,46 @@ pub async fn pick_data_dir(app: tauri::AppHandle) -> AppResult<Option<String>> {
         .map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// 位置指针是否落在临时目录（`app_local_data_dir()` 解析失败的降级态）。
+///
+/// 判据看 `default_data_dir`（指针所在处）而不是 `data_dir_source`：降级 +
+/// 已保存的自定义目录生效时 `source == Custom`，但默认目录仍是临时目录，
+/// 指针依旧会随临时目录清理消失。
+pub(crate) fn pointer_in_temp(default_data_dir: &std::path::Path) -> bool {
+    default_data_dir == data_dir::legacy_dir()
+}
+
+/// 降级模式下指针所在位置的附加风险提示（纯函数，便于单测）。
+pub(crate) fn degraded_pointer_warning(default_data_dir: &std::path::Path) -> Option<String> {
+    pointer_in_temp(default_data_dir).then(|| {
+        "当前处于临时目录降级模式：位置指针也保存在临时目录，系统清理临时文件后本次更改会丢失；\
+         请在重启后确认当前目录，并尽快让默认数据目录恢复可用"
+            .to_string()
+    })
+}
+
 /// 写入位置指针：`data_dir=None` 表示用默认目录。
+///
+/// `legacy_migrated` 必须从磁盘**严格**读回（只有 NotFound 视为 None）：用宽松的
+/// `read_pointer` 会把损坏/不可读的指针当成默认值，写回时抹掉 `Some(true)`，
+/// 下次启动重新执行一次性搬家、把用户已删除的旧数据拷回来（评审）。读不出来时
+/// 宁可拒绝本次更改并让用户修复指针文件。
 fn write_target(
     ctx: &State<'_, AppContext>,
     data_dir: Option<std::path::PathBuf>,
     migrate_from: Option<std::path::PathBuf>,
 ) -> AppResult<()> {
+    let existing = data_dir::read_pointer_strict(&ctx.default_data_dir).map_err(|e| {
+        AppError::Config(format!(
+            "现有数据目录指针不可读或已损坏，已拒绝更新（避免丢失迁移标记；可修复或删除 data_dir.json 后重试）: {}",
+            e.user_message()
+        ))
+    })?;
     let pointer = DataDirPointer {
         data_dir: data_dir.map(|p| p.to_string_lossy().into_owned()),
         migrate_from: migrate_from.map(|p| p.to_string_lossy().into_owned()),
         // 设置页改目录不涉及「临时目录一次性搬家」标记，保持原值（由 read-modify-write 补）
-        legacy_migrated: data_dir::read_pointer(&ctx.default_data_dir).legacy_migrated,
+        legacy_migrated: existing.legacy_migrated,
     };
     data_dir::write_pointer(&ctx.default_data_dir, &pointer)
 }

@@ -28,7 +28,7 @@
 
 ## 逻辑流程
 
-选择器返回候选后由用户确认；取消候选复位 migrate=true。确认和恢复默认都由 controller 先取 migrate 快照再写指针、重读并提示重启。`fallbackTemp` 与 `restartRequired` 仍按原样式展示。
+选择器返回候选后由用户确认；取消候选复位 migrate=true。确认和恢复默认都由 controller 先取 migrate 快照再写指针、重读并提示重启。`fallbackTemp`、`restartRequired` 仍按原样式展示；`pointerInTemp`（降级态指针在临时目录）单独显眼告警——与 source 正交，自定义目录生效时也要提示「设置本身会随临时目录清理丢失」。
 
 ## 测试
 

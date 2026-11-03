@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   })),
   purgeLocalData: vi.fn(async () => ({ freedBytes: 0, removedSnapshots: 0, logCleared: false, crashCleared: true })),
   getStorageInfo: vi.fn(async () => ({ baseDir: 'D:\\hinina', logPath: 'D:\\hinina\\logs\\hinina.log', version: '0.1.0' })),
-  getDataDir: vi.fn(async () => ({ currentDir: 'D:\\hinina', defaultDir: 'D:\\hinina', source: 'default', restartRequired: false })),
+  getDataDir: vi.fn(async () => ({ currentDir: 'D:\\hinina', defaultDir: 'D:\\hinina', source: 'default', restartRequired: false, pointerInTemp: false })),
   // config.service
   getConfig: vi.fn(async () => ({})),
   updateConfig: vi.fn(async () => {}),

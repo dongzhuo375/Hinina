@@ -70,7 +70,17 @@ const {
                     class="rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
                   >
                     默认数据目录不可用，当前数据存在<strong class="font-semibold">临时目录</strong>中
-                    —— 系统清理临时文件时会连带删除你的代码与提交留档，请尽快更改数据目录。
+                    —— 系统清理临时文件时会连带删除你的代码与提交留档，请尽快更改数据目录；
+                    位置指针也保存在临时目录，清理后自定义目录设置会一并丢失。
+                  </p>
+                  <!-- 指针在临时目录但数据已用自定义目录：source=custom，上面的告警不渲染，
+                       但「自定义目录设置会丢」的风险仍在，必须持续可见 -->
+                  <p
+                    v-else-if="dataDir.pointerInTemp"
+                    class="rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
+                  >
+                    位置指针保存在<strong class="font-semibold">临时目录</strong>：系统清理临时文件后，
+                    你设置的自定义数据目录会失效（当前数据仍在上面显示的目录中）。
                   </p>
 
                   <!-- 待重启提示：改动已记录但尚未生效，必须说清「现在仍在用旧目录」 -->

@@ -13,7 +13,7 @@
 | `dataDir` / `dataDirFailed` / `loadDataDir` | refs / fn | 当前目录、默认目录、来源、restartRequired 与局部失败 |
 | `pendingDir` / `migrateData` | refs | 原生选择器返回的候选与迁移勾选（默认 true） |
 | `chooseDataDir` / `cancelDataDirChoice` | fn | 选择/取消候选；取消时复位 migrate=true |
-| `confirmDataDir` / `restoreDefaultDataDir` | fn | 先取 migrate 快照，再写指针、复位、重读并提示重启生效 |
+| `confirmDataDir` / `restoreDefaultDataDir` | fn | 先取 migrate 快照，再写指针、复位、重读并提示重启生效；后端返回 `warning`（降级模式下指针也在临时目录）时**用它替换普通成功文案** |
 | `dataDirSourceMeta` | computed | 默认/自定义/临时目录的文案与配色 |
 | `changingDir` / `changeNotice` / `changeError` | refs | 执行态与 5 秒反馈 |
 

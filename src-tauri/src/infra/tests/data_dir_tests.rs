@@ -83,6 +83,45 @@ fn missing_or_corrupt_pointer_degrades_to_default() {
     assert_eq!(read_pointer(&dir), DataDirPointer::default());
 }
 
+/// 严格读取（设置页读-改-写基线）：损坏/不可读必须报错，不能退化成默认值。
+/// 否则写回会把 `legacy_migrated: Some(true)` 抹成 None，下次启动重新搬旧数据。
+#[test]
+fn strict_pointer_read_refuses_corrupt_or_unreadable_file() {
+    let dir = unique_dir("pointer-strict-bad");
+    write_file(&dir, "data_dir.json", "not-json{{{");
+    assert!(
+        matches!(read_pointer_strict(&dir), Err(AppError::Serialization(_))),
+        "损坏 JSON 必须落 Serialization 错误"
+    );
+
+    let non_utf8 = unique_dir("pointer-strict-non-utf8");
+    std::fs::create_dir_all(non_utf8.path()).unwrap();
+    std::fs::write(non_utf8.join("data_dir.json"), [0xFF, 0xFE, 0x00]).unwrap();
+    assert!(
+        matches!(read_pointer_strict(&non_utf8), Err(AppError::Io(_))),
+        "非 UTF-8 必须落 Io 错误"
+    );
+}
+
+/// 严格读取的正常路径：缺失 = 未指定；有效指针（含一次性迁移标记）原样读回。
+#[test]
+fn strict_pointer_read_keeps_legacy_marker() {
+    let dir = unique_dir("pointer-strict-ok");
+    assert_eq!(
+        read_pointer_strict(&dir).expect("缺失指针应视为未指定"),
+        DataDirPointer::default()
+    );
+
+    write_pointer(&dir, &pointer_with_legacy(None, Some(true))).expect("写指针失败");
+    assert_eq!(
+        read_pointer_strict(&dir)
+            .expect("有效指针应读回")
+            .legacy_migrated,
+        Some(true),
+        "读-改-写基线必须保留一次性搬家标记"
+    );
+}
+
 #[test]
 fn pointer_omits_absent_fields() {
     // skip_serializing_if：未指定目录时文件里不该出现 null 字段
@@ -159,6 +198,30 @@ fn validate_target_rejects_legacy_temp_dir_and_its_children() {
         validate_target(&child, &legacy, false).is_err(),
         "临时目录的子目录也应被拒"
     );
+}
+
+/// 回归：字符串前缀判据会被 `..` 绕过 —— `temp/decoy/../hinina` 文本上不以
+/// 临时目录开头，解析后却正是它。拒绝未规范化组件必须发生在任何 I/O 之前。
+#[test]
+fn validate_target_rejects_unresolved_dot_components() {
+    let legacy = unique_dir("validate-dotdot-legacy");
+    std::fs::create_dir_all(legacy.path()).unwrap();
+    let decoy = unique_dir("validate-dotdot-decoy");
+    std::fs::create_dir_all(decoy.path()).unwrap();
+
+    let legacy_name = legacy.path().file_name().expect("legacy 应有文件名");
+    let sneaky = decoy.path().join("..").join(legacy_name);
+    assert!(
+        !sneaky.starts_with(legacy.path()),
+        "前置条件：文本上确实绕开了临时目录前缀"
+    );
+    let err = validate_target(&sneaky, legacy.path(), false)
+        .expect_err("含 .. 的路径必须拒绝（否则可把数据目录设回临时目录）");
+    assert!(err.to_string().contains("规范化"), "{err}");
+
+    // 显式 `.` 同样拒绝（`dir_is_usable` 会把它解析成上级目录）
+    let dotted = legacy.path().join("sub").join(".");
+    assert!(validate_target(&dotted, legacy.path(), false).is_err());
 }
 
 #[test]
@@ -1110,18 +1173,25 @@ fn migrate_captures_create_target_failure_details() {
     write_file(&holder, "blocker", "i am a file");
     let blocked_target = holder.join("blocker");
 
-    let outcome = migrate(&from, &blocked_target);
-
+    // 启动路径：诊断直接写进调用方缓冲（plan.warnings），outcome 不再另存一份
+    let mut diagnostics = Vec::new();
+    let outcome = migrate_into(&from, &blocked_target, &mut diagnostics);
     assert!(outcome.failed.contains(&"(目标目录)".to_string()));
-    assert_eq!(outcome.diagnostics.len(), 1, "{:?}", outcome.diagnostics);
-    assert_eq!(outcome.diagnostics[0].level, EarlyLevel::Error);
     assert!(
-        outcome.diagnostics[0]
-            .message
-            .contains("创建目标数据目录失败"),
-        "{:?}",
-        outcome.diagnostics[0]
+        outcome.diagnostics.is_empty(),
+        "启动路径的诊断只进缓冲，避免两处重放"
     );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].level, EarlyLevel::Error);
+    assert!(
+        diagnostics[0].message.contains("创建目标数据目录失败"),
+        "{:?}",
+        diagnostics[0]
+    );
+
+    // 直接调用 migrate 的调用方仍从 outcome 取诊断（向后兼容）
+    let direct = migrate(&from, &blocked_target);
+    assert_eq!(direct.diagnostics.len(), 1, "{:?}", direct.diagnostics);
 }
 
 /// 指针里的自定义目录不是绝对路径：按「不可用」处理并留下诊断

@@ -58,6 +58,9 @@ export interface DataDirInfo {
   source: DataDirSource
   /// 是否有改动待重启生效
   restartRequired: boolean
+  /// 位置指针是否落在临时目录（降级态）：为 true 时「自定义目录」设置本身
+  /// 也会随临时目录清理丢失（与 `source` 正交，降级 + 自定义目录时 source=custom）
+  pointerInTemp: boolean
 }
 
 /// 数据目录更改结果，对应 Rust `commands::data_dir_cmd::DataDirChange`。
@@ -68,6 +71,11 @@ export interface DataDirChange {
   migrateFrom: string | null
   /// 恒为 true：数据目录改动只能重启生效
   restartRequired: boolean
+  /// 附加风险提示（非 null 时必须替换成功文案展示）
+  ///
+  /// 目前来自降级模式：位置指针本身也保存在临时目录，临时目录被清理后
+  /// 本次自定义目录设置会一起丢失
+  warning: string | null
 }
 
 /// 本次启动的启动标志，对应 Rust `infra::launch_args::LaunchFlags`。
