@@ -429,7 +429,18 @@ fn is_absolute_path(path: &Path) -> bool {
 pub fn resolve(default_dir: &Path, legacy: &Path) -> DataDirPlan {
     let mut warnings = Vec::new();
     let pointer = read_pointer_early(default_dir, &mut warnings);
+    resolve_with_pointer(default_dir, legacy, &pointer, &mut warnings)
+}
 
+/// [`resolve`] 的内部变体：指针由调用方读取后传入。`prepare_startup` 自己
+/// 也要读指针（`migrate_from` / `legacy_migrated` 标记），若 `resolve` 再读
+/// 一次，同一损坏指针会被**记两条相同诊断**（指针文件也被读两次）。
+fn resolve_with_pointer(
+    default_dir: &Path,
+    legacy: &Path,
+    pointer: &DataDirPointer,
+    warnings: &mut Vec<EarlyDiagnostic>,
+) -> DataDirPlan {
     if let Some(custom) = pointer.data_dir.as_deref().filter(|s| !s.trim().is_empty()) {
         let path = PathBuf::from(custom);
         if is_absolute_path(&path) {
@@ -438,7 +449,7 @@ pub fn resolve(default_dir: &Path, legacy: &Path) -> DataDirPlan {
                     base_dir: path,
                     default_dir: default_dir.to_path_buf(),
                     source: DataDirSource::Custom,
-                    warnings,
+                    warnings: std::mem::take(warnings),
                 };
             }
             let reason = dir_unusable_reason(&path);
@@ -465,7 +476,7 @@ pub fn resolve(default_dir: &Path, legacy: &Path) -> DataDirPlan {
             base_dir: default_dir.to_path_buf(),
             default_dir: default_dir.to_path_buf(),
             source: DataDirSource::Default,
-            warnings,
+            warnings: std::mem::take(warnings),
         };
     }
 
@@ -486,7 +497,7 @@ pub fn resolve(default_dir: &Path, legacy: &Path) -> DataDirPlan {
         base_dir: legacy.to_path_buf(),
         default_dir: default_dir.to_path_buf(),
         source: DataDirSource::FallbackTemp,
-        warnings,
+        warnings: std::mem::take(warnings),
     }
 }
 
@@ -515,14 +526,13 @@ fn dir_unusable_reason(dir: &Path) -> String {
 /// 迁移失败**不阻断启动**：调用方继续用解析出的 `base_dir`（数据仍在原处，
 /// 客户端能正常工作），但必须强告警 —— 这正是「回退仍可用」优于「启动失败」的场景。
 pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, MigrateOutcome) {
-    let mut pointer_diagnostics = Vec::new();
-    let pointer = read_pointer_early(default_dir, &mut pointer_diagnostics);
-    let plan = resolve(default_dir, legacy);
-
-    // 诊断缓冲按时间顺序合并：本函数指针读取 → resolve 内部（候选目录因何被否）；
-    // 之后迁移与写指针的诊断继续追加到尾部。
-    let mut warnings = pointer_diagnostics;
-    warnings.extend(plan.warnings);
+    // 指针只读一次：诊断缓冲与指针数据（migrate_from / legacy 标记）共用这一次
+    // 读取。resolve 的内部变体把**指针诊断 + 候选目录诊断**一并收进
+    // `plan.warnings`（返回时 `mem::take` 收拢共享缓冲），因此启动期的全部诊断
+    // 以 plan.warnings 为唯一载体，之后迁移与写指针的诊断继续追加到它的尾部。
+    let mut early = Vec::new();
+    let pointer = read_pointer_early(default_dir, &mut early);
+    let mut plan = resolve_with_pointer(default_dir, legacy, &pointer, &mut early);
     let mut outcome = MigrateOutcome::default();
 
     // ① 显式要求的迁移（设置页改目录）
@@ -537,13 +547,13 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
             // 无失败项才清除标记：有失败项时保留，下次启动重试（已搬过去的条目
             // 会因「目标已存在」被跳过，故重试是幂等的，不会重复搬运）
             if should_clear_pending(&step) {
-                clear_migrate_from(default_dir, &mut warnings);
+                clear_migrate_from(default_dir, &mut plan.warnings);
             }
             outcome.merge(step);
         } else {
             // 来源不存在或与目标相同：标记已无意义，清掉避免每次启动都尝试
             debug!(from = %from.display(), "待迁移来源不存在或与目标相同，清除标记");
-            clear_migrate_from(default_dir, &mut warnings);
+            clear_migrate_from(default_dir, &mut plan.warnings);
         }
     }
 
@@ -551,11 +561,11 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
     if should_attempt_legacy(&pointer, plan.source, legacy) {
         let step = migrate(legacy, &plan.base_dir);
         // 成功 → Some(true)（永不重试）；失败 → Some(false)（**换个目录也继续重试**）
-        mark_legacy_migrated(default_dir, &mut warnings, step.is_ok());
+        mark_legacy_migrated(default_dir, &mut plan.warnings, step.is_ok());
         outcome.merge(step);
     }
 
-    (DataDirPlan { warnings, ..plan }, outcome)
+    (plan, outcome)
 }
 
 /// 是否该尝试把临时目录的旧数据搬到当前数据目录。

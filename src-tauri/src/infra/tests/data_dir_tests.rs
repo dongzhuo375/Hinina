@@ -1106,3 +1106,25 @@ fn resolve_rejects_relative_custom_dir_with_diagnostic() {
         plan.warnings[0]
     );
 }
+
+/// 聚合路径回归（评审修复）：损坏指针经 prepare_startup 只记**一条**诊断。
+/// prepare_startup 与 resolve 各自读一次指针会把同一损坏记成两条、重放两遍
+/// —— 指针单读共用后该场景只允许出现一次「指针解析失败」。
+#[test]
+fn prepare_startup_records_corrupt_pointer_exactly_once() {
+    let default_dir = unique_dir("startup-corrupt-pointer");
+    std::fs::create_dir_all(&default_dir).unwrap();
+    std::fs::write(default_dir.join("data_dir.json"), "{ not-json").unwrap();
+    let legacy = unique_dir("startup-corrupt-pointer-legacy");
+
+    let (plan, outcome) = prepare_startup(&default_dir, &legacy);
+
+    assert_eq!(plan.source, DataDirSource::Default);
+    assert!(outcome.is_noop());
+    let pointer_diags: Vec<&EarlyDiagnostic> = plan
+        .warnings
+        .iter()
+        .filter(|d| d.message.contains("指针解析失败"))
+        .collect();
+    assert_eq!(pointer_diags.len(), 1, "{:?}", plan.warnings);
+}
