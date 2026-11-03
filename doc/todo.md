@@ -58,7 +58,7 @@
 - [x] **SubmissionService** — `service/submission/mod.rs`：提交代码、评测结果轮询、超时处理
 
 ### 4.7 ThemeService
-- [x] **ThemeService** — `service/theme/mod.rs`：主题切换、配色方案管理，发布主题变更事件（阶段 8 事件总线重构后为 `CoreEvent::ThemeChanged`；当时为 `SystemEvent::ThemeChanged`）
+- [x] **ThemeService** — `service/theme/mod.rs`：主题切换、配色方案管理，发布主题变更事件（阶段 8 事件总线重构后为 `CoreEvent::ThemeChanged`；当时为 `SystemEvent::ThemeChanged`）。**后注**：2026-11 死代码清理中随 theme 域整体删除（命令零调用）
 
 ---
 
@@ -77,12 +77,12 @@
 > 每个 Service 完成后，对应的 Command 薄封装可同步填充。
 
 - [x] **auth_cmd** — `commands/auth_cmd.rs`：login / logout / get_session
-- [x] **contest_cmd** — `commands/contest_cmd.rs`：list_contests / select_contest
+- [x] **contest_cmd** — `commands/contest_cmd.rs`：list_contests / select_contest。**后注**：select_contest 已于 2026-11 删除（前端零调用；`ContestService::select_contest` 保留内部复用）
 - [x] **problem_cmd** — `commands/problem_cmd.rs`：get_problem / list_problems
 - [x] **submission_cmd** — `commands/submission_cmd.rs`：submit_code / get_judgement
 - [x] **workspace_cmd** — `commands/workspace_cmd.rs`：load / save / switch / current
 - [x] **config_cmd** — `commands/config_cmd.rs`：get_config / reload_config / update_config
-- [x] **theme_cmd** — `commands/theme_cmd.rs`：get_theme / set_theme
+- [x] **theme_cmd** — `commands/theme_cmd.rs`：get_theme / set_theme。**后注**：2026-11 已删除（前端零调用）
 - [x] **register_commands** — `commands/mod.rs` + `main.rs`：通过 `tauri::generate_handler!` + `invoke_handler()` 注册所有 18 个 Command
 
 ---

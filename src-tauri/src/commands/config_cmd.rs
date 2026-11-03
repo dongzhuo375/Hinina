@@ -175,7 +175,8 @@ where
 /// `tauri::async_runtime::spawn` 才拿得到 tokio 上下文），消费者一旦落后或缺失，
 /// 设置页改了开关却不生效，且无从察觉。
 ///
-/// 主题字段的切换效果由前端本地应用（`set_theme` 另有命令）；此处不做额外广播。
+/// 主题域（`set_theme`/`get_theme`）已随死代码清理删除：前端只有编辑器主题，
+/// 经 `update_config` 落盘并由消费方本地应用；此处不做额外广播。
 #[tauri::command]
 pub async fn update_config(
     ctx: State<'_, AppContext>,

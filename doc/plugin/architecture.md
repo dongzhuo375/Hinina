@@ -29,7 +29,7 @@ flowchart LR
   API --> Query[ScopedQueries: 作用域/游标]
   Query --> Service
   API --> Ports[PluginStorageApi / PluginHttpApi / NotificationOutput]
-  Ports --> Infra[infra: plugin_storage / plugin_http / plugin_notification]
+  Ports --> Infra[infra: plugin_storage / plugin_http] & 组合根[main.rs: 通知输出]
   Command[commands/plugin_cmd] --> Manager[PluginManager]
   Manager --> Host
   Manager --> Repository[PluginRepository / FsPluginRepository]
@@ -107,7 +107,7 @@ JS contest.problems / contest.rank(context, query)
 ```
 JS storage.*   → PluginStorageApi → infra/plugin_storage（fs4 + atomicwrites + CAS）
 JS http.request → PluginHttpApi → infra/plugin_http（独立 reqwest + origin/地址策略）
-JS notification.* → NotificationOutput → infra/plugin_notification → Tauri 事件 → 前端
+JS notification.* → NotificationOutput → 组合根 main.rs（TauriPluginNotifications）→ Tauri 事件 → 前端
 JS log.*       → LogApi（execution_api 内实现）→ tracing → logs/hinina.log
 ```
 
@@ -178,7 +178,6 @@ JS log.*       → LogApi（execution_api 内实现）→ tracing → logs/hinin
 | `infra/fs_plugin_repo` | [fs_plugin_repo.md](../modules/src-tauri/infra/fs_plugin_repo.md) |
 | `infra/plugin_storage` | [plugin_storage.md](../modules/src-tauri/infra/plugin_storage.md) |
 | `infra/plugin_http` | [plugin_http.md](../modules/src-tauri/infra/plugin_http.md) |
-| `infra/plugin_notification` | [plugin_notification.md](../modules/src-tauri/infra/plugin_notification.md) |
 | `commands/plugin_cmd` | [plugin_cmd.md](../modules/src-tauri/commands/plugin_cmd.md) |
 | 前端 | [plugin.service](../modules/src/services/plugin.service.md) / [pluginStore](../modules/src/stores/pluginStore.md) / [plugin.bridge](../modules/src/bridge/plugin.bridge.md) / [types/plugin](../modules/src/types/plugin.md) |
 

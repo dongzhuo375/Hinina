@@ -4,7 +4,7 @@
 
 ## 职责
 
-工作区相关 Tauri IPC 的薄封装：对 `load_workspace` / `save_workspace` / `current_workspace` / `update_workspace_file` / `set_workspace_language` / `delete_workspace_file` 六个 Command 做参数透传，并把后端的 `workspace-saved` 事件（落盘通知）封装为订阅函数，不含业务逻辑。
+工作区相关 Tauri IPC 的薄封装：对 `load_workspace` / `save_workspace` / `update_workspace_file` / `set_workspace_language` / `delete_workspace_file` 五个 Command 做参数透传（`current_workspace` 已随死 IPC 清理删除），并把后端的 `workspace-saved` 事件（落盘通知）封装为订阅函数，不含业务逻辑。
 
 ## 核心类型/函数
 
