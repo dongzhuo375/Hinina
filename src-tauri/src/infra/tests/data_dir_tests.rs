@@ -438,30 +438,35 @@ fn should_attempt_legacy_retries_failed_migration_regardless_of_source() {
     assert!(!should_attempt_legacy(
         &pointer(None, None),
         DataDirSource::Custom,
+        &_custom,
         &legacy
     ));
     // 从未尝试 + 默认目录 → 搬（全新升级场景）
     assert!(should_attempt_legacy(
         &pointer(None, None),
         DataDirSource::Default,
+        &default,
         &legacy
     ));
     // **试过但失败 + 自定义目录 → 仍要搬**（本缺陷的核心）
     assert!(should_attempt_legacy(
         &pointer_with_legacy(None, Some(false)),
         DataDirSource::Custom,
+        &_custom,
         &legacy
     ));
     // 已成功 + 任意目录 → 永不重试（否则用户删掉的旧工作区会复活）
     assert!(!should_attempt_legacy(
         &pointer_with_legacy(None, Some(true)),
         DataDirSource::Default,
+        &default,
         &legacy
     ));
     // 旧目录不存在 → 无事可做
     assert!(!should_attempt_legacy(
         &pointer(None, None),
         DataDirSource::Default,
+        &default,
         &default.join("nope")
     ));
 }
@@ -1025,14 +1030,22 @@ fn resolve_captures_default_dir_unusable_diagnostic() {
     // 「指针读取失败」诊断是否出现**取决于平台错误种类**——Linux 报 ENOTDIR
     // （非 NotFound，会多一条 Warn），Windows 把同路径归一为 NotFound（静默）。
     // 两条诊断都属实，这里只钉「回退决策与其 error 级原因」。
+    // 回退决策由 source（FallbackTemp）承载，强告警由 report_data_dir 统一发一条
+    // error；warnings 只写原因（Warn），避免同一决策两行 error
     let d = plan
         .warnings
         .iter()
-        .find(|d| d.level == EarlyLevel::Error)
-        .unwrap_or_else(|| panic!("缺少 error 级诊断: {:?}", plan.warnings));
+        .find(|d| d.message.contains("默认数据目录不可用"))
+        .unwrap_or_else(|| panic!("缺少原因诊断: {:?}", plan.warnings));
+    assert_eq!(d.level, EarlyLevel::Warn);
     assert!(
-        d.message.contains("默认数据目录不可用") && d.message.contains("回退临时目录"),
-        "诊断应说明决策与去向: {}",
+        d.message.contains(&unusable_default.display().to_string()),
+        "原因诊断应带失败的目录路径: {}",
+        d.message
+    );
+    assert!(
+        !d.message.contains("回退临时目录"),
+        "warnings 不得重复决策文本（归 report_data_dir）: {}",
         d.message
     );
 }
@@ -1190,10 +1203,13 @@ fn prepare_startup_forces_fallback_when_default_resolution_failed() {
     assert_eq!(plan.base_dir, legacy);
     assert!(outcome.is_noop(), "降级分支不做迁移");
     assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
-    assert_eq!(plan.warnings[0].level, EarlyLevel::Error);
+    assert_eq!(
+        plan.warnings[0].level,
+        EarlyLevel::Warn,
+        "原因级；决策强告警归 report_data_dir"
+    );
     assert!(
-        plan.warnings[0].message.contains("默认数据目录解析失败")
-            && plan.warnings[0].message.contains("随时可能被系统清理"),
+        plan.warnings[0].message.contains("默认数据目录解析失败"),
         "{}",
         plan.warnings[0].message
     );
@@ -1238,11 +1254,11 @@ fn degraded_mode_still_honors_saved_custom_dir() {
 
     assert_eq!(plan.source, DataDirSource::Custom, "自定义目录必须生效");
     assert_eq!(plan.base_dir, custom);
-    // 失败原因仍如实上报（error 级）
+    // 失败原因仍如实上报（原因级 Warn；决策强告警由 report_data_dir 发布）
     assert!(
         plan.warnings
             .iter()
-            .any(|d| d.level == EarlyLevel::Error && d.message.contains("默认数据目录解析失败")),
+            .any(|d| d.message.contains("默认数据目录解析失败")),
         "{:?}",
         plan.warnings
     );
@@ -1267,4 +1283,29 @@ fn update_pointer_aborts_on_io_error_instead_of_overwriting() {
     );
     // 写回被放弃：占位目录原样保留（若拿默认指针写回，会变成文件）
     assert!(pointer_path(&dir).is_dir(), "指针位置不得被覆盖成文件");
+}
+
+/// 观察项回归：当前就落在临时目录（降级态，base_dir == legacy）时不得尝试
+/// 「临时目录搬家」——自我搬运会全 skipped、被误判成功并写 `Some(true)`，
+/// 之后默认目录恢复也永不搬家，数据可能永久留在临时目录。
+#[test]
+fn degraded_mode_does_not_self_migrate_legacy() {
+    let legacy = unique_dir("self-migrate-legacy");
+    seed_legacy(&legacy);
+    // 降级模式下 default_dir 就是临时目录本身（main.rs 同口径），上次搬家失败过
+    write_pointer(&legacy, &pointer_with_legacy(None, Some(false))).expect("写指针失败");
+
+    let (plan, outcome) = prepare_startup_with_default_error(
+        Some("app_local_data_dir 解析失败: policy"),
+        &legacy,
+        &legacy,
+    );
+    assert_eq!(plan.base_dir, legacy, "降级态 base_dir 即临时目录");
+    assert!(outcome.is_noop(), "不得执行自我搬运: {outcome:?}");
+    // 关键：不得把失败标记改写成成功（否则默认目录恢复后也不再搬家）
+    assert_eq!(
+        read_pointer(&legacy).legacy_migrated,
+        Some(false),
+        "自我搬运被误判成功会永久阻断后续搬家"
+    );
 }

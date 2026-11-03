@@ -105,9 +105,13 @@ pub struct DataDirPlan {
     /// 默认数据目录（设置页「恢复默认」的目标，也是指针文件所在处）
     pub default_dir: PathBuf,
     pub source: DataDirSource,
-    /// 订阅器就绪前的诊断（指针解析失败、候选目录因何不可用、启动期指针写失败），
-    /// 由 `report_data_dir` 重放。**回退决策本身**不在此列 —— `source` 已如实承载，
-    /// 重复叙述只会制造两份真相。
+    /// 订阅器就绪前的诊断，与 [`MigrateOutcome::diagnostics`] 是两个载体：
+    /// 本字段承载**解析期原因与中间失败**（指针解析/读取失败、候选目录因何不可用、
+    /// 降级原因、启动期指针写失败）；迁移过程的诊断在 `MigrateOutcome.diagnostics`。
+    /// 二者由 `report_data_dir` 分两批重放（跨批不保证时序）。
+    ///
+    /// **回退决策的强告警不在此列**：`source` 如实承载决策，`report_data_dir` 的
+    /// FallbackTemp 分支统一发一条 error —— 此处只写原因，避免同一决策两行 error。
     pub warnings: Vec<EarlyDiagnostic>,
 }
 
@@ -500,7 +504,7 @@ fn resolve_with_pointer(
                 Err(e) => warnings.push(EarlyDiagnostic {
                     level: EarlyLevel::Warn,
                     message: format!(
-                        "指定的数据目录不可用（{e}），回退默认目录: {}",
+                        "指定的数据目录不可用（{e}）: {}，回退默认目录",
                         path.display()
                     ),
                 }),
@@ -509,7 +513,7 @@ fn resolve_with_pointer(
             warnings.push(EarlyDiagnostic {
                 level: EarlyLevel::Warn,
                 message: format!(
-                    "指定的数据目录不是绝对路径，忽略并回退默认目录: {}",
+                    "指定的数据目录不是绝对路径: {}，忽略并回退默认目录",
                     path.display()
                 ),
             });
@@ -531,13 +535,11 @@ fn resolve_with_pointer(
         }
         Err(e) => e,
     };
+    // 只讲原因（Warn）：回退到临时目录的强告警由 `report_data_dir` 按 source
+    // 统一发一条 error，不在此重复决策文本
     warnings.push(EarlyDiagnostic {
-        level: EarlyLevel::Error,
-        message: format!(
-            "默认数据目录不可用（{e}），回退临时目录（数据随时可能被系统清理）: {} → {}",
-            default_dir.display(),
-            legacy.display()
-        ),
+        level: EarlyLevel::Warn,
+        message: format!("默认数据目录不可用（{e}）: {}", default_dir.display()),
     });
     let _ = std::fs::create_dir_all(legacy);
     DataDirPlan {
@@ -585,17 +587,18 @@ pub fn prepare_startup_with_default_error(
 ) -> (DataDirPlan, MigrateOutcome) {
     // 指针只读一次：诊断缓冲与指针数据（migrate_from / legacy 标记）共用这一次
     // 读取。resolve 的内部变体把**指针诊断 + 候选目录诊断**一并收进
-    // `plan.warnings`（返回时 `mem::take` 收拢共享缓冲），因此启动期的全部诊断
-    // 以 plan.warnings 为唯一载体，之后迁移与写指针的诊断继续追加到它的尾部。
+    // `plan.warnings`（返回时 `mem::take` 收拢共享缓冲）。启动期诊断有**两个
+    // 载体**：`plan.warnings`（解析期原因 / 指针写失败等）与
+    // `MigrateOutcome.diagnostics`（迁移过程：条目失败、暂存清理、删源失败），
+    // `report_data_dir` 分两批重放。
     let mut early = Vec::new();
     if let Some(reason) = default_error {
         let _ = std::fs::create_dir_all(legacy);
+        // 只讲原因（Warn）；降级决策（FallbackTemp）的强告警由 report_data_dir
+        // 统一发布，此处不重复
         early.push(EarlyDiagnostic {
-            level: EarlyLevel::Error,
-            message: format!(
-                "默认数据目录解析失败（{reason}）；临时目录作为默认位置（数据随时可能被系统清理），此前保存的自定义数据目录仍会生效: {}",
-                default_dir.display()
-            ),
+            level: EarlyLevel::Warn,
+            message: format!("默认数据目录解析失败（{reason}）"),
         });
     }
     let pointer = read_pointer_early(default_dir, &mut early);
@@ -633,7 +636,7 @@ pub fn prepare_startup_with_default_error(
     }
 
     // ② 临时目录搬家（不提前返回，理由见函数注释）
-    if should_attempt_legacy(&pointer, plan.source, legacy) {
+    if should_attempt_legacy(&pointer, plan.source, plan.base_dir.as_path(), legacy) {
         let step = migrate(legacy, &plan.base_dir);
         // 成功 → Some(true)（永不重试）；失败 → Some(false)（**换个目录也继续重试**）
         mark_legacy_migrated(default_dir, &mut plan.warnings, step.is_ok());
@@ -654,8 +657,20 @@ pub fn prepare_startup_with_default_error(
 ///
 /// `Some(false)` 之所以**不看来源**：它意味着「我们确实尝试过、且失败」，那份数据是
 /// 用户的真实数据；若因为用户中途改了目录就放弃，它会一直留在临时目录里等被系统清理。
-fn should_attempt_legacy(pointer: &DataDirPointer, source: DataDirSource, legacy: &Path) -> bool {
+fn should_attempt_legacy(
+    pointer: &DataDirPointer,
+    source: DataDirSource,
+    base_dir: &Path,
+    legacy: &Path,
+) -> bool {
     if pointer.legacy_migrated == Some(true) || !legacy.exists() {
+        return false;
+    }
+    // 当前就落在临时目录（默认目录不可用的降级态）：搬家源与目标同一路径，
+    // 逐项都会因「目标已存在」被跳过、`is_ok()` 为真，进而把 `legacy_migrated`
+    // 写成 `Some(true)` —— 之后默认目录恢复也**永不搬家**，数据可能永久留在
+    // 临时目录（既有边界，随 2026-11 诊断改造一并收口）
+    if base_dir == legacy {
         return false;
     }
     pointer.legacy_migrated == Some(false) || source == DataDirSource::Default
