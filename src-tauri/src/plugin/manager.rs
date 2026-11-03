@@ -476,7 +476,7 @@ impl PluginManager {
                 }
                 let cleanup = self.stop_inner(id).await;
                 if let Err(error) = cleanup {
-                    tracing::warn!(plugin_id=?id,operation="start.cleanup",error=?error,"Plugin cleanup pending");
+                    tracing::warn!(plugin_id=?id,plugin_version="",runtime="js",operation="start.cleanup",error=?error,"Plugin cleanup pending");
                 }
                 Err(PluginError::Timeout)
             }
@@ -520,7 +520,7 @@ impl PluginManager {
                 break;
             }
             if start.elapsed() > self.stop_timeout {
-                tracing::warn!(plugin_id=?id,operation="worker.stop",error=?PluginError::Timeout,"Plugin stop timed out");
+                tracing::warn!(plugin_id=?id,plugin_version="",runtime="js",operation="worker.stop",error=?PluginError::Timeout,"Plugin stop timed out");
                 return self.stop_timed_out(id);
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
