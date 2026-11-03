@@ -1015,7 +1015,8 @@ fn resolve_captures_corrupt_pointer_diagnostic() {
     );
 }
 
-/// 默认目录不可用 → 回退临时目录：error 级诊断（数据随时可能被清理）。
+/// 默认目录不可用 → 回退临时目录：warnings 记 Warn 级原因（回退决策的强告警
+/// 由 `report_data_dir` 按 source 统一发一条 error）。
 #[test]
 fn resolve_captures_default_dir_unusable_diagnostic() {
     let blocker = unique_dir("diag-blocked");
@@ -1069,18 +1070,32 @@ fn resolve_captures_custom_dir_unusable_reason() {
     assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
     let d = &plan.warnings[0];
     assert_eq!(d.level, EarlyLevel::Warn);
+    // **P3-1 的实际锁定点**：路径必须出现在「回退默认目录」**之前**（原因位），
+    // 而不是紧随其后被读成回退目标。旧文案「不可用（{e}），回退默认目录: {path}」
+    // 末尾同样含路径——只断言「路径在场」区分不出方向，把文案改回旧形态仍会绿
+    // （已用变异验证确认）。
+    let failed_path = blocker.join("afile").join("sub");
     assert!(
-        d.message.contains("指定的数据目录不可用") && d.message.contains("回退默认目录"),
-        "诊断应说明决策与去向: {}",
+        d.message
+            .contains(&format!(": {}，回退默认目录", failed_path.display())),
+        "失败目录路径必须写在原因位（「: {{path}}，回退默认目录」）: {}",
         d.message
     );
-    // 「为什么」：诊断必须携带**真实探测原因**，而不是「未知」占位。
-    // `dir_unusable_reason` 只在复检已可用时返回「未知」——本夹具的目录由
-    // 「父路径是文件」确定性不可用，出现占位即说明原因没能被捕获。
-    // （旧断言用 `|| !d.message.is_empty()` 兜底，恒真，测不出任何东西）
     assert!(
-        d.message.contains("指定的数据目录不可用（") && !d.message.contains("未知"),
-        "诊断应携带探测错误而非占位: {}",
+        !d.message.contains("回退默认目录: "),
+        "「回退默认目录」之后不得再跟路径（那是被读成回退目标的旧形态）: {}",
+        d.message
+    );
+    assert!(
+        d.message.contains("指定的数据目录不可用") && d.message.contains("回退默认目录"),
+        "诊断应说明原因与去向: {}",
+        d.message
+    );
+    // 「为什么」：探测失败的底层原因必须在场（OS 错误的 Display 恒带
+    // 「(os error N)」后缀，两端平台一致）
+    assert!(
+        d.message.contains("(os error"),
+        "诊断应携带探测错误原文: {}",
         d.message
     );
 }
@@ -1187,8 +1202,8 @@ fn read_pointer_missing_file_is_silent() {
     assert!(early.is_empty(), "NotFound 不应产生诊断: {early:?}");
 }
 
-/// P2-2 回归：默认目录解析失败必须显式降级为 FallbackTemp + error 级诊断
-/// （临时目录「可用」不得被误报为 Default，否则强告警丢失）。
+/// P2-2 回归：默认目录解析失败必须显式降级为 FallbackTemp（临时目录「可用」
+/// 不得被误报为 Default）；warnings 记 Warn 级原因，决策 error 由 report_data_dir 发。
 #[test]
 fn prepare_startup_forces_fallback_when_default_resolution_failed() {
     let legacy = unique_dir("default-failure-legacy");

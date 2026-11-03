@@ -573,8 +573,9 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
 /// `app_local_data_dir()` 失败（策略锁定 / 环境变量缺失）时，组合根只能拿临时
 /// 目录顶替——若按普通路径解析，临时目录「可用」会让 `source` 变成 `Default`，
 /// `report_data_dir` 只记 Info，**丢掉「临时数据随时可能被清理」的强告警**
-/// （评审 P2-2）。这里把失败原因显式升级为 error 级诊断，并在无可用自定义目录时
-/// 把 `source` 强制为 `FallbackTemp`。
+/// （评审 P2-2）。这里把失败原因记入 warnings（Warn 级原因），并在无可用自定义
+/// 目录时把 `source` 强制为 `FallbackTemp`——回退决策的强告警由 `report_data_dir`
+/// 按 source 统一发一条 error。
 ///
 /// 降级模式下**仍完整读指针并尊重用户选择**（评审 P2-1）：客户端会把临时目录
 /// 当作 `default_dir`（`get_data_dir` 同口径），设置页写入的位置指针就落在那里
