@@ -737,7 +737,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       }
       case 'list_contest_announcements':
         return {
-          records: announcements,
+          // 克隆而非活引用：与其它命令一致（pushAnnouncement 事后追加不得
+          // 影响已返回的页对象——评审中 3）
+          records: structuredClone(announcements),
           total: announcements.length,
           size: Math.max(1, Number(args?.limit ?? 20)),
           current: Math.max(1, Number(args?.currentPage ?? 1)),
