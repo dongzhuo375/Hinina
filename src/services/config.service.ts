@@ -287,8 +287,8 @@ export class ConfigService {
     let persisted: AppConfig = draft
     try {
       // 默认值由「本次启动是否钥匙模式」推导：设置页之外的保存
-      // （解题页编辑器偏好、分栏比例）同样必须让后端保住锁定字段——`false`
-      // 会让普通启动被当成「可写锁定层」，手改的非法值被校验/钳制
+      // （解题页编辑器偏好、分栏比例）同样声明锁定意图。**对账字段**：后端
+      // 以 launch_args 自持真值执行锁定，此处推导不一致只会触发对账告警
       const maintainerLocked = options.maintainerLocked ?? !isKeyedProcess()
       persisted = (await configBridge.updateConfig(draft, maintainerLocked)) ?? draft
       // 用**实际落盘**的 active 判定：保存与切换在服务层

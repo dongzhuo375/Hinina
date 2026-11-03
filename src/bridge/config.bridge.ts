@@ -6,7 +6,12 @@ export async function getConfig(): Promise<AppConfig> {
   return ipcInvoke<AppConfig>('get_config')
 }
 
-/** 整体替换应用配置（Rust 端持久化并更新内存值，返回实际提交的配置） */
+/**
+ * 整体替换应用配置（Rust 端持久化并更新内存值，返回实际提交的配置）。
+ *
+ * `maintainerLocked` 是前端推导的**对账字段**：后端以 launch_args 自持真值
+ * 执行锁定语义，两者不一致时后端记对账告警。
+ */
 export async function updateConfig(
   config: AppConfig,
   maintainerLocked = false,

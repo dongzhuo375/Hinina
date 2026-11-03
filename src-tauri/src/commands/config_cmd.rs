@@ -8,6 +8,7 @@ use crate::core::entity::config::AppConfig;
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::core_event::CoreEvent;
 use crate::core::provider::oj_id::OjId;
+use crate::infra::launch_args;
 use crate::infra::logger::LOG_RELATIVE_PATH;
 
 /// 存储与版本信息（排障用：前端「关于/诊断」面板展示日志位置与客户端版本）。
@@ -181,16 +182,30 @@ where
 pub async fn update_config(
     ctx: State<'_, AppContext>,
     config: AppConfig,
-    // 维护者层锁定（普通启动）：锁定字段取旧值、不参与校验与钳制
+    // 前端推导的锁定声明，仅作**对账**：真值由组合根从 launch_args 自持（见下），
+    // 前端缺陷或被绕过传 false 时的唯一线索就是这条对账告警
     maintainer_locked: Option<bool>,
 ) -> AppResult<AppConfig> {
     info!("Command: 更新配置");
-    apply_config_update(&ctx, config, maintainer_locked.unwrap_or(false))
+    // 分层锁的执行点必须在**持有真值的一侧**：`--settings` 由组合根在启动早期
+    // 固化进 launch_args（普通启动 false → 锁定字段走保留/放宽语义；钥匙启动
+    // true → 维护者可写全部字段）。前端声明与此真值不一致时告警对账。
+    let enforced = !launch_args::get().settings;
+    let claimed = maintainer_locked.unwrap_or(false);
+    if claimed != enforced {
+        warn!(
+            claimed,
+            enforced, "update_config 的前端锁定声明与 launch_args 真值不一致，以后者为准"
+        );
+    }
+    apply_config_update(&ctx, config, enforced)
 }
 
 /// `update_config` 的真实编排（提取供测试直接调用，`#[tauri::command]` 只做薄转发）。
 ///
-/// `maintainer_locked` 为真时走「锁定字段不动」语义：先
+/// `maintainer_locked` 是**执行真值**（组合根从 launch_args 推导；测试显式传布尔
+/// 模拟两种启动模式，不经 launch_args——它是不可重置的进程级 OnceLock）：为真时
+/// 走「锁定字段不动」语义：先
 /// `preserve_locked_fields` 用旧配置覆盖锁定字段，再用放宽后的校验/净化 ——
 /// 手改出的非法锁定值（地址、越界数值）不得阻塞选手层字段的保存，也不得被
 /// 静默钳制/改写。
