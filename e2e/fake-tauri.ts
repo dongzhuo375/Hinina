@@ -22,7 +22,7 @@ import type { AnnouncementPage } from '../src/types/announcement'
 import type { AppConfig } from '../src/types/config'
 import type { Contest, ContestProblem } from '../src/types/contest'
 import type { Problem } from '../src/types/problem'
-import type { ContestRankPage, RankCell } from '../src/types/rank'
+import type { ContestRankPage, ContestRankRow, RankCell } from '../src/types/rank'
 import type { LaunchFlags } from '../src/types/system'
 import type {
   JudgementStatus,
