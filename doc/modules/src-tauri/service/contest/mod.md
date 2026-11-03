@@ -47,7 +47,7 @@
 ## 被依赖
 
 - `core::context`（`AppContext` 持有 `Arc<ContestService>`，构造时注入 `Arc<Storage>`）
-- `commands::contest_cmd`（经 AppContext 转发 `list_contests` / `select_contest` / `load_configured_contest` / `get_contest_rank` / `list_contest_announcements` / `get_read_announcement_ids` / `mark_announcements_read`）
+- `commands::contest_cmd`（经 AppContext 转发 `list_contests` / `load_configured_contest` / `get_contest_rank` / `list_contest_announcements` / `get_read_announcement_ids` / `mark_announcements_read`；`select_contest` 命令已删除，`ContestService::select_contest` 由服务层内部复用）
 - `commands::oj_cmd`（`switch_oj` → `on_oj_switched()` 显式清缓存）
 - `commands::maintenance_cmd`（`reset_client` → `clear_caches` / `clear_announcement_baseline` / `clear_announcement_read_state`）
 

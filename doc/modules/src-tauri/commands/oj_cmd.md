@@ -30,7 +30,7 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 1. 前端 `invoke('switch_oj', { ojId })`（设置页「当前 OJ」下拉的显式动作）
 2. `OjId::new` 规整入参（trim）→ **取得配置写事务锁** → 补注册 → 注册/配置校验 → `set_current` → `info!` 日志 → 三个 Service 的 `on_oj_switched()` → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched` → 释放事务锁
 3. 错误以 `AppError` 返回（`ProviderNotFound` / `Config`），经 serde 序列化为 `{ Variant: msg }`，前端在 `bridge/index.ts` 归一化为 `IpcError`
-4. 前端在**调用点**编排切换后果（`useSettingsForm.performSwitch` 成功分支）：`resetSessionForOjSwitch()` 清空旧 OJ 的会话与领域状态后按路由分岔——
+4. 前端在**调用点**编排切换后果（`useSettingsForm.performSwitch` 成功分支）：`resetSessionForOjSwitch()` 清空旧 OJ 的领域状态、`authStore.resetForOjSwitch()` 复位认证态，随后按路由分岔——
    - **普通路径**：导航登录页，路由守卫按新 OJ 的会话文件恢复会话；
    - **钥匙模式且当前路由仍是设置页**（`isKeyedSettingsRoute(currentRoute)`）：**留在设置页**，OJ 域字段按磁盘重载、baseline 重算，维护不被打断（踢回登录页等于重新锁死）。切换是异步的，期间用户可能已离开设置页——此时照常回登录页（豁免只属于设置页本身）。落盘失败（`OjSwitchPersistFailed`）视为已生效，同样走上述分岔并提示重启可能回退。
 
