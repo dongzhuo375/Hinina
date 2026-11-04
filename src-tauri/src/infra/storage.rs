@@ -20,6 +20,65 @@ fn is_atomic_tmp(target: &str, name: &str) -> bool {
     rest.len() > 1 && rest.starts_with('.') && rest[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
+/// 文件元数据快照（[`Storage::symlink_metadata`] 的返回值）。
+///
+/// 刻意不把 `std::fs::Metadata` 带进抽象签名：存储后端一旦需要替换（内存/远端），
+/// 调用方不应被迫感知本地文件系统。这里只暴露调用方真正需要的不可变快照值。
+///
+/// `modified` 为 `None` 表示平台未提供修改时间或读取失败 —— 调用方按需跳过，
+/// 与直接调用 `std::fs::Metadata::modified()` 的 `Err` 分支同义。
+#[derive(Debug, Clone, Copy)]
+pub struct FileStat {
+    len: u64,
+    is_file: bool,
+    is_dir: bool,
+    is_symlink: bool,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl FileStat {
+    fn from_std(meta: std::fs::Metadata) -> Self {
+        let file_type = meta.file_type();
+        Self {
+            len: meta.len(),
+            is_file: file_type.is_file(),
+            is_dir: file_type.is_dir(),
+            is_symlink: file_type.is_symlink(),
+            modified: meta.modified().ok(),
+        }
+    }
+
+    /// 字节数（目录为平台报告的元数据大小）。
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    /// 字节数是否为 0（与 [`Self::len`] 配对）。
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// 是否为普通文件（lstat 语义：符号链接恒为 false）。
+    pub fn is_file(&self) -> bool {
+        self.is_file
+    }
+
+    /// 是否为真实目录（lstat 语义：指向目录的链接恒为 false）。
+    pub fn is_dir(&self) -> bool {
+        self.is_dir
+    }
+
+    /// 条目本身是否为符号链接（不跟随目标）。
+    pub fn is_symlink(&self) -> bool {
+        self.is_symlink
+    }
+
+    /// 修改时间；平台未提供或读取失败时为 `None`。
+    pub fn modified(&self) -> Option<std::time::SystemTime> {
+        self.modified
+    }
+}
+
 /// 本地文件存储工具。
 ///
 /// 提供底层的文件读写能力，不包含业务语义。
@@ -203,10 +262,11 @@ impl Storage {
         }
     }
 
-    /// 读取文件元数据（大小、修改时间、是否文件等不可变快照值），**不跟随符号链接**。
+    /// 读取文件元数据（大小、类型、修改时间等不可变快照值），**不跟随符号链接**。
     ///
     /// 供 service 层做「stat 类」查询（如留档体积/过期预览）而无需绕过本抽象
-    /// 直用 `std::fs` 或感知 `base_dir` 布局。
+    /// 直用 `std::fs` 或感知 `base_dir` 布局；返回值是自有的 [`FileStat`]，
+    /// 不把 `std::fs::Metadata` 泄漏进抽象签名。
     ///
     /// 用 `fs::symlink_metadata`（lstat 语义）而不是 `fs::metadata`：[`Self::resolve`]
     /// 只做词法路径检查，不解析符号链接；跟随链接会让留档统计/清理穿过
@@ -215,9 +275,10 @@ impl Storage {
     ///
     /// # Errors
     /// 路径不安全或元数据读取失败时返回 `AppError::Io`。
-    pub fn symlink_metadata(&self, relative_path: &str) -> AppResult<std::fs::Metadata> {
+    pub fn symlink_metadata(&self, relative_path: &str) -> AppResult<FileStat> {
         let path = self.resolve(relative_path)?;
         fs::symlink_metadata(&path)
+            .map(FileStat::from_std)
             .map_err(|e| AppError::Io(format!("读取文件元数据失败 {}: {}", relative_path, e)))
     }
 

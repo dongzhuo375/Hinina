@@ -167,3 +167,38 @@ async fn local_data_usage_reports_seeded_footprint() {
 
     server.shutdown();
 }
+
+/// 日志体积统计经 `Storage` 抽象走 lstat：`logs/hinina.log` 若被换成指向
+/// 存储根之外的符号链接，预览不得跟随链接读到外部文件大小。
+/// （Unix-only：Windows 建符号链接需要开发者模式/管理员权限，CI 不具备。）
+#[cfg(unix)]
+#[tokio::test]
+async fn local_data_usage_does_not_follow_symlinked_log() {
+    use std::os::unix::fs::symlink;
+
+    let server = LoopbackServer::start(vec![]).await;
+    let (ctx, dir) = context_with_hoj(server.url()).await;
+    let external = crate::test_support::TempDir::unique("hinina-log-target");
+    std::fs::create_dir_all(external.path()).unwrap();
+    let target = external.join("outside.log");
+    std::fs::write(&target, vec![b'x'; 4096]).unwrap();
+
+    std::fs::create_dir_all(dir.join("logs")).unwrap();
+    let link = dir.join("logs/hinina.log");
+    // 上下文初始化可能已建过日志文件：链接创建前先移除，保证 EEXIST 不干扰。
+    let _ = std::fs::remove_file(&link);
+    symlink(&target, &link).unwrap();
+
+    let usage = local_data_usage_with(&ctx, &dir.join("hinina-panic.log"));
+
+    let link_len = std::fs::symlink_metadata(&link).unwrap().len();
+    assert_eq!(usage.log_bytes, link_len, "必须取链接自身的大小（lstat）");
+    assert!(usage.log_bytes < 4096, "不得跟随链接统计目标文件大小");
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().len(),
+        4096,
+        "外部目标不受影响"
+    );
+
+    server.shutdown();
+}

@@ -266,7 +266,7 @@ fn walk_snapshots(storage: &Storage) -> WalkResult {
             if !meta.is_file() {
                 continue;
             }
-            let Ok(modified) = meta.modified() else {
+            let Some(modified) = meta.modified() else {
                 continue;
             };
             result.files.push((relative, meta.len(), modified));

@@ -114,7 +114,15 @@ pub(crate) fn local_data_usage_with(
     crash_path: &std::path::Path,
 ) -> LocalDataUsage {
     let log_path = ctx.storage.base_dir().join(LOG_RELATIVE_PATH);
-    let log_bytes = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
+    // 日志在存储根内：经 Storage 抽象（lstat，不跟随链接）。`fs::metadata` 会
+    // 跟随 `logs/hinina.log` 的链接读到存储根之外；体积预览没有理由穿过链接。
+    let log_bytes = ctx
+        .storage
+        .symlink_metadata(LOG_RELATIVE_PATH)
+        .map(|stat| stat.len())
+        .unwrap_or(0);
+    // 崩溃记录在 `%TEMP%`（数据目录之外），没有对应的 Storage 相对路径，
+    // 直用 `std::fs` 是**合法例外**。
     let crash_bytes = std::fs::symlink_metadata(crash_path)
         .map(|m| m.len())
         .unwrap_or(0);
