@@ -1,13 +1,13 @@
 # storage
 
 ## 职责
-本地文件存储工具，提供底层的文件读写能力。不包含业务语义，业务层应通过 Repository trait 间接使用，不应直接依赖此模块。所有路径必须是 `base_dir` 下**非空**的相对路径：`resolve()` 只放行 `Normal` 组件，拒绝空串/`.`（会解析成 base 自身，`remove_all` 足以删掉数据根目录或整个 `workspaces/`）、`..`（穿越）与盘符/根目录等绝对形态（`PathBuf::join` 对带 prefix/root 的路径会整体替换 `base_dir`）。workspace 文件名的更严白名单在 `fs_workspace_repo::workspace_relative`，本函数是所有 Storage 调用的公共底线。
+本地文件存储工具，提供底层的文件读写能力。不包含业务语义，业务层应通过 Repository trait 间接使用，不应直接依赖此模块。所有路径必须是 `base_dir` 下**非空**的相对路径：`resolve()` 只放行 `Normal` 组件，拒绝空串/`.`（会解析成 base 自身，`remove_all` 足以删掉数据根目录或整个 `workspaces/`）、`..`（穿越）与盘符/根目录等绝对形态（`PathBuf::join` 对带 prefix/root 的路径会整体替换 `base_dir`）。`resolve()` 只做**词法**校验、不解析符号链接；需要防链接穿越的读取用 `symlink_metadata()`（lstat 语义）。workspace 文件名的更严白名单在 `fs_workspace_repo::workspace_relative`，本函数是所有 Storage 调用的公共底线。
 
 ## 核心类型/函数
 - **`Storage`** — 文件存储 struct，持有基础目录 `base_dir: PathBuf`
 - **`Storage::new(base_dir: PathBuf)`** — 构造函数，指定存储根目录
 - **`Storage::base_dir()`** — 返回基础目录的不可变引用
-- **`Storage::stat(relative_path) -> AppResult<std::fs::Metadata>`** — 读取文件元数据（大小/修改时间/is_file 等不可变快照值）；供 service 层做 stat 类查询而不必绕过抽象直用 `std::fs` 或感知 `base_dir` 布局（2026-11-04，F5）
+- **`Storage::symlink_metadata(relative_path) -> AppResult<std::fs::Metadata>`** — 读取文件元数据（大小/修改时间/is_file 等不可变快照值），**不跟随符号链接**（lstat 语义）；`resolve()` 只做词法路径校验，跟随链接会让调用方穿过 `base_dir` 内的链接看到/删除外部目标，故供留档统计/清理等需要路径约束的场景使用（2026-11-04，F5 + 符号链接加固）
 - **`Storage::read(relative_path) -> AppResult<Vec<u8>>`** — 读取二进制文件
 - **`Storage::read_to_string(relative_path) -> AppResult<String>`** — 读取 UTF-8 文件
 - **`Storage::write(relative_path, data) -> AppResult<()>`** — 写入二进制数据，自动创建父目录

@@ -74,7 +74,7 @@
   3. `active` 必须指向**已启用**的实例（禁用实例不会被注册，指向它等于死路）
 - **`AppConfig::sanitize(&mut self) -> bool`** — 就地钳制越界字段，取值域与前端 SettingsView 校验一致：`timeout_secs 1..=120`、`poll_interval_secs 1..=30`、`poll_timeout_secs 30..=3600`、`cache_ttl_secs 0..=600`、`font_size 8..=32`、`tab_size 1..=8`、`auto_save_interval_secs 5..=300`、`split_ratio 0.30..=0.70`（非有限值先回退默认 0.48 再钳制）；`oj.active`、`oj.contest_ref` 与各实例的 `id` / `base_url` trim；`default_language` 经私有 `sanitize_language_id` 净化 —— 旧 Monaco id 先走 `normalize_language_display_name` 映射为显示名，其余非空值（含 OJ 可能提供的 Go/Rust 等）原样保留，仅空串回退默认 `"C++"`；`editor_theme` 经私有 `sanitize_editor_theme` 收敛到 Monaco 内置 `vs` / `vs-dark`（其余值回退默认 `vs` —— 未知主题名会让 `setTheme` 静默无效）。返回是否修改了任何字段（调用方据此记 warn 日志），为此各配置 struct 追加了 `PartialEq` derive
 
-- **`AppConfig::preserve_locked_fields(&mut self, previous: &Self)`** / **`validate_preserving_locked(&self)`** / **`sanitize_editable(&mut self) -> bool`**（评审二十六 #2，`update_config` 的 `maintainer_locked` 路径）：锁定字段（OJ 选择、实例清单与地址、超时/轮询/缓存 TTL、题面缓存）整体取旧配置，只让选手层字段取新值；校验只保留「active 指向已启用实例」的结构性检查（手改非法锁定值不阻塞可编辑字段保存），净化只钳制比赛引用/编辑器/主题/布局——锁定值不 trim、不钳制、不改写。`oj.active` 在两条路径下都**只由 `switch_oj` 改写**（普通保存不得覆盖，评审二十九 #1）。
+- **`AppConfig::preserve_locked_fields(&mut self, previous: &Self)`** / **`validate_preserving_locked(&self)`** / **`sanitize_editable(&mut self) -> bool`**（评审二十六 #2，`update_config` 的锁定路径；执行真值由 `launch_args` 推导）：锁定字段（OJ 选择、实例清单与地址、超时/轮询/缓存 TTL、题面缓存）整体取旧配置，只让选手层字段取新值；校验只保留「active 指向已启用实例」的结构性检查（手改非法锁定值不阻塞可编辑字段保存），净化只钳制比赛引用/编辑器/主题/布局——锁定值不 trim、不钳制、不改写。`oj.active` 在两条路径下都**只由 `switch_oj` 改写**（普通保存不得覆盖，评审二十九 #1）。
 
 ## 直接依赖
 - `serde::{Deserialize, Serialize}`

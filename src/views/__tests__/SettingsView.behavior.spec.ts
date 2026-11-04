@@ -263,8 +263,8 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     expect(save?.disabled).toBe(false)
     save!.click()
     await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalled())
-    // 锁定语义由后端落实：前端必须把 maintainerLocked 透传
-    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.any(Function), { maintainerLocked: true })
+    // 锁定语义完全由后端落实：前端只提交完整配置，不携带「是否锁定」声明
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.any(Function))
     expect(currentConfig.oj.timeoutSecs).toBe(999) // 该 mock 不模拟钳制；真实语义由 Rust 测试锁定
     expect(currentConfig.editor.fontSize).toBe(18)
   })

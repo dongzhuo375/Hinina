@@ -203,16 +203,21 @@ impl Storage {
         }
     }
 
-    /// 读取文件元数据（大小、修改时间、是否文件等不可变快照值）。
+    /// 读取文件元数据（大小、修改时间、是否文件等不可变快照值），**不跟随符号链接**。
     ///
     /// 供 service 层做「stat 类」查询（如留档体积/过期预览）而无需绕过本抽象
     /// 直用 `std::fs` 或感知 `base_dir` 布局。
     ///
+    /// 用 `fs::symlink_metadata`（lstat 语义）而不是 `fs::metadata`：[`Self::resolve`]
+    /// 只做词法路径检查，不解析符号链接；跟随链接会让留档统计/清理穿过
+    /// `base_dir` 内的一条链接看到（乃至删除）存储根之外的目标。需要「跟随链接」
+    /// 语义的调用方应在自己的抽象层显式实现，不要复用本方法。
+    ///
     /// # Errors
     /// 路径不安全或元数据读取失败时返回 `AppError::Io`。
-    pub fn stat(&self, relative_path: &str) -> AppResult<std::fs::Metadata> {
+    pub fn symlink_metadata(&self, relative_path: &str) -> AppResult<std::fs::Metadata> {
         let path = self.resolve(relative_path)?;
-        fs::metadata(&path)
+        fs::symlink_metadata(&path)
             .map_err(|e| AppError::Io(format!("读取文件元数据失败 {}: {}", relative_path, e)))
     }
 

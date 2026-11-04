@@ -11,9 +11,6 @@ const { getConfig, updateConfig, reloadConfig, switchOj } = vi.hoisted(() => ({
 }))
 vi.mock('@/bridge/config.bridge', () => ({ getConfig, updateConfig, reloadConfig, switchOj }))
 
-const { isKeyed } = vi.hoisted(() => ({ isKeyed: vi.fn() }))
-vi.mock('@/services/system.service', () => ({ systemService: { isKeyed } }))
-
 import { ConfigService, configService } from '@/services/config.service'
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
@@ -44,8 +41,6 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // 默认普通启动（维护者层锁定 → maintainerLocked 推导为 true）
-  isKeyed.mockReturnValue(false)
   // 单例服务的进程内缓存必须逐用例清空，否则相互串扰
   configService.invalidate()
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -392,33 +387,17 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     expect(getConfig).toHaveBeenCalledTimes(2)
   })
 
-  it('未显式传参时按钥匙模式推导 maintainerLocked（普通启动=true）', async () => {
-    getConfig.mockResolvedValue(makeConfig())
-    updateConfig.mockResolvedValue(undefined)
-
-    // 设置页之外的保存入口（编辑器偏好 / 分栏比例）都不传第二参数
-    await configService.updateEditorPrefs({ fontSize: 18 })
-    expect(updateConfig).toHaveBeenCalledWith(expect.any(Object), true)
-
-    // 钥匙模式：维护者层可编辑，锁定语义关闭
-    isKeyed.mockReturnValue(true)
-    configService.invalidate()
-    getConfig.mockResolvedValue(makeConfig())
-    await configService.updateConfig((draft) => {
-      draft.layout.splitRatio = 0.5
-    })
-    expect(updateConfig).toHaveBeenLastCalledWith(expect.any(Object), false)
-  })
-
-  it('维护者层锁定把 maintainerLocked 透传给 bridge', async () => {
+  it('写回不携带锁定声明（锁定真值只在后端）', async () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockResolvedValue(undefined)
 
     await configService.updateConfig((draft) => {
       draft.editor.fontSize = 18
-    }, { maintainerLocked: true })
+    })
 
-    expect(updateConfig).toHaveBeenCalledWith(expect.any(Object), true)
+    // bridge 签名只有 config 一个入参：任何 IPC 载荷都不得再声明「是否锁定」
+    expect(updateConfig).toHaveBeenCalledWith(expect.any(Object))
+    expect(updateConfig.mock.calls[0]).toHaveLength(1)
   })
 
   it('写回失败同样失效缓存（避免缓存与磁盘漂移）并向上抛错', async () => {

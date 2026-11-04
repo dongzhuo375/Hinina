@@ -574,7 +574,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
           draft.editor.autoSaveIntervalSecs = autoSaveIntervalSecs
         }
         draft.layout.splitRatio = submitted.splitRatio
-      }, { maintainerLocked: lockAll })
+      })
       // 保存已把当前 active 落盘：若此前是「切换生效但持久化失败」，回退风险
       // 已由 ConfigService.updateConfig 解除；这里只清本控制器可见的警告
       //（即便控制器已卸载也不会影响服务级共享结果）。

@@ -29,7 +29,7 @@ import AboutSection from '@/components/settings/AboutSection.vue'
  * 分层锁：连接与缓存调优字段（OJ/地址/超时/轮询/TTL/数据目录）默认锁定，
  * 唯一提权来源是 `--settings` 启动参数（管理方钥匙）；选手日常字段（比赛
  * ID/引用、密码、编辑器、布局、重置与清理、关于）不受影响。护栏而非安全
- * 边界 —— IPC 更新路径由后端按 maintainer_locked 原样保留锁定字段；直接手改
+ * 边界 —— IPC 更新路径由后端按 `launch_args` 自持真值保留锁定字段；直接手改
  * config.json 不受该护栏限制。
  */
 
@@ -42,7 +42,7 @@ import AboutSection from '@/components/settings/AboutSection.vue'
 const locked = computed(() => !systemService.isKeyed())
 
 // locked 传入表单控制器：锁定字段不参与**前端**校验；保存载荷仍是完整 AppConfig，
-// 由后端按 maintainerLocked 用旧配置覆盖锁定字段
+// 由后端按 launch_args 真值用旧配置覆盖锁定字段
 const {
   form,
   dirty,

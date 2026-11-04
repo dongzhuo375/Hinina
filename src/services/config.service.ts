@@ -12,7 +12,6 @@ import {
   normalizeEditorTheme,
 } from '@/utils/editor'
 import { createLogger } from '@/utils/logger'
-import { systemService } from '@/services/system.service'
 
 /// 配置读取失败只影响局部展示/节奏，故一律 warn + 兜底值，不向上抛
 const log = createLogger('configService')
@@ -275,10 +274,7 @@ export class ConfigService {
    * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
    * 避免局部字段把其余配置冲掉。返回写入后的配置供调用方直接使用。
    */
-  async updateConfig(
-    mutate: (draft: AppConfig) => void,
-    options: { maintainerLocked?: boolean } = {},
-  ): Promise<AppConfig> {
+  async updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
     const current = await this.getConfig()
     const draft: AppConfig = structuredClone(current)
     mutate(draft)
@@ -286,11 +282,7 @@ export class ConfigService {
     // 旧后端/测试桩返回空时退回 draft
     let persisted: AppConfig = draft
     try {
-      // 默认值由「本次启动是否钥匙模式」推导：设置页之外的保存
-      // （解题页编辑器偏好、分栏比例）同样声明锁定意图。**对账字段**：后端
-      // 以 launch_args 自持真值执行锁定，此处推导不一致只会触发对账告警
-      const maintainerLocked = options.maintainerLocked ?? !systemService.isKeyed()
-      persisted = (await configBridge.updateConfig(draft, maintainerLocked)) ?? draft
+      persisted = (await configBridge.updateConfig(draft)) ?? draft
       // 用**实际落盘**的 active 判定：保存与切换在服务层
       // 可能交错，后端写锁内的 active 才是权威值；按旧快照判定会留下陈旧警告
       // 或返回过期 active。任意保存入口（含解题页偏好/分栏比例）都算解除。

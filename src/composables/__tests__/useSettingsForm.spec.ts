@@ -49,11 +49,8 @@ function resolvePersisted(active: string): void {
 vi.mock('@/services/config.service', () => ({
   configService: {
     getConfig: mocks.getConfig,
-    updateConfig: async (
-      mutate: (draft: AppConfig) => void,
-      options?: { maintainerLocked?: boolean },
-    ) => {
-      const saved = await mocks.updateConfig(mutate, options)
+    updateConfig: async (mutate: (draft: AppConfig) => void) => {
+      const saved = await mocks.updateConfig(mutate)
       resolvePersisted(saved.oj.active)
       return saved
     },

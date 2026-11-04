@@ -29,8 +29,11 @@ export async function destroyWindow(): Promise<void> {
  * 订阅关闭请求（close-guard 关窗握手的事件源）。
  *
  * 返回取消订阅的 promise（失败即「钩子没挂上」，调用方记日志）。
+ * **async 是契约的一部分**：`getCurrentWindow()` 可能同步抛错（非 Tauri 上下文），
+ * 只有 async 包装才能把它变成 rejected promise，让调用方的 `.catch` 接住；
+ * 裸返回 promise 的写法会让同步异常绕过 `.catch` 逃出组合根。
  */
-export function onCloseRequested(
+export async function onCloseRequested(
   handler: (event: { preventDefault(): void }) => void,
 ): Promise<() => void> {
   return getCurrentWindow().onCloseRequested(handler)

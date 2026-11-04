@@ -155,17 +155,22 @@ where
 
 /// 更新配置并持久化。
 ///
-/// 前端 invoke 签名: `update_config`({ config, maintainerLocked })
+/// 前端 invoke 签名: `update_config`({ config })
 ///
 /// **`oj.active` 无论哪种模式都只由 `switch_oj` 改写**：载荷里的 active 可能是
 /// 保存开始时的旧快照，与在途切换交错时会把新 active 覆盖回去，
 /// 这里一律以内存当前值为准。
 ///
+/// **锁定执行真值由后端自持**：`--settings` 由组合根在启动早期固化进
+/// `launch_args`（普通启动 false → 锁定字段走保留/放宽语义；钥匙启动 true →
+/// 维护者可写全部字段）。前端不传「是否锁定」——UI 层的锁定判断只影响可编辑性，
+/// 没有任何 IPC 输入能改变后端的执行路径。
+///
 /// 持久化前做后端兜底校验（config.json 可被手改，前端不是唯一防线），两条路径：
-/// - **普通模式**（`maintainer_locked=false`，钥匙视图）：先 `validate()` 拒绝
+/// - **钥匙视图**（`maintainer_locked=false`）：先 `validate()` 拒绝
 ///   不可钳制项（服务器地址非法），再 `sanitize()` 把越界字段钳制到与前端
 ///   SettingsView 一致的取值域。
-/// - **锁定模式**（`maintainer_locked=true`，普通启动）：先用旧配置覆盖锁定字段
+/// - **普通启动**（`maintainer_locked=true`）：先用旧配置覆盖锁定字段
 ///   （`preserve_locked_fields`），再 `validate_preserving_locked`（只查 active
 ///   指向已启用实例）与 `sanitize_editable`（只钳制可编辑层）——手改出的非法
 ///   锁定值既不阻塞可编辑字段保存，也不被改写。
@@ -179,36 +184,12 @@ where
 /// 主题域（`set_theme`/`get_theme`）已随死代码清理删除：前端只有编辑器主题，
 /// 经 `update_config` 落盘并由消费方本地应用；此处不做额外广播。
 #[tauri::command]
-pub async fn update_config(
-    ctx: State<'_, AppContext>,
-    config: AppConfig,
-    // 前端推导的锁定声明，仅作**对账**：真值由组合根从 launch_args 自持（见下），
-    // 前端缺陷或被绕过传 false 时的唯一线索就是这条对账告警
-    maintainer_locked: Option<bool>,
-) -> AppResult<AppConfig> {
+pub async fn update_config(ctx: State<'_, AppContext>, config: AppConfig) -> AppResult<AppConfig> {
     info!("Command: 更新配置");
-    // 分层锁的执行点必须在**持有真值的一侧**：`--settings` 由组合根在启动早期
-    // 固化进 launch_args（普通启动 false → 锁定字段走保留/放宽语义；钥匙启动
-    // true → 维护者可写全部字段）。前端声明与此真值不一致时告警对账。
-    let enforced = enforced_lock_from_flags(launch_args::get());
-    let claimed = maintainer_locked.unwrap_or(false);
-    if claimed != enforced {
-        warn!(
-            claimed,
-            enforced, "update_config 的前端锁定声明与 launch_args 真值不一致，以后者为准"
-        );
-    }
-    apply_config_update(&ctx, config, enforced)
-}
-
-/// 从启动标志推导锁定执行真值：`--settings`（维护者）可写全部字段 → 非锁定；
-/// 普通启动 → 锁定。
-///
-/// 抽成纯函数是因为映射方向本身就是契约（评审要求直接单测）：命令本体读
-/// `launch_args` 全局（进程级 OnceLock，测试不可 arm），但「true → 非锁定、
-/// false → 锁定」的推导可以零依赖钉死。
-pub(crate) fn enforced_lock_from_flags(flags: launch_args::LaunchFlags) -> bool {
-    !flags.settings
+    // 分层锁的执行点必须在**持有真值的一侧**：`--settings` 只由组合根固化，
+    // 前端不参与该判断（一次进程生命周期内不可变）。
+    let maintainer_locked = !launch_args::get().settings;
+    apply_config_update(&ctx, config, maintainer_locked)
 }
 
 /// `update_config` 的真实编排（提取供测试直接调用，`#[tauri::command]` 只做薄转发）。

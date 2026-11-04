@@ -285,7 +285,7 @@ Hinina/
             ├── problem_cmd.rs            # get_problem / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
             ├── workspace_cmd.rs          # load_workspace / save_workspace / update_workspace_file / set_workspace_language / delete_workspace_file
-            ├── config_cmd.rs             # get_config / reload_config（事务内预检通过后才提交内存/事件，并同步 Registry）/ update_config（锁定语义由后端自持：enforced = !launch_args.settings，前端传参仅为对账；锁内固定 active 后对最终候选校验；落盘后**显式**同步 auto-save 启停与间隔）/ get_storage_info（存储目录/日志路径/版本，设置页「关于」）
+            ├── config_cmd.rs             # get_config / reload_config（事务内预检通过后才提交内存/事件，并同步 Registry）/ update_config（锁定语义由后端自持：maintainer_locked = !launch_args.settings；锁内固定 active 后对最终候选校验；落盘后**显式**同步 auto-save 启停与间隔）/ get_storage_info（存储目录/日志路径/版本，设置页「关于」）
             ├── log_cmd.rs                # frontend_log（**薄转发** → infra/frontend_log：panic 钩子的前端半边）
             ├── maintenance_cmd.rs          # reset_client（设置页「重置客户端」：三层缓存 + 公告基线 + 公告已读状态，不重拉）/ local_data_usage（清理前体积预览，含临时目录崩溃记录）/ purge_local_data（不可逆：日志内容与崩溃记录文件 + 过期提交留档）
             ├── data_dir_cmd.rs           # get_data_dir / set_data_dir / reset_data_dir / pick_data_dir（设置页「数据目录」；改动重启后生效，只写位置指针不搬运）

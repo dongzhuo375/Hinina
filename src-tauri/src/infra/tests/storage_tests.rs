@@ -177,19 +177,37 @@ fn write_string_atomic_cleans_stale_temps_of_same_target() {
     );
 }
 
-/// stat：存在文件返回元数据，缺失/穿越路径报 Io 错误。
+/// symlink_metadata：存在文件返回元数据，缺失/穿越路径报 Io 错误。
 #[test]
-fn stat_reads_metadata_and_rejects_invalid_paths() {
-    let dir = TempDir::named("hinina-storage-stat");
+fn symlink_metadata_reads_regular_files_and_rejects_invalid_paths() {
+    let dir = TempDir::named("hinina-storage-lstat");
     let s = Storage::new(dir.to_path_buf());
     s.write_string("sessions/HOJ.json", "{\"token\":\"t\"}")
         .unwrap();
 
-    let meta = s.stat("sessions/HOJ.json").unwrap();
+    let meta = s.symlink_metadata("sessions/HOJ.json").unwrap();
     assert!(meta.is_file());
     assert_eq!(meta.len(), 13);
     assert!(meta.modified().is_ok());
 
-    assert!(s.stat("sessions/missing.json").is_err());
-    assert!(s.stat("../evil").is_err());
+    assert!(s.symlink_metadata("sessions/missing.json").is_err());
+    assert!(s.symlink_metadata("../evil").is_err());
+}
+
+/// lstat 语义：链接本身是「符号链接」而非文件，绝不返回目标文件的元数据。
+/// （Unix-only：Windows 建符号链接需要开发者模式/管理员权限，CI 不具备。）
+#[cfg(unix)]
+#[test]
+fn symlink_metadata_does_not_follow_symlink_targets() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::named("hinina-storage-lstat-link");
+    let external = TempDir::named("hinina-storage-lstat-target");
+    let s = Storage::new(dir.to_path_buf());
+    std::fs::write(external.join("outside.json"), "outside").unwrap();
+    symlink(external.join("outside.json"), dir.join("link.json")).unwrap();
+
+    let meta = s.symlink_metadata("link.json").unwrap();
+    assert!(meta.file_type().is_symlink(), "必须报告链接本身");
+    assert!(!meta.is_file(), "不得把链接目标当成文件");
 }

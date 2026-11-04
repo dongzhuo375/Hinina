@@ -25,7 +25,7 @@
 - `REQUIRED_ARGS`（逐个命令按 Rust 非 Option 参数取证，含 `switch_oj.ojId`）+ `ARG_TYPES`（Vec → array，AppConfig → object）+ `OPTIONAL_ARG_TYPES`（currentPage/limit/status → number，removeStar/containsEnd → boolean，keyword/problemDisplayId → string，null 视为未提供）：`assertRequiredArgs` 在命令体**之前**执行（对齐 Tauri 反序列化时机），缺参与类型错都以 Tauri 形态裸字符串拒绝。
 - `requireLoadedProblemId()`：工作区变更类命令必须先 `load_workspace`，否则拒绝——不建幻影工作区。
 - **调用记录脱敏**：统一经 `recordCall` 记录，`password` 参数替换为 `***` 后才进入内存（失败时由 fixtures.ts 附带为 artifact）；头注释已同步说明。
-- **契约约束**：`switch_oj` 实例校验（未注册/未启用 → `{ProviderNotFound}`）并更新 `oj.active`；`update_config` 复刻 `maintainerLocked` 必填、锁定字段合并与 active 守卫（2026-11-04 G1 后与生产同语义：**锁定真值 = `!launchFlags.settings`**，与 `launch_flags` 分支同一来源；前端传入的 maintainerLocked 仅对账，不一致时 console.warn），并**返回实际提交的完整 AppConfig**（与真实命令一致，避免 ConfigService 走旧二进制回退）；`load_configured_contest` 校验 `oj.contestRef`；`submit_code` 要求已登录（匿名 → `{Auth}`）。**登录态在命令发起时校验、先于 `delayNext` 的延迟**：延迟模拟的是「请求已带凭证发出、服务端稍后处理完」，否则「旧会话迟到成功」的时序永远构造不出来，跨会话回写守卫的 E2E 会被假阴性掩盖（评审五轮）。
+- **契约约束**：`switch_oj` 实例校验（未注册/未启用 → `{ProviderNotFound}`）并更新 `oj.active`；`update_config` 复刻锁定字段合并与 active 守卫（2026-11-04 G1 后与生产同语义：**锁定真值 = `!launchFlags.settings`**，与 `launch_flags` 分支同一来源；IPC 载荷不携带锁定声明），并**返回实际提交的完整 AppConfig**（与真实命令一致，避免 ConfigService 走旧二进制回退）；`load_configured_contest` 校验 `oj.contestRef`；`submit_code` 要求已登录（匿名 → `{Auth}`）。**登录态在命令发起时校验、先于 `delayNext` 的延迟**：延迟模拟的是「请求已带凭证发出、服务端稍后处理完」，否则「旧会话迟到成功」的时序永远构造不出来，跨会话回写守卫的 E2E 会被假阴性掩盖（评审五轮）。
 - `dispatch`：`plugin:event|listen/unlisten`（回调 id 注册表）与 `plugin:window|*`（no-op）单独分派，其余走命令表；`transformCallback`/`unregisterCallback` 支撑事件订阅。
 - 错误双形态：业务错误 `throw { [variant]: message }`；参数错误 `throw \`invalid args ...\``（裸字符串）。
 

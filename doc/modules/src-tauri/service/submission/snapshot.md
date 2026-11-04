@@ -22,12 +22,12 @@
 | `SnapshotUsage` | struct（`Default` / `PartialEq`） | 占用统计：`total_count` / `total_bytes` / `stale_count` / `stale_bytes` |
 | `inspect_snapshots` | `(storage, keep_days) => SnapshotUsage` | 统计留档占用（含过期部分），供清理前的**预览** |
 | `purge_stale_snapshots` | `(storage, keep_days) => (usize, u64)` | 删除过期留档，返回（删除条数, 释放字节数），并回收删空的 OJ 子目录 |
-| `stale_cutoff` / `walk_snapshots` | 私有 | 过期判据的截止时刻 / 遍历两层目录收集（路径, 字节数, mtime） |
+| `stale_cutoff` / `walk_snapshots` | 私有 | 过期判据的截止时刻 / 遍历两层目录收集（路径, 字节数, mtime；**跳过符号链接**，见设计要点） |
 
 ## 直接依赖
 
 - `core::error::{AppError, AppResult}`
-- `infra::storage::Storage`（`read_to_string` / `write_string` / `list` / `remove` / `base_dir`）
+- `infra::storage::Storage`（`read_to_string` / `write_string` / `list` / `remove` / `symlink_metadata`）
 - `tracing`（`warn` / `debug` / `info`）
 
 ## 被依赖
@@ -54,7 +54,7 @@ get_submission_detail
 清理本地数据（commands::maintenance_cmd）
   inspect_snapshots(keep_days=30)  → 总条数/字节 + 过期条数/字节（只读，供预览）
   purge_stale_snapshots(keep_days=30)
-       walk_snapshots 收集 → mtime < now-30d 的逐条 storage.remove
+       walk_snapshots 收集（`submissions/`、OJ 子目录、文件三层都要求真实条目；链接跳过） → mtime < now-30d 的逐条 storage.remove
        删除后扫 submissions/ 直接子项，remove 成功的（= 已空）即为回收的空目录
 ```
 

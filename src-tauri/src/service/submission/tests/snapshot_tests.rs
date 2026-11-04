@@ -226,3 +226,48 @@ fn inspect_and_purge_are_safe_without_any_snapshot() {
     );
     assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
 }
+
+/// 符号链接不得被统计/清理：链接文件与链接 OJ 目录都跳过，外部目标原样保留。
+/// （Unix-only：Windows 建符号链接需要开发者模式/管理员权限，CI 不具备。）
+#[cfg(unix)]
+#[test]
+fn walk_and_purge_ignore_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let (storage, dir) = temp_storage("symlink-walk");
+    write_snapshot(&storage, "HOJ", "1", "C++", "int main(){}");
+    let outside = TempDir::unique("hinina-snapshot-outside");
+    let outside_file = outside.join("secret.cpp");
+    std::fs::write(&outside_file, "outside").unwrap();
+    age_file(&outside_file, 60); // 即便「过期」，也不得被计入/删除
+    symlink(&outside_file, dir.join("submissions/HOJ/link.cpp")).unwrap();
+    symlink(outside.path(), dir.join("submissions/Hydro")).unwrap();
+
+    let usage = inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS);
+    assert_eq!(usage.total_count, 1, "只统计真实留档");
+    assert_eq!(usage.stale_count, 0, "链接目标再旧也不得计入");
+
+    assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
+    assert!(outside_file.exists(), "外部目标不得被删除");
+}
+
+/// `submissions` 本身就是链接时，整棵树跳过（连列目录都不做）。
+#[cfg(unix)]
+#[test]
+fn walk_ignores_symlinked_snapshot_root() {
+    use std::os::unix::fs::symlink;
+
+    let (storage, dir) = temp_storage("symlink-root");
+    let outside = TempDir::unique("hinina-snapshot-root-outside");
+    std::fs::create_dir_all(outside.join("HOJ")).unwrap();
+    let outside_file = outside.join("HOJ/1.cpp");
+    std::fs::write(&outside_file, "outside").unwrap();
+    symlink(outside.path(), dir.join("submissions")).unwrap();
+
+    assert_eq!(
+        inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS),
+        SnapshotUsage::default()
+    );
+    assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
+    assert!(outside_file.exists(), "外部目标不得被删除");
+}

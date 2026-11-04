@@ -229,18 +229,36 @@ pub struct SnapshotUsage {
 ///
 /// 目录结构固定两层（`submissions/{oj_id}/{submit_id}.{ext}`），故不引入递归。
 /// 读不到元数据的条目直接跳过：留档是便利特性，统计失败不该让清理流程报错。
+///
+/// **不跟随符号链接**：`Storage::resolve` 只做词法校验；若 `submissions/`、
+/// `{oj_id}/` 或留档文件本身是指向外部的链接，跟随会把外部文件计入统计，
+/// 清理阶段还会穿过目录链接删到存储根之外。三个层级一律用 `symlink_metadata`
+/// 并要求真实目录/文件，链接条目直接跳过。
 fn walk_snapshots(storage: &Storage) -> Vec<(String, u64, std::time::SystemTime)> {
     let mut found = Vec::new();
+    let Ok(root) = storage.symlink_metadata(SNAPSHOT_DIR) else {
+        return found;
+    };
+    if !root.is_dir() {
+        return found;
+    }
     let Ok(oj_dirs) = storage.list(SNAPSHOT_DIR) else {
         return found;
     };
     for oj_dir in oj_dirs {
-        let Ok(files) = storage.list(&oj_dir.to_string_lossy().replace('\\', "/")) else {
+        let relative_dir = oj_dir.to_string_lossy().replace('\\', "/");
+        let Ok(meta) = storage.symlink_metadata(&relative_dir) else {
+            continue;
+        };
+        if !meta.is_dir() {
+            continue;
+        }
+        let Ok(files) = storage.list(&relative_dir) else {
             continue;
         };
         for file in files {
             let relative = file.to_string_lossy().replace('\\', "/");
-            let Ok(meta) = storage.stat(&relative) else {
+            let Ok(meta) = storage.symlink_metadata(&relative) else {
                 continue;
             };
             if !meta.is_file() {
