@@ -190,7 +190,7 @@ pub async fn update_config(
     // 分层锁的执行点必须在**持有真值的一侧**：`--settings` 由组合根在启动早期
     // 固化进 launch_args（普通启动 false → 锁定字段走保留/放宽语义；钥匙启动
     // true → 维护者可写全部字段）。前端声明与此真值不一致时告警对账。
-    let enforced = !launch_args::get().settings;
+    let enforced = enforced_lock_from_flags(launch_args::get());
     let claimed = maintainer_locked.unwrap_or(false);
     if claimed != enforced {
         warn!(
@@ -199,6 +199,16 @@ pub async fn update_config(
         );
     }
     apply_config_update(&ctx, config, enforced)
+}
+
+/// 从启动标志推导锁定执行真值：`--settings`（维护者）可写全部字段 → 非锁定；
+/// 普通启动 → 锁定。
+///
+/// 抽成纯函数是因为映射方向本身就是契约（评审要求直接单测）：命令本体读
+/// `launch_args` 全局（进程级 OnceLock，测试不可 arm），但「true → 非锁定、
+/// false → 锁定」的推导可以零依赖钉死。
+pub(crate) fn enforced_lock_from_flags(flags: launch_args::LaunchFlags) -> bool {
+    !flags.settings
 }
 
 /// `update_config` 的真实编排（提取供测试直接调用，`#[tauri::command]` 只做薄转发）。

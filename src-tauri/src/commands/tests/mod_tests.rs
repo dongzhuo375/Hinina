@@ -864,3 +864,19 @@ async fn workspace_load_sync_is_serialised_with_config_save() {
     );
     assert!(ctx.config.get().editor.auto_save);
 }
+
+/// G1 映射方向直接单测：锁定执行真值由启动标志推导，与前端声明无关。
+/// `--settings`（维护者）→ 非锁定；普通启动 → 锁定（评审要求「!settings 映射
+/// 缺直接单测」——8 个锁定语义测试都注入 bool，推导方向本身此前无人钉）。
+#[test]
+fn enforced_lock_is_derived_from_launch_flags_not_the_frontend_claim() {
+    use crate::infra::launch_args::LaunchFlags;
+    assert!(
+        crate::commands::config_cmd::enforced_lock_from_flags(LaunchFlags { settings: false }),
+        "普通启动必须锁定"
+    );
+    assert!(
+        !crate::commands::config_cmd::enforced_lock_from_flags(LaunchFlags { settings: true }),
+        "钥匙启动必须解锁"
+    );
+}
