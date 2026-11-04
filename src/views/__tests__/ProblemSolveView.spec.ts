@@ -84,7 +84,9 @@ vi.mock('@/stores/submissionStore', () => ({
 vi.mock('@/services/config.service', () => ({
   configService: {
     getSplitRatio: vi.fn(async () => 0.48),
-    updateConfig: vi.fn(async () => {}),
+    // 视图的落盘入口是语义化包装 saveSplitRatio（不是 updateConfig）——
+    // mock 漏了它，首个覆盖 persistSplitRatio 的用例会报 not a function
+    saveSplitRatio: vi.fn(async () => {}),
   },
 }))
 
