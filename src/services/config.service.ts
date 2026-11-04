@@ -1,6 +1,5 @@
 import type { AppConfig } from '@/types/config'
 import * as configBridge from '@/bridge/config.bridge'
-import { isKeyedProcess } from '@/guards/keyed-settings-policy'
 import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
 import {
   DEFAULT_EDITOR_FONT_SIZE,
@@ -275,10 +274,7 @@ export class ConfigService {
    * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
    * 避免局部字段把其余配置冲掉。返回写入后的配置供调用方直接使用。
    */
-  async updateConfig(
-    mutate: (draft: AppConfig) => void,
-    options: { maintainerLocked?: boolean } = {},
-  ): Promise<AppConfig> {
+  async updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
     const current = await this.getConfig()
     const draft: AppConfig = structuredClone(current)
     mutate(draft)
@@ -286,11 +282,7 @@ export class ConfigService {
     // 旧后端/测试桩返回空时退回 draft
     let persisted: AppConfig = draft
     try {
-      // 默认值由「本次启动是否钥匙模式」推导：设置页之外的保存
-      // （解题页编辑器偏好、分栏比例）同样必须让后端保住锁定字段——`false`
-      // 会让普通启动被当成「可写锁定层」，手改的非法值被校验/钳制
-      const maintainerLocked = options.maintainerLocked ?? !isKeyedProcess()
-      persisted = (await configBridge.updateConfig(draft, maintainerLocked)) ?? draft
+      persisted = (await configBridge.updateConfig(draft)) ?? draft
       // 用**实际落盘**的 active 判定：保存与切换在服务层
       // 可能交错，后端写锁内的 active 才是权威值；按旧快照判定会留下陈旧警告
       // 或返回过期 active。任意保存入口（含解题页偏好/分栏比例）都算解除。

@@ -5,20 +5,23 @@
  * 窗口 `decorations: false`，这些按钮是唯一的 UI 出口（Alt+F4/任务栏是系统
  * 兜底）。注意父容器要保留 `data-tauri-drag-region`：按钮点击不应触发拖动。
  */
-import { systemService } from '@/services/system.service'
+import { useSystemStore } from '@/stores/systemStore'
 
-// 分层：View 只经 Service，不直接 import bridge（评审二十一 #6；窗口 API 本身
-// 由 bridge/window.bridge 封装，bridge 仍是唯一接触 @tauri-apps/api 的地方）
+// 分层：View → Store → Service → Bridge（2026-11-04 统一为严格口径）——
+// 视图只调 store，窗口 API 由 bridge/window.bridge 封装（唯一接触
+// @tauri-apps/api 的地方）
+const systemStore = useSystemStore()
+
 function minimize(): void {
-  void systemService.minimizeWindow()
+  void systemStore.minimizeWindow()
 }
 
 function toggleMaximize(): void {
-  void systemService.toggleMaximizeWindow()
+  void systemStore.toggleMaximizeWindow()
 }
 
 function closeAppWindow(): void {
-  void systemService.closeWindow()
+  void systemStore.closeWindow()
 }
 </script>
 

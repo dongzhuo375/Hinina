@@ -1,6 +1,5 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import router from "@/router";
 import App from "@/App.vue";
 import { installSessionGuard } from "@/guards/sessionGuard";
@@ -13,6 +12,7 @@ import {
 import { useAnnouncementStore } from "@/stores/announcementStore";
 import { onAnnouncementsPublished } from "@/bridge/announcement.bridge";
 import { createCloseGuard } from "@/utils/close-guard";
+import { systemService } from "@/services/system.service";
 import { createLogger } from "@/utils/logger";
 import "@/styles/global.css";
 import "@/styles/contest.css";
@@ -28,7 +28,7 @@ app.use(createPinia());
 app.use(router);
 // 组合根装配：全局错误转发（Vue / window / promise / router 四类全局错误 → Rust
 // 日志）。**必须先于 mount 与其余装配**：首屏渲染、早期 IPC 的错误也要被捕获；
-// 转发失败只 console 告警 —— 报错的通道不允许自己成为新的错误源。
+// 转发失败经 log.warn 告警 —— 报错的通道不允许自己成为新的错误源。
 installGlobalErrorGuard(app, router, (level, scope, message) => {
   void forwardFrontendLog(level, scope, message).catch((e) => {
     log.warn('错误转发失败:', e)
@@ -84,7 +84,6 @@ function installAnnouncementListener(): void {
  * 此处只负责把真实窗口操作注入进去。
  */
 function installCloseFlushGuard(): void {
-  const appWindow = getCurrentWindow();
   const guard = createCloseGuard({
     flush: () => useWorkspaceStore().saveWorkspace(),
     // PR21-7：每轮落盘完成后复查在途改动 —— 关窗握手窗口内到达的落键也纳入落盘。
@@ -94,13 +93,13 @@ function installCloseFlushGuard(): void {
       const store = useWorkspaceStore();
       return store.syncPending || store.isDirty;
     },
-    close: () => appWindow.close(),
+    close: () => systemService.closeWindow(),
     // 收尾用 destroy：落盘已完成，不需要再走一遍 close-requested 往返
     //（那个往返正是原实现「窗口关不掉」的失效点）
-    destroy: () => appWindow.destroy(),
+    destroy: () => systemService.destroyWindow(),
   });
 
-  void appWindow
+  void systemService
     .onCloseRequested((event) => {
       if (guard.handleRequest()) event.preventDefault();
     })

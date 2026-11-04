@@ -49,8 +49,6 @@ vi.mock('@/services/system.service', () => ({
     resetClient: mocks.resetClient,
     purgeLocalData: mocks.purgeLocalData,
     launchFlags: mocks.launchFlags,
-    isKeyedSettings: (name?: string | symbol | null) =>
-      mocks.launchFlags.value.settings && name === 'Settings',
     isKeyed: () => mocks.launchFlags.value.settings,
   },
 }))
@@ -263,8 +261,8 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     expect(save?.disabled).toBe(false)
     save!.click()
     await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalled())
-    // 锁定语义由后端落实：前端必须把 maintainerLocked 透传
-    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.any(Function), { maintainerLocked: true })
+    // 锁定语义完全由后端落实：前端只提交完整配置，不携带「是否锁定」声明
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.any(Function))
     expect(currentConfig.oj.timeoutSecs).toBe(999) // 该 mock 不模拟钳制；真实语义由 Rust 测试锁定
     expect(currentConfig.editor.fontSize).toBe(18)
   })
@@ -382,9 +380,8 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
     setCheckbox(view.host, '把现有数据迁移到新目录', false)
     button(view.host, '确认更改').click()
     await vi.waitFor(() => expect(mocks.setDataDir).toHaveBeenCalledWith('D:\\new-data', false))
-    await settleView(2)
-
-    expect(view.host.textContent).toContain('未迁移现有数据')
+    // 经 systemStore 转发比直连 service 多一跳微任务：等业务标记而不是数 tick
+    await vi.waitFor(() => expect(view.host.textContent).toContain('未迁移现有数据'))
     expect(mocks.getDataDir).toHaveBeenCalledTimes(2)
   })
 

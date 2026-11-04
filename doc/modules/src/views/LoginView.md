@@ -2,7 +2,7 @@
 
 > 源文件：`src/views/LoginView.vue`
 
-**`--settings` 管理方钥匙**：钥匙模式下页脚出现「返回设置」入口（`isKeyedProcess()`，`guards/keyed-settings-policy` 统一判据）。没有它，从设置页点「返回登录」就是单向门——无边框窗口没有地址栏、`firstNavigation` 已消费，维护者只能重启带参（评审十五 A）。
+**`--settings` 管理方钥匙**：钥匙模式下页脚出现「返回设置」入口（`systemService.isKeyed()`，`services/system.service` 统一判据）。没有它，从设置页点「返回登录」就是单向门——无边框窗口没有地址栏、`firstNavigation` 已消费，维护者只能重启带参（评审十五 A）。
 
 ## 职责
 
@@ -41,7 +41,7 @@
 - `vue` / `vue-router`
 - 组件：`@/components/login/EventTitle.vue` / `Countdown.vue` / `LoginForm.vue`
 - stores：`@/stores/authStore` / `@/stores/contestStore`
-- `@/guards/keyed-settings-policy`（`isKeyedProcess` —— 钥匙模式的「返回设置」入口）
+- `@/services/system.service`（`systemService.isKeyed()` —— 钥匙模式的「返回设置」入口）
 - `@/utils/markdown`（`renderMarkdown`）、`@/utils/contest`（`getAuthoritativeSchedule` / `getContestPhase`）、`@/utils/brief-retry`（`briefRetryDelayMs`）、`@/utils/session-check`（`planNextPrecheck` / `planRetryDelayMs` + `PrecheckReason` 类型）
 - `@/composables/useNowMs`（毫秒墙钟，派生秒）
 

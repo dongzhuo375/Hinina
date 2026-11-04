@@ -60,24 +60,24 @@ import { computed } from 'vue'
 import PluginNotifications from '@/components/PluginNotifications.vue'
 import { useRoute } from 'vue-router'
 import { NConfigProvider } from 'naive-ui'
+import { useSystemStore } from '@/stores/systemStore'
 import type { GlobalThemeOverrides } from 'naive-ui'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 
 const route = useRoute()
-const appWindow = getCurrentWindow()
+const systemStore = useSystemStore()
 
 /// 比赛外壳（ContestLayout，name: 'Contest'）的 TopBar 已含窗口控制，
 /// 外壳之外的路由（当前只有登录页）由 App 渲染精简窗口条，避免窗口无法关闭/最小化
 const showGlobalTitleBar = computed(() => !route.matched.some((r) => r.name === 'Contest'))
 
 function minimize() {
-  appWindow.minimize()
+  void systemStore.minimizeWindow()
 }
 function toggleMaximize() {
-  appWindow.toggleMaximize()
+  void systemStore.toggleMaximizeWindow()
 }
 function close() {
-  appWindow.close()
+  void systemStore.closeWindow()
 }
 
 /// Naive UI 主题覆盖（CSS 变量驱动的暗色适配）

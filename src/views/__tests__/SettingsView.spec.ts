@@ -40,7 +40,6 @@ vi.mock('@/services/system.service', () => ({
     getDataDir: mocks.getDataDir,
     // 正常模式（无 --settings）：维护者层保持锁定
     launchFlags: { value: { settings: false } },
-    isKeyedSettings: () => false,
     isKeyed: () => false,
   },
 }))

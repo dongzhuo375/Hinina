@@ -203,6 +203,24 @@ impl Storage {
         }
     }
 
+    /// 读取文件元数据（大小、修改时间、是否文件等不可变快照值），**不跟随符号链接**。
+    ///
+    /// 供 service 层做「stat 类」查询（如留档体积/过期预览）而无需绕过本抽象
+    /// 直用 `std::fs` 或感知 `base_dir` 布局。
+    ///
+    /// 用 `fs::symlink_metadata`（lstat 语义）而不是 `fs::metadata`：[`Self::resolve`]
+    /// 只做词法路径检查，不解析符号链接；跟随链接会让留档统计/清理穿过
+    /// `base_dir` 内的一条链接看到（乃至删除）存储根之外的目标。需要「跟随链接」
+    /// 语义的调用方应在自己的抽象层显式实现，不要复用本方法。
+    ///
+    /// # Errors
+    /// 路径不安全或元数据读取失败时返回 `AppError::Io`。
+    pub fn symlink_metadata(&self, relative_path: &str) -> AppResult<std::fs::Metadata> {
+        let path = self.resolve(relative_path)?;
+        fs::symlink_metadata(&path)
+            .map_err(|e| AppError::Io(format!("读取文件元数据失败 {}: {}", relative_path, e)))
+    }
+
     /// 检查文件或目录是否存在。
     pub fn exists(&self, relative_path: &str) -> bool {
         self.resolve(relative_path)
@@ -233,6 +251,39 @@ impl Storage {
             fs::remove_file(&path)
                 .map_err(|e| AppError::Io(format!("删除文件失败 {}: {}", relative_path, e)))
         }
+    }
+
+    /// 删除**文件**（文件专用、不跟随链接）。
+    ///
+    /// 与 [`Self::remove`] 的分工：后者用 `path.is_dir()`（跟随链接）分流，对
+    /// 「本应是文件、但此刻被替换成目录」的条目会走 `remove_dir`；本方法只做
+    /// `fs::remove_file`——目录条目必然失败、永不被删；Unix 上对符号链接删除
+    /// 的是**链接本身**（`unlink` 不跟随，目标不受影响），Windows 上对目录链接
+    /// 同样失败。供「只删文件」类清理使用，调用方仍应先 `symlink_metadata`。
+    ///
+    /// # Errors
+    /// 路径不安全、条目不是常规文件或删除失败时返回 `AppError::Io`。
+    pub fn remove_file(&self, relative_path: &str) -> AppResult<()> {
+        let path = self.resolve(relative_path)?;
+        fs::remove_file(&path)
+            .map_err(|e| AppError::Io(format!("删除文件失败 {}: {}", relative_path, e)))
+    }
+
+    /// 删除**空目录**（非递归、目录专用、不跟随链接）。
+    ///
+    /// 与 [`Self::remove`] 的分工：后者用 `path.is_dir()`（跟随链接）分流，对
+    /// 「本应是目录、但此刻被替换成文件」的条目会删文件、对目录链接在 Windows
+    /// 上会删链接本身。本方法只做 `fs::remove_dir`：非目录条目返回错误（文件
+    /// 永不被删），非空目录返回错误，符号链接/junction 在 Unix 上 `rmdir`
+    /// 返回 ENOTDIR、在 Windows 上删除**链接条目本身**（外部目标不受影响）——
+    /// 供「只回收空目录」类清理使用，调用方仍应先 `symlink_metadata` 跳过链接。
+    ///
+    /// # Errors
+    /// 路径不安全、条目不是目录或目录非空时返回 `AppError::Io`。
+    pub fn remove_empty_dir(&self, relative_path: &str) -> AppResult<()> {
+        let path = self.resolve(relative_path)?;
+        fs::remove_dir(&path)
+            .map_err(|e| AppError::Io(format!("删除空目录失败 {}: {}", relative_path, e)))
     }
 
     /// 删除文件或目录（递归删除非空目录）。

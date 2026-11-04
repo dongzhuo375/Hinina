@@ -14,7 +14,7 @@
 | `EditorPrefs` | `{ fontSize: number; tabSize: number; editorTheme: string }` | 编辑器偏好（字号 / Tab 宽度 / Monaco 主题） |
 | `ConfigService.getConfig` | `() => Promise<AppConfig>` | 读取配置（进程内缓存，并发共享同一次 IPC） |
 | `ConfigService.invalidate` | `() => void` | 使缓存失效（设置页保存后 / 需要磁盘真值时） |
-| `ConfigService.updateConfig` | `(mutate: (draft: AppConfig) => void, options?: { maintainerLocked?: boolean }) => Promise<AppConfig>` | **设置页保存唯一入口**：读当前配置 → structuredClone 副本上应用变更 → 整体写回后端（`update_config` 是整体替换语义）→ **返回后端实际提交的配置**（active 取后端写锁内值）→ 失效缓存；写回失败同样失效缓存（避免缓存与磁盘漂移）并抛出；第二个参数 `{ maintainerLocked }` 透传给 `update_config`（锁定模式的「锁定字段不动」语义由后端落实，评审二十六 #2）。**缺省值由 `guards/keyed-settings-policy` 的 `isKeyedProcess()` 推导**（普通启动 = 锁定）——设置页之外的保存入口（`updateEditorPrefs`、解题页分栏比例）不传该参数，也能让后端保住锁定字段（评审二十七）。**成功写回后按后端实际提交的 active 判定**：若与最近一次 `persist-failed` 切换目标相同，会解除该共享结果（评审三十六：任意保存入口都算回退风险解除；保存与切换交错时不会按旧快照误判） |
+| `ConfigService.updateConfig` | `(mutate: (draft: AppConfig) => void) => Promise<AppConfig>` | **设置页保存唯一入口**：读当前配置 → structuredClone 副本上应用变更 → 整体写回后端（`update_config` 是整体替换语义）→ **返回后端实际提交的配置**（active 取后端写锁内值）→ 失效缓存；写回失败同样失效缓存（避免缓存与磁盘漂移）并抛出；「锁定字段不动」由后端按 `launch_args` 自持真值执行，IPC 载荷不携带锁定声明（评审二十六 #2 与 2026-11-04 G1）——设置页之外的保存入口（`updateEditorPrefs`、解题页分栏比例）同样由后端保住锁定字段（评审二十七）。**成功写回后按后端实际提交的 active 判定**：若与最近一次 `persist-failed` 切换目标相同，会解除该共享结果（评审三十六：任意保存入口都算回退风险解除；保存与切换交错时不会按旧快照误判） |
 | `ConfigService.getOjBaseUrl` | `() => Promise<string>` | OJ 基址，用于题面/简介/公告相对图片 URL 改写；取当前 OJ 实例（`oj.active` 匹配）的 `baseUrl`（经 `activeOjBaseUrl`）；失败返回空串 |
 | `ConfigService.activeOjBaseUrl` | `(config: AppConfig) => string` | 同步帮手：解析配置中当前 OJ 实例的服务端地址，供已持有配置的调用方复用。`active` 未命中启用实例列表时回退第一个启用实例（正常配置经 Rust 归一不会未命中，此回退仅兜底 IPC 写读竞态）；无启用实例返回空串 |
 | `ConfigService.switchOj` | `(ojId: string) => Promise<void>` | 切换当前 OJ（设置页「当前 OJ」下拉的显式动作）：调 bridge `switchOj`（后端在**单一写事务**内：补注册 → 校验已注册且在启用实例列表 → 切 Registry → 显式清各 Service 的 OJ 域缓存 → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`）→ 本地缓存失效（后续读取拿到新 active）。并发调用**排队**执行。失败原样上抛；**`OjSwitchPersistFailed` 失败也先失效缓存**（后端已切 registry/内存，陈旧缓存会把旧 active 写回，评审二十六 P1）。其余失败由调用方按「未切换」处理 |
@@ -34,7 +34,6 @@
 ## 直接依赖
 
 - `@/bridge/config.bridge`（`get_config` / `update_config`）
-- `@/guards/keyed-settings-policy`（`isKeyedProcess()` —— `updateConfig` 缺省 `maintainerLocked` 的推导）
 - `@/types/config`（仅类型）
 - `@/utils/language`（`normalizeHojLanguage`）、`@/utils/editor`（偏好默认值、钳位上下界与主题归一）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
@@ -59,10 +58,9 @@ getConfig()
                  ├─ 成功 → 写入缓存
                  └─ 失败 → 清空缓存（下次调用重试）并抛出
 
-updateConfig(mutate, options)
+updateConfig(mutate)
   getConfig() → structuredClone 副本 → mutate(draft)
-  → maintainerLocked = options.maintainerLocked ?? !isKeyedProcess()（guards/keyed-settings-policy）
-  → bridge.updateConfig(draft, maintainerLocked)（整体替换）
+  → bridge.updateConfig(draft)（整体替换；锁定真值只在后端）
   → finally invalidate()（成败都失效，防缓存与磁盘漂移）
 
 updateEditorPrefs(patch)

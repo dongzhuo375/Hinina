@@ -82,8 +82,8 @@ export interface DataDirChange {
 ///
 /// 管理方钥匙：`--settings` 启动时初始导航直落设置页并解锁维护者层字段；
 /// 普通启动全部 false（正常门禁 + 选手层）。定位是防误触护栏而非安全边界
-/// （IPC 更新路径由后端按 maintainer_locked 保留锁定字段；直接手改 config.json
-/// 不受该护栏限制）。
+/// （IPC 更新路径的锁定语义由后端以本标志执行；直接手改 config.json 不受
+/// 该护栏限制）。
 export interface LaunchFlags {
   /// 以 `--settings` 启动
   settings: boolean

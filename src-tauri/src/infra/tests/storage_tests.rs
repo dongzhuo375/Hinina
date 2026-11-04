@@ -176,3 +176,113 @@ fn write_string_atomic_cleans_stale_temps_of_same_target() {
         "其他目标不误伤"
     );
 }
+
+/// symlink_metadata：存在文件返回元数据，缺失/穿越路径报 Io 错误。
+#[test]
+fn symlink_metadata_reads_regular_files_and_rejects_invalid_paths() {
+    let dir = TempDir::named("hinina-storage-lstat");
+    let s = Storage::new(dir.to_path_buf());
+    s.write_string("sessions/HOJ.json", "{\"token\":\"t\"}")
+        .unwrap();
+
+    let meta = s.symlink_metadata("sessions/HOJ.json").unwrap();
+    assert!(meta.is_file());
+    assert_eq!(meta.len(), 13);
+    assert!(meta.modified().is_ok());
+
+    assert!(s.symlink_metadata("sessions/missing.json").is_err());
+    assert!(s.symlink_metadata("../evil").is_err());
+}
+
+/// lstat 语义：链接本身是「符号链接」而非文件，绝不返回目标文件的元数据。
+/// （Unix-only：Windows 建符号链接需要开发者模式/管理员权限，CI 不具备。）
+#[cfg(unix)]
+#[test]
+fn symlink_metadata_does_not_follow_symlink_targets() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::named("hinina-storage-lstat-link");
+    let external = TempDir::named("hinina-storage-lstat-target");
+    let s = Storage::new(dir.to_path_buf());
+    std::fs::create_dir_all(external.path()).unwrap();
+    std::fs::write(external.join("outside.json"), "outside").unwrap();
+    symlink(external.join("outside.json"), dir.join("link.json")).unwrap();
+
+    let meta = s.symlink_metadata("link.json").unwrap();
+    assert!(meta.file_type().is_symlink(), "必须报告链接本身");
+    assert!(!meta.is_file(), "不得把链接目标当成文件");
+}
+
+/// `remove_empty_dir`：只删真实空目录——文件与非空目录报错（文件绝不被删）。
+#[test]
+fn remove_empty_dir_only_removes_real_empty_directories() {
+    let dir = TempDir::named("hinina-storage-remove-empty-dir");
+    let s = Storage::new(dir.to_path_buf());
+    s.create_dir("empty").unwrap();
+    s.write_string("full/a.txt", "x").unwrap();
+
+    assert!(s.remove_empty_dir("full").is_err(), "非空目录必须失败");
+    assert!(
+        s.remove_empty_dir("full/a.txt").is_err(),
+        "文件必须失败（目录专用删除不得删文件）"
+    );
+    assert!(s.exists("full/a.txt"));
+    assert!(s.remove_empty_dir("empty").is_ok());
+    assert!(!s.exists("empty"));
+}
+
+/// 符号链接不被跟随：对链接到目录的条目 `remove_empty_dir` 必须失败且链接与
+/// 目标原样保留（Unix 的 `rmdir` 对 symlink 返回 ENOTDIR）。
+#[cfg(unix)]
+#[test]
+fn remove_empty_dir_does_not_follow_symlinks() {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::named("hinina-storage-remove-empty-link");
+    let s = Storage::new(dir.to_path_buf());
+    let target = TempDir::named("hinina-storage-remove-empty-link-target");
+    std::fs::create_dir_all(target.path()).unwrap();
+    symlink(target.path(), dir.join("link")).unwrap();
+
+    assert!(
+        s.remove_empty_dir("link").is_err(),
+        "链接不得被当作空目录删除"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.join("link")).is_ok(),
+        "链接应保留"
+    );
+    assert!(target.path().exists(), "目标目录应保留");
+}
+
+/// `remove_file`：只删文件——目录报错（目录绝不被删）；Unix 上对符号链接删除
+/// 链接本身、目标原样保留（unlink 不跟随）。
+#[test]
+fn remove_file_only_removes_files() {
+    let dir = TempDir::named("hinina-storage-remove-file");
+    let s = Storage::new(dir.to_path_buf());
+    s.write_string("a.txt", "x").unwrap();
+    s.create_dir("sub").unwrap();
+
+    assert!(s.remove_file("a.txt").is_ok());
+    assert!(!s.exists("a.txt"));
+    assert!(s.remove_file("sub").is_err(), "目录不得被文件专用删除删掉");
+    assert!(s.exists("sub"));
+}
+
+#[cfg(unix)]
+#[test]
+fn remove_file_on_symlink_removes_the_link_not_the_target() {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::named("hinina-storage-remove-file-link");
+    let s = Storage::new(dir.to_path_buf());
+    let target = TempDir::named("hinina-storage-remove-file-link-target");
+    // TempDir 只清残留、不建目录（82191da 同款教训）——写目标文件前必须先建
+    std::fs::create_dir_all(target.path()).unwrap();
+    let target_file = target.path().join("secret.txt");
+    std::fs::write(&target_file, "outside").unwrap();
+    symlink(&target_file, dir.join("link.txt")).unwrap();
+
+    assert!(s.remove_file("link.txt").is_ok(), "删除的是链接本身");
+    assert!(!dir.join("link.txt").exists());
+    assert!(target_file.exists(), "目标文件必须保留");
+}

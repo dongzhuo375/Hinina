@@ -49,11 +49,8 @@ function resolvePersisted(active: string): void {
 vi.mock('@/services/config.service', () => ({
   configService: {
     getConfig: mocks.getConfig,
-    updateConfig: async (
-      mutate: (draft: AppConfig) => void,
-      options?: { maintainerLocked?: boolean },
-    ) => {
-      const saved = await mocks.updateConfig(mutate, options)
+    updateConfig: async (mutate: (draft: AppConfig) => void) => {
+      const saved = await mocks.updateConfig(mutate)
       resolvePersisted(saved.oj.active)
       return saved
     },
@@ -92,8 +89,7 @@ vi.mock('@/services/config.service', () => ({
 vi.mock('@/services/system.service', () => ({
   systemService: {
     launchFlags: mocks.launchFlags,
-    isKeyedSettings: (name?: string | symbol | null) =>
-      mocks.launchFlags.value.settings && name === 'Settings',
+    isKeyed: () => mocks.launchFlags.value.settings,
   },
 }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))

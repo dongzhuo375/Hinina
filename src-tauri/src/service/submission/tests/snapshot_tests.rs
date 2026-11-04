@@ -226,3 +226,191 @@ fn inspect_and_purge_are_safe_without_any_snapshot() {
     );
     assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
 }
+
+/// 符号链接不得被统计/清理：链接文件与链接 OJ 目录都跳过，外部目标原样保留。
+/// （Unix-only：Windows 建**符号链接**需要开发者模式/管理员权限，CI 不具备；
+/// Windows 的等价场景由免提权的 junction 用例
+/// `purge_reclaim_pass_skips_directory_junctions` 单独覆盖。）
+#[cfg(unix)]
+#[test]
+fn walk_and_purge_ignore_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let (storage, dir) = temp_storage("symlink-walk");
+    write_snapshot(&storage, "HOJ", "1", "C++", "int main(){}");
+    // 让真实留档过期 → purge 的 removed > 0，**回收空目录那一趟才会执行**，
+    // 链接 OJ 目录必须在那趟里被跳过（Windows 上 remove 会删掉链接本身）
+    age_file(&dir.join("submissions/HOJ/1.cpp"), 60);
+    let outside = TempDir::unique("hinina-snapshot-outside");
+    std::fs::create_dir_all(outside.path()).unwrap();
+    let outside_file = outside.join("secret.cpp");
+    std::fs::write(&outside_file, "outside").unwrap();
+    age_file(&outside_file, 60); // 即便「过期」，也不得被计入/删除
+    symlink(&outside_file, dir.join("submissions/HOJ/link.cpp")).unwrap();
+    symlink(outside.path(), dir.join("submissions/Hydro")).unwrap();
+
+    let usage = inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS);
+    assert_eq!(usage.total_count, 1, "只统计真实留档");
+    assert_eq!(usage.stale_count, 1, "真实留档过期计入；链接不计入");
+
+    let (removed, _) = purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS);
+    assert_eq!(removed, 1, "只删真实过期留档");
+    assert!(outside_file.exists(), "外部目标不得被删除");
+    // 回收趟只回收**真实空目录**：HOJ 里仍留着被跳过的 link.cpp（链接不被删），
+    // 所以 HOJ 非空、不得回收；Hydro 是链接目录，必须被跳过而非删掉链接本身。
+    assert!(
+        std::fs::symlink_metadata(dir.join("submissions/HOJ")).is_ok(),
+        "含跳过链接的目录非空，不得回收"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.join("submissions/HOJ/link.cpp")).is_ok(),
+        "链接文件本身也不得被删除"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.join("submissions/Hydro")).is_ok(),
+        "链接 OJ 目录不得被回收趟删除"
+    );
+}
+
+/// 回收趟只删**真实空目录**：`submissions/` 根下的普通杂项条目必须原样保留。
+/// 本用例锁定的是「不得回退到通用 `remove()`」（它对非目录条目走 `remove_file`，
+/// 会把它删掉）；`fs::remove_dir` 自身就拒绝普通文件，所以单去掉回收趟的
+/// lstat 守卫不会让本用例变红——链接跳过由 junction 用例与 walk 过滤覆盖。
+#[test]
+fn purge_reclaim_pass_preserves_non_directory_entries() {
+    let (storage, dir) = temp_storage("reclaim-misc");
+    write_snapshot(&storage, "HOJ", "1", "C++", "int main(){}");
+    // 让真实留档过期 → removed > 0，回收空目录那一趟才会执行
+    age_file(&dir.join("submissions/HOJ/1.cpp"), 60);
+    let misc = dir.join("submissions/README.txt");
+    std::fs::write(&misc, "not an oj dir").unwrap();
+
+    let (removed, _) = purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS);
+    assert_eq!(removed, 1);
+    assert!(
+        misc.exists(),
+        "回收趟不得删除 submissions/ 根下的非目录条目"
+    );
+    // HOJ 清空后应被回收（证明回收趟确实执行到了）
+    assert!(!dir.join("submissions/HOJ").exists(), "真实空目录应被回收");
+}
+
+/// Windows 上目录 junction 是免提权的链接形态：回收趟不得删除 junction 本身，
+/// 也不得触碰其外部目标（Windows 的 `RemoveDirectoryW` 会删掉 junction）。
+#[cfg(windows)]
+#[test]
+fn purge_reclaim_pass_skips_directory_junctions() {
+    let (storage, dir) = temp_storage("reclaim-junction");
+    write_snapshot(&storage, "HOJ", "1", "C++", "int main(){}");
+    age_file(&dir.join("submissions/HOJ/1.cpp"), 60);
+
+    let outside = TempDir::unique("hinina-snapshot-junction-outside");
+    std::fs::create_dir_all(outside.path()).unwrap();
+    let secret = outside.path().join("secret.cpp");
+    std::fs::write(&secret, "outside").unwrap();
+
+    let junction = dir.join("submissions/Hydro");
+    // 整条命令行作为单个 `/c` 参数：分段传参时 cmd 会按自身规则重新分词，
+    // 路径被截断成 `"Hydro"` 报「命令语法不正确」（实测）
+    let cmdline = format!(
+        "mklink /J \"{}\" \"{}\"",
+        junction.display(),
+        outside.path().display()
+    );
+    // `raw_arg`：整条命令行原样追加。`args` 会按 C 运行库规则给引号加反斜杠
+    // 转义，而 cmd.exe 不认那套转义（路径会被截断成 `"Hydro"`，实测）
+    use std::os::windows::process::CommandExt;
+    let output = std::process::Command::new("cmd")
+        .arg("/c")
+        .raw_arg(&cmdline)
+        .output()
+        .expect("无法调用 cmd 创建 junction");
+    assert!(
+        output.status.success(),
+        "mklink /J 创建 junction 失败（该操作不需要提权）: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let (removed, _) = purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS);
+    assert_eq!(removed, 1);
+    assert!(
+        std::fs::symlink_metadata(&junction).is_ok(),
+        "回收趟不得删除目录 junction 本身"
+    );
+    assert!(secret.exists(), "外部目标不得被删除");
+    assert!(!dir.join("submissions/HOJ").exists(), "真实空目录应被回收");
+
+    // 清理：Windows 上 remove_dir 删除 junction 本身（不动目标）
+    let _ = std::fs::remove_dir(&junction);
+}
+
+/// `submissions` 本身就是链接时，整棵树跳过（连列目录都不做）。
+#[cfg(unix)]
+#[test]
+fn walk_ignores_symlinked_snapshot_root() {
+    use std::os::unix::fs::symlink;
+
+    let (storage, dir) = temp_storage("symlink-root");
+    let outside = TempDir::unique("hinina-snapshot-root-outside");
+    std::fs::create_dir_all(outside.join("HOJ")).unwrap();
+    let outside_file = outside.join("HOJ/1.cpp");
+    std::fs::write(&outside_file, "outside").unwrap();
+    symlink(outside.path(), dir.join("submissions")).unwrap();
+
+    assert_eq!(
+        inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS),
+        SnapshotUsage::default()
+    );
+    assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
+    assert!(outside_file.exists(), "外部目标不得被删除");
+}
+
+/// 读取路径不得跟随符号链接：`submissions/HOJ/1.cpp` 指向数据目录外时，
+/// `read_snapshot` 必须返回 None（不能把外部文件内容当提交代码回给详情页）。
+#[cfg(unix)]
+#[test]
+fn read_snapshot_does_not_follow_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let (storage, dir) = temp_storage("read-symlink");
+    let outside = TempDir::unique("hinina-snapshot-read-outside");
+    std::fs::create_dir_all(outside.path()).unwrap();
+    let secret = outside.path().join("secret.cpp");
+    std::fs::write(&secret, "OUTSIDE-SECRET").unwrap();
+
+    std::fs::create_dir_all(dir.join("submissions/HOJ")).unwrap();
+    let link = dir.join("submissions/HOJ/1.cpp");
+    let expected = snapshot_path("HOJ", "1", "C++").expect("路径构造失败");
+    assert_eq!(expected, "submissions/HOJ/1.cpp");
+    symlink(&secret, &link).unwrap();
+
+    // 精确路径：链接文件必须被拒绝（而不是读到外部内容）
+    assert_eq!(read_snapshot(&storage, "HOJ", "1", "C++"), None);
+    // 回退扫描路径同样拒绝：同前缀的另一语言扩展名链接也不得被读
+    let scan_link = dir.join("submissions/HOJ/1.java");
+    symlink(&secret, &scan_link).unwrap();
+    assert_eq!(read_snapshot(&storage, "HOJ", "1", "Rust"), None);
+}
+
+/// 中间层级（`submissions/{oj}`）是指向外部的链接时，读取必须拒绝：
+/// `lstat` 只不跟随最后一级，顺着链接会读到外部真实文件——精确路径与
+/// `list()` 回退两条路径都要先过 `is_real_dir`。
+#[cfg(unix)]
+#[test]
+fn read_snapshot_rejects_symlinked_oj_directory() {
+    use std::os::unix::fs::symlink;
+
+    let (storage, dir) = temp_storage("read-oj-dir-link");
+    let outside = TempDir::unique("hinina-snapshot-read-oj-outside");
+    std::fs::create_dir_all(outside.path().join("HOJ")).unwrap();
+    std::fs::write(outside.path().join("HOJ/1.cpp"), "OUTSIDE-SECRET").unwrap();
+    std::fs::create_dir_all(dir.join("submissions")).unwrap();
+    // submissions/HOJ → 外部目录（真实目录，不是文件）
+    symlink(outside.path().join("HOJ"), dir.join("submissions/HOJ")).unwrap();
+
+    // 精确路径：链接目录下面的 1.cpp 在 lstat 下是真实文件，必须靠目录判据拦住
+    assert_eq!(read_snapshot(&storage, "HOJ", "1", "C++"), None);
+    // 回退扫描：列目录前就应拒绝，不得读到外部内容
+    assert_eq!(read_snapshot(&storage, "HOJ", "1", "Rust"), None);
+}

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
-import { systemService } from '@/services/system.service'
+import { useSystemStore } from '@/stores/systemStore'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
@@ -17,6 +17,7 @@ export function formatBytes(bytes: number): string {
 
 /// 重置与清理两个维护动作的状态和副作用；不参与配置表单的 dirty/save
 export function useMaintenanceSettings() {
+  const systemStore = useSystemStore()
   const resetting = ref(false)
   const resetConfirmOpen = ref(false)
   const {
@@ -45,7 +46,7 @@ export function useMaintenanceSettings() {
     clearResetNotice()
     resetError.value = null
     try {
-      await systemService.resetClient()
+      await systemStore.resetClient()
 
       // 只等待比赛重拉；公告 refresh 仍是 void，不改变现有提示判定
       let refreshed = true
@@ -69,7 +70,7 @@ export function useMaintenanceSettings() {
 
   async function loadUsage(): Promise<void> {
     try {
-      usage.value = await systemService.localDataUsage()
+      usage.value = await systemStore.localDataUsage()
       usageFailed.value = false
     } catch {
       usageFailed.value = true
@@ -87,7 +88,7 @@ export function useMaintenanceSettings() {
     clearPurgeNotice()
     purgeError.value = null
     try {
-      const report = await systemService.purgeLocalData(purgeLogs.value, purgeSnapshots.value)
+      const report = await systemStore.purgeLocalData(purgeLogs.value, purgeSnapshots.value)
       const parts = [`释放 ${formatBytes(report.freedBytes)}`]
       if (report.removedSnapshots > 0) parts.push(`删除留档 ${report.removedSnapshots} 个`)
       // 两个清理对象分别如实回报，不合并成一个「日志未清理」

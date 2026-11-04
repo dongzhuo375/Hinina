@@ -26,7 +26,7 @@
 
 ## 被依赖
 
-- `src/main.ts` — `installCloseFlushGuard()` 注入 `getCurrentWindow()` 的 `close` / `destroy`
+- `src/main.ts` — `installCloseFlushGuard()` 注入 `systemService.closeWindow` / `destroyWindow`（2026-11-04 G3 起不再直用 `getCurrentWindow()`；注入签名不变）
 - `src/utils/__tests__/close-guard.spec.ts` — 单元测试
 
 ## 逻辑流程

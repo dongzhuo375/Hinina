@@ -10,11 +10,12 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式，`readonly()` 包装——「进程内不可变」由类型强制，评审十 #6）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），组件/computed 直接读。默认 `{settings:false}` = 安全侧 |
+| `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式，`readonly()` 包装——「进程内不可变」由类型强制，评审十 #6）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），`systemStore.isKeyed` 读它（getter 依赖追踪）。默认 `{settings:false}` = 安全侧 |
 | `SystemService.getLaunchFlags` | `() => Promise<LaunchFlags>` | 启动标志的 Promise 入口（**仅守卫消费**）：进程内 memoize，解析成功填充快照；读取失败（旧二进制、桥异常）保持快照默认「无参数」—— 安全侧默认值，绝不让钥匙通道故障卡死启动或设置页；**失败不缓存**，下次调用重试（评审十九 #7：一次瞬时不等于整个进程失去钥匙）；守卫另有 try/catch 二道防线 |
-| `SystemService.isKeyed` | `() => boolean` | 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。组件一律经它判断钥匙模式，不直接读 `launchFlags.value.settings`（评审二十一 #4） |
+| `SystemService.isKeyed` | `() => boolean` | 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。组件一律经它判断钥匙模式，不直接读 `launchFlags.value.settings`（评审二十一 #4）。**进程级判定的唯一入口**（不认识任何路由名）。路由级判据（钥匙 + 设置页）在 `guards/keyed-settings-route`——服务层不引入路由知识（2026-11-04 复审：G2 曾把 `isKeyedSettings` 并入本服务，造成分层倒置，已移出） |
 | `SystemService.minimizeWindow` / `toggleMaximizeWindow` / `closeWindow` | `() => Promise<void>` | 无边框窗口控制（View 经 Service 调用，Service 转发 `bridge/window.bridge`——View 不直接 import bridge，评审二十一 #6） |
-| `SystemService.isKeyedSettings` | `(routeName) => boolean` | **钥匙设置页的唯一判据**（评审十 #5）：四处消费（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，避免各自内联漂移 |
+| `SystemService.destroyWindow` | `() => Promise<void>` | 销毁窗口（close-guard 落盘完成后的收尾，2026-11-04 G3） |
+| `SystemService.onCloseRequested` | `(handler) => Promise<() => void>` | 订阅关闭请求（关窗握手事件源，返回取消订阅函数） |
 | `SystemService.getStorageInfo` | `() => Promise<StorageInfo>` | 存储信息（baseDir / logPath / version）；失败由调用方降级展示（设置页「关于」区块显示「获取失败」，不影响其余分组） |
 | `SystemService.resetClient` | `() => Promise<void>` | 重置客户端（三层缓存 + 公告基线 + 公告已读状态）；**不重拉**，补拉由调用方编排（设置页重置后立刻重拉当前比赛数据） |
 | `SystemService.localDataUsage` | `() => Promise<LocalDataUsage>` | 可清理项的体积预览（日志与崩溃记录字节数 / 留档总与过期条数字节） |
@@ -33,8 +34,10 @@
 ## 被依赖
 
 - `composables/useDataDirSettings.ts` / `useMaintenanceSettings.ts` / `useAboutSettings.ts` — 数据目录生命周期、重置清理与 About 存储信息；对应 section 组件只消费模型，View 不直接调用 service
-- `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据）
-- `guards/keyed-settings-policy` — `isKeyed()` / `isKeyedSettings()` 的唯一消费入口；SettingsView（分层锁）、ContestLayout（最小壳）、sessionGuard、useSettingsForm、LoginView、ActivityBar 均经该策略模块取判据，不直接读 `launchFlags`
+- `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据；路由级钥匙判据经 `guards/keyed-settings-route` 的三处调用：`beforeEach` 条件豁免 / `fromKeyedSettings` / `afterEach` 落地不变量）
+- `stores/systemStore` — **View/component/composable 的唯一消费入口**（2026-11-04 严格 View → Store → Service）：窗口控制、`isKeyed`、存储信息、维护清理、数据目录全部经 store 转发；视图不再直接 import 本 service
+- 守卫与组合根（非视图层，允许直连）：`router/index.ts`（`getLaunchFlags` 初始落点）、`guards/keyed-settings-route`（`isKeyed()` 路由级判据）、`main.ts`（经 store 转发的关窗握手仍最终落到本 service）
+- `src/main.ts`（`onCloseRequested` 关窗握手事件源 + `closeWindow`/`destroyWindow` 注入 close-guard）、`src/App.vue`（登录页兜底窗口条：`minimizeWindow`/`toggleMaximizeWindow`/`closeWindow`）——2026-11-04 G3 起成为 systemService 的窗口控制消费方
 
 ## 逻辑流程
 

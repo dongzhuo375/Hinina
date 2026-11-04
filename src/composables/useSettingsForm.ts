@@ -1,9 +1,9 @@
 import { computed, getCurrentScope, onScopeDispose, reactive, ref } from 'vue'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-route'
 import type { Ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService } from '@/services/config.service'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { useAuthStore } from '@/stores/authStore'
 import { resetSessionForOjSwitch } from '@/stores/session'
 import { normalizeHojLanguage } from '@/utils/language'
@@ -574,7 +574,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
           draft.editor.autoSaveIntervalSecs = autoSaveIntervalSecs
         }
         draft.layout.splitRatio = submitted.splitRatio
-      }, { maintainerLocked: lockAll })
+      })
       // 保存已把当前 active 落盘：若此前是「切换生效但持久化失败」，回退风险
       // 已由 ConfigService.updateConfig 解除；这里只清本控制器可见的警告
       //（即便控制器已卸载也不会影响服务级共享结果）。

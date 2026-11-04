@@ -3,8 +3,8 @@ import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
 import { systemService } from '@/services/system.service'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-route'
 import { markSettingsGateBlocked } from '@/utils/settings-gate-notice'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 
 /// 路由元信息类型声明，避免 `to.meta.*` 退化为 any

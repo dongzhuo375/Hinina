@@ -1,11 +1,12 @@
 import { computed, ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
-import { systemService } from '@/services/system.service'
+import { useSystemStore } from '@/stores/systemStore'
 import { errorMessage } from '@/utils/error'
 import type { DataDirInfo } from '@/types/system'
 
 /// 数据目录：只校验并记录位置指针，真正迁移在下次启动完成
 export function useDataDirSettings() {
+  const systemStore = useSystemStore()
   const dataDir = ref<DataDirInfo | null>(null)
   const dataDirFailed = ref(false)
   const pendingDir = ref<string | null>(null)
@@ -31,7 +32,7 @@ export function useDataDirSettings() {
 
   async function loadDataDir(): Promise<void> {
     try {
-      dataDir.value = await systemService.getDataDir()
+      dataDir.value = await systemStore.getDataDir()
       dataDirFailed.value = false
     } catch {
       dataDirFailed.value = true
@@ -47,7 +48,7 @@ export function useDataDirSettings() {
     changeError.value = null
     clearChangeNotice()
     try {
-      const picked = await systemService.pickDataDir()
+      const picked = await systemStore.pickDataDir()
       if (!picked) return
       pendingDir.value = picked
       migrateData.value = true
@@ -64,7 +65,7 @@ export function useDataDirSettings() {
     changingDir.value = true
     changeError.value = null
     try {
-      const result = await systemService.setDataDir(target, migrate)
+      const result = await systemStore.setDataDir(target, migrate)
       pendingDir.value = null
       migrateData.value = true
       await loadDataDir()
@@ -85,7 +86,7 @@ export function useDataDirSettings() {
     changingDir.value = true
     changeError.value = null
     try {
-      const result = await systemService.resetDataDir(migrate)
+      const result = await systemStore.resetDataDir(migrate)
       pendingDir.value = null
       migrateData.value = true
       await loadDataDir()

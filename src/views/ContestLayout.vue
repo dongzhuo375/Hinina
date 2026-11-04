@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-route'
 import { useRoute, useRouter } from 'vue-router'
 import TopBar from '@/components/layout/TopBar.vue'
 import WindowControls from '@/components/layout/WindowControls.vue'
@@ -7,7 +8,6 @@ import StatusBar from '@/components/layout/StatusBar.vue'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 import { useNowMs } from '@/composables/useNowMs'
 

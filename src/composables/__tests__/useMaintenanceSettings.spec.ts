@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { effectScope } from 'vue'
 import type { EffectScope } from 'vue'
 import { useMaintenanceSettings } from '@/composables/useMaintenanceSettings'
@@ -27,6 +28,8 @@ let scope: EffectScope
 let maintenance: ReturnType<typeof useMaintenanceSettings>
 
 beforeEach(() => {
+  // composable 经 systemStore 转发到 service：需要活动 pinia
+  setActivePinia(createPinia())
   vi.resetAllMocks()
   vi.useFakeTimers()
   mocks.resetClient.mockResolvedValue(undefined)

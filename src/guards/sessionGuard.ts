@@ -1,7 +1,7 @@
 import type { Router } from 'vue-router'
 import { setIpcErrorObserver } from '@/bridge'
 import type { IpcError } from '@/bridge'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-policy'
+import { isKeyedSettingsRoute } from '@/guards/keyed-settings-route'
 import { markSettingsGateBlocked } from '@/utils/settings-gate-notice'
 import { SESSION_INVALID_MESSAGE, useAuthStore } from '@/stores/authStore'
 import { createLogger } from '@/utils/logger'

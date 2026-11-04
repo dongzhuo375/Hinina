@@ -17,7 +17,7 @@ vi.mock('@/views/ContestLayout.vue', () => ({ default: { template: '<div />' } }
 vi.mock('@/views/SettingsView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/views/ProblemSetView.vue', () => ({ default: { template: '<div />' } }))
 
-// 启动标志状态：getLaunchFlags 返回它，isKeyedSettings 同步读它（与真实实现同判据）
+// 启动标志状态：getLaunchFlags 返回它，isKeyed 同步读它（与真实实现同判据）
 const launchFlags = vi.hoisted(() => ({ state: { settings: false, fail: false } }))
 vi.mock('@/services/system.service', () => ({
   systemService: {
@@ -25,8 +25,7 @@ vi.mock('@/services/system.service', () => ({
       if (launchFlags.state.fail) throw new Error('invoke failed')
       return { settings: launchFlags.state.settings }
     },
-    isKeyedSettings: (name?: string | symbol | null) =>
-      launchFlags.state.settings && name === 'Settings',
+    isKeyed: () => launchFlags.state.settings,
   },
 }))
 

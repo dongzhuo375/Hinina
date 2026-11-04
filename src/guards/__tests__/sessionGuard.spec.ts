@@ -28,8 +28,7 @@ vi.mock('@/services/auth.service', () => ({ authService: { logout: mocks.logout 
 vi.mock('@/services/system.service', () => ({
   systemService: {
     launchFlags: mocks.launchFlags,
-    isKeyedSettings: (name?: string | symbol | null) =>
-      mocks.launchFlags.value.settings && name === 'Settings',
+    isKeyed: () => mocks.launchFlags.value.settings,
   },
 }))
 

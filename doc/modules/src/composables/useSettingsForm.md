@@ -16,7 +16,7 @@
 | `form` / `baseline` / `dirty` | reactive / ref / computed | 中央草稿、上次加载或保存成功的 JSON 基线、dirty 判定 |
 | `errors` / `isValid` / `canSave` | computed | URL 与各整数字段实时校验；`autoSave=false` 时隐藏的间隔字段不参与校验、不阻止保存，也不进入保存载荷（保留已存值） |
 | `load` / `populate` | fn | `load` 先等共享保存落地（`whenSaveSettled`；等待结束后再捕获 `saveEpoch`，避免保存结束的 +1 造成固定双读），再经 `readSettledConfig` 读取磁盘配置并回填表单和实例清单：撞上在途 OJ 切换时同样先等它落地再读，避免把保存/切换前的旧值展示出来；读完后若又有保存开始则重读。加载后按 `configService.latestOjSwitchResult()` 恢复历史持久化失败警告 |
-| `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示。**锁定字段不参与前端校验、也不按表单值改写**：保存载荷仍是完整 AppConfig（未改动字段保持读入值，数字字段不做 `Number()` 转换以免 NaN 拖垮保存），锁定语义由后端 `maintainer_locked` 用旧配置覆盖锁定字段落实（评审十 #3、评审二十九 #7）。`saving` **模块级共享**并覆盖 `save → 自动切换` 整段（评审三十四 #2）：新挂载控制器在旧控制器保存完成前不得保存/切换，避免较旧的保存意图覆盖用户较新的显式选择。结算期间 `switching=true`：`canSave` 需 `!switching`，保存与在途切换互斥（评审二十九 #1）；切换失败只回滚选择、保留地址草稿（#3）。保存/切换在途时 **OJ 域输入由 `OjServerSection` 整体禁用**（评审三十三 #3：完成后的磁盘重置会覆盖该域）；控制器卸载后不再回写表单，但保存新建实例触发的自动切换仍执行。**普通保存成功会把当前 active 落盘**：`ConfigService.updateConfig` 统一解除同一目标的 `persist-failed` 共享结果，`clearResolvedPersistedWarning` 只负责清本控制器可见的警告（评审三十六） |
+| `save` / `discard` | fn | 保存前冻结完整提交快照；成功后 baseline 只前移到该快照，保存期间的新编辑仍为 dirty。放弃时恢复基线并清除切换提示。**锁定字段不参与前端校验、也不按表单值改写**：保存载荷仍是完整 AppConfig（未改动字段保持读入值，数字字段不做 `Number()` 转换以免 NaN 拖垮保存），锁定语义由后端落实：`update_config` 用旧配置覆盖锁定字段（评审十 #3、评审二十九 #7）——**真值由后端 `launch_args` 自持**（`enforced = !settings`；2026-11-04 G1）。`saving` **模块级共享**并覆盖 `save → 自动切换` 整段（评审三十四 #2）：新挂载控制器在旧控制器保存完成前不得保存/切换，避免较旧的保存意图覆盖用户较新的显式选择。结算期间 `switching=true`：`canSave` 需 `!switching`，保存与在途切换互斥（评审二十九 #1）；切换失败只回滚选择、保留地址草稿（#3）。保存/切换在途时 **OJ 域输入由 `OjServerSection` 整体禁用**（评审三十三 #3：完成后的磁盘重置会覆盖该域）；控制器卸载后不再回写表单，但保存新建实例触发的自动切换仍执行。**普通保存成功会把当前 active 落盘**：`ConfigService.updateConfig` 统一解除同一目标的 `persist-failed` 共享结果，`clearResolvedPersistedWarning` 只负责清本控制器可见的警告（评审三十六） |
 | `switching`（模块级共享） | `Ref<boolean>` | 跨控制器共享：设置页卸载重挂后，新控制器也能看到旧控制器在途的切换并禁用保存/切换（评审三十三 #4）。**发起者会 await 其它控制器的 foreign reload 后才解除本标志**（评审三十四 #1）——重读期间输入保持禁用，`copyOjDomain` 不会覆盖用户输入；foreign reload 失败时用切换代际（`ojSwitchEpoch`）确认目标仍是当前代际，否则不执行旧目标对齐 |
 | `saving`（模块级共享） | `Ref<boolean>` | 跨控制器共享的保存状态；`save → 自动切换` 是一个操作，整段持有（评审三十四 #2） |
 | `latestOjSwitchResult`（服务级） | `configService.latestOjSwitchResult()` | 最近一次已生效切换的共享结果由 `ConfigService` 持有（评审三十五/三十六）：切换可能在无观察者时完成，晚挂载控制器由 `load` 据此恢复 persist-failed 警告；后续成功切换或**任意一次把同一 active 成功落盘的 `updateConfig`**（含解题页编辑器偏好/分栏比例）会把它改为 `success`（警告解除）；普通失败不覆盖 |
@@ -33,7 +33,7 @@
 - `vue`（`reactive` / `ref` / `computed` / `getCurrentScope` / `onScopeDispose`）
 - `vue-router`（普通模式切换成功后 `replace(Login)`；钥匙模式留在设置页）
 - `@/services/config.service`
-- `@/guards/keyed-settings-policy`（`isKeyedSettingsRoute` —— 切换后的「停留设置页」判据）
+- `@/guards/keyed-settings-route`（`isKeyedSettingsRoute()` —— 切换后的「停留设置页」判据；组合进程级钥匙状态与路由身份）
 - `@/stores/session`（`resetSessionForOjSwitch`）
 - `@/stores/authStore`（`resetForOjSwitch`，与领域清理成对调用）
 - `@/composables/useTransientValue`（已保存提示）
