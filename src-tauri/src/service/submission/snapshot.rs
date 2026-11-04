@@ -234,25 +234,20 @@ pub struct SnapshotUsage {
 /// `{oj_id}/` 或留档文件本身是指向外部的链接，跟随会把外部文件计入统计，
 /// 清理阶段还会穿过目录链接删到存储根之外。三个层级一律用 `symlink_metadata`
 /// 并要求真实目录/文件，链接条目直接跳过。
-fn walk_snapshots(storage: &Storage) -> Vec<(String, u64, std::time::SystemTime)> {
-    let mut found = Vec::new();
-    let Ok(root) = storage.symlink_metadata(SNAPSHOT_DIR) else {
-        return found;
-    };
-    if !root.is_dir() {
-        return found;
+fn walk_snapshots(storage: &Storage) -> WalkResult {
+    let mut result = WalkResult::default();
+    if real_dir_meta(storage, SNAPSHOT_DIR).is_none() {
+        return result;
     }
-    let Ok(oj_dirs) = storage.list(SNAPSHOT_DIR) else {
-        return found;
+    let Ok(entries) = storage.list(SNAPSHOT_DIR) else {
+        return result;
     };
-    for oj_dir in oj_dirs {
-        let relative_dir = oj_dir.to_string_lossy().replace('\\', "/");
-        let Ok(meta) = storage.symlink_metadata(&relative_dir) else {
-            continue;
-        };
-        if !meta.is_dir() {
+    for entry in entries {
+        let relative_dir = entry.to_string_lossy().replace('\\', "/");
+        if real_dir_meta(storage, &relative_dir).is_none() {
             continue;
         }
+        result.oj_dirs.push(relative_dir.clone());
         let Ok(files) = storage.list(&relative_dir) else {
             continue;
         };
@@ -267,17 +262,38 @@ fn walk_snapshots(storage: &Storage) -> Vec<(String, u64, std::time::SystemTime)
             let Ok(modified) = meta.modified() else {
                 continue;
             };
-            found.push((relative, meta.len(), modified));
+            result.files.push((relative, meta.len(), modified));
         }
     }
-    found
+    result
+}
+
+/// 遍历结果：留档文件 + 已确认的**真实** OJ 子目录（回收空目录时复用，
+/// 免去第二次 `list(submissions/)`；删除前仍逐条 lstat 作纵深防御）。
+#[derive(Debug, Default)]
+struct WalkResult {
+    files: Vec<(String, u64, std::time::SystemTime)>,
+    oj_dirs: Vec<String>,
+}
+
+/// 条目是**真实目录**时返回其 lstat 元数据，否则 `None`。
+///
+/// `symlink_metadata`（lstat）不跟随链接：符号链接与 Windows junction 的
+/// `is_dir()` 均为 false（junction 实测 `is_symlink() == true`），因此本函数
+/// 天然把链接挡在统计与清理之外。`submissions/` 根、OJ 子目录、回收空目录
+/// 三处共用同一判据。
+fn real_dir_meta(storage: &Storage, relative: &str) -> Option<std::fs::Metadata> {
+    storage
+        .symlink_metadata(relative)
+        .ok()
+        .filter(|meta| meta.is_dir())
 }
 
 /// 统计留档占用（含过期部分），供清理前的预览展示。
 pub fn inspect_snapshots(storage: &Storage, keep_days: u64) -> SnapshotUsage {
     let cutoff = stale_cutoff(keep_days);
     let mut usage = SnapshotUsage::default();
-    for (_, bytes, modified) in walk_snapshots(storage) {
+    for (_, bytes, modified) in walk_snapshots(storage).files {
         usage.total_count += 1;
         usage.total_bytes += bytes;
         if modified < cutoff {
@@ -297,7 +313,8 @@ pub fn purge_stale_snapshots(storage: &Storage, keep_days: u64) -> (usize, u64) 
     let mut removed = 0usize;
     let mut freed = 0u64;
 
-    for (relative, bytes, modified) in walk_snapshots(storage) {
+    let walk = walk_snapshots(storage);
+    for (relative, bytes, modified) in walk.files {
         if modified >= cutoff {
             continue;
         }
@@ -311,22 +328,18 @@ pub fn purge_stale_snapshots(storage: &Storage, keep_days: u64) -> (usize, u64) 
     }
 
     if removed > 0 {
-        if let Ok(oj_dirs) = storage.list(SNAPSHOT_DIR) {
-            for oj_dir in oj_dirs {
-                let relative = oj_dir.to_string_lossy().replace('\\', "/");
-                // 只回收**真实**空目录：`remove` 用 `path.is_dir()`（跟随链接）分流，
-                // 对目录链接在 Windows 上会删掉链接本身——与 walk 的「链接跳过」
-                // 语义不一致。先 lstat 并要求真实目录（链接的 `is_dir()` 为 false）。
-                let Ok(meta) = storage.symlink_metadata(&relative) else {
-                    continue;
-                };
-                if !meta.is_dir() {
-                    continue;
-                }
-                // remove 对目录是**非递归**删除：非空时必然失败，正好用来「只回收空目录」
-                if storage.remove(&relative).is_ok() {
-                    tracing::debug!(dir = %relative, "留档子目录已空，已回收");
-                }
+        // 复用 walk 已枚举并确认过「真实目录」的 OJ 子目录（不再重复
+        // `list(submissions/)`）；删除前仍逐条 lstat 作纵深防御。
+        for relative in walk.oj_dirs {
+            if real_dir_meta(storage, &relative).is_none() {
+                continue;
+            }
+            // `remove_empty_dir` 只做 `fs::remove_dir`：目录专用、不跟随链接
+            //（Unix 对链接返回 ENOTDIR；Windows 只删链接条目本身、不碰目标），
+            // 且非空目录必然失败 —— 正好用来「只回收空目录」。不用 `remove`：
+            // 它会用 `path.is_dir()`（跟随链接）分流，可能删文件/删链接。
+            if storage.remove_empty_dir(&relative).is_ok() {
+                tracing::debug!(dir = %relative, "留档子目录已空，已回收");
             }
         }
         tracing::info!(

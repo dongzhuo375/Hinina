@@ -253,6 +253,23 @@ impl Storage {
         }
     }
 
+    /// 删除**空目录**（非递归、目录专用、不跟随链接）。
+    ///
+    /// 与 [`Self::remove`] 的分工：后者用 `path.is_dir()`（跟随链接）分流，对
+    /// 「本应是目录、但此刻被替换成文件」的条目会删文件、对目录链接在 Windows
+    /// 上会删链接本身。本方法只做 `fs::remove_dir`：非目录条目返回错误（文件
+    /// 永不被删），非空目录返回错误，符号链接/junction 在 Unix 上 `rmdir`
+    /// 返回 ENOTDIR、在 Windows 上删除**链接条目本身**（外部目标不受影响）——
+    /// 供「只回收空目录」类清理使用，调用方仍应先 `symlink_metadata` 跳过链接。
+    ///
+    /// # Errors
+    /// 路径不安全、条目不是目录或目录非空时返回 `AppError::Io`。
+    pub fn remove_empty_dir(&self, relative_path: &str) -> AppResult<()> {
+        let path = self.resolve(relative_path)?;
+        fs::remove_dir(&path)
+            .map_err(|e| AppError::Io(format!("删除空目录失败 {}: {}", relative_path, e)))
+    }
+
     /// 删除文件或目录（递归删除非空目录）。
     ///
     /// # Errors

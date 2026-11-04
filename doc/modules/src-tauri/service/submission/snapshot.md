@@ -55,7 +55,7 @@ get_submission_detail
   inspect_snapshots(keep_days=30)  → 总条数/字节 + 过期条数/字节（只读，供预览）
   purge_stale_snapshots(keep_days=30)
        walk_snapshots 收集（`submissions/`、OJ 子目录、文件三层都要求真实条目；链接跳过） → mtime < now-30d 的逐条 storage.remove
-       删除后扫 submissions/ 直接子项，remove 成功的（= 已空）即为回收的空目录
+       删除后复用 walk 已枚举的真实 OJ 子目录（不重复列目录），`remove_empty_dir` 成功的（= 已空）即为回收的空目录
 ```
 
 ## 设计要点
@@ -67,8 +67,8 @@ get_submission_detail
 - **路径安全**：`oj_id` / `submit_id` 来自会话与服务端响应，必须拒绝路径分隔符与 `..`（与 `ContestService::read_state_path` 同款防线）。
 - **best-effort**：落盘失败只记 `warn`。快照是便利特性，丢一份快照远比丢一次提交轻。
 - **「过期」按 mtime 判定，不比对服务端列表**：后者要网络、要分页、还可能因赛制隐藏记录而误判；而留档价值本就随时间衰减。窗口 30 天（`SNAPSHOT_KEEP_DAYS`）是「基本不会误删还想看的东西」与「不让目录无限累积」之间的折中。
-- **清理绝不越界**：`purge_stale_snapshots` 只删 `submissions/` 下、mtime 早于窗口的文件，**保留窗口内的一律不动**（这是本功能唯一会丢数据的地方，有专门用例锁定）；删空的 OJ 子目录一并回收（先 `symlink_metadata` 要求真实目录——链接在 Windows 上会被 `remove` 删掉链接本身；再 `Storage::remove` 非递归删除，非空必然失败，正好用来「只回收空目录」）。
-- **接受 TOCTOU 残余**（设计取舍，2026-11-04）：`walk_snapshots` 是「lstat 检查 → 按路径再打开」，静态链接已完全挡住；但本地并发在两步之间把 `submissions/` 换成链接的窗口仍在，理论上清理可穿过。护栏定位是防误触而非安全边界，且需要本地写权限的竞态，不值得为此引入 `openat`/`O_NOFOLLOW` 的跨平台复杂度——**接受该残余**。
+- **清理绝不越界**：`purge_stale_snapshots` 只删 `submissions/` 下、mtime 早于窗口的文件，**保留窗口内的一律不动**（这是本功能唯一会丢数据的地方，有专门用例锁定）；删空的 OJ 子目录一并回收（walk 阶段已用 lstat 过滤链接、只把真实目录纳入待回收列表；回收前再 lstat 一次作纵深防御；删除用 `Storage::remove_empty_dir`——目录专用、非递归、不跟随链接，非空必然失败，正好用来「只回收空目录」）。
+- **接受 TOCTOU 残余**（设计取舍，2026-11-04）：全程是「lstat 检查 → 按路径再操作」，静态链接已完全挡住；但本地并发在两步之间替换条目的窗口仍在（walk 的 lstat→open、回收趟的 lstat→remove_dir）。最坏后果被两处设计压到最低：删除用目录专用的 `remove_empty_dir`（**文件永不因误判被删**），且即便窗口内目录被换成 junction，Windows 上删掉的也只是链接条目本身、**外部目标不受影响**。护栏定位是防误触而非安全边界，且需要本地写权限的竞态，不值得为此引入 `openat`/`O_NOFOLLOW` 的跨平台复杂度——**接受该残余**。
 - **统计只读**：`inspect_snapshots` 不改动任何磁盘状态 —— 界面必须能安全地反复预览。
 - **删除失败逐条忽略并告警**：清理是尽力而为的维护动作，不该因为一个文件被占用而整体失败。
 

@@ -212,3 +212,44 @@ fn symlink_metadata_does_not_follow_symlink_targets() {
     assert!(meta.file_type().is_symlink(), "必须报告链接本身");
     assert!(!meta.is_file(), "不得把链接目标当成文件");
 }
+
+/// `remove_empty_dir`：只删真实空目录——文件与非空目录报错（文件绝不被删）。
+#[test]
+fn remove_empty_dir_only_removes_real_empty_directories() {
+    let dir = TempDir::named("hinina-storage-remove-empty-dir");
+    let s = Storage::new(dir.to_path_buf());
+    s.create_dir("empty").unwrap();
+    s.write_string("full/a.txt", "x").unwrap();
+
+    assert!(s.remove_empty_dir("full").is_err(), "非空目录必须失败");
+    assert!(
+        s.remove_empty_dir("full/a.txt").is_err(),
+        "文件必须失败（目录专用删除不得删文件）"
+    );
+    assert!(s.exists("full/a.txt"));
+    assert!(s.remove_empty_dir("empty").is_ok());
+    assert!(!s.exists("empty"));
+}
+
+/// 符号链接不被跟随：对链接到目录的条目 `remove_empty_dir` 必须失败且链接与
+/// 目标原样保留（Unix 的 `rmdir` 对 symlink 返回 ENOTDIR）。
+#[cfg(unix)]
+#[test]
+fn remove_empty_dir_does_not_follow_symlinks() {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::named("hinina-storage-remove-empty-link");
+    let s = Storage::new(dir.to_path_buf());
+    let target = TempDir::named("hinina-storage-remove-empty-link-target");
+    std::fs::create_dir_all(target.path()).unwrap();
+    symlink(target.path(), dir.join("link")).unwrap();
+
+    assert!(
+        s.remove_empty_dir("link").is_err(),
+        "链接不得被当作空目录删除"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.join("link")).is_ok(),
+        "链接应保留"
+    );
+    assert!(target.path().exists(), "目标目录应保留");
+}
