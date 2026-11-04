@@ -120,8 +120,8 @@ vi.mock('@/services/config.service', async () => {
   return {
     configService: {
       getConfig: mocks.getConfig,
-      updateConfig: (mutate: (draft: AppConfig) => void) =>
-        runSaveTxn((tx) => tx.updateConfig(mutate)),
+      // 刻意不 mock 公共 updateConfig：生产已删除该公开包装（保存走
+      // runSaveTxn/tx.updateConfig），mock 面与生产 API 面保持一致
       invalidate: mocks.invalidate,
       switchOj: (id: string) => {
         switchState.epoch += 1

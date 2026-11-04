@@ -67,8 +67,7 @@ vi.mock('@/services/config.service', async () => {
   return {
     configService: {
       getConfig: mocks.getConfig,
-      updateConfig: (mutate: (draft: AppConfig) => void) =>
-        runSaveTxn((tx) => tx.updateConfig(mutate)),
+      // 刻意不 mock 公共 updateConfig：生产已删除该公开包装
       invalidate: mocks.invalidate,
       latestOjSwitchResult: () => null,
       ojSwitchEpoch: 0,

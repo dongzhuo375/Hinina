@@ -39,6 +39,9 @@
 // return type contains braces (`function f(): Array<{...}> {`) — unknown
 // *callback* forms fail closed instead, but the helper shapes above are
 // skipped silently; keep queued calls inside a tracked shape.
+// Scanning-fidelity note: an *unquoted regex literal* containing `//` is cut
+// by stripComments as a line comment, so the rest of that line is not scanned
+// (the current tree has none; keep regexes quoted or on their own line).
 //
 // Why not "structural" enforcement (only `SaveTxn` reachable): JS has no async
 // context (`AsyncLocalStorage` is Node-only), so a callback can always call a
@@ -68,6 +71,9 @@ export const TXN_ALLOWLIST = [
 const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\s*(?:\?\.)?\s*[<(]/
 
 /// Drop comments but keep string literals (`https://` must not read as a comment).
+///
+/// 已知边界：**未加引号的正则字面量**不在保留范围内——`/a\/\/b/` 里的 `//`
+/// 会被当成行注释，截掉该行其余部分（现树无此形态；写正则时加引号或独立成行）。
 export function stripComments(source) {
   let out = ''
   let i = 0
