@@ -27,7 +27,7 @@
 
 - `@/bridge`（`setIpcErrorObserver`、`IpcError` 类型）
 - `@/stores/authStore`（`useAuthStore`、`SESSION_INVALID_MESSAGE`）
-- `@/services/system.service`（`isKeyedSettingsRoute()` —— 钥匙设置页 401 旁路的唯一判据）
+- `@/guards/keyed-settings-route`（`isKeyedSettingsRoute()` —— 钥匙设置页 401 旁路的唯一判据）
 - `@/utils/settings-gate-notice`（`markSettingsGateBlocked` —— 旁路时写一次可见提示）
 - `vue-router`（仅 `Router` 类型 + 导航）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
