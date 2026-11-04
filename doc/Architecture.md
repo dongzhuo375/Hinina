@@ -376,14 +376,13 @@ src/
 │       └── ErrorMessage.vue              # 通用错误提示（role=alert）+ 重试按钮
 ├── guards/
 │   ├── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配；需 router + authStore，属跨层装配故不落在 stores/ 或 services/
-│   ├── globalErrorGuard.ts               # 全局错误转发守卫（Vue errorHandler / window error / unhandledrejection / router.onError 四类 → frontend_log 命令 → Rust tracing；限频去重、守卫自身绝不抛错、必须先于 mount 装配）—— panic 钩子的前端半边：JS 世界的崩溃从此有持久落点
-│   └── keyed-settings-route.ts           # 路由级钥匙判据：systemService.isKeyed() × routeName === 'Settings'（服务层不认识路由，组合属跨层装配；2026-11-04 G2 复审）
+│   └── globalErrorGuard.ts               # 全局错误转发守卫（Vue errorHandler / window error / unhandledrejection / router.onError 四类 → frontend_log 命令 → Rust tracing；限频去重、守卫自身绝不抛错、必须先于 mount 装配）—— panic 钩子的前端半边：JS 世界的崩溃从此有持久落点
 ├── stores/
 │   ├── pluginStore.ts                    # 插件状态、短时通知与控制
 │   ├── authStore.ts                      # 用户认证状态（登录/登出/会话恢复/三态校验 + sessionResolved 守卫标记 + authEpoch 认证代际：在途认证请求的迟到结果作废）
 │   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/榜单/公告/工作区并回收定时器；递增会话代际）
 │   ├── sessionGeneration.ts              # 会话代际计数器（叶子模块，不依赖任何 store；供各 store 在迟到响应写回前比对）。代际计数共三套各管一段：本计数器（领域状态代际，登出/OJ 切换整体 +1）、各 store 的 loadSeq（请求序号，区分同代际内的新旧请求）、authStore 的 authEpoch（认证代际，OJ 切换/登出/新登录作废在途认证请求）
-│   ├── systemStore.ts                    # 系统服务的前端消费入口（窗口控制/启动标志/存储信息/维护清理/数据目录；View 不直接调 service，2026-11-04 严格分层）
+│   ├── systemStore.ts                    # 系统服务的前端消费入口（窗口控制/启动标志/存储信息/维护清理/数据目录；View 不直接调 service，2026-11-04 严格分层）；钥匙判据两级入口：isKeyed（进程级）+ isKeyedSettingsRoute(routeName)（路由级参数化 getter，2026-11-04 H3 收敛——原 guards/keyed-settings-route 已删，guards/ 回归两成员）
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + loadContest 并发去重 + whenLoaded 统一等待入口（P59）+ 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情 + limits 缓存 + 我的题目状态（limitsOf/statusOf 派生读取；myStatusStale 增量失效，提交终态触发重拉）
 │   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页；用户操作路径查询去抖 in-flight 合并 + 3s memo，轮询与手动刷新不走去抖）
@@ -394,7 +393,7 @@ src/
 ├── services/
 │   ├── plugin.service.ts                 # 插件前端服务入口
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（刻意不做前端持久化：会话唯一存放处是后端会话文件，前端每次经后端查询）
-│   ├── config.service.ts                 # 配置读写唯一入口（进程内缓存 + 兜底）+ updateConfig 读改写 + 派生参数（OJ 基址、轮询调度、编辑器偏好、默认语言归一、分栏比例）
+│   ├── config.service.ts                 # 配置读写唯一入口（进程内缓存 + 兜底）+ updateConfig 读改写 + 派生参数（OJ 基址、轮询调度、编辑器偏好、默认语言归一、分栏比例）；**保存门禁**（runSaveTxn/saveEpoch/saveInFlight/whenSaveSettled）——所有写入口（设置页保存、编辑器偏好、分栏比例）同一队列串行，与 switch 侧排队对称（2026-11-04 G4 下沉）
 │   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
 │   ├── problem.service.ts                # 获取题目详情/列表 + 我的题目状态 + 批量 limits
 │   ├── rank.service.ts                   # 榜单查询（分页/关键词/去打星参数编排）
@@ -433,7 +432,7 @@ src/
 ├── composables/
 │   ├── useTransientValue.ts               # 临时反馈值与唯一回弹 timer（复制反馈；scope dispose 清理）
 │   ├── useNowMs.ts                        # 响应式毫秒墙钟（每秒重读 Date.now；各实例独立 interval，scope dispose 清理）
-│   ├── useSettingsForm.ts                 # 设置页配置草稿、校验、保存与 OJ 显式/自动切换控制器
+│   ├── useSettingsForm.ts                 # 设置页配置草稿、校验、保存与 OJ 显式/自动切换控制器（保存经 configService.runSaveTxn 事务整段持锁，模块级保存并发机器已删）
 │   ├── useAboutSettings.ts                # 设置页 About 存储信息与复制反馈（复用 useTransientValue）
 │   ├── useMaintenanceSettings.ts          # 设置页重置/清理控制器与提示 timer
 │   ├── useDataDirSettings.ts              # 设置页数据目录候选、迁移与通知控制器
@@ -522,7 +521,7 @@ src/
 - **豁免：`@tauri-apps/plugin-dialog` 前端零 import 但保留**：它是「带 JS API 的插件」的 npm 对齐伴生包 —— 上条规则的 CLI 版本检查要求 npm 包与 Rust crate 同步，删掉它会让 `tauri-plugin-dialog` 的 crate 升级失去对齐锚点。属**文档化的刻意例外**，不要按依赖卫生规则误删（分层审计 F8）
 - **前端通知是单一路径**：前端可见事件只有一条装配路径 —— `CoreEvent → main.rs 事件桥`；插件通知的 `NotificationOutput` 实现同样住在组合根 `main.rs`（原 `infra/plugin_notification`，因成为 infra 层唯一**非单实例类**框架依赖而上移，2026-11 清理）。infra 的**传输/存储类模块**（http/storage/cache/仓库实现）保持零 tauri 依赖；`infra/single_instance` 是 Tauri 插件属**设计内例外**（分层审计 F2）
 - **无 SQL 数据库**：纯文件存储，不引入 SQLite 等数据库依赖
-- **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（`sessionGuard` 会话失效兜底 + `globalErrorGuard` 全局错误转发 + `keyed-settings-route` 路由级钥匙判据）—— 前者需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）。钥匙模式判定分两级：**进程级** `isKeyed()` 归 `services/system.service`（不认识路由）；**路由级** `isKeyedSettingsRoute()` 归 `guards/keyed-settings-route`（组合「钥匙 × 设置页路由」，名副其实的跨层装配；services 不 import 它，无反向边）
+- **前端分层**：View → Store → Service → Bridge，Store 不放业务逻辑与网络请求。横向模块（`router/`、`utils/`、`types/`、`guards/`）不在此链上：`guards/` 放**跨层装配**（`sessionGuard` 会话失效兜底 + `globalErrorGuard` 全局错误转发，两成员）—— 前者需要 router 与 authStore，进 `services/` 会造成 Service → Store 反向依赖，进 `stores/` 又名不符实（无 `defineStore`）。钥匙模式判定分两级、**入口统一在 `stores/systemStore`**（2026-11-04 H3：原 `guards/keyed-settings-route` 收敛，消除「store 读进程级 / guard 读路由级」双路径）：**进程级** `isKeyed` getter 转发 `services/system.service` 的 `isKeyed()`（服务不认识路由）；**路由级** `isKeyedSettingsRoute(routeName)` 参数化 getter 组合「钥匙 × 设置页路由」
 - **前端分层口径**（2026-11-04 统一为严格 View → Store → Service）：红线两条 —— View / component **禁止 import `@/bridge`**（可 grep 断言）；View / component / composable **不直接 import Service**，一律经 Store 消费（`systemService` 族已全部收编到 `systemStore`）。Store 承担 UI 状态与动作入口，瞬态数据放 Store 的本地 `ref`/getter（如 `systemStore.isKeyed`），不再为「瞬态」另开 View→Service 直连通道。瞬态数据若需轮询，轮询器由视图自持（`createPoller`，`onUnmounted` 必停）。
 
   **既有欠账（非本 PR 引入，逐步迁移）**：`configService`（CodeEditor/ProblemStatement/TopBar/AnnouncementsView/SubmissionDetailView/ProblemSolveView/useSettingsForm）、`submissionService`（SubmissionDetailView/EditorConsoleBar）、`problemService`（QuickSubmitDialog）仍有 View/component/composable 直连——按本口径应迁入对应 store，留待后续专项；新代码不得再新增直连
@@ -552,7 +551,7 @@ src/
 - **设置入口默认隐藏，连点状态栏版本号 5 下才出现；`--settings` 启动时恒显**（`systemService.isKeyed()`，钥匙本应授予入口）：`utils/settings-access.ts` 用注入式计数状态机（`createRevealGate`，时间源可注入）+ 会话级单例（`settingsRevealed` / `tapVersion`）实现，`ActivityBar` 以 `v-if` 渲染设置项（不是 CSS 隐藏）。三条约束：① **状态不落盘** —— 显现是「我现在要调试」的临时意图而非配置，重启后重新隐藏，否则一次误触会永久暴露设置入口；② **间隔超窗从 1 重新计数**（2s 窗口），否则一天里零散点 5 次也能凑满；③ **版本号不给可点击的视觉暗示**（无 `title`、`cursor-default`、hover 无变化），显现瞬间给一次 3 秒提示 —— 它要防的是误触，不是引导用户去点。动机：设置页里是可改变客户端行为的开关（OJ 地址、轮询节拍、缓存），赛场误触后很难自查（改了服务器地址就再也连不上）
 - **「重置」与「清理本地数据」必须分开，且不可逆动作要先给范围**：`commands::maintenance_cmd` 提供两个动作 —— **重置客户端**清掉一切**可重新从服务端获取**的东西（三层缓存 + 公告基线 + 公告已读标记；安全、可反复点，故只做一次确认），**清理本地数据**删除**不可重建**的本地事实（日志内容与临时目录崩溃记录文件、`SNAPSHOT_KEEP_DAYS`=30 天前的提交源码留档；不可逆，故 `local_data_usage` 先给确切条数与体积、用户逐项勾选后再二次确认）。硬约束：① 两者都**不动**工作区代码（`workspaces/`，选手唯一作品本体，且 OJ 只有提交过的版本，未提交的编辑无法找回）、配置、登录会话（清会话等于把选手踢回登录页，换账号有独立的登出路径）；② 重置**兜底清扫 `cache/` 根目录** —— 各 Service 只清自己那部分，清扫根目录才能保证将来新增的 namespace 也被覆盖，否则重置会静默漏掉新缓存；③ 日志用「重开 + 截断」清内容而**不删文件**（追加模式句柄在 Windows 上 `set_len` 会被拒，实测 `Os code 5`；删文件则要等重启才重建，中间这段排障信息就没了）；崩溃记录文件（`%TEMP%/hinina-panic.log`，可能含插件可控文本）则**删除**，体积计入同一勾选项预览；④ 留档的「过期」按 mtime 判定而不比对服务端列表（后者要网络/分页，还可能因赛制隐藏记录而误判）；⑤ **两个勾选项互不牵连**（日志清理失败只降级为 `logCleared=false` 并继续，不 `?` 冒泡中断留档清理）；⑥ **提示文案与配色都不许失实** —— 补拉失败、日志未清掉都要如实说明并以警告色呈现；⑦ **锁中毒统一 `into_inner` 取回内部数据**（与 `TtlCache` / `provider_registry_impl` 同款约定）：相关容器是 `Option` / `HashMap`，panic 不会让它们结构不一致，而「静默跳过」会让重置留下脏缓存、公告基线则会在中毒后永久不再报新公告
 - **公告红点走事件驱动 + 可见性补拉**：Rust 侧 `ContestService::list_announcements` 按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`（**首次拉取只建基线不发事件**，否则一开机就亮红点；基线按比赛隔离，失败时保留旧基线），`main.rs` 的前端事件桥转发到 `announcements-published`，前端即时刷新。**事件只是刷新触发**：公告正文始终由 `list_contest_announcements` 经 IPC 查询，事件丢失时下一轮轮询即可恢复。前端轮询仍是拉取的唯一发起方（60s ± 10s），但**窗口重新可见/聚焦时立即补拉一次**（1s 去重）—— 桌面客户端的常态是「切出去看题解再切回来」，只靠节拍意味着切回来最多等 70s 才可能看到红点，被选手直接感知为「红点不出现」。已读语义配套收紧：页面不可见时不标记（切走了 = 没看到），`isWatching`（公告页在屏）时落地的新公告自动标为已读，避免离开页面后冒出假红点
-- **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；评测轮询的**节拍与超时唯一归属前端** `submissionStore`（createPoller 驱动，终态判据见 `utils/submission.ts`，deadline 兜底），后端 `get_judgement` 是单次查询、无内层循环 —— 双层轮询会让前端抖动沦为装饰、`stopPolling` 停不掉在途后端循环；View 只表达提交意图
+- **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；**保存门禁也在 service**——`runSaveTxn` 保存事务覆盖「保存 → 自动切换」复合临界区，设置页保存、编辑器偏好、分栏比例等全部写入口同一队列串行（并发的读-改-写不交错），`saveInFlight`（排队或在途）是设置页 `saving` 的唯一来源（2026-11-04 G4 下沉：原先只在 composable 模块级的单飞/代际/等待已删）；评测轮询的**节拍与超时唯一归属前端** `submissionStore`（createPoller 驱动，终态判据见 `utils/submission.ts`，deadline 兜底），后端 `get_judgement` 是单次查询、无内层循环 —— 双层轮询会让前端抖动沦为装饰、`stopPolling` 停不掉在途后端循环；View 只表达提交意图
 - **比赛工作台外壳**：`ContestLayout` 承载 TopBar（**导航条 ActivityBar 内嵌于其第二行**）+ `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；**`--settings` 无会话时为极简壳**（拖动区标题「Hinina 设置」+ 窗口控件 + 返回登录，内容区与完整外壳共享同一 router-view 以保留草稿）；钥匙设置页豁免结束遮罩/inert/navigation-disabled（`contestGated=false`），赛前/赛后从设置页点赛场页面被拦回并提示；钥匙设置页在 `running→upcoming` 回退时同样停公告轮询并清 `liveFor`（回到 running 再重启）；窗口拖拽与窗口控制在完整外壳的 TopBar 与极简壳头部各有一份，登录页由 `App.vue` 提供兜底窗口条。外壳同时承担**赛程闸门**：`upcoming` 立即回登录页，`ended` 叠加结束覆盖层（`inert` + 导航禁用）并在 2 秒后返回登录页 —— 延迟窗口留给离页落盘，不打断正在进行的保存。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
 - **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：
 
