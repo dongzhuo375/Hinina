@@ -16,7 +16,7 @@
 | `SystemService.minimizeWindow` / `toggleMaximizeWindow` / `closeWindow` | `() => Promise<void>` | 无边框窗口控制（View 经 Service 调用，Service 转发 `bridge/window.bridge`——View 不直接 import bridge，评审二十一 #6） |
 | `SystemService.destroyWindow` | `() => Promise<void>` | 销毁窗口（close-guard 落盘完成后的收尾，2026-11-04 G3） |
 | `SystemService.onCloseRequested` | `(handler) => Promise<() => void>` | 订阅关闭请求（关窗握手事件源，返回取消订阅函数） |
-| `SystemService.isKeyedSettings` | `(routeName) => boolean` | **钥匙设置页的唯一判据**（评审十 #5）：四处消费（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，避免各自内联漂移 |
+| `SystemService.isKeyedSettings` | `(routeName) => boolean` | **钥匙设置页的唯一判据**（评审十 #5）：消费方为阶段闸门/最小壳（ContestLayout）、sessionGuard 旁路、OJ 切换停留（useSettingsForm）、**router 的三处**（beforeEach 条件豁免、fromKeyedSettings、afterEach 落地不变量）——都走这里，避免各自内联漂移 |
 | `SystemService.getStorageInfo` | `() => Promise<StorageInfo>` | 存储信息（baseDir / logPath / version）；失败由调用方降级展示（设置页「关于」区块显示「获取失败」，不影响其余分组） |
 | `SystemService.resetClient` | `() => Promise<void>` | 重置客户端（三层缓存 + 公告基线 + 公告已读状态）；**不重拉**，补拉由调用方编排（设置页重置后立刻重拉当前比赛数据） |
 | `SystemService.localDataUsage` | `() => Promise<LocalDataUsage>` | 可清理项的体积预览（日志与崩溃记录字节数 / 留档总与过期条数字节） |
@@ -35,7 +35,7 @@
 ## 被依赖
 
 - `composables/useDataDirSettings.ts` / `useMaintenanceSettings.ts` / `useAboutSettings.ts` — 数据目录生命周期、重置清理与 About 存储信息；对应 section 组件只消费模型，View 不直接调用 service
-- `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据）
+- `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据；并消费 `isKeyedSettings` 三处：`beforeEach` 条件豁免 / `fromKeyedSettings` / `afterEach` 落地不变量）
 - `views/SettingsView`（分层锁）、`views/ContestLayout`（最小壳）、`guards/sessionGuard`、`composables/useSettingsForm`、`views/LoginView`、`components/layout/ActivityBar`——均直接取 `isKeyed()` / `isKeyedSettings()` 判据，不直接读 `launchFlags`
 
 ## 逻辑流程

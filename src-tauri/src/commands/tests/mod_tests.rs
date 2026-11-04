@@ -864,3 +864,19 @@ async fn workspace_load_sync_is_serialised_with_config_save() {
     );
     assert!(ctx.config.get().editor.auto_save);
 }
+
+/// 锁定执行真值的推导方向：`--settings`（维护者）→ 非锁定；普通启动 → 锁定。
+/// 命令本体读 launch_args 全局（OnceLock，测试不可 arm），这层推导由纯函数
+/// 单独钉死——8 个锁定语义测试只覆盖注入 bool 的两条分支，翻转 `!` 无人会红。
+#[test]
+fn enforced_lock_is_derived_from_launch_flags() {
+    use crate::infra::launch_args::LaunchFlags;
+    assert!(
+        crate::commands::config_cmd::enforced_lock_from_flags(LaunchFlags { settings: false }),
+        "普通启动必须锁定"
+    );
+    assert!(
+        !crate::commands::config_cmd::enforced_lock_from_flags(LaunchFlags { settings: true }),
+        "钥匙启动必须解锁"
+    );
+}
