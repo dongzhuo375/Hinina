@@ -276,6 +276,8 @@ fn remove_file_on_symlink_removes_the_link_not_the_target() {
     let dir = TempDir::named("hinina-storage-remove-file-link");
     let s = Storage::new(dir.to_path_buf());
     let target = TempDir::named("hinina-storage-remove-file-link-target");
+    // TempDir 只清残留、不建目录（82191da 同款教训）——写目标文件前必须先建
+    std::fs::create_dir_all(target.path()).unwrap();
     let target_file = target.path().join("secret.txt");
     std::fs::write(&target_file, "outside").unwrap();
     symlink(&target_file, dir.join("link.txt")).unwrap();
