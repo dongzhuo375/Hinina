@@ -12,16 +12,33 @@
 //   1. `runSaveTxn` may only appear in allowlisted files (definition + the one
 //      transactional caller). A new caller must pass review once.
 //   2. A `runSaveTxn` callback body must not reference ANY queued save entry —
-//      `runSaveTxn`, `updateEditorPrefs`, `saveSplitRatio`. The two wrappers
-//      queue too, so calling them inside a callback deadlocks exactly like a
-//      nested transaction.
+//      `runSaveTxn`, `updateEditorPrefs`, `saveSplitRatio` (including optional
+//      calls `saveSplitRatio?.(…)`). The two wrappers queue too, so calling
+//      them inside a callback deadlocks exactly like a nested transaction.
+//      **Fail-closed**: a callback form the scanner cannot extract (a referenced
+//      callback from another module, an alias, `handlers.save`, …) is reported
+//      as a violation instead of being skipped — otherwise the gate would show
+//      green while the queued save inside it goes unscanned.
 //   3. The two public wrappers must write through `runSaveTxn` and must not
 //      reach the private save body directly (that would bypass the queue).
+//   4. `switchObservers.add(listener)` listeners run inside the transaction
+//      callback (performSwitch's finally awaits them). A listener that calls a
+//      queued save deadlocks: listener waits the queue, the queue waits the
+//      callback, the callback waits the listener. Every registered listener must
+//      be resolvable and clean (fail-closed, same as rule 2).
 //
 // Rule 2 also follows **same-file local helpers** (callback → performSwitch →
-// saveSplitRatio), so a helper gaining a queued call is caught. Limits (stated,
-// not implied): cross-file helpers, aliases, and dynamic lookup are invisible.
-// It guards this repo's conventions, not adversarial code.
+// saveSplitRatio), so a helper gaining a queued call is caught.
+//
+// Why not "structural" enforcement (only `SaveTxn` reachable): JS has no async
+// context (`AsyncLocalStorage` is Node-only), so a callback can always call a
+// public queued wrapper — no module boundary can distinguish it from a
+// legitimate concurrent caller. The structural half is already in place (the
+// only non-queuing write channel is the private `updateConfigNow`, reachable
+// solely through the `SaveTxn` handle); this script is the honest complement
+// that pins the *call-site shape*. Limits (stated, not implied): cross-file
+// helpers, aliases, and dynamic lookup are invisible — which is exactly why
+// unknown forms fail closed above.
 //
 // Usage:
 //   node scripts/check-save-gate.mjs      (also: npm run check:save-gate)
@@ -37,7 +54,8 @@ export const TXN_ALLOWLIST = [
 ]
 
 /// Queued save entries: appearing inside a transaction callback body deadlocks.
-const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\s*[<(]/
+/// Optional calls (`saveSplitRatio?.(…)`) count too — `?.` is still a call.
+const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\s*(?:\?\.)?\s*[<(]/
 
 /// Drop comments but keep string literals (`https://` must not read as a comment).
 export function stripComments(source) {
@@ -114,11 +132,59 @@ export function readBalanced(source, start, open, close) {
   return null
 }
 
-/// Collect the callback bodies of every `runSaveTxn(...)` *call site*.
-/// The definition (`async runSaveTxn<T>(`) is skipped; both arrow forms (block
-/// body and expression body) are handled.
-export function txnCallbackBodies(source) {
-  const bodies = []
+/**
+ * Extract a callback body from a call's argument text.
+ *
+ * Handles inline arrows (block & expression body) and inline
+ * `function` / `async function` expressions. A **bare identifier** is returned
+ * as `ref` so the caller can resolve it against the same-file local function
+ * table. Anything else yields `{ body: null, ref: null }` — the caller must
+ * treat that as a fail-closed violation, never as "nothing to scan".
+ *
+ * @param {string} args raw text between the call's parentheses
+ * @returns {{ body: string | null, ref: string | null }}
+ */
+export function callbackFromArgs(args) {
+  const arrow = args.indexOf('=>')
+  if (arrow !== -1) {
+    const rest = args.slice(arrow + 2)
+    const lead = rest.search(/\S/)
+    if (lead !== -1) {
+      const tail = rest.slice(lead)
+      if (tail.startsWith('{')) {
+        const body = readBalanced(tail, 0, '{', '}')
+        return { body, ref: null }
+      }
+      // 表达式体：可能连第二个参数（如 `, { settingsPage: true }`）一起截进来——
+      // 偏保守（多扫不误放），无需精确切分。
+      return { body: tail, ref: null }
+    }
+  }
+  const fnHead = args.match(/^\s*(?:async\s+)?function\b/)
+  if (fnHead) {
+    const open = args.indexOf('(', fnHead[0].length)
+    const params = open === -1 ? null : readBalanced(args, open, '(', ')')
+    if (params !== null) {
+      const brace = args.indexOf('{', open + params.length + 2)
+      const body = brace === -1 ? null : readBalanced(args, brace, '{', '}')
+      return { body, ref: null }
+    }
+    return { body: null, ref: null }
+  }
+  // 裸标识符（可带第二参数）：由调用方在同文件函数表里解析
+  const refMatch = args.match(/^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/)
+  if (refMatch) return { body: null, ref: refMatch[1] }
+  return { body: null, ref: null }
+}
+
+/**
+ * Every `runSaveTxn(...)` **call site** with its argument text and the extracted
+ * callback. The definition (`async runSaveTxn<T>(`) is skipped. `body === null`
+ * is meaningful: `ref` is a same-file function name, or both are null for a
+ * form the gate cannot analyze (fail closed in `findViolations`).
+ */
+export function txnCallSites(source) {
+  const sites = []
   const needle = 'runSaveTxn'
   let from = 0
   for (;;) {
@@ -127,25 +193,28 @@ export function txnCallbackBodies(source) {
     from = hit + needle.length
     if (source.slice(from, from + 3) === '<T>') continue // definition
     const afterName = source.slice(from).match(/^\s*\(/)
-    if (!afterName) continue
+    if (!afterName) {
+      // 名字出现了但不是可解析的调用（别名/赋值/文本……）——fail closed
+      sites.push({ args: '', body: null, ref: null })
+      continue
+    }
     const openParen = from + afterName[0].length - 1
     const args = readBalanced(source, openParen, '(', ')')
-    if (!args) continue
-    const arrow = args.indexOf('=>')
-    if (arrow === -1) continue // not a callback call; skip defensively
-    const rest = args.slice(arrow + 2)
-    const lead = rest.search(/\S/)
-    if (lead === -1) continue
-    const tail = rest.slice(lead)
-    if (tail.startsWith('{')) {
-      const braceStart = openParen + 1 + arrow + 2 + lead
-      const body = readBalanced(source, braceStart, '{', '}')
-      if (body !== null) bodies.push(body)
-    } else {
-      bodies.push(tail)
+    if (args === null) {
+      sites.push({ args: '', body: null, ref: null })
+      continue
     }
+    sites.push({ args, ...callbackFromArgs(args) })
   }
-  return bodies
+  return sites
+}
+
+/// 兼容旧用例：只返回能直接提取到的回调正文（无法分析的形态由
+/// `txnCallSites` + `findViolations` 负责 fail closed）。
+export function txnCallbackBodies(source) {
+  return txnCallSites(source)
+    .map((site) => site.body)
+    .filter((body) => body !== null)
 }
 
 /// 关键字/保留字：调用点提取时排除（`if (`、`return (` 之类不是函数调用）
@@ -155,10 +224,10 @@ const NOT_CALLS = new Set([
   'throw', 'class', 'const', 'let', 'var', 'async', 'yield', 'super', 'this',
 ])
 
-/// 提取正文里被调用的标识符（`name(` 或 `name<T>(`），排除关键字。
+/// 提取正文里被调用的标识符（`name(` / `name?.(` / `name<T>(`），排除关键字。
 export function calledNames(body) {
   const names = new Set()
-  const re = /\b([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g
+  const re = /\b([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*(?:<[^<>()]*>)?\s*\(/g
   let match
   while ((match = re.exec(body))) {
     if (!NOT_CALLS.has(match[1])) names.add(match[1])
@@ -264,6 +333,50 @@ function wrapperViolations(file, source) {
 }
 
 /**
+ * 规则 4：`switchObservers.add(listener)` 的监听器会在事务回调内被 await
+ * （`performSwitch` 的 finally）。监听器若（直接/经同文件辅助函数）调用排队
+ * 保存入口，就是「监听器等队列、队列等回调、回调等监听器」的死锁。监听器形态
+ * 无法解析时同样 fail closed。
+ */
+export function observerViolations(path, source, functions) {
+  const violations = []
+  const re = /\bswitchObservers\.add\s*\(/g
+  let match
+  while ((match = re.exec(source))) {
+    const open = match.index + match[0].length - 1
+    const args = readBalanced(source, open, '(', ')')
+    if (args === null) {
+      violations.push(`${path}: switchObservers.add 的参数无法解析（门禁 fail closed）`)
+      continue
+    }
+    const cb = callbackFromArgs(args)
+    const body = cb.body ?? (cb.ref ? functions.get(cb.ref) ?? null : null)
+    if (body === null) {
+      violations.push(
+        `${path}: switchObservers.add 的监听器形态无法静态分析（${args.trim().slice(0, 80)}）——` +
+          '监听器在 runSaveTxn 回调内被 await，若它调用排队保存会死锁；请用同文件命名函数或内联箭头',
+      )
+      continue
+    }
+    const direct = body.match(QUEUED_ENTRY)
+    if (direct) {
+      violations.push(
+        `${path}: switchObservers 监听器内含排队保存入口 \`${direct[1]}\`——` +
+          '观察者在事务回调内被 await，会排队等自己（死锁）。监听器只能做读取/对齐',
+      )
+      continue
+    }
+    for (const hit of queuedViaLocals(body, functions)) {
+      violations.push(
+        `${path}: switchObservers 监听器经 ${hit.trail.join(' → ')} 间接调用排队入口 \`${hit.entry}\`——` +
+          '同一死锁形状（监听器等队列，队列等回调，回调等监听器）',
+      )
+    }
+  }
+  return violations
+}
+
+/**
  * Check a set of sources.
  * @param {Array<{path: string, content: string}>} files paths relative to `src/`
  * @returns {string[]} human-readable violations (empty = clean)
@@ -272,6 +385,7 @@ export function findViolations(files) {
   const violations = []
   for (const { path, content } of files) {
     const source = stripComments(content)
+    const functions = localFunctions(source)
     if (source.includes('runSaveTxn')) {
       if (!TXN_ALLOWLIST.includes(path)) {
         violations.push(
@@ -279,11 +393,19 @@ export function findViolations(files) {
             '再把文件加进 TXN_ALLOWLIST —— 白名单是有意设置的复核摩擦',
         )
       }
-      const functions = localFunctions(source)
-      for (const body of txnCallbackBodies(source)) {
+      for (const site of txnCallSites(source)) {
+        // 引用式回调：同文件命名函数可解析；跨文件/别名解析不到 → 违规（fail closed）
+        const body = site.body ?? (site.ref ? functions.get(site.ref) ?? null : null)
+        if (body === null) {
+          violations.push(
+            `${path}: runSaveTxn 回调形态无法静态分析（${site.args.trim().slice(0, 80) || '参数解析失败'}）——` +
+              '请改为内联箭头/同文件命名函数；无法确认回调内容时按违规处理（否则门禁会假绿）',
+          )
+          continue
+        }
         if (QUEUED_ENTRY.test(body)) {
           violations.push(
-            `${path}: runSaveTxn 回调内引用了排队保存入口（runSaveTxn/updateEditorPrefs/saveSplitRatio）——` +
+            `${path}: runSaveTxn 回调内引用了排队保存入口（runSaveTxn/updateEditorPrefs/saveSplitRatio，含 ?.()）——` +
               '它会排在回调自己持有的门禁之后，永久挂起。改用 tx.updateConfig(...)。片段：' +
               body.trim().slice(0, 120),
           )
@@ -303,6 +425,7 @@ export function findViolations(files) {
     if (path === 'services/config.service.ts') {
       violations.push(...wrapperViolations(path, source))
     }
+    violations.push(...observerViolations(path, source, functions))
   }
   return violations
 }

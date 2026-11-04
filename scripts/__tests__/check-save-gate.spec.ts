@@ -216,6 +216,147 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
     // 定义本身不算调用点
     expect(txnCallbackBodies('async runSaveTxn<T>(fn: (tx: SaveTxn) => Promise<T>) {}')).toEqual([])
   })
+
+  it('内联命名 function 回调同样被扫描（块体）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          await configService.runSaveTxn(async function doSave(tx) {
+            await configService.saveSplitRatio(0.5)
+          })
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+  })
+
+  it('引用同文件命名回调：解析其正文并扫描（不再静默跳过）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          async function doSave(tx) {
+            await configService.updateEditorPrefs({ fontSize: 16 })
+          }
+          await configService.runSaveTxn(doSave)
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+  })
+
+  it('引用无法解析的回调（跨文件/别名/表达式）→ fail closed 违规', () => {
+    for (const call of [
+      'await configService.runSaveTxn(sharedSaveHandler)',
+      'await configService.runSaveTxn(handlers.save)',
+      'await configService.runSaveTxn(makeHandler())',
+    ]) {
+      const violations = findViolations([
+        { path: 'composables/useSettingsForm.ts', content: call },
+      ])
+      expect(violations, call).toHaveLength(1)
+      expect(violations[0]).toContain('无法静态分析')
+    }
+  })
+
+  it('可选调用 saveSplitRatio?.(…) / updateEditorPrefs?.(…) 也算排队入口', () => {
+    for (const call of [
+      'configService.saveSplitRatio?.(0.5)',
+      'configService.updateEditorPrefs?.({ fontSize: 16 })',
+    ]) {
+      const violations = findViolations([
+        {
+          path: 'composables/useSettingsForm.ts',
+          content: `
+            await configService.runSaveTxn(async (tx) => {
+              ${call}
+              await tx.updateConfig(() => {})
+            })
+          `,
+        },
+      ])
+      expect(violations, call).toHaveLength(1)
+      expect(violations[0]).toContain('排队保存入口')
+    }
+  })
+
+  it('可选调用出现在同文件辅助函数里也能追踪到', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          function maybePersist() { return configService.saveSplitRatio?.(0.5) }
+          await configService.runSaveTxn((tx) => {
+            maybePersist()
+            return tx.updateConfig(() => {})
+          })
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('maybePersist')
+    expect(violations[0]).toContain('saveSplitRatio')
+  })
+
+  it('switchObservers 监听器调用排队入口 → 违规（观察者在事务回调内被 await）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          const observer = (target) => {
+            void configService.saveSplitRatio(0.5)
+          }
+          switchObservers.add(observer)
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('switchObservers 监听器')
+    expect(violations[0]).toContain('saveSplitRatio')
+  })
+
+  it('switchObservers 监听器经辅助函数间接调用排队入口 → 违规', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          function persistLater() { return configService.updateEditorPrefs({ fontSize: 15 }) }
+          const observer = () => { persistLater() }
+          switchObservers.add(observer)
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('persistLater')
+    expect(violations[0]).toContain('updateEditorPrefs')
+  })
+
+  it('安全的 switchObservers 监听器不报违规；无法解析的监听器 fail closed', () => {
+    const safe = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          const observer = () => { reloadOjFields() }
+          switchObservers.add(observer)
+        `,
+      },
+    ])
+    expect(safe).toEqual([])
+
+    const unsafe = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          switchObservers.add(externalObserver)
+        `,
+      },
+    ])
+    expect(unsafe).toHaveLength(1)
+    expect(unsafe[0]).toContain('无法静态分析')
+  })
 })
 
 describe('check-save-gate — 真实源码树', () => {
