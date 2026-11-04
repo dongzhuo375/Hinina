@@ -33,7 +33,7 @@
 - `vue` / `vue-router`
 - 组件：`ProblemTabStrip` / `ProblemStatement` / `CodeEditor` / `EditorConsoleBar` / `LoadingSpinner` / `ErrorMessage`
 - stores：`contestStore` / `problemStore` / `workspaceStore` / `submissionStore`
-- `@/services/config.service`（分栏比例读取/回写、`EditorPrefs` 类型 —— 配置读写的指定唯一入口，不违反「View 不得 import bridge」约束）
+- `@/services/config.service`（分栏比例读取/回写、`EditorPrefs` 类型 —— 配置读写的指定唯一入口；**属 `Architecture.md` 登记的分层欠账**（View 直连 Service），待后续专项迁入 store）
 - `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — 偏好上报到达前的状态行兜底）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
