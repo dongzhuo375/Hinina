@@ -49,6 +49,26 @@ describe('systemStore — UI 消费入口', () => {
     expect(store.isKeyed).toBe(false)
   })
 
+  it('isKeyedSettingsRoute：钥匙 × Settings 才为真；非钥匙/缺失/symbol 名恒假', () => {
+    const store = useSystemStore()
+    const isKeyedSettingsRoute = store.isKeyedSettingsRoute
+
+    launchFlags.value = { settings: true }
+    expect(isKeyedSettingsRoute('Settings')).toBe(true)
+    expect(isKeyedSettingsRoute('Login')).toBe(false)
+    // 缺失 / symbol 路由名不等于 'Settings'，一律 false
+    expect(isKeyedSettingsRoute(undefined)).toBe(false)
+    expect(isKeyedSettingsRoute(null)).toBe(false)
+    expect(isKeyedSettingsRoute(Symbol('Settings'))).toBe(false)
+
+    launchFlags.value = { settings: false }
+    expect(isKeyedSettingsRoute('Settings')).toBe(false)
+
+    // 同一函数随快照变化重新求值（依赖经方法调用追踪，与 isKeyed 同理）
+    launchFlags.value = { settings: true }
+    expect(isKeyedSettingsRoute('Settings')).toBe(true)
+  })
+
   it('窗口控制转发到 service', async () => {
     mocks.minimizeWindow.mockResolvedValue(undefined)
     mocks.closeWindow.mockResolvedValue(undefined)

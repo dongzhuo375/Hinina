@@ -32,7 +32,7 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 3. 错误以 `AppError` 返回（`ProviderNotFound` / `Config`），经 serde 序列化为 `{ Variant: msg }`，前端在 `bridge/index.ts` 归一化为 `IpcError`
 4. 前端在**调用点**编排切换后果（`useSettingsForm.performSwitch` 成功分支）：`resetSessionForOjSwitch()` 清空旧 OJ 的领域状态、`authStore.resetForOjSwitch()` 复位认证态，随后按路由分岔——
    - **普通路径**：导航登录页，路由守卫按新 OJ 的会话文件恢复会话；
-   - **钥匙模式且当前路由仍是设置页**（`isKeyedSettingsRoute(currentRoute)`，经 `guards/keyed-settings-route`）：**留在设置页**，OJ 域字段按磁盘重载、baseline 重算，维护不被打断（踢回登录页等于重新锁死）。切换是异步的，期间用户可能已离开设置页——此时照常回登录页（豁免只属于设置页本身）。落盘失败（`OjSwitchPersistFailed`）视为已生效，同样走上述分岔并提示重启可能回退。
+   - **钥匙模式且当前路由仍是设置页**（`isKeyedSettingsRoute(currentRoute)`，经 `systemStore.isKeyedSettingsRoute`）：**留在设置页**，OJ 域字段按磁盘重载、baseline 重算，维护不被打断（踢回登录页等于重新锁死）。切换是异步的，期间用户可能已离开设置页——此时照常回登录页（豁免只属于设置页本身）。落盘失败（`OjSwitchPersistFailed`）视为已生效，同样走上述分岔并提示重启可能回退。
 
 ## 设计要点
 - **清缓存是显式调用而不是事件订阅**：缓存清理属于「切换正确性的一部分」—— `switch_oj` 返回后新 OJ 的查询立刻可能进来，若清理要等异步事件消费者，就存在「旧 OJ 数据继续服务新 OJ 查询」的脏读窗口。旧实现靠同步投递把这件事做实，但那个保证建立在「发布方与订阅者同栈执行」的隐含前提上 —— 换成 `broadcast` 后该前提不再成立，因此改为显式调用，`OjSwitched` 只用来通知其他观察者。三个 Service 各自负责自己那批缓存（内存段同步清；磁盘段是空间回收，缓存键已带 OJ 维度，异步清理不影响正确性）。

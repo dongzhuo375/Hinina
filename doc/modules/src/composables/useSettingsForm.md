@@ -33,7 +33,7 @@
 - `vue`（`reactive` / `ref` / `computed` / `getCurrentScope` / `onScopeDispose`）
 - `vue-router`（普通模式切换成功后 `replace(Login)`；钥匙模式留在设置页）
 - `@/services/config.service`（`configService` + `isOjSwitchPersistFailed` 错误判据；保存门禁消费：`runSaveTxn` / `saveInFlight` / `saveEpoch` / `whenSaveSettled`）
-- `@/guards/keyed-settings-route`（`isKeyedSettingsRoute()` —— 切换后的「停留设置页」判据；组合进程级钥匙状态与路由身份）
+- `@/stores/systemStore`（`isKeyedSettingsRoute(routeName)` —— 切换后的「停留设置页」判据；组合进程级钥匙状态与路由身份，2026-11-04 H3 起收进 store 单一入口）
 - `@/stores/session`（`resetSessionForOjSwitch`）
 - `@/stores/authStore`（`resetForOjSwitch`，与领域清理成对调用）
 - `@/composables/useTransientValue`（已保存提示）

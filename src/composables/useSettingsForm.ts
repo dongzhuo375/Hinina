@@ -1,11 +1,11 @@
 import { computed, getCurrentScope, onScopeDispose, reactive, ref } from 'vue'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-route'
 import type { Ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService, isOjSwitchPersistFailed } from '@/services/config.service'
 import { useAuthStore } from '@/stores/authStore'
 import { resetSessionForOjSwitch } from '@/stores/session'
+import { useSystemStore } from '@/stores/systemStore'
 import { normalizeHojLanguage } from '@/utils/language'
 import { EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN, EDITOR_TAB_SIZES } from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
@@ -195,6 +195,8 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   const loading = ref(true)
   const loadError = ref<string | null>(null)
   const router = useRouter()
+  /// 路由级钥匙判据（systemStore 单一入口）：切换成功/持久化失败后的「留在设置页」分流
+  const isKeyedSettings = useSystemStore().isKeyedSettingsRoute
 
   const ojInstances = ref<OjInstance[]>([])
   const ojOptions = computed(() => ojSelectOptions(ojInstances.value))
@@ -313,7 +315,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // **豁免只属于设置页本身**：switch_oj 是异步的，期间用户可能已导航到
       // 比赛页——不查当前路由就把「停留」带过去，无会话用户会被留在比赛页
       //。判据与 sessionGuard 一致：钥匙 + 当前路由是设置页。
-      const stayOnSettings = isKeyedSettingsRoute(router.currentRoute.value?.name)
+      const stayOnSettings = isKeyedSettings(router.currentRoute.value?.name)
       if (!stayOnSettings) {
         persistedActive.value = target
         void router.replace({ name: 'Login' })
@@ -342,7 +344,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         outcome = 'persist-failed'
         resetSessionForOjSwitch()
         useAuthStore().resetForOjSwitch()
-        if (isKeyedSettingsRoute(router.currentRoute.value?.name)) {
+        if (isKeyedSettings(router.currentRoute.value?.name)) {
           adoptEffectiveSwitch(target, PERSIST_FAILED_NOTICE)
           lastSwitchStayed = true
           return true
