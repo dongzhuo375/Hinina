@@ -68,7 +68,7 @@ get_submission_detail
 - **best-effort**：落盘失败只记 `warn`。快照是便利特性，丢一份快照远比丢一次提交轻。
 - **「过期」按 mtime 判定，不比对服务端列表**：后者要网络、要分页、还可能因赛制隐藏记录而误判；而留档价值本就随时间衰减。窗口 30 天（`SNAPSHOT_KEEP_DAYS`）是「基本不会误删还想看的东西」与「不让目录无限累积」之间的折中。
 - **清理绝不越界**：`purge_stale_snapshots` 只删 `submissions/` 下、mtime 早于窗口的文件，**保留窗口内的一律不动**（这是本功能唯一会丢数据的地方，有专门用例锁定）；删空的 OJ 子目录一并回收（walk 阶段已用 lstat 过滤链接、只把真实目录纳入待回收列表；回收前再 lstat 一次作纵深防御；删除用 `Storage::remove_empty_dir`——目录专用、非递归、不跟随链接，非空必然失败，正好用来「只回收空目录」）。
-- **接受 TOCTOU 残余**（设计取舍，2026-11-04）：全程是「lstat 检查 → 按路径再操作」，静态链接已完全挡住；但本地并发在两步之间替换条目的窗口仍在（walk 的 lstat→open、回收趟的 lstat→remove_dir）。最坏后果被删除路径的**专用化**压到最低：过期文件用 `remove_file`（目录永不被删、Unix 上只删链接本身）、空目录回收用 `remove_empty_dir`（文件永不被删、Windows 上只删链接条目本身）——**外部目标在任何窗口下都不受影响**。**读取路径同样先 lstat 要求真实文件**（`read_real_file`）：链接到数据目录外的 `{id}.cpp` 不会被当作提交代码回给详情页；其 lstat→read 窗口与上述同类。护栏定位是防误触而非安全边界，且需要本地写权限的竞态，不值得为此引入 `openat`/`O_NOFOLLOW` 的跨平台复杂度——**接受该残余**。
+- **接受 TOCTOU 残余**（设计取舍，2026-11-04）：全程是「lstat 检查 → 按路径再操作」，静态链接已完全挡住；但本地并发在两步之间替换条目的窗口仍在（walk 的 lstat→open、回收趟的 lstat→remove_dir）。最坏后果被删除路径的**专用化**压到最低：过期文件用 `remove_file`（目录永不被删、Unix 上只删链接本身）、空目录回收用 `remove_empty_dir`（文件永不被删、Windows 上只删链接条目本身）——**外部目标在任何窗口下都不受影响**。**读取路径两级防线**：先要求 `submissions/` 与 `submissions/{oj}` 均为真实目录（`is_real_dir`，与 walk 同判据——末级 lstat 挡不住 OJ 目录本身是链接的形态），再逐文件 lstat 要求真实文件（`read_real_file`）；残余窗口相应为 dir-lstat→list/read。护栏定位是防误触而非安全边界，且需要本地写权限的竞态，不值得为此引入 `openat`/`O_NOFOLLOW` 的跨平台复杂度——**接受该残余**。
 - **统计只读**：`inspect_snapshots` 不改动任何磁盘状态 —— 界面必须能安全地反复预览。
 - **删除失败逐条忽略并告警**：清理是尽力而为的维护动作，不该因为一个文件被占用而整体失败。
 - **回收空目录与写入存在既有竞态**（早于本次加固，低危）：`write_snapshot` 的 `create_dir_all` 与 `fs::write` 之间若回收趟删掉了刚变空的 OJ 目录，本次快照写入失败（只记 warn，提交本身不受影响）。窗口极窄且需要清理与提交并发，接受该残余。
@@ -76,5 +76,7 @@ get_submission_detail
 ## 测试
 
 `src-tauri/src/service/submission/tests/snapshot_tests.rs` 锁定：扩展名与前端 `sourceFileNameOf` 逐一对齐、部署变体归一、`C#`/`JavaScript` 不被前缀吞并、未知语言回退 `txt`、路径越权拒绝、落盘读取往返、语言变更后扫描回退、跨 OJ 不撞号、非法 `submit_id` 不 panic 且不写出任何文件。
+
+**符号链接防护**（`#[cfg(unix)]`，Windows 侧由免提权 junction 用例覆盖回收趟）：链接文件不得被读、链接 OJ 目录不得被读（两条读取路径各一条用例）、遍历/清理跳过链接且外部目标完好、`remove_file` 只删链接本身、`remove_empty_dir` 不把链接当空目录。
 
 **清理语义**（用 `File::set_times` 伪造 mtime，不引入 `filetime` 依赖）：`inspect_snapshots` 统计跨 OJ 的总量与过期条数、窗口放宽后同一批留档不再过期、统计不改磁盘状态；`purge_stale_snapshots` **保留窗口内留档、只删过期的**、释放字节数与预览一致、清空的 OJ 子目录被回收而仍有留档的保留；从未提交过（目录不存在）时统计全零、清理是 no-op 而非报错。
