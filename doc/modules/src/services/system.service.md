@@ -10,7 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式，`readonly()` 包装——「进程内不可变」由类型强制，评审十 #6）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），组件/computed 直接读。默认 `{settings:false}` = 安全侧 |
+| `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式，`readonly()` 包装——「进程内不可变」由类型强制，评审十 #6）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），`systemStore.isKeyed` 读它（getter 依赖追踪）。默认 `{settings:false}` = 安全侧 |
 | `SystemService.getLaunchFlags` | `() => Promise<LaunchFlags>` | 启动标志的 Promise 入口（**仅守卫消费**）：进程内 memoize，解析成功填充快照；读取失败（旧二进制、桥异常）保持快照默认「无参数」—— 安全侧默认值，绝不让钥匙通道故障卡死启动或设置页；**失败不缓存**，下次调用重试（评审十九 #7：一次瞬时不等于整个进程失去钥匙）；守卫另有 try/catch 二道防线 |
 | `SystemService.isKeyed` | `() => boolean` | 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。组件一律经它判断钥匙模式，不直接读 `launchFlags.value.settings`（评审二十一 #4）。**进程级判定的唯一入口**（不认识任何路由名）。路由级判据（钥匙 + 设置页）在 `guards/keyed-settings-route`——服务层不引入路由知识（2026-11-04 复审：G2 曾把 `isKeyedSettings` 并入本服务，造成分层倒置，已移出） |
 | `SystemService.minimizeWindow` / `toggleMaximizeWindow` / `closeWindow` | `() => Promise<void>` | 无边框窗口控制（View 经 Service 调用，Service 转发 `bridge/window.bridge`——View 不直接 import bridge，评审二十一 #6） |
@@ -34,7 +34,7 @@
 ## 被依赖
 
 - `composables/useDataDirSettings.ts` / `useMaintenanceSettings.ts` / `useAboutSettings.ts` — 数据目录生命周期、重置清理与 About 存储信息；对应 section 组件只消费模型，View 不直接调用 service
-- `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据；并消费 `isKeyedSettings` 三处：`beforeEach` 条件豁免 / `fromKeyedSettings` / `afterEach` 落地不变量）
+- `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据；路由级钥匙判据经 `guards/keyed-settings-route` 的三处调用：`beforeEach` 条件豁免 / `fromKeyedSettings` / `afterEach` 落地不变量）
 - `stores/systemStore` — **View/component/composable 的唯一消费入口**（2026-11-04 严格 View → Store → Service）：窗口控制、`isKeyed`、存储信息、维护清理、数据目录全部经 store 转发；视图不再直接 import 本 service
 - 守卫与组合根（非视图层，允许直连）：`router/index.ts`（`getLaunchFlags` 初始落点）、`guards/keyed-settings-route`（`isKeyed()` 路由级判据）、`main.ts`（经 store 转发的关窗握手仍最终落到本 service）
 - `src/main.ts`（`onCloseRequested` 关窗握手事件源 + `closeWindow`/`destroyWindow` 注入 close-guard）、`src/App.vue`（登录页兜底窗口条：`minimizeWindow`/`toggleMaximizeWindow`/`closeWindow`）——2026-11-04 G3 起成为 systemService 的窗口控制消费方

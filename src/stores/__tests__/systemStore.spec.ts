@@ -2,31 +2,51 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 /// Store 只是 UI 消费入口：状态仍在 service（本测试只钉转发与回传）。
+/// 启动标志用**真实响应式 ref** 打桩：验证 getter 经 `systemService.isKeyed()`
+/// 方法调用也能建立依赖（Pinia getter 是 computed，方法内部读 ref 会被追踪）。
 const mocks = vi.hoisted(() => ({
-  launchFlags: { value: { settings: false } },
   minimizeWindow: vi.fn(),
   closeWindow: vi.fn(),
   getStorageInfo: vi.fn(),
   setDataDir: vi.fn(),
-  onCloseRequested: vi.fn(),
 }))
-vi.mock('@/services/system.service', () => ({ systemService: { ...mocks } }))
 
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await import('vue')
+  const launchFlags = ref<{ settings: boolean }>({ settings: false })
+  return {
+    systemService: {
+      ...mocks,
+      launchFlags,
+      isKeyed: () => launchFlags.value.settings,
+    },
+    __launchFlags: launchFlags,
+  }
+})
+
+import * as systemModule from '@/stores/../services/system.service'
 import { useSystemStore } from '@/stores/systemStore'
+
+const launchFlags = (
+  systemModule as unknown as {
+    __launchFlags: { value: { settings: boolean } }
+  }
+).__launchFlags
 
 describe('systemStore — UI 消费入口', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    for (const fn of Object.values(mocks)) if (vi.isMockFunction(fn)) fn.mockReset()
+    for (const fn of Object.values(mocks)) fn.mockReset()
+    launchFlags.value = { settings: false }
   })
 
-  it('isKeyed 读响应式启动标志快照（非方法调用，避免 getter 缓存陈旧值）', () => {
-    mocks.launchFlags.value = { settings: true }
-    expect(useSystemStore().isKeyed).toBe(true)
-    // 新 store 实例（同一快照）：false 也能即时反映
-    mocks.launchFlags.value = { settings: false }
-    setActivePinia(createPinia())
-    expect(useSystemStore().isKeyed).toBe(false)
+  it('isKeyed 转发单一判据，并随启动标志快照重新求值', () => {
+    launchFlags.value = { settings: true }
+    const store = useSystemStore()
+    expect(store.isKeyed).toBe(true)
+    // 同一个 store 实例：快照变化后 getter 必须重新求值（依赖经方法调用追踪）
+    launchFlags.value = { settings: false }
+    expect(store.isKeyed).toBe(false)
   })
 
   it('窗口控制转发到 service', async () => {

@@ -180,7 +180,7 @@ pub fn read_snapshot(
     language: &str,
 ) -> Option<String> {
     if let Ok(path) = snapshot_path(oj_id, submit_id, language) {
-        if let Ok(content) = storage.read_to_string(&path) {
+        if let Some(content) = read_real_file(storage, &path) {
             return Some(content);
         }
     }
@@ -192,7 +192,7 @@ pub fn read_snapshot(
         let name = entry.file_name()?.to_string_lossy().to_string();
         if name.starts_with(&prefix) {
             let relative = entry.to_string_lossy().replace('\\', "/");
-            if let Ok(content) = storage.read_to_string(&relative) {
+            if let Some(content) = read_real_file(storage, &relative) {
                 return Some(content);
             }
         }
@@ -236,7 +236,7 @@ pub struct SnapshotUsage {
 /// 并要求真实目录/文件，链接条目直接跳过。
 fn walk_snapshots(storage: &Storage) -> WalkResult {
     let mut result = WalkResult::default();
-    if real_dir_meta(storage, SNAPSHOT_DIR).is_none() {
+    if !is_real_dir(storage, SNAPSHOT_DIR) {
         return result;
     }
     let Ok(entries) = storage.list(SNAPSHOT_DIR) else {
@@ -244,7 +244,7 @@ fn walk_snapshots(storage: &Storage) -> WalkResult {
     };
     for entry in entries {
         let relative_dir = entry.to_string_lossy().replace('\\', "/");
-        if real_dir_meta(storage, &relative_dir).is_none() {
+        if !is_real_dir(storage, &relative_dir) {
             continue;
         }
         result.oj_dirs.push(relative_dir.clone());
@@ -276,17 +276,29 @@ struct WalkResult {
     oj_dirs: Vec<String>,
 }
 
-/// 条目是**真实目录**时返回其 lstat 元数据，否则 `None`。
+/// 条目是否为**真实目录**（lstat，不跟随链接）。
 ///
-/// `symlink_metadata`（lstat）不跟随链接：符号链接与 Windows junction 的
-/// `is_dir()` 均为 false（junction 实测 `is_symlink() == true`），因此本函数
-/// 天然把链接挡在统计与清理之外。`submissions/` 根、OJ 子目录、回收空目录
-/// 三处共用同一判据。
-fn real_dir_meta(storage: &Storage, relative: &str) -> Option<std::fs::Metadata> {
+/// `symlink_metadata` 不跟随链接：符号链接与 Windows junction 的 `is_dir()`
+/// 均为 false（junction 实测 `is_symlink() == true`），因此本函数天然把链接
+/// 挡在统计与清理之外。`submissions/` 根、OJ 子目录、回收空目录三处共用。
+fn is_real_dir(storage: &Storage, relative: &str) -> bool {
     storage
         .symlink_metadata(relative)
-        .ok()
-        .filter(|meta| meta.is_dir())
+        .is_ok_and(|meta| meta.is_dir())
+}
+
+/// 读取**真实文件**的内容（lstat 不跟随链接）。
+///
+/// 与遍历/清理同一判据：`submissions/{oj}/{id}.cpp` 若是指向数据目录外的
+/// 链接，直接 `read_to_string` 会把外部文件内容当提交代码回给详情页。读取前
+/// 先 lstat 并要求 `is_file()`（链接的 `is_file()` 为 false）。残余窗口同
+/// 遍历/清理：lstat 与读取之间的本地并发替换，见 `snapshot.md` 设计要点。
+fn read_real_file(storage: &Storage, relative: &str) -> Option<String> {
+    let meta = storage.symlink_metadata(relative).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    storage.read_to_string(relative).ok()
 }
 
 /// 统计留档占用（含过期部分），供清理前的预览展示。
@@ -334,7 +346,7 @@ pub fn purge_stale_snapshots(storage: &Storage, keep_days: u64) -> (usize, u64) 
         // 复用 walk 已枚举并确认过「真实目录」的 OJ 子目录（不再重复
         // `list(submissions/)`）；删除前仍逐条 lstat 作纵深防御。
         for relative in walk.oj_dirs {
-            if real_dir_meta(storage, &relative).is_none() {
+            if !is_real_dir(storage, &relative) {
                 continue;
             }
             // `remove_empty_dir` 只做 `fs::remove_dir`：目录专用、不跟随链接

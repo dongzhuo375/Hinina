@@ -272,9 +272,10 @@ fn walk_and_purge_ignore_symlinks() {
     );
 }
 
-/// 回收趟只删**真实空目录**：`submissions/` 根下的普通杂项条目必须原样保留
-/// （旧实现用 `remove()` 分流，对非目录条目走 `remove_file` —— 会把它删掉）。
-/// 跨平台回归：去掉「先 lstat 要求 is_dir」守卫，本用例在两端都会红。
+/// 回收趟只删**真实空目录**：`submissions/` 根下的普通杂项条目必须原样保留。
+/// 本用例锁定的是「不得回退到通用 `remove()`」（它对非目录条目走 `remove_file`，
+/// 会把它删掉）；`fs::remove_dir` 自身就拒绝普通文件，所以单去掉回收趟的
+/// lstat 守卫不会让本用例变红——链接跳过由 junction 用例与 walk 过滤覆盖。
 #[test]
 fn purge_reclaim_pass_preserves_non_directory_entries() {
     let (storage, dir) = temp_storage("reclaim-misc");
@@ -363,4 +364,31 @@ fn walk_ignores_symlinked_snapshot_root() {
     );
     assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
     assert!(outside_file.exists(), "外部目标不得被删除");
+}
+
+/// 读取路径不得跟随符号链接：`submissions/HOJ/1.cpp` 指向数据目录外时，
+/// `read_snapshot` 必须返回 None（不能把外部文件内容当提交代码回给详情页）。
+#[cfg(unix)]
+#[test]
+fn read_snapshot_does_not_follow_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let (storage, dir) = temp_storage("read-symlink");
+    let outside = TempDir::unique("hinina-snapshot-read-outside");
+    std::fs::create_dir_all(outside.path()).unwrap();
+    let secret = outside.path().join("secret.cpp");
+    std::fs::write(&secret, "OUTSIDE-SECRET").unwrap();
+
+    std::fs::create_dir_all(dir.join("submissions/HOJ")).unwrap();
+    let link = dir.join("submissions/HOJ/1.cpp");
+    let expected = snapshot_path("HOJ", "1", "C++").expect("路径构造失败");
+    assert_eq!(expected, "submissions/HOJ/1.cpp");
+    symlink(&secret, &link).unwrap();
+
+    // 精确路径：链接文件必须被拒绝（而不是读到外部内容）
+    assert_eq!(read_snapshot(&storage, "HOJ", "1", "C++"), None);
+    // 回退扫描路径同样拒绝：同前缀的另一语言扩展名链接也不得被读
+    let scan_link = dir.join("submissions/HOJ/1.java");
+    symlink(&secret, &scan_link).unwrap();
+    assert_eq!(read_snapshot(&storage, "HOJ", "1", "Rust"), None);
 }

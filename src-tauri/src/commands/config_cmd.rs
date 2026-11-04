@@ -204,7 +204,8 @@ pub(crate) fn enforced_lock_from_flags(flags: launch_args::LaunchFlags) -> bool 
 
 /// `update_config` 的真实编排（提取供测试直接调用，`#[tauri::command]` 只做薄转发）。
 ///
-/// `maintainer_locked` 是**执行真值**（组合根从 launch_args 推导；测试显式传布尔
+/// `maintainer_locked` 是**执行真值**（`update_config` 命令薄封装内用
+/// `enforced_lock_from_flags(launch_args::get())` 推导；测试显式传布尔
 /// 模拟两种启动模式，不经 launch_args——它是不可重置的进程级 OnceLock）：为真时
 /// 走「锁定字段不动」语义：先
 /// `preserve_locked_fields` 用旧配置覆盖锁定字段，再用放宽后的校验/净化 ——

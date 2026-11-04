@@ -24,11 +24,12 @@ export const useSystemStore = defineStore('system', {
     /**
      * 本次启动是否为 `--settings` 管理方钥匙（进程级判据）。
      *
-     * 必须读**响应式快照**本身而不是调 `systemService.isKeyed()`：Pinia getter
-     * 会缓存，方法调用不建立依赖——若在守卫填充快照前读过一次，会永久缓存
-     * false。直接读 `launchFlags.value.settings` 才能随快照填充重新求值。
+     * 转发 `systemService.isKeyed()`（判据单一来源，服务注释要求各处不直接读
+     * `launchFlags.value.settings`）。Pinia getter 是 computed：求值期间
+     * `isKeyed()` 内部对响应式 `launchFlags` 的读取会被依赖追踪，快照由守卫
+     * 填充后 getter 自动重新求值——不存在「首次读到 false 就永久缓存」的问题。
      */
-    isKeyed: (): boolean => systemService.launchFlags.value.settings,
+    isKeyed: (): boolean => systemService.isKeyed(),
   },
 
   actions: {

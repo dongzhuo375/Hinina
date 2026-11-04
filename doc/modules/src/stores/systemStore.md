@@ -11,9 +11,10 @@ View / component / composable 访问**系统服务**（窗口控制、启动标�
 口径「允许 View 经服务」相矛盾的部分已统一）。
 
 **本 store 不复制状态**：启动标志快照仍由 `systemService.launchFlags` 持有
-（守卫首航填充，早于任何组件挂载）。`isKeyed` 直接读该响应式快照而不是调
-`systemService.isKeyed()`——Pinia getter 会缓存、方法调用不建立依赖，若在
-快照填充前读过一次会永久缓存 false（有测试锁定读快照语义）。
+（守卫首航填充，早于任何组件挂载）。`isKeyed` 转发单一判据
+`systemService.isKeyed()`；Pinia getter 是 computed，求值期间方法内部对
+响应式快照的读取会被依赖追踪，快照填充/变化后自动重新求值（测试用真实
+响应式 ref 打桩，锁定同一 store 实例在快照变化后返回新值）。
 
 ## 核心类型/函数
 
