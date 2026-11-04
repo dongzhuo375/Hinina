@@ -39,6 +39,15 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   }
 }
 
+/// 保存入口的测试便捷封装：生产只有 `runSaveTxn` 一个写入通道（不暴露
+/// 队列化的 `updateConfig`），spec 统一从事务句柄进入，避免各写一遍箭头。
+function save(
+  svc: ConfigService,
+  mutate: (draft: AppConfig) => void,
+): Promise<AppConfig> {
+  return svc.runSaveTxn((tx) => tx.updateConfig(mutate))
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   // 单例服务的进程内缓存必须逐用例清空，否则相互串扰
@@ -342,7 +351,7 @@ describe('switchOj — 真实排队与代际', () => {
     expect(svc.latestOjSwitchResult()).toEqual({ target: 'B', outcome: 'persist-failed' })
   })
 
-  it('任意 updateConfig 成功且 active 匹配时解除 persist-failed', async () => {
+  it('任意保存成功且 active 匹配时解除 persist-failed', async () => {
     const svc = new ConfigService()
     const payload = { OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满' }
     const { variant, message } = parseAppError(payload)
@@ -353,7 +362,7 @@ describe('switchOj — 真实排队与代际', () => {
     config.oj.active = 'X'
     getConfig.mockResolvedValue(config)
     updateConfig.mockResolvedValue(undefined)
-    await svc.updateConfig(() => {})
+    await save(svc, () => {})
 
     expect(svc.latestOjSwitchResult()).toEqual({ target: 'X', outcome: 'success' })
   })
@@ -367,7 +376,7 @@ describe('switchOj — 真实排队与代际', () => {
 
     getConfig.mockResolvedValue(makeConfig()) // active=HOJ
     updateConfig.mockResolvedValue(undefined)
-    await svc.updateConfig(() => {})
+    await save(svc, () => {})
 
     expect(svc.latestOjSwitchResult()).toEqual({ target: 'X', outcome: 'persist-failed' })
   })
@@ -383,7 +392,7 @@ describe('switchOj — 真实排队与代际', () => {
     const persisted = makeConfig()
     persisted.oj.active = 'Hydro'
     updateConfig.mockResolvedValue(persisted)
-    const saved = await svc.updateConfig(() => {})
+    const saved = await save(svc, () => {})
 
     // 后端写锁内实际落盘的是 Hydro：返回值与警告解除都按它判定
     expect(saved.oj.active).toBe('Hydro')
@@ -391,12 +400,12 @@ describe('switchOj — 真实排队与代际', () => {
   })
 })
 
-describe('updateConfig — 设置页保存唯一入口', () => {
+describe('保存入口 — runSaveTxn 事务句柄（唯一写入通道）', () => {
   it('读取当前配置 → 应用变更 → 整体写回 → 失效缓存', async () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockResolvedValue(undefined)
 
-    const saved = await configService.updateConfig((draft) => {
+    const saved = await save(configService, (draft) => {
       draft.editor.fontSize = 18
     })
 
@@ -417,7 +426,7 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockResolvedValue(undefined)
 
-    await configService.updateConfig((draft) => {
+    await save(configService, (draft) => {
       draft.editor.fontSize = 18
     })
 
@@ -431,7 +440,7 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     updateConfig.mockRejectedValue(new Error('磁盘写入失败'))
 
     await expect(
-      configService.updateConfig((draft) => {
+      save(configService, (draft) => {
         draft.editor.fontSize = 18
       }),
     ).rejects.toThrow('磁盘写入失败')
@@ -446,7 +455,7 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     getConfig.mockResolvedValue(current)
     updateConfig.mockResolvedValue(undefined)
 
-    await configService.updateConfig((draft) => {
+    await save(configService, (draft) => {
       draft.layout.splitRatio = 0.66
     })
 
@@ -489,19 +498,26 @@ describe('save 门禁 — 真实排队与代际', () => {
       return second.promise
     })
 
-    const p1 = svc.updateConfig(() => {}).then(() => {
-      order.push('txn-1-done')
+    // 顺序断言记在**事务体内部**而不是调用方的 `.then`：后者的先后只取决于
+    // Promise 包装层数（微任务跳数），不是契约。这里要锁的是「第二个事务的
+    // 工作不得早于第一个事务结束」——去掉排队时 start-2 会先于 end-1。
+    const p1 = svc.runSaveTxn(async (tx) => {
+      order.push('start-1')
+      await tx.updateConfig(() => {})
+      order.push('end-1')
     })
-    const p2 = svc.updateConfig(() => {}).then(() => {
-      order.push('txn-2-done')
+    const p2 = svc.runSaveTxn(async (tx) => {
+      order.push('start-2')
+      await tx.updateConfig(() => {})
+      order.push('end-2')
     })
 
     first.resolve(makeConfig())
     second.resolve(makeConfig())
     await Promise.all([p1, p2])
 
-    // 去掉排队时 bridge-2 会先于 txn-1-done 出现（并发读-改-写）
-    expect(order).toEqual(['bridge-1', 'txn-1-done', 'bridge-2', 'txn-2-done'])
+    // 去掉排队时 start-2 会先于 end-1 出现（并发读-改-写）
+    expect(order).toEqual(['start-1', 'bridge-1', 'end-1', 'start-2', 'bridge-2', 'end-2'])
   })
 
   it('saveEpoch 入队/结束各 +1；saveInFlight 覆盖排队与在途，队尾落地才复位', async () => {
@@ -513,8 +529,8 @@ describe('save 门禁 — 真实排队与代际', () => {
 
     expect(svc.saveEpoch).toBe(0)
     expect(svc.saveInFlight.value).toBe(false)
-    const p1 = svc.updateConfig(() => {})
-    const p2 = svc.updateConfig(() => {})
+    const p1 = save(svc, () => {})
+    const p2 = save(svc, () => {})
     // 两次「入队」各 +1（同步；排队中的事务也算开始，读取方不得忽略）
     expect(svc.saveEpoch).toBe(2)
     expect(svc.saveInFlight.value).toBe(true)
@@ -538,8 +554,8 @@ describe('save 门禁 — 真实排队与代际', () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
 
-    const p1 = svc.updateConfig(() => {})
-    const p2 = svc.updateConfig(() => {})
+    const p1 = save(svc, () => {})
+    const p2 = save(svc, () => {})
     let settled = false
     const waiting = svc.whenSaveSettled().then(() => {
       settled = true
@@ -557,7 +573,7 @@ describe('save 门禁 — 真实排队与代际', () => {
     expect(svc.saveInFlight.value).toBe(false)
   })
 
-  it('runSaveTxn 持锁跨后续编排：事务外的 updateConfig（第二保存入口）排队到事务落地', async () => {
+  it('runSaveTxn 持锁跨后续编排：事务外发起的第二保存（编辑器偏好/分栏比例同款）排队到事务落地', async () => {
     const svc = new ConfigService()
     const saveBridge = deferred<AppConfig>()
     const followUp = deferred<void>()
@@ -581,7 +597,7 @@ describe('save 门禁 — 真实排队与代际', () => {
       order.push('txn-done')
     })
     // 事务进行中发起的第二保存入口（编辑器偏好 / 分栏比例）
-    const prefs = svc.updateConfig(() => {}).then(() => {
+    const prefs = save(svc, () => {}).then(() => {
       order.push('prefs-done')
     })
 
@@ -603,7 +619,7 @@ describe('save 门禁 — 真实排队与代际', () => {
     updateConfig.mockRejectedValueOnce(new Error('写盘失败'))
 
     const epochBefore = svc.saveEpoch
-    await expect(svc.updateConfig(() => {})).rejects.toThrow('写盘失败')
+    await expect(save(svc, () => {})).rejects.toThrow('写盘失败')
 
     expect(svc.saveEpoch).toBe(epochBefore + 2)
     expect(svc.saveInFlight.value).toBe(false)
@@ -614,5 +630,28 @@ describe('save 门禁 — 真实排队与代际', () => {
     expect(settled).toBe(true)
     await svc.getConfig()
     expect(getConfig).toHaveBeenCalledTimes(2) // 失败后缓存已失效，重读后端
+  })
+
+  it('settingsSaveInFlight 只标记设置页事务：后台写入期间设置页门禁保持空闲', async () => {
+    const svc = new ConfigService()
+    const background = deferred<AppConfig>()
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockReturnValueOnce(background.promise)
+
+    // 后台写入（编辑器偏好/分栏比例同款入口）：不传 settingsPage
+    const prefs = save(svc, () => {})
+    await flushMicrotasks()
+
+    // 任意保存队列在途（load 等待用），但设置页的门禁/UI 不被它置位
+    expect(svc.saveInFlight.value).toBe(true)
+    expect(svc.settingsSaveInFlight.value).toBe(false)
+
+    const settingsSave = svc.runSaveTxn(async () => {}, { settingsPage: true })
+    expect(svc.settingsSaveInFlight.value).toBe(true)
+
+    background.resolve(makeConfig())
+    await Promise.all([prefs, settingsSave])
+    expect(svc.saveInFlight.value).toBe(false)
+    expect(svc.settingsSaveInFlight.value).toBe(false)
   })
 })

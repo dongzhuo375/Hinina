@@ -40,9 +40,57 @@ export interface OjSwitchResult {
   outcome: OjSwitchOutcome
 }
 
-/** 保存事务句柄：`runSaveTxn` 回调内的唯一保存通道（直通，不再二次排队） */
+/** 保存事务句柄：`runSaveTxn` 回调内**唯一**的保存通道（直通，不再二次排队） */
 export interface SaveTxn {
   updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig>
+}
+
+/**
+ * 串行队列：任务按入队顺序逐个执行，后一个等前一个落地才开跑。
+ *
+ * 保存与切换两侧同构。原实现各自写一遍链式 Promise，并用两个手动同步的
+ * 布尔量（`saveTail !== null` / `saveBusy`）表示同一件事——任一处漏改就会
+ * 漂移。这里把「入队即置位 / 队尾落地才复位 / 等待捕获时刻的队尾」收敛成
+ * 唯一实现。
+ */
+class SerialQueue {
+  private tail: Promise<unknown> | null = null
+  private readonly busy = ref(false)
+
+  /** 排队或在途（入队即 true；队尾落地且无人再排队才 false） */
+  readonly inFlight: Readonly<Ref<boolean>> = readonly(this.busy)
+
+  /**
+   * 等待**调用时刻**的队尾落地（不向其后的新任务延伸）。
+   *
+   * 需要覆盖「调用之后才入队」的任务时，调用方必须自己复核代际
+   *（`saveEpoch` / `ojSwitchEpoch`）——本方法不承诺这一点。
+   */
+  whenSettled(): Promise<void> {
+    const tail = this.tail
+    return tail ? tail.then(() => {}, () => {}) : Promise.resolve()
+  }
+
+  async enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const previous = this.tail
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    this.tail = gate
+    this.busy.value = true
+    try {
+      if (previous) await previous.then(() => {}, () => {})
+      return await task()
+    } finally {
+      release()
+      // 只有自己仍是队尾才复位：排队在后面的任务已在入队时置位
+      if (this.tail === gate) {
+        this.tail = null
+        this.busy.value = false
+      }
+    }
+  }
 }
 
 /**
@@ -63,8 +111,8 @@ export function isOjSwitchPersistFailed(error: unknown): boolean {
  * 兜底逻辑集中在本服务，避免 IPC 细节与魔法数字散落各处。
  *
  * 缓存策略：配置属于应用级数据，由本服务在进程内缓存（缓存 Promise，使并发
- * 调用共享同一次 IPC）。设置页保存走 `updateConfig()`（写后端 + 失效缓存），
- * 其余读取方下次调用即拿到新值。
+ * 调用共享同一次 IPC）。设置页保存经 `runSaveTxn`（持保存门禁、覆盖
+ * 「保存 → 自动切换」整段）落盘并失效缓存，其余读取方下次调用即拿到新值。
  *
  * 保存门禁：所有写入口（设置页保存、编辑器偏好、分栏比例）经 `runSaveTxn`
  * 走**同一队列**串行——并发的读-改-写会互相覆盖字段（丢更新）。与切换侧
@@ -72,9 +120,8 @@ export function isOjSwitchPersistFailed(error: unknown): boolean {
  */
 export class ConfigService {
   private cache: Promise<AppConfig> | null = null
-  /// 在途 OJ 切换（跨控制器共享）：设置页可能被卸载重挂，
-  /// 单实例的 `switching` 既拦不住新控制器并发切换，也无法让新控制器等待。
-  private pendingSwitch: Promise<void> | null = null
+  /// 切换队列：并发切换串行落地（跨控制器共享）
+  private readonly switchQueue = new SerialQueue()
   /// 切换代际：每次切换**开始与结束**各 +1。读配置的调用方据此检测
   /// 「读取期间发生过切换」，从而在事务落地后重读，而不是把旧 active 展出。
   private switchEpoch = 0
@@ -82,16 +129,24 @@ export class ConfigService {
   /// 「已生效但重启可能回退」的既存事实，设置页晚挂载也要据此提示；后续
   /// 成功切换或任意一次把同一 active 成功落盘的 `updateConfig` 会解除它。
   private lastSwitchResult: OjSwitchResult | null = null
-  /// 保存事务队列尾（跨入口共享）：链式排队，后一次保存等前一次落地再执行。
-  private saveTail: Promise<unknown> | null = null
+  /// 保存队列：所有写入口共用，后一次等前一次落地再执行
+  private readonly saveQueue = new SerialQueue()
   /// 保存代际：每次保存事务**入队与结束**各 +1。读配置的调用方据此检测
   /// 「读取期间发生过保存」，事务落地后重读。排队中的事务也算开始——
   /// 它的意图已冻结，读取方不得忽略。
   private saveEpochCounter = 0
-  /// 保存门禁在途标志：入队即置位，只有队尾落地且无人再排队才复位
-  private readonly saveBusy = ref(false)
-  /** 保存门禁状态（排队或在途均为 true；响应式只读视图，供 UI 禁用态消费） */
-  readonly saveInFlight: Readonly<Ref<boolean>> = readonly(this.saveBusy)
+  /// 设置页发起、尚未落地的保存事务数（同一队列里也可能排在后台写入之后）
+  private settingsSaveDepth = 0
+  private readonly settingsSaveBusy = ref(false)
+  /** 保存门禁状态（排队或在途均为 true；响应式只读视图） */
+  readonly saveInFlight: Readonly<Ref<boolean>> = this.saveQueue.inFlight
+  /**
+   * **设置页发起**的保存事务是否在途（UI 的「保存中…」、保存按钮禁用、
+   * 与 OJ 切换的双向互斥都用它）。与 `saveInFlight` 的区别：后者还包含
+   * 编辑器偏好/分栏比例等**后台写入**——那些不该让设置页的下拉框与保存
+   * 按钮产生反应（后台写入排在队列里等它落地即可，不构成用户意图冲突）。
+   */
+  readonly settingsSaveInFlight: Readonly<Ref<boolean>> = readonly(this.settingsSaveBusy)
 
   /** 最近一次已生效切换的结果（未发生生效切换时为 null） */
   latestOjSwitchResult(): OjSwitchResult | null {
@@ -105,18 +160,18 @@ export class ConfigService {
 
   /** 是否有 OJ 切换在途（跨控制器） */
   get ojSwitchInFlight(): boolean {
-    return this.pendingSwitch !== null
+    return this.switchQueue.inFlight.value
   }
 
   /**
    * 等待在途 OJ 切换落地（不向等待者抛出切换错误）。
    *
    * 新挂载的设置页控制器在读取配置前必须等它：否则读到的可能是切换前的
-   * 旧 active，而旧控制器的完成回调不会再刷新新控制器。
+   * 旧 active，而旧控制器的完成回调不会再刷新新控制器。只覆盖调用时刻已
+   * 排队的切换，之后的切换由 `ojSwitchEpoch` 复查。
    */
   whenOjSwitchSettled(): Promise<void> {
-    const pending = this.pendingSwitch
-    return pending ? pending.catch(() => {}) : Promise.resolve()
+    return this.switchQueue.whenSettled()
   }
 
   /** 当前保存代际（只读；语义见 `saveEpochCounter`） */
@@ -127,12 +182,12 @@ export class ConfigService {
   /**
    * 等待在途/排队中的保存事务落地（不向等待者抛出保存错误）。
    *
-   * 返回**捕获时刻的队尾**：等待者不会漏掉其后排队的事务（与
-   * `whenOjSwitchSettled` 的队尾语义对称）。
+   * 只覆盖**调用时刻已排队**的事务：之后才入队的不在其中。需要连
+   * 「等待期间新开始的保存」一并覆盖的调用方，必须自己复核 `saveEpoch`
+   *（`useSettingsForm.load` 的循环即此）。
    */
   whenSaveSettled(): Promise<void> {
-    const tail = this.saveTail
-    return tail ? tail.then(() => {}, () => {}) : Promise.resolve()
+    return this.saveQueue.whenSettled()
   }
 
   /**
@@ -140,33 +195,34 @@ export class ConfigService {
    * 复合操作（旧实现靠设置页 composable 的模块级 `saving` 手动圈住，
    * 编辑器偏好/分栏比例等第二保存入口绕过它——现在所有入口同一队列）。
    *
-   * 回调内用 `tx.updateConfig` 保存（直通，不再二次排队）；**禁止**在回调内
-   * 调用公共 `updateConfig` —— 它会排队等本事务释放，等于等自己（死锁）。
+   * 回调内**只能**用 `tx.updateConfig` 保存（直通，不再二次排队）。本类不提供
+   * 公共的队列化保存方法，所以「在回调里调它、排队等自己」这种写法没有对应
+   * 的 API 可写；不要在回调内再嵌套 `runSaveTxn`（同样会排在自身门禁之后）。
    * `switchOj` 是独立队列，回调内调用安全（保存新建实例后的自动切换正是如此）。
+   *
+   * `options.settingsPage` 标记「本事务由设置页发起」：只有这类事务会置位
+   * `settingsSaveInFlight`，后台写入不参与设置页的 UI 门禁。
    */
-  async runSaveTxn<T>(fn: (tx: SaveTxn) => Promise<T>): Promise<T> {
-    const previous = this.saveTail
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    this.saveTail = gate
-    // 入队即视为开始：busy 与代际同步置位。若等真正执行才置位，「已排队、
-    // busy 仍 false」的窗口里另一控制器的显式切换可插队落地，随后本事务
-    // 仍按旧 target 自动切换——重演「较旧意图覆盖较新选择」。
-    this.saveBusy.value = true
+  async runSaveTxn<T>(
+    fn: (tx: SaveTxn) => Promise<T>,
+    options: { settingsPage?: boolean } = {},
+  ): Promise<T> {
+    // 入队即视为开始：代际同步 +1（busy 由队列在 enqueue 内置位）。若等真正
+    // 执行才置位，「已排队、busy 仍 false」的窗口里另一控制器的显式切换可
+    // 插队落地，随后本事务仍按旧 target 自动切换——重演「较旧意图覆盖较新选择」。
     this.saveEpochCounter += 1
+    if (options.settingsPage) {
+      this.settingsSaveDepth += 1
+      this.settingsSaveBusy.value = true
+    }
     const tx: SaveTxn = { updateConfig: (mutate) => this.updateConfigNow(mutate) }
     try {
-      if (previous) await previous.then(() => {}, () => {})
-      return await fn(tx)
+      return await this.saveQueue.enqueue(() => fn(tx))
     } finally {
       this.saveEpochCounter += 1
-      release()
-      // 只有自己仍是队尾才复位 busy：排队在后面的事务已在入队时置位
-      if (this.saveTail === gate) {
-        this.saveTail = null
-        this.saveBusy.value = false
+      if (options.settingsPage) {
+        this.settingsSaveDepth -= 1
+        if (this.settingsSaveDepth === 0) this.settingsSaveBusy.value = false
       }
     }
   }
@@ -195,35 +251,31 @@ export class ConfigService {
    * 本地缓存在切换后失效，后续读取拿到新 active。
    *
    * **并发调用排队**而不是并行发出：后一次切换等前一次落地再执行。后端已有
-   * 写事务保证最终一致，这里保证 `whenOjSwitchSettled` 覆盖全部排队工作
-   *（设置页新控制器等待时不会漏掉队尾的切换）。
+   * 写事务保证最终一致，这里保证 `whenOjSwitchSettled` 覆盖调用时刻已排队的
+   * 全部切换（设置页新控制器等待时不会漏掉队尾）；其后才发起的切换由
+   * `ojSwitchEpoch` 复查兜住。
    */
   async switchOj(ojId: string): Promise<void> {
     this.switchEpoch += 1
-    const previous = this.pendingSwitch
-    const run = (async () => {
-      if (previous) await previous.catch(() => {})
-      try {
-        await configBridge.switchOj(ojId)
-      } catch (e) {
-        // 切换已生效但持久化失败：后端 registry 与内存已是新 OJ，**陈旧缓存必须
-        // 失效**——否则后续读取/保存会把旧 active 再写回去，造成 register=新、
-        // 配置=旧 的再次分叉。结果同时留给设置页晚挂载提示。
-        if (isOjSwitchPersistFailed(e)) {
-          this.invalidate()
-          this.lastSwitchResult = { target: ojId, outcome: 'persist-failed' }
-        }
-        // 普通失败（切换未生效）不覆盖既存的生效结果
-        throw e
-      }
-      this.lastSwitchResult = { target: ojId, outcome: 'success' }
-      this.invalidate()
-    })()
-    this.pendingSwitch = run
     try {
-      await run
+      await this.switchQueue.enqueue(async () => {
+        try {
+          await configBridge.switchOj(ojId)
+        } catch (e) {
+          // 切换已生效但持久化失败：后端 registry 与内存已是新 OJ，**陈旧缓存必须
+          // 失效**——否则后续读取/保存会把旧 active 再写回去，造成 register=新、
+          // 配置=旧 的再次分叉。结果同时留给设置页晚挂载提示。
+          if (isOjSwitchPersistFailed(e)) {
+            this.invalidate()
+            this.lastSwitchResult = { target: ojId, outcome: 'persist-failed' }
+          }
+          // 普通失败（切换未生效）不覆盖既存的生效结果
+          throw e
+        }
+        this.lastSwitchResult = { target: ojId, outcome: 'success' }
+        this.invalidate()
+      })
     } finally {
-      if (this.pendingSwitch === run) this.pendingSwitch = null
       this.switchEpoch += 1
     }
   }
@@ -341,31 +393,35 @@ export class ConfigService {
   /**
    * 保存编辑器偏好（字号 / Tab 宽度 / 编辑器主题）—— 解题页编辑器设置弹层的落盘入口。
    *
-   * 只写传入的字段，其余配置经 `updateConfig` 读-改-写保留。编辑器主题落在
+   * 只写传入的字段，其余配置经事务句柄读-改-写保留。编辑器主题落在
    * `theme.editorTheme`（Monaco 主题）：客户端界面仍只有浅色，深色只作用于
    * 编辑器区域（旧版整机主题字段 themeName 已随 ThemeService 删除）。
    */
   async updateEditorPrefs(patch: Partial<EditorPrefs>): Promise<void> {
-    await this.updateConfig((draft) => {
+    await this.runSaveTxn((tx) => tx.updateConfig((draft) => {
       if (patch.fontSize !== undefined) draft.editor.fontSize = patch.fontSize
       if (patch.tabSize !== undefined) draft.editor.tabSize = patch.tabSize
       if (patch.editorTheme !== undefined) draft.theme.editorTheme = normalizeEditorTheme(patch.editorTheme)
-    })
+    }))
+  }
+
+  /** 保存分栏比例（解题页拖拽结束后落盘；后台写入，不参与设置页门禁） */
+  async saveSplitRatio(ratio: number): Promise<void> {
+    await this.runSaveTxn((tx) => tx.updateConfig((draft) => {
+      draft.layout.splitRatio = ratio
+    }))
   }
 
   /**
-   * 更新配置的通用入口：读取当前配置 → 应用变更 → 整体写回后端 → 失效本地缓存。
+   * 保存主体：读取当前配置 → 应用变更 → 整体写回后端 → 失效本地缓存。
    *
    * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
    * 避免局部字段把其余配置冲掉。返回写入后的配置供调用方直接使用。
    *
-   * 经保存门禁串行：设置页保存、编辑器偏好、分栏比例等全部入口同一队列
-   * （`runSaveTxn`），并发的读-改-写不交错。需要「保存 → 后续编排」整段
-   * 持锁的复合操作（如保存新建实例后的自动切换）改用 `runSaveTxn`。
+   * **只经 `runSaveTxn` 的回调句柄调用**（`tx.updateConfig`）——本类不暴露
+   * 公共的队列化保存方法，否则在事务回调里调它会排队等自己（把「能不能写
+   * 错」从「靠约定」变成「写不出来」：没有那个名字可调）。
    */
-  async updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
-    return this.runSaveTxn((tx) => tx.updateConfig(mutate))
-  }
 
   /// 无门禁的保存主体：只供 `runSaveTxn` 的直通变体调用，公共入口一律先过门禁
   private async updateConfigNow(mutate: (draft: AppConfig) => void): Promise<AppConfig> {

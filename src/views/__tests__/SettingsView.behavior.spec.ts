@@ -29,18 +29,22 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/services/config.service', async () => {
   const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
   const busy = ref(false)
+  const settingsBusy = ref(false)
   // 视图级只需「保存门禁 busy 可见 + 直通 bridge 缝」（「保存在途禁用 OJ 域」
   // 依赖 busy 响应式翻转）；真实排队语义由 config.service.spec 的「save 门禁」套件锁定
   async function runSaveTxn<T>(
     fn: (tx: {
       updateConfig: (mutate: (draft: AppConfig) => void) => Promise<AppConfig>
     }) => Promise<T>,
+    options: { settingsPage?: boolean } = {},
   ): Promise<T> {
     busy.value = true
+    if (options.settingsPage) settingsBusy.value = true
     try {
       return await fn({ updateConfig: (mutate) => mocks.updateConfig(mutate) })
     } finally {
       busy.value = false
+      if (options.settingsPage) settingsBusy.value = false
     }
   }
   return {
@@ -58,6 +62,7 @@ vi.mock('@/services/config.service', async () => {
         return 0
       },
       saveInFlight: readonly(busy),
+      settingsSaveInFlight: readonly(settingsBusy),
       whenSaveSettled: async () => {},
       runSaveTxn,
     },

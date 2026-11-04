@@ -41,6 +41,9 @@ const saveState = vi.hoisted(() => ({
   tail: null as Promise<unknown> | null,
   epoch: 0,
   busy: null as { value: boolean } | null,
+  /// 设置页发起的事务在途（与生产 `settingsSaveInFlight` 同构）
+  settingsBusy: null as { value: boolean } | null,
+  settingsDepth: 0,
 }))
 
 function settleSwitch(run: Promise<void>): void {
@@ -59,13 +62,17 @@ vi.mock('@/services/config.service', async () => {
   const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
   const saveBusy = ref(false)
   saveState.busy = saveBusy
+  const settingsSaveBusy = ref(false)
+  saveState.settingsBusy = settingsSaveBusy
 
   /// 与生产 `runSaveTxn` 同构：入队即置位/代际 +1，链式等前一个落地，
-  /// 只有队尾落地且无人再排队才复位；事务内直通 `tx.updateConfig`（不再排队）
+  /// 只有队尾落地且无人再排队才复位；事务内直通 `tx.updateConfig`（不再排队）。
+  /// `options.settingsPage` 只影响 `settingsSaveInFlight`（后台写入不置位）。
   async function runSaveTxn<T>(
     fn: (tx: {
       updateConfig: (mutate: (draft: AppConfig) => void) => Promise<AppConfig>
     }) => Promise<T>,
+    options: { settingsPage?: boolean } = {},
   ): Promise<T> {
     const previous = saveState.tail
     let release!: () => void
@@ -75,6 +82,10 @@ vi.mock('@/services/config.service', async () => {
     saveState.tail = gate
     saveBusy.value = true
     saveState.epoch += 1
+    if (options.settingsPage) {
+      saveState.settingsDepth += 1
+      settingsSaveBusy.value = true
+    }
     try {
       if (previous) await previous.then(() => {}, () => {})
       return await fn({
@@ -90,6 +101,10 @@ vi.mock('@/services/config.service', async () => {
       if (saveState.tail === gate) {
         saveState.tail = null
         saveBusy.value = false
+      }
+      if (options.settingsPage) {
+        saveState.settingsDepth -= 1
+        if (saveState.settingsDepth === 0) settingsSaveBusy.value = false
       }
     }
   }
@@ -133,6 +148,7 @@ vi.mock('@/services/config.service', async () => {
         return saveState.epoch
       },
       saveInFlight: readonly(saveBusy),
+      settingsSaveInFlight: readonly(settingsSaveBusy),
       whenSaveSettled: () => {
         const tail = saveState.tail
         return tail ? tail.then(() => {}, () => {}) : Promise.resolve()
@@ -549,6 +565,31 @@ describe('useSettingsForm', () => {
     expect(mocks.switchOj).not.toHaveBeenCalled()
     releaseSave()
     await saving
+  })
+
+  it('后台写入不阻塞显式切换：编辑器偏好/分栏比例在途时 OJ 下拉不被静默回退', async () => {
+    await settings.load()
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    mocks.switchOj.mockResolvedValue(undefined)
+
+    // 后台写入（不标记 settingsPage）：只排保存队列，不进入设置页门禁
+    let releaseBackground!: () => void
+    const background = configService.runSaveTxn(
+      () => new Promise<void>((resolve) => { releaseBackground = resolve }),
+    )
+    await vi.waitFor(() => expect(configService.saveInFlight.value).toBe(true))
+    expect(settings.saving.value).toBe(false)
+
+    settings.form.activeOj = 'Hydro'
+    await settings.onSwitchOj()
+
+    // 修复前（saving 直接取 saveInFlight）：下拉被静默回退，不发起切换
+    expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
+    expect(settings.form.activeOj).toBe('Hydro')
+
+    releaseBackground()
+    await background
   })
 
   it('旧控制器卸载后完成切换，新控制器等待事务并读到新 active', async () => {

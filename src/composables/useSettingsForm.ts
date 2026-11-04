@@ -141,10 +141,12 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
   const dirty = computed(() => baseline.value !== '' && snapshot() !== baseline.value)
 
-  /// 保存进行中（服务级共享 `configService.saveInFlight`）：覆盖 `save → 自动切换`
-  /// 整段（`runSaveTxn`），新挂载的控制器在旧控制器保存完成前不得发起切换/保存
-  /// （否则旧意图可覆盖用户较新的选择）。
-  const saving = configService.saveInFlight
+  /// **设置页发起**的保存事务在途（服务级共享，跨控制器）：覆盖
+  /// `save → 自动切换` 整段（`runSaveTxn(..., { settingsPage: true })`），
+  /// 新挂载的控制器在旧控制器保存完成前不得发起切换/保存（否则旧意图可覆盖
+  /// 用户较新的选择）。**不含**编辑器偏好/分栏比例等后台写入——那类写入只
+  /// 排在保存队列里，不该让设置页的下拉与保存按钮产生反应。
+  const saving = configService.settingsSaveInFlight
   const saveError = ref<string | null>(null)
   const { value: showSaved, show: markSaved, clear: clearSaved } = useTransientValue(false, 3_000)
 
@@ -376,10 +378,17 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   async function onSwitchOj(): Promise<void> {
-    // 单飞：切换进行中、或正在保存时，再次选择直接忽略并回退下拉
-    //（两条写路径必须双向互斥）
-    if (switching.value || saving.value) {
+    // 单飞：切换进行中直接忽略并回退下拉（两条写路径双向互斥）；本页/其它
+    // 控制器的**设置页保存**在途时同样拒绝，但要给出提示——静默回退会让用户
+    // 以为下拉坏了。后台写入（编辑器偏好/分栏比例）不在此列：它们只是排在
+    // 保存队列里，切换照常发起（后端写事务会把两者串行）。
+    if (switching.value) {
       form.activeOj = persistedActive.value
+      return
+    }
+    if (saving.value) {
+      form.activeOj = persistedActive.value
+      switchNotice.value = '正在保存配置，请稍候再切换 OJ'
       return
     }
     switchError.value = null
@@ -486,18 +495,20 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     loading.value = true
     loadError.value = null
     try {
-      // 新挂载的控制器若撞上旧控制器的在途保存（含自动切换），先等它落地：
-      // 否则读到的是保存前的配置，而普通保存不会发切换通知来刷新本页。
+      // 新挂载的控制器若撞上在途保存（含旧控制器的设置页保存、后台写入与自动
+      // 切换），先等它落地：否则读到的是保存前的配置，而普通保存不会发切换
+      // 通知来刷新本页。这里必须用**任意保存**的 `saveInFlight`（`saving`
+      // 只表示设置页事务，会漏掉后台写入）。
       // 无保存时**同步**通过，保持既有「invalidate → getConfig → 其它读取」
       // 的启动顺序（SettingsView 行为用例锁定）；读完后若又有保存开始，重读。
       let config: AppConfig
       for (;;) {
-        if (saving.value) await configService.whenSaveSettled()
+        if (configService.saveInFlight.value) await configService.whenSaveSettled()
         // 等待结束后再捕获代际：保存结束必然 +1，若沿用等待前的值会固定多读一次
         const epoch = configService.saveEpoch
         config = await readSettledConfig()
         // 读取期间若有保存开始/结束（epoch 变化）或仍有保存在途，重读
-        if (!saving.value && epoch === configService.saveEpoch) break
+        if (!configService.saveInFlight.value && epoch === configService.saveEpoch) break
       }
       if (disposed) return
       populate(config)
@@ -524,9 +535,9 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     // 走自动切换：否则 switch_oj 对不存在的实例失败，会谎报「实例已保存；
     // 切换未成功」（手改 active 指向缺失实例时可达）
     const isNewInstance = !lockAll && !ojInstances.value.some((i) => i.id === target)
-    // 保存事务：`saving`（= configService.saveInFlight）在**入队时**同步置位，
-    // 覆盖「保存 → 自动切换」整段；释放/代际/等待队列由服务层负责（含编辑器
-    // 偏好、分栏比例等其它保存入口与本事务串行）
+    // 保存事务：`saving`（= configService.settingsSaveInFlight）在**入队时**
+    // 同步置位，覆盖「保存 → 自动切换」整段；释放/代际/等待队列由服务层负责
+    //（含编辑器偏好、分栏比例等后台写入与本事务串行）
     try {
       await configService.runSaveTxn(async (tx) => {
         const saved = await tx.updateConfig((draft) => {
@@ -593,7 +604,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
             switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
           }
         }
-      })
+      }, { settingsPage: true })
     } catch (e) {
       if (!disposed) saveError.value = errorMessage(e, '保存配置失败')
     }
