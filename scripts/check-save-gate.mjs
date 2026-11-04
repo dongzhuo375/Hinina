@@ -28,7 +28,13 @@
 //      be resolvable and clean (fail-closed, same as rule 2).
 //
 // Rule 2 also follows **same-file local helpers** (callback → performSwitch →
-// saveSplitRatio), so a helper gaining a queued call is caught.
+// saveSplitRatio), so a helper gaining a queued call is caught — across the
+// shapes this repo actually writes: `function` declarations (with return-type
+// annotations), block- and expression-body arrows (`=> expr` captured to `;` /
+// newline), and class/object methods (`name(...) {`). What is *not* tracked:
+// cross-file helpers, aliases, dynamic lookup, and multi-line expression
+// bodies (truncated at the first newline) — unknown *callback* forms fail
+// closed instead.
 //
 // Why not "structural" enforcement (only `SaveTxn` reachable): JS has no async
 // context (`AsyncLocalStorage` is Node-only), so a callback can always call a
@@ -235,49 +241,122 @@ export function calledNames(body) {
   return names
 }
 
-/// 从 `afterName` 起解析一个函数声明/箭头函数的正文（无正文返回 null）。
+/// 从 `afterName` 起解析一个 **函数声明** 的正文（无正文返回 null）。
+///
+/// 评审抓到的漏报形态：`function pick(): () => void {` 的返回类型注解里也有
+/// `=>`，旧实现把它当成箭头函数的箭头、正文截成 "void"。修正：跳过配对的
+/// 类型注解括号与注解内的 `=>`，正文从首个深度 0 的 `{` 取配对块；裸 `=` 或
+/// `;` 意味着这不是函数声明的形状，返回 null。
 function declBody(source, afterName) {
   const openParen = source.indexOf('(', afterName)
   if (openParen === -1) return null
   const params = readBalanced(source, openParen, '(', ')')
   if (params === null) return null
   let i = openParen + params.length + 2
-  while (i < source.length && source[i] !== '{' && source[i] !== '=' && source[i] !== ';') i += 1
-  if (source[i] === '=' && source[i + 1] === '>') {
-    i += 2
-    while (i < source.length && /\s/.test(source[i])) i += 1
-    if (source[i] === '{') return readBalanced(source, i, '{', '}')
-    let j = i
-    while (j < source.length && source[j] !== ';' && source[j] !== '\n') j += 1
-    return source.slice(i, j)
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      i += 1
+      while (i < source.length) {
+        if (source[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (source[i] === quote) {
+          i += 1
+          break
+        }
+        i += 1
+      }
+      continue
+    }
+    if (ch === '(') {
+      const inner = readBalanced(source, i, '(', ')')
+      if (inner === null) return null
+      i += inner.length + 2
+      continue
+    }
+    if (ch === '{') return readBalanced(source, i, '{', '}')
+    if (ch === '=') {
+      // 函数声明分支里出现的 `=>` 只可能是返回类型注解的一部分
+      if (source[i + 1] === '>') {
+        i += 2
+        continue
+      }
+      return null
+    }
+    if (ch === ';') return null
+    i += 1
   }
-  if (source[i] === '{') return readBalanced(source, i, '{', '}')
   return null
 }
 
+/// 从 `=>` 之后解析箭头函数正文：块体取配对花括号；表达式体截到 `;` 或换行
+///（跳过字符串字面量，多行表达式会被截断——见文件头局限）。
+function arrowBody(source, afterArrow) {
+  let i = afterArrow
+  while (i < source.length && /\s/.test(source[i])) i += 1
+  if (source[i] === '{') return readBalanced(source, i, '{', '}')
+  let j = i
+  while (j < source.length) {
+    const ch = source[j]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      j += 1
+      while (j < source.length) {
+        if (source[j] === '\\') {
+          j += 2
+          continue
+        }
+        if (source[j] === quote) {
+          j += 1
+          break
+        }
+        j += 1
+      }
+      continue
+    }
+    if (ch === ';' || ch === '\n') break
+    j += 1
+  }
+  return source.slice(i, j)
+}
+
 /**
- * 同一文件内的局部函数表（`function name(...)` 与 `const name = (...) => {...}`）。
+ * 同一文件内的局部函数表，覆盖本仓实际会写的形态：
+ * - `function name(...)` 声明（含返回类型注解，正文换行）
+ * - `const name = (...) => {...}` 块体箭头 与 `const name = (...) => expr` 表达式体箭头
+ * - 类/对象方法 `name(...) {`（含 getter；`function`/关键字形态由 declRe 先消费）
  *
  * 只为「回调 → 局部辅助函数 → 排队入口」这条**传递路径**服务：直接调用由
- * `txnCallbackBodies` 的正文检查覆盖，跨文件/别名/动态调用不在能力范围内
- *（见文件头的局限声明）。
+ * 事务回调的正文检查覆盖，跨文件/别名/动态调用不在能力范围内（见文件头）。
  */
 export function localFunctions(source) {
   const table = new Map()
-  const declRe = /\bfunction\s+([A-Za-z_$][\w$]*)|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=]+)?=>\s*\{/g
+  const declRe = /\bfunction\s+([A-Za-z_$][\w$]*)|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=]+)?=>/g
   let match
   while ((match = declRe.exec(source))) {
     const name = match[1] ?? match[2]
     if (name === undefined || table.has(name)) continue
     const isFunction = match[1] !== undefined
-    let body = null
-    if (isFunction) {
-      body = declBody(source, declRe.lastIndex)
-    } else {
-      // 箭头函数：regex 已定位到 `{` 之前，取该花括号的配对正文
-      const braceStart = declRe.lastIndex - 1
-      body = readBalanced(source, braceStart, '{', '}')
-    }
+    const body = isFunction
+      ? declBody(source, declRe.lastIndex)
+      : arrowBody(source, declRe.lastIndex)
+    if (body !== null) table.set(name, body)
+  }
+  // 方法形态：`name(...) {`（排除关键字与已收录名字）。合法 TS 里「调用后跟
+  // 块」只会出现在类/对象体中；误收的条目只会多扫一些正文，方向是保守的。
+  const methodRe = /\b([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g
+  while ((match = methodRe.exec(source))) {
+    const name = match[1]
+    if (NOT_CALLS.has(name) || table.has(name)) continue
+    const params = readBalanced(source, match.index + match[0].length - 1, '(', ')')
+    if (params === null) continue
+    let i = match.index + match[0].length - 1 + params.length + 2
+    while (i < source.length && /\s/.test(source[i])) i += 1
+    if (source[i] !== '{') continue
+    const body = readBalanced(source, i, '{', '}')
     if (body !== null) table.set(name, body)
   }
   return table

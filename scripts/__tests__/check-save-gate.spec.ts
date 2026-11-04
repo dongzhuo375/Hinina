@@ -162,6 +162,85 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
     expect(violations[0]).toContain('updateEditorPrefs')
   })
 
+  it('表达式体箭头辅助函数同样追踪（=> expr，A 形态）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          const pushPrefs = (tx) => tx.saveSplitRatio?.(0.5)
+          await configService.runSaveTxn((tx) => {
+            pushPrefs(tx)
+            return tx.updateConfig(() => {})
+          })
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('pushPrefs')
+    expect(violations[0]).toContain('saveSplitRatio')
+  })
+
+  it('带返回类型注解、正文换行的命名函数同样追踪（B 形态）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          function pick(): () => void {
+            return configService.saveSplitRatio(0.5)
+          }
+          await configService.runSaveTxn((tx) => {
+            pick()
+            return tx.updateConfig(() => {})
+          })
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('pick')
+    expect(violations[0]).toContain('saveSplitRatio')
+  })
+
+  it('类/对象方法辅助函数同样追踪（C 形态）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          class Ctl {
+            helper() { return configService.updateEditorPrefs({ fontSize: 15 }) }
+          }
+          const ctl = new Ctl()
+          await configService.runSaveTxn((tx) => {
+            ctl.helper()
+            return tx.updateConfig(() => {})
+          })
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('helper')
+    expect(violations[0]).toContain('updateEditorPrefs')
+  })
+
+  it('带注解的函数声明正文不被返回类型注解里的 => 截断（B 的对照）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          function makeLoader(): () => Promise<void> {
+            return async () => { await configService.updateEditorPrefs({ fontSize: 15 }) }
+          }
+          await configService.runSaveTxn(async (tx) => {
+            await makeLoader()
+            await tx.updateConfig(() => {})
+          })
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('makeLoader')
+    expect(violations[0]).toContain('updateEditorPrefs')
+  })
+
   it('安全的辅助函数（只调独立队列 switchOj）不报违规', () => {
     const violations = findViolations([
       {
