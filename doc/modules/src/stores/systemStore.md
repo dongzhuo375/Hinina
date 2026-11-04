@@ -16,6 +16,13 @@ View / component / composable 访问**系统服务**（窗口控制、启动标�
 响应式快照的读取会被依赖追踪，快照填充/变化后自动重新求值（测试用真实
 响应式 ref 打桩，锁定同一 store 实例在快照变化后返回新值）。
 
+**为什么是逐个显式转发**（而非把 service 对象挂在 store 上或做成动态门面）：
+① View 只能看到 store 的**有类型方法**，拿不到 service 实例——否则 `store.service.x()`
+又绕回了 View→Service，严格口径失效；② 每个方法都可被 spec 直接断言（转发目标与
+回传值），新增系统接口的「三处改动」（bridge / service / store）是分层代价：
+bridge 管 IPC、service 管编排、store 管 UI 入口，各层职责不同，合并会重新制造
+「service 兼顾视图调用」的旧问题。
+
 ## 核心类型/函数
 
 | 名称 | 签名 | 说明 |

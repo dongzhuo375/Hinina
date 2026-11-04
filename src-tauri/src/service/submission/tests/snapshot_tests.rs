@@ -392,3 +392,25 @@ fn read_snapshot_does_not_follow_symlinks() {
     symlink(&secret, &scan_link).unwrap();
     assert_eq!(read_snapshot(&storage, "HOJ", "1", "Rust"), None);
 }
+
+/// 中间层级（`submissions/{oj}`）是指向外部的链接时，读取必须拒绝：
+/// `lstat` 只不跟随最后一级，顺着链接会读到外部真实文件——精确路径与
+/// `list()` 回退两条路径都要先过 `is_real_dir`。
+#[cfg(unix)]
+#[test]
+fn read_snapshot_rejects_symlinked_oj_directory() {
+    use std::os::unix::fs::symlink;
+
+    let (storage, dir) = temp_storage("read-oj-dir-link");
+    let outside = TempDir::unique("hinina-snapshot-read-oj-outside");
+    std::fs::create_dir_all(outside.path().join("HOJ")).unwrap();
+    std::fs::write(outside.path().join("HOJ/1.cpp"), "OUTSIDE-SECRET").unwrap();
+    std::fs::create_dir_all(dir.join("submissions")).unwrap();
+    // submissions/HOJ → 外部目录（真实目录，不是文件）
+    symlink(outside.path().join("HOJ"), dir.join("submissions/HOJ")).unwrap();
+
+    // 精确路径：链接目录下面的 1.cpp 在 lstat 下是真实文件，必须靠目录判据拦住
+    assert_eq!(read_snapshot(&storage, "HOJ", "1", "C++"), None);
+    // 回退扫描：列目录前就应拒绝，不得读到外部内容
+    assert_eq!(read_snapshot(&storage, "HOJ", "1", "Rust"), None);
+}

@@ -179,13 +179,20 @@ pub fn read_snapshot(
     submit_id: &str,
     language: &str,
 ) -> Option<String> {
+    // **中间层级也要查**：lstat 只不跟随最后一个组件，`submissions/HOJ` 若是指向
+    // 数据目录外的链接，`submissions/HOJ/1.cpp` 会顺着链接解析到外部真实文件、
+    // 末级 `is_file()` 照样为真——与 walk/清理的 is_real_dir 判据必须一致。
+    let dir = snapshot_dir(oj_id).ok()?;
+    if !is_real_dir(storage, SNAPSHOT_DIR) || !is_real_dir(storage, &dir) {
+        return None;
+    }
+
     if let Ok(path) = snapshot_path(oj_id, submit_id, language) {
         if let Some(content) = read_real_file(storage, &path) {
             return Some(content);
         }
     }
 
-    let dir = snapshot_dir(oj_id).ok()?;
     let prefix = format!("{}.", submit_id);
     let entries = storage.list(&dir).ok()?;
     for entry in entries {
@@ -343,16 +350,14 @@ pub fn purge_stale_snapshots(storage: &Storage, keep_days: u64) -> (usize, u64) 
     }
 
     if removed > 0 {
-        // 复用 walk 已枚举并确认过「真实目录」的 OJ 子目录（不再重复
-        // `list(submissions/)`）；删除前仍逐条 lstat 作纵深防御。
+        // 复用 walk 已枚举的真实 OJ 子目录（不重复 `list(submissions/)`）。
+        // 删除前逐条 lstat 是纵深防御：walk 与回收之间目录可能被替换（同一
+        // 类 TOCTOU 残余）；删除只走 `remove_empty_dir`（目录专用、非递归、
+        // 不跟随链接），所以最坏后果仅限链接条目本身，外部目标不受影响。
         for relative in walk.oj_dirs {
             if !is_real_dir(storage, &relative) {
                 continue;
             }
-            // `remove_empty_dir` 只做 `fs::remove_dir`：目录专用、不跟随链接
-            //（Unix 对链接返回 ENOTDIR；Windows 只删链接条目本身、不碰目标），
-            // 且非空目录必然失败 —— 正好用来「只回收空目录」。不用 `remove`：
-            // 它会用 `path.is_dir()`（跟随链接）分流，可能删文件/删链接。
             if storage.remove_empty_dir(&relative).is_ok() {
                 tracing::debug!(dir = %relative, "留档子目录已空，已回收");
             }
