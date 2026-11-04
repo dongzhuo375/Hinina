@@ -4,7 +4,7 @@
 
 ## 职责
 
-钥匙豁免的判定一律经 `services/system.service`（`systemService.isKeyedSettings()`），不在守卫内联。定义全部路由（登录页 + 比赛工作台嵌套子树）与 `beforeEach` 守卫：首次导航统一恢复后端会话，受保护路由鉴权，并在**首次进入工作台（含深链）前校验比赛阶段**——赛前/赛后一律退回登录页等待。另承载 `--settings` 管理方钥匙的前端落点：首次导航落登录页时直落设置页，且设置页的免登录访问是守卫里的**条件豁免**（`systemService.isKeyedSettings(to.name)`）——meta 保持继承父级保护，普通模式下无钥匙访客直达设置页会被送回登录页、页面 401 也照常回登录页。
+钥匙豁免的判定一律经 `services/system.service`（`isKeyedSettingsRoute()`），不在守卫内联。定义全部路由（登录页 + 比赛工作台嵌套子树）与 `beforeEach` 守卫：首次导航统一恢复后端会话，受保护路由鉴权，并在**首次进入工作台（含深链）前校验比赛阶段**——赛前/赛后一律退回登录页等待。另承载 `--settings` 管理方钥匙的前端落点：首次导航落登录页时直落设置页，且设置页的免登录访问是守卫里的**条件豁免**（`isKeyedSettingsRoute(to.name)`）——meta 保持继承父级保护，普通模式下无钥匙访客直达设置页会被送回登录页、页面 401 也照常回登录页。
 
 ## 核心类型/函数
 
@@ -43,7 +43,7 @@ beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不�
   2. requiresAuth = to.meta.requiresAuth === true
      —— 判据是**合并后的 to.meta**：vue-router 沿匹配链把父级 meta 合并进子级
      （子路由同键覆盖父路由），取最深层的值；未声明即不受保护（login/catch-all）
-  3. 非受保护 → 放行；受保护但 `systemService.isKeyedSettings(to.name)` → 放行（**条件豁免**，
+  3. 非受保护 → 放行；受保护但 `isKeyedSettingsRoute(to.name)` → 放行（**条件豁免**，
      不限首次——返回登录后想再修一次地址仍可直达）；受保护但未登录 → Login
      普通模式（无钥匙）设置页照常受保护：无钥匙访客直达 → Login；页面上 401 →
      sessionGuard 读到 requiresAuth=true 照常回登录页
@@ -68,14 +68,14 @@ beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不�
 afterEach(to):
   to.meta.requiresAuth !== true → return（登录页/catch-all 不受保护，不成环）
   已登录 → return
-  systemService.isKeyedSettings(to.name) → return（钥匙设置页豁免）
+  isKeyedSettingsRoute(to.name) → return（钥匙设置页豁免）
   否则 → replace(Login)
 ```
 **为什么需要**（评审九 P2-2）：beforeEach 只能看导航开始时的会话；守卫批准后、
 路由确认前，某个在途请求返回 401 → sessionGuard 清理会话——它读到的
 `currentRoute` 仍是**尚未确认**的旧路由（设置页），钥匙豁免会跳过跳转，豁免
 被这条在途的受保护导航继承，用户落到无会话的比赛页。afterEach 在确认后补一次
-同一判据（判据为 `systemService.isKeyedSettings(to.name)`），任何「导航中途会话失效」
+同一判据（判据为 `isKeyedSettingsRoute(to.name)`），任何「导航中途会话失效」
 都兜得住；替换目标是登录页（不受保护），不会循环。
 
 设计要点：

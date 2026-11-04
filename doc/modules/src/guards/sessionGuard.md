@@ -27,7 +27,7 @@
 
 - `@/bridge`（`setIpcErrorObserver`、`IpcError` 类型）
 - `@/stores/authStore`（`useAuthStore`、`SESSION_INVALID_MESSAGE`）
-- `@/services/system.service`（`systemService.isKeyedSettings()` —— 钥匙设置页 401 旁路的唯一判据）
+- `@/services/system.service`（`isKeyedSettingsRoute()` —— 钥匙设置页 401 旁路的唯一判据）
 - `@/utils/settings-gate-notice`（`markSettingsGateBlocked` —— 旁路时写一次可见提示）
 - `vue-router`（仅 `Router` 类型 + 导航）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
@@ -48,7 +48,7 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
             → authStore.invalidateSession(SESSION_INVALID_MESSAGE)
                  （复用 logout 清理链路：后端尽力清理 + 本地认证态 + 领域状态）
             → 当前路由 requiresAuth 时 replace 到登录页
-                 （唯一例外：`systemService.isKeyedSettings(currentRoute.name)` 为真——钥匙
+                 （唯一例外：`isKeyedSettingsRoute(currentRoute.name)` 为真——钥匙
                   进程的设置页，清理照旧、**留在原地**并写一次 settings-gate 提示。
                   踢回登录页会打断维护、丢失当前草稿；普通启动的设置页**不在豁免内**：
                   认证错误照常清理并跳转）
@@ -56,7 +56,7 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
 
 设计要点：
 
-- **钥匙旁路（评审四）**：`systemService.isKeyedSettings(router.currentRoute.value.name)`
+- **钥匙旁路（评审四）**：`isKeyedSettingsRoute(router.currentRoute.value.name)`
   时跳过登录重定向并写一次可见提示，其余路由不受旁路影响（钥匙模式下比赛页 401 照常回登录页）。
   最小壳（ContestLayout 的 bareShell）随之接管——其判据同样不含 `sessionResolved`
   （invalidateSession 会把它复位为 false，而此刻正是最小壳的形态）。

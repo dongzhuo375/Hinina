@@ -33,9 +33,8 @@ vi.mock('vue-router', () => ({
 vi.mock('@/services/system.service', () => ({
   systemService: {
     launchFlags: mocks.launchFlags,
-    // 与真实实现同判据（读取快照 + 路由名）
-    isKeyedSettings: (name?: string | symbol | null) =>
-      mocks.launchFlags.value.settings && name === 'Settings',
+    // 进程级判据（路由身份由 guards/keyed-settings-route 组合）
+    isKeyed: () => mocks.launchFlags.value.settings,
   },
 }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => mocks }))

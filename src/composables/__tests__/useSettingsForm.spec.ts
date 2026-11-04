@@ -89,8 +89,7 @@ vi.mock('@/services/config.service', () => ({
 vi.mock('@/services/system.service', () => ({
   systemService: {
     launchFlags: mocks.launchFlags,
-    isKeyedSettings: (name?: string | symbol | null) =>
-      mocks.launchFlags.value.settings && name === 'Settings',
+    isKeyed: () => mocks.launchFlags.value.settings,
   },
 }))
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))

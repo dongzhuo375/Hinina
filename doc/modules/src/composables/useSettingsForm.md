@@ -33,7 +33,7 @@
 - `vue`（`reactive` / `ref` / `computed` / `getCurrentScope` / `onScopeDispose`）
 - `vue-router`（普通模式切换成功后 `replace(Login)`；钥匙模式留在设置页）
 - `@/services/config.service`
-- `@/services/system.service`（`systemService.isKeyedSettings()` —— 切换后的「停留设置页」判据）
+- `@/services/system.service`（`isKeyedSettingsRoute()` —— 切换后的「停留设置页」判据）
 - `@/stores/session`（`resetSessionForOjSwitch`）
 - `@/stores/authStore`（`resetForOjSwitch`，与领域清理成对调用）
 - `@/composables/useTransientValue`（已保存提示）

@@ -47,15 +47,6 @@ export class SystemService {
     return launchFlagsSnapshot.value.settings
   }
 
-  /**
-   * 钥匙模式 + 指定路由是否为设置页：**路由级唯一判据**，各消费方
-   *（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，
-   * 避免注释声称一致、实现各自内联的漂移。进程级判断用 `isKeyed()`。
-   */
-  isKeyedSettings(routeName: string | symbol | null | undefined): boolean {
-    return launchFlagsSnapshot.value.settings && routeName === 'Settings'
-  }
-
   /** 获取客户端存储信息（设置页「关于」区块使用；失败由调用方降级展示） */
   async getStorageInfo(): Promise<StorageInfo> {
     return systemBridge.getStorageInfo()
