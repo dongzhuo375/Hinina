@@ -204,6 +204,7 @@ fn symlink_metadata_does_not_follow_symlink_targets() {
     let dir = TempDir::named("hinina-storage-lstat-link");
     let external = TempDir::named("hinina-storage-lstat-target");
     let s = Storage::new(dir.to_path_buf());
+    std::fs::create_dir_all(external.path()).unwrap();
     std::fs::write(external.join("outside.json"), "outside").unwrap();
     symlink(external.join("outside.json"), dir.join("link.json")).unwrap();
 

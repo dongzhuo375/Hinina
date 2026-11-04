@@ -237,6 +237,7 @@ fn walk_and_purge_ignore_symlinks() {
     let (storage, dir) = temp_storage("symlink-walk");
     write_snapshot(&storage, "HOJ", "1", "C++", "int main(){}");
     let outside = TempDir::unique("hinina-snapshot-outside");
+    std::fs::create_dir_all(outside.path()).unwrap();
     let outside_file = outside.join("secret.cpp");
     std::fs::write(&outside_file, "outside").unwrap();
     age_file(&outside_file, 60); // 即便「过期」，也不得被计入/删除
