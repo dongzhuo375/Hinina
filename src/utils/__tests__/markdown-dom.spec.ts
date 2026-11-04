@@ -60,6 +60,20 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toContain('class="katex"')
   })
 
+  it('外链锚点加固：target=_blank + rel=noopener noreferrer（外链 fail-safe）', () => {
+    const html = renderMarkdown('[勘误](https://errata.example.com/a1)', 'https://oj.example.com')
+    expect(html).toContain('href="https://errata.example.com/a1"')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
+  })
+
+  it('OJ 相对地址改写后的链接同样加固（与图片改写同链路）', () => {
+    const html = renderMarkdown('[题目页](/api/problem/1)', 'https://oj.example.com')
+    expect(html).toContain('href="https://oj.example.com/api/problem/1"')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
+  })
+
   it('出错公式消毒后错误文本与 errorColor 内联样式保留（可见降级）', () => {
     const html = renderMarkdown('$\\frac{$', '')
     expect(html).toContain('katex-error')

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// main.ts 组合根装配（M2 工作包 C，轻量）：五个装配副作用必须发生，
+// main.ts 组合根装配（M2 工作包 C，轻量）：六个装配副作用必须发生，
 // 公告事件按 contestId 过滤（切比赛瞬间的在途事件不得刷新新比赛的公告）。
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     async () => vi.fn() as unknown as () => void,
   ),
   createCloseGuard: vi.fn(() => ({ handleRequest: () => false })),
+  installExternalLinkOpener: vi.fn(),
   onCloseRequested: vi.fn(async () => vi.fn()),
   closeWindow: vi.fn(),
   destroyWindow: vi.fn(),
@@ -42,6 +43,9 @@ vi.mock('@/bridge/announcement.bridge', () => ({
   onAnnouncementsPublished: mocks.onAnnouncementsPublished,
 }))
 vi.mock('@/utils/close-guard', () => ({ createCloseGuard: mocks.createCloseGuard }))
+vi.mock('@/utils/external-links', () => ({
+  installExternalLinkOpener: mocks.installExternalLinkOpener,
+}))
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     close: mocks.closeWindow,
@@ -63,6 +67,7 @@ describe('main.ts 组合根装配', () => {
     workspaceListener: 0,
     announcements: 0,
     closeGuard: 0,
+    externalLinks: 0,
     /// 装配先后（全局错误转发必须先于其余装配：首屏错误也要被捕获）。
     /// clearMocks 会在测试间清空调用记录，这里与计数一样当场快照。
     errorGuardOrder: 0,
@@ -86,6 +91,7 @@ describe('main.ts 组合根装配', () => {
       mocks.installWorkspacePersistenceListener.mock.calls.length
     installed.announcements = mocks.onAnnouncementsPublished.mock.calls.length
     installed.closeGuard = mocks.onCloseRequested.mock.calls.length
+    installed.externalLinks = mocks.installExternalLinkOpener.mock.calls.length
     installed.announcementHandler =
       mocks.onAnnouncementsPublished.mock.calls[0]?.[0] ?? null
     // 该钩子挂载整个应用（导入 main.ts 即 mount + 首航）：并行跑全量时
@@ -94,7 +100,7 @@ describe('main.ts 组合根装配', () => {
 
   // beforeEach 不重置 DOM：挂载只发生一次，重置会把被测事实清掉
 
-  it('五个装配副作用全部注册', async () => {
+  it('六个装配副作用全部注册', async () => {
     // 全局错误转发必须先于其余装配（首屏渲染/早期 IPC 的错误也要被捕获）
     expect(installed.errorGuardOrder).toBeGreaterThan(0)
     expect(installed.errorGuardOrder).toBeLessThan(installed.sessionGuardOrder)
@@ -103,6 +109,7 @@ describe('main.ts 组合根装配', () => {
     expect(installed.workspaceListener).toBe(1)
     expect(installed.announcements).toBe(1)
     expect(installed.closeGuard).toBe(1) // 关窗握手必须挂上真实窗口
+    expect(installed.externalLinks).toBe(1) // 外链拦截必须挂上（WebView 永不导航离开应用）
     expect(document.querySelector('#app')?.innerHTML).not.toBe('') // 应用应挂载到 #app
   })
 

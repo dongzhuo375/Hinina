@@ -155,6 +155,12 @@ export class SystemService {
   async pickDataDir(): Promise<string | null> {
     return systemBridge.pickDataDir()
   }
+
+  /** 把 http(s) 外链转交系统默认浏览器（WebView 永不导航离开应用）。
+   * scheme 白名单在 Rust 命令侧守卫；失败由调用方兜底（main.ts 仅记日志） */
+  openExternal(url: string): Promise<void> {
+    return systemBridge.openExternal(url)
+  }
 }
 
 export const systemService = new SystemService()
