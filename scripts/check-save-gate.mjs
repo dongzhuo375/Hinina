@@ -28,13 +28,17 @@
 //      be resolvable and clean (fail-closed, same as rule 2).
 //
 // Rule 2 also follows **same-file local helpers** (callback → performSwitch →
-// saveSplitRatio), so a helper gaining a queued call is caught — across the
-// shapes this repo actually writes: `function` declarations (with return-type
-// annotations), block- and expression-body arrows (`=> expr` captured to `;` /
-// newline), and class/object methods (`name(...) {`). What is *not* tracked:
-// cross-file helpers, aliases, dynamic lookup, and multi-line expression
-// bodies (truncated at the first newline) — unknown *callback* forms fail
-// closed instead.
+// saveSplitRatio), so a helper gaining a queued call is caught — for the
+// shapes this repo actually writes: `function` declarations (return-type
+// annotations without braces, e.g. `(): () => void`), block- and
+// expression-body arrows (`=> expr` captured to `;` / newline), and
+// class/object methods **without annotations** (`name(...) {`, getters).
+// What is *not* tracked: cross-file helpers, aliases, dynamic lookup,
+// multi-line expression bodies (truncated at the first newline), methods with
+// a return annotation (`helper(): Promise<void> {`), and declarations whose
+// return type contains braces (`function f(): Array<{...}> {`) — unknown
+// *callback* forms fail closed instead, but the helper shapes above are
+// skipped silently; keep queued calls inside a tracked shape.
 //
 // Why not "structural" enforcement (only `SaveTxn` reachable): JS has no async
 // context (`AsyncLocalStorage` is Node-only), so a callback can always call a
@@ -325,9 +329,11 @@ function arrowBody(source, afterArrow) {
 
 /**
  * 同一文件内的局部函数表，覆盖本仓实际会写的形态：
- * - `function name(...)` 声明（含返回类型注解，正文换行）
+ * - `function name(...)` 声明（返回类型注解**不含 `{`** 时：`(): () => void` 可、
+ *   `(): Array<{...}> {` 不可——泛型里的 `{` 会被当成正文起点）
  * - `const name = (...) => {...}` 块体箭头 与 `const name = (...) => expr` 表达式体箭头
- * - 类/对象方法 `name(...) {`（含 getter；`function`/关键字形态由 declRe 先消费）
+ * - 类/对象方法 `name(...) {`（**仅无注解形态**，含 getter；`helper(): Promise<void> {`
+ *   与 `push(tx): void {` 不追踪——带上限的注解扫描成本高于收益，见文件头局限）
  *
  * 只为「回调 → 局部辅助函数 → 排队入口」这条**传递路径**服务：直接调用由
  * 事务回调的正文检查覆盖，跨文件/别名/动态调用不在能力范围内（见文件头）。
