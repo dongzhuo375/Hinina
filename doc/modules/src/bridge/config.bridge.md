@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `getConfig` | `() => Promise<AppConfig>` | invoke `get_config`，返回完整应用配置（user/oj/editor/theme/layout 五组） |
-| `updateConfig` | `(config: AppConfig) => Promise<AppConfig>` | invoke `update_config`，**整体替换**语义（Rust 端持久化并更新内存值），返回后端**实际提交**的配置（active 取后端写锁内值）——调用方必须先读当前值再改（由 `config.service.updateConfig` 编排）。锁定字段是否保留由后端按 `launch_args` 自持真值决定（并保留 active 结构检查），IPC 载荷不携带锁定声明；`oj.active` 无论哪种模式都**只由 switch_oj 改写** |
+| `updateConfig` | `(config: AppConfig) => Promise<AppConfig>` | invoke `update_config`，**整体替换**语义（Rust 端持久化并更新内存值），返回后端**实际提交**的配置（active 取后端写锁内值）——调用方必须先读当前值再改（由 `config.service` 的保存事务编排：`runSaveTxn` 回调内 `tx.updateConfig` 是唯一写入通道）。锁定字段是否保留由后端按 `launch_args` 自持真值决定（并保留 active 结构检查），IPC 载荷不携带锁定声明；`oj.active` 无论哪种模式都**只由 switch_oj 改写** |
 | `reloadConfig` | `() => Promise<void>` | invoke `reload_config`，触发后端从磁盘重载（发布 `CoreEvent::ConfigChanged`，并显式同步 auto-save 的启停与间隔） |
 | `switchOj` | `(ojId: string) => Promise<void>` | invoke `switch_oj`：后端补注册 → 校验目标 OJ 已注册 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 `oj.active` → 发布 `CoreEvent::OjSwitched`；未注册的 OJ 报 ProviderNotFound |
 
@@ -28,7 +28,7 @@
 
 ```
 config.service.getConfig（缓存未命中时）→ ipcInvoke('get_config') → Rust commands::config_cmd
-config.service.updateConfig（设置页保存）→ 读当前 → 副本变更 → ipcInvoke('update_config') → invalidate
+config.service.runSaveTxn（设置页保存；回调内 tx.updateConfig）→ 读当前 → 副本变更 → ipcInvoke('update_config') → invalidate
 ```
 
 设计要点：

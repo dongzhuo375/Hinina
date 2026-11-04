@@ -28,6 +28,7 @@ bridge 管 IPC、service 管编排、store 管 UI 入口，各层职责不同，
 | 名称 | 签名 | 说明 |
 |---|---|---|
 | `isKeyed` | getter `() => boolean` | 进程级钥匙判据（读 `systemService.launchFlags.value.settings`） |
+| `isKeyedSettingsRoute` | 参数化 getter `() => (routeName: string \| symbol \| null \| undefined) => boolean` | **路由级钥匙判据**（钥匙 × `routeName === 'Settings'`，缺失/symbol 名恒假）。2026-11-04 H3：原 `guards/keyed-settings-route`（18 行）收敛到此单一入口，消除「store 读进程级 / guard 读路由级」双路径；消费方 router（beforeEach 豁免 / fromKeyedSettings / afterEach 不变量）、sessionGuard（401 旁路）、ContestLayout（keyedSettings）、useSettingsForm（切换后停留判据）。guards/ 回归 sessionGuard/globalErrorGuard 两成员 |
 | `minimizeWindow` / `toggleMaximizeWindow` / `closeWindow` | `() => Promise<void>` | 无边框窗口控制（转发 service → bridge/window.bridge） |
 | `destroyWindow` | `() => Promise<void>` | close-guard 落盘后的收尾 |
 | `onCloseRequested` | `(handler) => Promise<() => void>` | 关窗握手事件源 |
@@ -45,6 +46,9 @@ bridge 管 IPC、service 管编排、store 管 UI 入口，各层职责不同，
 - `src/App.vue`（登录页兜底窗口条）
 - `components/layout/WindowControls.vue`（TopBar/极简壳共用窗口按钮）
 - `components/layout/ActivityBar.vue`、`views/LoginView.vue`、`views/SettingsView.vue`（`isKeyed` 判据）
+- `views/ContestLayout.vue`（`isKeyedSettingsRoute` —— 最小壳/阶段闸门豁免判据）
+- `composables/useSettingsForm.ts`（`isKeyedSettingsRoute` —— 切换后「停留设置页」判据）
+- `router/index.ts`、`guards/sessionGuard.ts`（守卫回调内 `useSystemStore()` 取 `isKeyedSettingsRoute`；2026-11-04 H3 起守卫也经 store）
 - `composables/useAboutSettings.ts` / `useMaintenanceSettings.ts` / `useDataDirSettings.ts`（设置页三个区块的控制器）
 
 ## 逻辑流程
@@ -58,4 +62,6 @@ View/composable → useSystemStore()
 ## 测试
 
 `src/stores/__tests__/systemStore.spec.ts`：`isKeyed` 读快照（非方法调用）、
-窗口动作与设置动作转发并原样回传结果。
+`isKeyedSettingsRoute` 参数化 getter（钥匙 × Settings 才真；非钥匙 / 缺失 /
+symbol 名恒假；同一函数随快照变化重新求值——原 keyed-settings-route.spec 的
+3 用例随模块删除迁入此处）、窗口动作与设置动作转发并原样回传结果。

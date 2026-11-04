@@ -52,6 +52,10 @@ jobs:
       - name: Type-check config and e2e sources
         run: npx tsc -p tsconfig.node.json --noEmit
       - run: npm run plugin:sdk:check
+      # 保存门禁的静态约束（事务回调内不得出现排队保存入口；新增 runSaveTxn
+      # 调用方须显式加白名单）。与 scripts/__tests__ 的用例互补：那里测判定，
+      # 这里对真实源码树出口。
+      - run: npm run check:save-gate
       # vitest run --coverage：同一套测试 + V8 覆盖率报告（基线只报告不卡线，M2 起）
       - run: npm run test:coverage
       - run: npm run build

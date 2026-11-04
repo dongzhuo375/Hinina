@@ -205,14 +205,9 @@ void configService.getSplitRatio().then((ratio) => {
 
 /// 拖拽结束后把比例写回配置（下次进入解题页生效）；失败只记录，不打断使用
 function persistSplitRatio() {
-  const ratio = splitRatio.value
-  configService
-    .updateConfig((draft) => {
-      draft.layout.splitRatio = ratio
-    })
-    .catch((e) => {
-      log.error('分栏比例持久化失败:', e)
-    })
+  configService.saveSplitRatio(splitRatio.value).catch((e) => {
+    log.error('分栏比例持久化失败:', e)
+  })
 }
 
 function adjustSplit(delta: number) {

@@ -34,6 +34,22 @@ const switchState = vi.hoisted(() => ({
   last: null as { target: string; outcome: 'success' | 'persist-failed' } | null,
 }))
 
+/// 保存门禁的孪生状态（与生产 `runSaveTxn` 同构；真实排队/代际/队尾语义由
+/// config.service.spec 的「save 门禁」套件用真实服务锁定，这里只复刻语义）。
+/// `busy`（ref 需要 vue，vi.hoisted 环境拿不到）由下方 mock 工厂注入。
+const saveState = vi.hoisted(() => ({
+  tail: null as Promise<unknown> | null,
+  epoch: 0,
+  busy: null as { value: boolean } | null,
+  /// 设置页发起的事务在途（与生产 `settingsSaveInFlight` 同构，由 depth 派生）。
+  /// ref 需要 vue，vi.hoisted 环境拿不到，由 mock 工厂注入。
+  settingsDepth: null as { value: number } | null,
+  /// 设置页保存代际（与生产 `settingsSaveEpoch` 同构：入队/结束各 +1）
+  settingsEpoch: 0,
+  /// 等设置页保存落地的等待者
+  settingsWaiters: [] as Array<() => void>,
+}))
+
 function settleSwitch(run: Promise<void>): void {
   if (switchState.pending === run) switchState.pending = null
   switchState.epoch += 1
@@ -46,49 +62,120 @@ function resolvePersisted(active: string): void {
   }
 }
 
-vi.mock('@/services/config.service', () => ({
-  configService: {
-    getConfig: mocks.getConfig,
-    updateConfig: async (mutate: (draft: AppConfig) => void) => {
-      const saved = await mocks.updateConfig(mutate)
-      resolvePersisted(saved.oj.active)
-      return saved
-    },
-    invalidate: mocks.invalidate,
-    switchOj: (id: string) => {
-      switchState.epoch += 1
-      const run = mocks.switchOj(id) as Promise<void>
-      switchState.pending = run
-      run.then(
-        () => {
-          switchState.last = { target: id, outcome: 'success' }
-          settleSwitch(run)
+vi.mock('@/services/config.service', async () => {
+  const { computed, readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
+  const saveBusy = ref(false)
+  saveState.busy = saveBusy
+  // 必须是 ref：`settingsSaveInFlight` 是 computed，普通字段不会触发重新求值
+  const settingsDepth = ref(0)
+  saveState.settingsDepth = settingsDepth
+
+  /// 与生产 `runSaveTxn` 同构：入队即置位/代际 +1，链式等前一个落地，
+  /// 只有队尾落地且无人再排队才复位；事务内直通 `tx.updateConfig`（不再排队）。
+  /// `options.settingsPage` 只影响 `settingsSaveInFlight`（后台写入不置位）。
+  async function runSaveTxn<T>(
+    fn: (tx: {
+      updateConfig: (mutate: (draft: AppConfig) => void) => Promise<AppConfig>
+    }) => Promise<T>,
+    options: { settingsPage?: boolean } = {},
+  ): Promise<T> {
+    const previous = saveState.tail
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    saveState.tail = gate
+    saveBusy.value = true
+    saveState.epoch += 1
+    if (options.settingsPage) {
+      settingsDepth.value += 1
+      saveState.settingsEpoch += 1
+    }
+    try {
+      if (previous) await previous.then(() => {}, () => {})
+      return await fn({
+        updateConfig: async (mutate: (draft: AppConfig) => void) => {
+          const saved = await mocks.updateConfig(mutate)
+          resolvePersisted(saved.oj.active)
+          return saved
         },
-        (e: { variant?: string }) => {
-          if (e?.variant === 'OjSwitchPersistFailed') {
-            switchState.last = { target: id, outcome: 'persist-failed' }
-          }
-          settleSwitch(run)
-        },
-      )
-      return run
+      })
+    } finally {
+      saveState.epoch += 1
+      release()
+      if (saveState.tail === gate) {
+        saveState.tail = null
+        saveBusy.value = false
+      }
+      if (options.settingsPage) {
+        saveState.settingsEpoch += 1
+        settingsDepth.value -= 1
+        if (settingsDepth.value === 0) {
+          for (const resolve of saveState.settingsWaiters.splice(0)) resolve()
+        }
+      }
+    }
+  }
+
+  return {
+    configService: {
+      getConfig: mocks.getConfig,
+      // 刻意不 mock 公共 updateConfig：生产已删除该公开包装（保存走
+      // runSaveTxn/tx.updateConfig），mock 面与生产 API 面保持一致
+      invalidate: mocks.invalidate,
+      switchOj: (id: string) => {
+        switchState.epoch += 1
+        const run = mocks.switchOj(id) as Promise<void>
+        switchState.pending = run
+        run.then(
+          () => {
+            switchState.last = { target: id, outcome: 'success' }
+            settleSwitch(run)
+          },
+          (e: { variant?: string }) => {
+            if (e?.variant === 'OjSwitchPersistFailed') {
+              switchState.last = { target: id, outcome: 'persist-failed' }
+            }
+            settleSwitch(run)
+          },
+        )
+        return run
+      },
+      latestOjSwitchResult: () => switchState.last,
+      get ojSwitchEpoch() {
+        return switchState.epoch
+      },
+      get ojSwitchInFlight() {
+        return switchState.pending !== null
+      },
+      whenOjSwitchSettled: () => {
+        const pending = switchState.pending
+        return pending ? pending.catch(() => {}) : Promise.resolve()
+      },
+      get saveEpoch() {
+        return saveState.epoch
+      },
+      saveInFlight: readonly(saveBusy),
+      // 与生产一致：由 depth 派生（没有独立布尔量可漂移）
+      settingsSaveInFlight: readonly(computed(() => settingsDepth.value > 0)),
+      get settingsSaveEpoch() {
+        return saveState.settingsEpoch
+      },
+      whenSaveSettled: () => {
+        const tail = saveState.tail
+        return tail ? tail.then(() => {}, () => {}) : Promise.resolve()
+      },
+      whenSettingsSaveSettled: () => {
+        if (settingsDepth.value === 0) return Promise.resolve()
+        return new Promise<void>((resolve) => saveState.settingsWaiters.push(resolve))
+      },
+      runSaveTxn,
     },
-    latestOjSwitchResult: () => switchState.last,
-    get ojSwitchEpoch() {
-      return switchState.epoch
-    },
-    get ojSwitchInFlight() {
-      return switchState.pending !== null
-    },
-    whenOjSwitchSettled: () => {
-      const pending = switchState.pending
-      return pending ? pending.catch(() => {}) : Promise.resolve()
-    },
-  },
-  // 与生产同源的具名判据；真实类型化判据由 config.service.spec 用真实 IpcError 锁定
-  isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
-    e?.variant === 'OjSwitchPersistFailed',
-}))
+    // 与生产同源的具名判据；真实类型化判据由 config.service.spec 用真实 IpcError 锁定
+    isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
+      e?.variant === 'OjSwitchPersistFailed',
+  }
+})
 vi.mock('@/services/system.service', () => ({
   systemService: {
     launchFlags: mocks.launchFlags,
@@ -100,6 +187,15 @@ vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSession
 /// 无活动 pinia，打桩同 session 模块）
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ resetForOjSwitch: mocks.resetAuthForOjSwitch }),
+}))
+/// 路由级钥匙判据经 systemStore（2026-11-04 H3 收敛单一入口）：同样无 pinia，
+/// 打桩同 authStore 模块模式，判据复刻「launchFlags × 'Settings'」
+vi.mock('@/stores/systemStore', () => ({
+  useSystemStore: () => ({
+    isKeyedSettingsRoute:
+      (routeName: string | symbol | null | undefined) =>
+        mocks.launchFlags.value.settings && routeName === 'Settings',
+  }),
 }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -132,6 +228,12 @@ beforeEach(async () => {
   switchState.pending = null
   switchState.epoch = 0
   switchState.last = null
+  saveState.tail = null
+  saveState.epoch = 0
+  if (saveState.busy) saveState.busy.value = false
+  if (saveState.settingsDepth) saveState.settingsDepth.value = 0
+  saveState.settingsEpoch = 0
+  saveState.settingsWaiters.length = 0
   currentConfig = baseConfig()
   // 默认正常模式（无 --settings）：切换成功照常回登录页；钥匙用例显式改写
   mocks.launchFlags.value = { settings: false }
@@ -464,7 +566,7 @@ describe('useSettingsForm', () => {
     expect(settings.switching.value).toBe(false)
   })
 
-  it('保存进行中禁止显式切换（反向互斥）', async () => {
+  it('保存进行中禁止显式切换（反向互斥）：回退下拉并给出可见提示', async () => {
     await settings.load()
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -476,12 +578,40 @@ describe('useSettingsForm', () => {
 
     const saving = settings.save()
     await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledTimes(1))
-    // 保存中：切换请求被忽略
+    // 保存中：切换请求被忽略。UI 层 select 已 disabled（ojDomainBusy），本分支
+    // 只能经程序化调用触达——锁定防御行为：回退选择 + 可见提示（不是静默）
     settings.form.activeOj = 'Hydro'
     await settings.onSwitchOj()
     expect(mocks.switchOj).not.toHaveBeenCalled()
+    expect(settings.form.activeOj).toBe('HOJ')
+    expect(settings.switchNotice.value).toContain('正在保存配置')
     releaseSave()
     await saving
+  })
+
+  it('后台写入不阻塞显式切换：编辑器偏好/分栏比例在途时 OJ 下拉不被静默回退', async () => {
+    await settings.load()
+    currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
+    await settings.load()
+    mocks.switchOj.mockResolvedValue(undefined)
+
+    // 后台写入（不标记 settingsPage）：只排保存队列，不进入设置页门禁
+    let releaseBackground!: () => void
+    const background = configService.runSaveTxn(
+      () => new Promise<void>((resolve) => { releaseBackground = resolve }),
+    )
+    await vi.waitFor(() => expect(configService.saveInFlight.value).toBe(true))
+    expect(settings.saving.value).toBe(false)
+
+    settings.form.activeOj = 'Hydro'
+    await settings.onSwitchOj()
+
+    // 修复前（saving 直接取 saveInFlight）：下拉被静默回退，不发起切换
+    expect(mocks.switchOj).toHaveBeenCalledWith('Hydro')
+    expect(settings.form.activeOj).toBe('Hydro')
+
+    releaseBackground()
+    await background
   })
 
   it('旧控制器卸载后完成切换，新控制器等待事务并读到新 active', async () => {
@@ -803,6 +933,34 @@ describe('useSettingsForm', () => {
     expect(formB.form.activeOj).toBe('C')
     expect(formB.saving.value).toBe(false)
     scopeB.stop()
+  })
+
+  it('后台写入悬挂不阻塞设置页加载（load 只等设置页保存）', async () => {
+    // 后台写入（编辑器偏好/分栏比例）永不返回：若 load 等「任意保存」，
+    // 设置页会永远停在 loading 且无法打断（2026-11-04 评审的行为回归）
+    let releaseBackground!: () => void
+    mocks.updateConfig.mockImplementationOnce(
+      (mutator: (draft: AppConfig) => void) => new Promise<AppConfig>((resolve) => {
+        releaseBackground = () => {
+          const draft = structuredClone(currentConfig)
+          mutator(draft)
+          currentConfig = draft
+          resolve(draft)
+        }
+      }),
+    )
+    const background = configService.runSaveTxn((tx) => tx.updateConfig(() => {}))
+    await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledTimes(1))
+    expect(configService.saveInFlight.value).toBe(true)
+    expect(configService.settingsSaveInFlight.value).toBe(false)
+
+    // load 不等后台写入：读盘完成、loading 复位
+    await settings.load()
+    expect(settings.loading.value).toBe(false)
+    expect(settings.loadError.value).toBeNull()
+
+    releaseBackground()
+    await background
   })
 
   it('跨控制器保留「已生效但持久化失败」警告', async () => {

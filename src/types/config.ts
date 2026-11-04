@@ -8,7 +8,7 @@ export interface AppConfig {
   /**
    * Rust 端 `AppConfig.user`（`UserConfig`）不在本镜像中：该段现仅存旧版
    * 迁移字段 `lastOjType`（读入即迁往 `oj.active`，永不写回），前端从不
-   * 读写；`updateConfig` 的 read-modify-write 原样保留运行时对象里的未知键。
+   * 读写；保存事务的 read-modify-write 原样保留运行时对象里的未知键。
    */
 }
 

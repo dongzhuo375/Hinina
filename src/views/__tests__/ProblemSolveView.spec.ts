@@ -6,7 +6,8 @@
 // 2. 快速切题的迟到响应污染 store 后，提交守卫拒绝错配且可见（第二道防线）；
 // 3. 防错题提交：加载失败后旧题与新路由不配对时拒绝提交（PR21-8）；
 // 4. 配对正确时提交确实以正确的题目真实 ID 发生（正向断言，评审 #7）；
-// 5. 离开解题页时在途改动落盘。
+// 5. 离开解题页时在途改动落盘；
+// 6. 分栏比例调整（键盘）经 saveSplitRatio 落盘（落盘入口是语义化包装）。
 //
 // 异步等待一律用 vi.waitFor 等可观察条件（评审 #9）：视图编排链上每多一个
 // await，固定次数的 Promise.resolve 轮询就会读到旧状态，测试变红或假阴性。
@@ -84,7 +85,8 @@ vi.mock('@/stores/submissionStore', () => ({
 vi.mock('@/services/config.service', () => ({
   configService: {
     getSplitRatio: vi.fn(async () => 0.48),
-    updateConfig: vi.fn(async () => {}),
+    // 视图的落盘入口是语义化包装 saveSplitRatio（不是 updateConfig）
+    saveSplitRatio: vi.fn(async () => {}),
   },
 }))
 
@@ -105,6 +107,7 @@ vi.mock('@/components/common/LoadingSpinner.vue', () => ({ default: { template: 
 vi.mock('@/components/common/ErrorMessage.vue', () => ({ default: { template: '<div />' } }))
 
 import ProblemSolveView from '@/views/ProblemSolveView.vue'
+import { configService } from '@/services/config.service'
 
 /// 登记挂载实例，afterEach 统一卸载（评审 #10）：失败用例不残留挂载实例，
 /// 避免后续用例经全局 document 查询误触旧实例产生连带失败。
@@ -249,5 +252,27 @@ describe('ProblemSolveView 加载与切题编排', () => {
     await m.unmount()
 
     expect(storeMocks.workspace.saveWorkspace).toHaveBeenCalled() // 卸载即离开解题页：必须落盘
+  })
+
+  it('键盘调整分栏（ArrowRight）经 saveSplitRatio 落盘', async () => {
+    storeMocks.problem.openProblem.mockImplementationOnce(async () => {
+      storeMocks.problem.currentProblem = problemOf('p-A', 'A')
+    })
+    const m = await mount()
+    await vi.waitFor(() => {
+      expect(storeMocks.problem.currentProblem?.id).toBe('p-A')
+    })
+
+    // getSplitRatio 已按 mock 回填 0.48；右方向键 = +0.02 → 0.5 落盘
+    const handle = m.host.querySelector('.split-handle')
+    expect(handle).not.toBeNull()
+    handle!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
+    )
+
+    await vi.waitFor(() => {
+      expect(configService.saveSplitRatio).toHaveBeenCalledTimes(1)
+    })
+    expect(configService.saveSplitRatio).toHaveBeenCalledWith(0.5)
   })
 })

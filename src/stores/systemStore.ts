@@ -30,6 +30,21 @@ export const useSystemStore = defineStore('system', {
      * 填充后 getter 自动重新求值——不存在「首次读到 false 就永久缓存」的问题。
      */
     isKeyed: (): boolean => systemService.isKeyed(),
+
+    /**
+     * 路由级钥匙判据（参数化 getter，返回判定函数）：本次启动是钥匙**且**
+     * 目标路由是设置页。
+     *
+     * 2026-11-04 H3：原先住在 `guards/keyed-settings-route`，判据单源但存在
+     * 「store 读进程级 / guard 读路由级」两条访问路径——现收敛到本 store 单一
+     * 入口，guards/ 回归 sessionGuard/globalErrorGuard 两成员。依赖追踪发生在
+     * 每次调用 `systemService.isKeyed()` 时（与 `isKeyed` 同理）。缺失/
+     * symbol 路由名不等于 `'Settings'`，一律 false。
+     */
+    isKeyedSettingsRoute:
+      () =>
+      (routeName: string | symbol | null | undefined): boolean =>
+        systemService.isKeyed() && routeName === 'Settings',
   },
 
   actions: {

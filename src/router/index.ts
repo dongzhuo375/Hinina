@@ -2,8 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useContestStore } from '@/stores/contestStore'
+import { useSystemStore } from '@/stores/systemStore'
 import { systemService } from '@/services/system.service'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-route'
 import { markSettingsGateBlocked } from '@/utils/settings-gate-notice'
 import { getAuthoritativeSchedule, getContestPhase } from '@/utils/contest'
 
@@ -130,6 +130,7 @@ router.beforeEach(async (to, from) => {
   }
 
   const auth = useAuthStore()
+  const isKeyedSettingsRoute = useSystemStore().isKeyedSettingsRoute
   if (!auth.sessionResolved) await auth.checkSession()
 
   const requiresAuth = to.meta.requiresAuth === true
@@ -203,7 +204,7 @@ router.afterEach((to) => {
   if (to.meta.requiresAuth !== true) return
   const auth = useAuthStore()
   if (auth.isLoggedIn) return
-  if (isKeyedSettingsRoute(to.name)) return
+  if (useSystemStore().isKeyedSettingsRoute(to.name)) return
   void router.replace({ name: 'Login' })
 })
 

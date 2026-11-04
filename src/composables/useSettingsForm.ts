@@ -1,11 +1,11 @@
 import { computed, getCurrentScope, onScopeDispose, reactive, ref } from 'vue'
-import { isKeyedSettingsRoute } from '@/guards/keyed-settings-route'
 import type { Ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { configService, isOjSwitchPersistFailed } from '@/services/config.service'
 import { useAuthStore } from '@/stores/authStore'
 import { resetSessionForOjSwitch } from '@/stores/session'
+import { useSystemStore } from '@/stores/systemStore'
 import { normalizeHojLanguage } from '@/utils/language'
 import { EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN, EDITOR_TAB_SIZES } from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
@@ -74,23 +74,11 @@ function copyOjDomain(from: SettingsForm, to: SettingsForm): void {
 /// 慢切换完成时，新控制器已经读到了旧 active；旧控制器只重置自己的表单，
 /// 新控制器不会收到刷新。`switching` 必须是共享的，否则两个控制器各自的
 /// 单飞互相看不见。
+///
+/// 保存侧的跨控制器单飞/代际/等待已下沉 `config.service`（`runSaveTxn` /
+/// `saveInFlight` / `saveEpoch` / `whenSaveSettled`）——所有保存入口
+/// （设置页保存、编辑器偏好、分栏比例）同一队列，本模块只消费。
 const sharedSwitching = ref(false)
-
-/// **跨控制器的保存状态**：`save → 新建实例自动切换` 是**一个**
-/// 用户操作，必须整段互斥。只共享 `switching` 时，旧控制器在途的保存仍可在新
-/// 控制器完成显式切换之后执行自动切换，用较旧的意图覆盖较新的选择。
-const sharedSaving = ref(false)
-
-/// 保存代际：开始/结束各 +1。新控制器读取配置时用它检测「读取期间有保存开始
-/// 或结束」，避免在同步检查与异步读取之间漏掉一次保存。
-let saveEpoch = 0
-
-/// 等待在途保存落地（新控制器挂载时用：先等旧控制器把配置写完，再读取）
-const saveWaiters: Array<() => void> = []
-function whenSaveSettled(): Promise<void> {
-  if (!sharedSaving.value) return Promise.resolve()
-  return new Promise((resolve) => saveWaiters.push(resolve))
-}
 
 /// 切换结果：成功 / **已生效但持久化失败**。后者必须跨控制器
 /// 传递——旧控制器卸载后无法设置警告，新控制器重读后仍要提示重启可能回退。
@@ -153,10 +141,12 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
   const dirty = computed(() => baseline.value !== '' && snapshot() !== baseline.value)
 
-  /// 保存进行中（跨控制器共享）：覆盖 `save → 自动切换` 整段，
+  /// **设置页发起**的保存事务在途（服务级共享，跨控制器）：覆盖
+  /// `save → 自动切换` 整段（`runSaveTxn(..., { settingsPage: true })`），
   /// 新挂载的控制器在旧控制器保存完成前不得发起切换/保存（否则旧意图可覆盖
-  /// 用户较新的选择）。
-  const saving = sharedSaving
+  /// 用户较新的选择）。**不含**编辑器偏好/分栏比例等后台写入——那类写入只
+  /// 排在保存队列里，不该让设置页的下拉与保存按钮产生反应。
+  const saving = configService.settingsSaveInFlight
   const saveError = ref<string | null>(null)
   const { value: showSaved, show: markSaved, clear: clearSaved } = useTransientValue(false, 3_000)
 
@@ -207,6 +197,8 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   const loading = ref(true)
   const loadError = ref<string | null>(null)
   const router = useRouter()
+  /// 路由级钥匙判据（systemStore 单一入口）：切换成功/持久化失败后的「留在设置页」分流
+  const isKeyedSettings = useSystemStore().isKeyedSettingsRoute
 
   const ojInstances = ref<OjInstance[]>([])
   const ojOptions = computed(() => ojSelectOptions(ojInstances.value))
@@ -325,7 +317,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // **豁免只属于设置页本身**：switch_oj 是异步的，期间用户可能已导航到
       // 比赛页——不查当前路由就把「停留」带过去，无会话用户会被留在比赛页
       //。判据与 sessionGuard 一致：钥匙 + 当前路由是设置页。
-      const stayOnSettings = isKeyedSettingsRoute(router.currentRoute.value?.name)
+      const stayOnSettings = isKeyedSettings(router.currentRoute.value?.name)
       if (!stayOnSettings) {
         persistedActive.value = target
         void router.replace({ name: 'Login' })
@@ -354,7 +346,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         outcome = 'persist-failed'
         resetSessionForOjSwitch()
         useAuthStore().resetForOjSwitch()
-        if (isKeyedSettingsRoute(router.currentRoute.value?.name)) {
+        if (isKeyedSettings(router.currentRoute.value?.name)) {
           adoptEffectiveSwitch(target, PERSIST_FAILED_NOTICE)
           lastSwitchStayed = true
           return true
@@ -386,10 +378,17 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   async function onSwitchOj(): Promise<void> {
-    // 单飞：切换进行中、或正在保存时，再次选择直接忽略并回退下拉
-    //（两条写路径必须双向互斥）
-    if (switching.value || saving.value) {
+    // 单飞：切换进行中直接忽略并回退下拉（两条写路径双向互斥）；本页/其它
+    // 控制器的**设置页保存**在途时同样拒绝，但要给出提示——静默回退会让用户
+    // 以为下拉坏了。后台写入（编辑器偏好/分栏比例）不在此列：它们只是排在
+    // 保存队列里，切换照常发起（后端写事务会把两者串行）。
+    if (switching.value) {
       form.activeOj = persistedActive.value
+      return
+    }
+    if (saving.value) {
+      form.activeOj = persistedActive.value
+      switchNotice.value = '正在保存配置，请稍候再切换 OJ'
       return
     }
     switchError.value = null
@@ -473,7 +472,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   /// 晚挂载控制器恢复历史持久化失败警告：共享结果由
-  /// `ConfigService` 持有（任意 updateConfig 成功也能解除），
+  /// `ConfigService` 持有（任意保存事务成功也能解除），
   /// 这里只在仍是同一目标的 persist-failed 时提示。
   function restoreHistoricalSwitchNotice(config: AppConfig): void {
     const last = configService.latestOjSwitchResult()
@@ -483,7 +482,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   /// 普通保存成功后清除本控制器可见的“重启可能回退”警告：解除判定已由
-  /// `ConfigService.updateConfig` 统一完成（覆盖设置页之外的保存入口）。
+  /// `updateConfigNow`（保存事务的写入主体）统一完成（覆盖设置页之外的保存入口）。
   function clearResolvedPersistedWarning(persistedActiveId: string): void {
     if (switchNotice.value !== PERSIST_FAILED_NOTICE) return
     const last = configService.latestOjSwitchResult()
@@ -496,18 +495,23 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     loading.value = true
     loadError.value = null
     try {
-      // 新挂载的控制器若撞上旧控制器的在途保存（含自动切换），先等它落地：
+      // 新挂载的控制器若撞上**设置页自己**的在途保存（含自动切换），先等它落地：
       // 否则读到的是保存前的配置，而普通保存不会发切换通知来刷新本页。
-      // 无保存时**同步**通过，保持既有「invalidate → getConfig → 其它读取」
-      // 的启动顺序（SettingsView 行为用例锁定）；读完后若又有保存开始，重读。
+      // **只等设置页保存**：后台写入（编辑器偏好/分栏比例）可能长时间不返回，
+      // 等它们会把设置页卡在 loading 且无法打断（旧 composable 实现同样只等
+      // 设置页保存）。无保存时**同步**通过，保持既有「invalidate → getConfig →
+      // 其它读取」的启动顺序（SettingsView 行为用例锁定）；读完后若又有设置页
+      // 保存开始，重读。
       let config: AppConfig
       for (;;) {
-        if (saving.value) await whenSaveSettled()
+        if (configService.settingsSaveInFlight.value) {
+          await configService.whenSettingsSaveSettled()
+        }
         // 等待结束后再捕获代际：保存结束必然 +1，若沿用等待前的值会固定多读一次
-        const epoch = saveEpoch
+        const epoch = configService.settingsSaveEpoch
         config = await readSettledConfig()
-        // 读取期间若有保存开始/结束（epoch 变化）或仍有保存在途，重读
-        if (!saving.value && epoch === saveEpoch) break
+        // 读取期间若有设置页保存开始/结束（epoch 变化）或仍在途，重读
+        if (!configService.settingsSaveInFlight.value && epoch === configService.settingsSaveEpoch) break
       }
       if (disposed) return
       populate(config)
@@ -521,8 +525,6 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
 
   async function save(): Promise<void> {
     if (!canSave.value || switching.value) return
-    saving.value = true
-    saveEpoch += 1
     saveError.value = null
     // 固定提交快照：保存期间的后续编辑不进入本次落盘，也不得被误标为已保存
     const submitted = { ...form }
@@ -536,78 +538,78 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     // 走自动切换：否则 switch_oj 对不存在的实例失败，会谎报「实例已保存；
     // 切换未成功」（手改 active 指向缺失实例时可达）
     const isNewInstance = !lockAll && !ojInstances.value.some((i) => i.id === target)
+    // 保存事务：`saving`（= configService.settingsSaveInFlight）在**入队时**
+    // 同步置位，覆盖「保存 → 自动切换」整段；释放/代际/等待队列由服务层负责
+    //（含编辑器偏好、分栏比例等后台写入与本事务串行）
     try {
-      const saved = await configService.updateConfig((draft) => {
-        // active 只由 switch_oj 改写；保存不能制造配置与运行中 Registry 的不一致
-        if (!lockAll) {
-          const instance = draft.oj.instances.find((i) => i.id === target)
-          if (instance) {
-            instance.baseUrl = submitted.ojUrl.trim()
-          } else {
-            draft.oj.instances.push({
-              id: target,
-              baseUrl: submitted.ojUrl.trim(),
-              enabled: true,
-              options: {},
-            })
+      await configService.runSaveTxn(async (tx) => {
+        const saved = await tx.updateConfig((draft) => {
+          // active 只由 switch_oj 改写；保存不能制造配置与运行中 Registry 的不一致
+          if (!lockAll) {
+            const instance = draft.oj.instances.find((i) => i.id === target)
+            if (instance) {
+              instance.baseUrl = submitted.ojUrl.trim()
+            } else {
+              draft.oj.instances.push({
+                id: target,
+                baseUrl: submitted.ojUrl.trim(),
+                enabled: true,
+                options: {},
+              })
+            }
+          }
+          draft.oj.contestRef = submitted.contestRef.trim()
+          draft.oj.contestPassword = submitted.contestPassword === '' ? null : submitted.contestPassword
+          if (!lockAll) {
+            draft.oj.timeoutSecs = Number(submitted.timeoutSecs)
+            draft.oj.pollIntervalSecs = Number(submitted.pollIntervalSecs)
+            draft.oj.pollTimeoutSecs = Number(submitted.pollTimeoutSecs)
+            draft.oj.cacheTtlSecs = Number(submitted.cacheTtlSecs)
+            draft.oj.cacheProblemStatement = submitted.cacheProblemStatement
+          }
+          draft.editor.fontSize = Number(submitted.fontSize)
+          draft.editor.tabSize = submitted.tabSize
+          draft.editor.defaultLanguage = submitted.defaultLanguage
+          draft.editor.autoSave = submitted.autoSave
+          // 关闭自动保存时该字段被禁用且不参与校验：隐藏的原始输入不得进入载荷
+          // （NaN 会序列化成 null，Rust u64 反序列化失败会让整次保存失败），保留已存值
+          const autoSaveIntervalSecs = submitted.autoSave
+            ? parseIntStrict(submitted.autoSaveIntervalSecs)
+            : null
+          if (autoSaveIntervalSecs !== null) {
+            draft.editor.autoSaveIntervalSecs = autoSaveIntervalSecs
+          }
+          draft.layout.splitRatio = submitted.splitRatio
+        })
+        // 保存已把当前 active 落盘：若此前是「切换生效但持久化失败」，回退风险
+        // 已由保存事务的写入主体（updateConfigNow）解除；这里只清本控制器可见的警告
+        //（即便控制器已卸载也不会影响服务级共享结果）。
+        clearResolvedPersistedWarning(saved.oj.active)
+        // 已卸载的旧控制器不再回写表单（跨控制器共享）；自动切换仍执行——
+        // 那是保存新建实例的既定后果，且切换本身与视图生命周期无关
+        if (!disposed) {
+          baseline.value = submittedSnapshot
+          ojInstances.value = saved.oj.instances
+          markSaved(true)
+        }
+
+        if (isNewInstance) {
+          if (await performSwitch(target)) return
+          // 后端仍停留在旧 OJ：下拉和地址必须一起回滚，否则下一次无关保存会把
+          // 新实例地址写进旧实例。baseline 同步到“已保存配置 + 回滚后的选择”，
+          // 避免产生用户未做任何编辑却显示未保存的假 dirty；保存期间的后续编辑仍保留。
+          if (!disposed) {
+            const rollbackActive = persistedActive.value
+            const rollbackUrl = ojInstances.value.find((i) => i.id === rollbackActive)?.baseUrl ?? ''
+            form.activeOj = rollbackActive
+            form.ojUrl = rollbackUrl
+            baseline.value = JSON.stringify({ ...submitted, activeOj: rollbackActive, ojUrl: rollbackUrl })
+            switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
           }
         }
-        draft.oj.contestRef = submitted.contestRef.trim()
-        draft.oj.contestPassword = submitted.contestPassword === '' ? null : submitted.contestPassword
-        if (!lockAll) {
-          draft.oj.timeoutSecs = Number(submitted.timeoutSecs)
-          draft.oj.pollIntervalSecs = Number(submitted.pollIntervalSecs)
-          draft.oj.pollTimeoutSecs = Number(submitted.pollTimeoutSecs)
-          draft.oj.cacheTtlSecs = Number(submitted.cacheTtlSecs)
-          draft.oj.cacheProblemStatement = submitted.cacheProblemStatement
-        }
-        draft.editor.fontSize = Number(submitted.fontSize)
-        draft.editor.tabSize = submitted.tabSize
-        draft.editor.defaultLanguage = submitted.defaultLanguage
-        draft.editor.autoSave = submitted.autoSave
-        // 关闭自动保存时该字段被禁用且不参与校验：隐藏的原始输入不得进入载荷
-        // （NaN 会序列化成 null，Rust u64 反序列化失败会让整次保存失败），保留已存值
-        const autoSaveIntervalSecs = submitted.autoSave
-          ? parseIntStrict(submitted.autoSaveIntervalSecs)
-          : null
-        if (autoSaveIntervalSecs !== null) {
-          draft.editor.autoSaveIntervalSecs = autoSaveIntervalSecs
-        }
-        draft.layout.splitRatio = submitted.splitRatio
-      })
-      // 保存已把当前 active 落盘：若此前是「切换生效但持久化失败」，回退风险
-      // 已由 ConfigService.updateConfig 解除；这里只清本控制器可见的警告
-      //（即便控制器已卸载也不会影响服务级共享结果）。
-      clearResolvedPersistedWarning(saved.oj.active)
-      // 已卸载的旧控制器不再回写表单（跨控制器共享）；自动切换仍执行——
-      // 那是保存新建实例的既定后果，且切换本身与视图生命周期无关
-      if (!disposed) {
-        baseline.value = submittedSnapshot
-        ojInstances.value = saved.oj.instances
-        markSaved(true)
-      }
-
-      if (isNewInstance) {
-        if (await performSwitch(target)) return
-        // 后端仍停留在旧 OJ：下拉和地址必须一起回滚，否则下一次无关保存会把
-        // 新实例地址写进旧实例。baseline 同步到“已保存配置 + 回滚后的选择”，
-        // 避免产生用户未做任何编辑却显示未保存的假 dirty；保存期间的后续编辑仍保留。
-        if (!disposed) {
-          const rollbackActive = persistedActive.value
-          const rollbackUrl = ojInstances.value.find((i) => i.id === rollbackActive)?.baseUrl ?? ''
-          form.activeOj = rollbackActive
-          form.ojUrl = rollbackUrl
-          baseline.value = JSON.stringify({ ...submitted, activeOj: rollbackActive, ojUrl: rollbackUrl })
-          switchNotice.value = `${target} 实例已保存；切换未成功，可在上方重试`
-        }
-      }
+      }, { settingsPage: true })
     } catch (e) {
       if (!disposed) saveError.value = errorMessage(e, '保存配置失败')
-    } finally {
-      saving.value = false
-      saveEpoch += 1
-      // 释放等待「旧控制器保存落地」的新控制器 load()
-      for (const resolve of saveWaiters.splice(0)) resolve()
     }
   }
 

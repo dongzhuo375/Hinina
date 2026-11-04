@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   getDataDir: vi.fn(async () => ({ currentDir: 'D:\\hinina', defaultDir: 'D:\\hinina', source: 'default', restartRequired: false, pointerInTemp: false })),
   // config.service
   getConfig: vi.fn(async () => ({})),
-  updateConfig: vi.fn(async () => {}),
+  updateConfig: vi.fn(),
   invalidate: vi.fn(),
   // stores
   loadContest: vi.fn(async () => {}),
@@ -43,20 +43,53 @@ vi.mock('@/services/system.service', () => ({
     isKeyed: () => false,
   },
 }))
-vi.mock('@/services/config.service', () => ({
-  configService: {
-    getConfig: mocks.getConfig,
-    updateConfig: mocks.updateConfig,
-    invalidate: mocks.invalidate,
-    latestOjSwitchResult: () => null,
-    ojSwitchEpoch: 0,
-    ojSwitchInFlight: false,
-    whenOjSwitchSettled: async () => {},
-  },
-  // useSettingsForm 的导入面需要该具名判据（本 spec 不触发切换失败，仍保持模块形状一致）
-  isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
-    e?.variant === 'OjSwitchPersistFailed',
-}))
+vi.mock('@/services/config.service', async () => {
+  const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
+  const busy = ref(false)
+  const settingsBusy = ref(false)
+  // 视图级只需「保存门禁 busy 可见 + 直通 bridge 缝」；真实排队语义由
+  // config.service.spec 的「save 门禁」套件锁定
+  async function runSaveTxn<T>(
+    fn: (tx: {
+      updateConfig: (mutate: (draft: AppConfig) => void) => Promise<AppConfig>
+    }) => Promise<T>,
+    options: { settingsPage?: boolean } = {},
+  ): Promise<T> {
+    busy.value = true
+    if (options.settingsPage) settingsBusy.value = true
+    try {
+      return await fn({ updateConfig: (mutate) => mocks.updateConfig(mutate) })
+    } finally {
+      busy.value = false
+      if (options.settingsPage) settingsBusy.value = false
+    }
+  }
+  return {
+    configService: {
+      getConfig: mocks.getConfig,
+      // 刻意不 mock 公共 updateConfig：生产已删除该公开包装
+      invalidate: mocks.invalidate,
+      latestOjSwitchResult: () => null,
+      ojSwitchEpoch: 0,
+      ojSwitchInFlight: false,
+      whenOjSwitchSettled: async () => {},
+      get saveEpoch() {
+        return 0
+      },
+      saveInFlight: readonly(busy),
+      settingsSaveInFlight: readonly(settingsBusy),
+      get settingsSaveEpoch() {
+        return 0
+      },
+      whenSaveSettled: async () => {},
+      whenSettingsSaveSettled: async () => {},
+      runSaveTxn,
+    },
+    // useSettingsForm 的导入面需要该具名判据（本 spec 不触发切换失败，仍保持模块形状一致）
+    isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
+      e?.variant === 'OjSwitchPersistFailed',
+  }
+})
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
 vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMyStatus: mocks.invalidateMyStatus }) }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => ({ refresh: mocks.announcementRefresh }) }))

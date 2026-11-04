@@ -39,6 +39,15 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   }
 }
 
+/// 保存入口的测试便捷封装：生产只有 `runSaveTxn` 一个写入通道（不暴露
+/// 队列化的 `updateConfig`），spec 统一从事务句柄进入，避免各写一遍箭头。
+function save(
+  svc: ConfigService,
+  mutate: (draft: AppConfig) => void,
+): Promise<AppConfig> {
+  return svc.runSaveTxn((tx) => tx.updateConfig(mutate))
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   // 单例服务的进程内缓存必须逐用例清空，否则相互串扰
@@ -342,7 +351,7 @@ describe('switchOj — 真实排队与代际', () => {
     expect(svc.latestOjSwitchResult()).toEqual({ target: 'B', outcome: 'persist-failed' })
   })
 
-  it('任意 updateConfig 成功且 active 匹配时解除 persist-failed', async () => {
+  it('任意保存成功且 active 匹配时解除 persist-failed', async () => {
     const svc = new ConfigService()
     const payload = { OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满' }
     const { variant, message } = parseAppError(payload)
@@ -353,7 +362,7 @@ describe('switchOj — 真实排队与代际', () => {
     config.oj.active = 'X'
     getConfig.mockResolvedValue(config)
     updateConfig.mockResolvedValue(undefined)
-    await svc.updateConfig(() => {})
+    await save(svc, () => {})
 
     expect(svc.latestOjSwitchResult()).toEqual({ target: 'X', outcome: 'success' })
   })
@@ -367,7 +376,7 @@ describe('switchOj — 真实排队与代际', () => {
 
     getConfig.mockResolvedValue(makeConfig()) // active=HOJ
     updateConfig.mockResolvedValue(undefined)
-    await svc.updateConfig(() => {})
+    await save(svc, () => {})
 
     expect(svc.latestOjSwitchResult()).toEqual({ target: 'X', outcome: 'persist-failed' })
   })
@@ -383,7 +392,7 @@ describe('switchOj — 真实排队与代际', () => {
     const persisted = makeConfig()
     persisted.oj.active = 'Hydro'
     updateConfig.mockResolvedValue(persisted)
-    const saved = await svc.updateConfig(() => {})
+    const saved = await save(svc, () => {})
 
     // 后端写锁内实际落盘的是 Hydro：返回值与警告解除都按它判定
     expect(saved.oj.active).toBe('Hydro')
@@ -391,12 +400,12 @@ describe('switchOj — 真实排队与代际', () => {
   })
 })
 
-describe('updateConfig — 设置页保存唯一入口', () => {
+describe('保存入口 — runSaveTxn 事务句柄（唯一写入通道）', () => {
   it('读取当前配置 → 应用变更 → 整体写回 → 失效缓存', async () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockResolvedValue(undefined)
 
-    const saved = await configService.updateConfig((draft) => {
+    const saved = await save(configService, (draft) => {
       draft.editor.fontSize = 18
     })
 
@@ -417,7 +426,7 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     getConfig.mockResolvedValue(makeConfig())
     updateConfig.mockResolvedValue(undefined)
 
-    await configService.updateConfig((draft) => {
+    await save(configService, (draft) => {
       draft.editor.fontSize = 18
     })
 
@@ -431,7 +440,7 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     updateConfig.mockRejectedValue(new Error('磁盘写入失败'))
 
     await expect(
-      configService.updateConfig((draft) => {
+      save(configService, (draft) => {
         draft.editor.fontSize = 18
       }),
     ).rejects.toThrow('磁盘写入失败')
@@ -446,10 +455,235 @@ describe('updateConfig — 设置页保存唯一入口', () => {
     getConfig.mockResolvedValue(current)
     updateConfig.mockResolvedValue(undefined)
 
-    await configService.updateConfig((draft) => {
+    await save(configService, (draft) => {
       draft.layout.splitRatio = 0.66
     })
 
     expect(current.layout.splitRatio).toBe(0.48)
+  })
+})
+
+/// save 门禁的真实服务测试（与 switchOj 排队套件同款方法：独立实例 + 延迟
+/// bridge promise）。useSettingsForm 的 mock 复刻了这套机器，若只测 mock，
+/// 删掉真实排队/代际仍会全绿——真实行为必须在这里锁定。
+describe('save 门禁 — 真实排队与代际', () => {
+  function deferred<T = void>() {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  /// 清空微任务队列：足够多跳之后仍未发生的事，只可能是被门禁挡住的工作
+  ///（避免按微任务跳数硬编码断言——`getConfig().catch` 等包装会引入额外跳）
+  async function flushMicrotasks() {
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+  }
+
+  it('并发保存串行：第二个事务在第一个落地后才发 bridge（读-改-写不交错）', async () => {
+    const svc = new ConfigService()
+    const first = deferred<AppConfig>()
+    const second = deferred<AppConfig>()
+    const order: string[] = []
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockImplementationOnce(() => {
+      order.push('bridge-1')
+      return first.promise
+    })
+    updateConfig.mockImplementationOnce(() => {
+      order.push('bridge-2')
+      return second.promise
+    })
+
+    // 顺序断言记在**事务体内部**而不是调用方的 `.then`：后者的先后只取决于
+    // Promise 包装层数（微任务跳数），不是契约。这里要锁的是「第二个事务的
+    // 工作不得早于第一个事务结束」——去掉排队时 start-2 会先于 end-1。
+    const p1 = svc.runSaveTxn(async (tx) => {
+      order.push('start-1')
+      await tx.updateConfig(() => {})
+      order.push('end-1')
+    })
+    const p2 = svc.runSaveTxn(async (tx) => {
+      order.push('start-2')
+      await tx.updateConfig(() => {})
+      order.push('end-2')
+    })
+
+    first.resolve(makeConfig())
+    second.resolve(makeConfig())
+    await Promise.all([p1, p2])
+
+    // 去掉排队时 start-2 会先于 end-1 出现（并发读-改-写）
+    expect(order).toEqual(['start-1', 'bridge-1', 'end-1', 'start-2', 'bridge-2', 'end-2'])
+  })
+
+  it('saveEpoch 入队/结束各 +1；saveInFlight 覆盖排队与在途，队尾落地才复位', async () => {
+    const svc = new ConfigService()
+    const first = deferred<AppConfig>()
+    const second = deferred<AppConfig>()
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    expect(svc.saveEpoch).toBe(0)
+    expect(svc.saveInFlight.value).toBe(false)
+    const p1 = save(svc, () => {})
+    const p2 = save(svc, () => {})
+    // 两次「入队」各 +1（同步；排队中的事务也算开始，读取方不得忽略）
+    expect(svc.saveEpoch).toBe(2)
+    expect(svc.saveInFlight.value).toBe(true)
+
+    first.resolve(makeConfig())
+    await p1
+    expect(svc.saveEpoch).toBe(3)
+    // 第二个事务仍在队里：busy 不得被第一个事务的结束复位
+    expect(svc.saveInFlight.value).toBe(true)
+
+    second.resolve(makeConfig())
+    await p2
+    expect(svc.saveEpoch).toBe(4)
+    expect(svc.saveInFlight.value).toBe(false)
+  })
+
+  it('whenSaveSettled 覆盖队尾；队尾失败也解除等待', async () => {
+    const svc = new ConfigService()
+    const first = deferred<AppConfig>()
+    const second = deferred<AppConfig>()
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    const p1 = save(svc, () => {})
+    const p2 = save(svc, () => {})
+    let settled = false
+    const waiting = svc.whenSaveSettled().then(() => {
+      settled = true
+    })
+
+    first.resolve(makeConfig())
+    await p1
+    await Promise.resolve()
+    expect(settled).toBe(false) // 队尾（第二个）仍在途
+
+    second.reject(new Error('第二次失败'))
+    await expect(p2).rejects.toThrow('第二次失败')
+    await waiting
+    expect(settled).toBe(true)
+    expect(svc.saveInFlight.value).toBe(false)
+  })
+
+  it('runSaveTxn 持锁跨后续编排：事务外发起的第二保存（编辑器偏好/分栏比例同款）排队到事务落地', async () => {
+    const svc = new ConfigService()
+    const saveBridge = deferred<AppConfig>()
+    const followUp = deferred<void>()
+    const prefsBridge = deferred<AppConfig>()
+    const order: string[] = []
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockImplementationOnce(() => {
+      order.push('settings-bridge')
+      return saveBridge.promise
+    })
+    updateConfig.mockImplementationOnce(() => {
+      order.push('prefs-bridge')
+      return prefsBridge.promise
+    })
+
+    // 复合保存事务：保存 → 后续编排（对应「保存新建实例 → 自动切换」）
+    const txn = svc.runSaveTxn(async (tx) => {
+      await tx.updateConfig(() => {})
+      order.push('settings-saved')
+      await followUp.promise
+      order.push('txn-done')
+    })
+    // 事务进行中发起的第二保存入口（编辑器偏好 / 分栏比例）
+    const prefs = save(svc, () => {}).then(() => {
+      order.push('prefs-done')
+    })
+
+    saveBridge.resolve(makeConfig())
+    await flushMicrotasks()
+    // 后续编排仍在途：第二入口不得插队发 bridge（去掉排队时这里就会出现 prefs-bridge）
+    expect(order).toEqual(['settings-bridge', 'settings-saved'])
+
+    followUp.resolve()
+    prefsBridge.resolve(makeConfig())
+    await Promise.all([txn, prefs])
+    expect(order).toEqual(['settings-bridge', 'settings-saved', 'txn-done', 'prefs-bridge', 'prefs-done'])
+  })
+
+  it('runSaveTxn 失败也释放：代际 +1、busy 复位、等待解除、缓存仍失效', async () => {
+    const svc = new ConfigService()
+    getConfig.mockResolvedValue(makeConfig())
+    await svc.getConfig() // 预热缓存
+    updateConfig.mockRejectedValueOnce(new Error('写盘失败'))
+
+    const epochBefore = svc.saveEpoch
+    await expect(save(svc, () => {})).rejects.toThrow('写盘失败')
+
+    expect(svc.saveEpoch).toBe(epochBefore + 2)
+    expect(svc.saveInFlight.value).toBe(false)
+    let settled = false
+    await svc.whenSaveSettled().then(() => {
+      settled = true
+    })
+    expect(settled).toBe(true)
+    await svc.getConfig()
+    expect(getConfig).toHaveBeenCalledTimes(2) // 失败后缓存已失效，重读后端
+  })
+
+  it('settingsSaveInFlight 只标记设置页事务：后台写入期间设置页门禁保持空闲', async () => {
+    const svc = new ConfigService()
+    const background = deferred<AppConfig>()
+    getConfig.mockResolvedValue(makeConfig())
+    updateConfig.mockReturnValueOnce(background.promise)
+
+    // 后台写入（编辑器偏好/分栏比例同款入口）：不传 settingsPage
+    const prefs = save(svc, () => {})
+    await flushMicrotasks()
+
+    // 任意保存队列在途（load 等待用），但设置页的门禁/UI 不被它置位
+    expect(svc.saveInFlight.value).toBe(true)
+    expect(svc.settingsSaveInFlight.value).toBe(false)
+
+    const settingsSave = svc.runSaveTxn(async () => {}, { settingsPage: true })
+    expect(svc.settingsSaveInFlight.value).toBe(true)
+
+    background.resolve(makeConfig())
+    await Promise.all([prefs, settingsSave])
+    expect(svc.saveInFlight.value).toBe(false)
+    expect(svc.settingsSaveInFlight.value).toBe(false)
+  })
+
+  it('whenSettingsSaveSettled 只等设置页事务：设置页落地即解除，不等悬挂的后台写入', async () => {
+    const svc = new ConfigService()
+    const settingsDone = deferred<void>()
+    const backgroundDone = deferred<void>()
+    const settingsSave = svc.runSaveTxn(async () => {
+      await settingsDone.promise
+    }, { settingsPage: true })
+    // 后台写入排在设置页事务之后并悬挂：设置页加载不得被它拖住
+    const background = svc.runSaveTxn(async () => {
+      await backgroundDone.promise
+    })
+
+    expect(svc.settingsSaveEpoch).toBe(1) // 入队 +1（后台写入不参与）
+    let settled = false
+    const waiting = svc.whenSettingsSaveSettled().then(() => {
+      settled = true
+    })
+
+    settingsDone.resolve()
+    await settingsSave
+    await waiting
+    expect(settled).toBe(true) // 设置页事务落地即解除
+    expect(svc.settingsSaveEpoch).toBe(2) // 结束 +1
+    expect(svc.settingsSaveInFlight.value).toBe(false)
+    // 后台写入仍在途：全量队列 busy 与设置页门禁互不影响
+    expect(svc.saveInFlight.value).toBe(true)
+
+    backgroundDone.resolve()
+    await background
+    expect(svc.settingsSaveEpoch).toBe(2) // 后台写入不再动设置页代际
   })
 })

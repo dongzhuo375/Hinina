@@ -18,7 +18,7 @@
 | `consumeFocusQuery` | `() => Promise<void>` | 消费 `?focus=1`：`nextTick` 后调 `codeEditor.focus()`，随后 `router.replace({ query: {} })` 清掉 |
 | `splitRatio` | ref | 初始值经 `configService.getSplitRatio()` 从配置读取（P55 消费落地；异步到达时若用户已拖拽则不覆盖） |
 | `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例钳制 0.3–0.7，拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
-| `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.updateConfig` 写回配置（下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
+| `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.saveSplitRatio` 写回配置（**后台写入**：只排保存队列、不进设置页门禁；下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
 | `adjustSplit` | `(delta: number) => void` | 分隔条键盘调整（`←/→` 每次 ±0.02，钳制在 [0.30, 0.70]）+ 落盘；分隔条带 `role="separator"` / `tabindex="0"` / `aria-*`，纯键盘可用 |
 | `pendingSubmission` | computed | `submissionStore.pendingFor(contestId, currentProblemId, displayId, workspaceStore.language, workspaceStore.code)` —— 本会话同内容提交在评测期间的锁与展示源 |
 | `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, displayId, workspaceStore.language, workspaceStore.code)`，其中 `displayId` 取路由参数（比赛内题号 "A"）—— **HOJ 提交接口认的是它而不是数字 pid**；轮询由 store 自动启动。**三重守卫**：`isLoadingPage`（加载编排覆盖 loadWorkspace 与 openProblem 全程）、`isSubmitting || pendingSubmission`（store 在途锁 + 本会话同内容已受理）、`loadedProblemDisplayId !== displayId`（openProblem 失败时 problemStore 不清空，currentProblem 仍是旧题而 code 已是新题 —— 无需并发，一次失败的切换就会错配） |
