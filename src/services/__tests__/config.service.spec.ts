@@ -11,7 +11,7 @@ const { getConfig, updateConfig, reloadConfig, switchOj } = vi.hoisted(() => ({
 }))
 vi.mock('@/bridge/config.bridge', () => ({ getConfig, updateConfig, reloadConfig, switchOj }))
 
-import { ConfigService, configService } from '@/services/config.service'
+import { ConfigService, configService, isOjSwitchPersistFailed } from '@/services/config.service'
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -229,6 +229,32 @@ describe('switchOj — 显式切换当前 OJ', () => {
   it('bridge 失败时原样上抛（设置页据此回滚下拉显示）', async () => {
     switchOj.mockRejectedValue(new Error('OJ X 未注册'))
     await expect(configService.switchOj('X')).rejects.toThrow('未注册')
+  })
+})
+
+describe('isOjSwitchPersistFailed — 类型化判据', () => {
+  it('只认 IpcError 的持久化失败变体，裸 variant 对象不算', () => {
+    const payload = { OjSwitchPersistFailed: 'OJ 切换已生效但保存配置失败: 磁盘满' }
+    const { variant, message } = parseAppError(payload)
+    expect(isOjSwitchPersistFailed(new IpcError('switch_oj', message, variant, payload))).toBe(true)
+    expect(isOjSwitchPersistFailed(new Error('普通失败'))).toBe(false)
+    // 旧判据 `(e as { variant? }).variant` 会把这种手写对象误判为「已生效」
+    expect(isOjSwitchPersistFailed({ variant: 'OjSwitchPersistFailed' })).toBe(false)
+  })
+
+  it('裸 variant 对象按普通失败处理：不记录持久化失败、不失效缓存', async () => {
+    const svc = new ConfigService()
+    getConfig.mockResolvedValue(makeConfig())
+    await svc.getConfig() // 预热缓存
+    const fake = { variant: 'OjSwitchPersistFailed', message: '伪装' }
+    switchOj.mockRejectedValueOnce(fake)
+
+    await expect(svc.switchOj('X')).rejects.toEqual(fake)
+
+    expect(svc.latestOjSwitchResult()).toBeNull()
+    // 未走 persist-failed 分支的 invalidate：缓存仍命中
+    await svc.getConfig()
+    expect(getConfig).toHaveBeenCalledTimes(1)
   })
 })
 

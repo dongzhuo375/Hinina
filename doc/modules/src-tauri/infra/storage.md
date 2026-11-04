@@ -9,7 +9,8 @@
 - **`Storage::base_dir()`** — 返回基础目录的不可变引用
 - **`Storage::remove_file(relative_path) -> AppResult<()>`** — 删除**文件**（文件专用、不跟随链接）：只做 `fs::remove_file`，目录条目必然失败（目录绝不被删）；Unix 上对符号链接删除链接本身（目标不受影响），Windows 上目录链接同样失败——供「只删文件」类清理使用（2026-11-04，回收趟 TOCTOU 处置）
 - **`Storage::remove_empty_dir(relative_path) -> AppResult<()>`** — 删除**空目录**（目录专用、非递归、不跟随链接）：只做 `fs::remove_dir`，文件永不被删、非空目录必然失败；Unix 对符号链接返回 ENOTDIR，Windows 只删链接条目本身（外部目标不受影响）——供「只回收空目录」类清理使用（2026-11-04，回收趟 TOCTOU 处置）
-- **`Storage::symlink_metadata(relative_path) -> AppResult<std::fs::Metadata>`** — 读取文件元数据（大小/修改时间/is_file 等不可变快照值），**不跟随符号链接**（lstat 语义）；`resolve()` 只做词法路径校验，跟随链接会让调用方穿过 `base_dir` 内的链接看到/删除外部目标，故供留档统计/清理等需要路径约束的场景使用（2026-11-04，F5 + 符号链接加固）
+- **`FileStat`** — `symlink_metadata` 的返回值：`len/is_empty/is_file/is_dir/is_symlink/modified` 的不可变快照（私有字段 + 只读方法）。刻意不复用 `std::fs::Metadata`，避免抽象签名绑定本地文件系统
+- **`Storage::symlink_metadata(relative_path) -> AppResult<FileStat>`** — 读取文件元数据，**不跟随符号链接**（lstat 语义），返回自有 `FileStat`：`len()` / `is_empty()` / `is_file()` / `is_dir()` / `is_symlink()` / `modified() -> Option<SystemTime>`（`None` = 平台未提供或读取失败，调用方按需跳过）。`resolve()` 只做词法路径校验，跟随链接会让调用方穿过 `base_dir` 内的链接看到/删除外部目标，故供留档统计/清理、日志体积预览等需要路径约束的场景使用（2026-11-04，F5 + 符号链接加固；H4 收为自有类型）
 - **`Storage::read(relative_path) -> AppResult<Vec<u8>>`** — 读取二进制文件
 - **`Storage::read_to_string(relative_path) -> AppResult<String>`** — 读取 UTF-8 文件
 - **`Storage::write(relative_path, data) -> AppResult<()>`** — 写入二进制数据，自动创建父目录
@@ -27,6 +28,7 @@
 - `std::path::{Path, PathBuf, Component}`
 - `std::fs`
 - `std::io::Write`（原子写用 `File::write_all`）
+- `std::time::SystemTime`（`FileStat::modified`）
 - `std::sync::atomic::{AtomicU64, Ordering}`（原子写临时文件序号）
 - `core::error::{AppError, AppResult}`
 
@@ -53,3 +55,4 @@
 测试代码位于 `tests/storage_tests.rs`，通过 `#[cfg(test)] #[path = "tests/storage_tests.rs"]` 引用。
 路径防线：正常路径通过、`..` 拒绝、**空串 / `.` / `workspaces/.` 拒绝（`remove_all` 不得删到数据根目录）**、绝对形态（`/x`；Windows 下 `C:\x`、`C:x`、verbatim）拒绝、深层嵌套合法路径通过；原子写同样拒绝绝对形态。
 原子写：首次写入、覆盖已有内容（rename 覆盖语义）、**写前清理同目标残片且不误伤**（`{target}.{数字}.tmp` 被清；`{target}.tmp` 与其他目标的残片保留）。
+元数据（`symlink_metadata`）：常规文件返回 `len/is_file/modified`、缺失/穿越路径报 `Io`；Unix 下链接返回 `is_symlink()` 且 `!is_file()`（lstat，不跟随目标）。

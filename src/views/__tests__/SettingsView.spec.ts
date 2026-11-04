@@ -53,6 +53,9 @@ vi.mock('@/services/config.service', () => ({
     ojSwitchInFlight: false,
     whenOjSwitchSettled: async () => {},
   },
+  // useSettingsForm 的导入面需要该具名判据（本 spec 不触发切换失败，仍保持模块形状一致）
+  isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
+    e?.variant === 'OjSwitchPersistFailed',
 }))
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
 vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMyStatus: mocks.invalidateMyStatus }) }))

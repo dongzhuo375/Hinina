@@ -3,7 +3,7 @@ import { isKeyedSettingsRoute } from '@/guards/keyed-settings-route'
 import type { Ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
-import { configService } from '@/services/config.service'
+import { configService, isOjSwitchPersistFailed } from '@/services/config.service'
 import { useAuthStore } from '@/stores/authStore'
 import { resetSessionForOjSwitch } from '@/stores/session'
 import { normalizeHojLanguage } from '@/utils/language'
@@ -350,7 +350,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // 后端已切 registry、清缓存，只是持久化 oj.active 失败：切换**已生效**，
       // 必须走「承认已生效」分支（并补做 resetSessionForOjSwitch——否则旧 OJ
       // 的登录态会被带到新 OJ）
-      if ((e as { variant?: string }).variant === 'OjSwitchPersistFailed') {
+      if (isOjSwitchPersistFailed(e)) {
         outcome = 'persist-failed'
         resetSessionForOjSwitch()
         useAuthStore().resetForOjSwitch()

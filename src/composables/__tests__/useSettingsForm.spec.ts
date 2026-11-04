@@ -85,6 +85,9 @@ vi.mock('@/services/config.service', () => ({
       return pending ? pending.catch(() => {}) : Promise.resolve()
     },
   },
+  // 与生产同源的具名判据；真实类型化判据由 config.service.spec 用真实 IpcError 锁定
+  isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
+    e?.variant === 'OjSwitchPersistFailed',
 }))
 vi.mock('@/services/system.service', () => ({
   systemService: {

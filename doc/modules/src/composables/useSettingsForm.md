@@ -24,7 +24,7 @@
 | `readSettledConfig`（内部） | `() => Promise<AppConfig>` | 先等 `configService.whenOjSwitchSettled()`（无在途时同步通过），再用 `ojSwitchEpoch` 复核读取期间是否发生切换；变了就重读。保证新控制器在事务完成后拿到新配置 |
 | `ojOptions` | computed | 实时下拉候选；实例清单与 persistedActive 为 controller 内部状态 |
 | 签名 | `useSettingsForm(maintainerLocked?: Readonly<Ref<boolean>>)` | 维护者层是否锁定（普通启动 true）；默认 `ref(false)`（不锁）供独立使用 |
-| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）且当前路由仍是设置页时**切换成功后留在设置页（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2）；`switch_oj` 是异步的，期间已导航离开则不再停留、照常回登录页（豁免只属于设置页本身，评审九 P2-1）；成功后重置/对齐 OJ 域并重算 baseline；重载失败时**承认切换已生效**（后端/registry/磁盘均已是新 OJ）——表单对齐新 OJ 的已知地址、OJ 域字段清单单一来源 `OJ_DOMAIN_KEYS`（脏判定/重置/对齐三处共用，评审二十四 #3）、OJ 域草稿回到磁盘值（避免 A 的比赛引用等写进 B）、基线按「磁盘值 + 新 active/url」重算（不出现假 dirty），提示「切换已生效，但配置刷新失败…」，绝不把 UI 回滚成「界面 A、实际 B」（评审二十二/#1、评审二十三）；停留时**只重置 OJ 域字段并按磁盘重算 baseline**（`resetOjFieldsFromDisk`）：编辑器/布局等全局草稿**保留**（评审十九 #1——整体 `load()` 会丢掉维护者刚改的字体/超时，与回滚分支的「保留编辑」不一致），dirty 只反映真正未保存的全局编辑，旧 OJ 的 OJ 域草稿不会写到新 OJ（评审十 #4）；OJ 域有未保存修改时给一次「已从磁盘重新加载」说明，不再静默丢弃（评审二十一 #2）。**卸载后的控制器不写回表单**（评审三十三 #4）；切换生效后等待其它仍挂载的控制器重读，并把 `success` / `persist-failed` 结果一并传过去（评审三十四 #1/#3） |
+| `onSwitchOj` / `performSwitch`（内部） | fn | 显式切换与保存新实例后的自动切换共用；自动切换失败回滚 activeOj，用户可重新选择重试。**钥匙模式（`--settings`）且当前路由仍是设置页时**切换成功后留在设置页（会话清理照旧、不导航）——踢回登录页等于重新锁死（评审八 P2）；`switch_oj` 是异步的，期间已导航离开则不再停留、照常回登录页（豁免只属于设置页本身，评审九 P2-1）；成功后重置/对齐 OJ 域并重算 baseline；重载失败时**承认切换已生效**（后端/registry/磁盘均已是新 OJ）——表单对齐新 OJ 的已知地址、OJ 域字段清单单一来源 `OJ_DOMAIN_KEYS`（脏判定/重置/对齐三处共用，评审二十四 #3）、OJ 域草稿回到磁盘值（避免 A 的比赛引用等写进 B）、基线按「磁盘值 + 新 active/url」重算（不出现假 dirty），提示「切换已生效，但配置刷新失败…」，绝不把 UI 回滚成「界面 A、实际 B」（评审二十二/#1、评审二十三）；停留时**只重置 OJ 域字段并按磁盘重算 baseline**（`resetOjFieldsFromDisk`）：编辑器/布局等全局草稿**保留**（评审十九 #1——整体 `load()` 会丢掉维护者刚改的字体/超时，与回滚分支的「保留编辑」不一致），dirty 只反映真正未保存的全局编辑，旧 OJ 的 OJ 域草稿不会写到新 OJ（评审十 #4）；OJ 域有未保存修改时给一次「已从磁盘重新加载」说明，不再静默丢弃（评审二十一 #2）。**卸载后的控制器不写回表单**（评审三十三 #4）；切换生效后等待其它仍挂载的控制器重读，并把 `success` / `persist-failed` 结果一并传过去（评审三十四 #1/#3）；`OjSwitchPersistFailed` 的分流经 `configService.isOjSwitchPersistFailed`（`IpcError` 类型化判据，不再裸读 `variant`，2026-11-04 G8） |
 | `SETTINGS_INPUT` / `inputClass` | 常量/fn | 共享输入框基础样式与错误态拼接 |
 
 
@@ -32,7 +32,7 @@
 
 - `vue`（`reactive` / `ref` / `computed` / `getCurrentScope` / `onScopeDispose`）
 - `vue-router`（普通模式切换成功后 `replace(Login)`；钥匙模式留在设置页）
-- `@/services/config.service`
+- `@/services/config.service`（`configService` + `isOjSwitchPersistFailed` 错误判据）
 - `@/guards/keyed-settings-route`（`isKeyedSettingsRoute()` —— 切换后的「停留设置页」判据；组合进程级钥匙状态与路由身份）
 - `@/stores/session`（`resetSessionForOjSwitch`）
 - `@/stores/authStore`（`resetForOjSwitch`，与领域清理成对调用）

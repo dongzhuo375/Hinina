@@ -187,8 +187,9 @@ fn symlink_metadata_reads_regular_files_and_rejects_invalid_paths() {
 
     let meta = s.symlink_metadata("sessions/HOJ.json").unwrap();
     assert!(meta.is_file());
+    assert!(!meta.is_empty());
     assert_eq!(meta.len(), 13);
-    assert!(meta.modified().is_ok());
+    assert!(meta.modified().is_some());
 
     assert!(s.symlink_metadata("sessions/missing.json").is_err());
     assert!(s.symlink_metadata("../evil").is_err());
@@ -209,7 +210,7 @@ fn symlink_metadata_does_not_follow_symlink_targets() {
     symlink(external.join("outside.json"), dir.join("link.json")).unwrap();
 
     let meta = s.symlink_metadata("link.json").unwrap();
-    assert!(meta.file_type().is_symlink(), "必须报告链接本身");
+    assert!(meta.is_symlink(), "必须报告链接本身");
     assert!(!meta.is_file(), "不得把链接目标当成文件");
 }
 

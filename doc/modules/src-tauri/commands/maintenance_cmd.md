@@ -66,8 +66,8 @@ reset_client
   → storage.remove_all("cache")                    // 兜底：覆盖将来新增的 namespace
 
 local_data_usage
-  → fs::metadata(logs/hinina.log)                  // 日志字节数
-  → fs::metadata(%TEMP%/hinina-panic.log)          // 崩溃记录字节数
+  → storage.symlink_metadata(logs/hinina.log)      // 日志字节数（经 Storage 抽象，lstat 不跟随链接）
+  → fs::symlink_metadata(%TEMP%/hinina-panic.log)  // 崩溃记录字节数（数据目录之外，直用 std::fs 是合法例外）
   → snapshot::inspect_snapshots(keep_days=30)      // 留档总/过期条数与字节数
 
 purge_local_data(logs, staleSnapshots)
