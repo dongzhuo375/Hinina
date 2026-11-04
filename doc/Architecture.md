@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-11-04 | 分支：`main`
+> 最后更新：2026-11-05 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -275,7 +275,7 @@ Hinina/
         │       ├── execution_api_tests.rs # 桥准入限流、响应上限与审计
         │       ├── bounded_json_tests.rs # 流式字节上限
         │       └── support.rs            # 直接挂载为 cfg(test) 的 test_support，跨模块夹具
-        └── commands/                     # Tauri Command 薄封装
+        └── commands/                     # Tauri Command 薄封装。**命令层允许跨 Service 编排与锁协调**（switch_oj/update_config/reload_config 的多步事务即此），但**锁的所有权始终在 Service**、业务规则不得长进命令层——命令是「编排 + 校验 + 事实通知」的组合点，不是第二个业务层（分层审计 2026-11-04 命令层趋势观察，评审三十三 #2 的锁内编排即此边界内的形态）
             ├── app_cmd.rs                # launch_flags（**零状态薄转发** → infra/launch_args：--settings 管理方钥匙的线上出口）
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
@@ -542,6 +542,7 @@ src/
 - **`AdapterDeps` 只准 infra 依赖**：适配器工厂构造签名只接收 http_client / event_bus / **session_repo** / storage，**禁止把 Service 塞进 `AdapterDeps`**（与「插件只能访问 `plugin/api`、禁止直调内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界彻底糊掉）。`session_repo` 是**仓库（infra 侧）**而非 Service：Provider 侧凭证轮换必须在拿到新 token 的当场显式落盘（见下一条），因此它需要的是「会话持久化能力」，不是认证业务逻辑。`AdapterFactory { id, build }` 的形状即 v1.0 插件 manifest 的雏形：将来把编译期工厂清单换成运行时扫描插件目录，上层（registry / context / Service）不用再改
 - **凭证轮换必须显式落盘，且 token 绝不进事件流**：HOJ 的 Refresh-Token 协议会在响应头里轮换凭证。旧实现让适配器发布**带真实 token** 的 `TokenRefreshed` 事件、由 `AuthService` 的同步订阅者代劳写盘 —— 既把凭证塞进公共事件流，又把持久性保证挂在事件投递时序上（消费者可能落后、可能不存在）。现在由适配器经 `SessionRepository::rotate_token` 在**当场显式写盘**（所有会话变更共用一把锁串行化，会话不存在返回 `Ok(false)` 不凭空创建；写入走 `write_string_atomic`），**仅在落盘成功后**才发布**只带 OJ 标识**的 `TokenRotated`（`Ok(false)`/`Err` 都不发布 —— 该事件的语义是「已轮换且已落盘」）；落盘失败只告警（HTTP 请求本身已成功，不能因落盘失败把它变成错误）
 - **接入新 OJ = 1 个子目录 + `factories()` 一行 + `oj.instances` 一条配置**：`OjConfig` 按 `OjInstance{ id, baseUrl, enabled, options }` 实例清单组织（`options` 刻意弱类型 Map —— 强类型枚举会让「新 OJ 要改 core」原样复活）；`contest_ref` 是**不透明字符串引用**（HOJ 数字串 / 其它 OJ 任意资源 ID，装得下 Hydro 的 hex ObjectId），空串 = 未配置；旧格式（hojUrl / contestId / lastOjType）经 serde 过渡字段在 `normalize_legacy_values` 一次性迁移、永不写回。OJ 切换走显式 `switch_oj` 命令（**整段持配置写事务锁**：校验已注册且在配置启用列表中 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 `oj.active` → 发布 `OjSwitched`），**不是 login 的副作用**；与 `update_config`/`reload` 共锁使并发切换串行落地，且保存与切换交错不会产出 `validate()` 拒绝的配置。切换的后果按端分工：Rust 侧由 `switch_oj` **显式调用** `contest/problem/submission` 三个 Service 的 `on_oj_switched()`（内存段同步清、磁盘段空间回收可后台），返回即已干净 —— 不再依赖 `OjSwitched` 订阅者（那会把切换正确性挂在事件投递时机上）；前端在**调用点**重置会话上下文（`resetSessionForOjSwitch`：领域状态清零；认证态经 `authStore.resetForOjSwitch()` 复位 `user`/`error`/`sessionResolved`；回登录页由守卫按新 OJ 会话文件恢复）—— 切换是前端发起的命令，发起方编排后果（与登出同款模式），不引入 Tauri 事件桥；各 OJ 会话文件按 id 隔离，切换保留旧 OJ 登录态（切回免登录），故前端重置不得走 `authStore.logout()`（会误删新 OJ 的会话文件）
+- **两份 OJ 域字段清单语义不同，改任一必须对照另一份**：前端 `OJ_DOMAIN_KEYS`（`useSettingsForm`，9 键，含 contestRef/contestPassword）回答「**OJ 切换时哪些草稿字段从磁盘重载**」——重置域，`copyOjDomain`/脏判定/切换对齐三处共用；后端 `preserve_locked_fields`（定义 `core/entity/config.rs`、消费 `config_cmd`，7 字段：active/instances/timeout/poll×2/cache_ttl/cachePS）回答「**普通启动（无钥匙）保存时哪些字段整体保留**」——维护者锁定层。覆盖面相近但判据、方向与消费方都不同：把锁定字段塞进重置域（或反之）会让「切 OJ 重载」与「普通保存保留」互相污染；任何一侧增删字段都要同步核对另一侧与 `doc/modules` 的两份清单页（分层审计 2026-11-04 契约 #8）
 - **OJ 状态码表必须照抄服务端枚举，不得凭直觉推排**：HOJ 的 `Constants.Judge` 是**含负数**的码表（`-10` Not Submitted / `-4` Cancelled / `-3` PE / `-2` CE / `-1` WA / `0` Accepted / `1` TLE / … / `5` Pending / `6` Compiling / `7` Judging / `8` PA / `9` Submitting / `10` SF / `15` No Status），**不是「0 起顺排」**。曾按「0 开头即排队中」把它整体错位（`0→Pending`、`5→Accepted`、`13→PA`），后果是所有 AC 提交被显示为 Pending 并无限轮询（实测：提交 1166 服务端 `status:0` + `time:2ms`/`memory:532KB` 是 AC，界面却永远转圈），评测页状态筛选选「Accepted」实际筛的是 HOJ 的 Pending。终态判据与之绑定：**非终态 = 5/6/7/9**。`map_status` 与 `is_terminal_status` 两张表必须等价（有测试逐码锁定），前端 `STATUS_META`/`STATUS_OPTIONS`/`NON_TERMINAL_STATUSES` 同源。同一码表还驱动「我的题目状态」（服务端回的是评测码而非 0/1/2 三态，需归一）与 Hydro 的状态筛选翻译
 - **提交接口的题目标识各 OJ 不同，两个都要传**：`SubmissionProvider::submit` 同时收 `problem_id`（题目真实 ID：工作区隔离与状态查询的键）与 `display_id`（比赛内展示题号，如 `"A"`）。HOJ 的 `POST /submit-problem-judge` 收的是**展示题号** —— 服务端拿它查 `contest_problem.display_id`，查不到直接 NPE 返回 **HTTP 500**（实测传数字 pid 必 500，日志里十条一模一样的「HTTP 500」）；Hydro 的 `/p/{id}/submit` 收的则是真实 ID。由 Adapter 各取所需，不要在某一家里「猜」另一家的语义
 - **非 2xx 的响应体必须带进错误信息**：`infra/http.rs` 的非 raw 变体在状态码判定失败时读取响应体、压成单行并截断后附进 `AppError`（`HTTP 500 … | {"status":500,"msg":"…"}`）。此前直接丢弃响应体，调用方只拿到一句 `HTTP 500 Internal Server Error`，排障时完全看不出服务端说了什么。**401 例外**：该变体是会话守卫的判据，且服务端可能在 401 响应里回显凭证，故不附带正文
