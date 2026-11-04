@@ -281,6 +281,10 @@ fn main() {
         // 目录选择器（设置页「数据目录」）。本项目不注册 tauri-plugin-fs / -http
         // （fs/http 的依赖与 capability 存在但从未注册，全部 I/O 都走 Rust）。
         .plugin(tauri_plugin_dialog::init())
+        // 外链转交系统浏览器（app_cmd::open_external 经 Rust API 消费）。Rust-only
+        // 注册：不装 npm 包、不声明 capability——插件自身的 IPC 命令对 webview 不暴露，
+        // scheme 白名单由 open_external 命令守卫（见 app_cmd.rs）。
+        .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             // AppContext 必须在这里初始化而不是 main()：只有 setup 能拿到 AppHandle，
             // 也就只有这里能解析 `app_local_data_dir()`。
@@ -353,6 +357,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_cmd::launch_flags,
+            commands::app_cmd::open_external,
             commands::plugin_cmd::plugin_list,
             commands::plugin_cmd::plugin_start,
             commands::plugin_cmd::plugin_stop,

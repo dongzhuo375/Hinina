@@ -18,5 +18,9 @@ pub mod submission_cmd;
 pub mod workspace_cmd;
 
 #[cfg(test)]
+#[path = "tests/app_cmd_tests.rs"]
+mod app_cmd_tests;
+
+#[cfg(test)]
 #[path = "tests/mod_tests.rs"]
 mod tests;
