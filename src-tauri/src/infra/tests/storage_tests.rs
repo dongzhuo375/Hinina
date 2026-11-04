@@ -253,3 +253,34 @@ fn remove_empty_dir_does_not_follow_symlinks() {
     );
     assert!(target.path().exists(), "目标目录应保留");
 }
+
+/// `remove_file`：只删文件——目录报错（目录绝不被删）；Unix 上对符号链接删除
+/// 链接本身、目标原样保留（unlink 不跟随）。
+#[test]
+fn remove_file_only_removes_files() {
+    let dir = TempDir::named("hinina-storage-remove-file");
+    let s = Storage::new(dir.to_path_buf());
+    s.write_string("a.txt", "x").unwrap();
+    s.create_dir("sub").unwrap();
+
+    assert!(s.remove_file("a.txt").is_ok());
+    assert!(!s.exists("a.txt"));
+    assert!(s.remove_file("sub").is_err(), "目录不得被文件专用删除删掉");
+    assert!(s.exists("sub"));
+}
+
+#[cfg(unix)]
+#[test]
+fn remove_file_on_symlink_removes_the_link_not_the_target() {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::named("hinina-storage-remove-file-link");
+    let s = Storage::new(dir.to_path_buf());
+    let target = TempDir::named("hinina-storage-remove-file-link-target");
+    let target_file = target.path().join("secret.txt");
+    std::fs::write(&target_file, "outside").unwrap();
+    symlink(&target_file, dir.join("link.txt")).unwrap();
+
+    assert!(s.remove_file("link.txt").is_ok(), "删除的是链接本身");
+    assert!(!dir.join("link.txt").exists());
+    assert!(target_file.exists(), "目标文件必须保留");
+}

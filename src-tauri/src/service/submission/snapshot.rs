@@ -318,7 +318,10 @@ pub fn purge_stale_snapshots(storage: &Storage, keep_days: u64) -> (usize, u64) 
         if modified >= cutoff {
             continue;
         }
-        match storage.remove(&relative) {
+        // 文件专用删除（不跟随链接）：即便条目在 lstat 与删除之间被换成目录
+        // 或链接，也不会删目录、不会穿过链接——Unix 上最多删掉链接本身，
+        // Windows 上目录链接直接失败，外部目标始终不受影响。
+        match storage.remove_file(&relative) {
             Ok(()) => {
                 removed += 1;
                 freed += bytes;

@@ -253,6 +253,22 @@ impl Storage {
         }
     }
 
+    /// 删除**文件**（文件专用、不跟随链接）。
+    ///
+    /// 与 [`Self::remove`] 的分工：后者用 `path.is_dir()`（跟随链接）分流，对
+    /// 「本应是文件、但此刻被替换成目录」的条目会走 `remove_dir`；本方法只做
+    /// `fs::remove_file`——目录条目必然失败、永不被删；Unix 上对符号链接删除
+    /// 的是**链接本身**（`unlink` 不跟随，目标不受影响），Windows 上对目录链接
+    /// 同样失败。供「只删文件」类清理使用，调用方仍应先 `symlink_metadata`。
+    ///
+    /// # Errors
+    /// 路径不安全、条目不是常规文件或删除失败时返回 `AppError::Io`。
+    pub fn remove_file(&self, relative_path: &str) -> AppResult<()> {
+        let path = self.resolve(relative_path)?;
+        fs::remove_file(&path)
+            .map_err(|e| AppError::Io(format!("删除文件失败 {}: {}", relative_path, e)))
+    }
+
     /// 删除**空目录**（非递归、目录专用、不跟随链接）。
     ///
     /// 与 [`Self::remove`] 的分工：后者用 `path.is_dir()`（跟随链接）分流，对
