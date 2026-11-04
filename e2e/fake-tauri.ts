@@ -454,12 +454,20 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       case 'get_config':
         return structuredClone(config)
       case 'update_config': {
-        // 复刻后端语义：maintainerLocked 必填；active 只由
-        // switch_oj 改写；锁定模式用旧值覆盖锁定字段，并保留结构性检查
+        // 复刻后端语义（2026-11-04 G1 后）：锁定真值 = !launchFlags.settings
+        // （与 launch_flags 分支同一来源），前端 maintainerLocked 必填但仅为
+        // 对账字段——不一致时如实记 console.warn，不改变执行结果。
+        // active 只由 switch_oj 改写；锁定模式用旧值覆盖锁定字段并保留结构性检查。
         const incoming = structuredClone(args?.config) as typeof config
-        const locked = args?.maintainerLocked
-        if (typeof locked !== 'boolean') {
+        const claimed = args?.maintainerLocked
+        if (typeof claimed !== 'boolean') {
           throw { Config: 'fake: update_config 缺少 maintainerLocked 参数' }
+        }
+        const locked = !(options.launchFlags ?? { settings: false }).settings
+        if (claimed !== locked) {
+          console.warn(
+            `[fake-tauri] update_config 的对账字段与 launchFlags 真值不一致: claimed=${claimed} enforced=${locked}`,
+          )
         }
         incoming.oj.active = config.oj.active
         if (locked) {
