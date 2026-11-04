@@ -133,7 +133,11 @@ export class ConfigService {
   /// 「已生效但重启可能回退」的既存事实，设置页晚挂载也要据此提示；后续
   /// 成功切换或任意一次把同一 active 成功落盘的保存事务会解除它。
   private lastSwitchResult: OjSwitchResult | null = null
-  /// 保存队列：所有写入口共用，后一次等前一次落地再执行
+  /// 保存队列：所有写入口共用，后一次等前一次落地再执行。
+  /// 已知限制（单队列头阻塞）：后台写入悬挂会把排在它之后的设置页保存一起
+  /// 卡住——设置页停在「保存中…」、OJ 切换被拒、load() 一并等待。拆双队列会
+  /// 重新打开「设置页保存与后台写并发丢更新」窗口（G4 的动机），故记录为
+  /// 已知限制（config.service.md）而非修复
   private readonly saveQueue = new SerialQueue()
   /// 保存代际：每次保存事务**入队与结束**各 +1。读配置的调用方据此检测
   /// 「读取期间发生过保存」，事务落地后重读。排队中的事务也算开始——
@@ -185,7 +189,7 @@ export class ConfigService {
     return this.switchQueue.whenSettled()
   }
 
-  /** 当前保存代际（只读；语义见 `saveEpochCounter`） */
+  /** 当前保存代际（只读；语义见 `saveEpochCounter`）。队列观测 API，见 `whenSaveSettled` 说明 */
   get saveEpoch(): number {
     return this.saveEpochCounter
   }
@@ -194,8 +198,12 @@ export class ConfigService {
    * 等待在途/排队中的保存事务落地（不向等待者抛出保存错误）。
    *
    * 只覆盖**调用时刻已排队**的事务：之后才入队的不在其中。需要连
-   * 「等待期间新开始的保存」一并覆盖的调用方，必须自己复核 `saveEpoch`
-   *（`useSettingsForm.load` 的循环即此）。
+   * 「等待期间新开始的任务」一并覆盖的调用方，必须自己复核代际
+   *（切换侧 `ojSwitchEpoch` / 设置页侧 `settingsSaveEpoch`）。
+   *
+   * 本方法与 `saveEpoch` / `saveInFlight` 是**队列观测 API**：生产代码当前
+   * 零消费——设置页加载走设置页作用域的 `whenSettingsSaveSettled`（后台写入
+   * 悬挂不得把加载卡住）。保留供测试锁定队列语义与将来调用方使用。
    */
   whenSaveSettled(): Promise<void> {
     return this.saveQueue.whenSettled()

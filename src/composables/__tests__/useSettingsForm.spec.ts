@@ -566,7 +566,7 @@ describe('useSettingsForm', () => {
     expect(settings.switching.value).toBe(false)
   })
 
-  it('保存进行中禁止显式切换（反向互斥）', async () => {
+  it('保存进行中禁止显式切换（反向互斥）：回退下拉并给出可见提示', async () => {
     await settings.load()
     currentConfig.oj.instances.push({ id: 'Hydro', baseUrl: 'https://hydro.example', enabled: true, options: {} })
     await settings.load()
@@ -578,10 +578,13 @@ describe('useSettingsForm', () => {
 
     const saving = settings.save()
     await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledTimes(1))
-    // 保存中：切换请求被忽略
+    // 保存中：切换请求被忽略。UI 层 select 已 disabled（ojDomainBusy），本分支
+    // 只能经程序化调用触达——锁定防御行为：回退选择 + 可见提示（不是静默）
     settings.form.activeOj = 'Hydro'
     await settings.onSwitchOj()
     expect(mocks.switchOj).not.toHaveBeenCalled()
+    expect(settings.form.activeOj).toBe('HOJ')
+    expect(settings.switchNotice.value).toContain('正在保存配置')
     releaseSave()
     await saving
   })
