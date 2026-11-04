@@ -63,7 +63,11 @@ vi.mock('@/services/config.service', async () => {
       },
       saveInFlight: readonly(busy),
       settingsSaveInFlight: readonly(settingsBusy),
+      get settingsSaveEpoch() {
+        return 0
+      },
       whenSaveSettled: async () => {},
+      whenSettingsSaveSettled: async () => {},
       runSaveTxn,
     },
     // useSettingsForm 的导入面需要该具名判据；本 spec 的切换失败用普通 Error，

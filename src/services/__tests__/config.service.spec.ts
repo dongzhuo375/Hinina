@@ -654,4 +654,36 @@ describe('save 门禁 — 真实排队与代际', () => {
     expect(svc.saveInFlight.value).toBe(false)
     expect(svc.settingsSaveInFlight.value).toBe(false)
   })
+
+  it('whenSettingsSaveSettled 只等设置页事务：设置页落地即解除，不等悬挂的后台写入', async () => {
+    const svc = new ConfigService()
+    const settingsDone = deferred<void>()
+    const backgroundDone = deferred<void>()
+    const settingsSave = svc.runSaveTxn(async () => {
+      await settingsDone.promise
+    }, { settingsPage: true })
+    // 后台写入排在设置页事务之后并悬挂：设置页加载不得被它拖住
+    const background = svc.runSaveTxn(async () => {
+      await backgroundDone.promise
+    })
+
+    expect(svc.settingsSaveEpoch).toBe(1) // 入队 +1（后台写入不参与）
+    let settled = false
+    const waiting = svc.whenSettingsSaveSettled().then(() => {
+      settled = true
+    })
+
+    settingsDone.resolve()
+    await settingsSave
+    await waiting
+    expect(settled).toBe(true) // 设置页事务落地即解除
+    expect(svc.settingsSaveEpoch).toBe(2) // 结束 +1
+    expect(svc.settingsSaveInFlight.value).toBe(false)
+    // 后台写入仍在途：全量队列 busy 与设置页门禁互不影响
+    expect(svc.saveInFlight.value).toBe(true)
+
+    backgroundDone.resolve()
+    await background
+    expect(svc.settingsSaveEpoch).toBe(2) // 后台写入不再动设置页代际
+  })
 })

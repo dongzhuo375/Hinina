@@ -472,7 +472,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   /// 晚挂载控制器恢复历史持久化失败警告：共享结果由
-  /// `ConfigService` 持有（任意 updateConfig 成功也能解除），
+  /// `ConfigService` 持有（任意保存事务成功也能解除），
   /// 这里只在仍是同一目标的 persist-failed 时提示。
   function restoreHistoricalSwitchNotice(config: AppConfig): void {
     const last = configService.latestOjSwitchResult()
@@ -482,7 +482,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   }
 
   /// 普通保存成功后清除本控制器可见的“重启可能回退”警告：解除判定已由
-  /// `ConfigService.updateConfig` 统一完成（覆盖设置页之外的保存入口）。
+  /// `updateConfigNow`（保存事务的写入主体）统一完成（覆盖设置页之外的保存入口）。
   function clearResolvedPersistedWarning(persistedActiveId: string): void {
     if (switchNotice.value !== PERSIST_FAILED_NOTICE) return
     const last = configService.latestOjSwitchResult()
@@ -495,20 +495,23 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     loading.value = true
     loadError.value = null
     try {
-      // 新挂载的控制器若撞上在途保存（含旧控制器的设置页保存、后台写入与自动
-      // 切换），先等它落地：否则读到的是保存前的配置，而普通保存不会发切换
-      // 通知来刷新本页。这里必须用**任意保存**的 `saveInFlight`（`saving`
-      // 只表示设置页事务，会漏掉后台写入）。
-      // 无保存时**同步**通过，保持既有「invalidate → getConfig → 其它读取」
-      // 的启动顺序（SettingsView 行为用例锁定）；读完后若又有保存开始，重读。
+      // 新挂载的控制器若撞上**设置页自己**的在途保存（含自动切换），先等它落地：
+      // 否则读到的是保存前的配置，而普通保存不会发切换通知来刷新本页。
+      // **只等设置页保存**：后台写入（编辑器偏好/分栏比例）可能长时间不返回，
+      // 等它们会把设置页卡在 loading 且无法打断（旧 composable 实现同样只等
+      // 设置页保存）。无保存时**同步**通过，保持既有「invalidate → getConfig →
+      // 其它读取」的启动顺序（SettingsView 行为用例锁定）；读完后若又有设置页
+      // 保存开始，重读。
       let config: AppConfig
       for (;;) {
-        if (configService.saveInFlight.value) await configService.whenSaveSettled()
+        if (configService.settingsSaveInFlight.value) {
+          await configService.whenSettingsSaveSettled()
+        }
         // 等待结束后再捕获代际：保存结束必然 +1，若沿用等待前的值会固定多读一次
-        const epoch = configService.saveEpoch
+        const epoch = configService.settingsSaveEpoch
         config = await readSettledConfig()
-        // 读取期间若有保存开始/结束（epoch 变化）或仍有保存在途，重读
-        if (!configService.saveInFlight.value && epoch === configService.saveEpoch) break
+        // 读取期间若有设置页保存开始/结束（epoch 变化）或仍在途，重读
+        if (!configService.settingsSaveInFlight.value && epoch === configService.settingsSaveEpoch) break
       }
       if (disposed) return
       populate(config)
@@ -579,7 +582,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
           draft.layout.splitRatio = submitted.splitRatio
         })
         // 保存已把当前 active 落盘：若此前是「切换生效但持久化失败」，回退风险
-        // 已由 ConfigService.updateConfig 解除；这里只清本控制器可见的警告
+        // 已由保存事务的写入主体（updateConfigNow）解除；这里只清本控制器可见的警告
         //（即便控制器已卸载也不会影响服务级共享结果）。
         clearResolvedPersistedWarning(saved.oj.active)
         // 已卸载的旧控制器不再回写表单（跨控制器共享）；自动切换仍执行——

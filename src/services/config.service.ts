@@ -1,5 +1,5 @@
 import type { AppConfig } from '@/types/config'
-import { readonly, ref } from 'vue'
+import { computed, readonly, ref, shallowRef } from 'vue'
 import type { Ref } from 'vue'
 import { IpcError } from '@/bridge'
 import * as configBridge from '@/bridge/config.bridge'
@@ -54,11 +54,11 @@ export interface SaveTxn {
  * 唯一实现。
  */
 class SerialQueue {
-  private tail: Promise<unknown> | null = null
-  private readonly busy = ref(false)
+  /// 队尾形态即唯一真相（`shallowRef` 避免 Vue 深度包装 Promise）
+  private readonly tail = shallowRef<Promise<unknown> | null>(null)
 
-  /** 排队或在途（入队即 true；队尾落地且无人再排队才 false） */
-  readonly inFlight: Readonly<Ref<boolean>> = readonly(this.busy)
+  /** 排队或在途（入队即 true；队尾落地且无人再排队才 false）——**从队尾派生** */
+  readonly inFlight: Readonly<Ref<boolean>> = readonly(computed(() => this.tail.value !== null))
 
   /**
    * 等待**调用时刻**的队尾落地（不向其后的新任务延伸）。
@@ -67,28 +67,24 @@ class SerialQueue {
    *（`saveEpoch` / `ojSwitchEpoch`）——本方法不承诺这一点。
    */
   whenSettled(): Promise<void> {
-    const tail = this.tail
+    const tail = this.tail.value
     return tail ? tail.then(() => {}, () => {}) : Promise.resolve()
   }
 
   async enqueue<T>(task: () => Promise<T>): Promise<T> {
-    const previous = this.tail
+    const previous = this.tail.value
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    this.tail = gate
-    this.busy.value = true
+    this.tail.value = gate
     try {
       if (previous) await previous.then(() => {}, () => {})
       return await task()
     } finally {
       release()
       // 只有自己仍是队尾才复位：排队在后面的任务已在入队时置位
-      if (this.tail === gate) {
-        this.tail = null
-        this.busy.value = false
-      }
+      if (this.tail.value === gate) this.tail.value = null
     }
   }
 }
@@ -135,7 +131,7 @@ export class ConfigService {
   private switchEpoch = 0
   /// 最近一次**已生效**切换的共享结果：持久化失败是
   /// 「已生效但重启可能回退」的既存事实，设置页晚挂载也要据此提示；后续
-  /// 成功切换或任意一次把同一 active 成功落盘的 `updateConfig` 会解除它。
+  /// 成功切换或任意一次把同一 active 成功落盘的保存事务会解除它。
   private lastSwitchResult: OjSwitchResult | null = null
   /// 保存队列：所有写入口共用，后一次等前一次落地再执行
   private readonly saveQueue = new SerialQueue()
@@ -144,17 +140,24 @@ export class ConfigService {
   /// 它的意图已冻结，读取方不得忽略。
   private saveEpochCounter = 0
   /// 设置页发起、尚未落地的保存事务数（同一队列里也可能排在后台写入之后）
-  private settingsSaveDepth = 0
-  private readonly settingsSaveBusy = ref(false)
-  /** 保存门禁状态（排队或在途均为 true；响应式只读视图） */
+  private readonly settingsSaveDepth = ref(0)
+  /// 设置页保存代际：**入队与结束**各 +1。后台写入不参与——设置页加载只关心
+  /// 自己的保存（后台写入悬挂不得把它卡在 loading）
+  private settingsSaveEpochCounter = 0
+  /// 「等设置页保存落地」的等待者：设置页事务至多一个在途（save() 由 canSave 单飞）
+  private readonly settingsSaveWaiters: Array<() => void> = []
+  /** 保存队列状态（排队或在途均为 true；**含后台写入**，供观测/测试，不驱动设置页 UI） */
   readonly saveInFlight: Readonly<Ref<boolean>> = this.saveQueue.inFlight
   /**
    * **设置页发起**的保存事务是否在途（UI 的「保存中…」、保存按钮禁用、
    * 与 OJ 切换的双向互斥都用它）。与 `saveInFlight` 的区别：后者还包含
    * 编辑器偏好/分栏比例等**后台写入**——那些不该让设置页的下拉框与保存
    * 按钮产生反应（后台写入排在队列里等它落地即可，不构成用户意图冲突）。
+   * 由 `settingsSaveDepth > 0` **派生**，没有独立布尔量可漂移。
    */
-  readonly settingsSaveInFlight: Readonly<Ref<boolean>> = readonly(this.settingsSaveBusy)
+  readonly settingsSaveInFlight: Readonly<Ref<boolean>> = readonly(
+    computed(() => this.settingsSaveDepth.value > 0),
+  )
 
   /** 最近一次已生效切换的结果（未发生生效切换时为 null） */
   latestOjSwitchResult(): OjSwitchResult | null {
@@ -198,6 +201,23 @@ export class ConfigService {
     return this.saveQueue.whenSettled()
   }
 
+  /** 设置页保存代际（只读；语义见 `settingsSaveEpochCounter`） */
+  get settingsSaveEpoch(): number {
+    return this.settingsSaveEpochCounter
+  }
+
+  /**
+   * 等待**设置页发起**的保存事务落地（不向等待者抛出保存错误）。
+   *
+   * 只等设置页自己的保存：后台写入（编辑器偏好/分栏比例）可能长时间不返回，
+   * 不应把设置页卡在 loading（2026-11-04 评审：恢复旧 composable 的等待范围）。
+   * 设置页事务至多一个在途（`save()` 由 `canSave` 单飞）。
+   */
+  whenSettingsSaveSettled(): Promise<void> {
+    if (this.settingsSaveDepth.value === 0) return Promise.resolve()
+    return new Promise((resolve) => this.settingsSaveWaiters.push(resolve))
+  }
+
   /**
    * 保存事务：整个回调期间持有保存门禁，覆盖「保存 → 自动切换」这类
    * 复合操作（旧实现靠设置页 composable 的模块级 `saving` 手动圈住，
@@ -212,19 +232,20 @@ export class ConfigService {
    * `switchOj` 是独立队列，回调内调用安全（保存新建实例后的自动切换正是如此）。
    *
    * `options.settingsPage` 标记「本事务由设置页发起」：只有这类事务会置位
-   * `settingsSaveInFlight`，后台写入不参与设置页的 UI 门禁。
+   * `settingsSaveInFlight` / `settingsSaveEpoch`，后台写入不参与设置页的 UI
+   * 门禁；设置页加载也只等这类事务。
    */
   async runSaveTxn<T>(
     fn: (tx: SaveTxn) => Promise<T>,
     options: { settingsPage?: boolean } = {},
   ): Promise<T> {
-    // 入队即视为开始：代际同步 +1（busy 由队列在 enqueue 内置位）。若等真正
+    // 入队即视为开始：代际同步 +1（busy 由队列在 enqueue 内从队尾派生）。若等真正
     // 执行才置位，「已排队、busy 仍 false」的窗口里另一控制器的显式切换可
     // 插队落地，随后本事务仍按旧 target 自动切换——重演「较旧意图覆盖较新选择」。
     this.saveEpochCounter += 1
     if (options.settingsPage) {
-      this.settingsSaveDepth += 1
-      this.settingsSaveBusy.value = true
+      this.settingsSaveDepth.value += 1
+      this.settingsSaveEpochCounter += 1
     }
     const tx: SaveTxn = { updateConfig: (mutate) => this.updateConfigNow(mutate) }
     try {
@@ -232,8 +253,11 @@ export class ConfigService {
     } finally {
       this.saveEpochCounter += 1
       if (options.settingsPage) {
-        this.settingsSaveDepth -= 1
-        if (this.settingsSaveDepth === 0) this.settingsSaveBusy.value = false
+        this.settingsSaveEpochCounter += 1
+        this.settingsSaveDepth.value -= 1
+        if (this.settingsSaveDepth.value === 0) {
+          for (const resolve of this.settingsSaveWaiters.splice(0)) resolve()
+        }
       }
     }
   }
@@ -433,8 +457,6 @@ export class ConfigService {
    * 的写入通道。私有而非公开，是因为任何公开的保存方法都会排队——在事务回调
    * 里调它就等于等自己（自死锁）。
    */
-
-  /// 无门禁的保存主体：只供 `runSaveTxn` 的直通变体调用，公共入口一律先过门禁
   private async updateConfigNow(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
     const current = await this.getConfig()
     const draft: AppConfig = structuredClone(current)

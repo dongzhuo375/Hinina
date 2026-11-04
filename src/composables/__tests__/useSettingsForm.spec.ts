@@ -41,9 +41,13 @@ const saveState = vi.hoisted(() => ({
   tail: null as Promise<unknown> | null,
   epoch: 0,
   busy: null as { value: boolean } | null,
-  /// 设置页发起的事务在途（与生产 `settingsSaveInFlight` 同构）
-  settingsBusy: null as { value: boolean } | null,
-  settingsDepth: 0,
+  /// 设置页发起的事务在途（与生产 `settingsSaveInFlight` 同构，由 depth 派生）。
+  /// ref 需要 vue，vi.hoisted 环境拿不到，由 mock 工厂注入。
+  settingsDepth: null as { value: number } | null,
+  /// 设置页保存代际（与生产 `settingsSaveEpoch` 同构：入队/结束各 +1）
+  settingsEpoch: 0,
+  /// 等设置页保存落地的等待者
+  settingsWaiters: [] as Array<() => void>,
 }))
 
 function settleSwitch(run: Promise<void>): void {
@@ -59,11 +63,12 @@ function resolvePersisted(active: string): void {
 }
 
 vi.mock('@/services/config.service', async () => {
-  const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
+  const { computed, readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
   const saveBusy = ref(false)
   saveState.busy = saveBusy
-  const settingsSaveBusy = ref(false)
-  saveState.settingsBusy = settingsSaveBusy
+  // 必须是 ref：`settingsSaveInFlight` 是 computed，普通字段不会触发重新求值
+  const settingsDepth = ref(0)
+  saveState.settingsDepth = settingsDepth
 
   /// 与生产 `runSaveTxn` 同构：入队即置位/代际 +1，链式等前一个落地，
   /// 只有队尾落地且无人再排队才复位；事务内直通 `tx.updateConfig`（不再排队）。
@@ -83,8 +88,8 @@ vi.mock('@/services/config.service', async () => {
     saveBusy.value = true
     saveState.epoch += 1
     if (options.settingsPage) {
-      saveState.settingsDepth += 1
-      settingsSaveBusy.value = true
+      settingsDepth.value += 1
+      saveState.settingsEpoch += 1
     }
     try {
       if (previous) await previous.then(() => {}, () => {})
@@ -103,8 +108,11 @@ vi.mock('@/services/config.service', async () => {
         saveBusy.value = false
       }
       if (options.settingsPage) {
-        saveState.settingsDepth -= 1
-        if (saveState.settingsDepth === 0) settingsSaveBusy.value = false
+        saveState.settingsEpoch += 1
+        settingsDepth.value -= 1
+        if (settingsDepth.value === 0) {
+          for (const resolve of saveState.settingsWaiters.splice(0)) resolve()
+        }
       }
     }
   }
@@ -148,10 +156,18 @@ vi.mock('@/services/config.service', async () => {
         return saveState.epoch
       },
       saveInFlight: readonly(saveBusy),
-      settingsSaveInFlight: readonly(settingsSaveBusy),
+      // 与生产一致：由 depth 派生（没有独立布尔量可漂移）
+      settingsSaveInFlight: readonly(computed(() => settingsDepth.value > 0)),
+      get settingsSaveEpoch() {
+        return saveState.settingsEpoch
+      },
       whenSaveSettled: () => {
         const tail = saveState.tail
         return tail ? tail.then(() => {}, () => {}) : Promise.resolve()
+      },
+      whenSettingsSaveSettled: () => {
+        if (settingsDepth.value === 0) return Promise.resolve()
+        return new Promise<void>((resolve) => saveState.settingsWaiters.push(resolve))
       },
       runSaveTxn,
     },
@@ -215,6 +231,9 @@ beforeEach(async () => {
   saveState.tail = null
   saveState.epoch = 0
   if (saveState.busy) saveState.busy.value = false
+  if (saveState.settingsDepth) saveState.settingsDepth.value = 0
+  saveState.settingsEpoch = 0
+  saveState.settingsWaiters.length = 0
   currentConfig = baseConfig()
   // 默认正常模式（无 --settings）：切换成功照常回登录页；钥匙用例显式改写
   mocks.launchFlags.value = { settings: false }
@@ -911,6 +930,34 @@ describe('useSettingsForm', () => {
     expect(formB.form.activeOj).toBe('C')
     expect(formB.saving.value).toBe(false)
     scopeB.stop()
+  })
+
+  it('后台写入悬挂不阻塞设置页加载（load 只等设置页保存）', async () => {
+    // 后台写入（编辑器偏好/分栏比例）永不返回：若 load 等「任意保存」，
+    // 设置页会永远停在 loading 且无法打断（2026-11-04 评审的行为回归）
+    let releaseBackground!: () => void
+    mocks.updateConfig.mockImplementationOnce(
+      (mutator: (draft: AppConfig) => void) => new Promise<AppConfig>((resolve) => {
+        releaseBackground = () => {
+          const draft = structuredClone(currentConfig)
+          mutator(draft)
+          currentConfig = draft
+          resolve(draft)
+        }
+      }),
+    )
+    const background = configService.runSaveTxn((tx) => tx.updateConfig(() => {}))
+    await vi.waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledTimes(1))
+    expect(configService.saveInFlight.value).toBe(true)
+    expect(configService.settingsSaveInFlight.value).toBe(false)
+
+    // load 不等后台写入：读盘完成、loading 复位
+    await settings.load()
+    expect(settings.loading.value).toBe(false)
+    expect(settings.loadError.value).toBeNull()
+
+    releaseBackground()
+    await background
   })
 
   it('跨控制器保留「已生效但持久化失败」警告', async () => {
