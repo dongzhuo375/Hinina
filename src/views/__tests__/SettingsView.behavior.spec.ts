@@ -37,6 +37,10 @@ vi.mock('@/services/config.service', () => ({
     ojSwitchInFlight: false,
     whenOjSwitchSettled: async () => {},
   },
+  // useSettingsForm 的导入面需要该具名判据；本 spec 的切换失败用普通 Error，
+  // 判据返回 false（真实类型化判据由 config.service.spec 锁定）
+  isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
+    e?.variant === 'OjSwitchPersistFailed',
 }))
 vi.mock('@/services/system.service', () => ({
   systemService: {

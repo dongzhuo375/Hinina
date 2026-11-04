@@ -1,4 +1,5 @@
 import type { AppConfig } from '@/types/config'
+import { IpcError } from '@/bridge'
 import * as configBridge from '@/bridge/config.bridge'
 import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
 import {
@@ -35,6 +36,17 @@ export type OjSwitchOutcome = 'success' | 'persist-failed'
 export interface OjSwitchResult {
   target: string
   outcome: OjSwitchOutcome
+}
+
+/**
+ * 是否为「OJ 切换已生效但配置持久化失败」错误。
+ *
+ * 只认 IPC 出口归一化的 `IpcError`：变体白名单在 `bridge`，裸读
+ * `(e as { variant? }).variant` 会让非 IPC 异常（手写对象、未来包装器）冒充
+ * 专用变体，把「切换未生效」误判成「已生效」。设置页与本服务共用本判据。
+ */
+export function isOjSwitchPersistFailed(error: unknown): boolean {
+  return error instanceof IpcError && error.variant === 'OjSwitchPersistFailed'
 }
 
 /**
@@ -124,7 +136,7 @@ export class ConfigService {
         // 切换已生效但持久化失败：后端 registry 与内存已是新 OJ，**陈旧缓存必须
         // 失效**——否则后续读取/保存会把旧 active 再写回去，造成 register=新、
         // 配置=旧 的再次分叉。结果同时留给设置页晚挂载提示。
-        if ((e as { variant?: string | null }).variant === 'OjSwitchPersistFailed') {
+        if (isOjSwitchPersistFailed(e)) {
           this.invalidate()
           this.lastSwitchResult = { target: ojId, outcome: 'persist-failed' }
         }
