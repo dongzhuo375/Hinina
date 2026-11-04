@@ -37,6 +37,7 @@
 - `composables/useDataDirSettings.ts` / `useMaintenanceSettings.ts` / `useAboutSettings.ts` — 数据目录生命周期、重置清理与 About 存储信息；对应 section 组件只消费模型，View 不直接调用 service
 - `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据；并消费 `isKeyedSettings` 三处：`beforeEach` 条件豁免 / `fromKeyedSettings` / `afterEach` 落地不变量）
 - `views/SettingsView`（分层锁）、`views/ContestLayout`（最小壳）、`guards/sessionGuard`、`composables/useSettingsForm`、`views/LoginView`、`components/layout/ActivityBar`——均直接取 `isKeyed()` / `isKeyedSettings()` 判据，不直接读 `launchFlags`
+- `src/main.ts`（`onCloseRequested` 关窗握手事件源 + `closeWindow`/`destroyWindow` 注入 close-guard）、`src/App.vue`（登录页兜底窗口条：`minimizeWindow`/`toggleMaximizeWindow`/`closeWindow`）——2026-11-04 G3 起成为 systemService 的窗口控制消费方
 
 ## 逻辑流程
 

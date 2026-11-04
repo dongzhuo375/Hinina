@@ -314,6 +314,15 @@ pub fn purge_stale_snapshots(storage: &Storage, keep_days: u64) -> (usize, u64) 
         if let Ok(oj_dirs) = storage.list(SNAPSHOT_DIR) {
             for oj_dir in oj_dirs {
                 let relative = oj_dir.to_string_lossy().replace('\\', "/");
+                // 只回收**真实**空目录：`remove` 用 `path.is_dir()`（跟随链接）分流，
+                // 对目录链接在 Windows 上会删掉链接本身——与 walk 的「链接跳过」
+                // 语义不一致。先 lstat 并要求真实目录（链接的 `is_dir()` 为 false）。
+                let Ok(meta) = storage.symlink_metadata(&relative) else {
+                    continue;
+                };
+                if !meta.is_dir() {
+                    continue;
+                }
                 // remove 对目录是**非递归**删除：非空时必然失败，正好用来「只回收空目录」
                 if storage.remove(&relative).is_ok() {
                     tracing::debug!(dir = %relative, "留档子目录已空，已回收");

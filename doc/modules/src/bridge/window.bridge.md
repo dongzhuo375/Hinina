@@ -38,5 +38,7 @@
 
 ## 测试
 
-无单测：纯转发，jsdom 无真实窗口实现；`WindowControls` 在组件测试中以 stub 出现，
-真实窗口行为属桌面人工验收。
+`src/bridge/__tests__/window.bridge.spec.ts`：一条用例锁定 **async 拒绝语义**——
+`getCurrentWindow()` 同步抛错时必须返回 rejected promise（而非同步 throw，否则
+异常会绕过组合根的 `.catch`）。其余纯转发行为（jsdom 无真实窗口实现）仍由
+`WindowControls` 组件测试以 stub 出现，真实窗口行为属桌面人工验收。

@@ -30,7 +30,7 @@
 > Repository 就绪后，填充核心实体和事件总线逻辑。
 
 - [x] **EventBus 实现（阶段 3 初版，已于阶段 8 重构）** — `core/event/event_bus.rs`：`publish()` / `subscribe()` / `unsubscribe()`、AppEvent::category() 映射、All 通配订阅、锁外回调防死锁。该实现**已被阶段 8 的 CoreEventBus 取代并删除**
-- [x] **AppError From 转换** — `core/error.rs`：`io::Error` / `reqwest::Error` / `serde_json::Error` — 阶段 1 已提前完成
+- [x] **AppError From 转换** — `core/error.rs`：`io::Error` / `reqwest::Error` / `serde_json::Error` — 阶段 1 已提前完成。**后注**：`reqwest::Error` 已于 2026-11-04 删除（F4：零消费者死转换，所有真实转换为发起点显式 `map_err`）
 - [x] **Workspace 实体完善** — `core/entity/workspace.rs`：`new()` / `touch()` / `mark_dirty()` / `mark_clean()` 方法。5 项单元测试
 
 ---

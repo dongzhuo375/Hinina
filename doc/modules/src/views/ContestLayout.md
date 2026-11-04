@@ -128,7 +128,7 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
 - 设置页也放在外壳内（子路由），切换时不丢失顶栏/状态条。
 - 分层约束：View 只 import store 与组件，不触 `@/bridge`；钥匙判据经
   `@/services/system.service`（`systemService.isKeyedSettings()`）统一取得，View 不直接读
-  `systemService.launchFlags`（属路由级瞬态数据，策略模块内部同步读取快照）。
+  `systemService.launchFlags`（属路由级瞬态数据，`systemService` 内部同步读取快照）。
 
 ## 测试
 

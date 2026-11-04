@@ -236,6 +236,9 @@ fn walk_and_purge_ignore_symlinks() {
 
     let (storage, dir) = temp_storage("symlink-walk");
     write_snapshot(&storage, "HOJ", "1", "C++", "int main(){}");
+    // 让真实留档过期 → purge 的 removed > 0，**回收空目录那一趟才会执行**，
+    // 链接 OJ 目录必须在那趟里被跳过（Windows 上 remove 会删掉链接本身）
+    age_file(&dir.join("submissions/HOJ/1.cpp"), 60);
     let outside = TempDir::unique("hinina-snapshot-outside");
     std::fs::create_dir_all(outside.path()).unwrap();
     let outside_file = outside.join("secret.cpp");
@@ -246,10 +249,18 @@ fn walk_and_purge_ignore_symlinks() {
 
     let usage = inspect_snapshots(&storage, SNAPSHOT_KEEP_DAYS);
     assert_eq!(usage.total_count, 1, "只统计真实留档");
-    assert_eq!(usage.stale_count, 0, "链接目标再旧也不得计入");
+    assert_eq!(usage.stale_count, 1, "真实留档过期计入；链接不计入");
 
-    assert_eq!(purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS), (0, 0));
+    let (removed, _) = purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS);
+    assert_eq!(removed, 1, "只删真实过期留档");
     assert!(outside_file.exists(), "外部目标不得被删除");
+    // 回收趟：真实空目录 HOJ 被回收（其中链接不计入、也不阻止回收），
+    // 链接 OJ 目录 Hydro 必须是「跳过」而非「被删链接」
+    assert!(!dir.join("submissions/HOJ").exists(), "真实空目录应被回收");
+    assert!(
+        std::fs::symlink_metadata(dir.join("submissions/Hydro")).is_ok(),
+        "链接 OJ 目录不得被回收趟删除"
+    );
 }
 
 /// `submissions` 本身就是链接时，整棵树跳过（连列目录都不做）。

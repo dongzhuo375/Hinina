@@ -58,7 +58,7 @@ getConfig()
                  ├─ 成功 → 写入缓存
                  └─ 失败 → 清空缓存（下次调用重试）并抛出
 
-updateConfig(mutate, options)
+updateConfig(mutate)
   getConfig() → structuredClone 副本 → mutate(draft)
   → bridge.updateConfig(draft)（整体替换；锁定真值只在后端）
   → finally invalidate()（成败都失效，防缓存与磁盘漂移）
