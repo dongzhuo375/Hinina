@@ -118,6 +118,85 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
     expect(violations.some((v) => v.includes('saveSplitRatio'))).toBe(true)
   })
 
+  it('回调经同文件辅助函数间接调用排队入口 → 违规（含调用链）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          async function performSwitch(target: string): Promise<boolean> {
+            await configService.saveSplitRatio(0.5)
+            return true
+          }
+          export async function save() {
+            await configService.runSaveTxn(async (tx) => {
+              await tx.updateConfig(() => {})
+              await performSwitch('Hydro')
+            })
+          }
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('performSwitch')
+    expect(violations[0]).toContain('saveSplitRatio')
+    expect(violations[0]).toContain('间接调用')
+  })
+
+  it('两跳辅助函数同样能追到（回调 → a → b → 排队入口）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          function innerHelper() { return configService.updateEditorPrefs({ fontSize: 15 }) }
+          function outerHelper() { return innerHelper() }
+          await configService.runSaveTxn((tx) => {
+            outerHelper()
+            return tx.updateConfig(() => {})
+          })
+        `,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('outerHelper')
+    expect(violations[0]).toContain('innerHelper')
+    expect(violations[0]).toContain('updateEditorPrefs')
+  })
+
+  it('安全的辅助函数（只调独立队列 switchOj）不报违规', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          async function performSwitch(target: string) {
+            await configService.switchOj(target)
+          }
+          await configService.runSaveTxn(async (tx) => {
+            await performSwitch('Hydro')
+            await tx.updateConfig(() => {})
+          })
+        `,
+      },
+    ])
+    expect(violations).toEqual([])
+  })
+
+  it('互相递归的辅助函数不会让扫描挂住（环检测）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `
+          function ping() { return pong() }
+          function pong() { return ping() }
+          await configService.runSaveTxn((tx) => {
+            ping()
+            return tx.updateConfig(() => {})
+          })
+        `,
+      },
+    ])
+    expect(violations).toEqual([])
+  })
+
   it('注释里的示例不触发违规（正则扫描前剥离注释）', () => {
     const violations = findViolations([
       {

@@ -18,8 +18,10 @@
 //   3. The two public wrappers must write through `runSaveTxn` and must not
 //      reach the private save body directly (that would bypass the queue).
 //
-// Limits (stated, not implied): this is textual. Calls routed through aliases
-// or dynamic lookup are invisible to it. It guards this repo's conventions.
+// Rule 2 also follows **same-file local helpers** (callback → performSwitch →
+// saveSplitRatio), so a helper gaining a queued call is caught. Limits (stated,
+// not implied): cross-file helpers, aliases, and dynamic lookup are invisible.
+// It guards this repo's conventions, not adversarial code.
 //
 // Usage:
 //   node scripts/check-save-gate.mjs      (also: npm run check:save-gate)
@@ -146,6 +148,96 @@ export function txnCallbackBodies(source) {
   return bodies
 }
 
+/// 关键字/保留字：调用点提取时排除（`if (`、`return (` 之类不是函数调用）
+const NOT_CALLS = new Set([
+  'if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'typeof', 'await',
+  'new', 'void', 'delete', 'in', 'of', 'instanceof', 'do', 'else', 'try', 'finally',
+  'throw', 'class', 'const', 'let', 'var', 'async', 'yield', 'super', 'this',
+])
+
+/// 提取正文里被调用的标识符（`name(` 或 `name<T>(`），排除关键字。
+export function calledNames(body) {
+  const names = new Set()
+  const re = /\b([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g
+  let match
+  while ((match = re.exec(body))) {
+    if (!NOT_CALLS.has(match[1])) names.add(match[1])
+  }
+  return names
+}
+
+/// 从 `afterName` 起解析一个函数声明/箭头函数的正文（无正文返回 null）。
+function declBody(source, afterName) {
+  const openParen = source.indexOf('(', afterName)
+  if (openParen === -1) return null
+  const params = readBalanced(source, openParen, '(', ')')
+  if (params === null) return null
+  let i = openParen + params.length + 2
+  while (i < source.length && source[i] !== '{' && source[i] !== '=' && source[i] !== ';') i += 1
+  if (source[i] === '=' && source[i + 1] === '>') {
+    i += 2
+    while (i < source.length && /\s/.test(source[i])) i += 1
+    if (source[i] === '{') return readBalanced(source, i, '{', '}')
+    let j = i
+    while (j < source.length && source[j] !== ';' && source[j] !== '\n') j += 1
+    return source.slice(i, j)
+  }
+  if (source[i] === '{') return readBalanced(source, i, '{', '}')
+  return null
+}
+
+/**
+ * 同一文件内的局部函数表（`function name(...)` 与 `const name = (...) => {...}`）。
+ *
+ * 只为「回调 → 局部辅助函数 → 排队入口」这条**传递路径**服务：直接调用由
+ * `txnCallbackBodies` 的正文检查覆盖，跨文件/别名/动态调用不在能力范围内
+ *（见文件头的局限声明）。
+ */
+export function localFunctions(source) {
+  const table = new Map()
+  const declRe = /\bfunction\s+([A-Za-z_$][\w$]*)|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=]+)?=>\s*\{/g
+  let match
+  while ((match = declRe.exec(source))) {
+    const name = match[1] ?? match[2]
+    if (name === undefined || table.has(name)) continue
+    const isFunction = match[1] !== undefined
+    let body = null
+    if (isFunction) {
+      body = declBody(source, declRe.lastIndex)
+    } else {
+      // 箭头函数：regex 已定位到 `{` 之前，取该花括号的配对正文
+      const braceStart = declRe.lastIndex - 1
+      body = readBalanced(source, braceStart, '{', '}')
+    }
+    if (body !== null) table.set(name, body)
+  }
+  return table
+}
+
+/**
+ * 从回调正文出发，沿**同文件局部函数**追踪到排队入口（深度有上限、带环检测）。
+ * 返回命中路径，例如 `performSwitch → saveSplitRatio`。
+ */
+export function queuedViaLocals(callbackBody, functions, maxDepth = 6) {
+  const hits = []
+  const walk = (body, trail, depth, seen) => {
+    for (const name of calledNames(body)) {
+      if (seen.has(name)) continue
+      const fnBody = functions.get(name)
+      if (fnBody === undefined) continue
+      const nextTrail = [...trail, name]
+      const match = fnBody.match(QUEUED_ENTRY)
+      if (match) {
+        hits.push({ trail: nextTrail, entry: match[1] })
+        continue
+      }
+      if (depth < maxDepth) walk(fnBody, nextTrail, depth + 1, new Set([...seen, name]))
+    }
+  }
+  walk(callbackBody, [], 0, new Set())
+  return hits
+}
+
 /// Rule 3: the wrapper method bodies must queue and must not bypass it.
 function wrapperViolations(file, source) {
   const violations = []
@@ -187,12 +279,23 @@ export function findViolations(files) {
             '再把文件加进 TXN_ALLOWLIST —— 白名单是有意设置的复核摩擦',
         )
       }
+      const functions = localFunctions(source)
       for (const body of txnCallbackBodies(source)) {
         if (QUEUED_ENTRY.test(body)) {
           violations.push(
             `${path}: runSaveTxn 回调内引用了排队保存入口（runSaveTxn/updateEditorPrefs/saveSplitRatio）——` +
               '它会排在回调自己持有的门禁之后，永久挂起。改用 tx.updateConfig(...)。片段：' +
               body.trim().slice(0, 120),
+          )
+          continue
+        }
+        // 传递路径：回调 → 局部辅助函数 →（…）→ 排队入口。只扫同文件局部函数，
+        // 覆盖「回调里调 performSwitch 之类辅助函数」的场景（评审：单层文本匹配
+        // 抓不到这种间接调用）。
+        for (const hit of queuedViaLocals(body, functions)) {
+          violations.push(
+            `${path}: runSaveTxn 回调经 ${hit.trail.join(' → ')} 间接调用排队入口 \`${hit.entry}\`——` +
+              '同一队列，回调会等自己，永久挂起。该辅助函数内应改用 tx 句柄，或改调独立队列（如 switchOj）',
           )
         }
       }

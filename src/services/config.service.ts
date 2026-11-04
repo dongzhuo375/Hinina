@@ -123,7 +123,8 @@ export function isOjSwitchPersistFailed(error: unknown): boolean {
  * `runSaveTxn` 回调里调用**任意一个**都会排队等自己（自死锁）；回调内只能用
  * 参数 `tx.updateConfig`。这条规则由脚本门禁 `scripts/check-save-gate.mjs`
  *（`npm run check:save-gate`，CI frontend job 执行）锁定：回调正文出现任何
- * 排队入口即失败。
+ * 排队入口即失败，并沿同文件局部辅助函数追踪传递路径（回调 → performSwitch →
+ * 排队入口 会报出调用链）。跨文件辅助函数/别名不在文本扫描能力内。
  */
 export class ConfigService {
   private cache: Promise<AppConfig> | null = null
@@ -206,7 +207,8 @@ export class ConfigService {
    * 注意排除面比「别调 `runSaveTxn`」更宽：`updateEditorPrefs` / `saveSplitRatio`
    * 这两个**语义化包装同样排队**，在回调内调用它们与嵌套 `runSaveTxn` 一样会
    * 排在自身门禁之后（自死锁）。禁止的写法由脚本门禁锁定
-   *（`scripts/check-save-gate.mjs`：回调正文出现任何排队入口即失败）。
+   *（`scripts/check-save-gate.mjs`：回调正文出现任何排队入口即失败，
+   * 同文件局部辅助函数的传递调用同样追踪）。
    * `switchOj` 是独立队列，回调内调用安全（保存新建实例后的自动切换正是如此）。
    *
    * `options.settingsPage` 标记「本事务由设置页发起」：只有这类事务会置位
