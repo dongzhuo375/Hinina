@@ -117,6 +117,13 @@ export function isOjSwitchPersistFailed(error: unknown): boolean {
  * 保存门禁：所有写入口（设置页保存、编辑器偏好、分栏比例）经 `runSaveTxn`
  * 走**同一队列**串行——并发的读-改-写会互相覆盖字段（丢更新）。与切换侧
  * （`switchOj` 排队 / `ojSwitchEpoch` / `whenOjSwitchSettled`）对称。
+ *
+ * **公开的排队入口有三个**：`runSaveTxn`（复合事务）与两个语义化包装
+ * `updateEditorPrefs` / `saveSplitRatio`。三者都会等门禁，因此在
+ * `runSaveTxn` 回调里调用**任意一个**都会排队等自己（自死锁）；回调内只能用
+ * 参数 `tx.updateConfig`。这条规则由脚本门禁 `scripts/check-save-gate.mjs`
+ *（`npm run check:save-gate`，CI frontend job 执行）锁定：回调正文出现任何
+ * 排队入口即失败。
  */
 export class ConfigService {
   private cache: Promise<AppConfig> | null = null
@@ -195,9 +202,11 @@ export class ConfigService {
    * 复合操作（旧实现靠设置页 composable 的模块级 `saving` 手动圈住，
    * 编辑器偏好/分栏比例等第二保存入口绕过它——现在所有入口同一队列）。
    *
-   * 回调内**只能**用 `tx.updateConfig` 保存（直通，不再二次排队）。本类不提供
-   * 公共的队列化保存方法，所以「在回调里调它、排队等自己」这种写法没有对应
-   * 的 API 可写；不要在回调内再嵌套 `runSaveTxn`（同样会排在自身门禁之后）。
+   * 回调内**只能**用 `tx.updateConfig` 保存（直通，不再二次排队）。
+   * 注意排除面比「别调 `runSaveTxn`」更宽：`updateEditorPrefs` / `saveSplitRatio`
+   * 这两个**语义化包装同样排队**，在回调内调用它们与嵌套 `runSaveTxn` 一样会
+   * 排在自身门禁之后（自死锁）。禁止的写法由脚本门禁锁定
+   *（`scripts/check-save-gate.mjs`：回调正文出现任何排队入口即失败）。
    * `switchOj` 是独立队列，回调内调用安全（保存新建实例后的自动切换正是如此）。
    *
    * `options.settingsPage` 标记「本事务由设置页发起」：只有这类事务会置位
@@ -418,9 +427,9 @@ export class ConfigService {
    * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
    * 避免局部字段把其余配置冲掉。返回写入后的配置供调用方直接使用。
    *
-   * **只经 `runSaveTxn` 的回调句柄调用**（`tx.updateConfig`）——本类不暴露
-   * 公共的队列化保存方法，否则在事务回调里调它会排队等自己（把「能不能写
-   * 错」从「靠约定」变成「写不出来」：没有那个名字可调）。
+   * **只经 `runSaveTxn` 的回调句柄调用**（`tx.updateConfig`）：这是唯一不排队
+   * 的写入通道。私有而非公开，是因为任何公开的保存方法都会排队——在事务回调
+   * 里调它就等于等自己（自死锁）。
    */
 
   /// 无门禁的保存主体：只供 `runSaveTxn` 的直通变体调用，公共入口一律先过门禁

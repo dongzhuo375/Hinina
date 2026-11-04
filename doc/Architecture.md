@@ -393,7 +393,7 @@ src/
 ├── services/
 │   ├── plugin.service.ts                 # 插件前端服务入口
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（刻意不做前端持久化：会话唯一存放处是后端会话文件，前端每次经后端查询）
-│   ├── config.service.ts                 # 配置读写唯一入口（进程内缓存 + 兜底）+ 事务句柄读写（runSaveTxn 是唯一写入通道，不暴露公共队列化保存）+ 派生参数（OJ 基址、轮询调度、编辑器偏好、默认语言归一、分栏比例）；**保存门禁**（runSaveTxn/saveEpoch/saveInFlight/settingsSaveInFlight/whenSaveSettled，队列原语与 switch 侧共用）——所有写入口（设置页保存、编辑器偏好、分栏比例）同一队列串行，`settingsSaveInFlight` 只标设置页事务（2026-11-04 G4 下沉）
+│   ├── config.service.ts                 # 配置读写唯一入口（进程内缓存 + 兜底）+ 保存事务（runSaveTxn；回调内唯一不排队通道是 tx.updateConfig，公开排队入口共三个，嵌套即自死锁、由 scripts/check-save-gate.mjs 门禁锁定）+ 派生参数（OJ 基址、轮询调度、编辑器偏好、默认语言归一、分栏比例）；**保存门禁**（runSaveTxn/saveEpoch/saveInFlight/settingsSaveInFlight/whenSaveSettled，队列原语与 switch 侧共用）——所有写入口（设置页保存、编辑器偏好、分栏比例）同一队列串行，`settingsSaveInFlight` 只标设置页事务（2026-11-04 G4 下沉）
 │   ├── contest.service.ts                # 加载配置的比赛 + 登录页匿名比赛简报编排（config → contestId → 列表筛选）
 │   ├── problem.service.ts                # 获取题目详情/列表 + 我的题目状态 + 批量 limits
 │   ├── rank.service.ts                   # 榜单查询（分页/关键词/去打星参数编排）
