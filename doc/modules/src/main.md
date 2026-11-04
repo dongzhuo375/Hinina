@@ -38,7 +38,7 @@
 - `@/stores/announcementStore`（`useAnnouncementStore` —— 新公告事件到达即 `refresh()`）
 - `@/bridge/announcement.bridge`（`onAnnouncementsPublished` —— 新公告事件订阅；组合根可直接用 Bridge 层的订阅原语，装配链「Bridge ← 观察者 ← store」不反向）
 - `@/utils/close-guard`（`createCloseGuard` —— 关窗守卫状态机与时间上界，见 `utils/close-guard.md`）
-- `@tauri-apps/api/window`（`getCurrentWindow().onCloseRequested` / `close` / `destroy`，权限 `core:window:allow-close` 与 `core:window:allow-destroy` 已在 capabilities）
+- `@/services/system.service`（`onCloseRequested` 关窗握手事件源 + `closeWindow` / `destroyWindow` 注入；2026-11-04 G3 起组合根不再直用 `@tauri-apps/api/window`，权限 `core:window:allow-close` 与 `core:window:allow-destroy` 已在 capabilities）
 - `@/styles/global.css`
 - `@/styles/contest.css`（赛场主题令牌与通用类；作用域仍靠 `.contest-theme` 类名限定）
 - `katex/dist/katex.min.css`（公式渲染的消费前提，与 `utils/markdown.ts` 的 KaTeX 输出配套）

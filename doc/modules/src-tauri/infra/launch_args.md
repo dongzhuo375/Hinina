@@ -6,7 +6,7 @@
 
 解析 `--settings` 启动参数并固化为进程级启动标志，供 `launch_flags` 命令交给前端：带参启动时前端初始导航直落设置页（跳过登录门禁），且设置页的维护者层字段解锁。解决「配置指向连不上的服务器 → 登录失败 → 进不了设置 → 改不了地址」的管理方死锁；正常路径（含连点版本号的隐藏入口）只开选手层。命名取「打开设置页」——它不设置任何值，区别于 `--config` 那个会让人以为要传配置的误称。
 
-定位是**防误触护栏而非安全边界**：config.json 明文可手改，前端锁不设后端强制。
+定位是**防误触护栏而非安全边界**：IPC 更新路径的锁定由后端按本标志强制（`update_config` 以 `!settings` 决定锁定字段是否保留，前端传参仅作对账，不一致记 `warn`）；config.json 明文可手改，护栏不构成安全边界。
 
 ## 核心类型/函数
 
@@ -27,6 +27,7 @@
 
 - `main.rs`（argv 收集后 `launch_args::init(&argv)`，紧随 `--console` 处理）
 - `commands/app_cmd.rs`（`launch_flags` 命令的只读来源）
+- `commands/config_cmd.rs`（`update_config` 的锁定执行真值：`enforced = !launch_args::get().settings`，2026-11-04 G1）
 
 ## 逻辑流程
 

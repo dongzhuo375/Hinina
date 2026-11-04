@@ -13,14 +13,14 @@
 | `activeKey` | computed | 由 `route.path` 前缀推导当前高亮项：`/contest/problem*`→`problems`、`/contest/rank`→`rank`、`/contest/submissions`→`submissions`、`/contest/announcements`→`announcements`、`/contest/settings`→`settings`（`/contest/problems` 与 `/contest/problem/:displayId` 均归属「题目」，解题页仍高亮题目入口） |
 | `showAnnouncementDot` | computed | `announcementStore.unreadCount > 0 && activeKey !== 'announcements'` —— 处于公告页时不显示（进入该页即全部已读，避免标记往返期间红点残留） |
 | `links` | 常量数组 | 四个主入口 `{ key, name, label, number }`（编号 `01`–`04` 等宽显示），模板 `v-for` 渲染 |
-| 设置项可见性 | `v-if="settingsRevealed \|\| keyedMode"` | 两套门控：`settingsRevealed`（连点版本号 5 下的会话级单例，来自 `@/utils/settings-access`）或 `keyedMode`（`isKeyedProcess()`，`guards/keyed-settings-policy`；钥匙本应授予入口，评审十九 #4）。任一为真即渲染 router-link（不是 CSS 隐藏） |
+| 设置项可见性 | `v-if="settingsRevealed \|\| keyedMode"` | 两套门控：`settingsRevealed`（连点版本号 5 下的会话级单例，来自 `@/utils/settings-access`）或 `keyedMode`（`systemService.isKeyed()`，`services/system.service`；钥匙本应授予入口，评审十九 #4）。任一为真即渲染 router-link（不是 CSS 隐藏） |
 
 ## 直接依赖
 
 - `vue`（`computed`）/ `vue-router`（`useRoute` + `router-link`，导航目标：ProblemSet / Rank / Submissions / Announcements / Settings）
 - `@/stores/announcementStore`（仅 `unreadCount` 只读消费）
 - `@/utils/settings-access`（`settingsRevealed`）
-- `@/guards/keyed-settings-policy`（`isKeyedProcess` —— 钥匙模式下入口恒显）
+- `@/services/system.service`（`systemService.isKeyed()` —— 钥匙模式下入口恒显）
 
 ## 被依赖
 

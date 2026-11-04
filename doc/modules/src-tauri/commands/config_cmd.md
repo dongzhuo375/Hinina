@@ -16,11 +16,12 @@
 ## 直接依赖
 - `serde::Serialize`（`StorageInfo`）
 - `tauri::State`
-- `tracing::{info, warn}`（warn 用于 sanitize 钳制留痕）
+- `tracing::{info, warn}`（warn 两用途：sanitize 钳制留痕 + 前端锁定声明与 launch_args 真值的对账告警）
 - `crate::core::context::AppContext`
 - `crate::core::entity::config::AppConfig`
 - `crate::core::error::{AppError, AppResult}`（`AppError::Config` 承载地址校验失败）
 - `crate::infra::logger::LOG_RELATIVE_PATH`（日志展示路径的唯一事实来源）
+- `crate::infra::launch_args`（`update_config` 的锁定执行真值：`enforced = !launch_args::get().settings`，2026-11-04 G1）
 
 ## 被依赖
 - `src-tauri/src/main.rs`（`generate_handler!` 注册全部四个 Command）

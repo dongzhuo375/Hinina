@@ -12,8 +12,10 @@
 |------|------|------|
 | `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式，`readonly()` 包装——「进程内不可变」由类型强制，评审十 #6）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），组件/computed 直接读。默认 `{settings:false}` = 安全侧 |
 | `SystemService.getLaunchFlags` | `() => Promise<LaunchFlags>` | 启动标志的 Promise 入口（**仅守卫消费**）：进程内 memoize，解析成功填充快照；读取失败（旧二进制、桥异常）保持快照默认「无参数」—— 安全侧默认值，绝不让钥匙通道故障卡死启动或设置页；**失败不缓存**，下次调用重试（评审十九 #7：一次瞬时不等于整个进程失去钥匙）；守卫另有 try/catch 二道防线 |
-| `SystemService.isKeyed` | `() => boolean` | 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。组件一律经它判断钥匙模式，不直接读 `launchFlags.value.settings`（评审二十一 #4）。**keyed 判定的唯一入口**：原 `guards/keyed-settings-policy` 纯转发模块已归并到此（2026-11-04，G2）——它曾是 guards/ 里唯一的非装配成员，且造成 config.service → guards 反向边 |
+| `SystemService.isKeyed` | `() => boolean` | 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。组件一律经它判断钥匙模式，不直接读 `launchFlags.value.settings`（评审二十一 #4）。**keyed 判定的唯一入口**：原 `services/system.service` 纯转发模块已归并到此（2026-11-04，G2）——它曾是 guards/ 里唯一的非装配成员，且造成 config.service → guards 反向边 |
 | `SystemService.minimizeWindow` / `toggleMaximizeWindow` / `closeWindow` | `() => Promise<void>` | 无边框窗口控制（View 经 Service 调用，Service 转发 `bridge/window.bridge`——View 不直接 import bridge，评审二十一 #6） |
+| `SystemService.destroyWindow` | `() => Promise<void>` | 销毁窗口（close-guard 落盘完成后的收尾，2026-11-04 G3） |
+| `SystemService.onCloseRequested` | `(handler) => Promise<() => void>` | 订阅关闭请求（关窗握手事件源，返回取消订阅函数） |
 | `SystemService.isKeyedSettings` | `(routeName) => boolean` | **钥匙设置页的唯一判据**（评审十 #5）：四处消费（阶段闸门/最小壳、sessionGuard 旁路、OJ 切换停留、路由落地不变量）都走这里，避免各自内联漂移 |
 | `SystemService.getStorageInfo` | `() => Promise<StorageInfo>` | 存储信息（baseDir / logPath / version）；失败由调用方降级展示（设置页「关于」区块显示「获取失败」，不影响其余分组） |
 | `SystemService.resetClient` | `() => Promise<void>` | 重置客户端（三层缓存 + 公告基线 + 公告已读状态）；**不重拉**，补拉由调用方编排（设置页重置后立刻重拉当前比赛数据） |
