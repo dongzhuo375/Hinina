@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { effectScope } from 'vue'
 import type { EffectScope } from 'vue'
 import { useAboutSettings } from '@/composables/useAboutSettings'
@@ -10,6 +11,8 @@ let scope: EffectScope
 let about: ReturnType<typeof useAboutSettings>
 
 beforeEach(() => {
+  // composable 经 systemStore 转发到 service：需要活动 pinia
+  setActivePinia(createPinia())
   vi.useFakeTimers()
   getStorageInfo.mockReset()
   getStorageInfo.mockResolvedValue({ baseDir: 'D:\\hinina', logPath: 'D:\\hinina\\log.txt', version: '0.1.2' })

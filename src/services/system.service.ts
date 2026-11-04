@@ -14,9 +14,11 @@ import * as windowBridge from '@/bridge/window.bridge'
  * 系统服务 — 客户端自身运行信息与维护操作
  * （存储目录 / 日志路径 / 版本号 / 重置客户端 / 清理本地数据 / 启动标志）。
  *
- * 分层约定：View / Store 不得直接调用 `system.bridge`，统一经本服务消费；
- * 不做缓存 —— 版本号构建期固定，但存储目录可能随用户数据迁移变化，设置页
- * 每次挂载都取实时值。**唯一例外是启动标志**：一次进程生命周期内不可变，
+ * 分层约定（2026-11-04 统一为严格 View → Store → Service）：View / component /
+ * composable **一律经 `stores/systemStore` 消费**，不得直接调用本服务或 bridge；
+ * 本服务只面向 store、守卫（`guards/keyed-settings-route`、`sessionGuard`）与
+ * 组合根（`main.ts` 关窗握手）。不做缓存 —— 版本号构建期固定，但存储目录可能
+ * 随用户数据迁移变化，设置页每次挂载都取实时值。**唯一例外是启动标志**：一次进程生命周期内不可变，
  * 且守卫与组件多处消费必须读到同一份，故 memoize 并维护响应式同步快照
  * （`launchFlags`，见下）。
  */
@@ -40,7 +42,8 @@ export class SystemService {
 
   /**
    * 本次启动是否为 `--settings` 管理方钥匙（**进程级**判据，无路由维度）。
-   * 组件里判断「钥匙模式」一律走这里，不要直接读 `launchFlags.value.settings`
+   * 组件经 `systemStore.isKeyed` 读取；守卫经 `guards/keyed-settings-route`
+   *（路由级）或直接读快照。不要各处直接读 `launchFlags.value.settings`
    *（判据要单一来源）。
    */
   isKeyed(): boolean {

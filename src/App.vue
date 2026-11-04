@@ -60,23 +60,24 @@ import { computed } from 'vue'
 import PluginNotifications from '@/components/PluginNotifications.vue'
 import { useRoute } from 'vue-router'
 import { NConfigProvider } from 'naive-ui'
-import { systemService } from '@/services/system.service'
+import { useSystemStore } from '@/stores/systemStore'
 import type { GlobalThemeOverrides } from 'naive-ui'
 
 const route = useRoute()
+const systemStore = useSystemStore()
 
 /// 比赛外壳（ContestLayout，name: 'Contest'）的 TopBar 已含窗口控制，
 /// 外壳之外的路由（当前只有登录页）由 App 渲染精简窗口条，避免窗口无法关闭/最小化
 const showGlobalTitleBar = computed(() => !route.matched.some((r) => r.name === 'Contest'))
 
 function minimize() {
-  void systemService.minimizeWindow()
+  void systemStore.minimizeWindow()
 }
 function toggleMaximize() {
-  void systemService.toggleMaximizeWindow()
+  void systemStore.toggleMaximizeWindow()
 }
 function close() {
-  void systemService.closeWindow()
+  void systemStore.closeWindow()
 }
 
 /// Naive UI 主题覆盖（CSS 变量驱动的暗色适配）

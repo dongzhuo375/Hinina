@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { systemService } from '@/services/system.service'
+import { useSystemStore } from '@/stores/systemStore'
 import { useRoute } from 'vue-router'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { settingsRevealed } from '@/utils/settings-access'
 
 const route = useRoute()
+const systemStore = useSystemStore()
 const announcementStore = useAnnouncementStore()
 
 /// 当前高亮项：/contest/problems 与 /contest/problem/:displayId 均归属「题目」
@@ -34,7 +35,7 @@ const links = [
 
 /// `--settings` 管理方钥匙：进入比赛壳层后恒显「环境设置」入口——钥匙本应授
 /// 予入口，reveal 门控（连点版本号）是选手侧的另一套机制
-const keyedMode = computed(() => systemService.isKeyed())
+const keyedMode = computed(() => systemStore.isKeyed)
 </script>
 <template>
   <nav class="contest-navigation" aria-label="赛场导航">

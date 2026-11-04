@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { effectScope } from 'vue'
 import type { EffectScope } from 'vue'
 import { useDataDirSettings } from '@/composables/useDataDirSettings'
@@ -23,6 +24,8 @@ let scope: EffectScope
 let dataDir: ReturnType<typeof useDataDirSettings>
 
 beforeEach(async () => {
+  // composable 经 systemStore 转发到 service：需要活动 pinia
+  setActivePinia(createPinia())
   vi.resetAllMocks()
   vi.useFakeTimers()
   mocks.getDataDir.mockResolvedValue({

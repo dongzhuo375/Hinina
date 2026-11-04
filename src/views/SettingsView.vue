@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PageHeading from '@/components/common/PageHeading.vue'
-import { systemService } from '@/services/system.service'
+import { useSystemStore } from '@/stores/systemStore'
 import { computed, onMounted, onUnmounted } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -39,7 +39,8 @@ import AboutSection from '@/components/settings/AboutSection.vue'
 
 /// 维护者层锁定（默认锁，`--settings` 解锁）。启动标志快照由守卫首航填充
 ///（早于本组件挂载），同步 computed 无闪烁、无 then 回调。
-const locked = computed(() => !systemService.isKeyed())
+const systemStore = useSystemStore()
+const locked = computed(() => !systemStore.isKeyed)
 
 // locked 传入表单控制器：锁定字段不参与**前端**校验；保存载荷仍是完整 AppConfig，
 // 由后端按 launch_args 真值用旧配置覆盖锁定字段

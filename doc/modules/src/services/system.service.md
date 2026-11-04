@@ -35,8 +35,8 @@
 
 - `composables/useDataDirSettings.ts` / `useMaintenanceSettings.ts` / `useAboutSettings.ts` — 数据目录生命周期、重置清理与 About 存储信息；对应 section 组件只消费模型，View 不直接调用 service
 - `router/index.ts`（守卫消费 `getLaunchFlags`：`--settings` 初始直落判据；并消费 `isKeyedSettings` 三处：`beforeEach` 条件豁免 / `fromKeyedSettings` / `afterEach` 落地不变量）
-- 取 `isKeyed()`（进程级）：`views/SettingsView`（分层锁）、`views/LoginView`、`components/layout/ActivityBar`、`services/config.service`（如有需要）
-- 取路由级判据 `isKeyedSettingsRoute()` 的消费方（经 `guards/keyed-settings-route`）：`router/index.ts`、`guards/sessionGuard`、`views/ContestLayout`、`composables/useSettingsForm`
+- `stores/systemStore` — **View/component/composable 的唯一消费入口**（2026-11-04 严格 View → Store → Service）：窗口控制、`isKeyed`、存储信息、维护清理、数据目录全部经 store 转发；视图不再直接 import 本 service
+- 守卫与组合根（非视图层，允许直连）：`router/index.ts`（`getLaunchFlags` 初始落点）、`guards/keyed-settings-route`（`isKeyed()` 路由级判据）、`main.ts`（经 store 转发的关窗握手仍最终落到本 service）
 - `src/main.ts`（`onCloseRequested` 关窗握手事件源 + `closeWindow`/`destroyWindow` 注入 close-guard）、`src/App.vue`（登录页兜底窗口条：`minimizeWindow`/`toggleMaximizeWindow`/`closeWindow`）——2026-11-04 G3 起成为 systemService 的窗口控制消费方
 
 ## 逻辑流程
