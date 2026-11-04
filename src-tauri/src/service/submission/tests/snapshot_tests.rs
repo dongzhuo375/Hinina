@@ -254,9 +254,16 @@ fn walk_and_purge_ignore_symlinks() {
     let (removed, _) = purge_stale_snapshots(&storage, SNAPSHOT_KEEP_DAYS);
     assert_eq!(removed, 1, "只删真实过期留档");
     assert!(outside_file.exists(), "外部目标不得被删除");
-    // 回收趟：真实空目录 HOJ 被回收（其中链接不计入、也不阻止回收），
-    // 链接 OJ 目录 Hydro 必须是「跳过」而非「被删链接」
-    assert!(!dir.join("submissions/HOJ").exists(), "真实空目录应被回收");
+    // 回收趟只回收**真实空目录**：HOJ 里仍留着被跳过的 link.cpp（链接不被删），
+    // 所以 HOJ 非空、不得回收；Hydro 是链接目录，必须被跳过而非删掉链接本身。
+    assert!(
+        std::fs::symlink_metadata(dir.join("submissions/HOJ")).is_ok(),
+        "含跳过链接的目录非空，不得回收"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.join("submissions/HOJ/link.cpp")).is_ok(),
+        "链接文件本身也不得被删除"
+    );
     assert!(
         std::fs::symlink_metadata(dir.join("submissions/Hydro")).is_ok(),
         "链接 OJ 目录不得被回收趟删除"
