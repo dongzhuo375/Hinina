@@ -1,4 +1,6 @@
 import type { AppConfig } from '@/types/config'
+import { readonly, ref } from 'vue'
+import type { Ref } from 'vue'
 import { IpcError } from '@/bridge'
 import * as configBridge from '@/bridge/config.bridge'
 import { DEFAULT_LANGUAGE, normalizeHojLanguage } from '@/utils/language'
@@ -38,6 +40,11 @@ export interface OjSwitchResult {
   outcome: OjSwitchOutcome
 }
 
+/** 保存事务句柄：`runSaveTxn` 回调内的唯一保存通道（直通，不再二次排队） */
+export interface SaveTxn {
+  updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig>
+}
+
 /**
  * 是否为「OJ 切换已生效但配置持久化失败」错误。
  *
@@ -58,6 +65,10 @@ export function isOjSwitchPersistFailed(error: unknown): boolean {
  * 缓存策略：配置属于应用级数据，由本服务在进程内缓存（缓存 Promise，使并发
  * 调用共享同一次 IPC）。设置页保存走 `updateConfig()`（写后端 + 失效缓存），
  * 其余读取方下次调用即拿到新值。
+ *
+ * 保存门禁：所有写入口（设置页保存、编辑器偏好、分栏比例）经 `runSaveTxn`
+ * 走**同一队列**串行——并发的读-改-写会互相覆盖字段（丢更新）。与切换侧
+ * （`switchOj` 排队 / `ojSwitchEpoch` / `whenOjSwitchSettled`）对称。
  */
 export class ConfigService {
   private cache: Promise<AppConfig> | null = null
@@ -71,6 +82,16 @@ export class ConfigService {
   /// 「已生效但重启可能回退」的既存事实，设置页晚挂载也要据此提示；后续
   /// 成功切换或任意一次把同一 active 成功落盘的 `updateConfig` 会解除它。
   private lastSwitchResult: OjSwitchResult | null = null
+  /// 保存事务队列尾（跨入口共享）：链式排队，后一次保存等前一次落地再执行。
+  private saveTail: Promise<unknown> | null = null
+  /// 保存代际：每次保存事务**入队与结束**各 +1。读配置的调用方据此检测
+  /// 「读取期间发生过保存」，事务落地后重读。排队中的事务也算开始——
+  /// 它的意图已冻结，读取方不得忽略。
+  private saveEpochCounter = 0
+  /// 保存门禁在途标志：入队即置位，只有队尾落地且无人再排队才复位
+  private readonly saveBusy = ref(false)
+  /** 保存门禁状态（排队或在途均为 true；响应式只读视图，供 UI 禁用态消费） */
+  readonly saveInFlight: Readonly<Ref<boolean>> = readonly(this.saveBusy)
 
   /** 最近一次已生效切换的结果（未发生生效切换时为 null） */
   latestOjSwitchResult(): OjSwitchResult | null {
@@ -96,6 +117,58 @@ export class ConfigService {
   whenOjSwitchSettled(): Promise<void> {
     const pending = this.pendingSwitch
     return pending ? pending.catch(() => {}) : Promise.resolve()
+  }
+
+  /** 当前保存代际（只读；语义见 `saveEpochCounter`） */
+  get saveEpoch(): number {
+    return this.saveEpochCounter
+  }
+
+  /**
+   * 等待在途/排队中的保存事务落地（不向等待者抛出保存错误）。
+   *
+   * 返回**捕获时刻的队尾**：等待者不会漏掉其后排队的事务（与
+   * `whenOjSwitchSettled` 的队尾语义对称）。
+   */
+  whenSaveSettled(): Promise<void> {
+    const tail = this.saveTail
+    return tail ? tail.then(() => {}, () => {}) : Promise.resolve()
+  }
+
+  /**
+   * 保存事务：整个回调期间持有保存门禁，覆盖「保存 → 自动切换」这类
+   * 复合操作（旧实现靠设置页 composable 的模块级 `saving` 手动圈住，
+   * 编辑器偏好/分栏比例等第二保存入口绕过它——现在所有入口同一队列）。
+   *
+   * 回调内用 `tx.updateConfig` 保存（直通，不再二次排队）；**禁止**在回调内
+   * 调用公共 `updateConfig` —— 它会排队等本事务释放，等于等自己（死锁）。
+   * `switchOj` 是独立队列，回调内调用安全（保存新建实例后的自动切换正是如此）。
+   */
+  async runSaveTxn<T>(fn: (tx: SaveTxn) => Promise<T>): Promise<T> {
+    const previous = this.saveTail
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    this.saveTail = gate
+    // 入队即视为开始：busy 与代际同步置位。若等真正执行才置位，「已排队、
+    // busy 仍 false」的窗口里另一控制器的显式切换可插队落地，随后本事务
+    // 仍按旧 target 自动切换——重演「较旧意图覆盖较新选择」。
+    this.saveBusy.value = true
+    this.saveEpochCounter += 1
+    const tx: SaveTxn = { updateConfig: (mutate) => this.updateConfigNow(mutate) }
+    try {
+      if (previous) await previous.then(() => {}, () => {})
+      return await fn(tx)
+    } finally {
+      this.saveEpochCounter += 1
+      release()
+      // 只有自己仍是队尾才复位 busy：排队在后面的事务已在入队时置位
+      if (this.saveTail === gate) {
+        this.saveTail = null
+        this.saveBusy.value = false
+      }
+    }
   }
 
   /** 读取应用配置（进程内缓存；失败时清空缓存以便下次重试） */
@@ -281,12 +354,21 @@ export class ConfigService {
   }
 
   /**
-   * 更新配置的唯一入口：读取当前配置 → 应用变更 → 整体写回后端 → 失效本地缓存。
+   * 更新配置的通用入口：读取当前配置 → 应用变更 → 整体写回后端 → 失效本地缓存。
    *
    * 后端 `update_config` 是整体替换语义，故必须先取当前值再改，
    * 避免局部字段把其余配置冲掉。返回写入后的配置供调用方直接使用。
+   *
+   * 经保存门禁串行：设置页保存、编辑器偏好、分栏比例等全部入口同一队列
+   * （`runSaveTxn`），并发的读-改-写不交错。需要「保存 → 后续编排」整段
+   * 持锁的复合操作（如保存新建实例后的自动切换）改用 `runSaveTxn`。
    */
   async updateConfig(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
+    return this.runSaveTxn((tx) => tx.updateConfig(mutate))
+  }
+
+  /// 无门禁的保存主体：只供 `runSaveTxn` 的直通变体调用，公共入口一律先过门禁
+  private async updateConfigNow(mutate: (draft: AppConfig) => void): Promise<AppConfig> {
     const current = await this.getConfig()
     const draft: AppConfig = structuredClone(current)
     mutate(draft)

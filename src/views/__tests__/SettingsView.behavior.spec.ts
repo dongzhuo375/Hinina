@@ -26,22 +26,47 @@ const mocks = vi.hoisted(() => ({
   routerReplace: vi.fn(),
 }))
 
-vi.mock('@/services/config.service', () => ({
-  configService: {
-    getConfig: mocks.getConfig,
-    updateConfig: mocks.updateConfig,
-    invalidate: mocks.invalidate,
-    switchOj: mocks.switchOj,
-    latestOjSwitchResult: () => null,
-    ojSwitchEpoch: 0,
-    ojSwitchInFlight: false,
-    whenOjSwitchSettled: async () => {},
-  },
-  // useSettingsForm 的导入面需要该具名判据；本 spec 的切换失败用普通 Error，
-  // 判据返回 false（真实类型化判据由 config.service.spec 锁定）
-  isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
-    e?.variant === 'OjSwitchPersistFailed',
-}))
+vi.mock('@/services/config.service', async () => {
+  const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
+  const busy = ref(false)
+  // 视图级只需「保存门禁 busy 可见 + 直通 bridge 缝」（「保存在途禁用 OJ 域」
+  // 依赖 busy 响应式翻转）；真实排队语义由 config.service.spec 的「save 门禁」套件锁定
+  async function runSaveTxn<T>(
+    fn: (tx: {
+      updateConfig: (mutate: (draft: AppConfig) => void) => Promise<AppConfig>
+    }) => Promise<T>,
+  ): Promise<T> {
+    busy.value = true
+    try {
+      return await fn({ updateConfig: (mutate) => mocks.updateConfig(mutate) })
+    } finally {
+      busy.value = false
+    }
+  }
+  return {
+    configService: {
+      getConfig: mocks.getConfig,
+      updateConfig: (mutate: (draft: AppConfig) => void) =>
+        runSaveTxn((tx) => tx.updateConfig(mutate)),
+      invalidate: mocks.invalidate,
+      switchOj: mocks.switchOj,
+      latestOjSwitchResult: () => null,
+      ojSwitchEpoch: 0,
+      ojSwitchInFlight: false,
+      whenOjSwitchSettled: async () => {},
+      get saveEpoch() {
+        return 0
+      },
+      saveInFlight: readonly(busy),
+      whenSaveSettled: async () => {},
+      runSaveTxn,
+    },
+    // useSettingsForm 的导入面需要该具名判据；本 spec 的切换失败用普通 Error，
+    // 判据返回 false（真实类型化判据由 config.service.spec 锁定）
+    isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
+      e?.variant === 'OjSwitchPersistFailed',
+  }
+})
 vi.mock('@/services/system.service', () => ({
   systemService: {
     getStorageInfo: mocks.getStorageInfo,

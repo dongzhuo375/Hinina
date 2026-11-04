@@ -34,6 +34,15 @@ const switchState = vi.hoisted(() => ({
   last: null as { target: string; outcome: 'success' | 'persist-failed' } | null,
 }))
 
+/// 保存门禁的孪生状态（与生产 `runSaveTxn` 同构；真实排队/代际/队尾语义由
+/// config.service.spec 的「save 门禁」套件用真实服务锁定，这里只复刻语义）。
+/// `busy`（ref 需要 vue，vi.hoisted 环境拿不到）由下方 mock 工厂注入。
+const saveState = vi.hoisted(() => ({
+  tail: null as Promise<unknown> | null,
+  epoch: 0,
+  busy: null as { value: boolean } | null,
+}))
+
 function settleSwitch(run: Promise<void>): void {
   if (switchState.pending === run) switchState.pending = null
   switchState.epoch += 1
@@ -46,49 +55,95 @@ function resolvePersisted(active: string): void {
   }
 }
 
-vi.mock('@/services/config.service', () => ({
-  configService: {
-    getConfig: mocks.getConfig,
-    updateConfig: async (mutate: (draft: AppConfig) => void) => {
-      const saved = await mocks.updateConfig(mutate)
-      resolvePersisted(saved.oj.active)
-      return saved
-    },
-    invalidate: mocks.invalidate,
-    switchOj: (id: string) => {
-      switchState.epoch += 1
-      const run = mocks.switchOj(id) as Promise<void>
-      switchState.pending = run
-      run.then(
-        () => {
-          switchState.last = { target: id, outcome: 'success' }
-          settleSwitch(run)
+vi.mock('@/services/config.service', async () => {
+  const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
+  const saveBusy = ref(false)
+  saveState.busy = saveBusy
+
+  /// 与生产 `runSaveTxn` 同构：入队即置位/代际 +1，链式等前一个落地，
+  /// 只有队尾落地且无人再排队才复位；事务内直通 `tx.updateConfig`（不再排队）
+  async function runSaveTxn<T>(
+    fn: (tx: {
+      updateConfig: (mutate: (draft: AppConfig) => void) => Promise<AppConfig>
+    }) => Promise<T>,
+  ): Promise<T> {
+    const previous = saveState.tail
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    saveState.tail = gate
+    saveBusy.value = true
+    saveState.epoch += 1
+    try {
+      if (previous) await previous.then(() => {}, () => {})
+      return await fn({
+        updateConfig: async (mutate: (draft: AppConfig) => void) => {
+          const saved = await mocks.updateConfig(mutate)
+          resolvePersisted(saved.oj.active)
+          return saved
         },
-        (e: { variant?: string }) => {
-          if (e?.variant === 'OjSwitchPersistFailed') {
-            switchState.last = { target: id, outcome: 'persist-failed' }
-          }
-          settleSwitch(run)
-        },
-      )
-      return run
+      })
+    } finally {
+      saveState.epoch += 1
+      release()
+      if (saveState.tail === gate) {
+        saveState.tail = null
+        saveBusy.value = false
+      }
+    }
+  }
+
+  return {
+    configService: {
+      getConfig: mocks.getConfig,
+      updateConfig: (mutate: (draft: AppConfig) => void) =>
+        runSaveTxn((tx) => tx.updateConfig(mutate)),
+      invalidate: mocks.invalidate,
+      switchOj: (id: string) => {
+        switchState.epoch += 1
+        const run = mocks.switchOj(id) as Promise<void>
+        switchState.pending = run
+        run.then(
+          () => {
+            switchState.last = { target: id, outcome: 'success' }
+            settleSwitch(run)
+          },
+          (e: { variant?: string }) => {
+            if (e?.variant === 'OjSwitchPersistFailed') {
+              switchState.last = { target: id, outcome: 'persist-failed' }
+            }
+            settleSwitch(run)
+          },
+        )
+        return run
+      },
+      latestOjSwitchResult: () => switchState.last,
+      get ojSwitchEpoch() {
+        return switchState.epoch
+      },
+      get ojSwitchInFlight() {
+        return switchState.pending !== null
+      },
+      whenOjSwitchSettled: () => {
+        const pending = switchState.pending
+        return pending ? pending.catch(() => {}) : Promise.resolve()
+      },
+      get saveEpoch() {
+        return saveState.epoch
+      },
+      saveInFlight: readonly(saveBusy),
+      whenSaveSettled: () => {
+        const tail = saveState.tail
+        return tail ? tail.then(() => {}, () => {}) : Promise.resolve()
+      },
+      runSaveTxn,
     },
-    latestOjSwitchResult: () => switchState.last,
-    get ojSwitchEpoch() {
-      return switchState.epoch
-    },
-    get ojSwitchInFlight() {
-      return switchState.pending !== null
-    },
-    whenOjSwitchSettled: () => {
-      const pending = switchState.pending
-      return pending ? pending.catch(() => {}) : Promise.resolve()
-    },
-  },
-  // 与生产同源的具名判据；真实类型化判据由 config.service.spec 用真实 IpcError 锁定
-  isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
-    e?.variant === 'OjSwitchPersistFailed',
-}))
+    // 与生产同源的具名判据；真实类型化判据由 config.service.spec 用真实 IpcError 锁定
+    isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
+      e?.variant === 'OjSwitchPersistFailed',
+  }
+})
 vi.mock('@/services/system.service', () => ({
   systemService: {
     launchFlags: mocks.launchFlags,
@@ -100,6 +155,15 @@ vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSession
 /// 无活动 pinia，打桩同 session 模块）
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ resetForOjSwitch: mocks.resetAuthForOjSwitch }),
+}))
+/// 路由级钥匙判据经 systemStore（2026-11-04 H3 收敛单一入口）：同样无 pinia，
+/// 打桩同 authStore 模块模式，判据复刻「launchFlags × 'Settings'」
+vi.mock('@/stores/systemStore', () => ({
+  useSystemStore: () => ({
+    isKeyedSettingsRoute:
+      (routeName: string | symbol | null | undefined) =>
+        mocks.launchFlags.value.settings && routeName === 'Settings',
+  }),
 }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -132,6 +196,9 @@ beforeEach(async () => {
   switchState.pending = null
   switchState.epoch = 0
   switchState.last = null
+  saveState.tail = null
+  saveState.epoch = 0
+  if (saveState.busy) saveState.busy.value = false
   currentConfig = baseConfig()
   // 默认正常模式（无 --settings）：切换成功照常回登录页；钥匙用例显式改写
   mocks.launchFlags.value = { settings: false }
