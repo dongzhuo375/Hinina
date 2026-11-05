@@ -778,7 +778,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       }
       case 'open_external': {
         // 真实命令（app_cmd.rs）校验 http/https 后经 tauri-plugin-opener 转交
-        // 系统默认浏览器——真实「浏览器打开」属真机验收（调用已由 :431 通用入口记录）
+        // 系统默认浏览器——真实「浏览器打开」属真机验收（调用由命令表通用入口统一记录，
+        // 本 case 不再重复 recordCall，否则同一次 dispatch 会记两条）
         return null
       }
       default:
