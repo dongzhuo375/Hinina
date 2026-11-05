@@ -75,14 +75,42 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
   })
 
   it('单引号/无引号属性里的相对地址同样改写并加固（消毒会归一化引号）', () => {
-    // 手写 HTML 常用单引号；DOMPurify 消毒后归一成双引号，改写必须在消毒前
-    // 就覆盖三种引号写法，否则单引号/无引号形式会漏改写
+    // 手写 HTML 常用单引号；改写走消毒钩子的属性遍历，三种引号写法都能覆盖
+    // （字符串正则按引号形态匹配，曾在单/无引号与正文同形字面量上出错）
     const single = renderMarkdown("<a href='/api/problem/1'>题目页</a>", 'https://oj.example.com')
     expect(single).toContain('href="https://oj.example.com/api/problem/1"')
     expect(single).toContain('target="_blank"')
 
     const unquoted = renderMarkdown('<img src=/api/public/img/b.png>', 'https://oj.example.com')
     expect(unquoted).toContain('src="https://oj.example.com/api/public/img/b.png"')
+  })
+
+  it('围栏代码块/行内代码/正文里的同形字面量不被改写（属性级改写，非字符串正则）', () => {
+    // 回归锁：字符串正则会把这些文本当成属性改写，还会把转义的 &gt; 吞进 URL
+    const fenced = renderMarkdown(
+      '```html\n<img src=/api/public/img/a.png>\n```',
+      'https://oj.example.com',
+    )
+    expect(fenced).toContain('&lt;img src=/api/public/img/a.png&gt;')
+    expect(fenced).not.toContain('https://oj.example.com')
+
+    const inline = renderMarkdown('写法是 `href=/api/x` 表示相对地址', 'https://oj.example.com')
+    expect(inline).toContain('<code>href=/api/x</code>')
+    expect(inline).not.toContain('https://oj.example.com')
+
+    const prose = renderMarkdown(
+      '请把 src=/api/x 改成绝对路径，例如 href="/api/y"',
+      'https://oj.example.com',
+    )
+    expect(prose).toContain('src=/api/x')
+    expect(prose).toContain('href="/api/y"')
+    expect(prose).not.toContain('https://oj.example.com')
+  })
+
+  it('危险 baseUrl scheme 不参与改写（消毒后改属性的注入面）', () => {
+    const html = renderMarkdown('![x](/api/public/img/a.png)', 'javascript:alert(1)')
+    expect(html).toContain('src="/api/public/img/a.png"')
+    expect(html).not.toContain('javascript:alert(1)')
   })
 
   it('`#` 片段锚点不加固（站内跳转必须留在当前页）', () => {
