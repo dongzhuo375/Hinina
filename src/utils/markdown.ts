@@ -98,19 +98,23 @@ const vditorContainer: MarkedExtension = {
 
 marked.use(vditorContainer)
 
-// 锚点加固（外链 fail-safe）：所有带 href 的 `<a>` 统一注入 `target="_blank"` +
+// 锚点加固（外链 fail-safe）：带**非片段** href 的 `<a>` 统一注入 `target="_blank"` +
 // `rel="noopener noreferrer"`。点击本身由 document 级拦截器（utils/external-links，
 // main.ts 装配）转交系统浏览器；本钩子是兜底层——拦截失效时最坏结果是新窗口
 // 请求被 Tauri 默认拒绝（界面不动），而不是 WebView 原地导航替换整个客户端。
+// `#` 片段锚点（题面/公告里的「跳到提示」）必须留在当前页：target="_blank" 会把
+// 点击变成新窗口请求（wry 无 new-window handler 时默认拒绝），站内跳转因此失效；
+// 拦截器同样跳过 `#` 片段，两处规则对齐。
 // （分层审计 2026-10「外链无出路」缺口的渲染半边；转交半边在 Rust open_external。）
 // Node 测试环境（无 DOM）下 DOMPurify 退化为工厂函数（无 addHook），且消毒本就被
 // 跳过——与 sanitize 同款 isSupported 守卫。
 if (DOMPurify.isSupported) {
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-    if (node.tagName === 'A' && node.hasAttribute('href')) {
-      node.setAttribute('target', '_blank')
-      node.setAttribute('rel', 'noopener noreferrer')
-    }
+    if (node.tagName !== 'A') return
+    const href = node.getAttribute('href')
+    if (!href || href.startsWith('#')) return
+    node.setAttribute('target', '_blank')
+    node.setAttribute('rel', 'noopener noreferrer')
   })
 }
 
