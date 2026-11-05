@@ -5,9 +5,11 @@
 //! —— 标志在 `main()` 早期由 `launch_args::init` 固化，命令只读。
 //!
 //! 外链（`open_external`）只经 Rust 官方 `tauri-plugin-opener` 的 **Rust API**
-//! 转交系统默认浏览器：插件注册为 Rust-only（不装 npm 包、不声明 capability，
-//! 插件自身的 IPC 命令对 webview 完全不暴露），前端经本命令消费——
-//! WebView 永不导航离开应用（分层审计 2026-10「外链无出路」缺口的闭合）。
+//! 转交系统默认浏览器：插件注册为 Rust-only（不装 npm 包、不声明 opener
+//! capability——插件的 IPC 命令虽已在 invoke handler 注册，但 webview 调用一律被
+//! ACL 拒绝；且 `open_js_links_on_click` 已关闭，没有注入的点击脚本这条旁路），
+//! 前端经本命令消费——WebView 永不导航离开应用（分层审计 2026-10「外链无出路」
+//! 缺口的闭合）。
 
 use crate::core::error::{AppError, AppResult};
 use crate::infra::launch_args::{self, LaunchFlags};
@@ -30,9 +32,9 @@ pub async fn launch_flags() -> AppResult<LaunchFlags> {
 /// 应用界面保持不动（分层审计 2026-10「外链无出路」缺口）。
 ///
 /// **scheme 白名单由本命令守卫**：`Opener` 的 Rust API 不做任何 scope 校验
-/// （插件文档明示），而本插件未声明 capability、插件自身的 IPC 也不暴露——
-/// 本命令是唯一入口，非 http/https 一律拒绝。失败只 `Unknown` 上抛，
-/// 前端 catch 后仅记日志（与窗口控制同款「无补救动作」）。
+/// （插件文档明示）；插件的 IPC 命令无 capability 授权（webview 调用被 ACL
+/// 拒绝），注入点击脚本也已关闭——本命令是唯一入口，非 http/https 一律拒绝。
+/// 失败只 `Unknown` 上抛，前端 catch 后仅记日志（与窗口控制同款「无补救动作」）。
 #[tauri::command]
 pub async fn open_external(app: AppHandle, url: String) -> AppResult<()> {
     let parsed = validate_external_url(&url).map_err(AppError::Config)?;
