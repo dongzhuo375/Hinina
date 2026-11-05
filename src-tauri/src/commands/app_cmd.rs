@@ -34,16 +34,31 @@ pub async fn launch_flags() -> AppResult<LaunchFlags> {
 /// **scheme 白名单由本命令守卫**：`Opener` 的 Rust API 不做任何 scope 校验
 /// （插件文档明示）；插件的 IPC 命令无 capability 授权（webview 调用被 ACL
 /// 拒绝），注入点击脚本也已关闭——本命令是唯一入口，非 http/https 一律拒绝。
-/// 失败只 `Unknown` 上抛，前端 catch 后仅记日志（与窗口控制同款「无补救动作」）。
+///
+/// **Windows 不存在 shell 拼接面**：插件启用 `open` crate 的
+/// `shellexecute-on-windows` feature，`that_detached` 直接走 `ShellExecuteExW`
+/// （URL 作为单个宽字符串参数，不经 cmd.exe；`&`/`^` 无特殊语义）。即便回退到
+/// PowerShell 启动路径，目标也是经 `OPEN_RS_TARGET` 环境变量传给固定脚本，
+/// crate 自带测试断言元字符不会被拼进命令文本。因此本命令只需守 scheme 白名单。
+///
+/// **失败信息绝不携带底层错误文本**：`tauri_plugin_opener::Error` 的
+/// `ForbiddenUrl` 分支会把 URL 原样带出，io 错误文本也可能含目标；query 里可能
+/// 有签名令牌，一律丢弃，只回固定文案（前端 catch 后仅记日志，无补救动作）。
 #[tauri::command]
 pub async fn open_external(app: AppHandle, url: String) -> AppResult<()> {
     let parsed = validate_external_url(&url).map_err(AppError::Config)?;
     app.opener()
         .open_url(parsed.as_str(), None::<&str>)
-        .map_err(|e| AppError::Unknown(format!("打开外链失败: {e}")))?;
+        .map_err(open_failure)?;
     // 只记 host 不记完整 URL：query 可能带签名令牌（沿 globalErrorGuard 先例）
     info!(host = ?parsed.host_str(), "open_external: 已转交系统浏览器");
     Ok(())
+}
+
+/// 打开失败 → 固定文案错误。**刻意丢弃底层错误文本**（可能含 URL/签名令牌），
+/// 独立成函数以便单测锁定「错误信息不含目标地址」。
+pub(crate) fn open_failure<E>(_error: E) -> AppError {
+    AppError::Unknown("打开外链失败".to_string())
 }
 
 /// scheme 白名单校验：只放行 http/https，返回解析后的绝对 URL。

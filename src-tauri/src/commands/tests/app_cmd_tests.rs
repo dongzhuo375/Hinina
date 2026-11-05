@@ -1,10 +1,12 @@
-// `app_cmd::validate_external_url` 的纯函数单测：scheme 白名单与令牌安全。
+// `app_cmd::validate_external_url` / `app_cmd::open_failure` 的纯函数单测：
+// scheme 白名单与令牌安全。
 //
 // 真实 `open_external`（AppHandle + 插件 Rust API）不做单测——tauri mock runtime
 // 会污染测试二进制（single_instance 先例），行为靠真机人工验收；
-// 本文件只锁定「哪些 URL 能进 opener」这道闸门。
+// 本文件只锁定「哪些 URL 能进 opener」这道闸门，以及失败信息不带目标地址。
 
-use super::app_cmd::validate_external_url;
+use super::app_cmd::{open_failure, validate_external_url};
+use crate::core::error::AppError;
 
 #[test]
 fn accepts_http_and_https_urls() {
@@ -47,4 +49,23 @@ fn error_message_never_contains_the_url() {
     let err = validate_external_url(url).unwrap_err();
     assert!(!err.contains("SECRET"), "错误信息不得回显 URL: {err}");
     assert!(!err.contains(url), "错误信息不得回显 URL: {err}");
+}
+
+/// `open_failure` 丢弃底层错误文本：`tauri_plugin_opener::Error` 的
+/// `ForbiddenUrl` 会把 URL 原样带出，io 错误文本也可能含目标——
+/// 传一个「带令牌的错误」进去，返回的文案必须只有固定文本。
+#[test]
+fn open_failure_drops_underlying_error_text() {
+    let leaky = "failed to open https://oj.example.com/api/x?token=SECRET";
+    match open_failure(leaky) {
+        AppError::Unknown(message) => {
+            assert_eq!(message, "打开外链失败");
+            assert!(!message.contains("SECRET"), "错误文案不得含令牌: {message}");
+            assert!(
+                !message.contains("https://"),
+                "错误文案不得含 URL: {message}"
+            );
+        }
+        other => panic!("期望 AppError::Unknown，得到 {other:?}"),
+    }
 }

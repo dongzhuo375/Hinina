@@ -13,8 +13,9 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `launch_flags` | `#[tauri::command] pub async fn launch_flags() -> AppResult<LaunchFlags>` | 返回**本次启动**的标志快照 `{ settings: bool }`。**零状态命令**（沿 `log_cmd::frontend_log` 先例，不取 `State<AppContext>`）——标志在 main() 早期由 `launch_args::init` 固化，命令只读。IPC 失败时前端按「无参数」退化（正常门禁 + 选手层），绝不让钥匙通道故障卡死启动或设置页 |
-| `open_external` | `#[tauri::command] pub async fn open_external(app: AppHandle, url: String) -> AppResult<()>` | 把 http(s) 外链转交系统默认浏览器：`validate_external_url` 校验 → `app.opener().open_url(...)`（`tauri-plugin-opener` 的 **Rust API**；插件 Rust-only 注册，不装 npm 包、不声明 opener capability——插件的 IPC 命令虽已在 invoke handler 注册，但 webview 调用一律被 ACL 拒绝；注册时并关闭默认开启的 `open_js_links_on_click`，插件不注入点击脚本，本命令是唯一转交通道）。**scheme 白名单由本命令守卫**（`Opener` Rust API 无 scope 校验，官方文档明示）；日志只记 host 不记完整 URL（query 可能带签名令牌）；失败 `AppError::Unknown`，前端 catch 后仅记日志（无补救动作，窗口控制同款） |
+| `open_external` | `#[tauri::command] pub async fn open_external(app: AppHandle, url: String) -> AppResult<()>` | 把 http(s) 外链转交系统默认浏览器：`validate_external_url` 校验 → `app.opener().open_url(...)`（`tauri-plugin-opener` 的 **Rust API**；插件 Rust-only 注册，不装 npm 包、不声明 opener capability——插件的 IPC 命令虽已在 invoke handler 注册，但 webview 调用一律被 ACL 拒绝；注册时并关闭默认开启的 `open_js_links_on_click`，插件不注入点击脚本，本命令是唯一转交通道）。**scheme 白名单由本命令守卫**（`Opener` Rust API 无 scope 校验，官方文档明示）；日志只记 host 不记完整 URL（query 可能带签名令牌）；失败 `AppError::Unknown`（**固定文案「打开外链失败」，不带任何底层错误文本**——`Error::ForbiddenUrl` 会把 URL 原样带出、io 文本也可能含目标），前端 catch 后仅记日志（无补救动作，窗口控制同款）。**Windows 无 shell 拼接面**：插件启用 `open` crate 的 `shellexecute-on-windows`，URL 经 `ShellExecuteExW` 作为单个参数传递（不经 cmd.exe，`&`/`^` 无特殊语义）；即使回退 PowerShell 路径，目标也是经 `OPEN_RS_TARGET` 环境变量传给固定脚本（crate 自带测试锁定） |
 | `validate_external_url` | `pub(crate) fn validate_external_url(url: &str) -> Result<url::Url, String>` | scheme 白名单纯函数（只放行 http/https，`url` crate 解析）。**错误信息刻意不含原始 URL**（令牌安全）。独立成纯函数以便单测——真实 open 不做单测（tauri mock runtime 污染测试二进制，single_instance 先例），真机人工验收 |
+| `open_failure` | `pub(crate) fn open_failure<E>(_error: E) -> AppError` | 打开失败 → 固定文案 `AppError::Unknown("打开外链失败")`，**刻意丢弃底层错误文本**（可能含 URL/签名令牌）。独立成泛型函数以便单测锁定「错误信息不含目标地址」 |
 
 ## 直接依赖
 
@@ -38,4 +39,4 @@
 
 `launch_flags`：无独立命令单测，解析语义与默认值行为由 `infra/tests/launch_args_tests.rs` 全覆盖；线上形状由 `LaunchFlags` Serialize 与前端 `types/system.ts` 两侧对齐。
 
-`validate_external_url`：`tests/app_cmd_tests.rs`（4 用例）——接受 http/https；拒绝 file/javascript/data/ftp/chrome/UNC 等非白名单 scheme 与畸形 URL；**错误信息不含原始 URL**（令牌安全断言）。scheme 白名单变异验证过（移除白名单 → 用例转红）。真实 open 不做单测（mock runtime 先例），真机人工验收：点题面外链 → 系统浏览器打开且应用界面不动。
+`validate_external_url` / `open_failure`：`tests/app_cmd_tests.rs`（5 用例）——接受 http/https；拒绝 file/javascript/data/ftp/chrome/UNC 等非白名单 scheme 与畸形 URL；**错误信息不含原始 URL**（令牌安全断言）；`open_failure` 传入「带令牌的错误文本」后返回固定文案（**底层错误文本被丢弃**，`Error::ForbiddenUrl` 的 URL 不会进日志/UI）。scheme 白名单变异验证过（移除白名单 → 用例转红）。真实 open 不做单测（mock runtime 先例），真机人工验收：点题面外链 → 系统浏览器打开且应用界面不动。
