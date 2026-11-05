@@ -46,7 +46,8 @@ pub async fn launch_flags() -> AppResult<LaunchFlags> {
 /// 有签名令牌，一律丢弃，只回固定文案（前端 catch 后仅记日志，无补救动作）。
 #[tauri::command]
 pub async fn open_external(app: AppHandle, url: String) -> AppResult<()> {
-    let parsed = validate_external_url(&url).map_err(AppError::Config)?;
+    // 非法链接来自远程题面/公告内容，不是本地配置——用通用 Unknown 而非 Config
+    let parsed = validate_external_url(&url).map_err(AppError::Unknown)?;
     app.opener()
         .open_url(parsed.as_str(), None::<&str>)
         .map_err(open_failure)?;

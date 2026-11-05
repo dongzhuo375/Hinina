@@ -33,7 +33,7 @@
 ## 逻辑流程
 
 - `invoke('launch_flags')` → 本命令同步读 `launch_args::get()` → 序列化为 `{ "settings": bool }` 返回。无参数、无状态、无副作用；不写日志（标志本身不含敏感信息，但也无记录必要）。
-- `invoke('open_external', { url })` → `validate_external_url`（http/https 白名单；失败 `AppError::Config`，错误信息不含 URL）→ `app.opener().open_url(...)` 转交系统浏览器 → `info!(host)`。前端拦截层（`utils/external-links`）已保证只有解析后 http/https 且 host ≠ 应用 host 的锚点会进来。
+- `invoke('open_external', { url })` → `validate_external_url`（http/https 白名单；失败 `AppError::Unknown`——非法链接来自远程题面/公告内容，不是本地配置，错误信息不含 URL）→ `app.opener().open_url(...)` 转交系统浏览器 → `info!(host)`。前端拦截层（`utils/external-links`）已保证只有解析后 http/https 且 host ≠ 应用 host 的锚点会进来。
 
 ## 测试
 

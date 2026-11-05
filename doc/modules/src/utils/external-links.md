@@ -25,7 +25,7 @@ document 级 click 委托：把 markdown 渲染面（题面/比赛简介/登录�
 
 ## 逻辑流程
 
-`click`（主键）/ `auxclick`（中键）→ document 冒泡 → `defaultPrevented` → 放行 → `closest('a')` 无 → 放行 → `resolveExternalHref` 为 null（应用内/非 http(s)/`#` 片段）→ 放行 → 否则 `preventDefault()` + `open(绝对 URL)`。右键（`auxclick` button 2）不进入本流程。
+`click`（主键）/ `auxclick`（中键）→ document 冒泡 → `defaultPrevented` → 放行 → `closest('a')` 无 → 放行 → `resolveExternalUrl` 为 null（应用内/非 http(s)/`#` 片段）→ 放行 → 否则 `preventDefault()` + `open(绝对 URL)`。右键（`auxclick` button 2）不进入本流程。
 
 ## 测试
 
