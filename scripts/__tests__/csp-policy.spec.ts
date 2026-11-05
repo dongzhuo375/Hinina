@@ -52,9 +52,9 @@ const PROD_POLICY: Record<string, string[]> = {
 }
 
 /// Dev-only extras on top of the production policy: the Vite HMR websocket
-// (scheme-source ws: covers both the default same-origin flow and the
-// TAURI_DEV_HOST variant, whose HMR host is whatever that variable holds)
-// and Monaco's dev-time blob worker wrappers. Anything else diverging
+/// (scheme-source ws: covers both the default same-origin flow and the
+/// TAURI_DEV_HOST variant, whose HMR host is whatever that variable holds)
+/// and Monaco's dev-time blob worker wrappers. Anything else diverging
 /// between devCsp and csp is drift, not a tooling need.
 const DEV_EXTRAS: Record<string, string[]> = {
   'connect-src': ['ws:'],
@@ -129,7 +129,7 @@ export function collectPolicyErrors(conf: unknown): string[] {
   if (!security) return ['tauri.conf.json: app.security is missing']
   if ('dangerousDisableAssetCspModification' in security) {
     errors.push(
-      'app.security.dangerousDisableAssetCspModification must stay unset: keep Tauri\u2019s serve-time CSP augmentation (observed: script-src gains one sha256 hash per bundled script asset; every other directive is served verbatim)',
+      'app.security.dangerousDisableAssetCspModification must stay unset: keep Tauri\u2019s serve-time CSP augmentation (observed: script-src gains one sha256 hash per bundled script asset; every other directive\u2019s source list is served unchanged, though the header is rebuilt from a map and its order is not guaranteed)',
     )
   }
   const prod = parseDirectives(security.csp, 'app.security.csp', errors)
