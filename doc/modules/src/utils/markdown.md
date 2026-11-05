@@ -18,7 +18,8 @@
 
 - `marked`（同步 parse）
 - `marked-katex-extension` + `katex`（tokenizer 层接管 `$/$$`，模块加载时 `marked.use()` 一次性装配）
-- `dompurify`（出口消毒）
+- `dompurify`（出口消毒；局部实例）
+- `@/utils/external-links`（`resolveExternalUrl`：外链判据与拦截器共用，防漂移）
 
 ## 被依赖
 
@@ -38,9 +39,10 @@
 renderMarkdown(md, baseUrl):
   md 为空 → ''
   marked.parse(md) → html（抛错 → html = md 原文）
-  baseUrl 非空 → 去尾斜杠后正则替换 (src|href)="/…" → "{base}/…"
+  baseUrl 非空 → 去尾斜杠后正则替换 (src|href)="/…"（兼容单/双/无引号）
      例：![x](/api/public/img/a.png) → <img src="https://hoj…/api/public/img/a.png">
      // 先改写再消毒：钩子才能按最终绝对地址判断 host；改写结果仍要过消毒白名单
+     // 必须兼容单/无引号：手写 HTML 常用 <img src='/api/…'>，而消毒会把属性归一成双引号
   purifier 非空（有 DOM）→ sanitize(html, {
       USE_PROFILES: { html, mathMl, svg },   // KaTeX 输出 MathML + SVG，只开 html 档会把公式剥成乱码
       ADD_TAGS: [semantics, annotation],     // KaTeX 无障碍树（LaTeX 源码）不在预置白名单，不补会被剥掉

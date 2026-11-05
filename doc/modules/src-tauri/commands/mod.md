@@ -17,7 +17,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 - `pub mod submission_cmd` — 提交 / 评测结果单次查询 / 提交列表 / 详情 / 测试点
 - `pub mod workspace_cmd` — 工作区加载 / 保存 / 文件更新 / 语言设置 / 文件删除（切换/当前命令已删）
 - `pub mod plugin_cmd` — 插件控制：`plugin_list` / `plugin_start` / `plugin_stop` / `plugin_reload` / `plugin_resync`（`PluginManager` 薄转发）
-- `#[cfg(test)] #[path = "tests/app_cmd_tests.rs"] mod app_cmd_tests` — `validate_external_url` 的 scheme 白名单与令牌安全用例
+- `#[cfg(test)] #[path = "tests/app_cmd_tests.rs"] mod app_cmd_tests` — `validate_external_url` 的 scheme 白名单与令牌安全用例 + `open_failure` 丢弃底层错误文本（URL/令牌不入日志）用例
 - `#[cfg(test)] #[path = "tests/mod_tests.rs"] mod tests` — 本层单元测试
 
 ## 直接依赖

@@ -11,7 +11,7 @@ document 级 click 委托：把 markdown 渲染面（题面/比赛简介/登录�
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `installExternalLinkOpener` | `(open: (url: string) => void, doc?: Document) => () => void` | 装配 document 级 `click` + `auxclick` 委托，返回解绑函数（应用生命周期内不解除）。拦截规则：**左键（含 Ctrl/Meta/Shift/Alt 修饰）与中键都拦**——WebView 没有新标签语义，修饰键/中键的默认策略就是新窗口请求被拒绝（点了没反应），所以一并转交；右键不拦（上下文菜单）；`closest('a')`；`href` 经 `new URL(href, location.href)` 解析后为 **http/https 且 host ≠ 当前 host** → `preventDefault()` + `open(绝对 URL)`。`open` 由装配方注入（`main.ts` → `systemService.openExternal`，失败仅记日志）——注入即测试点。应用内 RouterLink（自带 preventDefault）、`#` 片段、同 host 锚点由同一条判据（解析后同 host / 非 http(s)）自然放行，无重复规则 |
-| `resolveExternalHref`（私有） | `(anchor, doc) => URL \| null` | 锚点 → 解析后的外链 URL；非外链（无 href/非 http(s)/同 host/解析失败）返回 null |
+| `resolveExternalUrl`（导出） | `(href: string \| null, doc: Document) => URL \| null` | 外链判据的**唯一实现**：`href` 经 `new URL(href, doc.location.href)` 解析后为 http/https 且 host ≠ 文档 host 才返回绝对 URL。拦截器与 markdown 加固钩子（`utils/markdown`）共用这一份，防「什么算外链」两处漂移 |
 
 ## 直接依赖
 
