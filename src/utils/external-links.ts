@@ -4,11 +4,14 @@
  * 「外链无出路」缺口的危害形态）。
  *
  * 拦截规则（document 级委托，一次装配覆盖全部 v-html 消费面）：
+ * - **左键（含 Ctrl/Meta/Shift/Alt 修饰）与中键**都转交：WebView 没有
+ *   「新标签」语义，修饰键/中键的默认策略就是新窗口请求被 Tauri 拒绝——
+ *   放过等于「点了没反应」，所以一并转交（`click` + `auxclick`）。
+ * - 右键不拦（上下文菜单交给默认策略）。
  * - 只拦 `href` 解析后为 **http/https 且 host ≠ 当前 host** 的锚点——应用内
- *   路由（RouterLink，同 host）与 `#` 片段天然不受影响；
- * - 已被前置处理器拦下的点击（`defaultPrevented`）不再重复处理；
- * - 只拦左键无修饰键点击——Ctrl/中键等浏览器行为交给默认策略（Tauri 默认
- *   拒绝新窗口，结果是无动作而非劫持）。
+ *   路由（同 host）与 `#` 片段（解析后同 host，或非 http(s) 协议）自然落到
+ *   「非外链」分支，不转交；规则只有一份，由 URL 解析统一判定。
+ * - 已被前置处理器拦下的点击（`defaultPrevented`）不再重复处理。
  *
  * 转交通道由装配方注入（`main.ts` → `systemService.openExternal` → Rust
  * `open_external` 命令，scheme 白名单在 Rust 侧守卫）；本模块不做策略判断
@@ -18,7 +21,7 @@
 /** 判定一个锚点解析后是否为待转交的外链，返回解析后的绝对 URL（非外链返回 null）。 */
 function resolveExternalHref(anchor: HTMLAnchorElement, doc: Document): URL | null {
   const href = anchor.getAttribute('href');
-  if (!href || href.startsWith('#')) return null;
+  if (!href) return null;
   let resolved: URL;
   try {
     resolved = new URL(href, doc.location.href);
@@ -40,11 +43,8 @@ export function installExternalLinkOpener(
   open: (url: string) => void,
   doc: Document = document,
 ): () => void {
-  const onClick = (event: MouseEvent): void => {
+  const intercept = (event: MouseEvent): void => {
     if (event.defaultPrevented) return;
-    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
-      return;
-    }
     const target = event.target instanceof Element ? event.target : null;
     const anchor = target?.closest('a');
     if (!anchor) return;
@@ -53,6 +53,21 @@ export function installExternalLinkOpener(
     event.preventDefault();
     open(resolved.href);
   };
+  const onClick = (event: MouseEvent): void => {
+    // click 只对主键触发；中键/右键走 auxclick
+    if (event.button !== 0) return;
+    intercept(event);
+  };
+  const onAuxClick = (event: MouseEvent): void => {
+    // 中键 = 在 WebView 里本应「开新标签」，没有该能力，转交系统浏览器；
+    // 右键留给上下文菜单
+    if (event.button !== 1) return;
+    intercept(event);
+  };
   doc.addEventListener('click', onClick);
-  return () => doc.removeEventListener('click', onClick);
+  doc.addEventListener('auxclick', onAuxClick);
+  return () => {
+    doc.removeEventListener('click', onClick);
+    doc.removeEventListener('auxclick', onAuxClick);
+  };
 }

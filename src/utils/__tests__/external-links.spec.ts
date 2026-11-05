@@ -22,12 +22,16 @@ describe('installExternalLinkOpener — 外链拦截', () => {
     document.body.innerHTML = ''
   })
 
-  /** 写入一段含锚点的 HTML 并左键点击第一个 `<a>`，返回派发的事件（供断言默认动作是否被拦）。 */
-  function clickAnchor(html: string, init: MouseEventInit = {}): MouseEvent {
+  /** 写入一段含锚点的 HTML 并派发鼠标事件，返回事件（供断言默认动作是否被拦）。 */
+  function dispatchAnchor(
+    html: string,
+    type: 'click' | 'auxclick',
+    init: MouseEventInit = {},
+  ): MouseEvent {
     document.body.innerHTML = html
     const a = document.body.querySelector('a')
     if (!a) throw new Error('fixture 缺少 <a>')
-    const event = new MouseEvent('click', {
+    const event = new MouseEvent(type, {
       bubbles: true,
       cancelable: true,
       button: 0,
@@ -35,6 +39,11 @@ describe('installExternalLinkOpener — 外链拦截', () => {
     })
     a.dispatchEvent(event)
     return event
+  }
+
+  /** 左键点击第一个 `<a>`。 */
+  function clickAnchor(html: string, init: MouseEventInit = {}): MouseEvent {
+    return dispatchAnchor(html, 'click', init)
   }
 
   it('http(s) 外链转交 opener（preventDefault + 绝对 URL）', () => {
@@ -77,16 +86,31 @@ describe('installExternalLinkOpener — 外链拦截', () => {
     expect(ftp.defaultPrevented).toBe(false)
   })
 
-  it('修饰键点击不转交（浏览器默认行为交给默认策略）', () => {
+  it('修饰键（左键）点击同样转交——WebView 没有新标签语义，放过等于无动作', () => {
     const events = [
       clickAnchor('<a href="https://errata.example.com/a1">勘误</a>', { ctrlKey: true }),
       clickAnchor('<a href="https://errata.example.com/a1">勘误</a>', { metaKey: true }),
       clickAnchor('<a href="https://errata.example.com/a1">勘误</a>', { shiftKey: true }),
       clickAnchor('<a href="https://errata.example.com/a1">勘误</a>', { altKey: true }),
-      clickAnchor('<a href="https://errata.example.com/a1">勘误</a>', { button: 2 }),
     ]
-    expect(opener).not.toHaveBeenCalled()
-    expect(events.every((e) => !e.defaultPrevented)).toBe(true)
+    expect(opener).toHaveBeenCalledTimes(4)
+    expect(opener).toHaveBeenNthCalledWith(1, 'https://errata.example.com/a1')
+    expect(events.every((e) => e.defaultPrevented)).toBe(true)
+  })
+
+  it('中键（auxclick）转交；右键留给上下文菜单', () => {
+    const middle = dispatchAnchor('<a href="https://errata.example.com/a1">勘误</a>', 'auxclick', {
+      button: 1,
+    })
+    expect(opener).toHaveBeenCalledTimes(1)
+    expect(opener).toHaveBeenLastCalledWith('https://errata.example.com/a1')
+    expect(middle.defaultPrevented).toBe(true)
+
+    const right = dispatchAnchor('<a href="https://errata.example.com/a1">勘误</a>', 'auxclick', {
+      button: 2,
+    })
+    expect(opener).toHaveBeenCalledTimes(1)
+    expect(right.defaultPrevented).toBe(false)
   })
 
   it('已被前置处理器拦下的点击不重复转交', () => {
@@ -105,10 +129,14 @@ describe('installExternalLinkOpener — 外链拦截', () => {
     expect(event.defaultPrevented).toBe(false)
   })
 
-  it('detach 后不再拦截', () => {
+  it('detach 后 click 与 auxclick 都不再拦截', () => {
     detach()
-    const event = clickAnchor('<a href="https://errata.example.com/a1">勘误</a>')
+    const left = clickAnchor('<a href="https://errata.example.com/a1">勘误</a>')
+    const middle = dispatchAnchor('<a href="https://errata.example.com/a1">勘误</a>', 'auxclick', {
+      button: 1,
+    })
     expect(opener).not.toHaveBeenCalled()
-    expect(event.defaultPrevented).toBe(false)
+    expect(left.defaultPrevented).toBe(false)
+    expect(middle.defaultPrevented).toBe(false)
   })
 })

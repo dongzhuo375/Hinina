@@ -62,4 +62,27 @@ test.describe('外链拦截与转交', () => {
     // WebView 永不导航离开应用：点击后题面仍在屏（负向断言）
     await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
   })
+
+  /**
+   * 修饰键与中键不能是「静态无反应」：WebView 没有新标签语义，默认策略就是
+   * 新窗口请求被拒绝。两条路径都必须落到 open_external。
+   */
+  test('Ctrl+左键与中键点击同样转交，且页面留在原地', async ({ page }) => {
+    await loginAndEnterContest(page)
+    await page.getByRole('button', { name: '打开题目 A' }).click()
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+    const link = page.getByRole('link', { name: '勘误说明' })
+
+    await link.click({ modifiers: ['Control'] })
+    await expect
+      .poll(() => callCount(page, 'open_external'), { timeout: 5_000 })
+      .toBe(1)
+
+    await link.click({ button: 'middle' })
+    await expect
+      .poll(() => callCount(page, 'open_external'), { timeout: 5_000 })
+      .toBe(2)
+
+    await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)
+  })
 })
