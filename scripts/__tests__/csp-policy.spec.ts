@@ -38,6 +38,10 @@ const PROD_POLICY: Record<string, string[]> = {
   // URLs, and private-LAN OJ deployments rewrite relative images to plain
   // http absolutes; data: URIs survive DOMPurify for <img> by default.
   'img-src': ["'self'", 'http:', 'https:', 'data:'],
+  // <video>/<audio>/<source>/<track> survive DOMPurify's html profile too;
+  // same rationale as img-src — without this the fallback to default-src
+  // 'self' would silently block remote media that played before the CSP.
+  'media-src': ["'self'", 'http:', 'https:', 'data:'],
   'font-src': ["'self'"],
   // Tauri v2 IPC origins (Windows WebView2 uses http://ipc.localhost).
   'connect-src': ["'self'", 'ipc:', 'http://ipc.localhost'],
@@ -48,10 +52,12 @@ const PROD_POLICY: Record<string, string[]> = {
 }
 
 /// Dev-only extras on top of the production policy: the Vite HMR websocket
+// (scheme-source ws: covers both the default same-origin flow and the
+// TAURI_DEV_HOST variant, whose HMR host is whatever that variable holds)
 // and Monaco's dev-time blob worker wrappers. Anything else diverging
-// between devCsp and csp is drift, not a tooling need.
+/// between devCsp and csp is drift, not a tooling need.
 const DEV_EXTRAS: Record<string, string[]> = {
-  'connect-src': ['ws://localhost:1421'],
+  'connect-src': ['ws:'],
   'worker-src': ['blob:'],
 }
 
@@ -75,7 +81,12 @@ function parseDirectives(policy: unknown, field: string, errors: string[]): Dire
       errors.push(`${field} has an empty directive segment (stray ';'?)`)
       continue
     }
-    const [name, ...sources] = directive.split(/\s+/)
+    // CSP directive names are case-insensitive: normalize so that a
+    // `SCRIPT-SRC`-style duplicate is caught instead of masquerading as a
+    // distinct directive (browsers honor the first occurrence and silently
+    // drop the rest).
+    const [rawName, ...sources] = directive.split(/\s+/)
+    const name = rawName.toLowerCase()
     if (sources.length === 0) errors.push(`${field}: directive ${name} has no sources`)
     if (map.has(name)) {
       errors.push(`${field}: duplicate directive ${name} (the second occurrence is silently ignored by CSP)`)
@@ -90,6 +101,15 @@ function sortedSources(sources: string[]): string {
 }
 
 function checkPolicyShape(map: DirectiveMap, expected: Record<string, string[]>, field: string, errors: string[]): void {
+  // Lock the directive SET as well as each directive's sources: a brand-new
+  // directive (media-src/frame-src/child-src …) is the most natural form of
+  // future loosening, so an unexpected name must fail the gate even when
+  // both csp and devCsp gain it in lockstep.
+  for (const name of map.keys()) {
+    if (!(name in expected)) {
+      errors.push(`${field}: unexpected directive ${name} is not part of the pinned policy (extend the pinning deliberately if intended)`)
+    }
+  }
   for (const [name, sources] of Object.entries(expected)) {
     const actual = map.get(name)
     if (!actual) {
@@ -109,7 +129,7 @@ export function collectPolicyErrors(conf: unknown): string[] {
   if (!security) return ['tauri.conf.json: app.security is missing']
   if ('dangerousDisableAssetCspModification' in security) {
     errors.push(
-      'app.security.dangerousDisableAssetCspModification must stay unset: Tauri injects nonces/hashes for its IPC bootstrap scripts at compile time',
+      'app.security.dangerousDisableAssetCspModification must stay unset: keep Tauri\u2019s serve-time CSP augmentation (observed: script-src gains one sha256 hash per bundled script asset; every other directive is served verbatim)',
     )
   }
   const prod = parseDirectives(security.csp, 'app.security.csp', errors)
@@ -159,7 +179,7 @@ describe('webview CSP policy gate (real repository)', () => {
   it("rejects 'unsafe-inline' sneaking into script-src", () => {
     const errors = collectPolicyErrors(
       withSecurity((s) => {
-        s.csp = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
+        s.csp = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data:; media-src 'self' http: https: data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
       }),
     )
     expect(errors.some((e) => e.includes("app.security.csp: script-src must be exactly ['self']"))).toBe(true)
@@ -168,7 +188,7 @@ describe('webview CSP policy gate (real repository)', () => {
   it("rejects 'unsafe-eval' sneaking into script-src", () => {
     const errors = collectPolicyErrors(
       withSecurity((s) => {
-        s.devCsp = "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1421; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+        s.devCsp = "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data:; media-src 'self' http: https: data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
       }),
     )
     expect(errors.some((e) => e.includes("app.security.devCsp: script-src must be exactly ['self']"))).toBe(true)
@@ -177,7 +197,7 @@ describe('webview CSP policy gate (real repository)', () => {
   it('rejects img-src dropping http: (private-LAN OJ images would break)', () => {
     const errors = collectPolicyErrors(
       withSecurity((s) => {
-        s.csp = s.csp === null ? null : String(s.csp).replace('http: https: data:', 'https: data:')
+        s.csp = s.csp === null ? null : String(s.csp).replace("img-src 'self' http: https: data:", "img-src 'self' https: data:")
       }),
     )
     expect(errors.some((e) => e.includes('img-src'))).toBe(true)
@@ -214,10 +234,36 @@ describe('webview CSP policy gate (real repository)', () => {
   it('rejects a directive fork between csp and devCsp (extra directive on one side)', () => {
     const errors = collectPolicyErrors(
       withSecurity((s) => {
-        s.devCsp = typeof s.devCsp === 'string' ? `${s.devCsp}; media-src 'self'` : s.devCsp
+        s.devCsp = typeof s.devCsp === 'string' ? `${s.devCsp}; child-src 'self'` : s.devCsp
       }),
     )
-    expect(errors.some((e) => e.includes('adds directive media-src'))).toBe(true)
+    expect(errors.some((e) => e.includes('adds directive child-src'))).toBe(true)
+  })
+
+  it('rejects a brand-new directive added to both sides in lockstep (the set is pinned, not just the sources)', () => {
+    const errors = collectPolicyErrors(
+      withSecurity((s) => {
+        const extra = '; frame-src *'
+        s.csp = typeof s.csp === 'string' ? s.csp + extra : s.csp
+        s.devCsp = typeof s.devCsp === 'string' ? s.devCsp + extra : s.devCsp
+      }),
+    )
+    expect(errors.filter((e) => e.includes('unexpected directive frame-src')).length).toBe(2)
+  })
+
+  it('rejects case-camouflaged duplicates (CSP names are case-insensitive, first occurrence wins in browsers)', () => {
+    const errors = collectPolicyErrors(
+      withSecurity((s) => {
+        s.csp = typeof s.csp === 'string' ? `SCRIPT-SRC *; ${s.csp}` : s.csp
+      }),
+    )
+    expect(errors.some((e) => e.includes('duplicate directive script-src'))).toBe(true)
+  })
+
+  it('keeps DEV_EXTRAS keys aligned with PROD_POLICY (a typo key would be silently swallowed)', () => {
+    for (const key of Object.keys(DEV_EXTRAS)) {
+      expect(key in PROD_POLICY).toBe(true)
+    }
   })
 
   it('flags duplicate directives (CSP silently ignores the second one)', () => {
