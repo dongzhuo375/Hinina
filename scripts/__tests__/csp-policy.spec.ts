@@ -96,6 +96,24 @@ describe('webview CSP policy gate (real repository)', () => {
     expect(errors.some((e) => e.includes('img-src'))).toBe(true)
   })
 
+  it('rejects connect-src dropping ipc: (load-bearing IPC origin; fetch blocked degrades IPC to postMessage silently)', () => {
+    const errors = collectPolicyErrors(
+      withSecurity((s) => {
+        s.csp = swap(s.csp, "'self' ipc: http://ipc.localhost", "'self' http://ipc.localhost")
+      }),
+    )
+    expect(errors.some((e) => e.includes('app.security.csp: connect-src must be exactly'))).toBe(true)
+  })
+
+  it('rejects connect-src dropping http://ipc.localhost (Windows WebView2 invoke channel)', () => {
+    const errors = collectPolicyErrors(
+      withSecurity((s) => {
+        s.devCsp = swap(s.devCsp, "'self' ipc: http://ipc.localhost ws:", "'self' ipc: ws:")
+      }),
+    )
+    expect(errors.some((e) => e.includes('app.security.devCsp: connect-src must be exactly'))).toBe(true)
+  })
+
   it('rejects devCsp dropping the HMR websocket source', () => {
     const errors = collectPolicyErrors(withSecurity((s) => { s.devCsp = s.csp }))
     expect(errors.some((e) => e.includes('app.security.devCsp: connect-src'))).toBe(true)

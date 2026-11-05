@@ -22,8 +22,11 @@ export const PROD_POLICY = {
   // No unsafe-eval / unsafe-inline: the app ships no inline scripts and no
   // runtime template compilation; plugins execute in the Rust-side QuickJS.
   'script-src': ["'self'"],
-  // 'unsafe-inline' is unavoidable: Vue :style bindings, DOMPurify-preserved
-  // presentational inline styles in markdown output, Monaco theme injection.
+  // 'unsafe-inline' is unavoidable for two real dependents: inline style
+  // ATTRIBUTES in DOMPurify-preserved markdown output (v-html parses them as
+  // markup, which CSP governs) and Monaco's runtime theme <style> injection.
+  // (Vue :style object bindings write via CSSOM — style[k]=v — and are NOT
+  // subject to CSP, so they are not a reason.)
   'style-src': ["'self'", "'unsafe-inline'"],
   // Problem statements / announcements may embed arbitrary absolute image
   // URLs, and private-LAN OJ deployments rewrite relative images to plain
@@ -39,8 +42,17 @@ export const PROD_POLICY = {
   // same rationale as img-src — without this the fallback to default-src
   // 'self' would silently block remote media that played before the CSP.
   'media-src': ["'self'", 'http:', 'https:', 'data:'],
-  'font-src': ["'self'"],
-  // Tauri v2 IPC origins (Windows WebView2 uses http://ipc.localhost).
+  // data: covers Vite's build-time inlined font subsets (under the asset
+  // inline threshold — e.g. the cyrillic/emoji unicode-range blocks of the
+  // bundled variable fonts). Without it those ranges silently fall back to
+  // system fonts in the production exe ONLY (dev CSP is not injected and
+  // e2e runs against the dev server, so CI cannot see this regression).
+  'font-src': ["'self'", 'data:'],
+  // Tauri v2 IPC origins (Windows WebView2 uses http://ipc.localhost). These
+  // are load-bearing: the tauri 2.12.5 core has NO automatic connect-src
+  // augmentation for IPC, and when the fetch channel is CSP-blocked the IPC
+  // layer silently degrades to postMessage with a single console.warn —
+  // config drift here is a quiet slowdown, not a loud failure.
   'connect-src': ["'self'", 'ipc:', 'http://ipc.localhost'],
   'worker-src': ["'self'"],
   'object-src': ["'none'"],
@@ -128,7 +140,7 @@ export function collectPolicyErrors(conf) {
   if (!security) return ['tauri.conf.json: app.security is missing']
   if ('dangerousDisableAssetCspModification' in security) {
     errors.push(
-      'app.security.dangerousDisableAssetCspModification must stay unset: keep Tauri\u2019s serve-time CSP augmentation (observed: script-src gains one sha256 hash per bundled script asset; every other directive\u2019s source list is served unchanged, though the header is rebuilt from a map and its order is not guaranteed)',
+      'app.security.dangerousDisableAssetCspModification must stay unset (an explicit false is rejected too — touching the knob at all requires a conscious decision): keep Tauri\u2019s serve-time CSP augmentation (observed: script-src gains one sha256 hash per bundled script asset; every other directive\u2019s source list is served unchanged, though the header is rebuilt from a map and its order is not guaranteed)',
     )
   }
   const prod = parseDirectives(security.csp, 'app.security.csp', errors)

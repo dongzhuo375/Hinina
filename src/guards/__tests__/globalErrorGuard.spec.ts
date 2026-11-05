@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// 全局错误转发守卫：四类钩子触发 → 注入的 forward 收到归一化消息；
-// 限频去重；forward 抛错不炸守卫；IpcError 归一为 ipc:{cmd}。
+// 全局错误转发守卫：五类钩子触发 → 注入的 forward 收到归一化消息；
+// 限频去重；forward 抛错不炸守卫；IpcError 归一为 ipc:{cmd}；
+// CSP 违规走 csp 作用域且 blockedURI 不带查询串。
 // 每个用例自建 app + router 并在 afterEach 统一拆卸 —— 单个断言失败不得把
 // 监听器泄漏进后续用例（否则计数类断言会互相污染）。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -65,6 +66,18 @@ function emitRejection(reason: unknown): void {
   const event = new CustomEvent('unhandledrejection')
   Object.defineProperty(event, 'reason', { value: reason })
   window.dispatchEvent(event as unknown as PromiseRejectionEvent)
+}
+
+function emitCspViolation(init: Partial<SecurityPolicyViolationEvent> = {}): void {
+  // jsdom 未实现 SecurityPolicyViolationEvent 构造器：同上，CustomEvent 承载字段。
+  // 派发在 document（元素上的违规不冒泡，守卫监听在 capture 阶段）
+  const event = new CustomEvent('securitypolicyviolation')
+  Object.defineProperties(event, {
+    effectiveDirective: { value: init.effectiveDirective ?? 'img-src' },
+    blockedURI: { value: init.blockedURI ?? 'https://cdn.example.com/x.png' },
+    disposition: { value: init.disposition ?? 'enforce' },
+  })
+  document.dispatchEvent(event as unknown as SecurityPolicyViolationEvent)
 }
 
 describe('installGlobalErrorGuard', () => {
@@ -256,5 +269,30 @@ describe('installGlobalErrorGuard', () => {
     expect(calls[0]?.message).toBe('<empty error>')
     expect(calls[1]?.message).toBe('plain string')
     expect(calls[2]?.message).toBe('{"code":7}')
+  })
+
+  it('CSP 违规转发为 csp 作用域 error 日志，blockedURI 只落文件名（令牌不进日志）', () => {
+    setup()
+
+    emitCspViolation({
+      blockedURI: 'https://cdn.example.com/pic.png?token=SECRET',
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ level: 'error', scope: 'csp' })
+    expect(calls[0]?.message).toContain('img-src')
+    expect(calls[0]?.message).toContain('pic.png')
+    expect(calls[0]?.message).not.toContain('SECRET')
+    expect(calls[0]?.message).not.toContain('cdn.example.com')
+  })
+
+  it('CSP 违规同签名 1 秒窗口内去重（被拦资源成批出现时不刷屏）', () => {
+    setup()
+
+    emitCspViolation({ blockedURI: 'https://cdn.example.com/a.png' })
+    emitCspViolation({ blockedURI: 'https://cdn.example.com/a.png' })
+    emitCspViolation({ blockedURI: 'https://cdn.example.com/b.png' })
+
+    expect(calls).toHaveLength(2)
   })
 })

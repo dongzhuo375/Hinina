@@ -207,12 +207,16 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
         // 源码，供辅助技术与复制公式用），二者均不在 DOMPurify 预置 mathMl 白名单里，
         // 不补会被整体剥掉、LaTeX 源码反而泄漏成 <math> 内的裸文本。
         // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外。
-        //
-        // 剥离原则：只为安全剥（脚本/事件属性由 DOMPurify 白名单负责），表现性标记
-        // （<big>/<font size>/<center> 等老题面排版）按作者原意保真渲染，与 HOJ
-        // 网页端一致 —— 浏览器 font-size:larger 的放大比例在本客户端与 HOJ 等价
         ADD_TAGS: ['semantics', 'annotation'],
         ADD_ATTR: ['encoding'],
+        // <style> 显式禁（2026-11-05 实测）：DOMPurify html 档白名单**实际含 style**，
+        // mid-body（正文在前、样式块在后，题面天然形态）的 <style> 原样存活 —— 可
+        // 全文档改写界面（伪造弹窗）并借属性选择器 + url(...) 外泄；置于片段开头时
+        // 被解析器归入 <head> 而 WHOLE_DOCUMENT=false 只处理 body，静默丢弃只是位置
+        // 伪象，不是白名单剥除。style 在 DEFAULT_FORBID_CONTENTS 里，FORBID 删除时
+        // CSS 文本一并丢弃、不回填正文。inline style **属性**不受影响（保真保留）。
+        // <link>/<meta>/<base> 不在档内，mid-body 也被剥，无需另禁。
+        FORBID_TAGS: ['style'],
       })
     } finally {
       rewriteBase = ''

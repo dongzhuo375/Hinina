@@ -21,12 +21,15 @@ const DEDUP_TABLE_MAX = 256
  * 安装全局错误转发 —— 仅应在组合根（`main.ts`）调用一次，且**必须先于 mount**：
  * 首屏渲染/setup 抛出的错误只有 errorHandler 已在位才会被捕获。
  *
- * 覆盖四类「JS 世界的崩溃」，它们此前只进 console（用户不开 DevTools 就无痕，
- * Rust 日志看不到）—— panic 钩子的前端半边：
+ * 覆盖五类「JS 世界的崩溃 / 策略违规」，它们此前只进 console（用户不开 DevTools
+ * 就无痕，Rust 日志看不到）—— panic 钩子的前端半边：
  * - `app.config.errorHandler`：组件渲染 / 生命周期 / watcher 内的错误；
  * - `window` `error` 事件：未捕获的同步异常与资源加载失败；
  * - `unhandledrejection`：无人接的 Promise 拒绝（IpcError 归一为 `ipc:{cmd}`）；
- * - `router.onError`：异步组件加载失败 / 导航守卫抛错。
+ * - `router.onError`：异步组件加载失败 / 导航守卫抛错；
+ * - `document` `securitypolicyviolation`：CSP 违规 —— 资源类违规（img/media/
+ *   font/worker…被策略拦截）**不抛 JS 异常、不触发上述任何钩子**，浏览器只在
+ *   console 记一条；生产端（exe）CSP 配置漂移此前零可观测性。
  *
  * 设计约束：
  * - **守卫自身绝不抛错**：所有钩子体包 try/catch；`forward` 抛错同样被吞
@@ -122,11 +125,27 @@ export function installGlobalErrorGuard(
     report('router', error)
   })
 
+  // CSP 违规：见文件头第五条。**必须 capture 阶段挂 document** —— 违规事件
+  // 派发在被拦的元素上且不冒泡（与资源加载失败的 error 事件同款传播形态）。
+  // blockedURI 只落**文件名**：markdown 外链等绝对地址可能带签名令牌查询串，
+  // 与 resourceFailureMessage 同一「令牌不进日志」口径。浏览器自带的 console
+  // 报文保留（转发是持久化，不是接管输出），不重复补 console。
+  const onCspViolation = (event: Event): void => {
+    const e = event as SecurityPolicyViolationEvent
+    // TS lib 只类型化标准的 effectiveDirective（Chrome 运行时另有非标准的
+    // directive 同值字段，不依赖）；两个都缺的怪异载荷落 'unknown'
+    const directive = e.effectiveDirective || 'unknown'
+    const disposition = typeof e.disposition === 'string' ? e.disposition : ''
+    report('csp', `CSP ${directive} 被拦 ${disposition} ${fileNameOf(e.blockedURI)}`.replace(/\s+/g, ' ').trim())
+  }
+  document.addEventListener('securitypolicyviolation', onCspViolation, true)
+
   return () => {
     // removeEventListener 按 type+listener+capture 匹配：必须与注册时的
     // capture: true 一致才能真的移除
     window.removeEventListener('error', onWindowError, true)
     window.removeEventListener('unhandledrejection', onUnhandledRejection)
+    document.removeEventListener('securitypolicyviolation', onCspViolation, true)
     offRouterError()
     app.config.errorHandler = undefined
     lastSeen.clear()
