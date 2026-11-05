@@ -114,6 +114,15 @@ describe('webview CSP policy gate (real repository)', () => {
     expect(errors.some((e) => e.includes('app.security.devCsp: connect-src must be exactly'))).toBe(true)
   })
 
+  it('rejects font-src dropping data: (Vite-inlined font subsets would fall back to system fonts, exe-only)', () => {
+    const errors = collectPolicyErrors(
+      withSecurity((s) => {
+        s.csp = swap(s.csp, "font-src 'self' data:", "font-src 'self'")
+      }),
+    )
+    expect(errors.some((e) => e.includes('app.security.csp: font-src must be exactly'))).toBe(true)
+  })
+
   it('rejects devCsp dropping the HMR websocket source', () => {
     const errors = collectPolicyErrors(withSecurity((s) => { s.devCsp = s.csp }))
     expect(errors.some((e) => e.includes('app.security.devCsp: connect-src'))).toBe(true)

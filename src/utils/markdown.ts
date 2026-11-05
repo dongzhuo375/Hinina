@@ -207,6 +207,11 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
         // 源码，供辅助技术与复制公式用），二者均不在 DOMPurify 预置 mathMl 白名单里，
         // 不补会被整体剥掉、LaTeX 源码反而泄漏成 <math> 内的裸文本。
         // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外。
+        //
+        // 剥离原则：只为安全剥（脚本/事件属性由 DOMPurify 白名单负责），表现性标记
+        // （<big>/<font size>/<center> 等老题面排版）按作者原意保真渲染，与 HOJ
+        // 网页端一致 —— 浏览器 font-size:larger 的放大比例在本客户端与 HOJ 等价。
+        // 唯一的安全特例是下方 FORBID_TAGS 的 <style>（mid-body 存活见该注释）
         ADD_TAGS: ['semantics', 'annotation'],
         ADD_ATTR: ['encoding'],
         // <style> 显式禁（2026-11-05 实测）：DOMPurify html 档白名单**实际含 style**，

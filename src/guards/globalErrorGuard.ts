@@ -125,10 +125,12 @@ export function installGlobalErrorGuard(
     report('router', error)
   })
 
-  // CSP 违规：见文件头第五条。**必须 capture 阶段挂 document** —— 违规事件
-  // 派发在被拦的元素上且不冒泡（与资源加载失败的 error 事件同款传播形态）。
-  // blockedURI 只落**文件名**：markdown 外链等绝对地址可能带签名令牌查询串，
-  // 与 resourceFailureMessage 同一「令牌不进日志」口径。浏览器自带的 console
+  // CSP 违规：见文件头第五条。挂 document 是权威建议（MDN）：事件**冒泡至
+  // Window 且 composed**，Chromium 对资源类违规（被拦 <img> 等）**直接以
+  // document 为 target 派发**、不经被拦元素冒泡——capture 监听在「直接派发」
+  // 与「元素冒泡」两种模型下都收得到，属双保险而非必需。blockedURI 只落**文
+  // 件名**：markdown 外链等绝对地址可能带签名令牌查询串，与
+  // resourceFailureMessage 同一「令牌不进日志」口径。浏览器自带的 console
   // 报文保留（转发是持久化，不是接管输出），不重复补 console。
   const onCspViolation = (event: Event): void => {
     const e = event as SecurityPolicyViolationEvent
