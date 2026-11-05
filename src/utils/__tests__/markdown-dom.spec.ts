@@ -81,6 +81,29 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).not.toContain('rel="noopener')
   })
 
+  it('同 host 链接不加固（站内跳转保留默认导航）', () => {
+    const origin = window.location.origin
+    const html = renderMarkdown(`[题目列表](${origin}/contest/problems)`, 'https://oj.example.com')
+    expect(html).toContain(`href="${origin}/contest/problems"`)
+    expect(html).not.toContain('target="_blank"')
+    expect(html).not.toContain('rel="noopener')
+  })
+
+  it('mailto 链接不加固（非 http(s)，交给默认处理器）', () => {
+    const html = renderMarkdown('[邮件](mailto:judge@example.com)', '')
+    expect(html).toContain('href="mailto:judge@example.com"')
+    expect(html).not.toContain('target="_blank"')
+    expect(html).not.toContain('rel="noopener')
+  })
+
+  it('加固钩子只作用于局部实例，不污染全局 DOMPurify', () => {
+    // 若钩子挂在全局单例上，应用里其它 sanitize 调用会无辜多出 target/rel
+    const html = DOMPurify.sanitize('<a href="https://errata.example.com/a1">勘误</a>')
+    expect(html).toContain('href="https://errata.example.com/a1"')
+    expect(html).not.toContain('target=')
+    expect(html).not.toContain('rel=')
+  })
+
   it('出错公式消毒后错误文本与 errorColor 内联样式保留（可见降级）', () => {
     const html = renderMarkdown('$\\frac{$', '')
     expect(html).toContain('katex-error')

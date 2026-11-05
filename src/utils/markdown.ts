@@ -98,41 +98,60 @@ const vditorContainer: MarkedExtension = {
 
 marked.use(vditorContainer)
 
-// 锚点加固（外链 fail-safe）：带**非片段** href 的 `<a>` 统一注入 `target="_blank"` +
-// `rel="noopener noreferrer"`。点击本身由 document 级拦截器（utils/external-links，
-// main.ts 装配）转交系统浏览器；本钩子是兜底层——拦截失效时最坏结果是新窗口
-// 请求被 Tauri 默认拒绝（界面不动），而不是 WebView 原地导航替换整个客户端。
-// `#` 片段锚点（题面/公告里的「跳到提示」）必须留在当前页：target="_blank" 会把
-// 点击变成新窗口请求（wry 无 new-window handler 时默认拒绝），站内跳转因此失效；
-// 拦截器同样跳过 `#` 片段，两处规则对齐。
+// 锚点加固（外链 fail-safe）：只有**外链**（解析后 http/https 且 host ≠ 应用
+// host）才注入 `target="_blank"` + `rel="noopener noreferrer"`。
+//
+// 为什么必须排除站内/非 http(s)：`target="_blank"` 会把点击变成新窗口请求，而
+// Tauri/wry 默认拒绝新窗口——对不会被拦截器转交的链接（同 host、`mailto:`、
+// `tel:`、`#` 片段）而言，加 target 等于把原本正常的跳转变成「点了没反应」。
+// 判据与拦截器（utils/external-links）同一条：URL 解析 + http(s) + host 不同。
+//
+// 钩子注册在**本模块私有的 DOMPurify 实例**上（`DOMPurify(window)`），不动全局
+// 单例——应用里其它 `DOMPurify.sanitize` 调用不应继承 target/rel。
+// 渲染顺序：先改写相对 URL（`/api/...` → `{baseUrl}/api/...`）再消毒，钩子才能
+// 看到最终绝对地址并判断 host；且改写后的地址仍要过消毒白名单（baseUrl 若含
+// `javascript:` 之类会被 DOMPurify 剥掉，先改写比后改写更安全）。
+// Node 测试环境（无 DOM）下 isSupported 为 false：不创建实例、跳过消毒。
 // （分层审计 2026-10「外链无出路」缺口的渲染半边；转交半边在 Rust open_external。）
-// Node 测试环境（无 DOM）下 DOMPurify 退化为工厂函数（无 addHook），且消毒本就被
-// 跳过——与 sanitize 同款 isSupported 守卫。
-if (DOMPurify.isSupported) {
-  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+function createPurifier(): typeof DOMPurify | null {
+  if (typeof window === 'undefined' || !DOMPurify.isSupported) return null
+  const appLocation = window.location
+  const instance = DOMPurify(window)
+  instance.addHook('afterSanitizeAttributes', (node) => {
     if (node.tagName !== 'A') return
     const href = node.getAttribute('href')
-    if (!href || href.startsWith('#')) return
+    if (!href) return
+    let resolved: URL
+    try {
+      resolved = new URL(href, appLocation.href)
+    } catch {
+      return
+    }
+    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return
+    if (resolved.host === appLocation.host) return
     node.setAttribute('target', '_blank')
     node.setAttribute('rel', 'noopener noreferrer')
   })
+  return instance
 }
+
+const purifier = createPurifier()
 
 /// 将 Markdown 文本渲染为 HTML（含 LaTeX 公式），消毒后输出，并把相对 URL 改写为绝对地址。
 ///
 /// HOJ 返回的题目描述/题面/公告是 Markdown + LaTeX 混合语法，其中图片使用相对路径，
 /// 例如 `![alt](/api/public/img/xxx.png)`。此函数：
 /// 1. 用 marked 将 Markdown 转为 HTML，`$...$` / `$$...$$` 经 KaTeX 渲染为公式
-/// 2. 用 DOMPurify 在**唯一出口**统一消毒（marked 默认放行内联 HTML，而内容来自
+/// 2. 将以 `/` 开头的相对 `src`/`href` 改写为 `{baseUrl}` + 相对路径
+///    （先于消毒：锚点加固钩子要按最终绝对地址判断是否外链）
+/// 3. 用 DOMPurify 在**唯一出口**统一消毒（marked 默认放行内联 HTML，而内容来自
 ///    OJ 服务端且编辑者面较宽；出口消毒使所有 v-html 调用点自动受保护，见 P63）
-/// 3. 将以 `/` 开头的相对 `src`/`href` 改写为 `{baseUrl}` + 相对路径，
-///    使图片能正确指向 HOJ 服务端而非前端 dev server
 ///
 /// 消毒档位必须含 `mathMl` 与 `svg`：KaTeX 输出 MathML（读屏无障碍）与 SVG
 /// （可伸缩括号/根号），只开 `html` 档会把公式结构整体剥掉、只剩乱码文本。
 ///
 /// 注意：DOMPurify 依赖 DOM，Node 测试环境（无 jsdom）下 `isSupported === false`，
-/// 此时跳过消毒仅做渲染 —— 生产环境恒为 WebView，消毒必然生效。
+/// 此时不创建消毒实例、跳过消毒仅做渲染 —— 生产环境恒为 WebView，消毒必然生效。
 export function renderMarkdown(markdown: string, baseUrl: string): string {
   if (!markdown) return ''
 
@@ -145,8 +164,12 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
     html = markdown
   }
 
-  if (DOMPurify.isSupported) {
-    html = DOMPurify.sanitize(html, {
+  if (baseUrl) {
+    html = rewriteRelativeUrls(html, baseUrl)
+  }
+
+  if (purifier) {
+    html = purifier.sanitize(html, {
       USE_PROFILES: { html: true, mathMl: true, svg: true },
       // KaTeX 的读屏无障碍树由 <semantics>/<annotation> 承载（annotation 内是 LaTeX
       // 源码，供辅助技术与复制公式用），二者均不在 DOMPurify 预置 mathMl 白名单里，
@@ -161,15 +184,17 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
     })
   }
 
-  if (baseUrl) {
-    const base = baseUrl.replace(/\/+$/, '')
-    html = html.replace(
-      /\b(src|href)="(\/[^"]*)"/g,
-      (_m, attr: string, path: string) => `${attr}="${resolveUrl(path, base)}"`,
-    )
-  }
-
   return html
+}
+
+/// 把以 `/` 开头的相对 `src`/`href` 改写为 `{baseUrl}` + 路径。
+/// 协议相对 `//host` 与其它绝对地址由 `resolveUrl` 原样放行。
+function rewriteRelativeUrls(html: string, baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, '')
+  return html.replace(
+    /\b(src|href)="(\/[^"]*)"/g,
+    (_m, attr: string, path: string) => `${attr}="${resolveUrl(path, base)}"`,
+  )
 }
 
 /// 将相对路径解析为绝对 URL。

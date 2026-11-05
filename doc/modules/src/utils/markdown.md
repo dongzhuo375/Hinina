@@ -10,8 +10,8 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `renderMarkdown` | `(markdown: string, baseUrl: string) => string` | marked 同步渲染（含 KaTeX 公式）→ **DOMPurify 出口消毒** → 相对 `src`/`href` 改写；空文本返回空串；渲染抛错时**退回原文按纯文本输出**（题面显示降级好过白屏） |
-| `DOMPurify.addHook('afterSanitizeAttributes')` | 模块级钩子（isSupported 守卫，Node 无 DOM 时跳过） | **外链 fail-safe**：带**非片段** href 的 `<a>` 注入 `target="_blank"` + `rel="noopener noreferrer"`——点击由 `utils/external-links` 的 document 级拦截转交系统浏览器，本钩子兜底：拦截失效时最坏是新窗口被 Tauri 拒绝（界面不动），而非 WebView 原地导航替换整个客户端。`#` 片段锚点（「跳到提示」）**不加** target：加了会变成新窗口请求被拒，站内跳转失效；与拦截器跳过 `#` 片段的规则对齐 |
+| `renderMarkdown` | `(markdown: string, baseUrl: string) => string` | marked 同步渲染（含 KaTeX 公式）→ 相对 `src`/`href` 改写 → **DOMPurify 出口消毒**；空文本返回空串；渲染抛错时**退回原文按纯文本输出**（题面显示降级好过白屏） |
+| `createPurifier()`（模块私有） | 创建本模块专用的 `DOMPurify(window)` 实例并注册 `afterSanitizeAttributes` 钩子；无 DOM（Node 测试）返回 null | **外链 fail-safe**：仅对解析后 **http/https 且 host ≠ 应用 host** 的 `<a>` 注入 `target="_blank"` + `rel="noopener noreferrer"`——同 host、`mailto:`/`tel:`、`#` 片段都不加（加了会把原本正常的跳转变成被拒绝的新窗口，即「点了没反应」）。钩子只挂局部实例，**不污染全局 `DOMPurify` 单例** |
 | `resolveUrl` | `(path, base) => string`（私有） | 已是绝对 URL（`http(s)://`、`data:`、`//`）原样返回，否则 `base + path` |
 
 ## 直接依赖
@@ -32,18 +32,20 @@
 ```
 模块加载：marked.use(markedKatex({ nonStandard, throwOnError:false, strict:'ignore' }))
          marked.use(vditorContainer)   // ::: 容器块级扩展
+         createPurifier()              // 局部 DOMPurify(window) 实例 + 外链加固钩子
+                                       // （仅 http/https 且 host ≠ 应用 host，不污染全局）
 
 renderMarkdown(md, baseUrl):
   md 为空 → ''
   marked.parse(md) → html（抛错 → html = md 原文）
-  DOMPurify.isSupported →
-    sanitize(html, {
+  baseUrl 非空 → 去尾斜杠后正则替换 (src|href)="/…" → "{base}/…"
+     例：![x](/api/public/img/a.png) → <img src="https://hoj…/api/public/img/a.png">
+     // 先改写再消毒：钩子才能按最终绝对地址判断 host；改写结果仍要过消毒白名单
+  purifier 非空（有 DOM）→ sanitize(html, {
       USE_PROFILES: { html, mathMl, svg },   // KaTeX 输出 MathML + SVG，只开 html 档会把公式剥成乱码
       ADD_TAGS: [semantics, annotation],     // KaTeX 无障碍树（LaTeX 源码）不在预置白名单，不补会被剥掉
       ADD_ATTR: [encoding],
     })                                       // 剥离只为安全；表现性标记（big/font 等）保真渲染
-  baseUrl 非空 → 去尾斜杠后正则替换 (src|href)="/…" → "{base}/…"
-     例：![x](/api/public/img/a.png) → <img src="https://hoj…/api/public/img/a.png">
 ```
 
 设计要点：
