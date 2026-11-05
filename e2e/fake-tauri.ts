@@ -111,7 +111,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     A: {
       id: '101',
       title: '两数之和',
-      description: '<p>给定整数数组与目标值，找出和为目标值的两个整数下标。</p>',
+      description:
+        '<p>给定整数数组与目标值，找出和为目标值的两个整数下标。</p><p>勘误见 <a href="https://errata.example.com/a1">勘误说明</a>。</p>',
       inputDescription: '<p>第一行两个整数 n 与 target。</p>',
       outputDescription: '<p>一行两个下标。</p>',
       samples: [{ input: '4 9\n2 7 11 15\n', output: '0 1\n' }],
@@ -356,6 +357,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     delete_workspace_file: ['fileName'],
     update_config: ['config'],
     switch_oj: ['ojId'],
+    open_external: ['url'],
   }
   // 必填参数的类型（默认 string；Vec<String> → array；AppConfig → object）
   const ARG_TYPES: Record<string, 'array' | 'object'> = {
@@ -772,6 +774,12 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         const ids = new Set(readAnnouncementIdsByScope[key] ?? [])
         for (const id of (args?.ids as string[] | undefined) ?? []) ids.add(String(id))
         readAnnouncementIdsByScope[key] = [...ids]
+        return null
+      }
+      case 'open_external': {
+        // 真实命令（app_cmd.rs）校验 http/https 后经 tauri-plugin-opener 转交
+        // 系统默认浏览器——真实「浏览器打开」属真机验收（调用由命令表通用入口统一记录，
+        // 本 case 不再重复 recordCall，否则同一次 dispatch 会记两条）
         return null
       }
       default:

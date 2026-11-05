@@ -19,6 +19,7 @@
 | `setDataDir` | `(path: string, migrate: boolean) => Promise<DataDirChange>` | `set_data_dir` |
 | `resetDataDir` | `(migrate: boolean) => Promise<DataDirChange>` | `reset_data_dir` |
 | `pickDataDir` | `() => Promise<string \| null>` | `pick_data_dir`（原生目录选择器） |
+| `openExternal` | `(url: string) => Promise<void>` | invoke `open_external`（`{ url }`）：http(s) 外链转交系统默认浏览器——WebView 永不导航离开应用；scheme 白名单在 Rust 命令侧守卫（`app_cmd::open_external`）。消费方：`main.ts` 组合根的外链拦截装配（`utils/external-links`） |
 
 ## 直接依赖
 

@@ -60,6 +60,105 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toContain('class="katex"')
   })
 
+  it('外链锚点加固：target=_blank + rel=noopener noreferrer（外链 fail-safe）', () => {
+    const html = renderMarkdown('[勘误](https://errata.example.com/a1)', 'https://oj.example.com')
+    expect(html).toContain('href="https://errata.example.com/a1"')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
+  })
+
+  it('OJ 相对地址改写后的链接同样加固（与图片改写同链路）', () => {
+    const html = renderMarkdown('[题目页](/api/problem/1)', 'https://oj.example.com')
+    expect(html).toContain('href="https://oj.example.com/api/problem/1"')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
+  })
+
+  it('单引号/无引号属性里的相对地址同样改写并加固（消毒会归一化引号）', () => {
+    // 手写 HTML 常用单引号；改写走消毒钩子的属性遍历，三种引号写法都能覆盖
+    // （字符串正则按引号形态匹配，曾在单/无引号与正文同形字面量上出错）
+    const single = renderMarkdown("<a href='/api/problem/1'>题目页</a>", 'https://oj.example.com')
+    expect(single).toContain('href="https://oj.example.com/api/problem/1"')
+    expect(single).toContain('target="_blank"')
+
+    const unquoted = renderMarkdown('<img src=/api/public/img/b.png>', 'https://oj.example.com')
+    expect(unquoted).toContain('src="https://oj.example.com/api/public/img/b.png"')
+  })
+
+  it('围栏代码块/行内代码/正文里的同形字面量不被改写（属性级改写，非字符串正则）', () => {
+    // 回归锁：字符串正则会把这些文本当成属性改写，还会把转义的 &gt; 吞进 URL
+    const fenced = renderMarkdown(
+      '```html\n<img src=/api/public/img/a.png>\n```',
+      'https://oj.example.com',
+    )
+    expect(fenced).toContain('&lt;img src=/api/public/img/a.png&gt;')
+    expect(fenced).not.toContain('https://oj.example.com')
+
+    const inline = renderMarkdown('写法是 `href=/api/x` 表示相对地址', 'https://oj.example.com')
+    expect(inline).toContain('<code>href=/api/x</code>')
+    expect(inline).not.toContain('https://oj.example.com')
+
+    const prose = renderMarkdown(
+      '请把 src=/api/x 改成绝对路径，例如 href="/api/y"',
+      'https://oj.example.com',
+    )
+    expect(prose).toContain('src=/api/x')
+    expect(prose).toContain('href="/api/y"')
+    expect(prose).not.toContain('https://oj.example.com')
+  })
+
+  it('危险 baseUrl scheme 不参与改写（消毒后改属性的注入面）', () => {
+    const html = renderMarkdown('![x](/api/public/img/a.png)', 'javascript:alert(1)')
+    expect(html).toContain('src="/api/public/img/a.png"')
+    expect(html).not.toContain('javascript:alert(1)')
+  })
+
+  it('空 href 变成占位链接（`[x]()`：无 href/target/rel）', () => {
+    // 空 href 解析后等于当前文档 URL，点击会整页重载（丢防抖内的草稿）；
+    // 渲染成不可点占位链接，比「可点但没反应」更诚实
+    const html = renderMarkdown('[x]()', 'https://oj.example.com')
+    expect(html).toContain('<a>x</a>')
+    expect(html).not.toContain('href=')
+    expect(html).not.toContain('target=')
+    expect(html).not.toContain('rel=')
+  })
+
+  it('纯空白 href 同样变成占位链接（`<a href=" ">`）', () => {
+    const html = renderMarkdown('<a href=" ">x</a>', 'https://oj.example.com')
+    expect(html).toContain('<a>x</a>')
+    expect(html).not.toContain('href=')
+  })
+
+  it('`#` 片段锚点不加固（站内跳转必须留在当前页）', () => {
+    const html = renderMarkdown('[跳到提示](#hint)', 'https://oj.example.com')
+    expect(html).toContain('href="#hint"')
+    expect(html).not.toContain('target="_blank"')
+    expect(html).not.toContain('rel="noopener')
+  })
+
+  it('同 host 链接不加固（站内跳转保留默认导航）', () => {
+    const origin = window.location.origin
+    const html = renderMarkdown(`[题目列表](${origin}/contest/problems)`, 'https://oj.example.com')
+    expect(html).toContain(`href="${origin}/contest/problems"`)
+    expect(html).not.toContain('target="_blank"')
+    expect(html).not.toContain('rel="noopener')
+  })
+
+  it('mailto 链接不加固（非 http(s)，交给默认处理器）', () => {
+    const html = renderMarkdown('[邮件](mailto:judge@example.com)', '')
+    expect(html).toContain('href="mailto:judge@example.com"')
+    expect(html).not.toContain('target="_blank"')
+    expect(html).not.toContain('rel="noopener')
+  })
+
+  it('加固钩子只作用于局部实例，不污染全局 DOMPurify', () => {
+    // 若钩子挂在全局单例上，应用里其它 sanitize 调用会无辜多出 target/rel
+    const html = DOMPurify.sanitize('<a href="https://errata.example.com/a1">勘误</a>')
+    expect(html).toContain('href="https://errata.example.com/a1"')
+    expect(html).not.toContain('target=')
+    expect(html).not.toContain('rel=')
+  })
+
   it('出错公式消毒后错误文本与 errorColor 内联样式保留（可见降级）', () => {
     const html = renderMarkdown('$\\frac{$', '')
     expect(html).toContain('katex-error')

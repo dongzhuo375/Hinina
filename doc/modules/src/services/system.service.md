@@ -24,6 +24,7 @@
 | `SystemService.setDataDir` | `(path: string, migrate: boolean) => Promise<DataDirChange>` | 更改数据目录（**重启后生效**）；只「校验 + 记下改动」，搬运由下次启动完成 |
 | `SystemService.resetDataDir` | `(migrate: boolean) => Promise<DataDirChange>` | 恢复默认数据目录（**重启后生效**） |
 | `SystemService.pickDataDir` | `() => Promise<string \| null>` | 原生目录选择器（用户取消返回 null） |
+| `SystemService.openExternal` | `(url: string) => Promise<void>` | 把 http(s) 外链转交系统默认浏览器（WebView 永不导航离开应用）；scheme 白名单在 Rust 命令侧守卫。消费方：`main.ts` 组合根的外链拦截装配（失败仅记日志，无补救动作） |
 | `systemService` | 单例 | 全局唯一实例 |
 
 ## 直接依赖

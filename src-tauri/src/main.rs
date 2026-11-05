@@ -281,6 +281,20 @@ fn main() {
         // 目录选择器（设置页「数据目录」）。本项目不注册 tauri-plugin-fs / -http
         // （fs/http 的依赖与 capability 存在但从未注册，全部 I/O 都走 Rust）。
         .plugin(tauri_plugin_dialog::init())
+        // 外链转交系统浏览器（app_cmd::open_external 经 Rust API 消费）。Rust-only
+        // 注册：不装 npm 包、不声明 opener capability——插件的 IPC 命令虽已在
+        // invoke handler 注册，但 webview 调用一律被 ACL 拒绝（无授权即拒绝）。
+        // **关闭默认开启的 `open_js_links_on_click`**：默认值 true 会给 webview 注入
+        // 点击脚本，对 _blank / Ctrl / Shift 点击的 http(s)/mailto/tel 锚点直接调
+        // `plugin:opener|open_url`——该 invoke 必经 ACL 拒绝并成为 unhandled
+        // rejection（每次点击一条错误日志），且一旦将来有人补了 capability 就会
+        // 成为绕过 open_external 白名单的第二条转交通道。关掉才保证唯一入口。
+        // scheme 白名单由该命令守卫（见 app_cmd.rs）。
+        .plugin(
+            tauri_plugin_opener::Builder::default()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .setup(move |app| {
             // AppContext 必须在这里初始化而不是 main()：只有 setup 能拿到 AppHandle，
             // 也就只有这里能解析 `app_local_data_dir()`。
@@ -353,6 +367,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_cmd::launch_flags,
+            commands::app_cmd::open_external,
             commands::plugin_cmd::plugin_list,
             commands::plugin_cmd::plugin_start,
             commands::plugin_cmd::plugin_stop,

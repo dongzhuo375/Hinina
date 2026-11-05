@@ -68,3 +68,9 @@ export async function resetDataDir(migrate: boolean): Promise<DataDirChange> {
 export async function pickDataDir(): Promise<string | null> {
   return ipcInvoke<string | null>('pick_data_dir')
 }
+
+/** invoke 签名: `open_external`（`{ url }`）。把 http(s) 外链转交系统默认浏览器——
+ * WebView 永不导航离开应用；scheme 白名单在 Rust 命令侧守卫（app_cmd.rs） */
+export async function openExternal(url: string): Promise<void> {
+  return ipcInvoke<void>('open_external', { url })
+}

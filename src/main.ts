@@ -12,6 +12,7 @@ import {
 import { useAnnouncementStore } from "@/stores/announcementStore";
 import { onAnnouncementsPublished } from "@/bridge/announcement.bridge";
 import { createCloseGuard } from "@/utils/close-guard";
+import { installExternalLinkOpener } from "@/utils/external-links";
 import { systemService } from "@/services/system.service";
 import { createLogger } from "@/utils/logger";
 import "@/styles/global.css";
@@ -42,6 +43,9 @@ installWorkspacePersistenceListener();
 installAnnouncementListener();
 // 组合根装配：关窗握手 —— 退出前把在途改动落盘
 installCloseFlushGuard();
+// 组合根装配：外链拦截 —— markdown 渲染面（题面/公告/简报）里的 http(s) 锚点
+// 转交系统默认浏览器，WebView 永不导航离开应用
+installExternalLinks();
 
 app.mount("#app");
 
@@ -74,6 +78,21 @@ function installAnnouncementListener(): void {
     void store.refresh();
   }).catch((e) => {
     log.error("新公告事件订阅失败，红点将退化为轮询发现:", e);
+  });
+}
+
+/**
+ * 外链拦截：markdown 渲染面里的 http(s) 锚点转交系统默认浏览器。
+ *
+ * 拦截规则与注入点见 `utils/external-links`；转交通道 = `open_external` 命令
+ * （scheme 白名单在 Rust 侧守卫）。失败仅记日志——打开失败无补救动作，
+ * 沿窗口控制「无补救动作」先例。
+ */
+function installExternalLinks(): void {
+  installExternalLinkOpener((url) => {
+    systemService.openExternal(url).catch((e) => {
+      log.warn("打开外链失败:", e);
+    });
   });
 }
 

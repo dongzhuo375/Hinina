@@ -1,6 +1,7 @@
 import { marked, type MarkedExtension, type Tokens } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import DOMPurify from 'dompurify'
+import { resolveExternalUrl } from '@/utils/external-links'
 
 /**
  * 数学公式（KaTeX）配置 —— 在 tokenizer 层接管 `$...$` / `$$...$$`。
@@ -98,6 +99,77 @@ const vditorContainer: MarkedExtension = {
 
 marked.use(vditorContainer)
 
+// 锚点加固（外链 fail-safe）：只有**外链**（解析后 http/https 且 host ≠ 应用
+// host）才注入 `target="_blank"` + `rel="noopener noreferrer"`。
+//
+// 为什么必须排除站内/非 http(s)：`target="_blank"` 会把点击变成新窗口请求，而
+// Tauri/wry 默认拒绝新窗口——对不会被拦截器转交的链接（同 host、`mailto:`、
+// `tel:`、`#` 片段）而言，加 target 等于把原本正常的跳转变成「点了没反应」。
+// 判据与拦截器（utils/external-links）**共用 `resolveExternalUrl`**：URL 解析 +
+// http(s) + host 不同——只有一处定义，不会两边漂移。
+//
+// 相对 URL 改写也在这里做（同一钩子、**属性级**）：只遍历元素的 `src`/`href`
+// 属性，天然不会误伤文本节点/代码块——`<img src=/api/…>` 写在围栏代码或正文里
+// 只是文本，不会被当成属性。字符串正则做不到这个区分（会把代码样例里的
+// `src=/...` 也改写、还会吞掉转义的 `&gt;`）。
+//
+// 钩子注册在**本模块私有的 DOMPurify 实例**上（`DOMPurify(window)`），不动全局
+// 单例——应用里其它 `DOMPurify.sanitize` 调用不应继承 target/rel。
+// 改写发生在消毒**之后**的 DOM 属性上，因此先校验 baseUrl scheme（只接受
+// http/https 或协议相对），防止 `javascript:` 基址绕过白名单。
+// Node 测试环境（无 DOM）下 isSupported 为 false：不创建实例、跳过消毒与改写
+// （相对 URL 改写的用例在 markdown-dom.spec.ts）。
+// （分层审计 2026-10「外链无出路」缺口的渲染半边；转交半边在 Rust open_external。）
+
+/// 本次 sanitize 期间的相对 URL 改写基址（空串 = 不改写）。
+/// `renderMarkdown` 同步调用 sanitize，钩子在同一个调用栈内读取，无并发问题。
+let rewriteBase = ''
+
+/// 校验改写基址：只接受 http/https 绝对地址或协议相对 `//host`；
+/// 空串/畸形/危险 scheme（`javascript:`、`data:` 等）一律返回空串（不改写）。
+function validRewriteBase(baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, '')
+  if (!base) return ''
+  if (base.startsWith('//')) return base
+  try {
+    const parsed = new URL(base)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return base
+  } catch {
+    // 非绝对 URL：拒绝改写
+  }
+  return ''
+}
+
+function createPurifier(): typeof DOMPurify | null {
+  if (typeof window === 'undefined' || !DOMPurify.isSupported) return null
+  const appDocument = window.document
+  const instance = DOMPurify(window)
+  instance.addHook('afterSanitizeAttributes', (node) => {
+    // 空/纯空白 href（`[x]()`）解析后等于当前文档 URL：点击 = 整页重载，会丢
+    // 2s 防抖内的编辑器输入与未保存的设置草稿。无目标 → 占位链接（不可点，
+    // 也不显示手型），比「可点但点了没反应」更诚实。
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href')
+      if (href !== null && href.trim() === '') node.removeAttribute('href')
+    }
+    // 相对 URL 改写：只碰属性，文本/代码块天然不受影响
+    if (rewriteBase) {
+      for (const attr of ['src', 'href'] as const) {
+        const value = node.getAttribute(attr)
+        if (value?.startsWith('/')) node.setAttribute(attr, resolveUrl(value, rewriteBase))
+      }
+    }
+    if (node.tagName !== 'A') return
+    // 与拦截器同一条判据：只有外链才加固（站内/非 http(s) 加 target 会变死链接）
+    if (!resolveExternalUrl(node.getAttribute('href'), appDocument)) return
+    node.setAttribute('target', '_blank')
+    node.setAttribute('rel', 'noopener noreferrer')
+  })
+  return instance
+}
+
+const purifier = createPurifier()
+
 /// 将 Markdown 文本渲染为 HTML（含 LaTeX 公式），消毒后输出，并把相对 URL 改写为绝对地址。
 ///
 /// HOJ 返回的题目描述/题面/公告是 Markdown + LaTeX 混合语法，其中图片使用相对路径，
@@ -105,14 +177,15 @@ marked.use(vditorContainer)
 /// 1. 用 marked 将 Markdown 转为 HTML，`$...$` / `$$...$$` 经 KaTeX 渲染为公式
 /// 2. 用 DOMPurify 在**唯一出口**统一消毒（marked 默认放行内联 HTML，而内容来自
 ///    OJ 服务端且编辑者面较宽；出口消毒使所有 v-html 调用点自动受保护，见 P63）
-/// 3. 将以 `/` 开头的相对 `src`/`href` 改写为 `{baseUrl}` + 相对路径，
-///    使图片能正确指向 HOJ 服务端而非前端 dev server
+/// 3. 消毒钩子里把以 `/` 开头的相对 `src`/`href` 改写为 `{baseUrl}` + 路径
+///    （属性级：只碰真实元素，文本/代码块里的同形字面量原样保留）
 ///
 /// 消毒档位必须含 `mathMl` 与 `svg`：KaTeX 输出 MathML（读屏无障碍）与 SVG
 /// （可伸缩括号/根号），只开 `html` 档会把公式结构整体剥掉、只剩乱码文本。
 ///
 /// 注意：DOMPurify 依赖 DOM，Node 测试环境（无 jsdom）下 `isSupported === false`，
-/// 此时跳过消毒仅做渲染 —— 生产环境恒为 WebView，消毒必然生效。
+/// 此时不创建消毒实例、跳过消毒与 URL 改写仅做渲染 —— 生产环境恒为 WebView，
+/// 消毒必然生效。
 export function renderMarkdown(markdown: string, baseUrl: string): string {
   if (!markdown) return ''
 
@@ -125,28 +198,25 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
     html = markdown
   }
 
-  if (DOMPurify.isSupported) {
-    html = DOMPurify.sanitize(html, {
-      USE_PROFILES: { html: true, mathMl: true, svg: true },
-      // KaTeX 的读屏无障碍树由 <semantics>/<annotation> 承载（annotation 内是 LaTeX
-      // 源码，供辅助技术与复制公式用），二者均不在 DOMPurify 预置 mathMl 白名单里，
-      // 不补会被整体剥掉、LaTeX 源码反而泄漏成 <math> 内的裸文本。
-      // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外。
-      //
-      // 剥离原则：只为安全剥（脚本/事件属性由 DOMPurify 白名单负责），表现性标记
-      // （<big>/<font size>/<center> 等老题面排版）按作者原意保真渲染，与 HOJ
-      // 网页端一致 —— 浏览器 font-size:larger 的放大比例在本客户端与 HOJ 等价
-      ADD_TAGS: ['semantics', 'annotation'],
-      ADD_ATTR: ['encoding'],
-    })
-  }
-
-  if (baseUrl) {
-    const base = baseUrl.replace(/\/+$/, '')
-    html = html.replace(
-      /\b(src|href)="(\/[^"]*)"/g,
-      (_m, attr: string, path: string) => `${attr}="${resolveUrl(path, base)}"`,
-    )
+  if (purifier) {
+    rewriteBase = validRewriteBase(baseUrl)
+    try {
+      html = purifier.sanitize(html, {
+        USE_PROFILES: { html: true, mathMl: true, svg: true },
+        // KaTeX 的读屏无障碍树由 <semantics>/<annotation> 承载（annotation 内是 LaTeX
+        // 源码，供辅助技术与复制公式用），二者均不在 DOMPurify 预置 mathMl 白名单里，
+        // 不补会被整体剥掉、LaTeX 源码反而泄漏成 <math> 内的裸文本。
+        // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外。
+        //
+        // 剥离原则：只为安全剥（脚本/事件属性由 DOMPurify 白名单负责），表现性标记
+        // （<big>/<font size>/<center> 等老题面排版）按作者原意保真渲染，与 HOJ
+        // 网页端一致 —— 浏览器 font-size:larger 的放大比例在本客户端与 HOJ 等价
+        ADD_TAGS: ['semantics', 'annotation'],
+        ADD_ATTR: ['encoding'],
+      })
+    } finally {
+      rewriteBase = ''
+    }
   }
 
   return html

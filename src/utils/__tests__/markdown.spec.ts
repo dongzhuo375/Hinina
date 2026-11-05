@@ -5,8 +5,9 @@ import { renderMarkdown } from '@/utils/markdown'
  * renderMarkdown 单元测试。
  *
  * 注意：DOMPurify 消毒依赖 DOM，Node 测试环境（手册约定不引入 jsdom）下
- * `isSupported === false`，消毒分支不生效 —— 生产环境恒为 WebView，消毒必然生效。
- * 消毒行为本身由 DOMPurify 自身测试保障，此处只锁定渲染与 URL 改写契约。
+ * `isSupported === false`，消毒与相对 URL 改写（都在消毒钩子里）不生效 ——
+ * 生产环境恒为 WebView，二者必然生效。消毒与改写契约由 `markdown-dom.spec.ts`
+ * （jsdom）锁定，此处只锁定「不依赖 DOM 的渲染」行为。
  */
 describe('renderMarkdown', () => {
   it('空输入返回空串', () => {
@@ -17,11 +18,6 @@ describe('renderMarkdown', () => {
     const html = renderMarkdown('# 标题\n\n正文 **加粗**', '')
     expect(html).toContain('<h1>标题</h1>')
     expect(html).toContain('<strong>加粗</strong>')
-  })
-
-  it('相对 src/href 改写为 OJ 绝对地址', () => {
-    const html = renderMarkdown('![img](/api/public/img/a.png)', 'https://oj.example.com/')
-    expect(html).toContain('src="https://oj.example.com/api/public/img/a.png"')
   })
 
   it('绝对 URL 与 data: 协议保持原样', () => {
@@ -106,10 +102,14 @@ describe('renderMarkdown — 数学公式', () => {
     expect(html).toContain('class="katex"')
   })
 
-  it('公式渲染不影响图片相对 URL 改写', () => {
-    const html = renderMarkdown('![图](/api/public/img/a.png)\n\n设 $n$ 为整数', 'https://oj.example.com')
-    expect(html).toContain('src="https://oj.example.com/api/public/img/a.png"')
+  it('公式渲染与图片相对路径共存（改写由 DOM 钩子负责，见 markdown-dom.spec）', () => {
+    const html = renderMarkdown(
+      '![图](/api/public/img/a.png)\n\n设 $n$ 为整数',
+      'https://oj.example.com',
+    )
     expect(html).toContain('class="katex"')
+    // 无 DOM 环境不执行改写（生产恒为 WebView，改写由消毒钩子完成）
+    expect(html).toContain('src="/api/public/img/a.png"')
   })
 })
 
