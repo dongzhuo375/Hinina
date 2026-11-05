@@ -18,6 +18,7 @@
     "plugin:scaffold:build": "node scripts/build-plugin-scaffold.mjs",
     "plugin:balloon:build": "node scripts/build-plugin-scaffold.mjs doc/modules/src-tauri/plugin/sdk/examples/balloon/index.ts src-tauri/target/plugin-balloon.js",
     "release:check": "node scripts/check-release-versions.mjs",
+    "check:csp-policy": "node scripts/check-csp-policy.mjs",
     "check:save-gate": "node scripts/check-save-gate.mjs",
     "test:coverage": "vitest run --coverage"
   },
