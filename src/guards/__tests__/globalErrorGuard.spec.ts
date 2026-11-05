@@ -70,7 +70,8 @@ function emitRejection(reason: unknown): void {
 
 function emitCspViolation(init: Partial<SecurityPolicyViolationEvent> = {}): void {
   // jsdom 未实现 SecurityPolicyViolationEvent 构造器：同上，CustomEvent 承载字段。
-  // 派发在 document（元素上的违规不冒泡，守卫监听在 capture 阶段）
+  // 派发在 document —— MDN：事件冒泡至 Window 且 composed，Chromium 对被拦资源
+  // 直接以 document 为 target 派发；capture 监听两种形态皆收
   const event = new CustomEvent('securitypolicyviolation')
   Object.defineProperties(event, {
     effectiveDirective: { value: init.effectiveDirective ?? 'img-src' },
