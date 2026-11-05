@@ -8,7 +8,7 @@
 
 ## 用例
 
-- **点击题面外链转交 `open_external`，且页面不导航**：打开题目 A（fixture 描述含勘误外链）→ 断言渲染层加固属性 → 点击 → `callCount('open_external')` 恰为 1、URL 为原样绝对地址 → 负向断言 `h1.statement-title` 仍在屏（WebView 永不导航离开应用）。
+- **点击题面外链转交 `open_external`，且页面不导航**：打开题目 A（fixture 描述含勘误外链）→ 断言渲染层加固属性 → **先挂 `popup` 监听再点击** → `callCount('open_external')` 恰为 1、URL 为原样绝对地址 → 断言 `popup === null`（`preventDefault` 失效时 Chromium 会把 `target="_blank"` 变成新窗口——`h1` 仍在屏断言看不到这个差异，popup 是默认动作是否被拦的可观测信号）→ 负向断言 `h1.statement-title` 仍在屏（WebView 永不导航离开应用）。
 
 ## 边界
 

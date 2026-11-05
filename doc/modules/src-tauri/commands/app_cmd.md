@@ -13,7 +13,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `launch_flags` | `#[tauri::command] pub async fn launch_flags() -> AppResult<LaunchFlags>` | 返回**本次启动**的标志快照 `{ settings: bool }`。**零状态命令**（沿 `log_cmd::frontend_log` 先例，不取 `State<AppContext>`）——标志在 main() 早期由 `launch_args::init` 固化，命令只读。IPC 失败时前端按「无参数」退化（正常门禁 + 选手层），绝不让钥匙通道故障卡死启动或设置页 |
-| `open_external` | `#[tauri::command] pub async fn open_external(app: AppHandle, url: String) -> AppResult<()>` | 把 http(s) 外链转交系统默认浏览器：`validate_external_url` 校验 → `app.opener().open_url(...)`（`tauri-plugin-opener` 的 **Rust API**；插件 Rust-only 注册，不装 npm 包、不声明 capability——插件自身 IPC 对 webview 不暴露）。**scheme 白名单由本命令守卫**（`Opener` Rust API 无 scope 校验，官方文档明示）；日志只记 host 不记完整 URL（query 可能带签名令牌）；失败 `AppError::Unknown`，前端 catch 后仅记日志（无补救动作，窗口控制同款） |
+| `open_external` | `#[tauri::command] pub async fn open_external(app: AppHandle, url: String) -> AppResult<()>` | 把 http(s) 外链转交系统默认浏览器：`validate_external_url` 校验 → `app.opener().open_url(...)`（`tauri-plugin-opener` 的 **Rust API**；插件 Rust-only 注册，不装 npm 包、不声明 opener capability——插件的 IPC 命令虽已在 invoke handler 注册，但 webview 调用一律被 ACL 拒绝；注册时并关闭默认开启的 `open_js_links_on_click`，插件不注入点击脚本，本命令是唯一转交通道）。**scheme 白名单由本命令守卫**（`Opener` Rust API 无 scope 校验，官方文档明示）；日志只记 host 不记完整 URL（query 可能带签名令牌）；失败 `AppError::Unknown`，前端 catch 后仅记日志（无补救动作，窗口控制同款） |
 | `validate_external_url` | `pub(crate) fn validate_external_url(url: &str) -> Result<url::Url, String>` | scheme 白名单纯函数（只放行 http/https，`url` crate 解析）。**错误信息刻意不含原始 URL**（令牌安全）。独立成纯函数以便单测——真实 open 不做单测（tauri mock runtime 污染测试二进制，single_instance 先例），真机人工验收 |
 
 ## 直接依赖

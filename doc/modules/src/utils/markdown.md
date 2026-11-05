@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `renderMarkdown` | `(markdown: string, baseUrl: string) => string` | marked 同步渲染（含 KaTeX 公式）→ **DOMPurify 出口消毒** → 相对 `src`/`href` 改写；空文本返回空串；渲染抛错时**退回原文按纯文本输出**（题面显示降级好过白屏） |
-| `DOMPurify.addHook('afterSanitizeAttributes')` | 模块级钩子（isSupported 守卫，Node 无 DOM 时跳过） | **外链 fail-safe**：所有带 href 的 `<a>` 注入 `target="_blank"` + `rel="noopener noreferrer"`——点击由 `utils/external-links` 的 document 级拦截转交系统浏览器，本钩子兜底：拦截失效时最坏是新窗口被 Tauri 拒绝（界面不动），而非 WebView 原地导航替换整个客户端 |
+| `DOMPurify.addHook('afterSanitizeAttributes')` | 模块级钩子（isSupported 守卫，Node 无 DOM 时跳过） | **外链 fail-safe**：带**非片段** href 的 `<a>` 注入 `target="_blank"` + `rel="noopener noreferrer"`——点击由 `utils/external-links` 的 document 级拦截转交系统浏览器，本钩子兜底：拦截失效时最坏是新窗口被 Tauri 拒绝（界面不动），而非 WebView 原地导航替换整个客户端。`#` 片段锚点（「跳到提示」）**不加** target：加了会变成新窗口请求被拒，站内跳转失效；与拦截器跳过 `#` 片段的规则对齐 |
 | `resolveUrl` | `(path, base) => string`（私有） | 已是绝对 URL（`http(s)://`、`data:`、`//`）原样返回，否则 `base + path` |
 
 ## 直接依赖
