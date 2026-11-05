@@ -1,6 +1,7 @@
 import { marked, type MarkedExtension, type Tokens } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import DOMPurify from 'dompurify'
+import { resolveExternalUrl } from '@/utils/external-links'
 
 /**
  * 数学公式（KaTeX）配置 —— 在 tokenizer 层接管 `$...$` / `$$...$$`。
@@ -104,7 +105,8 @@ marked.use(vditorContainer)
 // 为什么必须排除站内/非 http(s)：`target="_blank"` 会把点击变成新窗口请求，而
 // Tauri/wry 默认拒绝新窗口——对不会被拦截器转交的链接（同 host、`mailto:`、
 // `tel:`、`#` 片段）而言，加 target 等于把原本正常的跳转变成「点了没反应」。
-// 判据与拦截器（utils/external-links）同一条：URL 解析 + http(s) + host 不同。
+// 判据与拦截器（utils/external-links）**共用 `resolveExternalUrl`**：URL 解析 +
+// http(s) + host 不同——只有一处定义，不会两边漂移。
 //
 // 钩子注册在**本模块私有的 DOMPurify 实例**上（`DOMPurify(window)`），不动全局
 // 单例——应用里其它 `DOMPurify.sanitize` 调用不应继承 target/rel。
@@ -115,20 +117,11 @@ marked.use(vditorContainer)
 // （分层审计 2026-10「外链无出路」缺口的渲染半边；转交半边在 Rust open_external。）
 function createPurifier(): typeof DOMPurify | null {
   if (typeof window === 'undefined' || !DOMPurify.isSupported) return null
-  const appLocation = window.location
   const instance = DOMPurify(window)
   instance.addHook('afterSanitizeAttributes', (node) => {
     if (node.tagName !== 'A') return
-    const href = node.getAttribute('href')
-    if (!href) return
-    let resolved: URL
-    try {
-      resolved = new URL(href, appLocation.href)
-    } catch {
-      return
-    }
-    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return
-    if (resolved.host === appLocation.host) return
+    // 与拦截器同一条判据：只有外链才加固（站内/非 http(s) 加 target 会变死链接）
+    if (!resolveExternalUrl(node.getAttribute('href'), window.document)) return
     node.setAttribute('target', '_blank')
     node.setAttribute('rel', 'noopener noreferrer')
   })
@@ -189,11 +182,22 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
 
 /// 把以 `/` 开头的相对 `src`/`href` 改写为 `{baseUrl}` + 路径。
 /// 协议相对 `//host` 与其它绝对地址由 `resolveUrl` 原样放行。
+///
+/// 属性值兼容**双引号/单引号/无引号**三种原始写法：题面里的手写 HTML 常用
+/// `<img src='/api/...'>`，而 DOMPurify 消毒后会把属性归一成双引号——改写必须
+/// 在消毒前一次覆盖全部写法，否则单引号/无引号形式会漏改写。
 function rewriteRelativeUrls(html: string, baseUrl: string): string {
   const base = baseUrl.replace(/\/+$/, '')
   return html.replace(
-    /\b(src|href)="(\/[^"]*)"/g,
-    (_m, attr: string, path: string) => `${attr}="${resolveUrl(path, base)}"`,
+    /\b(src|href)=("(\/[^"]*)"|'(\/[^']*)'|(\/[^\s"'=<>`]+))/g,
+    (
+      _m,
+      attr: string,
+      _value: string,
+      doubleQuoted: string | undefined,
+      singleQuoted: string | undefined,
+      unquoted: string | undefined,
+    ) => `${attr}="${resolveUrl(doubleQuoted ?? singleQuoted ?? unquoted ?? '', base)}"`,
   )
 }
 

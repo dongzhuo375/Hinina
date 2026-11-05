@@ -18,9 +18,14 @@
  * 之外的事，注入即测试点。
  */
 
-/** 判定一个锚点解析后是否为待转交的外链，返回解析后的绝对 URL（非外链返回 null）。 */
-function resolveExternalHref(anchor: HTMLAnchorElement, doc: Document): URL | null {
-  const href = anchor.getAttribute('href');
+/**
+ * 判定一个 href 解析后是否为待转交的外链，返回解析后的绝对 URL（非外链返回 null）。
+ *
+ * 判据只有这一条：`new URL(href, doc.location.href)` 后为 **http/https 且
+ * host ≠ 文档 host**。拦截器（click/auxclick）与 markdown 加固钩子共用它，
+ * 避免「什么算外链」两处实现漂移；`#` 片段解析后同 host（或非 http(s)）自然落选。
+ */
+export function resolveExternalUrl(href: string | null, doc: Document): URL | null {
   if (!href) return null;
   let resolved: URL;
   try {
@@ -48,7 +53,7 @@ export function installExternalLinkOpener(
     const target = event.target instanceof Element ? event.target : null;
     const anchor = target?.closest('a');
     if (!anchor) return;
-    const resolved = resolveExternalHref(anchor, doc);
+    const resolved = resolveExternalUrl(anchor.getAttribute('href'), doc);
     if (!resolved) return;
     event.preventDefault();
     open(resolved.href);

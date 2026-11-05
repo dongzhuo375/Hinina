@@ -74,6 +74,17 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toContain('rel="noopener noreferrer"')
   })
 
+  it('单引号/无引号属性里的相对地址同样改写并加固（消毒会归一化引号）', () => {
+    // 手写 HTML 常用单引号；DOMPurify 消毒后归一成双引号，改写必须在消毒前
+    // 就覆盖三种引号写法，否则单引号/无引号形式会漏改写
+    const single = renderMarkdown("<a href='/api/problem/1'>题目页</a>", 'https://oj.example.com')
+    expect(single).toContain('href="https://oj.example.com/api/problem/1"')
+    expect(single).toContain('target="_blank"')
+
+    const unquoted = renderMarkdown('<img src=/api/public/img/b.png>', 'https://oj.example.com')
+    expect(unquoted).toContain('src="https://oj.example.com/api/public/img/b.png"')
+  })
+
   it('`#` 片段锚点不加固（站内跳转必须留在当前页）', () => {
     const html = renderMarkdown('[跳到提示](#hint)', 'https://oj.example.com')
     expect(html).toContain('href="#hint"')
