@@ -145,6 +145,13 @@ function createPurifier(): typeof DOMPurify | null {
   const appDocument = window.document
   const instance = DOMPurify(window)
   instance.addHook('afterSanitizeAttributes', (node) => {
+    // 空/纯空白 href（`[x]()`）解析后等于当前文档 URL：点击 = 整页重载，会丢
+    // 2s 防抖内的编辑器输入与未保存的设置草稿。无目标 → 占位链接（不可点，
+    // 也不显示手型），比「可点但点了没反应」更诚实。
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href')
+      if (href !== null && href.trim() === '') node.removeAttribute('href')
+    }
     // 相对 URL 改写：只碰属性，文本/代码块天然不受影响
     if (rewriteBase) {
       for (const attr of ['src', 'href'] as const) {

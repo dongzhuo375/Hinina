@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `renderMarkdown` | `(markdown: string, baseUrl: string) => string` | marked 同步渲染（含 KaTeX 公式）→ **DOMPurify 出口消毒**（钩子内完成相对 `src`/`href` 改写与外链加固）；空文本返回空串；渲染抛错时**退回原文按纯文本输出**（题面显示降级好过白屏） |
-| `createPurifier()`（模块私有） | 创建本模块专用的 `DOMPurify(window)` 实例并注册 `afterSanitizeAttributes` 钩子；无 DOM（Node 测试）返回 null | 钩子做两件事：①**相对 URL 改写**——只遍历真实元素的 `src`/`href` 属性（`/` 开头 → `{baseUrl}` + 路径），文本节点/代码块里的同形字面量天然不受影响；改写基址先经 `validRewriteBase` 校验（只接受 http/https 或 `//host`，防 `javascript:` 在消毒后注入）。②**外链 fail-safe**：仅对 http/https 且 host ≠ 应用 host 的 `<a>` 注入 `target="_blank"` + `rel="noopener noreferrer"`（同 host/`mailto:`/`tel:`/`#` 不加，否则变死链接）。钩子只挂局部实例，**不污染全局 `DOMPurify` 单例** |
+| `createPurifier()`（模块私有） | 创建本模块专用的 `DOMPurify(window)` 实例并注册 `afterSanitizeAttributes` 钩子；无 DOM（Node 测试）返回 null | 钩子做三件事：①**空 href 占位化**——`href` 存在但 `trim()` 为空（`[x]()` / `<a href=" ">`）时移除 href：空 href 解析后等于当前文档 URL，点击会整页重载（丢防抖内的编辑器输入/草稿），无目标就不该可点；②**相对 URL 改写**——只遍历真实元素的 `src`/`href` 属性（`/` 开头 → `{baseUrl}` + 路径），文本节点/代码块里的同形字面量天然不受影响；改写基址先经 `validRewriteBase` 校验（只接受 http/https 或 `//host`，防 `javascript:` 在消毒后注入）；③**外链 fail-safe**：仅对 http/https 且 host ≠ 应用 host 的 `<a>` 注入 `target="_blank"` + `rel="noopener noreferrer"`（同 host/`mailto:`/`tel:`/`#` 不加，否则变死链接）。钩子只挂局部实例，**不污染全局 `DOMPurify` 单例** |
 | `validRewriteBase`（私有） | `(baseUrl: string) => string` | 改写基址校验：空/畸形/非 http(s) scheme 一律返回空串（不改写）——改写发生在消毒之后，必须堵住危险 scheme |
 | `resolveUrl` | `(path, base) => string`（私有） | 已是绝对 URL（`http(s)://`、`data:`、`//`）原样返回，否则 `base + path` |
 
@@ -47,6 +47,7 @@ renderMarkdown(md, baseUrl):
       ADD_ATTR: [encoding],
     })                                       // 剥离只为安全；表现性标记（big/font 等）保真渲染
     // 钩子（每元素，afterSanitizeAttributes）：
+    //   0) <a> 且 href 存在但 trim() 为空 → 移除 href（占位链接，防点击整页重载）
     //   1) src/href 以 / 开头 → 改写为 {baseUrl} + 路径（属性级，文本/代码块不受影响）
     //   2) <a> 且解析后 http(s) 且 host ≠ 应用 host → target=_blank + rel=noopener noreferrer
     finally rewriteBase = ''

@@ -113,6 +113,22 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).not.toContain('javascript:alert(1)')
   })
 
+  it('空 href 变成占位链接（`[x]()`：无 href/target/rel）', () => {
+    // 空 href 解析后等于当前文档 URL，点击会整页重载（丢防抖内的草稿）；
+    // 渲染成不可点占位链接，比「可点但没反应」更诚实
+    const html = renderMarkdown('[x]()', 'https://oj.example.com')
+    expect(html).toContain('<a>x</a>')
+    expect(html).not.toContain('href=')
+    expect(html).not.toContain('target=')
+    expect(html).not.toContain('rel=')
+  })
+
+  it('纯空白 href 同样变成占位链接（`<a href=" ">`）', () => {
+    const html = renderMarkdown('<a href=" ">x</a>', 'https://oj.example.com')
+    expect(html).toContain('<a>x</a>')
+    expect(html).not.toContain('href=')
+  })
+
   it('`#` 片段锚点不加固（站内跳转必须留在当前页）', () => {
     const html = renderMarkdown('[跳到提示](#hint)', 'https://oj.example.com')
     expect(html).toContain('href="#hint"')
