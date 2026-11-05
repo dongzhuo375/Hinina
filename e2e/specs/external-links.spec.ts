@@ -19,7 +19,27 @@ test.describe('外链拦截与转交', () => {
     await expect(link).toHaveAttribute('target', '_blank')
     await expect(link).toHaveAttribute('rel', /noopener/)
 
-    // 点击 → 拦截 → open_external（一次，URL 为原样绝对地址）
+    // 默认动作必须被拦下（确定性信号）：在 document 上**后注册**一次性监听 ——
+    // 应用监听器在启动时先注册，同一节点按注册顺序执行，此处读到的是应用处理
+    // 之后的 defaultPrevented。preventDefault 失效时它是 false（变异验证锁定）。
+    await page.evaluate(() => {
+      const probe = window as unknown as { __e2eLinkPrevented?: boolean }
+      probe.__e2eLinkPrevented = false
+      document.addEventListener(
+        'click',
+        (event) => {
+          const target = event.target instanceof Element ? event.target : null
+          if (target?.closest('a[href^="https://errata.example.com"]')) {
+            probe.__e2eLinkPrevented = event.defaultPrevented
+          }
+        },
+        { once: true },
+      )
+    })
+
+    // 默认动作的下游表现：没有新窗口。窗口要等外部导航发起后才可见（本环境约
+    // 0.9s，500ms 会假绿），故给 2s 窗口；主锁是上面的 defaultPrevented。
+    const popup = page.waitForEvent('popup', { timeout: 2_000 }).catch(() => null)
     await link.click()
     await expect
       .poll(() => callCount(page, 'open_external'), { timeout: 5_000 })
@@ -30,6 +50,14 @@ test.describe('外链拦截与转交', () => {
       return last?.args ?? null
     })
     expect(args).toEqual({ url: 'https://errata.example.com/a1' })
+    // 主锁（确定性）：应用处理后的 defaultPrevented
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __e2eLinkPrevented?: boolean }).__e2eLinkPrevented,
+      ),
+    ).toBe(true)
+    // 下游佐证：没有新窗口
+    expect(await popup).toBeNull()
 
     // WebView 永不导航离开应用：点击后题面仍在屏（负向断言）
     await expect(page.locator('h1.statement-title')).toHaveText(/^A\./)

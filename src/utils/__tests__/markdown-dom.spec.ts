@@ -74,6 +74,13 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toContain('rel="noopener noreferrer"')
   })
 
+  it('`#` 片段锚点不加固（站内跳转必须留在当前页）', () => {
+    const html = renderMarkdown('[跳到提示](#hint)', 'https://oj.example.com')
+    expect(html).toContain('href="#hint"')
+    expect(html).not.toContain('target="_blank"')
+    expect(html).not.toContain('rel="noopener')
+  })
+
   it('出错公式消毒后错误文本与 errorColor 内联样式保留（可见降级）', () => {
     const html = renderMarkdown('$\\frac{$', '')
     expect(html).toContain('katex-error')
