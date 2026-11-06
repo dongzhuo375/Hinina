@@ -45,7 +45,10 @@ renderMarkdown(md, baseUrl):
       USE_PROFILES: { html, mathMl, svg },   // KaTeX 输出 MathML + SVG，只开 html 档会把公式剥成乱码
       ADD_TAGS: [semantics, annotation],     // KaTeX 无障碍树（LaTeX 源码）不在预置白名单，不补会被剥掉
       ADD_ATTR: [encoding],
-    })                                       // 剥离只为安全；表现性标记（big/font 等）保真渲染
+      FORBID_TAGS: [style, form],            // 显式禁：html 档白名单实际含二者；<style> mid-body 可全文档改写+CSS 外泄
+    })                                       //   （leading 被剥只是 head 位置伪象）；<form> 外域 action 保留且导航两层无覆盖，
+                                             //   提交残余=整页重载丢草稿。二者均剥标签保/弃内容见源码注释；其余剥离只为安全，
+                                             //   表现性标记（big/font 等）保真渲染
     // 钩子（每元素，afterSanitizeAttributes）：
     //   0) <a> 且 href 存在但 trim() 为空 → 移除 href（占位链接，防点击整页重载）
     //   1) src/href 以 / 开头 → 改写为 {baseUrl} + 路径（属性级，文本/代码块不受影响）

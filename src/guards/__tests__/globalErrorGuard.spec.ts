@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// 全局错误转发守卫：四类钩子触发 → 注入的 forward 收到归一化消息；
-// 限频去重；forward 抛错不炸守卫；IpcError 归一为 ipc:{cmd}。
+// 全局错误转发守卫：五类钩子触发 → 注入的 forward 收到归一化消息；
+// 限频去重；forward 抛错不炸守卫；IpcError 归一为 ipc:{cmd}；
+// CSP 违规走 csp 作用域：来源收敛 host 级、data: 只落协议+MIME、同宿主合并去重。
 // 每个用例自建 app + router 并在 afterEach 统一拆卸 —— 单个断言失败不得把
 // 监听器泄漏进后续用例（否则计数类断言会互相污染）。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -67,8 +68,21 @@ function emitRejection(reason: unknown): void {
   window.dispatchEvent(event as unknown as PromiseRejectionEvent)
 }
 
+function emitCspViolation(init: Partial<SecurityPolicyViolationEvent> = {}): void {
+  // jsdom 未实现 SecurityPolicyViolationEvent 构造器：同上，CustomEvent 承载字段。
+  // 派发在 document —— MDN：事件冒泡至 Window 且 composed，Chromium 对被拦资源
+  // 直接以 document 为 target 派发；capture 监听两种形态皆收
+  const event = new CustomEvent('securitypolicyviolation')
+  Object.defineProperties(event, {
+    effectiveDirective: { value: init.effectiveDirective ?? 'img-src' },
+    blockedURI: { value: init.blockedURI ?? 'https://cdn.example.com/x.png' },
+    disposition: { value: init.disposition ?? 'enforce' },
+  })
+  document.dispatchEvent(event as unknown as SecurityPolicyViolationEvent)
+}
+
 describe('installGlobalErrorGuard', () => {
-  it('四类钩子触发都转发 error 级日志，归一化消息携带环节/来源', async () => {
+  it('四类基础钩子（vue/window/promise/router）触发都转发 error 级日志，归一化消息携带环节/来源', async () => {
     const { app, router } = setup()
     // 路由错误的确定性触发源：导航守卫抛错必然进入 router.onError
     router.beforeEach(() => {
@@ -181,22 +195,66 @@ describe('installGlobalErrorGuard', () => {
     document.body.appendChild(img)
     img.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
 
-    // 只记标签名与路径末段文件名：完整 URL（含签名令牌查询参数）不得进日志
+    // 跨源资源收敛到 host 级（防成批外链失败刷满 Rust 日志预算）：
+    // 文件名/查询串令牌/协议都不得进日志
     expect(calls[0]).toMatchObject({
       level: 'error',
       scope: 'window',
-      message: '资源加载失败: <img> missing.png',
+      message: '资源加载失败: <img> cdn.example.com',
     })
+    expect(calls[0]?.message).not.toContain('missing.png')
     expect(calls[0]?.message).not.toContain('SECRET')
     expect(calls[0]?.message).not.toContain('http')
   })
 
-  it('不可解析的 src 走兜底分支：先剥查询串再取末段（令牌不进日志）', () => {
+  it('同源资源失败仍记文件名（本地资产诊断；同源文件数有界）', () => {
     setup()
 
-    // 伪造 target 携带 URL 解析必然失败的 src（直接对原串按 [/?#] 切会返回
-    // 查询串本身，泄漏令牌 —— 评审抓出）；DOM 的 .src 属性总会被解析成绝对
-    // URL，兜底分支只能这样经公开路径触达
+    // 同源 URL 从 location 动态构造（jsdom 的 host 带端口，硬编码 localhost
+    // 会落进跨源分支）
+    const img = document.createElement('img')
+    img.setAttribute('src', new URL('/assets/missing.png?token=SECRET', window.location.href).href)
+    document.body.appendChild(img)
+    img.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
+
+    expect(calls[0]?.message).toBe('资源加载失败: <img> missing.png')
+    expect(calls[0]?.message).not.toContain('SECRET')
+  })
+
+  it('file:/blob: 等空 host 的 exotic 协议落协议级标签（不产出末尾为空的行）', () => {
+    setup()
+
+    const file = document.createElement('img')
+    file.setAttribute('src', 'file:///C:/contest/pic.png')
+    document.body.appendChild(file)
+    file.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
+    file.remove()
+
+    expect(calls[0]?.message).toBe('资源加载失败: <img> file:')
+
+    const blob = document.createElement('img')
+    blob.setAttribute('src', 'blob:http://tauri.localhost/uuid-1')
+    document.body.appendChild(blob)
+    blob.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
+    blob.remove()
+
+    expect(calls[1]?.message).toBe('资源加载失败: <img> blob:uri')
+  })
+
+  it('CSP 违规的 blob: 来源落同款字面量（与资源行一致，无空尾巴）', () => {
+    setup()
+
+    emitCspViolation({ blockedURI: 'blob:http://tauri.localhost/uuid-2' })
+
+    expect(calls[0]?.message).toContain('blob:uri')
+  })
+
+  it('协议相对地址按基址解析后落在根路径 → unknown（令牌不进日志）', () => {
+    setup()
+
+    // 伪造 target 携带协议相对 src（DOM 的 .src 属性总会被解析成绝对 URL，
+    // 该分支只能这样经公开路径触达）；//?token=SECRET 以 location 为基址解析
+    // 后查询串被 URL 解析器分离、pathname 落根路径 → unknown
     const fake = { src: '//?token=SECRET' }
     emitWindowError({ target: fake as unknown as EventTarget })
 
@@ -256,5 +314,62 @@ describe('installGlobalErrorGuard', () => {
     expect(calls[0]?.message).toBe('<empty error>')
     expect(calls[1]?.message).toBe('plain string')
     expect(calls[2]?.message).toBe('{"code":7}')
+  })
+
+  it('CSP 违规转发为 csp 作用域 error 日志，来源收敛到 host 级（令牌/路径不进日志）', () => {
+    setup()
+
+    emitCspViolation({
+      blockedURI: 'https://cdn.example.com/pic.png?token=SECRET',
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ level: 'error', scope: 'csp' })
+    expect(calls[0]?.message).toContain('img-src')
+    expect(calls[0]?.message).toContain('cdn.example.com')
+    expect(calls[0]?.message).not.toContain('pic.png')
+    expect(calls[0]?.message).not.toContain('SECRET')
+  })
+
+  it('CSP 违规的 data: 来源只落协议+MIME（base64 载荷不进日志）', () => {
+    setup()
+
+    emitCspViolation({ blockedURI: 'data:image/png;base64,U00UN7PAYLOAD' })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.message).toContain('data:image/png')
+    expect(calls[0]?.message).not.toContain('base64')
+    expect(calls[0]?.message).not.toContain('PAYLOAD')
+  })
+
+  it('CSP 违规的不可解析 blockedURI 绝不原样进日志（//?token= 实证曾整段写入）', () => {
+    setup()
+
+    emitCspViolation({ blockedURI: '//?token=SECRET' })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.message).toContain('unknown')
+    expect(calls[0]?.message).not.toContain('SECRET')
+    expect(calls[0]?.message).not.toContain('//?')
+  })
+
+  it('CSP 违规的 inline/eval 白名单字面量保留（标准关键字，非用户可控）', () => {
+    setup()
+
+    emitCspViolation({ blockedURI: 'inline' })
+
+    expect(calls[0]?.message).toContain('inline')
+  })
+
+  it('同 host 同指令的 CSP 违规在去重窗口内合并（防刷满 Rust 端日志预算）', () => {
+    setup()
+
+    // 大批被拦资源同宿主：文件名粒度由双报的 window error 行承担，本行按宿主合并
+    emitCspViolation({ blockedURI: 'https://cdn.example.com/a.png' })
+    emitCspViolation({ blockedURI: 'https://cdn.example.com/b.png' })
+    emitCspViolation({ blockedURI: 'https://cdn.example.com/c.png' })
+    emitCspViolation({ blockedURI: 'https://other.example.net/d.png' })
+
+    expect(calls).toHaveLength(2)
   })
 })

@@ -210,9 +210,28 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
         //
         // 剥离原则：只为安全剥（脚本/事件属性由 DOMPurify 白名单负责），表现性标记
         // （<big>/<font size>/<center> 等老题面排版）按作者原意保真渲染，与 HOJ
-        // 网页端一致 —— 浏览器 font-size:larger 的放大比例在本客户端与 HOJ 等价
+        // 网页端一致 —— 浏览器 font-size:larger 的放大比例在本客户端与 HOJ 等价。
+        // 唯一的安全特例是下方 FORBID_TAGS 的 <style>（mid-body 存活见该注释）
         ADD_TAGS: ['semantics', 'annotation'],
         ADD_ATTR: ['encoding'],
+        // <style> 显式禁（2026-11-05 实测）：DOMPurify html 档白名单**实际含 style**，
+        // mid-body（正文在前、样式块在后，题面天然形态）的 <style> 原样存活 —— 可
+        // 全文档改写界面（伪造弹窗）并借属性选择器 + url(...) 外泄；置于片段开头时
+        // 被解析器归入 <head> 而 WHOLE_DOCUMENT=false 只处理 body，静默丢弃只是位置
+        // 伪象，不是白名单剥除。style 在 DEFAULT_FORBID_CONTENTS 里，FORBID 删除时
+        // CSS 文本一并丢弃、不回填正文。inline style **属性**不受影响（保真保留）。
+        // <link>/<meta>/<base> 不在档内，mid-body 也被剥，无需另禁。
+        //
+        // <form> 显式禁（2026-11-06 实测）：html 档白名单含 form/input/button，
+        // **连外域 action 属性都原样保留**——外链拦截器只拦锚点（closest('a')），
+        // Rust 侧无 on_navigation，form 提交是消毒与导航两层都不覆盖的资源面：
+        // 外域 action 被 CSP form-action 'self' 拦下（webview 替换洞已关），但
+        // 无/self action 的提交会整页重载，丢 2s 防抖内的编辑器输入与草稿（与
+        // [x]() 占位化同类危害）。题面/公告里 form 无合法渲染语义（提交只会打
+        // 到 tauri.localhost 资产服务端）；form 不在 DEFAULT_FORBID_CONTENTS，
+        // FORBID 只剥标签保子内容——input/button/select 照常渲染、失去提交路径，
+        // 不破坏表现性保真原则。
+        FORBID_TAGS: ['style', 'form'],
       })
     } finally {
       rewriteBase = ''
