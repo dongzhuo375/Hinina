@@ -35,12 +35,13 @@
 ## 逻辑流程
 
 ```
-四类钩子触发
+五类钩子触发
   errorHandler(err, _instance, info)        → report('vue',     err, `vue:${info}`)
   window 'error'（capture 阶段；有 error/message）→ report('window', source)
   window 'error'（capture 阶段；无消息 → 资源加载失败）→ report('window', `资源加载失败: <tag> 文件名`)
   unhandledrejection(reason)                → report('promise', reason)
   router.onError(error)                     → report('router', error)
+  document 'securitypolicyviolation'（capture）→ report('csp', `CSP {directive} 被拦 {disposition} 文件名`)
 → normalize（归一 + 截断）→ 限频去重 → forward('error', scope, message)
 → 组合根的 forward 包装 → forwardFrontendLog → Rust frontend_log → tracing → logs/hinina.log
 ```
@@ -48,9 +49,9 @@
 设计要点：
 
 - **守卫零信任自身**：`report` 整体 try/catch，`forward` 同步抛错被单独捕获并撤销去重记录（重试窗口）；绝不 `preventDefault` unhandledrejection —— 默认 console 输出保留，本守卫是补一份持久化，不接管 DevTools 排障。
-- **安全边界**：只转发 level/scope/message 三个标量，不传 payload/args；scope 来自本模块常量（`vue`/`window`/`promise`/`router`），scope 白名单、控制字符剥离与最终长度上限由 Rust 端收敛（`infra/frontend_log.md`）；本模块的 2000 字符预截断是 **IPC 载荷大小预算**，非重复实现。资源加载失败**只记标签名与路径末段文件名** —— 绝对 URL（Markdown 外链图片）可能带签名令牌等查询参数，完整 URL 不进日志。
+- **安全边界**：只转发 level/scope/message 三个标量，不传 payload/args；scope 来自本模块常量（`vue`/`window`/`promise`/`router`/`csp`），scope 白名单、控制字符剥离与最终长度上限由 Rust 端收敛（`infra/frontend_log.md`）；本模块的 2000 字符预截断是 **IPC 载荷大小预算**，非重复实现。资源加载失败**只记标签名与路径末段文件名** —— 绝对 URL（Markdown 外链图片）可能带签名令牌等查询参数，完整 URL 不进日志。
 - **持久化是尽力而为**：`RUST_LOG=off` 或日志文件不可写时前端错误不留痕（与 panic 的 bootstrap 文件不同，不承诺无条件落盘）；转发失败在组合根降级为 `log.warn`。
 
 ## 测试
 
-`src/guards/__tests__/globalErrorGuard.spec.ts`（jsdom，13 用例）：四类钩子触发 → forward 收到归一化消息（路由错误用「导航守卫抛错」确定性触发；Error 断言用包含式 —— 消息含 stack）；**errorHandler 补发 console.error**（`toHaveBeenCalledWith(err, info)`）；Error 上报携带堆栈（含 `at ` 帧）；**按码点截断**（emoji 落在截断边界，断言完整代理对存活）；**去重键用完整消息**（同 300 字符前缀不同后缀的两条都转发）；拆卸后不再转发；IpcError 归一；**资源加载错误用真实 DOM 派发验证**（元素挂进文档、事件派发在元素上且 `bubbles: false` —— 无 capture 的实现下该用例必红，变异验证过；伪造 `event.target` 直接向 window 派发只会走 target 阶段，测不出传播路径），且**只记文件名不记 URL**（带 `?token=SECRET` 的外链断言 `SECRET`/`http` 不在消息里）；限频去重（fake timers + 1s 窗口 + 窗口后重放，用字符串 reason —— Error 的 stack 含构造行号，两次构造天然不同键）；forward 同步抛错被吞、窗口后同签名可重试；空/非 Error reason 归一。每个用例自建 app+router 并在 afterEach 统一拆卸 —— 单个断言失败不得把监听器泄漏进后续用例。装配面由 `src/__tests__/main.spec.ts` 锁定（先于 sessionGuard 装配）。
+`src/guards/__tests__/globalErrorGuard.spec.ts`（jsdom，15 用例）：五类钩子触发（CSP 违规走 csp 作用域、blockedURI 只落文件名并去重） → forward 收到归一化消息（路由错误用「导航守卫抛错」确定性触发；Error 断言用包含式 —— 消息含 stack）；**errorHandler 补发 console.error**（`toHaveBeenCalledWith(err, info)`）；Error 上报携带堆栈（含 `at ` 帧）；**按码点截断**（emoji 落在截断边界，断言完整代理对存活）；**去重键用完整消息**（同 300 字符前缀不同后缀的两条都转发）；拆卸后不再转发；IpcError 归一；**资源加载错误用真实 DOM 派发验证**（元素挂进文档、事件派发在元素上且 `bubbles: false` —— 无 capture 的实现下该用例必红，变异验证过；伪造 `event.target` 直接向 window 派发只会走 target 阶段，测不出传播路径），且**只记文件名不记 URL**（带 `?token=SECRET` 的外链断言 `SECRET`/`http` 不在消息里）；限频去重（fake timers + 1s 窗口 + 窗口后重放，用字符串 reason —— Error 的 stack 含构造行号，两次构造天然不同键）；forward 同步抛错被吞、窗口后同签名可重试；空/非 Error reason 归一。每个用例自建 app+router 并在 afterEach 统一拆卸 —— 单个断言失败不得把监听器泄漏进后续用例。装配面由 `src/__tests__/main.spec.ts` 锁定（先于 sessionGuard 装配）。

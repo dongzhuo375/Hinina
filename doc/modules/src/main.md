@@ -13,7 +13,7 @@
 | `createApp(App)` | 创建根应用 |
 | `app.use(createPinia())` | 装配 Pinia（全部 store 的前提） |
 | `app.use(router)` | 装配路由（含 `beforeEach` 会话守卫，见 `router/index.md`） |
-| `installGlobalErrorGuard(app, router, forward)` | **组合根注入**（**第一个装配，先于 mount 与其余 install** —— 首屏渲染/早期 IPC 的错误也要被捕获）：装 `app.config.errorHandler` + `window` `error`/`unhandledrejection` 监听 + `router.onError`，四类全局错误归一化（IpcError → `ipc:{cmd}`）后经注入的 `forward` 走 `bridge/diagnostics.bridge` 的 `forwardFrontendLog` → Rust `frontend_log` 命令落 `logs/hinina.log`（panic 钩子的前端半边）。`forward` 的 Promise 拒绝由组合根 catch 成 `log.warn` —— 报错的通道不允许自己成为新的错误源。见 `guards/globalErrorGuard.md` |
+| `installGlobalErrorGuard(app, router, forward)` | **组合根注入**（**第一个装配，先于 mount 与其余 install** —— 首屏渲染/早期 IPC 的错误也要被捕获）：装 `app.config.errorHandler` + `window` `error`/`unhandledrejection` 监听 + `router.onError` + `document` `securitypolicyviolation` 监听，五类全局事件归一化（IpcError → `ipc:{cmd}`）后经注入的 `forward` 走 `bridge/diagnostics.bridge` 的 `forwardFrontendLog` → Rust `frontend_log` 命令落 `logs/hinina.log`（panic 钩子的前端半边）。`forward` 的 Promise 拒绝由组合根 catch 成 `log.warn` —— 报错的通道不允许自己成为新的错误源。见 `guards/globalErrorGuard.md` |
 | `installSessionGuard(router)` | **组合根注入**：把「认证类 IPC 失败 → 判定会话失效 → 清理并回登录页」的观察者挂到 Bridge 层，随后传入 router 供失效后导航 |
 | `installWorkspacePersistenceListener()` | **组合根注入**：订阅后端 `workspace-saved`（显式保存 / 后台 auto-save 成功）→ `workspaceStore.markPersisted()`，驱动「已自动备份」指示；订阅失败只降级指示器 |
 | `installAnnouncementListener()` | **组合根注入**：订阅 `onAnnouncementsPublished`（Rust 比对公告基线后发布的新公告事件）→ 事件的 `contestId` 与 store 当前 `contestId` 一致时调 `announcementStore.refresh()`，红点随即点亮，不必等下一个 60s 轮询周期。**只认当前比赛**：切比赛瞬间可能有在途事件（旧比赛的新公告），误刷新会把旧比赛的公告拉进当前列表；订阅失败只经 `createLogger('main')` 记 `log.error`（F6 吸收：`main.ts` 已不用裸 console），红点退化为轮询发现（功能降级而非失效） |
@@ -53,7 +53,7 @@
 
 ```
 createApp → use(pinia) → use(router)
-  → installGlobalErrorGuard(app, router, forward)  // 四类全局错误 → Rust 日志（必须最先装）
+  → installGlobalErrorGuard(app, router, forward)  // 五类全局事件（含 CSP 违规）→ Rust 日志（必须最先装）
   → installSessionGuard(router)              // 认证类 IPC 失败 → 清会话 + 回登录页
   → installWorkspacePersistenceListener()    // 后端落盘事件 → 清「编辑中…」指示
   → installAnnouncementListener()            // 新公告事件 → 刷新列表（红点不等 60s 周期）

@@ -82,7 +82,7 @@ function emitCspViolation(init: Partial<SecurityPolicyViolationEvent> = {}): voi
 }
 
 describe('installGlobalErrorGuard', () => {
-  it('四类钩子触发都转发 error 级日志，归一化消息携带环节/来源', async () => {
+  it('四类基础钩子（vue/window/promise/router）触发都转发 error 级日志，归一化消息携带环节/来源', async () => {
     const { app, router } = setup()
     // 路由错误的确定性触发源：导航守卫抛错必然进入 router.onError
     router.beforeEach(() => {

@@ -128,27 +128,28 @@ describe('webview CSP policy gate (real repository)', () => {
     expect(errors.some((e) => e.includes('app.security.devCsp: connect-src'))).toBe(true)
   })
 
-  it('rejects devCsp dropping blob: from worker-src (Monaco dev workers would break)', () => {
-    const errors = collectPolicyErrors(
-      withSecurity((s) => {
-        s.devCsp = swap(s.devCsp, "worker-src 'self' blob:", "worker-src 'self'")
-      }),
-    )
-    expect(errors.some((e) => e.includes('app.security.devCsp: worker-src'))).toBe(true)
-  })
-
   it('rejects the production csp gaining dev-only sources', () => {
     const errors = collectPolicyErrors(
       withSecurity((s) => {
-        s.csp = swap(s.csp, "worker-src 'self'", "worker-src 'self' blob:")
+        s.csp = swap(s.csp, "'self' ipc: http://ipc.localhost", "'self' ipc: http://ipc.localhost ws:")
       }),
     )
-    expect(errors.some((e) => e.includes("app.security.csp: worker-src must be exactly ['self']"))).toBe(true)
+    expect(errors.some((e) => e.includes('app.security.csp: connect-src must be exactly'))).toBe(true)
   })
 
   it('rejects dangerousDisableAssetCspModification being set', () => {
     const errors = collectPolicyErrors(withSecurity((s) => { s.dangerousDisableAssetCspModification = ['csp'] }))
     expect(errors.some((e) => e.includes('dangerousDisableAssetCspModification'))).toBe(true)
+  })
+
+  it('rejects dangerousDisableAssetCspModification explicitly set to false (touching the knob at all)', () => {
+    const errors = collectPolicyErrors(withSecurity((s) => { s.dangerousDisableAssetCspModification = false }))
+    expect(errors.some((e) => e.includes('an explicit false is rejected too') || e.includes('dangerousDisableAssetCspModification'))).toBe(true)
+  })
+
+  it('reports a non-object app.security as a clean error (never a stack trace)', () => {
+    const errors = collectPolicyErrors({ app: { security: 'oops' } })
+    expect(errors.some((e) => e.includes('app.security must be an object, got string'))).toBe(true)
   })
 
   it('rejects a directive fork between csp and devCsp (extra directive on one side)', () => {

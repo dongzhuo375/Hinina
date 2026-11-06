@@ -62,12 +62,13 @@ export const PROD_POLICY = {
 
 /// Dev-only extras on top of the production policy: the Vite HMR websocket
 /// (scheme-source ws: covers both the default same-origin flow and the
-/// TAURI_DEV_HOST variant, whose HMR host is whatever that variable holds)
-/// and Monaco's dev-time blob worker wrappers. Anything else diverging
-/// between devCsp and csp is drift, not a tooling need.
+/// TAURI_DEV_HOST variant, whose HMR host is whatever that variable holds).
+/// Anything else diverging between devCsp and csp is drift, not a tooling
+/// need — note in particular that Vite 6's dev-time ?worker wrapper serves a
+/// SAME-ORIGIN URL; createObjectURL workers only exist in the build-time
+/// `?worker&inline` branch (unused here), so worker-src needs no blob:.
 export const DEV_EXTRAS = {
   'connect-src': ['ws:'],
-  'worker-src': ['blob:'],
 }
 
 export function devPolicy() {
@@ -134,10 +135,15 @@ function checkPolicyShape(map, expected, field, errors) {
 }
 
 /// Full gate: returns every policy violation found in a parsed tauri.conf.json.
+/// Never throws on malformed shapes — a non-object app.security surfaces as a
+/// clean error line (the CLI promises no stack traces).
 export function collectPolicyErrors(conf) {
   const errors = []
   const security = conf?.app?.security
-  if (!security) return ['tauri.conf.json: app.security is missing']
+  if (security === undefined) return ['tauri.conf.json: app.security is missing']
+  if (typeof security !== 'object' || security === null || Array.isArray(security)) {
+    return [`app.security must be an object, got ${Array.isArray(security) ? 'array' : typeof security}`]
+  }
   if ('dangerousDisableAssetCspModification' in security) {
     errors.push(
       'app.security.dangerousDisableAssetCspModification must stay unset (an explicit false is rejected too — touching the knob at all requires a conscious decision): keep Tauri\u2019s serve-time CSP augmentation (observed: script-src gains one sha256 hash per bundled script asset; every other directive\u2019s source list is served unchanged, though the header is rebuilt from a map and its order is not guaranteed)',
@@ -180,7 +186,13 @@ export function runGate(root, log = () => {}) {
     log(message)
     return { ok: false, errors: [message] }
   }
-  const errors = collectPolicyErrors(conf)
+  let errors
+  try {
+    errors = collectPolicyErrors(conf)
+  } catch (error) {
+    // 契约：任何畸形配置都出干净单行错误，绝不吐堆栈
+    errors = [`collectPolicyErrors failed on malformed config: ${error.message}`]
+  }
   for (const error of errors) log(error)
   if (errors.length === 0) {
     log(`OK（csp/devCsp 与钉死策略一致：${Object.keys(PROD_POLICY).length} 条指令逐项 exact，devCsp ⊇ csp）`)

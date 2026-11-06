@@ -7,8 +7,8 @@ export type FrontendLogLevel = 'debug' | 'info' | 'warn' | 'error'
  * 把一条前端日志交给 Rust `tracing`（`frontend_log` 命令 → stderr + `logs/hinina.log`）。
  *
  * 这是前端世界的**唯一**持久化日志通道：`utils/logger` 只写 console，全局错误
- * 守卫（`guards/globalErrorGuard`）经本函数把 Vue / window / promise / router
- * 四类全局错误送进与 Rust panic 同一份日志文件。
+ * 守卫（`guards/globalErrorGuard`）经本函数把 Vue / window / promise / router /
+ * CSP 违规 五类全局事件送进与 Rust panic 同一份日志文件。
  *
  * 安全约束与全链一致：只传 level / scope / message 三个标量，**不传 payload**；
  * 分工：scope 白名单、控制字符剥离与最终长度上限都在 Rust 端收敛；前端的
