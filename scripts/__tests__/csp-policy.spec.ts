@@ -152,6 +152,11 @@ describe('webview CSP policy gate (real repository)', () => {
     expect(errors.some((e) => e.includes('app.security must be an object, got string'))).toBe(true)
   })
 
+  it('reports null app.security as got null (typeof null is object — must not claim "got object")', () => {
+    const errors = collectPolicyErrors({ app: { security: null } })
+    expect(errors.some((e) => e.includes('app.security must be an object, got null'))).toBe(true)
+  })
+
   it('rejects a directive fork between csp and devCsp (extra directive on one side)', () => {
     const errors = collectPolicyErrors(
       withSecurity((s) => {
@@ -246,5 +251,17 @@ describe('runGate (CLI entry)', () => {
     const result = runGate(root, (line) => lines.push(line))
     expect(result.ok).toBe(false)
     expect(lines.join('\n')).toContain('app.security.csp must be a non-empty string')
+  })
+
+  it('fails on a malformed app.security fixture through the runGate try-wrap (clean line, no stack)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hinina-csp-gate-'))
+    mkdirSync(join(root, 'src-tauri'), { recursive: true })
+    writeFileSync(join(root, 'src-tauri', 'tauri.conf.json'), JSON.stringify({ app: { security: 'oops' } }))
+    const lines: string[] = []
+    const result = runGate(root, (line) => lines.push(line))
+    expect(result.ok).toBe(false)
+    const out = lines.join('\n')
+    expect(out).toContain('app.security must be an object, got string')
+    expect(out).not.toMatch(/^\s+at /m)
   })
 })

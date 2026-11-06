@@ -141,7 +141,9 @@ export function collectPolicyErrors(conf) {
   const errors = []
   const security = conf?.app?.security
   if (security === undefined) return ['tauri.conf.json: app.security is missing']
-  if (typeof security !== 'object' || security === null || Array.isArray(security)) {
+  // null 单独点名：typeof null === 'object' 会把 null 报成 "got object"（经典坑）
+  if (security === null) return ['app.security must be an object, got null']
+  if (typeof security !== 'object' || Array.isArray(security)) {
     return [`app.security must be an object, got ${Array.isArray(security) ? 'array' : typeof security}`]
   }
   if ('dangerousDisableAssetCspModification' in security) {
