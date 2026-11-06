@@ -97,7 +97,9 @@ try {
   // 1) served header matches configured sources per directive; only sha256-*
   //    additions on script-src are tolerated (see header comment)
   const header = await page.evaluate(async () => {
-    // 页面刚可寻址时偶发 Failed to fetch（CI 实证）——小重试只吞这一形态
+    // 页面刚可寻址时偶发 Failed to fetch（CI 实证）——有界小重试 ×2：任何
+    // 错误都重试（瞬时/永久不区分），重试耗尽后原样抛出转红（永久错误只多
+    // 耗 ~1s，不影响判读）
     let response
     for (let attempt = 0; ; attempt++) {
       try {
@@ -120,6 +122,11 @@ try {
   // 唯一容忍的增补：script-src 上的 sha256-* hash（tauri 2.12.5 实证的唯一
   // 增补形态）。其余任何多出来的源（含上游追加以放宽为方向的 'unsafe-eval'
   // 类）一律红——superset 检查会静默漏过这类放宽。
+  // 反向盲区同样关闭：服务态**新增整条指令**（配置里没有的指令名）也红——
+  // 2.12.5 的 set_csp 机制上不会这么做，此断言是对未来上游行为的观测兜底。
+  for (const name of served.keys()) {
+    if (!expected.has(name)) failures.push(`served header has a directive not in the config: ${name}`)
+  }
   const allowedAddition = /^'sha256-[A-Za-z0-9+/=]+'$/
   for (const [name, sources] of expected) {
     const got = served.get(name)
