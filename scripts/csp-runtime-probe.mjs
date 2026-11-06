@@ -63,19 +63,51 @@ async function connectWithRetry() {
   }
 }
 
+/// CDP 可连 ≠ 页面就绪：窗口刚创建时 pages() 只有 about:blank（CI 实证竞态
+/// ——探针报错比应用首行启动日志早 4ms）。轮询直到真正的应用页（打包产物
+/// 恒为 tauri.localhost）出现；超时打印全部 page URL 便于归因。
+async function waitForAppPage(browser) {
+  const deadline = Date.now() + CONNECT_TIMEOUT_MS
+  for (;;) {
+    const pages = browser.contexts().flatMap((context) => context.pages())
+    const appPage = pages.find((page) => {
+      try {
+        return new URL(page.url()).hostname === 'tauri.localhost'
+      } catch {
+        return false
+      }
+    })
+    if (appPage) return appPage
+    if (Date.now() > deadline) {
+      const urls = pages.map((page) => page.url()).join(', ')
+      throw new Error(`app page (tauri.localhost) not found within ${CONNECT_TIMEOUT_MS / 1000}s — pages: [${urls}]`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+}
+
 const expected = configuredCsp()
 const browser = await connectWithRetry()
 try {
-  const page = browser.contexts()[0]?.pages()[0]
-  if (!page) {
-    throw new Error('no page found over CDP — webview window not created?')
-  }
+  const page = await waitForAppPage(browser)
+  // DOM 就绪再取头（catch 不致命：header fetch 自带重试兜底）
+  await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => {})
   const failures = []
 
   // 1) served header matches configured sources per directive; only sha256-*
-//    additions on script-src are tolerated (see header comment)
+  //    additions on script-src are tolerated (see header comment)
   const header = await page.evaluate(async () => {
-    const response = await fetch(window.location.href, { mode: 'same-origin' })
+    // 页面刚可寻址时偶发 Failed to fetch（CI 实证）——小重试只吞这一形态
+    let response
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = await fetch(window.location.href, { mode: 'same-origin' })
+        break
+      } catch (error) {
+        if (attempt >= 2) throw error
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    }
     return response.headers.get('content-security-policy') ?? ''
   })
   const served = new Map()

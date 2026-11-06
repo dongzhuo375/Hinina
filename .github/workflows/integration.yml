@@ -127,7 +127,7 @@ jobs:
                 if (Test-Path $log) { Write-Host "--- tail of $log ---"; Get-Content $log -Tail 20 }
               }
               foreach ($root in @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients', 'HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients')) {
-                $pv = (Get-ItemProperty -Path "$root\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}\pv" -ErrorAction SilentlyContinue).pv
+                $pv = (Get-ItemProperty -Path "$root\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -Name pv -ErrorAction SilentlyContinue).pv
                 if ($pv) { Write-Host "WebView2 runtime version ($root): $pv" }
               }
               Write-Host "msedgewebview2 processes: $((Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Measure-Object).Count)"
@@ -383,7 +383,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| 检查 | 结果 |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| build (windows-latest，阻塞口径) | ${{ needs.build.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| build (windows-2022 钉版，阻塞口径) | ${{ needs.build.result }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| stress-repeat | ${{ needs.stress-repeat.result }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| rust-coverage | ${{ needs.rust-coverage.result }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| e2e | ${{ needs.e2e.result }} |" >> "$GITHUB_STEP_SUMMARY"
