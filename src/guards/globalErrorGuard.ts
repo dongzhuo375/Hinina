@@ -28,8 +28,10 @@ const DEDUP_TABLE_MAX = 256
  * - `unhandledrejection`：无人接的 Promise 拒绝（IpcError 归一为 `ipc:{cmd}`）；
  * - `router.onError`：异步组件加载失败 / 导航守卫抛错；
  * - `document` `securitypolicyviolation`：CSP 违规 —— 资源类违规（img/media/
- *   font/worker…被策略拦截）**不抛 JS 异常、不触发上述任何钩子**，浏览器只在
- *   console 记一条；生产端（exe）CSP 配置漂移此前零可观测性。
+ *   font/worker…被策略拦截）**不抛 JS 异常**，但被拦元素**同样触发上面的
+ *   window error 钩子**（这正是「双报」来源：error 行带文件名、violation 行带
+ *   指令与来源宿主）；无元素关联的违规（如 JS `fetch` 被 connect-src 拦）则只
+ *   走本钩子。生产端（exe）CSP 配置漂移此前零可观测性。
  *
  * 设计约束：
  * - **守卫自身绝不抛错**：所有钩子体包 try/catch；`forward` 抛错同样被吞
@@ -128,17 +130,19 @@ export function installGlobalErrorGuard(
   // CSP 违规：见文件头第五条。挂 document 是权威建议（MDN）：事件**冒泡至
   // Window 且 composed**，Chromium 对资源类违规（被拦 <img> 等）**直接以
   // document 为 target 派发**、不经被拦元素冒泡——capture 监听在「直接派发」
-  // 与「元素冒泡」两种模型下都收得到，属双保险而非必需。blockedURI 只落**文
-  // 件名**：markdown 外链等绝对地址可能带签名令牌查询串，与
-  // resourceFailureMessage 同一「令牌不进日志」口径。浏览器自带的 console
-  // 报文保留（转发是持久化，不是接管输出），不重复补 console。
+  // 与「元素冒泡」两种模型下都收得到，属双保险而非必需。来源标签收敛到
+  // **host 级**（cspSourceLabel）：被拦资源与 window error 行双报，error 行已
+  // 带文件名，本行只需指令 + 来源宿主——同 host 同指令经限频去重合并，防大
+  // 批被拦资源刷满 Rust 端 frontend_log 的 60s 滚动预算、挤掉同窗口的其它错
+  // 误。浏览器自带的 console 报文保留（转发是持久化，不是接管输出），不重复
+  // 补 console。
   const onCspViolation = (event: Event): void => {
     const e = event as SecurityPolicyViolationEvent
     // TS lib 只类型化标准的 effectiveDirective（Chrome 运行时另有非标准的
     // directive 同值字段，不依赖）；两个都缺的怪异载荷落 'unknown'
     const directive = e.effectiveDirective || 'unknown'
     const disposition = typeof e.disposition === 'string' ? e.disposition : ''
-    report('csp', `CSP ${directive} 被拦 ${disposition} ${fileNameOf(e.blockedURI)}`.replace(/\s+/g, ' ').trim())
+    report('csp', `CSP ${directive} 被拦 ${disposition} ${cspSourceLabel(e.blockedURI)}`.replace(/\s+/g, ' ').trim())
   }
   document.addEventListener('securitypolicyviolation', onCspViolation, true)
 
@@ -209,13 +213,39 @@ function truncateByChars(text: string, max: number): string {
 /// 从资源地址提取文件名：URL 解析取 pathname 末段（查询串/fragment 里的签名
 /// 令牌不进日志）；不可解析的地址先剥掉 `?`/`#` 再取 `/` 末段兜底 —— 直接对
 /// 原串按 `[/?#]` 切会返回查询串本身（`//?token=SECRET` → `token=SECRET`），
-/// 与「令牌不进日志」相反（评审抓出）。
+/// 与「令牌不进日志」相反（评审抓出）。**data: URI 只落协议 + MIME**：base64
+/// 载荷可含攻击者可控内容，整段进日志既是泄漏面也是刷日志面（策略收紧拦下
+/// data: 资源时就会走到这里）。
 function fileNameOf(raw: unknown): string {
   if (typeof raw !== 'string' || raw.length === 0) return 'unknown'
+  if (raw.startsWith('data:')) return dataUriLabel(raw)
   try {
     return new URL(raw).pathname.split('/').pop() || 'unknown'
   } catch {
     const withoutQuery = raw.split(/[?#]/)[0] ?? raw
     return withoutQuery.split('/').pop() || 'unknown'
   }
+}
+
+/// data: URI → `data:<mime>`（载荷截断，MIME 缺失落 `data:uri`）。
+function dataUriLabel(raw: string): string {
+  const mime = /^data:([^;,]*)/.exec(raw)?.[1]
+  return mime ? `data:${mime}` : 'data:uri'
+}
+
+/// CSP 违规来源标签：http(s) 只留 **host**（大批被拦资源按宿主合并去重，防
+/// 挤占 frontend_log 的 60s 预算——文件名粒度由双报的 window error 行承担）；
+/// data: 走 dataUriLabel（载荷不进日志）；blob: 溯源复杂只落 `blob:uri`；
+/// inline/eval 等短字面量原样；其余 unknown。
+function cspSourceLabel(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length === 0) return 'unknown'
+  if (raw.startsWith('data:')) return dataUriLabel(raw)
+  if (raw.startsWith('blob:')) return 'blob:uri'
+  try {
+    const url = new URL(raw)
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.host
+  } catch {
+    return raw.length <= 32 ? raw : `${raw.slice(0, 32)}…`
+  }
+  return 'unknown'
 }

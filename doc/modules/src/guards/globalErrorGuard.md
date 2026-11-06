@@ -4,7 +4,7 @@
 
 ## 职责
 
-把五类「JS 世界的崩溃 / 策略违规」统一转发到 Rust 日志：Vue 组件树错误（`app.config.errorHandler`）、未捕获同步异常与资源加载失败（`window` `error` 事件）、无人接的 Promise 拒绝（`unhandledrejection`）、路由错误（`router.onError`）、CSP 违规（`document` `securitypolicyviolation` —— 资源类违规不抛 JS 异常、浏览器只在 console 记一条，生产 exe 端 CSP 配置漂移此前零可观测性；事件**冒泡至 Window 且 composed**，Chromium 对被拦资源**直接以 document 为 target 派发**，挂 document 两种形态皆收；`blockedURI` 只落文件名，与资源失败消息同款「令牌不进日志」口径）。此前它们只进 console —— 用户不开 DevTools 就**白屏无痕**，Rust 日志完全看不到 JS 世界；这是 panic 钩子的前端半边（Rust 侧入口为 `commands/log_cmd.rs` 的 `frontend_log`）。
+把五类「JS 世界的崩溃 / 策略违规」统一转发到 Rust 日志：Vue 组件树错误（`app.config.errorHandler`）、未捕获同步异常与资源加载失败（`window` `error` 事件）、无人接的 Promise 拒绝（`unhandledrejection`）、路由错误（`router.onError`）、CSP 违规（`document` `securitypolicyviolation` —— 资源类违规不抛 JS 异常、浏览器只在 console 记一条，生产 exe 端 CSP 配置漂移此前零可观测性；事件**冒泡至 Window 且 composed**，Chromium 对被拦资源**直接以 document 为 target 派发**，挂 document 两种形态皆收；`blockedURI` 收敛 **host 级**——与资源失败消息同款「令牌不进日志」口径，且 data: 只落协议+MIME（base64 载荷不进日志）、同宿主同指令经限频去重合并（大批被拦资源不致刷满 Rust 端 60s 日志预算、挤掉同窗口其它错误；文件名粒度由双报的 window error 行承担））。此前它们只进 console —— 用户不开 DevTools 就**白屏无痕**，Rust 日志完全看不到 JS 世界；这是 panic 钩子的前端半边（Rust 侧入口为 `commands/log_cmd.rs` 的 `frontend_log`）。
 
 ## 落位说明（为什么在 `guards/`）
 
@@ -41,7 +41,7 @@
   window 'error'（capture 阶段；无消息 → 资源加载失败）→ report('window', `资源加载失败: <tag> 文件名`)
   unhandledrejection(reason)                → report('promise', reason)
   router.onError(error)                     → report('router', error)
-  document 'securitypolicyviolation'（capture）→ report('csp', `CSP {directive} 被拦 {disposition} 文件名`)
+  document 'securitypolicyviolation'（capture）→ report('csp', `CSP {directive} 被拦 {disposition} host级来源`)
 → normalize（归一 + 截断）→ 限频去重 → forward('error', scope, message)
 → 组合根的 forward 包装 → forwardFrontendLog → Rust frontend_log → tracing → logs/hinina.log
 ```

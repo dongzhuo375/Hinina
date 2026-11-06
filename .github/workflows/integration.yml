@@ -1,7 +1,7 @@
 # M3 夜间集成（doc/cicd/m3-integration.md）：三平台原生构建、并发压力重复、
 # Rust 覆盖率基线、浏览器 E2E。
 # 独立 workflow，不在 ci-required 分支保护链内（必需检查仅属 ci.yml）；
-# 阻塞口径：build(windows-latest) + stress-repeat + rust-coverage + e2e → integration-summary。
+# 阻塞口径：build(windows-latest，含 CSP 运行时探针) + stress-repeat + rust-coverage + e2e → integration-summary。
 # macOS/Linux 为观测平台（施工方案 §6.2：不伪装成已支持平台）——continue-on-error 会把其
 # 失败吞成 job success，真实结果由各 build leg 自报进 Step Summary，阻塞判定不含观测平台。
 name: Integration
@@ -42,6 +42,8 @@ jobs:
             observability: false
             artifactName: binary-windows
             artifactPath: src-tauri/target/release/hinina.exe
+            # CSP 运行时探针只在 Windows leg 跑（唯一阻塞 leg；Linux/macOS 无 WebView2）
+            cspProbe: true
           - os: ubuntu-24.04
             bundleArgs: --no-bundle
             observability: true
@@ -93,6 +95,23 @@ jobs:
         # artifactPath 指回 bundle/nsis/。
         shell: bash
         run: npm run tauri build -- ${{ matrix.bundleArgs }}
+      # CSP 运行时探针：静态门禁钉「策略应该是什么」，这里验证打包产物真的按
+      # 配置服务并强制执行（exe-only 回归——dev 不注入、e2e 不进 webview——只有
+      # 这里能在 CI 暴露）。期望源唯一取自 tauri.conf.json（无第二份策略副本）；
+      # 零违规基线另证 IPC 走 fetch 快通道而非 postMessage 静默降级。探针自带
+      # CDP 连接重试（等窗口起来），connectOverCDP 只需 playwright 库不需浏览器。
+      - name: CSP runtime probe (packaged exe + CDP)
+        if: matrix.cspProbe
+        id: csp_probe
+        shell: pwsh
+        run: |
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9223'
+          $exe = Start-Process -FilePath "src-tauri/target/release/hinina.exe" -PassThru
+          try {
+            node scripts/csp-runtime-probe.mjs 9223
+          } finally {
+            Stop-Process -Id $exe.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Upload smoke artifact
         id: artifact_upload
         if: success()
@@ -114,6 +133,7 @@ jobs:
           NPM_BUILD: ${{ steps.npm_ci_build.outcome }}
           TAURI_BUILD: ${{ steps.tauri_build.outcome }}
           ARTIFACT_UPLOAD: ${{ steps.artifact_upload.outcome }}
+          CSP_PROBE: ${{ steps.csp_probe.outcome }}
         run: |
           outcome=success
           for value in "$NPM_BUILD" "$TAURI_BUILD" "$ARTIFACT_UPLOAD"; do
@@ -123,6 +143,10 @@ jobs:
             #（评审三轮：macOS/Linux 的唯一真实结果渠道就是这份自报）
             if [ "$value" != "success" ]; then outcome=failure; fi
           done
+          # 探针只在 Windows leg 存在：其余 leg 的 skipped 是合法跳过，不判失败
+          if [ "${{ matrix.cspProbe }}" = "true" ] && [ "$CSP_PROBE" != "success" ]; then
+            outcome=failure
+          fi
           echo "- build (${{ matrix.os }}): **${outcome}**" >> "$GITHUB_STEP_SUMMARY"
 
   # §6.5 定时重复：对并发与自动保存用例做 10 轮重复取抖动。

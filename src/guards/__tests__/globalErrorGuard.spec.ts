@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 全局错误转发守卫：五类钩子触发 → 注入的 forward 收到归一化消息；
 // 限频去重；forward 抛错不炸守卫；IpcError 归一为 ipc:{cmd}；
-// CSP 违规走 csp 作用域且 blockedURI 不带查询串。
+// CSP 违规走 csp 作用域：来源收敛 host 级、data: 只落协议+MIME、同宿主合并去重。
 // 每个用例自建 app + router 并在 afterEach 统一拆卸 —— 单个断言失败不得把
 // 监听器泄漏进后续用例（否则计数类断言会互相污染）。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -272,7 +272,7 @@ describe('installGlobalErrorGuard', () => {
     expect(calls[2]?.message).toBe('{"code":7}')
   })
 
-  it('CSP 违规转发为 csp 作用域 error 日志，blockedURI 只落文件名（令牌不进日志）', () => {
+  it('CSP 违规转发为 csp 作用域 error 日志，来源收敛到 host 级（令牌/路径不进日志）', () => {
     setup()
 
     emitCspViolation({
@@ -282,17 +282,30 @@ describe('installGlobalErrorGuard', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({ level: 'error', scope: 'csp' })
     expect(calls[0]?.message).toContain('img-src')
-    expect(calls[0]?.message).toContain('pic.png')
+    expect(calls[0]?.message).toContain('cdn.example.com')
+    expect(calls[0]?.message).not.toContain('pic.png')
     expect(calls[0]?.message).not.toContain('SECRET')
-    expect(calls[0]?.message).not.toContain('cdn.example.com')
   })
 
-  it('CSP 违规同签名 1 秒窗口内去重（被拦资源成批出现时不刷屏）', () => {
+  it('CSP 违规的 data: 来源只落协议+MIME（base64 载荷不进日志）', () => {
     setup()
 
-    emitCspViolation({ blockedURI: 'https://cdn.example.com/a.png' })
+    emitCspViolation({ blockedURI: 'data:image/png;base64,U00UN7PAYLOAD' })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.message).toContain('data:image/png')
+    expect(calls[0]?.message).not.toContain('base64')
+    expect(calls[0]?.message).not.toContain('PAYLOAD')
+  })
+
+  it('同 host 同指令的 CSP 违规在去重窗口内合并（防刷满 Rust 端日志预算）', () => {
+    setup()
+
+    // 大批被拦资源同宿主：文件名粒度由双报的 window error 行承担，本行按宿主合并
     emitCspViolation({ blockedURI: 'https://cdn.example.com/a.png' })
     emitCspViolation({ blockedURI: 'https://cdn.example.com/b.png' })
+    emitCspViolation({ blockedURI: 'https://cdn.example.com/c.png' })
+    emitCspViolation({ blockedURI: 'https://other.example.net/d.png' })
 
     expect(calls).toHaveLength(2)
   })
