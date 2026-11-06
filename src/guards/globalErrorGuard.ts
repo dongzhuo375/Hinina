@@ -98,15 +98,33 @@ export function installGlobalErrorGuard(
     }
   }
 
-  /// 资源加载失败消息：**只记标签名与路径末段文件名，绝不记完整 URL** ——
-  /// Markdown 外链图片等绝对地址可能带签名令牌等查询参数，进入本地日志即成
-  /// 泄漏面（此前注释称「本地静态资源名，非敏感」对外链不成立）。
+  /// 资源加载失败消息：**同源**记标签名与路径末段文件名（本地资产诊断——
+  /// 同源文件数有界）；**跨源收敛到 host 级**（与 CSP 违规行同一预算考量：
+  /// 题面外链资源成批失败/被拦时按文件名一行一个会刷满 Rust 端 60s 滚动预
+  /// 算、挤掉同窗口其它错误）；data: 只落协议+MIME。**完整 URL 绝不进日志**
+  /// ——外链可能带签名令牌查询参数（URL 解析天然分离查询串与 fragment，
+  /// 相对地址按基址解析后同样走该口径，无字符串切分分支可泄漏）。
   function resourceFailureMessage(target: EventTarget): string {
     const tag = (target as { tagName?: unknown }).tagName
     const name = typeof tag === 'string' ? tag.toLowerCase() : 'unknown'
     const raw =
       (target as { src?: unknown }).src ?? (target as { href?: unknown }).href
-    return `资源加载失败: <${name}> ${fileNameOf(raw)}`
+    return `资源加载失败: <${name}> ${resourceSourceLabel(raw)}`
+  }
+
+  /// 资源地址标签：同源 → 文件名；跨源 → host；data: → 协议+MIME；其余
+  /// （含解析后落在基址根路径的相对地址）→ unknown。
+  function resourceSourceLabel(raw: unknown): string {
+    if (typeof raw !== 'string' || raw.length === 0) return 'unknown'
+    if (raw.startsWith('data:')) return dataUriLabel(raw)
+    try {
+      const url = new URL(raw, window.location.href)
+      return url.host === window.location.host
+        ? url.pathname.split('/').pop() || 'unknown'
+        : url.host
+    } catch {
+      return 'unknown'
+    }
   }
 
   // **必须 capture 阶段**：资源加载失败的 error 事件派发在元素上且**不冒泡**
@@ -210,24 +228,8 @@ function truncateByChars(text: string, max: number): string {
   return chars.length <= max ? text : `${chars.slice(0, max).join('')}…`
 }
 
-/// 从资源地址提取文件名：URL 解析取 pathname 末段（查询串/fragment 里的签名
-/// 令牌不进日志）；不可解析的地址先剥掉 `?`/`#` 再取 `/` 末段兜底 —— 直接对
-/// 原串按 `[/?#]` 切会返回查询串本身（`//?token=SECRET` → `token=SECRET`），
-/// 与「令牌不进日志」相反（评审抓出）。**data: URI 只落协议 + MIME**：base64
-/// 载荷可含攻击者可控内容，整段进日志既是泄漏面也是刷日志面（策略收紧拦下
-/// data: 资源时就会走到这里）。
-function fileNameOf(raw: unknown): string {
-  if (typeof raw !== 'string' || raw.length === 0) return 'unknown'
-  if (raw.startsWith('data:')) return dataUriLabel(raw)
-  try {
-    return new URL(raw).pathname.split('/').pop() || 'unknown'
-  } catch {
-    const withoutQuery = raw.split(/[?#]/)[0] ?? raw
-    return withoutQuery.split('/').pop() || 'unknown'
-  }
-}
-
-/// data: URI → `data:<mime>`（载荷截断，MIME 缺失落 `data:uri`）。
+/// data: URI → `data:<mime>`（载荷截断，MIME 缺失落 `data:uri`）。base64
+/// 载荷可含攻击者可控内容，整段进日志既是泄漏面也是刷日志面。
 function dataUriLabel(raw: string): string {
   const mime = /^data:([^;,]*)/.exec(raw)?.[1]
   return mime ? `data:${mime}` : 'data:uri'
@@ -236,16 +238,20 @@ function dataUriLabel(raw: string): string {
 /// CSP 违规来源标签：http(s) 只留 **host**（大批被拦资源按宿主合并去重，防
 /// 挤占 frontend_log 的 60s 预算——文件名粒度由双报的 window error 行承担）；
 /// data: 走 dataUriLabel（载荷不进日志）；blob: 溯源复杂只落 `blob:uri`；
-/// inline/eval 等短字面量原样；其余 unknown。
+/// inline/eval 白名单字面量原样。**不可解析串绝不原样返回**：相对地址可能带
+/// 查询串令牌（`//?token=…` 实证曾整段进日志，与 fileNameOf 的教训同类），
+/// 只保留 scheme 级信息，否则 unknown。
 function cspSourceLabel(raw: unknown): string {
   if (typeof raw !== 'string' || raw.length === 0) return 'unknown'
   if (raw.startsWith('data:')) return dataUriLabel(raw)
   if (raw.startsWith('blob:')) return 'blob:uri'
+  if (raw === 'inline' || raw === 'eval') return raw
   try {
     const url = new URL(raw)
     if (url.protocol === 'http:' || url.protocol === 'https:') return url.host
   } catch {
-    return raw.length <= 32 ? raw : `${raw.slice(0, 32)}…`
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(raw)?.[1]
+    return scheme ? `${scheme.toLowerCase()}:` : 'unknown'
   }
   return 'unknown'
 }

@@ -195,22 +195,38 @@ describe('installGlobalErrorGuard', () => {
     document.body.appendChild(img)
     img.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
 
-    // 只记标签名与路径末段文件名：完整 URL（含签名令牌查询参数）不得进日志
+    // 跨源资源收敛到 host 级（防成批外链失败刷满 Rust 日志预算）：
+    // 文件名/查询串令牌/协议都不得进日志
     expect(calls[0]).toMatchObject({
       level: 'error',
       scope: 'window',
-      message: '资源加载失败: <img> missing.png',
+      message: '资源加载失败: <img> cdn.example.com',
     })
+    expect(calls[0]?.message).not.toContain('missing.png')
     expect(calls[0]?.message).not.toContain('SECRET')
     expect(calls[0]?.message).not.toContain('http')
   })
 
-  it('不可解析的 src 走兜底分支：先剥查询串再取末段（令牌不进日志）', () => {
+  it('同源资源失败仍记文件名（本地资产诊断；同源文件数有界）', () => {
     setup()
 
-    // 伪造 target 携带 URL 解析必然失败的 src（直接对原串按 [/?#] 切会返回
-    // 查询串本身，泄漏令牌 —— 评审抓出）；DOM 的 .src 属性总会被解析成绝对
-    // URL，兜底分支只能这样经公开路径触达
+    // 同源 URL 从 location 动态构造（jsdom 的 host 带端口，硬编码 localhost
+    // 会落进跨源分支）
+    const img = document.createElement('img')
+    img.setAttribute('src', new URL('/assets/missing.png?token=SECRET', window.location.href).href)
+    document.body.appendChild(img)
+    img.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
+
+    expect(calls[0]?.message).toBe('资源加载失败: <img> missing.png')
+    expect(calls[0]?.message).not.toContain('SECRET')
+  })
+
+  it('协议相对地址按基址解析后落在根路径 → unknown（令牌不进日志）', () => {
+    setup()
+
+    // 伪造 target 携带协议相对 src（DOM 的 .src 属性总会被解析成绝对 URL，
+    // 该分支只能这样经公开路径触达）；//?token=SECRET 以 location 为基址解析
+    // 后查询串被 URL 解析器分离、pathname 落根路径 → unknown
     const fake = { src: '//?token=SECRET' }
     emitWindowError({ target: fake as unknown as EventTarget })
 
@@ -296,6 +312,25 @@ describe('installGlobalErrorGuard', () => {
     expect(calls[0]?.message).toContain('data:image/png')
     expect(calls[0]?.message).not.toContain('base64')
     expect(calls[0]?.message).not.toContain('PAYLOAD')
+  })
+
+  it('CSP 违规的不可解析 blockedURI 绝不原样进日志（//?token= 实证曾整段写入）', () => {
+    setup()
+
+    emitCspViolation({ blockedURI: '//?token=SECRET' })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.message).toContain('unknown')
+    expect(calls[0]?.message).not.toContain('SECRET')
+    expect(calls[0]?.message).not.toContain('//?')
+  })
+
+  it('CSP 违规的 inline/eval 白名单字面量保留（标准关键字，非用户可控）', () => {
+    setup()
+
+    emitCspViolation({ blockedURI: 'inline' })
+
+    expect(calls[0]?.message).toContain('inline')
   })
 
   it('同 host 同指令的 CSP 违规在去重窗口内合并（防刷满 Rust 端日志预算）', () => {
