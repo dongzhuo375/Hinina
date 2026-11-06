@@ -221,6 +221,34 @@ describe('installGlobalErrorGuard', () => {
     expect(calls[0]?.message).not.toContain('SECRET')
   })
 
+  it('file:/blob: 等空 host 的 exotic 协议落协议级标签（不产出末尾为空的行）', () => {
+    setup()
+
+    const file = document.createElement('img')
+    file.setAttribute('src', 'file:///C:/contest/pic.png')
+    document.body.appendChild(file)
+    file.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
+    file.remove()
+
+    expect(calls[0]?.message).toBe('资源加载失败: <img> file:')
+
+    const blob = document.createElement('img')
+    blob.setAttribute('src', 'blob:http://tauri.localhost/uuid-1')
+    document.body.appendChild(blob)
+    blob.dispatchEvent(new ErrorEvent('error', { bubbles: false }))
+    blob.remove()
+
+    expect(calls[1]?.message).toBe('资源加载失败: <img> blob:uri')
+  })
+
+  it('CSP 违规的 blob: 来源落同款字面量（与资源行一致，无空尾巴）', () => {
+    setup()
+
+    emitCspViolation({ blockedURI: 'blob:http://tauri.localhost/uuid-2' })
+
+    expect(calls[0]?.message).toContain('blob:uri')
+  })
+
   it('协议相对地址按基址解析后落在根路径 → unknown（令牌不进日志）', () => {
     setup()
 

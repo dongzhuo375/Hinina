@@ -112,16 +112,21 @@ export function installGlobalErrorGuard(
     return `资源加载失败: <${name}> ${resourceSourceLabel(raw)}`
   }
 
-  /// 资源地址标签：同源 → 文件名；跨源 → host；data: → 协议+MIME；其余
-  /// （含解析后落在基址根路径的相对地址）→ unknown。
+  /// 资源地址标签：同源 → 文件名；跨源 http(s) → host；data: → 协议+MIME；
+  /// blob: → `blob:uri`（与 cspSourceLabel 同款）；host 为空的 exotic 协议
+  /// （file:/about: 等）→ 协议级标签（**不返回空串**——file:/blob: 的
+  /// url.host 是空串，直接落 host 会产出「末尾为空」的日志行，违背 unknown
+  /// 兜底约定且丢协议信息）；解析后落基址根路径/不可解析 → unknown。
   function resourceSourceLabel(raw: unknown): string {
     if (typeof raw !== 'string' || raw.length === 0) return 'unknown'
     if (raw.startsWith('data:')) return dataUriLabel(raw)
+    if (raw.startsWith('blob:')) return 'blob:uri'
     try {
       const url = new URL(raw, window.location.href)
-      return url.host === window.location.host
-        ? url.pathname.split('/').pop() || 'unknown'
-        : url.host
+      if (url.host === window.location.host) {
+        return url.pathname.split('/').pop() || 'unknown'
+      }
+      return url.host || url.protocol
     } catch {
       return 'unknown'
     }
@@ -249,9 +254,10 @@ function cspSourceLabel(raw: unknown): string {
   try {
     const url = new URL(raw)
     if (url.protocol === 'http:' || url.protocol === 'https:') return url.host
+    // 非 http(s) 协议：协议级标签（file:/ws: 等），不返回空 host
+    return url.host || url.protocol
   } catch {
     const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(raw)?.[1]
     return scheme ? `${scheme.toLowerCase()}:` : 'unknown'
   }
-  return 'unknown'
 }

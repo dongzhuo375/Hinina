@@ -49,7 +49,7 @@
 设计要点：
 
 - **守卫零信任自身**：`report` 整体 try/catch，`forward` 同步抛错被单独捕获并撤销去重记录（重试窗口）；绝不 `preventDefault` unhandledrejection —— 默认 console 输出保留，本守卫是补一份持久化，不接管 DevTools 排障。
-- **安全边界**：只转发 level/scope/message 三个标量，不传 payload/args；scope 来自本模块常量（`vue`/`window`/`promise`/`router`/`csp`），scope 白名单、控制字符剥离与最终长度上限由 Rust 端收敛（`infra/frontend_log.md`）；本模块的 2000 字符预截断是 **IPC 载荷大小预算**，非重复实现。资源加载失败按来源分级：**同源**记文件名（本地资产诊断，文件数有界）、**跨源收敛 host 级**（外链成批失败/被拦不按文件数无界增长、不刷满 Rust 端 60s 预算）、data: 只落协议+MIME；完整 URL（含查询串令牌）不进日志。
+- **安全边界**：只转发 level/scope/message 三个标量，不传 payload/args；scope 来自本模块常量（`vue`/`window`/`promise`/`router`/`csp`），scope 白名单、控制字符剥离与最终长度上限由 Rust 端收敛（`infra/frontend_log.md`）；本模块的 2000 字符预截断是 **IPC 载荷大小预算**，非重复实现。资源加载失败按来源分级：**同源**记文件名（本地资产诊断，文件数有界）、**跨源收敛 host 级**（外链成批失败/被拦不按文件数无界增长、不刷满 Rust 端 60s 预算）、data: 只落协议+MIME、blob: 落 `blob:uri`、file: 等空 host 的 exotic 协议落协议级标签（不产出末尾为空的行）；完整 URL（含查询串令牌）不进日志。
 - **持久化是尽力而为**：`RUST_LOG=off` 或日志文件不可写时前端错误不留痕（与 panic 的 bootstrap 文件不同，不承诺无条件落盘）；转发失败在组合根降级为 `log.warn`。
 
 ## 测试
