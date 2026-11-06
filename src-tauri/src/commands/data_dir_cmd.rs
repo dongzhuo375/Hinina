@@ -188,7 +188,7 @@ pub async fn reset_data_dir(ctx: State<'_, AppContext>, migrate: bool) -> AppRes
     // - default==current 已被 validate_reset 拒绝（无意义操作）；
     // - **当前正用着自定义目录**：本次恢复默认 + 勾迁移的 migrate_from 记录随
     //   临时目录里的指针一起可被清理——丢的是「迁移指令」而非数据（数据仍在
-    //   自定义目录），但用户的意图会无声消失，同样需要提示（评审）。
+    //   自定义目录），但用户的意图会无声消失，同样需要提示。
     // 与 set_data_dir 同走 degraded_pointer_warning。
     let warning = degraded_pointer_warning(&ctx.default_data_dir);
 
@@ -261,7 +261,7 @@ pub(crate) fn degraded_pointer_warning(default_data_dir: &std::path::Path) -> Op
 ///
 /// `legacy_migrated` 必须从磁盘**严格**读回（只有 NotFound 视为 None）：用宽松的
 /// `read_pointer` 会把损坏/不可读的指针当成默认值，写回时抹掉 `Some(true)`，
-/// 下次启动重新执行一次性搬家、把用户已删除的旧数据拷回来（评审）。读不出来时
+/// 下次启动重新执行一次性搬家、把用户已删除的旧数据拷回来。读不出来时
 /// 宁可拒绝本次更改并让用户修复指针文件。
 fn write_target(
     ctx: &State<'_, AppContext>,

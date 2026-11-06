@@ -218,7 +218,7 @@ export class ConfigService {
    * 等待**设置页发起**的保存事务落地（不向等待者抛出保存错误）。
    *
    * 只等设置页自己的保存：后台写入（编辑器偏好/分栏比例）可能长时间不返回，
-   * 不应把设置页卡在 loading（2026-11-04 评审：恢复旧 composable 的等待范围）。
+   * 不应把设置页卡在 loading（恢复旧 composable 的等待范围）。
    * 设置页事务至多一个在途（`save()` 由 `canSave` 单飞）。
    */
   whenSettingsSaveSettled(): Promise<void> {

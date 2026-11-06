@@ -2186,7 +2186,7 @@ async fn rank_failures_before_the_board_fetch_do_not_burn_the_rank_budget() {
 async fn rank_names_are_byte_bounded_so_a_full_page_stays_encodable() {
     let source = Arc::new(Source::default());
     *source.contest_override.lock().unwrap() = Some(contest_with_rank_show_name("realname"));
-    // The reviewer's probe scenario: 200 rows × 30 cells with names AND schools
+    // Worst-case probe: 200 rows × 30 cells with names AND schools
     // maxed at 256 CJK chars. Char-based truncation (768 B each) pushes the page
     // past the 1 MiB bridge cap; byte-based truncation must keep it encodable.
     let long_name: String = "名".repeat(256);

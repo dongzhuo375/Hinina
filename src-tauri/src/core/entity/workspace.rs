@@ -17,9 +17,11 @@ fn random_hex_suffix() -> String {
     format!("{:04x}", hasher.finish() as u16)
 }
 
-/// Workspace — 核心领域对象。
+/// Workspace — 核心领域实体。
 ///
-/// 负责代码存储、自动保存、崩溃恢复、比赛隔离、模板管理、缓存。
+/// 以纯数据承载一场比赛一道题的代码内容与元数据（`files` / `active_file` /
+/// `language` / 脏标记 / 时间戳）；自动保存、崩溃恢复与比赛隔离等生命周期
+/// 动作由 `WorkspaceManager` 编排。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
@@ -34,7 +36,7 @@ pub struct Workspace {
     /// 为什么不从 `language` 派生：语言切换后旧文件仍留在工作区里，靠「按语言派生
     /// 文件名 + 按扩展名探测」加载会受 `files`（HashMap）键序影响，可能加载出
     /// 「旧语言的代码 + 新语言元数据」的组合 —— 提交即 CE，且 Monaco 高亮与实际
-    /// 文件不符（P62，已闭合）。以本字段为准后，加载与写入锚定同一个
+    /// 文件不符。以本字段为准后，加载与写入锚定同一个
     /// 文件，`language` 只描述它的语言。
     ///
     /// `None` = 尚无代码文件（新工作区）或历史工作区未记录（`serde(default)`）。

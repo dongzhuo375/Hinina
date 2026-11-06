@@ -1,15 +1,15 @@
-// 阶段 7 P40：Command 层关键路径测试（第二轮：测试真实代码）。
+// Command 层关键路径测试。
 //
 // 测试重点：
 // 1. `workspace_cmd` 中降级路径（通过提取的纯函数验证逻辑）
-// 2. auto-save 的「按配置同步」判据（P48 / P74 遗留项）
+// 2. auto-save 的「按配置同步」判据
 //
 // （原 `parse_oj_type` 解析测试已随闭集枚举一并移除：OJ 身份改为数据
 //   `OjId`，注册校验在 `ProviderRegistry` 层由 `list_available` 承担。
 //   原 `auto_save_lazy_start_once` 锁定的是已删除的 static AtomicBool 标记 ——
 //   那条判据本身就是缺陷，改由 `auto_save_action` 的判据表接管。）
 
-/// auto-save「按配置同步」的判据表（P48 / P74 遗留项）。
+/// auto-save「按配置同步」的判据表。
 ///
 /// 旧实现用一次性 `static AtomicBool` 懒启动：关掉 auto-save 后再打开永不重启，
 /// 间隔也只读首次配置。判据现在是这张表 —— 它是「配置改动能否生效」的全部逻辑，
@@ -60,9 +60,9 @@ fn auto_save_action_supports_off_then_on_cycle() {
     );
 }
 
-// ── P58：Command 层可测的纯部分 ──
+// ── Command 层可测的纯部分 ──
 //
-// M2 起，依赖 `State` 的命令已把编排提取为 `*_impl(&AppContext)` 并在各
+// 依赖 `State` 的命令已把编排提取为 `*_impl(&AppContext)` 并在各
 // `tests/*_cmd_tests.rs` 用全真上下文直接测试（分页钳制、only_mine 强制、
 // uid 解析等此前靠「纯函数等价锁定」的条目已由真实调用取代）。本文件保留
 // 真正独立于命令编排的纯函数与 VO 锁定用例。
@@ -387,7 +387,7 @@ fn validate_reset_rejects_same_dir() {
     assert!(err.to_string().contains("已在默认数据目录"));
 }
 
-/// 榜单默认分页大小「三处同值」的锁定（P71）。
+/// 榜单默认分页大小「三处同值」的锁定。
 ///
 /// 前端 `rank.service.ts` 的 `DEFAULT_RANK_PAGE_SIZE` 是唯一取值点；后端的
 /// `DEFAULT_RANK_LIMIT` 与 `RankQuery::default()` 只服务于「绕过前端直接调命令」。

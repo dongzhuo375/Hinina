@@ -366,7 +366,7 @@ describe('refresh / startLive / stopLive — 轮询编排', () => {
   })
 })
 
-describe('会话代际（评审六轮：公告与已读）', () => {
+describe('会话代际（公告与已读）', () => {
   it('迟到的公告加载不得写回新会话', async () => {
     const { clearDomainState } = await import('@/stores/session')
     const store = useAnnouncementStore()

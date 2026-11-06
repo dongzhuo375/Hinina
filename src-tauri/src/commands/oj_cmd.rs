@@ -143,7 +143,7 @@ where
         })
         .map_err(|e| {
             // 切换已生效但持久化失败：用**专用变体**上报，前端据此承认已生效
-            // 而不是回滚 UI（前端据此承认已生效）
+            // 而不是回滚 UI
             AppError::OjSwitchPersistFailed(e.to_string())
         });
 

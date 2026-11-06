@@ -54,7 +54,7 @@ describe('sourceFileNameOf — 语言 → 工作区源文件名', () => {
 })
 
 describe('normalizeHojLanguage — 历史值归一为 HOJ 显示名', () => {
-  it('旧 Monaco id 映射回显示名（P55 时代工作区/配置的迁移）', () => {
+  it('旧 Monaco id 映射回显示名（旧版工作区/配置的迁移）', () => {
     expect(normalizeHojLanguage('cpp')).toBe('C++')
     expect(normalizeHojLanguage('c')).toBe('C')
     expect(normalizeHojLanguage('java')).toBe('Java')

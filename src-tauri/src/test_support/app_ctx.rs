@@ -41,7 +41,7 @@ pub async fn context_with_hoj(base_url: &str) -> (AppContext, TempDir) {
 }
 
 /// 构造**双 OJ** 全真上下文：HOJ 与 Hydro 实例均已启用并注册（各指向给定地址），
-/// 活动为 HOJ。用于验证真实的 OJ 切换（评审 P2：单 OJ 上下文里「切到自己」
+/// 活动为 HOJ。用于验证真实的 OJ 切换（单 OJ 上下文里「切到自己」
 /// 无法证明注册表切换、配置持久化与缓存清理发生）。
 pub async fn context_with_two_ojs(hoj_url: &str, hydro_url: &str) -> (AppContext, TempDir) {
     let dir = TempDir::unique("hinina-test-ctx2");

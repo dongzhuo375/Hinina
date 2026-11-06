@@ -168,7 +168,7 @@ impl HttpClient {
     ///
     /// reqwest 默认读取 `HTTP_PROXY` 等环境变量——宿主开着代理时，契约测试
     /// 打向 loopback 的请求会被代理劫持，表现为约 45% 的 "error sending
-    /// request"（评审第三轮 flaky 根因，hyper trace 实证
+    /// request"（hyper trace 实证
     /// `proxy(http://127.0.0.1:10809/) intercepts`）。生产构造器保持读环境
     /// 代理的默认行为不变。
     #[cfg(test)]

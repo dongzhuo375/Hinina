@@ -90,9 +90,8 @@ pub async fn list_contest_submissions(
 }
 
 /// `list_contest_submissions` 的参数编排（提取自命令本体，供命令与测试共用）：
-/// 分页默认值与钳制、`only_mine` 强制、空白筛选过滤。
-/// 评审 #13 定稿：5 参未超 clippy 阈值，保持逐参（仅 7 参的 get_contest_rank
-/// 保留参数结构体）。
+/// 分页默认值与钳制、`only_mine` 强制、空白筛选过滤；
+/// 5 参保持逐参（仅 7 参的 get_contest_rank 保留参数结构体）。
 pub(crate) async fn list_contest_submissions_impl(
     ctx: &AppContext,
     contest_id: String,

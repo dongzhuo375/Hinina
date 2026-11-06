@@ -1,4 +1,4 @@
-// core/entity/config.rs 单元测试：默认值取值域 + 旧值归一（P55）
+// core/entity/config.rs 单元测试：默认值取值域 + 旧值归一
 
 use super::*;
 
@@ -142,7 +142,7 @@ fn normalize_fixes_legacy_json_from_disk() {
     assert_eq!(cfg.layout.split_ratio, 0.48);
 }
 
-// ── 写入路径校验与净化（M4）──
+// ── 写入路径校验与净化 ──
 
 #[test]
 fn validate_rejects_url_without_http_scheme() {

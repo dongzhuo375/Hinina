@@ -36,7 +36,7 @@ const props = defineProps<{
   isDirty: boolean
   /// 只读模式（提交详情页代码查看）：隐藏工具条、禁用编辑与提交快捷键
   readonly?: boolean
-  /// 加载锁定（切题加载期间，PR21-8）：Monaco 只读但**工具条保留** —— 与 readonly
+  /// 加载锁定（切题加载期间）：Monaco 只读但**工具条保留** —— 与 readonly
   /// 的「隐藏工具条」语义不同；随加载完成自动解锁，解锁时以 modelValue 回写自愈
   locked?: boolean
   /// 本题允许的提交语言（来自题目详情 languages）；空/缺省回退内置默认列表

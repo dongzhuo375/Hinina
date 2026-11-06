@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
-// ProblemSolveView 组合测试（M2 工作包 C）。
+// ProblemSolveView 组合测试。
 //
 // 锁定视图自己的编排职责（store 内部逻辑各有 spec，此处整店打桩）：
 // 1. 切题先落盘未保存代码（代码保留是工作区核心承诺）；
 // 2. 快速切题的迟到响应污染 store 后，提交守卫拒绝错配且可见（第二道防线）；
-// 3. 防错题提交：加载失败后旧题与新路由不配对时拒绝提交（PR21-8）；
-// 4. 配对正确时提交确实以正确的题目真实 ID 发生（正向断言，评审 #7）；
+// 3. 防错题提交：加载失败后旧题与新路由不配对时拒绝提交；
+// 4. 配对正确时提交确实以正确的题目真实 ID 发生（正向断言）；
 // 5. 离开解题页时在途改动落盘；
 // 6. 分栏比例调整（键盘）经 saveSplitRatio 落盘（落盘入口是语义化包装）。
 //
-// 异步等待一律用 vi.waitFor 等可观察条件（评审 #9）：视图编排链上每多一个
+// 异步等待一律用 vi.waitFor 等可观察条件：视图编排链上每多一个
 // await，固定次数的 Promise.resolve 轮询就会读到旧状态，测试变红或假阴性。
 import { defineComponent, h, reactive } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -75,7 +75,7 @@ vi.mock('@/stores/workspaceStore', () => ({ useWorkspaceStore: () => storeMocks.
 vi.mock('@/stores/submissionStore', () => ({
   useSubmissionStore: () => ({
     ...storeMocks.submission,
-    // 评审 #14：守卫经 action 上报阻断；实现直写 mock 的 error 字段，
+    // 守卫经 action 上报阻断；实现直写 mock 的 error 字段，
     // 使既有「error 含…」断言继续锁定展示面契约
     reportSubmitBlocked: (message: string) => {
       storeMocks.submission.error = message
@@ -109,7 +109,7 @@ vi.mock('@/components/common/ErrorMessage.vue', () => ({ default: { template: '<
 import ProblemSolveView from '@/views/ProblemSolveView.vue'
 import { configService } from '@/services/config.service'
 
-/// 登记挂载实例，afterEach 统一卸载（评审 #10）：失败用例不残留挂载实例，
+/// 登记挂载实例，afterEach 统一卸载：失败用例不残留挂载实例，
 /// 避免后续用例经全局 document 查询误触旧实例产生连带失败。
 const mounted: Mounted[] = []
 async function mount(): Promise<Mounted> {
@@ -139,7 +139,7 @@ describe('ProblemSolveView 加载与切题编排', () => {
     // 初始 A 题加载完成
     storeMocks.problem.openProblem.mockResolvedValueOnce(undefined)
     await mount()
-    storeMocks.problem.currentProblem = problemOf('p-A', 'A') // 评审 #8：状态准备不藏在断言里
+    storeMocks.problem.currentProblem = problemOf('p-A', 'A') // 状态准备不藏在断言里
 
     calls.length = 0
     storeMocks.workspace.isDirty = true
@@ -156,7 +156,7 @@ describe('ProblemSolveView 加载与切题编排', () => {
     expect(loadIdx).toBeGreaterThan(saveIdx) // 保存必须先于新题工作区加载，否则落盘写的是旧内容
   })
 
-  it('配对正确时提交确实发生，且以正确的题目真实 ID（正向断言，评审 #7）', async () => {
+  it('配对正确时提交确实发生，且以正确的题目真实 ID（正向断言）', async () => {
     storeMocks.problem.openProblem.mockImplementationOnce(async () => {
       storeMocks.problem.currentProblem = problemOf('p-A', 'A')
     })
@@ -178,7 +178,7 @@ describe('ProblemSolveView 加载与切题编排', () => {
     expect(storeMocks.submission.error).toBeNull()
   })
 
-  it('快速切题：迟到旧题响应污染 store 后，提交守卫拒绝错配并给出可见反馈（评审 P1）', async () => {
+  it('快速切题：迟到旧题响应污染 store 后，提交守卫拒绝错配并给出可见反馈', async () => {
     // store 现已内置请求序号过期保护（主防线，见 problemStore.spec.ts）；
     // 本测试故意让迟到 mock 复刻「未受保护的写入」，锁定视图层第二道防线的
     // 契约：失败路径错配与防御纵深下，拒绝必须可见而不是静默无响应。
@@ -236,7 +236,7 @@ describe('ProblemSolveView 加载与切题编排', () => {
     expect(storeMocks.problem.currentProblem?.id).toBe('p-A') // openProblem 失败保留旧题（store 语义）
     storeMocks.workspace.code = 'code-B'
     editorSubmit.handler?.()
-    // 旧题与新路由不配对：放行会把新题代码提交到旧题题号（PR21-8）。
+    // 旧题与新路由不配对：放行会把新题代码提交到旧题题号。
     // 此场景 openProblem 未成功，displayId 配对即不成立 —— 命中第一道守卫
     await vi.waitFor(() => {
       expect(storeMocks.submission.error).toContain('切换中')

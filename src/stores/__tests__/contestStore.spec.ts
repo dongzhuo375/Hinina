@@ -182,7 +182,7 @@ describe('clearSessionData — 登出清理', () => {
   })
 })
 
-describe('whenLoaded — 等待比赛数据就绪（P59 统一入口）', () => {
+describe('whenLoaded — 等待比赛数据就绪（统一入口）', () => {
   it('已有数据时立即返回，不发请求', async () => {
     const store = useContestStore()
     store.contest = contest
@@ -230,7 +230,7 @@ describe('whenLoaded — 等待比赛数据就绪（P59 统一入口）', () => 
   })
 })
 
-describe('会话代际（评审五轮：跨会话去重回归）', () => {
+describe('会话代际（跨会话去重回归）', () => {
   it('旧会话在途的加载不得被新会话复用（否则静默空数据）', async () => {
     const { clearDomainState } = await import('@/stores/session')
     const resolvers: Array<(v: { contest: Contest; problems: typeof problems }) => void> = []
@@ -264,7 +264,7 @@ describe('会话代际（评审五轮：跨会话去重回归）', () => {
   })
 })
 
-describe('loadBrief — OJ 切换的过期守卫（评审八轮）', () => {
+describe('loadBrief — OJ 切换的过期守卫', () => {
   it('切 OJ 后旧 OJ 的简报请求回写必须丢弃（否则 canEnter 按旧时间窗误进场）', async () => {
     let resolveBrief!: (v: unknown) => void
     contestService.loadContestBrief.mockImplementation(

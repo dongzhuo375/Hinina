@@ -189,7 +189,7 @@ fn rejects_ads_device_and_trailing_variant_paths() {
     let ws = "ws-safe4";
     r.save_file(ws, Path::new("legit.txt"), "ok").unwrap();
 
-    // ADS 删除绕过（评审实测复现的链路）
+    // ADS 删除绕过（实测复现的链路）
     assert!(r
         .delete_file(ws, Path::new("workspace.json::$DATA"))
         .is_err());

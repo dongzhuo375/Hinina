@@ -18,7 +18,7 @@ pub trait WorkspaceRepository: Send + Sync {
 
     /// 删除工作区中的单个文件（文件不存在时为无操作，幂等）。
     ///
-    /// 供旧代码文件清理使用（P62）：语言切换后旧扩展名文件不再落盘。
+    /// 供旧代码文件清理使用：语言切换后旧扩展名文件不再落盘。
     /// 元数据文件 `workspace.json` 的防护由 Service 层守卫负责，仓库层不区分。
     fn delete_file(&self, workspace_id: &str, path: &Path) -> AppResult<()>;
 

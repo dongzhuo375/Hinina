@@ -94,7 +94,7 @@ test.describe('题目与工作区', () => {
   })
 
   test('刷新后「当前工作区」仍在（不依赖页面重新 load_workspace）', async ({ page }) => {
-    // 评审四轮 #5：真实后端的 WorkspaceManager.current 存活于 Rust 进程，reload 不丢。
+    // 真实后端的 WorkspaceManager.current 存活于 Rust 进程，reload 不丢。
     // fake 若只持久化工作区内容而不持久化 current id，reload 后的
     // update_workspace_file 会错误地报「尚无已加载的工作区」。
     await loginAndEnterContest(page)

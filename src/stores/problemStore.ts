@@ -14,7 +14,7 @@ export const useProblemStore = defineStore('problem', {
     isLoading: false,
     error: null as string | null,
 
-    /// openProblem 的请求序号：快速切题时丢弃过期响应（评审 P1）。
+    /// openProblem 的请求序号：快速切题时丢弃过期响应。
     ///
     /// 迟到的旧题响应若无条件写入 currentProblem，会出现「路由是 B、
     /// 题面显示 A」的脏状态 —— 视图的提交配对校验只能挡住错误提交，
@@ -68,7 +68,7 @@ export const useProblemStore = defineStore('problem', {
     /** 打开指定题目详情并设为当前题目（带过期响应保护：只认最新一次请求） */
     async openProblem(contestId: string, problemId: string) {
       const token = ++this.openProblemSeq
-      // 会话代际：登出后旧会话的题面响应不得写回新会话（评审四轮 #1）
+      // 会话代际：登出后旧会话的题面响应不得写回新会话
       const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
@@ -99,7 +99,7 @@ export const useProblemStore = defineStore('problem', {
      */
     async loadLimits(contestId: string, displayIds: string[]) {
       if (displayIds.length === 0) return
-      // 会话代际：登出后旧会话的 limits 不得写回新会话（评审四轮 #1）
+      // 会话代际：登出后旧会话的 limits 不得写回新会话
       const sessionGen = getSessionGeneration()
       this.isLimitsLoading = true
       try {
@@ -122,7 +122,6 @@ export const useProblemStore = defineStore('problem', {
     async loadMyStatus(contestId: string, problemIds: string[]) {
       if (problemIds.length === 0) return
       // 会话代际：该请求每个轮询周期都会发起，登出后旧用户的 AC 状态不得显示给新用户
-      //（评审四轮 #1）
       const sessionGen = getSessionGeneration()
       this.isStatusLoading = true
       try {

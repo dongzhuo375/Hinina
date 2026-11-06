@@ -45,7 +45,7 @@ export class WorkspaceService {
   }
 
   /**
-   * 删除当前工作区中的文件（P62：旧代码文件清理）。
+   * 删除当前工作区中的文件（旧代码文件清理）。
    *
    * 后端守卫拒绝删除当前代码文件（activeFile）与 workspace.json。
    */

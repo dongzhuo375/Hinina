@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 
 /**
- * E2E 的 Tauri IPC fake（M3，施工方案 §6.3「受控 Tauri internals fake」）。
+ * E2E 的 Tauri IPC fake（受控 Tauri internals fake）。
  *
  * 原理：Tauri v2 的命令与事件全部经 `window.__TAURI_INTERNALS__.invoke` 单点
  * （listen 也是 `invoke('plugin:event|listen',…)`），因此用 addInitScript 注入一个
@@ -182,7 +182,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
 
   // 工作区按题目真实 ID（pid）隔离，内存态跨切题保留（对应 Rust 磁盘 + 内存双层）。
   // 新建工作区与真实后端一致：**无预置文件**（files 为空、activeFile null、language 空），
-  // 前端按默认语言派生 main.cpp、内容为空串（评审六轮：此前虚构了初始代码）。
+  // 前端按默认语言派生 main.cpp、内容为空串（此前虚构了初始代码）。
   const workspaces = new Map<string, Workspace>()
   let lastWorkspaceId: string | null = null
   let revisionCounter = 100
@@ -190,7 +190,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   let submissions: SessionSubmission[] = []
   let submitSeq = 9000
 
-  // ── 后端状态跨 reload 持久化（评审三轮 #4） ──────────────────────────
+  // ── 后端状态跨 reload 持久化 ──────────────────────────
   //
   // addInitScript 在每次文档导航/reload 都会重跑：若状态只挂在这个文档的
   // 内存里，reload 就会重建「后端」，与真实 Tauri（WebView reload 不重建
@@ -204,7 +204,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   ]
   // 已读集合**有状态且按 (contestId, uid) 隔离**：生产实现由 contest_cmd 按
   // 会话 uid 键控（无会话读空、写跳过）。单集合的 fake 会让跨账号/跨比赛/
-  // 无会话的回归假绿（评审 P2-3）。键形如 `1001:1`。
+  // 无会话的回归假绿。键形如 `1001:1`。
   let readAnnouncementIdsByScope: Record<string, string[]> = {}
 
   const BACKEND_STORAGE_KEY = '__e2e_backend_v1__'
@@ -216,9 +216,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     submitSeq: number
     config: AppConfig
     /** 当前工作区：真实后端的 WorkspaceManager 存活于 Rust 进程，WebView reload 不会丢失
-     *（评审四轮 #5——不持久化会让 reload 后的 update_workspace_file 错误地报「无工作区」） */
+     *（不持久化会让 reload 后的 update_workspace_file 错误地报「无工作区」） */
     lastWorkspaceId: string | null
-    /** 公告与已读集合：真实后端同样存活于 Rust 进程（评审 2026-11-03） */
+    /** 公告与已读集合：真实后端同样存活于 Rust 进程 */
     announcements: Announcement[]
     /** 按 `contestId:uid` 键控的已读集合（与生产隔离口径一致） */
     readAnnouncementIdsByScope: Record<string, string[]>
@@ -292,7 +292,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
    * 工作区变更类命令的目标 pid：必须已有工作区经 load_workspace 加载。
    * 真实后端的这些命令作用于「当前工作区」，没有工作区会被 Rust 侧拒绝——
    * fake 若以空 id 兜底建出幻影工作区，前端在真实后端会失败的调用就假绿了
-   * （评审二轮：本文件自身的 fail-loud 纪律同样适用于这条边界）。
+   * （本文件自身的 fail-loud 纪律同样适用于这条边界）。
    */
   function requireLoadedProblemId(): string {
     if (!lastWorkspaceId) throw { Workspace: 'fake: 尚无已加载的工作区（先 load_workspace）' }
@@ -319,7 +319,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     calls.push({ cmd, args: safe })
   }
   const failQueue = new Map<string, { variant: string; message: string }[]>()
-  /// 一次性延迟队列（毫秒）：按命令排队，先进先出（评审五轮 E2E 时序构造）
+  /// 一次性延迟队列（毫秒）：按命令排队，先进先出
   const delayQueue = new Map<string, number[]>()
   if (!restored && options.failLogin) {
     failQueue.set('login', [options.failLogin])
@@ -550,7 +550,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       }
       case 'get_contest_problem_limits': {
         // 真实命令按请求的 displayIds 拉取，**获取失败的题不出现在结果里**：
-        // 未知/未请求的 id 一律省略，不以默认值兜底（评审六轮）
+        // 未知/未请求的 id 一律省略，不以默认值兜底
         const requested = new Set((args?.displayIds as string[] | undefined) ?? [])
         return problems
           .filter((p) => requested.has(p.displayId) && problemDetails[p.displayId])
@@ -561,10 +561,10 @@ function fakeTauriBootstrap(options: FakeOptions): void {
           }))
       }
       case 'get_contest_rank': {
-        // 真实服务端契约（P57 核对点 3）：每页前置「当前用户 + 关注列表」的副本，
+        // 真实服务端契约：每页前置「当前用户 + 关注列表」的副本，
         // total 相应偏大——前端的跨页去重（dedupeRankRows / mergeRankPages）与
         // 参与人数修正（total − 本页重复数 − 未去重的我的前置副本）只有在这种
-        // 形态下才会被 E2E 观测到（评审 P2-4）。fake 逐页前置当前用户行。
+        // 形态下才会被 E2E 观测到。fake 逐页前置当前用户行。
         const page = Math.max(1, Number(args?.currentPage ?? 1))
         const size = Math.max(1, Number(args?.limit ?? 20))
         const start = (page - 1) * size
@@ -665,7 +665,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         // 登录态校验在 dispatch 中于命令发起时执行（先于 delayNext 的延迟）。
         // 参数一致性按真实契约校验：displayId 必须是已知展示题号、其真实 pid 必须与
         // problemId 一致、语言必须在该题允许列表内——否则前端把 pid 当 displayId 传
-        // 之类的回归在 E2E 里会假绿（评审六轮）
+        // 之类的回归在 E2E 里会假绿
         const displayId = String(args?.displayId)
         const problemId = String(args?.problemId)
         const language = String(args?.language)
@@ -749,7 +749,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       case 'list_contest_announcements':
         return {
           // 克隆而非活引用：与其它命令一致（pushAnnouncement 事后追加不得
-          // 影响已返回的页对象——评审中 3）
+          // 影响已返回的页对象）
           records: structuredClone(announcements),
           total: announcements.length,
           size: Math.max(1, Number(args?.limit ?? 20)),
@@ -813,7 +813,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
     // 登录态在**命令发起时**校验（先于延迟）：延迟响应模拟的是「请求已带凭证发出、
     // 服务端稍后才处理完」，而不是「延迟期间用户登出 → 请求被拒」。否则
     // delayNext('submit_code') 永远拿不到「旧会话迟到成功」的时序，跨会话回写
-    // 守卫的 E2E 会被假阴性掩盖（评审五轮）
+    // 守卫的 E2E 会被假阴性掩盖
     if (cmd === 'submit_code' && !currentUser) {
       throw { Auth: 'fake: 未登录或会话已失效（require_token）' }
     }
@@ -879,7 +879,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
 
   // @tauri-apps/api 2.11.x 的 _unlisten（event.js:43）在 invoke 之前先调
   // window.__TAURI_EVENT_PLUGIN_INTERNALS__.unregisterListener —— 缺了这个全局，
-  // 任何 unlisten 都会先抛 TypeError（评审 P2：当前用例未触发，第一个卸载/注销类
+  // 任何 unlisten 都会先抛 TypeError（当前用例未触发，第一个卸载/注销类
   // spec 必撞）。接到事件注册表的清理上（后续 invoke 的 unlisten 分支幂等）。
   ;(window as unknown as Record<string, unknown>).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener(event: string, eventId: number): void {

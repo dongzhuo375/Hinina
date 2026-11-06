@@ -78,7 +78,7 @@ test.describe('赛事公告', () => {
 
   test('公告与已读状态跨 reload 持久化（后端状态保真）', async ({ page }) => {
     // fake 的后端状态（sessionStorage）不随 WebView reload 重建，与真实 Tauri
-    // 的 Rust 进程一致：追加的公告仍在、已读集不回退（评审低 6 的专项回归）
+    // 的 Rust 进程一致：追加的公告仍在、已读集不回退（专项回归）
     await loginAndEnterContest(page)
     await page.getByRole('link', { name: /公告/ }).click()
     await page.waitForURL('**/contest/announcements')

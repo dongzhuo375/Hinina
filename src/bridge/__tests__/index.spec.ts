@@ -91,7 +91,7 @@ describe('ipcInvoke — 错误归一化（Rust AppError ↔ 前端跨端契约�
     expect(error.isAuthError).toBe(false)
   })
 
-  it('OjSwitchPersistFailed 载荷 → variant 保留（切换已生效的专用变体，评审二十五）', async () => {
+  it('OjSwitchPersistFailed 载荷 → variant 保留（切换已生效的专用变体）', async () => {
     const payload = appError('OjSwitchPersistFailed', 'OJ 切换已生效但保存配置失败: 磁盘满')
     invoke.mockRejectedValue(payload)
 

@@ -60,7 +60,7 @@ pub(crate) fn emit(level: &str, scope: &str, message: &str) {
         BudgetDecision::Allow => {}
         BudgetDecision::Drop { first: true } => {
             // 本窗口首次超限：只发那一行状态迁移告警，**消息本身照常丢弃**
-            //（缺 return 会把首条超预算消息泄漏进日志，评审抓出）
+            //（缺 return 会把首条超预算消息泄漏进日志）
             tracing::warn!(
                 target: "frontend",
                 budget_bytes = BUDGET_WINDOW_BYTES,

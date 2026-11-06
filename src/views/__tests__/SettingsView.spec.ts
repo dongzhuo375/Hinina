@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// SettingsView 维护区（重置/清理）关键流测试（M2 工作包 C，范围刻意收窄：
+// SettingsView 维护区（重置/清理）关键流测试（范围刻意收窄：
 // 只测「不可逆操作的如实反馈」—— 双空勾选拦截、日志未清掉的 warn 文案、
 // 重置后补拉失败的 warn 文案。其余区块的 mock 面过大，留待后续按需补充。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

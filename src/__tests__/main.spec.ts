@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// main.ts 组合根装配（M2 工作包 C，轻量）：六个装配副作用必须发生，
+// main.ts 组合根装配（轻量）：六个装配副作用必须发生，
 // 公告事件按 contestId 过滤（切比赛瞬间的在途事件不得刷新新比赛的公告）。
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 

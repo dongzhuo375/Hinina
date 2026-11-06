@@ -682,7 +682,7 @@ describe('全量快照模式 — 打星/女生队跨页过滤', () => {
   })
 })
 
-describe('会话代际（评审六轮：榜单去抖缓存）', () => {
+describe('会话代际（榜单去抖缓存）', () => {
   it('旧会话查询落定时不写 memo（新会话必须重新请求）', async () => {
     const { clearDomainState } = await import('@/stores/session')
     const store = useRankStore()

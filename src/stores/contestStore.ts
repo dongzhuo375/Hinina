@@ -13,9 +13,9 @@ import { getSessionGeneration } from '@/stores/sessionGeneration'
  */
 let loadInFlight: Promise<void> | null = null
 /// 在途登记的归属 token：`finally` 只清理自己登记的那次请求（会话切换后
-/// 新会话可能已发起新的加载，旧请求不得把它清掉 —— 评审四轮 #1）
+/// 新会话可能已发起新的加载，旧请求不得把它清掉）
 let loadInFlightToken: object | null = null
-/// 在途登记所属的会话代际：去重只复用**同代际**的在途请求（评审五轮）。
+/// 在途登记所属的会话代际：去重只复用**同代际**的在途请求。
 /// 旧会话的 promise 即使仍在途也不能复用——它的结果会被代际守卫丢弃，
 /// 复用会让新会话拿到一个不会写入任何数据的空结果（静默空数据）。
 let loadInFlightGeneration = -1
@@ -25,7 +25,7 @@ let loadInFlightGeneration = -1
 /// 简报跨登出保留（同 OJ 的匿名数据），因此不能用会话代际做守卫；但切 OJ
 /// 后旧 OJ 的简报必须作废——否则切换前发出的 brief 请求在 reset 之后 resolve
 /// 时会把旧 OJ 的比赛写回已重置状态，LoginView 的 canEnter 会按旧时间窗
-/// 误自动进赛场（评审八轮）。
+/// 误自动进赛场。
 let briefEpoch = 0
 
 export const useContestStore = defineStore('contest', {
@@ -52,7 +52,7 @@ export const useContestStore = defineStore('contest', {
 
   actions: {
     /**
-     * 等待比赛数据就绪（P59 统一入口）。
+     * 等待比赛数据就绪（统一入口）。
      *
      * 外壳 `ContestLayout` 与各子视图都可能发现「比赛还没加载」：
      * - 已有数据 → 立即返回；
@@ -74,8 +74,8 @@ export const useContestStore = defineStore('contest', {
      * 因此调用方必须自行 catch（错误信息已写入 `error`）。
      */
     async loadContest() {
-      // 会话代际：登出后旧会话的比赛数据不得写回新会话（评审四轮 #1）；
-      // 去重也只复用同代际的在途请求（评审五轮：跨会话复用会得到静默空结果）
+      // 会话代际：登出后旧会话的比赛数据不得写回新会话；
+      // 去重也只复用同代际的在途请求（跨会话复用会得到静默空结果）
       const sessionGen = getSessionGeneration()
       if (loadInFlight && loadInFlightGeneration === sessionGen) return loadInFlight
 
@@ -115,7 +115,7 @@ export const useContestStore = defineStore('contest', {
      */
     async loadBrief() {
       // 简报的过期守卫用「OJ 失效世代」而不是会话代际：简报跨登出保留，
-      // 但切 OJ 后旧请求的回写必须丢弃（评审八轮）
+      // 但切 OJ 后旧请求的回写必须丢弃
       const epoch = briefEpoch
       this.briefState = 'connecting'
       this.briefError = null
@@ -159,7 +159,7 @@ export const useContestStore = defineStore('contest', {
      *
      * **同时注销在途加载登记**：`loadInFlight` 是模块级变量，`$reset()` 之外的
      * 定向清理不会触及它；不注销的话新会话的去重会拿到旧会话的 promise
-     * （其结果被代际守卫丢弃 → 新会话静默空数据，评审五轮）。
+     * （其结果被代际守卫丢弃 → 新会话静默空数据）。
      */
     clearSessionData() {
       loadInFlight = null

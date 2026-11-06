@@ -48,7 +48,7 @@ fn message_truncates_by_chars_not_bytes() {
 fn message_strips_control_chars_but_keeps_stack_shape() {
     // \r 与其它 C0 控制字符替换为空格（防伪造行首 / 终端转义注入）
     assert_eq!(sanitize_message("a\rb\u{1}c"), "a b c");
-    // 换行与制表保留：栈帧可读（前端自 PR #82 起上报 Error.stack）
+    // 换行与制表保留：栈帧可读（前端上报 Error.stack）
     assert_eq!(sanitize_message("line1\nline2\tend"), "line1\nline2\tend");
 }
 
@@ -56,7 +56,7 @@ fn message_strips_control_chars_but_keeps_stack_shape() {
 ///
 /// **全部预算断言必须收进这一个用例**：预算静态量是进程级单例，而 Rust 测试
 /// 在同一二进制内**并行**执行 —— 两个用例各自 set→consume→snapshot 会互相
-/// 踩状态（实测约 4.7% 失败率的并行竞态，评审抓出）。用例内部的断言天然串行。
+/// 踩状态（实测约 4.7% 失败率的并行竞态）。用例内部的断言天然串行。
 #[test]
 fn budget_window_lifecycle() {
     // ── 新窗口：放行并按消息字节数记账 ──

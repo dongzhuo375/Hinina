@@ -16,7 +16,7 @@ beforeEach(() => {
   bridge.getContestRank.mockResolvedValue(emptyPage)
 })
 
-describe('DEFAULT_RANK_PAGE_SIZE — 榜单默认分页大小的唯一取值点（P71）', () => {
+describe('DEFAULT_RANK_PAGE_SIZE — 榜单默认分页大小的唯一取值点', () => {
   it('锁定 50', () => {
     // 后端 DEFAULT_RANK_LIMIT 与 RankQuery::default() 是「绕过前端直接调命令」的
     // 防御值，必须与这里同值。漂移没有任何运行时症状（前端恒显式传参），

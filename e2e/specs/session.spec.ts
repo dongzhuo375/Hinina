@@ -67,7 +67,7 @@ test.describe('会话失效', () => {
   })
 
   test('提交在途时失效：迟到的提交响应不得重建状态或重启轮询（端到端）', async ({ page }) => {
-    // 评审五轮 #2：跨会话守卫此前只有 store 层单测，这里用延迟注入构造
+    // 跨会话守卫此前只有 store 层单测，这里用延迟注入构造
     // 「submit_code 在途 → 会话失效 → 旧响应成功」的真实时序
     await loginAndEnterContest(page)
     await page.getByRole('button', { name: '打开题目 A' }).click()

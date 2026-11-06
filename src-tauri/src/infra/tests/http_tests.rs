@@ -247,7 +247,7 @@ fn raw_accepts_success_same_as_default() {
         );
     }
 }
-// ── 真实传输层契约（M2 工作包 B）：此前只测判定函数，重试/不重试/头透传
+// ── 真实传输层契约：此前只测判定函数，重试/不重试/头透传
 // 从未在真实 reqwest 栈上验证过。以下经 loopback 脚本 server 断言线上行为。──
 
 use crate::test_support::loopback::{LoopbackServer, ScriptedResponse};

@@ -63,7 +63,7 @@ onUnmounted(() => {
 })
 
 /// 外壳（ContestLayout）通常已发起 loadContest：`whenLoaded` 复用在途请求、
-/// 无人拉取时兜底发起（P59 统一入口）；失败原因已由 store 写入 error，
+/// 无人拉取时兜底发起（统一入口）；失败原因已由 store 写入 error，
 /// 模板展示 ErrorMessage 并提供重试
 async function ensureContest() {
   if (contest.value) return

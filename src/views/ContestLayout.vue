@@ -96,7 +96,7 @@ watch([phase, keyedSettings], ([value, keyed]) => {
 async function bootstrap(): Promise<void> {
   if (bareShell.value) return
   try {
-    // whenLoaded 复用在途请求（P59 统一入口），子视图先触发加载时也走同一条链路
+    // whenLoaded 复用在途请求（统一入口），子视图先触发加载时也走同一条链路
     await contestStore.whenLoaded()
     if (disposed) return
 

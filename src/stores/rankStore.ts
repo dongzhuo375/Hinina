@@ -45,7 +45,7 @@ function sleep(ms: number): Promise<void> {
 /// seq 是发起时的 loadSeq：出现更新的用户意图后，旧 memo/在途请求均不得再被复用
 let queryMemo: { key: string; at: number; seq: number } | null = null
 /// 在途合并记录代际与归属 token：跨会话不复用旧 promise，finally 只清自己的登记
-/// （评审六轮：与 contestStore 的在途去重同类问题）
+/// （与 contestStore 的在途去重同类问题）
 let queryInFlight: {
   key: string
   promise: Promise<void>
@@ -205,7 +205,7 @@ export const useRankStore = defineStore('rank', {
       // 轮询 refresh 绕过 dedup 直调本方法，与用户翻页并发时，后完成的旧请求会
       // 把榜单整体拉回旧页且不自愈 —— 过期响应一律丢弃（与 openProblemSeq 同款范式）
       const token = ++this.loadSeq
-      // 会话代际：登出后旧会话的榜单响应不得写回新会话（评审四轮 #1）
+      // 会话代际：登出后旧会话的榜单响应不得写回新会话
       const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
@@ -277,7 +277,7 @@ export const useRankStore = defineStore('rank', {
       // 普通分页与全量拉取共享 isLoading：进入全量模式同时作废旧普通请求，
       // 其迟到响应/finally 不得覆盖快照状态或提前结束全量加载
       this.loadSeq++
-      // 会话代际：登出后旧会话的全量快照不得写回新会话（评审四轮 #1）
+      // 会话代际：登出后旧会话的全量快照不得写回新会话
       const sessionGen = getSessionGeneration()
       this.fullFetchState = 'loading'
       this.isLoading = true

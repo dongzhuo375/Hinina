@@ -388,7 +388,7 @@ fn get_user_problem_status_preserves_auth_variant() {
     );
 }
 
-// ── OJSwitched：OJ 域缓存失效（键控不含 OJ 维度，切 OJ 防跨 OJ 撞号）──
+// ── OJSwitched：OJ 域缓存失效（缓存键自带 OJ 维度，跨 OJ 撞号在结构上不可能）──
 
 #[test]
 fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {

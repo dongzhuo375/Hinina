@@ -21,13 +21,12 @@ let syncTimer: ReturnType<typeof setTimeout> | null = null
 ///
 /// 后端 `revision` 是**全局单调计数器**（工作区每次内容改动 +1），且跨登出/切换
 /// 账号/切换 OJ 都继续递增（WorkspaceManager 存活于 AppContext，只有数据目录
-/// 变更需重启才重建）。因此该水位**不随会话清理归零**：归零会让旧会话的迟到
-/// 落盘事件重新获得「高水位特权」，把新会话恢复出的脏工作区误清为「已备份」
-/// （评审七轮）。测试隔离通过 `cancelPendingSync({ resetRevisionWatermarks: true })`。
+/// 变更需重启才重建），因此只需记一个标量：小于等于它的落盘事件一律视为重复或
+/// 过期，幂等跳过 —— 落盘事实只能被更新的修订号推进，不能被回退。
 ///
-/// 后端 `revision` 是**全局单调计数器**（工作区每次内容改动 +1），因此只需记一个
-/// 标量：小于等于它的落盘事件一律视为重复或过期，幂等跳过 —— 落盘事实只能被
-/// 更新的修订号推进，不能被回退。
+/// 该水位**不随会话清理归零**：归零会让旧会话的迟到落盘事件重新获得「高水位
+/// 特权」，把新会话恢复出的脏工作区误清为「已备份」。测试隔离通过
+/// `cancelPendingSync({ resetRevisionWatermarks: true })`。
 let lastPersistedRevision = 0
 
 /// 最近一次成功推送到后端内存的修订号（模块级副作用句柄，不进响应式系统）。
@@ -78,7 +77,7 @@ export const useWorkspaceStore = defineStore('workspace', {
     isDirty: false,
     /// 有改动尚未推送到后端内存（防抖窗口内）
     syncPending: false,
-    /// 工作区加载进行中（loadWorkspace 在途）：期间编辑器只读、输入拒收（PR21-8）
+    /// 工作区加载进行中（loadWorkspace 在途）：期间编辑器只读、输入拒收
     isLoadingWorkspace: false,
   }),
 
@@ -97,7 +96,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       // 否则加载结果会覆盖 store.code，随后防抖回调再把**旧内容**推给后端 ——
       // 「敲键 → 切视图 → 立刻切回」会因此静默丢掉最后一次编辑
       //
-      // 加载在途期间拒收一切输入（PR21-8）：慢加载窗口内编辑器仍显示旧题代码，
+      // 加载在途期间拒收一切输入：慢加载窗口内编辑器仍显示旧题代码，
       // 此时的敲键属于旧题上下文，随加载结果被覆盖是预期行为；但「保留用户输入」
       // 更坏 —— 会把旧题文本推到新工作区文件名下。正解是编辑器只读（CodeEditor
       // locked）+ store 拒收（updateCode / changeLanguage 守卫）双保险
@@ -108,7 +107,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       try {
         await this.flushPendingSync()
         // flush 期间已有更新的切题发起，或会话已被清理：本次加载作废 ——
-        // IPC 由更新的加载发起；清理后绝不发旧会话的 load_workspace（评审七轮）
+        // IPC 由更新的加载发起；清理后绝不发旧会话的 load_workspace
         if (gen !== loadGeneration || sessionGen !== getSessionGeneration()) return
 
         // 单飞：等前一次加载 IPC 落定再发起本次；轮到本 turn 时已非最新代际
@@ -125,14 +124,14 @@ export const useWorkspaceStore = defineStore('workspace', {
         // IPC 在途期间又有更新的切题：迟到结果作废，不覆盖 store 状态。
         // 结果经 turn 返回、此处一次性原子应用 —— 轮次内直接写 this.workspace
         // 会留下「workspace 已是新题、code 还是旧题」的失配对，后续加载失败时
-        // 无法自愈（PR21-8 评审二轮）
+        // 无法自愈）
         const ws = await turn
         if (gen !== loadGeneration || sessionGen !== getSessionGeneration() || !ws) return
 
         // 元数据语言解析在 language 为空（新建工作区恒如此，Rust 端
         // `language: String::new()`）时走 getDefaultLanguage —— 配置缓存冷时是
         // 真实 IPC。必须先于任何 store 写入完成：await 期间被新加载取代则整体
-        // 放弃，不留半套字段（apply 块因此真正原子，评审三轮）
+        // 放弃，不留半套字段（apply 块因此真正原子）
         const metaLanguage = ws.language
           ? normalizeHojLanguage(ws.language)
           : await configService.getDefaultLanguage()
@@ -171,11 +170,11 @@ export const useWorkspaceStore = defineStore('workspace', {
         this.isDirty = ws.isDirty
         this.syncPending = false
 
-        // 历史多文件工作区收敛（P62）：activeFile 已解析为权威源，
+        // 历史多文件工作区收敛：activeFile 已解析为权威源，
         // 其余代码文件都是过期残留，静默清理（失败仅记日志，下次加载重试）
         void this.purgeStaleCodeFiles()
 
-        // 仅成功路径解锁，且带代际守卫（评审三轮）：apply 块此后再无 await，
+        // 仅成功路径解锁，且带代际守卫：apply 块此后再无 await，
         // 守卫属防御性加固 —— 防未来引入其他 await 后过期加载提前解锁、
         // 击穿失败闩锁
         if (gen === loadGeneration) this.isLoadingWorkspace = false
@@ -195,7 +194,7 @@ export const useWorkspaceStore = defineStore('workspace', {
     },
 
     /**
-     * 清理 ≠ activeFile 的代码文件（单代码文件约束，P62）。
+     * 清理 ≠ activeFile 的代码文件（单代码文件约束）。
      *
      * 语言切换后编辑器内容已复制到新文件名，旧扩展名文件成为过期残留：
      * 不清理会一直被 `save()` 全量落盘。代码文件判定沿用
@@ -235,8 +234,7 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 顺序有意：**先把在途改动推进后端内存，再落盘** —— 反了会把旧内容写进磁盘。
      */
     async saveWorkspace() {
-      // 会话代际：旧会话的保存落定时不得清掉新会话的脏标记（评审五轮：
-      // 产生假的「已保存」）
+      // 会话代际：旧会话的保存落定时不得清掉新会话的脏标记（否则产生假的「已保存」）
       const sessionGen = getSessionGeneration()
       const pushed = await this.flushPendingSync()
       await workspaceService.saveWorkspace()
@@ -249,7 +247,7 @@ export const useWorkspaceStore = defineStore('workspace', {
 
     /** 更新编辑器内代码（标记脏状态 + 防抖推送到后端内存） */
     updateCode(code: string) {
-      // 加载在途时拒收（PR21-8）：Monaco 只读是第一道防线，此处兜住工具条
+      // 加载在途时拒收：Monaco 只读是第一道防线，此处兜住工具条
       // 清空/上传等绕过键盘的程序化路径 —— 加载结果即将整体替换 code，中途
       // 接受的输入必被覆盖，且旧题内容绝不能经防抖写进新工作区文件
       if (this.isLoadingWorkspace) {
@@ -289,12 +287,11 @@ export const useWorkspaceStore = defineStore('workspace', {
       if (!this.syncPending) return true
 
       // 文件名以 `activeFile` 为权威源：写入必须落到「代码加载自的那个文件」，
-      // 不能每次重新按语言派生 —— 那会让读写锚定到不同文件（P62）。
+      // 不能每次重新按语言派生 —— 那会让读写锚定到不同文件。
       // 回退仅用于 activeFile 尚未建立的极早时刻。
       const fileName = this.activeFile ?? sourceFileNameOf(this.language)
       const content = this.code
       // 会话代际：旧会话的在途推送落定时不得改写水位或新会话的脏/待推标记
-      //（评审五轮）
       const sessionGen = getSessionGeneration()
       try {
         const revision = await workspaceService.updateWorkspaceFile(fileName, content)
@@ -332,7 +329,7 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 事件在推送在途到达（`syncPending` 推迟清脏）的场景由 `flushPendingSync`
      * 在推送返回后按「水位 ≥ 推送」补判，避免指示器卡住。
      *
-     * **跨会话安全性（评审五轮核验）**：事件载荷不携带会话代际，因此这里不加
+     * **跨会话安全性**：事件载荷不携带会话代际，因此这里不加
      * 代际守卫（加了会把新会话自己的落盘事件也挡掉）。安全性由三条既有不变量
      * 共同保证，且**不依赖「工作区 id 跨会话不同」**——`find_or_create` 会恢复
      * 同一 contest+problem 的既有工作区（同一 id）：
@@ -369,7 +366,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       }
       this.syncPending = false
       // 修订水位默认**保留**：后端 revision 是进程级单调计数器，跨会话可比；
-      // 归零会让旧会话的迟到落盘事件误清新会话的脏标记（评审七轮）。
+      // 归零会让旧会话的迟到落盘事件误清新会话的脏标记。
       // 仅测试隔离/未来重建后端管理器时显式归零。
       if (options.resetRevisionWatermarks) {
         lastPersistedRevision = 0
@@ -390,7 +387,7 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 代码推送过去（后端 `update_file` 会一并把它记为当前文件并持久化）——
      * 判题端按后缀判语言，代码必须落在与语言一致的扩展名上。
      *
-     * 内容推送完成后**先落盘再静默清理**旧扩展名文件（P62 已闭合）：purge 删除的
+     * 内容推送完成后**先落盘再静默清理**旧扩展名文件：purge 删除的
      * 旧文件是磁盘上唯一的崩溃恢复副本，必须等新文件内容与元数据（active_file
      * = 新名，顺带修正 set_language 落盘的旧名 meta）确已落盘后才删 —— 否则
      * auto-save 间隔内（默认 30s，最长 300s 或可关闭）崩溃会丢代码。推送失败
@@ -400,7 +397,7 @@ export const useWorkspaceStore = defineStore('workspace', {
      */
     changeLanguage(lang: string) {
       if (this.language === lang) return
-      // 加载在途时拒收（PR21-8 同源）：此时切换语言会把旧题代码经 flush 推到
+      // 加载在途时拒收（同源约束）：此时切换语言会把旧题代码经 flush 推到
       // 新派生文件名下 —— 后端若已切到新工作区，就是跨工作区的内容错配
       if (this.isLoadingWorkspace) {
         log.debug('工作区加载中，忽略语言切换')

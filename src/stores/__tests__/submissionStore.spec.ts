@@ -63,7 +63,7 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
-describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () => {
+describe('submitCode + 评测轮询（createPoller 收敛轮询）', () => {
   it('提交成功后记录条目并启动轮询，终态后自动停止', async () => {
     vi.useFakeTimers()
     try {
@@ -195,7 +195,7 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
     }
   })
 
-  it('瞬时失败不中断轮询；恢复成功后清除残留错误（P69）', async () => {
+  it('瞬时失败不中断轮询；恢复成功后清除残留错误', async () => {
     vi.useFakeTimers()
     try {
       submissionService.submitCode.mockResolvedValue('s1')
@@ -210,7 +210,7 @@ describe('submitCode + 评测轮询（P54：createPoller 收敛轮询）', () =>
       expect(store.error).toBeNull()
 
       await vi.advanceTimersByTimeAsync(2_600)
-      // 成功路径必须清 error，否则失败红字永久残留（P69）
+      // 成功路径必须清 error，否则失败红字永久残留
       expect(store.error).toBeNull()
       expect(store.submissions[0].status).toBe('Accepted')
     } finally {
@@ -658,7 +658,7 @@ describe('失败原因可见性（CE 编译错误 / 轮询持续失败）', () =
   })
 })
 
-describe('会话代际（评审 P1：清理后才完成的提交请求）', () => {
+describe('会话代际（清理后才完成的提交请求）', () => {
   it('迟到的 submit_code 不得重建状态或重启轮询', async () => {
     const store = useSubmissionStore()
     let resolveSubmit!: (id: string) => void
@@ -686,7 +686,7 @@ describe('会话代际（评审 P1：清理后才完成的提交请求）', () =
   })
 })
 
-describe('会话代际（评审四轮：其余写入方）', () => {
+describe('会话代际（其余写入方）', () => {
   it('旧提交的 finally 不得清掉新会话的提交锁', async () => {
     const store = useSubmissionStore()
     const resolvers: Array<(id: string) => void> = []
@@ -717,7 +717,7 @@ describe('会话代际（评审四轮：其余写入方）', () => {
   })
 })
 
-describe('会话代际（评审五轮：轮询收尾）', () => {
+describe('会话代际（轮询收尾）', () => {
   it('旧会话的轮询返回不得清掉新会话的错误提示', async () => {
     const store = useSubmissionStore()
     store.submissions.push({ id: 's-old', problemId: 'p1', status: 'Pending', submittedAt: new Date().toISOString() })

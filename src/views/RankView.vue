@@ -93,7 +93,7 @@ const pageItems = computed(() => getPageItems(rankStore.current, rankStore.pages
  * 确保比赛数据就绪。
  *
  * 外壳 `ContestLayout` 也会拉取比赛，但子视图的 `onMounted` 先于父视图触发，
- * 直接进入榜单页时这里才是实际发起方；`whenLoaded` 复用在途请求（P59 统一入口），
+ * 直接进入榜单页时这里才是实际发起方；`whenLoaded` 复用在途请求（统一入口），
  * 失败原因已写入 contestStore.error，模板据此展示重试入口。
  */
 async function ensureContest(): Promise<void> {
