@@ -3,7 +3,7 @@
 ## 职责
 Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`、`ContestProvider`、`ProblemProvider`、`SubmissionProvider` 四个 trait，并以 `HydroFactory` 身份接入 `adapter::factories()`（OJ 身份 = `HydroAdapter::ID`，会话文件 `sessions/Hydro.json`）。
 
-> 与 `adapter/hoj` 的区别：HOJ 是 Hydro 的衍生版并自带 REST + JWT 层，两者是**两套协议**。本适配器走 Hydro 的**传统 Handler 路由 + `Accept: application/json`**（Hydro 没有统一 REST API；JSON-RPC `/d/:domainId/api/:op` 只注册了 user/users/domain/problem 几个查询，没有题目列表、记录查询与题目状态，故不采用）。
+> 与 `adapter/hoj` 的区别：HOJ（Hcode Online Judge）与 Hydro 无关联、自带 REST + JWT 层，两者是**两套协议**。本适配器走 Hydro 的**传统 Handler 路由 + `Accept: application/json`**（Hydro 没有统一 REST API；JSON-RPC `/d/:domainId/api/:op` 只注册了 user/users/domain/problem 几个查询，没有题目列表、记录查询与题目状态，故不采用）。
 
 ## 核心类型/函数
 - `HydroAdapter` — 封装 `Arc<HttpClient>` + `base_url` + `RwLock<Option<String>>`（会话 sid）+ `RwLock<Option<HydroUser>>`（身份缓存）+ `TtlCache<String, Vec<String>>`（比赛题目顺序缓存）。**不持有事件总线**：Hydro 没有 HOJ 的 `Refresh-Token` 轮换协议，sid 由服务端滑动续期且值不变，不存在「凭证轮换需回写磁盘」的场景（它只随 `AdapterDeps` 的形状调整，不消费 `event_bus` / `session_repo`）

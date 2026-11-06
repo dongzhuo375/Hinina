@@ -388,7 +388,7 @@ fn get_user_problem_status_preserves_auth_variant() {
     );
 }
 
-// ── OJSwitched：OJ 域缓存失效（缓存键自带 OJ 维度，跨 OJ 撞号在结构上不可能）──
+// ── OjSwitched：OJ 域缓存失效（缓存键自带 OJ 维度，跨 OJ 撞号在结构上不可能）──
 
 #[test]
 fn statement_cache_key_carries_oj_scope_so_cross_oj_never_hits() {
@@ -520,7 +520,7 @@ fn limits_disk_cache_key_carries_oj_scope() {
 /// `on_oj_switched()` 显式清理题面 / limits 缓存（内存段同步，磁盘段同步兜底）。
 ///
 /// 同步上下文（无 tokio runtime）走 `on_oj_switched` 的同步兜底分支 —— 返回即已清完。
-/// 旧实现靠订阅 `OJSwitched` + 延迟队列清理，正确性依赖事件投递时序。
+/// 旧实现靠订阅 `OjSwitched` + 延迟队列清理，正确性依赖事件投递时序。
 #[test]
 fn on_oj_switched_clears_problem_scoped_caches() {
     let dir = TempDir::named("hinina-test-problem-oj-switch");
@@ -637,7 +637,7 @@ fn clear_caches_empties_statement_and_limits_caches() {
 #[test]
 fn clear_caches_without_any_disk_cache_is_not_an_error() {
     // 从未缓存过（目录不存在）时清空必须正常返回：remove_all 会返回 NotFound，
-    // 不该被当成失败（与 OJSwitched 的存在性守卫同款）
+    // 不该被当成失败（与 OjSwitched 的存在性守卫同款）
     let (service, _calls, dir) = make_service("clear-caches-empty", Vec::new());
 
     assert!(

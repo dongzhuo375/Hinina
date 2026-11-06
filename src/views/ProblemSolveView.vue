@@ -45,10 +45,10 @@ let isLoadingPage = false
 /// 旧题题号下
 let loadedProblemDisplayId: string | null = null
 /// 同一次成功加载写入的题目真实 ID（`cp.problemId`）—— 提交前的第二道配对校验。
-/// openProblem 对迟到的旧题响应**没有过期防护**（store 无条件写入 currentProblem），
-/// 而视图的 loadToken 只能丢弃旧加载的后续编排、无法撤销已发生的 store 写入：
-/// 会出现「配对标记是 B、currentProblem 却被迟到的 A 响应改回 A」的脏状态，
-/// displayId 配对对此失明。用真实 ID 兜底。
+/// store 的 openProblem 已有请求序号过期保护（迟到旧题响应在 store 层被丢弃，
+/// 主防线）；视图仍记账本次成功加载的真实 ID 作防御纵深 —— loadToken 只能
+/// 丢弃旧加载的后续编排，一旦 store 层守卫被未来改动击穿，displayId 配对对
+/// 「配对标记是 B、currentProblem 却被改回 A」的脏状态失明。用真实 ID 兜底。
 let loadedProblemId: string | null = null
 
 async function ensureContestId(): Promise<string> {

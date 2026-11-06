@@ -1,6 +1,6 @@
 //! 全真 `AppContext` 测试构造器（仅 `cfg(test)`）。
 //!
-//! M2 起命令层测试不再复制等价逻辑：预写 `config.json`（HOJ 指向脚本 server）
+//! 命令层测试不再复制等价逻辑：预写 `config.json`（HOJ 指向脚本 server）
 //! 后走 `AppContext::init` 装配**完整真实栈**（真实配置/注册表/服务/事件总线，
 //! 网络指向 loopback），命令提取出的 `*_impl(&AppContext)` 直接在其上执行。
 

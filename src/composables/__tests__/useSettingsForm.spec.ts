@@ -188,7 +188,7 @@ vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSession
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ resetForOjSwitch: mocks.resetAuthForOjSwitch }),
 }))
-/// 路由级钥匙判据经 systemStore（2026-11-04 H3 收敛单一入口）：同样无 pinia，
+/// 路由级钥匙判据经 systemStore（收敛单一入口）：同样无 pinia，
 /// 打桩同 authStore 模块模式，判据复刻「launchFlags × 'Settings'」
 vi.mock('@/stores/systemStore', () => ({
   useSystemStore: () => ({

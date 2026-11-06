@@ -176,7 +176,7 @@ const purifier = createPurifier()
 /// 例如 `![alt](/api/public/img/xxx.png)`。此函数：
 /// 1. 用 marked 将 Markdown 转为 HTML，`$...$` / `$$...$$` 经 KaTeX 渲染为公式
 /// 2. 用 DOMPurify 在**唯一出口**统一消毒（marked 默认放行内联 HTML，而内容来自
-///    OJ 服务端且编辑者面较宽；出口消毒使所有 v-html 调用点自动受保护，见 P63）
+///    OJ 服务端且编辑者面较宽；出口消毒使所有 v-html 调用点自动受保护）
 /// 3. 消毒钩子里把以 `/` 开头的相对 `src`/`href` 改写为 `{baseUrl}` + 路径
 ///    （属性级：只碰真实元素，文本/代码块里的同形字面量原样保留）
 ///
@@ -214,7 +214,7 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
         // 唯一的安全特例是下方 FORBID_TAGS 的 <style>（mid-body 存活见该注释）
         ADD_TAGS: ['semantics', 'annotation'],
         ADD_ATTR: ['encoding'],
-        // <style> 显式禁（2026-11-05 实测）：DOMPurify html 档白名单**实际含 style**，
+        // <style> 显式禁（实测）：DOMPurify html 档白名单**实际含 style**，
         // mid-body（正文在前、样式块在后，题面天然形态）的 <style> 原样存活 —— 可
         // 全文档改写界面（伪造弹窗）并借属性选择器 + url(...) 外泄；置于片段开头时
         // 被解析器归入 <head> 而 WHOLE_DOCUMENT=false 只处理 body，静默丢弃只是位置
@@ -222,7 +222,7 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
         // CSS 文本一并丢弃、不回填正文。inline style **属性**不受影响（保真保留）。
         // <link>/<meta>/<base> 不在档内，mid-body 也被剥，无需另禁。
         //
-        // <form> 显式禁（2026-11-06 实测）：html 档白名单含 form/input/button，
+        // <form> 显式禁（实测）：html 档白名单含 form/input/button，
         // **连外域 action 属性都原样保留**——外链拦截器只拦锚点（closest('a')），
         // Rust 侧无 on_navigation，form 提交是消毒与导航两层都不覆盖的资源面：
         // 外域 action 被 CSP form-action 'self' 拦下（webview 替换洞已关），但

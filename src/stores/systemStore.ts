@@ -9,7 +9,7 @@ import type {
 } from '@/types/system'
 
 /**
- * 系统服务的前端消费入口（2026-11-04，分层约定统一为 View → Store → Service）。
+ * 系统服务的前端消费入口（分层约定统一为 View → Store → Service）。
  *
  * 历史：窗口控制与启动标志曾由视图/组件直接调用 `systemService`，而 service
  * 的注释允许这种直连——与「View → Store → Service」的分层规则矛盾。现在
@@ -35,7 +35,7 @@ export const useSystemStore = defineStore('system', {
      * 路由级钥匙判据（参数化 getter，返回判定函数）：本次启动是钥匙**且**
      * 目标路由是设置页。
      *
-     * 2026-11-04 H3：原先住在 `guards/keyed-settings-route`，判据单源但存在
+     * 原先住在 `guards/keyed-settings-route`，判据单源但存在
      * 「store 读进程级 / guard 读路由级」两条访问路径——现收敛到本 store 单一
      * 入口，guards/ 回归 sessionGuard/globalErrorGuard 两成员。依赖追踪发生在
      * 每次调用 `systemService.isKeyed()` 时（与 `isKeyed` 同理）。缺失/

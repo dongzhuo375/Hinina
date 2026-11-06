@@ -301,7 +301,7 @@ fn read_pointer_early(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) -> D
 ///
 /// **读取或解析失败时绝不返回默认值**：调用方会据此写回指针，拿默认值顶替会把
 /// 磁盘上的 `legacy_migrated: Some(true)` 等字段抹成 `None` —— 下次启动会重新
-    /// 执行一次性搬家，把用户已经删除的旧数据从临时目录拷回来。宁可让
+/// 执行一次性搬家，把用户已经删除的旧数据从临时目录拷回来。宁可让
 /// 设置页报错、让用户修复/删除指针文件，也不静默重置迁移状态。
 pub fn read_pointer_strict(default_dir: &Path) -> AppResult<DataDirPointer> {
     let path = pointer_path(default_dir);
@@ -642,7 +642,7 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
 /// 目录时把 `source` 强制为 `FallbackTemp`——回退决策的强告警由 `report_data_dir`
 /// 按 source 统一发一条 error。
 ///
-    /// 降级模式下**仍完整读指针并尊重用户选择**：客户端会把临时目录
+/// 降级模式下**仍完整读指针并尊重用户选择**：客户端会把临时目录
 /// 当作 `default_dir`（`get_data_dir` 同口径），设置页写入的位置指针就落在那里
 /// ——用户选的自定义目录与待迁移请求必须继续生效，否则「设置自定义目录 →
 /// 默认目录仍解析失败 → 指针被无视」会把人永久困在临时目录。
@@ -818,7 +818,7 @@ fn clear_migrate_from(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) {
 /// 诊断按**发生顺序**直接写进 `plan.warnings`，避免两个缓冲分批回放导致因果颠倒。
 /// **仅测试使用**（`#[cfg(test)]`）：生产启动路径走 `prepare_startup →
 /// migrate_into`（诊断直接进 `plan.warnings`）。保留本包装是让「纯搬运」用例
-    /// 不必构造启动夹具——与 `resolve` 的降测试专用同一口径。
+/// 不必构造启动夹具——与 `resolve` 的降测试专用同一口径。
 #[cfg(test)]
 pub fn migrate(from: &Path, to: &Path) -> MigrateOutcome {
     let mut diagnostics = Vec::new();
@@ -961,7 +961,7 @@ fn remove_any(path: &Path, diagnostics: &mut Vec<EarlyDiagnostic>) {
 
 /// 复制完成后删除源（失败只记诊断：数据已在新目录，残留旧件不影响正确性）。
 ///
-    /// 「旧副本残留」必须可查（跨盘迁移复制成功后删不掉旧目录）：
+/// 「旧副本残留」必须可查（跨盘迁移复制成功后删不掉旧目录）：
 /// 必须进启动期诊断缓冲，重放后排障者才知道旧目录里为什么还有一份数据。
 fn remove_source(from: &Path, diagnostics: &mut Vec<EarlyDiagnostic>) {
     if from.is_dir() {

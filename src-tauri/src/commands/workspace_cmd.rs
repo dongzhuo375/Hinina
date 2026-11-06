@@ -60,7 +60,7 @@ where
 /// auto-save 的期望动作（由配置与当前运行状态决定）。
 ///
 /// 抽成纯函数是为了让判据可被单测锁定 —— 它是「配置改动能否生效」的全部逻辑，
-    /// 而这条链路此前出过两次问题（tokio runtime 上下文缺失、一次性 static 标记）。
+/// 而这条链路此前出过两次问题（tokio runtime 上下文缺失、一次性 static 标记）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AutoSaveAction {
     /// 维持现状（已在按同一间隔运行，或本就该停）
@@ -210,7 +210,7 @@ pub async fn set_workspace_language(
     wm.set_language(&language)
 }
 
-    /// 删除当前工作区中的文件（旧代码文件清理）。
+/// 删除当前工作区中的文件（旧代码文件清理）。
 ///
 /// 前端 invoke 签名: `delete_workspace_file`({ fileName })
 ///

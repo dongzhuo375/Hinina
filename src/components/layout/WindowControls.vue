@@ -7,7 +7,7 @@
  */
 import { useSystemStore } from '@/stores/systemStore'
 
-// 分层：View → Store → Service → Bridge（2026-11-04 统一为严格口径）——
+// 分层：View → Store → Service → Bridge（统一为严格口径）——
 // 视图只调 store，窗口 API 由 bridge/window.bridge 封装（唯一接触
 // @tauri-apps/api 的地方）
 const systemStore = useSystemStore()

@@ -888,10 +888,7 @@ fn active_file_survives_reload() {
         Some("Main.java"),
         "重启后必须仍指向语言切换后的那个文件，而不是按后缀探测碰运气"
     );
-    assert!(
-        loaded.files.contains_key("main.cpp"),
-        "旧文件仍在"
-    );
+    assert!(loaded.files.contains_key("main.cpp"), "旧文件仍在");
 }
 
 /// 历史 workspace.json 没有 `activeFile` 字段：反序列化为 `None`，不得报错。

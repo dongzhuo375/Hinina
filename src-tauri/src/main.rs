@@ -48,7 +48,7 @@ use hinina_lib::plugin::{
 /// 插件通知的前端出口（组合根唯一的前端通知路径）。
 ///
 /// 原住在 `infra::plugin_notification` —— 那让它成为 infra 层**唯一的**框架
-/// （tauri）依赖，与「infra 传输无关」的红线相抵（分层审计 F2）。端口
+/// （tauri）依赖，与「infra 传输无关」的红线相抵。端口
 /// `NotificationOutput`（`plugin::execution_api`）本身是干净的，脏的只是
 /// 实现的位置：本类型只被 main.rs 的 `set_output` 使用，理应与前端事件桥
 /// 同住组合根。宿主级通知失败经 `plugin_diagnostics::failure` 走统一形状。

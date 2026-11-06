@@ -10,7 +10,7 @@ use crate::service::auth::SessionValidity;
 /// 前端 invoke 签名: `login`({ username, password })
 ///
 /// OJ 切换走显式 `switch_oj`（应用级状态），不再作为登录的副作用 ——
-/// 切 OJ 与登录是两个独立意图，混在一起会让 `OJSwitched` 事件发了也无人能观察。
+/// 切 OJ 与登录是两个独立意图，混在一起会让 `OjSwitched` 事件发了也无人能观察。
 #[tauri::command]
 pub async fn login(
     ctx: State<'_, AppContext>,

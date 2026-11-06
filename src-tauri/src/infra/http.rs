@@ -319,7 +319,7 @@ impl HttpClient {
                         }
                         StatusDecision::Retry => {
                             let delay = retry_delay(attempt);
-                            // 重试决策必须可归因（审计 F8）：3 秒级延迟静默吞掉，
+                            // 重试决策必须可归因：3 秒级延迟静默吞掉，
                             // 排障时只会看到「突然变慢」而不知道在重试
                             warn!(
                                 url = %url,
