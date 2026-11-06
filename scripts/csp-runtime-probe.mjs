@@ -7,11 +7,16 @@
 //
 // Assertions (single expectation source = tauri.conf.json itself, no second
 // policy copy):
-//   1. served CSP header keeps every configured directive and every
-//      configured source (superset compare, order-independent — tauri appends
-//      script-src hashes and rebuilds the header from a map);
-//   2. zero violations in a quiet session (proves IPC rides the fetch fast
-//      path; the postMessage fallback is silent);
+//   1. served CSP header matches every configured directive source-for-source
+//      (order-independent; the ONLY tolerated addition is sha256-* hashes on
+//      script-src — the one augmentation tauri 2.12.5 empirically performs.
+//      Anything else the header gains, including loosening sources like
+//      'unsafe-eval', fails the probe);
+//   2. an EXPLICIT invoke inside the zero-violation window succeeds and
+//      produces zero violations (startup IPC may complete before the probe
+//      attaches, so a quiet wait alone proves nothing; success + zero
+//      violations together prove IPC rides the fetch fast path — the
+//      postMessage fallback is silent);
 //   3. an external fetch IS blocked by connect-src (enforcement is live).
 //
 // Usage: node scripts/csp-runtime-probe.mjs [cdpPort=9223]
@@ -79,6 +84,10 @@ try {
     const [name, ...sources] = directive.split(/\s+/)
     served.set(name.toLowerCase(), sources)
   }
+  // 唯一容忍的增补：script-src 上的 sha256-* hash（tauri 2.12.5 实证的唯一
+  // 增补形态）。其余任何多出来的源（含上游追加以放宽为方向的 'unsafe-eval'
+  // 类）一律红——superset 检查会静默漏过这类放宽。
+  const allowedAddition = /^'sha256-[A-Za-z0-9+/=]+'$/
   for (const [name, sources] of expected) {
     const got = served.get(name)
     if (!got) {
@@ -89,9 +98,16 @@ try {
     for (const source of sources) {
       if (!gotSet.has(source)) failures.push(`served ${name} lost source ${source} (configured: ${sources.join(' ')})`)
     }
+    for (const extra of got) {
+      if (sources.includes(extra)) continue
+      if (name === 'script-src' && allowedAddition.test(extra)) continue
+      failures.push(`served ${name} gained unexpected source ${extra} (only script-src sha256-* hashes may be appended)`)
+    }
   }
 
-  // 2) zero-violation baseline in a quiet session
+  // 2) explicit IPC inside the window + zero violations. Startup IPC may
+  //    finish before the probe attaches, so a quiet wait alone would be a
+  //    vacuous assertion; the explicit invoke makes it deterministic.
   const baseline = await page.evaluate(async () => {
     window.__cspProbeViolations = []
     document.addEventListener(
@@ -99,10 +115,21 @@ try {
       (e) => window.__cspProbeViolations.push(`${e.effectiveDirective}<-${String(e.blockedURI).slice(0, 60)}`),
       true,
     )
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    return window.__cspProbeViolations
+    let ipc
+    try {
+      ipc = JSON.stringify(await window.__TAURI_INTERNALS__.invoke('launch_flags'))
+    } catch (error) {
+      ipc = `INVOKE_FAILED: ${String(error?.message ?? error).slice(0, 120)}`
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    return { ipc, violations: window.__cspProbeViolations }
   })
-  for (const violation of baseline) failures.push(`baseline violation (quiet session must be zero): ${violation}`)
+  if (typeof baseline.ipc !== 'string' || baseline.ipc.startsWith('INVOKE_FAILED')) {
+    failures.push(`explicit IPC inside the baseline window failed: ${baseline.ipc}`)
+  }
+  for (const violation of baseline.violations) {
+    failures.push(`baseline violation (explicit IPC ran; must be zero): ${violation}`)
+  }
 
   // 3) enforcement probe: external fetch must hit connect-src
   //    (CSP refuses before the network, so this fires even offline)
@@ -117,7 +144,7 @@ try {
     for (const failure of failures) console.error(`csp-probe: ${failure}`)
     process.exitCode = 1
   } else {
-    console.log(`csp-probe: OK（${expected.size} 条指令服务态保持配置源集；静默会话零违规；外域 fetch 被 connect-src 拦截）`)
+    console.log(`csp-probe: OK（${expected.size} 条指令服务态逐源一致（唯一增补=script-src sha256）；窗口内显式 IPC 成功且零违规；外域 fetch 被 connect-src 拦截）`)
   }
 } finally {
   await browser.close()

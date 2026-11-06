@@ -112,7 +112,8 @@ export function installGlobalErrorGuard(
     return `资源加载失败: <${name}> ${resourceSourceLabel(raw)}`
   }
 
-  /// 资源地址标签：同源 → 文件名；跨源 http(s) → host；data: → 协议+MIME；
+  /// 资源地址标签：同 host → 文件名（**只比 host 未比 scheme**——http/https
+  /// 同 host 亦入此分支，仅影响日志粒度、非安全边界）；跨源 http(s) → host；data: → 协议+MIME；
   /// blob: → `blob:uri`（与 cspSourceLabel 同款）；host 为空的 exotic 协议
   /// （file:/about: 等）→ 协议级标签（**不返回空串**——file:/blob: 的
   /// url.host 是空串，直接落 host 会产出「末尾为空」的日志行，违背 unknown
