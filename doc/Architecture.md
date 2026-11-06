@@ -24,7 +24,7 @@ Hinina/
 ├── scripts/
 │   ├── build-plugin-scaffold.mjs          # 离线构建插件 ES module（默认脚手架；传 entry/outfile 参数构建 sdk/examples/balloon 等示例）
 │   ├── check-csp-policy.mjs               # webview CSP 门禁（指令集与逐指令源对钉死策略 exact + devCsp ⊇ csp 超集；npm run check:csp-policy 与 ci.yml 共用，变异覆盖见 __tests__/）
-│   ├── csp-runtime-probe.mjs               # CSP 运行时探针（打包 exe 经 CDP 验证服务态策略 ⊇ 配置源集 + 静默会话零违规 + 外域拦截在场；期望源唯一取自 tauri.conf.json，夜间 integration 的 Windows build leg 跑）
+│   ├── csp-runtime-probe.mjs               # CSP 运行时探针（打包 exe 经 CDP 验证服务态逐源一致（唯一增补=script-src sha256）+ 窗口内显式 IPC 成功且零违规 + 外域拦截在场；期望源唯一取自 tauri.conf.json；夜间 integration 的 Windows build leg 跑——镜像钉 windows-2022，2025 的 WebView2 DevTools 口不工作）
 │   ├── check-release-versions.mjs         # 发布版本一致性门禁（五个文件六处版本值/标签/CHANGELOG 段落与真实日期；npm run release:check 与 release.yml validate/draft-release 共用）
 │   ├── check-save-gate.mjs                # 保存门禁源码检查（保存路径必须经事务回调，防新增绕队列直写入口；npm run check:save-gate 与 ci.yml 共用）
 │   └── __tests__/                         # scripts 门禁的 Vitest 套件（check-csp-policy / check-release-versions / check-save-gate：判定函数正例 + 变异负例 + CLI 夹具）

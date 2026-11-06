@@ -1,7 +1,7 @@
 # M3 夜间集成（doc/cicd/m3-integration.md）：三平台原生构建、并发压力重复、
 # Rust 覆盖率基线、浏览器 E2E。
 # 独立 workflow，不在 ci-required 分支保护链内（必需检查仅属 ci.yml）；
-# 阻塞口径：build(windows-latest，含 CSP 运行时探针) + stress-repeat + rust-coverage + e2e → integration-summary。
+# 阻塞口径：build(windows-2022 钉版含 CSP 运行时探针 + ubuntu/macos) + stress-repeat + rust-coverage + e2e → integration-summary。
 # macOS/Linux 为观测平台（施工方案 §6.2：不伪装成已支持平台）——continue-on-error 会把其
 # 失败吞成 job success，真实结果由各 build leg 自报进 Step Summary，阻塞判定不含观测平台。
 name: Integration
@@ -37,7 +37,13 @@ jobs:
           # 三平台统一 --no-bundle：只验原生编译，产物为主二进制 smoke artifact
           # （与 release 主线一致；NSIS 线路保留于 tauri.conf.json 的 bundle.targets，
           # 移除 --no-bundle 即恢复安装包）。
-          - os: windows-latest
+          # 钉 windows-2022 而非 windows-latest（=windows-2025-vs2026）：该镜像上
+          # WebView2 的 DevTools/自动化端口不工作（actions/runner-images#14738，
+          # closed not_planned；WebView2 Runtime 是 Evergreen、不由镜像固定，
+          # 上游回归见 WebView2Feedback#5415）——CSP 探针的 CDP 口在 2025 镜像
+          # 实证 ECONNREFUSED（run 42215126177），同链路在 2022 全绿。升级 Windows
+          # 镜像前须先复跑本探针。
+          - os: windows-2022
             bundleArgs: --no-bundle
             observability: false
             artifactName: binary-windows
@@ -107,11 +113,29 @@ jobs:
         run: |
           $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9223'
           $exe = Start-Process -FilePath "src-tauri/target/release/hinina.exe" -PassThru
+          $probeFailed = $false
           try {
             node scripts/csp-runtime-probe.mjs 9223
+            if ($LASTEXITCODE -ne 0) { $probeFailed = $true }
           } finally {
+            if ($probeFailed) {
+              # 失败诊断（#14738 类镜像问题的现场取证）：进程状态/退出码、panic
+              # 落盘、应用日志尾部、WebView2 Evergreen 版本、WebView2 进程清单
+              Write-Host "::group::CSP probe failure diagnostics"
+              Write-Host "exe HasExited=$($exe.HasExited) ExitCode=$($exe.ExitCode)"
+              foreach ($log in @("$env:TEMP\hinina-panic.log", "$env:LOCALAPPDATA\com.hinina.app\logs\hinina.log", "$env:APPDATA\com.hinina.app\logs\hinina.log")) {
+                if (Test-Path $log) { Write-Host "--- tail of $log ---"; Get-Content $log -Tail 20 }
+              }
+              foreach ($root in @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients', 'HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients')) {
+                $pv = (Get-ItemProperty -Path "$root\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}\pv" -ErrorAction SilentlyContinue).pv
+                if ($pv) { Write-Host "WebView2 runtime version ($root): $pv" }
+              }
+              Write-Host "msedgewebview2 processes: $((Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Measure-Object).Count)"
+              Write-Host "::endgroup::"
+            }
             Stop-Process -Id $exe.Id -Force -ErrorAction SilentlyContinue
           }
+          if ($probeFailed) { exit 1 }
       - name: Upload smoke artifact
         id: artifact_upload
         if: success()

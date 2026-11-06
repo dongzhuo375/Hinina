@@ -33,7 +33,7 @@ import { chromium } from '@playwright/test'
 
 const port = process.argv[2] ?? '9223'
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
-const CONNECT_TIMEOUT_MS = 60_000
+const CONNECT_TIMEOUT_MS = 180_000
 
 function configuredCsp() {
   const conf = JSON.parse(readFileSync(join(repoRoot, 'src-tauri', 'tauri.conf.json'), 'utf-8'))
@@ -72,7 +72,8 @@ try {
   }
   const failures = []
 
-  // 1) served header ⊇ configured sources, per directive
+  // 1) served header matches configured sources per directive; only sha256-*
+//    additions on script-src are tolerated (see header comment)
   const header = await page.evaluate(async () => {
     const response = await fetch(window.location.href, { mode: 'same-origin' })
     return response.headers.get('content-security-policy') ?? ''
