@@ -90,6 +90,14 @@ watch([phase, keyedSettings], ([value, keyed]) => {
   }
 }, { immediate: true })
 
+/// 首次加载失败（bootstrap 的 catch 提前返回）后，30s 轮询/重试按钮自愈成功时
+/// phase 一直保持 running —— 按阶段跃迁的监听不会再触发，公告轮询必须跟随
+/// 「比赛数据首次到达 / 换场」补启（ensureLive 内部的 liveFor 判据保证不重复启动，
+/// 跨场换数据时换到新 id 重启）。keyedSettings 的停止语义仍归上面的阶段监听。
+watch(() => contestStore.contest?.id, (id) => {
+  if (id) ensureLive()
+})
+
 /// 会话有效性已由路由守卫（meta.requiresAuth）保证；
 /// 外壳负责拉取一次比赛数据，TopBar / StatusBar 与各视图共享该状态。
 /// 最小壳（--settings 直落设置页）时跳过：不发起任何面向 OJ 的请求。

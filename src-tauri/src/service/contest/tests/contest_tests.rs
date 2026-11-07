@@ -641,8 +641,18 @@ fn open_rank_private_contest_backfills_registration_best_effort() {
     );
     assert_eq!(stub.last_access_credential(), Some("pw".to_string()));
 
-    // 成功记忆命中：第二次加载的兜底任务不重复请求
-    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("第二次加载应成功");
+    // 成功记忆命中：第二次加载的兜底任务不重复请求。
+    // **必须在同一 block_on 内等任务完成**：block_on 返回会关闭 runtime、
+    // 丢弃未跑完的 spawn 任务——不等的话「删掉成功记忆」的变异不会红
+    block_on(async {
+        service
+            .load_contest_with_problems("1011", Some("pw"))
+            .await
+            .expect("第二次加载应成功");
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+    });
     assert_eq!(
         stub.access_call_count(),
         1,
@@ -652,11 +662,28 @@ fn open_rank_private_contest_backfills_registration_best_effort() {
 
 #[test]
 fn best_effort_backfill_failure_does_not_break_loading() {
-    // 报名失败（密码错误）只留日志：查看侧不得被提交侧兜底挡住
+    // 报名失败（密码错误）只留日志：查看侧不得被提交侧兜底挡住。
+    // 同一 block_on 内等后台任务真正执行失败路径（provider 被调一次）——
+    // 否则 runtime 关闭会丢弃未跑完的任务，「失败路径被执行」只是结构推断
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
     stub.set_access_mode(AccessMode::WrongPassword);
-    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("报名失败不影响加载");
+    block_on(async {
+        service
+            .load_contest_with_problems("1011", Some("pw"))
+            .await
+            .expect("报名失败不影响加载");
+        let mut waited = 0;
+        while stub.access_call_count() < 1 && waited < 10_000 {
+            tokio::task::yield_now().await;
+            waited += 1;
+        }
+    });
+    assert_eq!(
+        stub.access_call_count(),
+        1,
+        "后台失败路径确实执行（provider 被调一次，错误按 debug 级留痕）"
+    );
 }
 
 #[test]

@@ -155,6 +155,15 @@ impl AccessAttemptMemo {
     }
 }
 
+/// 进入校验失败日志的级别：错误驱动路径是用户可见错误的来源（每次失败都该
+/// `warn`），后台兜底路径外层已有 `debug` 上下文且失败不进 UI——保留期内每
+/// 30s 轮询的重复失败若用 `warn` 会刷屏。
+#[derive(Clone, Copy, PartialEq)]
+enum FailureLogLevel {
+    Warn,
+    Debug,
+}
+
 /// 私有赛进入校验的独立执行体：调用 provider 的凭证进入能力
 /// （`ContestProvider::ensure_contest_access`），带进程内防重复尝试记忆。
 ///
@@ -171,6 +180,7 @@ async fn ensure_contest_access_core(
     oj_id: String,
     contest_id: String,
     password: Option<String>,
+    failure_log: FailureLogLevel,
 ) -> AppResult<()> {
     let key: AccessAttemptKey = (oj_id, contest_id.clone(), password.clone());
     // 纪元捕获：logout/login/reset/切OJ 若发生在途（见 access_epoch 字段文档），
@@ -227,15 +237,23 @@ async fn ensure_contest_access_core(
             );
         }
     }
-    result.map_err(|e| {
-        warn!(contest_id = contest_id, error = %e, "私有赛进入校验失败");
-        e.context("私有赛进入校验失败")
+    result.map_err(|e| match failure_log {
+        FailureLogLevel::Warn => {
+            warn!(contest_id = contest_id, error = %e, "私有赛进入校验失败");
+            e.context("私有赛进入校验失败")
+        }
+        // 后台兜底的失败不进 UI：debug 级留痕即可（外层 run_best_effort_backfill
+        // 还有上下文日志），避免 Network 类不记忆失败在每 30s 轮询刷 warn
+        FailureLogLevel::Debug => {
+            debug!(contest_id = contest_id, error = %e, "私有赛进入校验失败（后台兜底）");
+            e.context("私有赛进入校验失败")
+        }
     })
 }
 
 /// 提交侧兜底的**真后台**执行体：报名是尽力而为，成功/失败都只记日志
-///（真实失败已由 `ensure_contest_access_core` 内的 `warn!` 留痕，此处降为
-/// `debug!` 避免保留期内每 30s 轮询重复刷屏）——查看侧不受任何影响。
+///（失败按 `FailureLogLevel::Debug` 留痕——Network 类不记忆失败会在每 30s
+/// 轮询重试，`warn` 会刷屏）——查看侧不受任何影响。
 async fn run_best_effort_backfill(
     memo: Arc<Mutex<AccessAttemptMemo>>,
     epoch_counter: Arc<AtomicU64>,
@@ -251,6 +269,7 @@ async fn run_best_effort_backfill(
         oj_id,
         contest_id.clone(),
         password,
+        FailureLogLevel::Debug,
     )
     .await;
     match result {
@@ -634,7 +653,7 @@ impl ContestService {
     /// 请求；仅当题目列表失败且适配器判定属「需凭证进入」类
     /// （[`ContestProvider::is_credential_rejection`]——`Contest` 变体只是必要
     /// 条件，「比赛还未开始」等业务失败同样落在该变体，不得误触发）时才走
-    /// [`Self::ensure_private_contest_access`] 并重试一次。密码来自配置
+    /// [`ensure_contest_access_core`] 并重试一次。密码来自配置
     /// `oj.contest_password`（命令层传入），未配置/错误时报可操作的引导。
     ///
     /// **提交侧兜底**：题目拉取成功但未报名的选手（openRank 私有赛可见不可交
@@ -670,6 +689,7 @@ impl ContestService {
                     oj_id.clone(),
                     contest_id.to_string(),
                     password.map(str::to_string),
+                    FailureLogLevel::Warn,
                 )
                 .await?;
                 provider
