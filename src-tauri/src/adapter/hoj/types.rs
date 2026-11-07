@@ -159,6 +159,26 @@ pub struct ContestVO {
     pub oi_rank_score_type: Option<String>,
 }
 
+/// `GET /api/get-contest-access` 的 data（AccessVO）。
+///
+/// `access` 缺失按 false 处理（`#[serde(default)]`）：语义上「未知」不能当
+/// 「已放行」，否则未报名的私有赛会静默跳过报名。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessVO {
+    #[serde(default)]
+    pub access: bool,
+}
+
+/// `POST /api/register-contest` 请求体（私有赛报名）。
+///
+/// 密码为明文传输，与登录约定一致（服务端自行比对，见 `LoginRequest`）。
+#[derive(Debug, Clone, Serialize)]
+pub struct RegisterContestDTO {
+    pub cid: i64,
+    pub password: String,
+}
+
 /// 比赛题目列表条目（ContestProblemVO）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

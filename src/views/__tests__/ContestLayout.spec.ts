@@ -143,6 +143,45 @@ describe('contest exit lifecycle', () => {
     expect(mocks.replace).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
+
+  it('restarts announcement polling when a failed first load self-heals without a phase change', async () => {
+    // 首次加载失败：bootstrap 的 catch 提前返回、不调 ensureLive；phase 一直保持
+    // running，按阶段跃迁的监听不会再触发 —— 公告轮询必须跟随「比赛数据到达」
+    // 补启，否则「私有赛缺密码 → 设置页补填 → 30s 轮询自愈」后红点永远不会亮
+    mocks.loadConfiguredContest.mockRejectedValueOnce(new Error('私有赛需要比赛密码'))
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useContestStore()
+    store.brief = { ...schedule } // 简报已让 phase 为 running
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(mocks.startLive).not.toHaveBeenCalled() // 加载失败：未启动
+
+    // 自愈：contest 到达（phase 未变），公告轮询随之补启
+    store.contest = { ...schedule }
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledExactlyOnceWith('1', expect.any(Function))
+  })
+
+  it('stops polling and clears liveFor when contest data is cleared, so the same id can restart', async () => {
+    // OJ 切换/登出清空 contest 数据（既有缺口：只有阶段跃迁清 liveFor——
+    // 切换前后都是 running 时 liveFor 残留，新 OJ 的同 cid 会被挡住，
+    // 公告轮询停在旧 OJ 上）。watcher 必须在 id 清空时停轮询并忘掉 id
+    const store = await render()
+    expect(mocks.startLive).toHaveBeenCalledOnce()
+
+    store.contest = null // 模拟 OJ 切换清空（phase 仍 running，阶段监听不管）
+    await nextTick()
+    expect(mocks.stopLive).toHaveBeenCalled()
+
+    store.contest = { ...schedule } // 新 OJ 的同 cid 到达：重启而非被 liveFor 挡住
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('--settings 无会话最小壳', () => {

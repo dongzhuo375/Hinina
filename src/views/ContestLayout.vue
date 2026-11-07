@@ -90,6 +90,27 @@ watch([phase, keyedSettings], ([value, keyed]) => {
   }
 }, { immediate: true })
 
+/// 首次加载失败（bootstrap 的 catch 提前返回）后，30s 轮询/重试按钮自愈成功时
+/// phase 一直保持 running —— 按阶段跃迁的监听不会再触发，公告轮询必须跟随
+/// 「比赛数据首次到达 / 换场」补启（ensureLive 内部的 liveFor 判据保证不重复启动，
+/// 跨场换数据时换到新 id 重启）。keyedSettings 的停止语义仍归上面的阶段监听。
+watch(() => contestStore.contest?.id, (id) => {
+  // 新调用入口不绕过 bootstrap 的最小壳跳过语义：bareShell 下不启动。
+  // 注意 phase 跃迁监听在 bareShell + 保留数据下启动轮询是**既有契约**
+  //（spec「同一比赛 running→ended→running」锁定），本守卫只约束新入口。
+  if (bareShell.value) return
+  if (id) {
+    ensureLive()
+  } else {
+    // 数据被清（登出 / OJ 切换）：停轮询并清 liveFor —— 否则同 id 的下一场
+    // （OJ 切换后 cid 撞号是常态）会被 liveFor 挡住，公告轮询停在旧 OJ 上。
+    // stopLive 是本地清理不是 OJ 请求，最小壳下也安全（幂等，登出路径的
+    // session 清理也会调）
+    announcementStore.stopLive()
+    liveFor = null
+  }
+})
+
 /// 会话有效性已由路由守卫（meta.requiresAuth）保证；
 /// 外壳负责拉取一次比赛数据，TopBar / StatusBar 与各视图共享该状态。
 /// 最小壳（--settings 直落设置页）时跳过：不发起任何面向 OJ 的请求。

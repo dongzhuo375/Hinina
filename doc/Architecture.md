@@ -97,7 +97,7 @@ Hinina/
         │   ├── provider/
         │   │   ├── mod.rs
         │   │   ├── auth.rs               # AuthProvider trait
-        │   │   ├── contest.rs            # ContestProvider trait（+ list_contest_problems / get_contest_rank / list_announcements）
+        │   │   ├── contest.rs            # ContestProvider trait（+ get_contest / ensure_contest_access 私有赛凭证进入 / list_contest_problems / get_contest_rank / list_announcements）
         │   │   ├── problem.rs            # ProblemProvider trait（get_problem + get_user_problem_status）
         │   │   ├── submission.rs         # SubmissionProvider trait（submit 同时收 problem_id 与 display_id —— 各 OJ 认的不是同一个标识；+ list_contest_submissions / get_submission_detail / get_submission_cases）
         │   │   ├── oj_id.rs             # OjId newtype（OJ 身份 = 数据而非枚举；session_file() 显式会话文件名契约，id 与历史枚举 Debug 输出一致）
@@ -125,7 +125,7 @@ Hinina/
         │   │   └── tests/
         │   │       └── auth_tests.rs     # AuthService 单元测试（会话持久化/轮换回写/失效清理）
         │   ├── contest/
-        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存（TTL 来自配置）/比赛元信息缓存（内存+磁盘，固定 TTL 120s，题面总览页轮询请求减半）/比赛切换/get_rank（榜单不缓存）/list_problems（插件路径：只读题目列表，不选中比赛、不落缓存）/list_announcements（公告不缓存；按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`，首次拉取只建基线不发事件）+ 公告已读状态持久化（announcements_read/{cid}_{uid}.json，合并去重、损坏降级为空+warn）；`on_oj_switched()` 供 `switch_oj` 显式清 OJ 域缓存
+        │   │   ├── mod.rs                # ContestService：比赛获取/列表缓存（TTL 来自配置）/比赛元信息缓存（内存+磁盘，固定 TTL 120s，题面总览页轮询请求减半）/比赛切换/get_rank（榜单不缓存）/list_problems（插件路径：只读题目列表，不选中比赛、不落缓存）/list_announcements（公告不缓存；按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`，首次拉取只建基线不发事件）+ 公告已读状态持久化（announcements_read/{cid}_{uid}.json，合并去重、损坏降级为空+warn）+ 私有赛错误驱动进入（题目列表「需凭证类」失败经适配器 is_credential_rejection 判据才走凭证报名 + 配置密码时 tokio::spawn 后台报名兜底提交侧；尝试记忆成败皆记、失败项带 10min 保留期、纪元守卫在途写回（锁内复核），login/logout/reset/切OJ 清空）；`on_oj_switched()` 供 `switch_oj` 显式清 OJ 域缓存
         │   │   └── tests/
         │   │       └── contest_tests.rs  # ContestService 单元测试（错误变体穿透 + TTL 缓存语义：命中零请求/过期重取/refresh 强制/失败不留 stale + 元信息缓存：命中跳过 get_contest 而题目列表仍实时/磁盘跨实例命中/按比赛隔离/refresh 清两层/错误不入缓存 + 公告已读读写与损坏降级 + 新公告检测：首次不发/新 ID 发一次/重复不发/基线按比赛隔离/失败保留基线）
         │   ├── problem/
@@ -283,9 +283,9 @@ Hinina/
             ├── app_cmd.rs                # launch_flags（**零状态薄转发** → infra/launch_args：--settings 管理方钥匙的线上出口）/ open_external（http(s) 外链转交系统默认浏览器——scheme 白名单在命令守卫，WebView 永不导航离开应用；经 Rust-only 注册的 tauri-plugin-opener）
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
-            ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj）/ logout（编排：清会话 + 清用户域缓存）/ get_session / validate_session（三态）
+            ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj；成功后清私有赛进入尝试记忆——报名状态是账号级的）/ logout（编排：清会话 + 清用户域缓存 + 清私有赛进入尝试记忆）/ get_session / validate_session（三态）
             ├── oj_cmd.rs                 # switch_oj（显式切换，**整段持配置写事务锁**：校验已注册且在启用实例列表 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 oj.active → 发布 OjSwitched；并发切换串行，不会 Registry/内存/磁盘分叉）
-            ├── contest_cmd.rs            # list_contests / load_configured_contest（读 oj.contest_ref，不透明字符串引用）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
+            ├── contest_cmd.rs            # list_contests / load_configured_contest（读 oj.contest_ref，不透明字符串引用；并以 oj.contestPassword 作为私有赛进入凭证传入）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
             ├── problem_cmd.rs            # get_problem / get_user_problem_status / get_contest_problem_limits
             ├── submission_cmd.rs         # submit_code / get_judgement / list_contest_submissions（onlyMine 后端恒 true）/ get_submission_detail / get_submission_cases
             ├── workspace_cmd.rs          # load_workspace / save_workspace / update_workspace_file / set_workspace_language / delete_workspace_file
