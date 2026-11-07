@@ -1,4 +1,4 @@
-// `contest_cmd` 提取实现的测试（M2 工作包 A）。
+// `contest_cmd` 提取实现的测试。
 //
 // session_uid 此前只有「测试文件内复制的等价函数」锁定（mod_tests.rs 旧版），
 // 现在直接调用生产函数；公告已读的无会话分支与 rank/公告分页钳制经 loopback

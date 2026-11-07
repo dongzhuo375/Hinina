@@ -659,7 +659,7 @@ fn clear_user_caches_empties_terminal_caches() {
 
 /// `on_oj_switched()` 显式清用户域缓存（与登出同一语义：换 OJ 即换用户上下文）。
 ///
-/// 旧实现靠订阅 `OJSwitched` 事件清理，正确性依赖事件投递时序；现在由
+/// 旧实现靠订阅 `OjSwitched` 事件清理，正确性依赖事件投递时序；现在由
 /// `switch_oj` 命令显式调用，返回即已清完。
 #[test]
 fn on_oj_switched_clears_user_scoped_caches() {

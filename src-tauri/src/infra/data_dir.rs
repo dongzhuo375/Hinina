@@ -243,7 +243,7 @@ fn load_pointer(default_dir: &Path) -> Result<DataDirPointer, PointerLoadError> 
 ///
 /// 但**读取失败不能一律当「没指针」**：只有 `NotFound` 是正常的「未指定」；
 /// 权限拒绝、非 UTF-8、其他 I/O 错误都是异常——静默回退默认目录会让用户的
-/// 自定义目录无声失效且无从排障（评审 P2-1）。非 NotFound 打 warn 并带路径与
+/// 自定义目录无声失效且无从排障。非 NotFound 打 warn 并带路径与
 /// 原始错误。
 pub fn read_pointer(default_dir: &Path) -> DataDirPointer {
     let path = pointer_path(default_dir);
@@ -274,7 +274,7 @@ fn read_pointer_early(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) -> D
         Err(PointerLoadError::NotFound) => DataDirPointer::default(),
         Err(PointerLoadError::Read(e)) => {
             // 非 NotFound（权限拒绝 / 非 UTF-8 / 其他 I/O 错误）必须可查：
-            // 静默回退默认目录会让自定义目录无声失效（评审 P2-1）
+            // 静默回退默认目录会让自定义目录无声失效
             early.push(diag(
                 EarlyLevel::Warn,
                 format!(
@@ -301,7 +301,7 @@ fn read_pointer_early(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) -> D
 ///
 /// **读取或解析失败时绝不返回默认值**：调用方会据此写回指针，拿默认值顶替会把
 /// 磁盘上的 `legacy_migrated: Some(true)` 等字段抹成 `None` —— 下次启动会重新
-/// 执行一次性搬家，把用户已经删除的旧数据从临时目录拷回来（评审）。宁可让
+/// 执行一次性搬家，把用户已经删除的旧数据从临时目录拷回来。宁可让
 /// 设置页报错、让用户修复/删除指针文件，也不静默重置迁移状态。
 pub fn read_pointer_strict(default_dir: &Path) -> AppResult<DataDirPointer> {
     let path = pointer_path(default_dir);
@@ -637,12 +637,12 @@ pub fn prepare_startup(default_dir: &Path, legacy: &Path) -> (DataDirPlan, Migra
 ///
 /// `app_local_data_dir()` 失败（策略锁定 / 环境变量缺失）时，组合根只能拿临时
 /// 目录顶替——若按普通路径解析，临时目录「可用」会让 `source` 变成 `Default`，
-/// `report_data_dir` 只记 Info，**丢掉「临时数据随时可能被清理」的强告警**
-/// （评审 P2-2）。这里把失败原因记入 warnings（Warn 级原因），并在无可用自定义
+/// `report_data_dir` 只记 Info，**丢掉「临时数据随时可能被清理」的强告警**。
+/// 这里把失败原因记入 warnings（Warn 级原因），并在无可用自定义
 /// 目录时把 `source` 强制为 `FallbackTemp`——回退决策的强告警由 `report_data_dir`
 /// 按 source 统一发一条 error。
 ///
-/// 降级模式下**仍完整读指针并尊重用户选择**（评审 P2-1）：客户端会把临时目录
+/// 降级模式下**仍完整读指针并尊重用户选择**：客户端会把临时目录
 /// 当作 `default_dir`（`get_data_dir` 同口径），设置页写入的位置指针就落在那里
 /// ——用户选的自定义目录与待迁移请求必须继续生效，否则「设置自定义目录 →
 /// 默认目录仍解析失败 → 指针被无视」会把人永久困在临时目录。
@@ -754,7 +754,7 @@ fn update_pointer(
     early: &mut Vec<EarlyDiagnostic>,
     mutate: impl FnOnce(&mut DataDirPointer),
 ) {
-    // 再读（读-改-写必须基于磁盘最新值），但按错误种类处理（评审 P2-2）：
+    // 再读（读-改-写必须基于磁盘最新值），按错误种类处理：
     // - NotFound：无文件 → 默认指针是安全基线；
     // - 解析失败：首读已把诊断写进缓冲（同一启动内指针只由我们写，文件未变），
     //   此处不重复上报；按默认指针继续写回等同「修复损坏的指针」；
@@ -818,8 +818,7 @@ fn clear_migrate_from(default_dir: &Path, early: &mut Vec<EarlyDiagnostic>) {
 /// 诊断按**发生顺序**直接写进 `plan.warnings`，避免两个缓冲分批回放导致因果颠倒。
 /// **仅测试使用**（`#[cfg(test)]`）：生产启动路径走 `prepare_startup →
 /// migrate_into`（诊断直接进 `plan.warnings`）。保留本包装是让「纯搬运」用例
-/// 不必构造启动夹具——与 `resolve` 的降测试专用同一口径，避免下一轮死代码
-/// 审计再把它翻出来。
+/// 不必构造启动夹具——与 `resolve` 的降测试专用同一口径。
 #[cfg(test)]
 pub fn migrate(from: &Path, to: &Path) -> MigrateOutcome {
     let mut diagnostics = Vec::new();
@@ -962,7 +961,7 @@ fn remove_any(path: &Path, diagnostics: &mut Vec<EarlyDiagnostic>) {
 
 /// 复制完成后删除源（失败只记诊断：数据已在新目录，残留旧件不影响正确性）。
 ///
-/// 「旧副本残留」正是评审点名的场景（跨盘迁移复制成功后删不掉旧目录）：
+/// 「旧副本残留」必须可查（跨盘迁移复制成功后删不掉旧目录）：
 /// 必须进启动期诊断缓冲，重放后排障者才知道旧目录里为什么还有一份数据。
 fn remove_source(from: &Path, diagnostics: &mut Vec<EarlyDiagnostic>) {
     if from.is_dir() {

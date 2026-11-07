@@ -589,7 +589,7 @@ impl WorkspaceManager {
             })
     }
 
-    /// 删除当前工作区中的文件（P62：按文件删除能力，供旧代码文件清理使用）。
+    /// 删除当前工作区中的文件（供旧代码文件清理使用）。
     ///
     /// 守卫（比较一律经 [`guard_equivalent`] 归一 —— Windows 把大小写变体与
     /// 尾随点/空格解析到同一文件，精确比较会被 "Workspace.json" / "MAIN.JAVA"
@@ -654,7 +654,7 @@ impl WorkspaceManager {
             .clone()
     }
 
-    /// 按 `contest_id` + `problem_id` 查找或创建工作区（修复 P36）。
+    /// 按 `contest_id` + `problem_id` 查找或创建工作区。
     ///
     /// 扫描所有已有工作区的元数据，匹配 `contest_id` 和 `problem_id`：
     /// - 命中 → 加载已有工作区（恢复之前的代码）

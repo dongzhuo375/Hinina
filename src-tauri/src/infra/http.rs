@@ -168,7 +168,7 @@ impl HttpClient {
     ///
     /// reqwest 默认读取 `HTTP_PROXY` 等环境变量——宿主开着代理时，契约测试
     /// 打向 loopback 的请求会被代理劫持，表现为约 45% 的 "error sending
-    /// request"（评审第三轮 flaky 根因，hyper trace 实证
+    /// request"（hyper trace 实证
     /// `proxy(http://127.0.0.1:10809/) intercepts`）。生产构造器保持读环境
     /// 代理的默认行为不变。
     #[cfg(test)]
@@ -319,7 +319,7 @@ impl HttpClient {
                         }
                         StatusDecision::Retry => {
                             let delay = retry_delay(attempt);
-                            // 重试决策必须可归因（审计 F8）：3 秒级延迟静默吞掉，
+                            // 重试决策必须可归因：3 秒级延迟静默吞掉，
                             // 排障时只会看到「突然变慢」而不知道在重试
                             warn!(
                                 url = %url,

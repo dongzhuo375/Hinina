@@ -135,7 +135,7 @@ const HOJ_NAME_BY_LEGACY_ID: Record<string, string> = {
 /**
  * 把任意历史值归一为 HOJ 显示名。
  *
- * - 旧 Monaco id（'cpp' 等，P55 时代的工作区元数据/配置）→ 对应显示名；
+ * - 旧 Monaco id（'cpp' 等旧版数据里的工作区元数据/配置）→ 对应显示名；
  * - 已是显示名或其它非空值（"Go"/"Rust"/"C++17"…）→ 原样保留（OJ 可能提供
  *   映射表之外的语言，不得强行归到 C++）；
  * - 空/缺失 → 默认 "C++"。

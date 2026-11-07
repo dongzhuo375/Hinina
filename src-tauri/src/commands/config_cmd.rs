@@ -228,8 +228,7 @@ pub(crate) fn apply_config_update(
 /// `apply_config_update` 的真实实现；`before_validate`/`sync` 只供测试注入。
 ///
 /// **整个「读最新活 → 合并/锁定 → 固定 active → 最终校验 → 整体替换 → 同步
-/// auto-save」都在 `ConfigService` 的写事务锁内完成**（
-/// 三十六 P2）：同步若在锁外，U1 保存 `autoSave=false` 与 U2 保存 `true`
+/// auto-save」都在 `ConfigService` 的写事务锁内完成**：同步若在锁外，U1 保存 `autoSave=false` 与 U2 保存 `true`
 /// 可以交错成「磁盘开启、管理器停止」（或反向）；把同步纳入同一串行域后，
 /// 最后一次写入与它触发的启停严格同序。
 pub(crate) fn apply_config_update_inner(

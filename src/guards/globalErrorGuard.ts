@@ -183,7 +183,7 @@ export function installGlobalErrorGuard(
 }
 
 /// 错误归一：**IpcError 先于 Error 判定**（IpcError extends Error，只按
-/// instanceof Error 走会丢失 `ipc:{cmd}` 前缀 —— 归一化曾是死代码，评审抓出）
+/// instanceof Error 走会丢失 `ipc:{cmd}` 前缀 —— 归一化曾是死代码）
 /// → message + 截断后的 stack（Rust 端为保留换行/制表所做的处理因此真正生效）；
 /// 空/null → 占位；其余 String 化。统一按**码点**截断到与 Rust 端一致的上限
 /// （Rust 侧还会再兜底一次）。
@@ -209,7 +209,7 @@ function normalize(error: unknown, detail?: string): string {
   const suffix = detail ? ` (${detail})` : ''
   // -1 为省略号预留：truncateByChars 截断时会追加一个字符，不预留则总长
   // 变成 2001，Rust 端再截一次会把后缀末字符切掉并追加第二个省略号
-  //（长栈错误 + 环节后缀必然命中，评审复现 len=2001）
+  //（长栈错误 + 环节后缀必然命中，实测 len=2001）
   const room = MESSAGE_MAX_CHARS - suffix.length - 1
   const body = truncateByChars(message, room)
   return `${body}${suffix}`

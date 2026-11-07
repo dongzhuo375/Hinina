@@ -1,4 +1,4 @@
-// core/entity/submission.rs 单元测试：终态判据（三处对齐的权威表）
+// core/entity/submission.rs 单元测试：终态判据（四处对齐的权威表）
 
 use super::*;
 
@@ -37,7 +37,7 @@ fn is_terminal_full_table() {
         assert_eq!(
             status.is_terminal(),
             expected,
-            "{:?} 的终态判据与预期不符（三处判据：core entity / HOJ adapter / 前端 utils）",
+            "{:?} 的终态判据与预期不符（四处判据：core entity / HOJ adapter / Hydro adapter / 前端 utils）",
             status
         );
     }

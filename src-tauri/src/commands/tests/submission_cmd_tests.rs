@@ -1,4 +1,4 @@
-// `list_contest_submissions` 提取实现的契约测试（M2 工作包 A）。
+// `list_contest_submissions` 提取实现的契约测试。
 //
 // 核心锁定点：**`only_mine=true` 由后端强制**（产品决策「提交记录只显示本人」，
 // 前端不可绕过）与分页默认值/钳制。此前这两条只存在于测试文件内复制的

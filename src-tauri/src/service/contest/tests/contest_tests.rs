@@ -72,7 +72,7 @@ struct StubContestProvider {
     /// `list_announcements` 返回的公告集合。
     ///
     /// 可变是为了测试「新公告检测」：同一场比赛连续拉取两次、第二次多一条公告，
-    /// 服务必须只在那一次发布 `AnnouncementsPublished`。
+    /// 服务必须只在那一次发布 `CoreEvent::AnnouncementChanged`。
     announcements: RwLock<Vec<Announcement>>,
 }
 

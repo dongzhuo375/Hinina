@@ -5,15 +5,15 @@ use crate::core::context::AppContext;
 use crate::core::entity::workspace::Workspace;
 use crate::core::error::{AppError, AppResult};
 
-/// 加载或创建工作区（修复 P36：find_or_create）。
+/// 加载或创建工作区（`find_or_create`）。
 ///
 /// 前端 invoke 签名: `load_workspace`({ contestId, problemId })
 ///
 /// 优先查找已有工作区（按 contest_id + problem_id 匹配），
 /// 找到则恢复之前保存的代码，否则创建新工作区。
 ///
-/// 加载前按当前配置同步 auto-save 状态（修复 P39：在 Tauri 的 tokio runtime 上运行；
-/// 修复 P48：不再用一次性 static 标记，配置改动可生效）。
+/// 加载前按当前配置同步 auto-save 状态（在 Tauri 的 tokio runtime 上运行；
+/// 不用一次性 static 标记，配置改动可生效）。
 #[tauri::command]
 pub async fn load_workspace(
     ctx: State<'_, AppContext>,
@@ -60,7 +60,7 @@ where
 /// auto-save 的期望动作（由配置与当前运行状态决定）。
 ///
 /// 抽成纯函数是为了让判据可被单测锁定 —— 它是「配置改动能否生效」的全部逻辑，
-/// 而这条链路此前出过两次问题（P39 的 runtime 上下文、P48 的一次性 static 标记）。
+/// 而这条链路此前出过两次问题（tokio runtime 上下文缺失、一次性 static 标记）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AutoSaveAction {
     /// 维持现状（已在按同一间隔运行，或本就该停）
@@ -210,7 +210,7 @@ pub async fn set_workspace_language(
     wm.set_language(&language)
 }
 
-/// 删除当前工作区中的文件（P62：旧代码文件清理）。
+/// 删除当前工作区中的文件（旧代码文件清理）。
 ///
 /// 前端 invoke 签名: `delete_workspace_file`({ fileName })
 ///

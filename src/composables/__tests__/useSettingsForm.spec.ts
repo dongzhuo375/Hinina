@@ -188,7 +188,7 @@ vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSession
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ resetForOjSwitch: mocks.resetAuthForOjSwitch }),
 }))
-/// 路由级钥匙判据经 systemStore（2026-11-04 H3 收敛单一入口）：同样无 pinia，
+/// 路由级钥匙判据经 systemStore（收敛单一入口）：同样无 pinia，
 /// 打桩同 authStore 模块模式，判据复刻「launchFlags × 'Settings'」
 vi.mock('@/stores/systemStore', () => ({
   useSystemStore: () => ({
@@ -937,7 +937,7 @@ describe('useSettingsForm', () => {
 
   it('后台写入悬挂不阻塞设置页加载（load 只等设置页保存）', async () => {
     // 后台写入（编辑器偏好/分栏比例）永不返回：若 load 等「任意保存」，
-    // 设置页会永远停在 loading 且无法打断（2026-11-04 评审的行为回归）
+    // 设置页会永远停在 loading 且无法打断（行为回归）
     let releaseBackground!: () => void
     mocks.updateConfig.mockImplementationOnce(
       (mutator: (draft: AppConfig) => void) => new Promise<AppConfig>((resolve) => {

@@ -43,7 +43,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.spyOn(console, 'error').mockImplementation(() => {})
   // 模块级落盘修订号是副作用句柄（跨用例存活），测试隔离需显式归零
-  //（生产语义已改为跨会话保留：后端 revision 进程级单调，评审七轮）
+  //（生产语义已改为跨会话保留：后端 revision 进程级单调）
   useWorkspaceStore().cancelPendingSync({ resetRevisionWatermarks: true })
   workspaceService.updateWorkspaceFile.mockResolvedValue(undefined)
   workspaceService.saveWorkspace.mockResolvedValue(undefined)
@@ -388,7 +388,7 @@ describe('loadWorkspace — 替换 store 状态前先推送在途改动', () => 
   })
 })
 
-describe('loadWorkspace — 加载在途拒收输入（PR21-8）', () => {
+describe('loadWorkspace — 加载在途拒收输入', () => {
   /// 慢加载夹具：loadWorkspace 挂起直到手动放行，模拟 IPC 往返窗口。
   /// `called` 在 mock 真正被调用（IPC 发起）时 resolve —— loadWorkspace 内部先
   /// await flushPendingSync（数个微任务跳数），测试须等 `called` 后再放行
@@ -694,7 +694,7 @@ describe('changeLanguage — 语言即时落盘，不计入未落盘的代码改
   })
 })
 
-describe('activeFile — 当前代码文件的权威源（P62）', () => {
+describe('activeFile — 当前代码文件的权威源', () => {
   it('加载以 activeFile 为准，而不是按语言派生', async () => {
     // 语言说 Java、activeFile 指向 Main.java，而 files 里同时留着旧的 main.cpp：
     // 若按「语言派生名优先 + 后缀探测」（files 来自 HashMap 序列化、键序不稳定）
@@ -781,7 +781,7 @@ describe('activeFile — 当前代码文件的权威源（P62）', () => {
   })
 })
 
-describe('purgeStaleCodeFiles — 单代码文件约束（P62 清理）', () => {
+describe('purgeStaleCodeFiles — 单代码文件约束', () => {
   it('加载后清理 ≠ activeFile 的代码文件（历史多文件收敛），非代码文件保留', async () => {
     workspaceService.loadWorkspace.mockResolvedValue(
       wsFixture({
@@ -946,7 +946,7 @@ describe('purgeStaleCodeFiles — 单代码文件约束（P62 清理）', () => 
   })
 })
 
-describe('会话代际（评审 P2：清理后才完成的工作区加载）', () => {
+describe('会话代际（清理后才完成的工作区加载）', () => {
   it('迟到的 load_workspace 不得恢复旧会话代码', async () => {
     const { clearDomainState } = await import('@/stores/session')
     const store = useWorkspaceStore()
@@ -956,7 +956,7 @@ describe('会话代际（评审 P2：清理后才完成的工作区加载）', (
     )
 
     // load_workspace 保持在途（清理发生在 IPC 已发出之后 → 覆盖「在途响应丢弃」；
-    // 「清理后才轮到队首的加载不发 IPC」由评审七轮用例覆盖）
+    // 「清理后才轮到队首的加载不发 IPC」由排队用例覆盖）
     const pending = store.loadWorkspace('1', 'p-old')
     await vi.waitFor(() => expect(workspaceService.loadWorkspace).toHaveBeenCalled())
 
@@ -978,7 +978,7 @@ describe('会话代际（评审 P2：清理后才完成的工作区加载）', (
   })
 })
 
-describe('会话代际（评审五轮：保存收尾）', () => {
+describe('会话代际（保存收尾）', () => {
   it('旧会话的保存落定时不得清掉新会话的脏标记', async () => {
     const { clearDomainState } = await import('@/stores/session')
     const store = useWorkspaceStore()
@@ -1013,7 +1013,7 @@ describe('会话代际（评审五轮：保存收尾）', () => {
   })
 })
 
-describe('markPersisted — 跨会话安全性（评审五轮核验）', () => {
+describe('markPersisted — 跨会话安全性', () => {
   it('同一工作区 id 的旧会话迟到事件按全局单调修订号裁决，不产生假 clean', async () => {
     const store = useWorkspaceStore()
     // 旧会话：编辑后登出 —— 取消在途同步、水位归零、脏标记清
@@ -1039,7 +1039,7 @@ describe('markPersisted — 跨会话安全性（评审五轮核验）', () => {
   })
 })
 
-describe('会话代际（评审七轮：排队中的旧加载）', () => {
+describe('会话代际（排队中的旧加载）', () => {
   it('清理后已排队的旧加载不得再发 load_workspace IPC', async () => {
     const { clearDomainState } = await import('@/stores/session')
     const store = useWorkspaceStore()
@@ -1064,7 +1064,7 @@ describe('会话代际（评审七轮：排队中的旧加载）', () => {
   })
 })
 
-describe('会话代际（评审七轮：修订水位跨会话保留）', () => {
+describe('会话代际（修订水位跨会话保留）', () => {
   it('旧会话迟到的落盘事件不得清新会话恢复出的脏工作区', async () => {
     const store = useWorkspaceStore()
     // 旧会话：推 rev 10 → 落盘 10；再推 rev 11（未落盘）

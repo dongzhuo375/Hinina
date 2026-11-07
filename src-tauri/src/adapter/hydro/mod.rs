@@ -1,7 +1,8 @@
 // Hydro Adapter：实现 Auth + Contest + Problem + Submission 四个 trait。
 //
 // 目标对象是**上游 Hydro OJ**（`packages/hydrooj`），与 `adapter/hoj` 的 HOJ
-// （Hydro 衍生版，自带 REST + JWT 层）是两套不同协议，故不能复用 HOJ 的调用方式：
+// （Hcode Online Judge，与 Hydro 无关联的独立项目、自带 REST + JWT 层）是两套
+// 不同协议，故不能复用 HOJ 的调用方式：
 //
 //   1. 走**传统 Handler 路由 + `Accept: application/json`** 取 JSON
 //      （Hydro 没有统一 REST API；JSON-RPC `/d/:domainId/api/:op` 只注册了
@@ -387,12 +388,12 @@ impl HydroAdapter {
 
     /// 探测当前用户上下文（**绕过缓存**：每次真实回访服务端）。
     ///
-    /// 专供 `validate_session` 使用（评审 P0）：身份缓存只服务展示类查询的
+    /// 专供 `validate_session` 使用：身份缓存只服务展示类查询的
     /// 加速，若校验也走缓存，「服务器已吊销 sid」在进程内永远不可见。
     /// 成功路径仍会回写缓存（下次展示查询受益）。
     async fn probe_user_context_uncached(&self) -> AppResult<Option<HydroUser>> {
         // 记录发起时持有的会话：慢响应晚到期间会话可能已被替换
-        // （登出 / 换号登录），响应属于旧会话，不得影响新会话（评审第三轮 #1/#2）
+        // （登出 / 换号登录），响应属于旧会话，不得影响新会话
         let sid_at_start = self.session();
         if sid_at_start.is_none() {
             return Ok(None);
@@ -840,7 +841,7 @@ impl AuthProvider for HydroAdapter {
 
         self.set_session(Some(sid.clone()));
         // 换号登录必须先清旧身份：身份缓存是「上一个账号」的，若不清，
-        // 探测命中缓存会返回旧账号的 uid/uname 配上新 sid（评审 P0）。
+        // 探测命中缓存会返回旧账号的 uid/uname 配上新 sid。
         // 新身份由下方探测成功路径重新缓存。
         self.set_user(None);
         // 取 uid/uname：探测失败/匿名时降级为「用输入的用户名」，**不得否定
@@ -910,7 +911,7 @@ impl AuthProvider for HydroAdapter {
             return Ok(false);
         }
         // 必须绕过身份缓存：校验的职责就是问服务器（缓存命中即恒真，
-        // 服务器吊销 sid 在进程内不可见 —— 评审 P0）
+        // 服务器吊销 sid 在进程内不可见）
         match self.probe_user_context_uncached().await {
             Ok(Some(_)) => Ok(true),
             Ok(None) => {

@@ -1061,7 +1061,7 @@ fn resolve_falls_back_to_default_when_custom_dir_unusable() {
     assert_eq!(plan.base_dir, default_dir);
 }
 
-/// 启动期诊断（F2）：订阅器就绪前 `warn!` 被丢弃，回退原因必须落在
+/// 启动期诊断：订阅器就绪前 `warn!` 被丢弃，回退原因必须落在
 /// `DataDirPlan.warnings` 里由 `report_data_dir` 重放 —— 这是排障者回答
 /// 「自定义数据目录为什么没生效」的唯一线索。
 #[test]
@@ -1095,8 +1095,8 @@ fn resolve_captures_default_dir_unusable_diagnostic() {
     let plan = resolve(&unusable_default, &legacy);
 
     assert_eq!(plan.source, DataDirSource::FallbackTemp);
-    // 不按条数断言：指针路径 `default_dir/data_dir.json` 本身不可读时，P2-1 的
-    // 「指针读取失败」诊断是否出现**取决于平台错误种类**——Linux 报 ENOTDIR
+    // 不按条数断言：指针路径 `default_dir/data_dir.json` 本身不可读时，「指针读取失败」
+    // 诊断是否出现**取决于平台错误种类**——Linux 报 ENOTDIR
     // （非 NotFound，会多一条 Warn），Windows 把同路径归一为 NotFound（静默）。
     // 两条诊断都属实，这里只钉「回退决策与其 error 级原因」。
     // 回退决策由 source（FallbackTemp）承载，强告警由 report_data_dir 统一发一条
@@ -1138,7 +1138,7 @@ fn resolve_captures_custom_dir_unusable_reason() {
     assert_eq!(plan.warnings.len(), 1, "{:?}", plan.warnings);
     let d = &plan.warnings[0];
     assert_eq!(d.level, EarlyLevel::Warn);
-    // **P3-1 的实际锁定点**：路径必须出现在「回退默认目录」**之前**（原因位），
+    // **实际锁定点**：路径必须出现在「回退默认目录」**之前**（原因位），
     // 而不是紧随其后被读成回退目标。旧文案「不可用（{e}），回退默认目录: {path}」
     // 末尾同样含路径——只断言「路径在场」区分不出方向，把文案改回旧形态仍会绿
     // （已用变异验证确认）。
@@ -1222,7 +1222,7 @@ fn resolve_rejects_relative_custom_dir_with_diagnostic() {
     );
 }
 
-/// 聚合路径回归（评审修复）：损坏指针经 prepare_startup 只记**一条**诊断。
+/// 聚合路径回归：损坏指针经 prepare_startup 只记**一条**诊断。
 /// prepare_startup 与 resolve 各自读一次指针会把同一损坏记成两条、重放两遍
 /// —— 指针单读共用后该场景只允许出现一次「指针解析失败」。
 #[test]
@@ -1244,7 +1244,7 @@ fn prepare_startup_records_corrupt_pointer_exactly_once() {
     assert_eq!(pointer_diags.len(), 1, "{:?}", plan.warnings);
 }
 
-/// P2-1 回归：指针文件存在但非 UTF-8（或读不了）不能被当成「没有指针」静默
+/// 回归：指针文件存在但非 UTF-8（或读不了）不能被当成「没有指针」静默
 /// 回退——诊断必须带路径与原始错误。仅 NotFound 才允许静默。
 #[test]
 fn read_pointer_records_non_utf8_failure() {
@@ -1265,7 +1265,7 @@ fn read_pointer_records_non_utf8_failure() {
     );
 }
 
-/// P2-1 互补：文件不存在（NotFound）保持静默——「未指定」是正常状态。
+/// 与上一条互补：文件不存在（NotFound）保持静默——「未指定」是正常状态。
 #[test]
 fn read_pointer_missing_file_is_silent() {
     let default_dir = unique_dir("pointer-missing");
@@ -1277,7 +1277,7 @@ fn read_pointer_missing_file_is_silent() {
     assert!(early.is_empty(), "NotFound 不应产生诊断: {early:?}");
 }
 
-/// P2-2 回归：默认目录解析失败必须显式降级为 FallbackTemp（临时目录「可用」
+/// 回归：默认目录解析失败必须显式降级为 FallbackTemp（临时目录「可用」
 /// 不得被误报为 Default）；warnings 记 Warn 级原因，决策 error 由 report_data_dir 发。
 #[test]
 fn prepare_startup_forces_fallback_when_default_resolution_failed() {
@@ -1305,7 +1305,7 @@ fn prepare_startup_forces_fallback_when_default_resolution_failed() {
     );
 }
 
-/// 低-2 回归：损坏指针 + 存在 legacy 目录（会走 mark_legacy_migrated 的指针
+/// 回归：损坏指针 + 存在 legacy 目录（会走 mark_legacy_migrated 的指针
 /// 再读）时，指针读取/解析诊断仍只能出现一次——`update_pointer` 的再读是静默的。
 #[test]
 fn corrupt_pointer_with_legacy_migration_reports_once() {
@@ -1327,7 +1327,7 @@ fn corrupt_pointer_with_legacy_migration_reports_once() {
     assert_eq!(pointer_diags.len(), 1, "{:?}", plan.warnings);
 }
 
-/// P2-1 回归：默认目录解析失败（降级模式）时，设置页写在**降级默认位置**的
+/// 回归：默认目录解析失败（降级模式）时，设置页写在**降级默认位置**的
 /// 指针必须继续生效——用户选的自定义目录不能被无视（否则会被永久困在临时目录）。
 #[test]
 fn degraded_mode_still_honors_saved_custom_dir() {
@@ -1354,7 +1354,7 @@ fn degraded_mode_still_honors_saved_custom_dir() {
     );
 }
 
-/// P2-2 回归：`update_pointer` 的再读遇到**新的 I/O 错误**（非 NotFound）时，
+/// 回归：`update_pointer` 的再读遇到**新的 I/O 错误**（非 NotFound）时，
 /// 必须放弃写回并记诊断——不能拿默认指针当基线把磁盘上的字段抹掉。
 #[test]
 fn update_pointer_aborts_on_io_error_instead_of_overwriting() {

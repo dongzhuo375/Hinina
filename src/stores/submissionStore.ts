@@ -69,7 +69,7 @@ const HISTORY_PAGE_SIZE = 20
 /**
  * 提交 store — 本会话提交条目 + 评测收敛轮询 + 服务端提交历史。
  *
- * 轮询语义（P54 迁移到 createPoller 后的不变量）：
+ * 轮询语义（迁移到 createPoller 后的不变量）：
  * - 每条提交一个独立 Poller（递归 setTimeout + 抖动 + 重入保护），
  *   命中终态或超过总超时（deadline）自动停止；
  * - **节拍唯一归属前端**：后端 `get_judgement` 是单次查询（无内层阻塞循环），
@@ -135,7 +135,7 @@ export const useSubmissionStore = defineStore('submission', {
 
   actions: {
     /**
-     * 视图层提交守卫的阻断上报（评审 #14：视图经 action 操作 store 状态）。
+     * 视图层提交守卫的阻断上报（视图经 action 操作 store 状态）。
      *
      * 三道守卫（加载中 / displayId 未配对 / 题目 ID 不一致）拒绝提交时调用，
      * 文案经控制台条现有错误面展示 —— 消除「点提交没反应」的静默失败。
@@ -171,7 +171,7 @@ export const useSubmissionStore = defineStore('submission', {
         )
         if (sessionGen !== getSessionGeneration()) {
           // 清理后才返回的旧提交：不得重建 submissions/pendingSubmissions，
-          // 也不得进入下方 startPolling（评审 P1）
+          // 也不得进入下方 startPolling
           return submissionId
         }
         this.submissions.push({
@@ -187,7 +187,7 @@ export const useSubmissionStore = defineStore('submission', {
         throw e
       } finally {
         // 会话切换后 $reset 已把锁复位；此刻新会话可能已有自己的提交在途，
-        // 旧请求的 finally 不得把新会话的锁清掉（评审四轮 #2）
+          // 旧请求的 finally 不得把新会话的锁清掉
         if (sessionGen === getSessionGeneration()) this.isSubmitting = false
       }
       // 提交已成功，轮询启动与提交结果解耦（轮询参数读取失败也有兜底值）。
@@ -199,7 +199,7 @@ export const useSubmissionStore = defineStore('submission', {
     /** 轮询评测结果并更新对应提交的状态 */
     async pollResult(submissionId: string) {
       // 会话代际：旧会话在途的轮询返回时不得改动新会话的状态
-      //（评审五轮：`error = null` 会清掉新会话的错误提示）
+      //（迟到回写的 `error = null` 会清掉新会话的错误提示）
       const sessionGen = getSessionGeneration()
       const result = await submissionService.pollJudgement(submissionId)
       if (sessionGen !== getSessionGeneration()) return result
@@ -268,7 +268,7 @@ export const useSubmissionStore = defineStore('submission', {
       const ctx = pollContexts.get(submissionId)
       if (!ctx) return
       // 会话代际：清理后旧轮询的收尾（invalidateMyStatus / stopPolling）不得
-      // 作用于新会话（评审五轮）
+      // 作用于新会话
       const sessionGen = getSessionGeneration()
       if (Date.now() >= ctx.deadline) {
         log.warn(`提交 ${submissionId} 评测轮询超时，已停止`)
@@ -330,7 +330,7 @@ export const useSubmissionStore = defineStore('submission', {
     async fetchHistory(contestId: string, page?: number) {
       // 快速连改筛选、翻页与历史轮询并发时，旧响应不得配着新筛选条件落表
       const token = ++this.historySeq
-      // 会话代际（评审四轮 #1）：history 是 state 内的嵌套对象，`$reset()` 会整体
+      // 会话代际：history 是 state 内的嵌套对象，`$reset()` 会整体
       // 替换它，因此迟到的旧请求写的是被替换掉的旧对象引用 —— 实际不会泄漏。
       // 守卫保留为纵深防御（若将来 history 改为模块级句柄或浅重置，这层仍成立）
       const sessionGen = getSessionGeneration()

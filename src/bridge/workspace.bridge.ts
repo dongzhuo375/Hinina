@@ -34,7 +34,7 @@ export async function setWorkspaceLanguage(language: string): Promise<Workspace>
 }
 
 /**
- * 删除当前工作区中的文件（P62：旧代码文件清理）。
+ * 删除当前工作区中的文件（旧代码文件清理）。
  *
  * 供语言切换后的旧扩展名文件清理使用：编辑器内容已复制到新文件名，
  * 旧文件删除后 save() 不再全量写出它们。后端守卫拒绝删除当前代码文件

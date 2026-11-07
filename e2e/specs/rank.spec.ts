@@ -33,7 +33,7 @@ test.describe('实时榜单', () => {
     await expect(page.getByText('封榜时段内的提交结果将在赛后统一揭晓')).toBeVisible()
     // 封榜不是禁用页面：表格照常渲染。断言必须落在**表格内**并命中封榜专属
     // 形态（`errorNum+tryNum tries`）——`getByText('e2e_player')` 会先命中顶栏
-    // 用户名，表格没渲染也可能假绿（评审低-1）
+    // 用户名，表格没渲染也可能假绿
     const table = page.getByRole('table')
     await expect(table.getByText('e2e_player').first()).toBeVisible()
     await expect(table.getByText('0+2 tries').first()).toBeVisible()

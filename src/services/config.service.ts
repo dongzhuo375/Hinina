@@ -136,7 +136,7 @@ export class ConfigService {
   /// 保存队列：所有写入口共用，后一次等前一次落地再执行。
   /// 已知限制（单队列头阻塞）：后台写入悬挂会把排在它之后的设置页保存一起
   /// 卡住——设置页停在「保存中…」、OJ 切换被拒、load() 一并等待。拆双队列会
-  /// 重新打开「设置页保存与后台写并发丢更新」窗口（G4 的动机），故记录为
+  /// 重新打开「设置页保存与后台写并发丢更新」窗口，故记录为
   /// 已知限制（config.service.md）而非修复
   private readonly saveQueue = new SerialQueue()
   /// 保存代际：每次保存事务**入队与结束**各 +1。读配置的调用方据此检测
@@ -218,7 +218,7 @@ export class ConfigService {
    * 等待**设置页发起**的保存事务落地（不向等待者抛出保存错误）。
    *
    * 只等设置页自己的保存：后台写入（编辑器偏好/分栏比例）可能长时间不返回，
-   * 不应把设置页卡在 loading（2026-11-04 评审：恢复旧 composable 的等待范围）。
+   * 不应把设置页卡在 loading（恢复旧 composable 的等待范围）。
    * 设置页事务至多一个在途（`save()` 由 `canSave` 单飞）。
    */
   whenSettingsSaveSettled(): Promise<void> {

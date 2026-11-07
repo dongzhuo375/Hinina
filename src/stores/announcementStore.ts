@@ -128,7 +128,7 @@ export const useAnnouncementStore = defineStore('announcement', {
      * 失败记录 error 并上抛，由调用方决定提示；轮询路径经 `refresh` 吞错。
      */
     async load(contestId: string) {
-      // 会话代际：登出后旧会话的公告/已读状态不得写回新会话（评审四轮 #1）
+      // 会话代际：登出后旧会话的公告/已读状态不得写回新会话
       const sessionGen = getSessionGeneration()
       this.isLoading = true
       this.error = null
@@ -180,7 +180,7 @@ export const useAnnouncementStore = defineStore('announcement', {
       if (!contestId) return
       // 不可见 = 没看到，不标记（见方法注释）
       if (isPageHidden()) return
-      // 会话代际：登出后旧会话的已读持久化结果不得写回新会话（评审四轮 #1）
+      // 会话代际：登出后旧会话的已读持久化结果不得写回新会话
       const sessionGen = getSessionGeneration()
       const read = new Set(this.readIds)
       const unreadIds = this.announcements.filter((a) => !read.has(a.id)).map((a) => a.id)

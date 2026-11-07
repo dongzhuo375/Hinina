@@ -17,7 +17,7 @@ const version = __APP_VERSION__
 
 /// 显现瞬间的提示：连点 5 下本身没有任何视觉反馈，若设置入口不在当前视野内，
 /// 用户无法判断「到底生效没有」。给一次 3 秒提示，之后不再打扰。
-/// 用 `useTransientValue`（与设置页「已保存」同一实现，评审二十四 #7）：timer
+/// 用 `useTransientValue`（与设置页「已保存」同一实现）：timer
 /// 与 scope 清理都在那里统一处理。
 const { value: revealedHint, show: showRevealedHint } = useTransientValue(false, 3_000)
 

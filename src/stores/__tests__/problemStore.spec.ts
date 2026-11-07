@@ -121,7 +121,7 @@ describe('myStatus 数据归属 — 比赛切换必须重拉', () => {
   })
 })
 
-// ── M2 工作包 C：openProblem / loadLimits 的失败语义（此前未覆盖）──
+// ── openProblem / loadLimits 的失败语义（此前未覆盖）──
 
 const problemOf = (id: string) => ({
   id, title: `题-${id}`, description: '', inputDescription: '', outputDescription: '',
@@ -172,7 +172,7 @@ describe('loadLimits 失败语义', () => {
   })
 })
 
-describe('openProblem 过期响应保护（评审 P1，store 层）', () => {
+describe('openProblem 过期响应保护（store 层）', () => {
   interface Deferred<T> {
     promise: Promise<T>
     resolve: (v: T) => void
@@ -236,7 +236,7 @@ describe('openProblem 过期响应保护（评审 P1，store 层）', () => {
   })
 })
 
-describe('会话代际（评审四轮 #1：旧用户的题目状态）', () => {
+describe('会话代际（旧用户的题目状态）', () => {
   it('迟到的 loadMyStatus 不得把旧会话 AC 状态写回新会话', async () => {
     const { clearDomainState } = await import('@/stores/session')
     const store = useProblemStore()
@@ -259,7 +259,7 @@ describe('会话代际（评审四轮 #1：旧用户的题目状态）', () => {
   })
 })
 
-describe('会话代际（评审六轮：limits）', () => {
+describe('会话代际（limits）', () => {
   it('迟到的 limits 不得写回新会话', async () => {
     const { clearDomainState } = await import('@/stores/session')
     const store = useProblemStore()

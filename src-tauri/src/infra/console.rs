@@ -19,7 +19,7 @@
 /// 静默忽略，留给未来扩展（避免未知参数把启动炸掉）。入参用 `OsString`：
 /// `std::env::args()` 遇非 Unicode 参数会 panic，`args_os()` 不会。
 pub fn requested(args: &[std::ffi::OsString]) -> bool {
-    // 解析语义与 --settings 共用同一原语（`infra::argv::has_flag`，评审十九 #9）
+    // 解析语义与 --settings 共用同一原语（`infra::argv::has_flag`）
     super::argv::has_flag(args, "--console")
 }
 

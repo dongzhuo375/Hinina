@@ -31,7 +31,7 @@ pub async fn list_contests(ctx: State<'_, AppContext>) -> AppResult<Vec<Contest>
     ctx.contest.list_contests(ttl).await
 }
 
-/// 从配置文件加载默认比赛（阶段 7 单比赛模式入口）。
+/// 从配置文件加载默认比赛（单比赛模式入口）。
 ///
 /// 前端 invoke 签名: `load_configured_contest`
 ///
@@ -87,7 +87,7 @@ pub async fn get_contest_rank(
     .await
 }
 
-/// `get_contest_rank` 的原始入参（评审 #9：参数收敛为结构体，命令与实现
+/// `get_contest_rank` 的原始入参（参数收敛为结构体，命令与实现
 /// 之间不再逐参转发——新增筛选参数只改两处，不再两份签名漂移）。
 pub(crate) struct RankParams {
     pub contest_id: String,
@@ -143,8 +143,8 @@ pub async fn list_contest_announcements(
     list_contest_announcements_impl(&ctx, contest_id, current_page, limit).await
 }
 
-/// `list_contest_announcements` 的参数编排（提取自命令本体，供命令与测试共用）。
-/// 评审 #13 定稿：4 参保持逐参（仅 7 参的 get_contest_rank 保留参数结构体）。
+/// `list_contest_announcements` 的参数编排（提取自命令本体，供命令与测试共用）；
+/// 4 参保持逐参（仅 7 参的 get_contest_rank 保留参数结构体）。
 pub(crate) async fn list_contest_announcements_impl(
     ctx: &AppContext,
     contest_id: String,

@@ -285,7 +285,7 @@ const fn default_split_ratio() -> f64 {
     0.48
 }
 
-// ── 旧值归一（P55）──
+// ── 旧值归一 ──
 
 /// 旧版 Monaco language id → HOJ 语言显示名（大小写不敏感）。
 fn normalize_language_display_name(raw: &str) -> Option<&'static str> {
@@ -393,7 +393,7 @@ pub fn normalize_legacy_values(cfg: &mut AppConfig) {
     }
 }
 
-// ── 写入路径校验与净化（M4）──
+// ── 写入路径校验与净化 ──
 //
 // config.json 可被手改，前端 SettingsView 不是唯一防线：
 // `update_config` 持久化前必须先 `validate()`（不可钳制项拒绝）再

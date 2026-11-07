@@ -176,7 +176,7 @@ fn get_file_reads_from_memory() {
     assert_eq!(content, code);
 }
 
-// ── delete_file（P62：按文件删除能力）──
+// ── delete_file ──
 
 #[test]
 fn delete_file_removes_from_memory_and_disk() {
@@ -279,7 +279,7 @@ fn delete_file_guards_reject_windows_name_variants() {
 fn delete_file_rejects_ads_names_end_to_end() {
     // ADS 变体（workspace.json::$DATA = 文件本身的默认数据流）能绕过 manager
     // 的等价类守卫（"workspace.json::$data" ≠ "workspace.json"），由仓库层的
-    // Win32 非法字符校验收口 —— 评审实测复现的完整链路，端到端锁定
+    // Win32 非法字符校验收口 —— 实测复现的完整链路，端到端锁定
     let (mgr, storage) = test_manager_with_storage("delete-file-ads");
     mgr.create("contest-6", "problem-F", "/ws").unwrap();
     mgr.update_file("Main.java", "// active").unwrap();
@@ -809,7 +809,7 @@ async fn auto_save_keeps_dirty_and_silent_when_write_fails() {
     );
 }
 
-/// auto-save 的启停与间隔是可观测状态，且支持「停掉再启动」（P48）。
+/// auto-save 的启停与间隔是可观测状态，且支持「停掉再启动」。
 #[tokio::test]
 async fn auto_save_tracks_interval_and_can_be_restarted() {
     let mgr = test_manager("auto-save-restart");
@@ -835,7 +835,7 @@ async fn auto_save_tracks_interval_and_can_be_restarted() {
     mgr.stop_auto_save();
 }
 
-/// `activeFile` 是当前代码文件的权威源：`update_file` 写到哪个文件就记哪个（P62）。
+/// `activeFile` 是当前代码文件的权威源：`update_file` 写到哪个文件就记哪个。
 #[test]
 fn update_file_records_active_file() {
     let mgr = test_manager("active-file-update");
@@ -888,10 +888,7 @@ fn active_file_survives_reload() {
         Some("Main.java"),
         "重启后必须仍指向语言切换后的那个文件，而不是按后缀探测碰运气"
     );
-    assert!(
-        loaded.files.contains_key("main.cpp"),
-        "旧文件仍在（P62 未闭合部分）"
-    );
+    assert!(loaded.files.contains_key("main.cpp"), "旧文件仍在");
 }
 
 /// 历史 workspace.json 没有 `activeFile` 字段：反序列化为 `None`，不得报错。

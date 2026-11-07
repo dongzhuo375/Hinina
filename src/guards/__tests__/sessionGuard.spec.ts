@@ -1,6 +1,6 @@
-// sessionGuard 并发会话失效处理（M2 工作包 C）：
+// sessionGuard 并发会话失效处理：
 // 并发认证错误只清理一次、未登录不跳转、非认证错误不误处理、
-// 受保护页面才回登录页。此前该守卫零测试（M0 盘点：guards 0/1）。
+// 受保护页面才回登录页。此前该守卫零测试。
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuthStore, SESSION_INVALID_MESSAGE } from '@/stores/authStore'

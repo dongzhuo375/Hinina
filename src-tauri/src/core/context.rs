@@ -76,7 +76,8 @@ impl AppContext {
     /// 8. ProviderRegistry — OJ 适配器注册中心（按配置实例注册全部内建 OJ）
     /// 9. WorkspaceManager
     /// 10. Service 层 — auth / contest / problem / submission
-    /// 11. PluginHost — 插件事件边界（消费者在 `main.rs` 启动）
+    /// 11. PluginHost + PluginManager — 插件事件边界与生命周期控制（PluginHost
+    ///     消费者在 `main.rs` 启动；PluginManager 持 `ServiceQueries` 查询端口）
     /// 12. 装配 AppContext
     ///
     /// `default_data_dir` / `source` 来自 [`crate::infra::data_dir::prepare_startup`]，

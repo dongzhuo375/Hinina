@@ -42,19 +42,19 @@ let isLoadingPage = false
 /// 最近一次 openProblem 成功且为最新加载的比赛内题号 —— currentProblem 与它的
 /// 配对凭证。openProblem 失败时 problemStore 不清空（currentProblem 仍是旧题），
 /// 而 workspaceStore.code 已是新题：提交前必须校验配对，否则新题代码会提交到
-/// 旧题题号下（PR21-8 评审二轮）
+/// 旧题题号下
 let loadedProblemDisplayId: string | null = null
 /// 同一次成功加载写入的题目真实 ID（`cp.problemId`）—— 提交前的第二道配对校验。
-/// openProblem 对迟到的旧题响应**没有过期防护**（store 无条件写入 currentProblem），
-/// 而视图的 loadToken 只能丢弃旧加载的后续编排、无法撤销已发生的 store 写入：
-/// 会出现「配对标记是 B、currentProblem 却被迟到的 A 响应改回 A」的脏状态，
-/// displayId 配对对此失明。用真实 ID 兜底（M2 评审 P1）。
+/// store 的 openProblem 已有请求序号过期保护（迟到旧题响应在 store 层被丢弃，
+/// 主防线）；视图仍记账本次成功加载的真实 ID 作防御纵深 —— loadToken 只能
+/// 丢弃旧加载的后续编排，一旦 store 层守卫被未来改动击穿，displayId 配对对
+/// 「配对标记是 B、currentProblem 却被改回 A」的脏状态失明。用真实 ID 兜底。
 let loadedProblemId: string | null = null
 
 async function ensureContestId(): Promise<string> {
   if (!contestStore.contest) {
     // 直接进入本页（刷新/深链）时外壳可能尚未加载完比赛数据；
-    // whenLoaded 复用在途请求，避免重复 IPC（P59 统一入口）
+    // whenLoaded 复用在途请求，避免重复 IPC（统一入口）
     await contestStore.whenLoaded()
   }
   const id = contestStore.contest?.id
@@ -198,7 +198,7 @@ const splitContainer = ref<HTMLElement>()
 /// 用户是否已手动拖拽 —— 配置异步到达时不得覆盖用户刚调好的比例
 let userAdjustedSplit = false
 
-// 初始分栏比例读取配置（P55：layout.splitRatio 消费落地）；失败回退设计稿 0.48
+// 初始分栏比例读取配置（layout.splitRatio 消费）；失败回退设计稿 0.48
 void configService.getSplitRatio().then((ratio) => {
   if (!userAdjustedSplit) splitRatio.value = ratio
 })
@@ -260,7 +260,7 @@ const pendingSubmission = computed(() => submissionStore.pendingFor(
 async function handleSubmit() {
   // 加载编排未完成时拒绝提交（isLoadingPage 覆盖 loadWorkspace 与 openProblem
   // 全程）：此间隙 workspaceStore.code 已是新题代码而 problemStore.currentProblem
-  // 仍是旧题，放行会把新题代码提交到旧题题号下（PR21-8 评审）
+  // 仍是旧题，放行会把新题代码提交到旧题题号下
   if (isLoadingPage) {
     submissionStore.reportSubmitBlocked('题目仍在切换中，请稍候再提交')
     return
@@ -270,10 +270,10 @@ async function handleSubmit() {
   if (!contestId || !problem || submissionStore.isSubmitting || pendingSubmission.value) return
   // currentProblem 必须与路由 displayId 配对：openProblem 失败时 problemStore
   // 不清空（currentProblem 仍是旧题），而 code 已是新题 —— 无需并发，一次失败
-  // 的切换就会造成错配（PR21-8 评审二轮）。此外 currentProblem.id 还必须与
+  // 的切换就会造成错配。此外 currentProblem.id 还必须与
   // 本次成功加载写入的真实 ID 一致：store 已有请求序号过期保护（主防线），
   // 此处是失败路径错配与防御纵深的兜底。拒绝必须可见 —— 静默 return 会让
-  // 「点提交没反应」看起来像按钮坏了（M2 评审 P2），复用控制台条的错误面。
+  // 「点提交没反应」看起来像按钮坏了，复用控制台条的错误面。
   if (loadedProblemDisplayId !== displayId.value) {
     submissionStore.reportSubmitBlocked('题目仍在切换中，请稍候再提交')
     return

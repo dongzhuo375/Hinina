@@ -74,7 +74,7 @@ fn new_uses_defaults_when_no_config() {
 
 #[test]
 fn new_normalizes_legacy_config_from_disk() {
-    // P55：上一版落盘的 Monaco id 'cpp' / dark / 0.45 在加载路径一次性归一
+    // 上一版落盘的 Monaco id 'cpp' / dark / 0.45 在加载路径一次性归一
     let dir = TempDir::named("hinina-test-cfg-legacy-normalize");
     let storage = Arc::new(Storage::new(dir.to_path_buf()));
     storage

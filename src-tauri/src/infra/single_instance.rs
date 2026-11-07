@@ -18,7 +18,7 @@
 //!
 //! **无单测**：曾尝试用 tauri mock runtime 测本模块兜底逻辑，实测会把
 //! 本机 lib 测试二进制变成启动即崩（`0xc0000139`，坏二进制额外链入整套
-//! 真实 wry/tao 窗口栈，取证见 PR 描述）——为不污染日常 `cargo test`，
+//! 真实 wry/tao 窗口栈）——为不污染日常 `cargo test`，
 //! 兜底逻辑不留单测；行为验证 = 双开脚本核进程数 + 人工验收聚焦效果。
 
 use tauri::Manager;
@@ -32,18 +32,17 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri_plugin_single_instance::init(|app, args, _cwd| {
         focus_main_window(app);
         // 第二实例带 `--settings`：本进程的启动标志已固化、参数无处可施，
-        // 静默聚焦会让维护者以为设置页已打开（评审十九 #6）——弹一次提示，
+        // 静默聚焦会让维护者以为设置页已打开——弹一次提示，
         // 明确「需完全退出后重启」。
         let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
         // 只有**当前实例不是钥匙启动**时提示才有意义：已在钥匙模式下运行、
         // 再带 --settings 启动是幂等的，弹「请完全退出后重启」会误导
-        //（评审二十四 #2）
         if crate::infra::argv::has_flag(&args, "--settings")
             && !crate::infra::launch_args::get().settings
         {
             crate::infra::startup_dialog::present_message(
                 "Hinina 已在运行",
-                // concat! 显式拼接：多行字面量会把源码缩进带进正文（评审二十一 #7）
+                // concat! 显式拼接：多行字面量会把源码缩进带进正文
                 concat!(
                     "当前实例不是以 --settings 启动的，设置页的维护者选项仍处于锁定状态。\n\n",
                     "请完全退出 Hinina 后，再以 --settings 重新启动。",

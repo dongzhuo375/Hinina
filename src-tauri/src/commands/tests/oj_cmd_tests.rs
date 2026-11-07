@@ -1,4 +1,4 @@
-// `switch_oj` 提取实现（switch_oj_impl）的全真上下文测试（M2 工作包 A）。
+// `switch_oj` 提取实现（switch_oj_impl）的全真上下文测试。
 //
 // 此前该命令的编排（按需补注册 → 注册校验 → 注册表切换 + 三服务缓存清理 →
 // 配置落盘 → OjSwitched 事件）完全没有测试：命令签名依赖 `tauri::State`，
@@ -129,10 +129,6 @@ async fn real_switch_moves_registry_persists_config_and_clears_caches() {
         "提交详情必须重新拉取（submission 用户域缓存已清，status=2 终态在预热时入缓存）"
     );
 
-    // problem 内存 statement_cache 的清理断言（补严）：
-    // 磁盘题面缓存键带 OJ 维度、切 OJ 时刻意保留（空间回收由异步任务做），
-    // 因此先删除磁盘层排除其干扰——此后 open_problem 是否打网络**只**取决于
-    // 内存 statement_cache 是否已被 on_oj_switched 清空。
     // problem 内存 statement_cache 的清理断言（补严）：
     // on_oj_switched 会**异步 spawn** 清理磁盘题面缓存（键带 OJ 维度，属空间
     // 回收）——轮询等清理落地；若超时仍在则显式删除兜底。此后 open_problem

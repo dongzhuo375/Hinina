@@ -110,7 +110,7 @@ fn message(payload: &str, crash_log: Option<&Path>) -> String {
 }
 
 /// 非致命提示框：供单实例回调复用（第二实例带 `--settings` 被拦截时告知维护者
-/// 需完全退出后重启，评审十九 #6）。独立线程执行并 `join`，与崩溃框同款 ——
+/// 需完全退出后重启）。独立线程执行并 `join`，与崩溃框同款 ——
 /// 回调跑在第一实例的事件循环里，主线程上嵌套模态消息泵会重入。
 pub fn present_message(title: &str, text: &str) {
     #[cfg(windows)]
@@ -152,7 +152,7 @@ fn show_blocking(text: String) {
 fn show_blocking(_text: String) {}
 
 /// `MessageBoxW` 的唯一调用点：图标由调用方给出，`MB_OK | MB_SETFOREGROUND |
-/// MB_TOPMOST` 的窗口策略集中在这里维护（评审二十四 #8）。
+/// MB_TOPMOST` 的窗口策略集中在这里维护。
 #[cfg(windows)]
 fn show_message(title: &str, text: &str, icon: u32) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{

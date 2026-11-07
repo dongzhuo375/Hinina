@@ -1,6 +1,6 @@
 // HOJ Adapter：实现 Auth + Contest + Problem + Submission 四个 trait。
 //
-// HOJ (Hydro Online Judge) API 基于 JWT 认证，统一响应格式 {status, msg, data}。
+// HOJ (Hcode Online Judge) API 基于 JWT 认证，统一响应格式 {status, msg, data}。
 // Token 在登录响应的 `authorization` 头中返回，后续请求通过该头传递。
 pub mod error;
 pub mod types;
@@ -448,7 +448,7 @@ impl HOJAdapter {
     /// 实现已上提到 `adapter::time`（与 Hydro 共用）：此前这里按**固定 19 字符
     /// 取位**，恰好把实测格式 `2026-09-21T16:00:00.000+0000` 的 `.000+0000`
     /// 截断忽略 —— 在本机 UTC 部署下碰巧正确，目标部署时区非 UTC 时会整体偏移
-    /// 且静默无告警（P64 / P30，已修复归档）。共享实现按字段切分，支持
+    /// 且静默无告警。共享实现按字段切分，支持
     /// 毫秒、`Z`、`±HHMM` / `±HH:MM` 与非零填充，并在偏移非零或解析失败时告警。
     fn parse_time(s: &str) -> i64 {
         crate::adapter::time::parse_time(s)
@@ -663,11 +663,11 @@ impl AuthProvider for HOJAdapter {
         // 忽略远端响应（可能失败），以清除 token 为主 —— 但失败必须留痕：
         // 远端会话仍在（表现为排障难的「顶号」现象），静默丢弃连这条线索都没有。
         // 传输失败与非成功状态码都记 warn：登出端点的状态码语义未经真实联调
-        // 确认（P57 核对点之一，如过期 token 登出可能回 401），宁可多记一条
+        // 确认（如过期 token 登出可能回 401），宁可多记一条
         // 可过滤的 warn，不可让「顶号」无线索。
         //
         // 成功日志只在远端确实成功时打印：失败分支紧接着再打一句「HOJ 已登出」
-        // 会让同一次登出在日志里自相矛盾（评审）。本地 token 在任何分支都已清除，
+        // 会让同一次登出在日志里自相矛盾。本地 token 在任何分支都已清除，
         // 失败文案如实说明了这一点。
         let headers = Self::auth_headers(token.as_deref());
         let result = self.http.client().get(&url).headers(headers).send().await;

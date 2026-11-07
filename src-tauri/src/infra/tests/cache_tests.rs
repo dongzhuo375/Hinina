@@ -174,7 +174,7 @@ fn ttl_cache_supports_concurrent_reads_and_writes() {
     // 种子条目先于读线程存在：「至少命中一次」由预置数据保证，不再依赖读/写
     // 线程的调度顺序 —— 此前 4 个读线程先 spawn、主线程后插入且无同步点，
     // runner 高负载下读线程可在首次插入前清空全部读数，hits=0 随机失败
-    //（stress-repeat 首跑 run 40225126527 第 7/10 轮实证，§6.5 抖动治理产出）。
+    //（stress-repeat 高负载下实测命中过）。
     for i in 0..32 {
         cache.insert(format!("k{}", i), i);
     }

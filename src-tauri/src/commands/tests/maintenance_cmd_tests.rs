@@ -1,5 +1,5 @@
-// `reset_client` / `purge_local_data` / `local_data_usage` 提取实现的全真上下文测试
-// （M2 工作包 A）。锁定「精确删除范围」：可重建的缓存全清、不可重建的本地事实
+// `reset_client` / `purge_local_data` / `local_data_usage` 提取实现的全真上下文测试。
+// 锁定「精确删除范围」：可重建的缓存全清、不可重建的本地事实
 // （工作区/配置/会话/留档）分毫不动——这是设置页两个危险按钮的行为边界。
 
 use super::*;

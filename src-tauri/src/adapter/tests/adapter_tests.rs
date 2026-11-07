@@ -56,8 +56,9 @@ fn hoj_factory_id_matches_session_file_contract() {
 /// HOJ 工厂四能力齐备的专属锁定。
 ///
 /// 通用断言（`factory_ids_unique_and_buildable`）为保住「先实现部分接口」的
-/// 扩展路径只查「至少一个能力」；HOJ 是当前唯一全功能内建 OJ，其四项能力
-/// 齐备在此显式锁定 —— 若工厂漏装某个能力，不该等到运行期 ProviderNotFound。
+/// 扩展路径只查「至少一个能力」；内建 OJ 的完整形态逐家显式锁定（本用例锁
+/// HOJ，Hydro 见 `adapter/hydro/tests/mod_tests.rs` 的同名用例）——
+/// 若工厂漏装某个能力，不该等到运行期 ProviderNotFound。
 #[test]
 fn hoj_factory_provides_all_four_capabilities() {
     let dir = TempDir::named("hinina-test-hoj-factory-capabilities");

@@ -8,7 +8,7 @@ use crate::core::error::{AppError, AppResult};
 
 // 订阅器装配只存在于非测试构建（见 `Logger::init` 的 cfg 拆分）：
 // 测试构建不装全局 tracing 订阅器，这些导入若不加门控会在 `cargo clippy
-// --all-targets -- -D warnings` 下以 unused-import 阻塞 CI（评审 #6）。
+// --all-targets -- -D warnings` 下以 unused-import 阻塞 CI。
 #[cfg(not(test))]
 use tracing_subscriber::fmt::MakeWriter;
 #[cfg(not(test))]
@@ -31,7 +31,7 @@ pub const LOG_RELATIVE_PATH: &str = "logs/hinina.log";
 /// 日志只服务于近期排障，单文件 + 上限截断足以防止无限膨胀占满选手磁盘。
 const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
-/// 进程内**实际接管文件层的日志路径**（评审第三轮 #12）。
+/// 进程内**实际接管文件层的日志路径**。
 ///
 /// 全局订阅器是进程级单例：第二次 `init` 的 `try_init` 必然失败，但第一次
 /// 安装的文件层仍在向**它自己的路径**写入。`log_path`/`has_log_file` 以
@@ -157,7 +157,7 @@ impl Logger {
                     // try_init 而非 init：全局 subscriber 每进程只能设一次，重复
                     // init 时沿用已装好的订阅器而不是 panic（防御性；生产只跑一次）。
                     // 安装失败时本次没有任何订阅器生效，文件层不会有写入 ——
-                    // log_path 必须如实为 None（评审 #4：has_log_file 不得虚报）
+                    // log_path 必须如实为 None（has_log_file 不得虚报）
                     let installed = tracing_subscriber::registry()
                         .with(filter)
                         .with(stderr_layer)
@@ -172,7 +172,7 @@ impl Logger {
                     } else {
                         // 安装失败时沿用实际接管文件层的路径（若有）：第一次
                         // 安装的文件层仍在向它写入，has_log_file 以此为准；
-                        // 进程内从未成功安装过则如实为 None（评审 #4/#12）
+                        // 进程内从未成功安装过则如实为 None
                         ACTIVE_LOG_PATH
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())

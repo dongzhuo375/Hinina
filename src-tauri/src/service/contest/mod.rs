@@ -304,7 +304,7 @@ impl ContestService {
     /// 显式决定（见 [`ContestService::clear_announcement_baseline`]）。
     pub fn clear_caches(&self) {
         // 锁中毒统一 `into_inner` 取回内部数据（与 `TtlCache` / `provider_registry_impl`
-        // 同款约定，见 provider_registry_impl.rs 头注释）：容器是 `Option<ContestCache>`，
+        // 同款约定）：容器是 `Option<ContestCache>`，
         // panic 不会让它结构不一致，而「静默跳过清理」会让重置**留下脏缓存** ——
         // 那是比重置失败更糟的静默后果。
         *self.cache.write().unwrap_or_else(|e| e.into_inner()) = None;
@@ -378,7 +378,7 @@ impl ContestService {
 
     /// 加载指定比赛及其题目列表，并自动选中。
     ///
-    /// 阶段 7 单比赛模式入口：从配置文件读取 contest_id 后调用此方法，
+    /// 单比赛模式入口：从配置文件读取 contest_id 后调用此方法，
     /// 一次性获取比赛详情 + 题目列表 + 自动选中。
     ///
     /// **缓存策略**：比赛元信息走内存 → 磁盘 → 网络（TTL 120s）；题目列表
@@ -397,7 +397,7 @@ impl ContestService {
         // 私有赛需要密码
         if contest.auth == 1 {
             if let Some(_pw) = password {
-                // TODO: 阶段 7 后续实现比赛注册 API 调用
+                // TODO: 后续实现比赛注册 API 调用
                 debug!("私有赛密码已提供");
             }
         }

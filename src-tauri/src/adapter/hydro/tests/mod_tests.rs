@@ -659,7 +659,7 @@ fn hydro_factory_provides_all_four_capabilities() {
     assert_eq!(adapter.url("/login"), "https://hydro.ac/login");
 }
 
-// ── 本地 scripted HTTP 契约测试（M2 工作包 B）──
+// ── 本地 scripted HTTP 契约测试 ──
 //
 // 与上方 DTO/fixture 测试互补：打**真实网络栈**（reqwest → loopback server，
 // `test_support::loopback`），锁定线上协议行为而非判定函数。
@@ -764,7 +764,7 @@ async fn login_without_sid_cookie_fails_as_auth() {
     server.shutdown();
 }
 
-/// 登录降级身份不进已验证用户缓存（M2 评审 P2）：探测失败的登录仍成功，
+/// 登录降级身份不进已验证用户缓存：探测失败的登录仍成功，
 /// 但随后的 validate_session 必须真实回访服务端 —— 探测失败判 Unknown（Err）、
 /// 服务端给出身份后恢复 Ok(true)，而不是被占位用户缓存无条件判有效。
 #[tokio::test]
@@ -819,9 +819,9 @@ async fn validate_session_does_not_trust_degraded_cached_identity() {
     server.shutdown();
 }
 
-// ── 会话校验与身份缓存（PR #52 评审 P0 两项）──
+// ── 会话校验与身份缓存 ──
 
-/// 已缓存身份的 validate_session 仍必须真实回访服务端（评审 P0-1）：
+/// 已缓存身份的 validate_session 仍必须真实回访服务端：
 /// 身份缓存只服务展示查询；校验走缓存会让「服务器吊销 sid」在进程内不可见。
 #[tokio::test]
 async fn validate_session_revalidates_despite_cached_identity() {
@@ -856,7 +856,7 @@ async fn validate_session_revalidates_despite_cached_identity() {
     server.shutdown();
 }
 
-/// 服务端已吊销（匿名）：缓存的旧身份必须被推翻，判失效并清除（评审 P0-1）。
+/// 服务端已吊销（匿名）：缓存的旧身份必须被推翻，判失效并清除。
 #[tokio::test]
 async fn validate_session_reports_invalid_when_server_says_anonymous() {
     let server = LoopbackServer::start(vec![
@@ -879,7 +879,7 @@ async fn validate_session_reports_invalid_when_server_says_anonymous() {
     server.shutdown();
 }
 
-/// 换号登录：新身份不得沿用上一个账号的缓存（评审 P0-2）。
+/// 换号登录：新身份不得沿用上一个账号的缓存。
 #[tokio::test]
 async fn login_switching_accounts_refreshes_cached_identity() {
     let server = LoopbackServer::start(vec![
@@ -905,7 +905,7 @@ async fn login_switching_accounts_refreshes_cached_identity() {
 }
 
 /// 探测进行中换号：慢响应晚到必须作废，不得把旧身份写回缓存、
-/// 不得以旧会话的判定结论清除新会话（评审第三轮 #1/#2 的真实竞态）。
+/// 不得以旧会话的判定结论清除新会话（真实竞态）。
 #[tokio::test]
 async fn probe_response_during_account_switch_is_discarded() {
     let alice_ctx = || ScriptedResponse::json(r#"{"UserContext":{"_id":7,"uname":"alice"}}"#);

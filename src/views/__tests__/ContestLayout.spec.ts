@@ -263,7 +263,7 @@ describe('--settings 无会话最小壳', () => {
   })
 
   it('钥匙 + 会话有效 + 已结束简报 + 设置路由——不跳转（完整外壳保持）', async () => {
-    // P2-2 的有会话分支：bareShell 为 false（正常外壳），但赛程闸门的钥匙短路
+    // 有会话分支：bareShell 为 false（正常外壳），但赛程闸门的钥匙短路
     // 看 keyedSettings —— 已结束简报不得把维护者从设置页踢回登录页
     vi.useFakeTimers()
     const now = Math.floor(Date.now() / 1000)

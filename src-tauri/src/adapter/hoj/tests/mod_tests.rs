@@ -78,7 +78,7 @@ fn parse_time_empty() {
 fn parse_time_too_short() {
     // 残缺到「年-月-日」都不全的输入按无法解析处理（返回 0 + warn）。
     // 注意：非零填充的完整日期（`2024-1-1 8:00:00`）现在能正确解析 ——
-    // 旧实现按固定字节取位，长度不足 19 一律归 0，这正是 P30 的问题。
+    // 旧实现按固定字节取位，长度不足 19 一律归 0。
     assert_eq!(HOJAdapter::parse_time("2024"), 0);
 }
 
@@ -104,7 +104,7 @@ fn parse_time_handles_real_fixture_offset_suffix() {
     );
 }
 
-/// 非零填充的日期/时刻也能解析（P30 点名的 `2024-1-1 8:00:00`）。
+/// 非零填充的日期/时刻也能解析（`2024-1-1 8:00:00`）。
 #[test]
 fn parse_time_accepts_non_padded_fields() {
     assert_eq!(
@@ -490,11 +490,11 @@ fn validity_non_success_body_status_is_unknown() {
     }
 }
 
-// ── 公告 / 提交列表 / 测试点夹具（按文档构造，未经真实联调校正 —— P57 待联调清单）──
+// ── 公告 / 提交列表 / 测试点夹具（按文档构造，未经真实联调校正）──
 //
 // 以下三个夹具均按 doc/HOJ/HOJ-API-Documentation.md §3.7 / §3.9 / §5.6 的响应形状
 // 手工构造，保留了 HOJ 的显式 null 风格与 status:200 信封；字段名与真实服务端的
-// 出入需在联调时校正（P57）。
+// 出入需在联调时校正。
 
 const ANNOUNCEMENT_LIST: &str = include_str!("fixtures/announcement_list.json");
 const CONTEST_SUBMISSIONS: &str = include_str!("fixtures/contest_submissions.json");
@@ -502,7 +502,7 @@ const CASE_RESULT: &str = include_str!("fixtures/case_result.json");
 
 #[test]
 fn announcement_list_fixture_parses_and_maps() {
-    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    // 按文档构造，未经真实联调校正
     let resp: ApiResponse<types::PageResult<AnnouncementVO>> =
         HOJAdapter::parse_hoj_json(ANNOUNCEMENT_LIST, "http://oj/api/get-contest-announcement")
             .expect("公告夹具应能解析");
@@ -527,7 +527,7 @@ fn announcement_list_fixture_parses_and_maps() {
 
 #[test]
 fn announcement_null_content_and_times_degrade_to_defaults() {
-    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    // 按文档构造，未经真实联调校正
     // 第二条公告 content / gmtModified / uid 均为 null：去 null 后落默认值而不是解析失败
     let resp: ApiResponse<types::PageResult<AnnouncementVO>> =
         HOJAdapter::parse_hoj_json(ANNOUNCEMENT_LIST, "http://oj/api/get-contest-announcement")
@@ -549,7 +549,7 @@ fn announcement_null_content_and_times_degrade_to_defaults() {
 
 #[test]
 fn contest_submissions_fixture_parses_and_maps() {
-    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    // 按文档构造，未经真实联调校正
     let resp: ApiResponse<types::PageResult<JudgeVO>> =
         HOJAdapter::parse_hoj_json(CONTEST_SUBMISSIONS, "http://oj/api/contest-submissions")
             .expect("提交列表夹具应能解析");
@@ -599,7 +599,7 @@ fn contest_submissions_fixture_parses_and_maps() {
 
 #[test]
 fn contest_submissions_fixture_fails_without_null_stripping() {
-    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    // 按文档构造，未经真实联调校正
     let err = serde_json::from_str::<ApiResponse<types::PageResult<JudgeVO>>>(CONTEST_SUBMISSIONS)
         .expect_err("含显式 null 的提交列表直接解析应当失败");
     assert!(err.to_string().contains("null"), "实际: {}", err);
@@ -626,7 +626,7 @@ fn missing_uid_yields_no_owner_instead_of_trusting_a_display_name() {
 
 #[test]
 fn case_result_fixture_parses_and_maps() {
-    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    // 按文档构造，未经真实联调校正
     let resp: ApiResponse<types::JudgeCaseVO> =
         HOJAdapter::parse_hoj_json(CASE_RESULT, "http://oj/api/get-all-case-result")
             .expect("测试点夹具应能解析");
@@ -653,7 +653,7 @@ fn case_result_fixture_parses_and_maps() {
 
 #[test]
 fn case_result_malformed_entries_are_skipped_not_fatal() {
-    // 按文档构造，未经真实联调校正 —— P57 待联调清单
+    // 按文档构造，未经真实联调校正
     // SubTask 形态文档不完整：单条测试点/单个分组类型异常时只跳过该条，
     // 绝不让整个响应解析失败（测试点面板降级展示好过整页报错）
     let body = r#"{
@@ -915,7 +915,7 @@ fn problem_details_missing_or_null_languages_yield_empty_vec() {
     }
 }
 
-// ── 本地 scripted HTTP 契约测试（M2 工作包 B）──
+// ── 本地 scripted HTTP 契约测试 ──
 //
 // 与上方 DTO/fixture 测试互补：打**真实网络栈**（reqwest → loopback server，
 // `test_support::loopback`），锁定线上协议行为而非判定函数。
