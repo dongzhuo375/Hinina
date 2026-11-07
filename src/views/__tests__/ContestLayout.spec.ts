@@ -216,6 +216,38 @@ describe('--settings 无会话最小壳', () => {
     expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
   })
 
+  it('最小壳下：阶段跃迁启动轮询是既有契约，id 清空的本地清理不受守卫', async () => {
+    // bareShell 守卫只拦新 watcher 的「启动」分支（对齐 bootstrap 跳过语义——
+    // 不发新 OJ 请求）；phase 跃迁监听在 bareShell + 保留数据下启动轮询是
+    // 既有契约（「同一比赛 running→ended→running」用例锁定），此处如实断言。
+    // 清理（stopLive/清 liveFor）是本地操作不是 OJ 请求，最小壳下照跑
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const store = useContestStore()
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    store.contest = { ...schedule } // 数据到达：phase 跃迁经既有契约启动轮询
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+
+    // 跨场 id 变化（phase 保持 running，阶段监听不触发）：bareShell 守卫拦住
+    // 新入口的启动 —— 删守卫该断言得 2 而变红
+    store.contest = { ...schedule, id: '2' }
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+
+    // 数据清空：清理分支照跑（不受守卫）——stopLive 是本地清理非 OJ 请求
+    store.contest = null
+    await nextTick()
+    expect(mocks.stopLive).toHaveBeenCalled()
+  })
+
   it('无会话 + 设置路由但普通启动（无钥匙）：不进最小壳（登出过渡态在设置页上同样安全）', async () => {
     // 普通启动永远不进最小壳：即使会话缺失且正停在设置路由——
     // 例如已登录维护者经隐藏入口进设置页后登出的过渡态——也保持原外壳
