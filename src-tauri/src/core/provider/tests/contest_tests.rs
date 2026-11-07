@@ -56,3 +56,10 @@ fn default_ensure_contest_access_is_contest_variant_with_hint() {
         err
     );
 }
+
+#[test]
+fn default_is_credential_rejection_is_false() {
+    // 未声明「凭证进入」能力的 OJ 不得触发进入流程（安全降级方向）
+    assert!(!DefaultOnlyProvider
+        .is_credential_rejection(&AppError::Contest("任意业务失败".to_string())));
+}

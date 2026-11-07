@@ -47,8 +47,11 @@ enum StubMode {
     Auth,
     /// 模拟网络中断
     Network,
-    /// 模拟业务拒绝（适配器契约：未报名/需凭证的私有赛题目列表以 Contest 变体表达）
+    /// 模拟「需凭证进入」类业务拒绝（is_credential_rejection 判定为 true 的形态）
     Contest,
+    /// 无视 `registered` 的业务拒绝：报名后题目仍失败（模拟服务端状态未解锁），
+    /// 用于走通服务级**成功记忆**路径
+    ContestAlways,
 }
 
 impl StubMode {
@@ -56,7 +59,9 @@ impl StubMode {
         match self {
             StubMode::Auth => AppError::Auth(format!("{}: HTTP 401 Unauthorized", ctx)),
             StubMode::Network => AppError::Network(format!("{}: connection reset", ctx)),
-            StubMode::Contest => AppError::Contest(format!("{}: 私有赛未报名，需要比赛密码", ctx)),
+            StubMode::Contest | StubMode::ContestAlways => {
+                AppError::Contest(format!("{}: 私有赛未报名，需要比赛密码", ctx))
+            }
             StubMode::Ok => unreachable!("Ok 模式不应构造错误"),
         }
     }
@@ -94,6 +99,8 @@ struct StubContestProvider {
     access_calls: AtomicUsize,
     /// 最近一次进入调用收到的凭证（断言配置密码确实透传到 provider）。
     access_credential: RwLock<Option<String>>,
+    /// `ensure_contest_access` 的延迟（毫秒）：复现「清理发生在途」竞态用。
+    ensure_delay_ms: RwLock<u64>,
 }
 
 /// `ensure_contest_access` 的 stub 行为。
@@ -123,6 +130,7 @@ impl StubContestProvider {
             access_mode: RwLock::new(AccessMode::Grant),
             access_calls: AtomicUsize::new(0),
             access_credential: RwLock::new(None),
+            ensure_delay_ms: RwLock::new(0),
         }
     }
 
@@ -143,6 +151,11 @@ impl StubContestProvider {
     /// 设置 `ensure_contest_access` 的行为。
     fn set_access_mode(&self, mode: AccessMode) {
         *self.access_mode.write().unwrap() = mode;
+    }
+
+    /// 设置 `ensure_contest_access` 的延迟（复现「清理发生在途」竞态）。
+    fn set_ensure_delay_ms(&self, ms: u64) {
+        *self.ensure_delay_ms.write().unwrap() = ms;
     }
 
     /// `ensure_contest_access` 调用次数
@@ -302,6 +315,10 @@ impl ContestProvider for StubContestProvider {
             StubMode::Contest if self.registered.load(Ordering::SeqCst) => {
                 Ok(vec![sample_problem()])
             }
+            // ContestAlways 无视报名状态：报名后题目仍失败（服务端状态未解锁的形态）
+            StubMode::Contest | StubMode::ContestAlways => {
+                Err(mode.into_err("stub list_contest_problems"))
+            }
             m => Err(m.into_err("stub list_contest_problems")),
         }
     }
@@ -345,6 +362,11 @@ impl ContestProvider for StubContestProvider {
     ) -> AppResult<()> {
         self.access_calls.fetch_add(1, Ordering::SeqCst);
         *self.access_credential.write().unwrap() = credential.map(str::to_string);
+        let delay_ms = *self.ensure_delay_ms.read().unwrap();
+        if delay_ms > 0 {
+            // 竞态用例：让「清理」能落在本次调用在途期间
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        }
         match *self.access_mode.read().unwrap() {
             AccessMode::Grant => {
                 // 模拟服务端：报名成功解锁私有赛题目列表
@@ -359,6 +381,12 @@ impl ContestProvider for StubContestProvider {
                 "stub ensure_contest_access: HTTP 401".into(),
             )),
         }
+    }
+
+    /// stub 的 Contest/ContestAlways 消息全部代表「需凭证进入」类失败，
+    /// 故按变体判定即可（真实消息级分类由 HOJ 适配器测试锁定）。
+    fn is_credential_rejection(&self, error: &AppError) -> bool {
+        matches!(error, AppError::Contest(_))
     }
 }
 
@@ -573,18 +601,51 @@ fn public_contest_never_triggers_access() {
 }
 
 #[test]
-fn private_contest_with_accessible_problems_skips_access() {
+fn private_contest_with_accessible_problems_never_triggers_access_flow() {
     // 错误驱动的关键不变量：题目列表能成功（已报名/管理员/开放赛外榜单）
-    // 时绝不发起进入校验 —— 否则这三类用户会被密码错误页误挡
+    // 时进入流程不得被触发 —— 否则这三类用户会被密码错误页误挡。
+    // password=None 使提交侧 best-effort 兜底也不参与（它由
+    // open_rank_private_contest_backfills_registration_best_effort 单独锁定）
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
-    block_on(service.load_contest_with_problems("1011", Some("pw")))
-        .expect("题目可拉的私有赛加载应成功");
+    block_on(service.load_contest_with_problems("1011", None)).expect("题目可拉的私有赛加载应成功");
     assert_eq!(
         stub.access_call_count(),
         0,
-        "题目列表成功时不得发起进入校验"
+        "题目列表成功且无密码时不得发起任何进入请求"
     );
+}
+
+#[test]
+fn open_rank_private_contest_backfills_registration_best_effort() {
+    // 提交侧兜底：题目可拉（openRank 私有赛可见不可交）+ 配置了密码 →
+    // 后台 best-effort 报名，报名成功记忆生效，查看不受影响
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    stub.set_auth(1);
+    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("加载应成功");
+    assert_eq!(
+        stub.access_call_count(),
+        1,
+        "题目成功且配置了密码时应 best-effort 报名（提交通道对 auth==1 始终要求报名）"
+    );
+    assert_eq!(stub.last_access_credential(), Some("pw".to_string()));
+
+    // 成功记忆命中：第二次加载不重复请求
+    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("第二次加载应成功");
+    assert_eq!(
+        stub.access_call_count(),
+        1,
+        "成功记忆命中，best-effort 不重复请求"
+    );
+}
+
+#[test]
+fn best_effort_backfill_failure_does_not_break_loading() {
+    // 报名失败（密码错误）只留日志：查看侧不得被提交侧兜底挡住
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    stub.set_auth(1);
+    stub.set_access_mode(AccessMode::WrongPassword);
+    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("报名失败不影响加载");
 }
 
 #[test]
@@ -740,15 +801,41 @@ fn password_change_retries_after_memoized_failure() {
         .expect_err("重试同密码仍报错");
     assert_eq!(stub.access_call_count(), 1, "同密码组合在保留期内命中记忆");
 
-    // 用户在设置页更正密码 → 新 key → 重新发起（允许一次新尝试）
+    // 用户在设置页更正密码 → 新 key → 重新发起（允许一次新尝试）；
+    // 报名成功解锁题目列表（registered），重试拿到题目、本次加载成功
     stub.set_access_mode(AccessMode::Grant);
     block_on(service.load_contest_with_problems("1011", Some("good"))).expect("更正密码后应成功");
     assert_eq!(stub.last_access_credential(), Some("good".to_string()));
+    // 成功记忆的服务级路径由 success_memo_hits_when_problems_still_fail 锁定
+    //（本用例报名后题目列表直接放行，走不到记忆）
+}
 
-    // 成功也记入记忆：报名是账号级持久状态，同进程内无需再查再报
-    block_on(service.load_contest_with_problems("1011", Some("good")))
-        .expect("成功后再次加载应成功");
-    assert_eq!(stub.access_call_count(), 2, "成功组合同样命中记忆");
+#[test]
+fn success_memo_hits_when_problems_still_fail() {
+    // 服务级成功记忆路径：报名成功但题目仍失败（ContestAlways 无视 registered）。
+    // 第二次加载必须命中成功记忆、不再触达 ensure_contest_access ——
+    // 删掉成功记忆分支本用例会红（变异验证）
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::ContestAlways));
+    stub.set_access_mode(AccessMode::Grant);
+
+    block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect_err("报名成功但题目仍失败，本次加载应上抛题目错误");
+    assert_eq!(stub.access_call_count(), 1);
+
+    block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect_err("第二次加载题目仍失败");
+    assert_eq!(
+        stub.access_call_count(),
+        1,
+        "成功记忆命中：不再触达 ensure_contest_access"
+    );
+    assert_eq!(
+        stub.problems_call_count(),
+        4,
+        "两次加载各失败 1 次 + 各重试 1 次"
+    );
 }
 
 #[test]
@@ -791,6 +878,39 @@ fn clear_access_attempts_forgets_recorded_outcomes() {
         stub.access_call_count(),
         2,
         "清空后同组合必须重新触达 provider"
+    );
+}
+
+#[test]
+fn in_flight_access_attempt_is_not_written_back_after_clear() {
+    // clear_access_attempts 是时点清理：logout/login 期间仍在途的旧会话加载
+    // 若在清理后才完成，不得把旧账号的尝试结果写回记忆（access_epoch 守卫）。
+    // 用带延迟的 stub 复现竞态：清理落在 ensure 调用在途期间。
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    let service = Arc::new(service);
+    stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::ContestAlways));
+    stub.set_access_mode(AccessMode::Grant);
+    stub.set_ensure_delay_ms(300);
+
+    block_on(async {
+        let svc = Arc::clone(&service);
+        let load =
+            tokio::spawn(async move { svc.load_contest_with_problems("1011", Some("pw")).await });
+        // 让在途 load 进入 ensure 调用（延迟中），期间执行清理
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        service.clear_access_attempts();
+        let result = load.await.expect("后台任务不应 panic");
+        assert!(result.is_err(), "题目恒失败，在途加载应报错");
+    });
+
+    // 在途写回被纪元拦截：下一次加载必须重新触达 provider
+    //（若写回泄漏，成功记忆命中会让本断言得 1 而变红）
+    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect_err("题目仍失败");
+    assert_eq!(
+        stub.access_call_count(),
+        2,
+        "在途写回必须被纪元丢弃，清理后的加载重新发起进入"
     );
 }
 

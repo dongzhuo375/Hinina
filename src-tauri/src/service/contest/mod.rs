@@ -14,6 +14,7 @@
 // 变体被改写会让 token 过期时榜单静默 stale、选手永远回不到登录页。
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -182,6 +183,13 @@ pub struct ContestService {
     /// （见 [`Self::clear_access_attempts`]）。设置页改密码自然换 key。
     /// 仅进程内存，不跨重启。
     access_attempts: Mutex<AccessAttemptMemo>,
+    /// 进入记忆的纪元（[`Self::clear_access_attempts`] 时递增）。
+    ///
+    /// 清理是**时点**操作：logout/login 期间仍在途的旧会话加载可能在清理之后
+    /// 才完成并写回记忆。进入流程在发起请求前捕获纪元、写回前校验——纪元已变
+    /// 即放弃写回，旧账号的尝试结果不得落进新会话的记忆。读侧（记忆命中）的
+    /// 同类窗口只有微秒级且自愈（下次轮询重新查），不做守卫。
+    access_epoch: AtomicU64,
 }
 
 impl ContestService {
@@ -209,6 +217,7 @@ impl ContestService {
             cache,
             announcement_baseline: Arc::new(RwLock::new(HashMap::new())),
             access_attempts: Mutex::new(AccessAttemptMemo::new()),
+            access_epoch: AtomicU64::new(0),
         }
     }
 
@@ -219,7 +228,11 @@ impl ContestService {
     /// 进入校验（随后题目接口报「请先到比赛首页输入比赛密码进行注册」——不含
     /// 登录关键词，不触发会话守卫，页面停在无法自愈的错误上），失败记忆则会让
     /// 本可访问的新账号继续看到旧错误。登出/登录即进程内信号，换账号必须清。
+    ///
+    /// 递增纪元（[`Self::access_epoch`]）：logout/login 期间仍在途的旧会话加载
+    /// 完成后写回记忆会被纪元校验拦下，旧账号的结果不落新会话。
     pub fn clear_access_attempts(&self) {
+        self.access_epoch.fetch_add(1, Ordering::SeqCst);
         self.access_attempts
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -507,10 +520,16 @@ impl ContestService {
     ///
     /// **私有赛**（`auth == 1`）**错误驱动进入**：题目列表先行 —— 已报名用户、
     /// 比赛管理员、开放了赛外榜单的私有赛（HOJ 对这些用户不校验报名）零额外
-    /// 请求；仅当题目列表以 `Contest` 变体失败（适配器契约：未报名/需凭证的
-    /// 失败以业务错误表达，`Auth`/`Network` 变体不触发）时才走
+    /// 请求；仅当题目列表失败且适配器判定属「需凭证进入」类
+    /// （[`ContestProvider::is_credential_rejection`]——`Contest` 变体只是必要
+    /// 条件，「比赛还未开始」等业务失败同样落在该变体，不得误触发）时才走
     /// [`Self::ensure_private_contest_access`] 并重试一次。密码来自配置
     /// `oj.contest_password`（命令层传入），未配置/错误时报可操作的引导。
+    ///
+    /// **提交侧兜底**：题目拉取成功但未报名的选手（openRank 私有赛可见不可交
+    /// ——HOJ 的提交通道对 `auth == 1` 始终要求报名，与 openRank 无关）在配置了
+    /// 密码时做一次 best-effort 报名（记忆防重复）；失败只留日志不打断加载
+    /// —— 查看侧不得被它挡住，管理员未配密码也不受影响。
     pub async fn load_contest_with_problems(
         &self,
         contest_id: &str,
@@ -526,9 +545,10 @@ impl ContestService {
 
         let problems = match provider.list_contest_problems(contest_id).await {
             Ok(problems) => problems,
-            Err(err) if contest.auth == 1 && matches!(&err, AppError::Contest(_)) => {
-                // 私有赛可能只是未报名：走凭证进入流程（带防重试记忆）后重试一次。
-                // 进入失败时上抛进入的引导错误（比题目接口的裸服务端报错可操作）
+            Err(err) if contest.auth == 1 && provider.is_credential_rejection(&err) => {
+                // 首个错误必须留痕：进入失败时用户看到的是引导文案，
+                // 原始原因只能在这里追溯；进入成功则本次失败已被修复
+                debug!(contest_id = contest_id, error = %err, "题目列表失败属需凭证类，尝试凭证进入");
                 self.ensure_private_contest_access(provider.as_ref(), &oj_id, contest_id, password)
                     .await?;
                 provider
@@ -544,6 +564,17 @@ impl ContestService {
                 return Err(err.context("获取比赛题目列表失败"));
             }
         };
+
+        // 提交侧兜底（best-effort，见方法文档）：报名是后台尽力而为，
+        // 失败不影响本次加载
+        if contest.auth == 1 && password.is_some() {
+            if let Err(e) = self
+                .ensure_private_contest_access(provider.as_ref(), &oj_id, contest_id, password)
+                .await
+            {
+                warn!(contest_id = contest_id, error = %e, "私有赛后台报名失败（不影响查看）");
+            }
+        }
 
         // 自动选中
         self.select_contest(contest_id)?;
@@ -571,6 +602,9 @@ impl ContestService {
             contest_id.to_string(),
             password.map(str::to_string),
         );
+        // 纪元捕获：logout/login/reset/切OJ 若发生在途（见 access_epoch 字段文档），
+        // 请求结果不得写回清理后的记忆
+        let epoch = self.access_epoch.load(Ordering::SeqCst);
         let now = Instant::now();
         match self
             .access_attempts
@@ -593,7 +627,7 @@ impl ContestService {
         }
 
         let result = provider.ensure_contest_access(contest_id, password).await;
-        {
+        if self.access_epoch.load(Ordering::SeqCst) == epoch {
             let mut memo = self
                 .access_attempts
                 .lock()
@@ -614,6 +648,11 @@ impl ContestService {
                 // 不记 memo，下一周期照常重试
                 Err(_) => {}
             }
+        } else {
+            debug!(
+                contest_id = contest_id,
+                "私有赛进入期间记忆已被清理（登出/换账号），放弃写回旧账号结果"
+            );
         }
         result.map_err(|e| {
             warn!(contest_id = contest_id, error = %e, "私有赛进入校验失败");

@@ -101,6 +101,17 @@ impl HOJAdapter {
             .map_err(|_| AppError::Contest(format!("比赛 ID 非法: {}", contest_id)))
     }
 
+    /// 「需凭证进入」类业务消息判据（纯函数，单测锁定正负样本）。
+    ///
+    /// HOJ 未报名私有赛的题目列表返回「请先到比赛首页输入比赛密码进行注册！」，
+    /// 判据取其特征片段（「输入比赛密码」「进行注册」）。刻意**保守**：
+    /// - 漏判（HOJ 改文案）→ 进入流程不触发、原始错误原样上抛 —— 安全降级；
+    /// - 误判需无关消息恰好同时含这些片段（如「校验比赛密码失败，请稍后再试」
+    ///   只含「比赛密码」不含「输入比赛密码」，不会命中）—— 可能性极低。
+    fn message_indicates_credential_rejection(msg: &str) -> bool {
+        msg.contains("输入比赛密码") || msg.contains("进行注册")
+    }
+
     /// 获取当前存储的 token。
     ///
     /// 锁中毒时取回内部值继续（全仓 `into_inner()` 惯例）—— 中毒只说明曾有
@@ -803,6 +814,18 @@ impl ContestProvider for HOJAdapter {
             .collect();
 
         Ok(problems)
+    }
+
+    /// 判断题目列表业务失败是否属「需凭证进入」类（错误驱动进入的触发判据）。
+    ///
+    /// 「Contest 变体」只是必要条件不充分——「比赛还未开始」「该比赛不存在」
+    /// 等同样落在 Contest 变体，误判会让用户看到密码引导而非真实原因。
+    /// 判据见 [`Self::message_indicates_credential_rejection`]。
+    fn is_credential_rejection(&self, error: &AppError) -> bool {
+        match error {
+            AppError::Contest(msg) => Self::message_indicates_credential_rejection(msg),
+            _ => false,
+        }
     }
 
     /// 确保当前会话可访问指定比赛：私有赛（auth==1）需先报名。

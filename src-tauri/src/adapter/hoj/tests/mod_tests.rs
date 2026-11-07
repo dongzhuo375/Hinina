@@ -1394,3 +1394,61 @@ async fn ensure_access_register_ok_but_still_denied_errors() {
 
     server.shutdown();
 }
+
+// ── 「需凭证进入」消息判据（is_credential_rejection 的纯函数核心）──
+
+#[test]
+fn credential_rejection_matches_real_hoj_message() {
+    // 正样本：未报名私有赛的真实消息（取特征片段，宽松形态也算）
+    assert!(HOJAdapter::message_indicates_credential_rejection(
+        "HOJ contest problem list 失败: 请先到比赛首页输入比赛密码进行注册！"
+    ));
+    assert!(HOJAdapter::message_indicates_credential_rejection(
+        "HOJ contest problem list 失败: 请先进行注册"
+    ));
+}
+
+#[test]
+fn credential_rejection_rejects_other_business_failures() {
+    // 负样本：同样落在 Contest 变体的其它业务失败不得触发进入流程
+    //（误判会让用户看到密码引导而非真实原因）。
+    // 注意「校验比赛密码失败，请稍后再试」含「比赛密码」但不含特征片段
+    for msg in [
+        "HOJ contest problem list 失败: 比赛还未开始",
+        "HOJ contest problem list 失败: 该比赛不存在!",
+        "HOJ contest problem list 失败: 您不是该团队成员",
+        "HOJ register contest 失败: 校验比赛密码失败，请稍后再试",
+    ] {
+        assert!(
+            !HOJAdapter::message_indicates_credential_rejection(msg),
+            "不应判为需凭证类: {}",
+            msg
+        );
+    }
+}
+
+/// 变体收窄：Auth/Network 变体一律不触发（is_credential_rejection 是
+/// 同步 trait 方法，无需真实请求即可判定）。
+#[tokio::test]
+async fn credential_rejection_only_for_contest_variant() {
+    let server = LoopbackServer::start(vec![]).await;
+    let fx = fixture(server.url());
+
+    assert!(!fx
+        .adapter
+        .is_credential_rejection(&crate::core::error::AppError::Auth(
+            "请您先登录".to_string()
+        )));
+    assert!(!fx
+        .adapter
+        .is_credential_rejection(&crate::core::error::AppError::Network(
+            "connection reset".to_string()
+        )));
+    assert!(!fx
+        .adapter
+        .is_credential_rejection(&crate::core::error::AppError::Contest(
+            "比赛还未开始".to_string()
+        )));
+
+    server.shutdown();
+}
