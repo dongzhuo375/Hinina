@@ -97,7 +97,7 @@ Hinina/
         │   ├── provider/
         │   │   ├── mod.rs
         │   │   ├── auth.rs               # AuthProvider trait
-        │   │   ├── contest.rs            # ContestProvider trait（+ list_contest_problems / get_contest_rank / list_announcements）
+        │   │   ├── contest.rs            # ContestProvider trait（+ get_contest / ensure_contest_access 私有赛凭证进入 / list_contest_problems / get_contest_rank / list_announcements）
         │   │   ├── problem.rs            # ProblemProvider trait（get_problem + get_user_problem_status）
         │   │   ├── submission.rs         # SubmissionProvider trait（submit 同时收 problem_id 与 display_id —— 各 OJ 认的不是同一个标识；+ list_contest_submissions / get_submission_detail / get_submission_cases）
         │   │   ├── oj_id.rs             # OjId newtype（OJ 身份 = 数据而非枚举；session_file() 显式会话文件名契约，id 与历史枚举 Debug 输出一致）
