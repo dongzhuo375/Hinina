@@ -923,6 +923,7 @@ fn problem_details_missing_or_null_languages_yield_empty_vec() {
 use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
+use crate::core::provider::contest::ContestProvider;
 use crate::core::provider::oj_id::OjId;
 use crate::core::provider::submission::SubmissionProvider;
 use crate::core::repository::session_repo::SessionRepository;
@@ -1175,6 +1176,181 @@ async fn submit_server_error_is_not_retried_and_carries_excerpt() {
         reqs.len(),
         2,
         "登录 1 次 + 提交 1 次：POST 非幂等，不得自动重试"
+    );
+
+    server.shutdown();
+}
+
+// ── 私有赛进入（ensure_contest_access：先查后报 + 复查）──
+
+/// 比赛访问权限查询响应（AccessVO）。
+fn access_ok(access: bool) -> ScriptedResponse {
+    ScriptedResponse::json(format!(
+        r#"{{"status":200,"msg":"success","data":{{"access":{}}}}}"#,
+        access
+    ))
+}
+
+/// 报名成功响应：data 恒为 null，成败只看包络 status。
+fn register_ok() -> ScriptedResponse {
+    ScriptedResponse::json(r#"{"status":200,"msg":"success","data":null}"#)
+}
+
+/// 报名被拒（密码错误）：包络 status 非 200 + 业务消息（非 401/403，不判会话失效）。
+fn register_rejected() -> ScriptedResponse {
+    ScriptedResponse::json(r#"{"status":500,"msg":"密码错误","data":null}"#)
+}
+
+/// 已有访问权限（报名过/公开过）：幂等跳过报名，不发 POST。
+#[tokio::test]
+async fn ensure_access_granted_skips_register() {
+    let server = LoopbackServer::start(vec![login_ok("jwt-1"), access_ok(true)]).await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    fx.adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .expect("已可访问应直接成功");
+
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 2, "access=true 时不得发报名请求");
+    assert_eq!(reqs[1].method, "GET");
+    assert_eq!(reqs[1].path, "/api/get-contest-access?cid=1001");
+    assert_eq!(
+        reqs[1].header("authorization"),
+        Some("jwt-1"),
+        "权限查询必须带会话（裸 JWT）"
+    );
+
+    server.shutdown();
+}
+
+/// 未报名：提交密码报名 → 复查 access → 放行。请求体必须是 {cid, password}。
+#[tokio::test]
+async fn ensure_access_registers_with_password_then_rechecks() {
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        access_ok(false),
+        register_ok(),
+        access_ok(true),
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    fx.adapter
+        .ensure_contest_access("1001", Some("contest-pw"))
+        .await
+        .expect("报名成功后应可访问");
+
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 4, "查询→报名→复查 共 3 次请求");
+    let register = &reqs[2];
+    assert_eq!(register.method, "POST");
+    assert_eq!(register.path, "/api/register-contest");
+    let body: serde_json::Value = serde_json::from_str(&register.body).unwrap();
+    assert_eq!(body["cid"], 1001);
+    assert_eq!(body["password"], "contest-pw");
+    assert_eq!(
+        reqs[3].path, "/api/get-contest-access?cid=1001",
+        "报名成功后必须复查 access，防止「200 但权限未生效」静默通过"
+    );
+
+    server.shutdown();
+}
+
+/// 未报名且未提供密码：报可操作的引导文案，不发报名请求。
+#[tokio::test]
+async fn ensure_access_without_password_errors_with_guidance() {
+    let server = LoopbackServer::start(vec![login_ok("jwt-1"), access_ok(false)]).await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Contest(ref m) if m.contains("比赛密码")),
+        "缺密码应是带引导的 Contest 错误，实际 {:?}",
+        err
+    );
+    assert_eq!(server.requests().len(), 2, "未提供密码不得提交报名");
+
+    server.shutdown();
+}
+
+/// 密码错误：业务错误透传为 Contest 变体（sessionGuard 不得误判会话失效踢回登录页）。
+#[tokio::test]
+async fn ensure_access_wrong_password_stays_business_error() {
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        access_ok(false),
+        register_rejected(),
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", Some("bad"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Contest(ref m) if m.contains("密码错误")),
+        "密码错误必须保留业务语义（不是 Auth），实际 {:?}",
+        err
+    );
+
+    server.shutdown();
+}
+
+/// 未登录：前置断言「请先登录」，零请求 —— 密码不能发给匿名会话。
+#[tokio::test]
+async fn ensure_access_requires_login() {
+    let server = LoopbackServer::start(vec![]).await;
+    let fx = fixture(server.url());
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Auth(ref m) if m.contains("请先登录")),
+        "匿名会话应报请先登录，实际 {:?}",
+        err
+    );
+    assert_eq!(server.requests().len(), 0);
+
+    server.shutdown();
+}
+
+/// 报名接口 200 但复查 access 仍 false：防御性报错，不静默放行。
+#[tokio::test]
+async fn ensure_access_register_ok_but_still_denied_errors() {
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        access_ok(false),
+        register_ok(),
+        access_ok(false),
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Contest(ref m) if m.contains("仍无访问权限")),
+        "报名成功但未放行应显式报错，实际 {:?}",
+        err
     );
 
     server.shutdown();

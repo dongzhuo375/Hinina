@@ -14,7 +14,7 @@
 // 变体被改写会让 token 过期时榜单静默 stale、选手永远回不到登录页。
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,7 @@ use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
+use crate::core::provider::contest::ContestProvider;
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::{JsonDiskCache, TtlCache};
 use crate::infra::storage::Storage;
@@ -60,6 +61,10 @@ pub struct ReadAnnouncementState {
     pub read_ids: Vec<String>,
 }
 
+/// 私有赛进入尝试记录的类型别名：键 `(oj_id, contest_id, password)`，
+/// 值 `None` = 已成功 / `Some(msg)` = 业务失败消息。
+type AccessAttempts = Mutex<HashMap<(String, String, Option<String>), Option<String>>>;
+
 /// 比赛服务。
 pub struct ContestService {
     access: Arc<crate::core::access::AccessRevision>,
@@ -80,6 +85,19 @@ pub struct ContestService {
     /// **每个比赛一条基线**：同一进程内可能先看 1011 再看 1012，
     /// 只留一份会让切回旧比赛时把已有公告误判成新公告（红点误报）。
     announcement_baseline: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// 私有赛进入尝试记录：(oj_id, contest_id, password) → 失败消息。
+    ///
+    /// **防轮询重复报名**：题目总览每 30s 轮询 `load_contest_with_problems`，
+    /// 私有赛密码缺失/错误时若无记忆会每周期重复提交报名请求（可能触发
+    /// 服务端限频/锁定）。同一（OJ, 比赛, 密码）组合的尝试结果不会变化，
+    /// 故成败皆记：`None` = 已成功（报名是账号级持久状态，本进程内无需再查）；
+    /// `Some(msg)` = 业务失败（密码缺失/错误），命中后复用首次的引导消息。
+    /// 网络/序列化/会话类失败**不记**——瞬态或有恢复路径（重新登录），应重试。
+    ///
+    /// 局限（有意接受）：同 OJ 换账号不换 key，换号后需重启进程才会重新报名；
+    /// 设置页改密码自然换 key；OJ 切换时整体清空（见 `on_oj_switched`）。
+    /// 仅进程内存，不跨重启。
+    access_attempts: AccessAttempts,
 }
 
 impl ContestService {
@@ -106,6 +124,7 @@ impl ContestService {
             current_contest: RwLock::new(None),
             cache,
             announcement_baseline: Arc::new(RwLock::new(HashMap::new())),
+            access_attempts: Mutex::new(HashMap::new()),
         }
     }
 
@@ -130,6 +149,12 @@ impl ContestService {
             .unwrap_or_else(|e| e.into_inner()) = None;
         // 中毒也必须完成失效（into_inner）：跳过会让旧 OJ 的榜单缓存跨切换存活
         *self.cache.write().unwrap_or_else(|e| e.into_inner()) = None;
+        // 私有赛进入尝试记录一并失效：不同 OJ 的报名状态互不相干，
+        // 保留会让切回旧 OJ 时跳过本该重新发起的报名
+        self.access_attempts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         self.meta_cache.clear();
         info!("OJ 已切换：清空比赛列表与元信息内存缓存");
 
@@ -384,6 +409,10 @@ impl ContestService {
     /// **缓存策略**：比赛元信息走内存 → 磁盘 → 网络（TTL 120s）；题目列表
     /// **每次实时拉取** —— 题目总览页轮询它就是为了刷新 ac/total 计数，
     /// 缓存题目列表等于让轮询失去意义。
+    ///
+    /// **私有赛**（`auth == 1`）加载前先走 [`Self::ensure_private_contest_access`]：
+    /// 用配置里的比赛密码（`oj.contest_password`，由命令层传入）报名进入，
+    /// 未配置/错误时报可操作的错误引导用户补填。
     pub async fn load_contest_with_problems(
         &self,
         contest_id: &str,
@@ -394,12 +423,10 @@ impl ContestService {
         info!(contest_id = contest_id, "加载比赛");
         let contest = self.load_contest_meta(contest_id).await?;
 
-        // 私有赛需要密码
+        // 私有赛需要密码：先确保当前会话可访问（必要时用配置密码报名），再拉题目
         if contest.auth == 1 {
-            if let Some(_pw) = password {
-                // TODO: 后续实现比赛注册 API 调用
-                debug!("私有赛密码已提供");
-            }
+            self.ensure_private_contest_access(provider.as_ref(), contest_id, password)
+                .await?;
         }
 
         let problems = provider
@@ -415,6 +442,69 @@ impl ContestService {
 
         debug!(problem_count = problems.len(), "比赛加载完成");
         Ok(ContestBundle { contest, problems })
+    }
+
+    /// 私有赛（`auth == 1`）进入校验：调用 provider 的凭证进入能力
+    /// （`ContestProvider::ensure_contest_access`），带进程内防重复尝试记忆
+    /// （见 `access_attempts` 字段文档）。
+    ///
+    /// 记忆命中失败时复用首次的错误消息 —— 轮询重试时用户看到的仍是同一条
+    /// 可操作的引导，而不是题目列表接口返回的裸服务端报错。
+    async fn ensure_private_contest_access(
+        &self,
+        provider: &dyn ContestProvider,
+        contest_id: &str,
+        password: Option<&str>,
+    ) -> AppResult<()> {
+        let key = (
+            self.registry.current_id().as_str().to_string(),
+            contest_id.to_string(),
+            password.map(str::to_string),
+        );
+        if let Some(outcome) = self
+            .access_attempts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+        {
+            debug!(
+                contest_id = contest_id,
+                "私有赛进入已尝试过（同 OJ/比赛/密码），跳过重复请求"
+            );
+            return match outcome {
+                None => Ok(()),
+                Some(msg) => Err(AppError::Contest(msg.clone()).context("私有赛进入校验失败")),
+            };
+        }
+
+        let result = provider.ensure_contest_access(contest_id, password).await;
+        {
+            let mut attempts = self
+                .access_attempts
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            match &result {
+                Ok(()) => {
+                    attempts.insert(key, None);
+                }
+                // 业务拒绝（密码缺失/错误等）结果确定：记入 memo，
+                // 防 30s 轮询对同一组合反复提交报名请求
+                Err(AppError::Contest(msg)) => {
+                    debug!(
+                        contest_id = contest_id,
+                        "私有赛进入被业务拒绝，记入防重试记忆"
+                    );
+                    attempts.insert(key, Some(msg.clone()));
+                }
+                // 网络/序列化/会话类失败是瞬态或有恢复路径（重新登录）：
+                // 不记 memo，下一周期照常重试
+                Err(_) => {}
+            }
+        }
+        result.map_err(|e| {
+            warn!(contest_id = contest_id, error = %e, "私有赛进入校验失败");
+            e.context("私有赛进入校验失败")
+        })
     }
 
     /// 获取比赛公告（分页）。

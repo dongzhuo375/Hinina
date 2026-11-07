@@ -168,6 +168,22 @@ impl HOJAdapter {
         Self::parse_hoj_json::<T>(&text, url)
     }
 
+    /// 查询当前会话对比赛的访问权限（`GET /get-contest-access` → `AccessVO.access`）。
+    ///
+    /// 只读不报名；报名见 `ensure_contest_access`。
+    async fn get_contest_access(&self, cid: i64) -> AppResult<bool> {
+        let url = self.api_url(&format!("/get-contest-access?cid={}", cid));
+        let api_resp = self
+            .get_json_authed::<ApiResponse<types::AccessVO>>(&url)
+            .await
+            .map_err(|e| e.context("HOJ contest access"))?;
+
+        let vo = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Contest(format!("HOJ contest access 失败: {}", msg)))?;
+        Ok(vo.access)
+    }
+
     /// 把 `get-user-auth-info` 的调用结果映射为三态契约的 `Ok(true)` / `Ok(false)` / `Err`。
     ///
     /// 抽成纯函数是为了让「哪些情况算服务端**明确**判定失效」可被单元测试锁定 ——
@@ -787,6 +803,69 @@ impl ContestProvider for HOJAdapter {
             .collect();
 
         Ok(problems)
+    }
+
+    /// 确保当前会话可访问指定比赛：私有赛（auth==1）需先报名。
+    ///
+    /// 判定顺序刻意**先查后报**：报名是账号级持久状态，`get-contest-access`
+    /// 为 true（已报名/已放行）时直接返回，避免每次加载都重复提交报名请求。
+    /// 报名成功后复查一次 access，确认服务端确实放行 —— 防止「报名接口
+    /// 返回成功但权限未生效」的语义差异静默通过。
+    ///
+    /// 密码错误的业务失败（包络 status != 200）保留为 `AppError::Contest`：
+    /// `auth_failure_from_body` 只把指向登录/凭证的 401/403 判为会话问题，
+    /// 私有赛未注册、密码错误不会误踢会话。
+    async fn ensure_contest_access(
+        &self,
+        contest_id: &str,
+        credential: Option<&str>,
+    ) -> AppResult<()> {
+        // 报名与权限查询都要求登录：匿名会话给出明确的「请先登录」，
+        // 而不是把密码发给一个未认证的会话（与 submit 的前置断言同理）
+        self.require_token()?;
+        let cid: i64 = Self::parse_cid(contest_id)?;
+
+        if self.get_contest_access(cid).await? {
+            debug!(cid = cid, "HOJ 私有赛访问权限已存在，跳过报名");
+            return Ok(());
+        }
+
+        let password = credential.ok_or_else(|| {
+            AppError::Contest(
+                "该比赛为私有赛，需要比赛密码：请在「设置 → OJ 服务」填写「比赛密码」后重试"
+                    .to_string(),
+            )
+        })?;
+
+        let url = self.api_url("/register-contest");
+        let body = types::RegisterContestDTO {
+            cid,
+            password: password.to_string(),
+        };
+        // 报名接口的 data 恒为 null（成功与否只看包络 status），
+        // 不能走 into_data（成功但 data 缺失会误报「响应数据为空」）
+        let api_resp = self
+            .post_json_authed::<ApiResponse<serde_json::Value>, _>(&url, &body)
+            .await
+            .map_err(|e| e.context("HOJ register contest"))?;
+        if !api_resp.is_success() {
+            return Err(AppError::Contest(format!(
+                "HOJ register contest 失败: {}",
+                api_resp
+                    .msg
+                    .unwrap_or_else(|| format!("HOJ 错误 status={}", api_resp.status))
+            )));
+        }
+
+        if self.get_contest_access(cid).await? {
+            debug!(cid = cid, "HOJ 私有赛报名成功");
+            Ok(())
+        } else {
+            Err(AppError::Contest(format!(
+                "报名请求已被 HOJ 接受但仍无访问权限（cid={}）",
+                cid
+            )))
+        }
     }
 
     async fn get_contest_rank(
