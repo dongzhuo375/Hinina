@@ -619,18 +619,29 @@ fn private_contest_with_accessible_problems_never_triggers_access_flow() {
 #[test]
 fn open_rank_private_contest_backfills_registration_best_effort() {
     // 提交侧兜底：题目可拉（openRank 私有赛可见不可交）+ 配置了密码 →
-    // 后台 best-effort 报名，报名成功记忆生效，查看不受影响
+    // **真后台**报名（tokio::spawn，不阻塞加载返回），报名成功记忆生效
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
-    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("加载应成功");
+    block_on(async {
+        service
+            .load_contest_with_problems("1011", Some("pw"))
+            .await
+            .expect("加载应成功");
+        // 兜底已 spawn：current_thread 上让出调度直到后台任务完成
+        let mut waited = 0;
+        while stub.access_call_count() < 1 && waited < 10_000 {
+            tokio::task::yield_now().await;
+            waited += 1;
+        }
+    });
     assert_eq!(
         stub.access_call_count(),
         1,
-        "题目成功且配置了密码时应 best-effort 报名（提交通道对 auth==1 始终要求报名）"
+        "题目成功且配置了密码时应后台 best-effort 报名（提交通道对 auth==1 始终要求报名）"
     );
     assert_eq!(stub.last_access_credential(), Some("pw".to_string()));
 
-    // 成功记忆命中：第二次加载不重复请求
+    // 成功记忆命中：第二次加载的兜底任务不重复请求
     block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("第二次加载应成功");
     assert_eq!(
         stub.access_call_count(),

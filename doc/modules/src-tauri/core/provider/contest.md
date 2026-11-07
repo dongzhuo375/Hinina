@@ -26,8 +26,8 @@
 ## 被依赖
 - `core::provider::registry`（ProviderRegistry 注册/获取 ContestProvider）
 - `infra::provider_registry_impl`
-- `adapter::hoj`（实现全部方法，含覆盖 `ensure_contest_access` 默认实现；Hydro 沿用默认实现）
-- `service::contest`（`get_rank` 经 registry 调用 `get_contest_rank`；`list_announcements` 经 registry 调用同名方法；`ensure_private_contest_access` 调用 `ensure_contest_access`）
+- `adapter::hoj`（实现全部方法，含覆盖 `ensure_contest_access` 与 `is_credential_rejection` 默认实现；Hydro 沿用默认实现）
+- `service::contest`（`get_rank` 经 registry 调用 `get_contest_rank`；`list_announcements` 经 registry 调用同名方法；`ensure_contest_access_core` 调用 `ensure_contest_access`，错误驱动触发判据调用 `is_credential_rejection`）
 
 ## 逻辑流程
 本文件绝大部分是纯 trait 声明；仅两个**默认实现**自带行为：
