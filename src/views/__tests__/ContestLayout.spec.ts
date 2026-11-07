@@ -166,6 +166,22 @@ describe('contest exit lifecycle', () => {
     await nextTick()
     expect(mocks.startLive).toHaveBeenCalledExactlyOnceWith('1', expect.any(Function))
   })
+
+  it('stops polling and clears liveFor when contest data is cleared, so the same id can restart', async () => {
+    // OJ 切换/登出清空 contest 数据（既有缺口：只有阶段跃迁清 liveFor——
+    // 切换前后都是 running 时 liveFor 残留，新 OJ 的同 cid 会被挡住，
+    // 公告轮询停在旧 OJ 上）。watcher 必须在 id 清空时停轮询并忘掉 id
+    const store = await render()
+    expect(mocks.startLive).toHaveBeenCalledOnce()
+
+    store.contest = null // 模拟 OJ 切换清空（phase 仍 running，阶段监听不管）
+    await nextTick()
+    expect(mocks.stopLive).toHaveBeenCalled()
+
+    store.contest = { ...schedule } // 新 OJ 的同 cid 到达：重启而非被 liveFor 挡住
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('--settings 无会话最小壳', () => {

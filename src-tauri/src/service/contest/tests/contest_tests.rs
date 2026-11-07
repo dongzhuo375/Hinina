@@ -640,24 +640,10 @@ fn open_rank_private_contest_backfills_registration_best_effort() {
         "题目成功且配置了密码时应后台 best-effort 报名（提交通道对 auth==1 始终要求报名）"
     );
     assert_eq!(stub.last_access_credential(), Some("pw".to_string()));
-
-    // 成功记忆命中：第二次加载的兜底任务不重复请求。
-    // **必须在同一 block_on 内等任务完成**：block_on 返回会关闭 runtime、
-    // 丢弃未跑完的 spawn 任务——不等的话「删掉成功记忆」的变异不会红
-    block_on(async {
-        service
-            .load_contest_with_problems("1011", Some("pw"))
-            .await
-            .expect("第二次加载应成功");
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-        }
-    });
-    assert_eq!(
-        stub.access_call_count(),
-        1,
-        "成功记忆命中，best-effort 不重复请求"
-    );
+    // 「成功记忆命中不重复请求」**不在本用例断言**：后台命中 memo 时无 provider
+    // 调用可观察，yield 次数也不是完成信号（任务未被调度到则变异不红）。
+    // 该不变量由 success_memo_hits_when_problems_still_fail 在错误驱动路径
+    // （同步 await、可靠等待）锁定——后台兜底与其共用同一 core 实现。
 }
 
 #[test]
