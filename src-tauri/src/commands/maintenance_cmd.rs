@@ -29,6 +29,7 @@ use crate::service::submission::snapshot::{self, SNAPSHOT_KEEP_DAYS};
 /// - 题面（内存 + 磁盘 `cache/problem_statement/`）、题目 limits（内存 + 磁盘 `cache/problem_limits/`）
 /// - 终态提交详情 / 测试点（内存；含源代码，属登录态数据，与登出清理同一方法）
 /// - 公告基线（`announcement_baseline`）与公告已读状态（`announcements_read/`）
+/// - 私有赛进入尝试记忆（报名状态是账号级的，重置后必须重新校验）
 ///
 /// **刻意不清什么**（本地事实，删掉不可恢复，且不属于「可重新获取」的范畴）：
 /// - 工作区代码与元数据（`workspaces/`）
@@ -51,6 +52,8 @@ pub(crate) fn reset_client_impl(ctx: &AppContext) -> AppResult<()> {
     ctx.problem.clear_caches();
     // 用户域缓存（含源代码）与登出同一语义：换账号/重置后都不得复用上一位选手的提交内容
     ctx.submission.clear_user_caches();
+    // 私有赛进入尝试记忆同登出语义：报名状态是账号级的，重置后必须重新校验
+    ctx.contest.clear_access_attempts();
 
     // 重置语义下「已告知过哪些公告」也该忘掉：重置后一切皆未见，留着基线没有意义
     ctx.contest.clear_announcement_baseline();

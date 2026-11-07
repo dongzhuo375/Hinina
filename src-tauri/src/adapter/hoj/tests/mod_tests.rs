@@ -1196,9 +1196,11 @@ fn register_ok() -> ScriptedResponse {
     ScriptedResponse::json(r#"{"status":200,"msg":"success","data":null}"#)
 }
 
-/// 报名被拒（密码错误）：包络 status 非 200 + 业务消息（非 401/403，不判会话失效）。
+/// 报名被拒（密码错误）：真实 HOJ 载荷 —— `StatusFailException("比赛密码错误，
+/// 请重新输入！")` 经 `CommonResult.errorResponse` 得到包络 **status=400**
+///（ResultStatus.FAIL）+ 原文消息。非 401/403，不判会话失效。
 fn register_rejected() -> ScriptedResponse {
-    ScriptedResponse::json(r#"{"status":500,"msg":"密码错误","data":null}"#)
+    ScriptedResponse::json(r#"{"status":400,"msg":"比赛密码错误，请重新输入！","data":null}"#)
 }
 
 /// 已有访问权限（报名过/公开过）：幂等跳过报名，不发 POST。
@@ -1277,12 +1279,18 @@ async fn ensure_access_without_password_errors_with_guidance() {
         "缺密码应是带引导的 Contest 错误，实际 {:?}",
         err
     );
+    assert!(
+        err.user_message().contains("OJ 服务器"),
+        "引导文案必须指向设置页实际区块标题「OJ 服务器」，实际 {}",
+        err.user_message()
+    );
     assert_eq!(server.requests().len(), 2, "未提供密码不得提交报名");
 
     server.shutdown();
 }
 
-/// 密码错误：业务错误透传为 Contest 变体（sessionGuard 不得误判会话失效踢回登录页）。
+/// 密码错误：业务错误透传为 Contest 变体（sessionGuard 不得误判会话失效踢回登录页），
+/// 且补上可操作的设置路径（只看 HOJ 原文「比赛密码错误，请重新输入！」没有出路）。
 #[tokio::test]
 async fn ensure_access_wrong_password_stays_business_error() {
     let server = LoopbackServer::start(vec![
@@ -1300,8 +1308,39 @@ async fn ensure_access_wrong_password_stays_business_error() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, crate::core::error::AppError::Contest(ref m) if m.contains("密码错误")),
+        matches!(err, crate::core::error::AppError::Contest(ref m) if m.contains("比赛密码错误，请重新输入")),
         "密码错误必须保留业务语义（不是 Auth），实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("OJ 服务器"),
+        "密码错误文案必须带可操作的设置路径（区块实名「OJ 服务器」），实际 {}",
+        err.user_message()
+    );
+
+    server.shutdown();
+}
+
+/// 权限查询返回体内 403「请您先登录！」（会话在进入流程中途失效）：
+/// 必须映射为 Auth 变体 —— 前端会话守卫靠它把用户带回登录页。
+#[tokio::test]
+async fn ensure_access_access_check_body_auth_failure_maps_to_auth() {
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        ScriptedResponse::json(r#"{"status":403,"msg":"请您先登录！","data":null}"#),
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Auth(_)),
+        "体内 403+登录关键词必须映射为 Auth（会话守卫路径），实际 {:?}",
         err
     );
 

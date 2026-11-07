@@ -832,7 +832,7 @@ impl ContestProvider for HOJAdapter {
 
         let password = credential.ok_or_else(|| {
             AppError::Contest(
-                "该比赛为私有赛，需要比赛密码：请在「设置 → OJ 服务」填写「比赛密码」后重试"
+                "该比赛为私有赛，需要比赛密码：请在「设置 → OJ 服务器」填写「比赛密码」后重试"
                     .to_string(),
             )
         })?;
@@ -849,11 +849,14 @@ impl ContestProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ register contest"))?;
         if !api_resp.is_success() {
+            // 密码错误只看到 HOJ 原文没有出路，补一句可操作的设置路径
+            //（「若密码有误」的条件措辞兼容同一状态码下的其它业务拒绝）
+            let msg = api_resp
+                .msg
+                .unwrap_or_else(|| format!("HOJ 错误 status={}", api_resp.status));
             return Err(AppError::Contest(format!(
-                "HOJ register contest 失败: {}",
-                api_resp
-                    .msg
-                    .unwrap_or_else(|| format!("HOJ 错误 status={}", api_resp.status))
+                "HOJ register contest 失败: {}；若密码有误，请在「设置 → OJ 服务器」更正「比赛密码」后重试",
+                msg
             )));
         }
 

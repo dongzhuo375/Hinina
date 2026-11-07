@@ -16,7 +16,7 @@ fn reselect_same_contest_keeps_scope_but_aba_and_oj_switch_revoke_it() {
 }
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use crate::core::entity::announcement::{Announcement, AnnouncementPage};
@@ -47,6 +47,8 @@ enum StubMode {
     Auth,
     /// 模拟网络中断
     Network,
+    /// 模拟业务拒绝（适配器契约：未报名/需凭证的私有赛题目列表以 Contest 变体表达）
+    Contest,
 }
 
 impl StubMode {
@@ -54,6 +56,7 @@ impl StubMode {
         match self {
             StubMode::Auth => AppError::Auth(format!("{}: HTTP 401 Unauthorized", ctx)),
             StubMode::Network => AppError::Network(format!("{}: connection reset", ctx)),
+            StubMode::Contest => AppError::Contest(format!("{}: 私有赛未报名，需要比赛密码", ctx)),
             StubMode::Ok => unreachable!("Ok 模式不应构造错误"),
         }
     }
@@ -76,6 +79,16 @@ struct StubContestProvider {
     announcements: RwLock<Vec<Announcement>>,
     /// `get_contest` 返回的比赛 auth（0=公开，1=私有），测私有赛进入分支用。
     contest_auth: RwLock<i32>,
+    /// `list_contest_problems` 的独立模式（`None` 时跟随全局 `mode`）。
+    ///
+    /// 错误驱动的私有赛进入用例需要「元信息成功 + 题目列表业务失败」的组合，
+    /// 全局 `mode` 做不到（会连 `get_contest` 一起失败）。
+    problems_mode: RwLock<Option<StubMode>>,
+    /// 是否已报名（`ensure_contest_access` 返回 Ok 时置位）。
+    ///
+    /// 模拟服务端事实：报名解锁私有赛题目列表 —— `problems_mode` 为 Contest 且
+    /// 未报名时题目列表失败，报名后（或 `problems_mode` 放开）成功。
+    registered: AtomicBool,
     /// `ensure_contest_access` 的行为与调用记录。
     access_mode: RwLock<AccessMode>,
     access_calls: AtomicUsize,
@@ -92,6 +105,8 @@ enum AccessMode {
     WrongPassword,
     /// 瞬态失败（AppError::Network —— 不应记入记忆）
     Network,
+    /// 会话失效（AppError::Auth —— 不应记入记忆，重新登录后应重试）
+    Auth,
 }
 
 impl StubContestProvider {
@@ -103,6 +118,8 @@ impl StubContestProvider {
             problems_calls: AtomicUsize::new(0),
             announcements: RwLock::new(sample_announcement_page().records),
             contest_auth: RwLock::new(0),
+            problems_mode: RwLock::new(None),
+            registered: AtomicBool::new(false),
             access_mode: RwLock::new(AccessMode::Grant),
             access_calls: AtomicUsize::new(0),
             access_credential: RwLock::new(None),
@@ -111,6 +128,11 @@ impl StubContestProvider {
 
     fn set_mode(&self, mode: StubMode) {
         *self.mode.write().unwrap() = mode;
+    }
+
+    /// 覆盖 `list_contest_problems` 的独立模式（`None` 恢复跟随全局）。
+    fn set_problems_mode(&self, mode: Option<StubMode>) {
+        *self.problems_mode.write().unwrap() = mode;
     }
 
     /// 设置 `get_contest` 返回的比赛 auth（0=公开，1=私有）。
@@ -268,8 +290,18 @@ impl ContestProvider for StubContestProvider {
 
     async fn list_contest_problems(&self, _contest_id: &str) -> AppResult<Vec<ContestProblem>> {
         self.problems_calls.fetch_add(1, Ordering::SeqCst);
-        match self.current_mode() {
+        let mode = self
+            .problems_mode
+            .read()
+            .unwrap()
+            .unwrap_or_else(|| self.current_mode());
+        match mode {
             StubMode::Ok => Ok(vec![sample_problem()]),
+            // Contest 语义是「未报名/需凭证」：报名成功（registered 置位）后放行，
+            // 与服务端事实一致 —— 进入流程成功后的重试必须能拿到题目
+            StubMode::Contest if self.registered.load(Ordering::SeqCst) => {
+                Ok(vec![sample_problem()])
+            }
             m => Err(m.into_err("stub list_contest_problems")),
         }
     }
@@ -314,10 +346,17 @@ impl ContestProvider for StubContestProvider {
         self.access_calls.fetch_add(1, Ordering::SeqCst);
         *self.access_credential.write().unwrap() = credential.map(str::to_string);
         match *self.access_mode.read().unwrap() {
-            AccessMode::Grant => Ok(()),
+            AccessMode::Grant => {
+                // 模拟服务端：报名成功解锁私有赛题目列表
+                self.registered.store(true, Ordering::SeqCst);
+                Ok(())
+            }
             AccessMode::WrongPassword => Err(AppError::Contest("密码错误".to_string())),
             AccessMode::Network => Err(AppError::Network(
                 "stub ensure_contest_access: connection reset".to_string(),
+            )),
+            AccessMode::Auth => Err(AppError::Auth(
+                "stub ensure_contest_access: HTTP 401".into(),
             )),
         }
     }
@@ -515,11 +554,12 @@ fn load_contest_with_problems_returns_bundle_and_selects() {
     );
 }
 
-// ── 私有赛进入（auth==1：凭证报名 + 防轮询重复尝试记忆）──
+// ── 私有赛进入（auth==1：错误驱动 + 凭证报名 + 防轮询重复尝试记忆）──
 //
-// 题目总览每 30s 轮询 load_contest_with_problems：密码缺失/错误时若无记忆，
-// 每周期都会对 OJ 重复提交报名请求（可能触发服务端限频/锁定）。以下锁定
-// 「何时发起进入」「哪些失败记入记忆」「记忆何时失效」三组不变量。
+// 题目列表先行：已报名用户、比赛管理员、开放赛外榜单（HOJ 不校验报名的用户）
+// 零额外请求；仅当题目列表以 Contest 变体失败（适配器契约）时才走进入流程并
+// 重试一次。记忆防 30s 轮询重复提交报名：成败皆记、失败项带保留期
+// （见 AccessAttemptMemo），网络/会话类失败不记（瞬态或有恢复路径）。
 
 #[test]
 fn public_contest_never_triggers_access() {
@@ -533,23 +573,76 @@ fn public_contest_never_triggers_access() {
 }
 
 #[test]
-fn private_contest_passes_configured_password_to_provider() {
+fn private_contest_with_accessible_problems_skips_access() {
+    // 错误驱动的关键不变量：题目列表能成功（已报名/管理员/开放赛外榜单）
+    // 时绝不发起进入校验 —— 否则这三类用户会被密码错误页误挡
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
     block_on(service.load_contest_with_problems("1011", Some("pw")))
-        .expect("已可访问的私有赛加载应成功");
+        .expect("题目可拉的私有赛加载应成功");
+    assert_eq!(
+        stub.access_call_count(),
+        0,
+        "题目列表成功时不得发起进入校验"
+    );
+}
+
+#[test]
+fn private_contest_problems_failure_triggers_access_and_retries() {
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::Contest));
+    stub.set_access_mode(AccessMode::Grant);
+
+    block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect("进入成功后重试题目列表应成功");
     assert_eq!(stub.access_call_count(), 1);
     assert_eq!(
         stub.last_access_credential(),
         Some("pw".to_string()),
         "配置里的比赛密码必须透传到 provider"
     );
+    assert_eq!(stub.problems_call_count(), 2, "进入成功后必须重试题目列表");
+}
+
+#[test]
+fn public_contest_problems_failure_is_not_rerouted_to_access() {
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    stub.set_problems_mode(Some(StubMode::Contest)); // auth 仍为 0
+
+    let err = block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect_err("公开赛题目失败应原样报错");
+    assert!(
+        matches!(err, AppError::Contest(ref m) if m.contains("获取比赛题目列表失败")),
+        "公开赛题目失败保留 Contest 变体 + 环节名，实际 {:?}",
+        err
+    );
+    assert_eq!(stub.access_call_count(), 0, "公开赛不得走进入流程");
+}
+
+#[test]
+fn private_contest_access_failure_surfaces_access_error() {
+    // 进入失败时上抛进入的引导错误（可操作），而不是题目接口的裸服务端报错
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::Contest));
+    stub.set_access_mode(AccessMode::WrongPassword);
+
+    let err = block_on(service.load_contest_with_problems("1011", Some("bad")))
+        .expect_err("密码错误应报错");
+    assert!(
+        matches!(err, AppError::Contest(ref m) if m.contains("密码错误") && m.contains("私有赛进入校验失败")),
+        "应报进入校验的引导错误，实际 {:?}",
+        err
+    );
+    assert_eq!(stub.problems_call_count(), 1, "进入失败后不得重试题目列表");
 }
 
 #[test]
 fn private_contest_business_failure_is_memoized() {
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::Contest));
     stub.set_access_mode(AccessMode::WrongPassword);
 
     let err1 = block_on(service.load_contest_with_problems("1011", Some("bad")))
@@ -571,14 +664,16 @@ fn private_contest_business_failure_is_memoized() {
     assert_eq!(
         stub.access_call_count(),
         1,
-        "同（OJ, 比赛, 密码）组合不得重复提交"
+        "同（OJ, 比赛, 密码）组合在保留期内不得重复提交"
     );
+    assert_eq!(stub.problems_call_count(), 2, "每次加载题目列表各失败一次");
 }
 
 #[test]
 fn private_contest_transient_failure_is_not_memoized() {
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::Contest));
     stub.set_access_mode(AccessMode::Network);
 
     block_on(service.load_contest_with_problems("1011", Some("pw"))).expect_err("网络失败应报错");
@@ -596,23 +691,54 @@ fn private_contest_transient_failure_is_not_memoized() {
         "网络类失败不记记忆：第二周期应照常重试"
     );
 
-    // 瞬态恢复后同进程内即可成功
+    // 瞬态恢复后同进程内即可成功（报名同时解锁题目列表：失败重试 1 次）
     stub.set_access_mode(AccessMode::Grant);
     block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("恢复后重试应成功");
     assert_eq!(stub.access_call_count(), 3);
+    assert_eq!(
+        stub.problems_call_count(),
+        4,
+        "前两次各失败 1 次 + 第三次失败 1 次 + 报名成功后重试 1 次"
+    );
+}
+
+#[test]
+fn private_contest_auth_failure_is_not_memoized() {
+    // 会话失效有恢复路径（重新登录）：不记记忆，两次加载都必须触达 provider，
+    // 且错误保持 Auth 变体（前端会话守卫的唯一判据）
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::Contest));
+    stub.set_access_mode(AccessMode::Auth);
+
+    for _ in 0..2 {
+        let err = block_on(service.load_contest_with_problems("1011", Some("pw")))
+            .expect_err("会话失效应报错");
+        assert!(
+            matches!(err, AppError::Auth(_)),
+            "Auth 失败必须保持 Auth 变体，实际 {:?}",
+            err
+        );
+    }
+    assert_eq!(
+        stub.access_call_count(),
+        2,
+        "会话类失败不记记忆：每次都应重新发起（重新登录后即可成功）"
+    );
 }
 
 #[test]
 fn password_change_retries_after_memoized_failure() {
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::Contest));
     stub.set_access_mode(AccessMode::WrongPassword);
 
     block_on(service.load_contest_with_problems("1011", Some("bad")))
         .expect_err("首次密码错误应报错");
     block_on(service.load_contest_with_problems("1011", Some("bad")))
         .expect_err("重试同密码仍报错");
-    assert_eq!(stub.access_call_count(), 1, "同密码组合命中记忆");
+    assert_eq!(stub.access_call_count(), 1, "同密码组合在保留期内命中记忆");
 
     // 用户在设置页更正密码 → 新 key → 重新发起（允许一次新尝试）
     stub.set_access_mode(AccessMode::Grant);
@@ -629,6 +755,7 @@ fn password_change_retries_after_memoized_failure() {
 fn oj_switch_clears_access_attempts() {
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::Contest));
     stub.set_access_mode(AccessMode::WrongPassword);
     block_on(service.load_contest_with_problems("1011", Some("bad")))
         .expect_err("首次密码错误应报错");
@@ -639,6 +766,98 @@ fn oj_switch_clears_access_attempts() {
     block_on(service.load_contest_with_problems("1011", Some("bad")))
         .expect("OJ 切换后记忆已清空，应重新发起进入");
     assert_eq!(stub.access_call_count(), 2, "OJ 切换必须清空进入尝试记录");
+}
+
+#[test]
+fn clear_access_attempts_forgets_recorded_outcomes() {
+    // 登出/成功登录/重置客户端走的清理入口：失败记忆失效后，同组合必须
+    // 重新触达 provider（换账号场景：新账号本可访问，不得被旧账号的失败卡死）
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::Contest));
+    stub.set_access_mode(AccessMode::WrongPassword);
+
+    block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect_err("首次密码错误应报错");
+    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect_err("保留期内命中记忆");
+    assert_eq!(stub.access_call_count(), 1);
+
+    service.clear_access_attempts();
+
+    stub.set_access_mode(AccessMode::Grant);
+    block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect("清空后应重新发起进入并成功");
+    assert_eq!(
+        stub.access_call_count(),
+        2,
+        "清空后同组合必须重新触达 provider"
+    );
+}
+
+#[test]
+fn access_memo_failure_expires_after_retry_window() {
+    // 「同一组合的尝试结果不变」并不严格成立（HOJ 报名有「请稍后再试」类
+    // 瞬态业务失败）：失败记忆必须带保留期，过期即视为从未尝试
+    let mut memo = AccessAttemptMemo::new();
+    let key: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some("pw".into()));
+    let t0 = Instant::now();
+    memo.record_failure(key.clone(), "密码错误".to_string(), t0);
+
+    assert!(
+        matches!(
+            memo.lookup(&key, t0 + Duration::from_secs(1)),
+            AccessMemoLookup::Failure(ref m) if m == "密码错误"
+        ),
+        "保留期内复用首次消息"
+    );
+    assert!(
+        matches!(
+            memo.lookup(
+                &key,
+                t0 + ACCESS_FAILURE_RETRY_AFTER - Duration::from_secs(1)
+            ),
+            AccessMemoLookup::Failure(_)
+        ),
+        "保留期最后一秒内仍命中"
+    );
+    assert!(
+        matches!(
+            memo.lookup(&key, t0 + ACCESS_FAILURE_RETRY_AFTER),
+            AccessMemoLookup::Miss
+        ),
+        "保留期一过即视为未尝试"
+    );
+    assert!(
+        matches!(
+            memo.lookup(&key, t0 + ACCESS_FAILURE_RETRY_AFTER),
+            AccessMemoLookup::Miss
+        ),
+        "过期条目已被顺手清除，不会反复判过期"
+    );
+}
+
+#[test]
+fn access_memo_success_has_no_expiry() {
+    // 报名是账号级持久状态：成功记忆不随时间失效（账号切换由
+    // logout/login/reset/oj_switch 显式清空兜底）
+    let mut memo = AccessAttemptMemo::new();
+    let key: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some("pw".into()));
+    let t0 = Instant::now();
+    memo.record_success(key.clone(), t0);
+    assert!(matches!(
+        memo.lookup(&key, t0 + ACCESS_FAILURE_RETRY_AFTER * 100),
+        AccessMemoLookup::Success
+    ));
+}
+
+#[test]
+fn access_memo_missing_key_is_miss() {
+    let mut memo = AccessAttemptMemo::new();
+    let key: AccessAttemptKey = ("HOJ".into(), "1011".into(), None);
+    assert!(matches!(
+        memo.lookup(&key, Instant::now()),
+        AccessMemoLookup::Miss
+    ));
 }
 
 #[test]
