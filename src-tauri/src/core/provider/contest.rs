@@ -5,6 +5,20 @@ use crate::core::entity::contest::{Contest, ContestProblem};
 use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
 
+/// 进入流程业务失败的分类，决定防重试记忆的写回策略（消费方：
+/// `service::contest` 的 `AccessAttemptMemo`——只把 `Rejected` 升级为结论，
+/// 其余保持 Attempted 退避）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessRejectionKind {
+    /// 注册被拒（密码错误等确定性结果：同密码同结果）——记入结论记忆，
+    /// 保留期内复用首次消息，防轮询重复提交报名。
+    Rejected,
+    /// 其余业务失败：权限查询阶段失败（与凭证无关）、「该比赛不存在」、
+    /// 「请稍后再试」类瞬态——不进结论记忆，由最小重发间隔退避，下一周期
+    /// 即可自愈。
+    Other,
+}
+
 /// 比赛 Provider：获取比赛列表与详情
 #[async_trait]
 pub trait ContestProvider: Send + Sync {
@@ -75,6 +89,24 @@ pub trait ContestProvider: Send + Sync {
     /// 默认实现恒 false：未声明该能力的 OJ 不触发进入流程。
     fn is_credential_rejection(&self, _error: &AppError) -> bool {
         false
+    }
+
+    /// 分类进入流程的业务失败，决定防重试记忆的写回策略。
+    ///
+    /// 是否「注册被拒」只有适配器能可靠解读自家服务端的业务消息（查询阶段
+    /// 失败与注册被拒从 `ensure_contest_access` 的黑盒里出来都是
+    /// `AppError::Contest`，但前者与凭证无关、后者是确定性结果）。core 只把
+    /// `Rejected` 升级为结论记忆；`Other` 保持退避条目，下一周期即可重试。
+    ///
+    /// 默认实现把 `AppError::Contest` 归为 `Rejected`（保守缓存：未实现分类
+    /// 的适配器按现状防重复提交，避免未知措辞的密码错误每周期重发报名
+    /// POST 触发服务端限频）；非 `Contest` 变体归为 `Other`（core 不会对
+    /// 其它变体询问分类）。
+    fn classify_access_rejection(&self, error: &AppError) -> AccessRejectionKind {
+        match error {
+            AppError::Contest(_) => AccessRejectionKind::Rejected,
+            _ => AccessRejectionKind::Other,
+        }
     }
 }
 

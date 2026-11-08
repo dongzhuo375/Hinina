@@ -63,3 +63,19 @@ fn default_is_credential_rejection_is_false() {
     assert!(!DefaultOnlyProvider
         .is_credential_rejection(&AppError::Contest("任意业务失败".to_string())));
 }
+
+#[test]
+fn default_classification_is_conservative() {
+    // 未实现分类的适配器：Contest 一律按 Rejected 处理（保守缓存——防未知
+    // 措辞的密码错误每周期重发报名 POST 触发限频），非 Contest 归 Other
+    assert_eq!(
+        DefaultOnlyProvider
+            .classify_access_rejection(&AppError::Contest("未知措辞的拒绝".to_string())),
+        AccessRejectionKind::Rejected
+    );
+    assert_eq!(
+        DefaultOnlyProvider
+            .classify_access_rejection(&AppError::Network("connection reset".to_string())),
+        AccessRejectionKind::Other
+    );
+}

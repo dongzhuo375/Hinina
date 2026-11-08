@@ -388,6 +388,16 @@ impl ContestProvider for StubContestProvider {
     fn is_credential_rejection(&self, error: &AppError) -> bool {
         matches!(error, AppError::Contest(_))
     }
+
+    /// stub 的 Contest 错误全部代表「注册被拒」（确定性结果，进结论记忆）；
+    /// Network/Auth 错误走默认的 Other（退避，不进结论记忆）——与
+    /// AccessMode 语义一一对应
+    fn classify_access_rejection(&self, error: &AppError) -> AccessRejectionKind {
+        match error {
+            AppError::Contest(_) => AccessRejectionKind::Rejected,
+            _ => AccessRejectionKind::Other,
+        }
+    }
 }
 
 /// 构造基于独立临时目录的 ContestService；返回服务、Stub 句柄与目录守卫。
@@ -755,60 +765,66 @@ fn private_contest_business_failure_is_memoized() {
 }
 
 #[test]
-fn private_contest_transient_failure_is_not_memoized() {
+fn private_contest_network_failure_backs_off_within_interval() {
+    // Network 类失败结论不升级，条目保持 Attempted：最小重发间隔内拦住同 key
+    // 重发（在途防重 + 退避——OJ 故障时不再每 30s 轮询都打请求）；错误驱动
+    // 路径被拦时上抛原始题目错误（本轮未发起进入，下周期自愈）
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
     stub.set_problems_mode(Some(StubMode::Contest));
     stub.set_access_mode(AccessMode::Network);
 
-    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect_err("网络失败应报错");
+    let err1 = block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect_err("网络失败应报错");
+    assert!(
+        matches!(err1, AppError::Network(_)),
+        "网络类失败不应被改写变体（否则会误踢会话/误引导），实际 {:?}",
+        err1
+    );
 
     let err2 = block_on(service.load_contest_with_problems("1011", Some("pw")))
-        .expect_err("第二周期重试仍失败应报错");
+        .expect_err("退避窗口内的加载仍应报错");
     assert!(
-        matches!(err2, AppError::Network(_)),
-        "网络类失败不应被改写变体（否则会误踢会话/误引导），实际 {:?}",
+        matches!(err2, AppError::Contest(ref m) if m.contains("获取比赛题目列表失败")),
+        "被拦时上抛原始题目错误（本轮未发起进入），实际 {:?}",
         err2
     );
     assert_eq!(
         stub.access_call_count(),
-        2,
-        "网络类失败不记记忆：第二周期应照常重试"
-    );
-
-    // 瞬态恢复后同进程内即可成功（报名同时解锁题目列表：失败重试 1 次）
-    stub.set_access_mode(AccessMode::Grant);
-    block_on(service.load_contest_with_problems("1011", Some("pw"))).expect("恢复后重试应成功");
-    assert_eq!(stub.access_call_count(), 3);
-    assert_eq!(
-        stub.problems_call_count(),
-        4,
-        "前两次各失败 1 次 + 第三次失败 1 次 + 报名成功后重试 1 次"
+        1,
+        "退避窗口内不得重复发起进入请求"
     );
 }
 
 #[test]
 fn private_contest_auth_failure_is_not_memoized() {
-    // 会话失效有恢复路径（重新登录）：不记记忆，两次加载都必须触达 provider，
-    // 且错误保持 Auth 变体（前端会话守卫的唯一判据）
+    // 会话失效的结论记忆不收（有恢复路径：重新登录，login 命令清空记忆）；
+    // 但 Attempted 条目仍在最小重发间隔内——第二次加载被拦（上抛原始题目
+    // 错误），退避过期后才会重试
     let (service, stub, _dir) = make_service(StubMode::Ok);
     stub.set_auth(1);
     stub.set_problems_mode(Some(StubMode::Contest));
     stub.set_access_mode(AccessMode::Auth);
 
-    for _ in 0..2 {
-        let err = block_on(service.load_contest_with_problems("1011", Some("pw")))
-            .expect_err("会话失效应报错");
-        assert!(
-            matches!(err, AppError::Auth(_)),
-            "Auth 失败必须保持 Auth 变体，实际 {:?}",
-            err
-        );
-    }
+    let err1 = block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect_err("会话失效应报错");
+    assert!(
+        matches!(err1, AppError::Auth(_)),
+        "Auth 失败必须保持 Auth 变体（首次失败触发会话守卫），实际 {:?}",
+        err1
+    );
+
+    let err2 = block_on(service.load_contest_with_problems("1011", Some("pw")))
+        .expect_err("退避窗口内的加载仍应报错");
+    assert!(
+        matches!(err2, AppError::Contest(ref m) if m.contains("获取比赛题目列表失败")),
+        "退避窗口内被拦，上抛原始题目错误，实际 {:?}",
+        err2
+    );
     assert_eq!(
         stub.access_call_count(),
-        2,
-        "会话类失败不记记忆：每次都应重新发起（重新登录后即可成功）"
+        1,
+        "退避窗口内不得重复发起进入请求"
     );
 }
 
@@ -939,13 +955,13 @@ fn in_flight_access_attempt_is_not_written_back_after_clear() {
 }
 
 #[test]
-fn access_memo_failure_expires_after_retry_window() {
-    // 「同一组合的尝试结果不变」并不严格成立（HOJ 报名有「请稍后再试」类
-    // 瞬态业务失败）：失败记忆必须带保留期，过期即视为从未尝试
+fn access_memo_rejected_expires_after_retention() {
+    // 「同一组合的尝试结果不变」并不严格成立（服务端可能撤销报名）：Rejected
+    // 记忆带保留期，过期即视为从未尝试
     let mut memo = AccessAttemptMemo::new();
-    let key: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some("pw".into()));
+    let key: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some(123));
     let t0 = Instant::now();
-    memo.record_failure(key.clone(), "密码错误".to_string(), t0);
+    memo.record_rejected(key.clone(), "密码错误".to_string(), t0);
 
     assert!(
         matches!(
@@ -956,24 +972,21 @@ fn access_memo_failure_expires_after_retry_window() {
     );
     assert!(
         matches!(
-            memo.lookup(
-                &key,
-                t0 + ACCESS_FAILURE_RETRY_AFTER - Duration::from_secs(1)
-            ),
+            memo.lookup(&key, t0 + ACCESS_MEMO_RETENTION - Duration::from_secs(1)),
             AccessMemoLookup::Failure(_)
         ),
         "保留期最后一秒内仍命中"
     );
     assert!(
         matches!(
-            memo.lookup(&key, t0 + ACCESS_FAILURE_RETRY_AFTER),
+            memo.lookup(&key, t0 + ACCESS_MEMO_RETENTION),
             AccessMemoLookup::Miss
         ),
         "保留期一过即视为未尝试"
     );
     assert!(
         matches!(
-            memo.lookup(&key, t0 + ACCESS_FAILURE_RETRY_AFTER),
+            memo.lookup(&key, t0 + ACCESS_MEMO_RETENTION),
             AccessMemoLookup::Miss
         ),
         "过期条目已被顺手清除，不会反复判过期"
@@ -981,17 +994,101 @@ fn access_memo_failure_expires_after_retry_window() {
 }
 
 #[test]
-fn access_memo_success_has_no_expiry() {
-    // 报名是账号级持久状态：成功记忆不随时间失效（账号切换由
-    // logout/login/reset/oj_switch 显式清空兜底）
+fn access_memo_success_expires_for_recheck() {
+    // 成功不能永久可信：服务端可能撤销报名。成功条目带复核保留期——过期后
+    // 视为未尝试，下次加载重新查 access（撤销后 ≤ 保留期自愈，已报名用户
+    // 的代价是每保留期一次权限查询）
     let mut memo = AccessAttemptMemo::new();
-    let key: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some("pw".into()));
+    let key: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some(123));
     let t0 = Instant::now();
     memo.record_success(key.clone(), t0);
     assert!(matches!(
-        memo.lookup(&key, t0 + ACCESS_FAILURE_RETRY_AFTER * 100),
+        memo.lookup(&key, t0 + ACCESS_MEMO_RETENTION - Duration::from_secs(1)),
         AccessMemoLookup::Success
     ));
+    assert!(
+        matches!(
+            memo.lookup(&key, t0 + ACCESS_MEMO_RETENTION),
+            AccessMemoLookup::Miss
+        ),
+        "保留期一过即重新校验"
+    );
+}
+
+#[test]
+fn access_memo_attempted_blocks_within_interval_then_expires() {
+    // Attempted 条目（请求发起前记录）：最小重发间隔内 Busy 拦住同 key 重发
+    //（在途防重 + 网络退避），过期放行
+    let mut memo = AccessAttemptMemo::new();
+    let key: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some(123));
+    let t0 = Instant::now();
+    memo.record_attempted(key.clone(), t0);
+
+    assert!(
+        matches!(
+            memo.lookup(&key, t0 + Duration::from_secs(1)),
+            AccessMemoLookup::Busy
+        ),
+        "最小重发间隔内拦住重发（注册在途/网络退避）"
+    );
+    assert!(
+        matches!(
+            memo.lookup(&key, t0 + ACCESS_RETRY_MIN_INTERVAL),
+            AccessMemoLookup::Miss
+        ),
+        "间隔一过即放行（重试/下周期自愈）"
+    );
+}
+
+#[test]
+fn access_memo_record_sweeps_expired_entries() {
+    // 过期条目只在同 key 再查时被发现的话，改过多次密码的用户会让旧条目
+    // 无限累积——每次写回顺带清扫全表
+    let mut memo = AccessAttemptMemo::new();
+    let t0 = Instant::now();
+    let pw1: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some(1));
+    let pw2: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some(2));
+    let pw3: AccessAttemptKey = ("HOJ".into(), "1011".into(), Some(3));
+    memo.record_rejected(pw1.clone(), "密码错误 v1".to_string(), t0);
+    memo.record_rejected(pw2.clone(), "密码错误 v2".to_string(), t0);
+
+    // v2 过期清扫发生在 t0 + RETENTION 的任意一次写回：v1（同批过期）一并清除，
+    // 新条目（v3）保留
+    memo.record_rejected(
+        pw3.clone(),
+        "密码错误 v3".to_string(),
+        t0 + ACCESS_MEMO_RETENTION,
+    );
+    assert!(
+        matches!(
+            memo.lookup(&pw1, t0 + ACCESS_MEMO_RETENTION),
+            AccessMemoLookup::Miss
+        ),
+        "同批过期条目被写回时顺带清扫"
+    );
+    assert!(matches!(
+        memo.lookup(&pw2, t0 + ACCESS_MEMO_RETENTION),
+        AccessMemoLookup::Miss
+    ));
+    assert!(
+        matches!(
+            memo.lookup(&pw3, t0 + ACCESS_MEMO_RETENTION),
+            AccessMemoLookup::Failure(_)
+        ),
+        "新写入的条目不受清扫影响"
+    );
+}
+
+#[test]
+fn credential_fingerprint_distinguishes_passwords() {
+    // 密码只以指纹参与键：不同密码不同指纹（同密码同指纹），明文不落记忆表
+    let none = credential_fingerprint(&None);
+    let a = credential_fingerprint(&Some("pw-a".to_string()));
+    let a2 = credential_fingerprint(&Some("pw-a".to_string()));
+    let b = credential_fingerprint(&Some("pw-b".to_string()));
+    assert!(none.is_none());
+    assert_eq!(a, a2, "同密码同指纹");
+    assert_ne!(a, b, "不同密码不同指纹");
 }
 
 #[test]

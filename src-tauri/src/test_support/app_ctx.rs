@@ -13,18 +13,23 @@ use crate::infra::data_dir::DataDirSource;
 ///
 /// 返回 `(ctx, 目录守卫)`——守卫必须被调用方持有，目录随用例结束回收。
 pub async fn context_with_hoj(base_url: &str) -> (AppContext, TempDir) {
+    context_with_hoj_oj(base_url, OjConfig::default()).await
+}
+
+/// 同 [`context_with_hoj`]，但 OJ 域配置由调用方给定（进场景需要
+/// `contest_ref` / `contest_password` 等非默认值）。活动实例恒为指向
+/// `base_url` 的 HOJ。
+pub async fn context_with_hoj_oj(base_url: &str, mut oj: OjConfig) -> (AppContext, TempDir) {
     let dir = TempDir::unique("hinina-test-ctx");
+    oj.active = "HOJ".into();
+    oj.instances = vec![OjInstance {
+        id: "HOJ".into(),
+        base_url: base_url.to_string(),
+        enabled: true,
+        options: serde_json::Map::new(),
+    }];
     let config = AppConfig {
-        oj: OjConfig {
-            active: "HOJ".into(),
-            instances: vec![OjInstance {
-                id: "HOJ".into(),
-                base_url: base_url.to_string(),
-                enabled: true,
-                options: serde_json::Map::new(),
-            }],
-            ..OjConfig::default()
-        },
+        oj,
         ..AppConfig::default()
     };
     std::fs::create_dir_all(dir.path()).unwrap();

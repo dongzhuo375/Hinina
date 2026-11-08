@@ -24,7 +24,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
-use crate::core::provider::contest::ContestProvider;
+use crate::core::provider::contest::{AccessRejectionKind, ContestProvider};
 use crate::core::provider::oj_id::OjId;
 use crate::core::provider::problem::ProblemProvider;
 use crate::core::provider::registry::ProviderSet;
@@ -104,13 +104,12 @@ impl HOJAdapter {
     /// 「需凭证进入」类业务消息判据（纯函数，单测锁定正负样本）。
     ///
     /// HOJ 未报名私有赛的题目列表返回「请先到比赛首页输入比赛密码进行注册！」，
-    /// 判据取其特征片段（「输入比赛密码」「进行注册」），**任一片段命中即 true**
-    /// （OR）。刻意**保守**：
-    /// - 漏判（HOJ 改文案）→ 进入流程不触发、原始错误原样上抛 —— 安全降级；
-    /// - 误判需无关消息恰好含任一片段（如「校验比赛密码失败，请稍后再试」
-    ///   只含「比赛密码」不含「输入比赛密码」，不会命中）—— 可能性极低。
+    /// 判据匹配该**完整短语**（不带尾部标点，容忍 `！` 有无）：宽片段（如
+    /// 单独的「进行注册」）可能误伤其它 HOJ 消息，把它们错误导向密码流程。
+    /// 刻意**保守**：漏判（HOJ 改措辞）→ 进入流程不触发、原始错误原样上抛
+    /// ——安全降级方向。
     fn message_indicates_credential_rejection(msg: &str) -> bool {
-        msg.contains("输入比赛密码") || msg.contains("进行注册")
+        msg.contains("请先到比赛首页输入比赛密码进行注册")
     }
 
     /// 获取当前存储的 token。
@@ -826,6 +825,34 @@ impl ContestProvider for HOJAdapter {
         match error {
             AppError::Contest(msg) => Self::message_indicates_credential_rejection(msg),
             _ => false,
+        }
+    }
+
+    /// 分类进入流程业务失败（防重试记忆写回策略）。
+    ///
+    /// 从 `ensure_contest_access` 黑盒里出来的 `AppError::Contest` 有三类：
+    /// - **瞬态业务失败**（「校验比赛密码失败，请稍后再试」——服务端明示稍后
+    ///   可过）：`Other`，判定**先于**环节前缀（注册接口自己的瞬态也算）；
+    /// - **注册接口的业务拒绝**（消息带本适配器的环节前缀
+    ///   `"HOJ register contest 失败"`）：密码错误等确定性结果 → `Rejected`
+    ///   （进结论记忆，保留期内复用首次消息防重复提交）；
+    /// - **其余**（权限查询阶段失败如「HOJ contest access 失败: 该比赛不存在!」
+    ///   ——与凭证无关）→ `Other`（不进结论记忆，由最小重发间隔退避，
+    ///   下一周期即可自愈）。
+    fn classify_access_rejection(&self, error: &AppError) -> AccessRejectionKind {
+        match error {
+            AppError::Contest(msg) => {
+                // 瞬态判定**先于**环节前缀：注册接口自己的「请稍后再试」类
+                // 失败也是瞬态（服务端明示稍后可过），不进结论记忆
+                if msg.contains("稍后再试") {
+                    AccessRejectionKind::Other
+                } else if msg.contains("HOJ register contest 失败") {
+                    AccessRejectionKind::Rejected
+                } else {
+                    AccessRejectionKind::Other
+                }
+            }
+            _ => AccessRejectionKind::Other,
         }
     }
 

@@ -56,6 +56,18 @@ pub trait ProviderRegistry: Send + Sync {
     /// 当前 OJ 的 ContestProvider
     fn current_contest(&self) -> AppResult<Arc<dyn ContestProvider>>;
 
+    /// 当前 OJ 的 ContestProvider 与归属 OJ id 的**同源快照**。
+    ///
+    /// 调用方（私有赛进入校验）需要「provider 与记忆键里的 oj_id 严格同源」：
+    /// 分别调用 `current_contest` / `current_id` 是两次独立加锁，切换 OJ 落在
+    /// 中间会让旧 provider 的结果被记到新 OJ 名下。默认实现退化为两次调用
+    /// （非原子，调用方结果可能错配）；实现方应覆写：**捕获 id 一次，再按该
+    /// id 反查 provider**——能力集合注册后常驻（register 只插入不移除），
+    /// 按捕获 id 反查天然自洽。
+    fn current_contest_snapshot(&self) -> AppResult<(Arc<dyn ContestProvider>, OjId)> {
+        Ok((self.current_contest()?, self.current_id()))
+    }
+
     /// 当前 OJ 的 ProblemProvider
     fn current_problem(&self) -> AppResult<Arc<dyn ProblemProvider>>;
 

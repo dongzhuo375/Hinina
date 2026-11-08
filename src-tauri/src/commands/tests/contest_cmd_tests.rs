@@ -73,3 +73,64 @@ async fn announcement_paging_defaults_and_clamping() {
 
     server.shutdown();
 }
+
+// ── 私有赛密码：命令入口的归一化契约 ──
+
+/// 私有赛（auth=1）的比赛元信息响应（get-contest-info）。
+const CONTEST_AUTH1: &str = r#"{"status":200,"msg":"success","data":{"id":1001,"author":"a","title":"私有赛","type":0,"description":"","status":0,"source":0,"auth":1,"now":null,"startTime":"2026-09-21T16:00:00.000+0000","endTime":"2026-09-29T16:00:00.000+0000","duration":100,"sealRank":null,"openPrint":null,"sealRankTime":null,"rankShowName":null,"openRank":false,"oiRankScoreType":"Recent","count":null,"gid":null,"allowEndSubmit":false}}"#;
+
+/// 未报名私有赛的题目列表响应（真实消息，触发凭证进入流程）。
+const PROBLEMS_UNREGISTERED: &str =
+    r#"{"status":403,"msg":"请先到比赛首页输入比赛密码进行注册！","data":null}"#;
+
+/// 权限查询：未报名。
+const ACCESS_FALSE: &str = r#"{"status":200,"msg":"success","data":{"access":false}}"#;
+
+/// 去空白后为空的比赛密码在命令入口归一化为 None：config.json 里的 Some("")
+/// 不得以空密码发起注册（用户会看到「密码错误」而不是「需要比赛密码」的
+/// 引导），loopback 不得收到任何 register-contest POST。
+#[tokio::test]
+async fn load_configured_contest_normalizes_blank_password_to_none() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::json(CONTEST_AUTH1), // get-contest-info（auth=1）
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED), // get-contest-problem（触发凭证进入）
+        ScriptedResponse::json(ACCESS_FALSE),  // get-contest-access（未报名）
+    ])
+    .await;
+    let (ctx, _dir) = crate::test_support::app_ctx::context_with_hoj_oj(
+        server.url(),
+        crate::core::entity::config::OjConfig {
+            contest_ref: "1001".into(),
+            contest_password: Some("   ".into()), // 空白密码（手工编辑常见）
+            ..Default::default()
+        },
+    )
+    .await;
+
+    // 会话恢复：require_token 需要已登录（无会话会被前置断言拦下，测不到归一化）；
+    // get_session 的恢复路径顺带把 token 回注 provider
+    ctx.session_repo
+        .save(&Session::new("HOJ", "uuid-1", "alice", "t1"))
+        .unwrap();
+    crate::commands::auth_cmd::get_session_impl(&ctx);
+
+    let err = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("未报名且无有效密码应报引导错误");
+    assert!(
+        err.user_message().contains("比赛密码"),
+        "空密码归一化后应报「缺凭证」引导，实际 {}",
+        err.user_message()
+    );
+
+    // 关键断言：全程只有 GET——空密码若被透传，这里会出现 register-contest POST
+    for req in server.requests() {
+        assert_eq!(
+            req.method, "GET",
+            "空密码不得发起注册 POST（实际打到 {}）",
+            req.path
+        );
+    }
+
+    server.shutdown();
+}

@@ -923,7 +923,7 @@ fn problem_details_missing_or_null_languages_yield_empty_vec() {
 use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
-use crate::core::provider::contest::ContestProvider;
+use crate::core::provider::contest::{AccessRejectionKind, ContestProvider};
 use crate::core::provider::oj_id::OjId;
 use crate::core::provider::submission::SubmissionProvider;
 use crate::core::repository::session_repo::SessionRepository;
@@ -1395,28 +1395,31 @@ async fn ensure_access_register_ok_but_still_denied_errors() {
     server.shutdown();
 }
 
-// ── 「需凭证进入」消息判据（is_credential_rejection 的纯函数核心）──
+// ── 「需凭证进入」消息判据 + 业务失败分类（is_credential_rejection /
+//    classify_access_rejection 的纯函数核心）──
 
 #[test]
 fn credential_rejection_matches_real_hoj_message() {
-    // 正样本：未报名私有赛的真实消息（取特征片段，宽松形态也算）
+    // 正样本：未报名私有赛的完整短语（不带尾部标点，容忍 ！ 有无）
     assert!(HOJAdapter::message_indicates_credential_rejection(
         "HOJ contest problem list 失败: 请先到比赛首页输入比赛密码进行注册！"
     ));
     assert!(HOJAdapter::message_indicates_credential_rejection(
-        "HOJ contest problem list 失败: 请先进行注册"
+        "HOJ contest problem list 失败: 请先到比赛首页输入比赛密码进行注册"
     ));
 }
 
 #[test]
 fn credential_rejection_rejects_other_business_failures() {
     // 负样本：同样落在 Contest 变体的其它业务失败不得触发进入流程
-    //（误判会让用户看到密码引导而非真实原因）。
-    // 注意「校验比赛密码失败，请稍后再试」含「比赛密码」但不含特征片段
+    //（误判会让用户看到密码引导而非真实原因）。完整短语匹配下，
+    // 宽片段「进行注册」「输入比赛密码」单独出现都不再命中
     for msg in [
         "HOJ contest problem list 失败: 比赛还未开始",
         "HOJ contest problem list 失败: 该比赛不存在!",
         "HOJ contest problem list 失败: 您不是该团队成员",
+        "HOJ contest problem list 失败: 请先进行注册", // 宽片段误伤样本
+        "HOJ contest problem list 失败: 请输入比赛密码", // 宽片段误伤样本
         "HOJ register contest 失败: 校验比赛密码失败，请稍后再试",
     ] {
         assert!(
@@ -1425,6 +1428,53 @@ fn credential_rejection_rejects_other_business_failures() {
             msg
         );
     }
+}
+
+#[tokio::test]
+async fn classification_routes_register_rejections_to_memo() {
+    // 防重试记忆只收**注册被拒**：本适配器以环节前缀识别（register-contest
+    // 的错误都带「HOJ register contest 失败」上下文）
+    let server = LoopbackServer::start(vec![]).await;
+    let fx = fixture(server.url());
+
+    let rejected = fx
+        .adapter
+        .classify_access_rejection(&crate::core::error::AppError::Contest(
+            "HOJ register contest 失败: 比赛密码错误，请重新输入！".to_string(),
+        ));
+    assert_eq!(
+        rejected,
+        AccessRejectionKind::Rejected,
+        "注册被拒进结论记忆"
+    );
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn classification_routes_non_register_failures_to_other() {
+    // 查询阶段失败（与凭证无关）与瞬态业务失败（「请稍后再试」）不进结论
+    // 记忆：由最小重发间隔退避，下一周期即可自愈
+    let server = LoopbackServer::start(vec![]).await;
+    let fx = fixture(server.url());
+
+    for msg in [
+        "HOJ contest access 失败: 该比赛不存在!",
+        "HOJ register contest 失败: 校验比赛密码失败，请稍后再试",
+    ] {
+        let kind = fx
+            .adapter
+            .classify_access_rejection(&crate::core::error::AppError::Contest(msg.to_string()));
+        assert_eq!(kind, AccessRejectionKind::Other, "不应进结论记忆: {}", msg);
+    }
+    let non_contest = fx
+        .adapter
+        .classify_access_rejection(&crate::core::error::AppError::Network(
+            "connection reset".to_string(),
+        ));
+    assert_eq!(non_contest, AccessRejectionKind::Other);
+
+    server.shutdown();
 }
 
 /// 变体收窄：Auth/Network 变体一律不触发（is_credential_rejection 是
