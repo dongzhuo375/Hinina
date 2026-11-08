@@ -922,6 +922,47 @@ fn clear_access_attempts_forgets_recorded_outcomes() {
 }
 
 #[test]
+fn concurrent_loads_do_not_double_register() {
+    // 同临界区 lookup+begin 的并发行为：多线程 runtime 下两个加载同时进入
+    // core，先到者在临界区内记录 Attempted、后到者必然看到 Busy → Skipped，
+    // 不触达 provider（互斥锁保证该断言确定成立）。若把「查」与「记」拆回
+    // 两次加锁，双线程交错可双双 Miss → 双双发起注册（变异在此构造下
+    // 大概率变红——竞态本质是时序相关的，故本用例是压力测试而非确定性
+    // 变异验证；结构性正确由「单临界区」实现保证）
+    let (service, stub, _dir) = make_service(StubMode::Ok);
+    let service = Arc::new(service);
+    stub.set_auth(1);
+    stub.set_problems_mode(Some(StubMode::ContestAlways));
+    stub.set_access_mode(AccessMode::Grant);
+    stub.set_ensure_delay_ms(150);
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("创建多线程测试 runtime 失败");
+    rt.block_on(async {
+        let s1 = Arc::clone(&service);
+        let s2 = Arc::clone(&service);
+        let l1 =
+            tokio::spawn(async move { s1.load_contest_with_problems("1011", Some("pw")).await });
+        let l2 =
+            tokio::spawn(async move { s2.load_contest_with_problems("1011", Some("pw")).await });
+        for r in [l1, l2] {
+            assert!(
+                r.await.expect("任务不应 panic").is_err(),
+                "题目恒失败，两次加载都应报错"
+            );
+        }
+    });
+
+    assert_eq!(
+        stub.access_call_count(),
+        1,
+        "并发加载不得双双发起注册（第二个加载必然被 Attempted 拦为 Busy）"
+    );
+}
+
+#[test]
 fn in_flight_access_attempt_is_not_written_back_after_clear() {
     // clear_access_attempts 是时点清理：logout/login 期间仍在途的旧会话加载
     // 若在清理后才完成，不得把旧账号的尝试结果写回记忆（access_epoch 守卫）。
