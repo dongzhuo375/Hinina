@@ -150,7 +150,6 @@ impl AccessAttemptMemo {
     }
 
     /// 条目是否过期：结论条目按保留期，Attempted 按最小重发间隔。
-    /// 条目是否过期：结论条目按保留期，Attempted 按最小重发间隔。
     /// 关联函数（无 &self）：sweep 的 retain 闭包与 entries 的可变借用并存。
     fn is_expired(attempt: &AccessAttempt, now: Instant) -> bool {
         let ttl = match attempt.outcome {
@@ -332,9 +331,9 @@ async fn ensure_contest_access_core(
         }
     }
     AccessCoreResult::Done(result.map_err(|e| {
-        // 运行时选级别：tracing::event!/warn!/debug! 的首参都只接受常量级别，
-        // 两个分支是宏限制下的最小写法（级别之外完全一致）。错误驱动 WARN
-        //（用户可见错误的来源）、后台 DEBUG（防轮询刷屏）
+        // 运行时选级别：tracing 的日志宏（event!、warn!、debug!）首参都只接受
+        // 常量级别，两个分支是宏限制下的最小写法（级别之外完全一致）。错误
+        // 驱动 WARN（用户可见错误的来源）、后台 DEBUG（防轮询刷屏）
         match failure_log {
             tracing::Level::WARN => {
                 warn!(contest_id = contest_id, error = %e, "私有赛进入校验失败")
@@ -404,7 +403,7 @@ pub struct ContestService {
     announcement_baseline: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// 私有赛进入尝试记忆（防轮询重复报名；失败项带保留期）。
     ///
-    /// 见 [`AccessAttemptMemo`] 与 [`ACCESS_FAILURE_RETRY_AFTER`]。
+    /// 见 [`AccessAttemptMemo`] 与 [`ACCESS_MEMO_RETENTION`]。
     /// 账号级状态的对冲：报名是账号级持久状态，同 OJ 换账号后旧记忆不再成立，
     /// 故 `logout` / 成功 `login` / `reset_client` / `on_oj_switched` 都显式清空
     /// （见 [`Self::clear_access_attempts`]）。设置页改密码自然换 key。
