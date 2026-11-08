@@ -302,13 +302,16 @@ async fn reset_client_clears_access_attempts() {
 
 /// 合法密码带首尾空格时**保留原值**：归一化只判空、不裁剪——静默裁剪会
 /// 改写用户的真实密码（注册请求体必须携带原值，变异：改回 trim 即红）。
+/// 拒绝形态与 adapter 契约测试一致（HTTP 200 + 体内 status=400），并断言
+/// **错误变体**为 Contest——若只断言响应体摘录，HTTP 400 的 Network 摘录
+/// 也能蒙混过关（假绿）。
 #[tokio::test]
 async fn load_configured_contest_preserves_password_with_spaces() {
     let server = LoopbackServer::start(vec![
         ScriptedResponse::json(CONTEST_AUTH1),
         ScriptedResponse::json(PROBLEMS_UNREGISTERED),
         ScriptedResponse::json(ACCESS_FALSE),
-        ScriptedResponse::with(400, Vec::new(), REGISTER_REJECTED),
+        ScriptedResponse::json(REGISTER_REJECTED),
     ])
     .await;
     let (ctx, _dir) = crate::test_support::app_ctx::context_with_hoj_oj(
@@ -328,7 +331,11 @@ async fn load_configured_contest_preserves_password_with_spaces() {
     let err = load_configured_contest_impl(&ctx)
         .await
         .expect_err("脚本仍拒，应报错");
-    assert!(err.user_message().contains("比赛密码错误"));
+    assert!(
+        matches!(err, AppError::Contest(ref m) if m.contains("比赛密码错误")),
+        "拒绝必须走信封业务路径（Contest 变体），而不是 HTTP 400 的 Network 摘录，实际 {:?}",
+        err
+    );
 
     // 注册请求体必须携带原值（含空格）——静默裁剪会让用户以错误的密码注册
     let reqs = server.requests();

@@ -1196,9 +1196,11 @@ fn register_ok() -> ScriptedResponse {
     ScriptedResponse::json(r#"{"status":200,"msg":"success","data":null}"#)
 }
 
-/// 报名被拒（密码错误）：真实 HOJ 载荷 —— `StatusFailException("比赛密码错误，
-/// 请重新输入！")` 经 `CommonResult.errorResponse` 得到包络 **status=400**
-///（ResultStatus.FAIL）+ 原文消息。非 401/403，不判会话失效。
+/// 报名被拒（密码错误）：按 HOJ 惯例的拒绝形态构造——**HTTP 200 + 体内
+/// status=400**（ResultStatus.FAIL）+ `StatusFailException` 原文消息，与
+/// `get-contest-problem` 的实测报法（HTTP 200 + 体内 status）同款。非 401/403，
+/// 不判会话失效。**注意**：register 拒绝的传输形态未真机取证（若真实走
+/// HTTP 400，错误将以 Network 摘录形态出现而非本形态——见真机走查清单）。
 fn register_rejected() -> ScriptedResponse {
     ScriptedResponse::json(r#"{"status":400,"msg":"比赛密码错误，请重新输入！","data":null}"#)
 }
