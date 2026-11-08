@@ -27,7 +27,7 @@
 ## 被依赖
 - `core::provider::registry`（ProviderRegistry 注册/获取 ContestProvider）
 - `infra::provider_registry_impl`
-- `adapter::hoj`（实现全部方法，含覆盖 `ensure_contest_access` 与 `is_credential_rejection` 默认实现；Hydro 沿用默认实现）
+- `adapter::hoj`（实现全部方法，含覆盖 `ensure_contest_access` / `is_credential_rejection` / `classify_access_rejection` 三个默认实现；Hydro 沿用默认实现）
 - `service::contest`（`get_rank` 经 registry 调用 `get_contest_rank`；`list_announcements` 经 registry 调用同名方法；`ensure_contest_access_core` 调用 `ensure_contest_access`，错误驱动触发判据调用 `is_credential_rejection`，记忆写回策略调用 `classify_access_rejection`）
 
 ## 逻辑流程
