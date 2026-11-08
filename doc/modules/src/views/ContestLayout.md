@@ -95,8 +95,9 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
 
 - **会话有效性不在本组件校验**：由路由守卫（`meta.requiresAuth` + 赛程闸门）统一保证，
   外壳只负责数据、布局与赛程退出。唯一例外是最小壳：守卫对「钥匙启动 + 设置路由」
-  条件豁免鉴权，外壳以 `bareShell` 识别该形态并退化为最小壳，**不发起任何认证/OJ
-  请求**。
+  条件豁免鉴权，外壳以 `bareShell` 识别该形态并退化为最小壳，**bootstrap 入口不发起认证/OJ
+  请求**（公告轮询的既有启动契约——阶段跃迁监听在 bareShell + 保留数据下启动——
+  刻意保留，见上文「无会话最小壳」节）。
 - **最小壳必须自带拖动区**：App 的全局标题栏在 matched 含 Contest 时不渲染，
   窗口 `decorations: false`，无拖动区则窗口无法移动。
 - **最小壳含窗口控件（评审十 #2 反转了 M1 的「不加 UI」裁定）**：窗口
