@@ -351,3 +351,55 @@ async fn load_configured_contest_preserves_password_with_spaces() {
 
     server.shutdown();
 }
+
+/// login 接线：**登录失败也清进入记忆**。provider.login 被服务端接受后适配器
+/// 内存已是新 token——随后会话落盘失败让整体返回 Err（`?` 会提前返回）；
+/// 旧账号的结论记忆必须失效，否则新 token 复用旧账号的 Rejected/Success。
+/// 观察点：失败登录后再加载，access 查询必须再次出现（记忆未清则 lookup
+/// 命中 Failure 提前返回、不发 access GET）。
+#[tokio::test]
+async fn failed_login_still_clears_access_attempts() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::json(CONTEST_AUTH1),
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED),
+        ScriptedResponse::json(ACCESS_FALSE),
+        ScriptedResponse::json(REGISTER_REJECTED),
+        // 登录失败形态：200 但缺 Authorization 头 → adapter 报 Auth
+        ScriptedResponse::json(LOGIN_OK),
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED),
+        ScriptedResponse::json(ACCESS_FALSE),
+        ScriptedResponse::json(REGISTER_REJECTED),
+    ])
+    .await;
+    let (ctx, _dir) = wired_context(&server).await;
+
+    let err1 = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("首次密码错误应报错");
+    assert!(err1.user_message().contains("比赛密码错误"));
+
+    let login_err = crate::commands::auth_cmd::login_impl(&ctx, "alice", "pw")
+        .await
+        .expect_err("缺 token 头的登录应失败");
+    assert!(
+        matches!(login_err, AppError::Auth(_)),
+        "登录失败应为 Auth，实际 {:?}",
+        login_err
+    );
+
+    let err2 = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("第二次加载仍应报错（脚本仍拒）");
+    assert!(
+        err2.user_message().contains("比赛密码错误"),
+        "重新发起后应是服务端真实拒绝（非复用旧账号消息），实得 {}",
+        err2.user_message()
+    );
+    assert_eq!(
+        access_query_count(&server),
+        2,
+        "登录失败也必须清空记忆：第二次加载重新发起进入（access 查询再次出现）"
+    );
+
+    server.shutdown();
+}

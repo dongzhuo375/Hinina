@@ -112,6 +112,18 @@ impl HOJAdapter {
         msg.contains("请先到比赛首页输入比赛密码进行注册")
     }
 
+    /// register-contest 的「已注册」类业务消息判据（纯函数，单测锁定正负样本）。
+    ///
+    /// 重复报名时服务端以业务错误告知「您已注册过该比赛」——这不是拒绝：
+    /// 账号级状态早已存在，语义与「已可访问」等价。归为幂等后转入复查
+    /// access（复查 false 仍报错，不静默放行）。匹配「已注册」「已报名」
+    /// 两个短语（OR）：消息为服务端措辞、未真机取证完整句式，宽松匹配的
+    /// 失败方向是保守的——最多把一次本可报错的消息转成「复查 access」，
+    /// 复查会给出真实结论。
+    fn message_indicates_already_registered(msg: &str) -> bool {
+        msg.contains("已注册") || msg.contains("已报名")
+    }
+
     /// 获取当前存储的 token。
     ///
     /// 锁中毒时取回内部值继续（全仓 `into_inner()` 惯例）—— 中毒只说明曾有
@@ -907,15 +919,23 @@ impl ContestProvider for HOJAdapter {
             .await
             .map_err(|e| e.context("HOJ register contest"))?;
         if !api_resp.is_success() {
-            // 密码错误只看到 HOJ 原文没有出路，补一句可操作的设置路径
-            //（「若密码有误」的条件措辞兼容同一状态码下的其它业务拒绝）
             let msg = api_resp
                 .msg
                 .unwrap_or_else(|| format!("HOJ 错误 status={}", api_resp.status));
-            return Err(AppError::Contest(format!(
-                "HOJ register contest 失败: {}；若密码有误，请在「设置 → OJ 服务器」更正「比赛密码」后重试",
-                msg
-            )));
+            // **幂等场景**：服务端判定「已注册/已报名」——语义与「已可访问」
+            // 等价（账号级持久状态早于本次请求存在），不作为业务拒绝：
+            // 不返回错误、不写 Rejected 结论记忆，转入下方复查 access 确认
+            //（复查 false 时落到防御分支报错——不静默放行）
+            if Self::message_indicates_already_registered(&msg) {
+                debug!(cid = cid, "HOJ 判定已注册，按幂等成功处理并复查 access");
+            } else {
+                // 密码错误只看到 HOJ 原文没有出路，补一句可操作的设置路径
+                //（「若密码有误」的条件措辞兼容同一状态码下的其它业务拒绝）
+                return Err(AppError::Contest(format!(
+                    "HOJ register contest 失败: {}；若密码有误，请在「设置 → OJ 服务器」更正「比赛密码」后重试",
+                    msg
+                )));
+            }
         }
 
         if self.get_contest_access(cid).await? {

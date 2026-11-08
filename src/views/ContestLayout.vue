@@ -94,7 +94,11 @@ watch([phase, keyedSettings], ([value, keyed]) => {
 /// phase 一直保持 running —— 按阶段跃迁的监听不会再触发，公告轮询必须跟随
 /// 「比赛数据首次到达 / 换场」补启（ensureLive 内部的 liveFor 判据保证不重复启动，
 /// 跨场换数据时换到新 id 重启）。keyedSettings 的停止语义仍归上面的阶段监听。
-watch(() => contestStore.contest?.id, (id) => {
+/// brief 也要监听：contest 先换到新场时会被 ensureLive 的 brief 失配守卫拦下
+///（等 brief 跟上再启动）——若只监听 contest.id，brief 后到的瞬间无人再调
+/// ensureLive，公告轮询会停在旧场上。两个 id 任一变化都重跑 ensureLive，
+/// 由其内部守卫（liveFor 幂等、失配拦下、bareShell 拦启动）决定实际动作。
+watch(() => [contestStore.contest?.id, contestStore.brief?.id], ([id]) => {
   if (id) {
     // 新调用入口不绕过 bootstrap 的最小壳跳过语义：bareShell 下不**启动**。
     // 注意 phase 跃迁监听在 bareShell + 保留数据下启动轮询是**既有契约**

@@ -176,3 +176,71 @@ fn current_contest_snapshot_is_id_consistent_across_switch() {
         Err(AppError::ProviderNotFound(_))
     ));
 }
+
+/// 并发切换压力测试：写线程持续翻转 set_current，主线程并行取快照并断言
+/// **id 与 provider 的配对**（provider 身份经 Arc 数据指针识别）。
+///
+/// 这是「同源」契约的真正锁：朴素实现（分别调 `current_contest()` 与
+/// `current_id()`）在翻转线程命中间隙时会产出「A 的 provider 配 B 的 id」
+/// ——指针与 id 的配对断言变红。当前实现捕获 id 一次后按 id 反查 provider，
+/// 任一时刻的配对都自洽，因此本用例在正确实现下**确定性通过**（与调度无关）。
+#[test]
+fn concurrent_switches_never_mix_provider_and_id() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let registry = std::sync::Arc::new(ProviderRegistryImpl::new(
+        OjId::new("HOJ"),
+        std::sync::Arc::default(),
+    ));
+    let hoj_stub = std::sync::Arc::new(SnapshotStubProvider);
+    let hydro_stub = std::sync::Arc::new(SnapshotStubProvider);
+    registry.register(
+        OjId::new("HOJ"),
+        ProviderSet {
+            contest: Some(std::sync::Arc::clone(&hoj_stub) as std::sync::Arc<dyn ContestProvider>),
+            ..Default::default()
+        },
+    );
+    registry.register(
+        OjId::new("HYDRO"),
+        ProviderSet {
+            contest: Some(std::sync::Arc::clone(&hydro_stub) as std::sync::Arc<dyn ContestProvider>),
+            ..Default::default()
+        },
+    );
+
+    let hoj_ptr = std::sync::Arc::as_ptr(&hoj_stub) as *const u8;
+    let hydro_ptr = std::sync::Arc::as_ptr(&hydro_stub) as *const u8;
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let stop_for_thread = std::sync::Arc::clone(&stop);
+    let flipper_registry = std::sync::Arc::clone(&registry);
+    let flipper = std::thread::spawn(move || {
+        let mut toggle = false;
+        while !stop_for_thread.load(Ordering::Relaxed) {
+            toggle = !toggle;
+            flipper_registry.set_current(OjId::new(if toggle { "HYDRO" } else { "HOJ" }));
+            std::hint::spin_loop();
+        }
+    });
+
+    let mut mismatches = 0;
+    for _ in 0..2_000 {
+        let (provider, id) = registry.current_contest_snapshot().expect("两 OJ 均已注册");
+        let ptr = std::sync::Arc::as_ptr(&provider) as *const u8;
+        let expected = match id.to_string().as_str() {
+            "HOJ" => hoj_ptr,
+            "HYDRO" => hydro_ptr,
+            other => panic!("意外的 OJ: {other}"),
+        };
+        if ptr != expected {
+            mismatches += 1;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    flipper.join().expect("翻转线程不应 panic");
+
+    assert_eq!(
+        mismatches, 0,
+        "快照的 provider 与 id 必须始终同源（朴素两读实现在翻转下会配错）"
+    );
+}

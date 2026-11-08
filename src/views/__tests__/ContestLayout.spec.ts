@@ -170,7 +170,11 @@ describe('contest exit lifecycle', () => {
   it('stops polling and clears liveFor when contest data is cleared, so the same id can restart', async () => {
     // OJ 切换/登出清空 contest 数据（既有缺口：只有阶段跃迁清 liveFor——
     // 切换前后都是 running 时 liveFor 残留，新 OJ 的同 cid 会被挡住，
-    // 公告轮询停在旧 OJ 上）。watcher 必须在 id 清空时停轮询并忘掉 id
+    // 公告轮询停在旧 OJ 上）。
+    // **覆盖归属**：本用例锁「清空分支」（stopLive + 清 liveFor，断言 179 行）；
+    // 末尾的同 id 重启走的是 phase watcher（none→running 也会调 ensureLive）
+    //——只删 watcher 的启动分支时本用例仍绿，watcher 启动分支的唯一覆盖是
+    // 上一条 brief 补启用例，勿把重启断言当作 watcher 启动分支的证明
     const store = await render()
     expect(mocks.startLive).toHaveBeenCalledOnce()
 
@@ -181,6 +185,35 @@ describe('contest exit lifecycle', () => {
     store.contest = { ...schedule } // 新 OJ 的同 cid 到达：重启而非被 liveFor 挡住
     await nextTick()
     expect(mocks.startLive).toHaveBeenCalledTimes(2)
+  })
+
+  it('switches polling when contest arrives before brief catches up', async () => {
+    // P1 回归：contest 与 brief 先后从 A 切到 B。contest 先换到 B 时被
+    // ensureLive 的 brief 失配守卫拦下（等 brief 跟上再启动）；此前只监听
+    // contest.id，brief 后到时无人再调 ensureLive —— 旧 A 轮询不停止、
+    // B 轮询不启动。watcher 必须同时观察 brief.id（变异：去掉 brief 观察即红）
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useContestStore()
+    store.contest = { ...schedule } // A（id '1'），phase running
+    store.brief = { ...schedule } // 简报也在 A——失配守卫才会生效
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledExactlyOnceWith('1', expect.any(Function))
+
+    const contestB = { ...schedule, id: '2' }
+    // ① contest 先换到 B（brief 仍 A）→ 失配守卫拦下，轮询继续停在 A
+    store.contest = contestB
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+    // ② brief 后到（B）：watcher 必须补启 B 的轮询（startLive 内部先 stop A）
+    store.brief = { ...contestB }
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(2)
+    expect(mocks.startLive).toHaveBeenLastCalledWith('2', expect.any(Function))
   })
 })
 

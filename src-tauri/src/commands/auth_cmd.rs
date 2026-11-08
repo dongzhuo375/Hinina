@@ -26,12 +26,15 @@ pub(crate) async fn login_impl(
     username: &str,
     password: &str,
 ) -> AppResult<User> {
-    let user = ctx.auth.login(username, password).await?;
-    // 新会话的私有赛报名状态可能与上一会话不同：进入尝试记忆按账号失效，
-    // 否则旧账号的成功记忆会让新账号跳过进入校验（题目接口报「请先注册」
-    // 且不含登录关键词，不触发会话守卫），失败记忆则继续报旧错
+    // **无论登录成败都清进入记忆**：provider.login 一旦被服务端接受，适配器
+    // 内存里已是新 token——即使随后会话落盘失败让整体返回 Err（`?` 会提前
+    // 返回）。旧账号的访问结论必须失效，否则新 token 会继续复用旧账号的
+    // Rejected 记忆（复用消息掩盖真实结果）或 Success 记忆（跳过复查）。
+    // 失败登录（口令错误）时清理同样无害：旧会话仍在，下次加载重新复核
+    // access 最多多一次 GET。
+    let result = ctx.auth.login(username, password).await;
     ctx.contest.clear_access_attempts();
-    Ok(user)
+    result
 }
 
 /// 登出 Command。

@@ -1518,3 +1518,57 @@ async fn credential_rejection_only_for_contest_variant() {
 
     server.shutdown();
 }
+
+/// 重复报名（服务端报「已注册」）：按幂等成功处理——不返回业务拒绝、
+/// 不复用密码引导，转入复查 access，复查通过即 Ok（不会被写进 Rejected 记忆）
+#[tokio::test]
+async fn ensure_access_already_registered_is_idempotent_success() {
+    let already =
+        ScriptedResponse::json(r#"{"status":400,"msg":"您已注册过该比赛！","data":null}"#);
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        access_ok(false), // 首次预查：未报名
+        already,          // 报名接口：服务端判定已注册（业务错误形态）
+        access_ok(true),  // 复查：确实已可访问
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    fx.adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .expect("已注册应幂等成功（不作为密码错误）");
+
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 4, "预查→报名→复查，共 3 次业务请求 + 登录");
+    assert_eq!(
+        reqs[3].path, "/api/get-contest-access?cid=1001",
+        "已注册响应后必须转入复查 access（不静默放行）"
+    );
+
+    server.shutdown();
+}
+
+/// 已注册判据：正样本匹配「已注册」「已报名」；密码错误消息不得命中
+#[test]
+fn already_registered_matcher_samples() {
+    for msg in ["您已注册过该比赛！", "您已报名该比赛"] {
+        assert!(
+            HOJAdapter::message_indicates_already_registered(msg),
+            "应判为已注册: {}",
+            msg
+        );
+    }
+    for msg in [
+        "比赛密码错误，请重新输入！",
+        "校验比赛密码失败，请稍后再试",
+        "请先到比赛首页输入比赛密码进行注册！",
+    ] {
+        assert!(
+            !HOJAdapter::message_indicates_already_registered(msg),
+            "不得判为已注册: {}",
+            msg
+        );
+    }
+}
