@@ -31,8 +31,9 @@
 - `service::contest`（`get_rank` 经 registry 调用 `get_contest_rank`；`list_announcements` 经 registry 调用同名方法；`ensure_contest_access_core` 调用 `ensure_contest_access`，错误驱动触发判据调用 `is_credential_rejection`，记忆写回策略调用 `classify_access_rejection`）
 
 ## 逻辑流程
-本文件绝大部分是纯 trait 声明；仅两个**默认实现**自带行为：
+本文件绝大部分是纯 trait 声明；仅三个**默认实现**自带行为：
 - `ensure_contest_access` 默认实现：返回 `AppError::Contest("当前 OJ 不支持凭密码/凭证进入私有赛")`——能力缺失必须是 `Contest` 变体而不是 `Auth`（否则前端 sessionGuard 会把「不支持」误判成会话失效把选手踢回登录页）；
-- `is_credential_rejection` 默认实现：恒 `false`——未声明「凭证进入」能力的 OJ 不触发错误驱动的进入流程（安全降级方向）。
+- `is_credential_rejection` 默认实现：恒 `false`——未声明「凭证进入」能力的 OJ 不触发错误驱动的进入流程（安全降级方向）；
+- `classify_access_rejection` 默认实现：`Contest` 变体归 `Rejected`（保守缓存——防未知措辞的密码错误每周期重发报名 POST）、非 `Contest` 归 `Other`。
 
-两者的默认行为由 `core/provider/tests/contest_tests.rs` 锁定。
+三者的默认行为由 `core/provider/tests/contest_tests.rs` 锁定。
