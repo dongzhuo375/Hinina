@@ -223,11 +223,14 @@ impl AccessAttemptMemo {
     }
 }
 
-/// `ensure_contest_access_core` 的结果：`Skipped` = 距上次尝试不足最小重发
-/// 间隔（在途或退避），本轮**未发起**任何请求——错误驱动路径应上抛原始题目
-/// 错误（下周期自愈），后台路径静默跳过。
+/// `ensure_contest_access_core` 的结果。区分「真实发起了 provider 请求」与
+/// 「记忆命中复用」：后台兜底路径对前者的**注册被拒**失败升 `warn`（release
+/// 默认 info 下 `debug` 不落日志，「真实原因可追溯」的披露依赖这一条；
+/// Rejected 记忆已把重试压到保留期一次，不会刷屏），后者保持 `debug`——
+/// 复用消息路径未发起请求，按调用频率本就该安静。
 enum AccessCoreResult {
-    Done(AppResult<()>),
+    Attempted(AppResult<()>),
+    Memoized(AppResult<()>),
     Skipped,
 }
 
@@ -265,14 +268,14 @@ async fn ensure_contest_access_core(
     {
         AccessMemoLookup::Success => {
             debug!(contest_id = contest_id, "私有赛进入已成功过，跳过重复请求");
-            return AccessCoreResult::Done(Ok(()));
+            return AccessCoreResult::Memoized(Ok(()));
         }
         AccessMemoLookup::Failure(msg) => {
             debug!(
                 contest_id = contest_id,
                 "私有赛进入失败仍在保留期内，复用首次消息"
             );
-            return AccessCoreResult::Done(Err(
+            return AccessCoreResult::Memoized(Err(
                 AppError::Contest(msg).context("私有赛进入校验失败")
             ));
         }
@@ -330,7 +333,7 @@ async fn ensure_contest_access_core(
             );
         }
     }
-    AccessCoreResult::Done(result.map_err(|e| {
+    AccessCoreResult::Attempted(result.map_err(|e| {
         // 运行时选级别：tracing 的日志宏（event!、warn!、debug!）首参都只接受
         // 常量级别，两个分支是宏限制下的最小写法（级别之外完全一致）。错误
         // 驱动 WARN（用户可见错误的来源）、后台 DEBUG（防轮询刷屏）
@@ -358,7 +361,8 @@ async fn run_best_effort_backfill(
     let result = ensure_contest_access_core(
         memo,
         epoch_counter,
-        provider,
+        // 克隆留出本尊：分类失败级别（warn/debug）要在返回后按类别判断
+        provider.clone(),
         oj_id,
         contest_id.clone(),
         password,
@@ -366,13 +370,36 @@ async fn run_best_effort_backfill(
     )
     .await;
     match result {
-        AccessCoreResult::Done(Ok(())) => {
+        AccessCoreResult::Attempted(Ok(())) => {
             debug!(contest_id = contest_id, "私有赛后台报名完成（提交侧兜底）")
         }
-        AccessCoreResult::Done(Err(e)) => debug!(
+        AccessCoreResult::Attempted(Err(e)) => {
+            // 真实发起了请求且失败：注册被拒（确定性结果）升 **warn**——
+            // release 默认 info 下 debug 不落日志，「openRank + 错误密码时
+            // 真实原因可追溯」的披露依赖这一条；Rejected 记忆已把重试压到
+            // 保留期一次，不会刷屏。其余（Network 类退避等）保持 debug。
+            if provider.classify_access_rejection(&e) == AccessRejectionKind::Rejected {
+                warn!(
+                    contest_id = contest_id,
+                    error = %e,
+                    "私有赛后台报名被拒（不影响查看；改密码后下次轮询自动重试）"
+                );
+            } else {
+                debug!(
+                    contest_id = contest_id,
+                    error = %e,
+                    "私有赛后台报名未生效（不影响查看）"
+                );
+            }
+        }
+        // 记忆命中复用：本轮未发起任何请求，保持 debug（按调用频率本就该安静）
+        AccessCoreResult::Memoized(Ok(())) => {
+            debug!(contest_id = contest_id, "私有赛后台报名已生效（记忆命中）")
+        }
+        AccessCoreResult::Memoized(Err(e)) => debug!(
             contest_id = contest_id,
             error = %e,
-            "私有赛后台报名未生效（不影响查看；改密码后下次轮询自动重试）"
+            "私有赛后台报名复用保留期内的失败消息（本轮未发起请求）"
         ),
         AccessCoreResult::Skipped => debug!(
             contest_id = contest_id,
@@ -793,8 +820,11 @@ impl ContestService {
                 )
                 .await
                 {
-                    AccessCoreResult::Done(Ok(())) => {}
-                    AccessCoreResult::Done(Err(access_err)) => return Err(access_err),
+                    // 真实请求与记忆命中复用对错误驱动路径行为一致：
+                    // 成功 → 重试题目；失败 → 上抛进入的引导/复用错误
+                    AccessCoreResult::Attempted(Ok(())) | AccessCoreResult::Memoized(Ok(())) => {}
+                    AccessCoreResult::Attempted(Err(access_err))
+                    | AccessCoreResult::Memoized(Err(access_err)) => return Err(access_err),
                     // 距上次尝试不足最小重发间隔（在途或退避）：本轮未发起
                     // 任何请求，原始题目错误上抛——45s 窗口内的暂态展示，
                     // 下周期即有真实结果（成功/引导文案）

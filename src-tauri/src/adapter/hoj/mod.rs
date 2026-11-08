@@ -830,9 +830,14 @@ impl ContestProvider for HOJAdapter {
 
     /// 分类进入流程业务失败（防重试记忆写回策略）。
     ///
-    /// 从 `ensure_contest_access` 黑盒里出来的 `AppError::Contest` 有三类：
+    /// 从 `ensure_contest_access` 黑盒里出来的 `AppError::Contest` 有四类：
     /// - **瞬态业务失败**（「校验比赛密码失败，请稍后再试」——服务端明示稍后
     ///   可过）：`Other`，判定**先于**环节前缀（注册接口自己的瞬态也算）；
+    /// - **缺凭证引导**（本适配器自构造的「该比赛为私有赛，需要比赛密码：…」
+    ///   ——密码补填前恒同，补填后 key 变化不受旧记忆阻挡，确定性等同注册
+    ///   被拒）→ `Rejected`：进结论记忆让引导文案**持续显示**——若归
+    ///   `Other`，30s 轮询会与 Attempted 退避交错，引导文案和裸服务端错误
+    ///   每两轮交替一次；
     /// - **注册接口的业务拒绝**（消息带本适配器的环节前缀
     ///   `"HOJ register contest 失败"`）：密码错误等确定性结果 → `Rejected`
     ///   （进结论记忆，保留期内复用首次消息防重复提交）；
@@ -846,7 +851,9 @@ impl ContestProvider for HOJAdapter {
                 // 失败也是瞬态（服务端明示稍后可过），不进结论记忆
                 if msg.contains("稍后再试") {
                     AccessRejectionKind::Other
-                } else if msg.contains("HOJ register contest 失败") {
+                } else if msg.contains("需要比赛密码") || msg.contains("HOJ register contest 失败")
+                {
+                    // 「需要比赛密码」= 缺凭证引导（本适配器构造，见 ensure）
                     AccessRejectionKind::Rejected
                 } else {
                     AccessRejectionKind::Other

@@ -1432,8 +1432,10 @@ fn credential_rejection_rejects_other_business_failures() {
 
 #[tokio::test]
 async fn classification_routes_register_rejections_to_memo() {
-    // 防重试记忆只收**注册被拒**：本适配器以环节前缀识别（register-contest
-    // 的错误都带「HOJ register contest 失败」上下文）
+    // 防重试记忆只收**确定性拒绝**：本适配器以环节前缀识别（register-contest
+    // 的错误都带「HOJ register contest 失败」上下文）；缺凭证引导是适配器
+    // 自构造的确定性结果（密码补填前恒同），同样进结论记忆——若归 Other，
+    // 30s 轮询会与退避交错、引导文案与裸服务端错误每两轮交替一次
     let server = LoopbackServer::start(vec![]).await;
     let fx = fixture(server.url());
 
@@ -1446,6 +1448,18 @@ async fn classification_routes_register_rejections_to_memo() {
         rejected,
         AccessRejectionKind::Rejected,
         "注册被拒进结论记忆"
+    );
+
+    let guidance = fx
+        .adapter
+        .classify_access_rejection(&crate::core::error::AppError::Contest(
+            "该比赛为私有赛，需要比赛密码：请在「设置 → OJ 服务器」填写「比赛密码」后重试"
+                .to_string(),
+        ));
+    assert_eq!(
+        guidance,
+        AccessRejectionKind::Rejected,
+        "缺凭证引导进结论记忆（密码补填前恒同）"
     );
 
     server.shutdown();
