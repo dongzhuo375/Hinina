@@ -314,8 +314,7 @@ async fn ensure_contest_access_core(
                 // 失败一律不升级——Attempted 条目留在原地（最小间隔退避），
                 // 过期放行自愈
                 Err(AppError::Contest(msg))
-                    if provider
-                        .classify_access_rejection(result.as_ref().unwrap_err())
+                    if provider.classify_access_rejection(result.as_ref().unwrap_err())
                         == AccessRejectionKind::Rejected =>
                 {
                     debug!(contest_id = contest_id, "私有赛注册被拒，记入防重试记忆");
