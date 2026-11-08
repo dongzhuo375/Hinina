@@ -124,30 +124,50 @@ fn current_id_and_set_current_roundtrip() {
 fn current_contest_snapshot_is_id_consistent_across_switch() {
     // 同源快照契约：provider 与归属 id 必须来自**同一个**捕获的 OJ——
     // 两次独立读取在切换竞态下会拿到 A 的 provider 配 B 的 id
-    //（进入校验的记忆键因此错配）。快照按捕获 id 反查 provider，天然自洽
+    //（进入校验的记忆键因此错配）。快照按捕获 id 反查 provider，天然自洽。
+    // 双 OJ 各挂**独立 stub 实例**，快照返回的 provider 经 Arc 数据指针与
+    // 注册实例比对——上一版两个 OJ 共用同一 stub 类型且只断言 id，
+    // 区分不了「provider 与 id 配错」的错配
     let registry = ProviderRegistryImpl::new(OjId::new("HOJ"), Arc::default());
+    let hoj_stub = Arc::new(SnapshotStubProvider);
+    let hydro_stub = Arc::new(SnapshotStubProvider);
     registry.register(
         OjId::new("HOJ"),
         ProviderSet {
-            contest: Some(Arc::new(SnapshotStubProvider)),
+            contest: Some(Arc::clone(&hoj_stub) as Arc<dyn ContestProvider>),
             ..Default::default()
         },
     );
     registry.register(
         OjId::new("HYDRO"),
         ProviderSet {
-            contest: Some(Arc::new(SnapshotStubProvider)),
+            contest: Some(Arc::clone(&hydro_stub) as Arc<dyn ContestProvider>),
             ..Default::default()
         },
     );
 
     let (provider, id) = registry.current_contest_snapshot().expect("已注册应成功");
     assert_eq!(id.to_string(), "HOJ");
-    let _ = provider; // 同一 stub 类型无法按值区分，id 一致即同源（provider 按 id 反查）
+    // Arc 数据指针同源：dyn 胖指针与具体指针的数据地址可比
+    assert_eq!(
+        Arc::as_ptr(&provider) as *const u8,
+        Arc::as_ptr(&hoj_stub) as *const u8,
+        "快照返回的 provider 必须是 HOJ 注册的那个实例"
+    );
 
     registry.set_current(OjId::new("HYDRO"));
-    let (_, id) = registry.current_contest_snapshot().expect("已注册应成功");
+    let (provider, id) = registry.current_contest_snapshot().expect("已注册应成功");
     assert_eq!(id.to_string(), "HYDRO", "切换后快照跟随新 OJ");
+    assert_eq!(
+        Arc::as_ptr(&provider) as *const u8,
+        Arc::as_ptr(&hydro_stub) as *const u8,
+        "切换后快照返回的必须是 HYDRO 注册的实例"
+    );
+    assert_ne!(
+        Arc::as_ptr(&provider) as *const u8,
+        Arc::as_ptr(&hoj_stub) as *const u8,
+        "不同 OJ 的注册实例互不同源"
+    );
 
     // 未注册的当前 OJ：快照同样 ProviderNotFound（与 current_contest 契约一致）
     registry.set_current(OjId::new("MISSING"));

@@ -353,8 +353,9 @@ async fn ensure_contest_access_core(
 }
 
 /// 提交侧兜底的**真后台**执行体：报名是尽力而为，成功/失败都只记日志
-///（失败按 `debug` 级留痕——Network 类不记忆失败会在每 30s 轮询重试，
-/// `warn` 会刷屏）——查看侧不受任何影响。
+///（失败分级：**注册被拒升 `warn`**——Rejected 记忆已把重试压到保留期一次、
+/// 不会刷屏，且 release 默认 info 下 debug 不落日志；Network 等其余保持
+/// `debug`——退避期内每 30s 轮询一次，`warn` 会刷屏）——查看侧不受任何影响。
 async fn run_best_effort_backfill(
     memo: Arc<Mutex<AccessAttemptMemo>>,
     epoch_counter: Arc<AtomicU64>,

@@ -54,17 +54,18 @@ pub(crate) async fn load_configured_contest_impl(ctx: &AppContext) -> AppResult<
     }
 
     info!(contest_ref = %contest_ref, "Command: 加载配置的比赛");
-    // 归一化：去空白后的空串视为未配置（手工编辑/旧数据可能在 config.json 留下
-    // Some("")——透传会以空密码发起注册，用户看到「密码错误」而不是引导文案，
-    // 且 best-effort 兜底的 password.is_some() 判断会被空串误触发）
+    // 归一化：**只判空、不裁剪**——空串/纯空白视为未配置（手工编辑/旧数据可能
+    // 在 config.json 留下 Some("")，透传会以空密码发起注册，用户看到「密码
+    // 错误」而不是引导文案，且 best-effort 兜底的 password.is_some() 判断会被
+    // 空串误触发）；非空值保留原样（合法密码可能带首尾空格，静默裁剪会改写
+    // 用户的真实密码）
     let password = ctx
         .config
         .get()
         .oj
         .contest_password
         .clone()
-        .map(|p| p.trim().to_string())
-        .filter(|p| !p.is_empty());
+        .filter(|p| !p.trim().is_empty());
     ctx.contest
         .load_contest_with_problems(&contest_ref, password.as_deref())
         .await
