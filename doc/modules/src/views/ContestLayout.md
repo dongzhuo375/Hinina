@@ -6,7 +6,7 @@
 
 比赛工作台的布局外壳：`TopBar`（顶栏，内嵌横向导航）+ `<router-view>` 子视图 + `StatusBar`（底栏）；挂载时拉取比赛数据、**按权威赛程刷新跨场缓存**、在比赛进行中启动公告轮询，并以每秒时钟驱动**赛程闸门**——赛程被移到未来时立即退回登录页，比赛结束时叠加结束覆盖层并在 2 秒后自动返回登录页。
 
-**无会话最小壳**：`--settings`（管理方钥匙）会在无会话时经守卫直落设置路由（守卫条件豁免其鉴权，见 `router/index.md`），此时外壳退化为最小壳——自带 `data-tauri-drag-region` 拖动区标题栏（「Hinina 设置」+「返回登录」，`decorations: false` 下窗口移动全靠它）+ 内容区；**不渲染** TopBar/StatusBar（其数据全部依赖会话），`bootstrap` 直接跳过（无会话时认证拉取只会失败），不产生任何面向 OJ 的请求。判据是**三条件与**：钥匙启动 + 无会话 + 设置路由（`launchFlags.settings && !isLoggedIn && route === 'Settings'`）——绑路由防「正常登出/会话失效在 `replace(Login)` 异步守卫完成前闪最小壳、子视图重挂」（评审二），绑钥匙防「普通启动在设置页上登出时闪最小壳」（评审三），**刻意不含 `sessionResolved`**：存量过期会话的首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1）——普通启动**永远**不进最小壳。
+**无会话最小壳**：`--settings`（管理方钥匙）会在无会话时经守卫直落设置路由（守卫条件豁免其鉴权，见 `router/index.md`），此时外壳退化为最小壳——自带 `data-tauri-drag-region` 拖动区标题栏（「Hinina 设置」+「返回登录」，`decorations: false` 下窗口移动全靠它）+ 内容区；**不渲染** TopBar/StatusBar（其数据全部依赖会话），`bootstrap` 直接跳过——**本入口**不发起认证拉取与公告轮询（无会话时认证拉取只会失败）。措辞限定在 bootstrap：**阶段跃迁监听在 bareShell + 保留数据下启动公告轮询是既有契约**（spec「钥匙设置页 running→ended→running」锁定，bareShell 守卫刻意不上提到 ensureLive 全体）——「认证类 OJ 请求不产生」成立，公告轮询的既有启动行为刻意保留。判据是**三条件与**：钥匙启动 + 无会话 + 设置路由（`launchFlags.settings && !isLoggedIn && route === 'Settings'`）——绑路由防「正常登出/会话失效在 `replace(Login)` 异步守卫完成前闪最小壳、子视图重挂」（评审二），绑钥匙防「普通启动在设置页上登出时闪最小壳」（评审三），**刻意不含 `sessionResolved`**：存量过期会话的首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1）——普通启动**永远**不进最小壳。
 
 ## 核心类型/函数
 
