@@ -922,6 +922,11 @@ impl ContestProvider for HOJAdapter {
             debug!(cid = cid, "HOJ 私有赛报名成功");
             Ok(())
         } else {
+            // 防御分支（报名接口 200 但复查仍无权限——成因未取证：可能是权限
+            // 传播类暂态，也可能是需要人工介入的异常）。消息不含 register 环节
+            // 前缀与瞬态标记 → classify 归 Other → 结论记忆不收、按最小重发
+            // 间隔（45s）退避重跑「预查→报名→复查」三连：给暂态自愈机会，
+            // 代价是退避期内每 45s 一次三连（量小可接受，见 hoj/mod.md）
             Err(AppError::Contest(format!(
                 "报名请求已被 HOJ 接受但仍无访问权限（cid={}）",
                 cid

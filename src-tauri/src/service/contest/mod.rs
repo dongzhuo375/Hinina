@@ -106,7 +106,8 @@ struct AccessAttempt {
 /// 场景自愈窗口。
 const ACCESS_MEMO_RETENTION: Duration = Duration::from_secs(10 * 60);
 
-/// 同 key 两次发起请求的最小间隔（退避）：请求发起前先记 [`AttemptOutcome::Attempted`]，
+/// 同 key 两次发起请求的最小间隔（退避）：Attempted 条目在查记忆的同一临界
+/// 区内记录（并发第二个加载必然 Busy），
 /// 间隔内的后续调用被拦——覆盖「注册请求在途超过轮询间隔」的防重发与
 /// 「网络故障」的退避（失败结论不升级时，条目保持 Attempted）。放行后若
 /// 原请求仍在途，可能并发重发一次：HTTP 超时上限通常低于该间隔，概率与
@@ -242,10 +243,10 @@ enum AccessCoreResult {
 ///
 /// `oj_id` 由调用方与 provider 经 registry 同源快照传入（切 OJ 竞态下防键错配）。
 /// 记忆命中失败时复用首次的错误消息 —— 轮询重试时用户看到的仍是同一条
-/// 可操作的引导，而不是题目列表接口返回的裸服务端报错。请求发起前先记
-/// Attempted（最小重发间隔内拦住同 key 重发：在途防重 + 退避）；完成后按
-/// `classify_access_rejection` 写回——仅注册被拒升级为 Rejected 结论，其余
-/// 保持 Attempted（退避）。
+/// 可操作的引导，而不是题目列表接口返回的裸服务端报错。查记忆与 Miss 时
+/// 记录 Attempted 在**同一临界区**完成（并发的第二个加载必然 Busy：在途防
+/// 重发 + 退避）；完成后按 `classify_access_rejection` 写回——仅注册被拒
+/// 升级为 Rejected 结论，其余保持 Attempted（退避）。
 #[allow(clippy::too_many_arguments)]
 async fn ensure_contest_access_core(
     memo: Arc<Mutex<AccessAttemptMemo>>,
@@ -779,12 +780,14 @@ impl ContestService {
     /// 缓存题目列表等于让轮询失去意义。
     ///
     /// **私有赛**（`auth == 1`）**错误驱动进入**：题目列表先行 —— 已报名用户、
-    /// 比赛管理员、开放了赛外榜单的私有赛（HOJ 对这些用户不校验报名）零额外
-    /// 请求；仅当题目列表失败且适配器判定属「需凭证进入」类
+    /// 比赛管理员、开放了赛外榜单的私有赛（HOJ 对这些用户不校验报名）**同步
+    /// 进入流程零额外请求**（配置了密码时的后台兜底仍会发起一次不阻塞的
+    /// 权限查询，见下）；仅当题目列表失败且适配器判定属「需凭证进入」类
     /// （[`ContestProvider::is_credential_rejection`]——`Contest` 变体只是必要
     /// 条件，「比赛还未开始」等业务失败同样落在该变体，不得误触发）时才走
     /// [`ensure_contest_access_core`] 并重试一次。密码来自配置
-    /// `oj.contest_password`（命令层传入），未配置/错误时报可操作的引导。
+    /// `oj.contest_password`（命令层传入，去空白后空串归一化为 None），
+    /// 未配置/错误时报可操作的引导。
     ///
     /// **提交侧兜底**：题目拉取成功但未报名的选手（openRank 私有赛可见不可交
     /// ——HOJ 的提交通道对 `auth == 1` 始终要求报名，与 openRank 无关）在配置了

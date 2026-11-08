@@ -10,6 +10,7 @@
   - `register(&self, oj_id: OjId, set: ProviderSet)` — 注册一个 OJ 的能力集合（N 个 OJ = N 次调用，取代旧的 4×N 次单项注册）
   - `current_auth(&self) -> AppResult<Arc<dyn AuthProvider>>` — 当前 OJ 的 AuthProvider（未注册 / 未提供该能力 → `ProviderNotFound`）
   - `current_contest(&self) -> AppResult<Arc<dyn ContestProvider>>` — 当前 OJ 的 ContestProvider
+  - `current_contest_snapshot(&self) -> AppResult<(Arc<dyn ContestProvider>, OjId)>` — 当前 OJ 的 ContestProvider 与归属 id 的**同源快照**（无默认实现——退化为两次独立读取的默认体就是它要消除的竞态；实现要求：捕获 id 一次、按该 id 反查 provider，能力集合注册后常驻故按 id 反查自洽）。私有赛进入校验用它保证「provider 与记忆键里的 oj_id 严格同源」，切换竞态下旧 provider 的结果不会被记到新 OJ 名下
   - `current_problem(&self) -> AppResult<Arc<dyn ProblemProvider>>` — 当前 OJ 的 ProblemProvider
   - `current_submission(&self) -> AppResult<Arc<dyn SubmissionProvider>>` — 当前 OJ 的 SubmissionProvider
   - `current_id(&self) -> OjId` — 当前选中的 OJ

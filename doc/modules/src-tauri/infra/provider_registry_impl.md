@@ -9,6 +9,7 @@
 - **`capability<T, F>(&self, pick: F) -> AppResult<Arc<T>>`**（私有帮手）— 按能力取当前 OJ 的 Provider，四个 `current_xxx` 共用：取 `current_id()` → 读锁查单表（未注册 → `ProviderNotFound`「OJ {} 未注册」）→ `pick(set)` 克隆（该能力为 `None` → `ProviderNotFound`「OJ {} 未提供该能力」）
 - **`register(oj_id, set)`** — 获取写锁，将 `(OjId, ProviderSet)` 插入单表（同 id 二次注册为覆盖）
 - **`current_auth / current_contest / current_problem / current_submission`** — 分别转调 `capability(|set| &set.xxx)`
+- **`current_contest_snapshot(&self)`** — 同源快照（`ProviderRegistry` 必需方法）：读锁捕获 current id **一次** → 按该 id 反查 providers 单表取 contest 能力（未注册 / 缺能力 → `ProviderNotFound`）。与两次独立加锁不同，id 与 provider 不可能来自不同 OJ——切换竞态下旧 provider 的进入校验结果不会被记到新 OJ 名下
 - **`current_id()` / `set_current(oj_id)`** — 读写当前 OJ
 - **锁中毒策略（全方法一致）**：所有 RwLock 操作统一 `unwrap_or_else(|e| e.into_inner())` 取回内部数据 —— 注册表进程级单例，中毒即全局异常，不做静默丢弃（旧值丢失）或二次报错，各方法的恢复行为一致可预期
 - **`list_available()`** — 以 providers 单表 key 集合为准（注册过 `ProviderSet` 即视为可用 OJ）
@@ -31,7 +32,7 @@
 5. **列出可用 OJ**：`list_available` 以单表 key 集合为准
 
 ## 测试
-`src-tauri/src/infra/tests/provider_registry_impl_tests.rs`（由 `provider_registry_impl.rs` 底部 `#[cfg(test)] #[path = "tests/provider_registry_impl_tests.rs"] mod tests;` 引用）锁定查询侧契约：未注册时四种能力均 `ProviderNotFound` 且列表为空、部分实现（`ProviderSet::default`）是合法注册但缺能力报 `ProviderNotFound`、切换到未注册 OJ 同样 `ProviderNotFound`、同 id 二次注册覆盖与 `list_available` 反映注册、`current_id` / `set_current` 往返与 `OjId` 身份规整（trim）。
+`src-tauri/src/infra/tests/provider_registry_impl_tests.rs`（由 `provider_registry_impl.rs` 底部 `#[cfg(test)] #[path = "tests/provider_registry_impl_tests.rs"] mod tests;` 引用）锁定查询侧契约：未注册时四种能力均 `ProviderNotFound` 且列表为空、部分实现（`ProviderSet::default`）是合法注册但缺能力报 `ProviderNotFound`、切换到未注册 OJ 同样 `ProviderNotFound`、同 id 二次注册覆盖与 `list_available` 反映注册、`current_id` / `set_current` 往返与 `OjId` 身份规整（trim）、**同源快照**（`current_contest_snapshot_is_id_consistent_across_switch`：双 OJ 各挂独立 stub 实例，快照返回的 provider 经 `Arc` 数据指针比对与注册实例同源、切换后 id 跟随新 OJ、未注册 OJ 报 `ProviderNotFound`）。
 
 ## 访问作用域
 
