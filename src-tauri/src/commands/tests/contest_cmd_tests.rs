@@ -134,3 +134,168 @@ async fn load_configured_contest_normalizes_blank_password_to_none() {
 
     server.shutdown();
 }
+
+// ── 私有赛密码：clear_access_attempts 的三条命令接线（换账号的关键入口）──
+
+/// 注册被拒响应（包络 400 + 真实消息，非 401/403 不判会话失效）。
+const REGISTER_REJECTED: &str = r#"{"status":400,"msg":"比赛密码错误，请重新输入！","data":null}"#;
+
+/// 登录成功响应：token 在响应头（HOJ 约定），身份在信封 data。
+const LOGIN_OK: &str = r#"{"status":200,"msg":"success","data":{"uid":"7","username":"alice"}}"#;
+
+/// 登出响应（HOJAdapter 忽略响应内容，以清 token 为主）。
+const LOGOUT_OK: &str = r#"{"status":200,"msg":"success","data":null}"#;
+
+/// 供接线测试装配「指向 loopback 的 HOJ + 私有赛配置」的会话种子。
+async fn wired_context(server: &LoopbackServer) -> (AppContext, crate::test_support::TempDir) {
+    let (ctx, dir) = crate::test_support::app_ctx::context_with_hoj_oj(
+        server.url(),
+        crate::core::entity::config::OjConfig {
+            contest_ref: "1001".into(),
+            contest_password: Some("bad".into()),
+            ..Default::default()
+        },
+    )
+    .await;
+    // 会话恢复：get_session 顺带把 token 回注 provider（require_token 需要）
+    ctx.session_repo
+        .save(&Session::new("HOJ", "uuid-1", "alice", "t1"))
+        .unwrap();
+    crate::commands::auth_cmd::get_session_impl(&ctx);
+    (ctx, dir)
+}
+
+fn access_query_count(server: &LoopbackServer) -> usize {
+    server
+        .requests()
+        .iter()
+        .filter(|r| r.path.contains("get-contest-access"))
+        .count()
+}
+
+/// logout 接线：进入失败（密码错误 → Rejected 记忆）→ 登出 → 再加载必须
+/// **重新发起进入**。观察点是错误形态：记忆残留时 lookup Failure 提前返回、
+/// 复用「密码错误」消息（Contest 变体）；已清则重新触达 provider，匿名会话
+/// 被 require_token 前置断言拦下（Auth「请先登录」）。
+#[tokio::test]
+async fn logout_clears_access_attempts_so_next_load_retouches_provider() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::json(CONTEST_AUTH1),
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED),
+        ScriptedResponse::json(ACCESS_FALSE),
+        ScriptedResponse::json(REGISTER_REJECTED),
+        ScriptedResponse::json(LOGOUT_OK),
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED),
+    ])
+    .await;
+    let (ctx, _dir) = wired_context(&server).await;
+
+    let err1 = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("首次密码错误应报错");
+    assert!(
+        err1.user_message().contains("比赛密码错误"),
+        "实得 {}",
+        err1.user_message()
+    );
+
+    crate::commands::auth_cmd::logout_impl(&ctx).await.unwrap();
+
+    let err2 = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("第二次加载仍应失败（匿名会话）");
+    assert!(
+        matches!(err2, AppError::Auth(ref m) if m.contains("请先登录")),
+        "记忆已清：重新发起的进入被 require_token 拦下（Auth 变体触发会话守卫），实际 {:?}",
+        err2
+    );
+
+    server.shutdown();
+}
+
+/// login 接线：进入失败（密码错误 → Rejected 记忆）→ 登录成功 → 同密码再加载
+/// 必须重新发起进入。观察点是 access 查询再次出现——记忆残留时 lookup Failure
+/// 提前返回、不会发 access GET（变异：删 login_impl 的清空调用，本用例红）。
+#[tokio::test]
+async fn login_clears_access_attempts_so_retry_retouches_provider() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::json(CONTEST_AUTH1),
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED),
+        ScriptedResponse::json(ACCESS_FALSE),
+        ScriptedResponse::json(REGISTER_REJECTED),
+        ScriptedResponse::with(
+            200,
+            vec![("Authorization".into(), "jwt-2".into())],
+            LOGIN_OK,
+        ),
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED),
+        ScriptedResponse::json(ACCESS_FALSE),
+        ScriptedResponse::json(REGISTER_REJECTED),
+    ])
+    .await;
+    let (ctx, _dir) = wired_context(&server).await;
+
+    let err1 = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("首次密码错误应报错");
+    assert!(err1.user_message().contains("比赛密码错误"));
+
+    let user = crate::commands::auth_cmd::login_impl(&ctx, "alice", "pw")
+        .await
+        .expect("登录应成功");
+    assert_eq!(user.username, "alice");
+
+    let err2 = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("第二次加载仍应报错（脚本仍拒）");
+    assert!(
+        err2.user_message().contains("比赛密码错误"),
+        "重新发起后仍是服务端真实拒绝（非复用消息），实得 {}",
+        err2.user_message()
+    );
+    assert_eq!(
+        access_query_count(&server),
+        2,
+        "login 清空记忆：第二次加载重新发起进入（access 查询再次出现）"
+    );
+
+    server.shutdown();
+}
+
+/// reset_client 接线：进入失败（密码错误 → Rejected 记忆）→ 重置 → 再加载必须
+/// 重新发起进入。reset 不清会话（token 仍在），access 查询照常走到——
+/// 记忆残留时 lookup Failure 提前返回、access GET 不会出现（变异即红）。
+#[tokio::test]
+async fn reset_client_clears_access_attempts() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::json(CONTEST_AUTH1),
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED),
+        ScriptedResponse::json(ACCESS_FALSE),
+        ScriptedResponse::json(REGISTER_REJECTED),
+        ScriptedResponse::json(CONTEST_AUTH1), // reset 清了元信息内存缓存：load#2 重新拉
+        ScriptedResponse::json(PROBLEMS_UNREGISTERED),
+        ScriptedResponse::json(ACCESS_FALSE),
+        ScriptedResponse::json(REGISTER_REJECTED),
+    ])
+    .await;
+    let (ctx, _dir) = wired_context(&server).await;
+
+    let err1 = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("首次密码错误应报错");
+    assert!(err1.user_message().contains("比赛密码错误"));
+
+    crate::commands::maintenance_cmd::reset_client_impl(&ctx).unwrap();
+
+    let err2 = load_configured_contest_impl(&ctx)
+        .await
+        .expect_err("第二次加载仍应报错（脚本仍拒）");
+    assert!(err2.user_message().contains("比赛密码错误"));
+    assert_eq!(
+        access_query_count(&server),
+        2,
+        "reset_client 清空记忆：第二次加载重新发起进入（access 查询再次出现）"
+    );
+
+    server.shutdown();
+}

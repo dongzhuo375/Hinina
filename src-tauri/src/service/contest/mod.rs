@@ -261,11 +261,24 @@ async fn ensure_contest_access_core(
     // 请求结果不得写回清理后的记忆
     let epoch = epoch_counter.load(Ordering::SeqCst);
     let now = Instant::now();
-    match memo
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .lookup(&key, now)
-    {
+
+    // **单临界区**完成「查记忆 + Miss 时记录 Attempted」：并发的第二个加载在
+    // 第一个 core 记录完放锁后只会看到 Attempted → Busy——双双发起注册 POST
+    // 的窗口结构性闭合（此前查与记分两次加锁，两次读取之间并发可双双 Miss，
+    // 前端 loadInFlight 去重只是压低概率）。纪元校验在同一临界区内生效：
+    // 清理发生在捕获与记录之间时不得把旧账号的时间戳写进新会话的记忆
+    //（否则新账号首次尝试会被无辜拦 45s）。
+    let lookup = {
+        let mut memo = memo.lock().unwrap_or_else(|e| e.into_inner());
+        let outcome = memo.lookup(&key, now);
+        if matches!(outcome, AccessMemoLookup::Miss)
+            && epoch_counter.load(Ordering::SeqCst) == epoch
+        {
+            memo.record_attempted(key.clone(), now);
+        }
+        outcome
+    };
+    match lookup {
         AccessMemoLookup::Success => {
             debug!(contest_id = contest_id, "私有赛进入已成功过，跳过重复请求");
             return AccessCoreResult::Memoized(Ok(()));
@@ -286,18 +299,9 @@ async fn ensure_contest_access_core(
             );
             return AccessCoreResult::Skipped;
         }
+        // 已在本临界区记录 Attempted，直接发起请求（失败不升级结论时条目
+        // 自然退避）
         AccessMemoLookup::Miss => {}
-    }
-
-    // 发起前先记 Attempted：同 key 在最小重发间隔内的后续调用被 Busy 拦住
-    //（注册在途超过轮询间隔时防重发；网络类失败结论不升级，条目自然退避）。
-    // 纪元校验同样生效：清理发生在捕获与记录之间时不得把旧账号的时间戳
-    // 写进新会话的记忆（否则新账号首次尝试会被无辜拦 45s）
-    {
-        let mut memo = memo.lock().unwrap_or_else(|e| e.into_inner());
-        if epoch_counter.load(Ordering::SeqCst) == epoch {
-            memo.record_attempted(key.clone(), now);
-        }
     }
 
     let result = provider

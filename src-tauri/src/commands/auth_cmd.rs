@@ -17,7 +17,16 @@ pub async fn login(
     username: String,
     password: String,
 ) -> AppResult<User> {
-    let user = ctx.auth.login(&username, &password).await?;
+    login_impl(&ctx, &username, &password).await
+}
+
+/// `login` 的真实编排（提取自命令本体，供命令与测试共用同一实现）。
+pub(crate) async fn login_impl(
+    ctx: &AppContext,
+    username: &str,
+    password: &str,
+) -> AppResult<User> {
+    let user = ctx.auth.login(username, password).await?;
     // 新会话的私有赛报名状态可能与上一会话不同：进入尝试记忆按账号失效，
     // 否则旧账号的成功记忆会让新账号跳过进入校验（题目接口报「请先注册」
     // 且不含登录关键词，不触发会话守卫），失败记忆则继续报旧错
