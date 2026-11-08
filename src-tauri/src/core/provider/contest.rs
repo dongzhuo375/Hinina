@@ -100,8 +100,9 @@ pub trait ContestProvider: Send + Sync {
     ///
     /// 默认实现把 `AppError::Contest` 归为 `Rejected`（保守缓存：未实现分类
     /// 的适配器按现状防重复提交，避免未知措辞的密码错误每周期重发报名
-    /// POST 触发服务端限频）；非 `Contest` 变体归为 `Other`（core 不会对
-    /// 其它变体询问分类）。
+    /// POST 触发服务端限频）；非 `Contest` 变体归为 `Other`（后台兜底路径
+    /// 会对所有失败变体询问本方法——非 `Contest` 一律 `Other` 即保持退避，
+    /// 不会被升级为结论）。
     fn classify_access_rejection(&self, error: &AppError) -> AccessRejectionKind {
         match error {
             AppError::Contest(_) => AccessRejectionKind::Rejected,
