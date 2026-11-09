@@ -174,11 +174,11 @@ describe('contest exit lifecycle', () => {
     // **覆盖归属**：本用例锁「清空分支」（stopLive + 清 liveFor，断言 179 行）；
     // 末尾的同 id 重启走的是 phase watcher（none→running 也会调 ensureLive）
     //——只删 watcher 的启动分支时本用例仍绿，watcher 启动分支的唯一覆盖是
-    // 上一条 brief 补启用例，勿把重启断言当作 watcher 启动分支的证明
+    // 下一条 brief 补启用例，勿把重启断言当作 watcher 启动分支的证明
     const store = await render()
     expect(mocks.startLive).toHaveBeenCalledOnce()
 
-    store.contest = null // 模拟 OJ 切换清空（phase 仍 running，阶段监听不管）
+    store.contest = null // 模拟 OJ 切换清空（phase 走 running→none，阶段监听对 none 不做清理）
     await nextTick()
     expect(mocks.stopLive).toHaveBeenCalled()
 

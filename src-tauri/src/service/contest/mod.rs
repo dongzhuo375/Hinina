@@ -481,7 +481,8 @@ impl ContestService {
         }
     }
 
-    /// 清空私有赛进入尝试记忆（`logout` / 成功 `login` / `reset_client` /
+    /// 清空私有赛进入尝试记忆（`logout` / `login`（成败皆清——provider 先接受
+    /// 新凭证再落盘，落盘失败时适配器已持新 token）/ `reset_client` /
     /// `on_oj_switched` 调用）。
     ///
     /// 报名状态是**账号级**的：同 OJ 换账号后，旧账号的成功记忆会让新账号跳过
