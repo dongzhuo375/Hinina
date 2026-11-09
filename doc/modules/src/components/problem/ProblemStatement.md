@@ -30,7 +30,7 @@ scoped 样式要点：`--statement-font: clamp(14px, min(calc(7px + 1.1cqi), cal
 - `vue`
 - `@/types/problem` / `@/types/rank`（仅类型）
 - `@/utils/markdown`（`renderMarkdown`）、`@/utils/limits`（`effectiveLimits` / `isDoubleLimitLanguage` / `formatTimeLimit` / `formatMemoryLimit`）
-- `@/stores/configStore`（OJ 基址；2026-11-09 严格分层收编：View 经 store 消费配置，store 纯转发 `config.service`，service 仍是不直接调 config.bridge 的唯一配置读取层）
+- `@/stores/configStore`（OJ 基址；2026-11-09 严格分层收编：View 不直接调 `config.bridge`，统一经 `configStore` → `config.service`，由 service 层调 bridge）
 - `@/stores/contestStore`（通过率）/ `problemStore`（limits）/ `workspaceStore`（当前语言）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 - `@/composables/useTransientValue`（复制反馈临时值与 timer 生命周期）

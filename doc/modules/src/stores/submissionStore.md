@@ -34,7 +34,7 @@
 ## 直接依赖
 
 - `pinia`
-- `@/types/submission`（`JudgementStatus` / `SubmissionRecord` 类型）
+- `@/types/submission`（`JudgementStatus` / `SubmissionRecord` / `SubmissionCases` / `SubmissionDetail` 类型——后两个为 2026-11-09 转发 `getSubmissionDetail` / `getSubmissionCases` 新增）
 - `@/services/submission.service`（提交、查询、历史、详情）
 - `@/services/config.service`（轮询间隔与总超时）
 - `@/utils/submission`（`isTerminalStatus` 终态判据）
