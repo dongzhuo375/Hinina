@@ -60,8 +60,13 @@ const saveState = vi.hoisted(() => ({
 }))
 
 function settleSwitch(run: Promise<void>): void {
-  if (switchState.pending === run) switchState.pending = null
-  if (switchState.inFlight) switchState.inFlight.value = false
+  // 与生产 `SerialQueue.enqueue` 的 finally 同构：只有队尾（最新一次切换）落地
+  // 才复位 pending 与 inFlight——先落地者不得清掉仍在途的后发切换
+  //（inFlight 由「队尾是否落地」派生，评审：无守卫的重叠切换会提前清标志）
+  if (switchState.pending === run) {
+    switchState.pending = null
+    if (switchState.inFlight) switchState.inFlight.value = false
+  }
   switchState.epoch += 1
 }
 
@@ -678,6 +683,31 @@ describe('useSettingsForm', () => {
     expect(next.form.activeOj).toBe('Hydro')
     expect(next.form.ojUrl).toBe('https://hydro.example')
     expect(next.dirty.value).toBe(false)
+  })
+
+  it('mock 队列语义同构：重叠切换先落地者不清 in-flight（队尾派生，评审）', async () => {
+    // 直接驱动 mock service（绕过 composable 的切换单飞），制造两个重叠切换：
+    // in-flight 由「队尾是否落地」派生——A（先入队）先落地时队尾是 B，标志必须保持
+    let releaseA!: () => void
+    let releaseB!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseA = resolve }),
+    )
+    mocks.switchOj.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseB = resolve }),
+    )
+    const pendingA = configService.switchOj('Hydro')
+    const pendingB = configService.switchOj('HOJ')
+    expect(switchState.inFlight!.value).toBe(true)
+
+    releaseA()
+    await Promise.resolve()
+    expect(switchState.inFlight!.value).toBe(true)
+
+    releaseB()
+    await pendingA
+    await pendingB
+    expect(switchState.inFlight!.value).toBe(false)
   })
 
   it('旧控制器卸载后的完成回调不再回写表单', async () => {
