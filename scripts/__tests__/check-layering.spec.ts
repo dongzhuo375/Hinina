@@ -82,6 +82,17 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     expect(violations).toHaveLength(1)
   })
 
+  it('规则A：裸目录 barrel（from 加 @/services、无尾斜杠）同样算边——与 bridge 判据对称', () => {
+    const violations = findViolations([
+      { path: 'views/F.vue', content: `import { configService } from '@/services'` },
+    ])
+    expect(violations).toHaveLength(1)
+    // 同形不误伤：services 前缀的其它模块（如假设的 @/services-extra）不在判据内
+    expect(findViolations([
+      { path: 'views/F.vue', content: `import x from '@/services-extra'` },
+    ])).toEqual([])
+  })
+
   it('规则A：export ... from 再导出也算边', () => {
     const violations = findViolations([
       { path: 'views/G.vue', content: `export { EditorPrefs } from '@/services/config.service'` },

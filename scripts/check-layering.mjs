@@ -17,17 +17,25 @@
 // real src/ tree runs in `npm test` too.
 //
 // Detection is a per-line scan for import specifiers:
-//   - `from '<spec>'` (covers static, `import type`, and multi-line statements
-//     — the specifier always sits on the `from` line)
+//   - `from '<spec>'` (covers static and `import type` imports; for multi-line
+//     statements it relies on the specifier sharing the `from` line)
 //   - `import '<spec>'` (side-effect, line-anchored)
 //   - `import('<spec>')` (dynamic)
 // Comments are stripped first (same string-preserving scanner shape as
-// check-save-gate). Known limits, stated: string literals are preserved, so a
-// string containing `from '@/services/x'` would read as an import (no such
-// form in the current tree — keep prose examples in comments); `require()` is
-// not scanned (ESM-only codebase). Path scopes are enforced by construction
-// (the walk only visits views/ components/ composables/ + App.vue), so a
-// misplaced service file under those dirs is still scanned — fail-closed.
+// check-save-gate). Known limits, stated:
+//   - **A hand-written line split between `from` and the specifier** (i.e.
+//     `from` ending a line with the specifier on the next line) is silently
+//     missed — the scanner has no cross-line statement stitching. No formatter
+//     in this repo enforces the canonical shape, so the convention is: keep
+//     the specifier on the `from` line (mirrored in Architecture.md's known-
+//     limits sentence; the current tree has no such form).
+//   - String literals are preserved, so a string containing
+//     `from '@/services/x'` would read as an import (no such form in the
+//     current tree — keep prose examples in comments); `require()` is not
+//     scanned (ESM-only codebase).
+// Path scopes are enforced by construction (the walk only visits views/
+// components/ composables/ + App.vue), so a misplaced service file under
+// those dirs is still scanned — fail-closed.
 //
 // Stores/services/guards/router/main.ts are deliberately out of scope: they
 // sit on other rungs of the ladder (Store → Service → Bridge is legal; the
@@ -44,8 +52,9 @@ import { pathToFileURL } from 'node:url'
 export const SCAN_ROOTS = ['views', 'components', 'composables']
 export const ROOT_FILES = ['App.vue']
 
-/// Rule A: specifiers that resolve into the service layer.
-const SERVICE_SPEC = /(?:^|\/)services\//
+/// Rule A: specifiers that resolve into the service layer — including the bare
+/// directory barrel (`from '@/services'`), symmetric with BRIDGE_SPEC below.
+const SERVICE_SPEC = /(?:^|\/)services(?:\/|$)/
 /// Rule B: specifiers that resolve into the bridge layer.
 const BRIDGE_SPEC = /(?:^|\/)bridge(?:\/|$)/
 
