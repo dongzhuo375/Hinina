@@ -24,8 +24,9 @@ import AboutSection from '@/components/settings/AboutSection.vue'
  *
  * 数据流：onMounted 先 `invalidate()` 再 `getConfig()`，保证页面展示的恒为磁盘真值
  * （其它页面可能已热改过配置，进程内缓存不可信）；编辑在本地草稿上进行，
- * 保存经 `useSettingsForm` 的 `configService.runSaveTxn`（持保存门禁、覆盖
- * 「保存 → 新建实例自动切换」整段，读-改-写整体替换）落盘并失效缓存。
+ * 保存经 `useSettingsForm` 的 `configStore.runSaveTxn`（转发 `config.service`，
+ * 持保存门禁、覆盖「保存 → 新建实例自动切换」整段，读-改-写整体替换）落盘并
+ * 失效缓存。
  *
  * 分层锁：连接与缓存调优字段（OJ/地址/超时/轮询/TTL/数据目录）默认锁定，
  * 唯一提权来源是 `--settings` 启动参数（管理方钥匙）；选手日常字段（比赛

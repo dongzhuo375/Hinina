@@ -35,9 +35,10 @@ export type { EditorPrefs } from '@/services/config.service'
  *   读到的值上，`useSettingsForm` 的重读循环与持久化失败提示会静默失效。
  *   方法每次调用直读 service，无缓存。
  *
- * **action 一律非 async、直接 return service 调用（零微任务插入）**：设置页
- * 「invalidate → getConfig → 其它读取」的启动顺序与保存/切换的排队时序被既有
- * 用例锁定，转发层不得加 await 壳（与 systemStore 的 async 写法刻意不同）。
+ * **action 一律非 async、直接 return service 调用**：调用同步进入 service、
+ * 不加 await 壳，调用顺序与转发前一致（「invalidate → getConfig → 其它读取」
+ * 的启动顺序与保存/切换的排队时序被既有用例锁定）。返回的 Promise 仍经 Pinia
+ * action 包装、并非零微任务（实测多两跳——时序敏感断言须等终态而非数节拍）。
  */
 export const useConfigStore = defineStore('config', {
   getters: {

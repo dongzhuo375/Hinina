@@ -27,7 +27,8 @@ Hinina/
 │   ├── csp-runtime-probe.mjs               # CSP 运行时探针（打包 exe 经 CDP 验证服务态逐源一致（唯一增补=script-src sha256）+ 窗口内显式 IPC 成功且零违规 + 外域拦截在场；期望源唯一取自 tauri.conf.json；夜间 integration 的 Windows build leg 跑——镜像钉 windows-2022，2025 的 WebView2 DevTools 口不工作）
 │   ├── check-release-versions.mjs         # 发布版本一致性门禁（五个文件六处版本值/标签/CHANGELOG 段落与真实日期；npm run release:check 与 release.yml validate/draft-release 共用）
 │   ├── check-save-gate.mjs                # 保存门禁源码检查（保存路径必须经事务回调，防新增绕队列直写入口；npm run check:save-gate 与 ci.yml 共用）
-│   └── __tests__/                         # scripts 门禁的 Vitest 套件（check-csp-policy / check-release-versions / check-save-gate：判定函数正例 + 变异负例 + CLI 夹具）
+│   ├── check-layering.mjs                 # 前端分层门禁（View/component/composable 不 import Service；View/component 不 import bridge——Architecture.md「前端分层口径」两条红线；npm run check:layering 与 ci.yml 共用，已知边界见脚本头）
+│   └── __tests__/                         # scripts 门禁的 Vitest 套件（check-csp-policy / check-release-versions / check-save-gate / check-layering：判定函数正例 + 变异负例 + CLI 夹具）
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
@@ -387,13 +388,14 @@ src/
 │   ├── session.ts                        # 会话级领域状态清理（登出/切换账号时重置比赛/题目/提交/榜单/公告/工作区并回收定时器；递增会话代际）
 │   ├── sessionGeneration.ts              # 会话代际计数器（叶子模块，不依赖任何 store；供各 store 在迟到响应写回前比对）。代际计数共三套各管一段：本计数器（领域状态代际，登出/OJ 切换整体 +1）、各 store 的 loadSeq（请求序号，区分同代际内的新旧请求）、authStore 的 authEpoch（认证代际，OJ 切换/登出/新登录作废在途认证请求）
 │   ├── systemStore.ts                    # 系统服务的前端消费入口（窗口控制/启动标志/存储信息/维护清理/数据目录；View 不直接调 service，2026-11-04 严格分层）；钥匙判据两级入口：isKeyed（进程级）+ isKeyedSettingsRoute(routeName)（路由级参数化 getter，2026-11-04 H3 收敛——原 guards/keyed-settings-route 已删，guards/ 回归两成员）
+│   ├── configStore.ts                    # 配置服务的前端消费入口（2026-11-09 严格分层：原 View/component/composable 直连 configService 的 7 条边收编于此；配置读取/保存事务 runSaveTxn/OJ 切换/OJ 基址/编辑器偏好/分栏比例/轮询参数纯转发，保存队列/切换队列/代际仍由 service 持有不复制；ref 支撑走 getter、普通字段（代际/最近切换结果）走 action 逐次直读——getter 化会被 computed 永久缓存）
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + loadContest 并发去重 + whenLoaded 统一等待入口（P59）+ 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情 + limits 缓存 + 我的题目状态（limitsOf/statusOf 派生读取；myStatusStale 增量失效，提交终态触发重拉）
 │   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页；用户操作路径查询去抖 in-flight 合并 + 3s memo，轮询与手动刷新不走去抖）
 │   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收；终态时触发 problemStore.invalidateMyStatus）+ **重复发送防护**（pendingFor 按「比赛+题目+展示题号+语言+源码」五元组去重，评测期间复用编号；isSubmitting 同步上锁）+ **轮询超时把条目收敛为终态 Unknown**（让服务端结果接管展示）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
 │   ├── announcementStore.ts              # 公告列表 + 客户端已读状态（unreadCount 红点数据源、markAllRead 乐观更新+失败回滚+不可见不标记、isWatching 语义、60s±10s 轮询、窗口重新可见/聚焦即时补拉（去重 1s））
 │   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（两级状态机：syncPending=未推送内存 / isDirty=未落盘；语言权威值=HOJ 显示名，切换即时持久化；源文件名经 utils/language 派生；落盘事件订阅安装器）
-│   └── __tests__/                        # authStore / contestStore / problemStore / rankStore / submissionStore / announcementStore / session / workspaceStore / pluginStore .spec.ts（会话状态机、加载去重与 whenLoaded、我的题目状态失效、榜单去重/轮询/全量模式、评测收敛轮询与重复提交防护、公告未读语义、会话级清理、工作区落盘状态机与 flush 顺序）
+│   └── __tests__/                        # authStore / configStore / contestStore / problemStore / rankStore / submissionStore / announcementStore / session / workspaceStore / pluginStore .spec.ts（会话状态机、加载去重与 whenLoaded、我的题目状态失效、榜单去重/轮询/全量模式、评测收敛轮询与重复提交防护、公告未读语义、会话级清理、工作区落盘状态机与 flush 顺序）
 ├── services/
 │   ├── plugin.service.ts                 # 插件前端服务入口
 │   ├── auth.service.ts                   # 登录/登出/会话检查/三态会话校验（刻意不做前端持久化：会话唯一存放处是后端会话文件，前端每次经后端查询）
@@ -436,7 +438,7 @@ src/
 ├── composables/
 │   ├── useTransientValue.ts               # 临时反馈值与唯一回弹 timer（复制反馈；scope dispose 清理）
 │   ├── useNowMs.ts                        # 响应式毫秒墙钟（每秒重读 Date.now；各实例独立 interval，scope dispose 清理）
-│   ├── useSettingsForm.ts                 # 设置页配置草稿、校验、保存与 OJ 显式/自动切换控制器（保存经 configService.runSaveTxn 事务整段持锁，模块级保存并发机器已删）
+│   ├── useSettingsForm.ts                 # 设置页配置草稿、校验、保存与 OJ 显式/自动切换控制器（保存经 configStore.runSaveTxn 转发 config.service、事务整段持锁，模块级保存并发机器已删）
 │   ├── useAboutSettings.ts                # 设置页 About 存储信息与复制反馈（复用 useTransientValue）
 │   ├── useMaintenanceSettings.ts          # 设置页重置/清理控制器与提示 timer
 │   ├── useDataDirSettings.ts              # 设置页数据目录候选、迁移与通知控制器
