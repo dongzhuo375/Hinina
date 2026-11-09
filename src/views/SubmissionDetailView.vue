@@ -4,9 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import CodeEditor from '@/components/editor/CodeEditor.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import { configService } from '@/services/config.service'
-import { submissionService } from '@/services/submission.service'
+import { useConfigStore } from '@/stores/configStore'
 import { useContestStore } from '@/stores/contestStore'
+import { useSubmissionStore } from '@/stores/submissionStore'
 import type { JudgeCase, SubmissionCases, SubmissionDetail } from '@/types/submission'
 import { monacoIdOf } from '@/utils/language'
 import {
@@ -35,6 +35,8 @@ const JITTER_CAP_MS = 500
 const route = useRoute()
 const router = useRouter()
 const contestStore = useContestStore()
+const submissionStore = useSubmissionStore()
+const configStore = useConfigStore()
 
 const submitId = computed(() => String(route.params.submitId ?? ''))
 
@@ -167,7 +169,7 @@ async function reload(id: string): Promise<void> {
  */
 async function loadDetail(id: string, token: number): Promise<void> {
   try {
-    const d = await submissionService.getSubmissionDetail(id)
+    const d = await submissionStore.getSubmissionDetail(id)
     if (!isCurrentLoad(id, token)) return
     detail.value = d
     loadError.value = null
@@ -186,7 +188,7 @@ async function loadDetail(id: string, token: number): Promise<void> {
 /// 拉取测试点明细；失败不致命，降级为提示条（详情主体照常展示）
 async function loadCases(id: string, token: number): Promise<void> {
   try {
-    const c = await submissionService.getSubmissionCases(id)
+    const c = await submissionStore.getSubmissionCases(id)
     if (!isCurrentLoad(id, token)) return
     cases.value = c
     casesError.value = null
@@ -238,7 +240,7 @@ onMounted(async () => {
   // 比赛数据用于「题目」跳转与赛时相对时间；深链直接进入时可能尚未加载，失败静默
   contestStore.whenLoaded().catch(() => {})
   scheduleReady = (async () => {
-    const schedule = await configService.getPollSchedule()
+    const schedule = await configStore.getPollSchedule()
     if (!alive) return
     pollIntervalMs = schedule.intervalMs
     pollJitterMs = Math.min(JITTER_CAP_MS, Math.round(schedule.intervalMs * JITTER_RATIO))

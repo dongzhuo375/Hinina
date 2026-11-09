@@ -6,7 +6,7 @@ import CodeEditor from '@/components/editor/CodeEditor.vue'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { problemService } from '@/services/problem.service'
+import { useProblemStore } from '@/stores/problemStore'
 import type { ContestProblem } from '@/types/contest'
 import {
   DEFAULT_LANGUAGE,
@@ -34,6 +34,7 @@ const router = useRouter()
 const contestStore = useContestStore()
 const submissionStore = useSubmissionStore()
 const workspaceStore = useWorkspaceStore()
+const problemStore = useProblemStore()
 
 /// 本题允许的提交语言（HOJ 显示名）：挂载时从题目详情拉取，失败回退内置默认列表
 const allowedLanguages = ref<string[]>([...DEFAULT_LANGUAGES])
@@ -46,7 +47,7 @@ async function loadAllowedLanguages() {
   const contestId = contestStore.contest?.id
   if (!contestId) return
   try {
-    const detail = await problemService.getProblem(contestId, props.problem.displayId)
+    const detail = await problemStore.getProblem(contestId, props.problem.displayId)
     if (detail.languages.length > 0) {
       allowedLanguages.value = detail.languages
       // 当前选择按语言族解析为列表中的服务端原名（"C++"→"C++17" 等变体归位）；

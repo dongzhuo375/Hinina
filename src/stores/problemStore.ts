@@ -91,6 +91,18 @@ export const useProblemStore = defineStore('problem', {
     },
 
     /**
+     * 获取单个题目详情（不写入 store 状态）——快捷提交弹窗拉取允许语言用。
+     *
+     * 纯转发（2026-11-09 严格分层：QuickSubmitDialog 此前直连
+     * `problemService.getProblem`，现一律经本 store；不复制状态、不加 await 壳）。
+     * 与 `openProblem` 的区别：后者把结果设为 `currentProblem` 并带过期保护，
+     * 本方法只回传数据，由调用方自行消费。
+     */
+    getProblem(contestId: string, problemId: string): Promise<Problem> {
+      return problemService.getProblem(contestId, problemId)
+    },
+
+    /**
      * 批量加载题目 limits（后端带内存 + 磁盘双层缓存，命中时零网络请求）。
      *
      * 失败**不抛出**：limits 只影响卡片上的一行信息，不应打断整页渲染；

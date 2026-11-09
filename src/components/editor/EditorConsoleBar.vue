@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { submissionService } from '@/services/submission.service'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import type { JudgementStatus, SubmissionRecord } from '@/types/submission'
@@ -119,7 +118,7 @@ watch(
     const tone = statusTone(record.status)
     if (tone !== 'wa' && tone !== 'tle') return
     try {
-      const result = await submissionService.getSubmissionCases(record.submitId)
+      const result = await submissionStore.getSubmissionCases(record.submitId)
       // 子任务制下平铺 cases 常为空，helper 会展开 subTasks 查找，避免提示静默消失
       const first = findFirstFailedCase(result)
       if (first && hintSubmitId === record.submitId) failedCaseHint.value = `Test ${first.seq} · ${formatMsToSeconds(first.timeMs)}`
