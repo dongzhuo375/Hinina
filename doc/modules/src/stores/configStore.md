@@ -17,7 +17,7 @@ View / component / composable 访问**配置服务**（应用配置读取与缓�
 
 ## 为什么是逐个显式转发
 
-与 `systemStore` 同一理由：① View 只能看到 store 的**有类型方法**，拿不到 service 实例——否则 `store.service.x()` 又绕回了 View→Service，严格口径失效；② 每个方法都可被 spec 直接断言（转发目标与回传值）；③ service 的公开面没有全部转发——无视图消费的成员（`activeOjBaseUrl`、`getDefaultLanguage`、`whenSettled`、`whenSaveSettled`、`saveInFlight`/`saveEpoch`）留给内部与其它 store 消费，新增视图消费面时再显式补转发。
+与 `systemStore` 同一理由：① View 只能看到 store 的**有类型方法**，拿不到 service 实例——否则 `store.service.x()` 又绕回了 View→Service，严格口径失效；② 每个方法都可被 spec 直接断言（转发目标与回传值）；③ service 的公开面没有全部转发——无视图消费的成员（`activeOjBaseUrl`、`getDefaultLanguage`、`whenSaveSettled`、`saveInFlight`/`saveEpoch`）留给内部与其它 store 消费，新增视图消费面时再显式补转发。
 
 **action 一律非 async、直接 return service 调用（零微任务插入）**：设置页「invalidate → getConfig → 其它读取」的启动顺序与保存/切换的排队时序被既有用例锁定，转发层不得加 await 壳（与 `systemStore` 的 async 写法刻意不同，理由见上）。
 

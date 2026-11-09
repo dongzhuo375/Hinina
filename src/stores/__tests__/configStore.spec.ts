@@ -12,9 +12,10 @@ import type { OjSwitchResult } from '@/services/config.service'
  * - ref 支撑的（settingsSaveInFlight / ojSwitchInFlight）走 getter——响应式
  *   追踪，值翻转后重读拿到新值；
  * - 普通字段支撑的（ojSwitchEpoch / settingsSaveEpoch / latestOjSwitchResult）
- *   走 action 方法——**逐次直读**。若有人把它们改成 getter，computed 对无
- *   响应式依赖的求值结果会永久缓存，代际比对与持久化失败提示会静默失效，
- *   「普通字段翻转后必须读到新值」的用例即变异守卫（见对应 it）。
+ *   走 action 方法——**逐次直读**。若有人把它们改成 getter，本文件的调用形态
+ *   会立即抛错（store 方法名不再是函数，比断言更响亮）；即便调用点同步改成
+ *   属性访问，computed 对无响应式依赖的求值结果也会永久缓存，代际比对与
+ *   持久化失败提示会静默失效——「翻转后必须读到新值」用例锁定取值新鲜度。
  */
 
 const mocks = vi.hoisted(() => ({
@@ -128,7 +129,7 @@ describe('configStore — ref 支撑的响应式转发（getter）', () => {
 })
 
 describe('configStore — 普通字段的逐次直读（action 方法）', () => {
-  it('ojSwitchEpoch 翻转后必须读到新值（getter 化会缓存成永旧值，本用例即变异守卫）', () => {
+  it('ojSwitchEpoch 翻转后必须读到新值（误改成 getter 会在调用形态直接抛错；本用例另锁定逐次直读的新鲜度）', () => {
     const store = useConfigStore()
     expect(store.ojSwitchEpoch()).toBe(0)
     plainState.ojSwitchEpoch = 2

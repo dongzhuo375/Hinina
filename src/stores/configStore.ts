@@ -65,7 +65,7 @@ export const useConfigStore = defineStore('config', {
       return configService.settingsSaveEpoch
     },
 
-    /** 最近一次已生效切换的共享结果（未发生生效切换时为 null）。普通字段，逐次直读 */
+    /** 最近一次已生效切换的共享结果（未发生生效切换时为 null）。service 方法读普通字段，非响应式——逐次直读 */
     latestOjSwitchResult(): OjSwitchResult | null {
       return configService.latestOjSwitchResult()
     },
