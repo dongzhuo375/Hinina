@@ -6,7 +6,7 @@
 
 比赛工作台的布局外壳：`TopBar`（顶栏，内嵌横向导航）+ `<router-view>` 子视图 + `StatusBar`（底栏）；挂载时拉取比赛数据、**按权威赛程刷新跨场缓存**、在比赛进行中启动公告轮询，并以每秒时钟驱动**赛程闸门**——赛程被移到未来时立即退回登录页，比赛结束时叠加结束覆盖层并在 2 秒后自动返回登录页。
 
-**无会话最小壳**：`--settings`（管理方钥匙）会在无会话时经守卫直落设置路由（守卫条件豁免其鉴权，见 `router/index.md`），此时外壳退化为最小壳——自带 `data-tauri-drag-region` 拖动区标题栏（「Hinina 设置」+「返回登录」，`decorations: false` 下窗口移动全靠它）+ 内容区；**不渲染** TopBar/StatusBar（其数据全部依赖会话），`bootstrap` 直接跳过——**本入口**不发起认证拉取与公告轮询（无会话时认证拉取只会失败）。措辞限定在 bootstrap：**阶段跃迁监听在 bareShell + 保留数据下启动公告轮询是既有契约**（spec「钥匙设置页 running→ended→running」锁定，bareShell 守卫刻意不上提到 ensureLive 全体）——bootstrap 不发起认证拉取；公告轮询的**既有启动契约**（bareShell + 保留数据下的阶段跃迁）刻意保留，两者不矛盾（「最小壳不发起认证请求」≠「最小壳永不启动轮询」）。判据是**三条件与**：钥匙启动 + 无会话 + 设置路由（`launchFlags.settings && !isLoggedIn && route === 'Settings'`）——绑路由防「正常登出/会话失效在 `replace(Login)` 异步守卫完成前闪最小壳、子视图重挂」（评审二），绑钥匙防「普通启动在设置页上登出时闪最小壳」（评审三），**刻意不含 `sessionResolved`**：存量过期会话的首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1）——普通启动**永远**不进最小壳。
+**无会话最小壳**：`--settings`（管理方钥匙）会在无会话时经守卫直落设置路由（守卫条件豁免其鉴权，见 `router/index.md`），此时外壳退化为最小壳——自带 `data-tauri-drag-region` 拖动区标题栏（「Hinina 设置」+「返回登录」，`decorations: false` 下窗口移动全靠它）+ 内容区；**不渲染** TopBar/StatusBar（其数据全部依赖会话），`bootstrap` 直接跳过——**本入口**不发起认证拉取与公告轮询（无会话时认证拉取只会失败）。措辞限定在 bootstrap：**阶段跃迁监听在 bareShell + 保留数据下启动公告轮询是既有契约**（spec「钥匙设置页 running→ended→running」锁定，bareShell 守卫刻意不上提到 ensureLive 全体）——bootstrap 不发起认证拉取；公告轮询的**既有启动契约**（bareShell + 保留数据下的阶段跃迁）刻意保留，两者不矛盾（「最小壳不发起认证请求」≠「最小壳永不启动轮询」）。判据是**三条件与**：钥匙启动 + 无会话 + 设置路由（`launchFlags.settings && !isLoggedIn && route === 'Settings'`）——绑路由防「正常登出/会话失效在 `replace(Login)` 异步守卫完成前闪最小壳、子视图重挂」，绑钥匙防「普通启动在设置页上登出时闪最小壳」，**刻意不含 `sessionResolved`**：存量过期会话的首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态——普通启动**永远**不进最小壳。
 
 ## 核心类型/函数
 
@@ -21,8 +21,8 @@
 | `bareShell` | computed | `keyedSettings && !auth.isLoggedIn` —— 最小壳判据（三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1） |
 | `watch([phase, keyedSettings], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**keyedSettings 时只免跳转**——无会话（最小壳，评审四 P2-2）与有会话（评审五）两个分支都覆盖；`ended` 与 `upcoming` 的 `stopLive()` 清理**不能被豁免吞掉**（自然结束或 `running→upcoming` 回退后公告请求会一直打，评审八 P2-1、评审三十三 #5），并清 `liveFor` 以便回到 running 重启 |
 | `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → `ensureLive()`，见逻辑流程 |
-| `ensureLive` | `() => void` | 公告轮询的唯一启动点：`phase === 'running'` 且 `contest.id` 存在、且不是跨场未刷新（brief.id ≠ contest.id）时 `startLive(id)`；按 id 幂等。**阶段跃迁到 running 时也调用**（评审十九 #5：赛前打开的外壳在开赛后无需重挂即可补启轮询），**contest id 变化时也调用**（首次加载失败后的自愈路径：phase 未变、阶段监听不会再触发，见逻辑流程） |
-| `watch([contest?.id, brief?.id])` | — | **两个 id 任一变化** → `ensureLive()`（补启自愈轮询；监听 brief 的理由：contest 先换场会被 brief 失配守卫拦下，brief 后到时必须有人再触发——只监听 contest.id 会让轮询停在旧场；**bareShell 守卫只拦启动**——新入口不绕过 bootstrap 的最小壳跳过语义）；**contest.id 被清 → `stopLive()` + 清 liveFor**（修「OJ 切换后同 cid 被 liveFor 挡住」的既有缺口；本地清理不受守卫，最小壳下照跑） |
+| `ensureLive` | `() => void` | 公告轮询的唯一启动点：`phase === 'running'` 且 `contest.id` 存在、且不是跨场未刷新（brief.id ≠ contest.id）时 `startLive(id)`；按 id 幂等。**阶段跃迁到 running 时也调用**（赛前打开的外壳在开赛后无需重挂即可补启轮询），**contest id 变化时也调用**（首次加载失败后的自愈路径：phase 未变、阶段监听不会再触发，见逻辑流程） |
+| `watch([contest?.id, brief?.id])`（实现为单 getter 返回数组） | — | **两个 id 任一变化** → `ensureLive()`（数组每次求值都是新引用：同 id 的整对象替换也会触发回调，靠 ensureLive 的 liveFor 幂等吸收——行为正确、仅微量空转，改多源形态属可选优化）（补启自愈轮询；监听 brief 的理由：contest 先换场会被 brief 失配守卫拦下，brief 后到时必须有人再触发——只监听 contest.id 会让轮询停在旧场；**bareShell 守卫只拦启动**——新入口不绕过 bootstrap 的最小壳跳过语义）；**contest.id 被清 → `stopLive()` + 清 liveFor**（修「OJ 切换后同 cid 被 liveFor 挡住」的既有缺口；本地清理不受守卫，最小壳下照跑） |
 | `backToLogin` | `() => void` | 最小壳的「返回登录」按钮 → `replace(Login)`（正常登录页，含匿名简报与重试 UI） |
 | `exitTimer` | 定时器句柄 | 结束退出延迟；模块级普通变量，不进响应式系统（墙钟 interval 已归 `useNowMs`） |
 | `disposed` | `boolean` | 卸载后阻断在途异步续跑 |
@@ -55,7 +55,7 @@ bootstrap:
   └ 失败 → return（原因已由 store 写入 error，StatusBar 与各视图兜底）
   contestId 存在 且 phase === 'running' → announcementStore.startLive(contestId, () => contest.status === 1)
 
-watch([contest?.id, brief?.id]):
+watch([contest?.id, brief?.id])（单 getter 返回数组，同 id 换对象也会触发，由 liveFor 幂等吸收）:
   任一 id 变化 → **bareShell 守卫只拦启动**（新调用入口不绕过 bootstrap 的最小壳跳过
   语义；phase 跃迁监听在 bareShell + 保留数据下启动轮询是既有契约，本守卫只约束
   新入口）→ ensureLive()

@@ -283,7 +283,7 @@ Hinina/
             ├── app_cmd.rs                # launch_flags（**零状态薄转发** → infra/launch_args：--settings 管理方钥匙的线上出口）/ open_external（http(s) 外链转交系统默认浏览器——scheme 白名单在命令守卫，WebView 永不导航离开应用；经 Rust-only 注册的 tauri-plugin-opener）
             ├── plugin_cmd.rs             # plugin_list/start/stop/reload/resync（不接收授权/代码/路径）
             ├── mod.rs                    # register_commands() 入口（含 #[cfg(test)] tests 引用）
-            ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj；成功后清私有赛进入尝试记忆——报名状态是账号级的）/ logout（编排：清会话 + 清用户域缓存 + 清私有赛进入尝试记忆）/ get_session / validate_session（三态）
+            ├── auth_cmd.rs               # login(username, password)（OJ 切换已解耦至 switch_oj；**成败皆清**私有赛进入尝试记忆——provider 先接受新凭证再落盘，落盘失败时适配器已持新 token，报名状态是账号级的）/ logout（编排：清会话 + 清用户域缓存 + 清私有赛进入尝试记忆）/ get_session / validate_session（三态）
             ├── oj_cmd.rs                 # switch_oj（显式切换，**整段持配置写事务锁**：校验已注册且在启用实例列表 → 切 Registry → **显式清各 Service 的 OJ 域缓存** → 持久化 oj.active → 发布 OjSwitched；并发切换串行，不会 Registry/内存/磁盘分叉）
             ├── contest_cmd.rs            # list_contests / load_configured_contest（读 oj.contest_ref，不透明字符串引用；并以 oj.contestPassword 作为私有赛进入凭证传入）/ get_contest_rank / list_contest_announcements / get_read_announcement_ids / mark_announcements_read（uid 取自会话）
             ├── problem_cmd.rs            # get_problem / get_user_problem_status / get_contest_problem_limits

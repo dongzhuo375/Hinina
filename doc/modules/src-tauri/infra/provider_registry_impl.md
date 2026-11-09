@@ -32,7 +32,7 @@
 5. **列出可用 OJ**：`list_available` 以单表 key 集合为准
 
 ## 测试
-`src-tauri/src/infra/tests/provider_registry_impl_tests.rs`（由 `provider_registry_impl.rs` 底部 `#[cfg(test)] #[path = "tests/provider_registry_impl_tests.rs"] mod tests;` 引用）锁定查询侧契约：未注册时四种能力均 `ProviderNotFound` 且列表为空、部分实现（`ProviderSet::default`）是合法注册但缺能力报 `ProviderNotFound`、切换到未注册 OJ 同样 `ProviderNotFound`、同 id 二次注册覆盖与 `list_available` 反映注册、`current_id` / `set_current` 往返与 `OjId` 身份规整（trim）、**同源快照**（`current_contest_snapshot_is_id_consistent_across_switch`：双 OJ 各挂独立 stub 实例，快照返回的 provider 经 `Arc` 数据指针比对与注册实例同源、切换后 id 跟随新 OJ、未注册 OJ 报 `ProviderNotFound`）。
+`src-tauri/src/infra/tests/provider_registry_impl_tests.rs`（由 `provider_registry_impl.rs` 底部 `#[cfg(test)] #[path = "tests/provider_registry_impl_tests.rs"] mod tests;` 引用）锁定查询侧契约：未注册时四种能力均 `ProviderNotFound` 且列表为空、部分实现（`ProviderSet::default`）是合法注册但缺能力报 `ProviderNotFound`、切换到未注册 OJ 同样 `ProviderNotFound`、同 id 二次注册覆盖与 `list_available` 反映注册、`current_id` / `set_current` 往返与 `OjId` 身份规整（trim）、**同源快照**（`current_contest_snapshot_is_id_consistent_across_switch`：双 OJ 各挂独立 stub 实例，快照返回的 provider 经 `Arc` 数据指针比对与注册实例同源、切换后 id 跟随新 OJ、未注册 OJ 报 `ProviderNotFound`）、**并发切换压力测试**（`concurrent_switches_never_mix_provider_and_id`：写线程持续翻转 `set_current`，主线程 2000 次快照断言 provider/id 配对——朴素「两次独立读取」的实现在翻转下会配错，本用例可稳定捕获（变异实测多次红）；单次捕获实现与调度无关地通过）。
 
 ## 访问作用域
 
