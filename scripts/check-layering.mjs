@@ -16,20 +16,16 @@
 // fixtures pin the verdicts in scripts/__tests__/check-layering.spec.ts and the
 // real src/ tree runs in `npm test` too.
 //
-// Detection is a per-line scan for import specifiers:
-//   - `from '<spec>'` (covers static and `import type` imports; for multi-line
-//     statements it relies on the specifier sharing the `from` line)
-//   - `import '<spec>'` (side-effect, line-anchored)
-//   - `import('<spec>')` (dynamic)
-// Comments are stripped first (same string-preserving scanner shape as
-// check-save-gate). Known limits, stated:
-//   - **A hand-written line split between `from` and the specifier** (i.e.
-//     `from` ending a line with the specifier on the next line) is silently
-//     missed — the scanner has no cross-line statement stitching. No formatter
-//     in this repo enforces the canonical shape, so the convention is: keep
-//     the specifier on the `from` line (mirrored in Architecture.md's known-
-//     limits sentence; the current tree has no such form).
-//   - String literals are preserved, so a string containing
+// Detection scans the WHOLE comment-stripped source (not line-by-line), so
+// cross-line import shapes cannot slip through: `from` split from its
+// specifier, dynamic `import(...)` wrapped across lines, and side-effect
+// `import` split across lines all report; match offsets map back to line
+// numbers. Import-keyword matches require a statement boundary (start / `;` /
+// `{` / `}` / newline) and must not be preceded by `.` or word chars, so
+// property access / tagged templates (`x.import('y')`, `x.from`, …) do not
+// read as imports. Comments are stripped first (same string-preserving
+// scanner shape as check-save-gate). Known limits, stated:
+//   - String literals are preserved, so string content containing
 //     `from '@/services/x'` would read as an import (no such form in the
 //     current tree — keep prose examples in comments); `require()` is not
 //     scanned (ESM-only codebase).
@@ -112,36 +108,50 @@ export function stripComments(source) {
 }
 
 /**
- * One finding per (line, rule) — a line importing both layers reports both.
- * Specifier extraction: `from '<spec>'` anywhere on the (comment-stripped)
- * line, side-effect `import '<spec>'` line-anchored, dynamic `import('<spec>')`.
+ * One finding per (occurrence, rule) — an import hitting both layers reports
+ * both. Scans the WHOLE comment-stripped source (not line-by-line) so
+ * cross-line import shapes cannot slip through: `from` split from its
+ * specifier, dynamic `import(...)` wrapped across lines, and side-effect
+ * `import` split across lines all report; match offsets map back to line
+ * numbers. Import-keyword matches require a statement boundary (start / `;` /
+ * `{` / `}` / newline) and must not be preceded by `.` or word chars, so
+ * property access / tagged templates (`x.import('y')`, `x.from`, …) do not
+ * read as imports.
  */
 export function findViolations(files) {
   const violations = []
   for (const { path, content } of files) {
-    const lines = stripComments(content).split('\n')
-    lines.forEach((line, idx) => {
-      const specs = []
-      for (const match of line.matchAll(/from\s*['"]([^'"]+)['"]/g)) specs.push(match[1])
-      const sideEffect = line.match(/^\s*import\s*['"]([^'"]+)['"]/)
-      if (sideEffect) specs.push(sideEffect[1])
-      for (const match of line.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.push(match[1])
-
-      for (const spec of specs) {
-        if (SERVICE_SPEC.test(spec)) {
-          violations.push(
-            `${path}:${idx + 1}: 规则A —— View/component/composable 不得 import Service（${spec}）；` +
-              '一律经对应 store 消费（Architecture.md「前端分层口径」）',
-          )
-        }
-        if (ruleBEnabled(path) && BRIDGE_SPEC.test(spec)) {
-          violations.push(
-            `${path}:${idx + 1}: 规则B —— View/component 不得 import bridge（${spec}）；` +
-              'IPC 细节收敛在 service 层（Architecture.md「前端分层口径」）',
-          )
-        }
+    const source = stripComments(content)
+    const findings = []
+    for (const match of source.matchAll(/(?<![.\w$])from\s*['"]([^'"]+)['"]/g)) {
+      findings.push({ spec: match[1], index: match.index })
+    }
+    for (const match of source.matchAll(/(?:^|[;{}\n])\s*import\s*['"]([^'"]+)['"]/g)) {
+      findings.push({ spec: match[1], index: match.index + match[0].indexOf('import') })
+    }
+    for (const match of source.matchAll(/(?<![.\w$])import\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+      findings.push({ spec: match[1], index: match.index })
+    }
+    const lineOf = (index) => {
+      let line = 1
+      for (let i = 0; i < index; i += 1) if (source[i] === '\n') line += 1
+      return line
+    }
+    for (const { spec, index } of findings) {
+      const line = lineOf(index)
+      if (SERVICE_SPEC.test(spec)) {
+        violations.push(
+          `${path}:${line}: 规则A —— View/component/composable 不得 import Service（${spec}）；` +
+            '一律经对应 store 消费（Architecture.md「前端分层口径」）',
+        )
       }
-    })
+      if (ruleBEnabled(path) && BRIDGE_SPEC.test(spec)) {
+        violations.push(
+          `${path}:${line}: 规则B —— View/component 不得 import bridge（${spec}）；` +
+            'IPC 细节收敛在 service 层（Architecture.md「前端分层口径」）',
+        )
+      }
+    }
   }
   return violations
 }

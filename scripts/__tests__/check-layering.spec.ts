@@ -155,6 +155,70 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     ])
     expect(violations).toEqual([])
   })
+
+  it('属性访问与标签模板不误报（x.from / x.import(…）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/U.ts',
+        content: `const f = x.from
+const g = y.import('z')`,
+      },
+    ])
+    expect(violations).toEqual([])
+  })
+
+  it('规则A：动态 import 换行（import 与说明符分离）同样算边', () => {
+    const violations = findViolations([
+      {
+        path: 'views/P.vue',
+        content: `const module = await import(
+  '@/services/config.service'
+)`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('规则A')
+  })
+
+  it('规则A：副作用 import 换行同样算边', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Q.vue',
+        content: `import
+  '@/services/config.service'`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+  })
+
+  it('规则A：from 与说明符换行分离同样算边（静态与 export type 两形态）', () => {
+    const violations = findViolations([
+      {
+        path: 'views/R.vue',
+        content: `import { configService } from
+  '@/services/config.service'`,
+      },
+      {
+        path: 'components/S.vue',
+        content: `export type { EditorPrefs } from
+  '@/services/config.service'`,
+      },
+    ])
+    expect(violations).toHaveLength(2)
+  })
+
+  it('规则B：bridge 的跨行 import 同样算边', () => {
+    const violations = findViolations([
+      {
+        path: 'views/T.vue',
+        content: `const bridge = await import(
+  '@/bridge'
+)`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('规则B')
+  })
 })
 
 describe('check-layering — 真实源码树', () => {
