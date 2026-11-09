@@ -339,9 +339,10 @@ describe('SettingsView 行为表征（结构拆分前）', () => {
 
     await setField(view.host, '当前 OJ', 'Hydro')
     await vi.waitFor(() => expect(mocks.switchOj).toHaveBeenCalledWith('Hydro'))
-    await settleView(2)
 
-    expect(field(view.host, '当前 OJ').value).toBe('HOJ')
+    // 失败回滚落定断言：切换拒绝经 store 转发（Pinia action 包装）比直连
+    // service 多两跳微任务，固定 tick 窗口会读到回滚前的中间态——等终态而非数节拍
+    await vi.waitFor(() => expect(field(view.host, '当前 OJ').value).toBe('HOJ'))
     await vi.waitFor(() => expect(view.host.textContent).toContain('切换失败'))
     expect(mocks.resetSessionForOjSwitch).not.toHaveBeenCalled()
     expect(mocks.routerReplace).not.toHaveBeenCalled()

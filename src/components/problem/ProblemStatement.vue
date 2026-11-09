@@ -4,7 +4,7 @@ import { useTransientValue } from '@/composables/useTransientValue'
 import type { Problem, Sample } from '@/types/problem'
 import type { ProblemLimits } from '@/types/rank'
 import { renderMarkdown } from '@/utils/markdown'
-import { configService } from '@/services/config.service'
+import { useConfigStore } from '@/stores/configStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -28,13 +28,14 @@ const props = defineProps<{
 const contestStore = useContestStore()
 const problemStore = useProblemStore()
 const workspaceStore = useWorkspaceStore()
+const configStore = useConfigStore()
 
 /// OJ 服务端地址（用于把题目描述中的相对图片 URL 改写为绝对地址）
 const baseUrl = ref('')
 
 onMounted(async () => {
   // 配置服务内部已兜底：读取失败返回空串，相对路径按原样输出
-  baseUrl.value = await configService.getOjBaseUrl()
+  baseUrl.value = await configStore.getOjBaseUrl()
 })
 
 // ── 头部元信息 ──

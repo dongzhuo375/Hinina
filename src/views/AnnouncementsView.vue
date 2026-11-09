@@ -11,13 +11,14 @@ import {
 } from 'vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import { configService } from '@/services/config.service'
 import { useAnnouncementStore } from '@/stores/announcementStore'
+import { useConfigStore } from '@/stores/configStore'
 import { useContestStore } from '@/stores/contestStore'
 import { renderMarkdown } from '@/utils/markdown'
 
 const contestStore = useContestStore()
 const announcementStore = useAnnouncementStore()
+const configStore = useConfigStore()
 
 /// OJ 基址：把公告正文中的相对图片 URL 改写为绝对地址（读取失败回退空串）
 const baseUrl = ref('')
@@ -151,7 +152,7 @@ function onRefresh() {
 onMounted(async () => {
   // 先声明「用户正在看」：load 会据此把落地的那批公告标为已读
   announcementStore.isWatching = true
-  baseUrl.value = await configService.getOjBaseUrl()
+  baseUrl.value = await configStore.getOjBaseUrl()
   if (!alive) return
   await bootstrap()
   if (!alive) return

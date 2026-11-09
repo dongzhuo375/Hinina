@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { effectScope, ref } from 'vue'
 import type { EffectScope } from 'vue'
 import { IpcError, parseAppError } from '@/bridge'
@@ -225,6 +226,10 @@ let settings: ReturnType<typeof useSettingsForm>
 beforeEach(async () => {
   vi.resetAllMocks()
   vi.useFakeTimers()
+  // composable 的配置读写已收编 configStore（严格 View → Store → Service）：
+  // 真实 store（纯转发）+ 本文件对 config.service 的同构复刻 mock——语义与
+  // 迁移前一致，mock 面仍是 service API 面（authStore/systemStore 同理模块级打桩）
+  setActivePinia(createPinia())
   switchState.pending = null
   switchState.epoch = 0
   switchState.last = null

@@ -11,8 +11,8 @@ import { useContestStore } from '@/stores/contestStore'
 import { useProblemStore } from '@/stores/problemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
-import { configService } from '@/services/config.service'
-import type { EditorPrefs } from '@/services/config.service'
+import { useConfigStore } from '@/stores/configStore'
+import type { EditorPrefs } from '@/stores/configStore'
 import { resolveAllowedLanguage } from '@/utils/language'
 import { DEFAULT_EDITOR_TAB_SIZE } from '@/utils/editor'
 import { errorMessage } from '@/utils/error'
@@ -27,6 +27,7 @@ const contestStore = useContestStore()
 const problemStore = useProblemStore()
 const workspaceStore = useWorkspaceStore()
 const submissionStore = useSubmissionStore()
+const configStore = useConfigStore()
 
 const displayId = computed(() => String(route.params.displayId ?? ''))
 
@@ -199,13 +200,13 @@ const splitContainer = ref<HTMLElement>()
 let userAdjustedSplit = false
 
 // 初始分栏比例读取配置（layout.splitRatio 消费）；失败回退设计稿 0.48
-void configService.getSplitRatio().then((ratio) => {
+void configStore.getSplitRatio().then((ratio) => {
   if (!userAdjustedSplit) splitRatio.value = ratio
 })
 
 /// 拖拽结束后把比例写回配置（下次进入解题页生效）；失败只记录，不打断使用
 function persistSplitRatio() {
-  configService.saveSplitRatio(splitRatio.value).catch((e) => {
+  configStore.saveSplitRatio(splitRatio.value).catch((e) => {
     log.error('分栏比例持久化失败:', e)
   })
 }

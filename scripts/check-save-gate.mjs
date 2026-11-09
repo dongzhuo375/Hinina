@@ -64,6 +64,10 @@ import { pathToFileURL } from 'node:url'
 export const TXN_ALLOWLIST = [
   'services/config.service.ts', // definition + the two semantic wrappers
   'composables/useSettingsForm.ts', // the only compound transaction (save → auto-switch)
+  // 2026-11-09 严格分层：View/composable 不再直连 configService，保存事务经
+  // stores/configStore 转发。纯转发（非新事务调用方），箭头包一层让回调保持
+  // 可静态分析（裸参数直传会 fail closed）。
+  'stores/configStore.ts',
 ]
 
 /// Queued save entries: appearing inside a transaction callback body deadlocks.

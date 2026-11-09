@@ -3,8 +3,8 @@ import { vFocusScope } from '@/utils/focus-scope'
 import { ref, reactive, onMounted, onUnmounted, watch, nextTick, shallowRef, computed } from 'vue'
 import * as monaco from 'monaco-editor'
 import EditorSettingsPopover from '@/components/editor/EditorSettingsPopover.vue'
-import { configService } from '@/services/config.service'
-import type { EditorPrefs } from '@/services/config.service'
+import { useConfigStore } from '@/stores/configStore'
+import type { EditorPrefs } from '@/stores/configStore'
 import { DEFAULT_LANGUAGES, hojLanguageOfFileName, monacoIdOf, resolveAllowedLanguage, SOURCE_FILE_EXTENSIONS } from '@/utils/language'
 import { DEFAULT_EDITOR_FONT_SIZE, DEFAULT_EDITOR_TAB_SIZE, DEFAULT_EDITOR_THEME } from '@/utils/editor'
 import { createLogger } from '@/utils/logger'
@@ -55,6 +55,8 @@ const emit = defineEmits<{
   'prefs-change': [prefs: EditorPrefs]
 }>()
 
+const configStore = useConfigStore()
+
 const editorContainer = ref<HTMLDivElement>()
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
@@ -102,7 +104,7 @@ onMounted(async () => {
   if (!editorContainer.value) return
 
   // 编辑器偏好来自应用配置（设置页 / 编辑器设置弹层可调）；读取失败时服务内部已回退兜底值。
-  const loadedPrefs = await configService.getEditorPrefs()
+  const loadedPrefs = await configStore.getEditorPrefs()
   // 配置等待期间组件可能已卸载；必须重新取容器，否则 create(null) 会抛错，
   // 且卸载钩子已经执行，事后创建的 editor/keydown listener 将无人清理
   const container = editorContainer.value
@@ -273,7 +275,7 @@ async function handleFileChange(e: Event) {
 // ── 编辑器设置（字号 / Tab 宽度 / 主题） ──
 //
 // 偏好是**应用级配置**（与设置页「编辑器」分组同一份数据），因此改动走
-// configService.updateEditorPrefs 落盘，而非仅作用于本实例。落盘前先即时应用到
+// configStore.updateEditorPrefs 落盘，而非仅作用于本实例。落盘前先即时应用到
 // Monaco —— 赛场调字号是「边看边调」，等 IPC 回来才生效是不可接受的交互延迟。
 
 /// 当前偏好：挂载时读配置，弹层改动就地更新（不重读配置，避免与在途写入打架）
@@ -350,7 +352,7 @@ async function persistPrefs() {
   // 无改动可写（只读实例等）：不发起无意义的配置写
   if (Object.keys(patch).length === 0) return
   try {
-    await configService.updateEditorPrefs(patch)
+    await configStore.updateEditorPrefs(patch)
     prefsError.value = null
   } catch (e) {
     // 已应用到编辑器，仅落盘失败：提示「仅本次会话生效」而不是回滚 ——
