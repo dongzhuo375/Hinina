@@ -17,16 +17,34 @@ pub async fn login(
     username: String,
     password: String,
 ) -> AppResult<User> {
-    ctx.auth.login(&username, &password).await
+    login_impl(&ctx, &username, &password).await
+}
+
+/// `login` 的真实编排（提取自命令本体，供命令与测试共用同一实现）。
+pub(crate) async fn login_impl(
+    ctx: &AppContext,
+    username: &str,
+    password: &str,
+) -> AppResult<User> {
+    // **无论登录成败都清进入记忆**：provider.login 一旦被服务端接受，适配器
+    // 内存里已是新 token——即使随后会话落盘失败让整体返回 Err（`?` 会提前
+    // 返回）。旧账号的访问结论必须失效，否则新 token 会继续复用旧账号的
+    // Rejected 记忆（复用消息掩盖真实结果）或 Success 记忆（跳过复查）。
+    // 失败登录（口令错误）时清理同样无害：旧会话仍在，下次加载重新复核
+    // access 最多多一次 GET。
+    let result = ctx.auth.login(username, password).await;
+    ctx.contest.clear_access_attempts();
+    result
 }
 
 /// 登出 Command。
 ///
 /// 前端 invoke 签名: `logout`
 ///
-/// 编排两件事：清除会话（`AuthService::logout`，其内部即使远端登出失败也返回 Ok），
+/// 编排三件事：清除会话（`AuthService::logout`，其内部即使远端登出失败也返回 Ok），
 /// 以及**清空用户域缓存**（终态提交详情/测试点，含源代码）—— 缓存是内存态，
-/// 不清理会让同机换账号后仍能读到上一位选手的提交内容。
+/// 不清理会让同机换账号后仍能读到上一位选手的提交内容；以及**清空私有赛进入
+/// 尝试记忆** —— 报名状态是账号级的，旧账号的记忆对新账号不再成立。
 #[tauri::command]
 pub async fn logout(ctx: State<'_, AppContext>) -> AppResult<()> {
     logout_impl(&ctx).await
@@ -36,6 +54,7 @@ pub async fn logout(ctx: State<'_, AppContext>) -> AppResult<()> {
 pub(crate) async fn logout_impl(ctx: &AppContext) -> AppResult<()> {
     let result = ctx.auth.logout().await;
     ctx.submission.clear_user_caches();
+    ctx.contest.clear_access_attempts();
     result
 }
 

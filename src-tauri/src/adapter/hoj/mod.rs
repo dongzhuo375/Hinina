@@ -24,7 +24,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
-use crate::core::provider::contest::ContestProvider;
+use crate::core::provider::contest::{AccessRejectionKind, ContestProvider};
 use crate::core::provider::oj_id::OjId;
 use crate::core::provider::problem::ProblemProvider;
 use crate::core::provider::registry::ProviderSet;
@@ -101,6 +101,29 @@ impl HOJAdapter {
             .map_err(|_| AppError::Contest(format!("比赛 ID 非法: {}", contest_id)))
     }
 
+    /// 「需凭证进入」类业务消息判据（纯函数，单测锁定正负样本）。
+    ///
+    /// HOJ 未报名私有赛的题目列表返回「请先到比赛首页输入比赛密码进行注册！」，
+    /// 判据匹配该**完整短语**（不带尾部标点，容忍 `！` 有无）：宽片段（如
+    /// 单独的「进行注册」）可能误伤其它 HOJ 消息，把它们错误导向密码流程。
+    /// 刻意**保守**：漏判（HOJ 改措辞）→ 进入流程不触发、原始错误原样上抛
+    /// ——安全降级方向。
+    fn message_indicates_credential_rejection(msg: &str) -> bool {
+        msg.contains("请先到比赛首页输入比赛密码进行注册")
+    }
+
+    /// register-contest 的「已注册」类业务消息判据（纯函数，单测锁定正负样本）。
+    ///
+    /// 重复报名时服务端以业务错误告知「您已注册过该比赛」——这不是拒绝：
+    /// 账号级状态早已存在，语义与「已可访问」等价。归为幂等后转入复查
+    /// access（复查 false 仍报错，不静默放行）。匹配「已注册」「已报名」
+    /// 两个短语（OR）：消息为服务端措辞、未真机取证完整句式，宽松匹配的
+    /// 失败方向是保守的——最多把一次本可报错的消息转成「复查 access」，
+    /// 复查会给出真实结论。
+    fn message_indicates_already_registered(msg: &str) -> bool {
+        msg.contains("已注册") || msg.contains("已报名")
+    }
+
     /// 获取当前存储的 token。
     ///
     /// 锁中毒时取回内部值继续（全仓 `into_inner()` 惯例）—— 中毒只说明曾有
@@ -166,6 +189,22 @@ impl HOJAdapter {
             .await?;
         self.handle_token_rotation(&headers);
         Self::parse_hoj_json::<T>(&text, url)
+    }
+
+    /// 查询当前会话对比赛的访问权限（`GET /get-contest-access` → `AccessVO.access`）。
+    ///
+    /// 只读不报名；报名见 `ensure_contest_access`。
+    async fn get_contest_access(&self, cid: i64) -> AppResult<bool> {
+        let url = self.api_url(&format!("/get-contest-access?cid={}", cid));
+        let api_resp = self
+            .get_json_authed::<ApiResponse<types::AccessVO>>(&url)
+            .await
+            .map_err(|e| e.context("HOJ contest access"))?;
+
+        let vo = api_resp
+            .into_data()
+            .map_err(|msg| AppError::Contest(format!("HOJ contest access 失败: {}", msg)))?;
+        Ok(vo.access)
     }
 
     /// 把 `get-user-auth-info` 的调用结果映射为三态契约的 `Ok(true)` / `Ok(false)` / `Err`。
@@ -787,6 +826,132 @@ impl ContestProvider for HOJAdapter {
             .collect();
 
         Ok(problems)
+    }
+
+    /// 判断题目列表业务失败是否属「需凭证进入」类（错误驱动进入的触发判据）。
+    ///
+    /// 「Contest 变体」只是必要条件不充分——「比赛还未开始」「该比赛不存在」
+    /// 等同样落在 Contest 变体，误判会让用户看到密码引导而非真实原因。
+    /// 判据见 [`Self::message_indicates_credential_rejection`]。
+    fn is_credential_rejection(&self, error: &AppError) -> bool {
+        match error {
+            AppError::Contest(msg) => Self::message_indicates_credential_rejection(msg),
+            _ => false,
+        }
+    }
+
+    /// 分类进入流程业务失败（防重试记忆写回策略）。
+    ///
+    /// 从 `ensure_contest_access` 黑盒里出来的 `AppError::Contest` 有四类：
+    /// - **瞬态业务失败**（「校验比赛密码失败，请稍后再试」——服务端明示稍后
+    ///   可过）：`Other`，判定**先于**环节前缀（注册接口自己的瞬态也算）；
+    /// - **缺凭证引导**（本适配器自构造的「该比赛为私有赛，需要比赛密码：…」
+    ///   ——密码补填前恒同，补填后 key 变化不受旧记忆阻挡，确定性等同注册
+    ///   被拒）→ `Rejected`：进结论记忆让引导文案**持续显示**——若归
+    ///   `Other`，30s 轮询会与 Attempted 退避交错，引导文案和裸服务端错误
+    ///   每两轮交替一次；
+    /// - **注册接口的业务拒绝**（消息带本适配器的环节前缀
+    ///   `"HOJ register contest 失败"`）：密码错误等确定性结果 → `Rejected`
+    ///   （进结论记忆，保留期内复用首次消息防重复提交）；
+    /// - **其余**（权限查询阶段失败如「HOJ contest access 失败: 该比赛不存在!」
+    ///   ——与凭证无关）→ `Other`（不进结论记忆，由最小重发间隔退避，
+    ///   下一周期即可自愈）。
+    fn classify_access_rejection(&self, error: &AppError) -> AccessRejectionKind {
+        match error {
+            AppError::Contest(msg) => {
+                // 瞬态判定**先于**环节前缀：注册接口自己的「请稍后再试」类
+                // 失败也是瞬态（服务端明示稍后可过），不进结论记忆
+                if msg.contains("稍后再试") {
+                    AccessRejectionKind::Other
+                } else if msg.contains("需要比赛密码") || msg.contains("HOJ register contest 失败")
+                {
+                    // 「需要比赛密码」= 缺凭证引导（本适配器构造，见 ensure）
+                    AccessRejectionKind::Rejected
+                } else {
+                    AccessRejectionKind::Other
+                }
+            }
+            _ => AccessRejectionKind::Other,
+        }
+    }
+
+    /// 确保当前会话可访问指定比赛：私有赛（auth==1）需先报名。
+    ///
+    /// 判定顺序刻意**先查后报**：报名是账号级持久状态，`get-contest-access`
+    /// 为 true（已报名/已放行）时直接返回，避免每次加载都重复提交报名请求。
+    /// 报名成功后复查一次 access，确认服务端确实放行 —— 防止「报名接口
+    /// 返回成功但权限未生效」的语义差异静默通过。
+    ///
+    /// 密码错误的业务失败（包络 status != 200）保留为 `AppError::Contest`：
+    /// `auth_failure_from_body` 只把指向登录/凭证的 401/403 判为会话问题，
+    /// 私有赛未注册、密码错误不会误踢会话。
+    async fn ensure_contest_access(
+        &self,
+        contest_id: &str,
+        credential: Option<&str>,
+    ) -> AppResult<()> {
+        // 报名与权限查询都要求登录：匿名会话给出明确的「请先登录」，
+        // 而不是把密码发给一个未认证的会话（与 submit 的前置断言同理）
+        self.require_token()?;
+        let cid: i64 = Self::parse_cid(contest_id)?;
+
+        if self.get_contest_access(cid).await? {
+            debug!(cid = cid, "HOJ 私有赛访问权限已存在，跳过报名");
+            return Ok(());
+        }
+
+        let password = credential.ok_or_else(|| {
+            AppError::Contest(
+                "该比赛为私有赛，需要比赛密码：请在「设置 → OJ 服务器」填写「比赛密码」后重试"
+                    .to_string(),
+            )
+        })?;
+
+        let url = self.api_url("/register-contest");
+        let body = types::RegisterContestDTO {
+            cid,
+            password: password.to_string(),
+        };
+        // 报名接口的 data 恒为 null（成功与否只看包络 status），
+        // 不能走 into_data（成功但 data 缺失会误报「响应数据为空」）
+        let api_resp = self
+            .post_json_authed::<ApiResponse<serde_json::Value>, _>(&url, &body)
+            .await
+            .map_err(|e| e.context("HOJ register contest"))?;
+        if !api_resp.is_success() {
+            let msg = api_resp
+                .msg
+                .unwrap_or_else(|| format!("HOJ 错误 status={}", api_resp.status));
+            // **幂等场景**：服务端判定「已注册/已报名」——语义与「已可访问」
+            // 等价（账号级持久状态早于本次请求存在），不作为业务拒绝：
+            // 不返回错误、不写 Rejected 结论记忆，转入下方复查 access 确认
+            //（复查 false 时落到防御分支报错——不静默放行）
+            if Self::message_indicates_already_registered(&msg) {
+                debug!(cid = cid, "HOJ 判定已注册，按幂等成功处理并复查 access");
+            } else {
+                // 密码错误只看到 HOJ 原文没有出路，补一句可操作的设置路径
+                //（「若密码有误」的条件措辞兼容同一状态码下的其它业务拒绝）
+                return Err(AppError::Contest(format!(
+                    "HOJ register contest 失败: {}；若密码有误，请在「设置 → OJ 服务器」更正「比赛密码」后重试",
+                    msg
+                )));
+            }
+        }
+
+        if self.get_contest_access(cid).await? {
+            debug!(cid = cid, "HOJ 私有赛报名成功");
+            Ok(())
+        } else {
+            // 防御分支（报名接口 200 但复查仍无权限——成因未取证：可能是权限
+            // 传播类暂态，也可能是需要人工介入的异常）。消息不含 register 环节
+            // 前缀与瞬态标记 → classify 归 Other → 结论记忆不收、按最小重发
+            // 间隔（45s）退避重跑「预查→报名→复查」三连：给暂态自愈机会，
+            // 代价是退避期内每 45s 一次三连（量小可接受，见 hoj/mod.md）
+            Err(AppError::Contest(format!(
+                "报名请求已被 HOJ 接受但仍无访问权限（cid={}）",
+                cid
+            )))
+        }
     }
 
     async fn get_contest_rank(

@@ -143,6 +143,78 @@ describe('contest exit lifecycle', () => {
     expect(mocks.replace).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
+
+  it('restarts announcement polling when a failed first load self-heals without a phase change', async () => {
+    // 首次加载失败：bootstrap 的 catch 提前返回、不调 ensureLive；phase 一直保持
+    // running，按阶段跃迁的监听不会再触发 —— 公告轮询必须跟随「比赛数据到达」
+    // 补启，否则「私有赛缺密码 → 设置页补填 → 30s 轮询自愈」后红点永远不会亮
+    mocks.loadConfiguredContest.mockRejectedValueOnce(new Error('私有赛需要比赛密码'))
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useContestStore()
+    store.brief = { ...schedule } // 简报已让 phase 为 running
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    expect(mocks.startLive).not.toHaveBeenCalled() // 加载失败：未启动
+
+    // 自愈：contest 到达（phase 未变），公告轮询随之补启
+    store.contest = { ...schedule }
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledExactlyOnceWith('1', expect.any(Function))
+  })
+
+  it('stops polling and clears liveFor when contest data is cleared, so the same id can restart', async () => {
+    // OJ 切换/登出清空 contest 数据（既有缺口：只有阶段跃迁清 liveFor——
+    // 切换前后都是 running 时 liveFor 残留，新 OJ 的同 cid 会被挡住，
+    // 公告轮询停在旧 OJ 上）。
+    // **覆盖归属**：本用例锁「清空分支」（stopLive + 清 liveFor，断言 179 行）；
+    // 末尾的同 id 重启走的是 phase watcher（none→running 也会调 ensureLive）
+    //——只删 watcher 的启动分支时本用例仍绿，watcher 启动分支的唯一覆盖是
+    // 下一条 brief 补启用例，勿把重启断言当作 watcher 启动分支的证明
+    const store = await render()
+    expect(mocks.startLive).toHaveBeenCalledOnce()
+
+    store.contest = null // 模拟 OJ 切换清空（phase 走 running→none，阶段监听对 none 不做清理）
+    await nextTick()
+    expect(mocks.stopLive).toHaveBeenCalled()
+
+    store.contest = { ...schedule } // 新 OJ 的同 cid 到达：重启而非被 liveFor 挡住
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(2)
+  })
+
+  it('switches polling when contest arrives before brief catches up', async () => {
+    // P1 回归：contest 与 brief 先后从 A 切到 B。contest 先换到 B 时被
+    // ensureLive 的 brief 失配守卫拦下（等 brief 跟上再启动）；此前只监听
+    // contest.id，brief 后到时无人再调 ensureLive —— 旧 A 轮询不停止、
+    // B 轮询不启动。watcher 必须同时观察 brief.id（变异：去掉 brief 观察即红）
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useContestStore()
+    store.contest = { ...schedule } // A（id '1'），phase running
+    store.brief = { ...schedule } // 简报也在 A——失配守卫才会生效
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>contest content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledExactlyOnceWith('1', expect.any(Function))
+
+    const contestB = { ...schedule, id: '2' }
+    // ① contest 先换到 B（brief 仍 A）→ 失配守卫拦下，轮询继续停在 A
+    store.contest = contestB
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+    // ② brief 后到（B）：watcher 必须补启 B 的轮询（startLive 内部先 stop A）
+    store.brief = { ...contestB }
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(2)
+    expect(mocks.startLive).toHaveBeenLastCalledWith('2', expect.any(Function))
+  })
 })
 
 describe('--settings 无会话最小壳', () => {
@@ -175,6 +247,38 @@ describe('--settings 无会话最小壳', () => {
     back!.click()
     await nextTick()
     expect(mocks.replace).toHaveBeenCalledWith({ name: 'Login' })
+  })
+
+  it('最小壳下：阶段跃迁启动轮询是既有契约，id 清空的本地清理不受守卫', async () => {
+    // bareShell 守卫只拦新 watcher 的「启动」分支（对齐 bootstrap 跳过语义——
+    // 不发新 OJ 请求）；phase 跃迁监听在 bareShell + 保留数据下启动轮询是
+    // 既有契约（「同一比赛 running→ended→running」用例锁定），此处如实断言。
+    // 清理（stopLive/清 liveFor）是本地操作不是 OJ 请求，最小壳下照跑
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mocks.launchFlags.value = { settings: true }
+    mocks.routeName.value = 'Settings'
+    const store = useContestStore()
+    app = createApp(ContestLayout)
+    app.use(pinia)
+    app.component('RouterView', { template: '<div>settings content</div>' })
+    app.mount(host)
+    for (let i = 0; i < 5; i++) await nextTick()
+
+    store.contest = { ...schedule } // 数据到达：phase 跃迁经既有契约启动轮询
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+
+    // 跨场 id 变化（phase 保持 running，阶段监听不触发）：bareShell 守卫拦住
+    // 新入口的启动 —— 删守卫该断言得 2 而变红
+    store.contest = { ...schedule, id: '2' }
+    await nextTick()
+    expect(mocks.startLive).toHaveBeenCalledTimes(1)
+
+    // 数据清空：清理分支照跑（不受守卫）——stopLive 是本地清理非 OJ 请求
+    store.contest = null
+    await nextTick()
+    expect(mocks.stopLive).toHaveBeenCalled()
   })
 
   it('无会话 + 设置路由但普通启动（无钥匙）：不进最小壳（登出过渡态在设置页上同样安全）', async () => {

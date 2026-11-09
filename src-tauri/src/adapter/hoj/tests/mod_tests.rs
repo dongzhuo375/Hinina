@@ -923,6 +923,7 @@ fn problem_details_missing_or_null_languages_yield_empty_vec() {
 use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
+use crate::core::provider::contest::{AccessRejectionKind, ContestProvider};
 use crate::core::provider::oj_id::OjId;
 use crate::core::provider::submission::SubmissionProvider;
 use crate::core::repository::session_repo::SessionRepository;
@@ -1178,4 +1179,396 @@ async fn submit_server_error_is_not_retried_and_carries_excerpt() {
     );
 
     server.shutdown();
+}
+
+// ── 私有赛进入（ensure_contest_access：先查后报 + 复查）──
+
+/// 比赛访问权限查询响应（AccessVO）。
+fn access_ok(access: bool) -> ScriptedResponse {
+    ScriptedResponse::json(format!(
+        r#"{{"status":200,"msg":"success","data":{{"access":{}}}}}"#,
+        access
+    ))
+}
+
+/// 报名成功响应：data 恒为 null，成败只看包络 status。
+fn register_ok() -> ScriptedResponse {
+    ScriptedResponse::json(r#"{"status":200,"msg":"success","data":null}"#)
+}
+
+/// 报名被拒（密码错误）：按 HOJ 惯例的拒绝形态构造——**HTTP 200 + 体内
+/// status=400**（ResultStatus.FAIL）+ `StatusFailException` 原文消息，与
+/// `get-contest-problem` 的实测报法（HTTP 200 + 体内 status）同款。非 401/403，
+/// 不判会话失效。**注意**：register 拒绝的传输形态未真机取证（若真实走
+/// HTTP 400，错误将以 Network 摘录形态出现而非本形态——见真机走查清单）。
+fn register_rejected() -> ScriptedResponse {
+    ScriptedResponse::json(r#"{"status":400,"msg":"比赛密码错误，请重新输入！","data":null}"#)
+}
+
+/// 已有访问权限（报名过/公开过）：幂等跳过报名，不发 POST。
+#[tokio::test]
+async fn ensure_access_granted_skips_register() {
+    let server = LoopbackServer::start(vec![login_ok("jwt-1"), access_ok(true)]).await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    fx.adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .expect("已可访问应直接成功");
+
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 2, "access=true 时不得发报名请求");
+    assert_eq!(reqs[1].method, "GET");
+    assert_eq!(reqs[1].path, "/api/get-contest-access?cid=1001");
+    assert_eq!(
+        reqs[1].header("authorization"),
+        Some("jwt-1"),
+        "权限查询必须带会话（裸 JWT）"
+    );
+
+    server.shutdown();
+}
+
+/// 未报名：提交密码报名 → 复查 access → 放行。请求体必须是 {cid, password}。
+#[tokio::test]
+async fn ensure_access_registers_with_password_then_rechecks() {
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        access_ok(false),
+        register_ok(),
+        access_ok(true),
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    fx.adapter
+        .ensure_contest_access("1001", Some("contest-pw"))
+        .await
+        .expect("报名成功后应可访问");
+
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 4, "查询→报名→复查 共 3 次请求");
+    let register = &reqs[2];
+    assert_eq!(register.method, "POST");
+    assert_eq!(register.path, "/api/register-contest");
+    let body: serde_json::Value = serde_json::from_str(&register.body).unwrap();
+    assert_eq!(body["cid"], 1001);
+    assert_eq!(body["password"], "contest-pw");
+    assert_eq!(
+        reqs[3].path, "/api/get-contest-access?cid=1001",
+        "报名成功后必须复查 access，防止「200 但权限未生效」静默通过"
+    );
+
+    server.shutdown();
+}
+
+/// 未报名且未提供密码：报可操作的引导文案，不发报名请求。
+#[tokio::test]
+async fn ensure_access_without_password_errors_with_guidance() {
+    let server = LoopbackServer::start(vec![login_ok("jwt-1"), access_ok(false)]).await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Contest(ref m) if m.contains("比赛密码")),
+        "缺密码应是带引导的 Contest 错误，实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("OJ 服务器"),
+        "引导文案必须指向设置页实际区块标题「OJ 服务器」，实际 {}",
+        err.user_message()
+    );
+    assert_eq!(server.requests().len(), 2, "未提供密码不得提交报名");
+
+    server.shutdown();
+}
+
+/// 密码错误：业务错误透传为 Contest 变体（sessionGuard 不得误判会话失效踢回登录页），
+/// 且补上可操作的设置路径（只看 HOJ 原文「比赛密码错误，请重新输入！」没有出路）。
+#[tokio::test]
+async fn ensure_access_wrong_password_stays_business_error() {
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        access_ok(false),
+        register_rejected(),
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", Some("bad"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Contest(ref m) if m.contains("比赛密码错误，请重新输入")),
+        "密码错误必须保留业务语义（不是 Auth），实际 {:?}",
+        err
+    );
+    assert!(
+        err.user_message().contains("OJ 服务器"),
+        "密码错误文案必须带可操作的设置路径（区块实名「OJ 服务器」），实际 {}",
+        err.user_message()
+    );
+
+    server.shutdown();
+}
+
+/// 权限查询返回体内 403「请您先登录！」（会话在进入流程中途失效）：
+/// 必须映射为 Auth 变体 —— 前端会话守卫靠它把用户带回登录页。
+#[tokio::test]
+async fn ensure_access_access_check_body_auth_failure_maps_to_auth() {
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        ScriptedResponse::json(r#"{"status":403,"msg":"请您先登录！","data":null}"#),
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Auth(_)),
+        "体内 403+登录关键词必须映射为 Auth（会话守卫路径），实际 {:?}",
+        err
+    );
+
+    server.shutdown();
+}
+
+/// 未登录：前置断言「请先登录」，零请求 —— 密码不能发给匿名会话。
+#[tokio::test]
+async fn ensure_access_requires_login() {
+    let server = LoopbackServer::start(vec![]).await;
+    let fx = fixture(server.url());
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Auth(ref m) if m.contains("请先登录")),
+        "匿名会话应报请先登录，实际 {:?}",
+        err
+    );
+    assert_eq!(server.requests().len(), 0);
+
+    server.shutdown();
+}
+
+/// 报名接口 200 但复查 access 仍 false：防御性报错，不静默放行。
+#[tokio::test]
+async fn ensure_access_register_ok_but_still_denied_errors() {
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        access_ok(false),
+        register_ok(),
+        access_ok(false),
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    let err = fx
+        .adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::core::error::AppError::Contest(ref m) if m.contains("仍无访问权限")),
+        "报名成功但未放行应显式报错，实际 {:?}",
+        err
+    );
+
+    server.shutdown();
+}
+
+// ── 「需凭证进入」消息判据 + 业务失败分类（is_credential_rejection /
+//    classify_access_rejection 的纯函数核心）──
+
+#[test]
+fn credential_rejection_matches_real_hoj_message() {
+    // 正样本：未报名私有赛的完整短语（不带尾部标点，容忍 ！ 有无）
+    assert!(HOJAdapter::message_indicates_credential_rejection(
+        "HOJ contest problem list 失败: 请先到比赛首页输入比赛密码进行注册！"
+    ));
+    assert!(HOJAdapter::message_indicates_credential_rejection(
+        "HOJ contest problem list 失败: 请先到比赛首页输入比赛密码进行注册"
+    ));
+}
+
+#[test]
+fn credential_rejection_rejects_other_business_failures() {
+    // 负样本：同样落在 Contest 变体的其它业务失败不得触发进入流程
+    //（误判会让用户看到密码引导而非真实原因）。完整短语匹配下，
+    // 宽片段「进行注册」「输入比赛密码」单独出现都不再命中
+    for msg in [
+        "HOJ contest problem list 失败: 比赛还未开始",
+        "HOJ contest problem list 失败: 该比赛不存在!",
+        "HOJ contest problem list 失败: 您不是该团队成员",
+        "HOJ contest problem list 失败: 请先进行注册", // 宽片段误伤样本
+        "HOJ contest problem list 失败: 请输入比赛密码", // 宽片段误伤样本
+        "HOJ register contest 失败: 校验比赛密码失败，请稍后再试",
+    ] {
+        assert!(
+            !HOJAdapter::message_indicates_credential_rejection(msg),
+            "不应判为需凭证类: {}",
+            msg
+        );
+    }
+}
+
+#[tokio::test]
+async fn classification_routes_register_rejections_to_memo() {
+    // 防重试记忆只收**确定性拒绝**：本适配器以环节前缀识别（register-contest
+    // 的错误都带「HOJ register contest 失败」上下文）；缺凭证引导是适配器
+    // 自构造的确定性结果（密码补填前恒同），同样进结论记忆——若归 Other，
+    // 30s 轮询会与退避交错、引导文案与裸服务端错误每两轮交替一次
+    let server = LoopbackServer::start(vec![]).await;
+    let fx = fixture(server.url());
+
+    let rejected = fx
+        .adapter
+        .classify_access_rejection(&crate::core::error::AppError::Contest(
+            "HOJ register contest 失败: 比赛密码错误，请重新输入！".to_string(),
+        ));
+    assert_eq!(
+        rejected,
+        AccessRejectionKind::Rejected,
+        "注册被拒进结论记忆"
+    );
+
+    let guidance = fx
+        .adapter
+        .classify_access_rejection(&crate::core::error::AppError::Contest(
+            "该比赛为私有赛，需要比赛密码：请在「设置 → OJ 服务器」填写「比赛密码」后重试"
+                .to_string(),
+        ));
+    assert_eq!(
+        guidance,
+        AccessRejectionKind::Rejected,
+        "缺凭证引导进结论记忆（密码补填前恒同）"
+    );
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn classification_routes_non_register_failures_to_other() {
+    // 查询阶段失败（与凭证无关）与瞬态业务失败（「请稍后再试」）不进结论
+    // 记忆：由最小重发间隔退避，下一周期即可自愈
+    let server = LoopbackServer::start(vec![]).await;
+    let fx = fixture(server.url());
+
+    for msg in [
+        "HOJ contest access 失败: 该比赛不存在!",
+        "HOJ register contest 失败: 校验比赛密码失败，请稍后再试",
+    ] {
+        let kind = fx
+            .adapter
+            .classify_access_rejection(&crate::core::error::AppError::Contest(msg.to_string()));
+        assert_eq!(kind, AccessRejectionKind::Other, "不应进结论记忆: {}", msg);
+    }
+    let non_contest = fx
+        .adapter
+        .classify_access_rejection(&crate::core::error::AppError::Network(
+            "connection reset".to_string(),
+        ));
+    assert_eq!(non_contest, AccessRejectionKind::Other);
+
+    server.shutdown();
+}
+
+/// 变体收窄：Auth/Network 变体一律不触发（is_credential_rejection 是
+/// 同步 trait 方法，无需真实请求即可判定）。
+#[tokio::test]
+async fn credential_rejection_only_for_contest_variant() {
+    let server = LoopbackServer::start(vec![]).await;
+    let fx = fixture(server.url());
+
+    assert!(!fx
+        .adapter
+        .is_credential_rejection(&crate::core::error::AppError::Auth(
+            "请您先登录".to_string()
+        )));
+    assert!(!fx
+        .adapter
+        .is_credential_rejection(&crate::core::error::AppError::Network(
+            "connection reset".to_string()
+        )));
+    assert!(!fx
+        .adapter
+        .is_credential_rejection(&crate::core::error::AppError::Contest(
+            "比赛还未开始".to_string()
+        )));
+
+    server.shutdown();
+}
+
+/// 重复报名（服务端报「已注册」）：按幂等成功处理——不返回业务拒绝、
+/// 不复用密码引导，转入复查 access，复查通过即 Ok（不会被写进 Rejected 记忆）
+#[tokio::test]
+async fn ensure_access_already_registered_is_idempotent_success() {
+    let already =
+        ScriptedResponse::json(r#"{"status":400,"msg":"您已注册过该比赛！","data":null}"#);
+    let server = LoopbackServer::start(vec![
+        login_ok("jwt-1"),
+        access_ok(false), // 首次预查：未报名
+        already,          // 报名接口：服务端判定已注册（业务错误形态）
+        access_ok(true),  // 复查：确实已可访问
+    ])
+    .await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.unwrap();
+
+    fx.adapter
+        .ensure_contest_access("1001", Some("pw"))
+        .await
+        .expect("已注册应幂等成功（不作为密码错误）");
+
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 4, "预查→报名→复查，共 3 次业务请求 + 登录");
+    assert_eq!(
+        reqs[3].path, "/api/get-contest-access?cid=1001",
+        "已注册响应后必须转入复查 access（不静默放行）"
+    );
+
+    server.shutdown();
+}
+
+/// 已注册判据：正样本匹配「已注册」「已报名」；密码错误消息不得命中
+#[test]
+fn already_registered_matcher_samples() {
+    for msg in ["您已注册过该比赛！", "您已报名该比赛"] {
+        assert!(
+            HOJAdapter::message_indicates_already_registered(msg),
+            "应判为已注册: {}",
+            msg
+        );
+    }
+    for msg in [
+        "比赛密码错误，请重新输入！",
+        "校验比赛密码失败，请稍后再试",
+        "请先到比赛首页输入比赛密码进行注册！",
+    ] {
+        assert!(
+            !HOJAdapter::message_indicates_already_registered(msg),
+            "不得判为已注册: {}",
+            msg
+        );
+    }
 }

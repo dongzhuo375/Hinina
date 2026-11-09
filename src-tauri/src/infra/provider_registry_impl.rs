@@ -63,6 +63,31 @@ impl ProviderRegistry for ProviderRegistryImpl {
         self.capability(|set| &set.contest)
     }
 
+    /// 同源快照：**捕获 id 一次，再按该 id 反查 provider**——providers 映射注册后
+    /// 常驻（register 只插入不移除），按捕获 id 反查与两次独立加锁不同，
+    /// id 与 provider 不可能来自不同 OJ（切换竞态下旧 provider 的结果不会被
+    /// 记到新 OJ 名下）。
+    fn current_contest_snapshot(
+        &self,
+    ) -> AppResult<(
+        Arc<dyn crate::core::provider::contest::ContestProvider>,
+        OjId,
+    )> {
+        let id = self
+            .current
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let guard = self.providers.read().unwrap_or_else(|e| e.into_inner());
+        let set = guard
+            .get(&id)
+            .ok_or_else(|| AppError::ProviderNotFound(format!("OJ {} 未注册", id)))?;
+        set.contest
+            .clone()
+            .ok_or_else(|| AppError::ProviderNotFound(format!("OJ {} 未提供该能力", id)))
+            .map(|provider| (provider, id))
+    }
+
     fn current_problem(
         &self,
     ) -> AppResult<Arc<dyn crate::core::provider::problem::ProblemProvider>> {

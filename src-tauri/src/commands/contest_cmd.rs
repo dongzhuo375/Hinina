@@ -41,6 +41,11 @@ pub async fn list_contests(ctx: State<'_, AppContext>) -> AppResult<Vec<Contest>
 /// 返回 `ContestBundle`（`{ contest, problems }`），前端据此渲染题目侧边栏。
 #[tauri::command]
 pub async fn load_configured_contest(ctx: State<'_, AppContext>) -> AppResult<ContestBundle> {
+    load_configured_contest_impl(&ctx).await
+}
+
+/// `load_configured_contest` 的真实编排（提取自命令本体，供命令与测试共用）。
+pub(crate) async fn load_configured_contest_impl(ctx: &AppContext) -> AppResult<ContestBundle> {
     let contest_ref = ctx.config.get().oj.contest_ref.trim().to_string();
     if contest_ref.is_empty() {
         return Err(AppError::Contest(
@@ -49,7 +54,18 @@ pub async fn load_configured_contest(ctx: State<'_, AppContext>) -> AppResult<Co
     }
 
     info!(contest_ref = %contest_ref, "Command: 加载配置的比赛");
-    let password = ctx.config.get().oj.contest_password.clone();
+    // 归一化：**只判空、不裁剪**——空串/纯空白视为未配置（手工编辑/旧数据可能
+    // 在 config.json 留下 Some("")，透传会以空密码发起注册，用户看到「密码
+    // 错误」而不是引导文案，且 best-effort 兜底的 password.is_some() 判断会被
+    // 空串误触发）；非空值保留原样（合法密码可能带首尾空格，静默裁剪会改写
+    // 用户的真实密码）
+    let password = ctx
+        .config
+        .get()
+        .oj
+        .contest_password
+        .clone()
+        .filter(|p| !p.trim().is_empty());
     ctx.contest
         .load_contest_with_problems(&contest_ref, password.as_deref())
         .await

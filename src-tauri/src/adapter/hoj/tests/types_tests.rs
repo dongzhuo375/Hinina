@@ -609,6 +609,31 @@ fn contest_vo_tolerates_hoj_null_fields() {
     assert_eq!(vo.duration, 691200);
 }
 
+// ── AccessVO / RegisterContestDTO（私有赛进入）──
+
+#[test]
+fn access_vo_defaults_to_false_when_field_missing() {
+    // data 缺 access 字段（或为 null 被 strip_nulls 剔除）时按 false 处理：
+    // 「未知」不能当「已放行」，否则未报名的私有赛会静默跳过报名
+    let vo: AccessVO = serde_json::from_str("{}").expect("空对象应能解析");
+    assert!(!vo.access, "缺失 access 必须落默认 false");
+
+    let vo: AccessVO = serde_json::from_str(r#"{"access":true}"#).expect("正常形态应能解析");
+    assert!(vo.access);
+}
+
+#[test]
+fn register_contest_dto_serializes_cid_and_password() {
+    // register-contest 请求体：cid 为数字、password 明文（与登录同一约定）
+    let dto = RegisterContestDTO {
+        cid: 1001,
+        password: "contest-pw".to_string(),
+    };
+    let json = serde_json::to_value(&dto).expect("序列化不应失败");
+    assert_eq!(json["cid"], 1001);
+    assert_eq!(json["password"], "contest-pw");
+}
+
 #[test]
 fn page_result_accepts_documented_and_degenerate_shapes() {
     // 文档只承诺 records/total；实测还会带 size/current/orders/searchCount/pages

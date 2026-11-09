@@ -15,7 +15,7 @@
 
 | 名称 | 签名 | 说明 |
 |------|------|------|
-| `reset_client` | `async fn(State<'_, AppContext>) -> AppResult<()>` | 前端 invoke `reset_client`（无参数）。清缓存 → 忘公告基线 → 清公告已读 → 兜底清扫 `cache/` 根目录 |
+| `reset_client` | `async fn(State<'_, AppContext>) -> AppResult<()>` | 前端 invoke `reset_client`（无参数）。清缓存 → 清私有赛进入尝试记忆 → 忘公告基线 → 清公告已读 → 兜底清扫 `cache/` 根目录 |
 | `local_data_usage` | `async fn(State<'_, AppContext>) -> AppResult<LocalDataUsage>` | 前端 invoke `local_data_usage`。统计日志、崩溃记录文件（`%TEMP%/hinina-panic.log`）字节数与留档占用（总/过期），供**先看再删** |
 | `purge_local_data` | `async fn(State<'_, AppContext>, logs: bool, stale_snapshots: bool) -> AppResult<PurgeReport>` | 前端 invoke `purge_local_data`({ logs, staleSnapshots })。两个开关都由调用方显式传入；**逐项容错**（见下） |
 | `run_purge` | `pub(crate) fn(logs, stale_snapshots, clear_log, clear_crash, purge_snapshots) -> PurgeReport` | 逐项容错的编排（依赖以闭包注入，故可单测）。**两个勾选项互不牵连**；同一勾选项下的日志与崩溃记录也**各自独立回报**（任一失败只影响自己的 `*_cleared`，已成功项的字节数照常累计） |
@@ -33,6 +33,7 @@
 | 终态提交详情 / 测试点（**含源代码，属登录态数据**） | 内存（与登出共用 `clear_user_caches`） |
 | 公告基线（`announcement_baseline`） | 内存 |
 | 公告已读状态（`announcements_read/`） | 磁盘 |
+| 私有赛进入尝试记忆（报名状态是账号级的，重置后必须重新校验） | 内存 |
 
 | 不清 | 为什么 |
 |---|---|
@@ -61,6 +62,7 @@ reset_client
   → ContestService::clear_caches()                 // 列表/元信息内存 + 元信息磁盘
   → ProblemService::clear_caches()                 // 题面内存/磁盘 + limits 内存/磁盘
   → SubmissionService::clear_user_caches()         // 终态详情/测试点内存（含源代码）
+  → ContestService::clear_access_attempts()        // 私有赛进入尝试记忆（报名状态是账号级的）
   → ContestService::clear_announcement_baseline()  // 重置语义：连「已告知过哪些公告」也忘掉
   → ContestService::clear_announcement_read_state()// 已读状态落盘文件（红点复亮）
   → storage.remove_all("cache")                    // 兜底：覆盖将来新增的 namespace

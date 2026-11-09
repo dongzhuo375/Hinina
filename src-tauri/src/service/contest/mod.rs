@@ -14,7 +14,9 @@
 // 变体被改写会让 token 过期时榜单静默 stale、选手永远回不到登录页。
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::hash::Hasher;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,7 @@ use crate::core::entity::rank::{ContestRankPage, RankQuery};
 use crate::core::error::{AppError, AppResult};
 use crate::core::event::core_event::CoreEvent;
 use crate::core::event::core_event_bus::CoreEventBus;
+use crate::core::provider::contest::{AccessRejectionKind, ContestProvider};
 use crate::core::provider::registry::ProviderRegistry;
 use crate::infra::cache::{JsonDiskCache, TtlCache};
 use crate::infra::storage::Storage;
@@ -60,6 +63,357 @@ pub struct ReadAnnouncementState {
     pub read_ids: Vec<String>,
 }
 
+/// 私有赛进入尝试记忆的键：`(oj_id, contest_id, password 指纹)`。
+///
+/// 密码只以哈希指纹参与键（进程内 `DefaultHasher`，固定键种子）——记忆表
+/// 不落明文凭证；u64 指纹在条目量级下碰撞概率可忽略，碰撞后果仅是同 OJ
+/// 同比赛的两个密码共用一条记忆（下一周期自然覆写）。
+type AccessAttemptKey = (String, String, Option<u64>);
+
+/// 凭证的进程内指纹：同密码恒同值（仅进程内语义，不跨重启、不做安全用途）。
+fn credential_fingerprint(password: &Option<String>) -> Option<u64> {
+    password.as_ref().map(|pw| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(pw, &mut hasher);
+        hasher.finish()
+    })
+}
+
+/// 尝试条目的结论。
+enum AttemptOutcome {
+    /// 已成功（保留期内跳过复查）
+    Success,
+    /// 注册被拒（保留期内复用首次消息）
+    Rejected(String),
+    /// 仅发起过请求（时间戳即最后尝试发起时间）：网络/序列化/会话失败、
+    /// 瞬态与查询阶段业务失败——**不升级为结论**，最小重发间隔内拦住同 key
+    /// 重发（在途防重 + 退避），过期后放行
+    Attempted,
+}
+
+struct AccessAttempt {
+    outcome: AttemptOutcome,
+    recorded_at: Instant,
+}
+
+/// 结论记忆的保留时长（成功复核与注册被拒复用同值）：期内 Success 跳过复查、
+/// Rejected 复用首次消息，过期后放行重新校验。
+///
+/// 「同一组合的尝试结果不变」并不严格成立——服务端可能撤销报名（成功不能
+/// 永久可信），HOJ 的报名接口也存在瞬态业务失败（已被分类移出结论记忆，
+/// 见 `ContestProvider::classify_access_rejection`）。10 分钟把错误密码下的
+/// 报名 POST 压到每 10 分钟一次（远低于服务端限频量级），同时给撤销/瞬态
+/// 场景自愈窗口。
+const ACCESS_MEMO_RETENTION: Duration = Duration::from_secs(10 * 60);
+
+/// 同 key 两次发起请求的最小间隔（退避）：Attempted 条目在查记忆的同一临界
+/// 区内记录（并发第二个加载必然 Busy），
+/// 间隔内的后续调用被拦——覆盖「注册请求在途超过轮询间隔」的防重发与
+/// 「网络故障」的退避（失败结论不升级时，条目保持 Attempted）。放行后若
+/// 原请求仍在途，可能并发重发一次：HTTP 超时上限通常低于该间隔，概率与
+/// 后果（一次多余的幂等性不保证的 POST）可接受，结构上互斥需要每 key 锁，
+/// 不值得。
+const ACCESS_RETRY_MIN_INTERVAL: Duration = Duration::from_secs(45);
+
+/// 私有赛进入尝试记忆：键 [`AccessAttemptKey`]。
+///
+/// **防轮询重复报名**：题目总览每 30s±5s 轮询进场链路，私有赛密码缺失/错误时
+/// 若无记忆会对 OJ 每周期重复提交报名请求（可能触发服务端限频/锁定）。写回
+/// 策略由 `ContestProvider::classify_access_rejection` 决定：注册被拒 →
+/// Rejected（保留期内复用首次消息）；其余（瞬态/查询阶段失败/网络类）→ 条目
+/// 保持 Attempted（退避）。成功条目带保留期（服务端可能撤销报名，不能永久
+/// 可信）。时钟经参数注入，过期可单测。仅进程内存，不跨重启。
+struct AccessAttemptMemo {
+    entries: HashMap<AccessAttemptKey, AccessAttempt>,
+}
+
+/// [`AccessAttemptMemo::lookup`] 的结果。
+enum AccessMemoLookup {
+    /// 已成功（保留期内），直接放行
+    Success,
+    /// 注册被拒且仍在保留期内：带上首次消息
+    Failure(String),
+    /// 上次尝试仍在最小重发间隔内（在途或退避）：本轮跳过
+    Busy,
+    /// 无有效记忆（无记录，或条目已过期——过期条目已被顺手清除）
+    Miss,
+}
+
+impl AccessAttemptMemo {
+    fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// 条目是否过期：结论条目按保留期，Attempted 按最小重发间隔。
+    /// 关联函数（无 &self）：sweep 的 retain 闭包与 entries 的可变借用并存。
+    fn is_expired(attempt: &AccessAttempt, now: Instant) -> bool {
+        let ttl = match attempt.outcome {
+            AttemptOutcome::Attempted => ACCESS_RETRY_MIN_INTERVAL,
+            AttemptOutcome::Success | AttemptOutcome::Rejected(_) => ACCESS_MEMO_RETENTION,
+        };
+        now.duration_since(attempt.recorded_at) >= ttl
+    }
+
+    /// 查记忆。过期条目顺手清除（等价「从未尝试」）。
+    fn lookup(&mut self, key: &AccessAttemptKey, now: Instant) -> AccessMemoLookup {
+        let expired = matches!(
+            self.entries.get(key),
+            Some(attempt) if Self::is_expired(attempt, now)
+        );
+        if expired {
+            self.entries.remove(key);
+            return AccessMemoLookup::Miss;
+        }
+        match self.entries.get(key) {
+            None => AccessMemoLookup::Miss,
+            Some(attempt) => match &attempt.outcome {
+                AttemptOutcome::Success => AccessMemoLookup::Success,
+                AttemptOutcome::Rejected(msg) => AccessMemoLookup::Failure(msg.clone()),
+                AttemptOutcome::Attempted => AccessMemoLookup::Busy,
+            },
+        }
+    }
+
+    /// 写入前清扫全表过期条目：过期记录只在同 key 再查时被发现的话，
+    /// 改过多次密码的用户会让旧条目无限累积（每次写回顺带清扫，表为
+    /// 常量级小，全表扫描无妨）。
+    fn sweep_expired(&mut self, now: Instant) {
+        self.entries
+            .retain(|_, attempt| !Self::is_expired(attempt, now));
+    }
+
+    fn record_success(&mut self, key: AccessAttemptKey, now: Instant) {
+        self.sweep_expired(now);
+        self.entries.insert(
+            key,
+            AccessAttempt {
+                outcome: AttemptOutcome::Success,
+                recorded_at: now,
+            },
+        );
+    }
+
+    fn record_rejected(&mut self, key: AccessAttemptKey, msg: String, now: Instant) {
+        self.sweep_expired(now);
+        self.entries.insert(
+            key,
+            AccessAttempt {
+                outcome: AttemptOutcome::Rejected(msg),
+                recorded_at: now,
+            },
+        );
+    }
+
+    /// 请求发起前记录：同 key 在最小重发间隔内的后续调用被 Busy 拦住
+    ///（在途防重 + 退避）。
+    fn record_attempted(&mut self, key: AccessAttemptKey, now: Instant) {
+        self.sweep_expired(now);
+        self.entries.insert(
+            key,
+            AccessAttempt {
+                outcome: AttemptOutcome::Attempted,
+                recorded_at: now,
+            },
+        );
+    }
+}
+
+/// `ensure_contest_access_core` 的结果。区分「真实发起了 provider 请求」与
+/// 「记忆命中复用」：后台兜底路径对前者的**注册被拒**失败升 `warn`（release
+/// 默认 info 下 `debug` 不落日志，「真实原因可追溯」的披露依赖这一条；
+/// Rejected 记忆已把重试压到保留期一次，不会刷屏），后者保持 `debug`——
+/// 复用消息路径未发起请求，按调用频率本就该安静。
+enum AccessCoreResult {
+    Attempted(AppResult<()>),
+    Memoized(AppResult<()>),
+    Skipped,
+}
+
+/// 私有赛进入校验的独立执行体：调用 provider 的凭证进入能力
+/// （`ContestProvider::ensure_contest_access`），带进程内防重复尝试记忆。
+///
+/// 状态全部 owned（memo / 纪元 Arc、provider Arc、键字段），错误驱动路径与
+/// **后台兜底任务**（`run_best_effort_backfill`，经 `tokio::spawn`）共用同一实现。
+///
+/// `oj_id` 由调用方与 provider 经 registry 同源快照传入（切 OJ 竞态下防键错配）。
+/// 记忆命中失败时复用首次的错误消息 —— 轮询重试时用户看到的仍是同一条
+/// 可操作的引导，而不是题目列表接口返回的裸服务端报错。查记忆与 Miss 时
+/// 记录 Attempted 在**同一临界区**完成（并发的第二个加载必然 Busy：在途防
+/// 重发 + 退避）；完成后按 `classify_access_rejection` 写回——仅注册被拒
+/// 升级为 Rejected 结论，其余保持 Attempted（退避）。
+#[allow(clippy::too_many_arguments)]
+async fn ensure_contest_access_core(
+    memo: Arc<Mutex<AccessAttemptMemo>>,
+    epoch_counter: Arc<AtomicU64>,
+    provider: Arc<dyn ContestProvider>,
+    oj_id: String,
+    contest_id: String,
+    password: Option<String>,
+    failure_log: tracing::Level,
+) -> AccessCoreResult {
+    let key: AccessAttemptKey = (oj_id, contest_id.clone(), credential_fingerprint(&password));
+    // 纪元捕获：logout/login/reset/切OJ 若发生在途（见 access_epoch 字段文档），
+    // 请求结果不得写回清理后的记忆
+    let epoch = epoch_counter.load(Ordering::SeqCst);
+    let now = Instant::now();
+
+    // **单临界区**完成「查记忆 + Miss 时记录 Attempted」：并发的第二个加载在
+    // 第一个 core 记录完放锁后只会看到 Attempted → Busy——双双发起注册 POST
+    // 的窗口结构性闭合（此前查与记分两次加锁，两次读取之间并发可双双 Miss，
+    // 前端 loadInFlight 去重只是压低概率）。纪元校验在同一临界区内生效：
+    // 清理发生在捕获与记录之间时不得把旧账号的时间戳写进新会话的记忆
+    //（否则新账号首次尝试会被无辜拦 45s）。
+    let lookup = {
+        let mut memo = memo.lock().unwrap_or_else(|e| e.into_inner());
+        let outcome = memo.lookup(&key, now);
+        if matches!(outcome, AccessMemoLookup::Miss)
+            && epoch_counter.load(Ordering::SeqCst) == epoch
+        {
+            memo.record_attempted(key.clone(), now);
+        }
+        outcome
+    };
+    match lookup {
+        AccessMemoLookup::Success => {
+            debug!(contest_id = contest_id, "私有赛进入已成功过，跳过重复请求");
+            return AccessCoreResult::Memoized(Ok(()));
+        }
+        AccessMemoLookup::Failure(msg) => {
+            debug!(
+                contest_id = contest_id,
+                "私有赛进入失败仍在保留期内，复用首次消息"
+            );
+            return AccessCoreResult::Memoized(Err(
+                AppError::Contest(msg).context("私有赛进入校验失败")
+            ));
+        }
+        AccessMemoLookup::Busy => {
+            debug!(
+                contest_id = contest_id,
+                "距上次尝试不足最小重发间隔（在途或退避），本轮跳过"
+            );
+            return AccessCoreResult::Skipped;
+        }
+        // 已在本临界区记录 Attempted，直接发起请求（失败不升级结论时条目
+        // 自然退避）
+        AccessMemoLookup::Miss => {}
+    }
+
+    let result = provider
+        .ensure_contest_access(&contest_id, password.as_deref())
+        .await;
+    {
+        let mut memo = memo.lock().unwrap_or_else(|e| e.into_inner());
+        // **锁内复核纪元**：清理持同一把锁（先递增再清），与「检查+写回」互斥
+        //——清理不可能插在检查与插回之间，交错窗口彻底闭合
+        if epoch_counter.load(Ordering::SeqCst) == epoch {
+            match &result {
+                Ok(()) => memo.record_success(key, now),
+                // 仅**注册被拒**升级为结论（密码错误等确定性结果：同密码同
+                // 结果，保留期内复用首次消息防 30s 轮询重复提交报名）；
+                // 权限查询阶段失败、「请稍后再试」类瞬态、网络/序列化/会话
+                // 失败一律不升级——Attempted 条目留在原地（最小间隔退避），
+                // 过期放行自愈
+                Err(AppError::Contest(msg))
+                    if provider.classify_access_rejection(result.as_ref().unwrap_err())
+                        == AccessRejectionKind::Rejected =>
+                {
+                    debug!(contest_id = contest_id, "私有赛注册被拒，记入防重试记忆");
+                    memo.record_rejected(key, msg.clone(), now);
+                }
+                // 其余：瞬态、查询阶段失败、网络/序列化/会话类——不升级结论，
+                // Attempted 条目退避，过期后照常重试
+                _ => {}
+            }
+        } else {
+            debug!(
+                contest_id = contest_id,
+                "私有赛进入期间记忆已被清理（登出/换账号），放弃写回旧账号结果"
+            );
+        }
+    }
+    AccessCoreResult::Attempted(result.map_err(|e| {
+        // 运行时选级别：tracing 的日志宏（event!、warn!、debug!）首参都只接受
+        // 常量级别，两个分支是宏限制下的最小写法（级别之外完全一致）。错误
+        // 驱动 WARN（用户可见错误的来源）、后台 DEBUG（防轮询刷屏）
+        match failure_log {
+            tracing::Level::WARN => {
+                warn!(contest_id = contest_id, error = %e, "私有赛进入校验失败")
+            }
+            _ => debug!(contest_id = contest_id, error = %e, "私有赛进入校验失败"),
+        }
+        e.context("私有赛进入校验失败")
+    }))
+}
+
+/// 提交侧兜底的**真后台**执行体：报名是尽力而为，成功/失败都只记日志
+///（失败分级：**注册被拒升 `warn`**——Rejected 记忆已把重试压到保留期一次、
+/// 不会刷屏，且 release 默认 info 下 debug 不落日志；Network 等其余保持
+/// `debug`——退避期内每 30s 轮询一次，`warn` 会刷屏）——查看侧不受任何影响。
+async fn run_best_effort_backfill(
+    memo: Arc<Mutex<AccessAttemptMemo>>,
+    epoch_counter: Arc<AtomicU64>,
+    provider: Arc<dyn ContestProvider>,
+    oj_id: String,
+    contest_id: String,
+    password: Option<String>,
+) {
+    let result = ensure_contest_access_core(
+        memo,
+        epoch_counter,
+        // 克隆留出本尊：分类失败级别（warn/debug）要在返回后按类别判断
+        provider.clone(),
+        oj_id,
+        contest_id.clone(),
+        password,
+        tracing::Level::DEBUG,
+    )
+    .await;
+    match result {
+        AccessCoreResult::Attempted(Ok(())) => {
+            debug!(contest_id = contest_id, "私有赛后台报名完成（提交侧兜底）")
+        }
+        AccessCoreResult::Attempted(Err(e)) => {
+            // 真实发起了请求且失败：注册被拒（确定性结果）升 **warn**——
+            // release 默认 info 下 debug 不落日志，「openRank + 错误密码时
+            // 真实原因可追溯」的披露依赖这一条；Rejected 记忆已把重试压到
+            // 保留期一次，不会刷屏。其余（Network 类退避等）保持 debug。
+            if provider.classify_access_rejection(&e) == AccessRejectionKind::Rejected {
+                warn!(
+                    contest_id = contest_id,
+                    error = %e,
+                    "私有赛后台报名被拒（不影响查看；改密码后下次轮询自动重试）"
+                );
+            } else {
+                debug!(
+                    contest_id = contest_id,
+                    error = %e,
+                    "私有赛后台报名未生效（不影响查看）"
+                );
+            }
+        }
+        // 记忆命中复用：本轮未发起任何请求，保持 debug（按调用频率本就该安静）
+        AccessCoreResult::Memoized(Ok(())) => {
+            debug!(contest_id = contest_id, "私有赛后台报名已生效（记忆命中）")
+        }
+        AccessCoreResult::Memoized(Err(e)) => debug!(
+            contest_id = contest_id,
+            error = %e,
+            "私有赛后台报名复用保留期内的失败消息（本轮未发起请求）"
+        ),
+        AccessCoreResult::Skipped => debug!(
+            contest_id = contest_id,
+            "距上次尝试不足最小重发间隔，本轮兜底跳过"
+        ),
+    }
+}
+
 /// 比赛服务。
 pub struct ContestService {
     access: Arc<crate::core::access::AccessRevision>,
@@ -80,6 +434,22 @@ pub struct ContestService {
     /// **每个比赛一条基线**：同一进程内可能先看 1011 再看 1012，
     /// 只留一份会让切回旧比赛时把已有公告误判成新公告（红点误报）。
     announcement_baseline: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// 私有赛进入尝试记忆（防轮询重复报名；失败项带保留期）。
+    ///
+    /// 见 [`AccessAttemptMemo`] 与 [`ACCESS_MEMO_RETENTION`]。
+    /// 账号级状态的对冲：报名是账号级持久状态，同 OJ 换账号后旧记忆不再成立，
+    /// 故 `logout` / 成功 `login` / `reset_client` / `on_oj_switched` 都显式清空
+    /// （见 [`Self::clear_access_attempts`]）。设置页改密码自然换 key。
+    /// 仅进程内存，不跨重启。**Arc 包装**：提交侧兜底以 `tokio::spawn` 跑成
+    /// 真后台（见 `run_best_effort_backfill`），后台任务需要 owned 状态。
+    access_attempts: Arc<Mutex<AccessAttemptMemo>>,
+    /// 进入记忆的纪元（[`Self::clear_access_attempts`] 时递增）。
+    ///
+    /// 清理是**时点**操作：logout/login 期间仍在途的旧会话加载可能在清理之后
+    /// 才完成并写回记忆。进入流程在发起请求前捕获纪元、写回前**在 memo 锁内**
+    /// 校验（清理持同一把锁先递增再清，与「检查+写回」互斥，窗口彻底闭合）。
+    /// Arc 包装理由同上。
+    access_epoch: Arc<AtomicU64>,
 }
 
 impl ContestService {
@@ -106,7 +476,30 @@ impl ContestService {
             current_contest: RwLock::new(None),
             cache,
             announcement_baseline: Arc::new(RwLock::new(HashMap::new())),
+            access_attempts: Arc::new(Mutex::new(AccessAttemptMemo::new())),
+            access_epoch: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// 清空私有赛进入尝试记忆（`logout` / `login`（成败皆清——provider 先接受
+    /// 新凭证再落盘，落盘失败时适配器已持新 token）/ `reset_client` /
+    /// `on_oj_switched` 调用）。
+    ///
+    /// 报名状态是**账号级**的：同 OJ 换账号后，旧账号的成功记忆会让新账号跳过
+    /// 进入校验（随后题目接口报「请先到比赛首页输入比赛密码进行注册」——不含
+    /// 登录关键词，不触发会话守卫，页面停在无法自愈的错误上），失败记忆则会让
+    /// 本可访问的新账号继续看到旧错误。登出/登录即进程内信号，换账号必须清。
+    ///
+    /// **先持 memo 锁再递增纪元**：写回侧在锁内复核纪元后才插回（见
+    /// `ensure_contest_access_core`），清理与「检查+写回」互斥——清理不可能
+    /// 插在检查与插回之间，纳秒级交错窗口彻底闭合。
+    pub fn clear_access_attempts(&self) {
+        let mut memo = self
+            .access_attempts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        self.access_epoch.fetch_add(1, Ordering::SeqCst);
+        memo.clear();
     }
 
     /// OJ 切换后的缓存清理（**由 `switch_oj` 命令显式调用**，不订阅事件）。
@@ -130,6 +523,9 @@ impl ContestService {
             .unwrap_or_else(|e| e.into_inner()) = None;
         // 中毒也必须完成失效（into_inner）：跳过会让旧 OJ 的榜单缓存跨切换存活
         *self.cache.write().unwrap_or_else(|e| e.into_inner()) = None;
+        // 私有赛进入尝试记忆一并失效：不同 OJ 的报名状态互不相干，
+        // 保留会让切回旧 OJ 时跳过本该重新发起的报名
+        self.clear_access_attempts();
         self.meta_cache.clear();
         info!("OJ 已切换：清空比赛列表与元信息内存缓存");
 
@@ -384,31 +780,101 @@ impl ContestService {
     /// **缓存策略**：比赛元信息走内存 → 磁盘 → 网络（TTL 120s）；题目列表
     /// **每次实时拉取** —— 题目总览页轮询它就是为了刷新 ac/total 计数，
     /// 缓存题目列表等于让轮询失去意义。
+    ///
+    /// **私有赛**（`auth == 1`）**错误驱动进入**：题目列表先行 —— 已报名用户、
+    /// 比赛管理员、开放了赛外榜单的私有赛（HOJ 对这些用户不校验报名）**同步
+    /// 进入流程零额外请求**（配置了密码时的后台兜底仍会发起一次不阻塞的
+    /// 权限查询，见下）；仅当题目列表失败且适配器判定属「需凭证进入」类
+    /// （[`ContestProvider::is_credential_rejection`]——`Contest` 变体只是必要
+    /// 条件，「比赛还未开始」等业务失败同样落在该变体，不得误触发）时才走
+    /// [`ensure_contest_access_core`] 并重试一次。密码来自配置
+    /// `oj.contest_password`（命令层传入，去空白后空串归一化为 None），
+    /// 未配置/错误时报可操作的引导。
+    ///
+    /// **提交侧兜底**：题目拉取成功但未报名的选手（openRank 私有赛可见不可交
+    /// ——HOJ 的提交通道对 `auth == 1` 始终要求报名，与 openRank 无关）在配置了
+    /// 密码时后台报名（**`tokio::spawn` 真后台**，记忆防重复，不阻塞本次加载
+    /// 返回——首载/记忆过期时的一次权限查询不再拖慢 30s 轮询）；失败只留日志
+    /// 不影响查看——查看侧不得被它挡住，管理员未配密码也不受。无 tokio 上下文
+    /// 时退化为同步执行（与 `on_oj_switched` 的退化先例一致）。已知限制见
+    /// `doc/modules/src-tauri/service/contest/mod.md` 设计要点。
     pub async fn load_contest_with_problems(
         &self,
         contest_id: &str,
         password: Option<&str>,
     ) -> AppResult<ContestBundle> {
-        let provider = self.registry.current_contest()?;
+        // provider 与 oj_id 必须**同源**快照（registry 按捕获 id 反查 provider）：
+        // 两次独立读取在切换竞态下会拿到 A 的 provider 配 B 的 id，
+        // 进入记忆键错配会让结果跨 OJ 泄漏
+        let (provider, oj_id) = self.registry.current_contest_snapshot()?;
+        let oj_id = oj_id.as_str().to_string();
 
         info!(contest_id = contest_id, "加载比赛");
         let contest = self.load_contest_meta(contest_id).await?;
 
-        // 私有赛需要密码
-        if contest.auth == 1 {
-            if let Some(_pw) = password {
-                // TODO: 后续实现比赛注册 API 调用
-                debug!("私有赛密码已提供");
+        let problems = match provider.list_contest_problems(contest_id).await {
+            Ok(problems) => problems,
+            Err(err) if contest.auth == 1 && provider.is_credential_rejection(&err) => {
+                // 首个错误必须留痕：进入失败时用户看到的是引导文案，
+                // 原始原因只能在这里追溯；进入成功则本次失败已被修复
+                debug!(contest_id = contest_id, error = %err, "题目列表失败属需凭证类，尝试凭证进入");
+                match ensure_contest_access_core(
+                    Arc::clone(&self.access_attempts),
+                    Arc::clone(&self.access_epoch),
+                    Arc::clone(&provider),
+                    oj_id.clone(),
+                    contest_id.to_string(),
+                    password.map(str::to_string),
+                    tracing::Level::WARN,
+                )
+                .await
+                {
+                    // 真实请求与记忆命中复用对错误驱动路径行为一致：
+                    // 成功 → 重试题目；失败 → 上抛进入的引导/复用错误
+                    AccessCoreResult::Attempted(Ok(())) | AccessCoreResult::Memoized(Ok(())) => {}
+                    AccessCoreResult::Attempted(Err(access_err))
+                    | AccessCoreResult::Memoized(Err(access_err)) => return Err(access_err),
+                    // 距上次尝试不足最小重发间隔（在途或退避）：本轮未发起
+                    // 任何请求，原始题目错误上抛——45s 窗口内的暂态展示，
+                    // 下周期即有真实结果（成功/引导文案）
+                    AccessCoreResult::Skipped => {
+                        return Err(err.context("获取比赛题目列表失败"));
+                    }
+                }
+                provider
+                    .list_contest_problems(contest_id)
+                    .await
+                    .map_err(|e| {
+                        warn!(error = %e, "获取比赛题目列表失败");
+                        e.context("获取比赛题目列表失败")
+                    })?
+            }
+            Err(err) => {
+                warn!(error = %err, "获取比赛题目列表失败");
+                return Err(err.context("获取比赛题目列表失败"));
+            }
+        };
+
+        // 提交侧兜底（best-effort，见方法文档）：**spawn 成真后台**——
+        // 不阻塞本次加载返回（首载/记忆过期时的一次权限查询或报名不再拖慢
+        // 30s 轮询）；失败只留日志，查看侧不受影响。无 tokio 上下文时退化为
+        // 同步执行（与 on_oj_switched 的退化先例一致）。
+        if contest.auth == 1 && password.is_some() {
+            let fut = run_best_effort_backfill(
+                Arc::clone(&self.access_attempts),
+                Arc::clone(&self.access_epoch),
+                Arc::clone(&provider),
+                oj_id,
+                contest_id.to_string(),
+                password.map(str::to_string),
+            );
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    handle.spawn(fut);
+                }
+                Err(_) => fut.await,
             }
         }
-
-        let problems = provider
-            .list_contest_problems(contest_id)
-            .await
-            .map_err(|e| {
-                warn!(error = %e, "获取比赛题目列表失败");
-                e.context("获取比赛题目列表失败")
-            })?;
 
         // 自动选中
         self.select_contest(contest_id)?;
