@@ -32,12 +32,12 @@
 | `touchedPatch` | `() => Partial<EditorPrefs>` | 由 `touched` 组装落盘载荷（只含用户改过的字段） |
 | `applyPrefs` | `fn` | `editor.updateOptions({ fontSize, tabSize })` + `monaco.editor.setTheme(editorTheme)`；**主题是全局选项**（Monaco 无按实例主题），同页其它编辑器一并跟随；实例未就绪时直接返回 |
 | `resetPrefs` | `fn` | 恢复默认值（`utils/editor` 常量）：与手动改动同一条链路（即时生效 + 落盘），不是只改本地内存 |
-| `persistPrefs` | `async fn` | `configService.updateEditorPrefs(touchedPatch())` —— **只写用户改过的字段**（部分写语义；载荷为空则直接返回）；失败置 `prefsError`（「保存失败，设置仅本次会话生效」）但**不回滚已应用的值** |
+| `persistPrefs` | `async fn` | `configStore.updateEditorPrefs(touchedPatch())`（经 store 转发 `config.service`）—— **只写用户改过的字段**（部分写语义；载荷为空则直接返回）；失败置 `prefsError`（「保存失败，设置仅本次会话生效」）但**不回滚已应用的值** |
 | `prefsError` | ref | 落盘失败提示，透传给 `EditorSettingsPopover` 的 `error`（成功路径不展示任何状态文案） |
 | `editorSurfaceClass` | computed | 容器底色跟随主题（`vs-dark` → `#1e1e1e`，否则 `var(--bg-card)`）：Monaco 实例创建前与尺寸重算瞬间不露白底。**编辑器背景本身由 Monaco 主题绘制** —— `styles/global.css` 刻意不再用 `!important` 覆写 `.margin` / `.monaco-editor-background`，否则 vs-dark 只换字色、底色仍被钉在浅色 |
 | 清空确认面板 | 模板 | `v-focus-scope="() => { confirmClearOpen = false }"` + `role="dialog" aria-label="确认清空代码"`：键盘用户 Esc 可取消，焦点不会逃出面板 |
 
-编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configService.getEditorPrefs()` 读取**（读取失败服务内部回退 14 / 4 / 'vs'）、JetBrains Mono 字体栈（`"JetBrains Mono Variable", "JetBrains Mono", "Noto Sans SC Variable", "Cascadia Code", Consolas, monospace`）、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 `readonly || locked`（只读时行高亮关闭；locked 响应式 —— watcher 经 `updateOptions` 翻转，解锁时 `getValue() !== modelValue` 则按 modelValue 回写，抑制 change 回流）。
+编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configStore.getEditorPrefs()` 读取**（store 纯转发 `config.service`）（读取失败服务内部回退 14 / 4 / 'vs'）、JetBrains Mono 字体栈（`"JetBrains Mono Variable", "JetBrains Mono", "Noto Sans SC Variable", "Cascadia Code", Consolas, monospace`）、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 `readonly || locked`（只读时行高亮关闭；locked 响应式 —— watcher 经 `updateOptions` 翻转，解锁时 `getValue() !== modelValue` 则按 modelValue 回写，抑制 change 回流）。
 
 工具条容器为 `editor-toolbar flex min-h-12 flex-wrap gap-y-2`：允许换行，窄分栏下语言按钮与设置入口不会被挤出可视区。
 
@@ -46,7 +46,7 @@
 - `vue`
 - `monaco-editor`（生产源码保持裸包导入；Vitest 在测试配置中用 alias 指向包自带 ESM 入口，含 5 个 `?worker` 导入）
 - `@/components/editor/EditorSettingsPopover.vue`（工具条设置弹层）
-- `@/services/config.service`（编辑器偏好读写 + `EditorPrefs` 类型）
+- `@/stores/configStore`（编辑器偏好读写 + `EditorPrefs` 类型；2026-11-09 严格分层收编，原 `@/services/config.service` 直连改经 store 纯转发）
 - `@/utils/language`（语言值域/文件名识别）
 - `@/utils/editor`（偏好默认值）
 - `@/utils/focus-scope`（`vFocusScope` —— 语言菜单与清空确认面板的焦点陷阱 / Esc 关闭）
@@ -61,7 +61,7 @@
 ## 逻辑流程
 
 ```
-onMounted → nextTick → 检查容器 → loadedPrefs = await configService.getEditorPrefs()
+onMounted → nextTick → 检查容器 → loadedPrefs = await configStore.getEditorPrefs()
                      → 再次读取并检查容器（配置等待期间可能已卸载）
                      → applyLoadedPrefs(loadedPrefs) → emit prefs-change
                      → monaco.editor.create(container, {...})
@@ -79,7 +79,7 @@ watch readonly/locked → editor.updateOptions({ readOnly })；解锁时 getValu
                最大高度 ≤320px）→ nextTick 聚焦当前语言项；v-focus-scope 接管 Tab/Esc；
                window resize → positionLangMenu 重定位
 EditorSettingsPopover change/reset → handlePrefsChange → applyPrefs（即时生效）
-                → emit prefs-change → 400ms debounce → configService.updateEditorPrefs(touchedPatch())
+                → emit prefs-change → 400ms debounce → configStore.updateEditorPrefs(touchedPatch())
 onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补一次落盘
 ```
 

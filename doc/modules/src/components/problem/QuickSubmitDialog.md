@@ -12,7 +12,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `allowedLanguages` | `ref<string[]>` | 本题允许的提交语言（HOJ 显示名）：`loadAllowedLanguages()` 经 `problemService.getProblem` 拉取，失败回退 `DEFAULT_LANGUAGES`（不阻断快捷提交）；当前语言经 `resolveAllowedLanguage` 归位，不命中则切首项 |
+| `allowedLanguages` | `ref<string[]>` | 本题允许的提交语言（HOJ 显示名）：`loadAllowedLanguages()` 经 `problemStore.getProblem` 拉取（store 纯转发 `problem.service`，不写入 store 状态），失败回退 `DEFAULT_LANGUAGES`（不阻断快捷提交）；当前语言经 `resolveAllowedLanguage` 归位，不命中则切首项 |
 | `code` / `language` | ref | 代码草稿；默认语言沿用 `workspaceStore.language`（与解题页习惯一致），兜底 `DEFAULT_LANGUAGE` |
 | `submitError` / `fileError` | ref | 提交失败原因（store.error 兜底文案）/ 文件导入错误 |
 | `preparingSubmission` | `ref<boolean>` | **请求前即置位**的提交锁，覆盖 `whenLoaded()` 等待窗口（此时 store 的 `isSubmitting` 还没被置位）；`finally` 复位 |
@@ -35,7 +35,7 @@
 - 组件：`CodeEditor`（v-model 代码、语言双向绑定、Ctrl+Enter submit 复用）
 - `@/utils/focus-scope`（`vFocusScope` —— 对话框焦点陷阱与 Esc 关闭）
 - stores：`contestStore`（contestId，`whenLoaded` 兜底）、`submissionStore`（`submitCode` / `pendingFor` / `submissions` / `isSubmitting` / `error`）、`workspaceStore`（仅读 `language` 作默认值）
-- `@/services/problem.service`（允许语言列表）
+- `@/stores/problemStore`（允许语言列表；2026-11-09 严格分层收编，原 `@/services/problem.service` 直连改经 store 转发）
 - `@/types/contest`（仅类型）
 - `@/utils/language`（`DEFAULT_LANGUAGE` / `DEFAULT_LANGUAGES` / `hojLanguageOfFileName` / `resolveAllowedLanguage` / `SOURCE_FILE_EXTENSIONS`）
 - `@/utils/submission`（`formatMemoryKb` / `isTerminalStatus` / `statusLabel` / `statusTone`）

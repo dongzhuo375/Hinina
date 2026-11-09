@@ -30,7 +30,7 @@
 
 - `vue` / `vue-router`
 - 组件：`CodeEditor`（readonly 模式）/ `ErrorMessage` / `LoadingSpinner`
-- `@/services/config.service`（`getPollSchedule` 轮询参数）、`@/services/submission.service`（`getSubmissionDetail` / `getSubmissionCases`）
+- `@/stores/configStore`（`getPollSchedule` 轮询参数）、`@/stores/submissionStore`（`getSubmissionDetail` / `getSubmissionCases`）—— 2026-11-09 严格分层收编，store 均为对 `config.service` / `submission.service` 的纯转发
 - `@/stores/contestStore`（`whenLoaded`：赛时相对时间与题目跳转）
 - `@/types/submission`（仅类型）
 - `@/utils/submission`（`formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `isTerminalStatus` / `statusAbbr` / `statusLabel` / `statusTone`）
@@ -104,8 +104,9 @@ onUnmounted: alive = false；stopPoller()；复制反馈 timer 由 useTransientV
   放在普通块级容器里会塌缩成数像素高，表现为「展开后一片空白」（曾把渲染问题误读成
   「后端没返回代码」）。`code` 为空（OJ 隐藏代码且无本地快照）时渲染「未取到本次提交的
   源代码」文案，而不是留一个空编辑器 —— 让「真没代码」与「渲染失败」在界面上可区分。
-- 分层例外说明：本视图直接消费 `submission.service`（一次性只读查询，无共享状态），
-  提交/轮询等有状态链路仍走 store。
+- 分层口径：本视图对 `submission.service` / `config.service` 的消费**全部经 store 纯转发**
+  （2026-11-09 严格分层收编；此前的「一次性只读查询直连 service」例外已取消，
+  轮询循环内的取数同样走 store——由视图自持的收敛轮询器驱动）。
 - **配色与骨架随赛场主题收敛**（PR #36）：`TONE_CLASSES` 改为主题变量（与评测页同步）、
   判定卡由「圆角卡片 + 阴影」改为 `border-y` + `--bg-card`、CE 面板用 `--color-wa-*` /
   `--color-error`、内容区放宽到 `max-w-[1400px]`（大窗口下测试点表不必挤在 1024px 内）；

@@ -16,9 +16,9 @@
 | `ensureContestId` | `() => Promise<string>` | 深链/刷新直达本页时外壳可能未加载完比赛，`contestStore.whenLoaded()`（P59 统一入口，复用在途请求）后取 id |
 | `load` | `(id: string) => Promise<void>` | 加载编排主流程（见逻辑流程），每步之后校验 `token !== loadToken` 则放弃 |
 | `consumeFocusQuery` | `() => Promise<void>` | 消费 `?focus=1`：`nextTick` 后调 `codeEditor.focus()`，随后 `router.replace({ query: {} })` 清掉 |
-| `splitRatio` | ref | 初始值经 `configService.getSplitRatio()` 从配置读取（P55 消费落地；异步到达时若用户已拖拽则不覆盖） |
+| `splitRatio` | ref | 初始值经 `configStore.getSplitRatio()` 从配置读取（P55 消费落地；异步到达时若用户已拖拽则不覆盖） |
 | `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例钳制 0.3–0.7，拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
-| `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configService.saveSplitRatio` 写回配置（**后台写入**：只排保存队列、不进设置页门禁；下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
+| `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configStore.saveSplitRatio`（转发 `config.service`）写回配置（**后台写入**：只排保存队列、不进设置页门禁；下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
 | `adjustSplit` | `(delta: number) => void` | 分隔条键盘调整（`←/→` 每次 ±0.02，钳制在 [0.30, 0.70]）+ 落盘；分隔条带 `role="separator"` / `tabindex="0"` / `aria-*`，纯键盘可用 |
 | `pendingSubmission` | computed | `submissionStore.pendingFor(contestId, currentProblemId, displayId, workspaceStore.language, workspaceStore.code)` —— 本会话同内容提交在评测期间的锁与展示源 |
 | `handleSubmit` | `() => Promise<void>` | 提交：`submissionStore.submitCode(contestId, problem.id, displayId, workspaceStore.language, workspaceStore.code)`，其中 `displayId` 取路由参数（比赛内题号 "A"）—— **HOJ 提交接口认的是它而不是数字 pid**；轮询由 store 自动启动。**三重守卫**：`isLoadingPage`（加载编排覆盖 loadWorkspace 与 openProblem 全程）、`isSubmitting || pendingSubmission`（store 在途锁 + 本会话同内容已受理）、`loadedProblemDisplayId !== displayId`（openProblem 失败时 problemStore 不清空，currentProblem 仍是旧题而 code 已是新题 —— 无需并发，一次失败的切换就会错配） |
@@ -33,7 +33,7 @@
 - `vue` / `vue-router`
 - 组件：`ProblemTabStrip` / `ProblemStatement` / `CodeEditor` / `EditorConsoleBar` / `LoadingSpinner` / `ErrorMessage`
 - stores：`contestStore` / `problemStore` / `workspaceStore` / `submissionStore`
-- `@/services/config.service`（分栏比例读取/回写、`EditorPrefs` 类型 —— 配置读写的指定唯一入口；**属 `Architecture.md` 登记的分层欠账**（View 直连 Service），待后续专项迁入 store）
+- `@/stores/configStore`（分栏比例读取/回写、`EditorPrefs` 类型 —— View 侧配置消费唯一入口，store 纯转发 `config.service`；2026-11-09 严格分层收编，`Architecture.md` 登记的 View 直连 Service 欠账已清偿）
 - `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — 偏好上报到达前的状态行兜底）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
@@ -101,7 +101,7 @@ load(id):
 - **编辑器偏好单向流转**：CodeEditor 读配置 → `prefs-change` 上报 → 本视图转发给
   EditorConsoleBar 的 `tabSize`。本视图不自己读配置：弹层改动是即时的，重复读取只会
   拿到滞后值并与弹层写入竞态。
-- 分层约束：View 不 import `@/bridge`；配置读写走 `config.service`（架构指定的配置唯一入口）。
+- 分层约束：View 不 import `@/bridge`；配置读写走 `configStore`（View 侧唯一入口，转发 `config.service`）。
 
 
 ## 测试（M2）

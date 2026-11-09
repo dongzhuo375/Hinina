@@ -19,7 +19,7 @@
 | `timing` | computed | `total = max(1, end - start)`；`elapsed = clamp(0, total, now - start)`（未开始为 0、结束后封顶）；`remaining` |
 | `formatHMS` | `(secs: number) => string` | 补零 `HH:MM:SS` |
 | `progressPercent` | computed | `elapsed / total * 100`，驱动进度条宽度 |
-| `toggleBrief` | `() => Promise<void>` | 打开简介浮层时异步读 `configService.getOjBaseUrl()`，把描述中相对图片地址改写为绝对地址后 `renderMarkdown` |
+| `toggleBrief` | `() => Promise<void>` | 打开简介浮层时异步读 `configStore.getOjBaseUrl()`（store 纯转发 `config.service`），把描述中相对图片地址改写为绝对地址后 `renderMarkdown` |
 | `handleLogout` | `() => Promise<void>` | `isLoggingOut` 防重复点击；`authStore.logout()` 不会 reject（后端失败也清理本地），`finally` 中必然 `router.replace(Login)`，不会滞留比赛页 |
 | `userInitial` | computed | 账号首字母（大写），账号菜单头像位 |
 | `WindowControls` | 子组件 | 窗口控制（最小化/最大化/关闭）走共享组件 `components/layout/WindowControls.vue`——与 `--settings` 极简壳同一实现（评审十 #2），窗口 API 不再由本组件持有 |
@@ -31,7 +31,7 @@
 - `@/components/layout/WindowControls.vue`（窗口控制按钮）
 - `@/stores/authStore` / `@/stores/contestStore`
 - `@/utils/contest`（`getContestPhase`）、`@/utils/markdown`（`renderMarkdown`）、`@/utils/focus-scope`（`vFocusScope` —— 简介浮层/账号菜单的焦点陷阱与 Esc 关闭）
-- `@/services/config.service`（OJ 基址，用于简介图片改写）
+- `@/stores/configStore`（OJ 基址，用于简介图片改写；2026-11-09 严格分层收编，原 `@/services/config.service` 直连改经 store）
 - `@/composables/useNowMs`（毫秒墙钟，派生秒）
 
 ## 被依赖

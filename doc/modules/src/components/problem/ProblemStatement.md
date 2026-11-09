@@ -12,7 +12,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `baseUrl` | ref | OJ 基址（onMounted 经 `configService.getOjBaseUrl()` 异步读取，失败返回空串、相对图片按原样输出），用于题面相对图片 URL 改写 |
+| `baseUrl` | ref | OJ 基址（onMounted 经 `configStore.getOjBaseUrl()` 异步读取，失败返回空串、相对图片按原样输出），用于题面相对图片 URL 改写 |
 | `contestProblem` | computed | 从 `contestStore.problems` 按 displayId 找摘要（通过率 ac/total 来源） |
 | `baseLimits` | computed | C/C++ 基准 limits：**优先 limits API 精确值**（`problemStore.limitsOf`），缺失回退题目详情自带值，两者皆无 → null（展示 `—`，不留假默认值） |
 | `isDouble` / `shownLimits` | computed | 当前语言是否 ×2（`isDoubleLimitLanguage(workspaceStore.language)`）；头部展示的是**当前语言实际生效阈值**（`effectiveLimits`），与判题行为一致（HOJ-Problem-Limits-API.md §5） |
@@ -30,7 +30,7 @@ scoped 样式要点：`--statement-font: clamp(14px, min(calc(7px + 1.1cqi), cal
 - `vue`
 - `@/types/problem` / `@/types/rank`（仅类型）
 - `@/utils/markdown`（`renderMarkdown`）、`@/utils/limits`（`effectiveLimits` / `isDoubleLimitLanguage` / `formatTimeLimit` / `formatMemoryLimit`）
-- `@/services/config.service`（OJ 基址；配置读取按约定一律经该服务，不直接调 config.bridge）
+- `@/stores/configStore`（OJ 基址；2026-11-09 严格分层收编：View 经 store 消费配置，store 纯转发 `config.service`，service 仍是不直接调 config.bridge 的唯一配置读取层）
 - `@/stores/contestStore`（通过率）/ `problemStore`（limits）/ `workspaceStore`（当前语言）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 - `@/composables/useTransientValue`（复制反馈临时值与 timer 生命周期）

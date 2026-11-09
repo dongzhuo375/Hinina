@@ -56,10 +56,11 @@
 - `stores/submissionStore.ts` — `startPolling()` 读取轮询调度参数
 - `stores/workspaceStore.ts` — `loadWorkspace()` 读取默认语言
 - `stores/announcementStore.ts`（经 announcement.service 间接）
-- `components/problem/ProblemStatement.vue` — 题面图片基址
-- `components/editor/CodeEditor.vue` — 字号 / Tab 宽度 / 编辑器主题（读 + 弹层改动落盘）
-- `views/ProblemSolveView.vue` — 初始分栏比例读取与拖拽回写
-- `composables/useSettingsForm.ts` — 设置页配置读取与保存、当前 OJ 切换（`switchOj`）；`views/SettingsView.vue` 仅作组合根
+- **`stores/configStore.ts` — View / component / composable 的唯一消费入口**（2026-11-09 严格分层收编：
+  OJ 基址、编辑器偏好、分栏比例、轮询参数、设置页保存事务与 OJ 切换全部经 store 纯转发；
+  视图不再直接 import 本 service。store 只做消费入口——保存队列/切换队列/代际/最近结果
+  仍由本服务持有；**代际与最近结果是普通字段，store 以 action 方法逐次直读**，勿改成 getter）
+- `components/problem/ProblemStatement.vue`、`components/editor/CodeEditor.vue`、`views/ProblemSolveView.vue`、`composables/useSettingsForm.ts`、`views/AnnouncementsView.vue`、`views/SubmissionDetailView.vue`、`components/layout/TopBar.vue` — 均经 `stores/configStore` 消费（题面图片基址、编辑器偏好读写、分栏比例、设置页配置/保存/切换、轮询参数）
 
 ## 逻辑流程
 

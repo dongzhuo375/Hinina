@@ -36,7 +36,7 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- `@/services/submission.service`（`getSubmissionCases` — 失败测试点提示）
+- `@/stores/submissionStore`（`getSubmissionCases` — 失败测试点提示；2026-11-09 严格分层收编，store 纯转发 `submission.service`）
 - stores：`contestStore`（contestId）、`submissionStore`（`submissions` / `error` / `isSubmitting` / `fetchProblemSummary`）
 - `@/types/submission`（仅 `JudgementStatus` / `SubmissionRecord` 类型）
 - `@/utils/submission`（`findFirstFailedCase` / `formatMsToSeconds` / `isTerminalStatus` / `statusAbbr` / `statusTone` + `StatusTone` 类型）
@@ -60,7 +60,7 @@
 watch summary.latest（服务端最新记录变化）:
   同一 submitId 已拉过测试点 → 跳过（hintSubmitId 去重）
   statusTone ∈ {wa, tle}（失败判定）
-    → submissionService.getSubmissionCases(submitId)
+    → submissionStore.getSubmissionCases(submitId)
     → findFirstFailedCase（平铺 cases 优先；子任务制 cases 为空时按 groupNum/seq
       展开 subTasks）→ failedCaseHint = `Test {seq} · {formatMsToSeconds(timeMs)}`
     → 失败 → log.warn 记录，pill 回退记录自身耗时
@@ -93,8 +93,9 @@ submissionStore.error 非空 → 紧随其后截断展示（提交失败 / 轮�
 - **提交按钮由父级传入的 `pendingSubmissionId` 与 store 的 `isSubmitting` 共同上锁**：
   两把锁覆盖不同窗口 —— 前者管「已受理但还在评测」（同内容重复提交），后者管
   「请求在途」；只在其中一处上锁都会留出可重复发送的缝隙（见 `stores/submissionStore.md`）。
-- 摘要查询走 `submissionStore.fetchProblemSummary`（独立于评测页 history，不干扰
-  其列表/筛选）；测试点明细是组件级一次性只读查询，直接消费 submission.service。
+- 摘要查询与测试点明细都走 `submissionStore`（摘要经 `fetchProblemSummary`，独立于
+  评测页 history，不干扰其列表/筛选；测试点明细经 `getSubmissionCases` —— 2026-11-09
+  严格分层后 View 不再直连 `submission.service`，一次性只读查询也经 store 纯转发）。
 - 色彩语义取主题 CSS 变量，与榜单/题目行/评测页的状态色体系一致
   （`StatusTone` → 控制台条 `Tone` 经 `SERVER_TONE_MAP` 桥接）。
 - **pill 键盘可达**（`role="button"` + `tabindex="0"` + Enter/Space）：它是进详情页的
