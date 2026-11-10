@@ -22,7 +22,7 @@ View / component / composable 访问**配置服务**（配置读取与缓存失�
 | `isOjSwitchPersistFailed` | action `(error: unknown) => boolean` | 「OJ 切换已生效但配置持久化失败」错误判据（判据单一来源在 service） |
 | `getConfig` / `invalidate` | 见 service | 配置读取（进程内缓存、并发调用共享同一次 IPC）与缓存失效 |
 | `switchOj` | `(ojId: string) => Promise<void>` | 切换当前 OJ（service 内并发排队串行；persist-failed 语义见 `config.service.md`） |
-| `runSaveTxn` | `<T>(fn: (tx: SaveTxn) => Promise<T>, options?: { settingsPage?: boolean }) => Promise<T>` | 保存事务：回调内**只能**用 `tx.updateConfig`（排队入口在回调内调用即自死锁）。**两个特殊点**：① 本文件因此列入 `scripts/check-save-gate.mjs` 的 `TXN_ALLOWLIST`（门禁按标识符扫描，转发体出现 `runSaveTxn` 必须显式登记）；② 转发用 `(tx) => fn(tx)` 包一层而非裸参数直传——保存门禁的静态扫描无法解析「裸参数直传」的回调形态（fail closed），内联箭头让回调保持可分析且语义不变 |
+| `runSaveTxn` | `<T>(fn: (tx: SaveTxn) => Promise<T>, options?: { settingsPage?: boolean }) => Promise<T>` | 保存事务：回调内**只能**用 `tx.updateConfig`（排队入口在回调内调用即自死锁）。**两个特殊点**：① 本文件因此列入 `scripts/check-save-gate.mjs` 的 `TXN_ALLOWLIST`（门禁按标识符扫描，转发体出现 `runSaveTxn` 必须显式登记）；② **回调以参数直传形态转发**（`runSaveTxn(fn, options)`）——保存门禁把「裸标识符且是同文件函数参数」识别为纯转发：回调正文由调用方提供，而任何出现 `runSaveTxn` 的文件都必须白名单化并被逐调用点扫描，转发体自身不可能引入排队入口 |
 | `whenOjSwitchSettled` / `whenSettingsSaveSettled` | `() => Promise<void>` | 等待在途切换 / 设置页保存落地（只覆盖调用时刻已排队者，其后由代际复查） |
 | `getOjBaseUrl` / `getPollSchedule` / `getEditorPrefs` / `updateEditorPrefs` / `getSplitRatio` / `saveSplitRatio` | 见 service | 派生读取与后台写入口（OJ 基址、轮询参数、编辑器偏好读写、分栏比例读写），兜底值语义见 `config.service.md` |
 | `EditorPrefs`（模块级再导出） | `export type` | 编辑器偏好类型单一来源在 service；CodeEditor / ProblemSolveView 经本 store 取类型，避免类型边直连 service |
