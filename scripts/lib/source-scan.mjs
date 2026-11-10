@@ -21,19 +21,24 @@
 //     rest of the source in that shape. Char classes `[...]` are respected
 //     (a `/` inside them does not end the regex). The heuristic is imperfect by
 //     nature; keep exotic shapes out of scanned sources or disclose them here.
+//     Control-statement closing parens (`if`/`for`/`while`/`switch`/`catch`)
+//     are regex context: `/` after them starts a regex, not a division —
+//     `if (ok) /[/*]/.test(v)` scans intact.
 //   - For `.vue` files the `<script>` / `<script setup>` blocks are extracted
 //     with the REAL SFC parser (`@vue/compiler-sfc` `parse`) — not regexes — so
 //     whitespace before `>` in a closing tag, HTML-commented script examples and
 //     similar shapes parse exactly like the framework does. Everything outside
 //     those blocks is masked with spaces (newlines preserved). Parse failures
 //     throw: the gates fail closed instead of scanning an empty surface.
-//   - The `<script …>` opener is sliced at its first `>`, so an attribute value
-//     containing `>` would misplace the block start (no such form in the tree).
+//   - Template executable expressions (directive bindings + interpolations) are
+//     extracted from the template AST by `templateExpressions` for the save
+//     gate; HTML comments are COMMENT nodes and never yield expressions.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { parse } from '@vue/compiler-sfc'
 
+const CONTROL_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with'])
 const REGEX_PRECEDING_KEYWORDS = new Set([
   'return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
   'throw', 'case', 'do', 'else', 'yield', 'await',
@@ -51,6 +56,10 @@ export function stripComments(source) {
   let i = 0
   let prevChar = '' // last meaningful (non-whitespace) code char seen
   let prevWord = '' // last identifier/keyword token, '' if prevChar isn't a word char
+  // 括号栈：记录每个 `(` 是否为控制语句条件括号（if/for/while/switch/catch 后）。
+  // 控制括号的闭括号之后是语句起点，随后的 `/` 是正则；分组括号的闭括号是值，
+  // 随后的 `/` 是除法（评审第七轮 P2：`if (ok) /[/*]/.test(value)` 曾被截断）。
+  const parenStack = []
   const maskTo = (start, end) => {
     while (start < end) {
       out += source[start] === '\n' ? '\n' : ' '
@@ -150,6 +159,22 @@ export function stripComments(source) {
       prevChar = source[i - 1]
       continue
     }
+    if (ch === '(') {
+      out += ch
+      parenStack.push(CONTROL_KEYWORDS.has(prevWord))
+      prevChar = ch
+      prevWord = ''
+      i += 1
+      continue
+    }
+    if (ch === ')') {
+      out += ch
+      // 控制括号闭括号之后是语句起点：视同 `;`（随后 `/` 是正则）
+      prevChar = (parenStack.pop() ?? false) ? ';' : ')'
+      prevWord = ''
+      i += 1
+      continue
+    }
     out += ch
     i += 1
     prevChar = ch
@@ -222,40 +247,33 @@ function keepRanges(source, ranges) {
 }
 
 /**
- * Vue 模板指令表达式提取（供保存门禁使用）：`@…` / `v-…` / `:` 绑定的属性值是
- * 可执行代码，必须与 `<script>` 一起进入扫描面；静态属性（class/id/…）不取。
- * 只在 `<script>` 块之外提取（script 里的同形字符串不参与）——与
- * `scriptBlocksOnly` 相反的掩码方向：模板保留、script 块掩码。
- * 已知边界：HTML 实体（&quot; 等）不展开；同引号转义不存在于合法 Vue 模板。
+ * Vue 模板可执行表达式提取（供保存门禁使用）：**指令表达式**（`@…` / `v-…` /
+ * `:…` 绑定的 `exp`）与**插值**（`{{ … }}` 的 content）都是可执行代码，必须与
+ * `<script>` 一起进入扫描面。提取走 `@vue/compiler-sfc` 的模板 AST（与框架
+ * 同一解析结果）：HTML 注释（COMMENT 节点）与静态属性自然不在集合内，散文
+ * 里的伪指令不再误报；偏移为文件绝对，直接切片。
+ * 已知边界：指令的动态参数（`v-on:[event]`）不提取（Vue 编译器限制其形态，
+ * 不含函数调用）；HTML 实体不展开。
  */
-export function templateDirectiveExpressions(source, scriptRanges) {
-  // 保留 script 块**之外**的区域（模板指令在这里），script 块本身掩码——
-  // 与 `scriptBlocksOnly`（保留 script、掩码其余）方向相反。
-  let masked = ''
-  let cursor = 0
-  const keepTo = (end) => {
-    masked += source.slice(cursor, end)
-    cursor = Math.max(cursor, end)
+export function templateExpressions(source) {
+  const { descriptor } = parse(source, { filename: 'gate-input.vue' })
+  const ast = descriptor.template?.ast
+  if (!ast) return []
+  const locs = []
+  const walk = (node) => {
+    if (!node) return
+    // 7 = DIRECTIVE：exp 是绑定表达式（v-for 的 exp 覆盖整段 `item in items`，
+    // 原样切片对保存门禁无害）
+    if (node.type === 7 && node.exp?.loc) locs.push([node.exp.loc.start.offset, node.exp.loc.end.offset])
+    // 5 = INTERPOLATION：content 是插值表达式
+    else if (node.type === 5 && node.content?.loc) locs.push([node.content.loc.start.offset, node.content.loc.end.offset])
+    for (const child of node.children ?? []) walk(child)
+    // 指令住在元素的 props 里（children 之外），必须单独遍历
+    for (const prop of node.props ?? []) walk(prop)
   }
-  const maskTo = (end) => {
-    while (cursor < end) {
-      masked += source[cursor] === '\n' ? '\n' : ' '
-      cursor += 1
-    }
-  }
-  for (const [start, end] of scriptRanges) {
-    keepTo(start)
-    maskTo(end)
-  }
-  keepTo(source.length)
-  const expressions = []
-  const re = /(?:^|\s)(?:@|v-|:)[\w.:\-[\]]+\s*=\s*(?:"([^"]*)"|'([^']*)')/g
-  let match
-  while ((match = re.exec(masked))) {
-    const value = match[1] ?? match[2]
-    if (value && value.trim() !== '') expressions.push(value)
-  }
-  return expressions
+  walk(ast)
+  locs.sort((a, b) => a[0] - b[0])
+  return locs.map(([start, end]) => source.slice(start, end)).filter((text) => text.trim() !== '')
 }
 
 /**
@@ -268,12 +286,12 @@ export function templateDirectiveExpressions(source, scriptRanges) {
  *   (imports cannot appear in template expressions).
  * - other extensions: comment-masked source as-is.
  */
-export function prepareSource(path, content, { templateExpressions = false } = {}) {
+export function prepareSource(path, content, { templateExpressions: includeTemplateExpressions = false } = {}) {
   if (!path.endsWith('.vue')) return stripComments(content)
   const ranges = vueScriptRanges(content)
   let prepared = stripComments(keepRanges(content, ranges))
-  if (templateExpressions) {
-    const expressions = templateDirectiveExpressions(content, ranges)
+  if (includeTemplateExpressions) {
+    const expressions = templateExpressions(content)
     if (expressions.length > 0) {
       prepared += `\n${expressions.join('\n')}`
     }

@@ -27,19 +27,22 @@
 //      callback, the callback waits the listener. Every registered listener must
 //      be resolvable and clean (fail-closed, same as rule 2).
 //
-// Rule 2 treats a **bare parameter name** as a pure forward: a wrapper such as
-// `runSaveTxn<T>(fn, options) { return service.runSaveTxn(fn, options) }` hands
-// the callback to the service untouched, so the body is scanned at the call
-// sites (every file that mentions runSaveTxn must be allowlisted and gets its
-// call-site callbacks scanned). Anything else it cannot resolve still fails
-// closed. Parameter names are collected from `function` declarations,
-// parenthesised / bare-identifier arrows, and class/object methods (annotated
-// `name(...): Promise<T> {` included; the annotation must sit on the params line
-// so call-expression arguments never leak into the parameter set).
+// Rule 2 treats a **bare parameter name** as a pure forward — scoped to the
+// registered forward entry: the call site must sit inside a method named
+// `runSaveTxn` in stores/configStore.ts and the forwarded callback must be one
+// of that method's own parameters (annotated returns included). The callback
+// body is then provided at the callers' call sites, which are scanned; every
+// file mentioning runSaveTxn is allowlisted and scanned per call site. Same-named
+// external callbacks, arbitrary forward aliases and non-parameter bare
+// identifiers all fail closed. Anything else it cannot resolve still fails
+// closed.
 //
-// Vue SFCs are scanned through their `<script>` blocks only (`prepareSource` in
-// scripts/lib/source-scan.mjs): template prose is never fed to the tokenizer, so
-// an apostrophe in `Don't` cannot decide how a later `/* … */` reads.
+// Vue SFCs are scanned through their `<script>` blocks PLUS the template's
+// executable expressions — directive bindings (`@` / `v-` / `:`) and
+// interpolations (`{{ … }}`), extracted from the real template AST
+// (`templateExpressions` in scripts/lib/source-scan.mjs) and appended after the
+// script body. HTML comments and static attributes are not expressions; an
+// apostrophe in `Don't` cannot decide how a later `/* … */` reads.
 //
 // Rule 2 also follows **same-file local helpers** (callback → performSwitch →
 // saveSplitRatio), so a helper gaining a queued call is caught — for the
@@ -53,9 +56,10 @@
 // return type contains braces (`function f(): Array<{...}> {`) — unknown
 // *callback* forms fail closed instead, but the helper shapes above are
 // skipped silently; keep queued calls inside a tracked shape.
-// Scanning-fidelity note: an *unquoted regex literal* containing `//` is cut
-// by stripComments as a line comment, so the rest of that line is not scanned
-// (the current tree has none; keep regexes quoted or on their own line).
+// Scanning-fidelity note: unquoted regex literals are consumed verbatim by the
+// regex-aware stripper (division-vs-regex heuristic; control-statement closing
+// parens are regex context — see scripts/lib/source-scan.mjs), so `/[/*]/` and
+// `if (ok) /[/*]/.test(v)` no longer truncate the scan.
 //
 // Why not "structural" enforcement (only `SaveTxn` reachable): JS has no async
 // context (`AsyncLocalStorage` is Node-only), so a callback can always call a

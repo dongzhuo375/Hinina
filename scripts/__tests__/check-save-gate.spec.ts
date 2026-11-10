@@ -437,6 +437,36 @@ const configStore = useConfigStore()
     expect(violations.some((v) => v.includes('排队保存入口'))).toBe(true)
   })
 
+  it('Vue 插值表达式进入扫描面：{{ }} 里的保存队列自等待 → 两条违规', () => {
+    const violations = findViolations([
+      {
+        path: 'views/InterpView.vue',
+        content: `<template>
+  <div>
+    {{ configStore.runSaveTxn((tx) => configStore.saveSplitRatio(0.5)) }}
+  </div>
+</template>
+<script setup lang="ts">const configStore = useConfigStore()</script>`,
+      },
+    ])
+    expect(violations).toHaveLength(2)
+    expect(violations.some((v) => v.includes('不在白名单'))).toBe(true)
+    expect(violations.some((v) => v.includes('排队保存入口'))).toBe(true)
+  })
+
+  it('HTML 注释里的伪 @click 不产生违规（模板 AST 不含注释节点）', () => {
+    const violations = findViolations([
+      {
+        path: 'views/CommentedView.vue',
+        content: `<template>
+  <!-- <button @click="configStore.runSaveTxn((tx) => configStore.saveSplitRatio(0.7))" /> -->
+</template>
+<script setup lang="ts">const c = 1</script>`,
+      },
+    ])
+    expect(violations).toEqual([])
+  })
+
   it('模板散文不产生指令违规；script 字符串只有 mention 级触发（rule 1 口径）', () => {
     // 散文与 script 内的 @click 形字符串不含 runSaveTxn mention → 零违规：
     // 指令表达式提取不会把 script 内字符串当模板指令
