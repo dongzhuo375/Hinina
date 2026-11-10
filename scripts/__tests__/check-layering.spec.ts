@@ -1,22 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import {
-  findViolations,
-  loadSources,
-  stripComments,
-} from '../../scripts/check-layering.mjs'
+import { findViolations, loadSources } from '../../scripts/check-layering.mjs'
+import { stripComments } from '../../scripts/lib/source-scan.mjs'
 
 /**
  * 分层门禁的静态约束用例（与 check-save-gate.spec.ts 同款机制）。
  *
  * 被测逻辑在 `scripts/check-layering.mjs`（本地 `npm run check:layering`、
- * CI frontend job 各跑一次）。放在 `src/` 之外是刻意的——`src/**` 的 tsconfig
+ * CI frontend job 各跑一次）；注释剥离 / `.vue` 处理 / 目录遍历来自共享模块
+ * `scripts/lib/source-scan.mjs`。放在 `src/` 之外是刻意的——`src/**` 的 tsconfig
  * 不含 Node 类型，静态检查不该污染覆盖率基线。
  *
  * 断言分两层：先用合成夹具锁住每条规则的判定（含变异验证的等价物——每类
- * 违规形态各给一份「种进去必须红」的夹具），再对真实 `src/` 树跑一遍——后者
+ * 违规形态各给一份「种进去必须红」的夹具；跨行、动态 import 的非字面量形态、
+ * Vue 模板文本三类曾是缺口，负例逐条覆盖），再对真实 `src/` 树跑一遍——后者
  * 是「View/composable 不 import Service、View/component 不 import bridge」
  * 两条红线在 `npm test` 里的实际保障（2026-11-09 分层欠账清偿后恒绿；
  * 新增直连会在这里红出来）。
+ *
+ * `.vue` 夹具注意：扫描只看 `<script>` 块，裸脚本夹具一律用 `.ts` 路径，
+ * SFC 行为由专门的 `.vue` 用例覆盖。
  */
 
 const cleanView = {
@@ -39,16 +41,16 @@ describe('check-layering — 规则判定（合成夹具）', () => {
 
   it('规则A：静态具名 import Service → 违规', () => {
     const violations = findViolations([
-      { path: 'views/A.vue', content: `import { configService } from '@/services/config.service'` },
+      { path: 'views/A.ts', content: `import { configService } from '@/services/config.service'` },
     ])
     expect(violations).toHaveLength(1)
     expect(violations[0]).toContain('规则A')
-    expect(violations[0]).toContain('views/A.vue:1:')
+    expect(violations[0]).toContain('views/A.ts:1:')
   })
 
   it('规则A：import type 同样算边（登记口径计入类型边）', () => {
     const violations = findViolations([
-      { path: 'components/B.vue', content: `import type { EditorPrefs } from '@/services/config.service'` },
+      { path: 'components/B.ts', content: `import type { EditorPrefs } from '@/services/config.service'` },
     ])
     expect(violations).toHaveLength(1)
     expect(violations[0]).toContain('规则A')
@@ -70,41 +72,41 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     ])
     expect(dynamic).toHaveLength(1)
     const sideEffect = findViolations([
-      { path: 'views/E.vue', content: `import '@/services/config.service'` },
+      { path: 'views/E.ts', content: `import '@/services/config.service'` },
     ])
     expect(sideEffect).toHaveLength(1)
   })
 
   it('规则A：相对路径跨入 services/ 目录同样算边', () => {
     const violations = findViolations([
-      { path: 'views/F.vue', content: `import { configService } from '../services/config.service'` },
+      { path: 'views/F.ts', content: `import { configService } from '../services/config.service'` },
     ])
     expect(violations).toHaveLength(1)
   })
 
   it('规则A：裸目录 barrel（from 加 @/services、无尾斜杠）同样算边——与 bridge 判据对称', () => {
     const violations = findViolations([
-      { path: 'views/F.vue', content: `import { configService } from '@/services'` },
+      { path: 'views/F.ts', content: `import { configService } from '@/services'` },
     ])
     expect(violations).toHaveLength(1)
     // 同形不误伤：services 前缀的其它模块（如假设的 @/services-extra）不在判据内
     expect(findViolations([
-      { path: 'views/F.vue', content: `import x from '@/services-extra'` },
+      { path: 'views/F.ts', content: `import x from '@/services-extra'` },
     ])).toEqual([])
   })
 
   it('规则A：export ... from 再导出也算边', () => {
     const violations = findViolations([
-      { path: 'views/G.vue', content: `export { EditorPrefs } from '@/services/config.service'` },
+      { path: 'views/G.ts', content: `export { EditorPrefs } from '@/services/config.service'` },
     ])
     expect(violations).toHaveLength(1)
   })
 
   it('规则B：View/component/App.vue import bridge → 违规（含子路径与相对路径）', () => {
     for (const [path, content] of [
-      ['views/H.vue', `import { IpcError } from '@/bridge'`],
-      ['components/I.vue', `import * as configBridge from '../../bridge/config.bridge'`],
-      ['App.vue', `import '@/bridge'`],
+      ['views/H.ts', `import { IpcError } from '@/bridge'`],
+      ['components/I.ts', `import * as configBridge from '../../bridge/config.bridge'`],
+      ['App.vue', `<script setup lang="ts">\nimport '@/bridge'\n</script>`],
     ] as const) {
       const violations = findViolations([{ path, content }])
       expect(violations, path).toHaveLength(1)
@@ -122,17 +124,17 @@ describe('check-layering — 规则判定（合成夹具）', () => {
   it('一行同时命中两层规则 → 两条违规各自报出（实际写法不存在，锁定扫描器语义）', () => {
     const violations = findViolations([
       {
-        path: 'views/K.vue',
+        path: 'views/K.ts',
         content: `export { a } from '@/bridge'; export { b } from '@/services/config.service'`,
       },
     ])
     expect(violations).toHaveLength(2)
   })
 
-  it('注释里的示例不触发违规（正则扫描前剥离注释）', () => {
+  it('注释里的示例不触发违规（扫描前剥离注释）', () => {
     const violations = findViolations([
       {
-        path: 'views/L.vue',
+        path: 'views/L.ts',
         content: `
           // 迁移前这里 from '@/services/config.service'（已收编 configStore）
           /* import { configService } from '@/services/config.service' */
@@ -170,7 +172,7 @@ const g = y.import('z')`,
   it('规则A：动态 import 换行（import 与说明符分离）同样算边', () => {
     const violations = findViolations([
       {
-        path: 'views/P.vue',
+        path: 'views/P.ts',
         content: `const module = await import(
   '@/services/config.service'
 )`,
@@ -183,7 +185,7 @@ const g = y.import('z')`,
   it('规则A：副作用 import 换行同样算边', () => {
     const violations = findViolations([
       {
-        path: 'views/Q.vue',
+        path: 'views/Q.ts',
         content: `import
   '@/services/config.service'`,
       },
@@ -194,23 +196,25 @@ const g = y.import('z')`,
   it('规则A：from 与说明符换行分离同样算边（静态与 export type 两形态）', () => {
     const violations = findViolations([
       {
-        path: 'views/R.vue',
+        path: 'views/R.ts',
         content: `import { configService } from
   '@/services/config.service'`,
       },
       {
-        path: 'components/S.vue',
+        path: 'components/S.ts',
         content: `export type { EditorPrefs } from
   '@/services/config.service'`,
       },
     ])
     expect(violations).toHaveLength(2)
+    // 行号回溯到 from 所在行（第二行说明符）
+    expect(violations[0]).toContain('views/R.ts:1:')
   })
 
   it('规则B：bridge 的跨行 import 同样算边', () => {
     const violations = findViolations([
       {
-        path: 'views/T.vue',
+        path: 'views/T.ts',
         content: `const bridge = await import(
   '@/bridge'
 )`,
@@ -218,6 +222,77 @@ const g = y.import('z')`,
     ])
     expect(violations).toHaveLength(1)
     expect(violations[0]).toContain('规则B')
+  })
+
+  // ── 动态 import 的说明符形态：字面量可判定，其余 fail closed ──
+
+  it('规则A：模板字符串字面量（无 ${}）的动态 import 算边', () => {
+    const violations = findViolations([
+      { path: 'views/V.ts', content: 'const m = await import(`@/services/config.service`)' },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('规则A')
+  })
+
+  it('动态 import 的非字面量形态一律 fail closed（变量 / 拼接 / ${} 插值）', () => {
+    const shapes = [
+      'const m = await import(spec)',
+      "const m = await import('@/services/' + name)",
+      'const m = await import(`@/services/${name}`)',
+    ]
+    for (const content of shapes) {
+      const violations = findViolations([{ path: 'views/W.ts', content }])
+      expect(violations, content).toHaveLength(1)
+      expect(violations[0], content).toContain('无法静态分析')
+    }
+  })
+
+  // ── Vue SFC：只扫 <script> 块 ──
+
+  it('规则A：<script setup> 与 import 同处一行同样算边', () => {
+    const violations = findViolations([
+      {
+        path: 'views/X.vue',
+        content: `<script setup lang="ts">import '@/services/config.service'</script>`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('规则A')
+  })
+
+  it('模板文本不参与扫描：散文里的 import 形状既不误报也不影响 script 判定', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Y.vue',
+        content: `<template><p>use from '@/services/x' never</p></template>
+<script setup lang="ts">
+const a = 1
+</script>`,
+      },
+    ])
+    expect(violations).toEqual([])
+  })
+
+  it('模板里的撇号（Don\'t）不破坏 script 块的注释剥离与 import 判定', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Z.vue',
+        content: `<template><p>Don't</p></template>
+<script setup lang="ts">
+/* 真实注释：from '@/services/ignored' */
+import { x } from '@/services/config.service'
+</script>`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('views/Z.vue:4:')
+  })
+
+  it('声明文件（.d.ts）同样在扫描面内', () => {
+    const violations = findViolations([
+      { path: 'views/types.d.ts', content: `import type { EditorPrefs } from '@/services/config.service'` },
+    ])
+    expect(violations).toHaveLength(1)
   })
 })
 

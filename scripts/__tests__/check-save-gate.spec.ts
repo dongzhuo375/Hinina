@@ -92,7 +92,7 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
   it('白名单外的文件使用 runSaveTxn → 违规（新增调用方须复核）', () => {
     const violations = findViolations([
       {
-        path: 'views/ProblemSolveView.vue',
+        path: 'views/ProblemSolveView.ts',
         content: `
           configService.runSaveTxn((tx) => tx.updateConfig((draft) => { draft.layout.splitRatio = r }))
         `,
@@ -339,6 +339,57 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
       expect(violations, call).toHaveLength(1)
       expect(violations[0]).toContain('无法静态分析')
     }
+  })
+
+  it('参数直传（纯转发，如 configStore）免扫——回调正文在调用点被逐点扫描', () => {
+    // 无注解方法形态
+    expect(
+      findViolations([
+        {
+          path: 'stores/configStore.ts',
+          content: `export const useStore = defineStore('c', { actions: {
+            runSaveTxn<T>(fn, options = {}) {
+              return configService.runSaveTxn(fn, options)
+            },
+          } })`,
+        },
+      ]),
+    ).toEqual([])
+    // 带返回注解的方法形态（configStore 的真实写法）
+    expect(
+      findViolations([
+        {
+          path: 'stores/configStore.ts',
+          content: `runSaveTxn<T>(
+            fn: (tx: SaveTxn) => Promise<T>,
+            options: { settingsPage?: boolean } = {},
+          ): Promise<T> {
+            return configService.runSaveTxn(fn, options)
+          }`,
+        },
+      ]),
+    ).toEqual([])
+    // function 声明形态
+    expect(
+      findViolations([
+        {
+          path: 'stores/configStore.ts',
+          content: 'function forward(fn) { return configService.runSaveTxn(fn) }',
+        },
+      ]),
+    ).toEqual([])
+  })
+
+  it('参数直传豁免不外溢：普通实参（非函数参数）仍 fail closed', () => {
+    // 调用参数不是任何函数的形参 → 不算纯转发
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: 'const x = configService.runSaveTxn(sharedSaveHandler)',
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('无法静态分析')
   })
 
   it('可选调用 saveSplitRatio?.(…) / updateEditorPrefs?.(…) 也算排队入口', () => {

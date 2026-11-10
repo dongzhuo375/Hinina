@@ -27,6 +27,20 @@
 //      callback, the callback waits the listener. Every registered listener must
 //      be resolvable and clean (fail-closed, same as rule 2).
 //
+// Rule 2 treats a **bare parameter name** as a pure forward: a wrapper such as
+// `runSaveTxn<T>(fn, options) { return service.runSaveTxn(fn, options) }` hands
+// the callback to the service untouched, so the body is scanned at the call
+// sites (every file that mentions runSaveTxn must be allowlisted and gets its
+// call-site callbacks scanned). Anything else it cannot resolve still fails
+// closed. Parameter names are collected from `function` declarations,
+// parenthesised / bare-identifier arrows, and class/object methods (annotated
+// `name(...): Promise<T> {` included; the annotation must sit on the params line
+// so call-expression arguments never leak into the parameter set).
+//
+// Vue SFCs are scanned through their `<script>` blocks only (`prepareSource` in
+// scripts/lib/source-scan.mjs): template prose is never fed to the tokenizer, so
+// an apostrophe in `Don't` cannot decide how a later `/* … */` reads.
+//
 // Rule 2 also follows **same-file local helpers** (callback → performSwitch →
 // saveSplitRatio), so a helper gaining a queued call is caught — for the
 // shapes this repo actually writes: `function` declarations (return-type
@@ -56,101 +70,35 @@
 // Usage:
 //   node scripts/check-save-gate.mjs      (also: npm run check:save-gate)
 
-import { readFileSync, readdirSync } from 'node:fs'
-import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import {
+  prepareSource,
+  readBalanced,
+  stripComments,
+  walkSources,
+} from './lib/source-scan.mjs'
+
+// stripComments / readBalanced / the directory walk live in
+// scripts/lib/source-scan.mjs, shared with check-layering.mjs: a fidelity fix
+// (Vue template prose feeding the tokenizer, a comment-stripping edge) must not
+// drift between the two gates. Re-exported below for existing callers.
+export { stripComments, readBalanced }
 
 /// Files allowed to mention `runSaveTxn` (paths relative to `src/`, forward slashes).
 export const TXN_ALLOWLIST = [
   'services/config.service.ts', // definition + the two semantic wrappers
   'composables/useSettingsForm.ts', // the only compound transaction (save → auto-switch)
   // 2026-11-09 严格分层：View/composable 不再直连 configService，保存事务经
-  // stores/configStore 转发。纯转发（非新事务调用方），箭头包一层让回调保持
-  // 可静态分析（裸参数直传会 fail closed）。
+  // stores/configStore 转发。纯转发（非新事务调用方）：回调以**参数直传**形态出现，
+  // 由 findViolations 的参数直传规则免扫——回调正文在调用点，而任何出现
+  // runSaveTxn 的文件都必须白名单化并被逐调用点扫描，转发体本身不可能引入
+  // 排队入口。
   'stores/configStore.ts',
 ]
 
 /// Queued save entries: appearing inside a transaction callback body deadlocks.
 /// Optional calls (`saveSplitRatio?.(…)`) count too — `?.` is still a call.
 const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\s*(?:\?\.)?\s*[<(]/
-
-/// Drop comments but keep string literals (`https://` must not read as a comment).
-///
-/// 已知边界：**未加引号的正则字面量**不在保留范围内——`/a\/\/b/` 里的 `//`
-/// 会被当成行注释，截掉该行其余部分（现树无此形态；写正则时加引号或独立成行）。
-export function stripComments(source) {
-  let out = ''
-  let i = 0
-  while (i < source.length) {
-    const ch = source[i]
-    const next = source[i + 1]
-    if (ch === '/' && next === '/') {
-      while (i < source.length && source[i] !== '\n') i += 1
-      continue
-    }
-    if (ch === '/' && next === '*') {
-      i += 2
-      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i += 1
-      i += 2
-      continue
-    }
-    if (ch === '"' || ch === "'" || ch === '`') {
-      const quote = ch
-      out += ch
-      i += 1
-      while (i < source.length) {
-        out += source[i]
-        if (source[i] === '\\') {
-          out += source[i + 1] ?? ''
-          i += 2
-          continue
-        }
-        if (source[i] === quote) {
-          i += 1
-          break
-        }
-        i += 1
-      }
-      continue
-    }
-    out += ch
-    i += 1
-  }
-  return out
-}
-
-/// Read a balanced bracket body starting at `start` (which points at the opener),
-/// skipping string literals so braces inside strings cannot unbalance the scan.
-export function readBalanced(source, start, open, close) {
-  let depth = 0
-  let i = start
-  while (i < source.length) {
-    const ch = source[i]
-    if (ch === '"' || ch === "'" || ch === '`') {
-      const quote = ch
-      i += 1
-      while (i < source.length) {
-        if (source[i] === '\\') {
-          i += 2
-          continue
-        }
-        if (source[i] === quote) {
-          i += 1
-          break
-        }
-        i += 1
-      }
-      continue
-    }
-    if (ch === open) depth += 1
-    else if (ch === close) {
-      depth -= 1
-      if (depth === 0) return source.slice(start + 1, i)
-    }
-    i += 1
-  }
-  return null
-}
 
 /**
  * Extract a callback body from a call's argument text.
@@ -378,6 +326,91 @@ export function localFunctions(source) {
   return table
 }
 
+/// 参数列表按深度 0 的逗号切分（嵌套括号/泛型/对象字面量里的逗号不切）。
+function splitTopLevel(params) {
+  const segments = []
+  let depth = 0
+  let current = ''
+  for (const ch of params) {
+    if (ch === '(' || ch === '[' || ch === '{' || ch === '<') depth += 1
+    else if (ch === ')' || ch === ']' || ch === '}' || ch === '>') depth = Math.max(0, depth - 1)
+    if (ch === ',' && depth === 0) {
+      segments.push(current)
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  segments.push(current)
+  return segments
+}
+
+/**
+ * 文件内全部**函数参数**名（参数直传规则的判定面）。
+ *
+ * 覆盖形态与 `localFunctions` 对齐：`function` 声明、`const/let/var` 箭头
+ * （带括号或裸标识符）、无注解的类/对象方法。**过度收集是可接受的**：集合只
+ * 用于豁免「裸标识符且不是同文件命名函数」的 runSaveTxn 回调，而该文件必须先过
+ * 白名单（rule 1）——豁免面被白名单摩擦兜住。方法分支同样只认无注解形态
+ * （`helper(): Promise<void> {` 不追踪，与 localFunctions 一致）。
+ */
+export function functionParameters(source) {
+  const names = new Set()
+  const add = (params) => {
+    for (const segment of splitTopLevel(params)) {
+      const m = segment.trim().match(/^(?:\.\.\.)?([A-Za-z_$][\w$]*)/)
+      if (m) names.add(m[1])
+    }
+  }
+  // function 声明/表达式
+  for (const match of source.matchAll(/\bfunction\b[^(]*\(/g)) {
+    const open = match.index + match[0].length - 1
+    const params = readBalanced(source, open, '(', ')')
+    if (params !== null) add(params)
+  }
+  // const/let/var 的带括号箭头
+  for (const match of source.matchAll(/(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*(?::[^=]+)?=\s*(?:async\s*)?\(/g)) {
+    const open = match.index + match[0].length - 1
+    const params = readBalanced(source, open, '(', ')')
+    if (params !== null) add(params)
+  }
+  // 裸标识符单参箭头：`const f = async tx => …`
+  for (const match of source.matchAll(/(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s*)?([A-Za-z_$][\w$]*)\s*=>/g)) {
+    names.add(match[1])
+  }
+  // 类/对象方法：`name(...) {` 与带返回注解的 `name(...): Promise<T> {`。
+  // 注解只允许出现在参数括号的同一行（遇换行/分号/运算符即判定不是方法）——
+  // 调用表达式的实参因此不会混进参数集（spec 的 sharedSaveHandler 用例是防线）。
+  const methodRe = /\b([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g
+  let match
+  while ((match = methodRe.exec(source))) {
+    const name = match[1]
+    if (NOT_CALLS.has(name)) continue
+    const open = match.index + match[0].length - 1
+    const params = readBalanced(source, open, '(', ')')
+    if (params === null) continue
+    let i = open + params.length + 2
+    let isMethod = false
+    while (i < source.length) {
+      const ch = source[i]
+      if (ch === '\n' || ch === ';' || ch === '=' || ch === ')' || ch === ',' || ch === '}') break
+      if (ch === '{') {
+        isMethod = true
+        break
+      }
+      if (ch === '(') {
+        const inner = readBalanced(source, i, '(', ')')
+        if (inner === null) break
+        i += inner.length + 2
+        continue
+      }
+      i += 1
+    }
+    if (isMethod) add(params)
+  }
+  return names
+}
+
 /**
  * 从回调正文出发，沿**同文件局部函数**追踪到排队入口（深度有上限、带环检测）。
  * 返回命中路径，例如 `performSwitch → saveSplitRatio`。
@@ -479,8 +512,9 @@ export function observerViolations(path, source, functions) {
 export function findViolations(files) {
   const violations = []
   for (const { path, content } of files) {
-    const source = stripComments(content)
+    const source = prepareSource(path, content)
     const functions = localFunctions(source)
+    const parameters = functionParameters(source)
     if (source.includes('runSaveTxn')) {
       if (!TXN_ALLOWLIST.includes(path)) {
         violations.push(
@@ -491,6 +525,14 @@ export function findViolations(files) {
       for (const site of txnCallSites(source)) {
         // 引用式回调：同文件命名函数可解析；跨文件/别名解析不到 → 违规（fail closed）
         const body = site.body ?? (site.ref ? functions.get(site.ref) ?? null : null)
+        if (body === null && site.ref !== null && parameters.has(site.ref)) {
+          // **参数直传 = 纯转发**（如 stores/configStore 的 runSaveTxn 转发）：
+          // 回调正文由调用方提供，而任何出现 runSaveTxn 的文件都必须白名单化
+          // 并被本门禁逐调用点扫描——转发体自身只能把参数原样交给 service，
+          // 不可能引入排队入口。函数**参数**与「本地命名函数」是两种形态：
+          // 后者由上面的 functions 表解析正文，前者在此豁免。
+          continue
+        }
         if (body === null) {
           violations.push(
             `${path}: runSaveTxn 回调形态无法静态分析（${site.args.trim().slice(0, 80) || '参数解析失败'}）——` +
@@ -527,24 +569,12 @@ export function findViolations(files) {
 
 /// Walk `src/` for production sources (tests/test-support/declarations excluded).
 export function loadSources(root) {
-  const srcDir = join(root, 'src')
-  const files = []
-  const walk = (dir) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        walk(full)
-        continue
-      }
-      if (!/\.(ts|vue)$/.test(entry.name)) continue
-      if (entry.name.endsWith('.d.ts')) continue
-      const rel = relative(srcDir, full).split('\\').join('/')
-      if (rel.includes('__tests__') || rel.startsWith('test-support')) continue
-      files.push({ path: rel, content: readFileSync(full, 'utf8') })
-    }
-  }
-  walk(srcDir)
-  return files
+  return walkSources(root, {
+    dirs: ['.'],
+    extensions: /\.(ts|vue)$/,
+    skip: (rel) =>
+      rel.endsWith('.d.ts') || rel.includes('__tests__') || rel.startsWith('test-support'),
+  })
 }
 
 export function runCli(root) {

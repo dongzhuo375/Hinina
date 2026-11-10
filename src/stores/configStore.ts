@@ -98,15 +98,15 @@ export const useConfigStore = defineStore('config', {
      * `saveSplitRatio` 都排队，在回调内调用会等自己（自死锁），由
      * `scripts/check-save-gate.mjs` 静态锁定（本文件因此列入其 TXN_ALLOWLIST）。
      *
-     * 实现注记：这里用 `(tx) => fn(tx)` 包一层而不是直接透传 `fn`——保存门禁
-     * 的静态扫描无法解析「裸参数直传」的回调形态（fail closed 视为违规），
-     * 内联箭头让回调保持可分析且语义不变。
+     * 实现注记：`fn` 以**参数直传**交给 service——保存门禁把「裸标识符且是同
+     * 文件函数参数」的回调识别为纯转发（回调正文在调用点，而任何出现
+     * `runSaveTxn` 的文件都必须白名单化并被逐调用点扫描），转发层不做包装。
      */
     runSaveTxn<T>(
       fn: (tx: SaveTxn) => Promise<T>,
       options: { settingsPage?: boolean } = {},
     ): Promise<T> {
-      return configService.runSaveTxn((tx) => fn(tx), options)
+      return configService.runSaveTxn(fn, options)
     },
 
     /** 等待在途 OJ 切换落地（只覆盖调用时刻已排队的切换，其后切换由代际复查） */
