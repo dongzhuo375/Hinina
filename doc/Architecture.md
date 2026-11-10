@@ -28,7 +28,8 @@ Hinina/
 │   ├── check-release-versions.mjs         # 发布版本一致性门禁（五个文件六处版本值/标签/CHANGELOG 段落与真实日期；npm run release:check 与 release.yml validate/draft-release 共用）
 │   ├── check-save-gate.mjs                # 保存门禁源码检查（保存路径必须经事务回调，防新增绕队列直写入口；npm run check:save-gate 与 ci.yml 共用）
 │   ├── check-layering.mjs                 # 前端分层门禁（View/component/composable 不 import Service；View/component 不 import bridge——Architecture.md「前端分层口径」两条红线；npm run check:layering 与 ci.yml 共用，已知边界见脚本头）
-│   └── __tests__/                         # scripts 门禁的 Vitest 套件（check-csp-policy / check-release-versions / check-save-gate / check-layering：判定函数正例 + 变异负例 + CLI 夹具）
+│   ├── lib/source-scan.mjs                # 两个源码门禁（check-layering / check-save-gate）共用的扫描原语：注释剥离（掩码式、正则字面量感知）、.vue script 块提取（@vue/compiler-sfc 真实解析）、括号配对、目录遍历——同一保真面防两副本漂移
+│   └── __tests__/                         # scripts 门禁的 Vitest 套件（check-csp-policy / check-release-versions / check-save-gate / check-layering / source-scan：判定函数正例 + 变异负例 + CLI 夹具 + 共享原语判定）
 ├── doc/
 │   ├── 开发手册.md                        # 项目权威开发手册（架构设计、NFR、风险、协作规范）
 │   ├── Architecture.md                   # 本文件：项目文件树与职责说明
