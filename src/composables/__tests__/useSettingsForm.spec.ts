@@ -685,9 +685,11 @@ describe('useSettingsForm', () => {
     expect(next.dirty.value).toBe(false)
   })
 
-  it('mock 队列语义同构：重叠切换先落地者不清 in-flight（队尾派生，评审）', async () => {
+  it('mock 切换 in-flight 标志语义同构：重叠切换先落地者不清标志（队尾派生，评审）', async () => {
     // 直接驱动 mock service（绕过 composable 的切换单飞），制造两个重叠切换：
-    // in-flight 由「队尾是否落地」派生——A（先入队）先落地时队尾是 B，标志必须保持
+    // in-flight 由「队尾是否落地」派生——A（先入队）先落地时队尾是 B，标志必须保持。
+    // 注意本用例只锁标志语义；**请求串行化不在 mock 复刻范围**（mock 立即执行底层
+    // 调用，生产 switchQueue.enqueue 的排队语义由 config.service.spec 用真实服务覆盖）
     let releaseA!: () => void
     let releaseB!: () => void
     mocks.switchOj.mockImplementationOnce(

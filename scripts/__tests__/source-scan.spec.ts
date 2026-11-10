@@ -72,9 +72,13 @@ const a = 1
     expect(ts).not.toContain('注释')
   })
 
-  it('偏移稳定：prepareSource 的输出长度与输入一致（掩码不删字符）', () => {
-    const src = `<template><p>Don't</p></template>\n<script>\nconst a = 1\n</script>`
-    expect(prepareSource('views/A.vue', src)).toHaveLength(stripComments(src).length)
+  it('偏移稳定（P3）：prepareSource 的输出长度与原始输入一致、换行逐一保留', () => {
+    const src = `<template><p>Don't</p></template>\n<script>\n/* first\nsecond */\nconst a = 1\n</script>`
+    const prepared = prepareSource('views/A.vue', src)
+    expect(prepared).toHaveLength(src.length)
+    expect(prepared.split('\n')).toHaveLength(src.split('\n').length)
+    // 掩码不改变行号：多行块注释后的代码仍在真实行（第 5 行）
+    expect(lineOfIndex(prepared, prepared.indexOf('const a = 1'))).toBe(5)
   })
 })
 

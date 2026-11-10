@@ -163,16 +163,16 @@ export function txnCallSites(source) {
     const afterName = source.slice(from).match(/^\s*\(/)
     if (!afterName) {
       // 名字出现了但不是可解析的调用（别名/赋值/文本……）——fail closed
-      sites.push({ args: '', body: null, ref: null })
+      sites.push({ index: hit, args: '', body: null, ref: null })
       continue
     }
     const openParen = from + afterName[0].length - 1
     const args = readBalanced(source, openParen, '(', ')')
     if (args === null) {
-      sites.push({ args: '', body: null, ref: null })
+      sites.push({ index: hit, args: '', body: null, ref: null })
       continue
     }
-    sites.push({ args, ...callbackFromArgs(args) })
+    sites.push({ index: hit, args, ...callbackFromArgs(args) })
   }
   return sites
 }
@@ -345,57 +345,34 @@ function splitTopLevel(params) {
   return segments
 }
 
-/**
- * 文件内全部**函数参数**名（参数直传规则的判定面）。
- *
- * 覆盖形态与 `localFunctions` 对齐：`function` 声明、`const/let/var` 箭头
- * （带括号或裸标识符）、无注解的类/对象方法。**过度收集是可接受的**：集合只
- * 用于豁免「裸标识符且不是同文件命名函数」的 runSaveTxn 回调，而该文件必须先过
- * 白名单（rule 1）——豁免面被白名单摩擦兜住。方法分支同样只认无注解形态
- * （`helper(): Promise<void> {` 不追踪，与 localFunctions 一致）。
- */
-export function functionParameters(source) {
+function paramNames(params) {
   const names = new Set()
-  const add = (params) => {
-    for (const segment of splitTopLevel(params)) {
-      const m = segment.trim().match(/^(?:\.\.\.)?([A-Za-z_$][\w$]*)/)
-      if (m) names.add(m[1])
-    }
+  for (const segment of splitTopLevel(params)) {
+    const m = segment.trim().match(/^(?:\.\.\.)?([A-Za-z_$][\w$]*)/)
+    if (m) names.add(m[1])
   }
-  // function 声明/表达式
-  for (const match of source.matchAll(/\bfunction\b[^(]*\(/g)) {
-    const open = match.index + match[0].length - 1
-    const params = readBalanced(source, open, '(', ')')
-    if (params !== null) add(params)
-  }
-  // const/let/var 的带括号箭头
-  for (const match of source.matchAll(/(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*(?::[^=]+)?=\s*(?:async\s*)?\(/g)) {
-    const open = match.index + match[0].length - 1
-    const params = readBalanced(source, open, '(', ')')
-    if (params !== null) add(params)
-  }
-  // 裸标识符单参箭头：`const f = async tx => …`
-  for (const match of source.matchAll(/(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s*)?([A-Za-z_$][\w$]*)\s*=>/g)) {
-    names.add(match[1])
-  }
-  // 类/对象方法：`name(...) {` 与带返回注解的 `name(...): Promise<T> {`。
-  // 注解只允许出现在参数括号的同一行（遇换行/分号/运算符即判定不是方法）——
-  // 调用表达式的实参因此不会混进参数集（spec 的 sharedSaveHandler 用例是防线）。
-  const methodRe = /\b([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g
-  let match
-  while ((match = methodRe.exec(source))) {
-    const name = match[1]
-    if (NOT_CALLS.has(name)) continue
+  return names
+}
+
+/**
+ * 识别「同名转发入口」：名为 `runSaveTxn` 的方法定义（其**形参**被原样转发给
+ * service）。调用点会被 `;`/换行/`)` 过滤掉——定义之后才跟方法体；带返回注解
+ * 的 `runSaveTxn<T>(…): Promise<T> {` 同样识别（注解只允许出现在参数括号的
+ * 同一行，调用表达式的实参不会混进来）。
+ */
+export function runSaveTxnForwardEntries(source) {
+  const entries = []
+  for (const match of source.matchAll(/\brunSaveTxn\b\s*(?:<[^<>()]*>)?\s*\(/g)) {
     const open = match.index + match[0].length - 1
     const params = readBalanced(source, open, '(', ')')
     if (params === null) continue
     let i = open + params.length + 2
-    let isMethod = false
+    let bodyOpen = -1
     while (i < source.length) {
       const ch = source[i]
       if (ch === '\n' || ch === ';' || ch === '=' || ch === ')' || ch === ',' || ch === '}') break
       if (ch === '{') {
-        isMethod = true
+        bodyOpen = i
         break
       }
       if (ch === '(') {
@@ -406,9 +383,19 @@ export function functionParameters(source) {
       }
       i += 1
     }
-    if (isMethod) add(params)
+    if (bodyOpen === -1) continue
+    const body = readBalanced(source, bodyOpen, '{', '}')
+    if (body === null) continue
+    entries.push({ bodyStart: bodyOpen + 1, bodyEnd: bodyOpen + 1 + body.length, paramNames: paramNames(params) })
   }
-  return names
+  return entries
+}
+
+/** 调用点落在转发入口方法体内、且被转发回调是该方法的形参——纯转发。 */
+function isPureForward(entries, callIndex, ref) {
+  return entries.some(
+    (entry) => callIndex >= entry.bodyStart && callIndex <= entry.bodyEnd && entry.paramNames.has(ref),
+  )
 }
 
 /**
@@ -512,9 +499,12 @@ export function observerViolations(path, source, functions) {
 export function findViolations(files) {
   const violations = []
   for (const { path, content } of files) {
-    const source = prepareSource(path, content)
+    const source = prepareSource(path, content, { templateExpressions: true })
     const functions = localFunctions(source)
-    const parameters = functionParameters(source)
+    // 参数直传豁免**只认 stores/configStore.ts 的同名转发入口**（评审 P2：
+    // 文件级参数名豁免会把同名外部回调假绿；任意 forward 别名的调用点不会
+    // 出现 runSaveTxn，回调正文根本没有被扫描）。
+    const forwardEntries = path === 'stores/configStore.ts' ? runSaveTxnForwardEntries(source) : []
     if (source.includes('runSaveTxn')) {
       if (!TXN_ALLOWLIST.includes(path)) {
         violations.push(
@@ -525,12 +515,7 @@ export function findViolations(files) {
       for (const site of txnCallSites(source)) {
         // 引用式回调：同文件命名函数可解析；跨文件/别名解析不到 → 违规（fail closed）
         const body = site.body ?? (site.ref ? functions.get(site.ref) ?? null : null)
-        if (body === null && site.ref !== null && parameters.has(site.ref)) {
-          // **参数直传 = 纯转发**（如 stores/configStore 的 runSaveTxn 转发）：
-          // 回调正文由调用方提供，而任何出现 runSaveTxn 的文件都必须白名单化
-          // 并被本门禁逐调用点扫描——转发体自身只能把参数原样交给 service，
-          // 不可能引入排队入口。函数**参数**与「本地命名函数」是两种形态：
-          // 后者由上面的 functions 表解析正文，前者在此豁免。
+        if (body === null && site.ref !== null && isPureForward(forwardEntries, site.index, site.ref)) {
           continue
         }
         if (body === null) {

@@ -341,7 +341,7 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
     }
   })
 
-  it('参数直传（纯转发，如 configStore）免扫——回调正文在调用点被逐点扫描', () => {
+  it('参数直传（纯转发）免扫——仅限同名转发入口：configStore.ts 里名为 runSaveTxn 的方法', () => {
     // 无注解方法形态
     expect(
       findViolations([
@@ -369,27 +369,88 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
         },
       ]),
     ).toEqual([])
-    // function 声明形态
-    expect(
-      findViolations([
-        {
-          path: 'stores/configStore.ts',
-          content: 'function forward(fn) { return configService.runSaveTxn(fn) }',
-        },
-      ]),
-    ).toEqual([])
   })
 
-  it('参数直传豁免不外溢：普通实参（非函数参数）仍 fail closed', () => {
-    // 调用参数不是任何函数的形参 → 不算纯转发
+  it('参数直传豁免不外溢（评审 P2）——三类形近形态全部 fail closed', () => {
+    // ① 任意 forward 别名：调用方写 forward(callback)，调用点不会出现
+    //    runSaveTxn，回调正文根本没有被扫描 → 不豁免（方法名不是 runSaveTxn）
+    const alias = findViolations([
+      {
+        path: 'stores/configStore.ts',
+        content: 'export function forward(fn) { return configService.runSaveTxn(fn) }',
+      },
+    ])
+    expect(alias).toHaveLength(1)
+    expect(alias[0]).toContain('无法静态分析')
+    // ② 同名外部回调撞上文件级参数名 → 不豁免（豁免只认转发入口自己的形参）
+    const collision = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `import { sharedSaveHandler } from './handlers'
+function unrelated(sharedSaveHandler) {}
+await configService.runSaveTxn(sharedSaveHandler)`,
+      },
+    ])
+    expect(collision).toHaveLength(1)
+    expect(collision[0]).toContain('无法静态分析')
+    // ③ 非参数的裸标识符（模块级常量等）→ 不豁免
+    const moduleConst = findViolations([
+      {
+        path: 'stores/configStore.ts',
+        content: 'const handler = makeHandler()\nrunSaveTxn<T>(fn) { return configService.runSaveTxn(handler) }',
+      },
+    ])
+    expect(moduleConst.length).toBeGreaterThanOrEqual(1)
+    expect(moduleConst.some((v) => v.includes('无法静态分析'))).toBe(true)
+  })
+
+  it('参数直传豁免限定文件：其它白名单文件里的同名方法形态仍 fail closed', () => {
     const violations = findViolations([
       {
         path: 'composables/useSettingsForm.ts',
-        content: 'const x = configService.runSaveTxn(sharedSaveHandler)',
+        content: `runSaveTxn<T>(fn, options = {}) {
+          return configService.runSaveTxn(fn, options)
+        }`,
       },
     ])
     expect(violations).toHaveLength(1)
     expect(violations[0]).toContain('无法静态分析')
+  })
+
+  it('Vue 模板指令表达式进入扫描面：@click 里的保存队列自等待 → 两条违规', () => {
+    // 与 main 行为对齐：白名单 + 回调内排队入口各自报一条；模板里的撇号
+    //（Don't）不得破坏 script 块的判定
+    const violations = findViolations([
+      {
+        path: 'views/SomeView.vue',
+        content: `<template>
+  <p>Don't</p>
+  <button @click="configStore.runSaveTxn((tx) => configStore.saveSplitRatio(0.5))" />
+</template>
+<script setup lang="ts">
+const configStore = useConfigStore()
+</script>`,
+      },
+    ])
+    expect(violations).toHaveLength(2)
+    expect(violations.some((v) => v.includes('不在白名单'))).toBe(true)
+    expect(violations.some((v) => v.includes('排队保存入口'))).toBe(true)
+  })
+
+  it('模板散文不产生指令违规；script 字符串只有 mention 级触发（rule 1 口径）', () => {
+    // 散文与 script 内的 @click 形字符串不含 runSaveTxn mention → 零违规：
+    // 指令表达式提取不会把 script 内字符串当模板指令
+    expect(
+      findViolations([
+        {
+          path: 'views/Doc.vue',
+          content: `<template><p>文档说 @click 会排队</p></template>
+<script setup lang="ts">
+const s = '@click="configStore.saveSplitRatio(0.5)"'
+</script>`,
+        },
+      ]),
+    ).toEqual([])
   })
 
   it('可选调用 saveSplitRatio?.(…) / updateEditorPrefs?.(…) 也算排队入口', () => {

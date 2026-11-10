@@ -288,6 +288,57 @@ import { x } from '@/services/config.service'
     expect(violations[0]).toContain('views/Z.vue:4:')
   })
 
+  it('规则A：闭合标签多空格（</script >）——真实解析器口径同样算边', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Aa.vue',
+        content: `<script setup lang="ts">
+import x from '@/services/real'
+</script >`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('规则A')
+  })
+
+  it('HTML 注释里的 script 示例不产生伪造违规', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Ab.vue',
+        content: `<!-- <script>import x from '@/services/fake'</script> -->
+<script setup>const ok = true</script>`,
+      },
+    ])
+    expect(violations).toEqual([])
+  })
+
+  it('规则A：合法正则字面量含 /* 不再截断后续源码（P2-5）', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Ac.ts',
+        content: `const r = /[/*]/
+import { x } from '@/services/config.service'`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('views/Ac.ts:2:')
+  })
+
+  it('P3：多行块注释掩码保留换行——违规行号落在真实行', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Ad.vue',
+        content: `<script setup lang="ts">
+/* first
+second */
+import { x } from '@/services/config.service'
+</script>`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('views/Ad.vue:4:')
+  })
+
   it('声明文件（.d.ts）同样在扫描面内', () => {
     const violations = findViolations([
       { path: 'views/types.d.ts', content: `import type { EditorPrefs } from '@/services/config.service'` },

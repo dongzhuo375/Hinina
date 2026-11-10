@@ -102,11 +102,14 @@ export function dynamicImportArgs(source) {
       }
       let i = end + 1
       while (i < source.length && /\s/.test(source[i])) i += 1
-      if (source[i] === '+') {
-        opaque.push({ index: match.index, snippet: `${quote}${raw}${quote} + …` })
+      // 说明符之后只允许 `)` 或 import options 的 `,`——任何其它 token（&& ||
+      // ?? + …）都说明这不是纯字面量，fail closed（`'a' && loadB` 的第一个串恒
+      // truthy，实际加载的是后面的模块，单读第一个串会假绿）。
+      if (source[i] === ')' || source[i] === ',') {
+        literal.push({ spec: raw, index: match.index })
         continue
       }
-      literal.push({ spec: raw, index: match.index })
+      opaque.push({ index: match.index, snippet: `${quote}${raw}${quote} …` })
       continue
     }
     const snippet = source.slice(match.index, Math.min(match.index + 48, source.length))
