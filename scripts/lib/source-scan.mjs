@@ -280,8 +280,9 @@ export function templateExpressions(source) {
  * Comment-stripped, gate-aware source for one file (offsets are stable).
  *
  * - `.vue`: script blocks (parser-extracted) are kept verbatim, everything else
- *   is masked. With `templateExpressions: true`（保存门禁），template directive
- *   expressions — executable code — are appended after the script body so the
+ *   is masked. With `templateExpressions: true`（保存门禁），template executable
+ *   expressions — directive bindings and interpolations (`{{ … }}`), extracted
+ *   from the template AST — are appended after the script body so the
  *   save gate can scan handlers; the layering gate keeps script-only scanning
  *   (imports cannot appear in template expressions).
  * - other extensions: comment-masked source as-is.
