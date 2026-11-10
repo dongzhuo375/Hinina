@@ -49,7 +49,7 @@ View / component / composable 访问**配置服务**（配置读取与缓存失�
 View/composable → useConfigStore()
   ├─ getter：settingsSaveInFlight / ojSwitchInFlight —— 读 configService 的 ref（computed 追踪，值翻转自动重估）
   ├─ action：ojSwitchEpoch() / settingsSaveEpoch() / latestOjSwitchResult() —— 普通字段逐次直读（无缓存）
-  └─ action：getConfig / switchOj / runSaveTxn((tx) => fn(tx)) / whenXxxSettled / ... —— 直透 service（保存队列/代际/最近结果仍由 service 持有）
+  └─ action：getConfig / switchOj / runSaveTxn(fn, options)（回调参数直传）/ whenXxxSettled / ... —— 直透 service（保存队列/代际/最近结果仍由 service 持有）
 ```
 
 ## 测试
