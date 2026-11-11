@@ -358,13 +358,17 @@ import { x } from '@/services/config.service'
     expect(violations).toHaveLength(1)
   })
 
-  it('转义字形不绕过：说明符按运行时值解码后再判定（\\u0063 / \\u0069）', () => {
-    // 静态、副作用、动态三种入口都走解码
+  it('转义字形不绕过：说明符按运行时值解码后再判定（Unicode / hex / 身份转义）', () => {
+    // 静态、副作用、动态三种入口都走解码；身份转义（\c → c、\i → i）同样是
+    // 运行时等价字形——首轮的 `\\(.)` 正则多写一个反斜杠，此形态曾漏报
     const cases = [
       String.raw`import { configService } from '@/servi\u0063es/config.service'`,
       String.raw`import '@/servi\u0063es/config.service'`,
       String.raw`const m = await import('@/servi\u0063es/config.service')`,
       String.raw`const b = await import('@/br\u0069dge')`,
+      String.raw`import { configService } from '@/servi\x63es/config.service'`,
+      String.raw`import { configService } from '@/servi\ces/config.service'`,
+      String.raw`const b = await import('@/br\idge')`,
     ]
     for (const content of cases) {
       const violations = findViolations([{ path: 'views/Esc.ts', content }])

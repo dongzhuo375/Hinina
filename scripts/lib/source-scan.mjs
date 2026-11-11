@@ -270,11 +270,12 @@ function keepRanges(source, ranges) {
 /**
  * Vue 模板可执行表达式提取（供保存门禁使用）：**指令表达式**（`@…` / `v-…` /
  * `:…` 绑定的 `exp`）与**插值**（`{{ … }}` 的 content）都是可执行代码，必须与
- * `<script>` 一起进入扫描面。提取走 `@vue/compiler-sfc` 的模板 AST（与框架
- * 同一解析结果）：HTML 注释（COMMENT 节点）与静态属性自然不在集合内，散文
- * 里的伪指令不再误报；偏移为文件绝对，直接切片。
+ * `<script>` 一起进入扫描面。提取走 `vue/compiler-sfc` 的模板 AST（与应用同一
+ * 解析器）：HTML 注释（COMMENT 节点）与静态属性自然不在集合内，散文里的伪指令
+ * 不再误报；偏移为文件绝对，直接切片。表达式切片随后经 `decodeHtmlEntities`
+ * 解码（`&#114;unSaveTxn` 运行时就是 runSaveTxn）。
  * 已知边界：指令的动态参数（`v-on:[event]`）不提取（Vue 编译器限制其形态，
- * 不含函数调用）；HTML 实体不展开。
+ * 不含函数调用）；命名实体的表只含常见集合（表外命名实体保持原样）。
  */
 export function templateExpressions(source) {
   const { descriptor } = parse(source, { filename: 'gate-input.vue' })
@@ -450,37 +451,59 @@ export function readBalanced(source, start, open, close) {
 /**
  * Decode string-literal escapes in a module specifier before the layer match.
  * `'@/servi\u0063es/config.service'` is `@/services/...` at runtime — the gate
- * must not go green on the raw spelling (review). Conservative: `\uXXXX`,
- * `\u{…}`, `\xXX`, `\\`, `\'`, `\"`, `\n`, `\r`, `\t`; anything else is left
- * verbatim (and therefore fails the layer match → conservative).
+ * must not go green on the raw spelling (review).
+ *
+ * Covers `\uXXXX`, `\u{…}`, `\xXX`, and **identity escapes** (`\c` → `c`,
+ * `\e` → `e`): JavaScript drops the backslash for any non-special character, so
+ * `'@/servi\ces/config.service'` is the service module too (round-ten review:
+ * simple escapes were the remaining bypass). Plus `\\`, quotes, `\b`, `\f`,
+ * `\v`, `\0`, `\n`, `\r`, `\t`. An unmatched `\u`/`\x` (invalid escape, file
+ * would not compile) stays verbatim — conservative.
  */
 export function decodeStringLiteral(raw) {
-  return raw.replace(/\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|\\(.))/g, (m, cp, u4, x2, simple) => {
+  // 前导 `\\` 已消耗掉那个反斜杠，末段只能是 `(.)`——写成 `\\(.)` 需要两个
+  // 反斜杠，身份转义（`\c`）永远不会命中（评审第十一轮：简单转义仍漏报）。
+  return raw.replace(/\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))/g, (m, cp, u4, x2, simple) => {
     if (cp !== undefined) {
       const code = Number.parseInt(cp, 16)
       return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m
     }
     if (u4 !== undefined) return String.fromCharCode(Number.parseInt(u4, 16))
     if (x2 !== undefined) return String.fromCharCode(Number.parseInt(x2, 16))
-    const map = { '\\': '\\', "'": "'", '"': '"', n: '\n', r: '\r', t: '\t' }
-    return map[simple] ?? m
+    const map = { '\\': '\\', "'": "'", '"': '"', n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', 0: '\0' }
+    if (simple in map) return map[simple]
+    if (simple === 'u' || simple === 'x') return m // 非法转义（源文件本就编译不过）
+    return simple // identity escape：反斜杠被 JS 丢弃
   })
 }
 
 const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
 
 /**
- * Decode HTML character references in template expression text. Vue decodes
- * entities before compiling, so `&#114;unSaveTxn(…)` inside `@click` is a real
+ * Decode HTML character references in template expression text. Vue compiles
+ * after entity decoding, so `&#114;unSaveTxn(…)` inside `@click` is a real
  * `runSaveTxn` call while the raw source spells something else (review: the
- * save gate must not go green on that). Numeric references plus the common
- * named set; unknown names stay verbatim (conservative).
+ * save gate must not go green on that).
+ *
+ * Mirrors **attribute-value** decoding (directives and interpolations are
+ * attribute / text content): numeric references decode with or without the
+ * semicolon (`&#114` and `&#x72` and `&#X72`), named references decode with a
+ * semicolon and — for the small legacy set here — also without one unless the
+ * next character is alphanumeric or `=` (`&amp` → `&`, `&ampx` → verbatim),
+ * exactly as the browser parser rules jsdom confirmed. Unknown names stay
+ * verbatim (conservative: a false miss only for named entities outside the
+ * table).
  */
 export function decodeHtmlEntities(text) {
-  return text.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z]+));/g, (m, dec, hex, name) => {
+  return text.replace(/&(?:#([0-9]+)|#[xX]([0-9a-fA-F]+)|([a-zA-Z][a-zA-Z0-9]*))(;?)/g, (m, dec, hex, name, semi, offset, whole) => {
     if (dec !== undefined) return String.fromCodePoint(Number.parseInt(dec, 10))
     if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16))
-    return NAMED_ENTITIES[name] ?? m
+    if (!(name in NAMED_ENTITIES)) return m
+    if (semi === ';') return NAMED_ENTITIES[name]
+    const next = whole[offset + m.length] ?? ''
+    // 属性语境：无分号的 legacy 实体后接字母数字/等号时浏览器不解码
+    if (/[A-Za-z0-9=]/.test(next)) return m
+    return NAMED_ENTITIES[name]
   })
 }
 

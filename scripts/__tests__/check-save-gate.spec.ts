@@ -492,19 +492,37 @@ const configStore = useConfigStore()
     expect(violations).toEqual([])
   })
 
-  it('模板里的 HTML 实体不隐藏调用（&#114;unSaveTxn 解码后是 runSaveTxn）', () => {
-    const violations = findViolations([
-      {
-        path: 'views/EntityView.vue',
-        content: `<template>
-  <button @click="configStore.&#114;unSaveTxn((tx) => configStore.saveSplitRatio(0.8))" />
+  it('模板里的 HTML 实体不隐藏调用（带/不带分号、十进制/十六进制、插值同样）', () => {
+    // 属性语境的浏览器解码规则：数字引用无论有无分号都解码——无分号变体
+    // 曾零违规（评审第十一轮）
+    const handlers = [
+      'configStore.&#114;unSaveTxn((tx) => configStore.saveSplitRatio(0.8))',
+      'configStore.&#114unSaveTxn((tx) => configStore.saveSplitRatio(0.8))',
+      'configStore.&#x72unSaveTxn((tx) => configStore.saveSplitRatio(0.8))',
+    ]
+    for (const handler of handlers) {
+      const violations = findViolations([
+        {
+          path: 'views/EntityView.vue',
+          content: `<template>
+  <button @click="${handler}" />
 </template>
+<script setup lang="ts">const configStore = useConfigStore()</script>`,
+        },
+      ])
+      expect(violations, handler).toHaveLength(2)
+      expect(violations.some((v) => v.includes('不在白名单')), handler).toBe(true)
+      expect(violations.some((v) => v.includes('排队保存入口')), handler).toBe(true)
+    }
+    // 插值同样解码
+    const interp = findViolations([
+      {
+        path: 'views/EntityInterp.vue',
+        content: `<template><div>{{ configStore.&#114unSaveTxn((tx) => configStore.saveSplitRatio(0.8)) }}</div></template>
 <script setup lang="ts">const configStore = useConfigStore()</script>`,
       },
     ])
-    expect(violations).toHaveLength(2)
-    expect(violations.some((v) => v.includes('不在白名单'))).toBe(true)
-    expect(violations.some((v) => v.includes('排队保存入口'))).toBe(true)
+    expect(interp).toHaveLength(2)
   })
 
   it('回调正文里的 /[}]/ 不截断事务回调（readBalanced 正则感知）', () => {
