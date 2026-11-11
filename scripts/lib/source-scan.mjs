@@ -23,7 +23,15 @@
 //     nature; keep exotic shapes out of scanned sources or disclose them here.
 //     Control-statement closing parens (`if`/`for`/`while`/`switch`/`catch`)
 //     are regex context: `/` after them starts a regex, not a division —
-//     `if (ok) /[/*]/.test(v)` scans intact.
+//     `if (ok) /[/*]/.test(v)` scans intact. Member calls are excluded
+//     (`promise.catch(h)` — the word is preceded by `.`, so its closing paren
+//     stays a value boundary; without the guard the `/` would be consumed as a
+//     regex, which is fail-closed but noisy). Why the direction is safe: a
+//     mis-detected regex is consumed VRBATIM (offsets/content unchanged), so the
+//     failure mode is comment residue → a false positive, never a silent miss.
+//   - Template expressions (directive bindings / interpolations) are appended
+//     WITHOUT comment stripping: they are expression fragments, and any `//`
+//     inside them can only add scan text (conservative direction).
 //   - For `.vue` files the `<script>` / `<script setup>` blocks are extracted
 //     with the REAL SFC parser (`@vue/compiler-sfc` `parse`) — not regexes — so
 //     whitespace before `>` in a closing tag, HTML-commented script examples and
@@ -56,6 +64,7 @@ export function stripComments(source) {
   let i = 0
   let prevChar = '' // last meaningful (non-whitespace) code char seen
   let prevWord = '' // last identifier/keyword token, '' if prevChar isn't a word char
+  let prevWordIsMember = false // 上一个词前紧邻 `.`（成员访问，不是关键词语境）
   // 括号栈：记录每个 `(` 是否为控制语句条件括号（if/for/while/switch/catch 后）。
   // 控制括号的闭括号之后是语句起点，随后的 `/` 是正则；分组括号的闭括号是值，
   // 随后的 `/` 是除法（评审第七轮 P2：`if (ok) /[/*]/.test(value)` 曾被截断）。
@@ -69,6 +78,10 @@ export function stripComments(source) {
   const emitWord = (from, to) => {
     out += source.slice(from, to)
     prevWord = source.slice(from, to)
+    // 成员访问的 `catch`（`promise.catch(h)`）不是控制语句：前面那个 `.` 让
+    // 括号不被压成「条件语境」，否则 `p.catch(h)` 的 `/` 会被当正则消费
+    //（方向是 fail closed（注释残留→假阳），但仍应消除）。
+    prevWordIsMember = source[from - 1] === '.'
   }
   while (i < source.length) {
     const ch = source[i]
@@ -161,7 +174,7 @@ export function stripComments(source) {
     }
     if (ch === '(') {
       out += ch
-      parenStack.push(CONTROL_KEYWORDS.has(prevWord))
+      parenStack.push(CONTROL_KEYWORDS.has(prevWord) && !prevWordIsMember)
       prevChar = ch
       prevWord = ''
       i += 1

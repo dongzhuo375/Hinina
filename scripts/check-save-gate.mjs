@@ -149,9 +149,35 @@ export function callbackFromArgs(args) {
   return { body: null, ref: null }
 }
 
+/// 定义尾形态判定：参数闭括号之后（同行）是方法体 `{` 或返回注解 `: … {`。
+/// 调用表达式之后不可能出现这两种形态（`foo(x) {` 不是合法调用），因此用它
+/// 区分「定义」与「显式泛型调用」——旧实现按字面 `<T>` 跳定义，会把
+/// `runSaveTxn<T>(cb)` 调用一并静默跳过（白名单文件内的真实残留面）。
+function isDefinitionTail(source, closeParenIndex) {
+  let i = closeParenIndex + 1
+  while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i += 1
+  if (source[i] === '\n' || source[i] === '\r') return false
+  if (source[i] === '{') return true
+  if (source[i] !== ':') return false
+  let depth = 0
+  i += 1
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '\n') return false
+    if (ch === '(' || ch === '[' || ch === '<') depth += 1
+    else if (ch === ')' || ch === ']' || ch === '>') depth = Math.max(0, depth - 1)
+    else if (ch === '{' && depth === 0) return true
+    else if ((ch === '=' || ch === ';') && depth === 0) return false
+    i += 1
+  }
+  return false
+}
+
 /**
  * Every `runSaveTxn(...)` **call site** with its argument text and the extracted
- * callback. The definition (`async runSaveTxn<T>(`) is skipped. `body === null`
+ * callback. Method **definitions** are skipped by shape (params followed by a
+ * body or a return annotation — see `isDefinitionTail`), so explicit generic
+ * calls (`runSaveTxn<T>(cb)`) are scanned like any other call. `body === null`
  * is meaningful: `ref` is a same-file function name, or both are null for a
  * form the gate cannot analyze (fail closed in `findViolations`).
  */
@@ -163,8 +189,7 @@ export function txnCallSites(source) {
     const hit = source.indexOf(needle, from)
     if (hit === -1) break
     from = hit + needle.length
-    if (source.slice(from, from + 3) === '<T>') continue // definition
-    const afterName = source.slice(from).match(/^\s*\(/)
+    const afterName = source.slice(from).match(/^\s*(?:<[^<>()]*>)?\s*\(/)
     if (!afterName) {
       // 名字出现了但不是可解析的调用（别名/赋值/文本……）——fail closed
       sites.push({ index: hit, args: '', body: null, ref: null })
@@ -176,6 +201,7 @@ export function txnCallSites(source) {
       sites.push({ index: hit, args: '', body: null, ref: null })
       continue
     }
+    if (isDefinitionTail(source, openParen + args.length + 1)) continue
     sites.push({ index: hit, args, ...callbackFromArgs(args) })
   }
   return sites

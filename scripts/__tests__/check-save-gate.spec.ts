@@ -3,6 +3,7 @@ import {
   TXN_ALLOWLIST,
   findViolations,
   loadSources,
+  txnCallSites,
   txnCallbackBodies,
 } from '../../scripts/check-save-gate.mjs'
 
@@ -402,6 +403,30 @@ await configService.runSaveTxn(sharedSaveHandler)`,
     ])
     expect(moduleConst.length).toBeGreaterThanOrEqual(1)
     expect(moduleConst.some((v) => v.includes('无法静态分析'))).toBe(true)
+  })
+
+  it('显式泛型调用 runSaveTxn<T>(cb) 被扫描（定义按形态跳过，不再按字面 <T>）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `await configService.runSaveTxn<void>((tx) => {
+          configService.saveSplitRatio(0.5)
+          return tx.updateConfig(() => {})
+        })`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+    // 定义形态（含返回注解）不算调用点
+    expect(
+      txnCallSites(`async runSaveTxn<T>(
+  fn,
+  options = {},
+): Promise<T> {
+  return x(fn)
+}`),
+    ).toHaveLength(0)
+    expect(txnCallSites('runSaveTxn<T>(fn, options = {}) { return configService.runSaveTxn(fn, options) }')).toHaveLength(1)
   })
 
   it('参数直传豁免限定文件：其它白名单文件里的同名方法形态仍 fail closed', () => {

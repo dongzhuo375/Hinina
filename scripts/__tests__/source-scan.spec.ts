@@ -82,6 +82,31 @@ const a = 1
   })
 })
 
+describe('source-scan — 正则字面量与控制括号', () => {
+  it('正则字面量原样保留（字符类里的 /* 与 // 不截断源码）', () => {
+    const src = `const r = /[/*]/
+const u = /a\\/b/
+import { x } from 'y'`
+    const out = stripComments(src)
+    expect(out).toHaveLength(src.length)
+    expect(out).toContain('/[/*]/')
+    expect(out).toContain("import { x } from 'y'")
+  })
+
+  it('成员调用的 catch 不算控制语境（promise.catch(h) 后是除法）', () => {
+    const src = `promise.catch(h) / 2
+import { x } from 'y'`
+    const out = stripComments(src)
+    expect(out).toHaveLength(src.length)
+    expect(out).toContain('.catch(h) / 2')
+  })
+
+  it('控制语句的 catch 仍是正则语境（catch (e) /[/*]/…）', () => {
+    const out = stripComments('try { x() } catch (e) /[/*]/.test(s)')
+    expect(out).toContain('/[/*]/')
+  })
+})
+
 describe('source-scan — lineOfIndex', () => {
   it('1-based 行号，跨多行正确', () => {
     const src = 'a\nb\nc'
