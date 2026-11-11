@@ -227,10 +227,20 @@ function isRegexStart(prevChar, prevWord) {
  */
 export function vueScriptRanges(source) {
   let descriptor
+  let errors
   try {
-    descriptor = parse(source, { filename: 'gate-input.vue' }).descriptor
+    const parsed = parse(source, { filename: 'gate-input.vue' })
+    descriptor = parsed.descriptor
+    errors = parsed.errors ?? []
   } catch (error) {
     throw new Error(`SFC 解析失败（fail closed）: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  // `parse()` 通常把错误放进返回值而不是 throw——只 catch throw 会让门禁在
+  // 部分 AST 上继续扫（评审 P4：注释声称的 fail closed 不成立）
+  if (errors.length > 0) {
+    const first = errors[0]
+    const message = first instanceof Error ? first.message : String(first?.message ?? first)
+    throw new Error(`SFC 解析错误（fail closed，共 ${errors.length} 条）: ${message}`)
   }
   const ranges = []
   for (const block of [descriptor.script, descriptor.scriptSetup]) {
@@ -289,6 +299,12 @@ export function templateExpressions(source) {
     if (node.type === 7 && node.exp?.loc) locs.push([node.exp.loc.start.offset, node.exp.loc.end.offset])
     // 5 = INTERPOLATION：content 是插值表达式
     else if (node.type === 5 && node.content?.loc) locs.push([node.content.loc.start.offset, node.content.loc.end.offset])
+    // 动态指令参数 `@[expr]="handler"` / `v-slot:[expr]`：arg 是**可执行表达式**
+    //（`isStatic === false`）。只收 exp 会漏掉它——`@[runSaveTxn(h)]="go"` 在
+    // 运行时是一次真实调用（评审 P2）
+    if (node.type === 7 && node.arg && node.arg.isStatic === false && node.arg.loc) {
+      locs.push([node.arg.loc.start.offset, node.arg.loc.end.offset])
+    }
     for (const child of node.children ?? []) walk(child)
     // 指令住在元素的 props 里（children 之外），必须单独遍历
     for (const prop of node.props ?? []) walk(prop)
@@ -306,11 +322,12 @@ export function templateExpressions(source) {
  * Comment-stripped, gate-aware source for one file (offsets are stable).
  *
  * - `.vue`: script blocks (parser-extracted) are kept verbatim, everything else
- *   is masked. With `templateExpressions: true`（保存门禁），template executable
- *   expressions — directive bindings and interpolations (`{{ … }}`), extracted
- *   from the template AST — are appended after the script body so the
- *   save gate can scan handlers; the layering gate keeps script-only scanning
- *   (imports cannot appear in template expressions).
+ *   is masked. With `templateExpressions: true`（两个门禁都开），template
+ *   executable expressions — directive bindings, dynamic directive arguments
+ *   and interpolations (`{{ … }}`), extracted from the template AST — are
+ *   appended after the script body. The layering gate needs them too: a
+ *   dynamic `import()` is a legal template expression
+ *   (`@click="import('@/services/x')"` compiles to a real call).
  * - other extensions: comment-masked source as-is.
  */
 export function prepareSource(path, content, { templateExpressions: includeTemplateExpressions = false } = {}) {
@@ -333,6 +350,78 @@ export function lineOfIndex(source, index) {
     if (source[i] === '\n') line += 1
   }
   return line
+}
+
+/**
+ * Read a JavaScript string literal starting at `quoteIndex` (the opening quote).
+ *
+ * Honors backslash escapes — so `'@/foo\'bar/services/x'` does not terminate at
+ * the escaped quote, and only the **starting** delimiter closes the literal, so
+ * `"@/foo'bar/services/x"` keeps its apostrophe. Preserves escape sequences
+ * verbatim in `raw` (decode them with `decodeStringLiteral`); line continuations
+ * survive here and are removed by the decoder. Returns `{ raw, end }` or `null`
+ * when the literal is unterminated or a single/double-quoted literal contains a
+ * raw newline — callers must fail closed on `null` (review: regex `[^'"]+`
+ * capture stopped at the *other* quote type and at escaped quotes, so three
+ * specifier shapes went green).
+ */
+export function readStringLiteral(source, quoteIndex) {
+  const quote = source[quoteIndex]
+  if (quote !== "'" && quote !== '"' && quote !== '`') return null
+  let i = quoteIndex + 1
+  let raw = ''
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '\\') {
+      // 行续接的 CRLF 要整段吞掉：只吃 `\` + `\r` 会把裸 `\n` 留在字面量里，
+      // 被下面的「单/双引号不允许裸换行」判成未闭合（CRLF 夹具曾因此漏报）
+      if (source[i + 1] === '\r' && source[i + 2] === '\n') {
+        raw += '\\\r\n'
+        i += 3
+        continue
+      }
+      raw += ch + (source[i + 1] ?? '')
+      i += 2
+      continue
+    }
+    if (ch === quote) return { raw, end: i + 1 }
+    if (ch === '\n' && quote !== '`') return null
+    raw += ch
+    i += 1
+  }
+  return null
+}
+
+/**
+ * Read a balanced `<...>` generic argument/parameter list starting at `start`
+ * (the opening `<`). Nested generics (`Array<Map<string, T>>`) and string
+ * literals inside the list are handled; returns the index just past the closing
+ * `>` or `null` when unbalanced. Used for call-name extraction — the old
+ * `<[^<>()]*>` pattern stopped at the inner `<` and silently dropped
+ * `persist<Array<string>>(…)` from the called-name set (review P3).
+ */
+export function readAngles(source, start) {
+  if (source[start] !== '<') return null
+  let depth = 0
+  let i = start
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const literal = readStringLiteral(source, i)
+      if (literal === null) return null
+      i = literal.end
+      continue
+    }
+    if (ch === '<') depth += 1
+    else if (ch === '>') {
+      depth -= 1
+      if (depth === 0) return i + 1
+    } else if (ch === '\n' && depth === 0) {
+      return null
+    }
+    i += 1
+  }
+  return null
 }
 
 /**

@@ -540,6 +540,60 @@ const configStore = useConfigStore()
     expect(violations[0]).toContain('排队保存入口')
   })
 
+  it('动态指令参数（@[expr]）进入扫描面', () => {
+    const violations = findViolations([
+      {
+        path: 'views/DynArg.vue',
+        content: `<template><button @[runSaveTxn(handler)]="go" /></template>
+<script setup lang="ts">const go = () => {}</script>`,
+      },
+    ])
+    expect(violations.length).toBeGreaterThanOrEqual(1)
+    expect(violations.some((v) => v.includes('不在白名单'))).toBe(true)
+  })
+
+  it('三元表达式里调用后跟 `: { … }` 不被误判为方法定义（成员调用无定义尾）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `const result = flag
+  ? configService.runSaveTxn((tx) => configService.saveSplitRatio(0.5)) : { fallback: true }`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+  })
+
+  it('function 回调体内含嵌套箭头时正文不被劫持（function 头先判定）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `await configService.runSaveTxn(async function doSave(tx) {
+  await configService.saveSplitRatio(0.5)
+  const nested = () => null
+  return nested
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+  })
+
+  it('嵌套泛型调用名同样被追踪（persist<Array<string>>）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `function persist<T>(value: T) { return configService.saveSplitRatio(0.5) }
+await configService.runSaveTxn((tx) => {
+  persist<Array<string>>([])
+  return tx.updateConfig(() => {})
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('persist')
+  })
+
   it('模板散文不产生指令违规；script 字符串只有 mention 级触发（rule 1 口径）', () => {
     // 散文与 script 内的 @click 形字符串不含 runSaveTxn mention → 零违规：
     // 指令表达式提取不会把 script 内字符串当模板指令

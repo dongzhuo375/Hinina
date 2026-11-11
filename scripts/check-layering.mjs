@@ -39,9 +39,15 @@
 // `src/App.vue`, over `.ts` / `.tsx` / `.js` / `.jsx` / `.mjs` / `.cjs` /
 // `.vue` — `.d.ts` included (a declaration file importing the service layer is
 // still a view-side edge). `__tests__/` and `test-support/` are excluded. `.vue`
-// files are scanned through their `<script>` blocks only (template prose never
-// reaches the import matcher). A misplaced service file under those directories
-// is therefore scanned — fail-closed on the surface, not just on the matcher.
+// files are scanned through their `<script>` blocks **plus the template's
+// executable expressions** (directive bindings, dynamic directive arguments,
+// interpolations): template prose never reaches the import matcher, but a
+// dynamic `import()` IS a legal template expression and compiles to a real call
+// (`@click="import('@/services/x')"`). Specifiers are read with the shared
+// string-literal reader (escape- and delimiter-aware), so `"a'b/services/x"` and
+// `'a\'b/services/x'` keep their full path. A misplaced service file under
+// those directories is therefore scanned — fail-closed on the surface, not just
+// on the matcher.
 //
 // Known limits, stated: string literals are preserved by the stripper, so a
 // *string-literal text* such as `const s = "from '@/services/x'"` is guarded
@@ -60,6 +66,7 @@ import {
   decodeStringLiteral,
   lineOfIndex,
   prepareSource,
+  readStringLiteral,
   walkSources,
 } from './lib/source-scan.mjs'
 
@@ -92,36 +99,60 @@ export function dynamicImportArgs(source) {
   const opaque = []
   for (const match of source.matchAll(/(?<![.\w$'"`])import\s*\(\s*/g)) {
     const argStart = match.index + match[0].length
-    const quote = source[argStart]
-    if (quote === "'" || quote === '"' || quote === '`') {
-      const end = source.indexOf(quote, argStart + 1)
-      if (end === -1) {
-        opaque.push({ index: match.index, snippet: `${quote}…（未闭合）` })
-        continue
-      }
-      const raw = source.slice(argStart + 1, end)
-      if (quote === '`' && raw.includes('${')) {
-        opaque.push({ index: match.index, snippet: '`…${…}…`' })
-        continue
-      }
-      let i = end + 1
-      while (i < source.length && /\s/.test(source[i])) i += 1
-      // 说明符之后只允许 `)` 或 import options 的 `,`——任何其它 token（&& ||
-      // ?? + …）都说明这不是纯字面量，fail closed（`'a' && loadB` 的第一个串恒
-      // truthy，实际加载的是后面的模块，单读第一个串会假绿）。
-      if (source[i] === ')' || source[i] === ',') {
-        // 字符串字面量的转义在运行时生效：`@/services/…` 就是 services，
-        // 按原文匹配会假绿——解码后再进入层判定（评审 P2）
-        literal.push({ spec: decodeStringLiteral(raw), index: match.index })
-        continue
-      }
-      opaque.push({ index: match.index, snippet: `${quote}${raw}${quote} …` })
+    // 字符串字面量用共享读取器（尊重转义与起始定界符）——`indexOf(quote)`
+    // 会在转义引号处提前收尾，把恶意路径的 `/services/` 段留在字面量之外
+    //（评审 P2：`import('@/safe\')/services/…')` 曾假绿）
+    const literalRead = readStringLiteral(source, argStart)
+    if (literalRead === null) {
+      const snippet = source.slice(match.index, Math.min(match.index + 48, source.length))
+      opaque.push({ index: match.index, snippet: `${snippet.replace(/\s+/g, ' ')}…` })
       continue
     }
-    const snippet = source.slice(match.index, Math.min(match.index + 48, source.length))
-    opaque.push({ index: match.index, snippet: `${snippet.replace(/\s+/g, ' ')}…` })
+    const { raw, end } = literalRead
+    const quote = source[argStart]
+    if (quote === '`' && raw.includes('${')) {
+      opaque.push({ index: match.index, snippet: '`…${…}…`' })
+      continue
+    }
+    let i = end
+    while (i < source.length && /\s/.test(source[i])) i += 1
+    // 说明符之后只允许 `)` 或 import options 的 `,`——任何其它 token（&& ||
+    // ?? + …）都说明这不是纯字面量，fail closed（`'a' && loadB` 的第一个串恒
+    // truthy，实际加载的是后面的模块，单读第一个串会假绿）。
+    if (source[i] === ')' || source[i] === ',') {
+      // 字符串字面量的转义在运行时生效：`@/servi\u0063es/…` 就是 services，
+      // 按原文匹配会假绿——解码后再进入层判定（评审 P2）
+      literal.push({ spec: decodeStringLiteral(raw), index: match.index })
+      continue
+    }
+    opaque.push({ index: match.index, snippet: `${quote}${raw}${quote} …` })
   }
   return { literal, opaque }
+}
+
+/**
+ * Every module specifier of a file, read with the shared string-literal reader
+ * so quote boundaries follow JavaScript semantics: an escaped delimiter does not
+ * end the literal and only the **starting** delimiter closes it (`"a'b/…"` keeps
+ * its apostrophe). Static `from`, side-effect `import` and dynamic `import(…)`
+ * share the reader; an unreadable literal is reported as opaque (fail closed).
+ */
+export function moduleSpecifiers(source) {
+  const findings = []
+  const opaque = []
+  for (const match of source.matchAll(/(?<![.\w$'"`])(from|import)\b\s*/g)) {
+    const keyword = match[1]
+    const afterKeyword = match.index + match[0].length
+    if (keyword === 'import') {
+      // `import(...)` is handled by dynamicImportArgs; `import.meta` / `import {`
+      // / `import type` carry no specifier here (the `from` keyword does).
+      if (source[afterKeyword] === '(') continue
+    }
+    const literalRead = readStringLiteral(source, afterKeyword)
+    if (literalRead === null) continue // 不是字符串位置（`from` 作标识符等）
+    findings.push({ spec: decodeStringLiteral(literalRead.raw), index: match.index })
+  }
+  return { findings, opaque }
 }
 
 /**
@@ -132,20 +163,10 @@ export function dynamicImportArgs(source) {
 export function findViolations(files) {
   const violations = []
   for (const { path, content } of files) {
-    const source = prepareSource(path, content)
-    const findings = []
-    // Keywords must not be preceded by a property dot / word char / quote: the
-    // dot blocks `x.from`, the word char blocks `myimport`, the quote keeps
-    // string-literal prose (`"from '@/services/x'"`) out of the matcher.
-    for (const match of source.matchAll(/(?<![.\w$'"`])from\s*['"]([^'"]+)['"]/g)) {
-      // 转义解码后再判定（`@/services/…` 运行时就是 services）
-      findings.push({ spec: decodeStringLiteral(match[1]), index: match.index })
-    }
-    for (const match of source.matchAll(/(?<![.\w$'"`])import\s*['"]([^'"]+)['"]/g)) {
-      // 副作用 import（`import '<spec>'`）；`x.import(...)` 被 lookbehind 挡掉，
-      // `import(...)` 走下面的动态分支
-      findings.push({ spec: decodeStringLiteral(match[1]), index: match.index })
-    }
+    // 模板可执行表达式也要扫：动态 `import()` 是合法模板表达式
+    //（`@click="import('@/services/x')"` 编译成真实调用——评审 P2）
+    const source = prepareSource(path, content, { templateExpressions: true })
+    const findings = moduleSpecifiers(source).findings
     const dynamic = dynamicImportArgs(source)
     findings.push(...dynamic.literal)
     for (const { index, snippet } of dynamic.opaque) {

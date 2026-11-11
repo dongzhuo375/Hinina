@@ -77,6 +77,7 @@
 import { pathToFileURL } from 'node:url'
 import {
   prepareSource,
+  readAngles,
   readBalanced,
   stripComments,
   walkSources,
@@ -117,6 +118,20 @@ const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\s*(?:\?\.)
  * @returns {{ body: string | null, ref: string | null }}
  */
 export function callbackFromArgs(args) {
+  // `function` 头必须先判定：先找任意 `=>` 会被回调体内部的嵌套箭头劫持
+  //（`async function doSave(tx) { … const nested = () => null }` 会截出错误正文，
+  // 排队入口因此漏扫——评审 P3）
+  const fnHead = args.match(/^\s*(?:async\s+)?function\b/)
+  if (fnHead) {
+    const open = args.indexOf('(', fnHead[0].length)
+    const params = open === -1 ? null : readBalanced(args, open, '(', ')')
+    if (params !== null) {
+      const brace = args.indexOf('{', open + params.length + 2)
+      const body = brace === -1 ? null : readBalanced(args, brace, '{', '}')
+      return { body, ref: null }
+    }
+    return { body: null, ref: null }
+  }
   const arrow = args.indexOf('=>')
   if (arrow !== -1) {
     const rest = args.slice(arrow + 2)
@@ -131,17 +146,6 @@ export function callbackFromArgs(args) {
       // 偏保守（多扫不误放），无需精确切分。
       return { body: tail, ref: null }
     }
-  }
-  const fnHead = args.match(/^\s*(?:async\s+)?function\b/)
-  if (fnHead) {
-    const open = args.indexOf('(', fnHead[0].length)
-    const params = open === -1 ? null : readBalanced(args, open, '(', ')')
-    if (params !== null) {
-      const brace = args.indexOf('{', open + params.length + 2)
-      const body = brace === -1 ? null : readBalanced(args, brace, '{', '}')
-      return { body, ref: null }
-    }
-    return { body: null, ref: null }
   }
   // 裸标识符（可带第二参数）：由调用方在同文件函数表里解析
   const refMatch = args.match(/^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/)
@@ -201,7 +205,12 @@ export function txnCallSites(source) {
       sites.push({ index: hit, args: '', body: null, ref: null })
       continue
     }
-    if (isDefinitionTail(source, openParen + args.length + 1)) continue
+    // 成员调用（`configService.runSaveTxn(…)`）不可能是方法定义：三元表达式
+    // 里调用后可以跟 `: { … }` 对象字面量，按尾形态会把它误判成「返回注解 +
+    // 方法体」而跳过整个调用点（评审 P2）。定义只可能是裸名（`async runSaveTxn`）
+    // 或对象/类成员（行首裸名）。
+    const isMemberCall = hit > 0 && source[hit - 1] === '.'
+    if (!isMemberCall && isDefinitionTail(source, openParen + args.length + 1)) continue
     sites.push({ index: hit, args, ...callbackFromArgs(args) })
   }
   return sites
@@ -223,12 +232,28 @@ const NOT_CALLS = new Set([
 ])
 
 /// 提取正文里被调用的标识符（`name(` / `name?.(` / `name<T>(`），排除关键字。
+/// 泛型实参用平衡读取（`readAngles`）——旧正则 `<[^<>()]*>` 在内层 `<` 处停下，
+/// `persist<Array<string>>(…)` 不进集合、传递路径漏追（评审 P3）。
 export function calledNames(body) {
   const names = new Set()
-  const re = /\b([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*(?:<[^<>()]*>)?\s*\(/g
+  const idRe = /\b([A-Za-z_$][\w$]*)/g
   let match
-  while ((match = re.exec(body))) {
-    if (!NOT_CALLS.has(match[1])) names.add(match[1])
+  while ((match = idRe.exec(body))) {
+    const name = match[1]
+    let i = match.index + name.length
+    while (i < body.length && /\s/.test(body[i])) i += 1
+    // 可选调用 `?.`
+    if (body[i] === '?' && body[i + 1] === '.') {
+      i += 2
+      while (i < body.length && /\s/.test(body[i])) i += 1
+    }
+    if (body[i] === '<') {
+      const end = readAngles(body, i)
+      if (end === null) continue // 无法解析的泛型形态：不作为调用名（方向保守）
+      i = end
+      while (i < body.length && /\s/.test(body[i])) i += 1
+    }
+    if (body[i] === '(' && !NOT_CALLS.has(name)) names.add(name)
   }
   return names
 }

@@ -393,6 +393,51 @@ import { x } from '@/services/config.service'`,
     expect(violations).toHaveLength(1)
     expect(violations[0]).toContain('views/Exp.ts:2:')
   })
+
+  it('规则A：模板表达式里的动态 import 同样算边（"imports cannot appear" 只对静态成立）', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Tpl.vue',
+        content: `<template><button @click="import('@/services/config.service')">load</button></template>
+<script setup lang="ts">const ready = true</script>`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('规则A')
+    // 插值里的动态 bridge import 同样命中（规则B）
+    const bridge = findViolations([
+      {
+        path: 'views/TplB.vue',
+        content: `<template><div>{{ import('@/bridge') }}</div></template>
+<script setup lang="ts">const a = 1</script>`,
+      },
+    ])
+    expect(bridge).toHaveLength(1)
+    expect(bridge[0]).toContain('规则B')
+  })
+
+  it('说明符按字符串语义定界：异种引号、转义定界符都不截断（静态与动态）', () => {
+    const cases = [
+      // 双引号串里的单引号属于路径
+      `import { x } from "@/foo'bar/services/config.service"`,
+      // 单引号串里转义的同种定界符
+      "import { x } from '@/foo\\'bar/services/config.service'",
+      // 动态 import 的转义定界符：benign 前缀之后的 /services/ 段必须被读到
+      "const m = import('@/safe\\')/services/config.service')",
+    ]
+    for (const content of cases) {
+      const violations = findViolations([{ path: 'views/Quote.ts', content }])
+      expect(violations, content).toHaveLength(1)
+    }
+  })
+
+  it('未闭合或无法读取的字符串字面量按动态 import 违规 fail closed', () => {
+    const violations = findViolations([
+      { path: 'views/Unterminated.ts', content: "const m = import('@/services/x" },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('无法静态分析')
+  })
 })
 
 describe('check-layering — 真实源码树', () => {
