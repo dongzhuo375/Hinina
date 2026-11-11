@@ -35,7 +35,7 @@
 - 组件：`CodeEditor`（v-model 代码、语言双向绑定、Ctrl+Enter submit 复用）
 - `@/utils/focus-scope`（`vFocusScope` —— 对话框焦点陷阱与 Esc 关闭）
 - stores：`contestStore`（contestId，`whenLoaded` 兜底）、`submissionStore`（`submitCode` / `pendingFor` / `submissions` / `isSubmitting` / `error`）、`workspaceStore`（仅读 `language` 作默认值）
-- `@/stores/problemStore`（允许语言列表；2026-11-09 严格分层收编，原 `@/services/problem.service` 直连改经 store 转发）
+- `@/stores/problemStore`（允许语言列表；（纯转发 `problem.service`））
 - `@/types/contest`（仅类型）
 - `@/utils/language`（`DEFAULT_LANGUAGE` / `DEFAULT_LANGUAGES` / `hojLanguageOfFileName` / `resolveAllowedLanguage` / `SOURCE_FILE_EXTENSIONS`）
 - `@/utils/submission`（`formatMemoryKb` / `isTerminalStatus` / `statusLabel` / `statusTone`）

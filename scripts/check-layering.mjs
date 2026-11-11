@@ -32,8 +32,11 @@
 //
 // Dynamic imports are only checkable when the specifier is statically visible:
 // a plain string literal or a backtick literal without `${}`. Every other form
-// (identifier, concatenation, interpolated template) **fails closed** with a
-// violation — the gate must not go green on a specifier it cannot read.
+// (identifier, concatenation, interpolated template, glob array)
+// **fails closed** with a violation — the gate must not go green on a specifier
+// it cannot read. The same rule covers `import.meta.glob(...)` /
+// `globEager(...)`: Vite compiles them into lazy imports, so they are real
+// View→Service edges (review P1).
 //
 // Scan surface: `views/`, `components/`, `composables/` (recursively) plus
 // `src/App.vue`, over `.ts` / `.tsx` / `.js` / `.jsx` / `.mjs` / `.cjs` /
@@ -49,10 +52,11 @@
 // those directories is therefore scanned — fail-closed on the surface, not just
 // on the matcher.
 //
-// Known limits, stated: string literals are preserved by the stripper, so a
-// *string-literal text* such as `const s = "from '@/services/x'"` is guarded
-// only by the quote-lookbehind (no such form in the current tree — keep prose
-// examples in comments); `require()` is not scanned (ESM-only codebase).
+// Known limits, stated: string literals are preserved by the stripper, so
+// **import-shaped text inside a string literal is scanned** — a string such as
+// `'x from "@/services/y"'` reports a violation (false positive, fail-closed
+// direction; keep prose examples in comments). `require()` is not scanned
+// (ESM-only codebase).
 //
 // Stores/services/guards/router/main.ts are deliberately out of scope: they
 // sit on other rungs of the ladder (Store → Service → Bridge is legal; the
@@ -66,17 +70,24 @@ import {
   buildLineIndex,
   decodeStringLiteral,
   lineOfIndex,
-  prepareSource,
+  parseSfc,
   readStringLiteral,
+  scriptSurfaceOf,
+  stripComments,
+  templateExpressionEntries,
   walkSources,
 } from './lib/source-scan.mjs'
 
 /** Scan roots (relative to `src/`, forward slashes) + the single root component. */
 export const SCAN_ROOTS = ['views', 'components', 'composables']
+/// 横向模块：不在 View 链上，但可以成为 **View→Service 的中转**（`utils/x.ts`
+/// 里 `export { configService } from '@/services/…'`，view 只 import 中转文件
+/// 就绕过了规则 A）。只对它们应用规则 A（规则 B 的红线仍只列 View/component）。
+export const TRANSIT_ROOTS = ['utils', 'types']
 export const ROOT_FILES = ['App.vue']
 /// Every script-ish extension under the scan roots is scanned, declarations
 /// included (see header).
-export const SOURCE_EXTENSIONS = /\.(?:d\.ts|ts|tsx|js|jsx|mjs|cjs|vue)$/
+export const SOURCE_EXTENSIONS = /\.(?:d\.ts|ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$/
 
 /// Rule A: specifiers that resolve into the service layer — including the bare
 /// directory barrel (`from '@/services'`), symmetric with BRIDGE_SPEC below.
@@ -85,20 +96,27 @@ const SERVICE_SPEC = /(?:^|\/)services(?:\/|$)/
 const BRIDGE_SPEC = /(?:^|\/)bridge(?:\/|$)/
 
 /// Rule A applies to every scanned scope; rule B excludes composables
-/// (the registered red line names View / component only).
+/// (the registered red line names View / component only) and the transit
+/// roots (utils/types are not on the View chain).
 function ruleBEnabled(relPath) {
-  return !relPath.startsWith('composables/')
+  if (relPath.startsWith('composables/')) return false
+  return !TRANSIT_ROOTS.some((root) => relPath.startsWith(`${root}/`))
 }
 
 /**
- * Split a `import(...)` argument into statically-readable specs and opaque
+ * Split a dynamic-import argument — `import(...)`, `import.meta.glob(...)` and
+ * `import.meta.globEager(...)` — into statically-readable specs and opaque
  * forms. Opaque forms are reported by the caller as fail-closed violations:
- * `import(name)`, `import('prefix' + rest)`, `` import(`…${x}…`) ``.
+ * `import(name)`, `import('prefix' + rest)`, `` import(`…${x}…`) ``,
+ * `import.meta.glob(['./a', './b'])`.
  */
 export function dynamicImportArgs(source) {
   const literal = []
   const opaque = []
-  for (const match of source.matchAll(/(?<![.\w$'"`])import\s*\(\s*/g)) {
+  // `import(...)` 与 Vite 的 `import.meta.glob(...)` / `globEager(...)`：后者在
+  // 编译期变成懒加载 import，是真实的 View→Service 边（评审 P1）。说明符规则
+  // 与动态 import 完全一致：字面量可判定，其余（数组/变量/拼接/插值）fail closed。
+  for (const match of source.matchAll(/(?<![.\w$'"`])import\s*(?:\.\s*meta\s*\.\s*(?:glob|globEager))?\s*\(\s*/g)) {
     const argStart = match.index + match[0].length
     // 字符串字面量用共享读取器（尊重转义与起始定界符）——`indexOf(quote)`
     // 会在转义引号处提前收尾，把恶意路径的 `/services/` 段留在字面量之外
@@ -132,67 +150,90 @@ export function dynamicImportArgs(source) {
 }
 
 /**
- * Every module specifier of a file, read with the shared string-literal reader
- * so quote boundaries follow JavaScript semantics: an escaped delimiter does not
- * end the literal and only the **starting** delimiter closes it (`"a'b/…"` keeps
- * its apostrophe). Static `from`, side-effect `import` and dynamic `import(…)`
- * share the reader; an unreadable literal is reported as opaque (fail closed).
+ * Every **static** module specifier of a file, read with the shared
+ * string-literal reader so quote boundaries follow JavaScript semantics: an
+ * escaped delimiter does not end the literal and only the **starting**
+ * delimiter closes it (`"a'b/…"` keeps its apostrophe). `from` (static /
+ * re-export / `import type`) and side-effect `import '<spec>'` are covered here;
+ * dynamic `import(…)` and `import.meta.glob(…)` are handled by
+ * `dynamicImportArgs`, which fails closed on unreadable specifiers. A `null`
+ * literal read here just means the keyword is not followed by a string
+ * (`from` as an identifier, `import {` / `import type` / `import.meta`), so it
+ * is skipped — there is nothing to fail closed on.
  */
 export function moduleSpecifiers(source) {
   const findings = []
-  const opaque = []
   for (const match of source.matchAll(/(?<![.\w$'"`])(from|import)\b\s*/g)) {
     const keyword = match[1]
     const afterKeyword = match.index + match[0].length
     if (keyword === 'import') {
-      // `import(...)` is handled by dynamicImportArgs; `import.meta` / `import {`
-      // / `import type` carry no specifier here (the `from` keyword does).
-      if (source[afterKeyword] === '(') continue
+      // `import(...)` / `import.meta…` handled elsewhere; `import {` / `import type`
+      // carry no specifier here (the `from` keyword does).
+      if (source[afterKeyword] === '(' || source[afterKeyword] === '.') continue
     }
     const literalRead = readStringLiteral(source, afterKeyword)
     if (literalRead === null) continue // 不是字符串位置（`from` 作标识符等）
     findings.push({ spec: decodeStringLiteral(literalRead.raw), index: match.index })
   }
-  return { findings, opaque }
+  return { findings }
+}
+
+/**
+ * Analyse one source unit (script surface or one template expression) and push
+ * findings with correct file line numbers: `lineBase` is the 1-based line of
+ * the unit's first line, so template expressions keep their **original** lines
+ * (appending them to the script surface would misreport lines and let adjacent
+ * expressions concatenate into a pseudo import).
+ */
+function scanUnit(violations, path, unitSource, lineBase) {
+  const lines = buildLineIndex(unitSource)
+  const lineOf = (index) => lineBase + lineOfIndex(unitSource, index, lines) - 1
+  const findings = moduleSpecifiers(unitSource).findings
+  const dynamic = dynamicImportArgs(unitSource)
+  findings.push(...dynamic.literal)
+  for (const { index, snippet } of dynamic.opaque) {
+    violations.push(
+      `${path}:${lineOf(index)}: 动态 import / import.meta.glob 的说明符无法静态分析（${snippet}）；` +
+        '分层门禁 fail closed——请改用字符串字面量（不含 ${} / 拼接 / 变量 / 数组）或静态 import。' +
+        '规则 A/B 无法确认目标模块时按违规处理（否则门禁会假绿）',
+    )
+  }
+  for (const { spec, index } of findings) {
+    const line = lineOf(index)
+    if (SERVICE_SPEC.test(spec)) {
+      violations.push(
+        `${path}:${line}: 规则A —— View/component/composable 不得 import Service（${spec}）；` +
+          '一律经对应 store 消费（Architecture.md「前端分层口径」）',
+      )
+    }
+    if (ruleBEnabled(path) && BRIDGE_SPEC.test(spec)) {
+      violations.push(
+        `${path}:${line}: 规则B —— View/component 不得 import bridge（${spec}）；` +
+          'IPC 细节收敛在 service 层（Architecture.md「前端分层口径」）',
+      )
+    }
+  }
 }
 
 /**
  * One finding per (occurrence, rule) — an import hitting both layers reports
  * both. See the header for the scanned shapes and the dynamic-import
- * fail-closed rule.
+ * fail-closed rule. For `.vue` files the script surface and each template
+ * executable expression (directive binding / dynamic argument / interpolation)
+ * are scanned as separate units so every finding keeps its real line.
  */
 export function findViolations(files) {
   const violations = []
   for (const { path, content } of files) {
-    // 模板可执行表达式也要扫：动态 `import()` 是合法模板表达式
-    //（`@click="import('@/services/x')"` 编译成真实调用——评审 P2）
-    const source = prepareSource(path, content, { templateExpressions: true })
-    const lines = buildLineIndex(source)
-    const findings = moduleSpecifiers(source).findings
-    const dynamic = dynamicImportArgs(source)
-    findings.push(...dynamic.literal)
-    for (const { index, snippet } of dynamic.opaque) {
-      violations.push(
-        `${path}:${lineOfIndex(source, index, lines)}: 动态 import 的说明符无法静态分析（${snippet}）；` +
-          '分层门禁 fail closed——请改用字符串字面量（不含 ${} / 拼接 / 变量）或静态 import。' +
-          '规则 A/B 无法确认目标模块时按违规处理（否则门禁会假绿）',
-      )
-    }
-    for (const { spec, index } of findings) {
-      const line = lineOfIndex(source, index, lines)
-      if (SERVICE_SPEC.test(spec)) {
-        violations.push(
-          `${path}:${line}: 规则A —— View/component/composable 不得 import Service（${spec}）；` +
-            '一律经对应 store 消费（Architecture.md「前端分层口径」）',
-        )
+    if (path.endsWith('.vue')) {
+      const descriptor = parseSfc(content)
+      scanUnit(violations, path, stripComments(scriptSurfaceOf(content, descriptor)), 1)
+      for (const { text, line } of templateExpressionEntries(content, descriptor)) {
+        scanUnit(violations, path, text, line)
       }
-      if (ruleBEnabled(path) && BRIDGE_SPEC.test(spec)) {
-        violations.push(
-          `${path}:${line}: 规则B —— View/component 不得 import bridge（${spec}）；` +
-            'IPC 细节收敛在 service 层（Architecture.md「前端分层口径」）',
-        )
-      }
+      continue
     }
+    scanUnit(violations, path, stripComments(content), 1)
   }
   return violations
 }
@@ -201,10 +242,12 @@ export function findViolations(files) {
 /// Paths relative to `src/`, forward slashes.
 export function loadSources(root) {
   const files = walkSources(root, {
-    dirs: SCAN_ROOTS,
+    dirs: ['views', 'components', 'composables', 'utils', 'types'],
     files: ROOT_FILES,
     extensions: SOURCE_EXTENSIONS,
-    skip: (rel) => rel.includes('__tests__') || rel.startsWith('test-support'),
+    // 路径段匹配（`utils/__tests__` 这类子串过宽：`utils__tests__helpers` 之类
+    // 会被误排除）
+    skip: (rel) => /(^|\/)__tests__(\/|$)/.test(rel) || rel.startsWith('test-support/'),
   })
   if (files.length === 0) {
     // 防御假绿：扫描面为空说明根目录结构变了，门禁必须红而不是静默通过

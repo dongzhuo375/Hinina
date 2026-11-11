@@ -8,7 +8,7 @@ View / component / composable 访问**配置服务**（配置读取与缓存失�
 
 **本 store 不复制状态**：保存队列、切换队列、代际计数、最近切换结果与配置缓存仍由 `configService` 持有（跨控制器共享的单一真值），这里只做消费入口的转发。
 
-**为什么是逐个显式转发**（而非把 service 对象挂在 store 上或做成动态门面）：① View 只能看到 store 的**有类型方法**，拿不到 service 实例——否则 `store.service.x()` 又绕回了 View→Service，严格口径失效；② 每个方法都可被 spec 直接断言（转发目标与回传值）；③ service 的公开面没有全部转发——无视图消费的成员（`activeOjBaseUrl`、`getDefaultLanguage`、`whenSaveSettled`、`saveInFlight`/`saveEpoch`）留给内部与其它 store 消费，新增视图消费面时再显式补转发。
+**为什么是逐个显式转发**（而非把 service 对象挂在 store 上或做成动态门面）：① View 只能看到 store 的**有类型方法**，拿不到 service 实例——否则 `store.service.x()` 又绕回了 View→Service，严格口径失效；② 每个方法都可被 spec 直接断言（转发目标与回传值）；③ service 的公开面没有全部转发——无视图消费的成员（`activeOjBaseUrl`、`getDefaultLanguage`）留给内部与其它 store；`whenSaveSettled` / `saveInFlight` / `saveEpoch` 是**队列观测 API，生产零消费**（设置页加载走设置页作用域的 `whenSettingsSaveSettled`），保留供测试锁定队列语义。新增视图消费面时再显式补转发。
 
 ## 核心类型/函数
 

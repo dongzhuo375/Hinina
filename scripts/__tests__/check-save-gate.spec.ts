@@ -594,6 +594,48 @@ await configService.runSaveTxn((tx) => {
     expect(violations[0]).toContain('persist')
   })
 
+  it('带默认值的转发形参不享受纯转发豁免（默认值可内联排队调用）', () => {
+    const violations = findViolations([
+      {
+        path: 'stores/configStore.ts',
+        content: `runSaveTxn<T>(fn = (tx) => configService.saveSplitRatio(0.5), options = {}) {
+          return configService.runSaveTxn(fn, options)
+        }`,
+      },
+    ])
+    expect(violations.length).toBeGreaterThanOrEqual(1)
+    expect(violations.some((v) => v.includes('无法静态分析'))).toBe(true)
+  })
+
+  it('switchObservers 的混淆注册形态 fail closed（方括号 / add.bind）', () => {
+    for (const content of [
+      `switchObservers['add'](handler)`,
+      `switchObservers.add.bind(switchObservers)(handler)`,
+    ]) {
+      const violations = findViolations([
+        { path: 'composables/useSettingsForm.ts', content },
+      ])
+      expect(violations, content).toHaveLength(1)
+      expect(violations[0], content).toContain('无法静态分析')
+    }
+  })
+
+  it('.call / .apply 调用排队入口同样算违规', () => {
+    for (const call of [
+      'configService.saveSplitRatio.call(null, 0.5)',
+      'configService.saveSplitRatio.apply(null, [0.5])',
+    ]) {
+      const violations = findViolations([
+        {
+          path: 'composables/useSettingsForm.ts',
+          content: `await configService.runSaveTxn((tx) => { ${call}; return tx.updateConfig(() => {}) })`,
+        },
+      ])
+      expect(violations, call).toHaveLength(1)
+      expect(violations[0], call).toContain('排队保存入口')
+    }
+  })
+
   it('点号与属性名之间允许空白：`svc . runSaveTxn(…) : { … }` 仍被扫描', () => {
     const violations = findViolations([
       {

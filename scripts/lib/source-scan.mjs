@@ -61,6 +61,18 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
 ])
 
 /**
+ * `(` 是否控制语句条件括号（其闭括号后是语句起点、随后的 `/` 是正则）。
+ * 含 `for await (` 头：`await` 单独出现不算（`await (x) / 2` 是除法），
+ * 只有紧跟 `for` 时才是控制语境（评审：`for await (const x of y) /re/` 曾
+ * 被当除法而截断后续扫描）。
+ */
+function isControlParenHead(prevWord, prevPrevWord, prevWordIsMember) {
+  if (prevWordIsMember) return false
+  if (CONTROL_KEYWORDS.has(prevWord)) return true
+  return prevWord === 'await' && prevPrevWord === 'for'
+}
+
+/**
  * Skip a regex literal starting at `start` (the opening `/`). Returns the index
  * just past the literal (flags included) or `-1` when unterminated. `/` inside a
  * character class does not end the literal.
@@ -133,6 +145,7 @@ function skipTemplateExpression(source, start) {
   let i = start
   let prevChar = ''
   let prevWord = ''
+  let prevPreviousWord = ''
   let prevWordIsMember = false
   const parenStack = []
   while (i < source.length) {
@@ -171,13 +184,14 @@ function skipTemplateExpression(source, start) {
     if (/[A-Za-z0-9_$]/.test(ch)) {
       const s = i
       while (i < source.length && /[A-Za-z0-9_$]/.test(source[i])) i += 1
+      prevPreviousWord = prevWord
       prevWord = source.slice(s, i)
       prevWordIsMember = source[s - 1] === '.'
       prevChar = source[i - 1]
       continue
     }
     if (ch === '(') {
-      parenStack.push(CONTROL_KEYWORDS.has(prevWord) && !prevWordIsMember)
+      parenStack.push(isControlParenHead(prevWord, prevPreviousWord, prevWordIsMember))
       prevChar = ch
       prevWord = ''
       i += 1
@@ -223,6 +237,7 @@ export function stripComments(source) {
   let i = 0
   let prevChar = '' // last meaningful (non-whitespace) code char seen
   let prevWord = '' // last identifier/keyword token, '' if prevChar isn't a word char
+  let prevPreviousWord = ''
   let prevWordIsMember = false // 上一个词前紧邻 `.`（成员访问，不是关键词语境）
   // 括号栈：记录每个 `(` 是否为控制语句条件括号（if/for/while/switch/catch 后）。
   // 控制括号的闭括号之后是语句起点，随后的 `/` 是正则；分组括号的闭括号是值，
@@ -236,6 +251,7 @@ export function stripComments(source) {
   }
   const emitWord = (from, to) => {
     out += source.slice(from, to)
+    prevPreviousWord = prevWord
     prevWord = source.slice(from, to)
     // 成员访问的 `catch`（`promise.catch(h)`）不是控制语句：前面那个 `.` 让
     // 括号不被压成「条件语境」，否则 `p.catch(h)` 的 `/` 会被当正则消费
@@ -305,7 +321,7 @@ export function stripComments(source) {
     }
     if (ch === '(') {
       out += ch
-      parenStack.push(CONTROL_KEYWORDS.has(prevWord) && !prevWordIsMember)
+      parenStack.push(isControlParenHead(prevWord, prevPreviousWord, prevWordIsMember))
       prevChar = ch
       prevWord = ''
       i += 1
@@ -348,29 +364,40 @@ function isRegexStart(prevChar, prevWord) {
  * like the framework does. Returns `[start, end)` offsets in source order.
  * Throws when the SFC cannot be parsed — callers must fail closed.
  */
-export function vueScriptRanges(source) {
-  let descriptor
-  let errors
+/**
+ * Parse an SFC once, failing closed on BOTH throw and returned errors.
+ * `parse()` normally reports problems in `errors` instead of throwing; the
+ * previous implementation only caught throws, so a file with an unclosed
+ * `<script setup>` still produced a (partial) AST and the gate scanned a
+ * surface it had not really read.
+ */
+export function parseSfc(source) {
+  let parsed
   try {
-    const parsed = parse(source, { filename: 'gate-input.vue' })
-    descriptor = parsed.descriptor
-    errors = parsed.errors ?? []
+    parsed = parse(source, { filename: 'gate-input.vue' })
   } catch (error) {
     throw new Error(`SFC 解析失败（fail closed）: ${error instanceof Error ? error.message : String(error)}`)
   }
-  // `parse()` 通常把错误放进返回值而不是 throw——只 catch throw 会让门禁在
-  // 部分 AST 上继续扫（评审 P4：注释声称的 fail closed 不成立）
+  const errors = parsed.errors ?? []
   if (errors.length > 0) {
     const first = errors[0]
     const message = first instanceof Error ? first.message : String(first?.message ?? first)
     throw new Error(`SFC 解析错误（fail closed，共 ${errors.length} 条）: ${message}`)
   }
+  return parsed.descriptor
+}
+
+function scriptRangesOf(descriptor) {
   const ranges = []
   for (const block of [descriptor.script, descriptor.scriptSetup]) {
     if (block) ranges.push([block.loc.start.offset, block.loc.end.offset])
   }
   ranges.sort((a, b) => a[0] - b[0])
   return ranges
+}
+
+export function vueScriptRanges(source) {
+  return scriptRangesOf(parseSfc(source))
 }
 
 /**
@@ -380,6 +407,11 @@ export function vueScriptRanges(source) {
  */
 export function scriptBlocksOnly(source) {
   return keepRanges(source, vueScriptRanges(source))
+}
+
+/** 用已解析的 descriptor 生成 script 扫描面（避免同文件重复 parse）。 */
+export function scriptSurfaceOf(source, descriptor) {
+  return keepRanges(source, scriptRangesOf(descriptor))
 }
 
 function keepRanges(source, ranges) {
@@ -410,8 +442,7 @@ function keepRanges(source, ranges) {
  * 已知边界：指令的动态参数（`v-on:[event]`）不提取（Vue 编译器限制其形态，
  * 不含函数调用）；命名实体的表只含常见集合（表外命名实体保持原样）。
  */
-export function templateExpressions(source) {
-  const { descriptor } = parse(source, { filename: 'gate-input.vue' })
+export function templateExpressions(source, descriptor = parseSfc(source)) {
   const ast = descriptor.template?.ast
   if (!ast) return []
   const locs = []
@@ -439,6 +470,35 @@ export function templateExpressions(source) {
   return locs
     .map(([start, end]) => decodeHtmlEntities(source.slice(start, end)))
     .filter((text) => text.trim() !== '')
+}
+
+/**
+ * 与 `templateExpressions` 相同，但保留每条表达式的**原始行号**：分层门禁
+ * 需要按原文件行报违规（把表达式拼接到扫描面尾部会丢行号，也可能让相邻表达式
+ * 拼出伪 import）。返回 `[{ text, line }]`（line 1-based）。
+ */
+export function templateExpressionEntries(source, descriptor = parseSfc(source)) {
+  const ast = descriptor.template?.ast
+  if (!ast) return []
+  const starts = buildLineIndex(source)
+  const entries = []
+  const walk = (node) => {
+    if (!node) return
+    const push = (loc) => {
+      if (!loc) return
+      const text = decodeHtmlEntities(source.slice(loc.start.offset, loc.end.offset))
+      if (text.trim() === '') return
+      entries.push({ text, line: loc.start.line })
+    }
+    if (node.type === 7 && node.exp) push(node.exp.loc)
+    else if (node.type === 5 && node.content) push(node.content.loc)
+    if (node.type === 7 && node.arg && node.arg.isStatic === false) push(node.arg.loc)
+    for (const child of node.children ?? []) walk(child)
+    for (const prop of node.props ?? []) walk(prop)
+  }
+  walk(ast)
+  entries.sort((a, b) => a.line - b.line)
+  return entries
 }
 
 /**
@@ -581,6 +641,7 @@ export function readBalanced(source, start, open, close) {
   let i = start
   let prevChar = ''
   let prevWord = ''
+  let prevPreviousWord = ''
   let prevWordIsMember = false
   const parenStack = []
   while (i < source.length) {
@@ -620,6 +681,7 @@ export function readBalanced(source, start, open, close) {
     if (/[A-Za-z0-9_$]/.test(ch)) {
       const wordStart = i
       while (i < source.length && /[A-Za-z0-9_$]/.test(source[i])) i += 1
+      prevPreviousWord = prevWord
       prevWord = source.slice(wordStart, i)
       prevWordIsMember = source[wordStart - 1] === '.'
       prevChar = source[i - 1]
@@ -629,7 +691,7 @@ export function readBalanced(source, start, open, close) {
       // 深度计数与括号栈各管一段：计数服务 readBalanced 的配平，栈服务
       // 「闭括号后是否正则语境」
       if (ch === open) depth += 1
-      parenStack.push(CONTROL_KEYWORDS.has(prevWord) && !prevWordIsMember)
+      parenStack.push(isControlParenHead(prevWord, prevPreviousWord, prevWordIsMember))
       prevChar = ch
       prevWord = ''
       i += 1
@@ -742,7 +804,7 @@ export function decodeHtmlEntities(text) {
  * @param {(relPath: string) => boolean} [options.skip] exclusion predicate
  * @returns {Array<{path: string, content: string}>} paths relative to `src/`, forward slashes
  */
-export function walkSources(root, { dirs, files: rootFiles = [], extensions, skip = () => false }) {
+export function walkSources(root, { dirs, files: rootFiles = [], required = [], extensions, skip = () => false }) {
   const srcDir = join(root, 'src')
   const files = []
   const walk = (dir) => {
@@ -765,6 +827,13 @@ export function walkSources(root, { dirs, files: rootFiles = [], extensions, ski
       throw new Error(`扫描面不完整：缺少 ${rootFile}（fail-closed）`)
     }
     files.push({ path: rootFile, content: readFileSync(full, 'utf8') })
+  }
+  // 关键文件必须出现在扫描结果里：文件被改名/挪目录时，按 path 匹配的专项检查
+  // （如 save-gate 的包装规则）会整体蒸发而门禁仍绿（评审 P1）
+  const present = new Set(files.map((file) => file.path))
+  const missing = required.filter((rel) => !present.has(rel))
+  if (missing.length > 0) {
+    throw new Error(`扫描面不完整：缺少关键文件 ${missing.join('、')}（fail-closed）`)
   }
   return files
 }

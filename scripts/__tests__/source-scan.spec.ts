@@ -7,6 +7,8 @@ import {
   scriptBlocksOnly,
   skipStringLiteral,
   stripComments,
+  templateExpressions,
+  vueScriptRanges,
 } from '../../scripts/lib/source-scan.mjs'
 
 /**
@@ -82,6 +84,17 @@ const a = 1
     expect(prepared.split('\n')).toHaveLength(src.split('\n').length)
     // 掩码不改变行号：多行块注释后的代码仍在真实行（第 5 行）
     expect(lineOfIndex(prepared, prepared.indexOf('const a = 1'))).toBe(5)
+  })
+})
+
+describe('source-scan — SFC fail-closed 契约', () => {
+  it('未闭合的 <script setup> 抛错（parse 的错误在返回值里，不是 throw）', () => {
+    const unclosed = ['<template><div/></template>', '<script setup>', 'const a = 1'].join('\n')
+    expect(() => vueScriptRanges(unclosed)).toThrow(/SFC 解析/)
+  })
+
+  it('templateExpressions 直接调用（不经 prepareSource）同样 fail closed', () => {
+    expect(() => templateExpressions('<template><button @[a b]="go" /></template>')).toThrow(/SFC 解析/)
   })
 })
 

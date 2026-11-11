@@ -52,10 +52,13 @@
 // class/object methods **without annotations** (`name(...) {`, getters).
 // What is *not* tracked: cross-file helpers, aliases, dynamic lookup,
 // multi-line expression bodies (truncated at the first newline), methods with
-// a return annotation (`helper(): Promise<void> {`), and declarations whose
-// return type contains braces (`function f(): Array<{...}> {`) — unknown
-// *callback* forms fail closed instead, but the helper shapes above are
-// skipped silently; keep queued calls inside a tracked shape.
+// a return annotation (`helper(): Promise<void> {`), declarations whose
+// return type contains braces (`function f(): Array<{...}> {`), arrows stored as
+// **object properties** (`const o = { h: () => saveSplitRatio(0.5) }` — only
+// same-file function declarations / arrows / methods are keyed by name), and
+// same-named helpers resolved at **depth > 6** (the transfer walk has a hard
+// depth cap). Unknown *callback* forms fail closed instead, but the helper
+// shapes above are skipped silently; keep queued calls inside a tracked shape.
 // Scanning-fidelity note: unquoted regex literals are consumed verbatim by the
 // regex-aware stripper (division-vs-regex heuristic; control-statement closing
 // parens are regex context — see scripts/lib/source-scan.mjs), so `/[/*]/` and
@@ -102,8 +105,9 @@ export const TXN_ALLOWLIST = [
 ]
 
 /// Queued save entries: appearing inside a transaction callback body deadlocks.
-/// Optional calls (`saveSplitRatio?.(…)`) count too — `?.` is still a call.
-const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\s*(?:\?\.)?\s*[<(]/
+/// Optional calls (`saveSplitRatio?.(…)`) count too — `?.` is still a call;
+/// `.call(...)` / `.apply(...)` also queue (review: they were not recognized).
+const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\s*(?:\?\.)?\s*(?:\.\s*(?:call|apply)\s*)?[<(]/
 
 /**
  * Extract a callback body from a call's argument text.
@@ -426,11 +430,37 @@ function splitTopLevel(params) {
   return segments
 }
 
+/// 顶层默认值赋值的 `=`（排除箭头 `=>` 与比较 `==`/`===`/`>=`/`<=`）。
+function defaultAssignmentIndex(segment) {
+  let depth = 0
+  for (let i = 0; i < segment.length; i += 1) {
+    const ch = segment[i]
+    if (ch === '(' || ch === '[' || ch === '{' || ch === '<') depth += 1
+    else if (ch === ')' || ch === ']' || ch === '}' || ch === '>') depth = Math.max(0, depth - 1)
+    else if (ch === '=' && depth === 0) {
+      const prev = segment[i - 1]
+      const next = segment[i + 1]
+      if (next === '>' || next === '=' || prev === '=' || prev === '!' || prev === '<' || prev === '>') continue
+      return i
+    }
+  }
+  return -1
+}
+
 function paramNames(params) {
   const names = new Set()
   for (const segment of splitTopLevel(params)) {
-    const m = segment.trim().match(/^(?:\.\.\.)?([A-Za-z_$][\w$]*)/)
-    if (m) names.add(m[1])
+    const trimmed = segment.trim()
+    const m = trimmed.match(/^(?:\.\.\.)?([A-Za-z_$][\w$]*)/)
+    if (!m) continue
+    // 带默认值的形参：**惰性字面量**（`{}` / 布尔 / 数字 / 字符串 / null）无害；
+    // 任何表达式默认值（箭头、调用、标识符）都可能把回调内联在转发体之外执行，
+    // 而那段正文永不被扫（评审：默认参数走私）——整条入口放弃豁免，fail closed。
+    const eq = defaultAssignmentIndex(trimmed)
+    if (eq !== -1 && !/^\s*(?:\{\s*\}|true|false|null|-?\d+(?:\.\d+)?|'[^']*'|"[^"]*")\s*$/.test(trimmed.slice(eq + 1))) {
+      return null
+    }
+    names.add(m[1])
   }
   return names
 }
@@ -467,7 +497,10 @@ export function runSaveTxnForwardEntries(source) {
     if (bodyOpen === -1) continue
     const body = readBalanced(source, bodyOpen, '{', '}')
     if (body === null) continue
-    entries.push({ bodyStart: bodyOpen + 1, bodyEnd: bodyOpen + 1 + body.length, paramNames: paramNames(params) })
+    const names = paramNames(params)
+    // 默认值形参（null）整条入口不作豁免：回调可能内联在缺省值里
+    if (names === null) continue
+    entries.push({ bodyStart: bodyOpen + 1, bodyEnd: bodyOpen + 1 + body.length, paramNames: names })
   }
   return entries
 }
@@ -539,6 +572,14 @@ function wrapperViolations(file, source) {
  */
 export function observerViolations(path, source, functions) {
   const violations = []
+  // 混淆注册形态（`switchObservers['add'](...)`、`switchObservers.add.bind(...)`）
+  // 扫描不到监听器 → 门禁会假绿；出现即 fail closed（评审：bind/['add'] 变体）
+  if (/\bswitchObservers\s*\[/.test(source) || /\bswitchObservers\s*\.\s*add\s*\./.test(source)) {
+    violations.push(
+      `${path}: switchObservers 的注册形态无法静态分析（方括号取值 / add.bind）——` +
+        '监听器在事务回调内被 await，若其调用排队保存会死锁；请用 switchObservers.add(命名函数或内联箭头)',
+    )
+  }
   const re = /\bswitchObservers\.add\s*\(/g
   let match
   while ((match = re.exec(source))) {
@@ -643,17 +684,35 @@ export function findViolations(files) {
 
 /// Walk `src/` for production sources (tests/test-support/declarations excluded).
 export function loadSources(root) {
-  return walkSources(root, {
+  const files = walkSources(root, {
     dirs: ['.'],
     // 与 layering 门禁同一扩展名面（含 .d.ts）：.js/.jsx/.tsx/.mjs/.cjs 里
     // 同样可能出现保存事务调用，扫描面不能比文件名清单窄（评审 P2）
-    extensions: /\.(?:d\.ts|ts|tsx|js|jsx|mjs|cjs|vue)$/,
-    skip: (rel) => rel.includes('__tests__') || rel.startsWith('test-support'),
+    extensions: /\.(?:d\.ts|ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$/,
+    // 关键文件钉死：config.service.ts 改名/挪目录时按 path 匹配的包装规则会
+    // 整体蒸发，必须 fail closed 而不是静默放行
+    required: ['services/config.service.ts'],
+    // 路径段匹配（子串会把 `x__tests__y` 这类正常文件误排除）
+    skip: (rel) => /(^|\/)__tests__(\/|$)/.test(rel) || rel.startsWith('test-support/'),
   })
+  if (files.length === 0) {
+    // 空扫描面 = 门禁静默死亡（评审 P1：对照 layering 的 throw）
+    throw new Error('save-gate: 扫描面为空（src/ 下未找到任何源文件）')
+  }
+  return files
 }
 
 export function runCli(root) {
-  const violations = findViolations(loadSources(root))
+  let violations
+  try {
+    violations = findViolations(loadSources(root))
+  } catch (error) {
+    // 扫描面不完整（空面 / 关键文件缺失）必须红：此前 runCli 直接抛，
+    // 主模块守卫会退成非零——但 spec 调用 runCli 时看到的是异常而非返回码，
+    // 且对照 layering 的口径应统一为「返回码」（评审 P1）
+    console.error(`save-gate: ${error instanceof Error ? error.message : String(error)}`)
+    return 1
+  }
   if (violations.length === 0) {
     console.log('save-gate: OK（事务回调内无排队入口，公开包装经队列写入）')
     return 0

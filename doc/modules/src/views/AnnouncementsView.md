@@ -28,7 +28,7 @@
 
 - `vue`
 - 组件：`PageHeading`（页头，编号 `04` / `BULLETIN BOARD`）/ `ErrorMessage` / `LoadingSpinner`
-- `@/stores/configStore`（`getOjBaseUrl`；2026-11-09 严格分层收编，原 `@/services/config.service` 直连改经 store）
+- `@/stores/configStore`（`getOjBaseUrl`；（配置消费的唯一入口，纯转发 `config.service`））
 - stores：`announcementStore`（列表/已读/未读数）、`contestStore`（`whenLoaded` + 标题）
 - `@/utils/markdown`（`renderMarkdown`）
 

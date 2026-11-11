@@ -36,7 +36,7 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- `@/stores/submissionStore`（`getSubmissionCases` — 失败测试点提示；2026-11-09 严格分层收编，store 纯转发 `submission.service`）
+- `@/stores/submissionStore`（`getSubmissionCases` — 失败测试点提示；（`getSubmissionCases` 经 store 纯转发 `submission.service`））
 - stores：`contestStore`（contestId）、`submissionStore`（`submissions` / `error` / `isSubmitting` / `fetchProblemSummary`）
 - `@/types/submission`（仅 `JudgementStatus` / `SubmissionRecord` 类型）
 - `@/utils/submission`（`findFirstFailedCase` / `formatMsToSeconds` / `isTerminalStatus` / `statusAbbr` / `statusTone` + `StatusTone` 类型）

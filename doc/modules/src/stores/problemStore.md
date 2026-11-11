@@ -21,7 +21,7 @@
 | `limitsOf` | getter `(displayId) => ProblemLimits \| null` | 取某题 limits；**null = 后端获取失败**，视图应显示占位而非假默认值 |
 | `statusOf` | getter `(problemId) => UserProblemStatus` | 取某题我的状态；未出现在 map 中视为未提交（0） |
 | `openProblem` | `(contestId, problemId) => Promise<void>` | 加载详情并设为当前题目；失败记录 error 并抛出。**请求序号 + 会话代际双守卫**：过期响应不写 `currentProblem`/`error`/`isLoading` |
-| `getProblem` | `(contestId, problemId) => Promise<Problem>` | **纯转发** `problem.service`（2026-11-09 严格分层收编）：快捷提交弹窗拉取本题允许语言用，不写入 store 状态、不参与过期保护；与 `openProblem` 的区别是只回传数据 |
+| `getProblem` | `(contestId, problemId) => Promise<Problem>` | **纯转发** `problem.service`（（经 store 消费））：快捷提交弹窗拉取本题允许语言用，不写入 store 状态、不参与过期保护；与 `openProblem` 的区别是只回传数据 |
 | `loadLimits` | `(contestId, displayIds) => Promise<void>` | 批量加载 limits（后端双层缓存，命中时零网络请求）；**失败不抛出**；会话切换后迟到的 limits 不写回（评审四轮 #1） |
 | `loadMyStatus` | `(contestId, problemIds) => Promise<void>` | 批量加载我的提交状态；**失败不抛出**；成功后清除 `myStatusStale`，失败则置为过期（数据仍是旧的）以便下一周期重试。**会话代际守卫**：每轮询周期都会发起，登出后旧用户的 AC/尝试状态不得显示给新用户（评审四轮 #1） |
 | `invalidateMyStatus` | `() => void` | 标记我的题目状态已过期（提交终态、轮询超时时由 `submissionStore` 调用）；**只置位不发请求** —— 重拉交给总览页在下次可见刷新时执行，避免在解题页后台凭空多打一次请求 |

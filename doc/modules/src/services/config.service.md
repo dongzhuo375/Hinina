@@ -56,7 +56,7 @@
 - `stores/submissionStore.ts` — `startPolling()` 读取轮询调度参数
 - `stores/workspaceStore.ts` — `loadWorkspace()` 读取默认语言
 - `stores/announcementStore.ts`（经 announcement.service 间接）
-- **`stores/configStore.ts` — View / component / composable 的唯一消费入口**（2026-11-09 严格分层收编：
+- **`stores/configStore.ts` — View / component / composable 的唯一消费入口**（（经 store 消费）：
   OJ 基址、编辑器偏好、分栏比例、轮询参数、设置页保存事务与 OJ 切换全部经 store 纯转发；
   视图不再直接 import 本 service。store 只做消费入口——保存队列/切换队列/代际/最近结果
   仍由本服务持有；**代际与最近结果是普通字段，store 以 action 方法逐次直读**，勿改成 getter）

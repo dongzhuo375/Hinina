@@ -312,6 +312,57 @@ import x from '@/services/real'
     expect(violations).toEqual([])
   })
 
+  it('import.meta.glob / globEager 是真实边：字面量命中、不可读形态 fail closed', () => {
+    const literal = findViolations([
+      { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/services/*.service.ts')` },
+    ])
+    expect(literal).toHaveLength(1)
+    expect(literal[0]).toContain('规则A')
+    const eager = findViolations([
+      { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/services/x.ts', { eager: true })` },
+    ])
+    expect(eager).toHaveLength(1)
+    const bridge = findViolations([
+      { path: 'views/Glob.ts', content: `const m = import.meta.globEager('@/bridge')` },
+    ])
+    expect(bridge).toHaveLength(1)
+    expect(bridge[0]).toContain('规则B')
+    for (const content of [
+      `const m = import.meta.glob(['@/services/a.ts'])`,
+      'const m = import.meta.glob(spec)',
+    ]) {
+      const violations = findViolations([{ path: 'views/Glob.ts', content }])
+      expect(violations, content).toHaveLength(1)
+      expect(violations[0], content).toContain('无法静态分析')
+    }
+  })
+
+  it('模板表达式按原行号报告（不拼接、不跨表达式串味）', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Line.vue',
+        content: `<template>
+  <div>{{ import('@/services/config.service') }}</div>
+</template>
+<script setup lang="ts">const a = 1</script>`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('views/Line.vue:2:')
+  })
+
+  it('横向模块中转（utils 里再导出 service）同样算边', () => {
+    const violations = findViolations([
+      { path: 'utils/transit.ts', content: `export { configService } from '@/services/config.service'` },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('规则A')
+    // utils 不是 View 链：规则 B 不适用
+    expect(
+      findViolations([{ path: 'utils/ipc.ts', content: `import { IpcError } from '@/bridge'` }]),
+    ).toEqual([])
+  })
+
   it('规则A：合法正则字面量含 /* 不再截断后续源码（P2-5）', () => {
     const violations = findViolations([
       {

@@ -31,7 +31,7 @@
 - `@/components/layout/WindowControls.vue`（窗口控制按钮）
 - `@/stores/authStore` / `@/stores/contestStore`
 - `@/utils/contest`（`getContestPhase`）、`@/utils/markdown`（`renderMarkdown`）、`@/utils/focus-scope`（`vFocusScope` —— 简介浮层/账号菜单的焦点陷阱与 Esc 关闭）
-- `@/stores/configStore`（OJ 基址，用于简介图片改写；2026-11-09 严格分层收编，原 `@/services/config.service` 直连改经 store）
+- `@/stores/configStore`（OJ 基址，用于简介图片改写；（配置消费的唯一入口，纯转发 `config.service`））
 - `@/composables/useNowMs`（毫秒墙钟，派生秒）
 
 ## 被依赖
