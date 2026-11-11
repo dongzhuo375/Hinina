@@ -61,6 +61,157 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
 ])
 
 /**
+ * Skip a regex literal starting at `start` (the opening `/`). Returns the index
+ * just past the literal (flags included) or `-1` when unterminated. `/` inside a
+ * character class does not end the literal.
+ */
+export function skipRegexLiteral(source, start) {
+  if (source[start] !== '/') return -1
+  let i = start + 1
+  let inClass = false
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (ch === '\n') return -1
+    if (ch === '[') inClass = true
+    else if (ch === ']') inClass = false
+    else if (ch === '/' && !inClass) {
+      i += 1
+      while (i < source.length && /[a-z]/i.test(source[i])) i += 1
+      return i
+    }
+    i += 1
+  }
+  return -1
+}
+
+/**
+ * Skip a string literal starting at `start` (the quote). Returns the index just
+ * past the closing quote or `-1` when unterminated.
+ *
+ * **Template literals are nested-aware**: `${ … }` is scanned as JavaScript
+ * (strings, comments, regex heuristics, nested templates, braces) so
+ * `` `a${`b`}c` `` does not desync the tokenizer — the previous shallow scan
+ * treated everything up to the next backtick as literal text, so a `/*` or `//`
+ * inside a real string could flip comment states and either hide code or flag a
+ * commented-out call (review item 6). CRLF line continuations are consumed as a
+ * unit so a bare `\n` is never left dangling.
+ */
+export function skipStringLiteral(source, start) {
+  const quote = source[start]
+  if (quote !== "'" && quote !== '"' && quote !== '`') return -1
+  let i = start + 1
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '\\') {
+      if (source[i + 1] === '\r' && source[i + 2] === '\n') {
+        i += 3
+        continue
+      }
+      i += 2
+      continue
+    }
+    if (ch === quote) return i + 1
+    if (quote === '`' && ch === '$' && source[i + 1] === '{') {
+      const end = skipTemplateExpression(source, i + 2)
+      if (end === -1) return -1
+      i = end
+      continue
+    }
+    if (ch === '\n' && quote !== '`') return -1
+    i += 1
+  }
+  return -1
+}
+
+/// `${ … }` 内部：按 JS 词法扫到配对 `}`，返回其后的下标。
+function skipTemplateExpression(source, start) {
+  let depth = 1
+  let i = start
+  let prevChar = ''
+  let prevWord = ''
+  let prevWordIsMember = false
+  const parenStack = []
+  while (i < source.length) {
+    const ch = source[i]
+    const next = source[i + 1]
+    if (ch === '/' && next === '/') {
+      while (i < source.length && source[i] !== '\n') i += 1
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2)
+      if (end === -1) return -1
+      i = end + 2
+      continue
+    }
+    if (ch === '/' && isRegexStart(prevChar, prevWord)) {
+      const end = skipRegexLiteral(source, i)
+      if (end === -1) return -1
+      i = end
+      prevChar = ')'
+      prevWord = ''
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const end = skipStringLiteral(source, i)
+      if (end === -1) return -1
+      i = end
+      prevChar = ch
+      prevWord = ''
+      continue
+    }
+    if (/\s/.test(ch)) {
+      i += 1
+      continue
+    }
+    if (/[A-Za-z0-9_$]/.test(ch)) {
+      const s = i
+      while (i < source.length && /[A-Za-z0-9_$]/.test(source[i])) i += 1
+      prevWord = source.slice(s, i)
+      prevWordIsMember = source[s - 1] === '.'
+      prevChar = source[i - 1]
+      continue
+    }
+    if (ch === '(') {
+      parenStack.push(CONTROL_KEYWORDS.has(prevWord) && !prevWordIsMember)
+      prevChar = ch
+      prevWord = ''
+      i += 1
+      continue
+    }
+    if (ch === ')') {
+      prevChar = (parenStack.pop() ?? false) ? ';' : ')'
+      prevWord = ''
+      i += 1
+      continue
+    }
+    if (ch === '{') {
+      depth += 1
+      prevChar = ch
+      prevWord = ''
+      i += 1
+      continue
+    }
+    if (ch === '}') {
+      depth -= 1
+      if (depth === 0) return i + 1
+      prevChar = ch
+      prevWord = ''
+      i += 1
+      continue
+    }
+    prevChar = ch
+    prevWord = ''
+    i += 1
+  }
+  return -1
+}
+
+/**
  * Drop comments but keep string literals, masking comment characters with
  * spaces (newlines preserved — offsets stay identical to the raw input).
  *
@@ -110,57 +261,29 @@ export function stripComments(source) {
       continue
     }
     if (ch === '/' && isRegexStart(prevChar, prevWord)) {
-      // Regex literal: consume verbatim, `/` inside `[...]` does not end it.
-      out += ch
-      i += 1
-      let inClass = false
-      while (i < source.length) {
-        const rch = source[i]
-        if (rch === '\\') {
-          out += rch + (source[i + 1] ?? '')
-          i += 2
-          continue
-        }
-        if (rch === '[') inClass = true
-        else if (rch === ']') inClass = false
-        else if (rch === '/' && !inClass) {
-          out += rch
-          i += 1
-          break
-        }
-        out += rch
-        i += 1
+      const end = skipRegexLiteral(source, i)
+      if (end !== -1) {
+        out += source.slice(i, end)
+        i = end
+        prevChar = ')' // a regex is a value: a following `/` is division
+        prevWord = ''
+        continue
       }
-      // flags
-      while (i < source.length && /[a-z]/i.test(source[i])) {
-        out += source[i]
-        i += 1
-      }
-      prevChar = ')' // a regex is a value: a following `/` is division
-      prevWord = ''
-      continue
+      // 未闭合的正则按除法处理（继续走标点分支）
     }
     if (ch === '"' || ch === "'" || ch === '`') {
       const quote = ch
-      const start = i
-      out += ch
-      i += 1
-      while (i < source.length) {
-        out += source[i]
-        if (source[i] === '\\') {
-          out += source[i + 1] ?? ''
-          i += 2
-          continue
-        }
-        if (source[i] === quote) {
-          i += 1
-          break
-        }
-        i += 1
+      const end = skipStringLiteral(source, i)
+      if (end !== -1) {
+        // 模板字面量整段原样保留（`${}` 里的表达式文本也保留——扫描器只在
+        // 其中找 import 形状，保留只会多扫不会漏扫）
+        out += source.slice(i, end)
+        i = end
+        prevChar = quote // a string is a value: a following `/` is division
+        prevWord = ''
+        continue
       }
-      prevChar = quote // a string is a value: a following `/` is division
-      prevWord = ''
-      continue
+      // 未闭合：原样输出该字符，继续扫描（fail closed 方向）
     }
     if (ch === '\n') {
       out += '\n'
@@ -343,13 +466,33 @@ export function prepareSource(path, content, { templateExpressions: includeTempl
   return prepared
 }
 
-/** 1-based line number of `index` in `source`. */
-export function lineOfIndex(source, index) {
+/** 1-based line number of `index` in `source`. `lineStarts`（可选，来自
+ * `buildLineIndex`）避免每个违规定位都从头重扫——文件大、违规多时是 O(n·m)。 */
+export function lineOfIndex(source, index, lineStarts) {
+  if (lineStarts !== undefined) {
+    let lo = 0
+    let hi = lineStarts.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (lineStarts[mid] <= index) lo = mid
+      else hi = mid - 1
+    }
+    return lo + 1
+  }
   let line = 1
   for (let i = 0; i < index && i < source.length; i += 1) {
     if (source[i] === '\n') line += 1
   }
   return line
+}
+
+/** 每行起始偏移（0-based 行号 → 偏移），配 `lineOfIndex` 做二分定位。 */
+export function buildLineIndex(source) {
+  const starts = [0]
+  for (let i = 0; i < source.length; i += 1) {
+    if (source[i] === '\n') starts.push(i + 1)
+  }
+  return starts
 }
 
 /**
@@ -454,41 +597,18 @@ export function readBalanced(source, start, open, close) {
       continue
     }
     if (ch === '/' && isRegexStart(prevChar, prevWord)) {
-      i += 1
-      let inClass = false
-      while (i < source.length) {
-        const rch = source[i]
-        if (rch === '\\') {
-          i += 2
-          continue
-        }
-        if (rch === '[') inClass = true
-        else if (rch === ']') inClass = false
-        else if (rch === '/' && !inClass) {
-          i += 1
-          break
-        }
-        i += 1
-      }
-      while (i < source.length && /[a-z]/i.test(source[i])) i += 1
+      const end = skipRegexLiteral(source, i)
+      if (end === -1) return null
+      i = end
       prevChar = ')'
       prevWord = ''
       continue
     }
     if (ch === '"' || ch === "'" || ch === '`') {
       const quote = ch
-      i += 1
-      while (i < source.length) {
-        if (source[i] === '\\') {
-          i += 2
-          continue
-        }
-        if (source[i] === quote) {
-          i += 1
-          break
-        }
-        i += 1
-      }
+      const end = skipStringLiteral(source, i)
+      if (end === -1) return null
+      i = end
       prevChar = quote
       prevWord = ''
       continue
@@ -590,9 +710,19 @@ const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp:
  */
 export function decodeHtmlEntities(text) {
   return text.replace(/&(?:#([0-9]+)|#[xX]([0-9a-fA-F]+)|([a-zA-Z][a-zA-Z0-9]*))(;?)/g, (m, dec, hex, name, semi, offset, whole) => {
-    if (dec !== undefined) return String.fromCodePoint(Number.parseInt(dec, 10))
-    if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16))
-    if (!(name in NAMED_ENTITIES)) return m
+    // 码点必须在 Unicode 范围内：`&#99999999;` 会让 String.fromCodePoint 抛
+    // RangeError 并把整个门禁打崩（评审：应返回裁决而不是异常）
+    if (dec !== undefined) {
+      const code = Number.parseInt(dec, 10)
+      return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m
+    }
+    if (hex !== undefined) {
+      const code = Number.parseInt(hex, 16)
+      return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m
+    }
+    // 只认自有属性：`&constructor;` / `&toString;` 会命中原型链上的函数
+    //（`String(NAMED_ENTITIES['constructor'])` 是一段源码文本，评审 P2）
+    if (!Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, name)) return m
     if (semi === ';') return NAMED_ENTITIES[name]
     const next = whole[offset + m.length] ?? ''
     // 属性语境：无分号的 legacy 实体后接字母数字/等号时浏览器不解码

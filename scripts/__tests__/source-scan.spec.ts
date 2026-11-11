@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildLineIndex,
+  decodeHtmlEntities,
   lineOfIndex,
   prepareSource,
   scriptBlocksOnly,
+  skipStringLiteral,
   stripComments,
 } from '../../scripts/lib/source-scan.mjs'
 
@@ -79,6 +82,39 @@ const a = 1
     expect(prepared.split('\n')).toHaveLength(src.split('\n').length)
     // 掩码不改变行号：多行块注释后的代码仍在真实行（第 5 行）
     expect(lineOfIndex(prepared, prepared.indexOf('const a = 1'))).toBe(5)
+  })
+})
+
+describe('source-scan — 词法健壮性', () => {
+  it('嵌套模板字符串：${`…`} 内部按 JS 词法扫描，字面量整体跳到正确终点', () => {
+    const src = 'const s = `a${`b`}c` + 1'
+    const end = skipStringLiteral(src, src.indexOf('`'))
+    expect(src.slice(end)).toBe(' + 1')
+  })
+
+  it('嵌套模板里的 /* 不会把后续源码当成注释（偏移与内容不变）', () => {
+    const src = `const s = \`x\${\`/*\`}y\`
+import { z } from '@/stores/a'`
+    const out = stripComments(src)
+    expect(out).toHaveLength(src.length)
+    expect(out).toContain("import { z } from '@/stores/a'")
+  })
+
+  it('HTML 实体解码：原型链名字不命中、越界码点不抛异常', () => {
+    expect(decodeHtmlEntities('&constructor;')).toBe('&constructor;')
+    expect(decodeHtmlEntities('&toString;')).toBe('&toString;')
+    expect(decodeHtmlEntities('&#99999999;')).toBe('&#99999999;')
+    expect(decodeHtmlEntities('&#1114112;')).toBe('&#1114112;') // 0x110000 越界
+    expect(decodeHtmlEntities('&#114;')).toBe('r')
+    expect(decodeHtmlEntities('&#x72;')).toBe('r')
+  })
+
+  it('行索引：buildLineIndex + 二分 lineOfIndex 与逐步扫描一致', () => {
+    const src = ['a', 'b', 'c', 'd'].join('\n')
+    const starts = buildLineIndex(src)
+    for (let i = 0; i < src.length; i += 1) {
+      expect(lineOfIndex(src, i, starts)).toBe(lineOfIndex(src, i))
+    }
   })
 })
 

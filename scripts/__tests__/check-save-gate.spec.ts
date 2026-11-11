@@ -594,6 +594,48 @@ await configService.runSaveTxn((tx) => {
     expect(violations[0]).toContain('persist')
   })
 
+  it('点号与属性名之间允许空白：`svc . runSaveTxn(…) : { … }` 仍被扫描', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `const result = flag
+  ? configService . runSaveTxn((tx) => configService.saveSplitRatio(0.5)) : { fallback: true }`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+  })
+
+  it('同名函数多份定义全部检查（先出现的无关同名不再遮蔽真正的调用者）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `function persist(v) { return v }
+await configService.runSaveTxn((tx) => {
+  persist(1)
+  return tx.updateConfig(() => {})
+})
+function persist() { return configService.saveSplitRatio(0.5) }`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('persist')
+    expect(violations[0]).toContain('saveSplitRatio')
+  })
+
+  it('嵌套模板字符串（`a${`b`}c`）不破坏注释剥离：注释里的调用不误报', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Nested.ts',
+        content: `const s = \`a\${\`b\`}c\`
+// configService.runSaveTxn(x)
+configService.updateEditorPrefs({ fontSize: 15 })`,
+      },
+    ])
+    // 唯一 mention 在注释里 → 零违规；updateEditorPrefs 是合法排队入口（回调外）
+    expect(violations).toEqual([])
+  })
+
   it('模板散文不产生指令违规；script 字符串只有 mention 级触发（rule 1 口径）', () => {
     // 散文与 script 内的 @click 形字符串不含 runSaveTxn mention → 零违规：
     // 指令表达式提取不会把 script 内字符串当模板指令

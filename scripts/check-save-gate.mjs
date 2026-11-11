@@ -193,13 +193,24 @@ export function txnCallSites(source) {
     const hit = source.indexOf(needle, from)
     if (hit === -1) break
     from = hit + needle.length
-    const afterName = source.slice(from).match(/^\s*(?:<[^<>()]*>)?\s*\(/)
-    if (!afterName) {
+    // 就地前扫（不 slice 文件尾部）：跳过空白与可选泛型实参，找调用括号
+    let cursor = from
+    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    if (source[cursor] === '<') {
+      const anglesEnd = readAngles(source, cursor)
+      if (anglesEnd === null) {
+        sites.push({ index: hit, args: '', body: null, ref: null })
+        continue
+      }
+      cursor = anglesEnd
+      while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    }
+    if (source[cursor] !== '(') {
       // 名字出现了但不是可解析的调用（别名/赋值/文本……）——fail closed
       sites.push({ index: hit, args: '', body: null, ref: null })
       continue
     }
-    const openParen = from + afterName[0].length - 1
+    const openParen = cursor
     const args = readBalanced(source, openParen, '(', ')')
     if (args === null) {
       sites.push({ index: hit, args: '', body: null, ref: null })
@@ -208,8 +219,11 @@ export function txnCallSites(source) {
     // 成员调用（`configService.runSaveTxn(…)`）不可能是方法定义：三元表达式
     // 里调用后可以跟 `: { … }` 对象字面量，按尾形态会把它误判成「返回注解 +
     // 方法体」而跳过整个调用点（评审 P2）。定义只可能是裸名（`async runSaveTxn`）
-    // 或对象/类成员（行首裸名）。
-    const isMemberCall = hit > 0 && source[hit - 1] === '.'
+    // 或对象/类成员（行首裸名）。**点号与属性名之间允许空白**（`svc . runSaveTxn(…)`
+    // 是合法 JS），因此向前跳过空白再判 `.`。
+    let dotScan = hit - 1
+    while (dotScan >= 0 && /\s/.test(source[dotScan])) dotScan -= 1
+    const isMemberCall = dotScan >= 0 && source[dotScan] === '.'
     if (!isMemberCall && isDefinitionTail(source, openParen + args.length + 1)) continue
     sites.push({ index: hit, args, ...callbackFromArgs(args) })
   }
@@ -352,31 +366,43 @@ function arrowBody(source, afterArrow) {
  * 事务回调的正文检查覆盖，跨文件/别名/动态调用不在能力范围内（见文件头）。
  */
 export function localFunctions(source) {
+  // 同名可有多份定义（不同作用域）。**保留全部正文**：旧实现首个定义获胜，
+  // 先出现的无关同名函数会遮蔽后面真正调用排队入口的那份（评审 P2）。
   const table = new Map()
+  const add = (name, body) => {
+    if (body === null) return
+    const bodies = table.get(name)
+    if (bodies === undefined) {
+      table.set(name, [body])
+      return
+    }
+    // 同一正文可能被声明分支与方法分支各收一次；按内容去重，但**不同作用域的
+    // 同名定义**（正文不同）全部保留
+    if (!bodies.includes(body)) bodies.push(body)
+  }
   const declRe = /\bfunction\s+([A-Za-z_$][\w$]*)|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=]+)?=>/g
   let match
   while ((match = declRe.exec(source))) {
     const name = match[1] ?? match[2]
-    if (name === undefined || table.has(name)) continue
+    if (name === undefined) continue
     const isFunction = match[1] !== undefined
-    const body = isFunction
-      ? declBody(source, declRe.lastIndex)
-      : arrowBody(source, declRe.lastIndex)
-    if (body !== null) table.set(name, body)
+    add(
+      name,
+      isFunction ? declBody(source, declRe.lastIndex) : arrowBody(source, declRe.lastIndex),
+    )
   }
-  // 方法形态：`name(...) {`（排除关键字与已收录名字）。合法 TS 里「调用后跟
-  // 块」只会出现在类/对象体中；误收的条目只会多扫一些正文，方向是保守的。
+  // 方法形态：`name(...) {`（排除关键字）。合法 TS 里「调用后跟块」只会出现
+  // 在类/对象体中；误收的条目只会多扫一些正文，方向是保守的。
   const methodRe = /\b([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g
   while ((match = methodRe.exec(source))) {
     const name = match[1]
-    if (NOT_CALLS.has(name) || table.has(name)) continue
+    if (NOT_CALLS.has(name)) continue
     const params = readBalanced(source, match.index + match[0].length - 1, '(', ')')
     if (params === null) continue
     let i = match.index + match[0].length - 1 + params.length + 2
     while (i < source.length && /\s/.test(source[i])) i += 1
     if (source[i] !== '{') continue
-    const body = readBalanced(source, i, '{', '}')
-    if (body !== null) table.set(name, body)
+    add(name, readBalanced(source, i, '{', '}'))
   }
   return table
 }
@@ -462,15 +488,18 @@ export function queuedViaLocals(callbackBody, functions, maxDepth = 6) {
   const walk = (body, trail, depth, seen) => {
     for (const name of calledNames(body)) {
       if (seen.has(name)) continue
-      const fnBody = functions.get(name)
-      if (fnBody === undefined) continue
+      const bodies = functions.get(name)
+      if (bodies === undefined) continue
       const nextTrail = [...trail, name]
-      const match = fnBody.match(QUEUED_ENTRY)
-      if (match) {
-        hits.push({ trail: nextTrail, entry: match[1] })
-        continue
+      // 同名可能有多份正文（不同作用域）：逐份检查，任一份命中即报
+      for (const fnBody of bodies) {
+        const match = fnBody.match(QUEUED_ENTRY)
+        if (match) {
+          hits.push({ trail: nextTrail, entry: match[1] })
+          continue
+        }
+        if (depth < maxDepth) walk(fnBody, nextTrail, depth + 1, new Set([...seen, name]))
       }
-      if (depth < maxDepth) walk(fnBody, nextTrail, depth + 1, new Set([...seen, name]))
     }
   }
   walk(callbackBody, [], 0, new Set())
@@ -520,27 +549,29 @@ export function observerViolations(path, source, functions) {
       continue
     }
     const cb = callbackFromArgs(args)
-    const body = cb.body ?? (cb.ref ? functions.get(cb.ref) ?? null : null)
-    if (body === null) {
+    const bodies = cb.body !== null ? [cb.body] : cb.ref ? functions.get(cb.ref) ?? null : null
+    if (bodies === null || bodies.length === 0) {
       violations.push(
         `${path}: switchObservers.add 的监听器形态无法静态分析（${args.trim().slice(0, 80)}）——` +
           '监听器在 runSaveTxn 回调内被 await，若它调用排队保存会死锁；请用同文件命名函数或内联箭头',
       )
       continue
     }
-    const direct = body.match(QUEUED_ENTRY)
-    if (direct) {
-      violations.push(
-        `${path}: switchObservers 监听器内含排队保存入口 \`${direct[1]}\`——` +
-          '观察者在事务回调内被 await，会排队等自己（死锁）。监听器只能做读取/对齐',
-      )
-      continue
-    }
-    for (const hit of queuedViaLocals(body, functions)) {
-      violations.push(
-        `${path}: switchObservers 监听器经 ${hit.trail.join(' → ')} 间接调用排队入口 \`${hit.entry}\`——` +
-          '同一死锁形状（监听器等队列，队列等回调，回调等监听器）',
-      )
+    for (const body of bodies) {
+      const direct = body.match(QUEUED_ENTRY)
+      if (direct) {
+        violations.push(
+          `${path}: switchObservers 监听器内含排队保存入口 \`${direct[1]}\`——` +
+            '观察者在事务回调内被 await，会排队等自己（死锁）。监听器只能做读取/对齐',
+        )
+        continue
+      }
+      for (const hit of queuedViaLocals(body, functions)) {
+        violations.push(
+          `${path}: switchObservers 监听器经 ${hit.trail.join(' → ')} 间接调用排队入口 \`${hit.entry}\`——` +
+            '同一死锁形状（监听器等队列，队列等回调，回调等监听器）',
+        )
+      }
     }
   }
   return violations
@@ -568,34 +599,37 @@ export function findViolations(files) {
         )
       }
       for (const site of txnCallSites(source)) {
-        // 引用式回调：同文件命名函数可解析；跨文件/别名解析不到 → 违规（fail closed）
-        const body = site.body ?? (site.ref ? functions.get(site.ref) ?? null : null)
-        if (body === null && site.ref !== null && isPureForward(forwardEntries, site.index, site.ref)) {
+        // 引用式回调：同文件命名函数可解析（同名多份正文时逐份扫）；
+        // 跨文件/别名解析不到 → 违规（fail closed）
+        const bodies = site.body !== null ? [site.body] : site.ref ? functions.get(site.ref) ?? null : null
+        if (bodies === null && site.ref !== null && isPureForward(forwardEntries, site.index, site.ref)) {
           continue
         }
-        if (body === null) {
+        if (bodies === null || bodies.length === 0) {
           violations.push(
             `${path}: runSaveTxn 回调形态无法静态分析（${site.args.trim().slice(0, 80) || '参数解析失败'}）——` +
               '请改为内联箭头/同文件命名函数；无法确认回调内容时按违规处理（否则门禁会假绿）',
           )
           continue
         }
-        if (QUEUED_ENTRY.test(body)) {
-          violations.push(
-            `${path}: runSaveTxn 回调内引用了排队保存入口（runSaveTxn/updateEditorPrefs/saveSplitRatio，含 ?.()）——` +
-              '它会排在回调自己持有的门禁之后，永久挂起。改用 tx.updateConfig(...)。片段：' +
-              body.trim().slice(0, 120),
-          )
-          continue
-        }
-        // 传递路径：回调 → 局部辅助函数 →（…）→ 排队入口。只扫同文件局部函数，
-        // 覆盖「回调里调 performSwitch 之类辅助函数」的场景（评审：单层文本匹配
-        // 抓不到这种间接调用）。
-        for (const hit of queuedViaLocals(body, functions)) {
-          violations.push(
-            `${path}: runSaveTxn 回调经 ${hit.trail.join(' → ')} 间接调用排队入口 \`${hit.entry}\`——` +
-              '同一队列，回调会等自己，永久挂起。该辅助函数内应改用 tx 句柄，或改调独立队列（如 switchOj）',
-          )
+        for (const body of bodies) {
+          if (QUEUED_ENTRY.test(body)) {
+            violations.push(
+              `${path}: runSaveTxn 回调内引用了排队保存入口（runSaveTxn/updateEditorPrefs/saveSplitRatio，含 ?.()）——` +
+                '它会排在回调自己持有的门禁之后，永久挂起。改用 tx.updateConfig(...)。片段：' +
+                body.trim().slice(0, 120),
+            )
+            continue
+          }
+          // 传递路径：回调 → 局部辅助函数 →（…）→ 排队入口。只扫同文件局部函数，
+          // 覆盖「回调里调 performSwitch 之类辅助函数」的场景（评审：单层文本匹配
+          // 抓不到这种间接调用）。
+          for (const hit of queuedViaLocals(body, functions)) {
+            violations.push(
+              `${path}: runSaveTxn 回调经 ${hit.trail.join(' → ')} 间接调用排队入口 \`${hit.entry}\`——` +
+                '同一队列，回调会等自己，永久挂起。该辅助函数内应改用 tx 句柄，或改调独立队列（如 switchOj）',
+            )
+          }
         }
       }
     }
@@ -611,9 +645,10 @@ export function findViolations(files) {
 export function loadSources(root) {
   return walkSources(root, {
     dirs: ['.'],
-    extensions: /\.(ts|vue)$/,
-    skip: (rel) =>
-      rel.endsWith('.d.ts') || rel.includes('__tests__') || rel.startsWith('test-support'),
+    // 与 layering 门禁同一扩展名面（含 .d.ts）：.js/.jsx/.tsx/.mjs/.cjs 里
+    // 同样可能出现保存事务调用，扫描面不能比文件名清单窄（评审 P2）
+    extensions: /\.(?:d\.ts|ts|tsx|js|jsx|mjs|cjs|vue)$/,
+    skip: (rel) => rel.includes('__tests__') || rel.startsWith('test-support'),
   })
 }
 

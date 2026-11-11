@@ -63,6 +63,7 @@
 
 import { pathToFileURL } from 'node:url'
 import {
+  buildLineIndex,
   decodeStringLiteral,
   lineOfIndex,
   prepareSource,
@@ -166,18 +167,19 @@ export function findViolations(files) {
     // 模板可执行表达式也要扫：动态 `import()` 是合法模板表达式
     //（`@click="import('@/services/x')"` 编译成真实调用——评审 P2）
     const source = prepareSource(path, content, { templateExpressions: true })
+    const lines = buildLineIndex(source)
     const findings = moduleSpecifiers(source).findings
     const dynamic = dynamicImportArgs(source)
     findings.push(...dynamic.literal)
     for (const { index, snippet } of dynamic.opaque) {
       violations.push(
-        `${path}:${lineOfIndex(source, index)}: 动态 import 的说明符无法静态分析（${snippet}）；` +
+        `${path}:${lineOfIndex(source, index, lines)}: 动态 import 的说明符无法静态分析（${snippet}）；` +
           '分层门禁 fail closed——请改用字符串字面量（不含 ${} / 拼接 / 变量）或静态 import。' +
           '规则 A/B 无法确认目标模块时按违规处理（否则门禁会假绿）',
       )
     }
     for (const { spec, index } of findings) {
-      const line = lineOfIndex(source, index)
+      const line = lineOfIndex(source, index, lines)
       if (SERVICE_SPEC.test(spec)) {
         violations.push(
           `${path}:${line}: 规则A —— View/component/composable 不得 import Service（${spec}）；` +
