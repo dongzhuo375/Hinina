@@ -453,17 +453,22 @@ export function readBalanced(source, start, open, close) {
  * `'@/servi\u0063es/config.service'` is `@/services/...` at runtime — the gate
  * must not go green on the raw spelling (review).
  *
- * Covers `\uXXXX`, `\u{…}`, `\xXX`, and **identity escapes** (`\c` → `c`,
+ * Covers `\uXXXX`, `\u{…}`, `\xXX`, **identity escapes** (`\c` → `c`,
  * `\e` → `e`): JavaScript drops the backslash for any non-special character, so
- * `'@/servi\ces/config.service'` is the service module too (round-ten review:
- * simple escapes were the remaining bypass). Plus `\\`, quotes, `\b`, `\f`,
+ * `'@/servi\ces/config.service'` is the service module too, and **line
+ * continuations** (`\` + LF / CRLF / LS / PS — a backslash-newline inside a
+ * string literal produces nothing, so `"@/servi\<newline>ces/…"` is the
+ * service module — round-twelve review). Plus `\\`, quotes, `\b`, `\f`,
  * `\v`, `\0`, `\n`, `\r`, `\t`. An unmatched `\u`/`\x` (invalid escape, file
  * would not compile) stays verbatim — conservative.
  */
 export function decodeStringLiteral(raw) {
+  // 行续接先消除：`\` + 行终止符在字符串里不产生任何字符（ES LineContinuation）。
+  // 放在转义总替换之前——`.` 不匹配换行，续接会落到「未识别」而原样保留。
+  const joined = raw.replace(/\\(?:\r\n|[\n\r\u2028\u2029])/g, '')
   // 前导 `\\` 已消耗掉那个反斜杠，末段只能是 `(.)`——写成 `\\(.)` 需要两个
   // 反斜杠，身份转义（`\c`）永远不会命中（评审第十一轮：简单转义仍漏报）。
-  return raw.replace(/\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))/g, (m, cp, u4, x2, simple) => {
+  return joined.replace(/\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))/g, (m, cp, u4, x2, simple) => {
     if (cp !== undefined) {
       const code = Number.parseInt(cp, 16)
       return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m

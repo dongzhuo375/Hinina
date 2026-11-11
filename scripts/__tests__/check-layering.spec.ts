@@ -358,9 +358,10 @@ import { x } from '@/services/config.service'
     expect(violations).toHaveLength(1)
   })
 
-  it('转义字形不绕过：说明符按运行时值解码后再判定（Unicode / hex / 身份转义）', () => {
+  it('转义字形不绕过：说明符按运行时值解码后再判定（Unicode / hex / 身份 / 行续接）', () => {
     // 静态、副作用、动态三种入口都走解码；身份转义（\c → c、\i → i）同样是
-    // 运行时等价字形——首轮的 `\\(.)` 正则多写一个反斜杠，此形态曾漏报
+    // 运行时等价字形——首轮的 `\\(.)` 正则多写一个反斜杠，此形态曾漏报；
+    // 行续接（\ + 换行）在字符串里不产生字符，是第十一轮之后的又一漏报面
     const cases = [
       String.raw`import { configService } from '@/servi\u0063es/config.service'`,
       String.raw`import '@/servi\u0063es/config.service'`,
@@ -369,10 +370,15 @@ import { x } from '@/services/config.service'
       String.raw`import { configService } from '@/servi\x63es/config.service'`,
       String.raw`import { configService } from '@/servi\ces/config.service'`,
       String.raw`const b = await import('@/br\idge')`,
+      // 行续接：LF / CRLF / 动态 / bridge
+      'import { x } from "@/servi\\\nces/config.service"',
+      "import { x } from '@/servi\\\r\nces/config.service'",
+      'const m = await import("@/servi\\\nces/config.service")',
+      'const b = await import("@/br\\\nidge")',
     ]
     for (const content of cases) {
       const violations = findViolations([{ path: 'views/Esc.ts', content }])
-      expect(violations, content).toHaveLength(1)
+      expect(violations, JSON.stringify(content)).toHaveLength(1)
     }
   })
 
