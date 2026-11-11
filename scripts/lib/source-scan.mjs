@@ -31,7 +31,12 @@
 //     failure mode is comment residue → a false positive, never a silent miss.
 //   - Template expressions (directive bindings / interpolations) are appended
 //     WITHOUT comment stripping: they are expression fragments, and any `//`
-//     inside them can only add scan text (conservative direction).
+//     inside them can only add scan text (conservative direction). They are
+//     HTML-entity decoded first (`&#114;unSaveTxn` is a real runSaveTxn at
+//     runtime); numeric references and the common named set only.
+//   - `readBalanced` skips strings, comments and regex literals with the same
+//     heuristic, so `/[}]/` inside a transaction callback no longer truncates
+//     the body it is scanning.
 //   - For `.vue` files the `<script>` / `<script setup>` blocks are extracted
 //     with the REAL SFC parser (`@vue/compiler-sfc` `parse`) — not regexes — so
 //     whitespace before `>` in a closing tag, HTML-commented script examples and
@@ -44,12 +49,15 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { parse } from '@vue/compiler-sfc'
+// 与应用同一解析器：'vue/compiler-sfc' 是 vue 包挂出的子路径（Vite 的
+// @vitejs/plugin-vue 也走它）——直接钉 @vue/compiler-sfc 的版本会与 vue 的
+// 内部版本各自漂移（评审 P3）。
+import { parse } from 'vue/compiler-sfc'
 
 const CONTROL_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with'])
 const REGEX_PRECEDING_KEYWORDS = new Set([
   'return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
-  'throw', 'case', 'do', 'else', 'yield', 'await',
+  'throw', 'case', 'do', 'else', 'yield', 'await', 'default',
 ])
 
 /**
@@ -286,7 +294,11 @@ export function templateExpressions(source) {
   }
   walk(ast)
   locs.sort((a, b) => a[0] - b[0])
-  return locs.map(([start, end]) => source.slice(start, end)).filter((text) => text.trim() !== '')
+  // Vue 编译前会解码 HTML 实体：`&#114;unSaveTxn(…)` 在运行时就是
+  // runSaveTxn——原文切片必须先解码再进入扫描面（评审：实体曾可藏调用）
+  return locs
+    .map(([start, end]) => decodeHtmlEntities(source.slice(start, end)))
+    .filter((text) => text.trim() !== '')
 }
 
 /**
@@ -322,13 +334,57 @@ export function lineOfIndex(source, index) {
   return line
 }
 
-/** Read a balanced bracket body starting at `start` (which points at the opener),
- * skipping string literals so braces inside strings cannot unbalance the scan. */
+/**
+ * Read a balanced bracket body starting at `start` (which points at the opener).
+ *
+ * Skips string literals, comments and regex literals so braces inside them
+ * cannot unbalance the scan. The regex/division decision reuses the same
+ * heuristic as `stripComments` (control-statement closing parens are regex
+ * context; member `.catch(` is not) — review: `/[}]/` inside a transaction
+ * callback used to truncate the body and hide the queued save behind it.
+ */
 export function readBalanced(source, start, open, close) {
   let depth = 0
   let i = start
+  let prevChar = ''
+  let prevWord = ''
+  let prevWordIsMember = false
+  const parenStack = []
   while (i < source.length) {
     const ch = source[i]
+    const next = source[i + 1]
+    if (ch === '/' && next === '/') {
+      while (i < source.length && source[i] !== '\n') i += 1
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i += 1
+      i += 2
+      continue
+    }
+    if (ch === '/' && isRegexStart(prevChar, prevWord)) {
+      i += 1
+      let inClass = false
+      while (i < source.length) {
+        const rch = source[i]
+        if (rch === '\\') {
+          i += 2
+          continue
+        }
+        if (rch === '[') inClass = true
+        else if (rch === ']') inClass = false
+        else if (rch === '/' && !inClass) {
+          i += 1
+          break
+        }
+        i += 1
+      }
+      while (i < source.length && /[a-z]/i.test(source[i])) i += 1
+      prevChar = ')'
+      prevWord = ''
+      continue
+    }
     if (ch === '"' || ch === "'" || ch === '`') {
       const quote = ch
       i += 1
@@ -343,6 +399,40 @@ export function readBalanced(source, start, open, close) {
         }
         i += 1
       }
+      prevChar = quote
+      prevWord = ''
+      continue
+    }
+    if (/\s/.test(ch)) {
+      i += 1
+      continue
+    }
+    if (/[A-Za-z0-9_$]/.test(ch)) {
+      const wordStart = i
+      while (i < source.length && /[A-Za-z0-9_$]/.test(source[i])) i += 1
+      prevWord = source.slice(wordStart, i)
+      prevWordIsMember = source[wordStart - 1] === '.'
+      prevChar = source[i - 1]
+      continue
+    }
+    if (ch === '(') {
+      // 深度计数与括号栈各管一段：计数服务 readBalanced 的配平，栈服务
+      // 「闭括号后是否正则语境」
+      if (ch === open) depth += 1
+      parenStack.push(CONTROL_KEYWORDS.has(prevWord) && !prevWordIsMember)
+      prevChar = ch
+      prevWord = ''
+      i += 1
+      continue
+    }
+    if (ch === ')') {
+      if (ch === close) {
+        depth -= 1
+        if (depth === 0) return source.slice(start + 1, i)
+      }
+      prevChar = (parenStack.pop() ?? false) ? ';' : ')'
+      prevWord = ''
+      i += 1
       continue
     }
     if (ch === open) depth += 1
@@ -350,9 +440,48 @@ export function readBalanced(source, start, open, close) {
       depth -= 1
       if (depth === 0) return source.slice(start + 1, i)
     }
+    prevChar = ch
+    prevWord = ''
     i += 1
   }
   return null
+}
+
+/**
+ * Decode string-literal escapes in a module specifier before the layer match.
+ * `'@/servi\u0063es/config.service'` is `@/services/...` at runtime — the gate
+ * must not go green on the raw spelling (review). Conservative: `\uXXXX`,
+ * `\u{…}`, `\xXX`, `\\`, `\'`, `\"`, `\n`, `\r`, `\t`; anything else is left
+ * verbatim (and therefore fails the layer match → conservative).
+ */
+export function decodeStringLiteral(raw) {
+  return raw.replace(/\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|\\(.))/g, (m, cp, u4, x2, simple) => {
+    if (cp !== undefined) {
+      const code = Number.parseInt(cp, 16)
+      return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m
+    }
+    if (u4 !== undefined) return String.fromCharCode(Number.parseInt(u4, 16))
+    if (x2 !== undefined) return String.fromCharCode(Number.parseInt(x2, 16))
+    const map = { '\\': '\\', "'": "'", '"': '"', n: '\n', r: '\r', t: '\t' }
+    return map[simple] ?? m
+  })
+}
+
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
+
+/**
+ * Decode HTML character references in template expression text. Vue decodes
+ * entities before compiling, so `&#114;unSaveTxn(…)` inside `@click` is a real
+ * `runSaveTxn` call while the raw source spells something else (review: the
+ * save gate must not go green on that). Numeric references plus the common
+ * named set; unknown names stay verbatim (conservative).
+ */
+export function decodeHtmlEntities(text) {
+  return text.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z]+));/g, (m, dec, hex, name) => {
+    if (dec !== undefined) return String.fromCodePoint(Number.parseInt(dec, 10))
+    if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16))
+    return NAMED_ENTITIES[name] ?? m
+  })
 }
 
 /**

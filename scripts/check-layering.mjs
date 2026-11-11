@@ -25,7 +25,10 @@
 // lines all report; match offsets map back to line numbers. Import-keyword
 // matches must not be preceded by `.` / word chars / a quote, so property
 // access (`x.from`, `x.import('y')`) does not read as an import and prose inside
-// a string literal does not read as one either.
+// a string literal does not read as one either. Specifiers are decoded
+// (`decodeStringLiteral`: Unicode, hex and simple escapes) before the layer
+// match - an escaped spelling of the service module is still the service module
+// at runtime (review: raw-text matching was a silent bypass).
 //
 // Dynamic imports are only checkable when the specifier is statically visible:
 // a plain string literal or a backtick literal without `${}`. Every other form
@@ -54,6 +57,7 @@
 
 import { pathToFileURL } from 'node:url'
 import {
+  decodeStringLiteral,
   lineOfIndex,
   prepareSource,
   walkSources,
@@ -106,7 +110,9 @@ export function dynamicImportArgs(source) {
       // ?? + …）都说明这不是纯字面量，fail closed（`'a' && loadB` 的第一个串恒
       // truthy，实际加载的是后面的模块，单读第一个串会假绿）。
       if (source[i] === ')' || source[i] === ',') {
-        literal.push({ spec: raw, index: match.index })
+        // 字符串字面量的转义在运行时生效：`@/services/…` 就是 services，
+        // 按原文匹配会假绿——解码后再进入层判定（评审 P2）
+        literal.push({ spec: decodeStringLiteral(raw), index: match.index })
         continue
       }
       opaque.push({ index: match.index, snippet: `${quote}${raw}${quote} …` })
@@ -132,12 +138,13 @@ export function findViolations(files) {
     // dot blocks `x.from`, the word char blocks `myimport`, the quote keeps
     // string-literal prose (`"from '@/services/x'"`) out of the matcher.
     for (const match of source.matchAll(/(?<![.\w$'"`])from\s*['"]([^'"]+)['"]/g)) {
-      findings.push({ spec: match[1], index: match.index })
+      // 转义解码后再判定（`@/services/…` 运行时就是 services）
+      findings.push({ spec: decodeStringLiteral(match[1]), index: match.index })
     }
     for (const match of source.matchAll(/(?<![.\w$'"`])import\s*['"]([^'"]+)['"]/g)) {
       // 副作用 import（`import '<spec>'`）；`x.import(...)` 被 lookbehind 挡掉，
       // `import(...)` 走下面的动态分支
-      findings.push({ spec: match[1], index: match.index })
+      findings.push({ spec: decodeStringLiteral(match[1]), index: match.index })
     }
     const dynamic = dynamicImportArgs(source)
     findings.push(...dynamic.literal)

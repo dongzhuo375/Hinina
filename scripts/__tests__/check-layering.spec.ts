@@ -357,6 +357,32 @@ import { x } from '@/services/config.service'
     ])
     expect(violations).toHaveLength(1)
   })
+
+  it('转义字形不绕过：说明符按运行时值解码后再判定（\\u0063 / \\u0069）', () => {
+    // 静态、副作用、动态三种入口都走解码
+    const cases = [
+      String.raw`import { configService } from '@/servi\u0063es/config.service'`,
+      String.raw`import '@/servi\u0063es/config.service'`,
+      String.raw`const m = await import('@/servi\u0063es/config.service')`,
+      String.raw`const b = await import('@/br\u0069dge')`,
+    ]
+    for (const content of cases) {
+      const violations = findViolations([{ path: 'views/Esc.ts', content }])
+      expect(violations, content).toHaveLength(1)
+    }
+  })
+
+  it('规则A：export default /[/*]/ 后的 import 仍被扫描（default 是正则先行词）', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Exp.ts',
+        content: `export default /[/*]/
+import { x } from '@/services/config.service'`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('views/Exp.ts:2:')
+  })
 })
 
 describe('check-layering — 真实源码树', () => {

@@ -492,6 +492,36 @@ const configStore = useConfigStore()
     expect(violations).toEqual([])
   })
 
+  it('模板里的 HTML 实体不隐藏调用（&#114;unSaveTxn 解码后是 runSaveTxn）', () => {
+    const violations = findViolations([
+      {
+        path: 'views/EntityView.vue',
+        content: `<template>
+  <button @click="configStore.&#114;unSaveTxn((tx) => configStore.saveSplitRatio(0.8))" />
+</template>
+<script setup lang="ts">const configStore = useConfigStore()</script>`,
+      },
+    ])
+    expect(violations).toHaveLength(2)
+    expect(violations.some((v) => v.includes('不在白名单'))).toBe(true)
+    expect(violations.some((v) => v.includes('排队保存入口'))).toBe(true)
+  })
+
+  it('回调正文里的 /[}]/ 不截断事务回调（readBalanced 正则感知）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `await configService.runSaveTxn((tx) => {
+  const r = /[}]/
+  configService.saveSplitRatio(0.5)
+  return tx.updateConfig(() => {})
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+  })
+
   it('模板散文不产生指令违规；script 字符串只有 mention 级触发（rule 1 口径）', () => {
     // 散文与 script 内的 @click 形字符串不含 runSaveTxn mention → 零违规：
     // 指令表达式提取不会把 script 内字符串当模板指令
