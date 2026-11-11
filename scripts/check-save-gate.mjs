@@ -395,18 +395,50 @@ export function localFunctions(source) {
       isFunction ? declBody(source, declRe.lastIndex) : arrowBody(source, declRe.lastIndex),
     )
   }
-  // 方法形态：`name(...) {`（排除关键字）。合法 TS 里「调用后跟块」只会出现
-  // 在类/对象体中；误收的条目只会多扫一些正文，方向是保守的。
-  const methodRe = /\b([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g
+  // 方法形态：`name(...) {` / `name<T>(...) {`（排除关键字）。**泛型实参用
+  // readAngles 平衡读取**——单层 `<[^<>()]*>` 在嵌套泛型（`Array<Map<…>>`）或
+  // 函数类型（`(e: Event) => void`）处截断，嵌套泛型方法不进函数表、间接路径
+  // 漏追（评审 P3）。合法 TS 里「调用后跟块」只会出现在类/对象体中；误收的
+  // 条目只会多扫一些正文，方向是保守的。
+  const methodRe = /\b([A-Za-z_$][\w$]*)\b/g
   while ((match = methodRe.exec(source))) {
     const name = match[1]
     if (NOT_CALLS.has(name)) continue
-    const params = readBalanced(source, match.index + match[0].length - 1, '(', ')')
+    let cursor = match.index + name.length
+    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    // 可选泛型实参：`<...>`（readAngles 平衡读取，支持嵌套与函数类型）；无泛型
+    // 则直接找参数括号——**两条路径都必须**，只认泛型形态会漏掉无泛型方法
+    if (source[cursor] === '<') {
+      const anglesEnd = readAngles(source, cursor)
+      if (anglesEnd === null) continue
+      cursor = anglesEnd
+      while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    }
+    if (source[cursor] !== '(') continue
+    const params = readBalanced(source, cursor, '(', ')')
     if (params === null) continue
-    let i = match.index + match[0].length - 1 + params.length + 2
+    let i = cursor + params.length + 2
     while (i < source.length && /\s/.test(source[i])) i += 1
-    if (source[i] !== '{') continue
-    add(name, readBalanced(source, i, '{', '}'))
+    // 参数闭括号后允许**同一行**的返回类型注解（`): Promise<void> {`——注解里
+    // 的 `=>`、括号、泛型逐 token 跳过），方法体 `{` 可能在注解之后
+    let sawOpen = false
+    while (i < source.length) {
+      const ch = source[i]
+      if (ch === '\n' || ch === ';') break
+      if (ch === '{') {
+        add(name, readBalanced(source, i, '{', '}'))
+        sawOpen = true
+        break
+      }
+      if (ch === '(' || ch === '<') {
+        const closer = ch === '(' ? readBalanced(source, i, '(', ')') : readAngles(source, i)
+        if (closer === null) break
+        i += closer === null ? 1 : closer - i
+        continue
+      }
+      i += 1
+    }
+    if (!sawOpen) continue
   }
   return table
 }

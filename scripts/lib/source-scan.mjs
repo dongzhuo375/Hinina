@@ -598,10 +598,11 @@ export function readStringLiteral(source, quoteIndex) {
 /**
  * Read a balanced `<...>` generic argument/parameter list starting at `start`
  * (the opening `<`). Nested generics (`Array<Map<string, T>>`) and string
- * literals inside the list are handled; returns the index just past the closing
- * `>` or `null` when unbalanced. Used for call-name extraction — the old
- * `<[^<>()]*>` pattern stopped at the inner `<` and silently dropped
- * `persist<Array<string>>(…)` from the called-name set (review P3).
+ * literals inside the list are handled. **`=>` inside the list is skipped**
+ * (function-type annotations like `(e: Event) => void` — the `>` of `=>` must
+ * not decrease the depth, review P3: the shallow `</>` balance truncated at the
+ * arrow and dropped the whole call name). Returns the index just past the
+ * closing `>` or `null` when unbalanced.
  */
 export function readAngles(source, start) {
   if (source[start] !== '<') return null
@@ -613,6 +614,10 @@ export function readAngles(source, start) {
       const literal = readStringLiteral(source, i)
       if (literal === null) return null
       i = literal.end
+      continue
+    }
+    if (ch === '=' && source[i + 1] === '>') {
+      i += 2
       continue
     }
     if (ch === '<') depth += 1

@@ -594,6 +594,39 @@ await configService.runSaveTxn((tx) => {
     expect(violations[0]).toContain('persist')
   })
 
+  it('泛型实参里的函数类型（=>）不截断调用名（readAngles 跳过箭头）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `function persist<T>(value: T) { return configService.saveSplitRatio(0.5) }
+await configService.runSaveTxn((tx) => {
+  persist<(e: Event) => void>(cb)
+  return tx.updateConfig(() => {})
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('persist')
+  })
+
+  it('带返回注解 + 嵌套泛型的方法进函数表（方法分支的注解与泛型感知）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `class Repo {
+  save<T>(v: Array<Map<string, T>>): void { configService.saveSplitRatio(0.5) }
+}
+const repo = new Repo()
+await configService.runSaveTxn((tx) => {
+  repo.save([])
+  return tx.updateConfig(() => {})
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('间接调用排队入口')
+  })
+
   it('带默认值的转发形参不享受纯转发豁免（默认值可内联排队调用）', () => {
     const violations = findViolations([
       {
