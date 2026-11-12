@@ -73,7 +73,9 @@ export const useProblemStore = defineStore('problem', {
       this.isLoading = true
       this.error = null
       try {
-        const problem = await problemService.getProblem(contestId, problemId)
+        // 取数经本 store 的转发 action（与 getProblem 单入口）——同一取数路径
+        // 只保留一个调用点，不再直接碰 problemService
+        const problem = await this.getProblem(contestId, problemId)
         // 过期响应：期间又发起了新的 openProblem，状态（currentProblem/error/
         // isLoading）一律由最新请求决定。失败也不重抛 —— 调用方（视图）对
         // 这次加载早已通过自身 loadToken 放弃，重抛只会制造未处理拒绝
