@@ -438,12 +438,19 @@ import x from '@/services/real'
     // Vite 对非相对/非绝对模式先 resolveId（别名生效）再展开：`@/**/x` 是真实
     // 懒加载边，但字面量模式看不出解析集合——曾零违规（探针：tinyglobby 实测
     // 命中 src/services/config.service.ts 与全部 bridge）。只有文件名段可通配。
+    // 判定跑在**解码后**的说明符上（第二十五轮）：Vite 展开用的是 AST literal
+    // 的 element.value，`@/\u002a/…` 运行时就是 `@/*/…`，转义不能把通配藏进目录段。
     for (const pattern of [
       '@/*/config.service.ts',
       '@/**/config.service.ts',
       '@/**/*.service.ts',
       '/src/**/config.service.ts',
       '@/**/*.bridge.ts',
+      // 转义拼写：raw 里没有通配符/斜杠，解码后才出现（旧判据上全绿）
+      String.raw`@/\u002a/config.service.ts`,
+      String.raw`@/\x2a/config.service.ts`,
+      String.raw`@/\u003f/config.service.ts`,
+      String.raw`@\u002f**\u002f*.service.ts`,
     ]) {
       const violations = findViolations([
         { path: 'views/Glob.ts', content: `const m = import.meta.glob('${pattern}')` },
@@ -452,12 +459,14 @@ import x from '@/services/real'
       expect(violations[0], pattern).toContain('无法静态分析')
       expect(violations[0], pattern).toContain('目录段')
     }
-    // 文件名段通配仍按段判据报红
-    const segment = findViolations([
-      { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/services/*.ts')` },
-    ])
-    expect(segment).toHaveLength(1)
-    expect(segment[0]).toContain('规则A')
+    // 文件名段通配仍按段判据报红（含转义拼写：解码后段判据同样成立）
+    for (const pattern of ['@/services/*.ts', String.raw`@/services/\u002a.ts`]) {
+      const segment = findViolations([
+        { path: 'views/Glob.ts', content: `const m = import.meta.glob('${pattern}')` },
+      ])
+      expect(segment, pattern).toHaveLength(1)
+      expect(segment[0], pattern).toContain('规则A')
+    }
     // 文件名段通配的非层目标不误报
     const assets = findViolations([
       { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/assets/*.svg')` },

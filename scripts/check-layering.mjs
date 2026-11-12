@@ -54,7 +54,10 @@
 // `@/**/*.service.ts` are real lazy edges but the literal pattern does not
 // reveal the resolved set — a wildcard anywhere before the last `/` fails
 // closed (review round twenty-four; `@/services/*.ts` still reports by its
-// path segment).
+// path segment). The check runs on the **decoded** specifier (Vite expands
+// the AST literal's `element.value`), so escape spellings — `@/\u002a/…`,
+// `@\u002f**\u002f…` — cannot hide the wildcard in a directory segment
+// (review round twenty-five).
 //
 // Scan surface: `views/`, `components/`, `composables/` (recursively) plus
 // `src/App.vue`, over `.ts` / `.tsx` / `.js` / `.jsx` / `.mjs` / `.cjs` /
@@ -167,14 +170,21 @@ export function dynamicImportArgs(source) {
       opaque.push({ index: match.index, snippet: '`…${…}…`' })
       continue
     }
+    // 字符串字面量的转义在运行时生效：`@/servi\u0063es/…` 就是 services，
+    // 按原文匹配会假绿——所有判定都在**解码后**的说明符上做（评审 P2；第二十五
+    // 轮补齐 glob 判定：Vite 展开用的是 AST literal 的 element.value，即解码后
+    // 的模式，`@/\u002a/config.service.ts` 运行时就是 `@/*/config.service.ts`）
+    const spec = decodeStringLiteral(raw)
     // **glob 的目录段通配 fail closed**（评审第二十四轮）：Vite 对非相对/
     // 非绝对模式先 resolveId（别名插件生效）再展开——`@/**/config.service.ts`、
     // `@/**/*.service.ts` 等都是真实懒加载边，但字面量模式本身看不出解析集合
     //（通配符可跨目录段命中 services/bridge）。只有**文件名段**允许通配
     //（`@/services/*.ts` 的段判据仍成立）；目录段带通配即按不可静态判定处理。
+    // 判定用**解码后**的 spec：转义拼写（`\u002a` / `\x2a` / `\u002f`）不能
+    // 把通配符藏进目录段（评审第二十五轮）。
     if (isGlob) {
-      const lastSlash = raw.lastIndexOf('/')
-      const dirPart = lastSlash === -1 ? '' : raw.slice(0, lastSlash)
+      const lastSlash = spec.lastIndexOf('/')
+      const dirPart = lastSlash === -1 ? '' : spec.slice(0, lastSlash)
       if (/[*?[{]/.test(dirPart)) {
         opaque.push({
           index: match.index,
@@ -190,9 +200,7 @@ export function dynamicImportArgs(source) {
     // ?? + …）都说明这不是纯字面量，fail closed（`'a' && loadB` 的第一个串恒
     // truthy，实际加载的是后面的模块，单读第一个串会假绿）。
     if (source[i] === ')' || source[i] === ',') {
-      // 字符串字面量的转义在运行时生效：`@/servi\u0063es/…` 就是 services，
-      // 按原文匹配会假绿——解码后再进入层判定（评审 P2）
-      literal.push({ spec: decodeStringLiteral(raw), index: match.index })
+      literal.push({ spec, index: match.index })
       continue
     }
     opaque.push({ index: match.index, snippet: `${quote}${raw}${quote} …` })
