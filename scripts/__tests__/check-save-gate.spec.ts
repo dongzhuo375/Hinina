@@ -313,6 +313,61 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
     expect(violations[0]).toContain('排队保存入口')
   })
 
+  it('内联 function 回调的返回注解含对象类型时仍定位真实正文（评审第十九轮）', () => {
+    // `indexOf('{')` 曾把注解里的类型字面量当正文：截出的 ` ok: boolean ` 不含
+    // 排队入口，真实回调体整条漏扫。类型本身合法（回调返回 Promise<{…}>）。
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `await configService.runSaveTxn(function (tx): Promise<{ ok: boolean }> {
+  configService.saveSplitRatio(0.5)
+  return tx.updateConfig(() => ({ ok: true }))
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+    expect(violations[0]).toContain('saveSplitRatio')
+  })
+
+  it('对象类型返回注解的方法进函数表（(): { ok: boolean } 不再把类型字面量当正文）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `class Repo {
+  helper(): { ok: boolean } { configService.saveSplitRatio(0.5); return { ok: true } }
+}
+await configService.runSaveTxn((tx) => {
+  new Repo().helper()
+  return tx.updateConfig(() => {})
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('间接引用排队入口')
+    expect(violations[0]).toContain('saveSplitRatio')
+  })
+
+  it('function 声明的泛型返回注解含对象类型时正文不被类型字面量替代', () => {
+    // `function f(): Array<{...}>` 曾被当成「注解里的 `{` 是正文起点」，函数表
+    // 存的是 ` ok: boolean `，间接调用路径静默漏追。正文换行是刻意的：方法分支
+    // 只认同行注解，此时仅 `declBody` 能收进函数表（用例覆盖声明分支本身）。
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `function persist(): Array<{ ok: boolean }>
+{ return configService.saveSplitRatio(0.5) }
+await configService.runSaveTxn((tx) => {
+  persist()
+  return tx.updateConfig(() => {})
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('间接引用排队入口')
+    expect(violations[0]).toContain('saveSplitRatio')
+  })
+
   it('引用同文件命名回调：解析其正文并扫描（不再静默跳过）', () => {
     const violations = findViolations([
       {

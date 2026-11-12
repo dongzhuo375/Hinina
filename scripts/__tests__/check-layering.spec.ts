@@ -514,6 +514,21 @@ import { x } from '@/services/config.service'`,
     expect(bridge[0]).toContain('规则B')
   })
 
+  it('模板表达式先剥注释：块注释不能拆开 import 与调用括号（评审第十九轮）', () => {
+    // `import/*c*/(…)` 是合法动态 import，Vue 模板解析通过；表达式原样进入
+    // 扫描面时既不像 `import(`、也不像不可读说明符，曾**零违规**静默假绿。
+    // 与脚本块同口径（脚本块一直剥注释，跨行/转义等形态都已命中）。
+    for (const content of [
+      `<template><button @click="import/*x*/('@/services/config.service')" /></template>\n<script setup>const a = 1</script>`,
+      `<template><button @click="import/*x*/('@/services/config.service', {})" /></template>\n<script setup>const a = 1</script>`,
+    ]) {
+      const violations = findViolations([{ path: 'views/Cmt.vue', content }])
+      expect(violations, content).toHaveLength(1)
+      expect(violations[0], content).toContain('规则A')
+      expect(violations[0], content).toContain('views/Cmt.vue:1:')
+    }
+  })
+
   it('说明符按字符串语义定界：异种引号、转义定界符都不截断（静态与动态）', () => {
     const cases = [
       // 双引号串里的单引号属于路径

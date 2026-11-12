@@ -65,19 +65,22 @@
 // saveSplitRatio), and the transfer walk keys on **mentions**, not just calls —
 // a helper passed by reference (`list.map(persistOne)`) is followed too (a
 // reference can be invoked later). Tracked declaration shapes: `function`
-// declarations (return-type annotations without braces, e.g. `(): () => void`),
-// function-expression constants (`const f = function (...) { … }`), assignment
-// arrows keyed by the assigned name (`h = () => …` class fields, `this.x = …`,
-// params read with balanced brackets so nested-paren defaults survive), block-
-// and expression-body arrows, and class/object methods **with a single-line
-// return annotation**, generics included (`save<T>(v: Array<Map<string,
-// T>>): void {`, getters; the body must sit on the params' line — a newline
-// after the call parens means the next statement is not a definition). What is
-// *not* tracked: cross-file helpers, aliases, dynamic lookup, multi-line
-// expression bodies (truncated at the first newline), annotations that span a
-// newline or contain a conditional `?` (the body walk stops there),
-// declarations whose return type contains braces (`function f(): Array<{...}>
-// {`), arrows stored as **object properties** (`const o = { h: () =>
+// declarations (annotations may contain parentheses, generics such as
+// `Array<{...}>` and `=>`; an object-type annotation immediately followed by
+// the body, `(): { a: 1 } {`, is disambiguated from the body), function-
+// expression constants (`const f = function (...) { … }`, annotated returns
+// included), assignment arrows keyed by the assigned name (`h = () => …` class
+// fields, `this.x = …`, params read with balanced brackets so nested-paren
+// defaults survive), block- and expression-body arrows, and class/object
+// methods **with a single-line return annotation**, generics included
+// (`save<T>(v: Array<Map<string, T>>): void {`, getters; the body must sit on
+// the params' line — a newline after the call parens means the next statement
+// is not a definition). What is *not* tracked: cross-file helpers, aliases,
+// dynamic lookup, multi-line expression bodies (truncated at the first
+// newline), method annotations that span a newline or contain a conditional
+// `?` (the body walk stops there), object-type annotations with a postfix
+// (`function f(): { a: 1 }[] {` — the type literal is read as the body),
+// arrows stored as **object properties** (`const o = { h: () =>
 // saveSplitRatio(0.5) }` — the colon form is keyed by nothing; assignment
 // arrows are), generic arguments spanning a newline (readAngles is
 // single-line), and same-named helpers resolved at **depth > 6** (the transfer
@@ -153,10 +156,13 @@ const QUEUED_MENTION = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\b/
  * Extract a callback body from a call's argument text.
  *
  * Handles inline arrows (block & expression body) and inline
- * `function` / `async function` expressions. A **bare identifier** is returned
- * as `ref` so the caller can resolve it against the same-file local function
- * table. Anything else yields `{ body: null, ref: null }` — the caller must
- * treat that as a fail-closed violation, never as "nothing to scan".
+ * `function` / `async function` expressions — including a return annotation
+ * whose type contains braces (`function (tx): Promise<{ ok: boolean }> { … }`);
+ * the body is located by `bodyBraceAfterParams`, never by the first `{`.
+ * A **bare identifier** is returned as `ref` so the caller can resolve it
+ * against the same-file local function table. Anything else yields
+ * `{ body: null, ref: null }` — the caller must treat that as a fail-closed
+ * violation, never as "nothing to scan".
  *
  * @param {string} args raw text between the call's parentheses
  * @returns {{ body: string | null, ref: string | null }}
@@ -170,9 +176,12 @@ export function callbackFromArgs(args) {
     const open = args.indexOf('(', fnHead[0].length)
     const params = open === -1 ? null : readBalanced(args, open, '(', ')')
     if (params !== null) {
-      const brace = args.indexOf('{', open + params.length + 2)
-      const body = brace === -1 ? null : readBalanced(args, brace, '{', '}')
-      return { body, ref: null }
+      // `indexOf('{')` 会把返回注解里的类型字面量当正文：`function (tx):
+      // Promise<{ ok: boolean }> { … }` 的正文曾被截成 ` ok: boolean `，
+      // 真实回调体（含排队入口）整条漏扫。注解感知定位见 bodyBraceAfterParams。
+      const bodyOpen = bodyBraceAfterParams(args, open + params.length + 2, { sameLine: false })
+      if (bodyOpen === -1) return { body: null, ref: null }
+      return { body: readBalanced(args, bodyOpen, '{', '}'), ref: null }
     }
     return { body: null, ref: null }
   }
@@ -314,44 +323,21 @@ export function calledNames(body) {
 /// 从 `afterName` 起解析一个 **函数声明** 的正文（无正文返回 null）。
 ///
 /// 评审抓到的漏报形态：`function pick(): () => void {` 的返回类型注解里也有
-/// `=>`，旧实现把它当成箭头函数的箭头、正文截成 "void"。修正：跳过配对的
-/// 类型注解括号与注解内的 `=>`，正文从首个深度 0 的 `{` 取配对块；裸 `=` 或
-/// `;` 意味着这不是函数声明的形状，返回 null。
+/// `=>`，旧实现把它当成箭头函数的箭头、正文截成 "void"。修正：注解里的
+/// 括号、方括号、泛型（`Array<{...}>`）与 `=>` 逐 token 跳过，对象类型注解
+/// （`(): { a: 1 } {`）按「类型字面量后紧跟正文」消歧（见
+/// `bodyBraceAfterParams`）；裸 `=` 或 `;` 意味着不是函数声明形状，返回 null。
 function declBody(source, afterName) {
   const openParen = source.indexOf('(', afterName)
   if (openParen === -1) return null
   const params = readBalanced(source, openParen, '(', ')')
   if (params === null) return null
-  let i = openParen + params.length + 2
-  while (i < source.length) {
-    const ch = source[i]
-    if (ch === '"' || ch === "'" || ch === '`') {
-      // 字符串字面量跳过用共享实现（转义/模板插值同口径——评审：四份手写跳过
-      // 曾各自漂移，嵌套模板 `${`…`}` 只有一份支持）
-      const end = skipStringLiteral(source, i)
-      if (end === -1) return null
-      i = end
-      continue
-    }
-    if (ch === '(') {
-      const inner = readBalanced(source, i, '(', ')')
-      if (inner === null) return null
-      i += inner.length + 2
-      continue
-    }
-    if (ch === '{') return readBalanced(source, i, '{', '}')
-    if (ch === '=') {
-      // 函数声明分支里出现的 `=>` 只可能是返回类型注解的一部分
-      if (source[i + 1] === '>') {
-        i += 2
-        continue
-      }
-      return null
-    }
-    if (ch === ';') return null
-    i += 1
-  }
-  return null
+  const bodyOpen = bodyBraceAfterParams(source, openParen + params.length + 2, {
+    sameLine: false,
+    bailOnEquals: true,
+  })
+  if (bodyOpen === -1) return null
+  return readBalanced(source, bodyOpen, '{', '}')
 }
 
 /// 从 `=>` 之后解析箭头函数正文：块体取配对花括号；表达式体截到 `;` 或换行
@@ -432,10 +418,15 @@ function assignArrowBody(source, afterEq) {
   return null
 }
 
-/// 参数闭括号之后（**同一行**）定位方法体 `{`：允许一段返回类型注解
-///（`): Promise<void> {` 或 `): () => void {`；注解里的 `=>`、括号、泛型逐
-/// token 跳过）。遇到换行 / `;` / `)` / `,` / `}` / `?` 即放弃——`call()` 后接
-/// 三元、逗号或下一条语句不是定义。返回 `{` 的下标，找不到返回 -1。
+/// 参数闭括号之后定位正文 `{`（方法/包装器定义与内联 `function` 回调共用）。
+/// 允许一段返回类型注解：注解里的 `=>`、括号、方括号、泛型逐 token 跳过。
+/// **对象类型注解与正文的消歧**：`): { a: 1 } {` 的第一个 `{` 是类型字面量——
+/// 读平衡后若（同一行空白之后）紧跟另一个 `{`，后者才是正文；否则第一个就是
+/// 正文（`): Promise<void> {`）。`sameLine` 模式遇换行即放弃（方法定义只认
+/// 同一行）；非 sameLine 模式（内联 function 表达式）允许注解/正文换行。
+/// 遇到 `;` / `)` / `,` / `}` / `?`（条件类型）即放弃——`call()` 后接三元、
+/// 逗号或下一条语句不是定义；`bailOnEquals` 供 `function` 声明保留旧行为
+///（顶层裸 `=` 不是声明形态）。返回 `{` 的**绝对下标**，找不到返回 -1。
 ///
 /// **两种配平读取的返回值形态不同**：`readBalanced` 返回括号内正文（推进
 /// 长度 + 2），`readAngles` 返回闭括号后的**绝对下标**。混用（旧实现对两者
@@ -443,14 +434,33 @@ function assignArrowBody(source, afterEq) {
 /// 从文件头重扫 → 单行文件死循环；正文非空时变 NaN → 静默放弃整条注解。
 ///（评审：注解/方法体只允许出现在参数括号的**同一行**——跳过前导换行会让
 /// `log(1)` 之后下一行的无关 if 块被当成方法体，产生误报。）
-function sameLineBodyOpen(source, from) {
+function bodyBraceAfterParams(source, from, { sameLine, bailOnEquals = false }) {
   let i = from
   while (i < source.length) {
     const ch = source[i]
-    if (ch === '\n' || ch === ';' || ch === ')' || ch === ',' || ch === '}' || ch === '?') return -1
-    if (ch === '{') return i
+    if (ch === '\n' || ch === '\r') {
+      if (sameLine) return -1
+      i += 1
+      continue
+    }
+    if (ch === ';' || ch === ')' || ch === ',' || ch === '}' || ch === '?') return -1
+    if (ch === '"' || ch === "'" || ch === '`') {
+      // 字符串字面量类型（`'a{b'`）里的标点不得参与正文定位；注解里的模板
+      // 字面量类型可跨行，sameLine 模式仍按旧口径放弃
+      const end = skipStringLiteral(source, i)
+      if (end === -1) return -1
+      if (sameLine && source.slice(i, end).includes('\n')) return -1
+      i = end
+      continue
+    }
     if (ch === '(') {
       const inner = readBalanced(source, i, '(', ')')
+      if (inner === null) return -1
+      i += inner.length + 2
+      continue
+    }
+    if (ch === '[') {
+      const inner = readBalanced(source, i, '[', ']')
       if (inner === null) return -1
       i += inner.length + 2
       continue
@@ -461,15 +471,37 @@ function sameLineBodyOpen(source, from) {
       i = end
       continue
     }
+    if (ch === '{') {
+      const inner = readBalanced(source, i, '{', '}')
+      if (inner !== null) {
+        let j = i + inner.length + 2
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j += 1
+        // 紧跟第二个 `{`：前一个 `{` 是对象类型注解（`): { a: 1 } {`）
+        if (source[j] === '{') return j
+      }
+      return i
+    }
+    if (ch === '=') {
+      if (source[i + 1] === '>') {
+        i += 2
+        continue
+      }
+      if (bailOnEquals) return -1
+    }
     i += 1
   }
   return -1
 }
 
+/// 方法定义（含包装器 / 转发入口）：注解与正文只允许在同一行。
+function sameLineBodyOpen(source, from) {
+  return bodyBraceAfterParams(source, from, { sameLine: true })
+}
+
 /**
  * 同一文件内的局部函数表，覆盖本仓实际会写的形态：
- * - `function name(...)` 声明（返回类型注解**不含 `{`** 时：`(): () => void` 可、
- *   `(): Array<{...}> {` 不可——泛型里的 `{` 会被当成正文起点）
+ * - `function name(...)` 声明：返回类型注解里的括号、泛型（含 `Array<{...}>`
+ *   这类泛型内对象类型）与 `=>` 逐 token 跳过；注解与正文之间可以换行
  * - 函数表达式常量：`const name = function (...) { … }`（匿名/具名、可 async）
  * - 赋值箭头：`name = (...) => { … }` / `name = x => expr`——含**类字段箭头**
  *   （`h = () => …`）、`this.onSave = (v) => …`、解构后的重绑定；参数括号配平
@@ -477,8 +509,9 @@ function sameLineBodyOpen(source, from) {
  * - 类/对象方法 `name(...) {`、带泛型/返回注解的 `name<T>(...): R {`（含 getter）
  *   与对象方法形态；注解与方法体只允许出现在参数括号的**同一行**
  *   （`sameLineBodyOpen`：换行/`;`/`)`/`,`/`}`/`?` 即放弃——`call()` 后接三元/
- *   下一条语句不是定义，见文件头局限）。`function` 声明里返回类型含 `{` 的
- *   形态仍不追踪；`{ h: () => … }` 冒号形态的对象属性箭头也不追踪（见文件头）。
+ *   下一条语句不是定义，见文件头局限）。对象类型注解（`(): { a: 1 } {`）通过
+ *   「类型字面量后紧跟正文 `{`」消歧；`{ h: () => … }` 冒号形态的对象属性箭头
+ *   不追踪（见文件头）。
  *
  * 只为「回调 → 局部辅助函数 → 排队入口」这条**传递路径**服务：直接调用由
  * 事务回调的正文检查覆盖，跨文件/别名/动态调用不在能力范围内（见文件头）。
@@ -499,7 +532,7 @@ export function localFunctions(source) {
     if (!bodies.includes(body)) bodies.push(body)
   }
   let match
-  // `function name(...)` 声明（返回注解不含 `{`；declBody 里逐 token 跳注解）
+  // `function name(...)` 声明（declBody 里逐 token 跳注解，泛型/对象类型均可）
   const fnDeclRe = /\bfunction\s+([A-Za-z_$][\w$]*)/g
   while ((match = fnDeclRe.exec(source))) {
     add(match[1], declBody(source, fnDeclRe.lastIndex))

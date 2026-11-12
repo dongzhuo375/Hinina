@@ -29,11 +29,15 @@
 //     regex, which is fail-closed but noisy). Why the direction is safe: a
 //     mis-detected regex is consumed VRBATIM (offsets/content unchanged), so the
 //     failure mode is comment residue → a false positive, never a silent miss.
-//   - Template expressions (directive bindings / interpolations) are appended
-//     WITHOUT comment stripping: they are expression fragments, and any `//`
-//     inside them can only add scan text (conservative direction). They are
+//   - Template expressions (directive bindings / interpolations) are
 //     HTML-entity decoded first (`&#114;unSaveTxn` is a real runSaveTxn at
-//     runtime); numeric references and the common named set only.
+//     runtime; numeric references and the common named set only) and then
+//     comment-masked with the same stripper. They are **code fragments**, and a
+//     block comment can split a token pair the matchers key on:
+//     `import/*c*/('@/services/x')` is a real dynamic import that the raw text
+//     read as neither `import(` nor an unreadable argument (silent green,
+//     review). Masking preserves offsets and line numbers; string literals stay
+//     verbatim, so `'https://…'` and `//` inside a string are still data.
 //   - `readBalanced` skips strings, comments and regex literals with the same
 //     heuristic, so `/[}]/` inside a transaction callback no longer truncates
 //     the body it is scanning.
@@ -437,10 +441,15 @@ function keepRanges(source, ranges) {
  * `:…` 绑定的 `exp`）与**插值**（`{{ … }}` 的 content）都是可执行代码，必须与
  * `<script>` 一起进入扫描面。提取走 `vue/compiler-sfc` 的模板 AST（与应用同一
  * 解析器）：HTML 注释（COMMENT 节点）与静态属性自然不在集合内，散文里的伪指令
- * 不再误报；偏移为文件绝对，直接切片。表达式切片随后经 `decodeHtmlEntities`
- * 解码（`&#114;unSaveTxn` 运行时就是 runSaveTxn）。
- * 已知边界：指令的动态参数（`v-on:[event]`）不提取（Vue 编译器限制其形态，
- * 不含函数调用）；命名实体的表只含常见集合（表外命名实体保持原样）。
+ * 不再误报；偏移为文件绝对，直接切片。表达式切片先经 `decodeHtmlEntities` 解码
+ * （`&#114;unSaveTxn` 运行时就是 runSaveTxn），再经 `stripComments` 掩码注释——
+ * 表达式是**代码片段**，块注释可以拆开 matcher 依赖的相邻 token 对
+ *（`import` 与 `(` 之间夹一段块注释仍是真实动态 import，原样文本既不像
+ * `import(` 也不像可读说明符，曾静默假绿）；字符串字面量原样保留。命名实体的
+ * 表只含常见集合（表外命名实体保持原样）。
+ *
+ * 动态参数（`@[expr]` / `v-slot:[expr]` 的 arg）与指令 exp、插值一并提取——
+ * arg 是**可执行表达式**（`@[runSaveTxn(h)]="go"` 在运行时是一次真实调用）。
  *
  * 单一**遍历器**：本函数是唯一实现（收集 `{ text, line }`，按行序——与按偏移序
  * 等价，同文件的非交叠区间行序即偏移序）；`templateExpressions` 从它派生。
@@ -453,8 +462,10 @@ export function templateExpressionEntries(source, descriptor = parseSfc(source))
   const push = (loc) => {
     if (!loc) return
     // Vue 编译前会解码 HTML 实体：`&#114;unSaveTxn(…)` 在运行时就是
-    // runSaveTxn——原文切片必须先解码再进入扫描面（评审：实体曾可藏调用）
-    const text = decodeHtmlEntities(source.slice(loc.start.offset, loc.end.offset))
+    // runSaveTxn——原文切片必须先解码再进入扫描面（评审：实体曾可藏调用）。
+    // 注释同样要掩码：表达式是代码片段，`import/*c*/(…)` 的注释把 matcher
+    // 依赖的 token 对拆开，原样扫描会静默假绿（评审第十九轮）
+    const text = stripComments(decodeHtmlEntities(source.slice(loc.start.offset, loc.end.offset)))
     if (text.trim() === '') return
     entries.push({ text, line: loc.start.line })
   }
