@@ -112,7 +112,7 @@ import { z } from '@/stores/a'`
     expect(out).toContain("import { z } from '@/stores/a'")
   })
 
-  it('模板表达式取 AST 已解码的 content（命名实体不再靠自带表，评审第二十一轮）', () => {
+  it('模板表达式取 AST 已解码的 content（命名实体不再靠自带表）', () => {
     // `&lpar;` / `&sol;` 在完整 HTML5 表里，Vue 解析模板时解成正文字符——
     // 表达式文本必须是解码后的代码，否则动态 import 对门禁不可见（静默假绿）
     const source =
@@ -167,7 +167,7 @@ describe('source-scan — lineOfIndex', () => {
   })
 })
 
-describe('source-scan — readAngles 换行边界（评审 S9）', () => {
+describe('source-scan — readAngles 换行边界', () => {
   it('泛型实参只认单行：跨行扫描曾把游标推到后面无关的 `>`（旧守卫 depth===0 永不为真）', async () => {
     const { readAngles } = await import('../../scripts/lib/source-scan.mjs')
     // 单行平衡：返回闭括号后的绝对下标
@@ -177,7 +177,7 @@ describe('source-scan — readAngles 换行边界（评审 S9）', () => {
   })
 })
 
-describe('source-scan — 模板遍历器单一实现（评审 C10）', () => {
+describe('source-scan — 模板遍历器单一实现', () => {
   it('templateExpressions 与 templateExpressionEntries 是同一集合（文本/行号一致）', async () => {
     const { templateExpressionEntries } = await import('../../scripts/lib/source-scan.mjs')
     const source = [

@@ -3,9 +3,9 @@
 //
 // Why one module: the comment stripper, the `.vue` script extraction and the
 // directory walk are load-bearing for both gates. A fidelity fix applied to one
-// copy would silently drift from the other — review round five found exactly
-// that class of divergence (a Vue template apostrophe deciding how a later
-// `/* … */` reads, an unquoted regex literal truncating the rest of the file).
+// copy would silently drift from the other — that class of divergence has
+// bitten before (a Vue template apostrophe deciding how a later `/* … */`
+// reads, an unquoted regex literal truncating the rest of the file).
 // Both gates now prepare sources through `prepareSource`.
 //
 // Fidelity notes, stated rather than implied:
@@ -34,8 +34,8 @@
 //     decodes the full HTML5 entity table when parsing the template, so the
 //     node text IS the runtime code (`import&lpar;('@/services/x')` compiles to
 //     a real dynamic import; a raw source slice plus a six-name entity table
-//     missed `&lpar;` / `&sol;` / … and stayed silent — review round
-//     twenty-one). The decoded text is then comment-masked with the same
+//     missed `&lpar;` / `&sol;` / … and stayed silent). The decoded text is
+//     then comment-masked with the same
 //     stripper: expressions are **code fragments**, and a block comment can
 //     split a token pair the matchers key on (`import/*c*/('@/services/x')` was
 //     a real dynamic import the raw text read as neither `import(` nor an
@@ -58,7 +58,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 // 与应用同一解析器：'vue/compiler-sfc' 是 vue 包挂出的子路径（Vite 的
 // @vitejs/plugin-vue 也走它）——直接钉 @vue/compiler-sfc 的版本会与 vue 的
-// 内部版本各自漂移（评审 P3）。
+// 内部版本各自漂移。
 import { parse } from 'vue/compiler-sfc'
 
 const CONTROL_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with'])
@@ -70,7 +70,7 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
 /**
  * `(` 是否控制语句条件括号（其闭括号后是语句起点、随后的 `/` 是正则）。
  * 含 `for await (` 头：`await` 单独出现不算（`await (x) / 2` 是除法），
- * 只有紧跟 `for` 时才是控制语境（评审：`for await (const x of y) /re/` 曾
+ * 只有紧跟 `for` 时才是控制语境（`for await (const x of y) /re/` 曾
  * 被当除法而截断后续扫描）。
  */
 function isControlParenHead(prevWord, prevPrevWord, prevWordIsMember) {
@@ -248,7 +248,7 @@ export function stripComments(source) {
   let prevWordIsMember = false // 上一个词前紧邻 `.`（成员访问，不是关键词语境）
   // 括号栈：记录每个 `(` 是否为控制语句条件括号（if/for/while/switch/catch 后）。
   // 控制括号的闭括号之后是语句起点，随后的 `/` 是正则；分组括号的闭括号是值，
-  // 随后的 `/` 是除法（评审第七轮 P2：`if (ok) /[/*]/.test(value)` 曾被截断）。
+  // 随后的 `/` 是除法（`if (ok) /[/*]/.test(value)` 曾被截断）。
   const parenStack = []
   const maskTo = (start, end) => {
     while (start < end) {
@@ -451,7 +451,7 @@ function keepRanges(source, ranges) {
  * 动态参数 `node.arg.content` 都是运行时代码）；**不再**用原文切片配自带
  * 实体表：表只含 6 个命名实体，`&lpar;` / `&sol;` / `&period;` 等可让
  * `import&lpar;('@/services/x')` 对门禁不可见而编译产物是真实动态 import
- *（评审第二十一轮，静默假绿）。注释仍在解码后经 `stripComments` 掩码——
+ *。注释仍在解码后经 `stripComments` 掩码——
  * 表达式是**代码片段**，`import` 与调用括号之间夹一段块注释仍是真实动态
  * import（曾静默假绿）；字符串字面量原样保留。
  *
@@ -460,7 +460,7 @@ function keepRanges(source, ranges) {
  *
  * 单一**遍历器**：本函数是唯一实现（收集 `{ text, line }`，按行序——同文件的
  * 非交叠表达式行序即源码序）；`templateExpressions` 从它派生。两份 walker 会
- * 漂移（评审：一个修了动态参数、另一个漏掉）。
+ * 漂移（一个修了动态参数、另一个漏掉）。
  */
 export function templateExpressionEntries(source, descriptor = parseSfc(source)) {
   const ast = descriptor.template?.ast
@@ -469,7 +469,7 @@ export function templateExpressionEntries(source, descriptor = parseSfc(source))
   const push = (loc, content) => {
     if (!loc || typeof content !== 'string') return
     // content 已是解码后的代码；注释掩码保持（`import/*c*/(…)` 的块注释会把
-    // matcher 依赖的 token 对拆开，原样扫描会静默假绿，评审第十九轮）
+    // matcher 依赖的 token 对拆开，原样扫描会静默假绿）
     const text = stripComments(content)
     if (text.trim() === '') return
     entries.push({ text, line: loc.start.line })
@@ -483,7 +483,7 @@ export function templateExpressionEntries(source, descriptor = parseSfc(source))
     else if (node.type === 5 && node.content) push(node.content.loc, node.content.content)
     // 动态指令参数 `@[expr]="handler"` / `v-slot:[expr]`：arg 是**可执行表达式**
     //（`isStatic === false`）。只收 exp 会漏掉它——`@[runSaveTxn(h)]="go"` 在
-    // 运行时是一次真实调用（评审 P2）
+    // 运行时是一次真实调用
     if (node.type === 7 && node.arg && node.arg.isStatic === false) {
       push(node.arg.loc, node.arg.content)
     }
@@ -515,7 +515,7 @@ export function templateExpressions(source, descriptor = parseSfc(source)) {
  */
 export function prepareSource(path, content, { templateExpressions: includeTemplateExpressions = false } = {}) {
   if (!path.endsWith('.vue')) return stripComments(content)
-  // **单次解析**：descriptor 同时喂给 script 面与模板表达式提取（评审：每个
+  // **单次解析**：descriptor 同时喂给 script 面与模板表达式提取（每个
   // SFC 被 parseSfc 两次，解析失败时第二次还会重复抛错）
   const descriptor = parseSfc(content)
   let prepared = stripComments(scriptSurfaceOf(content, descriptor))
@@ -749,7 +749,7 @@ export function decodeStringLiteral(raw) {
   // 放在转义总替换之前——`.` 不匹配换行，续接会落到「未识别」而原样保留。
   const joined = raw.replace(/\\(?:\r\n|[\n\r\u2028\u2029])/g, '')
   // 前导 `\\` 已消耗掉那个反斜杠，末段只能是 `(.)`——写成 `\\(.)` 需要两个
-  // 反斜杠，身份转义（`\c`）永远不会命中（评审第十一轮：简单转义仍漏报）。
+  // 反斜杠，身份转义（`\c`）永远不会命中（简单转义仍漏报）。
   return joined.replace(/\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))/g, (m, cp, u4, x2, simple) => {
     if (cp !== undefined) {
       const code = Number.parseInt(cp, 16)
@@ -767,7 +767,7 @@ export function decodeStringLiteral(raw) {
 // 模板表达式的 HTML 实体解码已不再需要：表达式文本直接取 AST 节点的
 // `content`（Vue 解析时按**完整 HTML5 实体表**解码，见
 // `templateExpressionEntries`）。自带六实体表配原文切片漏掉 `&lpar;` /
-// `&sol;` 等命名实体，曾让模板动态 import 静默假绿（评审第二十一轮）。
+// `&sol;` 等命名实体，曾让模板动态 import 静默假绿。
 
 /**
  * Walk sources for a gate.
@@ -805,7 +805,7 @@ export function walkSources(root, { dirs, files: rootFiles = [], required = [], 
     files.push({ path: rootFile, content: readFileSync(full, 'utf8') })
   }
   // 关键文件必须出现在扫描结果里：文件被改名/挪目录时，按 path 匹配的专项检查
-  // （如 save-gate 的包装规则）会整体蒸发而门禁仍绿（评审 P1）
+  // （如 save-gate 的包装规则）会整体蒸发而门禁仍绿
   const present = new Set(files.map((file) => file.path))
   const missing = required.filter((rel) => !present.has(rel))
   if (missing.length > 0) {

@@ -82,9 +82,9 @@
 // (`save<T>(v: Array<Map<string, T>>): void {`, getters; the body must sit on
 // the params' line — a newline after the call parens means the next statement
 // is not a definition). Object-literal properties are keyed by the property
-// name (`{ run: async () => … }`, `{ run: function () { … } }` — review round
-// twenty-two; plain `key: value` entries fast-fail, a ternary can key a
-// pseudo-name — over-collection only widens the scan). What is *not*
+// name (`{ run: async () => … }`, `{ run: function () { … } }`; plain
+// `key: value` entries fast-fail, a ternary can key a pseudo-name —
+// over-collection only widens the scan). What is *not*
 // tracked: cross-file helpers, aliases, dynamic lookup, multi-line
 // expression bodies (truncated at the first newline), method annotations that
 // span a newline or contain a conditional `?` (the body walk stops there),
@@ -158,7 +158,7 @@ const QUEUED_NAME = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\b/g
  * `const up = configStore.updateEditorPrefs`、传参
  * `register(configStore.saveSplitRatio)`、属性分离
  * `configStore['saveSplitRatio']`……）。这些引用可以在事务回调里经别名调用——
- * 回调正文里只有别名、看不到排队入口的名字，回调级扫描必然漏掉（评审：模块
+ * 回调正文里只有别名、看不到排队入口的名字，回调级扫描必然漏掉（模块
  * 顶层取别名 + 回调内 `up({})` 曾零违规；运行时 `up()` 排在回调已持有的保存门
  * 后，设置页永久停在「保存中…」直到重启）。方向 fail closed：字符串里仅拼写
  * 名字同样报（与调用级口径一致）。调用形态不在此列（`name(` / `?.(` /
@@ -193,7 +193,7 @@ export function bareQueuedReferences(source) {
 export function callbackFromArgs(args) {
   // `function` 头必须先判定：先找任意 `=>` 会被回调体内部的嵌套箭头劫持
   //（`async function doSave(tx) { … const nested = () => null }` 会截出错误正文，
-  // 排队入口因此漏扫——评审 P3）
+  // 排队入口因此漏扫）
   const fnHead = args.match(/^\s*(?:async\s+)?function\b/)
   if (fnHead) {
     const open = args.indexOf('(', fnHead[0].length)
@@ -244,7 +244,7 @@ function isDefinitionTail(source, closeParenIndex) {
   // 冒号后**首个 token 就是 `{`**：三元后件的对象字面量（`ok ? runSaveTxn(cb) :
   // { ok: false }`），不是返回类型注解——注解里深度 0 的 `{` 只会是对象**类型**
   // 字面量（`): { a: 1 } {`），那类声明本就在不追踪清单里；按非定义处理的方向是
-  // 把调用点扫出来（fail closed，评审：三元对象尾曾让整个调用点被跳过）
+  // 把调用点扫出来（fail closed——三元对象尾曾让整个调用点被跳过）
   if (source[i] === '{') return false
   let depth = 0
   while (i < source.length) {
@@ -300,7 +300,7 @@ export function txnCallSites(source) {
     }
     // 成员调用（`configService.runSaveTxn(…)`）不可能是方法定义：三元表达式
     // 里调用后可以跟 `: { … }` 对象字面量，按尾形态会把它误判成「返回注解 +
-    // 方法体」而跳过整个调用点（评审 P2）。定义只可能是裸名（`async runSaveTxn`）
+    // 方法体」而跳过整个调用点。定义只可能是裸名（`async runSaveTxn`）
     // 或对象/类成员（行首裸名）。**点号与属性名之间允许空白**（`svc . runSaveTxn(…)`
     // 是合法 JS），因此向前跳过空白再判 `.`。
     let dotScan = hit - 1
@@ -330,7 +330,7 @@ const NOT_CALLS = new Set([
 /// 提取正文里被**调用或引用**的标识符，排除关键字/保留字。调用形态
 /// （`name(` / `name?.(` / `name<T>(`）之外，**裸引用同样收集**——`list.map(persistOne)`
 /// 的 `persistOne`、别名赋值、作为实参传递的函数，都可能随后被调用；引用式
-/// 传参曾让传递路径漏追（评审）。集合是「正文里出现过的非关键字标识符」，
+/// 传参曾让传递路径漏追。集合是「正文里出现过的非关键字标识符」，
 /// 交由 localFunctions 表解析，方向保守（多一条边只多扫一份正文）。
 export function calledNames(body) {
   const names = new Set()
@@ -345,7 +345,7 @@ export function calledNames(body) {
 
 /// 从 `afterName` 起解析一个 **函数声明** 的正文（无正文返回 null）。
 ///
-/// 评审抓到的漏报形态：`function pick(): () => void {` 的返回类型注解里也有
+/// 漏报形态：`function pick(): () => void {` 的返回类型注解里也有
 /// `=>`，旧实现把它当成箭头函数的箭头、正文截成 "void"。修正：注解里的
 /// 括号、方括号、泛型（`Array<{...}>`）与 `=>` 逐 token 跳过，对象类型注解
 /// （`(): { a: 1 } {`）按「类型字面量后紧跟正文」消歧（见
@@ -391,7 +391,7 @@ function arrowBody(source, afterArrow) {
 /// 从赋值 `=` 之后解析「赋值箭头」正文：可选 `async` → 参数（**配平括号**或裸
 /// 标识符）→ 可选同行返回注解 → `=>` → arrowBody。形状不符返回 null——大量
 /// 普通赋值（`count = 0`、`this.x = obj`）会走到这里快速失败，方向保守。
-///（评审：旧实现 `\([^)]*\)` 在嵌套括号默认值 `(a = (1, 2))` 处截断，类字段
+///（旧实现 `\([^)]*\)` 在嵌套括号默认值 `(a = (1, 2))` 处截断，类字段
 /// 箭头 `h = () => …` 与函数表达式常量则完全没有分支。）
 function assignArrowBody(source, afterEq) {
   let i = afterEq
@@ -455,7 +455,7 @@ function assignArrowBody(source, afterEq) {
 /// 长度 + 2），`readAngles` 返回闭括号后的**绝对下标**。混用（旧实现对两者
 /// 都写 `closer - i`）会得到两种错误：正文为空（注解里的 `()`）时游标归零、
 /// 从文件头重扫 → 单行文件死循环；正文非空时变 NaN → 静默放弃整条注解。
-///（评审：注解/方法体只允许出现在参数括号的**同一行**——跳过前导换行会让
+///（注解/方法体只允许出现在参数括号的**同一行**——跳过前导换行会让
 /// `log(1)` 之后下一行的无关 if 块被当成方法体，产生误报。）
 function bodyBraceAfterParams(source, from, { sameLine, bailOnEquals = false }) {
   let i = from
@@ -528,21 +528,21 @@ function sameLineBodyOpen(source, from) {
  * - 函数表达式常量：`const name = function (...) { … }`（匿名/具名、可 async）
  * - 赋值箭头：`name = (...) => { … }` / `name = x => expr`——含**类字段箭头**
  *   （`h = () => …`）、`this.onSave = (v) => …`、解构后的重绑定；参数括号配平
- *   读取，嵌套括号默认值 `(a = (1, 2))` 不再截断（评审：`\[^)]*\` 单层括号）
+ *   读取，嵌套括号默认值 `(a = (1, 2))` 不再截断（`\[^)]*\` 单层括号）
  * - 类/对象方法 `name(...) {`、带泛型/返回注解的 `name<T>(...): R {`（含 getter）
  *   与对象方法形态；注解与方法体只允许出现在参数括号的**同一行**
  *   （`sameLineBodyOpen`：换行/`;`/`)`/`,`/`}`/`?` 即放弃——`call()` 后接三元/
  *   下一条语句不是定义，见文件头局限）。对象类型注解（`(): { a: 1 } {`）通过
  *   「类型字面量后紧跟正文 `{`」消歧
  * - 对象字面量属性：`{ run: async () => { … } }` / `{ run: function () { … } }`
- *   ——键名即入口名（评审第二十二轮补；方向保守，普通 `key: value` 快速失败）
+ *   ——键名即入口名（方向保守，普通 `key: value` 快速失败）
  *
  * 只为「回调 → 局部辅助函数 → 排队入口」这条**传递路径**服务：直接调用由
  * 事务回调的正文检查覆盖，跨文件/别名/动态调用不在能力范围内（见文件头）。
  */
 export function localFunctions(source) {
   // 同名可有多份定义（不同作用域）。**保留全部正文**：旧实现首个定义获胜，
-  // 先出现的无关同名函数会遮蔽后面真正调用排队入口的那份（评审 P2）。
+  // 先出现的无关同名函数会遮蔽后面真正调用排队入口的那份。
   const table = new Map()
   const add = (name, body) => {
     if (body === null) return
@@ -574,7 +574,7 @@ export function localFunctions(source) {
   while ((match = assignRe.exec(source))) {
     add(match[1], assignArrowBody(source, assignRe.lastIndex))
   }
-  // **对象字面量属性形态**（评审第二十二轮）：`{ run: async () => { … } }` /
+  // **对象字面量属性形态**：`{ run: async () => { … } }` /
   // `{ run: function () { … } }`——键名即调用入口名。过去冒号形态完全不进表，
   // 回调里 `svc.run()` 只带成员名、间接死锁路径漏追（门禁绿而运行时会排队等
   // 自己）。方向保守：`{ key: value }` 普通值快速失败；三元 `a : b => c` 之类
@@ -590,7 +590,7 @@ export function localFunctions(source) {
   // 方法形态：`name(...) {` / `name<T>(...) {`（排除关键字）。**泛型实参用
   // readAngles 平衡读取**——单层 `<[^<>()]*>` 在嵌套泛型（`Array<Map<…>>`）或
   // 函数类型（`(e: Event) => void`）处截断，嵌套泛型方法不进函数表、间接路径
-  // 漏追（评审 P3）。合法 TS 里「调用后跟块」只会出现在类/对象体中；误收的
+  // 漏追。合法 TS 里「调用后跟块」只会出现在类/对象体中；误收的
   // 条目只会多扫一些正文，方向是保守的。
   const methodRe = /\b([A-Za-z_$][\w$]*)\b/g
   while ((match = methodRe.exec(source))) {
@@ -660,7 +660,7 @@ function paramNames(params) {
     if (!m) continue
     // 带默认值的形参：**惰性字面量**（`{}` / 布尔 / 数字 / 字符串 / null）无害；
     // 任何表达式默认值（箭头、调用、标识符）都可能把回调内联在转发体之外执行，
-    // 而那段正文永不被扫（评审：默认参数走私）——整条入口放弃豁免，fail closed。
+    // 而那段正文永不被扫（默认参数走私）——整条入口放弃豁免，fail closed。
     const eq = defaultAssignmentIndex(trimmed)
     if (eq !== -1 && !/^\s*(?:\{\s*\}|true|false|null|-?\d+(?:\.\d+)?|'[^']*'|"[^"]*")\s*$/.test(trimmed.slice(eq + 1))) {
       return null
@@ -680,7 +680,7 @@ export function runSaveTxnForwardEntries(source) {
   const entries = []
   // 泛型实参用 readAngles 平衡读取——嵌套泛型转发入口
   // （`runSaveTxn<Array<T>>(fn)`）用单层 `<[^<>()]*>` 会找不到调用括号、整条
-  // 入口消失（方向安全但「无法静态分析」的报错对合法形态有误导，评审 P4）。
+  // 入口消失（方向安全但「无法静态分析」的报错对合法形态有误导）。
   // 调用点（`configService.runSaveTxn(fn)`）不会产生入口：其参数闭括号后没有
   // 方法体 `{`。
   for (const match of source.matchAll(/\brunSaveTxn\b/g)) {
@@ -750,7 +750,7 @@ export function queuedViaLocals(callbackBody, functions, maxDepth = 6) {
 /// 定位**定义**不能靠 `indexOf(name + '(')`——文件里更早出现的同名文本（对象
 /// 方法、`this.saveSplitRatio(…)` 调用点）会抢先命中，取到的正文是别的块：
 /// 真正绕过队列的包装器没被检查（错块放行），或无关块被当成包装器（错块
-/// 误报），两个方向都会发生（评审）。逐个出现位置按「参数 → 同行注解 → 块」
+/// 误报），两个方向都会发生。逐个出现位置按「参数 → 同行注解 → 块」
 /// 判定定义形态（与 localFunctions 方法分支共用 sameLineBodyOpen），同名定义
 /// 全部收齐、逐份检查。
 function wrapperViolations(file, source) {
@@ -793,7 +793,7 @@ function wrapperViolations(file, source) {
  * 保存入口，就是「监听器等队列、队列等回调、回调等监听器」的死锁。监听器形态
  * 无法解析时同样 fail closed。
  *
- * 注册形态按**逐出现点**判定（评审：`const reg = switchObservers.add` 别名与
+ * 注册形态按**逐出现点**判定（`const reg = switchObservers.add` 别名与
  * `switchObservers?.add(…)` 可选链都能让 `switchObservers\.add\s*\(` 匹配落空，
  * 监听器不被扫描）。每个 `switchObservers` 出现只允许四种良性形态——
  * `= new Set` 声明、`.add(…)`（含 `?.` 可选链）、`.delete(…)`（移除监听器）、
@@ -895,12 +895,12 @@ export function findViolations(files) {
   for (const { path, content } of files) {
     const source = prepareSource(path, content, { templateExpressions: true })
     const functions = localFunctions(source)
-    // 参数直传豁免**只认 stores/configStore.ts 的同名转发入口**（评审 P2：
+    // 参数直传豁免**只认 stores/configStore.ts 的同名转发入口**（
     // 文件级参数名豁免会把同名外部回调假绿；任意 forward 别名的调用点不会
     // 出现 runSaveTxn，回调正文根本没有被扫描）。
     const forwardEntries = path === 'stores/configStore.ts' ? runSaveTxnForwardEntries(source) : []
     // 全文件裸引用：取别名/传参/属性分离的排队入口——别名可在事务回调里被调用，
-    // 回调正文只见别名不见入口名，回调级扫描必然漏（评审：模块顶层
+    // 回调正文只见别名不见入口名，回调级扫描必然漏（模块顶层
     // `const up = configStore.updateEditorPrefs` + 回调内 `up({})` 曾零违规）。
     // 在**出现处**直接报，fail closed。
     for (const bare of bareQueuedReferences(source)) {
@@ -945,7 +945,7 @@ export function findViolations(files) {
             continue
           }
           // 传递路径：回调 → 局部辅助函数 →（…）→ 排队入口。只扫同文件局部函数，
-          // 覆盖「回调里调 performSwitch 之类辅助函数」的场景（评审：单层文本匹配
+          // 覆盖「回调里调 performSwitch 之类辅助函数」的场景（单层文本匹配
           // 抓不到这种间接调用）。
           for (const hit of queuedViaLocals(body, functions)) {
             violations.push(
@@ -969,7 +969,7 @@ export function loadSources(root) {
   const files = walkSources(root, {
     dirs: ['.'],
     // 与 layering 门禁同一扩展名面（含 .d.ts）：.js/.jsx/.tsx/.mjs/.cjs 里
-    // 同样可能出现保存事务调用，扫描面不能比文件名清单窄（评审 P2）
+    // 同样可能出现保存事务调用，扫描面不能比文件名清单窄
     extensions: /\.(?:d\.ts|ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$/,
     // 关键文件钉死：config.service.ts 改名/挪目录时按 path 匹配的包装规则会
     // 整体蒸发，必须 fail closed 而不是静默放行
@@ -978,7 +978,7 @@ export function loadSources(root) {
     skip: (rel) => /(^|\/)__tests__(\/|$)/.test(rel) || rel.startsWith('test-support/'),
   })
   if (files.length === 0) {
-    // 空扫描面 = 门禁静默死亡（评审 P1：对照 layering 的 throw）
+    // 空扫描面 = 门禁静默死亡（对照 layering 的 throw）
     throw new Error('save-gate: 扫描面为空（src/ 下未找到任何源文件）')
   }
   return files
@@ -991,7 +991,7 @@ export function runCli(root) {
   } catch (error) {
     // 扫描面不完整（空面 / 关键文件缺失）必须红：此前 runCli 直接抛，
     // 主模块守卫会退成非零——但 spec 调用 runCli 时看到的是异常而非返回码，
-    // 且对照 layering 的口径应统一为「返回码」（评审 P1）
+    // 且对照 layering 的口径应统一为「返回码」
     console.error(`save-gate: ${error instanceof Error ? error.message : String(error)}`)
     return 1
   }

@@ -37,7 +37,7 @@ const switchState = vi.hoisted(() => ({
   /// **必须与生产 `switchQueue.inFlight`（computed ref）同构**：store 的
   /// `ojSwitchInFlight` getter 是 computed，只追踪真实 ref——若 mock 读普通属性
   /// （`pending !== null`），该 getter 首次求值后永久缓存 false，把「新控制器等待
-  /// 在途切换」整条路径测成死代码（用例靠 epoch 复查兜底假绿，评审 P2）。
+  /// 在途切换」整条路径测成死代码（用例靠 epoch 复查兜底假绿）。
   inFlight: null as { value: boolean } | null,
   /// `whenOjSwitchSettled` 调用计数：目标用例据此断言等待路径真实走过
   whenSettledCalls: 0,
@@ -62,7 +62,7 @@ const saveState = vi.hoisted(() => ({
 function settleSwitch(run: Promise<void>): void {
   // 与生产 `SerialQueue.enqueue` 的 finally 同构：只有队尾（最新一次切换）落地
   // 才复位 pending 与 inFlight——先落地者不得清掉仍在途的后发切换
-  //（inFlight 由「队尾是否落地」派生，评审：无守卫的重叠切换会提前清标志）
+  //（inFlight 由「队尾是否落地」派生——无守卫的重叠切换会提前清标志）
   if (switchState.pending === run) {
     switchState.pending = null
     if (switchState.inFlight) switchState.inFlight.value = false
@@ -85,7 +85,7 @@ vi.mock('@/services/config.service', async () => {
   const settingsDepth = ref(0)
   saveState.settingsDepth = settingsDepth
   // 同理：`ojSwitchInFlight` 经 store getter（computed）转发，支撑必须是 ref
-  //（与生产 `switchQueue.inFlight` 同构；评审 P2）
+  //（与生产 `switchQueue.inFlight` 同构）
   const switchInFlight = ref(false)
   switchState.inFlight = switchInFlight
 
@@ -678,14 +678,14 @@ describe('useSettingsForm', () => {
     await loading
 
     // 等待路径必须真实走过：mock 的 ojSwitchInFlight 曾读普通属性，store getter
-    // 缓存成永 false，本用例会退化成 epoch 复查兜底仍然绿（评审 P2）
+    // 缓存成永 false，本用例会退化成 epoch 复查兜底仍然绿
     expect(switchState.whenSettledCalls).toBeGreaterThanOrEqual(1)
     expect(next.form.activeOj).toBe('Hydro')
     expect(next.form.ojUrl).toBe('https://hydro.example')
     expect(next.dirty.value).toBe(false)
   })
 
-  it('mock 切换 in-flight 标志语义同构：重叠切换先落地者不清标志（队尾派生，评审）', async () => {
+  it('mock 切换 in-flight 标志语义同构：重叠切换先落地者不清标志（队尾派生）', async () => {
     // 直接驱动 mock service（绕过 composable 的切换单飞），制造两个重叠切换：
     // in-flight 由「队尾是否落地」派生——A（先入队）先落地时队尾是 B，标志必须保持。
     // 注意本用例只锁标志语义；**请求串行化不在 mock 复刻范围**（mock 立即执行底层

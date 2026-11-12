@@ -36,7 +36,7 @@ describe('check-layering — CLI 出口', () => {
     expect(withTempSrc({}, (root) => runLayering(root))).toBe(1)
   })
 
-  it('SFC 解析错误返回 1（不抛异常——runCli 的契约是返回码，评审 L3）', () => {
+  it('SFC 解析错误返回 1（不抛异常——runCli 的契约是返回码）', () => {
     const root = mkdtempSync(join(tmpdir(), 'hinina-gate-'))
     try {
       mkdirSync(join(root, 'src', 'views'), { recursive: true })

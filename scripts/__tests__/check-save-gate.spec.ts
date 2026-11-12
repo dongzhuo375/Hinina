@@ -313,7 +313,7 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
     expect(violations[0]).toContain('排队保存入口')
   })
 
-  it('内联 function 回调的返回注解含对象类型时仍定位真实正文（评审第十九轮）', () => {
+  it('内联 function 回调的返回注解含对象类型时仍定位真实正文', () => {
     // `indexOf('{')` 曾把注解里的类型字面量当正文：截出的 ` ok: boolean ` 不含
     // 排队入口，真实回调体整条漏扫。类型本身合法（回调返回 Promise<{…}>）。
     const violations = findViolations([
@@ -428,7 +428,7 @@ await configService.runSaveTxn((tx) => {
     ).toEqual([])
   })
 
-  it('参数直传豁免不外溢（评审 P2）——三类形近形态全部 fail closed', () => {
+  it('参数直传豁免不外溢——三类形近形态全部 fail closed', () => {
     // ① 任意 forward 别名：调用方写 forward(callback)，调用点不会出现
     //    runSaveTxn，回调正文根本没有被扫描 → 不豁免（方法名不是 runSaveTxn）
     const alias = findViolations([
@@ -550,7 +550,7 @@ const configStore = useConfigStore()
 
   it('模板里的 HTML 实体不隐藏调用（带/不带分号、十进制/十六进制、插值同样）', () => {
     // 属性语境的浏览器解码规则：数字引用无论有无分号都解码——无分号变体
-    // 曾零违规（评审第十一轮）
+    // 曾零违规
     const handlers = [
       'configStore.&#114;unSaveTxn((tx) => configStore.saveSplitRatio(0.8))',
       'configStore.&#114unSaveTxn((tx) => configStore.saveSplitRatio(0.8))',
@@ -723,7 +723,7 @@ await configService.runSaveTxn((tx) => {
 
   it('switchObservers 的混淆注册形态 fail closed（方括号 / add.bind）', () => {
     // bind 用例有两个出现点（`.add.` 别名形 + bind 实参里的裸引用），统一逐
-    // 出现点判定后各报一条（评审：别名/可选链曾让注册匹配落空）
+    // 出现点判定后各报一条（别名/可选链曾让注册匹配落空）
     const cases: Array<[string, number]> = [
       [`switchObservers['add'](handler)`, 1],
       [`switchObservers.add.bind(switchObservers)(handler)`, 2],
@@ -754,7 +754,7 @@ await configService.runSaveTxn((tx) => {
   })
 
   it('排队入口的其余调用形态不再假绿（括号成员 / .bind / 可选括号 / 逗号表达式 / 标签模板）', () => {
-    // 十六轮评审逐形态补正则，每轮都还剩下下一种；规则 2 的契约是「不得引用」，
+    // 调用形态逐项补正则仍会漏下一种；规则 2 的契约是「不得引用」，
     // 因此改为引用级判定（调用形态 `QUEUED_ENTRY` + 全文件裸引用
     // `bareQueuedReferences`）——下列形态即使调用语法各不相同，
     // 名字出现即违规，不再依赖穷举。
@@ -802,7 +802,7 @@ await configService.runSaveTxn((tx) => {
     expect(viaHelper[0]).toContain('saveSplitRatio')
   })
 
-  it('模块顶层取别名、回调内经别名调用 → 违规（评审第二十轮：回调正文只见别名）', () => {
+  it('模块顶层取别名、回调内经别名调用 → 违规（回调正文只见别名）', () => {
     const violations = findViolations([
       {
         path: 'composables/useSettingsForm.ts',
@@ -986,7 +986,7 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     expect(unsafe[0]).toContain('无法静态分析')
   })
 
-  it('观察者注册的别名/整体赋值形态 fail closed（逐出现点判定，评审 S5）', () => {
+  it('观察者注册的别名/整体赋值形态 fail closed（逐出现点判定）', () => {
     // 别名：注册匹配落空、监听器不被扫描——出现即违规
     const alias = findViolations([
       { path: 'composables/useSettingsForm.ts', content: 'const reg = switchObservers.add\nreg(handler)' },
@@ -1021,7 +1021,7 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     expect(benign).toEqual([])
   })
 
-  it('辅助函数表补形态：函数表达式常量 / 类字段箭头 / 嵌套括号参数（评审 S6）', () => {
+  it('辅助函数表补形态：函数表达式常量 / 类字段箭头 / 嵌套括号参数', () => {
     // 函数表达式常量
     const fnExpr = findViolations([
       {
@@ -1058,7 +1058,7 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     expect(nested[0]).toContain('间接引用')
   })
 
-  it('以引用方式传入的辅助函数同样被追踪（list.map(persistOne)，评审 S7）', () => {
+  it('以引用方式传入的辅助函数同样被追踪（list.map(persistOne)）', () => {
     const violations = findViolations([
       {
         path: 'composables/useSettingsForm.ts',
@@ -1072,7 +1072,7 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     expect(violations[0]).toContain('persistOne')
   })
 
-  it('对象字面量属性方法体里的排队调用同样被追踪（评审第二十二轮）', () => {
+  it('对象字面量属性方法体里的排队调用同样被追踪', () => {
     // 冒号形态过去完全不进函数表：回调里 `svc.run()` 只带成员名，间接死锁
     // 路径漏追（运行时会排在回调已持有的保存门后）。属性箭头与函数表达式都收。
     const arrowProp = findViolations([
@@ -1108,7 +1108,7 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     expect(plain).toEqual([])
   })
 
-  it('包装器检查按定义形态定位，不再锁定首个同名文本（评审 S8）', () => {
+  it('包装器检查按定义形态定位，不再锁定首个同名文本', () => {
     // 更早出现的同名**定义形态**（对象方法）曾抢先命中 indexOf，真正的包装器
     // 绕过队列反而没被检查
     const violations = findViolations([
@@ -1133,7 +1133,7 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     expect(violations.some((v) => v.includes('直连 updateConfigNow'))).toBe(true)
   })
 
-  it('定义检测不跨前导换行：log(1) 之后下一行的无关 if 块不再被当成方法体（评审 S9）', () => {
+  it('定义检测不跨前导换行：log(1) 之后下一行的无关 if 块不再被当成方法体', () => {
     // if 块里放一次**合法的**排队调用（模块层的队列调用本身不违规）：旧实现
     // 把 if 块吸收成 log 的方法体，回调里 `log(cfg)` 经传递路径假报；修复后
     // log 不进函数表，零违规。
@@ -1149,8 +1149,8 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     expect(violations).toEqual([])
   })
 
-  it('裸调用后跟三元对象字面量（`: { ok: false }`）仍被扫描（评审 S4）', () => {
-    // 成员调用的同型用例已在早期评审闭合；裸名调用的定义尾判定同样不能被
+  it('裸调用后跟三元对象字面量（`: { ok: false }`）仍被扫描', () => {
+    // 成员调用的同型用例已闭合；裸名调用的定义尾判定同样不能被
     // 三元后件的对象字面量骗过
     const violations = findViolations([
       {

@@ -117,7 +117,7 @@ describe('check-layering — 规则判定（合成夹具）', () => {
   })
 
   it('规则B 口径：composable import bridge 同样违规（被 View 消费即抵达 IPC 的路径）', () => {
-    // 第二十轮口径：composable 被 View 消费，放行它的 bridge 导入等于给 View
+    // composable 被 View 消费，放行它的 bridge 导入等于给 View
     // 留一条经 composable 抵达 IPC 的路径——规则 B 收编全部扫描面
     const violations = findViolations([
       { path: 'composables/J.ts', content: `import { IpcError } from '@/bridge'` },
@@ -148,7 +148,7 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     ])
     expect(composable).toHaveLength(1)
     expect(composable[0]).toContain('规则B')
-    // 插件包同样是 Tauri 边（第二十二轮：只匹配 @tauri-apps/api 曾放行 plugin-*）
+    // 插件包同样是 Tauri 边（只匹配 @tauri-apps/api 曾放行 plugin-*）
     for (const spec of ['@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener']) {
       const plugin = findViolations([
         {
@@ -172,13 +172,13 @@ describe('check-layering — 规则判定（合成夹具）', () => {
       { path: 'services/x.ts', content: `import { IpcError } from '@/bridge'`, mode: 'tauriOnly' },
     ])
     expect(serviceBridge).toEqual([])
-    // **stores 应用 bridge 半边**（第二十八轮）：Store→Bridge 破坏梯级
+    // **stores 应用 bridge 半边**：Store→Bridge 破坏梯级
     const storeBridge = findViolations([
       { path: 'stores/x.ts', content: `import { IpcError } from '@/bridge'`, mode: 'store' },
     ])
     expect(storeBridge).toHaveLength(1)
     expect(storeBridge[0]).toContain('Store 不得 import bridge')
-    // store 模式的**不可读形态**也判红（第二十九轮）：Vite 会把点名的 glob/拼接
+    // store 模式的**不可读形态**也判红：Vite 会把点名的 glob/拼接
     // 展开成真实 bridge 边——模式/可读前缀已点名 bridge，属可静态判定的那一类
     for (const content of [
       `const m = import.meta.glob('@/bridge/*.ts')`,
@@ -190,7 +190,7 @@ describe('check-layering — 规则判定（合成夹具）', () => {
       expect(hit[0], content).toContain('规则B')
       expect(hit[0], content).toContain('Store')
     }
-    // **store 的 glob 一律 fail closed**（第三十轮）：模式串不点名 bridge 也可能
+    // **store 的 glob 一律 fail closed**：模式串不点名 bridge 也可能
     // 展开到 bridge（主面第二十四～二十七轮终结的同一族——字面文本判据看不见
     // 展开集合）。以下六形态 Vite 都真实展开成 bridge 边，代码里没有 bridge 字样。
     for (const pattern of [
@@ -241,7 +241,7 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     }
     // loadSources 的整树标记：main.ts / env.d.ts 必在扫描面且为 tauriOnly；
     // stores 标记 'store'（bridge+Tauri），其余扩展面 'tauriOnly'
-    //（评审第二十三轮：枚举目录曾漏掉根级文件，未来顶层目录由整树遍历覆盖）
+    //（枚举目录曾漏掉根级文件，未来顶层目录由整树遍历覆盖）
     const files = loadSources(process.cwd())
     const main = files.find((f) => f.path === 'main.ts')
     expect(main, 'main.ts 缺失（扫描面 fail-closed）').toBeTruthy()
@@ -468,7 +468,7 @@ import x from '@/services/real'
   })
 
   it('import.meta.glob / globEager 默认 fail closed；allowlist 放行后按层规则判定', () => {
-    // 终结式（第二十七轮）：逐轮补丁（明文通配 → 转义 → extglob → `**` 递归）
+    // 终结式：逐项补丁（明文通配 → 转义 → extglob → `**` 递归）无法穷尽
     // 无法穷尽 picomatch 语义，扫描面内 glob 调用默认 opaque；显式复核过的模式
     // 进 GLOB_ALLOWLIST 后，模式本身仍按规则 A/B 判定。
     const defaultLiteral = findViolations([
@@ -512,7 +512,7 @@ import x from '@/services/real'
     }
   })
 
-  it('glob 语义不可穷尽 → 一律 fail closed（明文/转义/extglob/** 递归，评审第二十四–二十七轮）', () => {
+  it('glob 语义不可穷尽 → 一律 fail closed（明文/转义/extglob/** 递归）', () => {
     // 同一处门禁的连续四轮修补清单，全部收敛为 opaque：Vite 对非相对/非绝对
     // 模式先 resolveId（别名生效）再展开，展开集合由 picomatch/tinyglobby 决定
     // ——`@/**` 与 `@/../**` 是**路径递归**（字面量前缀判据看不见 services/
@@ -524,17 +524,17 @@ import x from '@/services/real'
       '@/**/*.service.ts',
       '/src/**/config.service.ts',
       '@/**/*.bridge.ts',
-      // 转义拼写：解码后才出现通配（第二十五轮）
+      // 转义拼写：解码后才出现通配
       String.raw`@/\u002a/config.service.ts`,
       String.raw`@/\x2a/config.service.ts`,
       String.raw`@/\u003f/config.service.ts`,
       String.raw`@\u002f**\u002f*.service.ts`,
-      // picomatch extglob：不含 `*?[{` 也能表达目录集合（第二十六轮）
+      // picomatch extglob：不含 `*?[{` 也能表达目录集合
       '@/@(services|utils)/config.service.ts',
       '@/+(services|utils)/config.service.ts',
       '@/!(utils)/config.service.ts',
       '@/(services|utils)/config.service.ts',
-      // 末段 `**` 是路径递归而非文件名通配（第二十七轮）
+      // 末段 `**` 是路径递归而非文件名通配
       '@/**',
       '@/../**',
       '@/**.**',
@@ -571,7 +571,7 @@ import x from '@/services/real'
     expect(violations).toHaveLength(1)
     expect(violations[0]).toContain('规则A')
     // 规则 B 同样覆盖中转面：重导出 bridge 的 utils/types 文件本身就是违规点
-    //（评审：规则 B 曾豁免中转，view → utils/ipc → bridge 全绿）
+    //（规则 B 曾豁免中转，view → utils/ipc → bridge 全绿）
     const bridgeTransit = findViolations([
       { path: 'utils/ipc.ts', content: `import { IpcError } from '@/bridge'` },
     ])
@@ -580,7 +580,7 @@ import x from '@/services/real'
     expect(bridgeTransit[0]).toContain('utils/ipc.ts:1:')
   })
 
-  it('规则B：View 经 utils 中转摸 bridge 被斩断（中转文件本身红，评审 L1）', () => {
+  it('规则B：View 经 utils 中转摸 bridge 被斩断（中转文件本身红）', () => {
     const violations = findViolations([
       {
         path: 'views/Foo.vue',
@@ -595,7 +595,7 @@ import x from '@/services/real'
     expect(violations[0]).toContain('规则B')
   })
 
-  it('规则A/B：`<script src>` 外链脚本按说明符判定（编译期内联成真实依赖，评审 L2）', () => {
+  it('规则A/B：`<script src>` 外链脚本按说明符判定（编译期内联成真实依赖）', () => {
     const service = findViolations([
       {
         path: 'views/Bar.vue',
@@ -672,7 +672,7 @@ import { x } from '@/services/config.service'
   it('转义字形不绕过：说明符按运行时值解码后再判定（Unicode / hex / 身份 / 行续接）', () => {
     // 静态、副作用、动态三种入口都走解码；身份转义（\c → c、\i → i）同样是
     // 运行时等价字形——首轮的 `\\(.)` 正则多写一个反斜杠，此形态曾漏报；
-    // 行续接（\ + 换行）在字符串里不产生字符，是第十一轮之后的又一漏报面
+    // 行续接（\ + 换行）在字符串里不产生字符，是同一族的又一漏报面
     const cases = [
       String.raw`import { configService } from '@/servi\u0063es/config.service'`,
       String.raw`import '@/servi\u0063es/config.service'`,
@@ -693,7 +693,7 @@ import { x } from '@/services/config.service'
     }
   })
 
-  it('反斜杠路径按 / 归一化后判定（评审第二十八轮）；大小写不归一', () => {
+  it('反斜杠路径按 / 归一化后判定；大小写不归一', () => {
     // `@/services\config.service` 在 Windows 上可解析（ubuntu build 会挡下，
     // 但门禁自身要闭合）；大小写不归一——Linux 上 `Services/` 可能是真实目录。
     // 源码里是 `\\`（JS 值里一个反斜杠）：单反斜杠是身份转义、解码后直接消失
@@ -746,7 +746,7 @@ import { x } from '@/services/config.service'`,
     expect(bridge[0]).toContain('规则B')
   })
 
-  it('命名 HTML 实体不隐藏模板动态 import（评审第二十一轮：&lpar; / &sol; / @tauri-apps/api）', () => {
+  it('命名 HTML 实体不隐藏模板动态 import（&lpar; / &sol; / @tauri-apps/api）', () => {
     // Vue 解析模板时按**完整 HTML5 实体表**解码，编译产物是真实动态 import；
     // 门禁曾用原文切片 + 六实体量表 → 零违规静默假绿。表达式文本改取 AST 的
     // 已解码 content 后全部命中。
@@ -769,7 +769,7 @@ import { x } from '@/services/config.service'`,
     }
   })
 
-  it('模板表达式先剥注释：块注释不能拆开 import 与调用括号（评审第十九轮）', () => {
+  it('模板表达式先剥注释：块注释不能拆开 import 与调用括号', () => {
     // `import/*c*/(…)` 是合法动态 import，Vue 模板解析通过；表达式原样进入
     // 扫描面时既不像 `import(`、也不像不可读说明符，曾**零违规**静默假绿。
     // 与脚本块同口径（脚本块一直剥注释，跨行/转义等形态都已命中）。

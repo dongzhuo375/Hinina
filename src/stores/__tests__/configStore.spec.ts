@@ -212,7 +212,7 @@ describe('configStore — action 纯转发（参数与回传直透，不加 awai
   it('action 同步进入 service（零等待即可见调用）——转发层不得再加 await 壳', () => {
     // 若有人把转发改成 `async runSaveTxn(...) { await ... }` 或在中间插
     // `await Promise.resolve()`，调用会在下一个微任务才到达 service：入队/代际
-    // 的「同步置位」窗口被推迟（评审：仅注释锁定不够，补一个零节拍断言）
+    // 的「同步置位」窗口被推迟（仅注释锁定不够，补一个零节拍断言）
     const store = useConfigStore()
     mocks.runSaveTxn.mockReturnValue(Promise.resolve('ok'))
     mocks.getConfig.mockReturnValue(Promise.resolve({}))

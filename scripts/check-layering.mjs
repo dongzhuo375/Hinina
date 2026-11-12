@@ -9,19 +9,19 @@
 //   Rule B — no scanned file may import `@/bridge` / `*/bridge/*`, and **no
 //            file anywhere under src/ except bridge/ may import any
 //            `@tauri-apps/*` package** (CLAUDE.md: bridge is the only place
-//            that touches Tauri; a direct `invoke` — or a direct
-//            `@tauri-apps/plugin-dialog` call — bypasses the bridge boundary
-//            and its IpcError normalization; plugin packages added in review
-//            round twenty-two). Rule B's bridge half covers the **whole scan
+//            that touches Tauri; a direct `invoke` — or a direct plugin
+//            call — bypasses the bridge boundary and its IpcError
+//            normalization). Rule B's bridge half covers the **whole scan
 //            surface**: View / component (+ App.vue), **composables** (a View
-//            consuming the composable reaches IPC through it — review round
-//            twenty), and the **transit roots** (utils/types — re-exporting
-//            bridge is the same router shape; review round eighteen).
-//            The Tauri half additionally covers an **extended surface** —
-//            stores/, services/, guards/, router/ and main.ts — where bridge
-//            imports stay legal (Service→Bridge is the ladder; guards do
-//            cross-layer assembly) but Tauri packages are not.
-//            Rule A and rule B's bridge half share one scope.
+//            consuming the composable reaches IPC through it), and the
+//            **transit roots** (utils/types — re-exporting bridge is the same
+//            router shape). The Tauri half additionally covers an **extended
+//            surface** — stores/, services/, guards/, router/ and main.ts —
+//            where bridge imports stay legal (Service→Bridge is the ladder;
+//            guards do cross-layer assembly) but Tauri packages are not;
+//            `stores/` is the exception on the bridge half too (Store→Bridge
+//            breaks the ladder). Rule A and rule B's bridge half share one
+//            scope.
 //
 // Both red lines were previously enforced by manual grep ("可 grep 断言"); this
 // script makes them a CI check (`npm run check:layering`, ci.yml frontend job),
@@ -48,18 +48,17 @@
 // **fails closed** with a violation — the gate must not go green on a specifier
 // it cannot read. The same rule covers `import.meta.glob(...)` /
 // `globEager(...)`: Vite compiles them into lazy imports, so they are real
-// View→Service edges (review P1). **Glob calls fail closed by default**: Vite
-// resolves a non-relative pattern through the alias plugin and expands it, so
+// View→Service edges. **Glob calls fail closed by default**: Vite resolves a
+// non-relative pattern through the alias plugin and expands it, so
 // `import.meta.glob` / `globEager` are real lazy edges — but the resolved set
 // follows picomatch/tinyglobby semantics, which no static character list can
-// enumerate. Rounds twenty-four and twenty-five patched plaintext wildcards
-// and escape spellings; round twenty-six added extglob parentheses; round
-// twenty-seven found `**` — path recursion, not a filename wildcard — where
-// `@/**` / `@/../**` resolve into services/bridge while the literal directory
-// prefix says nothing. The rule is therefore terminal: within the scan
-// surface every glob call is opaque (fail closed) unless its **decoded**
-// pattern is registered in GLOB_ALLOWLIST (explicit review; the pattern's own
-// layer rules still run). Plain dynamic `import()` keeps the literal rule.
+// enumerate: plaintext wildcards, escape spellings, extglob parentheses and
+// `**` (path recursion — `@/**` / `@/../**` resolve into services/bridge
+// while the literal directory prefix says nothing) each defeated a
+// pattern-text check. The rule is therefore terminal: within the scan surface
+// every glob call is opaque (fail closed) unless its **decoded** pattern is
+// registered in GLOB_ALLOWLIST (explicit review; the pattern's own layer
+// rules still run). Plain dynamic `import()` keeps the literal rule.
 //
 // Scan surface: `views/`, `components/`, `composables/` (recursively) plus
 // `src/App.vue`, over `.ts` / `.tsx` / `.js` / `.jsx` / `.mjs` / `.cjs` /
@@ -105,7 +104,7 @@ import {
 export const SCAN_ROOTS = ['views', 'components', 'composables']
 /// 横向模块：不在 View 链上，但可以成为**中转路由**——`utils/x.ts` 里
 /// `export { configService } from '@/services/…'` 或 `export { ipc } from '@/bridge/…'`，
-/// view 只 import 中转文件就绕过了红线。对它们应用规则 A 与规则 B（评审：
+/// view 只 import 中转文件就绕过了红线。对它们应用规则 A 与规则 B（
 /// 规则 B 曾豁免中转面，`view → utils/ipc → bridge` 全绿——重导出 bridge 的
 /// utils/types 文件本身就是违规点，View→Bridge 的边在路由处被斩断）。
 export const TRANSIT_ROOTS = ['utils', 'types']
@@ -118,28 +117,25 @@ export const SOURCE_EXTENSIONS = /\.(?:d\.ts|ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$
 /// directory barrel (`from '@/services'`), symmetric with BRIDGE_SPEC below.
 const SERVICE_SPEC = /(?:^|\/)services(?:\/|$)/
 /// Rule B: specifiers that reach the IPC surface — the bridge layer, and any
-/// `@tauri-apps/*` package. CLAUDE.md: bridge is **the only place** that
-/// touches Tauri; a direct `invoke` (or a direct plugin-dialog call) from a
-/// view bypasses the IpcError normalization / bridge boundary (review round
-/// twenty; plugin packages added in round twenty-two — `@tauri-apps/api`
-/// alone let `@tauri-apps/plugin-dialog` through).
+/// `@tauri-apps/*` package (api and plugin packages alike). CLAUDE.md: bridge
+/// is **the only place** that touches Tauri; a direct `invoke` (or a direct
+/// plugin-dialog call) from a view bypasses the IpcError normalization /
+/// bridge boundary.
 const BRIDGE_SPEC = /(?:^|\/)bridge(?:\/|$)/
 const TAURI_SPEC = /^@tauri-apps(?:\/|$)/
 
-/// Rule B 覆盖**全部扫描面**（2026-11-12 第二十轮口径）：View/component/
-/// App.vue、composables 与 utils/types 中转面。composable 被 View 消费——
-/// 放行 composable 的 bridge 导入等于给 View 留一条经 composable 抵达 IPC 的
-/// 路径；中转文件重导出 bridge 同理（边在路由处斩断）。规则 A 与规则 B 的
-/// 作用域自此一致。
+/// Rule B 覆盖**全部扫描面**：View/component/App.vue、composables 与
+/// utils/types 中转面。composable 被 View 消费——放行 composable 的 bridge
+/// 导入等于给 View 留一条经 composable 抵达 IPC 的路径；中转文件重导出
+/// bridge 同理（边在路由处斩断）。规则 A 与规则 B 的作用域一致。
 ///
-/// **Tauri 红线整树遍历（第二十二轮立规、第二十三轮落实）**：头注/Architecture
-/// 的承诺是「src 内除 bridge/ 与 tests 外任何文件都不得 import @tauri-apps/*」——
-/// 因此除主扫描面外，`src/` 的**其余全部文件**也进扫描（`main.ts`、`env.d.ts`
-/// 与未来新增的顶层目录都在内；枚举 stores/services/guards/router 会漏掉它们，
-/// 评审第二十三轮），这些文件按所在层应用规则：
+/// **Tauri 红线整树遍历**：头注/Architecture 的承诺是「src 内除 bridge/ 与
+/// tests 外任何文件都不得 import @tauri-apps/*」——因此除主扫描面外，`src/`
+/// 的**其余全部文件**也进扫描（`main.ts`、`env.d.ts` 与未来新增的顶层目录
+/// 都在内；枚举目录会漏掉它们），这些文件按所在层应用规则：
 ///   - `stores/`：**bridge 半边也适用**（Store→Bridge 破坏 View→Store→Service→
-///     Bridge 梯级，与「Store 不放业务逻辑与网络请求」一致；评审第二十八轮）
-///     ——规则 A 不适用（Store→Service 合法），Tauri 包规则照常；
+///     Bridge 梯级，与「Store 不放业务逻辑与网络请求」一致）——规则 A 不适用
+///     （Store→Service 合法），Tauri 包规则照常；
 ///   - `services/`、`guards/`、`router/`、`main.ts`：只应用 **Tauri 包规则**
 ///     （import `@/bridge/*` 是合法梯级：Service→Bridge；guards 是跨层装配），
 ///     `@tauri-apps/*` 则任何位置都只能经 bridge（CLAUDE.md:47）。
@@ -147,17 +143,17 @@ const TAURI_SPEC = /^@tauri-apps(?:\/|$)/
 export const TAURI_ONLY_ROOT_FILES = ['main.ts']
 
 /// 说明符归一化：反斜杠按 `/` 判定。`@/services\config.service` 在 Windows 上
-/// 可解析（ubuntu build 会挡下，但门禁自身要闭合——评审第二十八轮）。大小写不
-/// 归一（Linux 上 `Services/` 可能是真实目录，归一化会引入假阳）。
+/// 可解析（ubuntu build 会挡下，但门禁自身要闭合）。大小写不归一（Linux 上
+/// `Services/` 可能是真实目录，归一化会引入假阳）。
 function normalizeSpecifier(spec) {
   return spec.replaceAll('\\', '/')
 }
 
 /// `import.meta.glob` / `globEager` 的显式放行清单（**解码 + 归一化后**的模式
 /// 字符串）。扫描面内 glob 调用默认一律 fail closed（展开集合由
-/// picomatch/tinyglobby 语义决定，通配/转义/extglob/`**` 递归无法穷尽——评审
-/// 第二十四～二十七轮）。新增条目必须评审：模式本身的层判据（规则 A/B）仍会
-/// 执行，但展开集合是否全在合法落点由评审负责。当前为空（src 内 glob 零使用）。
+/// picomatch/tinyglobby 语义决定，通配/转义/extglob/`**` 递归无法穷尽）。新增
+/// 条目必须评审：模式本身的层判据（规则 A/B）仍会执行，但展开集合是否全在
+/// 合法落点由评审负责。当前为空（src 内 glob 零使用）。
 export const GLOB_ALLOWLIST = []
 
 /**
@@ -171,14 +167,14 @@ export function dynamicImportArgs(source) {
   const literal = []
   const opaque = []
   // `import(...)` 与 Vite 的 `import.meta.glob(...)` / `globEager(...)`：后者在
-  // 编译期变成懒加载 import，是真实的 View→Service 边（评审 P1）。说明符规则
+  // 编译期变成懒加载 import，是真实的 View→Service 边。说明符规则
   // 与动态 import 完全一致：字面量可判定，其余（数组/变量/拼接/插值）fail closed。
   for (const match of source.matchAll(/(?<![.\w$'"`])import\s*(?:\.\s*meta\s*\.\s*(glob|globEager))?\s*\(\s*/g)) {
     const isGlob = match[1] !== undefined
     const argStart = match.index + match[0].length
     // 字符串字面量用共享读取器（尊重转义与起始定界符）——`indexOf(quote)`
     // 会在转义引号处提前收尾，把恶意路径的 `/services/` 段留在字面量之外
-    //（评审 P2：`import('@/safe\')/services/…')` 曾假绿）
+    //（`import('@/safe\')/services/…')` 曾假绿）
     const literalRead = readStringLiteral(source, argStart)
     if (literalRead === null) {
       const snippet = source.slice(match.index, Math.min(match.index + 48, source.length))
@@ -188,25 +184,25 @@ export function dynamicImportArgs(source) {
     const { raw, end } = literalRead
     const quote = source[argStart]
     if (quote === '`' && raw.includes('${')) {
-      // 可读前缀（`${` 之前）留给 store 模式点名 bridge 用（第二十九轮）
+      // 可读前缀（`${` 之前）留给 store 模式点名 bridge 用
       const prefix = normalizeSpecifier(decodeStringLiteral(raw.slice(0, raw.indexOf('${'))))
       opaque.push({ index: match.index, snippet: '`…${…}…`', spec: prefix })
       continue
     }
     // 字符串字面量的转义在运行时生效：`@/servi\u0063es/…` 就是 services，
-    // 按原文匹配会假绿——所有判定都在**解码后**的说明符上做（评审 P2；第二十五
-    // 轮补齐 glob 判定：Vite 展开用的是 AST literal 的 element.value，即解码后
-    // 的模式，`@/\u002a/config.service.ts` 运行时就是 `@/*/config.service.ts`）
+    // 按原文匹配会假绿——所有判定都在**解码后**的说明符上做（Vite 展开 glob
+    // 用的是 AST literal 的 element.value，即解码后的模式，
+    // `@/\u002a/config.service.ts` 运行时就是 `@/*/config.service.ts`）
     const spec = normalizeSpecifier(decodeStringLiteral(raw))
-    // **glob 调用一律 fail closed**（终结式，评审第二十七轮）：前几轮按
-    // picomatch 语义逐项打补丁（明文通配 → 解码后转义 → extglob → `**` 递归），
-    // 每轮都还剩一种——`**` 在末段是**路径递归**而不是文件名通配，字面量目录
-    // 前缀的祖先判据（`@/**`、`@/../**`）完全看不见 services/bridge。展开集合由
-    // tinyglobby 决定，静态判据无法穷尽，因此扫描面内 glob 调用不判断据、直接
-    // fail closed；需要的写法在 `GLOB_ALLOWLIST` 显式登记（模式本身仍按规则
-    // A/B 判定）。现树零使用，迁移成本为零。
+    // **glob 调用一律 fail closed**（终结式）：按 picomatch 语义逐项判模式总
+    // 会漏下一种（明文通配 → 解码后转义 → extglob → `**` 递归）；`**` 在末段是
+    // **路径递归**而不是文件名通配，字面量目录前缀的祖先判据（`@/**`、
+    // `@/../**`）完全看不见 services/bridge。展开集合由 tinyglobby 决定，静态
+    // 判据无法穷尽，因此扫描面内 glob 调用不判断据、直接 fail closed；需要的
+    // 写法在 `GLOB_ALLOWLIST` 显式登记（模式本身仍按规则 A/B 判定）。现树零
+    // 使用，迁移成本为零。
     if (isGlob && !GLOB_ALLOWLIST.includes(spec)) {
-      // spec 一并带上：store 模式对点名 bridge 的模式直接判红（第二十九轮）
+      // spec 一并带上：store 模式对点名 bridge 的模式直接判红
       opaque.push({ index: match.index, snippet: `${quote}${raw}${quote}`, reason: 'glob-call', spec })
       continue
     }
@@ -268,10 +264,9 @@ function scanUnit(violations, path, unitSource, lineBase, { mode = 'main' } = {}
   findings.push(...dynamic.literal)
   // 非主扫描面不报动态 import 的**不可读形态**（懒加载拼接在这些层是正常
   // 写法，与红灯无关）。store 模式例外（Store→Bridge 破坏梯级）：
-  //   - **glob 调用一律 fail closed**（第三十轮）——模式串不点名 bridge 也可能
-  //     展开到 bridge（`@/**`、`@/*/x`、`@/@(bridge|views)/*`、`@/b**/**`），
-  //     正是主面第二十四～二十七轮终结的那一族；模式判据只看字面文本，必须
-  //     与主面同口径；
+  //   - **glob 调用一律 fail closed**——模式串不点名 bridge 也可能展开到
+  //     bridge（`@/**`、`@/*/x`、`@/@(bridge|views)/*`、`@/b**/**`）；模式判据
+  //     只看字面文本，必须与主面同口径；
   //   - 拼接/模板只按**可读前缀**判 `BRIDGE_SPEC`（点名 bridge 即红；部分前缀
   //     `'../b' + x` 放行——这是「允许 store 懒加载拼接」的显式代价，主面对
   //     同类形态是 fail closed）。
@@ -347,7 +342,7 @@ export function findViolations(files) {
       const descriptor = parseSfc(content)
       scanUnit(violations, path, stripComments(scriptSurfaceOf(content, descriptor)), 1, { mode })
       // `<script src="…">`：外链脚本在编译期被内联进该组件，是真实的静态依赖
-      //（评审：src 指向 services/ 时零违规）。src 值本身就是模块说明符，按
+      //（src 指向 services/ 时零违规）。src 值本身就是模块说明符，按
       // 规则 A/B 判定；行号取 block 起点。相对说明符的匹配口径与 import 一致
       //（`../services/x`、`@/bridge/x` 命中；同目录裸名不指向层目录，不命中）。
       for (const block of [descriptor.script, descriptor.scriptSetup]) {
@@ -401,10 +396,10 @@ export function loadSources(root) {
     throw new Error('layering-gate: 扫描面为空（views/components/composables/App.vue 均未找到）')
   }
   // 整树遍历：`src/` 下除 `bridge/` 与 tests 外的**全部文件**都扫（承诺见
-  // 头注；枚举目录会漏掉 env.d.ts 与未来顶层目录，评审第二十三轮）。已在主
-  // 扫描面里的文件**不重复**收集；其余文件按所在层打 mode：
+  // 头注；枚举目录会漏掉 env.d.ts 与未来顶层目录）。已在主扫描面里的文件
+  // **不重复**收集；其余文件按所在层打 mode：
   //   - `stores/` → 'store'：bridge 半边也适用（Store→Bridge 破坏梯级，与
-  //     「Store 不放业务逻辑与网络请求」一致；评审第二十八轮），规则 A 不适用；
+  //     「Store 不放业务逻辑与网络请求」一致），规则 A 不适用；
   //   - 其余（services/guards/router/main.ts 与未来顶层目录）→ 'tauriOnly'：
   //     `@/bridge/*` 是合法梯级，只禁 Tauri 包。
   // main.ts 缺失按扫描面不完整处理（fail-closed）。
@@ -428,7 +423,7 @@ export function runCli(root) {
   try {
     files = loadSources(root)
     // findViolations 也必须收进 try：SFC 解析错误（parseSfc throw）同样是红，
-    // runCli 的契约是**返回码**而非异常（评审：坏 .vue 曾把 CLI 变成未捕获异常，
+    // runCli 的契约是**返回码**而非异常（坏 .vue 曾把 CLI 变成未捕获异常，
     // 与 save-gate / 空扫描面的口径不一致）
     violations = findViolations(files)
   } catch (error) {
