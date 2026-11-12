@@ -29,7 +29,7 @@ flowchart LR
   API --> Query[ScopedQueries: 作用域/游标]
   Query --> Service
   API --> Ports[PluginStorageApi / PluginHttpApi / NotificationOutput]
-  Ports --> Infra[infra: plugin_storage / plugin_http] & 组合根[main.rs: 通知输出]
+  Ports --> Infra[infra: plugin_storage / plugin_http] & 组合根[bootstrap/notification.rs: 通知输出]
   Command[commands/plugin_cmd] --> Manager[PluginManager]
   Manager --> Host
   Manager --> Repository[PluginRepository / FsPluginRepository]
@@ -107,7 +107,7 @@ JS contest.problems / contest.rank(context, query)
 ```
 JS storage.*   → PluginStorageApi → infra/plugin_storage（fs4 + atomicwrites + CAS）
 JS http.request → PluginHttpApi → infra/plugin_http（独立 reqwest + origin/地址策略）
-JS notification.* → NotificationOutput → 组合根 main.rs（TauriPluginNotifications）→ Tauri 事件 → 前端
+JS notification.* → NotificationOutput → 组合根 bootstrap/notification.rs（TauriPluginNotifications）→ Tauri 事件 → 前端
 JS log.*       → LogApi（execution_api 内实现）→ tracing → logs/hinina.log
 ```
 

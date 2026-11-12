@@ -18,7 +18,7 @@
 
 ## 被依赖
 - `src-tauri/src/commands/mod.rs`（通过 `pub mod problem_cmd` 声明）
-- `src-tauri/src/main.rs`（`generate_handler!` 注册全部三个 command）
+- `commands::invoke_handler`（`generate_handler!` 注册全部三个 command）
 
 ## 逻辑流程
 1. 前端调用 `invoke('get_problem', { contestId, problemId })` / `invoke('get_user_problem_status', { contestId, problemIds })` / `invoke('get_contest_problem_limits', { contestId, displayIds })`

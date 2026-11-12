@@ -4,7 +4,7 @@
 
 ## 职责
 
-document 级 click 委托：把 markdown 渲染面（题面/比赛简介/登录页简报/公告——覆盖全部 `renderMarkdown` 消费方，清单见 `markdown.md`）里的 http(s) 锚点转交系统默认浏览器。WebView 内点这类链接的默认行为是把整个客户端导航走（分层审计 2026-10「外链无出路」缺口）——本模块 + Rust `open_external`（`app_cmd.md`）共同闭合它：拦截在前端、scheme 白名单最后一道在 Rust 命令、转交经 `tauri-plugin-opener` 的 Rust API（`Cargo.toml`）；插件默认注入的点击脚本已在注册时关闭（`main.rs`），本命令是唯一转交通道。
+document 级 click 委托：把 markdown 渲染面（题面/比赛简介/登录页简报/公告——覆盖全部 `renderMarkdown` 消费方，清单见 `markdown.md`）里的 http(s) 锚点转交系统默认浏览器。WebView 内点这类链接的默认行为是把整个客户端导航走（分层审计 2026-10「外链无出路」缺口）——本模块 + Rust `open_external`（`app_cmd.md`）共同闭合它：拦截在前端、scheme 白名单最后一道在 Rust 命令、转交经 `tauri-plugin-opener` 的 Rust API（`Cargo.toml`）；插件默认注入的点击脚本已在注册时关闭（`bootstrap::builder`），本命令是唯一转交通道。
 
 ## 核心类型/函数
 

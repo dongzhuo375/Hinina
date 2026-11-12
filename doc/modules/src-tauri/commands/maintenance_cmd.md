@@ -52,7 +52,7 @@
 
 ## 被依赖
 
-- `main.rs` — `generate_handler!` 注册为 `reset_client` / `local_data_usage` / `purge_local_data`
+- `commands::invoke_handler` — `generate_handler!` 注册为 `reset_client` / `local_data_usage` / `purge_local_data`
 - `src/bridge/system.bridge.ts` → `system.service.ts` → `composables/useMaintenanceSettings.ts` → `components/settings/ResetPurgeSection.vue`
 
 ## 逻辑流程

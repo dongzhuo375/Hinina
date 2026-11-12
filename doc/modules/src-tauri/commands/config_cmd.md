@@ -24,7 +24,7 @@
 - `crate::infra::launch_args`（`update_config` 的锁定执行真值：`maintainer_locked = !launch_args::get().settings`，2026-11-04 G1）
 
 ## 被依赖
-- `src-tauri/src/main.rs`（`generate_handler!` 注册全部四个 Command）
+- `commands::invoke_handler`（`generate_handler!` 注册全部四个 Command）
 
 ## 逻辑流程
 1. 前端调用 `invoke('get_config')` 获取当前配置用于设置页面展示

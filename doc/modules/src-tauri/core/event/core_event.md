@@ -18,7 +18,7 @@
 ## 被依赖
 - `core::event::core_event_bus`（通道载荷）
 - `core::event::consumer`（消费者处理入参）
-- 全部 Service（发布事实通知）与 `main.rs`（前端桥 / 审计 / 插件宿主）
+- 全部 Service（发布事实通知）与 `bootstrap::events`（前端桥 / 审计 / 插件宿主）
 - `plugin::host::event_adapter`（白名单映射的唯一来源）
 
 ## 逻辑流程

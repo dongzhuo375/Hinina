@@ -18,7 +18,7 @@
 
 ## 被依赖
 - `src-tauri/src/commands/mod.rs`（`pub mod auth_cmd` 声明）
-- `src-tauri/src/main.rs`（`tauri::generate_handler!` 注册四个命令）
+- `commands::invoke_handler`（`tauri::generate_handler!` 注册四个命令）
 - 前端 `src/bridge/auth.bridge.ts`（`login` / `logout` / `get_session` / `validate_session`）
 
 ## 逻辑流程

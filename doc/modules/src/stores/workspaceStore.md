@@ -61,7 +61,7 @@ saveWorkspace()            // 切题（ProblemSolveView.load） / 失焦 / 关�
   → workspaceService.saveWorkspace()   // 后端全量落盘 + 发布 Saved
   → 推送成功才清 isDirty
 
-workspace-saved 事件（后端 CoreEvent::WorkspaceSaved 经 main.rs 前端事件桥下发）
+workspace-saved 事件（后端 CoreEvent::WorkspaceSaved 经 bootstrap::events 前端事件桥下发）
   → markPersisted(workspaceId, revision)
       ├─ workspaceId 与当前工作区不符 → 丢弃（过期事件）
       ├─ revision <= lastPersistedRevision → 丢弃（重复/回退）

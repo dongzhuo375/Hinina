@@ -4,7 +4,7 @@
 
 ## 职责
 
-比赛公告列表、本地已读状态与**新公告事件**的 Tauri IPC 薄封装。已读状态是客户端特性（HOJ 无已读概念），由 Rust 端按「比赛 + 用户」持久化到本地文件；新公告事件由 Rust 侧比对公告基线后发布（`CoreEvent::AnnouncementChanged`），经 `src-tauri/src/main.rs` 的前端事件桥转发到 `announcements-published` 通道。
+比赛公告列表、本地已读状态与**新公告事件**的 Tauri IPC 薄封装。已读状态是客户端特性（HOJ 无已读概念），由 Rust 端按「比赛 + 用户」持久化到本地文件；新公告事件由 Rust 侧比对公告基线后发布（`CoreEvent::AnnouncementChanged`），经 Rust 组合根 `bootstrap::events` 的前端事件桥转发到 `announcements-published` 通道。
 
 ## 核心类型/函数
 
@@ -13,7 +13,7 @@
 | `listContestAnnouncements` | `(contestId, currentPage, limit) => Promise<AnnouncementPage>` | `list_contest_announcements` |
 | `getReadAnnouncementIds` | `(contestId) => Promise<string[]>` | `get_read_announcement_ids`（uid 取自后端会话；未登录返回空） |
 | `markAnnouncementsRead` | `(contestId, ids) => Promise<void>` | `mark_announcements_read`（后端合并去重持久化） |
-| `ANNOUNCEMENTS_PUBLISHED_EVENT` | 常量 `'announcements-published'` | 前端事件通道名，必须与 `src-tauri/src/main.rs` 的 emit 字面量一致 |
+| `ANNOUNCEMENTS_PUBLISHED_EVENT` | 常量 `'announcements-published'` | 前端事件通道名，必须与 `bootstrap::events` 的 emit 字面量一致 |
 | `AnnouncementsPublishedPayload` | `{ contestId: string; newIds: string[] }` | 事件载荷；`newIds` = 本次新出现的公告 ID |
 | `onAnnouncementsPublished` | `(handler) => Promise<UnlistenFn>` | 包一层 Tauri `listen`：**校验载荷形状**（`payload` 存在且 `contestId` 为 string，否则直接丢弃 —— 事件来自 Rust 且通道公开，越界数据不该进 store），`newIds` 缺省补 `[]`。返回取消订阅函数，调用方（组合根）应保留以便注销 |
 
@@ -41,7 +41,7 @@
 事件类（**由前端拉取触发，Rust 侧不自行轮询**）：
   list_contest_announcements → ContestService 与上次基线比对 → 出现新 ID
     → 发布 CoreEvent::AnnouncementChanged { contest_id, new_ids }
-    → src-tauri/src/main.rs 的前端事件桥 emit('announcements-published', { contestId, newIds })
+    → src-tauri/src/bootstrap/events.rs 的前端事件桥 emit('announcements-published', { contestId, newIds })
     → onAnnouncementsPublished：载荷校验 → handler({ contestId, newIds: newIds ?? [] })
     → main.ts 判 contestId 是否当前比赛 → announcementStore.refresh()
 ```

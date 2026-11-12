@@ -23,7 +23,7 @@ OJ 切换 Command 模块，仅暴露 `switch_oj` 一个 IPC 命令。OJ 选择�
 
 ## 被依赖
 - `src-tauri/src/commands/mod.rs`（`pub mod oj_cmd` 声明）
-- `src-tauri/src/main.rs`（`tauri::generate_handler!` 注册）
+- `commands::invoke_handler`（`tauri::generate_handler!` 注册）
 - 前端 `src/bridge/config.bridge.ts`（`switchOj`，由 `services/config.service.ts` 编排）
 
 ## 逻辑流程

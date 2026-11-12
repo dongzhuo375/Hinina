@@ -10,7 +10,7 @@
 无外部依赖，仅声明子模块。
 
 ## 被依赖
-- `main.rs` / `lib.rs`（顶层 crate 入口）
+- `main.rs` / `bootstrap` / `lib.rs`（顶层 crate 入口 / 组合根）
 
 ## 逻辑流程
 无（仅模块声明）。

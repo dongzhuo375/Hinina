@@ -63,7 +63,7 @@ Workspace 生命周期状态机：
 - `update_file()` 只写内存 + 记录 `active_file` + 递增修订号（不落盘）；`get_file()` 优先内存后回退磁盘
 - `start_auto_save()` 启动 tokio task 定时扫描 dirty 标记；取快照与写盘在同一读锁内完成（与 `save()` 的写锁形成全序），落盘成功且快照之后无新改动才清脏并发布 `WorkspaceSaved { automatic: true }`；`Drop` 确保 task 被 abort
 
-**唯一的事件发布点**：`save()`（`automatic: false`）与 auto-save 成功 tick（`automatic: true`），两者都是 `CoreEvent::WorkspaceSaved { workspace_id, revision, automatic }`。`create` / `load` **都不发布事件** —— 它们由前端经 IPC 发起，返回值即真值；事件只用来把「后台 auto-save 已完成落盘」这件前端无法感知的事实告诉它（经 `main.rs` 的前端事件桥转为 `workspace-saved`）。
+**唯一的事件发布点**：`save()`（`automatic: false`）与 auto-save 成功 tick（`automatic: true`），两者都是 `CoreEvent::WorkspaceSaved { workspace_id, revision, automatic }`。`create` / `load` **都不发布事件** —— 它们由前端经 IPC 发起，返回值即真值；事件只用来把「后台 auto-save 已完成落盘」这件前端无法感知的事实告诉它（经 `bootstrap::events` 的前端事件桥转为 `workspace-saved`）。
 
 **`revision` 为什么在写锁内取**：释放锁之后 `update_file` 可能立刻递增它，那样事件会报出比磁盘内容更新的修订号，前端据此清脏 = 假 clean（最新内容仍在内存，直到下一次编辑才可能落盘）。auto-save 侧同理：修订号与快照必须在同一读锁作用域内取得，否则「取快照 → 取修订号」之间到来的改动会让修订号偏新，写盘的是旧内容却误判为可 clean。
 

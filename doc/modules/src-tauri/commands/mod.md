@@ -1,10 +1,11 @@
 # mod
 
 ## 职责
-Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单元测试。**不做注册**：全部 Command 由 `main.rs` 的 `tauri::generate_handler![...]` 一次性注册（选用 generate_handler 而非 `.setup()` 手动注册，避免兼容性问题，见本文件头部注释）。
+Commands 模块入口。声明所有 Tauri Command 子模块、提供 `invoke_handler()` 注册表并挂载本层单元测试。注册表用 `tauri::generate_handler![...]` 一次性构造（由 `bootstrap` 的 Builder 接线；不用 `.setup()` 手动注册，避免兼容性问题），handler 固定 `Wry`——`open_external` / `pick_data_dir` 的参数是具体 `AppHandle`，`CommandArg` 只为 `AppHandle<R>` 实现。
 
 ## 核心类型/函数
-无（仅模块声明）：
+- `pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static` — 43 条 Command 的注册表（`generate_handler!`）；handler 固定 `Wry` 的原因见「职责」。
+- 子模块声明：
 - `pub mod app_cmd` — `launch_flags`：启动标志快照（`--settings` 管理方钥匙；零状态只读）/ `open_external`：http(s) 外链转交系统默认浏览器（scheme 白名单在命令守卫，见 app_cmd.md）
 - `pub mod auth_cmd` — 登录 / 登出 / 会话查询 / 会话校验
 - `pub mod data_dir_cmd` — 数据目录：`get_data_dir` / `set_data_dir` / `reset_data_dir` / `pick_data_dir`（改动重启后生效）
@@ -21,10 +22,10 @@ Commands 模块入口。声明所有 Tauri Command 子模块并挂载本层单�
 - `#[cfg(test)] #[path = "tests/mod_tests.rs"] mod tests` — 本层单元测试
 
 ## 直接依赖
-无外部依赖，仅声明子模块。
+- `tauri`（`generate_handler!`、`ipc::Invoke`、`Wry`）
 
 ## 被依赖
-- `src-tauri/src/main.rs`（`use hinina_lib::commands` + `generate_handler!` 逐个注册 43 个 Command：**app 2** / plugin 5 / auth 4 / oj 1 / contest 6 / problem 3 / submission 5 / workspace 5 / config 4 / **log 1** / maintenance 3 / data_dir 4（contest 7→6：`select_contest` 前端零调用已删，服务层方法保留内部复用；workspace 7→5：`switch_workspace`/`current_workspace` 已删，`WorkspaceManager::switch` 同步删除、`current` 降为 `#[cfg(test)]` 测试入口））
+- `bootstrap`（`use crate::commands` + `commands::invoke_handler()` 注册 43 个 Command：**app 2** / plugin 5 / auth 4 / oj 1 / contest 6 / problem 3 / submission 5 / workspace 5 / config 4 / **log 1** / maintenance 3 / data_dir 4（contest 7→6：`select_contest` 前端零调用已删，服务层方法保留内部复用；workspace 7→5：`switch_workspace`/`current_workspace` 已删，`WorkspaceManager::switch` 同步删除、`current` 降为 `#[cfg(test)]` 测试入口））
 
 ## 逻辑流程
 无（仅模块声明）。

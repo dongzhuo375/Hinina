@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `arm` | `pub fn arm()` | 记录主线程 `ThreadId`（未记录即未启用）。`main()` 在 `panic_report::install()` 之后调用。**测试构建永不调用**：模态框会卡死 CI（`panic_report_*` 集成测试会故意 panic） |
-| `mark_started` | `pub fn mark_started()` | 标记启动完成：`main.rs` 的 `run` 回调收到 `RunEvent::Ready` 时调用。此后 panic 不再弹窗，运行期崩溃只走日志与崩溃文件 |
+| `mark_started` | `pub fn mark_started()` | 标记启动完成：`bootstrap::handle_run_event` 收到 `RunEvent::Ready` 时调用。此后 panic 不再弹窗，运行期崩溃只走日志与崩溃文件 |
 | `present_startup_panic` | `pub fn present_startup_panic(payload: &str, crash_log: Option<&Path>)` | 钩子的调用点。只有「启动未完成、主线程、本进程首次」才弹；正文含 payload（三处 expect 已改成中文上下文）、「关闭后程序将退出」、`--console` 提示。**`crash_log` 只在崩溃记录真正写入成功时是 `Some`**；`None` 时正文明确说「崩溃记录未能写入（临时目录不可写）」，不展示不存在的路径。`MessageBoxW` 在独立线程执行并 `join`——钩子可能跑在 Tauri 事件循环回调里，主线程上嵌套模态消息泵会重入事件循环。线程创建/FFI 失败静默跳过（持久记录已先写入） |
 | `should_present` | `fn should_present(started, on_main) -> bool`（私有） | 纯判定：启动未完成且在主线程。未 `arm` 时 `on_main` 必为 false，故不需要单独的 armed 标志 |
 | `claim_presentation` | `fn claim_presentation(&AtomicBool) -> bool`（私有） | 一次性领取弹窗权：并发 panic 只有一个线程弹出 |
@@ -28,7 +28,7 @@
 
 ## 被依赖
 
-- `main.rs`（`main()` 里的 `arm`；`run` 回调的 `RunEvent::Ready` 里的 `mark_started`）
+- `bootstrap::early`（`prepare()` 里的 `arm`）与 `bootstrap::handle_run_event`（`RunEvent::Ready` 里的 `mark_started`）
 - `infra::panic_report::report`（启动期 panic 的钩子末尾调用，顺序见 `panic_report.md`）
 
 ## 逻辑流程

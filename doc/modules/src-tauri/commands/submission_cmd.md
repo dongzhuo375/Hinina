@@ -19,7 +19,7 @@
 - `crate::core::error::AppResult`
 
 ## 被依赖
-- `src-tauri/src/main.rs`（`generate_handler!` 注册全部五个 Command）
+- `commands::invoke_handler`（`generate_handler!` 注册全部五个 Command）
 
 ## 逻辑流程
 1. 前端调用 `invoke('submit_code', {...})` 提交代码，获得 submission_id

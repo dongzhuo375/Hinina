@@ -15,8 +15,8 @@
 无（仅包含 `pub mod` 声明，不 import 任何外部模块）
 
 ## 被依赖
-- `src-tauri/src/main.rs`（通过 `use crate::service::...` 引用各子服务）
-- `src-tauri/src/core/context.rs`（引用 `ConfigService`、`WorkspaceManager`）
+- `src-tauri/src/core/context.rs`（构造 `ConfigService`、`WorkspaceManager` 与各 Service）
+- `src-tauri/src/commands`（借用 `SessionValidity`、提交留档等类型/常量）
 
 ## 逻辑流程
 无（纯模块声明）
