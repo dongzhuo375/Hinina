@@ -451,6 +451,13 @@ import x from '@/services/real'
       String.raw`@/\x2a/config.service.ts`,
       String.raw`@/\u003f/config.service.ts`,
       String.raw`@\u002f**\u002f*.service.ts`,
+      // picomatch extglob：不含 `*?[{` 也能表达目录集合（旧字符枚举上全绿；
+      // tinyglobby 实测 @(…)/+(…)/!(…) 命中 src/services/config.service.ts）
+      '@/@(services|utils)/config.service.ts',
+      '@/+(services|utils)/config.service.ts',
+      '@/!(utils)/config.service.ts',
+      // 裸括号同样按集合语法拒绝（闭包，不留旁路）
+      '@/(services|utils)/config.service.ts',
     ]) {
       const violations = findViolations([
         { path: 'views/Glob.ts', content: `const m = import.meta.glob('${pattern}')` },
