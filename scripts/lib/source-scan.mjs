@@ -433,7 +433,7 @@ function keepRanges(source, ranges) {
 }
 
 /**
- * Vue 模板可执行表达式提取（供保存门禁使用）：**指令表达式**（`@…` / `v-…` /
+ * Vue 模板可执行表达式提取（两个门禁共用）：**指令表达式**（`@…` / `v-…` /
  * `:…` 绑定的 `exp`）与**插值**（`{{ … }}` 的 content）都是可执行代码，必须与
  * `<script>` 一起进入扫描面。提取走 `vue/compiler-sfc` 的模板 AST（与应用同一
  * 解析器）：HTML 注释（COMMENT 节点）与静态属性自然不在集合内，散文里的伪指令
@@ -441,64 +441,46 @@ function keepRanges(source, ranges) {
  * 解码（`&#114;unSaveTxn` 运行时就是 runSaveTxn）。
  * 已知边界：指令的动态参数（`v-on:[event]`）不提取（Vue 编译器限制其形态，
  * 不含函数调用）；命名实体的表只含常见集合（表外命名实体保持原样）。
+ *
+ * 单一**遍历器**：本函数是唯一实现（收集 `{ text, line }`，按行序——与按偏移序
+ * 等价，同文件的非交叠区间行序即偏移序）；`templateExpressions` 从它派生。
+ * 两份 walker 会漂移（评审：一个修了动态参数、另一个漏掉）。
  */
-export function templateExpressions(source, descriptor = parseSfc(source)) {
+export function templateExpressionEntries(source, descriptor = parseSfc(source)) {
   const ast = descriptor.template?.ast
   if (!ast) return []
-  const locs = []
+  const entries = []
+  const push = (loc) => {
+    if (!loc) return
+    // Vue 编译前会解码 HTML 实体：`&#114;unSaveTxn(…)` 在运行时就是
+    // runSaveTxn——原文切片必须先解码再进入扫描面（评审：实体曾可藏调用）
+    const text = decodeHtmlEntities(source.slice(loc.start.offset, loc.end.offset))
+    if (text.trim() === '') return
+    entries.push({ text, line: loc.start.line })
+  }
   const walk = (node) => {
     if (!node) return
     // 7 = DIRECTIVE：exp 是绑定表达式（v-for 的 exp 覆盖整段 `item in items`，
     // 原样切片对保存门禁无害）
-    if (node.type === 7 && node.exp?.loc) locs.push([node.exp.loc.start.offset, node.exp.loc.end.offset])
+    if (node.type === 7 && node.exp) push(node.exp.loc)
     // 5 = INTERPOLATION：content 是插值表达式
-    else if (node.type === 5 && node.content?.loc) locs.push([node.content.loc.start.offset, node.content.loc.end.offset])
+    else if (node.type === 5 && node.content) push(node.content.loc)
     // 动态指令参数 `@[expr]="handler"` / `v-slot:[expr]`：arg 是**可执行表达式**
     //（`isStatic === false`）。只收 exp 会漏掉它——`@[runSaveTxn(h)]="go"` 在
     // 运行时是一次真实调用（评审 P2）
-    if (node.type === 7 && node.arg && node.arg.isStatic === false && node.arg.loc) {
-      locs.push([node.arg.loc.start.offset, node.arg.loc.end.offset])
-    }
+    if (node.type === 7 && node.arg && node.arg.isStatic === false) push(node.arg.loc)
     for (const child of node.children ?? []) walk(child)
     // 指令住在元素的 props 里（children 之外），必须单独遍历
     for (const prop of node.props ?? []) walk(prop)
   }
   walk(ast)
-  locs.sort((a, b) => a[0] - b[0])
-  // Vue 编译前会解码 HTML 实体：`&#114;unSaveTxn(…)` 在运行时就是
-  // runSaveTxn——原文切片必须先解码再进入扫描面（评审：实体曾可藏调用）
-  return locs
-    .map(([start, end]) => decodeHtmlEntities(source.slice(start, end)))
-    .filter((text) => text.trim() !== '')
-}
-
-/**
- * 与 `templateExpressions` 相同，但保留每条表达式的**原始行号**：分层门禁
- * 需要按原文件行报违规（把表达式拼接到扫描面尾部会丢行号，也可能让相邻表达式
- * 拼出伪 import）。返回 `[{ text, line }]`（line 1-based）。
- */
-export function templateExpressionEntries(source, descriptor = parseSfc(source)) {
-  const ast = descriptor.template?.ast
-  if (!ast) return []
-  const starts = buildLineIndex(source)
-  const entries = []
-  const walk = (node) => {
-    if (!node) return
-    const push = (loc) => {
-      if (!loc) return
-      const text = decodeHtmlEntities(source.slice(loc.start.offset, loc.end.offset))
-      if (text.trim() === '') return
-      entries.push({ text, line: loc.start.line })
-    }
-    if (node.type === 7 && node.exp) push(node.exp.loc)
-    else if (node.type === 5 && node.content) push(node.content.loc)
-    if (node.type === 7 && node.arg && node.arg.isStatic === false) push(node.arg.loc)
-    for (const child of node.children ?? []) walk(child)
-    for (const prop of node.props ?? []) walk(prop)
-  }
-  walk(ast)
   entries.sort((a, b) => a.line - b.line)
   return entries
+}
+
+/** 与 `templateExpressionEntries` 相同集合的表达式文本（保存门禁拼接扫描面用）。 */
+export function templateExpressions(source, descriptor = parseSfc(source)) {
+  return templateExpressionEntries(source, descriptor).map((entry) => entry.text)
 }
 
 /**
@@ -515,10 +497,12 @@ export function templateExpressionEntries(source, descriptor = parseSfc(source))
  */
 export function prepareSource(path, content, { templateExpressions: includeTemplateExpressions = false } = {}) {
   if (!path.endsWith('.vue')) return stripComments(content)
-  const ranges = vueScriptRanges(content)
-  let prepared = stripComments(keepRanges(content, ranges))
+  // **单次解析**：descriptor 同时喂给 script 面与模板表达式提取（评审：每个
+  // SFC 被 parseSfc 两次，解析失败时第二次还会重复抛错）
+  const descriptor = parseSfc(content)
+  let prepared = stripComments(scriptSurfaceOf(content, descriptor))
   if (includeTemplateExpressions) {
-    const expressions = templateExpressions(content)
+    const expressions = templateExpressions(content, descriptor)
     if (expressions.length > 0) {
       prepared += `\n${expressions.join('\n')}`
     }
@@ -601,8 +585,12 @@ export function readStringLiteral(source, quoteIndex) {
  * literals inside the list are handled. **`=>` inside the list is skipped**
  * (function-type annotations like `(e: Event) => void` — the `>` of `=>` must
  * not decrease the depth, review P3: the shallow `</>` balance truncated at the
- * arrow and dropped the whole call name). Returns the index just past the
- * closing `>` or `null` when unbalanced.
+ * arrow and dropped the whole call name). **Single-line only**: any newline
+ * inside the list returns `null` — multi-line generic arguments are outside
+ * the tracked shapes, and a cross-line scan used to run past the newline (the
+ * old `depth === 0` guard was dead: depth is ≥ 1 from the first character) to
+ * an unrelated `>` further down (review). Returns the index just past the
+ * closing `>` or `null` when unbalanced / newline-crossing.
  */
 export function readAngles(source, start) {
   if (source[start] !== '<') return null
@@ -624,7 +612,7 @@ export function readAngles(source, start) {
     else if (ch === '>') {
       depth -= 1
       if (depth === 0) return i + 1
-    } else if (ch === '\n' && depth === 0) {
+    } else if (ch === '\n') {
       return null
     }
     i += 1

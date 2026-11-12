@@ -6,10 +6,14 @@
 //            `*/services/*` specifier, including `import type` / dynamic
 //            `import()` / side-effect / re-export).
 //   Rule B — View / component (+ App.vue) must not import `@/bridge` or any
-//            `*/bridge/*` specifier. **Composables are outside rule B**: the
-//            registered red line names View / component only (Architecture.md
-//            「前端分层口径」first bullet); widen it only with a documented
-//            reason.
+//            `*/bridge/*` specifier. The **transit roots** (utils/types) are
+//            inside rule B too — re-exporting bridge from a transit file is
+//            the same router shape as re-exporting services, and the
+//            View → Bridge edge must be cut at the router (review: rule B
+//            used to exempt transit, so `view → utils/ipc → bridge` went
+//            green). **Composables are outside rule B**: the registered red
+//            line names View / component only (Architecture.md「前端分层口径」
+//            first bullet); widen it only with a documented reason.
 //
 // Both red lines were previously enforced by manual grep ("可 grep 断言"); this
 // script makes them a CI check (`npm run check:layering`, ci.yml frontend job),
@@ -80,9 +84,11 @@ import {
 
 /** Scan roots (relative to `src/`, forward slashes) + the single root component. */
 export const SCAN_ROOTS = ['views', 'components', 'composables']
-/// 横向模块：不在 View 链上，但可以成为 **View→Service 的中转**（`utils/x.ts`
-/// 里 `export { configService } from '@/services/…'`，view 只 import 中转文件
-/// 就绕过了规则 A）。只对它们应用规则 A（规则 B 的红线仍只列 View/component）。
+/// 横向模块：不在 View 链上，但可以成为**中转路由**——`utils/x.ts` 里
+/// `export { configService } from '@/services/…'` 或 `export { ipc } from '@/bridge/…'`，
+/// view 只 import 中转文件就绕过了红线。对它们应用规则 A 与规则 B（评审：
+/// 规则 B 曾豁免中转面，`view → utils/ipc → bridge` 全绿——重导出 bridge 的
+/// utils/types 文件本身就是违规点，View→Bridge 的边在路由处被斩断）。
 export const TRANSIT_ROOTS = ['utils', 'types']
 export const ROOT_FILES = ['App.vue']
 /// Every script-ish extension under the scan roots is scanned, declarations
@@ -95,12 +101,14 @@ const SERVICE_SPEC = /(?:^|\/)services(?:\/|$)/
 /// Rule B: specifiers that resolve into the bridge layer.
 const BRIDGE_SPEC = /(?:^|\/)bridge(?:\/|$)/
 
-/// Rule A applies to every scanned scope; rule B excludes composables
-/// (the registered red line names View / component only) and the transit
-/// roots (utils/types are not on the View chain).
+/// Rule A applies to every scanned scope. Rule B covers View/component
+/// (+ App.vue) **and the transit roots** (utils/types): re-exporting bridge
+/// from a transit file is the same router shape as re-exporting services.
+/// Composables stay outside rule B — the registered red line names
+/// View / component only (Architecture.md「前端分层口径」first bullet); widen
+/// it only with a documented reason.
 function ruleBEnabled(relPath) {
-  if (relPath.startsWith('composables/')) return false
-  return !TRANSIT_ROOTS.some((root) => relPath.startsWith(`${root}/`))
+  return !relPath.startsWith('composables/')
 }
 
 /**
@@ -208,7 +216,7 @@ function scanUnit(violations, path, unitSource, lineBase) {
     }
     if (ruleBEnabled(path) && BRIDGE_SPEC.test(spec)) {
       violations.push(
-        `${path}:${line}: 规则B —— View/component 不得 import bridge（${spec}）；` +
+        `${path}:${line}: 规则B —— View/component（含 utils/types 中转面）不得 import bridge（${spec}）；` +
           'IPC 细节收敛在 service 层（Architecture.md「前端分层口径」）',
       )
     }
@@ -228,6 +236,27 @@ export function findViolations(files) {
     if (path.endsWith('.vue')) {
       const descriptor = parseSfc(content)
       scanUnit(violations, path, stripComments(scriptSurfaceOf(content, descriptor)), 1)
+      // `<script src="…">`：外链脚本在编译期被内联进该组件，是真实的静态依赖
+      //（评审：src 指向 services/ 时零违规）。src 值本身就是模块说明符，按
+      // 规则 A/B 判定；行号取 block 起点。相对说明符的匹配口径与 import 一致
+      //（`../services/x`、`@/bridge/x` 命中；同目录裸名不指向层目录，不命中）。
+      for (const block of [descriptor.script, descriptor.scriptSetup]) {
+        if (!block?.src) continue
+        const line = block.loc.start.line
+        if (SERVICE_SPEC.test(block.src)) {
+          violations.push(
+            `${path}:${line}: 规则A —— <script src="${block.src}"> 指向 Service；` +
+              'View/component/composable 不得 import Service，一律经对应 store 消费' +
+              '（Architecture.md「前端分层口径」）',
+          )
+        }
+        if (ruleBEnabled(path) && BRIDGE_SPEC.test(block.src)) {
+          violations.push(
+            `${path}:${line}: 规则B —— <script src="${block.src}"> 指向 bridge；` +
+              'IPC 细节收敛在 service 层（Architecture.md「前端分层口径」）',
+          )
+        }
+      }
       for (const { text, line } of templateExpressionEntries(content, descriptor)) {
         scanUnit(violations, path, text, line)
       }
@@ -258,13 +287,17 @@ export function loadSources(root) {
 
 export function runCli(root) {
   let files
+  let violations
   try {
     files = loadSources(root)
+    // findViolations 也必须收进 try：SFC 解析错误（parseSfc throw）同样是红，
+    // runCli 的契约是**返回码**而非异常（评审：坏 .vue 曾把 CLI 变成未捕获异常，
+    // 与 save-gate / 空扫描面的口径不一致）
+    violations = findViolations(files)
   } catch (error) {
     console.error(`layering-gate: ${error instanceof Error ? error.message : String(error)}`)
     return 1
   }
-  const violations = findViolations(files)
   if (violations.length === 0) {
     console.log(
       `layering-gate: OK（${files.length} 个文件；View/component/composable 不 import Service，View/component 不 import bridge）`,

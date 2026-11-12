@@ -164,3 +164,32 @@ describe('source-scan — lineOfIndex', () => {
     expect(lineOfIndex(src, 4)).toBe(3)
   })
 })
+
+describe('source-scan — readAngles 换行边界（评审 S9）', () => {
+  it('泛型实参只认单行：跨行扫描曾把游标推到后面无关的 `>`（旧守卫 depth===0 永不为真）', async () => {
+    const { readAngles } = await import('../../scripts/lib/source-scan.mjs')
+    // 单行平衡：返回闭括号后的绝对下标
+    expect(readAngles('a < b > c', 2)).toBe(7)
+    // 换行即放弃——`< b\nc >` 的 `>` 在下一行，属于无关表达式
+    expect(readAngles('a < b\nc > d', 2)).toBeNull()
+  })
+})
+
+describe('source-scan — 模板遍历器单一实现（评审 C10）', () => {
+  it('templateExpressions 与 templateExpressionEntries 是同一集合（文本/行号一致）', async () => {
+    const { templateExpressionEntries } = await import('../../scripts/lib/source-scan.mjs')
+    const source = [
+      '<template>',
+      '  <button @click="runSaveTxn(h)">{{ label }}</button>',
+      '  <input :[dyn]="v" />',
+      '</template>',
+      '<script setup>const label = 1</script>',
+    ].join('\n')
+    const expressions = templateExpressions(source)
+    const entries = templateExpressionEntries(source)
+    expect(entries.length).toBeGreaterThan(0)
+    expect(expressions).toEqual(entries.map((entry) => entry.text))
+    // 行号是原文件行（:2 的指令 exp 与插值；:3 的动态参数 [dyn] 与绑定值 "v"）
+    expect(entries.map((entry) => entry.line)).toEqual([2, 2, 3, 3])
+  })
+})

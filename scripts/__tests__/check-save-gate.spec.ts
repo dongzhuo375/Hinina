@@ -650,19 +650,35 @@ await configService.runSaveTxn((tx) => {
       },
     ])
     expect(violations.length).toBeGreaterThanOrEqual(1)
-    expect(violations.some((v) => v.includes('无法静态分析'))).toBe(true)
+    // 默认值里的内联箭头已被赋值箭头分支收进函数表——走私的保存入口被**点名**
+    //（比笼统的「无法静态分析」更精确；无法解析的默认值仍走 fail-closed，见下例）
+    expect(violations.some((v) => v.includes('排队保存入口'))).toBe(true)
+    // 非箭头默认值（无法解析成函数形态）依旧 fail closed
+    const opaque = findViolations([
+      {
+        path: 'stores/configStore.ts',
+        content: `runSaveTxn<T>(fn = makeHandler(), options = {}) {
+          return configService.runSaveTxn(fn, options)
+        }`,
+      },
+    ])
+    expect(opaque.length).toBeGreaterThanOrEqual(1)
+    expect(opaque.some((v) => v.includes('无法静态分析'))).toBe(true)
   })
 
   it('switchObservers 的混淆注册形态 fail closed（方括号 / add.bind）', () => {
-    for (const content of [
-      `switchObservers['add'](handler)`,
-      `switchObservers.add.bind(switchObservers)(handler)`,
-    ]) {
+    // bind 用例有两个出现点（`.add.` 别名形 + bind 实参里的裸引用），统一逐
+    // 出现点判定后各报一条（评审：别名/可选链曾让注册匹配落空）
+    const cases: Array<[string, number]> = [
+      [`switchObservers['add'](handler)`, 1],
+      [`switchObservers.add.bind(switchObservers)(handler)`, 2],
+    ]
+    for (const [content, expected] of cases) {
       const violations = findViolations([
         { path: 'composables/useSettingsForm.ts', content },
       ])
-      expect(violations, content).toHaveLength(1)
-      expect(violations[0], content).toContain('无法静态分析')
+      expect(violations, content).toHaveLength(expected)
+      for (const violation of violations) expect(violation, content).toContain('无法静态分析')
     }
   })
 
@@ -881,6 +897,155 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     ])
     expect(unsafe).toHaveLength(1)
     expect(unsafe[0]).toContain('无法静态分析')
+  })
+
+  it('观察者注册的别名/整体赋值形态 fail closed（逐出现点判定，评审 S5）', () => {
+    // 别名：注册匹配落空、监听器不被扫描——出现即违规
+    const alias = findViolations([
+      { path: 'composables/useSettingsForm.ts', content: 'const reg = switchObservers.add\nreg(handler)' },
+    ])
+    expect(alias).toHaveLength(1)
+    expect(alias[0]).toContain('无法静态分析')
+    // 可选链：与直接 `.add(` 同为注册形态，监听器照样被扫描
+    const optional = findViolations([
+      { path: 'composables/useSettingsForm.ts', content: 'switchObservers?.add(handler)' },
+    ])
+    expect(optional).toHaveLength(1)
+    expect(optional[0]).toContain('无法静态分析')
+    // 整体赋值为现成 Set（可能把带监听器的集合换进来）→ fail closed
+    const reassigned = findViolations([
+      { path: 'composables/useSettingsForm.ts', content: 'switchObservers = importedSet' },
+    ])
+    expect(reassigned).toHaveLength(1)
+    expect(reassigned[0]).toContain('无法静态分析')
+    // 真树的四种良性形态全部零违规（声明 / delete / 展开 / 直接 add）
+    const benign = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: [
+          'const switchObservers = new Set<SwitchObserver>()',
+          'const observer = () => { reloadOjFields() }',
+          'switchObservers.add(observer)',
+          'switchObservers.delete(observer)',
+          'const listeners = [...switchObservers]',
+        ].join('\n'),
+      },
+    ])
+    expect(benign).toEqual([])
+  })
+
+  it('辅助函数表补形态：函数表达式常量 / 类字段箭头 / 嵌套括号参数（评审 S6）', () => {
+    // 函数表达式常量
+    const fnExpr = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'const persistOne = function (ratio: number) { return configService.saveSplitRatio(ratio) }\n' +
+          'await configService.runSaveTxn(async (tx) => { persistOne(0.5); return tx.updateConfig(() => {}) })',
+      },
+    ])
+    expect(fnExpr).toHaveLength(1)
+    expect(fnExpr[0]).toContain('间接引用')
+    expect(fnExpr[0]).toContain('saveSplitRatio')
+    // 类字段箭头（`h = () => …`，无 const/let/var 前缀）
+    const classField = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'class A { h = () => configService.saveSplitRatio(0.5) }\n' +
+          'await configService.runSaveTxn(async (tx) => { new A().h(); return tx.updateConfig(() => {}) })',
+      },
+    ])
+    expect(classField).toHaveLength(1)
+    expect(classField[0]).toContain('间接引用')
+    // 参数里带嵌套括号的箭头（旧 `\[^)]*\` 在 `(a = (1, 2))` 处截断）
+    const nested = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'const persistTwo = (a = (1, 2)) => configService.saveSplitRatio(a)\n' +
+          'await configService.runSaveTxn(async (tx) => { persistTwo(); return tx.updateConfig(() => {}) })',
+      },
+    ])
+    expect(nested).toHaveLength(1)
+    expect(nested[0]).toContain('间接引用')
+  })
+
+  it('以引用方式传入的辅助函数同样被追踪（list.map(persistOne)，评审 S7）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'function persistOne(ratio: number) { return configService.saveSplitRatio(ratio) }\n' +
+          'await configService.runSaveTxn(async (tx) => { [0.5].map(persistOne); return tx.updateConfig(() => {}) })',
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('间接引用')
+    expect(violations[0]).toContain('persistOne')
+  })
+
+  it('包装器检查按定义形态定位，不再锁定首个同名文本（评审 S8）', () => {
+    // 更早出现的同名**定义形态**（对象方法）曾抢先命中 indexOf，真正的包装器
+    // 绕过队列反而没被检查
+    const violations = findViolations([
+      {
+        path: 'services/config.service.ts',
+        content: [
+          'export const legacyCallers = {',
+          '  saveSplitRatio(ratio: number) { return this.runSaveTxn((tx) => tx.updateConfig(ratio)) },',
+          '}',
+          'export class ConfigService {',
+          '  async saveSplitRatio(ratio: number): Promise<void> {',
+          '    await this.updateConfigNow(() => {})',
+          '  }',
+          '  async updateEditorPrefs(patch: Partial<EditorPrefs>): Promise<void> {',
+          '    return this.runSaveTxn((tx) => { tx.updateConfig(patch) })',
+          '  }',
+          '}',
+        ].join('\n'),
+      },
+    ])
+    expect(violations.length).toBeGreaterThanOrEqual(1)
+    expect(violations.some((v) => v.includes('直连 updateConfigNow'))).toBe(true)
+  })
+
+  it('定义检测不跨前导换行：log(1) 之后下一行的无关 if 块不再被当成方法体（评审 S9）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'const cfg = log(1)\n' +
+          'if (depth > 0) { const m = "saveSplitRatio" }\n' +
+          'await configService.runSaveTxn(async (tx) => { log(cfg); return tx.updateConfig(() => {}) })',
+      },
+    ])
+    expect(violations).toEqual([])
+  })
+
+  it('裸调用后跟三元对象字面量（`: { ok: false }`）仍被扫描（评审 S4）', () => {
+    // 成员调用的同型用例已在早期评审闭合；裸名调用的定义尾判定同样不能被
+    // 三元后件的对象字面量骗过
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'const r = ok ? runSaveTxn(async (tx) => { await saveSplitRatio(0.5) }) : { ok: false }\n' +
+          'export const ok = true',
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('排队保存入口')
+    // 对照：`: null`（无对象字面量尾）同样报出
+    const control = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'const r = ok ? runSaveTxn(async (tx) => { await saveSplitRatio(0.5) }) : null\n' +
+          'export const ok = true',
+      },
+    ])
+    expect(control).toHaveLength(1)
   })
 })
 

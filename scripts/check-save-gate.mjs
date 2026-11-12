@@ -26,12 +26,23 @@
 //      as a violation instead of being skipped — otherwise the gate would show
 //      green while the queued save inside it goes unscanned.
 //   3. The two public wrappers must write through `runSaveTxn` and must not
-//      reach the private save body directly (that would bypass the queue).
+//      reach the private save body directly (that would bypass the queue). The
+//      wrapper **definition** is located by definition shape at every
+//      occurrence (`name(` + params + same-line body `{`) — `indexOf(name +
+//      '(')` used to lock onto the first textual hit, so an earlier same-name
+//      method or call site made the check read the wrong block (both directions:
+//      a bypassing wrapper passed, an unrelated block was judged).
 //   4. `switchObservers.add(listener)` listeners run inside the transaction
 //      callback (performSwitch's finally awaits them). A listener that calls a
 //      queued save deadlocks: listener waits the queue, the queue waits the
-//      callback, the callback waits the listener. Every registered listener must
-//      be resolvable and clean (fail-closed, same as rule 2).
+//      callback, the callback waits the listener. Registration is judged **per
+//      occurrence** of `switchObservers`: only four benign shapes exist (`=
+//      new Set` declaration, `.add(…)` with optional chaining, `.delete(…)`,
+//      spread read `[...switchObservers]`) — aliases (`const reg =
+//      switchObservers.add`), `add.bind`, bracket access, wholesale reassignment
+//      and bare references all fail closed (an alias defeats any registration
+//      matcher, so its listener would never be scanned — review). Every scanned
+//      listener must be resolvable and clean.
 //
 // Rule 2 treats a **bare parameter name** as a pure forward — scoped to the
 // registered forward entry: the call site must sit inside a method named
@@ -51,23 +62,28 @@
 // apostrophe in `Don't` cannot decide how a later `/* … */` reads.
 //
 // Rule 2 also follows **same-file local helpers** (callback → performSwitch →
-// saveSplitRatio), so a helper gaining a queued call is caught — for the
-// shapes this repo actually writes: `function` declarations (return-type
-// annotations without braces, e.g. `(): () => void`), block- and
-// expression-body arrows (`=> expr` captured to `;` / newline), and
-// class/object methods **with a single-line return annotation**, generics
-// included (`save<T>(v: Array<Map<string, T>>): void {`, getters). What is
+// saveSplitRatio), and the transfer walk keys on **mentions**, not just calls —
+// a helper passed by reference (`list.map(persistOne)`) is followed too (a
+// reference can be invoked later). Tracked declaration shapes: `function`
+// declarations (return-type annotations without braces, e.g. `(): () => void`),
+// function-expression constants (`const f = function (...) { … }`), assignment
+// arrows keyed by the assigned name (`h = () => …` class fields, `this.x = …`,
+// params read with balanced brackets so nested-paren defaults survive), block-
+// and expression-body arrows, and class/object methods **with a single-line
+// return annotation**, generics included (`save<T>(v: Array<Map<string,
+// T>>): void {`, getters; the body must sit on the params' line — a newline
+// after the call parens means the next statement is not a definition). What is
 // *not* tracked: cross-file helpers, aliases, dynamic lookup, multi-line
 // expression bodies (truncated at the first newline), annotations that span a
-// newline (the annotation walk stops at a newline so `call()` followed by a
-// ternary/next statement is not read as a definition), declarations whose
-// return type contains braces (`function f(): Array<{...}> {`), arrows stored as
-// **object properties** (`const o = { h: () => saveSplitRatio(0.5) }` — only
-// same-file function declarations / arrows / methods are keyed by name), and
-// same-named helpers resolved at **depth > 6** (the transfer walk has a hard
-// depth cap). Unknown *callback* forms and any queued-entry **reference** fail
-// closed instead; the untracked helper shapes above are skipped silently — keep
-// queued calls inside a tracked shape.
+// newline or contain a conditional `?` (the body walk stops there),
+// declarations whose return type contains braces (`function f(): Array<{...}>
+// {`), arrows stored as **object properties** (`const o = { h: () =>
+// saveSplitRatio(0.5) }` — the colon form is keyed by nothing; assignment
+// arrows are), generic arguments spanning a newline (readAngles is
+// single-line), and same-named helpers resolved at **depth > 6** (the transfer
+// walk has a hard depth cap). Unknown *callback* forms and any queued-entry
+// **reference** fail closed instead; the untracked helper shapes above are
+// skipped silently — keep queued calls inside a tracked shape.
 // Scanning-fidelity note: unquoted regex literals are consumed verbatim by the
 // regex-aware stripper (division-vs-regex heuristic; control-statement closing
 // parens are regex context — see scripts/lib/source-scan.mjs), so `/[/*]/` and
@@ -91,6 +107,7 @@ import {
   prepareSource,
   readAngles,
   readBalanced,
+  skipStringLiteral,
   stripComments,
   walkSources,
 } from './lib/source-scan.mjs'
@@ -190,8 +207,14 @@ function isDefinitionTail(source, closeParenIndex) {
   if (source[i] === '\n' || source[i] === '\r') return false
   if (source[i] === '{') return true
   if (source[i] !== ':') return false
-  let depth = 0
   i += 1
+  while (i < source.length && /\s/.test(source[i])) i += 1
+  // 冒号后**首个 token 就是 `{`**：三元后件的对象字面量（`ok ? runSaveTxn(cb) :
+  // { ok: false }`），不是返回类型注解——注解里深度 0 的 `{` 只会是对象**类型**
+  // 字面量（`): { a: 1 } {`），那类声明本就在不追踪清单里；按非定义处理的方向是
+  // 把调用点扫出来（fail closed，评审：三元对象尾曾让整个调用点被跳过）
+  if (source[i] === '{') return false
+  let depth = 0
   while (i < source.length) {
     const ch = source[i]
     if (ch === '\n') return false
@@ -272,29 +295,18 @@ const NOT_CALLS = new Set([
   'throw', 'class', 'const', 'let', 'var', 'async', 'yield', 'super', 'this',
 ])
 
-/// 提取正文里被调用的标识符（`name(` / `name?.(` / `name<T>(`），排除关键字。
-/// 泛型实参用平衡读取（`readAngles`）——旧正则 `<[^<>()]*>` 在内层 `<` 处停下，
-/// `persist<Array<string>>(…)` 不进集合、传递路径漏追（评审 P3）。
+/// 提取正文里被**调用或引用**的标识符，排除关键字/保留字。调用形态
+/// （`name(` / `name?.(` / `name<T>(`）之外，**裸引用同样收集**——`list.map(persistOne)`
+/// 的 `persistOne`、别名赋值、作为实参传递的函数，都可能随后被调用；引用式
+/// 传参曾让传递路径漏追（评审）。集合是「正文里出现过的非关键字标识符」，
+/// 交由 localFunctions 表解析，方向保守（多一条边只多扫一份正文）。
 export function calledNames(body) {
   const names = new Set()
   const idRe = /\b([A-Za-z_$][\w$]*)/g
   let match
   while ((match = idRe.exec(body))) {
     const name = match[1]
-    let i = match.index + name.length
-    while (i < body.length && /\s/.test(body[i])) i += 1
-    // 可选调用 `?.`
-    if (body[i] === '?' && body[i + 1] === '.') {
-      i += 2
-      while (i < body.length && /\s/.test(body[i])) i += 1
-    }
-    if (body[i] === '<') {
-      const end = readAngles(body, i)
-      if (end === null) continue // 无法解析的泛型形态：不作为调用名（方向保守）
-      i = end
-      while (i < body.length && /\s/.test(body[i])) i += 1
-    }
-    if (body[i] === '(' && !NOT_CALLS.has(name)) names.add(name)
+    if (!NOT_CALLS.has(name)) names.add(name)
   }
   return names
 }
@@ -314,19 +326,11 @@ function declBody(source, afterName) {
   while (i < source.length) {
     const ch = source[i]
     if (ch === '"' || ch === "'" || ch === '`') {
-      const quote = ch
-      i += 1
-      while (i < source.length) {
-        if (source[i] === '\\') {
-          i += 2
-          continue
-        }
-        if (source[i] === quote) {
-          i += 1
-          break
-        }
-        i += 1
-      }
+      // 字符串字面量跳过用共享实现（转义/模板插值同口径——评审：四份手写跳过
+      // 曾各自漂移，嵌套模板 `${`…`}` 只有一份支持）
+      const end = skipStringLiteral(source, i)
+      if (end === -1) return null
+      i = end
       continue
     }
     if (ch === '(') {
@@ -351,7 +355,8 @@ function declBody(source, afterName) {
 }
 
 /// 从 `=>` 之后解析箭头函数正文：块体取配对花括号；表达式体截到 `;` 或换行
-///（跳过字符串字面量，多行表达式会被截断——见文件头局限）。
+///（跳过字符串字面量，多行表达式会被截断——见文件头局限）。字符串跳过用共享
+/// `skipStringLiteral`；未闭合字面量按「吞到文件尾」处理（方向：多扫不误放）。
 function arrowBody(source, afterArrow) {
   let i = afterArrow
   while (i < source.length && /\s/.test(source[i])) i += 1
@@ -360,19 +365,12 @@ function arrowBody(source, afterArrow) {
   while (j < source.length) {
     const ch = source[j]
     if (ch === '"' || ch === "'" || ch === '`') {
-      const quote = ch
-      j += 1
-      while (j < source.length) {
-        if (source[j] === '\\') {
-          j += 2
-          continue
-        }
-        if (source[j] === quote) {
-          j += 1
-          break
-        }
-        j += 1
+      const end = skipStringLiteral(source, j)
+      if (end === -1) {
+        j = source.length
+        break
       }
+      j = end
       continue
     }
     if (ch === ';' || ch === '\n') break
@@ -381,14 +379,106 @@ function arrowBody(source, afterArrow) {
   return source.slice(i, j)
 }
 
+/// 从赋值 `=` 之后解析「赋值箭头」正文：可选 `async` → 参数（**配平括号**或裸
+/// 标识符）→ 可选同行返回注解 → `=>` → arrowBody。形状不符返回 null——大量
+/// 普通赋值（`count = 0`、`this.x = obj`）会走到这里快速失败，方向保守。
+///（评审：旧实现 `\([^)]*\)` 在嵌套括号默认值 `(a = (1, 2))` 处截断，类字段
+/// 箭头 `h = () => …` 与函数表达式常量则完全没有分支。）
+function assignArrowBody(source, afterEq) {
+  let i = afterEq
+  while (i < source.length && /\s/.test(source[i])) i += 1
+  if (source.startsWith('async', i) && /\s/.test(source[i + 5] ?? '')) {
+    i += 5
+    while (i < source.length && /\s/.test(source[i])) i += 1
+  }
+  if (source[i] === '(') {
+    const params = readBalanced(source, i, '(', ')')
+    if (params === null) return null
+    i += params.length + 2
+  } else {
+    const id = /^[A-Za-z_$][\w$]*/.exec(source.slice(i))
+    if (id === null) return null
+    i += id[0].length
+  }
+  while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i += 1
+  if (source[i] === ':') {
+    // 同行返回注解：逐 token 跳到深度 0 的 `=>`（泛型走 readAngles、括号走
+    // readBalanced；换行即放弃——注解跨行不在追踪面）
+    i += 1
+    let depth = 0
+    while (i < source.length) {
+      const ch = source[i]
+      if (ch === '\n' || ch === ';') return null
+      if (ch === '=' && source[i + 1] === '>' && depth === 0) return arrowBody(source, i + 2)
+      if (ch === '(') {
+        const inner = readBalanced(source, i, '(', ')')
+        if (inner === null) return null
+        i += inner.length + 2
+        continue
+      }
+      if (ch === '<') {
+        const end = readAngles(source, i)
+        if (end === null) return null
+        i = end
+        continue
+      }
+      if (ch === '(' || ch === '[' || ch === '{' || ch === '<') depth += 1
+      else if (ch === ')' || ch === ']' || ch === '}' || ch === '>') depth = Math.max(0, depth - 1)
+      i += 1
+    }
+    return null
+  }
+  if (source[i] === '=' && source[i + 1] === '>') return arrowBody(source, i + 2)
+  return null
+}
+
+/// 参数闭括号之后（**同一行**）定位方法体 `{`：允许一段返回类型注解
+///（`): Promise<void> {` 或 `): () => void {`；注解里的 `=>`、括号、泛型逐
+/// token 跳过）。遇到换行 / `;` / `)` / `,` / `}` / `?` 即放弃——`call()` 后接
+/// 三元、逗号或下一条语句不是定义。返回 `{` 的下标，找不到返回 -1。
+///
+/// **两种配平读取的返回值形态不同**：`readBalanced` 返回括号内正文（推进
+/// 长度 + 2），`readAngles` 返回闭括号后的**绝对下标**。混用（旧实现对两者
+/// 都写 `closer - i`）会得到两种错误：正文为空（注解里的 `()`）时游标归零、
+/// 从文件头重扫 → 单行文件死循环；正文非空时变 NaN → 静默放弃整条注解。
+///（评审：注解/方法体只允许出现在参数括号的**同一行**——跳过前导换行会让
+/// `log(1)` 之后下一行的无关 if 块被当成方法体，产生误报。）
+function sameLineBodyOpen(source, from) {
+  let i = from
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '\n' || ch === ';' || ch === ')' || ch === ',' || ch === '}' || ch === '?') return -1
+    if (ch === '{') return i
+    if (ch === '(') {
+      const inner = readBalanced(source, i, '(', ')')
+      if (inner === null) return -1
+      i += inner.length + 2
+      continue
+    }
+    if (ch === '<') {
+      const end = readAngles(source, i)
+      if (end === null) return -1
+      i = end
+      continue
+    }
+    i += 1
+  }
+  return -1
+}
+
 /**
  * 同一文件内的局部函数表，覆盖本仓实际会写的形态：
  * - `function name(...)` 声明（返回类型注解**不含 `{`** 时：`(): () => void` 可、
  *   `(): Array<{...}> {` 不可——泛型里的 `{` 会被当成正文起点）
- * - `const name = (...) => {...}` 块体箭头 与 `const name = (...) => expr` 表达式体箭头
+ * - 函数表达式常量：`const name = function (...) { … }`（匿名/具名、可 async）
+ * - 赋值箭头：`name = (...) => { … }` / `name = x => expr`——含**类字段箭头**
+ *   （`h = () => …`）、`this.onSave = (v) => …`、解构后的重绑定；参数括号配平
+ *   读取，嵌套括号默认值 `(a = (1, 2))` 不再截断（评审：`\[^)]*\` 单层括号）
  * - 类/对象方法 `name(...) {`、带泛型/返回注解的 `name<T>(...): R {`（含 getter）
- *   与对象方法形态；注解内出现换行即停止——`call()` 后接三元/下一条语句不是
- *   定义，见文件头局限。`function` 声明里返回类型含 `{` 的形态仍不追踪。
+ *   与对象方法形态；注解与方法体只允许出现在参数括号的**同一行**
+ *   （`sameLineBodyOpen`：换行/`;`/`)`/`,`/`}`/`?` 即放弃——`call()` 后接三元/
+ *   下一条语句不是定义，见文件头局限）。`function` 声明里返回类型含 `{` 的
+ *   形态仍不追踪；`{ h: () => … }` 冒号形态的对象属性箭头也不追踪（见文件头）。
  *
  * 只为「回调 → 局部辅助函数 → 排队入口」这条**传递路径**服务：直接调用由
  * 事务回调的正文检查覆盖，跨文件/别名/动态调用不在能力范围内（见文件头）。
@@ -408,16 +498,24 @@ export function localFunctions(source) {
     // 同名定义**（正文不同）全部保留
     if (!bodies.includes(body)) bodies.push(body)
   }
-  const declRe = /\bfunction\s+([A-Za-z_$][\w$]*)|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=]+)?=>/g
   let match
-  while ((match = declRe.exec(source))) {
-    const name = match[1] ?? match[2]
-    if (name === undefined) continue
-    const isFunction = match[1] !== undefined
-    add(
-      name,
-      isFunction ? declBody(source, declRe.lastIndex) : arrowBody(source, declRe.lastIndex),
-    )
+  // `function name(...)` 声明（返回注解不含 `{`；declBody 里逐 token 跳注解）
+  const fnDeclRe = /\bfunction\s+([A-Za-z_$][\w$]*)/g
+  while ((match = fnDeclRe.exec(source))) {
+    add(match[1], declBody(source, fnDeclRe.lastIndex))
+  }
+  // 函数表达式常量：`const name = function (...) { … }`（`function` 关键字之后
+  // 交给 declBody——indexOf('(') 自然跳过可选的具名/泛型段）
+  const fnExprRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;\n]*)?=\s*(?:async\s+)?function\b/g
+  while ((match = fnExprRe.exec(source))) {
+    add(match[1], declBody(source, fnExprRe.lastIndex))
+  }
+  // 赋值箭头：正则只定位 `name =`（排除 `==`/`=>`/`<=`/`>=`/`!=`），参数、可选
+  // 同行注解与 `=>` 在 assignArrowBody 里逐 token 走。普通赋值快速失败返回
+  // null，方向保守（多收条目只多扫正文）。
+  const assignRe = /\b([A-Za-z_$][\w$]*)\s*(?::[^=;\n]*)?=(?![=>])\s*(?:async\b)?/g
+  while ((match = assignRe.exec(source))) {
+    add(match[1], assignArrowBody(source, assignRe.lastIndex))
   }
   // 方法形态：`name(...) {` / `name<T>(...) {`（排除关键字）。**泛型实参用
   // readAngles 平衡读取**——单层 `<[^<>()]*>` 在嵌套泛型（`Array<Map<…>>`）或
@@ -441,41 +539,9 @@ export function localFunctions(source) {
     if (source[cursor] !== '(') continue
     const params = readBalanced(source, cursor, '(', ')')
     if (params === null) continue
-    let i = cursor + params.length + 2
-    while (i < source.length && /\s/.test(source[i])) i += 1
-    // 参数闭括号后允许一段返回类型注解（`): Promise<void> {` 或
-    // `): () => void {`；注解里的 `=>`、括号、泛型逐 token 跳过），方法体 `{`
-    // 在注解之后。注解内出现换行即停止（见文件头局限）。
-    // **两种配平读取的返回值形态不同**：`readBalanced` 返回括号内正文（推进
-    // 长度 + 2），`readAngles` 返回闭括号后的**绝对下标**。混用（旧实现对两者
-    // 都写 `closer - i`）会得到两种错误：正文为空（注解里的 `()`）时 i 归零、
-    // 从文件头重扫 → 单行文件死循环（`const z = foo().bar()` 挂住整个门禁）；
-    // 正文非空（`: (e: Event) => void`）时 i 变 NaN → 静默放弃整条注解
-    //（这类方法不进函数表）。
-    let sawOpen = false
-    while (i < source.length) {
-      const ch = source[i]
-      if (ch === '\n' || ch === ';') break
-      if (ch === '{') {
-        add(name, readBalanced(source, i, '{', '}'))
-        sawOpen = true
-        break
-      }
-      if (ch === '(') {
-        const inner = readBalanced(source, i, '(', ')')
-        if (inner === null) break
-        i += inner.length + 2
-        continue
-      }
-      if (ch === '<') {
-        const end = readAngles(source, i)
-        if (end === null) break
-        i = end
-        continue
-      }
-      i += 1
-    }
-    if (!sawOpen) continue
+    const bodyOpen = sameLineBodyOpen(source, cursor + params.length + 2)
+    if (bodyOpen === -1) continue
+    add(name, readBalanced(source, bodyOpen, '{', '}'))
   }
   return table
 }
@@ -561,30 +627,8 @@ export function runSaveTxnForwardEntries(source) {
     const params = readBalanced(source, open, '(', ')')
     if (params === null) continue
     // 方法体 `{` 可能跟在**同一行**的返回注解之后（`): Promise<void> {`）——
-    // 逐 token 跳过注解内的括号/泛型/箭头，与 localFunctions 的方法分支同口径
-    let i = open + params.length + 2
-    let bodyOpen = -1
-    while (i < source.length) {
-      const ch = source[i]
-      if (ch === '\n' || ch === ';' || ch === ')' || ch === ',' || ch === '}') break
-      if (ch === '{') {
-        bodyOpen = i
-        break
-      }
-      if (ch === '(') {
-        const inner = readBalanced(source, i, '(', ')')
-        if (inner === null) break
-        i += inner.length + 2
-        continue
-      }
-      if (ch === '<') {
-        const anglesEnd = readAngles(source, i)
-        if (anglesEnd === null) break
-        i = anglesEnd
-        continue
-      }
-      i += 1
-    }
+    // 与 localFunctions 的方法分支共用 sameLineBodyOpen（同一套跳法）
+    const bodyOpen = sameLineBodyOpen(source, open + params.length + 2)
     if (bodyOpen === -1) continue
     const body = readBalanced(source, bodyOpen, '{', '}')
     if (body === null) continue
@@ -633,25 +677,41 @@ export function queuedViaLocals(callbackBody, functions, maxDepth = 6) {
 }
 
 /// Rule 3: the wrapper method bodies must queue and must not bypass it.
+/// 定位**定义**不能靠 `indexOf(name + '(')`——文件里更早出现的同名文本（对象
+/// 方法、`this.saveSplitRatio(…)` 调用点）会抢先命中，取到的正文是别的块：
+/// 真正绕过队列的包装器没被检查（错块放行），或无关块被当成包装器（错块
+/// 误报），两个方向都会发生（评审）。逐个出现位置按「参数 → 同行注解 → 块」
+/// 判定定义形态（与 localFunctions 方法分支共用 sameLineBodyOpen），同名定义
+/// 全部收齐、逐份检查。
 function wrapperViolations(file, source) {
   const violations = []
   for (const name of ['updateEditorPrefs', 'saveSplitRatio']) {
-    const signature = source.indexOf(`${name}(`)
-    if (signature === -1) {
-      violations.push(`${file}: ${name} 不存在（公开保存入口被删除或改名，请同步本门禁与文档）`)
+    const bodies = []
+    const re = new RegExp(`\\b${name}\\s*\\(`, 'g')
+    let match
+    while ((match = re.exec(source))) {
+      const open = match.index + match[0].length - 1
+      const params = readBalanced(source, open, '(', ')')
+      if (params === null) continue
+      const bodyOpen = sameLineBodyOpen(source, open + params.length + 2)
+      if (bodyOpen === -1) continue
+      const body = readBalanced(source, bodyOpen, '{', '}')
+      if (body !== null) bodies.push(body)
+    }
+    if (bodies.length === 0) {
+      violations.push(
+        `${file}: ${name} 的方法定义无法定位（公开保存入口被删除/改名，或出现文本均非定义形态）——` +
+          '请同步本门禁与文档',
+      )
       continue
     }
-    const braceStart = source.indexOf('{', signature)
-    const body = braceStart === -1 ? null : readBalanced(source, braceStart, '{', '}')
-    if (body === null) {
-      violations.push(`${file}: ${name} 方法体无法解析（门禁的配对扫描失败）`)
-      continue
-    }
-    if (!body.includes('runSaveTxn')) {
-      violations.push(`${file}: ${name} 未经营业队列（应经 runSaveTxn，否则并发保存会丢更新）`)
-    }
-    if (body.includes('updateConfigNow')) {
-      violations.push(`${file}: ${name} 直连 updateConfigNow（绕过保存队列）`)
+    for (const body of bodies) {
+      if (!body.includes('runSaveTxn')) {
+        violations.push(`${file}: ${name} 未经营业队列（应经 runSaveTxn，否则并发保存会丢更新）`)
+      }
+      if (body.includes('updateConfigNow')) {
+        violations.push(`${file}: ${name} 直连 updateConfigNow（绕过保存队列）`)
+      }
     }
   }
   return violations
@@ -662,21 +722,64 @@ function wrapperViolations(file, source) {
  * （`performSwitch` 的 finally）。监听器若（直接/经同文件辅助函数）调用排队
  * 保存入口，就是「监听器等队列、队列等回调、回调等监听器」的死锁。监听器形态
  * 无法解析时同样 fail closed。
+ *
+ * 注册形态按**逐出现点**判定（评审：`const reg = switchObservers.add` 别名与
+ * `switchObservers?.add(…)` 可选链都能让 `switchObservers\.add\s*\(` 匹配落空，
+ * 监听器不被扫描）。每个 `switchObservers` 出现只允许四种良性形态——
+ * `= new Set` 声明、`.add(…)`（含 `?.` 可选链）、`.delete(…)`（移除监听器）、
+ * 展开读取 `[...switchObservers]`；其余一切（方括号取值、`add.bind`、整体赋值
+ * 为现成 Set、把 Set 传出去、裸引用）一律 fail closed——「add 之后不是 `(`」
+ * 的形态无法穷举，与规则 2 同一哲学。
  */
 export function observerViolations(path, source, functions) {
   const violations = []
-  // 混淆注册形态（`switchObservers['add'](...)`、`switchObservers.add.bind(...)`）
-  // 扫描不到监听器 → 门禁会假绿；出现即 fail closed（评审：bind/['add'] 变体）
-  if (/\bswitchObservers\s*\[/.test(source) || /\bswitchObservers\s*\.\s*add\s*\./.test(source)) {
-    violations.push(
-      `${path}: switchObservers 的注册形态无法静态分析（方括号取值 / add.bind）——` +
-        '监听器在事务回调内被 await，若其调用排队保存会死锁；请用 switchObservers.add(命名函数或内联箭头)',
-    )
-  }
-  const re = /\bswitchObservers\.add\s*\(/g
+  const registrationOpens = []
+  const re = /\bswitchObservers\b/g
   let match
   while ((match = re.exec(source))) {
-    const open = match.index + match[0].length - 1
+    let i = match.index + match[0].length
+    while (i < source.length && /\s/.test(source[i])) i += 1
+    const failClosed = (why) => {
+      const snippet = source
+        .slice(match.index, Math.min(match.index + 60, source.length))
+        .replace(/\s+/g, ' ')
+      violations.push(
+        `${path}: switchObservers 的${why}形态无法静态分析（${snippet}…）——` +
+          '监听器在事务回调内被 await，若其调用排队保存会死锁；' +
+          '请用 switchObservers.add(命名函数或内联箭头)，注册面的别名/改写会让门禁 fail closed',
+      )
+    }
+    if (source[i] === '=') {
+      // 只放行 `new Set` 声明；整体赋值为现成 Set 可能把带监听器的集合换进来
+      let j = i + 1
+      while (j < source.length && /\s/.test(source[j])) j += 1
+      if (source.startsWith('new Set', j)) continue
+      failClosed('整体赋值')
+      continue
+    }
+    if (source[i] === ']') continue // 展开读取 `[...switchObservers]`：只读
+    if (source[i] === '?') i += 1 // 可选链 `?.add(`
+    if (source[i] === '.') {
+      let j = i + 1
+      while (j < source.length && /\s/.test(source[j])) j += 1
+      const member = /^([A-Za-z_$][\w$]*)/.exec(source.slice(j))
+      if (member?.[1] === 'add') {
+        let k = j + 3
+        while (k < source.length && /\s/.test(source[k])) k += 1
+        if (source[k] === '(') {
+          registrationOpens.push(k)
+          continue
+        }
+        failClosed('注册')
+        continue
+      }
+      if (member?.[1] === 'delete') continue // 移除监听器：良性
+      failClosed('注册')
+      continue
+    }
+    failClosed('使用')
+  }
+  for (const open of registrationOpens) {
     const args = readBalanced(source, open, '(', ')')
     if (args === null) {
       violations.push(`${path}: switchObservers.add 的参数无法解析（门禁 fail closed）`)

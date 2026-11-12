@@ -357,10 +357,57 @@ import x from '@/services/real'
     ])
     expect(violations).toHaveLength(1)
     expect(violations[0]).toContain('规则A')
-    // utils 不是 View 链：规则 B 不适用
-    expect(
-      findViolations([{ path: 'utils/ipc.ts', content: `import { IpcError } from '@/bridge'` }]),
-    ).toEqual([])
+    // 规则 B 同样覆盖中转面：重导出 bridge 的 utils/types 文件本身就是违规点
+    //（评审：规则 B 曾豁免中转，view → utils/ipc → bridge 全绿）
+    const bridgeTransit = findViolations([
+      { path: 'utils/ipc.ts', content: `import { IpcError } from '@/bridge'` },
+    ])
+    expect(bridgeTransit).toHaveLength(1)
+    expect(bridgeTransit[0]).toContain('规则B')
+    expect(bridgeTransit[0]).toContain('utils/ipc.ts:1:')
+  })
+
+  it('规则B：View 经 utils 中转摸 bridge 被斩断（中转文件本身红，评审 L1）', () => {
+    const violations = findViolations([
+      {
+        path: 'views/Foo.vue',
+        content:
+          '<template><div/></template>\n<script setup>\nimport { getConfig } from "@/utils/ipc"\n</script>',
+      },
+      { path: 'utils/ipc.ts', content: 'export { getConfig } from "@/bridge/config"\n' },
+    ])
+    // View 自身的说明符（`@/utils/ipc`）不指名 bridge；红线在中转文件处收口
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('utils/ipc.ts:1:')
+    expect(violations[0]).toContain('规则B')
+  })
+
+  it('规则A/B：`<script src>` 外链脚本按说明符判定（编译期内联成真实依赖，评审 L2）', () => {
+    const service = findViolations([
+      {
+        path: 'views/Bar.vue',
+        content: '<template><div/></template>\n<script src="../services/config.service"></script>',
+      },
+    ])
+    expect(service).toHaveLength(1)
+    expect(service[0]).toContain('规则A')
+    expect(service[0]).toContain('views/Bar.vue:2:')
+    const bridge = findViolations([
+      {
+        path: 'views/Baz.vue',
+        content: '<template><div/></template>\n<script src="@/bridge/config"></script>',
+      },
+    ])
+    expect(bridge).toHaveLength(1)
+    expect(bridge[0]).toContain('规则B')
+    // 指向同目录非层文件的 src 不误报
+    const local = findViolations([
+      {
+        path: 'views/Qux.vue',
+        content: '<template><div/></template>\n<script src="./editor-setup"></script>',
+      },
+    ])
+    expect(local).toEqual([])
   })
 
   it('规则A：合法正则字面量含 /* 不再截断后续源码（P2-5）', () => {

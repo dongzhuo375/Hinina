@@ -35,6 +35,21 @@ describe('check-layering — CLI 出口', () => {
   it('空扫描面返回 1（而不是静默通过）', () => {
     expect(withTempSrc({}, (root) => runLayering(root))).toBe(1)
   })
+
+  it('SFC 解析错误返回 1（不抛异常——runCli 的契约是返回码，评审 L3）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hinina-gate-'))
+    try {
+      mkdirSync(join(root, 'src', 'views'), { recursive: true })
+      for (const dir of ['components', 'composables', 'utils', 'types']) {
+        mkdirSync(join(root, 'src', dir), { recursive: true })
+      }
+      writeFileSync(join(root, 'src', 'App.vue'), '<template><div /></template>')
+      writeFileSync(join(root, 'src', 'views', 'Broken.vue'), '<template><div</template>')
+      expect(runLayering(root)).toBe(1)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('check-save-gate — CLI 出口', () => {
