@@ -106,8 +106,13 @@ export const TXN_ALLOWLIST = [
 
 /// Queued save entries: appearing inside a transaction callback body deadlocks.
 /// Optional calls (`saveSplitRatio?.(…)`) count too — `?.` is still a call;
-/// `.call(...)` / `.apply(...)` also queue (review: they were not recognized).
-const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\s*(?:\?\.)?\s*(?:\.\s*(?:call|apply)\s*)?[<(]/
+/// `.call(...)` / `.apply(...)` also queue; bracket-literal access
+/// (`configService['saveSplitRatio'](0.5)`, template brackets included) is the
+/// same queued entry — the quoted name inside the brackets is matched with a
+/// backreference so other members never match (review: literal bracket access
+/// was a false green). The anchor is **name + closing quote + `]` + `(`**,
+/// because the `\b` of the name sits inside the brackets.
+const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)(?:['"`]\s*\]\s*\(|\s*(?:\?\.)?\s*(?:\.\s*(?:call|apply)\s*)?\s*[<(])/
 
 /**
  * Extract a callback body from a call's argument text.
@@ -505,15 +510,31 @@ function paramNames(params) {
  */
 export function runSaveTxnForwardEntries(source) {
   const entries = []
-  for (const match of source.matchAll(/\brunSaveTxn\b\s*(?:<[^<>()]*>)?\s*\(/g)) {
-    const open = match.index + match[0].length - 1
+  // 泛型实参用 readAngles 平衡读取——嵌套泛型转发入口
+  // （`runSaveTxn<Array<T>>(fn)`）用单层 `<[^<>()]*>` 会找不到调用括号、整条
+  // 入口消失（方向安全但「无法静态分析」的报错对合法形态有误导，评审 P4）。
+  // 调用点（`configService.runSaveTxn(fn)`）不会产生入口：其参数闭括号后没有
+  // 方法体 `{`。
+  for (const match of source.matchAll(/\brunSaveTxn\b/g)) {
+    let cursor = match.index + 'runSaveTxn'.length
+    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    if (source[cursor] === '<') {
+      const anglesEnd = readAngles(source, cursor)
+      if (anglesEnd === null) continue
+      cursor = anglesEnd
+      while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    }
+    if (source[cursor] !== '(') continue
+    const open = cursor
     const params = readBalanced(source, open, '(', ')')
     if (params === null) continue
+    // 方法体 `{` 可能跟在**同一行**的返回注解之后（`): Promise<void> {`）——
+    // 逐 token 跳过注解内的括号/泛型/箭头，与 localFunctions 的方法分支同口径
     let i = open + params.length + 2
     let bodyOpen = -1
     while (i < source.length) {
       const ch = source[i]
-      if (ch === '\n' || ch === ';' || ch === '=' || ch === ')' || ch === ',' || ch === '}') break
+      if (ch === '\n' || ch === ';' || ch === ')' || ch === ',' || ch === '}') break
       if (ch === '{') {
         bodyOpen = i
         break
@@ -522,6 +543,12 @@ export function runSaveTxnForwardEntries(source) {
         const inner = readBalanced(source, i, '(', ')')
         if (inner === null) break
         i += inner.length + 2
+        continue
+      }
+      if (ch === '<') {
+        const anglesEnd = readAngles(source, i)
+        if (anglesEnd === null) break
+        i = anglesEnd
         continue
       }
       i += 1
