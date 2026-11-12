@@ -36,4 +36,4 @@ CoreEventBus（broadcast）
 ## 逻辑流程
 1. `spawn_event_consumers` 投递到 Tauri 运行时后依次启动前端桥、审计消费者、PluginHost；宿主启动失败 `warn!`，最后 `info!`「事件消费者已启动」。
 2. 前端桥对每条 `CoreEvent` 调 `payload_for`：`Some` → `emit` 到对应通道；`None` 直接丢弃。
-3. 契约由 `tests/events_tests.rs` 锁定：两个通道名、载荷逐键、**不桥接的 11 个变体逐一列举**（与 `CoreEvent` 全部 13 个变体对账，用例内断言 `events.len() + 2 == 13`）——不给 `payload_for` 的 `_ => None` 通配留「新增变体静默落入通配、CI 不红」的口子；新增变体时必须在此表态。
+3. 契约由两层锁定：`payload_for` 的 match 穷尽、无通配臂——新增 `CoreEvent` 变体时编译失败，迫使作者显式决定桥接与否；`tests/events_tests.rs` 另锁两个通道名、载荷逐键、11 个不桥接变体确实映射为 `None`（防编译压力下写出错误的 `Some` 臂；用例内断言 `events.len() + 2 == 13` 与变体总数对账）。

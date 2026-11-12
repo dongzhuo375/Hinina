@@ -44,8 +44,9 @@ fn announcement_changed_maps_to_published_channel() {
 #[test]
 fn other_events_are_not_bridged() {
     // 与 `CoreEvent` 全部 13 个变体对账：桥接 2 个（WorkspaceSaved /
-    // AnnouncementChanged），其余 11 个逐一在此列出——不给 `_ => None` 的
-    // 通配留「将来新增 Some 臂而 CI 不红」的口子；新增变体时必须在此表态。
+    // AnnouncementChanged），其余 11 个逐一在此列出。`payload_for` 无通配臂，
+    // 新增变体编译期即强制表态；本用例另锁这 11 个值确实映射为 None ——
+    // 防「编译强迫表态」之下写出错误的 Some 臂。
     let events = [
         CoreEvent::LoggedIn {
             oj_id: "HOJ".into(),
