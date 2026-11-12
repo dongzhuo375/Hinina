@@ -57,8 +57,8 @@ jobs:
       # 这里对真实源码树出口。
       - run: npm run check:save-gate
       # 前端分层门禁（扫描面不 import Service；扫描面不 import bridge；
-      # 扫描面与扩展面 stores/services/guards/router/main.ts 不 import
-      # @tauri-apps/*——Architecture.md「前端分层口径」两条红线）。与
+      # src 内除 bridge/ 与 tests 外不 import @tauri-apps/*（整树遍历）
+      # ——Architecture.md「前端分层口径」两条红线）。与
       # scripts/__tests__/check-layering.spec.ts 互补：那里测判定与变异，
       # 这里对真实源码树出口。
       - run: npm run check:layering

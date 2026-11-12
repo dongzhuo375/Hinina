@@ -121,11 +121,13 @@ const TAURI_SPEC = /^@tauri-apps(?:\/|$)/
 /// 路径；中转文件重导出 bridge 同理（边在路由处斩断）。规则 A 与规则 B 的
 /// 作用域自此一致。
 ///
-/// **Tauri 红线扩展面（第二十二轮）**：`stores/`、`services/`、`guards/`、
-/// `router/` 与 `main.ts` 也进入扫描，但只应用 **Tauri 包规则**——这些位置
-/// import `@/bridge/*` 是合法梯级（Service→Bridge；guards 是跨层装配），
-/// `@tauri-apps/*` 则任何位置都只能经 bridge（CLAUDE.md:47）。
-export const TAURI_ONLY_DIRS = ['stores', 'services', 'guards', 'router']
+/// **Tauri 红线整树遍历（第二十二轮立规、第二十三轮落实）**：头注/Architecture
+/// 的承诺是「src 内除 bridge/ 与 tests 外任何文件都不得 import @tauri-apps/*」——
+/// 因此除主扫描面外，`src/` 的**其余全部文件**也进扫描（`main.ts`、`env.d.ts`
+/// 与未来新增的顶层目录都在内；枚举 stores/services/guards/router 会漏掉它们，
+/// 评审第二十三轮），这些文件只应用 **Tauri 包规则**——import `@/bridge/*` 是
+/// 合法梯级（Service→Bridge；guards 是跨层装配），`@tauri-apps/*` 则任何位置
+/// 都只能经 bridge（CLAUDE.md:47）。`main.ts` 缺失按扫描面不完整处理。
 export const TAURI_ONLY_ROOT_FILES = ['main.ts']
 
 /**
@@ -312,14 +314,16 @@ export function loadSources(root) {
     // 防御假绿：扫描面为空说明根目录结构变了，门禁必须红而不是静默通过
     throw new Error('layering-gate: 扫描面为空（views/components/composables/App.vue 均未找到）')
   }
-  // Tauri 红线扩展面：stores/services/guards/router/main.ts 只应用 Tauri 包
-  // 规则（见 TAURI_ONLY_DIRS 注释）。main.ts 缺失按扫描面不完整处理（fail-closed）。
+  // Tauri 红线整树遍历：`src/` 下除 `bridge/` 与 tests 外的**全部文件**都扫
+  //（承诺见头注；枚举目录会漏掉 env.d.ts 与未来顶层目录，评审第二十三轮）。
+  // 已在主扫描面里的文件**不重复**收集（它们走规则 A/B 全查），其余文件只应用
+  // Tauri 包规则。main.ts 缺失按扫描面不完整处理（fail-closed）。
+  const seen = new Set(files.map((file) => file.path))
   const tauriOnlyFiles = walkSources(root, {
-    dirs: TAURI_ONLY_DIRS,
-    files: TAURI_ONLY_ROOT_FILES,
+    dirs: ['.'],
     required: TAURI_ONLY_ROOT_FILES,
     extensions: SOURCE_EXTENSIONS,
-    skip,
+    skip: (rel) => skip(rel) || rel.startsWith('bridge/') || seen.has(rel),
   })
   for (const file of tauriOnlyFiles) file.tauriOnly = true
   files.push(...tauriOnlyFiles)
@@ -341,7 +345,7 @@ export function runCli(root) {
   }
   if (violations.length === 0) {
     console.log(
-      `layering-gate: OK（${files.length} 个文件；扫描面（含 utils/types 中转面）不 import Service / bridge；扫描面与 stores/services/guards/router/main.ts 均不 import @tauri-apps/*）`,
+      `layering-gate: OK（${files.length} 个文件；扫描面（含 utils/types 中转面）不 import Service / bridge；src 内除 bridge/ 与 tests 外均不 import @tauri-apps/*）`,
     )
     return 0
   }

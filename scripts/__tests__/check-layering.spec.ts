@@ -14,7 +14,7 @@ import { stripComments } from '../../scripts/lib/source-scan.mjs'
  * 违规形态各给一份「种进去必须红」的夹具；跨行、动态 import 的非字面量形态、
  * Vue 模板文本三类曾是缺口，负例逐条覆盖），再对真实 `src/` 树跑一遍——后者
  * 是「扫描面（含 utils/types 中转面）不 import Service、扫描面不 import
- * bridge / @tauri-apps/*（扩展面同禁 Tauri 包）」两条红线在 `npm test`
+ * bridge / @tauri-apps/*（src 整树，bridge/ 与 tests 除外）」两条红线在 `npm test`
  * 里的实际保障（2026-11-09
  * 分层欠账清偿后恒绿；
  * 新增直连会在这里红出来）。
@@ -161,7 +161,7 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     }
   })
 
-  it('Tauri 红线扩展面：stores/services/guards/router/main 只禁 Tauri 包（bridge 梯级合法）', () => {
+  it('Tauri 红线整树：stores/services/guards/router/main 只禁 Tauri 包（bridge 梯级合法）', async () => {
     const serviceTauri = findViolations([
       { path: 'services/x.ts', content: `import { invoke } from '@tauri-apps/api/core'`, tauriOnly: true },
     ])
@@ -183,17 +183,39 @@ describe('check-layering — 规则判定（合成夹具）', () => {
       ])
       expect(plugin, path).toHaveLength(1)
     }
-    // loadSources 的扩展面标记：main.ts 必在扫描面且为 tauriOnly
+    // loadSources 的整树标记：main.ts / env.d.ts 必在扫描面且为 tauriOnly
+    //（评审第二十三轮：枚举目录曾漏掉根级文件，未来顶层目录由整树遍历覆盖）
     const files = loadSources(process.cwd())
     const main = files.find((f) => f.path === 'main.ts')
     expect(main, 'main.ts 缺失（扫描面 fail-closed）').toBeTruthy()
     expect(main?.tauriOnly).toBe(true)
+    const env = files.find((f) => f.path === 'env.d.ts')
+    expect(env, 'env.d.ts 缺失（整树遍历应覆盖根级声明文件）').toBeTruthy()
+    expect(env?.tauriOnly).toBe(true)
     for (const file of files) {
       if (/^(stores|services|guards|router)\//.test(file.path)) expect(file.tauriOnly, file.path).toBe(true)
       if (/^(views|components|composables|utils|types)\//.test(file.path) || file.path === 'App.vue') {
         expect(file.tauriOnly, file.path).toBeFalsy()
       }
     }
+    // 整树承诺：除 bridge/ 与 tests 外，src 下每个脚本文件都在扫描面
+    const { readdirSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const walked = new Set(files.map((file) => file.path))
+    const walkAll = (dir, rel) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        const nextRel = rel === '' ? entry.name : `${rel}/${entry.name}`
+        if (entry.isDirectory()) {
+          if (/(^|\/)(__tests__|test-support)$/.test(nextRel) || nextRel === 'bridge') continue
+          walkAll(full, nextRel)
+          continue
+        }
+        if (!/\.(?:d\.ts|ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$/.test(entry.name)) continue
+        expect(walked.has(nextRel), `未进扫描面：${nextRel}`).toBe(true)
+      }
+    }
+    walkAll(join(process.cwd(), 'src'), '')
   })
 
   it('一行同时命中两层规则 → 两条违规各自报出（实际写法不存在，锁定扫描器语义）', () => {

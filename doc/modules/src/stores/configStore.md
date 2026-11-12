@@ -14,7 +14,7 @@ View / component / composable 访问**配置服务**（配置读取与缓存失�
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `settingsSaveInFlight` | getter `() => boolean` | **设置页发起**的保存事务在途（覆盖「保存 → 自动切换」整段）。service 侧是 readonly computed ref——getter 内读 `.value` 被依赖追踪。消费方需要 Ref 语义时用 `computed(() => store.settingsSaveInFlight)` 包回（`useSettingsForm` 即此形态）；不要直接解构 store（拿到的是展开后的布尔快照） |
+| `settingsSaveInFlight` | getter `() => boolean` | **设置页发起**的保存事务在途（覆盖「保存 → 自动切换」整段）。service 侧是 readonly computed ref——getter 内读 `.value` 被依赖追踪。消费方需要 Ref 语义时直接 `const { settingsSaveInFlight } = storeToRefs(store)`（`useSettingsForm` 即此形态；getter 已是 computed，不必再手工包 `computed(() => store.settingsSaveInFlight)`）；不要直接解构 store（拿到的是展开后的布尔快照） |
 | `ojSwitchInFlight` | getter `() => boolean` | 是否有 OJ 切换在途。**支撑必须是 ref**：service 侧由 `switchQueue.inFlight`（computed ref）派生；转发或 mock 若读普通属性，getter 会对无响应式依赖的求值结果永久缓存（评审 P2 的死代码教训，`configStore.spec` 锁定） |
 | `ojSwitchEpoch` | action `() => number` | 切换代际（每次切换开始与结束各 +1）。service 侧普通字段（非响应式）——**必须 action 逐次直读**：getter 化会被 computed 永久缓存，`useSettingsForm` 的重读循环静默失效 |
 | `settingsSaveEpoch` | action `() => number` | 设置页保存代际（入队与结束各 +1；后台写入不参与）。同上，逐次直读 |
