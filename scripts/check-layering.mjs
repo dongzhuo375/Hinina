@@ -48,18 +48,18 @@
 // **fails closed** with a violation — the gate must not go green on a specifier
 // it cannot read. The same rule covers `import.meta.glob(...)` /
 // `globEager(...)`: Vite compiles them into lazy imports, so they are real
-// View→Service edges (review P1). **The directory part of a glob pattern must
-// be literal**: Vite resolves a non-relative pattern through the alias plugin
-// and then expands it, so `@/**/config.service.ts` / `@/**/*.service.ts` are
-// real lazy edges but the literal pattern does not reveal the resolved set.
-// Any picomatch set syntax before the last `/` fails closed — `* ? [ ] { }`
-// and the extglob parentheses (`@(a|b)`, `+(a|b)`, `!(a)` express directory
-// sets without those characters; review round twenty-six), while only the
-// filename segment may be wildcarded (`@/services/*.ts` still reports by its
-// path segment; `@/assets/*.svg` stays clean). The check runs on the
-// **decoded** specifier (Vite expands the AST literal's `element.value`), so
-// escape spellings — `@/\u002a/…`, `@\u002f**\u002f…` — cannot hide the
-// syntax in a directory segment (review round twenty-five).
+// View→Service edges (review P1). **Glob calls fail closed by default**: Vite
+// resolves a non-relative pattern through the alias plugin and expands it, so
+// `import.meta.glob` / `globEager` are real lazy edges — but the resolved set
+// follows picomatch/tinyglobby semantics, which no static character list can
+// enumerate. Rounds twenty-four and twenty-five patched plaintext wildcards
+// and escape spellings; round twenty-six added extglob parentheses; round
+// twenty-seven found `**` — path recursion, not a filename wildcard — where
+// `@/**` / `@/../**` resolve into services/bridge while the literal directory
+// prefix says nothing. The rule is therefore terminal: within the scan
+// surface every glob call is opaque (fail closed) unless its **decoded**
+// pattern is registered in GLOB_ALLOWLIST (explicit review; the pattern's own
+// layer rules still run). Plain dynamic `import()` keeps the literal rule.
 //
 // Scan surface: `views/`, `components/`, `composables/` (recursively) plus
 // `src/App.vue`, over `.ts` / `.tsx` / `.js` / `.jsx` / `.mjs` / `.cjs` /
@@ -141,6 +141,13 @@ const TAURI_SPEC = /^@tauri-apps(?:\/|$)/
 /// 都只能经 bridge（CLAUDE.md:47）。`main.ts` 缺失按扫描面不完整处理。
 export const TAURI_ONLY_ROOT_FILES = ['main.ts']
 
+/// `import.meta.glob` / `globEager` 的显式放行清单（**解码后**的模式字符串）。
+/// 扫描面内 glob 调用默认一律 fail closed（展开集合由 picomatch/tinyglobby
+/// 语义决定，通配/转义/extglob/`**` 递归无法穷尽——评审第二十四～二十七轮）。
+/// 新增条目必须评审：模式本身的层判据（规则 A/B）仍会执行，但展开集合是否
+/// 全在合法落点由评审负责。当前为空（src 内 glob 零使用）。
+export const GLOB_ALLOWLIST = []
+
 /**
  * Split a dynamic-import argument — `import(...)`, `import.meta.glob(...)` and
  * `import.meta.globEager(...)` — into statically-readable specs and opaque
@@ -177,27 +184,16 @@ export function dynamicImportArgs(source) {
     // 轮补齐 glob 判定：Vite 展开用的是 AST literal 的 element.value，即解码后
     // 的模式，`@/\u002a/config.service.ts` 运行时就是 `@/*/config.service.ts`）
     const spec = decodeStringLiteral(raw)
-    // **glob 的目录段通配 fail closed**（评审第二十四轮）：Vite 对非相对/
-    // 非绝对模式先 resolveId（别名插件生效）再展开——`@/**/config.service.ts`、
-    // `@/**/*.service.ts` 等都是真实懒加载边，但字面量模式本身看不出解析集合
-    //（通配符可跨目录段命中 services/bridge）。只有**文件名段**允许通配
-    //（`@/services/*.ts` 的段判据仍成立）；目录段带通配即按不可静态判定处理。
-    // 判定用**解码后**的 spec：转义拼写（`\u002a` / `\x2a` / `\u002f`）不能
-    // 把通配符藏进目录段（评审第二十五轮）。目录段必须是**字面量**：不再枚举
-    // 通配字符，而是把 picomatch 的全部集合语法符号一并拒绝——`* ? [ ] { }`
-    // 与括号（extglob 的 `@(a|b)` / `+(a|b)` / `!(a|b)` 不含 `*?[{` 也能表达
-    // 目录集合，Vite 的 importGlob 用的就是 tinyglobby；评审第二十六轮）。
-    if (isGlob) {
-      const lastSlash = spec.lastIndexOf('/')
-      const dirPart = lastSlash === -1 ? '' : spec.slice(0, lastSlash)
-      if (/[?*[\]{}()]/.test(dirPart)) {
-        opaque.push({
-          index: match.index,
-          snippet: `${quote}${raw}${quote}`,
-          reason: 'glob-dir-wildcard',
-        })
-        continue
-      }
+    // **glob 调用一律 fail closed**（终结式，评审第二十七轮）：前几轮按
+    // picomatch 语义逐项打补丁（明文通配 → 解码后转义 → extglob → `**` 递归），
+    // 每轮都还剩一种——`**` 在末段是**路径递归**而不是文件名通配，字面量目录
+    // 前缀的祖先判据（`@/**`、`@/../**`）完全看不见 services/bridge。展开集合由
+    // tinyglobby 决定，静态判据无法穷尽，因此扫描面内 glob 调用不判断据、直接
+    // fail closed；需要的写法在 `GLOB_ALLOWLIST` 显式登记（模式本身仍按规则
+    // A/B 判定）。现树零使用，迁移成本为零。
+    if (isGlob && !GLOB_ALLOWLIST.includes(spec)) {
+      opaque.push({ index: match.index, snippet: `${quote}${raw}${quote}`, reason: 'glob-call' })
+      continue
     }
     let i = end
     while (i < source.length && /\s/.test(source[i])) i += 1
@@ -260,14 +256,16 @@ function scanUnit(violations, path, unitSource, lineBase, { tauriOnly = false } 
   // 应用规则 A / bridge 路径规则（Service→Bridge 是合法梯级、guards 是跨层装配）
   if (!tauriOnly) {
     for (const { index, snippet, reason } of dynamic.opaque) {
-      const why =
-        reason === 'glob-dir-wildcard'
-          ? '说明符无法静态分析——glob 通配/集合语法出现在**目录段**（展开集合可跨目录命中 services/bridge，实际解析集合不可判定；目录段必须是字面量）'
-          : '说明符无法静态分析'
+      const isGlobCall = reason === 'glob-call'
+      const head = isGlobCall
+        ? 'import.meta.glob / globEager 调用无法静态分析（展开集合由 picomatch 语义决定：通配/转义/extglob/`**` 递归不能穷尽）'
+        : '动态 import 的说明符无法静态分析'
+      const fix = isGlobCall
+        ? '请在 GLOB_ALLOWLIST 显式登记复核过的模式，或改用静态 import'
+        : '请改用字符串字面量（不含 ${} / 拼接 / 变量 / 数组）或静态 import'
       violations.push(
-        `${path}:${lineOf(index)}: 动态 import / import.meta.glob 的${why}（${snippet}）；` +
-          '分层门禁 fail closed——请改用字符串字面量（不含 ${} / 拼接 / 变量 / 数组；glob 只有文件名段可带通配）' +
-          '或静态 import。规则 A/B 无法确认目标模块时按违规处理（否则门禁会假绿）',
+        `${path}:${lineOf(index)}: ${head}（${snippet}）；分层门禁 fail closed——${fix}。` +
+          '规则 A/B 无法确认目标模块时按违规处理（否则门禁会假绿）',
       )
     }
   }

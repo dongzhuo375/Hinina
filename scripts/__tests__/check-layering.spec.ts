@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findViolations, loadSources } from '../../scripts/check-layering.mjs'
+import { findViolations, loadSources, GLOB_ALLOWLIST } from '../../scripts/check-layering.mjs'
 import { stripComments } from '../../scripts/lib/source-scan.mjs'
 
 /**
@@ -409,21 +409,41 @@ import x from '@/services/real'
     expect(violations).toEqual([])
   })
 
-  it('import.meta.glob / globEager 是真实边：字面量命中、不可读形态 fail closed', () => {
-    const literal = findViolations([
+  it('import.meta.glob / globEager 默认 fail closed；allowlist 放行后按层规则判定', () => {
+    // 终结式（第二十七轮）：逐轮补丁（明文通配 → 转义 → extglob → `**` 递归）
+    // 无法穷尽 picomatch 语义，扫描面内 glob 调用默认 opaque；显式复核过的模式
+    // 进 GLOB_ALLOWLIST 后，模式本身仍按规则 A/B 判定。
+    const defaultLiteral = findViolations([
       { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/services/*.service.ts')` },
     ])
-    expect(literal).toHaveLength(1)
-    expect(literal[0]).toContain('规则A')
-    const eager = findViolations([
-      { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/services/x.ts', { eager: true })` },
-    ])
-    expect(eager).toHaveLength(1)
-    const bridge = findViolations([
-      { path: 'views/Glob.ts', content: `const m = import.meta.globEager('@/bridge')` },
-    ])
-    expect(bridge).toHaveLength(1)
-    expect(bridge[0]).toContain('规则B')
+    expect(defaultLiteral).toHaveLength(1)
+    expect(defaultLiteral[0]).toContain('无法静态分析')
+    expect(defaultLiteral[0]).toContain('GLOB_ALLOWLIST')
+    GLOB_ALLOWLIST.push('@/services/*.service.ts', '@/bridge')
+    try {
+      const literal = findViolations([
+        { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/services/*.service.ts')` },
+      ])
+      expect(literal).toHaveLength(1)
+      expect(literal[0]).toContain('规则A')
+      const eager = findViolations([
+        { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/services/x.ts', { eager: true })` },
+      ])
+      expect(eager).toHaveLength(1)
+      const bridge = findViolations([
+        { path: 'views/Glob.ts', content: `const m = import.meta.globEager('@/bridge')` },
+      ])
+      expect(bridge).toHaveLength(1)
+      expect(bridge[0]).toContain('规则B')
+      // 非层目标放行后不误报
+      GLOB_ALLOWLIST.push('@/assets/*.svg')
+      const assets = findViolations([
+        { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/assets/*.svg')` },
+      ])
+      expect(assets).toEqual([])
+    } finally {
+      GLOB_ALLOWLIST.length = 0
+    }
     for (const content of [
       `const m = import.meta.glob(['@/services/a.ts'])`,
       'const m = import.meta.glob(spec)',
@@ -434,51 +454,42 @@ import x from '@/services/real'
     }
   })
 
-  it('glob 目录段通配 fail closed（展开集合可跨目录命中 services/bridge，评审第二十四轮）', () => {
-    // Vite 对非相对/非绝对模式先 resolveId（别名生效）再展开：`@/**/x` 是真实
-    // 懒加载边，但字面量模式看不出解析集合——曾零违规（探针：tinyglobby 实测
-    // 命中 src/services/config.service.ts 与全部 bridge）。只有文件名段可通配。
-    // 判定跑在**解码后**的说明符上（第二十五轮）：Vite 展开用的是 AST literal
-    // 的 element.value，`@/\u002a/…` 运行时就是 `@/*/…`，转义不能把通配藏进目录段。
+  it('glob 语义不可穷尽 → 一律 fail closed（明文/转义/extglob/** 递归，评审第二十四–二十七轮）', () => {
+    // 同一处门禁的连续四轮修补清单，全部收敛为 opaque：Vite 对非相对/非绝对
+    // 模式先 resolveId（别名生效）再展开，展开集合由 picomatch/tinyglobby 决定
+    // ——`@/**` 与 `@/../**` 是**路径递归**（字面量前缀判据看不见 services/
+    // bridge），转义与 extglob 表达同样集合。逐项打补丁逐轮留缺口，故终结为
+    // 「glob 调用一律 fail closed + GLOB_ALLOWLIST」。
     for (const pattern of [
       '@/*/config.service.ts',
       '@/**/config.service.ts',
       '@/**/*.service.ts',
       '/src/**/config.service.ts',
       '@/**/*.bridge.ts',
-      // 转义拼写：raw 里没有通配符/斜杠，解码后才出现（旧判据上全绿）
+      // 转义拼写：解码后才出现通配（第二十五轮）
       String.raw`@/\u002a/config.service.ts`,
       String.raw`@/\x2a/config.service.ts`,
       String.raw`@/\u003f/config.service.ts`,
       String.raw`@\u002f**\u002f*.service.ts`,
-      // picomatch extglob：不含 `*?[{` 也能表达目录集合（旧字符枚举上全绿；
-      // tinyglobby 实测 @(…)/+(…)/!(…) 命中 src/services/config.service.ts）
+      // picomatch extglob：不含 `*?[{` 也能表达目录集合（第二十六轮）
       '@/@(services|utils)/config.service.ts',
       '@/+(services|utils)/config.service.ts',
       '@/!(utils)/config.service.ts',
-      // 裸括号同样按集合语法拒绝（闭包，不留旁路）
       '@/(services|utils)/config.service.ts',
+      // 末段 `**` 是路径递归而非文件名通配（第二十七轮）
+      '@/**',
+      '@/../**',
+      '@/**.**',
+      // 末段以目录分隔结尾的递归形态
+      '@/**/',
     ]) {
       const violations = findViolations([
         { path: 'views/Glob.ts', content: `const m = import.meta.glob('${pattern}')` },
       ])
       expect(violations, pattern).toHaveLength(1)
       expect(violations[0], pattern).toContain('无法静态分析')
-      expect(violations[0], pattern).toContain('目录段')
+      expect(violations[0], pattern).toContain('GLOB_ALLOWLIST')
     }
-    // 文件名段通配仍按段判据报红（含转义拼写：解码后段判据同样成立）
-    for (const pattern of ['@/services/*.ts', String.raw`@/services/\u002a.ts`]) {
-      const segment = findViolations([
-        { path: 'views/Glob.ts', content: `const m = import.meta.glob('${pattern}')` },
-      ])
-      expect(segment, pattern).toHaveLength(1)
-      expect(segment[0], pattern).toContain('规则A')
-    }
-    // 文件名段通配的非层目标不误报
-    const assets = findViolations([
-      { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/assets/*.svg')` },
-    ])
-    expect(assets).toEqual([])
   })
 
   it('模板表达式按原行号报告（不拼接、不跨表达式串味）', () => {
