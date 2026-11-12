@@ -3,6 +3,7 @@ import {
   TXN_ALLOWLIST,
   findViolations,
   loadSources,
+  localFunctions,
   txnCallSites,
   txnCallbackBodies,
 } from '../../scripts/check-save-gate.mjs'
@@ -140,7 +141,7 @@ describe('check-save-gate — 规则判定（合成夹具）', () => {
     expect(violations).toHaveLength(1)
     expect(violations[0]).toContain('performSwitch')
     expect(violations[0]).toContain('saveSplitRatio')
-    expect(violations[0]).toContain('间接调用')
+    expect(violations[0]).toContain('间接引用')
   })
 
   it('两跳辅助函数同样能追到（回调 → a → b → 排队入口）', () => {
@@ -624,7 +625,19 @@ await configService.runSaveTxn((tx) => {
       },
     ])
     expect(violations).toHaveLength(1)
-    expect(violations[0]).toContain('间接调用排队入口')
+    expect(violations[0]).toContain('间接引用排队入口')
+  })
+
+  it('返回注解含括号（(): (e: Event) => void）的方法也进函数表（两种配平读取的返回值形态不同）', () => {
+    // 旧实现把 readBalanced 返回的「括号内正文」当绝对下标（`closer - i`）：
+    // 注解里的非空 `(e: Event)` 让 i 变 NaN 并静默放弃整条注解——这类方法
+    // 整条漏出函数表，间接路径漏追。空 `()` 的兄弟形态更糟（i 归零、从文件头
+    // 重扫：单行文件死循环，由 gate-cli.spec 的子进程用例守）。
+    const table = localFunctions(
+      `class C { helper(): (e: Event) => void { return configService.saveSplitRatio(0.5) } }`,
+    )
+    expect([...table.keys()]).toContain('helper')
+    expect(table.get('helper')?.[0]).toContain('saveSplitRatio')
   })
 
   it('带默认值的转发形参不享受纯转发豁免（默认值可内联排队调用）', () => {
@@ -667,6 +680,53 @@ await configService.runSaveTxn((tx) => {
       expect(violations, call).toHaveLength(1)
       expect(violations[0], call).toContain('排队保存入口')
     }
+  })
+
+  it('排队入口的其余调用形态不再假绿（括号成员 / .bind / 可选括号 / 逗号表达式 / 标签模板）', () => {
+    // 十六轮评审逐形态补正则，每轮都还剩下下一种；规则 2 的契约是「不得引用」，
+    // 因此改为引用级判定（QUEUED_MENTION）——下列形态即使调用语法各不相同，
+    // 名字出现即违规，不再依赖穷举。
+    for (const call of [
+      '(configService.saveSplitRatio)(0.5)',
+      'configService.saveSplitRatio.bind(configService)(0.5)',
+      "configService?.['saveSplitRatio']?.(0.5)",
+      '(0, configService.saveSplitRatio)(0.5)',
+      'configService.saveSplitRatio`x`',
+    ]) {
+      const violations = findViolations([
+        {
+          path: 'composables/useSettingsForm.ts',
+          content: `await configService.runSaveTxn((tx) => { ${call}; return tx.updateConfig(() => {}) })`,
+        },
+      ])
+      expect(violations, call).toHaveLength(1)
+      expect(violations[0], call).toContain('排队保存入口')
+    }
+  })
+
+  it('回调内仅引用（未调用）排队入口同样 fail closed（引用可经别名调用）', () => {
+    const direct = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `await configService.runSaveTxn((tx) => { const later = configService.saveSplitRatio; return tx.updateConfig(() => {}) })`,
+      },
+    ])
+    expect(direct).toHaveLength(1)
+    expect(direct[0]).toContain('引用了排队保存入口')
+    // 同文件辅助函数里的裸引用同样经传递路径报出
+    const viaHelper = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `function pick() { return configService.saveSplitRatio }
+await configService.runSaveTxn((tx) => {
+  pick()
+  return tx.updateConfig(() => {})
+})`,
+      },
+    ])
+    expect(viaHelper).toHaveLength(1)
+    expect(viaHelper[0]).toContain('间接引用')
+    expect(viaHelper[0]).toContain('saveSplitRatio')
   })
 
   it('点号与属性名之间允许空白：`svc . runSaveTxn(…) : { … }` 仍被扫描', () => {

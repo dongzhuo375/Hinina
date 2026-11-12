@@ -11,10 +11,16 @@
 // Rules (each maps to one of the three exported findings):
 //   1. `runSaveTxn` may only appear in allowlisted files (definition + the one
 //      transactional caller). A new caller must pass review once.
-//   2. A `runSaveTxn` callback body must not reference ANY queued save entry —
-//      `runSaveTxn`, `updateEditorPrefs`, `saveSplitRatio` (including optional
-//      calls `saveSplitRatio?.(…)`). The two wrappers queue too, so calling
-//      them inside a callback deadlocks exactly like a nested transaction.
+//   2. A `runSaveTxn` callback body must not **reference** ANY queued save entry
+//      — `runSaveTxn`, `updateEditorPrefs`, `saveSplitRatio`. The two wrappers
+//      queue too, so calling them inside a callback deadlocks exactly like a
+//      nested transaction. Detection is **reference-level** (`QUEUED_MENTION`,
+//      any occurrence of the name), not call-syntax-level: the call shapes are
+//      open-ended — `(obj.m)(x)`, `obj.m.bind(obj)(x)`, `obj?.['m']?.(x)`,
+//      `(0, obj.m)(x)`, tagged templates — and sixteen review rounds each closed
+//      one shape while the next stayed green. A bare reference is dangerous on
+//      its own (it can be invoked through the alias later), so any mention is
+//      reported; the precise call form only decides the message wording.
 //      **Fail-closed**: a callback form the scanner cannot extract (a referenced
 //      callback from another module, an alias, `handlers.save`, …) is reported
 //      as a violation instead of being skipped — otherwise the gate would show
@@ -49,16 +55,19 @@
 // shapes this repo actually writes: `function` declarations (return-type
 // annotations without braces, e.g. `(): () => void`), block- and
 // expression-body arrows (`=> expr` captured to `;` / newline), and
-// class/object methods **without annotations** (`name(...) {`, getters).
-// What is *not* tracked: cross-file helpers, aliases, dynamic lookup,
-// multi-line expression bodies (truncated at the first newline), methods with
-// a return annotation (`helper(): Promise<void> {`), declarations whose
+// class/object methods **with a single-line return annotation**, generics
+// included (`save<T>(v: Array<Map<string, T>>): void {`, getters). What is
+// *not* tracked: cross-file helpers, aliases, dynamic lookup, multi-line
+// expression bodies (truncated at the first newline), annotations that span a
+// newline (the annotation walk stops at a newline so `call()` followed by a
+// ternary/next statement is not read as a definition), declarations whose
 // return type contains braces (`function f(): Array<{...}> {`), arrows stored as
 // **object properties** (`const o = { h: () => saveSplitRatio(0.5) }` — only
 // same-file function declarations / arrows / methods are keyed by name), and
 // same-named helpers resolved at **depth > 6** (the transfer walk has a hard
-// depth cap). Unknown *callback* forms fail closed instead, but the helper
-// shapes above are skipped silently; keep queued calls inside a tracked shape.
+// depth cap). Unknown *callback* forms and any queued-entry **reference** fail
+// closed instead; the untracked helper shapes above are skipped silently — keep
+// queued calls inside a tracked shape.
 // Scanning-fidelity note: unquoted regex literals are consumed verbatim by the
 // regex-aware stripper (division-vs-regex heuristic; control-statement closing
 // parens are regex context — see scripts/lib/source-scan.mjs), so `/[/*]/` and
@@ -105,14 +114,23 @@ export const TXN_ALLOWLIST = [
 ]
 
 /// Queued save entries: appearing inside a transaction callback body deadlocks.
-/// Optional calls (`saveSplitRatio?.(…)`) count too — `?.` is still a call;
-/// `.call(...)` / `.apply(...)` also queue; bracket-literal access
-/// (`configService['saveSplitRatio'](0.5)`, template brackets included) is the
-/// same queued entry — the quoted name inside the brackets is matched with a
-/// backreference so other members never match (review: literal bracket access
-/// was a false green). The anchor is **name + closing quote + `]` + `(`**,
-/// because the `\b` of the name sits inside the brackets.
+/// `QUEUED_ENTRY` recognizes the common **call** forms for the message wording
+/// (optional calls `saveSplitRatio?.(…)`, `.call(...)` / `.apply(...)`,
+/// bracket-literal access `configService['saveSplitRatio'](0.5)`); the rule
+/// itself is reference-level — see `QUEUED_MENTION` below. The anchor for
+/// bracket access is **name + closing quote + `]` + `(`**, because the `\b` of
+/// the name sits inside the brackets.
 const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)(?:['"`]\s*\]\s*\(|\s*(?:\?\.)?\s*(?:\.\s*(?:call|apply)\s*)?\s*[<(])/
+
+/// Reference-level rule: **any** occurrence of a queued entry name inside a
+/// transaction callback / observer listener / tracked local helper is a
+/// violation. Call-syntax alternatives (`(obj.m)(x)`, `.bind(obj)(x)`,
+/// `obj?.['m']?.(x)`, `(0, obj.m)(x)`, tagged templates) are open-ended and
+/// each review round closed only one; a bare reference can be invoked through
+/// an alias later, so it is reported too. Direction is fail-closed: a string
+/// literal that merely spells the name also reports (same as the call-level
+/// matcher, which already scans string literals).
+const QUEUED_MENTION = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\b/
 
 /**
  * Extract a callback body from a call's argument text.
@@ -368,8 +386,9 @@ function arrowBody(source, afterArrow) {
  * - `function name(...)` 声明（返回类型注解**不含 `{`** 时：`(): () => void` 可、
  *   `(): Array<{...}> {` 不可——泛型里的 `{` 会被当成正文起点）
  * - `const name = (...) => {...}` 块体箭头 与 `const name = (...) => expr` 表达式体箭头
- * - 类/对象方法 `name(...) {`（**仅无注解形态**，含 getter；`helper(): Promise<void> {`
- *   与 `push(tx): void {` 不追踪——带上限的注解扫描成本高于收益，见文件头局限）
+ * - 类/对象方法 `name(...) {`、带泛型/返回注解的 `name<T>(...): R {`（含 getter）
+ *   与对象方法形态；注解内出现换行即停止——`call()` 后接三元/下一条语句不是
+ *   定义，见文件头局限。`function` 声明里返回类型含 `{` 的形态仍不追踪。
  *
  * 只为「回调 → 局部辅助函数 → 排队入口」这条**传递路径**服务：直接调用由
  * 事务回调的正文检查覆盖，跨文件/别名/动态调用不在能力范围内（见文件头）。
@@ -424,8 +443,15 @@ export function localFunctions(source) {
     if (params === null) continue
     let i = cursor + params.length + 2
     while (i < source.length && /\s/.test(source[i])) i += 1
-    // 参数闭括号后允许**同一行**的返回类型注解（`): Promise<void> {`——注解里
-    // 的 `=>`、括号、泛型逐 token 跳过），方法体 `{` 可能在注解之后
+    // 参数闭括号后允许一段返回类型注解（`): Promise<void> {` 或
+    // `): () => void {`；注解里的 `=>`、括号、泛型逐 token 跳过），方法体 `{`
+    // 在注解之后。注解内出现换行即停止（见文件头局限）。
+    // **两种配平读取的返回值形态不同**：`readBalanced` 返回括号内正文（推进
+    // 长度 + 2），`readAngles` 返回闭括号后的**绝对下标**。混用（旧实现对两者
+    // 都写 `closer - i`）会得到两种错误：正文为空（注解里的 `()`）时 i 归零、
+    // 从文件头重扫 → 单行文件死循环（`const z = foo().bar()` 挂住整个门禁）；
+    // 正文非空（`: (e: Event) => void`）时 i 变 NaN → 静默放弃整条注解
+    //（这类方法不进函数表）。
     let sawOpen = false
     while (i < source.length) {
       const ch = source[i]
@@ -435,10 +461,16 @@ export function localFunctions(source) {
         sawOpen = true
         break
       }
-      if (ch === '(' || ch === '<') {
-        const closer = ch === '(' ? readBalanced(source, i, '(', ')') : readAngles(source, i)
-        if (closer === null) break
-        i += closer === null ? 1 : closer - i
+      if (ch === '(') {
+        const inner = readBalanced(source, i, '(', ')')
+        if (inner === null) break
+        i += inner.length + 2
+        continue
+      }
+      if (ch === '<') {
+        const end = readAngles(source, i)
+        if (end === null) break
+        i = end
         continue
       }
       i += 1
@@ -573,7 +605,9 @@ function isPureForward(entries, callIndex, ref) {
 
 /**
  * 从回调正文出发，沿**同文件局部函数**追踪到排队入口（深度有上限、带环检测）。
- * 返回命中路径，例如 `performSwitch → saveSplitRatio`。
+ * 判定同样按**引用**（`QUEUED_MENTION`）——辅助函数里把入口取别名、括号调用、
+ * 标签模板调用等形态无法穷举，引用即违规。返回命中路径，例如
+ * `performSwitch → saveSplitRatio`。
  */
 export function queuedViaLocals(callbackBody, functions, maxDepth = 6) {
   const hits = []
@@ -585,7 +619,7 @@ export function queuedViaLocals(callbackBody, functions, maxDepth = 6) {
       const nextTrail = [...trail, name]
       // 同名可能有多份正文（不同作用域）：逐份检查，任一份命中即报
       for (const fnBody of bodies) {
-        const match = fnBody.match(QUEUED_ENTRY)
+        const match = fnBody.match(QUEUED_MENTION)
         if (match) {
           hits.push({ trail: nextTrail, entry: match[1] })
           continue
@@ -658,17 +692,17 @@ export function observerViolations(path, source, functions) {
       continue
     }
     for (const body of bodies) {
-      const direct = body.match(QUEUED_ENTRY)
-      if (direct) {
+      const mention = body.match(QUEUED_MENTION)
+      if (mention) {
         violations.push(
-          `${path}: switchObservers 监听器内含排队保存入口 \`${direct[1]}\`——` +
+          `${path}: switchObservers 监听器内引用了排队保存入口 \`${mention[1]}\`——` +
             '观察者在事务回调内被 await，会排队等自己（死锁）。监听器只能做读取/对齐',
         )
         continue
       }
       for (const hit of queuedViaLocals(body, functions)) {
         violations.push(
-          `${path}: switchObservers 监听器经 ${hit.trail.join(' → ')} 间接调用排队入口 \`${hit.entry}\`——` +
+          `${path}: switchObservers 监听器经 ${hit.trail.join(' → ')} 间接引用排队入口 \`${hit.entry}\`——` +
             '同一死锁形状（监听器等队列，队列等回调，回调等监听器）',
         )
       }
@@ -713,9 +747,13 @@ export function findViolations(files) {
           continue
         }
         for (const body of bodies) {
-          if (QUEUED_ENTRY.test(body)) {
+          const mention = body.match(QUEUED_MENTION)
+          if (mention) {
+            // 引用级判定：别名、括号成员调用、`.bind`、可选括号、标签模板等
+            // 形态无法穷举，出现即违规；QUEUED_ENTRY 只用于区分消息措辞
+            const recognizedCall = QUEUED_ENTRY.test(body)
             violations.push(
-              `${path}: runSaveTxn 回调内引用了排队保存入口（runSaveTxn/updateEditorPrefs/saveSplitRatio，含 ?.()）——` +
+              `${path}: runSaveTxn 回调内${recognizedCall ? '调用了' : '引用了'}排队保存入口 \`${mention[1]}\`——` +
                 '它会排在回调自己持有的门禁之后，永久挂起。改用 tx.updateConfig(...)。片段：' +
                 body.trim().slice(0, 120),
             )
@@ -726,7 +764,7 @@ export function findViolations(files) {
           // 抓不到这种间接调用）。
           for (const hit of queuedViaLocals(body, functions)) {
             violations.push(
-              `${path}: runSaveTxn 回调经 ${hit.trail.join(' → ')} 间接调用排队入口 \`${hit.entry}\`——` +
+              `${path}: runSaveTxn 回调经 ${hit.trail.join(' → ')} 间接引用排队入口 \`${hit.entry}\`——` +
                 '同一队列，回调会等自己，永久挂起。该辅助函数内应改用 tx 句柄，或改调独立队列（如 switchOj）',
             )
           }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { runCli as runLayering } from '../../scripts/check-layering.mjs'
 import { runCli as runSave } from '../../scripts/check-save-gate.mjs'
 
@@ -65,6 +66,36 @@ describe('check-save-gate — CLI 出口', () => {
       mkdirSync(join(root, 'src', 'services'), { recursive: true })
       writeFileSync(join(root, 'src', 'services', 'config.service.ts'), 'export const configService = {}')
       expect(runSave(root)).toBe(1)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('单行源码的链式零参调用不会挂住 CLI（配平读取返回值混用会死循环）', () => {
+    // 同步死循环占住事件循环，vitest 的用例超时打不断它——必须在**子进程**里
+    // 跑，用 OS 级 timeout 兜底。旧实现在 `list().slice()`（单行、链式零参）上
+    // 永远从下标 0 重扫：门禁挂住而不是给裁决（多行文件先撞首个换行而侥幸退出，
+    // 所以真实树一直绿）。超时 → execFileSync 抛错 → 用例红，而非挂住 CI。
+    const root = mkdtempSync(join(tmpdir(), 'hinina-gate-'))
+    try {
+      mkdirSync(join(root, 'src', 'views'), { recursive: true })
+      writeFileSync(join(root, 'src', 'views', 'OneLine.ts'), 'export const z = list().slice()\n')
+      mkdirSync(join(root, 'src', 'services'), { recursive: true })
+      writeFileSync(
+        join(root, 'src', 'services', 'config.service.ts'),
+        `export class ConfigService {
+  runSaveTxn(fn) { return this.saveQueue.enqueue(() => fn(this.tx)) }
+  async updateEditorPrefs(patch) { await this.runSaveTxn((tx) => tx.updateConfig(patch)) }
+  async saveSplitRatio(ratio) { await this.runSaveTxn((tx) => tx.updateConfig(ratio)) }
+}
+`,
+      )
+      const output = execFileSync(
+        process.execPath,
+        [join(process.cwd(), 'scripts', 'check-save-gate.mjs')],
+        { cwd: root, encoding: 'utf8', timeout: 15_000, stdio: 'pipe' },
+      )
+      expect(output).toContain('save-gate: OK')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
