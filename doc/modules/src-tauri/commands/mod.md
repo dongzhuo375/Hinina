@@ -1,7 +1,7 @@
 # mod
 
 ## 职责
-Commands 模块入口。声明所有 Tauri Command 子模块、提供 `invoke_handler()` 注册表并挂载本层单元测试。注册表用 `tauri::generate_handler![...]` 一次性构造（由 `bootstrap` 的 Builder 接线；不用 `.setup()` 手动注册，避免兼容性问题），handler 固定 `Wry`——`open_external` / `pick_data_dir` 的参数是具体 `AppHandle`，`CommandArg` 只为 `AppHandle<R>` 实现。
+Commands 模块入口。声明所有 Tauri Command 子模块、提供 `invoke_handler()` 注册表并挂载本层单元测试。注册表用 `tauri::generate_handler![...]` 一次性构造，由 `main.rs` 接线到 `bootstrap::builder()` 产出的 Builder（不用 `.setup()` 手动注册，避免兼容性问题），handler 固定 `Wry`——`open_external` / `pick_data_dir` 的参数是具体 `AppHandle`，`CommandArg` 只为 `AppHandle<R>` 实现。
 
 ## 核心类型/函数
 - `pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static` — 43 条 Command 的注册表（`generate_handler!`）；handler 固定 `Wry` 的原因见「职责」。
@@ -28,7 +28,8 @@ Commands 模块入口。声明所有 Tauri Command 子模块、提供 `invoke_ha
 - `src-tauri/src/main.rs`（`.invoke_handler(hinina_lib::commands::invoke_handler())` 注册 43 个 Command：**app 2** / plugin 5 / auth 4 / oj 1 / contest 6 / problem 3 / submission 5 / workspace 5 / config 4 / **log 1** / maintenance 3 / data_dir 4（contest 7→6：`select_contest` 前端零调用已删，服务层方法保留内部复用；workspace 7→5：`switch_workspace`/`current_workspace` 已删，`WorkspaceManager::switch` 同步删除、`current` 降为 `#[cfg(test)]` 测试入口））
 
 ## 逻辑流程
-无（仅模块声明）。
+1. `invoke_handler()` 在编译期经 `generate_handler!` 把 43 条 Command 展开为一个 `Fn(Invoke<Wry>) -> bool + Send + Sync + 'static` 闭包（路径写错或漏 `#[tauri::command]` 直接编译失败），运行期零逻辑。
+2. 接线在 `main.rs`：`.invoke_handler(hinina_lib::commands::invoke_handler())` 挂到 `bootstrap::builder()` 产出的 Builder 上（见 `../main.md`）。
 
 ## 测试
 **M2 起命令本体直接可测**：有编排逻辑的命令把实现提取为 `pub(crate) async fn *_impl(ctx: &AppContext, ...)`，`#[tauri::command]` 只做薄转发（零行为变化）。测试经 `test_support::app_ctx::context_with_hoj` 构造**全真上下文**（`AppContext::init` 跑在 TempDir 上、HOJ 实例指向 loopback 脚本 server），直接调用 `*_impl` 验证生产行为 —— 分页钳制与 `only_mine` 强制以脚本 server **实际收到**的查询串断言，`switch_oj` 的注册校验/配置落盘/`OjSwitched` 事件、logout 的会话清理、reset/purge 的精确删除范围均在真实文件系统与事件总线上验证。

@@ -1,8 +1,8 @@
 // Tauri Command 模块树与 invoke handler 注册表。
 //
 // 全部 Command 由本模块的 `invoke_handler()` 一次注册（标准
-// `tauri::generate_handler!`），再由 `bootstrap` 的 Builder 接线；不在
-// `.setup()` 中手动注册，避免兼容性问题。
+// `tauri::generate_handler!`），由 main.rs 接线到 `bootstrap::builder()`
+// 产出的 Builder；不在 `.setup()` 中手动注册，避免兼容性问题。
 
 pub mod app_cmd;
 pub mod auth_cmd;
