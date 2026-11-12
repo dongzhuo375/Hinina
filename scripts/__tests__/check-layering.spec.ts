@@ -178,6 +178,28 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     ])
     expect(storeBridge).toHaveLength(1)
     expect(storeBridge[0]).toContain('Store 不得 import bridge')
+    // store 模式的**不可读形态**也判红（第二十九轮）：Vite 会把点名的 glob/拼接
+    // 展开成真实 bridge 边——模式/可读前缀已点名 bridge，属可静态判定的那一类
+    for (const content of [
+      `const m = import.meta.glob('@/bridge/*.ts')`,
+      `const n = await import('../bridge/' + name)`,
+      'const n = await import(`../bridge/${name}`)',
+    ]) {
+      const hit = findViolations([{ path: 'stores/x.ts', content, mode: 'store' }])
+      expect(hit, content).toHaveLength(1)
+      expect(hit[0], content).toContain('规则B')
+      expect(hit[0], content).toContain('Store')
+    }
+    // 非层前缀放行（与「懒加载拼接是正常写法」不冲突）
+    const storeLocal = findViolations([
+      { path: 'stores/x.ts', content: `const n = await import('./local/' + name)`, mode: 'store' },
+    ])
+    expect(storeLocal).toEqual([])
+    // services 保持豁免（bridge 是合法梯级、懒加载拼接正常）
+    const serviceGlob = findViolations([
+      { path: 'services/x.ts', content: `const m = import.meta.glob('@/bridge/*.ts')`, mode: 'tauriOnly' },
+    ])
+    expect(serviceGlob).toEqual([])
     // 扩展面不应用规则 A（Store→Service 合法）
     const storeService = findViolations([
       { path: 'stores/x.ts', content: `import { configService } from '@/services/config.service'`, mode: 'store' },

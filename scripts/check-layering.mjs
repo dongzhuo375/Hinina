@@ -188,7 +188,9 @@ export function dynamicImportArgs(source) {
     const { raw, end } = literalRead
     const quote = source[argStart]
     if (quote === '`' && raw.includes('${')) {
-      opaque.push({ index: match.index, snippet: '`…${…}…`' })
+      // 可读前缀（`${` 之前）留给 store 模式点名 bridge 用（第二十九轮）
+      const prefix = normalizeSpecifier(decodeStringLiteral(raw.slice(0, raw.indexOf('${'))))
+      opaque.push({ index: match.index, snippet: '`…${…}…`', spec: prefix })
       continue
     }
     // 字符串字面量的转义在运行时生效：`@/servi\u0063es/…` 就是 services，
@@ -204,7 +206,8 @@ export function dynamicImportArgs(source) {
     // fail closed；需要的写法在 `GLOB_ALLOWLIST` 显式登记（模式本身仍按规则
     // A/B 判定）。现树零使用，迁移成本为零。
     if (isGlob && !GLOB_ALLOWLIST.includes(spec)) {
-      opaque.push({ index: match.index, snippet: `${quote}${raw}${quote}`, reason: 'glob-call' })
+      // spec 一并带上：store 模式对点名 bridge 的模式直接判红（第二十九轮）
+      opaque.push({ index: match.index, snippet: `${quote}${raw}${quote}`, reason: 'glob-call', spec })
       continue
     }
     let i = end
@@ -216,7 +219,7 @@ export function dynamicImportArgs(source) {
       literal.push({ spec, index: match.index })
       continue
     }
-    opaque.push({ index: match.index, snippet: `${quote}${raw}${quote} …` })
+    opaque.push({ index: match.index, snippet: `${quote}${raw}${quote} …`, spec })
   }
   return { literal, opaque }
 }
@@ -263,10 +266,12 @@ function scanUnit(violations, path, unitSource, lineBase, { mode = 'main' } = {}
   const findings = moduleSpecifiers(unitSource).findings
   const dynamic = dynamicImportArgs(unitSource)
   findings.push(...dynamic.literal)
-  // 非主扫描面不报动态 import 的不可读形态（懒加载拼接在这些层是正常写法，
-  // 与红灯无关）；规则按 mode 应用（见 loadSources：store 也禁 bridge）
-  if (mode === 'main') {
-    for (const { index, snippet, reason } of dynamic.opaque) {
+  // 非主扫描面不报动态 import 的**不可读形态**（懒加载拼接在这些层是正常
+  // 写法，与红灯无关）；但可读前缀/模式点名 bridge 的 glob 与拼接在 store
+  // 模式下同样判红（第二十九轮：Vite 会把它展开成真实 bridge 边，
+  // `import.meta.glob('@/bridge/*.ts')`、`import('../bridge/' + name)`）。
+  for (const { index, snippet, reason, spec: opaqueSpec } of dynamic.opaque) {
+    if (mode === 'main') {
       const isGlobCall = reason === 'glob-call'
       const head = isGlobCall
         ? 'import.meta.glob / globEager 调用无法静态分析（展开集合由 picomatch 语义决定：通配/转义/extglob/`**` 递归不能穷尽）'
@@ -277,6 +282,13 @@ function scanUnit(violations, path, unitSource, lineBase, { mode = 'main' } = {}
       violations.push(
         `${path}:${lineOf(index)}: ${head}（${snippet}）；分层门禁 fail closed——${fix}。` +
           '规则 A/B 无法确认目标模块时按违规处理（否则门禁会假绿）',
+      )
+      continue
+    }
+    if (mode === 'store' && typeof opaqueSpec === 'string' && BRIDGE_SPEC.test(opaqueSpec)) {
+      violations.push(
+        `${path}:${lineOf(index)}: 规则B —— Store 的 glob / 动态 import 模式点名 bridge（${opaqueSpec}；${snippet}）；` +
+          'Store→Bridge 破坏 View→Store→Service→Bridge 梯级（Vite 会把它展开成真实 bridge 边；Architecture.md「前端分层口径」）',
       )
     }
   }
@@ -412,7 +424,7 @@ export function runCli(root) {
   }
   if (violations.length === 0) {
     console.log(
-      `layering-gate: OK（${files.length} 个文件；扫描面（含 utils/types 中转面）不 import Service / bridge；src 内除 bridge/ 与 tests 外均不 import @tauri-apps/*）`,
+      `layering-gate: OK（${files.length} 个文件；扫描面（含 utils/types 中转面）不 import Service；扫描面与 stores 不 import bridge；src 内除 bridge/ 与 tests 外均不 import @tauri-apps/*）`,
     )
     return 0
   }
