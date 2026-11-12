@@ -28,7 +28,7 @@
 | `resetHistoryFilters` | `() => void` | 清空题目/状态筛选，**不发请求**——评测页无 `?problem=` 深链进入时清除上次访问残留（L2），首查由调用方随后的 `fetchHistory` 统一发出；与 setHistoryProblemFilter（用户改筛选、清空即重拉）语义不同 |
 | `setHistoryPage` | `(contestId, page) => Promise<void>` | 翻页（越界不发请求） |
 | `fetchProblemSummary` | `(contestId, displayId) => Promise<{ latest, total }>` | 只取 1 条，供解题页「最新记录」pill 与「提交记录 (n)」；**不污染 `history`** |
-| `getSubmissionDetail` | `(submissionId) => Promise<SubmissionDetail>` | **纯转发** `submission.service`（（经 store 消费））：提交详情视图自持收敛轮询的取数入口，不复制状态、不加 await 壳 |
+| `getSubmissionDetail` | `(submissionId) => Promise<SubmissionDetail>` | **纯转发** `submission.service`（经 store 消费）：提交详情视图自持收敛轮询的取数入口，不复制状态、不加 await 壳 |
 | `getSubmissionCases` | `(submissionId) => Promise<SubmissionCases>` | **纯转发** `submission.service`（同上）：详情页测试点明细与控制台条失败提示的取数入口 |
 
 ## 直接依赖

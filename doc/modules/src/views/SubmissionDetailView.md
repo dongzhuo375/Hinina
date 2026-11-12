@@ -105,7 +105,7 @@ onUnmounted: alive = false；stopPoller()；复制反馈 timer 由 useTransientV
   「后端没返回代码」）。`code` 为空（OJ 隐藏代码且无本地快照）时渲染「未取到本次提交的
   源代码」文案，而不是留一个空编辑器 —— 让「真没代码」与「渲染失败」在界面上可区分。
 - 分层口径：本视图对 `submission.service` / `config.service` 的消费**全部经 store 纯转发**
-  （（经 store 消费）；此前的「一次性只读查询直连 service」例外已取消，
+  （经 store 消费；此前的「一次性只读查询直连 service」例外已取消，
   轮询循环内的取数同样走 store——由视图自持的收敛轮询器驱动）。
 - **配色与骨架随赛场主题收敛**（PR #36）：`TONE_CLASSES` 改为主题变量（与评测页同步）、
   判定卡由「圆角卡片 + 阴影」改为 `border-y` + `--bg-card`、CE 面板用 `--color-wa-*` /

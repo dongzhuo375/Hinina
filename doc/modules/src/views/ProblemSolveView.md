@@ -33,7 +33,7 @@
 - `vue` / `vue-router`
 - 组件：`ProblemTabStrip` / `ProblemStatement` / `CodeEditor` / `EditorConsoleBar` / `LoadingSpinner` / `ErrorMessage`
 - stores：`contestStore` / `problemStore` / `workspaceStore` / `submissionStore`
-- `@/stores/configStore`（分栏比例读取/回写、`EditorPrefs` 类型 —— View 侧配置消费唯一入口，store 纯转发 `config.service`；（经 store 消费），`Architecture.md` 登记的 View 直连 Service 欠账已清偿）
+- `@/stores/configStore`（分栏比例读取/回写、`EditorPrefs` 类型 —— View 侧配置消费唯一入口，store 纯转发 `config.service`；`Architecture.md` 登记的 View 直连 Service 欠账已清偿）
 - `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — 偏好上报到达前的状态行兜底）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）

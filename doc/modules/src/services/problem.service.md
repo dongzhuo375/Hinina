@@ -22,7 +22,7 @@
 
 ## 被依赖
 
-- `stores/problemStore.ts` — 唯一调用方（分层约定：View 不直接调 service/bridge）；`getProblem` 另经 store 纯转发供 `components/problem/QuickSubmitDialog.vue` 消费（（经 store 消费），原视图直连已取消）
+- `stores/problemStore.ts` — 唯一调用方（分层约定：View 不直接调 service/bridge）；`getProblem` 另经 store 纯转发供 `components/problem/QuickSubmitDialog.vue` 消费（经 store 消费；原视图直连已取消）
 
 ## 逻辑流程
 
