@@ -81,16 +81,17 @@
 // methods **with a single-line return annotation**, generics included
 // (`save<T>(v: Array<Map<string, T>>): void {`, getters; the body must sit on
 // the params' line — a newline after the call parens means the next statement
-// is not a definition). What is *not* tracked: cross-file helpers, aliases,
-// dynamic lookup, multi-line expression bodies (truncated at the first
-// newline), method annotations that span a newline or contain a conditional
-// `?` (the body walk stops there), object-type annotations with a postfix
-// (`function f(): { a: 1 }[] {` — the type literal is read as the body),
-// arrows stored as **object properties** (`const o = { h: () =>
-// saveSplitRatio(0.5) }` — the colon form is keyed by nothing; assignment
-// arrows are), generic arguments spanning a newline (readAngles is
-// single-line), and same-named helpers resolved at **depth > 6** (the transfer
-// walk has a hard depth cap). Unknown *callback* forms and any queued-entry
+// is not a definition). Object-literal properties are keyed by the property
+// name (`{ run: async () => … }`, `{ run: function () { … } }` — review round
+// twenty-two; plain `key: value` entries fast-fail, a ternary can key a
+// pseudo-name — over-collection only widens the scan). What is *not*
+// tracked: cross-file helpers, aliases, dynamic lookup, multi-line
+// expression bodies (truncated at the first newline), method annotations that
+// span a newline or contain a conditional `?` (the body walk stops there),
+// object-type annotations with a postfix (`function f(): { a: 1 }[] {` — the
+// type literal is read as the body), generic arguments spanning a newline
+// (readAngles is single-line), and same-named helpers resolved at **depth >
+// 6** (the transfer walk has a hard depth cap). Unknown *callback* forms and any queued-entry
 // **reference** fail closed instead; the untracked helper shapes above are
 // skipped silently — keep queued calls inside a tracked shape.
 // Scanning-fidelity note: unquoted regex literals are consumed verbatim by the
@@ -532,8 +533,9 @@ function sameLineBodyOpen(source, from) {
  *   与对象方法形态；注解与方法体只允许出现在参数括号的**同一行**
  *   （`sameLineBodyOpen`：换行/`;`/`)`/`,`/`}`/`?` 即放弃——`call()` 后接三元/
  *   下一条语句不是定义，见文件头局限）。对象类型注解（`(): { a: 1 } {`）通过
- *   「类型字面量后紧跟正文 `{`」消歧；`{ h: () => … }` 冒号形态的对象属性箭头
- *   不追踪（见文件头）。
+ *   「类型字面量后紧跟正文 `{`」消歧
+ * - 对象字面量属性：`{ run: async () => { … } }` / `{ run: function () { … } }`
+ *   ——键名即入口名（评审第二十二轮补；方向保守，普通 `key: value` 快速失败）
  *
  * 只为「回调 → 局部辅助函数 → 排队入口」这条**传递路径**服务：直接调用由
  * 事务回调的正文检查覆盖，跨文件/别名/动态调用不在能力范围内（见文件头）。
@@ -571,6 +573,19 @@ export function localFunctions(source) {
   const assignRe = /\b([A-Za-z_$][\w$]*)\s*(?::[^=;\n]*)?=(?![=>])\s*(?:async\b)?/g
   while ((match = assignRe.exec(source))) {
     add(match[1], assignArrowBody(source, assignRe.lastIndex))
+  }
+  // **对象字面量属性形态**（评审第二十二轮）：`{ run: async () => { … } }` /
+  // `{ run: function () { … } }`——键名即调用入口名。过去冒号形态完全不进表，
+  // 回调里 `svc.run()` 只带成员名、间接死锁路径漏追（门禁绿而运行时会排队等
+  // 自己）。方向保守：`{ key: value }` 普通值快速失败；三元 `a : b => c` 之类
+  // 伪键会多收正文，只加扫描面不加假绿。
+  const propFnRe = /\b([A-Za-z_$][\w$]*)\s*:\s*(?:async\s+)?function\b/g
+  while ((match = propFnRe.exec(source))) {
+    add(match[1], declBody(source, propFnRe.lastIndex))
+  }
+  const propArrowRe = /\b([A-Za-z_$][\w$]*)\s*:\s*(?:async\s+)?/g
+  while ((match = propArrowRe.exec(source))) {
+    add(match[1], assignArrowBody(source, propArrowRe.lastIndex))
   }
   // 方法形态：`name(...) {` / `name<T>(...) {`（排除关键字）。**泛型实参用
   // readAngles 平衡读取**——单层 `<[^<>()]*>` 在嵌套泛型（`Array<Map<…>>`）或

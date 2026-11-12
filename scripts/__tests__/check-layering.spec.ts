@@ -14,7 +14,8 @@ import { stripComments } from '../../scripts/lib/source-scan.mjs'
  * 违规形态各给一份「种进去必须红」的夹具；跨行、动态 import 的非字面量形态、
  * Vue 模板文本三类曾是缺口，负例逐条覆盖），再对真实 `src/` 树跑一遍——后者
  * 是「扫描面（含 utils/types 中转面）不 import Service、扫描面不 import
- * bridge / @tauri-apps/api」两条红线在 `npm test` 里的实际保障（2026-11-09
+ * bridge / @tauri-apps/*（扩展面同禁 Tauri 包）」两条红线在 `npm test`
+ * 里的实际保障（2026-11-09
  * 分层欠账清偿后恒绿；
  * 新增直连会在这里红出来）。
  *
@@ -147,6 +148,52 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     ])
     expect(composable).toHaveLength(1)
     expect(composable[0]).toContain('规则B')
+    // 插件包同样是 Tauri 边（第二十二轮：只匹配 @tauri-apps/api 曾放行 plugin-*）
+    for (const spec of ['@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener']) {
+      const plugin = findViolations([
+        {
+          path: 'views/Plugin.vue',
+          content: `<template><div/></template>\n<script setup>\nimport { open } from '${spec}'\n</script>`,
+        },
+      ])
+      expect(plugin, spec).toHaveLength(1)
+      expect(plugin[0], spec).toContain('规则B')
+    }
+  })
+
+  it('Tauri 红线扩展面：stores/services/guards/router/main 只禁 Tauri 包（bridge 梯级合法）', () => {
+    const serviceTauri = findViolations([
+      { path: 'services/x.ts', content: `import { invoke } from '@tauri-apps/api/core'`, tauriOnly: true },
+    ])
+    expect(serviceTauri).toHaveLength(1)
+    expect(serviceTauri[0]).toContain('规则B')
+    // Service→Bridge 是合法梯级：扩展面不应用 bridge 路径规则
+    const serviceBridge = findViolations([
+      { path: 'services/x.ts', content: `import { IpcError } from '@/bridge'`, tauriOnly: true },
+    ])
+    expect(serviceBridge).toEqual([])
+    // 扩展面同样不应用规则 A（Store→Service 合法）
+    const storeService = findViolations([
+      { path: 'stores/x.ts', content: `import { configService } from '@/services/config.service'`, tauriOnly: true },
+    ])
+    expect(storeService).toEqual([])
+    for (const path of ['stores/x.ts', 'guards/g.ts', 'router/r.ts']) {
+      const plugin = findViolations([
+        { path, content: `import { open } from '@tauri-apps/plugin-dialog'`, tauriOnly: true },
+      ])
+      expect(plugin, path).toHaveLength(1)
+    }
+    // loadSources 的扩展面标记：main.ts 必在扫描面且为 tauriOnly
+    const files = loadSources(process.cwd())
+    const main = files.find((f) => f.path === 'main.ts')
+    expect(main, 'main.ts 缺失（扫描面 fail-closed）').toBeTruthy()
+    expect(main?.tauriOnly).toBe(true)
+    for (const file of files) {
+      if (/^(stores|services|guards|router)\//.test(file.path)) expect(file.tauriOnly, file.path).toBe(true)
+      if (/^(views|components|composables|utils|types)\//.test(file.path) || file.path === 'App.vue') {
+        expect(file.tauriOnly, file.path).toBeFalsy()
+      }
+    }
   })
 
   it('一行同时命中两层规则 → 两条违规各自报出（实际写法不存在，锁定扫描器语义）', () => {

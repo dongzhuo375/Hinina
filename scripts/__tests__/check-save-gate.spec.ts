@@ -1072,6 +1072,42 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
     expect(violations[0]).toContain('persistOne')
   })
 
+  it('对象字面量属性方法体里的排队调用同样被追踪（评审第二十二轮）', () => {
+    // 冒号形态过去完全不进函数表：回调里 `svc.run()` 只带成员名，间接死锁
+    // 路径漏追（运行时会排在回调已持有的保存门后）。属性箭头与函数表达式都收。
+    const arrowProp = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'const svc = { run: async () => configService.saveSplitRatio(1) }\n' +
+          'await configService.runSaveTxn(async (tx) => { svc.run(); return tx.updateConfig(() => {}) })',
+      },
+    ])
+    expect(arrowProp).toHaveLength(1)
+    expect(arrowProp[0]).toContain('间接引用')
+    expect(arrowProp[0]).toContain('run')
+    const fnProp = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'const svc = { persist: function (r) { return configService.updateEditorPrefs({ r }) } }\n' +
+          'await configService.runSaveTxn(async (tx) => { svc.persist(1); return tx.updateConfig(() => {}) })',
+      },
+    ])
+    expect(fnProp).toHaveLength(1)
+    expect(fnProp[0]).toContain('间接引用')
+    // 普通 `key: value` 不误收（快速失败，方向保守）
+    const plain = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content:
+          'const opts = { ratio: 0.5, label: "x" }\n' +
+          'await configService.runSaveTxn(async (tx) => { use(opts.ratio); return tx.updateConfig(() => {}) })',
+      },
+    ])
+    expect(plain).toEqual([])
+  })
+
   it('包装器检查按定义形态定位，不再锁定首个同名文本（评审 S8）', () => {
     // 更早出现的同名**定义形态**（对象方法）曾抢先命中 indexOf，真正的包装器
     // 绕过队列反而没被检查
