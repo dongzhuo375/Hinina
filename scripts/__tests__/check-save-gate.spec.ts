@@ -755,7 +755,8 @@ await configService.runSaveTxn((tx) => {
 
   it('排队入口的其余调用形态不再假绿（括号成员 / .bind / 可选括号 / 逗号表达式 / 标签模板）', () => {
     // 十六轮评审逐形态补正则，每轮都还剩下下一种；规则 2 的契约是「不得引用」，
-    // 因此改为引用级判定（QUEUED_MENTION）——下列形态即使调用语法各不相同，
+    // 因此改为引用级判定（调用形态 `QUEUED_ENTRY` + 全文件裸引用
+    // `bareQueuedReferences`）——下列形态即使调用语法各不相同，
     // 名字出现即违规，不再依赖穷举。
     for (const call of [
       '(configService.saveSplitRatio)(0.5)',

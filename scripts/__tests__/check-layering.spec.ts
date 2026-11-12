@@ -13,8 +13,9 @@ import { stripComments } from '../../scripts/lib/source-scan.mjs'
  * 断言分两层：先用合成夹具锁住每条规则的判定（含变异验证的等价物——每类
  * 违规形态各给一份「种进去必须红」的夹具；跨行、动态 import 的非字面量形态、
  * Vue 模板文本三类曾是缺口，负例逐条覆盖），再对真实 `src/` 树跑一遍——后者
- * 是「View/composable 不 import Service、View/component 不 import bridge」
- * 两条红线在 `npm test` 里的实际保障（2026-11-09 分层欠账清偿后恒绿；
+ * 是「扫描面（含 utils/types 中转面）不 import Service、扫描面不 import
+ * bridge / @tauri-apps/api」两条红线在 `npm test` 里的实际保障（2026-11-09
+ * 分层欠账清偿后恒绿；
  * 新增直连会在这里红出来）。
  *
  * `.vue` 夹具注意：扫描只看 `<script>` 块，裸脚本夹具一律用 `.ts` 路径，
@@ -539,6 +540,29 @@ import { x } from '@/services/config.service'`,
     ])
     expect(bridge).toHaveLength(1)
     expect(bridge[0]).toContain('规则B')
+  })
+
+  it('命名 HTML 实体不隐藏模板动态 import（评审第二十一轮：&lpar; / &sol; / @tauri-apps/api）', () => {
+    // Vue 解析模板时按**完整 HTML5 实体表**解码，编译产物是真实动态 import；
+    // 门禁曾用原文切片 + 六实体量表 → 零违规静默假绿。表达式文本改取 AST 的
+    // 已解码 content 后全部命中。
+    const cases = [
+      `<button @click="import&lpar;'@/services/x'&rpar;">x</button>`,
+      `<button @click="import('@/services&sol;x')">y</button>`,
+      `<button @click="import&lpar;&apos;@tauri-apps&sol;api&sol;core&apos;&rpar;">z</button>`,
+      `<button @click="import&lpar;'@/bridge/config'&rpar;">w</button>`,
+      `<p>{{ import&lpar;'@/services/b'&rpar; }}</p>`,
+    ]
+    for (const markup of cases) {
+      const violations = findViolations([
+        {
+          path: 'components/X.vue',
+          content: `<template>${markup}</template>\n<script setup>const a = 1</script>`,
+        },
+      ])
+      expect(violations, markup).toHaveLength(1)
+      expect(violations[0], markup).toMatch(/规则[AB]/)
+    }
   })
 
   it('模板表达式先剥注释：块注释不能拆开 import 与调用括号（评审第十九轮）', () => {

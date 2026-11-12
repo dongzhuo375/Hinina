@@ -1,7 +1,8 @@
 // Layering static gate: pins the two red lines of the strict
 // View → Store → Service rule (doc/Architecture.md「前端分层口径」).
 //
-//   Rule A — View / component / composable (+ App.vue) must not import Service
+//   Rule A — the whole scan surface (View / component / composable, App.vue,
+//            and the utils/types **transit roots**) must not import Service
 //            (`@/services/*`, the bare `@/services` barrel, or any
 //            `*/services/*` specifier, including `import type` / dynamic
 //            `import()` / side-effect / re-export).
@@ -209,7 +210,7 @@ function scanUnit(violations, path, unitSource, lineBase) {
     const line = lineOf(index)
     if (SERVICE_SPEC.test(spec)) {
       violations.push(
-        `${path}:${line}: 规则A —— View/component/composable 不得 import Service（${spec}）；` +
+        `${path}:${line}: 规则A —— 扫描面（View/component/composable 与 utils/types 中转面）不得 import Service（${spec}）；` +
           '一律经对应 store 消费（Architecture.md「前端分层口径」）',
       )
     }
@@ -245,7 +246,7 @@ export function findViolations(files) {
         if (SERVICE_SPEC.test(block.src)) {
           violations.push(
             `${path}:${line}: 规则A —— <script src="${block.src}"> 指向 Service；` +
-              'View/component/composable 不得 import Service，一律经对应 store 消费' +
+              '扫描面（含 utils/types 中转面）不得 import Service，一律经对应 store 消费' +
               '（Architecture.md「前端分层口径」）',
           )
         }
@@ -299,7 +300,7 @@ export function runCli(root) {
   }
   if (violations.length === 0) {
     console.log(
-      `layering-gate: OK（${files.length} 个文件；View/component/composable 不 import Service，扫描面不 import bridge / @tauri-apps/api）`,
+      `layering-gate: OK（${files.length} 个文件；扫描面（含 utils/types 中转面）不 import Service / bridge / @tauri-apps/api）`,
     )
     return 0
   }

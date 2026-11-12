@@ -29,14 +29,17 @@
 //     regex, which is fail-closed but noisy). Why the direction is safe: a
 //     mis-detected regex is consumed VRBATIM (offsets/content unchanged), so the
 //     failure mode is comment residue → a false positive, never a silent miss.
-//   - Template expressions (directive bindings / interpolations) are
-//     HTML-entity decoded first (`&#114;unSaveTxn` is a real runSaveTxn at
-//     runtime; numeric references and the common named set only) and then
-//     comment-masked with the same stripper. They are **code fragments**, and a
-//     block comment can split a token pair the matchers key on:
-//     `import/*c*/('@/services/x')` is a real dynamic import that the raw text
-//     read as neither `import(` nor an unreadable argument (silent green,
-//     review). Masking preserves offsets and line numbers; string literals stay
+//   - Template expressions (directive bindings / interpolations / dynamic
+//     arguments) are taken from the AST node's **decoded `content`** — Vue
+//     decodes the full HTML5 entity table when parsing the template, so the
+//     node text IS the runtime code (`import&lpar;('@/services/x')` compiles to
+//     a real dynamic import; a raw source slice plus a six-name entity table
+//     missed `&lpar;` / `&sol;` / … and stayed silent — review round
+//     twenty-one). The decoded text is then comment-masked with the same
+//     stripper: expressions are **code fragments**, and a block comment can
+//     split a token pair the matchers key on (`import/*c*/('@/services/x')` was
+//     a real dynamic import the raw text read as neither `import(` nor an
+//     unreadable argument — silent green, review). String literals stay
 //     verbatim, so `'https://…'` and `//` inside a string are still data.
 //   - `readBalanced` skips strings, comments and regex literals with the same
 //     heuristic, so `/[}]/` inside a transaction callback no longer truncates
@@ -441,45 +444,49 @@ function keepRanges(source, ranges) {
  * `:…` 绑定的 `exp`）与**插值**（`{{ … }}` 的 content）都是可执行代码，必须与
  * `<script>` 一起进入扫描面。提取走 `vue/compiler-sfc` 的模板 AST（与应用同一
  * 解析器）：HTML 注释（COMMENT 节点）与静态属性自然不在集合内，散文里的伪指令
- * 不再误报；偏移为文件绝对，直接切片。表达式切片先经 `decodeHtmlEntities` 解码
- * （`&#114;unSaveTxn` 运行时就是 runSaveTxn），再经 `stripComments` 掩码注释——
- * 表达式是**代码片段**，块注释可以拆开 matcher 依赖的相邻 token 对
- *（`import` 与 `(` 之间夹一段块注释仍是真实动态 import，原样文本既不像
- * `import(` 也不像可读说明符，曾静默假绿）；字符串字面量原样保留。命名实体的
- * 表只含常见集合（表外命名实体保持原样）。
+ * 不再误报。
+ *
+ * 表达式文本取 AST 节点**已解码的 `content`**（Vue 解析模板时按完整 HTML5
+ * 实体表解码——`node.exp.content` / 插值 `node.content.content` /
+ * 动态参数 `node.arg.content` 都是运行时代码）；**不再**用原文切片配自带
+ * 实体表：表只含 6 个命名实体，`&lpar;` / `&sol;` / `&period;` 等可让
+ * `import&lpar;('@/services/x')` 对门禁不可见而编译产物是真实动态 import
+ *（评审第二十一轮，静默假绿）。注释仍在解码后经 `stripComments` 掩码——
+ * 表达式是**代码片段**，`import` 与调用括号之间夹一段块注释仍是真实动态
+ * import（曾静默假绿）；字符串字面量原样保留。
  *
  * 动态参数（`@[expr]` / `v-slot:[expr]` 的 arg）与指令 exp、插值一并提取——
  * arg 是**可执行表达式**（`@[runSaveTxn(h)]="go"` 在运行时是一次真实调用）。
  *
- * 单一**遍历器**：本函数是唯一实现（收集 `{ text, line }`，按行序——与按偏移序
- * 等价，同文件的非交叠区间行序即偏移序）；`templateExpressions` 从它派生。
- * 两份 walker 会漂移（评审：一个修了动态参数、另一个漏掉）。
+ * 单一**遍历器**：本函数是唯一实现（收集 `{ text, line }`，按行序——同文件的
+ * 非交叠表达式行序即源码序）；`templateExpressions` 从它派生。两份 walker 会
+ * 漂移（评审：一个修了动态参数、另一个漏掉）。
  */
 export function templateExpressionEntries(source, descriptor = parseSfc(source)) {
   const ast = descriptor.template?.ast
   if (!ast) return []
   const entries = []
-  const push = (loc) => {
-    if (!loc) return
-    // Vue 编译前会解码 HTML 实体：`&#114;unSaveTxn(…)` 在运行时就是
-    // runSaveTxn——原文切片必须先解码再进入扫描面（评审：实体曾可藏调用）。
-    // 注释同样要掩码：表达式是代码片段，`import/*c*/(…)` 的注释把 matcher
-    // 依赖的 token 对拆开，原样扫描会静默假绿（评审第十九轮）
-    const text = stripComments(decodeHtmlEntities(source.slice(loc.start.offset, loc.end.offset)))
+  const push = (loc, content) => {
+    if (!loc || typeof content !== 'string') return
+    // content 已是解码后的代码；注释掩码保持（`import/*c*/(…)` 的块注释会把
+    // matcher 依赖的 token 对拆开，原样扫描会静默假绿，评审第十九轮）
+    const text = stripComments(content)
     if (text.trim() === '') return
     entries.push({ text, line: loc.start.line })
   }
   const walk = (node) => {
     if (!node) return
     // 7 = DIRECTIVE：exp 是绑定表达式（v-for 的 exp 覆盖整段 `item in items`，
-    // 原样切片对保存门禁无害）
-    if (node.type === 7 && node.exp) push(node.exp.loc)
+    // 原样喂给保存门禁无害）
+    if (node.type === 7 && node.exp) push(node.exp.loc, node.exp.content)
     // 5 = INTERPOLATION：content 是插值表达式
-    else if (node.type === 5 && node.content) push(node.content.loc)
+    else if (node.type === 5 && node.content) push(node.content.loc, node.content.content)
     // 动态指令参数 `@[expr]="handler"` / `v-slot:[expr]`：arg 是**可执行表达式**
     //（`isStatic === false`）。只收 exp 会漏掉它——`@[runSaveTxn(h)]="go"` 在
     // 运行时是一次真实调用（评审 P2）
-    if (node.type === 7 && node.arg && node.arg.isStatic === false) push(node.arg.loc)
+    if (node.type === 7 && node.arg && node.arg.isStatic === false) {
+      push(node.arg.loc, node.arg.content)
+    }
     for (const child of node.children ?? []) walk(child)
     // 指令住在元素的 props 里（children 之外），必须单独遍历
     for (const prop of node.props ?? []) walk(prop)
@@ -757,45 +764,10 @@ export function decodeStringLiteral(raw) {
   })
 }
 
-const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
-
-/**
- * Decode HTML character references in template expression text. Vue compiles
- * after entity decoding, so `&#114;unSaveTxn(…)` inside `@click` is a real
- * `runSaveTxn` call while the raw source spells something else (review: the
- * save gate must not go green on that).
- *
- * Mirrors **attribute-value** decoding (directives and interpolations are
- * attribute / text content): numeric references decode with or without the
- * semicolon (`&#114` and `&#x72` and `&#X72`), named references decode with a
- * semicolon and — for the small legacy set here — also without one unless the
- * next character is alphanumeric or `=` (`&amp` → `&`, `&ampx` → verbatim),
- * exactly as the browser parser rules jsdom confirmed. Unknown names stay
- * verbatim (conservative: a false miss only for named entities outside the
- * table).
- */
-export function decodeHtmlEntities(text) {
-  return text.replace(/&(?:#([0-9]+)|#[xX]([0-9a-fA-F]+)|([a-zA-Z][a-zA-Z0-9]*))(;?)/g, (m, dec, hex, name, semi, offset, whole) => {
-    // 码点必须在 Unicode 范围内：`&#99999999;` 会让 String.fromCodePoint 抛
-    // RangeError 并把整个门禁打崩（评审：应返回裁决而不是异常）
-    if (dec !== undefined) {
-      const code = Number.parseInt(dec, 10)
-      return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m
-    }
-    if (hex !== undefined) {
-      const code = Number.parseInt(hex, 16)
-      return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m
-    }
-    // 只认自有属性：`&constructor;` / `&toString;` 会命中原型链上的函数
-    //（`String(NAMED_ENTITIES['constructor'])` 是一段源码文本，评审 P2）
-    if (!Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, name)) return m
-    if (semi === ';') return NAMED_ENTITIES[name]
-    const next = whole[offset + m.length] ?? ''
-    // 属性语境：无分号的 legacy 实体后接字母数字/等号时浏览器不解码
-    if (/[A-Za-z0-9=]/.test(next)) return m
-    return NAMED_ENTITIES[name]
-  })
-}
+// 模板表达式的 HTML 实体解码已不再需要：表达式文本直接取 AST 节点的
+// `content`（Vue 解析时按**完整 HTML5 实体表**解码，见
+// `templateExpressionEntries`）。自带六实体表配原文切片漏掉 `&lpar;` /
+// `&sol;` 等命名实体，曾让模板动态 import 静默假绿（评审第二十一轮）。
 
 /**
  * Walk sources for a gate.

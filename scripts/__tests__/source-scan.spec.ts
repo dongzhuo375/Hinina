@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildLineIndex,
-  decodeHtmlEntities,
   lineOfIndex,
   prepareSource,
   scriptBlocksOnly,
@@ -113,13 +112,16 @@ import { z } from '@/stores/a'`
     expect(out).toContain("import { z } from '@/stores/a'")
   })
 
-  it('HTML 实体解码：原型链名字不命中、越界码点不抛异常', () => {
-    expect(decodeHtmlEntities('&constructor;')).toBe('&constructor;')
-    expect(decodeHtmlEntities('&toString;')).toBe('&toString;')
-    expect(decodeHtmlEntities('&#99999999;')).toBe('&#99999999;')
-    expect(decodeHtmlEntities('&#1114112;')).toBe('&#1114112;') // 0x110000 越界
-    expect(decodeHtmlEntities('&#114;')).toBe('r')
-    expect(decodeHtmlEntities('&#x72;')).toBe('r')
+  it('模板表达式取 AST 已解码的 content（命名实体不再靠自带表，评审第二十一轮）', () => {
+    // `&lpar;` / `&sol;` 在完整 HTML5 表里，Vue 解析模板时解成正文字符——
+    // 表达式文本必须是解码后的代码，否则动态 import 对门禁不可见（静默假绿）
+    const source =
+      '<template><button @click="import&lpar;\'@/services/x\'&rpar;">x</button>' +
+      '<p>{{ import(\'@/services&sol;y\') }}</p></template>'
+    expect(templateExpressions(source)).toEqual([
+      "import('@/services/x')",
+      "import('@/services/y')",
+    ])
   })
 
   it('行索引：buildLineIndex + 二分 lineOfIndex 与逐步扫描一致', () => {
