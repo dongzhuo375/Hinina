@@ -783,8 +783,9 @@ await configService.runSaveTxn((tx) => {
       },
     ])
     expect(direct).toHaveLength(1)
-    expect(direct[0]).toContain('引用了排队保存入口')
-    // 同文件辅助函数里的裸引用同样经传递路径报出
+    expect(direct[0]).toContain('引用形态')
+    expect(direct[0]).toContain('saveSplitRatio')
+    // 同文件辅助函数里的裸引用同样报出（在**出现处**——不依赖调用链可达）
     const viaHelper = findViolations([
       {
         path: 'composables/useSettingsForm.ts',
@@ -796,8 +797,38 @@ await configService.runSaveTxn((tx) => {
       },
     ])
     expect(viaHelper).toHaveLength(1)
-    expect(viaHelper[0]).toContain('间接引用')
+    expect(viaHelper[0]).toContain('引用形态')
     expect(viaHelper[0]).toContain('saveSplitRatio')
+  })
+
+  it('模块顶层取别名、回调内经别名调用 → 违规（评审第二十轮：回调正文只见别名）', () => {
+    const violations = findViolations([
+      {
+        path: 'composables/useSettingsForm.ts',
+        content: `const up = configStore.updateEditorPrefs
+await configStore.runSaveTxn(async (tx) => {
+  up({})
+  return tx.updateConfig(() => {})
+})`,
+      },
+    ])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('引用形态')
+    expect(violations[0]).toContain('updateEditorPrefs')
+    // 传参 / 属性分离形态同样在出现处违规
+    for (const escape of [
+      `register(configStore.saveSplitRatio)`,
+      `const save = configStore['saveSplitRatio']`,
+    ]) {
+      const hit = findViolations([
+        {
+          path: 'composables/useSettingsForm.ts',
+          content: `${escape}\nexport const ok = true`,
+        },
+      ])
+      expect(hit, escape).toHaveLength(1)
+      expect(hit[0], escape).toContain('引用形态')
+    }
   })
 
   it('点号与属性名之间允许空白：`svc . runSaveTxn(…) : { … }` 仍被扫描', () => {
@@ -1066,12 +1097,15 @@ const s = '@click="configStore.saveSplitRatio(0.5)"'
   })
 
   it('定义检测不跨前导换行：log(1) 之后下一行的无关 if 块不再被当成方法体（评审 S9）', () => {
+    // if 块里放一次**合法的**排队调用（模块层的队列调用本身不违规）：旧实现
+    // 把 if 块吸收成 log 的方法体，回调里 `log(cfg)` 经传递路径假报；修复后
+    // log 不进函数表，零违规。
     const violations = findViolations([
       {
         path: 'composables/useSettingsForm.ts',
         content:
           'const cfg = log(1)\n' +
-          'if (depth > 0) { const m = "saveSplitRatio" }\n' +
+          'if (depth > 0) { configService.saveSplitRatio(0.5) }\n' +
           'await configService.runSaveTxn(async (tx) => { log(cfg); return tx.updateConfig(() => {}) })',
       },
     ])

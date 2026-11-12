@@ -11,16 +11,22 @@
 // Rules (each maps to one of the three exported findings):
 //   1. `runSaveTxn` may only appear in allowlisted files (definition + the one
 //      transactional caller). A new caller must pass review once.
-//   2. A `runSaveTxn` callback body must not **reference** ANY queued save entry
-//      — `runSaveTxn`, `updateEditorPrefs`, `saveSplitRatio`. The two wrappers
-//      queue too, so calling them inside a callback deadlocks exactly like a
-//      nested transaction. Detection is **reference-level** (`QUEUED_MENTION`,
-//      any occurrence of the name), not call-syntax-level: the call shapes are
-//      open-ended — `(obj.m)(x)`, `obj.m.bind(obj)(x)`, `obj?.['m']?.(x)`,
-//      `(0, obj.m)(x)`, tagged templates — and sixteen review rounds each closed
-//      one shape while the next stayed green. A bare reference is dangerous on
-//      its own (it can be invoked through the alias later), so any mention is
-//      reported; the precise call form only decides the message wording.
+//   2. A `runSaveTxn` callback body must not **call** ANY queued save entry
+//      — `runSaveTxn`, `updateEditorPrefs`, `saveSplitRatio` — and the entries
+//      must not be **referenced bare anywhere in a scanned file**. The two
+//      wrappers queue too, so calling them inside a callback deadlocks exactly
+//      like a nested transaction. Call detection is reference-level
+//      (`QUEUED_ENTRY`: `(obj.m)(x)`, `obj.m.bind(obj)(x)`, `obj?.['m']?.(x)`,
+//      `(0, obj.m)(x)`, tagged templates are all recognized or reported at the
+//      bare-reference site). The bare-reference rule is the round-twenty fix:
+//      `const up = configStore.updateEditorPrefs` at module scope followed by
+//      `up({})` inside a callback used to be green — the callback body only
+//      names the alias, and the runtime call queues behind the save gate the
+//      callback already holds (settings stuck at "saving…" until restart).
+//      Any non-call occurrence (alias binding, argument, property extraction,
+//      even a string that merely spells the name — fail-closed direction) is
+//      reported at its own site; the call-shaped forms are left to the
+//      callback / observer / helper scans.
 //      **Fail-closed**: a callback form the scanner cannot extract (a referenced
 //      callback from another module, an alias, `handlers.save`, …) is reported
 //      as a violation instead of being skipped — otherwise the gate would show
@@ -134,23 +140,39 @@ export const TXN_ALLOWLIST = [
 ]
 
 /// Queued save entries: appearing inside a transaction callback body deadlocks.
-/// `QUEUED_ENTRY` recognizes the common **call** forms for the message wording
-/// (optional calls `saveSplitRatio?.(…)`, `.call(...)` / `.apply(...)`,
-/// bracket-literal access `configService['saveSplitRatio'](0.5)`); the rule
-/// itself is reference-level — see `QUEUED_MENTION` below. The anchor for
-/// bracket access is **name + closing quote + `]` + `(`**, because the `\b` of
-/// the name sits inside the brackets.
-const QUEUED_ENTRY = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)(?:['"`]\s*\]\s*\(|\s*(?:\?\.)?\s*(?:\.\s*(?:call|apply)\s*)?\s*[<(])/
+/// `QUEUED_CALL_TAIL` recognizes the common **call** forms (optional calls
+/// `saveSplitRatio?.(…)`, `.call(...)` / `.apply(...)`, bracket-literal access
+/// `configService['saveSplitRatio'](0.5)`); `QUEUED_ENTRY` = name + tail. The
+/// anchor for bracket access is **name + closing quote + `]` + `(`**, because
+/// the `\b` of the name sits inside the brackets.
+const QUEUED_CALL_TAIL = /(?:['"`]\s*\]\s*\(|\s*(?:\?\.)?\s*(?:\.\s*(?:call|apply)\s*)?\s*[<(])/
+const QUEUED_ENTRY = new RegExp(`\\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)${QUEUED_CALL_TAIL.source}`)
+/// 同一 tail 的**锚定**版：判断某个出现点本身是否调用形态（全局裸引用扫描用——
+/// 不锚定会在 tail 里搜到后续另一个调用点，把本处的裸引用误判成调用）。
+const QUEUED_CALL_AT = new RegExp(`^${QUEUED_CALL_TAIL.source}`)
+const QUEUED_NAME = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\b/g
 
-/// Reference-level rule: **any** occurrence of a queued entry name inside a
-/// transaction callback / observer listener / tracked local helper is a
-/// violation. Call-syntax alternatives (`(obj.m)(x)`, `.bind(obj)(x)`,
-/// `obj?.['m']?.(x)`, `(0, obj.m)(x)`, tagged templates) are open-ended and
-/// each review round closed only one; a bare reference can be invoked through
-/// an alias later, so it is reported too. Direction is fail-closed: a string
-/// literal that merely spells the name also reports (same as the call-level
-/// matcher, which already scans string literals).
-const QUEUED_MENTION = /\b(runSaveTxn|updateEditorPrefs|saveSplitRatio)\b/
+/**
+ * 全文件**裸引用**扫描：排队入口以非调用形态出现的位置（取别名
+ * `const up = configStore.updateEditorPrefs`、传参
+ * `register(configStore.saveSplitRatio)`、属性分离
+ * `configStore['saveSplitRatio']`……）。这些引用可以在事务回调里经别名调用——
+ * 回调正文里只有别名、看不到排队入口的名字，回调级扫描必然漏掉（评审：模块
+ * 顶层取别名 + 回调内 `up({})` 曾零违规；运行时 `up()` 排在回调已持有的保存门
+ * 后，设置页永久停在「保存中…」直到重启）。方向 fail closed：字符串里仅拼写
+ * 名字同样报（与调用级口径一致）。调用形态不在此列（`name(` / `?.(` /
+ * `.call(` / 方括号调用交给回调/监听器/辅助函数的调用扫描）。
+ */
+export function bareQueuedReferences(source) {
+  const hits = []
+  let match
+  QUEUED_NAME.lastIndex = 0
+  while ((match = QUEUED_NAME.exec(source))) {
+    if (QUEUED_CALL_AT.test(source.slice(match.index + match[0].length))) continue
+    hits.push({ name: match[1], index: match.index })
+  }
+  return hits
+}
 
 /**
  * Extract a callback body from a call's argument text.
@@ -682,9 +704,9 @@ function isPureForward(entries, callIndex, ref) {
 
 /**
  * 从回调正文出发，沿**同文件局部函数**追踪到排队入口（深度有上限、带环检测）。
- * 判定同样按**引用**（`QUEUED_MENTION`）——辅助函数里把入口取别名、括号调用、
- * 标签模板调用等形态无法穷举，引用即违规。返回命中路径，例如
- * `performSwitch → saveSplitRatio`。
+ * 判定按**调用形态**（`QUEUED_ENTRY`）——辅助函数里的裸引用（取别名/传参）由
+ * 全文件 `bareQueuedReferences` 在出现处直接报，不依赖调用链可达性。返回命中
+ * 路径，例如 `performSwitch → saveSplitRatio`。
  */
 export function queuedViaLocals(callbackBody, functions, maxDepth = 6) {
   const hits = []
@@ -696,7 +718,7 @@ export function queuedViaLocals(callbackBody, functions, maxDepth = 6) {
       const nextTrail = [...trail, name]
       // 同名可能有多份正文（不同作用域）：逐份检查，任一份命中即报
       for (const fnBody of bodies) {
-        const match = fnBody.match(QUEUED_MENTION)
+        const match = fnBody.match(QUEUED_ENTRY)
         if (match) {
           hits.push({ trail: nextTrail, entry: match[1] })
           continue
@@ -828,10 +850,11 @@ export function observerViolations(path, source, functions) {
       continue
     }
     for (const body of bodies) {
-      const mention = body.match(QUEUED_MENTION)
+      // 调用形态（裸引用由全文件 bareQueuedReferences 在出现处直接报）
+      const mention = body.match(QUEUED_ENTRY)
       if (mention) {
         violations.push(
-          `${path}: switchObservers 监听器内引用了排队保存入口 \`${mention[1]}\`——` +
+          `${path}: switchObservers 监听器内调用了排队保存入口 \`${mention[1]}\`——` +
             '观察者在事务回调内被 await，会排队等自己（死锁）。监听器只能做读取/对齐',
         )
         continue
@@ -861,6 +884,18 @@ export function findViolations(files) {
     // 文件级参数名豁免会把同名外部回调假绿；任意 forward 别名的调用点不会
     // 出现 runSaveTxn，回调正文根本没有被扫描）。
     const forwardEntries = path === 'stores/configStore.ts' ? runSaveTxnForwardEntries(source) : []
+    // 全文件裸引用：取别名/传参/属性分离的排队入口——别名可在事务回调里被调用，
+    // 回调正文只见别名不见入口名，回调级扫描必然漏（评审：模块顶层
+    // `const up = configStore.updateEditorPrefs` + 回调内 `up({})` 曾零违规）。
+    // 在**出现处**直接报，fail closed。
+    for (const bare of bareQueuedReferences(source)) {
+      violations.push(
+        `${path}: 排队保存入口 \`${bare.name}\` 以引用形态出现（取别名 / 传参 / 属性分离）——` +
+          '调用点无法追踪：在事务回调里经别名调用会排在回调已持有的保存门后，永久挂起；' +
+          `请直接以 \`${bare.name}(...)\` 形态调用，事务内改用 tx.updateConfig。片段：` +
+          source.slice(Math.max(0, bare.index - 30), bare.index + 60).replace(/\s+/g, ' '),
+      )
+    }
     if (source.includes('runSaveTxn')) {
       if (!TXN_ALLOWLIST.includes(path)) {
         violations.push(
@@ -883,13 +918,12 @@ export function findViolations(files) {
           continue
         }
         for (const body of bodies) {
-          const mention = body.match(QUEUED_MENTION)
+          // 调用形态即违规；裸引用（取别名/传参）由全文件 bareQueuedReferences
+          // 在出现处直接报——即使别名在回调外创建，门禁也在原地红
+          const mention = body.match(QUEUED_ENTRY)
           if (mention) {
-            // 引用级判定：别名、括号成员调用、`.bind`、可选括号、标签模板等
-            // 形态无法穷举，出现即违规；QUEUED_ENTRY 只用于区分消息措辞
-            const recognizedCall = QUEUED_ENTRY.test(body)
             violations.push(
-              `${path}: runSaveTxn 回调内${recognizedCall ? '调用了' : '引用了'}排队保存入口 \`${mention[1]}\`——` +
+              `${path}: runSaveTxn 回调内调用了排队保存入口 \`${mention[1]}\`——` +
                 '它会排在回调自己持有的门禁之后，永久挂起。改用 tx.updateConfig(...)。片段：' +
                 body.trim().slice(0, 120),
             )

@@ -5,15 +5,15 @@
 //            (`@/services/*`, the bare `@/services` barrel, or any
 //            `*/services/*` specifier, including `import type` / dynamic
 //            `import()` / side-effect / re-export).
-//   Rule B — View / component (+ App.vue) must not import `@/bridge` or any
-//            `*/bridge/*` specifier. The **transit roots** (utils/types) are
-//            inside rule B too — re-exporting bridge from a transit file is
-//            the same router shape as re-exporting services, and the
-//            View → Bridge edge must be cut at the router (review: rule B
-//            used to exempt transit, so `view → utils/ipc → bridge` went
-//            green). **Composables are outside rule B**: the registered red
-//            line names View / component only (Architecture.md「前端分层口径」
-//            first bullet); widen it only with a documented reason.
+//   Rule B — no scanned file may import `@/bridge` / `*/bridge/*`, or the
+//            Tauri API package `@tauri-apps/api` (CLAUDE.md: bridge is the
+//            only place that touches it; a direct `invoke` bypasses the
+//            IpcError normalization). Rule B covers the **whole scan
+//            surface**: View / component (+ App.vue), **composables** (a View
+//            consuming the composable reaches IPC through it — review round
+//            twenty), and the **transit roots** (utils/types — re-exporting
+//            bridge is the same router shape; review round eighteen).
+//            Rule A and rule B now share one scope.
 //
 // Both red lines were previously enforced by manual grep ("可 grep 断言"); this
 // script makes them a CI check (`npm run check:layering`, ci.yml frontend job),
@@ -98,18 +98,17 @@ export const SOURCE_EXTENSIONS = /\.(?:d\.ts|ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$
 /// Rule A: specifiers that resolve into the service layer — including the bare
 /// directory barrel (`from '@/services'`), symmetric with BRIDGE_SPEC below.
 const SERVICE_SPEC = /(?:^|\/)services(?:\/|$)/
-/// Rule B: specifiers that resolve into the bridge layer.
-const BRIDGE_SPEC = /(?:^|\/)bridge(?:\/|$)/
+/// Rule B: specifiers that reach the IPC surface — the bridge layer and the
+/// Tauri API package itself. CLAUDE.md: bridge is **the only place** that
+/// touches `@tauri-apps/api`; a direct `invoke` from a view bypasses the
+/// IpcError normalization at the bridge boundary (review round twenty).
+const BRIDGE_SPEC = /(?:^|\/)bridge(?:\/|$)|^@tauri-apps\/api(?:\/|$)/
 
-/// Rule A applies to every scanned scope. Rule B covers View/component
-/// (+ App.vue) **and the transit roots** (utils/types): re-exporting bridge
-/// from a transit file is the same router shape as re-exporting services.
-/// Composables stay outside rule B — the registered red line names
-/// View / component only (Architecture.md「前端分层口径」first bullet); widen
-/// it only with a documented reason.
-function ruleBEnabled(relPath) {
-  return !relPath.startsWith('composables/')
-}
+/// Rule B 覆盖**全部扫描面**（2026-11-12 第二十轮口径）：View/component/
+/// App.vue、composables 与 utils/types 中转面。composable 被 View 消费——
+/// 放行 composable 的 bridge 导入等于给 View 留一条经 composable 抵达 IPC 的
+/// 路径；中转文件重导出 bridge 同理（边在路由处斩断）。规则 A 与规则 B 的
+/// 作用域自此一致。
 
 /**
  * Split a dynamic-import argument — `import(...)`, `import.meta.glob(...)` and
@@ -214,10 +213,10 @@ function scanUnit(violations, path, unitSource, lineBase) {
           '一律经对应 store 消费（Architecture.md「前端分层口径」）',
       )
     }
-    if (ruleBEnabled(path) && BRIDGE_SPEC.test(spec)) {
+    if (BRIDGE_SPEC.test(spec)) {
       violations.push(
-        `${path}:${line}: 规则B —— View/component（含 utils/types 中转面）不得 import bridge（${spec}）；` +
-          'IPC 细节收敛在 service 层（Architecture.md「前端分层口径」）',
+        `${path}:${line}: 规则B —— View/component/composable（含 utils/types 中转面）不得 import bridge / @tauri-apps/api（${spec}）；` +
+          'IPC 细节收敛在 service 层，bridge 是唯一接触点（IpcError 归一化在 bridge；Architecture.md「前端分层口径」）',
       )
     }
   }
@@ -250,10 +249,10 @@ export function findViolations(files) {
               '（Architecture.md「前端分层口径」）',
           )
         }
-        if (ruleBEnabled(path) && BRIDGE_SPEC.test(block.src)) {
+        if (BRIDGE_SPEC.test(block.src)) {
           violations.push(
-            `${path}:${line}: 规则B —— <script src="${block.src}"> 指向 bridge；` +
-              'IPC 细节收敛在 service 层（Architecture.md「前端分层口径」）',
+            `${path}:${line}: 规则B —— <script src="${block.src}"> 指向 bridge / @tauri-apps/api；` +
+              'IPC 细节收敛在 service 层，bridge 是唯一接触点（Architecture.md「前端分层口径」）',
           )
         }
       }
@@ -300,7 +299,7 @@ export function runCli(root) {
   }
   if (violations.length === 0) {
     console.log(
-      `layering-gate: OK（${files.length} 个文件；View/component/composable 不 import Service，View/component 不 import bridge）`,
+      `layering-gate: OK（${files.length} 个文件；View/component/composable 不 import Service，扫描面不 import bridge / @tauri-apps/api）`,
     )
     return 0
   }

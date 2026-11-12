@@ -114,11 +114,38 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     }
   })
 
-  it('规则B 口径：composable import bridge 不在红线内（红线只列 View/component）', () => {
+  it('规则B 口径：composable import bridge 同样违规（被 View 消费即抵达 IPC 的路径）', () => {
+    // 第二十轮口径：composable 被 View 消费，放行它的 bridge 导入等于给 View
+    // 留一条经 composable 抵达 IPC 的路径——规则 B 收编全部扫描面
     const violations = findViolations([
       { path: 'composables/J.ts', content: `import { IpcError } from '@/bridge'` },
     ])
-    expect(violations).toEqual([])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('规则B')
+  })
+
+  it('规则B：直接 import @tauri-apps/api 同样违规（bridge 是唯一接触点）', () => {
+    for (const content of [
+      `import { invoke } from '@tauri-apps/api/core'`,
+      `import { listen } from '@tauri-apps/api/event'`,
+      `import api from '@tauri-apps/api'`,
+    ]) {
+      const violations = findViolations([
+        {
+          path: 'components/Invoke.vue',
+          content: `<template><div/></template>\n<script setup>\n${content}\n</script>`,
+        },
+      ])
+      expect(violations, content).toHaveLength(1)
+      expect(violations[0], content).toContain('规则B')
+      expect(violations[0], content).toContain('@tauri-apps/api')
+    }
+    // composable 里同样命中（与 bridge 同口径）
+    const composable = findViolations([
+      { path: 'composables/useIpc.ts', content: `import { invoke } from '@tauri-apps/api/core'` },
+    ])
+    expect(composable).toHaveLength(1)
+    expect(composable[0]).toContain('规则B')
   })
 
   it('一行同时命中两层规则 → 两条违规各自报出（实际写法不存在，锁定扫描器语义）', () => {
