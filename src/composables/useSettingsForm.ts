@@ -1,5 +1,6 @@
 import { computed, getCurrentScope, onScopeDispose, reactive, ref } from 'vue'
 import type { Ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
@@ -147,9 +148,9 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   /// 用户较新的选择）。**不含**编辑器偏好/分栏比例等后台写入——那类写入只
   /// 排在保存队列里，不该让设置页的下拉与保存按钮产生反应。
   const configStore = useConfigStore()
-  // service 的 readonly ref 经 store getter 转发（getter 内读 .value 被依赖追踪）；
-  // 这里用 computed 包回 Ref 形状——返回面与迁移前一致，canSave/模板零改动
-  const saving = computed(() => configStore.settingsSaveInFlight)
+  // settingsSaveInFlight 是 store getter（computed）：storeToRefs 直接给出同名
+  // Ref（返回面与迁移前一致，canSave/模板零改动），不再手工包一层 computed
+  const { settingsSaveInFlight: saving } = storeToRefs(configStore)
   const saveError = ref<string | null>(null)
   const { value: showSaved, show: markSaved, clear: clearSaved } = useTransientValue(false, 3_000)
 
