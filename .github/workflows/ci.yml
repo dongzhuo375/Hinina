@@ -56,8 +56,8 @@ jobs:
       # 调用方须显式加白名单）。与 scripts/__tests__ 的用例互补：那里测判定，
       # 这里对真实源码树出口。
       - run: npm run check:save-gate
-      # 前端分层门禁（View/component/composable 不 import Service；View/component
-      # 不 import bridge——Architecture.md「前端分层口径」两条红线）。与
+      # 前端分层门禁（扫描面不 import Service；扫描面不 import bridge /
+      # @tauri-apps/api——Architecture.md「前端分层口径」两条红线）。与
       # scripts/__tests__/check-layering.spec.ts 互补：那里测判定与变异，
       # 这里对真实源码树出口。
       - run: npm run check:layering

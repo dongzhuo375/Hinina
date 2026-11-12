@@ -46,7 +46,7 @@
 - `vue`
 - `monaco-editor`（生产源码保持裸包导入；Vitest 在测试配置中用 alias 指向包自带 ESM 入口，含 5 个 `?worker` 导入）
 - `@/components/editor/EditorSettingsPopover.vue`（工具条设置弹层）
-- `@/stores/configStore`（编辑器偏好读写 + `EditorPrefs` 类型；（配置消费的唯一入口，纯转发 `config.service`））
+- `@/stores/configStore`（编辑器偏好读写 + `EditorPrefs` 类型；配置消费的唯一入口，纯转发 `config.service`）
 - `@/utils/language`（语言值域/文件名识别）
 - `@/utils/editor`（偏好默认值）
 - `@/utils/focus-scope`（`vFocusScope` —— 语言菜单与清空确认面板的焦点陷阱 / Esc 关闭）
