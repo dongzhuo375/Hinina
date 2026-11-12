@@ -267,9 +267,14 @@ function scanUnit(violations, path, unitSource, lineBase, { mode = 'main' } = {}
   const dynamic = dynamicImportArgs(unitSource)
   findings.push(...dynamic.literal)
   // 非主扫描面不报动态 import 的**不可读形态**（懒加载拼接在这些层是正常
-  // 写法，与红灯无关）；但可读前缀/模式点名 bridge 的 glob 与拼接在 store
-  // 模式下同样判红（第二十九轮：Vite 会把它展开成真实 bridge 边，
-  // `import.meta.glob('@/bridge/*.ts')`、`import('../bridge/' + name)`）。
+  // 写法，与红灯无关）。store 模式例外（Store→Bridge 破坏梯级）：
+  //   - **glob 调用一律 fail closed**（第三十轮）——模式串不点名 bridge 也可能
+  //     展开到 bridge（`@/**`、`@/*/x`、`@/@(bridge|views)/*`、`@/b**/**`），
+  //     正是主面第二十四～二十七轮终结的那一族；模式判据只看字面文本，必须
+  //     与主面同口径；
+  //   - 拼接/模板只按**可读前缀**判 `BRIDGE_SPEC`（点名 bridge 即红；部分前缀
+  //     `'../b' + x` 放行——这是「允许 store 懒加载拼接」的显式代价，主面对
+  //     同类形态是 fail closed）。
   for (const { index, snippet, reason, spec: opaqueSpec } of dynamic.opaque) {
     if (mode === 'main') {
       const isGlobCall = reason === 'glob-call'
@@ -285,9 +290,17 @@ function scanUnit(violations, path, unitSource, lineBase, { mode = 'main' } = {}
       )
       continue
     }
+    if (mode === 'store' && reason === 'glob-call') {
+      violations.push(
+        `${path}:${lineOf(index)}: 规则B —— Store 的 import.meta.glob / globEager 调用无法静态分析（${snippet}）；` +
+          '展开集合由 picomatch 语义决定（通配/extglob/`**` 递归可跨目录命中 bridge）——' +
+          'Store→Bridge 破坏 View→Store→Service→Bridge 梯级；请在 GLOB_ALLOWLIST 显式登记复核过的模式，或改用静态 import',
+      )
+      continue
+    }
     if (mode === 'store' && typeof opaqueSpec === 'string' && BRIDGE_SPEC.test(opaqueSpec)) {
       violations.push(
-        `${path}:${lineOf(index)}: 规则B —— Store 的 glob / 动态 import 模式点名 bridge（${opaqueSpec}；${snippet}）；` +
+        `${path}:${lineOf(index)}: 规则B —— Store 的动态 import 可读前缀点名 bridge（${opaqueSpec}；${snippet}）；` +
           'Store→Bridge 破坏 View→Store→Service→Bridge 梯级（Vite 会把它展开成真实 bridge 边；Architecture.md「前端分层口径」）',
       )
     }

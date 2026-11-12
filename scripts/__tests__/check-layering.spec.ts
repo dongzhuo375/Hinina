@@ -190,6 +190,30 @@ describe('check-layering — 规则判定（合成夹具）', () => {
       expect(hit[0], content).toContain('规则B')
       expect(hit[0], content).toContain('Store')
     }
+    // **store 的 glob 一律 fail closed**（第三十轮）：模式串不点名 bridge 也可能
+    // 展开到 bridge（主面第二十四～二十七轮终结的同一族——字面文本判据看不见
+    // 展开集合）。以下六形态 Vite 都真实展开成 bridge 边，代码里没有 bridge 字样。
+    for (const pattern of [
+      '@/**',
+      '@/*/config.service.ts',
+      '@/../**',
+      '@/**.**',
+      '@/@(bridge|views)/*',
+      '@/b**/**',
+    ]) {
+      const hit = findViolations([
+        { path: 'stores/x.ts', content: `const m = import.meta.glob('${pattern}')`, mode: 'store' },
+      ])
+      expect(hit, pattern).toHaveLength(1)
+      expect(hit[0], pattern).toContain('规则B')
+      expect(hit[0], pattern).toContain('GLOB_ALLOWLIST')
+    }
+    // 拼接的**部分前缀**放行——「允许 store 懒加载拼接」的显式代价（主面对同类
+    // 形态 fail closed；store 只按可读前缀点名 bridge 判红）
+    const partialPrefix = findViolations([
+      { path: 'stores/x.ts', content: `const n = await import('../b' + x)`, mode: 'store' },
+    ])
+    expect(partialPrefix).toEqual([])
     // 非层前缀放行（与「懒加载拼接是正常写法」不冲突）
     const storeLocal = findViolations([
       { path: 'stores/x.ts', content: `const n = await import('./local/' + name)`, mode: 'store' },
