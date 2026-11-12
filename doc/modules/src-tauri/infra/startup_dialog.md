@@ -2,7 +2,7 @@
 
 ## 职责
 
-启动期致命错误的系统错误对话框（panic 钩子的 UI 出口）。`main()` 在 panic 钩子安装后 `arm()` 记录主线程；Tauri 发出 `RunEvent::Ready`（窗口创建与 setup 均已完成）时 `mark_started()`。两者之间主线程上的 panic 视为启动失败，钩子在崩溃记录落盘**之后**调用 `present_startup_panic` 弹一次 `MessageBoxW`。覆盖三处启动 `expect`（Tokio runtime / Tauri Builder / AppContext）与 Tauri 自身创建窗口失败（WebView2 缺失等，tauri 的 `panic!("Failed to setup app: ...")`）。运行期 panic 只落日志，不弹窗。非 Windows 是 no-op（产品只发 Windows，开发/CI 的 stderr 已能看到 panic 报告）。
+启动期致命错误的系统错误对话框（panic 钩子的 UI 出口）。`bootstrap::early::prepare` 在 panic 钩子安装后 `arm()` 记录主线程；Tauri 发出 `RunEvent::Ready`（窗口创建与 setup 均已完成）时 `mark_started()`。两者之间主线程上的 panic 视为启动失败，钩子在崩溃记录落盘**之后**调用 `present_startup_panic` 弹一次 `MessageBoxW`。覆盖三处启动 `expect`（Tokio runtime / Tauri Builder / AppContext）与 Tauri 自身创建窗口失败（WebView2 缺失等，tauri 的 `panic!("Failed to setup app: ...")`）。运行期 panic 只落日志，不弹窗。非 Windows 是 no-op（产品只发 Windows，开发/CI 的 stderr 已能看到 panic 报告）。
 
 **为什么标记点选 `RunEvent::Ready`**：Tauri 2.11 的 `fn setup` 先按 `tauri.conf.json` 的 `app.windows` 创建窗口（WebView2 在这一步初始化），再调用用户的 setup 闭包；`RunEvent::Ready` 在 setup 返回后才发给 `run` 回调（tauri `app.rs` 的 `fn setup` / `make_run_event_loop_callback`）。窗口/WebView2 创建失败会在 setup 内 panic，此时 `mark_started` 尚未执行，错误框照常弹出——标记点不依赖用户 setup 闭包内部的顺序。
 
@@ -10,7 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `arm` | `pub fn arm()` | 记录主线程 `ThreadId`（未记录即未启用）。`main()` 在 `panic_report::install()` 之后调用。**测试构建永不调用**：模态框会卡死 CI（`panic_report_*` 集成测试会故意 panic） |
+| `arm` | `pub fn arm()` | 记录主线程 `ThreadId`（未记录即未启用）。`bootstrap::early::prepare` 在 `panic_report::install()` 之后调用。**测试构建永不调用**：模态框会卡死 CI（`panic_report_*` 集成测试会故意 panic） |
 | `mark_started` | `pub fn mark_started()` | 标记启动完成：`bootstrap::handle_run_event` 收到 `RunEvent::Ready` 时调用。此后 panic 不再弹窗，运行期崩溃只走日志与崩溃文件 |
 | `present_startup_panic` | `pub fn present_startup_panic(payload: &str, crash_log: Option<&Path>)` | 钩子的调用点。只有「启动未完成、主线程、本进程首次」才弹；正文含 payload（三处 expect 已改成中文上下文）、「关闭后程序将退出」、`--console` 提示。**`crash_log` 只在崩溃记录真正写入成功时是 `Some`**；`None` 时正文明确说「崩溃记录未能写入（临时目录不可写）」，不展示不存在的路径。`MessageBoxW` 在独立线程执行并 `join`——钩子可能跑在 Tauri 事件循环回调里，主线程上嵌套模态消息泵会重入事件循环。线程创建/FFI 失败静默跳过（持久记录已先写入） |
 | `should_present` | `fn should_present(started, on_main) -> bool`（私有） | 纯判定：启动未完成且在主线程。未 `arm` 时 `on_main` 必为 false，故不需要单独的 armed 标志 |
@@ -33,7 +33,7 @@
 
 ## 逻辑流程
 
-1. `main()` 装 panic 钩子 → `startup_dialog::arm()`（记主线程）→ 参数解析 / `--console` / Tokio runtime / Tauri Builder。
+1. `bootstrap::early::prepare` 装 panic 钩子 → `startup_dialog::arm()`（记主线程）→ 参数解析 / `--console` / `--settings`；随后 `main` 接 Builder，Tokio runtime 在 `bootstrap::setup::install` 内创建。
 2. 启动失败 → panic：三处 expect 已改为 `unwrap_or_else(|e| panic!("中文上下文：{e}"))`；Tauri 窗口/WebView2 创建失败由 Tauri 自己 panic（`Failed to setup app: ...`）。
 3. 钩子先写 `%TEMP%/hinina-panic.log`（`write_bootstrap_report` 返回是否成功），再按 `logger::ready()` 走 tracing/stderr，**最后**调用 `present_startup_panic`（写入成功才传 `Some(path)`）。
 4. 判定通过 → 一次性领取 `PRESENTED` → 独立线程弹 `MessageBoxW` → 等用户关闭 → 返回钩子 → panic 照常 unwind → 进程退出。

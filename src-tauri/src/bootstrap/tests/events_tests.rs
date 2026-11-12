@@ -43,6 +43,9 @@ fn announcement_changed_maps_to_published_channel() {
 
 #[test]
 fn other_events_are_not_bridged() {
+    // 与 `CoreEvent` 全部 13 个变体对账：桥接 2 个（WorkspaceSaved /
+    // AnnouncementChanged），其余 11 个逐一在此列出——不给 `_ => None` 的
+    // 通配留「将来新增 Some 臂而 CI 不红」的口子；新增变体时必须在此表态。
     let events = [
         CoreEvent::LoggedIn {
             oj_id: "HOJ".into(),
@@ -51,9 +54,23 @@ fn other_events_are_not_bridged() {
         CoreEvent::LoggedOut {
             oj_id: "HOJ".into(),
         },
+        CoreEvent::SessionExpired {
+            oj_id: "HOJ".into(),
+        },
+        CoreEvent::TokenRotated {
+            oj_id: "HOJ".into(),
+        },
         CoreEvent::ConfigChanged,
+        CoreEvent::ThemeChanged,
         CoreEvent::OjSwitched {
             oj_id: "HOJ".into(),
+        },
+        CoreEvent::ContestSelected {
+            contest_id: "1011".into(),
+        },
+        CoreEvent::ProblemOpened {
+            contest_id: "1011".into(),
+            problem_id: "A".into(),
         },
         CoreEvent::SubmissionCreated {
             submission_id: "s-1".into(),
@@ -63,6 +80,8 @@ fn other_events_are_not_bridged() {
             status: "Accepted".into(),
         },
     ];
+
+    assert_eq!(events.len() + 2, 13, "CoreEvent 变体总数变化时须同步本用例");
 
     for event in &events {
         assert!(

@@ -92,6 +92,9 @@ fn spawn_frontend_event_bridge(bus: Arc<CoreEventBus>, app: tauri::AppHandle) {
 /// 其余事件（OJ 切换、配置变更、提交创建/判定……）前端都能从 IPC 返回值直接得到，
 /// 转发只会制造「前端靠事件拿状态」的错误预期 —— 前端刷新触发之外的一切真实状态
 /// 仍必须经 IPC 查询（评测状态、榜单、公告内容、工作区真值）。
+///
+/// match **刻意穷尽**（无 `_` 通配臂）：给 `CoreEvent` 新增变体时这里编译失败，
+/// 迫使作者显式决定「桥接与否」——通配臂会让新变体静默落入「不桥接」而无人察觉。
 fn payload_for(event: &CoreEvent) -> Option<(&'static str, serde_json::Value, &'static str)> {
     match event {
         CoreEvent::WorkspaceSaved {
@@ -116,7 +119,17 @@ fn payload_for(event: &CoreEvent) -> Option<(&'static str, serde_json::Value, &'
             "新公告事件",
         )),
         // 其余事件不桥接：前端经 IPC 返回值即可得到，转发只会造成状态来源分叉
-        _ => None,
+        CoreEvent::LoggedIn { .. } => None,
+        CoreEvent::LoggedOut { .. } => None,
+        CoreEvent::SessionExpired { .. } => None,
+        CoreEvent::TokenRotated { .. } => None,
+        CoreEvent::ConfigChanged => None,
+        CoreEvent::ThemeChanged => None,
+        CoreEvent::OjSwitched { .. } => None,
+        CoreEvent::ContestSelected { .. } => None,
+        CoreEvent::ProblemOpened { .. } => None,
+        CoreEvent::SubmissionCreated { .. } => None,
+        CoreEvent::SubmissionJudged { .. } => None,
     }
 }
 

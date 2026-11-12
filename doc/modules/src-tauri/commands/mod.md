@@ -25,7 +25,7 @@ Commands 模块入口。声明所有 Tauri Command 子模块、提供 `invoke_ha
 - `tauri`（`generate_handler!`、`ipc::Invoke`、`Wry`）
 
 ## 被依赖
-- `bootstrap`（`use crate::commands` + `commands::invoke_handler()` 注册 43 个 Command：**app 2** / plugin 5 / auth 4 / oj 1 / contest 6 / problem 3 / submission 5 / workspace 5 / config 4 / **log 1** / maintenance 3 / data_dir 4（contest 7→6：`select_contest` 前端零调用已删，服务层方法保留内部复用；workspace 7→5：`switch_workspace`/`current_workspace` 已删，`WorkspaceManager::switch` 同步删除、`current` 降为 `#[cfg(test)]` 测试入口））
+- `src-tauri/src/main.rs`（`.invoke_handler(hinina_lib::commands::invoke_handler())` 注册 43 个 Command：**app 2** / plugin 5 / auth 4 / oj 1 / contest 6 / problem 3 / submission 5 / workspace 5 / config 4 / **log 1** / maintenance 3 / data_dir 4（contest 7→6：`select_contest` 前端零调用已删，服务层方法保留内部复用；workspace 7→5：`switch_workspace`/`current_workspace` 已删，`WorkspaceManager::switch` 同步删除、`current` 降为 `#[cfg(test)]` 测试入口））
 
 ## 逻辑流程
 无（仅模块声明）。

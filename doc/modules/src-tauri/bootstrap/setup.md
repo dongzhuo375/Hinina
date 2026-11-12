@@ -25,4 +25,4 @@
 - `bootstrap::builder` 的调用方 `src-tauri/src/main.rs`（经 `.setup(...)`）
 
 ## 逻辑流程
-见上「步骤 1–8」。顺序即契约：数据目录 → 迁移 → `AppContext::init`（内部 1–12 步，见 `core/context.rs`）→ 诊断 → 通知出口 + `manage` → 消费者 → autostart。失败路径只有 `AppContext::init` 一处 panic，其余降级都记录后继续。
+见上「步骤 1–8」。顺序即契约：数据目录 → 迁移 → `AppContext::init`（内部 1–12 步，见 `core/context.rs`）→ 诊断 → 通知出口 + `manage` → 消费者 → autostart。panic 路径两处：`Runtime::new` 失败（`无法创建后台运行时`）与 `AppContext::init` 失败（先 `report_data_dir` 再 panic）；其余降级都记录后继续。**与旧入口的时序微移**：runtime 原在 `main()` 里 Builder 之前创建，现移入 setup 闭包内 —— 单实例第二实例在插件初始化（Builder.build 阶段，早于 setup 闭包）即退出，不再先建 runtime；消费者仍投 Tauri 运行时，不受此影响。
