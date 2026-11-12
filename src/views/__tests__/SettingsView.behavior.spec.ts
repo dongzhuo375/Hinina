@@ -30,6 +30,8 @@ vi.mock('@/services/config.service', async () => {
   const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
   const busy = ref(false)
   const settingsBusy = ref(false)
+  // 切换在途标志（生产是读 `switchQueue.inFlight.value` 的 getter，见下方 mock）
+  const switchInFlight = ref(false)
   // 视图级只需「保存门禁 busy 可见 + 直通 bridge 缝」（「保存在途禁用 OJ 域」
   // 依赖 busy 响应式翻转）；真实排队语义由 config.service.spec 的「save 门禁」套件锁定
   async function runSaveTxn<T>(
@@ -54,8 +56,17 @@ vi.mock('@/services/config.service', async () => {
       invalidate: mocks.invalidate,
       switchOj: mocks.switchOj,
       latestOjSwitchResult: () => null,
-      ojSwitchEpoch: 0,
-      ojSwitchInFlight: false,
+      // 生产是只读 getter（store 以 action 逐次直读，不做缓存）——mock 同样用
+      // getter，避免「普通属性快照」的形态漂移
+      get ojSwitchEpoch() {
+        return 0
+      },
+      // 生产 getter 读 `switchQueue.inFlight.value`：响应式追踪发生在 .value，
+      // mock 用「getter 包 ref」同构。注意本 spec **不覆盖**「等待在途切换」
+      // 路径——那条路径的回归在 useSettingsForm.spec（普通属性 mock 曾致 P2）
+      get ojSwitchInFlight() {
+        return switchInFlight.value
+      },
       whenOjSwitchSettled: async () => {},
       get saveEpoch() {
         return 0
