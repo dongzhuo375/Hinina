@@ -434,6 +434,37 @@ import x from '@/services/real'
     }
   })
 
+  it('glob 目录段通配 fail closed（展开集合可跨目录命中 services/bridge，评审第二十四轮）', () => {
+    // Vite 对非相对/非绝对模式先 resolveId（别名生效）再展开：`@/**/x` 是真实
+    // 懒加载边，但字面量模式看不出解析集合——曾零违规（探针：tinyglobby 实测
+    // 命中 src/services/config.service.ts 与全部 bridge）。只有文件名段可通配。
+    for (const pattern of [
+      '@/*/config.service.ts',
+      '@/**/config.service.ts',
+      '@/**/*.service.ts',
+      '/src/**/config.service.ts',
+      '@/**/*.bridge.ts',
+    ]) {
+      const violations = findViolations([
+        { path: 'views/Glob.ts', content: `const m = import.meta.glob('${pattern}')` },
+      ])
+      expect(violations, pattern).toHaveLength(1)
+      expect(violations[0], pattern).toContain('无法静态分析')
+      expect(violations[0], pattern).toContain('目录段')
+    }
+    // 文件名段通配仍按段判据报红
+    const segment = findViolations([
+      { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/services/*.ts')` },
+    ])
+    expect(segment).toHaveLength(1)
+    expect(segment[0]).toContain('规则A')
+    // 文件名段通配的非层目标不误报
+    const assets = findViolations([
+      { path: 'views/Glob.ts', content: `const m = import.meta.glob('@/assets/*.svg')` },
+    ])
+    expect(assets).toEqual([])
+  })
+
   it('模板表达式按原行号报告（不拼接、不跨表达式串味）', () => {
     const violations = findViolations([
       {

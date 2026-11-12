@@ -48,7 +48,13 @@
 // **fails closed** with a violation — the gate must not go green on a specifier
 // it cannot read. The same rule covers `import.meta.glob(...)` /
 // `globEager(...)`: Vite compiles them into lazy imports, so they are real
-// View→Service edges (review P1).
+// View→Service edges (review P1). **Glob patterns may only use wildcards in
+// the filename segment**: Vite resolves a non-relative pattern through the
+// alias plugin and then expands it, so `@/**/config.service.ts` /
+// `@/**/*.service.ts` are real lazy edges but the literal pattern does not
+// reveal the resolved set — a wildcard anywhere before the last `/` fails
+// closed (review round twenty-four; `@/services/*.ts` still reports by its
+// path segment).
 //
 // Scan surface: `views/`, `components/`, `composables/` (recursively) plus
 // `src/App.vue`, over `.ts` / `.tsx` / `.js` / `.jsx` / `.mjs` / `.cjs` /
@@ -143,7 +149,8 @@ export function dynamicImportArgs(source) {
   // `import(...)` 与 Vite 的 `import.meta.glob(...)` / `globEager(...)`：后者在
   // 编译期变成懒加载 import，是真实的 View→Service 边（评审 P1）。说明符规则
   // 与动态 import 完全一致：字面量可判定，其余（数组/变量/拼接/插值）fail closed。
-  for (const match of source.matchAll(/(?<![.\w$'"`])import\s*(?:\.\s*meta\s*\.\s*(?:glob|globEager))?\s*\(\s*/g)) {
+  for (const match of source.matchAll(/(?<![.\w$'"`])import\s*(?:\.\s*meta\s*\.\s*(glob|globEager))?\s*\(\s*/g)) {
+    const isGlob = match[1] !== undefined
     const argStart = match.index + match[0].length
     // 字符串字面量用共享读取器（尊重转义与起始定界符）——`indexOf(quote)`
     // 会在转义引号处提前收尾，把恶意路径的 `/services/` 段留在字面量之外
@@ -159,6 +166,23 @@ export function dynamicImportArgs(source) {
     if (quote === '`' && raw.includes('${')) {
       opaque.push({ index: match.index, snippet: '`…${…}…`' })
       continue
+    }
+    // **glob 的目录段通配 fail closed**（评审第二十四轮）：Vite 对非相对/
+    // 非绝对模式先 resolveId（别名插件生效）再展开——`@/**/config.service.ts`、
+    // `@/**/*.service.ts` 等都是真实懒加载边，但字面量模式本身看不出解析集合
+    //（通配符可跨目录段命中 services/bridge）。只有**文件名段**允许通配
+    //（`@/services/*.ts` 的段判据仍成立）；目录段带通配即按不可静态判定处理。
+    if (isGlob) {
+      const lastSlash = raw.lastIndexOf('/')
+      const dirPart = lastSlash === -1 ? '' : raw.slice(0, lastSlash)
+      if (/[*?[{]/.test(dirPart)) {
+        opaque.push({
+          index: match.index,
+          snippet: `${quote}${raw}${quote}`,
+          reason: 'glob-dir-wildcard',
+        })
+        continue
+      }
     }
     let i = end
     while (i < source.length && /\s/.test(source[i])) i += 1
@@ -222,11 +246,15 @@ function scanUnit(violations, path, unitSource, lineBase, { tauriOnly = false } 
   // import 的不可读形态（懒加载拼接在这些层是正常写法，与红灯无关），也不
   // 应用规则 A / bridge 路径规则（Service→Bridge 是合法梯级、guards 是跨层装配）
   if (!tauriOnly) {
-    for (const { index, snippet } of dynamic.opaque) {
+    for (const { index, snippet, reason } of dynamic.opaque) {
+      const why =
+        reason === 'glob-dir-wildcard'
+          ? '说明符无法静态分析——glob 通配符出现在**目录段**（展开集合可跨目录命中 services/bridge，实际解析集合不可判定）'
+          : '说明符无法静态分析'
       violations.push(
-        `${path}:${lineOf(index)}: 动态 import / import.meta.glob 的说明符无法静态分析（${snippet}）；` +
-          '分层门禁 fail closed——请改用字符串字面量（不含 ${} / 拼接 / 变量 / 数组）或静态 import。' +
-          '规则 A/B 无法确认目标模块时按违规处理（否则门禁会假绿）',
+        `${path}:${lineOf(index)}: 动态 import / import.meta.glob 的${why}（${snippet}）；` +
+          '分层门禁 fail closed——请改用字符串字面量（不含 ${} / 拼接 / 变量 / 数组；glob 只有文件名段可带通配）' +
+          '或静态 import。规则 A/B 无法确认目标模块时按违规处理（否则门禁会假绿）',
       )
     }
   }

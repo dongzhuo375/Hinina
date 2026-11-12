@@ -46,8 +46,9 @@ export const useConfigStore = defineStore('config', {
      * 设置页发起的保存事务是否在途（覆盖「保存 → 自动切换」整段）。
      *
      * service 侧是 readonly computed ref；这里读 `.value` 让 computed 追踪到
-     * 它。消费方需要 Ref 语义时用 `computed(() => store.settingsSaveInFlight)`
-     * 包回——不要直接解构 store（拿到的是展开后的布尔快照）。
+     * 它。消费方需要 Ref 语义时用 `storeToRefs(store)` 直取 `settingsSaveInFlight`
+     *（getter 已是 computed，手工再包一层是多余的）——不要直接解构 store
+     *（拿到的是展开后的布尔快照）。
      */
     settingsSaveInFlight: (): boolean => configService.settingsSaveInFlight.value,
 
