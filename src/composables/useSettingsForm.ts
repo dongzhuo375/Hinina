@@ -280,8 +280,9 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   async function readSettledConfig(): Promise<AppConfig> {
     for (;;) {
       const epoch = configStore.ojSwitchEpoch()
-      // 无在途切换时**同步**走到 invalidate/getConfig：设置页其余读取的启动
-      // 顺序被既有用例锁定（invalidate → config → 其它），不能平白多一个微任务
+      // 无在途切换时**调用同步进入** service（invalidate/getConfig 的启动顺序被
+      // 既有用例锁定：invalidate → config → 其它）；返回的 Promise 经 Pinia
+      // action 多两跳微任务——时序敏感断言等终态，不要数 tick
       if (configStore.ojSwitchInFlight) {
         await configStore.whenOjSwitchSettled()
         if (epoch !== configStore.ojSwitchEpoch()) continue

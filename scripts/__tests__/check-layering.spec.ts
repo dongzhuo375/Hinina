@@ -14,7 +14,7 @@ import { stripComments } from '../../scripts/lib/source-scan.mjs'
  * 违规形态各给一份「种进去必须红」的夹具；跨行、动态 import 的非字面量形态、
  * Vue 模板文本三类曾是缺口，负例逐条覆盖），再对真实 `src/` 树跑一遍——后者
  * 是「扫描面（含 utils/types 中转面）不 import Service、扫描面不 import
- * bridge / @tauri-apps/*（src 整树，bridge/ 与 tests 除外）」两条红线在 `npm test`
+ * bridge / @tauri-apps/*（src 整树，bridge/ 与 tests 除外；stores 同禁 bridge——梯级）」两条红线在 `npm test`
  * 里的实际保障（2026-11-09
  * 分层欠账清偿后恒绿；
  * 新增直连会在这里红出来）。
@@ -161,41 +161,53 @@ describe('check-layering — 规则判定（合成夹具）', () => {
     }
   })
 
-  it('Tauri 红线整树：stores/services/guards/router/main 只禁 Tauri 包（bridge 梯级合法）', async () => {
+  it('Tauri 红线整树：stores 同禁 bridge（梯级）；services/guards/router/main 只禁 Tauri 包', async () => {
     const serviceTauri = findViolations([
-      { path: 'services/x.ts', content: `import { invoke } from '@tauri-apps/api/core'`, tauriOnly: true },
+      { path: 'services/x.ts', content: `import { invoke } from '@tauri-apps/api/core'`, mode: 'tauriOnly' },
     ])
     expect(serviceTauri).toHaveLength(1)
     expect(serviceTauri[0]).toContain('规则B')
-    // Service→Bridge 是合法梯级：扩展面不应用 bridge 路径规则
+    // Service→Bridge 是合法梯级：services 不应用 bridge 路径规则
     const serviceBridge = findViolations([
-      { path: 'services/x.ts', content: `import { IpcError } from '@/bridge'`, tauriOnly: true },
+      { path: 'services/x.ts', content: `import { IpcError } from '@/bridge'`, mode: 'tauriOnly' },
     ])
     expect(serviceBridge).toEqual([])
-    // 扩展面同样不应用规则 A（Store→Service 合法）
+    // **stores 应用 bridge 半边**（第二十八轮）：Store→Bridge 破坏梯级
+    const storeBridge = findViolations([
+      { path: 'stores/x.ts', content: `import { IpcError } from '@/bridge'`, mode: 'store' },
+    ])
+    expect(storeBridge).toHaveLength(1)
+    expect(storeBridge[0]).toContain('Store 不得 import bridge')
+    // 扩展面不应用规则 A（Store→Service 合法）
     const storeService = findViolations([
-      { path: 'stores/x.ts', content: `import { configService } from '@/services/config.service'`, tauriOnly: true },
+      { path: 'stores/x.ts', content: `import { configService } from '@/services/config.service'`, mode: 'store' },
     ])
     expect(storeService).toEqual([])
-    for (const path of ['stores/x.ts', 'guards/g.ts', 'router/r.ts']) {
+    for (const [path, fileMode] of [
+      ['stores/x.ts', 'store'],
+      ['guards/g.ts', 'tauriOnly'],
+      ['router/r.ts', 'tauriOnly'],
+    ] as const) {
       const plugin = findViolations([
-        { path, content: `import { open } from '@tauri-apps/plugin-dialog'`, tauriOnly: true },
+        { path, content: `import { open } from '@tauri-apps/plugin-dialog'`, mode: fileMode },
       ])
       expect(plugin, path).toHaveLength(1)
     }
-    // loadSources 的整树标记：main.ts / env.d.ts 必在扫描面且为 tauriOnly
+    // loadSources 的整树标记：main.ts / env.d.ts 必在扫描面且为 tauriOnly；
+    // stores 标记 'store'（bridge+Tauri），其余扩展面 'tauriOnly'
     //（评审第二十三轮：枚举目录曾漏掉根级文件，未来顶层目录由整树遍历覆盖）
     const files = loadSources(process.cwd())
     const main = files.find((f) => f.path === 'main.ts')
     expect(main, 'main.ts 缺失（扫描面 fail-closed）').toBeTruthy()
-    expect(main?.tauriOnly).toBe(true)
+    expect(main?.mode).toBe('tauriOnly')
     const env = files.find((f) => f.path === 'env.d.ts')
     expect(env, 'env.d.ts 缺失（整树遍历应覆盖根级声明文件）').toBeTruthy()
-    expect(env?.tauriOnly).toBe(true)
+    expect(env?.mode).toBe('tauriOnly')
     for (const file of files) {
-      if (/^(stores|services|guards|router)\//.test(file.path)) expect(file.tauriOnly, file.path).toBe(true)
+      if (file.path.startsWith('stores/')) expect(file.mode, file.path).toBe('store')
+      else if (/^(services|guards|router)\//.test(file.path)) expect(file.mode, file.path).toBe('tauriOnly')
       if (/^(views|components|composables|utils|types)\//.test(file.path) || file.path === 'App.vue') {
-        expect(file.tauriOnly, file.path).toBeFalsy()
+        expect(file.mode, file.path).toBeFalsy()
       }
     }
     // 整树承诺：除 bridge/ 与 tests 外，src 下每个脚本文件都在扫描面
@@ -633,6 +645,25 @@ import { x } from '@/services/config.service'
       const violations = findViolations([{ path: 'views/Esc.ts', content }])
       expect(violations, JSON.stringify(content)).toHaveLength(1)
     }
+  })
+
+  it('反斜杠路径按 / 归一化后判定（评审第二十八轮）；大小写不归一', () => {
+    // `@/services\config.service` 在 Windows 上可解析（ubuntu build 会挡下，
+    // 但门禁自身要闭合）；大小写不归一——Linux 上 `Services/` 可能是真实目录。
+    // 源码里是 `\\`（JS 值里一个反斜杠）：单反斜杠是身份转义、解码后直接消失
+    const cases = [
+      String.raw`import { configService } from '@/services\\config.service'`,
+      String.raw`const m = await import('@/services\\config.service')`,
+      String.raw`import { ipc } from '@/bridge\\config.bridge'`,
+    ]
+    for (const content of cases) {
+      const violations = findViolations([{ path: 'views/Back.ts', content }])
+      expect(violations, JSON.stringify(content)).toHaveLength(1)
+    }
+    const caseSensitive = findViolations([
+      { path: 'views/Case.ts', content: `import { x } from '@/Services/config.service'` },
+    ])
+    expect(caseSensitive).toEqual([])
   })
 
   it('规则A：export default /[/*]/ 后的 import 仍被扫描（default 是正则先行词）', () => {

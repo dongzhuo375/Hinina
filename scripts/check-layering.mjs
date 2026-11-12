@@ -136,16 +136,28 @@ const TAURI_SPEC = /^@tauri-apps(?:\/|$)/
 /// 的承诺是「src 内除 bridge/ 与 tests 外任何文件都不得 import @tauri-apps/*」——
 /// 因此除主扫描面外，`src/` 的**其余全部文件**也进扫描（`main.ts`、`env.d.ts`
 /// 与未来新增的顶层目录都在内；枚举 stores/services/guards/router 会漏掉它们，
-/// 评审第二十三轮），这些文件只应用 **Tauri 包规则**——import `@/bridge/*` 是
-/// 合法梯级（Service→Bridge；guards 是跨层装配），`@tauri-apps/*` 则任何位置
-/// 都只能经 bridge（CLAUDE.md:47）。`main.ts` 缺失按扫描面不完整处理。
+/// 评审第二十三轮），这些文件按所在层应用规则：
+///   - `stores/`：**bridge 半边也适用**（Store→Bridge 破坏 View→Store→Service→
+///     Bridge 梯级，与「Store 不放业务逻辑与网络请求」一致；评审第二十八轮）
+///     ——规则 A 不适用（Store→Service 合法），Tauri 包规则照常；
+///   - `services/`、`guards/`、`router/`、`main.ts`：只应用 **Tauri 包规则**
+///     （import `@/bridge/*` 是合法梯级：Service→Bridge；guards 是跨层装配），
+///     `@tauri-apps/*` 则任何位置都只能经 bridge（CLAUDE.md:47）。
+/// `main.ts` 缺失按扫描面不完整处理。
 export const TAURI_ONLY_ROOT_FILES = ['main.ts']
 
-/// `import.meta.glob` / `globEager` 的显式放行清单（**解码后**的模式字符串）。
-/// 扫描面内 glob 调用默认一律 fail closed（展开集合由 picomatch/tinyglobby
-/// 语义决定，通配/转义/extglob/`**` 递归无法穷尽——评审第二十四～二十七轮）。
-/// 新增条目必须评审：模式本身的层判据（规则 A/B）仍会执行，但展开集合是否
-/// 全在合法落点由评审负责。当前为空（src 内 glob 零使用）。
+/// 说明符归一化：反斜杠按 `/` 判定。`@/services\config.service` 在 Windows 上
+/// 可解析（ubuntu build 会挡下，但门禁自身要闭合——评审第二十八轮）。大小写不
+/// 归一（Linux 上 `Services/` 可能是真实目录，归一化会引入假阳）。
+function normalizeSpecifier(spec) {
+  return spec.replaceAll('\\', '/')
+}
+
+/// `import.meta.glob` / `globEager` 的显式放行清单（**解码 + 归一化后**的模式
+/// 字符串）。扫描面内 glob 调用默认一律 fail closed（展开集合由
+/// picomatch/tinyglobby 语义决定，通配/转义/extglob/`**` 递归无法穷尽——评审
+/// 第二十四～二十七轮）。新增条目必须评审：模式本身的层判据（规则 A/B）仍会
+/// 执行，但展开集合是否全在合法落点由评审负责。当前为空（src 内 glob 零使用）。
 export const GLOB_ALLOWLIST = []
 
 /**
@@ -183,7 +195,7 @@ export function dynamicImportArgs(source) {
     // 按原文匹配会假绿——所有判定都在**解码后**的说明符上做（评审 P2；第二十五
     // 轮补齐 glob 判定：Vite 展开用的是 AST literal 的 element.value，即解码后
     // 的模式，`@/\u002a/config.service.ts` 运行时就是 `@/*/config.service.ts`）
-    const spec = decodeStringLiteral(raw)
+    const spec = normalizeSpecifier(decodeStringLiteral(raw))
     // **glob 调用一律 fail closed**（终结式，评审第二十七轮）：前几轮按
     // picomatch 语义逐项打补丁（明文通配 → 解码后转义 → extglob → `**` 递归），
     // 每轮都还剩一种——`**` 在末段是**路径递归**而不是文件名通配，字面量目录
@@ -233,7 +245,7 @@ export function moduleSpecifiers(source) {
     }
     const literalRead = readStringLiteral(source, afterKeyword)
     if (literalRead === null) continue // 不是字符串位置（`from` 作标识符等）
-    findings.push({ spec: decodeStringLiteral(literalRead.raw), index: match.index })
+    findings.push({ spec: normalizeSpecifier(decodeStringLiteral(literalRead.raw)), index: match.index })
   }
   return { findings }
 }
@@ -245,16 +257,15 @@ export function moduleSpecifiers(source) {
  * (appending them to the script surface would misreport lines and let adjacent
  * expressions concatenate into a pseudo import).
  */
-function scanUnit(violations, path, unitSource, lineBase, { tauriOnly = false } = {}) {
+function scanUnit(violations, path, unitSource, lineBase, { mode = 'main' } = {}) {
   const lines = buildLineIndex(unitSource)
   const lineOf = (index) => lineBase + lineOfIndex(unitSource, index, lines) - 1
   const findings = moduleSpecifiers(unitSource).findings
   const dynamic = dynamicImportArgs(unitSource)
   findings.push(...dynamic.literal)
-  // 扩展面（stores/services/guards/router/main.ts）只认 Tauri 包：不报动态
-  // import 的不可读形态（懒加载拼接在这些层是正常写法，与红灯无关），也不
-  // 应用规则 A / bridge 路径规则（Service→Bridge 是合法梯级、guards 是跨层装配）
-  if (!tauriOnly) {
+  // 非主扫描面不报动态 import 的不可读形态（懒加载拼接在这些层是正常写法，
+  // 与红灯无关）；规则按 mode 应用（见 loadSources：store 也禁 bridge）
+  if (mode === 'main') {
     for (const { index, snippet, reason } of dynamic.opaque) {
       const isGlobCall = reason === 'glob-call'
       const head = isGlobCall
@@ -271,15 +282,19 @@ function scanUnit(violations, path, unitSource, lineBase, { tauriOnly = false } 
   }
   for (const { spec, index } of findings) {
     const line = lineOf(index)
-    if (!tauriOnly && SERVICE_SPEC.test(spec)) {
+    if (mode === 'main' && SERVICE_SPEC.test(spec)) {
       violations.push(
         `${path}:${line}: 规则A —— 扫描面（View/component/composable 与 utils/types 中转面）不得 import Service（${spec}）；` +
           '一律经对应 store 消费（Architecture.md「前端分层口径」）',
       )
     }
-    if (!tauriOnly && BRIDGE_SPEC.test(spec)) {
+    if ((mode === 'main' || mode === 'store') && BRIDGE_SPEC.test(spec)) {
+      const who =
+        mode === 'store'
+          ? `规则B —— Store 不得 import bridge（${spec}）；Store→Bridge 破坏 View→Store→Service→Bridge 梯级`
+          : `规则B —— View/component/composable（含 utils/types 中转面）不得 import bridge（${spec}）；`
       violations.push(
-        `${path}:${line}: 规则B —— View/component/composable（含 utils/types 中转面）不得 import bridge（${spec}）；` +
+        `${path}:${line}: ${who}` +
           'IPC 细节收敛在 service 层，bridge 是唯一接触点（IpcError 归一化在 bridge；Architecture.md「前端分层口径」）',
       )
     }
@@ -287,7 +302,7 @@ function scanUnit(violations, path, unitSource, lineBase, { tauriOnly = false } 
       violations.push(
         `${path}:${line}: 规则B —— Tauri 包只能由 bridge 接触（${spec}）；` +
           'bridge 是唯一 import @tauri-apps/* 的地方（CLAUDE.md:47）——直接调用绕过 bridge 的 IpcError 归一化' +
-          '（本文件位于扩展扫描面：stores/services/guards/router/main 同样适用）',
+          '（扫描面与 stores/services/guards/router/main 同样适用）',
       )
     }
   }
@@ -302,10 +317,10 @@ function scanUnit(violations, path, unitSource, lineBase, { tauriOnly = false } 
  */
 export function findViolations(files) {
   const violations = []
-  for (const { path, content, tauriOnly = false } of files) {
+  for (const { path, content, mode = 'main' } of files) {
     if (path.endsWith('.vue')) {
       const descriptor = parseSfc(content)
-      scanUnit(violations, path, stripComments(scriptSurfaceOf(content, descriptor)), 1)
+      scanUnit(violations, path, stripComments(scriptSurfaceOf(content, descriptor)), 1, { mode })
       // `<script src="…">`：外链脚本在编译期被内联进该组件，是真实的静态依赖
       //（评审：src 指向 services/ 时零违规）。src 值本身就是模块说明符，按
       // 规则 A/B 判定；行号取 block 起点。相对说明符的匹配口径与 import 一致
@@ -313,26 +328,33 @@ export function findViolations(files) {
       for (const block of [descriptor.script, descriptor.scriptSetup]) {
         if (!block?.src) continue
         const line = block.loc.start.line
-        if (SERVICE_SPEC.test(block.src)) {
+        const srcSpec = normalizeSpecifier(block.src)
+        if (mode === 'main' && SERVICE_SPEC.test(srcSpec)) {
           violations.push(
             `${path}:${line}: 规则A —— <script src="${block.src}"> 指向 Service；` +
               '扫描面（含 utils/types 中转面）不得 import Service，一律经对应 store 消费' +
               '（Architecture.md「前端分层口径」）',
           )
         }
-        if (BRIDGE_SPEC.test(block.src) || TAURI_SPEC.test(block.src)) {
+        if ((mode === 'main' || mode === 'store') && BRIDGE_SPEC.test(srcSpec)) {
           violations.push(
-            `${path}:${line}: 规则B —— <script src="${block.src}"> 指向 bridge / Tauri 包；` +
+            `${path}:${line}: 规则B —— <script src="${block.src}"> 指向 bridge；` +
               'IPC 细节收敛在 service 层，bridge 是唯一接触点（Architecture.md「前端分层口径」）',
+          )
+        }
+        if (TAURI_SPEC.test(srcSpec)) {
+          violations.push(
+            `${path}:${line}: 规则B —— <script src="${block.src}"> 指向 Tauri 包；` +
+              'bridge 是唯一 import @tauri-apps/* 的地方（Architecture.md「前端分层口径」）',
           )
         }
       }
       for (const { text, line } of templateExpressionEntries(content, descriptor)) {
-        scanUnit(violations, path, text, line)
+        scanUnit(violations, path, text, line, { mode })
       }
       continue
     }
-    scanUnit(violations, path, stripComments(content), 1, { tauriOnly })
+    scanUnit(violations, path, stripComments(content), 1, { mode })
   }
   return violations
 }
@@ -353,10 +375,14 @@ export function loadSources(root) {
     // 防御假绿：扫描面为空说明根目录结构变了，门禁必须红而不是静默通过
     throw new Error('layering-gate: 扫描面为空（views/components/composables/App.vue 均未找到）')
   }
-  // Tauri 红线整树遍历：`src/` 下除 `bridge/` 与 tests 外的**全部文件**都扫
-  //（承诺见头注；枚举目录会漏掉 env.d.ts 与未来顶层目录，评审第二十三轮）。
-  // 已在主扫描面里的文件**不重复**收集（它们走规则 A/B 全查），其余文件只应用
-  // Tauri 包规则。main.ts 缺失按扫描面不完整处理（fail-closed）。
+  // 整树遍历：`src/` 下除 `bridge/` 与 tests 外的**全部文件**都扫（承诺见
+  // 头注；枚举目录会漏掉 env.d.ts 与未来顶层目录，评审第二十三轮）。已在主
+  // 扫描面里的文件**不重复**收集；其余文件按所在层打 mode：
+  //   - `stores/` → 'store'：bridge 半边也适用（Store→Bridge 破坏梯级，与
+  //     「Store 不放业务逻辑与网络请求」一致；评审第二十八轮），规则 A 不适用；
+  //   - 其余（services/guards/router/main.ts 与未来顶层目录）→ 'tauriOnly'：
+  //     `@/bridge/*` 是合法梯级，只禁 Tauri 包。
+  // main.ts 缺失按扫描面不完整处理（fail-closed）。
   const seen = new Set(files.map((file) => file.path))
   const tauriOnlyFiles = walkSources(root, {
     dirs: ['.'],
@@ -364,7 +390,9 @@ export function loadSources(root) {
     extensions: SOURCE_EXTENSIONS,
     skip: (rel) => skip(rel) || rel.startsWith('bridge/') || seen.has(rel),
   })
-  for (const file of tauriOnlyFiles) file.tauriOnly = true
+  for (const file of tauriOnlyFiles) {
+    file.mode = file.path.startsWith('stores/') ? 'store' : 'tauriOnly'
+  }
   files.push(...tauriOnlyFiles)
   return files
 }

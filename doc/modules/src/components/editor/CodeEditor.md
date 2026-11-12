@@ -37,7 +37,7 @@
 | `editorSurfaceClass` | computed | 容器底色跟随主题（`vs-dark` → `#1e1e1e`，否则 `var(--bg-card)`）：Monaco 实例创建前与尺寸重算瞬间不露白底。**编辑器背景本身由 Monaco 主题绘制** —— `styles/global.css` 刻意不再用 `!important` 覆写 `.margin` / `.monaco-editor-background`，否则 vs-dark 只换字色、底色仍被钉在浅色 |
 | 清空确认面板 | 模板 | `v-focus-scope="() => { confirmClearOpen = false }"` + `role="dialog" aria-label="确认清空代码"`：键盘用户 Esc 可取消，焦点不会逃出面板 |
 
-编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configStore.getEditorPrefs()` 读取**（store 纯转发 `config.service`）（读取失败服务内部回退 `DEFAULT_EDITOR_FONT_SIZE` / `DEFAULT_EDITOR_TAB_SIZE` / `DEFAULT_EDITOR_THEME`，见 `utils/editor`）、JetBrains Mono 字体栈（`"JetBrains Mono Variable", "JetBrains Mono", "Noto Sans SC Variable", "Cascadia Code", Consolas, monospace`）、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 `readonly || locked`（只读时行高亮关闭；locked 响应式 —— watcher 经 `updateOptions` 翻转，解锁时 `getValue() !== modelValue` 则按 modelValue 回写，抑制 change 回流）。
+编辑器配置：`theme` = 配置 `theme.editorTheme`（弹层可选 `vs` / `vs-dark`，**仅编辑器区域**；客户端界面仍只有浅色）、**fontSize / tabSize / editorTheme 挂载时经 `configStore.getEditorPrefs()` 读取**（store 纯转发 `config.service`；读取失败服务内部回退 `DEFAULT_EDITOR_FONT_SIZE` / `DEFAULT_EDITOR_TAB_SIZE` / `DEFAULT_EDITOR_THEME`，见 `utils/editor`）、JetBrains Mono 字体栈（`"JetBrains Mono Variable", "JetBrains Mono", "Noto Sans SC Variable", "Cascadia Code", Consolas, monospace`）、minimap 关闭、wordWrap on、automaticLayout true（容器尺寸变化自适应，配合可拖拽分栏）、`readOnly` 跟随 `readonly || locked`（只读时行高亮关闭；locked 响应式 —— watcher 经 `updateOptions` 翻转，解锁时 `getValue() !== modelValue` 则按 modelValue 回写，抑制 change 回流）。
 
 工具条容器为 `editor-toolbar flex min-h-12 flex-wrap gap-y-2`：允许换行，窄分栏下语言按钮与设置入口不会被挤出可视区。
 

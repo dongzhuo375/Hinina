@@ -30,7 +30,7 @@
 
 - `vue` / `vue-router`
 - 组件：`CodeEditor`（readonly 模式）/ `ErrorMessage` / `LoadingSpinner`
-- `@/stores/configStore`（`getPollSchedule` 轮询参数）、`@/stores/submissionStore`（`getSubmissionDetail` / `getSubmissionCases`）—— （均经 store 纯转发 `config.service` / `submission.service`）
+- `@/stores/configStore`（`getPollSchedule` 轮询参数）、`@/stores/submissionStore`（`getSubmissionDetail` / `getSubmissionCases`）（均经 store 纯转发 `config.service` / `submission.service`）
 - `@/stores/contestStore`（`whenLoaded`：赛时相对时间与题目跳转）
 - `@/types/submission`（仅类型）
 - `@/utils/submission`（`formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `isTerminalStatus` / `statusAbbr` / `statusLabel` / `statusTone`）
