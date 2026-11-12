@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { effectScope, ref } from 'vue'
 import type { EffectScope } from 'vue'
 import { IpcError, parseAppError } from '@/bridge'
@@ -32,6 +33,14 @@ const switchState = vi.hoisted(() => ({
   pending: null as Promise<void> | null,
   epoch: 0,
   last: null as { target: string; outcome: 'success' | 'persist-failed' } | null,
+  /// 在途标记的 ref 载体（ref 需要 vue，vi.hoisted 环境拿不到，由 mock 工厂注入）。
+  /// **必须与生产 `switchQueue.inFlight`（computed ref）同构**：store 的
+  /// `ojSwitchInFlight` getter 是 computed，只追踪真实 ref——若 mock 读普通属性
+  /// （`pending !== null`），该 getter 首次求值后永久缓存 false，把「新控制器等待
+  /// 在途切换」整条路径测成死代码（用例靠 epoch 复查兜底假绿）。
+  inFlight: null as { value: boolean } | null,
+  /// `whenOjSwitchSettled` 调用计数：目标用例据此断言等待路径真实走过
+  whenSettledCalls: 0,
 }))
 
 /// 保存门禁的孪生状态（与生产 `runSaveTxn` 同构；真实排队/代际/队尾语义由
@@ -51,7 +60,13 @@ const saveState = vi.hoisted(() => ({
 }))
 
 function settleSwitch(run: Promise<void>): void {
-  if (switchState.pending === run) switchState.pending = null
+  // 与生产 `SerialQueue.enqueue` 的 finally 同构：只有队尾（最新一次切换）落地
+  // 才复位 pending 与 inFlight——先落地者不得清掉仍在途的后发切换
+  //（inFlight 由「队尾是否落地」派生——无守卫的重叠切换会提前清标志）
+  if (switchState.pending === run) {
+    switchState.pending = null
+    if (switchState.inFlight) switchState.inFlight.value = false
+  }
   switchState.epoch += 1
 }
 
@@ -69,6 +84,10 @@ vi.mock('@/services/config.service', async () => {
   // 必须是 ref：`settingsSaveInFlight` 是 computed，普通字段不会触发重新求值
   const settingsDepth = ref(0)
   saveState.settingsDepth = settingsDepth
+  // 同理：`ojSwitchInFlight` 经 store getter（computed）转发，支撑必须是 ref
+  //（与生产 `switchQueue.inFlight` 同构）
+  const switchInFlight = ref(false)
+  switchState.inFlight = switchInFlight
 
   /// 与生产 `runSaveTxn` 同构：入队即置位/代际 +1，链式等前一个落地，
   /// 只有队尾落地且无人再排队才复位；事务内直通 `tx.updateConfig`（不再排队）。
@@ -127,6 +146,7 @@ vi.mock('@/services/config.service', async () => {
         switchState.epoch += 1
         const run = mocks.switchOj(id) as Promise<void>
         switchState.pending = run
+        switchInFlight.value = true
         run.then(
           () => {
             switchState.last = { target: id, outcome: 'success' }
@@ -146,9 +166,10 @@ vi.mock('@/services/config.service', async () => {
         return switchState.epoch
       },
       get ojSwitchInFlight() {
-        return switchState.pending !== null
+        return switchInFlight.value
       },
       whenOjSwitchSettled: () => {
+        switchState.whenSettledCalls += 1
         const pending = switchState.pending
         return pending ? pending.catch(() => {}) : Promise.resolve()
       },
@@ -225,9 +246,15 @@ let settings: ReturnType<typeof useSettingsForm>
 beforeEach(async () => {
   vi.resetAllMocks()
   vi.useFakeTimers()
+  // composable 的配置读写已收编 configStore（严格 View → Store → Service）：
+  // 真实 store（纯转发）+ 本文件对 config.service 的同构复刻 mock——语义与
+  // 迁移前一致，mock 面仍是 service API 面（authStore/systemStore 同理模块级打桩）
+  setActivePinia(createPinia())
   switchState.pending = null
   switchState.epoch = 0
   switchState.last = null
+  if (switchState.inFlight) switchState.inFlight.value = false
+  switchState.whenSettledCalls = 0
   saveState.tail = null
   saveState.epoch = 0
   if (saveState.busy) saveState.busy.value = false
@@ -650,9 +677,39 @@ describe('useSettingsForm', () => {
     await pending
     await loading
 
+    // 等待路径必须真实走过：mock 的 ojSwitchInFlight 曾读普通属性，store getter
+    // 缓存成永 false，本用例会退化成 epoch 复查兜底仍然绿
+    expect(switchState.whenSettledCalls).toBeGreaterThanOrEqual(1)
     expect(next.form.activeOj).toBe('Hydro')
     expect(next.form.ojUrl).toBe('https://hydro.example')
     expect(next.dirty.value).toBe(false)
+  })
+
+  it('mock 切换 in-flight 标志语义同构：重叠切换先落地者不清标志（队尾派生）', async () => {
+    // 直接驱动 mock service（绕过 composable 的切换单飞），制造两个重叠切换：
+    // in-flight 由「队尾是否落地」派生——A（先入队）先落地时队尾是 B，标志必须保持。
+    // 注意本用例只锁标志语义；**请求串行化不在 mock 复刻范围**（mock 立即执行底层
+    // 调用，生产 switchQueue.enqueue 的排队语义由 config.service.spec 用真实服务覆盖）
+    let releaseA!: () => void
+    let releaseB!: () => void
+    mocks.switchOj.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseA = resolve }),
+    )
+    mocks.switchOj.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseB = resolve }),
+    )
+    const pendingA = configService.switchOj('Hydro')
+    const pendingB = configService.switchOj('HOJ')
+    expect(switchState.inFlight!.value).toBe(true)
+
+    releaseA()
+    await Promise.resolve()
+    expect(switchState.inFlight!.value).toBe(true)
+
+    releaseB()
+    await pendingA
+    await pendingB
+    expect(switchState.inFlight!.value).toBe(false)
   })
 
   it('旧控制器卸载后的完成回调不再回写表单', async () => {

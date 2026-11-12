@@ -9,11 +9,12 @@ import { getContestPhase } from '@/utils/contest'
 import { renderMarkdown } from '@/utils/markdown'
 import ActivityBar from '@/components/layout/ActivityBar.vue'
 import { vFocusScope } from '@/utils/focus-scope'
-import { configService } from '@/services/config.service'
+import { useConfigStore } from '@/stores/configStore'
 
 const router = useRouter()
 const auth = useAuthStore()
 const contestStore = useContestStore()
+const configStore = useConfigStore()
 defineProps<{ navigationDisabled?: boolean }>()
 
 /// 当前时间戳（秒），共享毫秒墙钟派生；每秒驱动倒计时与比赛阶段跃迁
@@ -85,7 +86,7 @@ const briefHtml = ref('')
 async function toggleBrief() {
   briefOpen.value = !briefOpen.value
   if (!briefOpen.value) return
-  const baseUrl = await configService.getOjBaseUrl()
+  const baseUrl = await configStore.getOjBaseUrl()
   briefHtml.value = renderMarkdown(contest.value?.description ?? '', baseUrl)
 }
 

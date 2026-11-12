@@ -28,11 +28,13 @@
 | `resetHistoryFilters` | `() => void` | 清空题目/状态筛选，**不发请求**——评测页无 `?problem=` 深链进入时清除上次访问残留（L2），首查由调用方随后的 `fetchHistory` 统一发出；与 setHistoryProblemFilter（用户改筛选、清空即重拉）语义不同 |
 | `setHistoryPage` | `(contestId, page) => Promise<void>` | 翻页（越界不发请求） |
 | `fetchProblemSummary` | `(contestId, displayId) => Promise<{ latest, total }>` | 只取 1 条，供解题页「最新记录」pill 与「提交记录 (n)」；**不污染 `history`** |
+| `getSubmissionDetail` | `(submissionId) => Promise<SubmissionDetail>` | **纯转发** `submission.service`（经 store 消费）：提交详情视图自持收敛轮询的取数入口，不复制状态、不加 await 壳 |
+| `getSubmissionCases` | `(submissionId) => Promise<SubmissionCases>` | **纯转发** `submission.service`（同上）：详情页测试点明细与控制台条失败提示的取数入口 |
 
 ## 直接依赖
 
 - `pinia`
-- `@/types/submission`（`JudgementStatus` / `SubmissionRecord` 类型）
+- `@/types/submission`（`JudgementStatus` / `SubmissionRecord` / `SubmissionCases` / `SubmissionDetail` 类型——后两个为 2026-11-09 转发 `getSubmissionDetail` / `getSubmissionCases` 新增）
 - `@/services/submission.service`（提交、查询、历史、详情）
 - `@/services/config.service`（轮询间隔与总超时）
 - `@/utils/submission`（`isTerminalStatus` 终态判据）
@@ -46,8 +48,8 @@
 
 - `views/ProblemSolveView.vue` — `handleSubmit` 调 `submitCode(contestId, problem.id, displayId, language, code)`（`displayId` 取路由参数），并以 `pendingFor(...)` 得出 `pendingSubmission` 作为第三重提交门控
 - `views/SubmissionsView.vue` — `history` / `fetchHistory` / 筛选 / 翻页
-- `views/SubmissionDetailView.vue` — 详情与测试点（经 service）
-- `components/editor/EditorConsoleBar.vue` — `latestLocalFor` / `fetchProblemSummary` 渲染最新记录 pill 与提交计数；`submissions[].errorMessage` 展示失败原因首行；`:pending-submission-id` 驱动「评测中…」锁
+- `views/SubmissionDetailView.vue` — 详情与测试点（经 `getSubmissionDetail` / `getSubmissionCases` 纯转发）
+- `components/editor/EditorConsoleBar.vue` — `latestLocalFor` / `fetchProblemSummary` / `getSubmissionCases`（失败测试点提示，2026-11-09 收编）渲染最新记录 pill 与提交计数；`submissions[].errorMessage` 展示失败原因首行；`:pending-submission-id` 驱动「评测中…」锁
 - `components/problem/QuickSubmitDialog.vue` — `submitCode(contestId, problem.problemId, problem.displayId, language, code)` + `pendingFor` 同内容锁定
 - `stores/session.ts` — 登出清理：`stopAllPolling()` + `$reset()`
 

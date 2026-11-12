@@ -73,7 +73,9 @@ export const useProblemStore = defineStore('problem', {
       this.isLoading = true
       this.error = null
       try {
-        const problem = await problemService.getProblem(contestId, problemId)
+        // 取数经本 store 的转发 action（与 getProblem 单入口）——同一取数路径
+        // 只保留一个调用点，不再直接碰 problemService
+        const problem = await this.getProblem(contestId, problemId)
         // 过期响应：期间又发起了新的 openProblem，状态（currentProblem/error/
         // isLoading）一律由最新请求决定。失败也不重抛 —— 调用方（视图）对
         // 这次加载早已通过自身 loadToken 放弃，重抛只会制造未处理拒绝
@@ -88,6 +90,18 @@ export const useProblemStore = defineStore('problem', {
         // 关掉新请求的加载态）；会话切换后同样不写状态
         if (token === this.openProblemSeq && sessionGen === getSessionGeneration()) this.isLoading = false
       }
+    },
+
+    /**
+     * 获取单个题目详情（不写入 store 状态）——快捷提交弹窗拉取允许语言用。
+     *
+     * 纯转发（2026-11-09 严格分层：QuickSubmitDialog 此前直连
+     * `problemService.getProblem`，现一律经本 store；不复制状态、不加 await 壳）。
+     * 与 `openProblem` 的区别：后者把结果设为 `currentProblem` 并带过期保护，
+     * 本方法只回传数据，由调用方自行消费。
+     */
+    getProblem(contestId: string, problemId: string): Promise<Problem> {
+      return problemService.getProblem(contestId, problemId)
     },
 
     /**

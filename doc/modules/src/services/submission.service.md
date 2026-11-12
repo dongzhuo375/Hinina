@@ -24,8 +24,9 @@
 
 ## 被依赖
 
-- `stores/submissionStore.ts` — 提交/轮询/历史
-- `views/SubmissionDetailView.vue`、`components/editor/EditorConsoleBar.vue` — 详情与测试点直查（一次性查询，无需进 store）
+- `stores/submissionStore.ts` — 提交/轮询/历史 + **`getSubmissionDetail` / `getSubmissionCases` 纯转发**
+  （经 store 消费：`views/SubmissionDetailView.vue`、`components/editor/EditorConsoleBar.vue`
+  的详情与测试点查询改经 store，视图不再直接 import 本 service；「一次性查询无需进 store」的旧例外取消）
 
 ## 逻辑流程
 

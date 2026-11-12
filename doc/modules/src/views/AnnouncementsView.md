@@ -12,7 +12,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `baseUrl` | ref | OJ 基址（`configService.getOjBaseUrl()`，失败回退空串），供 `renderMarkdown` 把正文中的相对图片 URL 改写为绝对地址 |
+| `baseUrl` | ref | OJ 基址（`configStore.getOjBaseUrl()`，store 纯转发 `config.service`；失败回退空串），供 `renderMarkdown` 把正文中的相对图片 URL 改写为绝对地址 |
 | `headerTitle` | computed | `{比赛标题} 赛事公告` —— **PR #36 起模板不再使用**（页头标题固定为「赛事公告」），保留为遗留项 |
 | `isContestFailed` / `isBootstrapping` / `isAnnouncementFailed` / `isEmpty` | computed | 四态分流：比赛加载彻底失败（整页 ErrorMessage）→ 首次加载 spinner → 公告失败且**无旧数据**（有旧数据时保留列表，错误交给下一轮轮询自愈）→ 空态 |
 | `renderedContents` | computed | 公告 id → 正文 HTML 的 Map 缓存：内容或基址变化才重渲染，避免模板里反复调 `renderMarkdown`（出口已消毒，`v-html` 安全） |
@@ -28,7 +28,7 @@
 
 - `vue`
 - 组件：`PageHeading`（页头，编号 `04` / `BULLETIN BOARD`）/ `ErrorMessage` / `LoadingSpinner`
-- `@/services/config.service`（`getOjBaseUrl`）
+- `@/stores/configStore`（`getOjBaseUrl`；配置消费的唯一入口，纯转发 `config.service`）
 - stores：`announcementStore`（列表/已读/未读数）、`contestStore`（`whenLoaded` + 标题）
 - `@/utils/markdown`（`renderMarkdown`）
 
@@ -41,7 +41,7 @@
 ```
 onMounted:
   announcementStore.isWatching = true           // 先声明「用户正在看」——load 据此标记已读
-  baseUrl = await configService.getOjBaseUrl()  // 先于渲染取基址，图片 URL 一步到位
+  baseUrl = await configStore.getOjBaseUrl()  // 先于渲染取基址，图片 URL 一步到位
   bootstrap():
     contestStore.whenLoaded()                   // 失败 → isContestFailed 整页报错
     announcementStore.load(contestId)           // 列表 + 已读集合（store 内并行拉取）

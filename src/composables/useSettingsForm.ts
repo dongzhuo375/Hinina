@@ -1,9 +1,10 @@
 import { computed, getCurrentScope, onScopeDispose, reactive, ref } from 'vue'
 import type { Ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useTransientValue } from '@/composables/useTransientValue'
 import { useRouter } from 'vue-router'
-import { configService, isOjSwitchPersistFailed } from '@/services/config.service'
 import { useAuthStore } from '@/stores/authStore'
+import { useConfigStore } from '@/stores/configStore'
 import { resetSessionForOjSwitch } from '@/stores/session'
 import { useSystemStore } from '@/stores/systemStore'
 import { normalizeHojLanguage } from '@/utils/language'
@@ -77,7 +78,7 @@ function copyOjDomain(from: SettingsForm, to: SettingsForm): void {
 ///
 /// 保存侧的跨控制器单飞/代际/等待已下沉 `config.service`（`runSaveTxn` /
 /// `saveInFlight` / `saveEpoch` / `whenSaveSettled`）——所有保存入口
-/// （设置页保存、编辑器偏好、分栏比例）同一队列，本模块只消费。
+/// （设置页保存、编辑器偏好、分栏比例）同一队列，本模块只消费（视图侧一律经 configStore 转发）。
 const sharedSwitching = ref(false)
 
 /// 切换结果：成功 / **已生效但持久化失败**。后者必须跨控制器
@@ -146,7 +147,10 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   /// 新挂载的控制器在旧控制器保存完成前不得发起切换/保存（否则旧意图可覆盖
   /// 用户较新的选择）。**不含**编辑器偏好/分栏比例等后台写入——那类写入只
   /// 排在保存队列里，不该让设置页的下拉与保存按钮产生反应。
-  const saving = configService.settingsSaveInFlight
+  const configStore = useConfigStore()
+  // settingsSaveInFlight 是 store getter（computed）：storeToRefs 直接给出同名
+  // Ref（返回面与迁移前一致，canSave/模板零改动），不再手工包一层 computed
+  const { settingsSaveInFlight: saving } = storeToRefs(configStore)
   const saveError = ref<string | null>(null)
   const { value: showSaved, show: markSaved, clear: clearSaved } = useTransientValue(false, 3_000)
 
@@ -256,13 +260,13 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       if (
         outcome === 'persist-failed' &&
         !disposed &&
-        configService.ojSwitchEpoch === epoch
+        configStore.ojSwitchEpoch() === epoch
       ) {
         // 重读成功会清空提示；持久化失败的事实必须保留
         switchNotice.value = PERSIST_FAILED_NOTICE
       }
     } catch {
-      if (disposed || configService.ojSwitchEpoch !== epoch) return
+      if (disposed || configStore.ojSwitchEpoch() !== epoch) return
       adoptEffectiveSwitch(
         target,
         outcome === 'persist-failed' ? PERSIST_FAILED_NOTICE : FOREIGN_RELOAD_FAILED_NOTICE,
@@ -275,16 +279,17 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   /// 而旧控制器的完成回调不会再刷新它。失败由调用方处理。
   async function readSettledConfig(): Promise<AppConfig> {
     for (;;) {
-      const epoch = configService.ojSwitchEpoch
-      // 无在途切换时**同步**走到 invalidate/getConfig：设置页其余读取的启动
-      // 顺序被既有用例锁定（invalidate → config → 其它），不能平白多一个微任务
-      if (configService.ojSwitchInFlight) {
-        await configService.whenOjSwitchSettled()
-        if (epoch !== configService.ojSwitchEpoch) continue
+      const epoch = configStore.ojSwitchEpoch()
+      // 无在途切换时**调用同步进入** service（invalidate/getConfig 的启动顺序被
+      // 既有用例锁定：invalidate → config → 其它）；返回的 Promise 经 Pinia
+      // action 多两跳微任务——时序敏感断言等终态，不要数 tick
+      if (configStore.ojSwitchInFlight) {
+        await configStore.whenOjSwitchSettled()
+        if (epoch !== configStore.ojSwitchEpoch()) continue
       }
-      configService.invalidate()
-      const config = await configService.getConfig()
-      if (epoch === configService.ojSwitchEpoch) return config
+      configStore.invalidate()
+      const config = await configStore.getConfig()
+      if (epoch === configStore.ojSwitchEpoch()) return config
     }
   }
 
@@ -293,7 +298,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     // 只包显式切换会让保存后的自动切换绕开门禁。
     // 共享的 `switching` 覆盖跨控制器（旧设置页的切换在途时新页面也不得再发）。
     if (switching.value) {
-      await configService.whenOjSwitchSettled()
+      await configStore.whenOjSwitchSettled()
       return false
     }
     switching.value = true
@@ -301,7 +306,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     // 切换结果（成功 / 已生效但持久化失败）：决定是否/如何通知其它控制器
     let outcome: SwitchOutcome | null = null
     try {
-      await configService.switchOj(target)
+      await configStore.switchOj(target)
       outcome = 'success'
       // 会话上下文先清理（领域状态 + 认证态，两者分离见各自文档）；
       // persistedActive 与 OJ 域在重置/对齐成功后才提交
@@ -342,7 +347,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // 后端已切 registry、清缓存，只是持久化 oj.active 失败：切换**已生效**，
       // 必须走「承认已生效」分支（并补做 resetSessionForOjSwitch——否则旧 OJ
       // 的登录态会被带到新 OJ）
-      if (isOjSwitchPersistFailed(e)) {
+      if (configStore.isOjSwitchPersistFailed(e)) {
         outcome = 'persist-failed'
         resetSessionForOjSwitch()
         useAuthStore().resetForOjSwitch()
@@ -364,7 +369,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
         // 已重新启用，`copyOjDomain` 会再次覆盖用户刚输入的内容。发起者自己
         // 已在上面完成重置/对齐。
         if (outcome) {
-          const epoch = configService.ojSwitchEpoch
+          const epoch = configStore.ojSwitchEpoch()
           // 共享结果已由 ConfigService.switchOj 记录；这里只通知仍挂载的控制器
           const listeners = [...switchObservers]
           await Promise.allSettled(
@@ -475,7 +480,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   /// `ConfigService` 持有（任意保存事务成功也能解除），
   /// 这里只在仍是同一目标的 persist-failed 时提示。
   function restoreHistoricalSwitchNotice(config: AppConfig): void {
-    const last = configService.latestOjSwitchResult()
+    const last = configStore.latestOjSwitchResult()
     if (!last || last.outcome !== 'persist-failed') return
     if (config.oj.active !== last.target) return
     switchNotice.value = PERSIST_FAILED_NOTICE
@@ -485,7 +490,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
   /// `updateConfigNow`（保存事务的写入主体）统一完成（覆盖设置页之外的保存入口）。
   function clearResolvedPersistedWarning(persistedActiveId: string): void {
     if (switchNotice.value !== PERSIST_FAILED_NOTICE) return
-    const last = configService.latestOjSwitchResult()
+    const last = configStore.latestOjSwitchResult()
     if (last?.outcome === 'success' && last.target === persistedActiveId) {
       switchNotice.value = null
     }
@@ -504,14 +509,14 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
       // 保存开始，重读。
       let config: AppConfig
       for (;;) {
-        if (configService.settingsSaveInFlight.value) {
-          await configService.whenSettingsSaveSettled()
+        if (configStore.settingsSaveInFlight) {
+          await configStore.whenSettingsSaveSettled()
         }
         // 等待结束后再捕获代际：保存结束必然 +1，若沿用等待前的值会固定多读一次
-        const epoch = configService.settingsSaveEpoch
+        const epoch = configStore.settingsSaveEpoch()
         config = await readSettledConfig()
         // 读取期间若有设置页保存开始/结束（epoch 变化）或仍在途，重读
-        if (!configService.settingsSaveInFlight.value && epoch === configService.settingsSaveEpoch) break
+        if (!configStore.settingsSaveInFlight && epoch === configStore.settingsSaveEpoch()) break
       }
       if (disposed) return
       populate(config)
@@ -538,11 +543,11 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     // 走自动切换：否则 switch_oj 对不存在的实例失败，会谎报「实例已保存；
     // 切换未成功」（手改 active 指向缺失实例时可达）
     const isNewInstance = !lockAll && !ojInstances.value.some((i) => i.id === target)
-    // 保存事务：`saving`（= configService.settingsSaveInFlight）在**入队时**
+    // 保存事务：`saving`（= configStore.settingsSaveInFlight，转发自 configService）在**入队时**
     // 同步置位，覆盖「保存 → 自动切换」整段；释放/代际/等待队列由服务层负责
     //（含编辑器偏好、分栏比例等后台写入与本事务串行）
     try {
-      await configService.runSaveTxn(async (tx) => {
+      await configStore.runSaveTxn(async (tx) => {
         const saved = await tx.updateConfig((draft) => {
           // active 只由 switch_oj 改写；保存不能制造配置与运行中 Registry 的不一致
           if (!lockAll) {

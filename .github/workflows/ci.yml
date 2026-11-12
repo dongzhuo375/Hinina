@@ -56,6 +56,12 @@ jobs:
       # 调用方须显式加白名单）。与 scripts/__tests__ 的用例互补：那里测判定，
       # 这里对真实源码树出口。
       - run: npm run check:save-gate
+      # 前端分层门禁（扫描面不 import Service；扫描面与 stores 不 import bridge；
+      # src 内除 bridge/ 与 tests 外不 import @tauri-apps/*（整树遍历）
+      # ——Architecture.md「前端分层口径」两条红线）。与
+      # scripts/__tests__/check-layering.spec.ts 互补：那里测判定与变异，
+      # 这里对真实源码树出口。
+      - run: npm run check:layering
       # webview CSP 门禁（指令集与逐指令源 exact 钉死 + devCsp ⊇ csp）。同样
       # 与 scripts/__tests__/csp-policy.spec.ts 互补：那里测判定与变异，
       # 这里对真实 tauri.conf.json 出口。

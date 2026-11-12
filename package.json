@@ -20,6 +20,7 @@
     "release:check": "node scripts/check-release-versions.mjs",
     "check:csp-policy": "node scripts/check-csp-policy.mjs",
     "check:save-gate": "node scripts/check-save-gate.mjs",
+    "check:layering": "node scripts/check-layering.mjs",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {

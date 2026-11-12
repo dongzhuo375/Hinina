@@ -1,5 +1,10 @@
 import { defineStore } from 'pinia'
-import type { JudgementStatus, SubmissionRecord } from '@/types/submission'
+import type {
+  JudgementStatus,
+  SubmissionCases,
+  SubmissionDetail,
+  SubmissionRecord,
+} from '@/types/submission'
 import { submissionService } from '@/services/submission.service'
 import { configService } from '@/services/config.service'
 import { isTerminalStatus } from '@/utils/submission'
@@ -416,6 +421,21 @@ export const useSubmissionStore = defineStore('submission', {
         status: null,
       })
       return { latest: page.records[0] ?? null, total: page.total }
+    },
+
+    /**
+     * 获取提交详情（含源代码 / CE 错误信息）——提交详情视图的取数入口。
+     *
+     * 纯转发（2026-11-09 严格分层：`SubmissionDetailView` 的自持轮询此前直连
+     * `submissionService`，现一律经本 store；转发不复制状态、不加 await 壳）。
+     */
+    getSubmissionDetail(submissionId: string): Promise<SubmissionDetail> {
+      return submissionService.getSubmissionDetail(submissionId)
+    },
+
+    /** 获取测试点详情（含子任务分组）——详情视图与控制台条的取数入口，纯转发 */
+    getSubmissionCases(submissionId: string): Promise<SubmissionCases> {
+      return submissionService.getSubmissionCases(submissionId)
     },
   },
 })
