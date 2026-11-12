@@ -1,6 +1,7 @@
 // Hinina 库根，公开模块树
 
 pub mod adapter;
+pub mod bootstrap;
 pub mod commands;
 pub mod core;
 pub mod infra;

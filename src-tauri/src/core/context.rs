@@ -25,12 +25,12 @@ use crate::service::workspace::manager::WorkspaceManager;
 
 /// 统一应用上下文。
 ///
-/// 在 `main.rs` 启动时装配，注入到 Tauri State 中。
+/// 在组合根启动时装配（`bootstrap::setup`），注入到 Tauri State 中。
 /// 所有 Service 通过 AppContext 获取依赖，避免相互直接引用。
 pub struct AppContext {
     /// Explicit fence for in-flight access across user/OJ/contest changes.
     pub access: Arc<crate::core::access::AccessRevision>,
-    /// 进程内事件总线（唯一事实通知源；消费者由组合根 `main.rs` 启动）
+    /// 进程内事件总线（唯一事实通知源；消费者由组合根 `bootstrap::events` 启动）
     pub event_bus: Arc<CoreEventBus>,
     /// 会话持久化仓库（应用层与适配器层共用）
     pub session_repo: Arc<dyn SessionRepository>,
@@ -69,7 +69,7 @@ impl AppContext {
     /// 1. Logger — 日志系统
     /// 2. 确保 `base_dir` 存在（`create_dir_all`）
     /// 3. Storage — 文件系统（`base_dir` 由调用方传入，来自 `infra::data_dir` 的解析结果）
-    /// 4. CoreEventBus — 事件总线（消费者不在此启动，见 `main.rs`）
+    /// 4. CoreEventBus — 事件总线（消费者不在此启动，见 `bootstrap::events`）
     /// 5. SessionRepository — 会话持久化（应用层与适配器层共用）
     /// 6. ConfigService — 配置管理（通过 FsConfigRepository 持久化）
     /// 7. HttpClient — 网络客户端（超时取自配置）
@@ -77,11 +77,11 @@ impl AppContext {
     /// 9. WorkspaceManager
     /// 10. Service 层 — auth / contest / problem / submission
     /// 11. PluginHost + PluginManager — 插件事件边界与生命周期控制（PluginHost
-    ///     消费者在 `main.rs` 启动；PluginManager 持 `ServiceQueries` 查询端口）
+    ///     消费者由 `bootstrap::events` 启动；PluginManager 持 `ServiceQueries` 查询端口）
     /// 12. 装配 AppContext
     ///
     /// `default_data_dir` / `source` 来自 [`crate::infra::data_dir::prepare_startup`]，
-    /// 调用方（`main.rs` 的 `.setup()`）必须在调用本函数**之前**完成一次性数据迁移 ——
+    /// 调用方（`bootstrap::setup`）必须在调用本函数**之前**完成一次性数据迁移 ——
     /// 否则日志句柄会占住旧目录，迁移会失败。
     pub async fn init(
         base_dir: PathBuf,
@@ -211,7 +211,7 @@ impl AppContext {
             Arc::clone(&storage),
         ));
 
-        // 11. 插件宿主（只持有总线句柄；消费者由 `main.rs` 启动）
+        // 11. 插件宿主（只持有总线句柄；消费者由 `bootstrap::events` 启动）
         let plugin_host = Arc::new(PluginHost::new(Arc::clone(&event_bus)));
 
         let queries = Arc::new(crate::plugin::query::ServiceQueries {

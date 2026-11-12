@@ -51,7 +51,7 @@ pub fn arm() {
     let _ = MAIN_THREAD.set(std::thread::current().id());
 }
 
-/// 标记启动完成：`main.rs` 的 `run` 回调收到 `RunEvent::Ready` 时调用
+/// 标记启动完成：`bootstrap::handle_run_event` 收到 `RunEvent::Ready` 时调用
 /// （窗口创建与 setup 均已完成），此后 panic 不再弹窗。
 pub fn mark_started() {
     STARTED.store(true, Ordering::SeqCst);

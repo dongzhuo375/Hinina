@@ -1154,7 +1154,7 @@ fn list_announcements_returns_page_on_success() {
 // ── 新公告检测（红点提醒的事件源）──
 //
 // 公告红点必须由事件驱动：前端仍按 60s 节拍拉取，但「有新公告」这一状态变更
-// 走 CoreEventBus，由 main.rs 的事件桥转发到 webview。以下锁定三个不变量。
+// 走 CoreEventBus，由 bootstrap::events 的事件桥转发到 webview。以下锁定三个不变量。
 
 #[test]
 fn first_announcement_fetch_establishes_baseline_without_event() {
