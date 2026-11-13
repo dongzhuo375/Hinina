@@ -20,6 +20,7 @@
 - `crate::bootstrap::{events, notification::TauriPluginNotifications}`
 - `crate::infra::data_dir::{self, DataDirPlan, DataDirSource, MigrateOutcome}`
 - `tauri::{AppHandle, Manager}` / `tokio::runtime::Runtime`
+- `std::io::Write`（忽略失败的 `writeln!` 写 stderr，release GUI 下句柄无效）/ `std::sync::Arc`（`set_output` 注入通知出口）
 
 ## 被依赖
 - `src-tauri/src/main.rs` — `.setup` 闭包调用 `setup::install`（闭包挂在 `bootstrap::builder()` 产出的 Builder 上）
