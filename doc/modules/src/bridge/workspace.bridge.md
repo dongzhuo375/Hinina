@@ -35,7 +35,7 @@ workspace.service → 各桥接函数 → ipcInvoke(cmd, args)
   → Rust commands::workspace_cmd 对应 Command → WorkspaceManager
 
 后端 `CoreEvent::WorkspaceSaved`（显式保存或 auto-save 完成）
-  → main.rs 的前端事件桥 emit("workspace-saved", { workspaceId, revision, auto })
+  → src-tauri/src/bootstrap/events.rs 的前端事件桥 emit("workspace-saved", { workspaceId, revision, auto })
   → onWorkspaceSaved 回调 → workspaceStore.markPersisted(workspaceId, revision)
 ```
 
@@ -46,7 +46,7 @@ workspace.service → 各桥接函数 → ipcInvoke(cmd, args)
 - 桥接层不做重试/防抖——节奏控制在 store（2s 防抖）与后端（auto-save）两层完成。
 - **`onWorkspaceSaved` 为何打破「桥接只有 ipcInvoke」的惯例**：后台 auto-save 由 Rust
   触发，是唯一非前端发起的落盘路径，前端无法用 invoke 感知；「已自动备份」若没有
-  这个信号就只能靠猜（旧实现即为假指示器）。事件名与载荷定义在 `main.rs` 的
+  这个信号就只能靠猜（旧实现即为假指示器）。事件名与载荷定义在 `bootstrap/events.rs` 的
   `WORKSPACE_SAVED_EVENT` 常量（`forward_to_webview` 组装载荷），两端需同步修改。
 - **事件只驱动 UI 指示，不是状态来源**：真实落盘状态由 `saveWorkspace` 的 IPC 返回值
   与磁盘真值保证；事件丢失时指示器退化为「编辑中…」直到下次显式保存。

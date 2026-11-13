@@ -157,7 +157,7 @@ where
 ///
 /// **保存本身是显式同步动作**：本命令返回 `Ok` 即表示内容已落盘（未脏时是无操作）。
 /// 成功落盘时 `WorkspaceManager` 发布 `CoreEvent::WorkspaceSaved`，
-/// 经 `main.rs` 的事件桥转为前端的 `workspace-saved`，驱动「已自动备份」指示 ——
+/// 经 `bootstrap::events` 的事件桥转为前端的 `workspace-saved`，驱动「已自动备份」指示 ——
 /// 事件只是通知，保存的成败由本命令的返回值决定。
 #[tauri::command]
 pub async fn save_workspace(ctx: State<'_, AppContext>) -> AppResult<()> {

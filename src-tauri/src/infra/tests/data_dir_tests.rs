@@ -1331,7 +1331,7 @@ fn corrupt_pointer_with_legacy_migration_reports_once() {
 /// 指针必须继续生效——用户选的自定义目录不能被无视（否则会被永久困在临时目录）。
 #[test]
 fn degraded_mode_still_honors_saved_custom_dir() {
-    // 降级模式下 default_dir == 临时目录（main.rs 同口径）：指针就落在那里
+    // 降级模式下 default_dir == 临时目录（bootstrap::setup 同口径）：指针就落在那里
     let degraded_default = unique_dir("degraded-custom-pointer");
     let custom = unique_dir("degraded-custom-target");
     write_pointer(&degraded_default, &pointer(Some(&custom), None)).expect("写指针失败");
@@ -1382,7 +1382,7 @@ fn update_pointer_aborts_on_io_error_instead_of_overwriting() {
 fn degraded_mode_does_not_self_migrate_legacy() {
     let legacy = unique_dir("self-migrate-legacy");
     seed_legacy(&legacy);
-    // 降级模式下 default_dir 就是临时目录本身（main.rs 同口径），上次搬家失败过
+    // 降级模式下 default_dir 就是临时目录本身（bootstrap::setup 同口径），上次搬家失败过
     write_pointer(&legacy, &pointer_with_legacy(None, Some(false))).expect("写指针失败");
 
     let (plan, outcome) = prepare_startup_with_default_error(

@@ -25,7 +25,7 @@
 
 ## 被依赖
 
-- `main.rs`（argv 收集后 `launch_args::init(&argv)`，紧随 `--console` 处理）
+- `bootstrap::early`（argv 收集后 `launch_args::init(&argv)`，紧随 `--console` 处理）
 - `commands/app_cmd.rs`（`launch_flags` 命令的只读来源）
 - `commands/config_cmd.rs`（`update_config` 的锁定执行真值：`maintainer_locked = !launch_args::get().settings`，2026-11-04 G1）
 

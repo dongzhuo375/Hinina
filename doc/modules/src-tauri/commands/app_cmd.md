@@ -27,7 +27,7 @@
 
 ## 被依赖
 
-- `main.rs` 的 `generate_handler!`（命令清单首位，注册命令之一）
+- `commands::invoke_handler` 的 `generate_handler!`（命令清单首位，注册命令之一）
 - 前端 `src/bridge/system.bridge.ts` 的 `getLaunchFlags()` / `openExternal()`（经 `system.service` 转发；`openExternal` 的消费方是 main.ts 组合根的外链拦截装配 `utils/external-links`）
 
 ## 逻辑流程

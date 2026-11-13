@@ -24,7 +24,7 @@
 - `crate::core::error::{AppError, AppResult}`
 
 ## 被依赖
-- `src-tauri/src/main.rs`（`generate_handler!` 注册）
+- `commands::invoke_handler`（`generate_handler!` 注册）
 
 ## 逻辑流程
 1. 前端调用 `invoke('list_contests')` / `invoke('load_configured_contest')`（「选中比赛」的 `select_contest` 已删除：配置比赛引用走 `update_config` 的 `oj.contestRef`，`ContestService::select_contest` 仍被服务层内部复用） / `invoke('get_contest_rank', { contestId, ... })` / `invoke('list_contest_announcements', { contestId, ... })` / `invoke('get_read_announcement_ids', { contestId })` / `invoke('mark_announcements_read', { contestId, ids })`

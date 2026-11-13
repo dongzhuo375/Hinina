@@ -24,7 +24,7 @@
 
 ## 被依赖
 
-- `main.rs`（`main()` 最先调用 `install()`；不 import 其它业务模块）
+- `bootstrap::early`（`prepare()` 最先调用 `install()`；不 import 其它业务模块）
 - `commands::maintenance_cmd`（`local_data_usage` 读 `bootstrap_log_path` 体积；`purge_local_data` 随「日志与崩溃记录」调用 `clear_bootstrap_log`）
 - `plugin::manager`（**策略交叉点**：插件 worker 有意不格式化 panic payload 以避开插件可控文本；全局钩子则记录**所有** panic 的 payload（含被 `catch_unwind` 捕获的插件 panic）。两处各自成立：插件日志走结构化字段，崩溃文件是本地取证且可由用户清理；钩子优先于捕获运行，属有意的全局可观测性）
 

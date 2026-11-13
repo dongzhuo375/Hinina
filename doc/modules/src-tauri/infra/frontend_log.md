@@ -24,7 +24,7 @@
 
 ## 被依赖
 
-- `commands/log_cmd.rs`（`frontend_log` 薄转发；`main.rs` 注册）
+- `commands/log_cmd.rs`（`frontend_log` 薄转发；`commands::invoke_handler` 注册）
 - 前端 `src/bridge/diagnostics.bridge.ts` 的 `forwardFrontendLog`（唯一调用方，经 `guards/globalErrorGuard` 装配）
 
 ## 逻辑流程

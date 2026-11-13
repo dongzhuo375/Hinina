@@ -19,11 +19,11 @@
 - `core::event::core_event_bus::CoreEventBus`
 
 ## 被依赖
-- `main.rs`（`spawn_event_consumers` 内与前端桥、PluginHost 一同启动）
+- `bootstrap::events`（`spawn_event_consumers` 内与前端桥、PluginHost 一同启动）
 
 ## 逻辑流程
 ```
-main.rs::spawn_event_consumers
+bootstrap::events::spawn_event_consumers
   → spawn_audit_consumer(&bus)
       → spawn_consumer(bus, "audit", |e| { log_event(&e); ready(()) }, |reason| { Lagged 才 debug })
           ├─ 事件到达 → log_event：match 变体 → info!/debug!(event = kind(), …)

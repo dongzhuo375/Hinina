@@ -7,11 +7,11 @@
 - **`AppContext`** — 统一应用上下文 struct，持有所有基础设施和 Service 的 `Arc` 引用。
   字段：`access: Arc<AccessRevision>`, `event_bus: Arc<CoreEventBus>`, `session_repo: Arc<dyn SessionRepository>`, `plugin_host: Arc<PluginHost>`, `plugin_manager: Arc<PluginManager>`, `config: Arc<ConfigService<FsConfigRepository>>`, `provider_registry: Arc<dyn ProviderRegistry>`, `workspace_manager: Option<Arc<WorkspaceManager>>`, `http_client`, `storage`, `logger`, `default_data_dir: PathBuf`, `data_dir_source: DataDirSource`, `auth: Arc<AuthService>`, `contest: Arc<ContestService>`, `problem: Arc<ProblemService>`, `submission: Arc<SubmissionService>`
 
-  `event_bus` 是**唯一事实通知源**（消费者不在此启动，见 `main.rs`）；`session_repo` 供应用层与适配器层共用（凭证轮换必须当场落盘）；`plugin_host` 只持有总线句柄（消费者同样在 `main.rs` 启动）。
+  `event_bus` 是**唯一事实通知源**（消费者不在此启动，见 `bootstrap::events`）；`session_repo` 供应用层与适配器层共用（凭证轮换必须当场落盘）；`plugin_host` 只持有总线句柄（消费者同样由 `bootstrap::events` 启动）。
   `default_data_dir` 与 `storage.base_dir()` 的区别：后者可能被用户改到别处（`data_dir.json` 指针），而前者是**位置指针文件所在处**与「恢复默认」的目标，永远不变。`data_dir_source` 供 `get_data_dir` 如实告诉界面「当前用哪个目录、为什么」。
 - **`AppContext::init(base_dir: PathBuf, default_data_dir: PathBuf, source: DataDirSource) -> AppResult<Self>`** — 异步初始化序列：
 
-  `default_data_dir` / `source` 来自 `infra::data_dir::prepare_startup`；调用方（`main.rs` 的 `.setup()`）**必须在调用本函数之前完成一次性数据迁移** —— 否则日志句柄会占住旧目录。
+  `default_data_dir` / `source` 来自 `infra::data_dir::prepare_startup`；调用方（`bootstrap::setup`）**必须在调用本函数之前完成一次性数据迁移** —— 否则日志句柄会占住旧目录。
   1. Logger — 日志系统初始化（`Logger::init(&base_dir)` 返回持有日志文件路径的实例，stderr + `{base_dir}/logs/hinina.log` 双路输出；实例挂到 `AppContext.logger` 供设置页「清理本地数据」截断日志）
   2. `create_dir_all` — 确保 base_dir 存在
   3. Storage — 文件系统（base_dir 传入）
@@ -22,7 +22,7 @@
   8. ProviderRegistry — 初始当前 OJ 取 `OjId::new(&oj.active)`；随后按配置实例注册全部内建 OJ（工厂数据化，约 8 行 for 循环）：组装 `AdapterDeps`（http_client / event_bus / **session_repo** / storage，仅 infra）→ 遍历 `oj.instances` 中 enabled 的实例并与 `adapter::factories()` 按 id 匹配（无对应适配器 `warn!` 跳过）→ `factory.build(&deps, &instance.base_url)` 得 `ProviderSet` 后 `register`（HOJAdapter 经 deps 注入 `event_bus` 与 `session_repo`：凭证轮换**显式落盘成功后**才发布 `CoreEvent::TokenRotated { oj_id }`，token 不进事件流）。注册完成后校验当前 OJ 已注册，未注册（配置手改/拼写错误）`warn!` 并**回退首个已注册 OJ**（不硬编码 HOJ —— HOJ 实例可能被禁用/移除，那是死路；一个都没注册时仅告警，首次查询以 `ProviderNotFound` 如实暴露）
   9. WorkspaceManager — 通过 `FsWorkspaceRepository` 创建，包装为 `Some(Arc<...>)`；注入 `Arc<CoreEventBus>`（落盘成功后发布 `WorkspaceSaved`）
   10. 装配 4 个 Service：AuthService（注入 `session_repo`，**不再注入 storage**）→ ContestService（注入 `Arc<Storage>`，供公告已读状态持久化 `announcements_read/`）→ ProblemService（注入 `Arc<Storage>`，供题目 limits / 题面磁盘缓存）→ SubmissionService
-  11. PluginHost — 只持总线句柄（订阅表由自身管理，消费者由 `main.rs` 启动）
+  11. PluginHost — 只持总线句柄（订阅表由自身管理，消费者由 `bootstrap::events` 启动）
   12. 装配 AppContext 并返回
 
 - **`AppContext::ensure_oj_registered(oj_id: &str) -> bool`** — **按需注册**某个已配置且启用的 OJ 实例（幂等，返回是否本次新注册）。存在的理由：注册只发生在 `init`，而设置页允许用户从 OJ 枚举里挑一个尚未配置的类型、填地址保存后立即切换 —— 不补注册用户就得重启客户端（`commands/oj_cmd::switch_oj` 在校验前调用它）。判定与注册**与 `init` 同源**：共用 [`enabled_instance`] 与 [`register_instance`]，不能凭空激活未配置的 OJ，否则 `switch_oj` 会绕过配置成为后门。此处组装 `AdapterDeps` 同样带 `session_repo`（经 `AppContext.session_repo` 取出）
@@ -67,7 +67,7 @@
 ## 逻辑流程
 `AppContext::init(base_dir, default_data_dir, source)` 按依赖顺序初始化：Logger（双路输出，日志文件落在 base_dir 下，故最先拿到 base_dir）→ Storage → CoreEventBus → SessionRepository → ConfigService → HttpClient（超时由配置注入）→ ProviderRegistry（当前 OJ 取 `oj.active`，按 `oj.instances` 的 enabled 实例匹配工厂注册全部内建 OJ，active 未注册回退**首个已注册 OJ**并告警）→ WorkspaceManager → 逐个装配 Service（auth → contest → problem → submission）→ PluginHost → 装配 AppContext。所有 Service 通过 Arc 共享 CoreEventBus、ConfigService、ProviderRegistry 和 Storage（ContestService 用于公告已读状态，ProblemService 用于 limits / 题面磁盘缓存）；AuthService 改持 `session_repo` 而非 Storage（会话读写归仓库层）。WorkspaceManager 在 Phase 4 已补全，不再是 `None`。
 
-**事件消费者不在此启动**：`init` 只创建总线与宿主，三个消费者（前端桥 / 审计 / 插件宿主）由 `main.rs` 的 `spawn_event_consumers` 在 Tauri 运行时内启动 —— `init` 跑在 `rt.block_on` 里，那个运行时在 `setup` 结束时随 `rt` 一起销毁，把长期消费者挂上去等于开机即死。
+**事件消费者不在此启动**：`init` 只创建总线与宿主，三个消费者（前端桥 / 审计 / 插件宿主）由 `bootstrap::events` 的 `spawn_event_consumers` 在 Tauri 运行时内启动 —— `init` 跑在 `rt.block_on` 里，那个运行时在 `setup` 结束时随 `rt` 一起销毁，把长期消费者挂上去等于开机即死。
 
 **base_dir 的来历**：由 `infra::data_dir` 在启动时解析（默认 `app_local_data_dir()`，可被 `data_dir.json` 指针改到别处，都不可用时回退临时目录），并由 `.setup()` 在调用本函数**之前**完成一次性数据迁移。详见 `infra/data_dir.md`。
 
@@ -100,7 +100,7 @@ switch_oj(id) → AppContext::ensure_oj_registered(id)
 
 已有实例的baseUrl修改按设置页提示在重启后生效；ensure_oj_registered不替换运行中的Adapter、凭据或缓存。插件查询绑定Registry实际endpoint，新配置只撤销旧上下文，不会让新上下文因待生效URL不同而永久不可用；实例被禁用/移除仍拒绝访问，差异以脱敏诊断提示。
 
-AppContext新增通用access和Send的plugin_manager控制器；共享revision注入Auth/Contest/Config/Registry。Manager绑定只读ServiceQueries与PluginHost。main.rs注入Tauri文本通知并在持久Tauri运行时autostart；引擎只在独立线程构建，退出同步cancel_all，不阻塞工作区关窗。
+AppContext新增通用access和Send的plugin_manager控制器；共享revision注入Auth/Contest/Config/Registry。Manager绑定只读ServiceQueries与PluginHost。bootstrap::setup 注入 Tauri 文本通知并在持久 Tauri 运行时 autostart；引擎只在独立线程构建，退出同步cancel_all，不阻塞工作区关窗。
 
 插件装配同时注入AccessRevision、ServiceQueries的revision缓存、Arc<dyn PluginRepository>和PluginApiFactory（FsPluginApiFactory）。Manager不再选择具体I/O实现，测试可使用内存仓库和假工厂。
 

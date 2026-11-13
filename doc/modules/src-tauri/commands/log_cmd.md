@@ -18,7 +18,7 @@
 
 ## 被依赖
 
-- `main.rs`（`generate_handler!` 注册 `frontend_log`）
+- `commands::invoke_handler`（`generate_handler!` 注册 `frontend_log`）
 - 前端 `src/bridge/diagnostics.bridge.ts` 的 `forwardFrontendLog`（唯一调用方，经 `guards/globalErrorGuard` 装配）
 
 ## 逻辑流程

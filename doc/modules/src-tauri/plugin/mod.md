@@ -42,7 +42,7 @@
   字段 `plugin_id`（经 `safe_id` 清洗：非空/≤128/小写数字点横线，否则 `<invalid>`；宿主级为 `<host>`）、
   `runtime="js"`、`operation`、`category`（+ 按类补充 `panic_kind`/`error_kind`/`stage`）。
   **源头错误绝不格式化进消息**——只记错误分类，凭证/URL/路径不出现在日志里。
-- **插件生命周期/宿主操作日志**（manager.rs、plugin_host.rs、main.rs）：字段
+- **插件生命周期/宿主操作日志**（manager.rs、plugin_host.rs、bootstrap）：字段
   `plugin_id`、`plugin_version`、`runtime="js"`、`operation`（+ API 事件补 `event`/`permission`/`request_id`，
   失败补 `error`）。值缺失时留**空串**而非省略字段（如宿主级 `host.start`/`host.autostart` 无具体插件归属、
   `worker.start` 失败可能发生在清单加载之前），保证同前缀日志可按字段过滤。

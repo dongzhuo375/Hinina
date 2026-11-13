@@ -30,7 +30,7 @@
 
 ## 被依赖
 
-- `main.rs`（`main()` 的**第二**步：先安装 panic 钩子（`infra::panic_report::install`），再用 `args_os().skip(1)` 收集参数并 `requested` → `attach`；`attach` **必须早于 `Logger::init` 与任何 stdio 使用**——重绑的 std 句柄要被 panic 钩子的 stderr 兜底与 Logger 的 stderr 层从 `GetStdHandle` 取到，新窗口的代码页与 VT 也要在第一批日志写出**之前**生效。钩子先装是纵深防御：重绑之前的任何 panic 也有落点）
+- `bootstrap::early`（`prepare()` 的**第三**步：前两步是 panic 钩子安装与启动错误框 arm；本步用 `args_os().skip(1)` 收集参数并 `requested` → `attach`；`attach` **必须早于 `Logger::init` 与任何 stdio 使用**——重绑的 std 句柄要被 panic 钩子的 stderr 兜底与 Logger 的 stderr 层从 `GetStdHandle` 取到，新窗口的代码页与 VT 也要在第一批日志写出**之前**生效。钩子先装是纵深防御：重绑之前的任何 panic 也有落点）
 
 ## 逻辑流程
 

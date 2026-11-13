@@ -22,7 +22,7 @@
 - `core::event::core_event::CoreEvent`、`core::event::core_event_bus::CoreEventBus`
 
 ## 被依赖
-- `main.rs`（前端事件桥、启动消费者）
+- `bootstrap::events`（前端事件桥、启动消费者）
 - `infra::audit`（审计消费者）
 - `plugin::host::plugin_host::PluginHost`（插件事件消费者）
 

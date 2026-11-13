@@ -74,7 +74,7 @@ pub enum DataDirSource {
 ///
 /// `prepare_startup` 跑在 [`crate::infra::logger::Logger`] 初始化**之前**，此阶段的
 /// `warn!`/`info!` 会被整体丢弃 —— 排障者因此看不到「自定义数据目录为什么失效」。
-/// 各函数把本该打日志的内容记入缓冲，`report_data_dir`（main.rs）在日志就绪后经
+/// 各函数把本该打日志的内容记入缓冲，`report_data_dir`（bootstrap::setup）在日志就绪后经
 /// [`replay`] 统一重放。消息为**已插值**的成品文案，重放不再拼装字段。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EarlyDiagnostic {

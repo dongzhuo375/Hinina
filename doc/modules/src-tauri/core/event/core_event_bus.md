@@ -23,7 +23,7 @@
 - `core::context::AppContext`（持有 `Arc<CoreEventBus>` 并注入各 Service）
 - 全部 Service 与适配器（发布事实通知）
 - `core::event::consumer::spawn_consumer`（取 receiver）
-- `main.rs`（前端桥 / 审计 / 插件宿主三个消费者）
+- `bootstrap::events`（前端桥 / 审计 / 插件宿主三个消费者）
 - `plugin::host::plugin_host::PluginHost`（只持有句柄，不建第二套总线）
 
 ## 逻辑流程

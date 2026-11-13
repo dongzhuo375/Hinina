@@ -505,7 +505,7 @@ fn set_language_without_current_workspace_errors() {
 // ── auto-save：落盘语义、修订号防线与事件契约 ──
 //
 // auto-save 是 debounce-to-memory 语义下唯一的周期落盘路径，且它的事件会被
-// main.rs 桥接为前端「已自动备份」指示 —— 事件必须只在「最新内容确已落盘」时发出。
+// bootstrap::events 桥接为前端「已自动备份」指示 —— 事件必须只在「最新内容确已落盘」时发出。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
