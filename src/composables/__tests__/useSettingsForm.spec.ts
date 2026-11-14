@@ -79,6 +79,12 @@ function resolvePersisted(active: string): void {
 
 vi.mock('@/services/config.service', async () => {
   const { computed, readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 生产判据的严格同构（config.service.ts 的 isOjSwitchPersistFailed）：
+  // instanceof IpcError + variant——裸 `{ variant }` 对象不再被误判为
+  // persist-failed，未来 reject 裸对象的用例会如生产一样判 false
+  const { IpcError } = await vi.importActual<typeof import('@/bridge')>('@/bridge')
+  const isPersistFailed = (e: unknown): boolean =>
+    e instanceof IpcError && e.variant === 'OjSwitchPersistFailed'
   const saveBusy = ref(false)
   saveState.busy = saveBusy
   // 必须是 ref：`settingsSaveInFlight` 是 computed，普通字段不会触发重新求值
@@ -112,20 +118,33 @@ vi.mock('@/services/config.service', async () => {
     }
     try {
       if (previous) await previous.then(() => {}, () => {})
-      return await fn({
-        updateConfig: async (mutate: (draft: AppConfig) => void) => {
-          const saved = await mocks.updateConfig(mutate)
-          resolvePersisted(saved.oj.active)
-          return saved
-        },
-      })
-    } finally {
-      saveState.epoch += 1
-      release()
-      if (saveState.tail === gate) {
-        saveState.tail = null
-        saveBusy.value = false
+      // 内层 = SerialQueue.enqueue 的 finally：事务落地即 release/复位 tail/busy，
+      // 等待者在内外两层之间的窗口能观察到「已放行但代际未推进」——与生产一致
+      try {
+        return await fn({
+          updateConfig: async (mutate: (draft: AppConfig) => void) => {
+            try {
+              const saved = await mocks.updateConfig(mutate)
+              resolvePersisted(saved.oj.active)
+              return saved
+            } finally {
+              // 与生产 tx.updateConfig 一致：无论成败都在 finally 失效缓存
+              //（失败时下次读取重新拉后端真值，避免缓存与磁盘漂移）
+              mocks.invalidate()
+            }
+          },
+        })
+      } finally {
+        release()
+        if (saveState.tail === gate) {
+          saveState.tail = null
+          saveBusy.value = false
+        }
       }
+    } finally {
+      // 外层 = 生产 runSaveTxn 的 finally：队列落地后才推进代际与 settings
+      // 记账（release 先于 epoch+1，与生产两层结构同序）
+      saveState.epoch += 1
       if (options.settingsPage) {
         saveState.settingsEpoch += 1
         settingsDepth.value -= 1
@@ -152,8 +171,8 @@ vi.mock('@/services/config.service', async () => {
             switchState.last = { target: id, outcome: 'success' }
             settleSwitch(run)
           },
-          (e: { variant?: string }) => {
-            if (e?.variant === 'OjSwitchPersistFailed') {
+          (e: unknown) => {
+            if (isPersistFailed(e)) {
               switchState.last = { target: id, outcome: 'persist-failed' }
             }
             settleSwitch(run)
@@ -192,9 +211,9 @@ vi.mock('@/services/config.service', async () => {
       },
       runSaveTxn,
     },
-    // 与生产同源的具名判据；真实类型化判据由 config.service.spec 用真实 IpcError 锁定
-    isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
-      e?.variant === 'OjSwitchPersistFailed',
+    // 与生产同构的具名判据（instanceof IpcError + variant）；真实类型化判据
+    // 由 config.service.spec 用真实 IpcError 锁定
+    isOjSwitchPersistFailed: (e: unknown) => isPersistFailed(e),
   }
 })
 vi.mock('@/services/system.service', () => ({
