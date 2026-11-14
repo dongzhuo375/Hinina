@@ -32,7 +32,7 @@
 
 - `vue`（`reactive` / `ref` / `computed` / `getCurrentScope` / `onScopeDispose`）
 - `vue-router`（普通模式切换成功后 `replace(Login)`；钥匙模式留在设置页）
-- `@/stores/configStore`（消费面（纯转发 `config.service`）：保存门禁 `runSaveTxn` / `settingsSaveInFlight` / `settingsSaveEpoch` / `whenSettingsSaveSettled`、切换侧 `switchOj` / `ojSwitchEpoch` / `ojSwitchInFlight` / `whenOjSwitchSettled`、读写 `getConfig` / `invalidate` / `latestOjSwitchResult`、错误判据 `isOjSwitchPersistFailed`）。**代际与最近结果在 service 是普通字段，store 以方法（action）逐次直读**——getter 化会被 computed 缓存成永旧值（`configStore.spec` 变异锁定）
+- `@/stores/configStore`（消费面 —— 纯转发 `config.service`：保存门禁 `runSaveTxn` / `settingsSaveInFlight` / `settingsSaveEpoch` / `whenSettingsSaveSettled`、切换侧 `switchOj` / `ojSwitchEpoch` / `ojSwitchInFlight` / `whenOjSwitchSettled`、读写 `getConfig` / `invalidate` / `latestOjSwitchResult`、错误判据 `isOjSwitchPersistFailed`）。**代际与最近结果在 service 是普通字段，store 以方法（action）逐次直读**——getter 化会被 computed 缓存成永旧值（`configStore.spec` 变异锁定）
 - `@/stores/systemStore`（`isKeyedSettingsRoute(routeName)` —— 切换后的「停留设置页」判据；组合进程级钥匙状态与路由身份，2026-11-04 H3 起收进 store 单一入口）
 - `@/stores/session`（`resetSessionForOjSwitch`）
 - `@/stores/authStore`（`resetForOjSwitch`，与领域清理成对调用）

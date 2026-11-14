@@ -8,14 +8,14 @@
 
 入口仍默认隐藏：连点状态栏版本号 5 下才在导航末尾出现设置项（`utils/settings-access`）。
 
-**分层锁（一页两层）**：连接与缓存调优字段默认锁定，唯一提权来源是 `--settings` 启动参数（管理方钥匙，经 `services/system.service` 的 `systemService.isKeyed()` 读取）。选手层（永远可编辑）：比赛 ID/引用、比赛密码、编辑器全部、布局滑杆、重置客户端 + 清理本地数据、About；维护者层（禁用 + 锁提示，不隐藏）：当前 OJ 下拉、服务器地址、请求超时/轮询/缓存 TTL、题面缓存、数据目录。定位是防误触护栏而非安全边界 —— IPC 更新路径由后端按 `launch_args` 自持真值保留锁定字段；直接手改 config.json 不受该护栏限制。
+**分层锁（一页两层）**：连接与缓存调优字段默认锁定，唯一提权来源是 `--settings` 启动参数（管理方钥匙，经 `stores/systemStore` 的 `systemStore.isKeyed` 读取）。选手层（永远可编辑）：比赛 ID/引用、比赛密码、编辑器全部、布局滑杆、重置客户端 + 清理本地数据、About；维护者层（禁用 + 锁提示，不隐藏）：当前 OJ 下拉、服务器地址、请求超时/轮询/缓存 TTL、题面缓存、数据目录。定位是防误触护栏而非安全边界 —— IPC 更新路径由后端按 `launch_args` 自持真值保留锁定字段；直接手改 config.json 不受该护栏限制。
 
 ## 核心类型/函数
 
 | 组成 | 职责 |
 |------|------|
 | `settingsGateNotice` | `@/utils/settings-gate-notice` 的提示文案：钥匙模式下从设置页点赛场页面被阶段闸门拦回时显示一行 warning（导航失败本身静默，评审十五 B）；4 秒自动清除；`sticky top-2` 保证滚到底部时仍在视口内；位于内容列 `.settings-sections` 内（不压左侧索引栏，评审十六）；卸载时 `clearSettingsGateNotice` 清计时器 |
-| `locked` | computed `!systemService.isKeyed()`（`services/system.service`）—— 维护者层锁定（默认锁，`--settings` 解锁）；判据委托 `systemService` 的启动标志快照（守卫首航已填充，同步读取无闪烁）。以 `:locked` 传给 OjServerSection 与 DataDirSection |
+| `locked` | computed `!systemStore.isKeyed`（`stores/systemStore`）—— 维护者层锁定（默认锁，`--settings` 解锁）；判据经 `systemStore` 转发 `systemService` 的启动标志快照（快照仍由 service 持有、store 只转发读；守卫首航已填充，同步读取无闪烁）。以 `:locked` 传给 OjServerSection 与 DataDirSection |
 | `switching` / `saving` | 来自 `useSettingsForm`，以同名 prop 传给 OjServerSection：切换或**设置页保存**在途时**整个 OJ 域**禁用（完成后的磁盘重置会覆盖该域，评审三十三 #3）。`saving` 取 `configStore.settingsSaveInFlight`（getter 转发 `config.service` 的 readonly ref；`useSettingsForm` 用 `storeToRefs` 直取同名 Ref）——编辑器偏好/分栏比例等后台写入不置位，不会锁住设置页 |
 | `useSettingsForm` | 中央 reactive 草稿、baseline/dirty/errors/canSave、配置加载/保存/放弃、OJ 清单与显式/自动切换 |
 | `updateForm(patch)` | 将 section 的 `SettingsFormPatch` 合并进同一 reactive 草稿；保存成功后仅当没有新编辑时才显示“已保存” |
@@ -35,9 +35,9 @@
 - `composables/useSettingsForm`（控制器与 `SettingsFormPatch` 类型）
 - `composables/useAboutSettings` / `useMaintenanceSettings` / `useDataDirSettings`
 - `composables/useSettingsScrollSpy`
-- `services/system.service`（`systemService.isKeyed()` —— 分层锁的提权判据）
+- `stores/systemStore`（`systemStore.isKeyed` —— 分层锁的提权判据）
 
-config/system service、相关 store 和 types 由对应 controllers 持有；View 不直接 import bridge。
+controllers 持有的是 `configStore` / `systemStore` 等相关 store 与 types（service 调用收在 store 内）；View 不直接 import bridge。
 
 ## 被依赖
 

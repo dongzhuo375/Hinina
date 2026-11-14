@@ -62,4 +62,4 @@ commands::*                 原样返回 AppResult，经 serde 序列化为 { Va
 ```
 
 ## 测试
-`src-tauri/src/core/tests/error_tests.rs`（在 `error.rs` 末尾以 `#[cfg(test)] #[path = "tests/error_tests.rs"] mod tests;` 引用）锁定：`context()` 对**全部 11 个变体**都保留变体且只在消息前拼接环节名（用穷尽 match 的 `variant_name` 兜底，新增变体时会漏测因此需同步补表）、`Auth` 错误经 `context()` 后仍可被 `matches!(_, AppError::Auth(_))` 识别（前端 sessionGuard 的判定依据）、`Display` 仍带变体前缀而 `user_message()` 不重复带前缀。
+`src-tauri/src/core/tests/error_tests.rs`（在 `error.rs` 末尾以 `#[cfg(test)] #[path = "tests/error_tests.rs"] mod tests;` 引用）锁定：`context()` 对**全部 12 个变体**都保留变体且只在消息前拼接环节名（用穷尽 match 的 `variant_name` 兜底，新增变体时会漏测因此需同步补表）、`Auth` 错误经 `context()` 后仍可被 `matches!(_, AppError::Auth(_))` 识别（前端 sessionGuard 的判定依据）、`Display` 仍带变体前缀而 `user_message()` 不重复带前缀。

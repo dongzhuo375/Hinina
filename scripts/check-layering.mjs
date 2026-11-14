@@ -8,7 +8,7 @@
 //            `import()` / side-effect / re-export).
 //   Rule B — no scanned file may import `@/bridge` / `*/bridge/*`, and **no
 //            file anywhere under src/ except bridge/ may import any
-//            `@tauri-apps/*` package** (CLAUDE.md: bridge is the only place
+//            `@tauri-apps/*` package** (doc/Architecture.md「前端分层口径」: bridge is the only place
 //            that touches Tauri; a direct `invoke` — or a direct plugin
 //            call — bypasses the bridge boundary and its IpcError
 //            normalization). Rule B's bridge half covers the **whole scan
@@ -80,10 +80,6 @@
 // direction; keep prose examples in comments). `require()` is not scanned
 // (ESM-only codebase).
 //
-// Stores/services/guards/router/main.ts are deliberately out of scope: they
-// sit on other rungs of the ladder (Store → Service → Bridge is legal; the
-// composition root and guards keep their registered service access).
-//
 // Usage:
 //   node scripts/check-layering.mjs      (also: npm run check:layering)
 
@@ -117,7 +113,7 @@ export const SOURCE_EXTENSIONS = /\.(?:d\.ts|ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$
 /// directory barrel (`from '@/services'`), symmetric with BRIDGE_SPEC below.
 const SERVICE_SPEC = /(?:^|\/)services(?:\/|$)/
 /// Rule B: specifiers that reach the IPC surface — the bridge layer, and any
-/// `@tauri-apps/*` package (api and plugin packages alike). CLAUDE.md: bridge
+/// `@tauri-apps/*` package (api and plugin packages alike). doc/Architecture.md「前端分层口径」: bridge
 /// is **the only place** that touches Tauri; a direct `invoke` (or a direct
 /// plugin-dialog call) from a view bypasses the IpcError normalization /
 /// bridge boundary.
@@ -138,7 +134,7 @@ const TAURI_SPEC = /^@tauri-apps(?:\/|$)/
 ///     （Store→Service 合法），Tauri 包规则照常；
 ///   - `services/`、`guards/`、`router/`、`main.ts`：只应用 **Tauri 包规则**
 ///     （import `@/bridge/*` 是合法梯级：Service→Bridge；guards 是跨层装配），
-///     `@tauri-apps/*` 则任何位置都只能经 bridge（CLAUDE.md:47）。
+///     `@tauri-apps/*` 则任何位置都只能经 bridge（doc/Architecture.md「前端分层口径」）。
 /// `main.ts` 缺失按扫描面不完整处理。
 export const TAURI_ONLY_ROOT_FILES = ['main.ts']
 
@@ -321,7 +317,7 @@ function scanUnit(violations, path, unitSource, lineBase, { mode = 'main' } = {}
     if (TAURI_SPEC.test(spec)) {
       violations.push(
         `${path}:${line}: 规则B —— Tauri 包只能由 bridge 接触（${spec}）；` +
-          'bridge 是唯一 import @tauri-apps/* 的地方（CLAUDE.md:47）——直接调用绕过 bridge 的 IpcError 归一化' +
+          'bridge 是唯一 import @tauri-apps/* 的地方（doc/Architecture.md「前端分层口径」）——直接调用绕过 bridge 的 IpcError 归一化' +
           '（扫描面与 stores/services/guards/router/main 同样适用）',
       )
     }

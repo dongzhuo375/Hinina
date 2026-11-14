@@ -11,7 +11,7 @@
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `storage` / `storageFailed` | `ref<StorageInfo \| null>` / `ref<boolean>` | 存储信息与局部失败降级 |
-| `loadStorage` | `() => Promise<void>` | 读取 `systemService.getStorageInfo()`；失败只影响 About |
+| `loadStorage` | `() => Promise<void>` | 读取 `systemStore.getStorageInfo()`；失败只影响 About |
 | `copiedKey` | `Readonly<Ref<string \| null>>` | 当前复制项（version/baseDir/logPath 等），2 秒后回弹 |
 | `copyText` | `(key, text) => Promise<void>` | 调用剪贴板，成功后 `showCopied(key)`；失败保持静默 |
 
