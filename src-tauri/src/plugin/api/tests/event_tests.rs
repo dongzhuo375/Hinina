@@ -15,7 +15,7 @@ fn envelope_serializes_with_camel_case_and_event_tag() {
     };
 
     let json = serde_json::to_string(&envelope).unwrap();
-    assert!(json.contains("\"version\":2"), "{json}");
+    assert!(json.contains("\"version\":3"), "{json}");
     assert!(json.contains("\"sequence\":7"), "{json}");
     assert!(json.contains("\"occurredAt\""), "{json}");
     assert!(json.contains("\"type\":\"workspace.saved\""), "{json}");
@@ -70,7 +70,6 @@ fn protocol_payload_contains_no_sensitive_fields() {
             automatic: false,
         },
         PluginEvent::ConfigChanged,
-        PluginEvent::ThemeChanged,
         PluginEvent::SessionLoggedIn {
             oj_id: "HOJ".into(),
         },
@@ -112,5 +111,5 @@ fn token_rotation_is_not_part_of_the_protocol() {
 /// 协议版本是显式契约：破坏性变更必须自增（此用例拦住「静默改协议」）。
 #[test]
 fn protocol_version_is_pinned() {
-    assert_eq!(PLUGIN_EVENT_PROTOCOL_VERSION, 2);
+    assert_eq!(PLUGIN_EVENT_PROTOCOL_VERSION, 3);
 }

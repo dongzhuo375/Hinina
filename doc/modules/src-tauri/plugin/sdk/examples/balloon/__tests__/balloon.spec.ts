@@ -422,7 +422,7 @@ async function resync(harness: Harness, now: number): Promise<void> {
   expect(harness.handlers.length).toBe(1)
   const handler = harness.handlers[0] as unknown as ResyncHandler
   await handler({ type: 'resync.required', lost: 0 }, {
-    version: 2,
+    version: 3,
     sequence: 1,
     occurredAt: now,
     event: { type: 'resync.required', lost: 0 },

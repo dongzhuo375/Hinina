@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 /// @plugin-api
 /// @since 1.0
 /// @stability stable
-pub const PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 2;
+pub const PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 3;
 
 /// 插件可见的事件。
 ///
@@ -99,10 +99,6 @@ pub enum PluginEvent {
     #[serde(rename = "system.config_changed")]
     ConfigChanged,
 
-    /// 主题已切换。
-    #[serde(rename = "system.theme_changed")]
-    ThemeChanged,
-
     /// 用户已登录（只给 OJ 标识；用户身份经插件 API 查询，避免协议层外泄标识）。
     #[serde(rename = "session.logged_in")]
     SessionLoggedIn { oj_id: String },
@@ -140,7 +136,6 @@ impl PluginEvent {
             Self::SubmissionJudged { .. } => Name::SubmissionJudged,
             Self::WorkspaceSaved { .. } => Name::WorkspaceSaved,
             Self::ConfigChanged => Name::ConfigChanged,
-            Self::ThemeChanged => Name::ThemeChanged,
             Self::SessionLoggedIn { .. } => Name::SessionLoggedIn,
             Self::SessionLoggedOut { .. } => Name::SessionLoggedOut,
             Self::SessionExpired { .. } => Name::SessionExpired,

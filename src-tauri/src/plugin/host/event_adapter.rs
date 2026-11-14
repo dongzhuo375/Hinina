@@ -143,7 +143,6 @@ fn to_plugin_event(event: &CoreEvent) -> Option<PluginEvent> {
             automatic: *automatic,
         },
         CoreEvent::ConfigChanged => PluginEvent::ConfigChanged,
-        CoreEvent::ThemeChanged => PluginEvent::ThemeChanged,
         CoreEvent::LoggedIn { oj_id, .. } => PluginEvent::SessionLoggedIn {
             oj_id: oj_id.clone(),
         },

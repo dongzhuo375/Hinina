@@ -75,7 +75,6 @@ fn whitelisted_events_map_with_trimmed_fields() {
             },
         ),
         (CoreEvent::ConfigChanged, PluginEvent::ConfigChanged),
-        (CoreEvent::ThemeChanged, PluginEvent::ThemeChanged),
         (
             // 登录只暴露 OJ 标识，用户 UUID 不进协议
             CoreEvent::LoggedIn {
@@ -135,7 +134,7 @@ fn token_rotation_is_filtered_out_without_consuming_sequence() {
 fn sequence_is_monotonic_from_one() {
     let mut adapter = PluginEventAdapter::new();
     for expected in 1..=5u64 {
-        let envelope = adapter.adapt(&CoreEvent::ThemeChanged).unwrap();
+        let envelope = adapter.adapt(&CoreEvent::ConfigChanged).unwrap();
         assert_eq!(envelope.sequence, expected);
     }
     assert_eq!(adapter.sequence(), 5);

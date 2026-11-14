@@ -38,7 +38,7 @@ fn publish_is_synchronous_and_does_not_block() {
 
     let started = std::time::Instant::now();
     for _ in 0..10_000 {
-        bus.publish(CoreEvent::ThemeChanged);
+        bus.publish(CoreEvent::ConfigChanged);
     }
     // 10k 次发布（消费者完全没读）应远快于 1 秒；这里只锁定「不阻塞」这一性质
     assert!(
@@ -58,8 +58,8 @@ async fn subscriber_does_not_receive_history() {
     let mut rx = bus.subscribe();
     assert!(rx.try_recv().is_err(), "订阅前的事件不应被投递");
 
-    bus.publish(CoreEvent::ThemeChanged);
-    assert_eq!(rx.recv().await.unwrap(), CoreEvent::ThemeChanged);
+    bus.publish(CoreEvent::ConfigChanged);
+    assert_eq!(rx.recv().await.unwrap(), CoreEvent::ConfigChanged);
 }
 
 /// 消费者落后于生产速度时收到 `Lagged`，而不是静默丢事件。
@@ -69,7 +69,7 @@ async fn slow_receiver_observes_lagged() {
     let mut rx = bus.subscribe();
 
     for _ in 0..5 {
-        bus.publish(CoreEvent::ThemeChanged);
+        bus.publish(CoreEvent::ConfigChanged);
     }
 
     match rx.recv().await {
@@ -80,7 +80,7 @@ async fn slow_receiver_observes_lagged() {
     }
 
     // Lagged 之后仍能继续消费（剩余缓存中的事件）
-    assert_eq!(rx.recv().await.unwrap(), CoreEvent::ThemeChanged);
+    assert_eq!(rx.recv().await.unwrap(), CoreEvent::ConfigChanged);
 }
 
 /// 总线析构 → 所有 receiver 收到 `Closed`（消费者据此正常退出）。
@@ -130,9 +130,9 @@ async fn bus_is_shareable_across_tasks() {
 
     let publisher = {
         let bus = Arc::clone(&bus);
-        tokio::spawn(async move { bus.publish(CoreEvent::ThemeChanged) })
+        tokio::spawn(async move { bus.publish(CoreEvent::ConfigChanged) })
     };
     publisher.await.unwrap();
 
-    assert_eq!(rx.recv().await.unwrap(), CoreEvent::ThemeChanged);
+    assert_eq!(rx.recv().await.unwrap(), CoreEvent::ConfigChanged);
 }

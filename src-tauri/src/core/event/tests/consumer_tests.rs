@@ -54,7 +54,7 @@ async fn consumer_receives_published_events() {
     let _task = spawn_consumer(&bus, "test-basic", counting_consumer(&handled), noop_resync);
 
     bus.publish(CoreEvent::ConfigChanged);
-    bus.publish(CoreEvent::ThemeChanged);
+    bus.publish(CoreEvent::ConfigChanged);
 
     wait_until(
         || handled.load(Ordering::SeqCst) >= 2,
@@ -74,7 +74,7 @@ async fn consumers_are_independent() {
     let _tb = spawn_consumer(&bus, "test-b", counting_consumer(&b), noop_resync);
 
     for _ in 0..3 {
-        bus.publish(CoreEvent::ThemeChanged);
+        bus.publish(CoreEvent::ConfigChanged);
     }
 
     wait_until(|| a.load(Ordering::SeqCst) >= 3, "消费者 A 收到 3 条").await;
@@ -129,7 +129,7 @@ async fn lagged_triggers_resync_and_keeps_consuming() {
     );
 
     for _ in 0..20 {
-        bus.publish(CoreEvent::ThemeChanged);
+        bus.publish(CoreEvent::ConfigChanged);
     }
 
     wait_until(
@@ -202,7 +202,7 @@ async fn panic_in_handler_restarts_consumer() {
     .await;
 
     // 重启后发布的事件仍被处理
-    bus.publish(CoreEvent::ThemeChanged);
+    bus.publish(CoreEvent::ConfigChanged);
     wait_until(
         || handled.load(Ordering::SeqCst) >= 1,
         "重启后应继续处理事件",
@@ -256,7 +256,7 @@ async fn healthy_run_resets_restart_counter() {
     let resync_count = || reasons.lock().unwrap_or_else(|e| e.into_inner()).len();
     // 每轮：发布 → panic → 重启（resync +1）→ 空闲存活超过阈值 → 下一轮
     for _ in 0..(MAX_CONSUMER_RESTARTS + 2) {
-        bus.publish(CoreEvent::ThemeChanged);
+        bus.publish(CoreEvent::ConfigChanged);
         let before = resync_count();
         wait_until(
             || resync_count() > before || task.is_finished(),
@@ -292,13 +292,13 @@ async fn rapid_crash_loop_exhausts_consumer() {
     // 不能一次性发布排队）。resync 总数 = 初始 Startup 1 次 + 每次重启 1 次，
     // 用绝对目标计数，避免「发布后读基线」与 Startup resync 竞争错位。
     for n in 1..=MAX_CONSUMER_RESTARTS {
-        bus.publish(CoreEvent::ThemeChanged);
+        bus.publish(CoreEvent::ConfigChanged);
         let target = usize::try_from(n + 1).expect("重启计数不会溢出 usize");
         wait_until(|| resync_count() >= target, "panic 后应触发重启").await;
     }
 
     // 第 MAX+1 次异常退出：不再重启，消费者被放弃
-    bus.publish(CoreEvent::ThemeChanged);
+    bus.publish(CoreEvent::ConfigChanged);
     let exit = tokio::time::timeout(Duration::from_secs(10), task)
         .await
         .expect("崩溃循环应在上限内被放弃")

@@ -8,7 +8,7 @@
 - **`spawn_audit_consumer(bus: &Arc<CoreEventBus>) -> tokio::task::JoinHandle<ConsumerExit>`** — 经 `core::event::consumer::spawn_consumer` 启动消费者；`handle` 同步调用 `log_event` 并返回 `std::future::ready(())`；`resync` 回调**只在 `ResyncReason::Lagged` 时记一条 `debug`** —— 审计只读、不承担任何状态同步职责，落后无需重新查询任何东西。返回的 `JoinHandle` 产出 `ConsumerExit`，供组合根在停机时观察
 - **`log_event(event: &CoreEvent)`**（私有）— 按事件类型记录审计日志。分级依据「排障价值 / 频率」：
   - `info`：低频且对复盘有意义的事实 —— `LoggedIn`（带 `user_id`）/ `LoggedOut` / `SessionExpired` / `TokenRotated` / `OjSwitched` / `WorkspaceSaved`（带 `workspace_id` / `revision` / `automatic`）/ `SubmissionCreated` / `SubmissionJudged`（带 `status`）/ `AnnouncementChanged`（只记 `new_count = new_ids.len()`）/ `ContestSelected` / `ConfigChanged`
-  - `debug`：可能高频的纯状态提醒 —— `ProblemOpened`、`ThemeChanged`
+  - `debug`：可能高频的纯状态提醒 —— `ProblemOpened`
   - 每条日志都带 `event = event.kind()` 字段；**只记录事件名与 ID / 状态摘要**，不额外拼接领域实体（`CoreEvent` 载荷本身已无敏感字段）
 
 ## 直接依赖

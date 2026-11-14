@@ -9,9 +9,9 @@
 |---|---|---|---|
 | `manifestVersion` | 2 | 清单格式 | 递增 `manifestVersion` |
 | `apiVersion` | 2 | 宿主 API 表面 | 递增 `apiVersion` |
-| 事件 `version` | 2 | 事件协议/信封 | 递增事件协议版本 |
+| 事件 `version` | 3 | 事件协议/信封 | 递增事件协议版本 |
 
-三者语义独立，恰好都为 2 不代表必须一起升级。“插件系统 1.0”也不要求这些字段填 1。
+三者语义独立，版本互不联动（当前清单/API 为 2、事件协议为 3）。“插件系统 1.0”也不要求这些字段填 1。
 
 规则：
 
@@ -144,7 +144,6 @@ export default async function activate(
 | `submission.judged` | `submissionId`, `status` | `submission.read` |
 | `workspace.saved` | `workspaceId`, `revision`, `automatic` | 无；仅元数据 |
 | `system.config_changed` | 无 | 无 |
-| `system.theme_changed` | 无 | 无 |
 | `session.logged_in` | `ojId` | 无；不含用户标识 |
 | `session.logged_out` | `ojId` | 无 |
 | `session.expired` | `ojId` | 无 |
@@ -259,7 +258,7 @@ export default async function activate(
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "sequence": 2,
   "occurredAt": 1780000000000,
   "event": { "type": "submission.judged", "submissionId": "s1", "status": "Accepted" }

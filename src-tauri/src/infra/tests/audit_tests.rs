@@ -25,7 +25,6 @@ async fn audit_consumer_handles_every_variant() {
             oj_id: "HOJ".into(),
         },
         CoreEvent::ConfigChanged,
-        CoreEvent::ThemeChanged,
         CoreEvent::OjSwitched {
             oj_id: "QDUOJ".into(),
         },
