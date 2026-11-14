@@ -112,7 +112,7 @@ getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / g
 
 - **分层约定**：View / Store 不得直接调用 `config.bridge`，配置读写一律经本服务。
 - **不引入 store**：缓存 Promise 而非结果，使多处调用共享一次 IPC；设置页保存经
-  保存经 `runSaveTxn` 事务句柄写后端 + 失效缓存，其余读取方下次调用即拿到新值。
+  `runSaveTxn` 事务句柄写后端 + 失效缓存，其余读取方下次调用即拿到新值。
 - **P55 值域统一（后经语言权威值改造修订）**：`defaultLanguage` 值域为 **HOJ 显示名**
   （与提交契约同源，见 `utils/language`）；历史 Monaco id 由前后端各自的归一函数
   映射回显示名（前端 `normalizeHojLanguage`、Rust `normalize_language_display_name`）。

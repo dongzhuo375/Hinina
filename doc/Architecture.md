@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-11-05 | 分支：`main`
+> 最后更新：2026-11-14 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -325,7 +325,7 @@ Hinina/
 ├── RELEASE.md                            # 发布手册（版本准备/打标签/草稿验收/正式发布/回退，M4）
 ├── SECURITY.md                           # 安全策略（GitHub 私密漏洞报告渠道、响应约定）
 ├── playwright.config.ts                  # Playwright E2E 配置（chromium，webServer 起 vite dev @1420）
-├── e2e/                                  # 浏览器 E2E（fake-tauri.ts 注入 __TAURI_INTERNALS__；auth/workspace/submission/session/settings/settings-key 六组 spec，见 doc/cicd/m3-integration.md 与 doc/modules/e2e/specs/）
+├── e2e/                                  # 浏览器 E2E（fake-tauri.ts 注入 __TAURI_INTERNALS__；auth/workspace/submission/submission-detail/session/settings/settings-key/rank/announcement/external-links 十组 spec，见 doc/cicd/m3-integration.md 与 doc/modules/e2e/specs/）
 ```
 
 ### Vue3 前端 — `src/`（阶段 7 已完成）
@@ -565,7 +565,7 @@ src/
 - **「重置」与「清理本地数据」必须分开，且不可逆动作要先给范围**：`commands::maintenance_cmd` 提供两个动作 —— **重置客户端**清掉一切**可重新从服务端获取**的东西（三层缓存 + 公告基线 + 公告已读标记；安全、可反复点，故只做一次确认），**清理本地数据**删除**不可重建**的本地事实（日志内容与临时目录崩溃记录文件、`SNAPSHOT_KEEP_DAYS`=30 天前的提交源码留档；不可逆，故 `local_data_usage` 先给确切条数与体积、用户逐项勾选后再二次确认）。硬约束：① 两者都**不动**工作区代码（`workspaces/`，选手唯一作品本体，且 OJ 只有提交过的版本，未提交的编辑无法找回）、配置、登录会话（清会话等于把选手踢回登录页，换账号有独立的登出路径）；② 重置**兜底清扫 `cache/` 根目录** —— 各 Service 只清自己那部分，清扫根目录才能保证将来新增的 namespace 也被覆盖，否则重置会静默漏掉新缓存；③ 日志用「重开 + 截断」清内容而**不删文件**（追加模式句柄在 Windows 上 `set_len` 会被拒，实测 `Os code 5`；删文件则要等重启才重建，中间这段排障信息就没了）；崩溃记录文件（`%TEMP%/hinina-panic.log`，可能含插件可控文本）则**删除**，体积计入同一勾选项预览；④ 留档的「过期」按 mtime 判定而不比对服务端列表（后者要网络/分页，还可能因赛制隐藏记录而误判）；⑤ **两个勾选项互不牵连**（日志清理失败只降级为 `logCleared=false` 并继续，不 `?` 冒泡中断留档清理）；⑥ **提示文案与配色都不许失实** —— 补拉失败、日志未清掉都要如实说明并以警告色呈现；⑦ **锁中毒统一 `into_inner` 取回内部数据**（与 `TtlCache` / `provider_registry_impl` 同款约定）：相关容器是 `Option` / `HashMap`，panic 不会让它们结构不一致，而「静默跳过」会让重置留下脏缓存、公告基线则会在中毒后永久不再报新公告
 - **公告红点走事件驱动 + 可见性补拉**：Rust 侧 `ContestService::list_announcements` 按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`（**首次拉取只建基线不发事件**，否则一开机就亮红点；基线按比赛隔离，失败时保留旧基线），`bootstrap::events` 的前端事件桥转发到 `announcements-published`，前端即时刷新。**事件只是刷新触发**：公告正文始终由 `list_contest_announcements` 经 IPC 查询，事件丢失时下一轮轮询即可恢复。前端轮询仍是拉取的唯一发起方（60s ± 10s），但**窗口重新可见/聚焦时立即补拉一次**（1s 去重）—— 桌面客户端的常态是「切出去看题解再切回来」，只靠节拍意味着切回来最多等 70s 才可能看到红点，被选手直接感知为「红点不出现」。已读语义配套收紧：页面不可见时不标记（切走了 = 没看到），`isWatching`（公告页在屏）时落地的新公告自动标为已读，避免离开页面后冒出假红点
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；**保存门禁也在 service**——`runSaveTxn` 保存事务覆盖「保存 → 自动切换」复合临界区，设置页保存、编辑器偏好、分栏比例等全部写入口同一队列串行（并发的读-改-写不交错）。门禁分两个视图：`settingsSaveInFlight`（只标 `settingsPage: true` 的事务，是设置页 `saving`／OJ 域禁用／切换互斥与 **`load` 等待**（`whenSettingsSaveSettled` + `settingsSaveEpoch`）的唯一来源——后台写入不该让设置页下拉框与保存按钮产生反应，其悬挂也不得把加载永久卡住）；`saveInFlight` = 任意写入口在途，是**队列观测 API**（生产零消费，测试锁定队列语义）（2026-11-04 G4 下沉：原先只在 composable 模块级的单飞/代际/等待已删）；评测轮询的**节拍与超时唯一归属前端** `submissionStore`（createPoller 驱动，终态判据见 `utils/submission.ts`，deadline 兜底），后端 `get_judgement` 是单次查询、无内层循环 —— 双层轮询会让前端抖动沦为装饰、`stopPolling` 停不掉在途后端循环；View 只表达提交意图
-- **比赛工作台外壳**：`ContestLayout` 承载 TopBar（**导航条 ActivityBar 内嵌于其第二行**）+ `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；**`--settings` 无会话时为极简壳**（拖动区标题「Hinina 设置」+ 窗口控件 + 返回登录，内容区与完整外壳共享同一 router-view 以保留草稿）；钥匙设置页豁免结束遮罩/inert/navigation-disabled（`contestGated=false`），赛前/赛后从设置页点赛场页面被拦回并提示；钥匙设置页在 `running→upcoming` 回退时同样停公告轮询并清 `liveFor`（回到 running 再重启）；窗口拖拽与窗口控制在完整外壳的 TopBar 与极简壳头部各有一份，登录页由 `App.vue` 提供兜底窗口条。外壳同时承担**赛程闸门**：`upcoming` 立即回登录页，`ended` 叠加结束覆盖层（`inert` + 导航禁用）并在 2 秒后返回登录页 —— 延迟窗口留给离页落盘，不打断正在进行的保存。View 与 component **禁止**直接 import `@/bridge`（分层判据，可 grep 断言）
+- **比赛工作台外壳**：`ContestLayout` 承载 TopBar（**导航条 ActivityBar 内嵌于其第二行**）+ `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；**`--settings` 无会话时为极简壳**（拖动区标题「Hinina 设置」+ 窗口控件 + 返回登录，内容区与完整外壳共享同一 router-view 以保留草稿）；钥匙设置页豁免结束遮罩/inert/navigation-disabled（`contestGated=false`），赛前/赛后从设置页点赛场页面被拦回并提示；钥匙设置页在 `running→upcoming` 回退时同样停公告轮询并清 `liveFor`（回到 running 再重启）；窗口拖拽与窗口控制在完整外壳的 TopBar 与极简壳头部各有一份，登录页由 `App.vue` 提供兜底窗口条。外壳同时承担**赛程闸门**：`upcoming` 立即回登录页，`ended` 叠加结束覆盖层（`inert` + 导航禁用）并在 2 秒后返回登录页 —— 延迟窗口留给离页落盘，不打断正在进行的保存。View 与 component **禁止**直接 import `@/bridge`（分层判据，`check:layering` 静态门禁断言）
 - **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：
 
   | 场景 | 节奏 | hidden 暂停 | 停止判据 | 归属 |

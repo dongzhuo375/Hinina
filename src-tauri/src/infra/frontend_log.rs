@@ -1,7 +1,7 @@
 //! 前端日志落 Rust tracing（panic 钩子的前端半边）。
 //!
 //! `commands/log_cmd.rs` 的 `frontend_log` 是薄转发，收敛与落盘逻辑全部在此
-//! （命令层零业务逻辑，CLAUDE.md「thin #[tauri::command] handlers」；落位与
+//! （命令层零业务逻辑，doc/Architecture.md：命令层保持薄封装、委托底层；落位与
 //! 写法沿 `plugin_diagnostics`）。
 //!
 //! **安全口径**：scope 白名单化、message 长度与控制字符收敛 —— 该通道把前端

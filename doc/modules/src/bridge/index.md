@@ -10,7 +10,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `AppErrorVariant` | 联合类型（11 个变体名） | Rust `core::error::AppError` 的变体名（serde 外部标签）；Rust 新增变体时此列表会滞后，未识别变体归为 `null`，仅退化为通用错误处理 |
+| `AppErrorVariant` | 联合类型（12 个变体名） | Rust `core::error::AppError` 的变体名（serde 外部标签）；Rust 新增变体时此列表会滞后，未识别变体归为 `null`，仅退化为通用错误处理 |
 | `IpcError` | `class extends Error` | 归一化错误：`cmd` / `variant: AppErrorVariant \| null` / `raw`（原始载荷）；getter `isAuthError`（variant === 'Auth'） |
 | `parseAppError` | `(raw) => { variant, message }`（私有） | 识别 AppError 外部标签形态 `{ Variant: message }`（单键 + 字符串值）；Error/字符串/`{message}` 各按其形处理；多键对象回退 JSON 文本 |
 | `IpcErrorObserver` / `setIpcErrorObserver` | type / `(observer \| null) => void` | 错误观察者注册（仅组合根 `main.ts` 调用一次）；Bridge 只回调，不感知 store/router |
