@@ -51,6 +51,27 @@ describe('renderMarkdown — 生产路径（DOMPurify 消毒激活）', () => {
     expect(html).toContain('class="katex"')
   })
 
+  it('mXSS 载体 <annotation-xml encoding="text/html"> 整体被拒（mathMl 档不放行）', () => {
+    // annotation-xml 是 MathML 结构的一部分，但也是经典 mXSS 载体：其
+    // encoding 指向 HTML 时下游解析会切回 HTML 模式，内嵌载荷借
+    // foreign-content 解析差异复活。ADD_TAGS 刻意只补纯文本的
+    // semantics/annotation（LaTeX 无障碍树够用），annotation-xml 连同
+    // 子树整体剥除。未来若为「修公式」把它补进白名单，本用例即红。
+    // 载荷取 mid-body 形态（与下方样式/表单用例同理：题面天然位置）。
+    const payload =
+      '<math><annotation-xml encoding="text/html"><img src=x onerror=alert(1)></annotation-xml></math>'
+    const html = renderMarkdown(`正文段 $a+b$ 先行\n\n${payload}\n\n尾段`, '')
+    expect(html).not.toContain('annotation-xml')
+    expect(html).not.toContain('text/html')
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('onerror')
+    // <math> 本身在 mathMl 档内保留；存活锚点防空窗假绿
+    expect(html).toContain('<math')
+    expect(html).toContain('class="katex"')
+    expect(html).toContain('正文段')
+    expect(html).toContain('尾段')
+  })
+
   it('文档级样式与表单注入面封闭：<style>/<link>/<meta refresh>/<base>/<form> 必须被剥（mid-body 形态）', () => {
     // 载荷必须 mid-body（正文在前、载荷在后）——题面天然形态，也是 marked
     // 的真实输出位置。置于片段开头时 <style> 被 HTML 解析器归入 <head>，

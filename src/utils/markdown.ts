@@ -206,7 +206,8 @@ export function renderMarkdown(markdown: string, baseUrl: string): string {
         // KaTeX 的读屏无障碍树由 <semantics>/<annotation> 承载（annotation 内是 LaTeX
         // 源码，供辅助技术与复制公式用），二者均不在 DOMPurify 预置 mathMl 白名单里，
         // 不补会被整体剥掉、LaTeX 源码反而泄漏成 <math> 内的裸文本。
-        // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外。
+        // 刻意只加这两个纯文本标签 —— mXSS 载体 <annotation-xml> 仍被拒之门外
+        // （负向回归用例锁定：markdown-dom.spec.ts）。
         //
         // 剥离原则：只为安全剥（脚本/事件属性由 DOMPurify 白名单负责），表现性标记
         // （<big>/<font size>/<center> 等老题面排版）按作者原意保真渲染，与 HOJ
