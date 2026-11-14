@@ -333,8 +333,8 @@ async fn ensure_contest_access_core(
                 // 结果，保留期内复用首次消息防 30s 轮询重复提交报名）；
                 // 权限查询阶段失败、「请稍后再试」类瞬态、网络/序列化/会话
                 // 失败一律不升级——Attempted 条目留在原地（最小间隔退避），
-                // 过期放行自愈。非 Contest 变体同样分类（一律 Other），守卫
-                // 模式仍要求 Contest 变体，语义不变
+                // 过期放行自愈。非 Contest 变体同样分类（默认/现有实现为
+                // Other），守卫模式仍要求 Contest 变体，语义不变
                 Err(AppError::Contest(msg)) if rejection == AccessRejectionKind::Rejected => {
                     debug!(contest_id = contest_id, "私有赛注册被拒，记入防重试记忆");
                     memo.record_rejected(key, msg.clone(), now);
