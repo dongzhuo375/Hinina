@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/services/config.service', async () => {
   const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
+  const { IpcError } = await vi.importActual<typeof import('@/bridge')>('@/bridge')
   const busy = ref(false)
   const settingsBusy = ref(false)
   // 切换在途标志（生产是读 `switchQueue.inFlight.value` 的 getter，见下方 mock）
@@ -81,9 +82,10 @@ vi.mock('@/services/config.service', async () => {
       runSaveTxn,
     },
     // useSettingsForm 的导入面需要该具名判据；本 spec 的切换失败用普通 Error，
-    // 判据返回 false（真实类型化判据由 config.service.spec 锁定）
-    isOjSwitchPersistFailed: (e: { variant?: string } | null | undefined) =>
-      e?.variant === 'OjSwitchPersistFailed',
+    // 判据返回 false（严格同构：instanceof IpcError + variant，真实类型化判据
+    // 由 config.service.spec 锁定）
+    isOjSwitchPersistFailed: (e: unknown) =>
+      e instanceof IpcError && e.variant === 'OjSwitchPersistFailed',
   }
 })
 vi.mock('@/services/system.service', () => ({

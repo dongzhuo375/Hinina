@@ -174,6 +174,8 @@ vi.mock('@/services/config.service', async () => {
           (e: unknown) => {
             if (isPersistFailed(e)) {
               switchState.last = { target: id, outcome: 'persist-failed' }
+              // 与生产 switchOj 一致：persist-failed 时失效缓存（下次读取拉真值）
+              mocks.invalidate()
             }
             settleSwitch(run)
           },
