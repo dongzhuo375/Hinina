@@ -229,8 +229,13 @@ impl AccessAttemptMemo {
 /// 默认 info 下 `debug` 不落日志，「真实原因可追溯」的披露依赖这一条；
 /// Rejected 记忆已把重试压到保留期一次，不会刷屏），后者保持 `debug`——
 /// 复用消息路径未发起请求，按调用频率本就该安静。
+///
+/// `Attempted` 随行携带**对原始错误**（加环节前缀之前）的分类结果：后台兜底
+/// 据此分级，不再对包装后的消息重新分类——前缀拼接对 `contains` 判据的适配器
+/// 恰好等价，但契约是「classify 见适配器原生错误」，改用锚定/精确判据的适配器
+/// 不应被环节前缀破坏。Ok 时分类值无意义（占位 [`AccessRejectionKind::Other`]）。
 enum AccessCoreResult {
-    Attempted(AppResult<()>),
+    Attempted(AppResult<()>, AccessRejectionKind),
     Memoized(AppResult<()>),
     Skipped,
 }
@@ -338,18 +343,27 @@ async fn ensure_contest_access_core(
             );
         }
     }
-    AccessCoreResult::Attempted(result.map_err(|e| {
-        // 运行时选级别：tracing 的日志宏（event!、warn!、debug!）首参都只接受
-        // 常量级别，两个分支是宏限制下的最小写法（级别之外完全一致）。错误
-        // 驱动 WARN（用户可见错误的来源）、后台 DEBUG（防轮询刷屏）
-        match failure_log {
-            tracing::Level::WARN => {
-                warn!(contest_id = contest_id, error = %e, "私有赛进入校验失败")
+    // 分类在**加前缀之前**对原始错误计算并随结果携带（Ok 无错误，占位值不
+    // 被消费）：后台兜底据此分级，不再对包装后的消息重新分类
+    let rejection = match &result {
+        Err(e) => provider.classify_access_rejection(e),
+        Ok(()) => AccessRejectionKind::Other,
+    };
+    AccessCoreResult::Attempted(
+        result.map_err(|e| {
+            // 运行时选级别：tracing 的日志宏（event!、warn!、debug!）首参都只接受
+            // 常量级别，两个分支是宏限制下的最小写法（级别之外完全一致）。错误
+            // 驱动 WARN（用户可见错误的来源）、后台 DEBUG（防轮询刷屏）
+            match failure_log {
+                tracing::Level::WARN => {
+                    warn!(contest_id = contest_id, error = %e, "私有赛进入校验失败")
+                }
+                _ => debug!(contest_id = contest_id, error = %e, "私有赛进入校验失败"),
             }
-            _ => debug!(contest_id = contest_id, error = %e, "私有赛进入校验失败"),
-        }
-        e.context("私有赛进入校验失败")
-    }))
+            e.context("私有赛进入校验失败")
+        }),
+        rejection,
+    )
 }
 
 /// 提交侧兜底的**真后台**执行体：报名是尽力而为，成功/失败都只记日志
@@ -367,8 +381,7 @@ async fn run_best_effort_backfill(
     let result = ensure_contest_access_core(
         memo,
         epoch_counter,
-        // 克隆留出本尊：分类失败级别（warn/debug）要在返回后按类别判断
-        provider.clone(),
+        provider,
         oj_id,
         contest_id.clone(),
         password,
@@ -376,15 +389,17 @@ async fn run_best_effort_backfill(
     )
     .await;
     match result {
-        AccessCoreResult::Attempted(Ok(())) => {
+        AccessCoreResult::Attempted(Ok(()), _) => {
             debug!(contest_id = contest_id, "私有赛后台报名完成（提交侧兜底）")
         }
-        AccessCoreResult::Attempted(Err(e)) => {
+        AccessCoreResult::Attempted(Err(e), rejection) => {
             // 真实发起了请求且失败：注册被拒（确定性结果）升 **warn**——
             // release 默认 info 下 debug 不落日志，「openRank + 错误密码时
             // 真实原因可追溯」的披露依赖这一条；Rejected 记忆已把重试压到
             // 保留期一次，不会刷屏。其余（Network 类退避等）保持 debug。
-            if provider.classify_access_rejection(&e) == AccessRejectionKind::Rejected {
+            // 分类在 core 内对原始错误计算并随结果携带（环节前缀加在分类
+            // 之后），此处不再对包装后的消息重新分类
+            if rejection == AccessRejectionKind::Rejected {
                 warn!(
                     contest_id = contest_id,
                     error = %e,
@@ -831,8 +846,9 @@ impl ContestService {
                 {
                     // 真实请求与记忆命中复用对错误驱动路径行为一致：
                     // 成功 → 重试题目；失败 → 上抛进入的引导/复用错误
-                    AccessCoreResult::Attempted(Ok(())) | AccessCoreResult::Memoized(Ok(())) => {}
-                    AccessCoreResult::Attempted(Err(access_err))
+                    AccessCoreResult::Attempted(Ok(()), _) | AccessCoreResult::Memoized(Ok(())) => {
+                    }
+                    AccessCoreResult::Attempted(Err(access_err), _)
                     | AccessCoreResult::Memoized(Err(access_err)) => return Err(access_err),
                     // 距上次尝试不足最小重发间隔（在途或退避）：本轮未发起
                     // 任何请求，原始题目错误上抛——45s 窗口内的暂态展示，

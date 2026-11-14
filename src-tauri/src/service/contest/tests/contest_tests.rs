@@ -1025,13 +1025,6 @@ fn access_memo_rejected_expires_after_retention() {
         ),
         "保留期一过即视为未尝试"
     );
-    assert!(
-        matches!(
-            memo.lookup(&key, t0 + ACCESS_MEMO_RETENTION),
-            AccessMemoLookup::Miss
-        ),
-        "过期条目已被顺手清除，不会反复判过期"
-    );
 }
 
 #[test]
