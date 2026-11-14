@@ -15,7 +15,7 @@
 | 组成 | 职责 |
 |------|------|
 | `settingsGateNotice` | `@/utils/settings-gate-notice` 的提示文案：钥匙模式下从设置页点赛场页面被阶段闸门拦回时显示一行 warning（导航失败本身静默，评审十五 B）；4 秒自动清除；`sticky top-2` 保证滚到底部时仍在视口内；位于内容列 `.settings-sections` 内（不压左侧索引栏，评审十六）；卸载时 `clearSettingsGateNotice` 清计时器 |
-| `locked` | computed `!systemStore.isKeyed`（`stores/systemStore`）—— 维护者层锁定（默认锁，`--settings` 解锁）；判据委托 `systemStore` 的启动标志快照（守卫首航已填充，同步读取无闪烁）。以 `:locked` 传给 OjServerSection 与 DataDirSection |
+| `locked` | computed `!systemStore.isKeyed`（`stores/systemStore`）—— 维护者层锁定（默认锁，`--settings` 解锁）；判据经 `systemStore` 转发 `systemService` 的启动标志快照（快照仍由 service 持有、store 只转发读；守卫首航已填充，同步读取无闪烁）。以 `:locked` 传给 OjServerSection 与 DataDirSection |
 | `switching` / `saving` | 来自 `useSettingsForm`，以同名 prop 传给 OjServerSection：切换或**设置页保存**在途时**整个 OJ 域**禁用（完成后的磁盘重置会覆盖该域，评审三十三 #3）。`saving` 取 `configStore.settingsSaveInFlight`（getter 转发 `config.service` 的 readonly ref；`useSettingsForm` 用 `storeToRefs` 直取同名 Ref）——编辑器偏好/分栏比例等后台写入不置位，不会锁住设置页 |
 | `useSettingsForm` | 中央 reactive 草稿、baseline/dirty/errors/canSave、配置加载/保存/放弃、OJ 清单与显式/自动切换 |
 | `updateForm(patch)` | 将 section 的 `SettingsFormPatch` 合并进同一 reactive 草稿；保存成功后仅当没有新编辑时才显示“已保存” |
@@ -37,7 +37,7 @@
 - `composables/useSettingsScrollSpy`
 - `stores/systemStore`（`systemStore.isKeyed` —— 分层锁的提权判据）
 
-config/system service、相关 store 和 types 由对应 controllers 持有；View 不直接 import bridge。
+controllers 持有的是 `configStore` / `systemStore` 等相关 store 与 types（service 调用收在 store 内）；View 不直接 import bridge。
 
 ## 被依赖
 

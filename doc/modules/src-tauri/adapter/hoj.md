@@ -23,7 +23,7 @@ HOJ 服务端适配器：把 `core/provider` 的四个 Provider trait（`AuthPro
 
 ## 逻辑流程
 
-请求统一带 `Authorization: Bearer <token>`（登录请求除外）；登录从响应头提取 token；提交以**展示题号**为 pid（HOJ 按 `contest_problem.display_id` 查库，查不到返回 HTTP 500——不重试且带响应体摘录）。
+认证头按需组装：JWT **直接**放 `Authorization` 头（**无 `Bearer` 前缀**）；token 缺失或含非法头字符时返回空 map、按匿名发出（不带该头——`@AnonApi` 接口本就要在登录页匿名可用，HOJ 对无效 token 也照常 200）；登录从响应头提取 token；提交以**展示题号**为 pid（HOJ 按 `contest_problem.display_id` 查库，查不到返回 HTTP 500——不重试且带响应体摘录）。
 
 ## 契约测试（M2）
 

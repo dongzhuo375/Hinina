@@ -14,9 +14,9 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `minimize` | `() => void` | `systemService.minimizeWindow()` |
-| `toggleMaximize` | `() => void` | `systemService.toggleMaximizeWindow()` |
-| `closeAppWindow` | `() => void` | `systemService.closeWindow()` |
+| `minimize` | `() => void` | `systemStore.minimizeWindow()` |
+| `toggleMaximize` | `() => void` | `systemStore.toggleMaximizeWindow()` |
+| `closeAppWindow` | `() => void` | `systemStore.closeWindow()` |
 
 模板是三个 `aria-label` 按钮（最小化 / 最大化 / 关闭窗口）内嵌 16×16 SVG。
 父容器需保留 `data-tauri-drag-region` 供拖动；按钮自身的点击不会触发拖动。
