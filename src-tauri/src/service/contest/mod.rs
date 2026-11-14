@@ -234,6 +234,7 @@ impl AccessAttemptMemo {
 /// 据此分级，不再对包装后的消息重新分类——前缀拼接对 `contains` 判据的适配器
 /// 恰好等价，但契约是「classify 见适配器原生错误」，改用锚定/精确判据的适配器
 /// 不应被环节前缀破坏。Ok 时分类值无意义（占位 [`AccessRejectionKind::Other`]）。
+#[derive(Debug)]
 enum AccessCoreResult {
     Attempted(AppResult<()>, AccessRejectionKind),
     Memoized(AppResult<()>),
@@ -313,6 +314,14 @@ async fn ensure_contest_access_core(
     let result = provider
         .ensure_contest_access(&contest_id, password.as_deref())
         .await;
+    // 分类**恰好一次**、且在加环节前缀之前对原始错误计算：写回守卫与随行值
+    // 复用同一判定（Ok 无错误，占位值不被消费）。契约是「classify 见适配器
+    // 原生错误」——环节前缀不得进入分类输入，改用锚定/精确判据的适配器
+    // 不应被 service 层文案破坏
+    let rejection = match &result {
+        Err(e) => provider.classify_access_rejection(e),
+        Ok(()) => AccessRejectionKind::Other,
+    };
     {
         let mut memo = memo.lock().unwrap_or_else(|e| e.into_inner());
         // **锁内复核纪元**：清理持同一把锁（先递增再清），与「检查+写回」互斥
@@ -324,11 +333,9 @@ async fn ensure_contest_access_core(
                 // 结果，保留期内复用首次消息防 30s 轮询重复提交报名）；
                 // 权限查询阶段失败、「请稍后再试」类瞬态、网络/序列化/会话
                 // 失败一律不升级——Attempted 条目留在原地（最小间隔退避），
-                // 过期放行自愈
-                Err(AppError::Contest(msg))
-                    if provider.classify_access_rejection(result.as_ref().unwrap_err())
-                        == AccessRejectionKind::Rejected =>
-                {
+                // 过期放行自愈。非 Contest 变体同样分类（一律 Other），守卫
+                // 模式仍要求 Contest 变体，语义不变
+                Err(AppError::Contest(msg)) if rejection == AccessRejectionKind::Rejected => {
                     debug!(contest_id = contest_id, "私有赛注册被拒，记入防重试记忆");
                     memo.record_rejected(key, msg.clone(), now);
                 }
@@ -343,12 +350,6 @@ async fn ensure_contest_access_core(
             );
         }
     }
-    // 分类在**加前缀之前**对原始错误计算并随结果携带（Ok 无错误，占位值不
-    // 被消费）：后台兜底据此分级，不再对包装后的消息重新分类
-    let rejection = match &result {
-        Err(e) => provider.classify_access_rejection(e),
-        Ok(()) => AccessRejectionKind::Other,
-    };
     AccessCoreResult::Attempted(
         result.map_err(|e| {
             // 运行时选级别：tracing 的日志宏（event!、warn!、debug!）首参都只接受

@@ -98,10 +98,15 @@ pub trait ContestProvider: Send + Sync {
     /// `AppError::Contest`，但前者与凭证无关、后者是确定性结果）。core 只把
     /// `Rejected` 升级为结论记忆；`Other` 保持退避条目，下一周期即可重试。
     ///
+    /// **输入形态契约**：入参是 `ensure_contest_access` 返回的**适配器原生
+    /// 错误**（可含适配器自有环节前缀），早于 service 层的 `context` 环节
+    /// 前缀包装——改用锚定/精确判据的适配器不应被 service 层文案破坏。
+    /// 分类在 core 内恰好执行一次，写回守卫与后台兜底的分级共用该结果。
+    ///
     /// 默认实现把 `AppError::Contest` 归为 `Rejected`（保守缓存：未实现分类
     /// 的适配器按现状防重复提交，避免未知措辞的密码错误每周期重发报名
-    /// POST 触发服务端限频）；非 `Contest` 变体归为 `Other`（后台兜底路径
-    /// 会对所有失败变体询问本方法——非 `Contest` 一律 `Other` 即保持退避，
+    /// POST 触发服务端限频）；非 `Contest` 变体归为 `Other`（core 对所有失败
+    /// 变体都会询问本方法——非 `Contest` 一律 `Other` 即保持退避，
     /// 不会被升级为结论）。
     fn classify_access_rejection(&self, error: &AppError) -> AccessRejectionKind {
         match error {
