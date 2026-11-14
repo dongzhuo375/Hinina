@@ -40,11 +40,6 @@ pub enum CoreEvent {
     // ── 系统 ──
     /// 配置已变更并**已成功落盘**。
     ConfigChanged,
-    /// 主题已切换（**当前无生产发布方**：唯一发布方 ThemeService 随死代码清理
-    /// 删除——主题切换从未接入前端。变体保留：插件事件契约
-    /// `system.theme_changed` 对插件可见（可订阅，当前不会收到），
-    /// 且消费端测试以其作通用事件夹具）。
-    ThemeChanged,
     /// 当前 OJ 已切换（缓存清理是显式动作，本事件只是通知）。
     OjSwitched { oj_id: String },
 
@@ -104,7 +99,6 @@ impl CoreEvent {
             Self::SessionExpired { .. } => "auth.session_expired",
             Self::TokenRotated { .. } => "auth.token_rotated",
             Self::ConfigChanged => "system.config_changed",
-            Self::ThemeChanged => "system.theme_changed",
             Self::OjSwitched { .. } => "system.oj_switched",
             Self::ContestSelected { .. } => "contest.selected",
             Self::AnnouncementChanged { .. } => "contest.announcement_changed",

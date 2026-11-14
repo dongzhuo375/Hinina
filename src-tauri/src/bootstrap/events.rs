@@ -124,7 +124,6 @@ fn payload_for(event: &CoreEvent) -> Option<(&'static str, serde_json::Value, &'
         CoreEvent::SessionExpired { .. } => None,
         CoreEvent::TokenRotated { .. } => None,
         CoreEvent::ConfigChanged => None,
-        CoreEvent::ThemeChanged => None,
         CoreEvent::OjSwitched { .. } => None,
         CoreEvent::ContestSelected { .. } => None,
         CoreEvent::ProblemOpened { .. } => None,

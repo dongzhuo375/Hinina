@@ -58,7 +58,7 @@
 - [x] **SubmissionService** — `service/submission/mod.rs`：提交代码、评测结果轮询、超时处理
 
 ### 4.7 ThemeService
-- [x] **ThemeService** — `service/theme/mod.rs`：主题切换、配色方案管理，发布主题变更事件（阶段 8 事件总线重构后为 `CoreEvent::ThemeChanged`；当时为 `SystemEvent::ThemeChanged`）。**后注**：2026-11 死代码清理中随 theme 域整体删除（命令零调用）
+- [x] **ThemeService** — `service/theme/mod.rs`：主题切换、配色方案管理，发布主题变更事件（阶段 8 事件总线重构后为 `CoreEvent::ThemeChanged`；当时为 `SystemEvent::ThemeChanged`）。**后注**：2026-11 死代码清理中随 theme 域整体删除（命令零调用）；`ThemeChanged` 变体亦于 2026-11-14 死事件清理中删除（插件事件协议随之自增至 3）
 
 ---
 

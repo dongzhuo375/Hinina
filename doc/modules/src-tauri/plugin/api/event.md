@@ -1,15 +1,15 @@
 # api/event
 
 ## 职责
-插件事件协议：`PluginEvent` 变体与版本化 `PluginEventEnvelope`（协议版本 2，旧 snake_case type 不兼容；Manifest 和 Host API 当前均为版本 2）。
+插件事件协议：`PluginEvent` 变体与版本化 `PluginEventEnvelope`（协议版本 3——删除 `system.theme_changed` 死事件时自增；Manifest 和 Host API 当前均为版本 2）。
 
 ## 核心类型/函数
-- `PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 2`
+- `PLUGIN_EVENT_PROTOCOL_VERSION: u32 = 3`
 - `PluginEvent`（serde tag = type）— 全部业务/系统/会话事件变体
 - `PluginEventEnvelope` — `{version, sequence, occurredAt, event}`：
 
 ```json
-{"version":2,"sequence":2,"occurredAt":1780000000000,"event":{"type":"submission.judged","submissionId":"s1","status":"Accepted"}}
+{"version":3,"sequence":2,"occurredAt":1780000000000,"event":{"type":"submission.judged","submissionId":"s1","status":"Accepted"}}
 ```
 
 ## 直接依赖
@@ -33,7 +33,7 @@
 | submission.created | submissionId | submission.read |
 | submission.judged | submissionId, status | submission.read |
 | workspace.saved | workspaceId, revision, automatic | 无，仅元数据，无读写能力 |
-| system.config_changed / system.theme_changed | 无 | 无 |
+| system.config_changed | 无 | 无 |
 | session.logged_in / logged_out / expired | ojId | 无，不含用户标识 |
 | resync.required | lost | 强制控制通知，无需声明 |
 

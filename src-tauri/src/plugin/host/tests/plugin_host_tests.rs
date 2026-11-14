@@ -8,7 +8,7 @@ fn grant(id: &str, approved: &[PluginPermission]) -> PluginGrant {
         "id":id,"name":"Demo","version":"1.0.0","manifestVersion":2,"apiVersion":2,
         "runtime":"js","entry":"index.js",
         "permissions":["events.subscribe","submission.read","contest.read","notification"],
-        "events":["submission.judged","system.config_changed","system.theme_changed"]
+        "events":["submission.judged","system.config_changed","system.oj_switched"]
     }))
     .unwrap();
     PluginGrant::authorize(&manifest, approved).unwrap()
@@ -160,9 +160,12 @@ fn closed_receiver_is_removed_without_affecting_other_subscribers() {
     drop(host.subscribe(&full_grant("com.example.closed")).unwrap());
     let mut healthy = host.subscribe(&full_grant("com.example.healthy")).unwrap();
     healthy.try_recv().unwrap();
-    host.dispatch(&CoreEvent::ThemeChanged);
+    host.dispatch(&CoreEvent::ConfigChanged);
     assert_eq!(host.subscriber_count(), 1);
-    assert_eq!(healthy.try_recv().unwrap().event, PluginEvent::ThemeChanged);
+    assert_eq!(
+        healthy.try_recv().unwrap().event,
+        PluginEvent::ConfigChanged
+    );
 }
 
 #[test]
@@ -173,7 +176,7 @@ fn unsubscribe_is_idempotent_and_prevents_further_enqueues() {
     host.dispatch(&CoreEvent::ConfigChanged);
     assert!(host.unsubscribe("com.example.demo"));
     assert!(!host.unsubscribe("com.example.demo"));
-    host.dispatch(&CoreEvent::ThemeChanged);
+    host.dispatch(&CoreEvent::ConfigChanged);
     assert_eq!(rx.try_recv().unwrap().event, PluginEvent::ConfigChanged); // previously buffered
     assert!(matches!(
         rx.try_recv(),
@@ -192,7 +195,7 @@ fn sequences_are_per_subscription_and_resync_is_mandatory() {
         b.try_recv().unwrap().event,
         PluginEvent::ResyncRequired { lost: 0 }
     );
-    host.dispatch(&CoreEvent::ThemeChanged);
+    host.dispatch(&CoreEvent::ConfigChanged);
     assert_eq!(a.try_recv().unwrap().sequence, 2);
     assert_eq!(a.try_recv().unwrap().sequence, 3);
     assert_eq!(b.try_recv().unwrap().sequence, 2);
@@ -264,11 +267,11 @@ async fn lagged_receiver_gets_resync_without_replay() {
     receive(&mut rx).await;
     // current_thread runtime: no await until all sends complete, deterministically lagging.
     for _ in 0..50 {
-        bus.publish(CoreEvent::ThemeChanged);
+        bus.publish(CoreEvent::ConfigChanged);
     }
     let notice = receive(&mut rx).await;
     assert!(matches!(notice.event,PluginEvent::ResyncRequired {lost} if lost>0));
-    assert_eq!(receive(&mut rx).await.event, PluginEvent::ThemeChanged);
+    assert_eq!(receive(&mut rx).await.event, PluginEvent::ConfigChanged);
     drop(host);
     drop(bus);
     assert_eq!(task.await.unwrap(), ConsumerExit::Closed);

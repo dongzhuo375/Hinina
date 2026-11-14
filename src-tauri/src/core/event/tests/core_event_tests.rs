@@ -17,7 +17,6 @@ fn all_variants() -> Vec<CoreEvent> {
             oj_id: "HOJ".into(),
         },
         CoreEvent::ConfigChanged,
-        CoreEvent::ThemeChanged,
         CoreEvent::OjSwitched {
             oj_id: "QDUOJ".into(),
         },
@@ -56,7 +55,6 @@ fn kind_is_unique_and_stable() {
         "auth.session_expired",
         "auth.token_rotated",
         "system.config_changed",
-        "system.theme_changed",
         "system.oj_switched",
         "contest.selected",
         "contest.announcement_changed",

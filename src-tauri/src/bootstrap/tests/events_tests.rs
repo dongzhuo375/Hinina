@@ -43,9 +43,9 @@ fn announcement_changed_maps_to_published_channel() {
 
 #[test]
 fn other_events_are_not_bridged() {
-    // 与 `CoreEvent` 全部 13 个变体对账：桥接 2 个（WorkspaceSaved /
-    // AnnouncementChanged），其余 11 个逐一在此列出。`payload_for` 无通配臂，
-    // 新增变体编译期即强制表态；本用例另锁这 11 个值确实映射为 None ——
+    // 与 `CoreEvent` 全部 12 个变体对账：桥接 2 个（WorkspaceSaved /
+    // AnnouncementChanged），其余 10 个逐一在此列出。`payload_for` 无通配臂，
+    // 新增变体编译期即强制表态；本用例另锁这 10 个值确实映射为 None ——
     // 防「编译强迫表态」之下写出错误的 Some 臂。
     let events = [
         CoreEvent::LoggedIn {
@@ -62,7 +62,6 @@ fn other_events_are_not_bridged() {
             oj_id: "HOJ".into(),
         },
         CoreEvent::ConfigChanged,
-        CoreEvent::ThemeChanged,
         CoreEvent::OjSwitched {
             oj_id: "HOJ".into(),
         },
@@ -82,7 +81,7 @@ fn other_events_are_not_bridged() {
         },
     ];
 
-    assert_eq!(events.len() + 2, 13, "CoreEvent 变体总数变化时须同步本用例");
+    assert_eq!(events.len() + 2, 12, "CoreEvent 变体总数变化时须同步本用例");
 
     for event in &events {
         assert!(

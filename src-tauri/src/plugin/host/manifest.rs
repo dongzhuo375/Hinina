@@ -58,8 +58,6 @@ pub enum PluginEventSubscription {
     WorkspaceSaved,
     #[serde(rename = "system.config_changed")]
     ConfigChanged,
-    #[serde(rename = "system.theme_changed")]
-    ThemeChanged,
     #[serde(rename = "session.logged_in")]
     SessionLoggedIn,
     #[serde(rename = "session.logged_out")]
@@ -85,7 +83,6 @@ impl PluginEventSubscription {
             Self::SubmissionJudged => "submission.judged",
             Self::WorkspaceSaved => "workspace.saved",
             Self::ConfigChanged => "system.config_changed",
-            Self::ThemeChanged => "system.theme_changed",
             Self::SessionLoggedIn => "session.logged_in",
             Self::SessionLoggedOut => "session.logged_out",
             Self::SessionExpired => "session.expired",

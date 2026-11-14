@@ -124,9 +124,6 @@ fn log_event(event: &CoreEvent) {
         CoreEvent::ConfigChanged => {
             info!(event = event.kind(), "审计");
         }
-        CoreEvent::ThemeChanged => {
-            debug!(event = event.kind(), "审计");
-        }
     }
 }
 

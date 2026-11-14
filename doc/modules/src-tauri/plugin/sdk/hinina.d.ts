@@ -117,7 +117,6 @@ export interface PluginEventMap {
   'submission.judged': { type: 'submission.judged'; submissionId: string; status: string }
   'workspace.saved': { type: 'workspace.saved'; workspaceId: string; revision: number; automatic: boolean }
   'system.config_changed': { type: 'system.config_changed' }
-  'system.theme_changed': { type: 'system.theme_changed' }
   'session.logged_in': { type: 'session.logged_in'; ojId: string }
   'session.logged_out': { type: 'session.logged_out'; ojId: string }
   'session.expired': { type: 'session.expired'; ojId: string }
@@ -126,7 +125,7 @@ export interface PluginEventMap {
 export type PluginEventName = keyof PluginEventMap
 export type PluginEvent = PluginEventMap[PluginEventName]
 export interface PluginEventEnvelope<E extends PluginEvent = PluginEvent> {
-  version: 2
+  version: 3
   sequence: number
   /** Adaptation time in UTC ms; not a submission timestamp. */
   occurredAt: number
