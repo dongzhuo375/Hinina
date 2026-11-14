@@ -169,6 +169,9 @@ vi.mock('@/services/config.service', async () => {
         run.then(
           () => {
             switchState.last = { target: id, outcome: 'success' }
+            // 生产 success 分支同款：赋值后失效缓存（persist-failed 分支则是
+            // invalidate 先于赋值；两分支都在分支内调用，顺序无行为权重）
+            mocks.invalidate()
             settleSwitch(run)
           },
           (e: unknown) => {
