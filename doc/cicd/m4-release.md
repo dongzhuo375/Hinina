@@ -23,7 +23,7 @@
 - 顶层 `permissions: contents: read`；concurrency 按 workflow+ref 分组、cancel-in-progress: false；仅 `draft-release` job 提升 `contents: write` 并挂受保护 environment `release`。
 - `validate`：fetch-depth 0 → `git merge-base --is-ancestor` 确认 tag 指向 main 历史 → 门禁脚本 `--tag --changelog`。
 - `test`：`uses: ./.github/workflows/ci.yml`（方案 §7.3「调用或复用完整必需 CI」，发布不跳过检查）。
-- `build-windows`：步骤照抄 integration.yml windows leg（corepack npm shim、rust-cache `src-tauri -> target`、npm ci + build + tauri build）；构建后生成 build-metadata.json（tag/commit/built_at/node/npm/rustc/cargo/target/bundle/`signed: false`）；**上传前先把 exe 与 metadata 平铺暂存进 `release-staging/`，再以单路径 `release-staging/*` 上传**为 `release-windows-unsigned`——upload-artifact v4+ 以所有搜索路径的最小公共祖先为 artifact 根且通配符后层级保留，若直接同时上传 bundle 深路径与根目录 json，exe 会嵌到 `src-tauri/…` 下、下载侧断言必空（评审一轮发现，见 §八）；artifact 名如实标注未签名，签名属 M5。
+- `build-windows`：步骤照抄 integration.yml windows leg（corepack npm shim、rust-cache `src-tauri -> target`、npm ci + build + tauri build）；构建后生成 build-metadata.json（tag/commit/built_at/node/npm/rustc/cargo/target/bundle/`signed: false`）；**上传前先把 exe 与 metadata 平铺暂存进 `release-staging/`，再以单路径 `release-staging/*` 上传**为 `release-windows-unsigned`——upload-artifact v4+ 以所有搜索路径的最小公共祖先为 artifact 根且通配符后层级保留，若直接同时上传 bundle 深路径与根目录 json，exe 会嵌到 `src-tauri/…` 下、下载侧断言必空（评审一轮发现，见 §八）；artifact 名如实标注未签名——OS 代码签名已取消（无签名证书，SmartScreen 的未签名警告作为已知成本接受，产物保持未签名）。
 - `verify-artifact`：在标签树上复跑门禁 → 下载 artifact → 断言恰一个 exe 且文件名恰为 `Hinina_<版本>_x64-setup.exe`（M0 构建日志实证的 NSIS 命名）、`file` 识别为 Windows PE → `sha256sum` 生成 SHA256SUMS.txt → 上传 `release-windows-verified`。
 - `draft-release`：needs [test, verify-artifact]，默认语义任一失败即跳过，不产生半成品草稿；发布说明由 `--extract-notes` 从 CHANGELOG 段落生成；`gh release create --draft`，同标签重跑走 `gh release upload --clobber` + `gh release edit --draft` 复用同一草稿；**遇到已发布同名 Release 显式失败**（发布后产物不可变，修复走新版本）。
 - 第三方 action 全部 SHA 固定：沿用现库批（checkout v7.0.1 / setup-node v7.1.0 / upload-artifact v7.0.2 / rust-cache v2.9.3），新增 download-artifact v7.0.0（37930b1c2abaa49bbe596cd826c3c89aef350131，与 upload v7 同主版本配套）。
@@ -104,7 +104,7 @@
 ## 七、遗留项
 
 - 桌面 smoke（tauri-driver 6 场景）属 M3 遗留，不在本阶段。
-- OS 代码签名属 M5（按发布范围决策只做 Windows 签名，macOS/Linux 产物推迟、不进支持矩阵）；updater 属 M6（前置：至少一次稳定正式发布）。
+- OS 代码签名**已取消**（无签名证书，SmartScreen 的未签名警告作为已知成本接受，产物保持未签名；macOS/Linux 产物推迟、不进支持矩阵的发布范围决策不变）；updater 属 M6（前置：至少一次稳定正式发布）。
 - 升级安装覆盖验收（`RELEASE.md` §五第 4 项）自第二个版本起适用。
 - 草稿 Release 的「收尾」是两步人工动作：environment 批准（已由维护者执行）+ 安装验收后手动公开（`gh release edit v0.1.1 --draft=false`）；后者不在 CI 自动化范围内，也不应由 agent 代点。
 
