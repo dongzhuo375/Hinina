@@ -104,7 +104,7 @@ fn retry_delay_backs_off_exponentially() {
 //
 // 回归背景：5xx 在重试耗尽后曾落到 `return Ok(response)`，把网关的 HTML 错误页
 // 当成正常响应交给上层，最终报成「响应不是合法 JSON」而不是「HTTP 502」，
-// 把排障引向错误方向；同时 retry_get 末尾的 Err(last_error) 成了永不可达的死代码。
+// 把排障引向错误方向；同时 retry_get_text 末尾的 Err(last_error) 成了永不可达的死代码。
 
 #[test]
 fn classify_accepts_success_on_any_attempt() {
