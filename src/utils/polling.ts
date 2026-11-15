@@ -137,8 +137,6 @@ export function createPoller(options: PollerOptions): Poller {
  * 壳只负责持有与回收。
  */
 export interface PollerLifecycle {
-  /** 当前是否持有轮询器（含已 start 的） */
-  isStarted(): boolean
   /** 未持有时创建并启动；已持有时不动（条件启停：由调用方决定何时 stop） */
   startIfAbsent(options: PollerOptions): void
   /** 停掉旧轮询器（若有）后重建并启动（重配置：间隔/判据可能已变） */
@@ -150,7 +148,6 @@ export interface PollerLifecycle {
 export function createPollerLifecycle(): PollerLifecycle {
   let poller: Poller | null = null
   return {
-    isStarted: () => poller !== null,
     startIfAbsent(options) {
       if (poller) return
       poller = createPoller(options)
