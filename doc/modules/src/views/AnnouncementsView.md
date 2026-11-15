@@ -71,7 +71,7 @@ onUnmounted:
 - **标记已读只走一条路径**：本页不再调 `markAllRead`，标记由 `store.load` 统一触发 ——
   视图侧调用会与 store 内部的标记逻辑并存，两条路径的判据（`isWatching`/页面可见性）
   迟早漂移，而漂移的后果是红点被吞（选手永远错过公告）。
-- 正文样式 scoped `.prose` 与题面同风格；`renderMarkdown` 出口消毒是 `v-html` 的安全前提。
+- 正文元素级排版（p/列表/代码块/表格等）共享自 `styles/prose.css`（与题面同源）；本组件只定义容器形态（字号/行宽/次级色）与公告独有的标题/引用样式。`renderMarkdown` 出口消毒是 `v-html` 的安全前提。
 - **卡片流改语义化 Grid 布局**（PR #36）：`announcement-*` 系列 scoped 类取代 Tailwind 类堆叠，
   卡片为两列 Grid（左 160px 元信息、右正文，≤1100px 收窄 140px）——公告标题/时间/正文
   在宽屏上形成稳定的阅读栏；正文 `font-size: var(--reading-size)`、`line-height: 1.85`、
