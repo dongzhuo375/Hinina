@@ -4,9 +4,9 @@
 // - **手工构造**（按 `doc/Hydro/HYDRO-API.md`）：contest_list / contest_problems /
 //   problem_detail / record_detail / record_list / scoreboard_* —— 无 pid 别名键的
 //   pdict、整数毫秒等形态仍是合法线格式，保留以锁旧契约与多题多记录覆盖；
-// - **2026-11-15 实测收编**（测试部署 http://135.149.84.204:18080，上游 master 行为）：
-//   record_detail_real / record_detail_tle / record_list_real —— 浮点毫秒、对象形态
-//   subtasks 等真实载荷，锁定缺口 D22 的容错契约。
+// - **2026-11-15 实测收编**（私有测试部署，上游 master 行为；脱敏：真实邮箱/QQ 号
+//   已替换为占位值，schema 保真）：record_detail_real / record_detail_tle /
+//   record_list_real —— 浮点毫秒、对象形态 subtasks 等真实载荷，锁定缺口 D22 的容错契约。
 
 use super::*;
 
