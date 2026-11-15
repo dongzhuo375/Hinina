@@ -10,9 +10,9 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式，`readonly()` 包装——「进程内不可变」由类型强制，评审十 #6）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），`systemStore.isKeyed` 读它（getter 依赖追踪）。默认 `{settings:false}` = 安全侧 |
-| `SystemService.getLaunchFlags` | `() => Promise<LaunchFlags>` | 启动标志的 Promise 入口（**仅守卫消费**）：进程内 memoize，解析成功填充快照；读取失败（旧二进制、桥异常）保持快照默认「无参数」—— 安全侧默认值，绝不让钥匙通道故障卡死启动或设置页；**失败不缓存**，下次调用重试（评审十九 #7：一次瞬时不等于整个进程失去钥匙）；守卫另有 try/catch 二道防线 |
-| `SystemService.isKeyed` | `() => boolean` | 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。组件一律经它判断钥匙模式，不直接读 `launchFlags.value.settings`（评审二十一 #4）。**进程级判定的唯一入口**（不认识任何路由名）。路由级组合（钥匙 + 设置页）在 `stores/systemStore.isKeyedSettingsRoute(routeName)`——服务层不引入路由知识（2026-11-04 复审：G2 曾把 `isKeyedSettings` 并入本服务造成分层倒置已移出；H3 又把组合从 `guards/keyed-settings-route` 收进 store 统一入口） |
+| `SystemService.launchFlags` | `readonly Ref<LaunchFlags>` | 启动标志**同步快照**（响应式，`readonly()` 包装——「进程内不可变」由类型强制）：守卫首航 `await getLaunchFlags()` 时填充（早于任何组件挂载），`systemStore.isKeyed` 读它（getter 依赖追踪）。默认 `{settings:false}` = 安全侧 |
+| `SystemService.getLaunchFlags` | `() => Promise<LaunchFlags>` | 启动标志的 Promise 入口（**仅守卫消费**）：进程内 memoize，解析成功填充快照；读取失败（旧二进制、桥异常）保持快照默认「无参数」—— 安全侧默认值，绝不让钥匙通道故障卡死启动或设置页；**失败不缓存**，下次调用重试——一次瞬时不等于整个进程失去钥匙；守卫另有 try/catch 二道防线 |
+| `SystemService.isKeyed` | `() => boolean` | 本次启动是否为 `--settings` 管理方钥匙（进程级判据，无路由维度）。组件一律经它判断钥匙模式，不直接读 `launchFlags.value.settings`。**进程级判定的唯一入口**（不认识任何路由名）。路由级组合（钥匙 + 设置页）在 `stores/systemStore.isKeyedSettingsRoute(routeName)`——服务层不引入路由知识（2026-11-04 复审：G2 曾把 `isKeyedSettings` 并入本服务造成分层倒置已移出；H3 又把组合从 `guards/keyed-settings-route` 收进 store 统一入口） |
 | `SystemService.minimizeWindow` / `toggleMaximizeWindow` / `closeWindow` | `() => Promise<void>` | 无边框窗口控制（View 经 store 调用，store 转发本服务，Service 再转发 `bridge/window.bridge`——View 不直接 import bridge） |
 | `SystemService.destroyWindow` | `() => Promise<void>` | 销毁窗口（close-guard 落盘完成后的收尾，2026-11-04 G3） |
 | `SystemService.onCloseRequested` | `(handler) => Promise<() => void>` | 订阅关闭请求（关窗握手事件源，返回取消订阅函数） |
