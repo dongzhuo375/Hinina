@@ -227,7 +227,7 @@ Hinina/
         │   ├── provider_registry_impl.rs # ProviderRegistryImpl（单表 HashMap<OjId, ProviderSet> + capability() 能力取件帮手）
         │   └── tests/
         │       ├── storage_tests.rs      # Storage 单元测试
-        │       ├── http_tests.rs         # HttpClient 单元测试（401→Auth、403/5xx→Network、退避延迟、classify_status 重试判据、with_timeout 构造）
+        │       ├── http_tests.rs         # HttpClient 单元测试（401→Auth、403/5xx→Network、退避延迟、classify_status 重试判据、body 断流重试的 loopback truncated 用例、with_timeout 构造）
         │       ├── plugin_http_tests.rs  # HTTP地址策略/公开请求/固定传输/超时与取消
         │       ├── plugin_storage_tests.rs # JSON/CAS/配额/限流与损坏保留
         │       ├── plugin_diagnostics_tests.rs # 失败阶段可见性与日志脱敏

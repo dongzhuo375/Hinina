@@ -119,9 +119,10 @@ enum StatusDecision {
 /// 把网关的 HTML 错误页当成正常响应交给上层，最终报成「响应不是合法 JSON」
 /// 而不是「HTTP 502」，把排障引向错误方向；同时末尾的 `Err(last_error)` 成了死代码。
 ///
-/// `allow_error` 由 raw 变体传入（`get_text_raw` / `post_text_raw`）：**任意状态码
+/// `allow_error` 由 GET 的 raw 变体（`get_text_raw`）传入：**任意状态码
 /// 都返回原始响应**，因为有些 OJ 把错误信息放在响应体里，而响应体在非 raw 变体里
-/// 会被丢弃。5xx 仍然重试（GET 幂等），只是**重试耗尽后返回响应而不是报错**。
+/// 会被丢弃（POST 非幂等不重试，不走本判据）。5xx 仍然重试（GET 幂等），只是
+/// **重试耗尽后返回响应而不是报错**。
 fn classify_status(status: reqwest::StatusCode, attempt: u32, allow_error: bool) -> StatusDecision {
     if status.is_server_error() {
         return if attempt < MAX_RETRIES {
@@ -207,8 +208,9 @@ impl HttpClient {
     /// `{"error":{"name","params","code"}}` 是用户可见文案的唯一来源），而 4xx/5xx 的
     /// 响应体在非 raw 变体里会被丢弃，调用方只能得到一句「HTTP 403」。
     ///
-    /// 重试策略：5xx 与 body 断流仍按退避重试（GET 幂等），
-    /// **重试耗尽后把最后一次响应原样返回**；4xx 不重试（重试只会得到同样的结果）。
+    /// 重试策略：5xx 与 body 断流仍按退避重试（GET 幂等）；
+    /// **5xx 重试耗尽后把最后一次响应原样返回，body 断流耗尽后报
+    /// `Err(读取响应体失败 {url}: {e})`**；4xx 不触发状态段重试（body 断流仍重试）。
     ///
     /// **调用方需自行处理状态码语义**：401 不会自动变成 `Auth` 变体，而前端
     /// `sessionGuard` 的会话失效判定依赖该变体 —— 用本方法就必须自己映射

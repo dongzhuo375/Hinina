@@ -196,9 +196,10 @@ fn with_timeout_builds_client() {
 //
 // raw 变体存在的理由：有些 OJ 把用户可见的错误文案放在响应体里（Hydro 的
 // `{"error":{"name",…}}`），而非 raw 变体在非 2xx 时会丢弃响应体。
-// 两条不能错的判据：① raw 下 4xx **不重试**（重试只会得到同样的结果，
-// 而 4xx 常是「密码错」这类不该重放的请求）；② 5xx **仍重试**，只是耗尽后
-// 返回响应而不是报错（否则 raw 变体等于把 5xx 退避策略整体废掉）。
+// 两条不能错的判据：① raw 下 4xx **不触发状态段重试**（重试只会得到同样的结果，
+// 而 4xx 常是「密码错」这类不该重放的请求；4xx 响应进入 body 段，断流仍重试）；
+// ② 5xx **仍重试**，只是耗尽后返回响应而不是报错（否则 raw 变体等于把 5xx 退避
+// 策略整体废掉）。
 
 #[test]
 fn raw_accepts_client_error_without_retry() {
@@ -477,6 +478,49 @@ async fn raw_variant_reports_error_when_body_disconnect_exhausts_budget() {
         err
     );
     assert_eq!(server.requests().len(), 3, "首次 + 最多 2 次重试");
+
+    server.shutdown();
+}
+
+/// POST 的 body 断流同样**不重试**（非幂等，防重复提交；重试矩阵只覆盖 GET）。
+/// 两个 POST 变体各打一发 truncated 响应即报 `读取响应体失败`，计数锁死 2。
+#[tokio::test]
+async fn post_never_retries_mid_body_disconnect() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("p1"),
+        ScriptedResponse::truncated("p2"),
+    ])
+    .await;
+
+    let err = client()
+        .post_text_with_headers(
+            &format!("{}/a", server.url()),
+            &serde_json::json!({"code": "x"}),
+            &Default::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("读取响应体失败")),
+        "POST body 断流应直接报错，实得 {:?}",
+        err
+    );
+
+    let err = client()
+        .post_text_raw(
+            &format!("{}/b", server.url()),
+            &serde_json::json!({}),
+            &Default::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("读取响应体失败")),
+        "raw POST body 断流应直接报错，实得 {:?}",
+        err
+    );
+
+    assert_eq!(server.requests().len(), 2, "POST 两个变体各一发，绝不重试");
 
     server.shutdown();
 }
