@@ -608,8 +608,9 @@ impl HydroAdapter {
         // pdoc（`r[pdoc.docId]=pdoc; if (pdoc.pid) l[pdoc.pid]=pdoc; …Object.assign(r,l)`），
         // 直接迭代 values() 会把同一道题映射两次——实测一场单题比赛返回 2 条重复
         // 条目（缺口 D21）。按归一 docId 去重、只保留首次出现：HashMap 迭代序随机，
-        // 但双键指向同一条 pdoc，保留哪条结果都相同；docId 缺失时回退用键名，
-        // 至少不把不同条目错并。之后按 docId 升序固定输出顺序。
+        // 但双键指向同一条 pdoc，保留哪条结果都相同。回退链 docId → pid → 键名
+        // 各带命名空间前缀，防跨域碰撞（docId "5" 与 pid "5" 不是同一标识）；
+        // 键名前缀保证不同条目永不被错并。之后按 docId 升序固定输出顺序。
         let mut entries: Vec<&PdocVO> = Vec::with_capacity(pdict.len());
         let mut seen_doc_ids: HashSet<String> = HashSet::with_capacity(pdict.len());
         for (key, pdoc) in pdict {
@@ -618,7 +619,15 @@ impl HydroAdapter {
                 .as_ref()
                 .map(types::coerce_id)
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| key.clone());
+                .map(|id| format!("d:{id}"))
+                .or_else(|| {
+                    pdoc.pid
+                        .as_ref()
+                        .map(types::coerce_id)
+                        .filter(|s| !s.is_empty())
+                        .map(|pid| format!("p:{pid}"))
+                })
+                .unwrap_or_else(|| format!("k:{key}"));
             if seen_doc_ids.insert(doc_id) {
                 entries.push(pdoc);
             }

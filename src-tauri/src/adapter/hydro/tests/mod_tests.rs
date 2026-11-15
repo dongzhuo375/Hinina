@@ -325,6 +325,51 @@ fn map_contest_problems_dedupes_pid_alias_keys() {
 }
 
 #[test]
+fn map_contest_problems_dedup_fallback_uses_namespaced_keys() {
+    // 回退链 docId → pid → 键名各带命名空间前缀：
+    // ① 缺 docId 的别名对按 pid 去重；② docId 与 pid 数值相同也不串题
+    let vo: ContestProblemListVO = serde_json::from_value(serde_json::json!({
+        "pdict": {
+            "1":  { "docId": 5, "title": "A" },
+            "2":  { "pid": "5", "title": "B" },
+            "10": { "pid": "P7", "title": "C" },
+            "P7": { "pid": "P7", "title": "C" },
+            "20": { "title": "D" },
+            "21": { "title": "D" }
+        }
+    }))
+    .unwrap();
+    // "1"/"2" 键的两个条目 docId 缺失、pid 数值同为 "5"——命名空间不同不得错并。
+    // 断言用计数而非顺序：缺 docId 的条目 doc_id_num 同为 0，稳定排序后相对顺序
+    // 随 HashMap 迭代序漂移
+    let problems = HydroAdapter::map_contest_problems(&vo, "cid", &[]);
+    assert_eq!(
+        problems.len(),
+        5,
+        "六键去重后 5 条：A/B/C/D，仅 C 的别名对并一条"
+    );
+    // 缺 docId 的别名对（"10"/"P7" 同 pid "P7"）按 pid 去重为一条
+    assert_eq!(
+        problems.iter().filter(|p| p.display_title == "C").count(),
+        1
+    );
+    // docId 与 pid 均缺失的两个条目键名不同——各算一道（键名前缀永唯一）
+    assert_eq!(
+        problems.iter().filter(|p| p.display_title == "D").count(),
+        2
+    );
+    // docId "5" 与 pid "5" 不同命名空间：A/B 都保留
+    assert_eq!(
+        problems.iter().filter(|p| p.display_title == "A").count(),
+        1
+    );
+    assert_eq!(
+        problems.iter().filter(|p| p.display_title == "B").count(),
+        1
+    );
+}
+
+#[test]
 fn submission_record_maps_from_dual_key_pdict_fixture() {
     // 实测夹具（record_list_real）：双键 pdict 下 `into_submission_record` 按 docId
     // 键反查 pdoc 的映射路径（display_pid/title）——旧单键夹具只覆盖了同形路径
