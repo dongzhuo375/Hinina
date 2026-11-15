@@ -23,7 +23,9 @@ const makeModel = (
 describe('AboutSection 项目仓库行', () => {
   it('渲染仓库外链（GitHub 内联 SVG + slug）并带 target fail-safe', async () => {
     const host = document.createElement('div')
-    const app = createApp(AboutSection, { model: makeModel('0.3.5') })
+    // 版本号用非真实值（9.9.9）：断言 host 渲染了**透传的** version，
+    // fixture 硬编码占位值时此用例即红
+    const app = createApp(AboutSection, { model: makeModel('9.9.9') })
     app.mount(host)
     await nextTick()
 
@@ -39,8 +41,7 @@ describe('AboutSection 项目仓库行', () => {
     // 点击无动作而非整页导航走
     expect(link?.getAttribute('target')).toBe('_blank')
     expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
-    // 版本号经 model 透传渲染（fixture 值非占位）
-    expect(host.textContent).toContain('0.3.5')
+    expect(host.textContent).toContain('9.9.9')
     app.unmount()
   })
 

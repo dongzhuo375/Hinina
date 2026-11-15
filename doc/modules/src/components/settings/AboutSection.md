@@ -29,4 +29,4 @@
 
 ## 测试
 
-`AboutSection.spec.ts` 锁定仓库行（href/slug/内联 SVG/无 target、失败态可见）；`useAboutSettings.spec.ts` 覆盖存储读取、复制 key 与失败静默；`SettingsView.behavior.spec.ts` 验证真实 DOM 复制链和回弹。
+`AboutSection.spec.ts` 锁定仓库行（href/slug/内联 SVG/`target="_blank"` + `rel`/无 aria-label、失败态可见，version 经 model 透传渲染）；`useAboutSettings.spec.ts` 覆盖存储读取、复制 key 与失败静默；`SettingsView.behavior.spec.ts` 验证真实 DOM 复制链和回弹。
