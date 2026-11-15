@@ -127,3 +127,43 @@ export function createPoller(options: PollerOptions): Poller {
     },
   }
 }
+
+/**
+ * 单持有位的轮询生命周期壳：吞掉「模块级句柄声明 + stop 置空 + 建后即启」
+ * 三段样板（榜单/公告/题目总览/评测列表/提交详情五处共用），并把
+ * 「句柄不得进 ref/reactive」的纪律收进壳内——调用方拿到的只有四个方法。
+ *
+ * 各调用方的暂停判据（页面隐藏/封榜/收敛即停）与启停时机编排留在调用点，
+ * 壳只负责持有与回收。
+ */
+export interface PollerLifecycle {
+  /** 当前是否持有轮询器（含已 start 的） */
+  isStarted(): boolean
+  /** 未持有时创建并启动；已持有时不动（条件启停：由调用方决定何时 stop） */
+  startIfAbsent(options: PollerOptions): void
+  /** 停掉旧轮询器（若有）后重建并启动（重配置：间隔/判据可能已变） */
+  restart(options: PollerOptions): void
+  /** 停止并清空持有位（幂等） */
+  stop(): void
+}
+
+export function createPollerLifecycle(): PollerLifecycle {
+  let poller: Poller | null = null
+  return {
+    isStarted: () => poller !== null,
+    startIfAbsent(options) {
+      if (poller) return
+      poller = createPoller(options)
+      poller.start()
+    },
+    restart(options) {
+      poller?.stop()
+      poller = createPoller(options)
+      poller.start()
+    },
+    stop() {
+      poller?.stop()
+      poller = null
+    },
+  }
+}

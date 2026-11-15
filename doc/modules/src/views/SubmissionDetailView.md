@@ -29,14 +29,14 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- 组件：`CodeEditor`（readonly 模式）/ `ErrorMessage` / `LoadingSpinner`
+- 组件：`CodeEditor`（readonly 模式）/ `ErrorMessage` / `LoadingSpinner` / `SpinnerIcon`（评测中徽章与判定 pill）
 - `@/stores/configStore`（`getPollSchedule` 轮询参数）、`@/stores/submissionStore`（`getSubmissionDetail` / `getSubmissionCases`）（均经 store 纯转发 `config.service` / `submission.service`）
 - `@/stores/contestStore`（`whenLoaded`：赛时相对时间与题目跳转）
 - `@/types/submission`（仅类型）
 - `@/utils/submission`（`formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `isTerminalStatus` / `statusAbbr` / `statusLabel` / `statusTone`）
 - `@/utils/submission-tone`（共享 pill 类串）
 - `@/utils/language`（`monacoIdOf` 只读代码视图高亮）
-- `@/utils/polling`（`createPoller` + `Poller` 类型）
+- `@/utils/polling`（`createPollerLifecycle` —— 详情轮询句柄的持有与回收）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 - `@/composables/useTransientValue`（复制反馈与路由复位）
@@ -75,9 +75,9 @@ loadCases(id, token):
   失败且当前 → casesError 提示条（**不致命**，主体不受影响）
 
 syncPoller(id, token):
-  detail 非终态且 now < deadline 且无 poller
-    → createPoller(task 捕获 id/token 并调 loadDetail, 不配置 isPaused)
-  终态或超时 → stopPoller()                    // 收敛即停
+  detail 非终态且 now < deadline
+    → detailPolling.startIfAbsent(task 捕获 id/token 并调 loadDetail, 不配置 isPaused)
+  终态或超时 → detailPolling.stop()            // 收敛即停
 
 onUnmounted: alive = false；stopPoller()；复制反馈 timer 由 useTransientValue 的 scope dispose 清理
 ```

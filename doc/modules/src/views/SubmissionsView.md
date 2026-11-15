@@ -29,12 +29,13 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- 组件：`PageHeading`（页头，编号 `03` / `SUBMISSION ARCHIVE`）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner`
+- 组件：`PageHeading`（页头，编号 `03` / `SUBMISSION ARCHIVE`）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner` / `NoticeBar`（刷新失败保留旧数据横幅）/ `SpinnerIcon`（状态 pill 评测中图标）
 - stores：`contestStore`（比赛标题 / startTime / 题目列表）、`submissionStore`（history 数据源）
 - `@/types/contest` / `@/types/submission`（仅类型）
 - `@/utils/submission`（`STATUS_OPTIONS` / `formatClock` / `formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `statusLabel` / `statusTone`）
 - `@/utils/submission-tone`（共享 pill 类串）
-- `@/utils/polling`（`createPoller` + `Poller` 类型）
+- `@/utils/polling`（`createPollerLifecycle` —— 视图自有轮询句柄的持有与回收）
+- `@/utils/page-visibility`（`isPageHidden` 切后台暂停判据）
 - `@/utils/pagination`（`getPageItems` 页码窗口纯函数）
 
 ## 被依赖
@@ -54,9 +55,9 @@ onMounted → bootstrap():
       // 题目/状态筛选（不发请求），否则列表会被静默过滤
 
 watch(history.records) → syncPoller():
-  当前页存在 isJudging 记录且无 poller → createPoller(5s±1s, task=重拉当前页,
-                                        isPaused: document.hidden)
-  当前页全部终态 → stopPoller()               // 收敛即停，不做常驻轮询
+  当前页存在 isJudging 记录 → historyPolling.startIfAbsent(5s±1s, task=重拉当前页,
+                                        isPaused: isPageHidden)   // 已持有则不动
+  当前页全部终态 → historyPolling.stop()      // 收敛即停，不做常驻轮询
 
 onUnmounted → alive = false；stopPoller()
 ```

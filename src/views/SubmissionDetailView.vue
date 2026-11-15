@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import CodeEditor from '@/components/editor/CodeEditor.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import SpinnerIcon from '@/components/common/SpinnerIcon.vue'
 import { useConfigStore } from '@/stores/configStore'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
@@ -20,8 +21,7 @@ import {
   statusTone,
 } from '@/utils/submission'
 import { statusToneClasses } from '@/utils/submission-tone'
-import { createPoller } from '@/utils/polling'
-import type { Poller } from '@/utils/polling'
+import { createPollerLifecycle } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
 import { useTransientValue } from '@/composables/useTransientValue'
@@ -52,7 +52,7 @@ let alive = true
 /// 路由切换代际：同一组件从提交 A 复用到 B 时，A 的详情/测试点/轮询一律失效
 let loadToken = 0
 /// 轮询器与截止时刻是副作用句柄，放普通变量（不进响应式系统）
-let poller: Poller | null = null
+const detailPolling = createPollerLifecycle()
 let deadline = 0
 let pollIntervalMs = 5_000
 let pollJitterMs = 500
@@ -203,8 +203,7 @@ async function retry(): Promise<void> {
 }
 
 function stopPoller() {
-  poller?.stop()
-  poller = null
+  detailPolling.stop()
 }
 
 /// 非终态且未超总超时才轮询；到达终态或超过 deadline 立即停
@@ -212,8 +211,8 @@ function syncPoller(id: string, token: number) {
   if (!isCurrentLoad(id, token)) return
   const d = detail.value
   const shouldPoll = !!d && !isTerminalStatus(d.status) && Date.now() < deadline
-  if (shouldPoll && !poller) {
-    poller = createPoller({
+  if (shouldPoll) {
+    detailPolling.startIfAbsent({
       task: async () => {
         if (!isCurrentLoad(id, token)) return
         if (Date.now() >= deadline) {
@@ -230,9 +229,8 @@ function syncPoller(id: string, token: number) {
         // 瞬时失败静默，总超时兜底
       },
     })
-    poller.start()
-  } else if (!shouldPoll) {
-    stopPoller()
+  } else {
+    detailPolling.stop()
   }
 }
 
@@ -291,10 +289,7 @@ function openProblem() {
         v-if="judging"
         class="flex shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-2.5 py-1 text-xs font-medium text-[var(--color-info)]"
       >
-        <svg class="h-3 w-3 animate-spin" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-          <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-        </svg>
+        <SpinnerIcon class="h-3 w-3" :stroke-width="2.5" />
         <span>评测中，自动刷新…</span>
       </span>
     </div>
@@ -318,18 +313,7 @@ function openProblem() {
               class="inline-flex items-center gap-2 rounded-sm border px-4 py-2 text-base font-bold shadow-none"
               :class="[statusToneClasses(statusTone(detail.status)), judging ? '' : '']"
             >
-              <svg
-                v-if="judging"
-                class="h-4 w-4 animate-spin"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-                <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-              </svg>
+              <SpinnerIcon v-if="judging" class="h-4 w-4" :stroke-width="2.5" />
               <span>{{ statusLabel(detail.status) }}</span>
             </span>
 

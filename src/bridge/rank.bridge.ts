@@ -8,12 +8,13 @@ import { ipcInvoke } from '@/bridge'
  * 由 `utils/rank` 的纯函数处理，Bridge 层只做 IPC。
  */
 export async function getContestRank(query: RankQuery): Promise<ContestRankPage> {
+  // HOJ 语义默认值的合并单点在 rank.service（唯一调用方）；Bridge 只做 IPC 透传
   return ipcInvoke<ContestRankPage>('get_contest_rank', {
     contestId: query.contestId,
     currentPage: query.currentPage,
     limit: query.limit,
-    keyword: query.keyword ?? null,
-    removeStar: query.removeStar ?? false,
-    containsEnd: query.containsEnd ?? false,
+    keyword: query.keyword,
+    removeStar: query.removeStar,
+    containsEnd: query.containsEnd,
   })
 }

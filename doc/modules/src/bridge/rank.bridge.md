@@ -12,7 +12,7 @@
 |------|------|------|
 | `getContestRank` | `(query: RankQuery) => Promise<ContestRankPage>` | invoke `get_contest_rank`，参数 `{ contestId, currentPage, limit, keyword, removeStar, containsEnd }` |
 
-可选参数在桥接层归一：`keyword ?? null`、`removeStar ?? false`、`containsEnd ?? false`，保证 Rust 端 `Option` 参数收到确定值。
+参数原样透传（`RankQuery` 字段均为必填）：HOJ 语义默认值的合并单点在 `services/rank.service`（唯一调用方），桥接层不做第二遍 `??` 归一——改一层漏一层的漂移面收敛到 service。
 
 ## 直接依赖
 

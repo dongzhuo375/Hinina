@@ -4,13 +4,13 @@
 
 ## 职责
 
-持有 About 分组的存储信息、局部读取失败状态，以及版本/目录/日志路径复制反馈。复制回弹直接复用共享 `useTransientValue`，不重新实现 timer。
+持有 About 分组的存储信息、局部读取失败状态，以及版本/目录/日志路径复制反馈。加载经共享 `useAsyncResource`（成功复位 failed，失败不动数据），复制回弹复用共享 `useTransientValue`，不重新实现 timer。
 
 ## 核心类型/函数
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `storage` / `storageFailed` | `ref<StorageInfo \| null>` / `ref<boolean>` | 存储信息与局部失败降级 |
+| `storage` / `storageFailed` | `ref<StorageInfo \| null>` / `ref<boolean>` | 存储信息与局部失败降级（`useAsyncResource` 产出） |
 | `loadStorage` | `() => Promise<void>` | 读取 `systemStore.getStorageInfo()`；失败只影响 About |
 | `copiedKey` | `Readonly<Ref<string \| null>>` | 当前复制项（version/baseDir/logPath 等），2 秒后回弹 |
 | `copyText` | `(key, text) => Promise<void>` | 调用剪贴板，成功后 `showCopied(key)`；失败保持静默 |
@@ -18,7 +18,8 @@
 ## 直接依赖
 
 - `vue`
-- `@/services/system.service`
+- `@/stores/systemStore`（`getStorageInfo` 纯转发 `system.service`）
+- `@/composables/useAsyncResource`
 - `@/composables/useTransientValue`
 - `@/types/system`
 

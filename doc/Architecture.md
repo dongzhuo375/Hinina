@@ -376,7 +376,7 @@ src/
 │   │   ├── ProblemStatement.vue          # 题面分节展示（描述/输入/输出/样例+复制，Markdown 渲染 + 相对图片 URL 改写；容器查询 cqi 驱动排版、48em 行宽封顶）
 │   │   └── __tests__/
 │   │       └── QuickSubmitDialog.spec.ts # 提交重复防护（鼠标+Ctrl+Enter 只发一次、等待比赛数据前即上锁）、错误提示与解锁
-│   ├── settings/                           # 设置页七个 section 与共享 frame（SettingsSectionFrame 保留真实 id/focus/deep 样式；OJ/Editor/Layout/Theme/ResetPurge/DataDir/About）
+│   ├── settings/                           # 设置页七个 section 与共享 frame（SettingsSectionFrame 保留真实 id/focus/deep 样式并统一输出区块头；OJ/Editor/Layout/Theme/ResetPurge/DataDir/About）与三个字段级骨架（SettingsField 表单四件套 / SettingsSwitch 开关行 / AboutInfoRow 信息行）
 │   ├── rank/
 │   │   ├── RankToolbar.vue               # 榜单工具条（服务端 keyword 搜索 300ms 防抖 + 分组 tab + 赛制图例 + OI 计分规则徽章）
 │   │   ├── ScoreboardTable.vue           # 榜单表格（粘性表头/我的行/前两列，ACM 与 OI 分流渲染）
@@ -385,7 +385,10 @@ src/
 │       ├── PageHeading.vue               # 赛场通用页头（编号/副标题眉标 + 主标题 + description 插槽 + 右侧操作插槽；样式取自 styles/contest.css）
 │       ├── PagePager.vue                 # 极简分页器（评测页/榜单页共用：无边框无底色，当前页加粗 + 木色极细下划线，上下页纯文字悬停转黑）
 │       ├── LoadingSpinner.vue            # 通用加载动画（role=status）
-│       └── ErrorMessage.vue              # 通用错误提示（role=alert）+ 重试按钮
+│       ├── ErrorMessage.vue              # 通用错误提示（role=alert）+ 重试按钮
+│       ├── NoticeBar.vue                 # 顶部状态横幅（wa/pending 双 tone + 可选重试；榜单/评测页共用）
+│       ├── SubmitButton.vue              # 提交代码三态按钮（提交中/评测中/常态，对话框与控制台条共用）
+│       └── SpinnerIcon.vue               # 旋转加载图标（class 定尺寸颜色、strokeWidth 可覆盖）
 ├── guards/
 │   ├── sessionGuard.ts                   # 全局会话守卫（认证类 IPC 失败 → 判定失效 → 清理并回登录页），由 main.ts 装配；需 router + authStore，属跨层装配故不落在 stores/ 或 services/
 │   └── globalErrorGuard.ts               # 全局错误转发守卫（Vue errorHandler / window error / unhandledrejection / router.onError / document securitypolicyviolation 五类 → frontend_log 命令 → Rust tracing；限频去重、守卫自身绝不抛错、必须先于 mount 装配）—— panic 钩子的前端半边：JS 世界的崩溃从此有持久落点
@@ -468,7 +471,7 @@ src/
 │   ├── logger.ts                         # 前端日志唯一入口（createLogger 作用域前缀 + debug/info 仅开发环境、warn/error 恒输出；不落盘，持久化日志归 Rust tracing）
 │   ├── error.ts                          # 错误文案收敛唯一出口（errorMessage：Error/字符串取信息，空值与非 Error 载荷回退兜底文案；不依赖 bridge，纯函数）
 │   ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
-│   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入）
+│   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入；createPollerLifecycle 单持有位生命周期壳）
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
 │   ├── oj.ts                             # OJ 类型域唯一权威（OJ_TYPES 已知类型枚举 / ojSelectOptions 下拉候选组装：枚举在前含未配置者 + 枚举外实例追加 / ojBaseUrlHint 地址占位）

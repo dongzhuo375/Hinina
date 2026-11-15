@@ -20,7 +20,8 @@
 
 - `vue`（`ref`）
 - `@/composables/useTransientValue`（3s 重置提示 / 4s 清理提示）
-- `@/services/system.service`
+- `@/composables/useAsyncResource`（占用预览加载 + failed 标志）
+- `@/stores/systemStore`（纯转发 `system.service`）
 - `@/stores/contestStore` / `problemStore` / `announcementStore`
 - `@/utils/error`
 - `@/types/system`
