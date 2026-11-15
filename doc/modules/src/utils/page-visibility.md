@@ -18,13 +18,13 @@
 
 ## 被依赖
 
-- `stores/rankStore.ts`（轮询暂停判据 + 公告可见性补拉同款）
-- `stores/announcementStore.ts`（轮询暂停判据与可见性补拉去重）
+- `stores/rankStore.ts`（榜单轮询暂停判据）
+- `stores/announcementStore.ts`（公告轮询暂停判据 + 可见性补拉去重/隐藏短路）
 - `views/SubmissionsView.vue` / `views/ProblemSetView.vue`（列表轮询 isPaused）
 
 ## 逻辑流程
 
-无 `document` 的环境（jsdom 部分用例/SSR）按可见处理——不因环境缺失而永久暂停轮询。
+无 `document` 的环境（node/SSR）按可见处理——不因环境缺失而永久暂停轮询。
 
 ## 测试
 

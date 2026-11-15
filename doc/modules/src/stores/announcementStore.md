@@ -8,9 +8,9 @@
 
 ## 核心类型/函数
 
-模块级 `poller: Poller | null` — 轮询器句柄放模块作用域（不进响应式系统），由 `stopLive` 回收；登出经 `stores/session` 统一停止。
+模块级 `livePolling: PollerLifecycle`（`createPollerLifecycle` 壳）— 轮询器句柄放模块作用域（不进响应式系统），由 `stopLive` 回收；登出经 `stores/session` 统一停止。
 
-模块级 `visibilityRefresh: (() => void) | null` + `lastVisibilityRefreshAt: number` + `VISIBILITY_REFRESH_DEDUPE_MS = 1000` — 「窗口重新可见/聚焦 → 立即补拉」的监听句柄与去重时间戳，与 `poller` 同款「副作用句柄不进响应式系统」约定，由 `installVisibilityRefresh` / `removeVisibilityRefresh` 成对管理。
+模块级 `visibilityRefresh: (() => void) | null` + `lastVisibilityRefreshAt: number` + `VISIBILITY_REFRESH_DEDUPE_MS = 1000` — 「窗口重新可见/聚焦 → 立即补拉」的监听句柄与去重时间戳，与轮询器同款「副作用句柄不进响应式系统」约定，由 `installVisibilityRefresh` / `removeVisibilityRefresh` 成对管理。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|

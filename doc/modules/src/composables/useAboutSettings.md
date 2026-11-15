@@ -17,7 +17,6 @@
 
 ## 直接依赖
 
-- `vue`
 - `@/stores/systemStore`（`getStorageInfo` 纯转发 `system.service`）
 - `@/composables/useAsyncResource`
 - `@/composables/useTransientValue`

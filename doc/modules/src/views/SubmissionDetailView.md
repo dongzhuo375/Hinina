@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-常量：`JITTER_RATIO`(0.2)、`JITTER_CAP_MS`(500) —— 抖动 ±20% 间隔封顶 500ms，与 submissionStore 同口径。普通变量：`alive`（卸载标记）、`loadToken`（路由切换代际）、`poller` / `deadline` / `pollIntervalMs` / `pollJitterMs` / `pollTimeoutMs` / `scheduleReady`（副作用句柄与轮询参数，不进响应式系统）。
+常量：`JITTER_RATIO`(0.2)、`JITTER_CAP_MS`(500) —— 抖动 ±20% 间隔封顶 500ms，与 submissionStore 同口径。setup 作用域普通变量：`alive`（卸载标记）、`loadToken`（路由切换代际）、`detailPolling`（`createPollerLifecycle` 壳，副作用句柄不进响应式系统）与 `deadline` / `pollIntervalMs` / `pollJitterMs` / `pollTimeoutMs` / `scheduleReady`（轮询参数与配置句柄，同样不进响应式系统）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
@@ -21,9 +21,9 @@
 | `codeLanguage` | computed | `monacoIdOf(detail.language)`（`utils/language`）—— 服务端返回展示名，按前缀归一为 Monaco id |
 | `caseList` / `acCaseCount` / `hasSubTasks` / `showScoreColumn` / `modeBadge` | computed | 测试点表派生：通过计数、子任务制判定（`subTasks` 非空）、得分列仅在有 score 时出现、判题模式徽章（非 `default` 才显示，如 spj/subtask） |
 | `copyErrorMessage` | fn | 剪贴板复制 CE 信息；WebView API 不可用时兜底隐藏 textarea + `execCommand('copy')`；成功后经共享 `useTransientValue(false, 1500)` 显示反馈，路由切换 `clear()` |
-| `reload` / `watch(submitId)` | — | 首载、重试与路由参数切换统一入口：递增 `loadToken`、停旧 poller、重置提交级状态并重建 deadline；watch 非 immediate，首载仍由 onMounted 触发 |
+| `reload` / `watch(submitId)` | — | 首载、重试与路由参数切换统一入口：递增 `loadToken`、停旧轮询器、重置提交级状态并重建 deadline；watch 非 immediate，首载仍由 onMounted 触发 |
 | `loadDetail` / `loadCases` / `retry` | — | 详情与测试点分离拉取：请求固定使用发起时的 `id + loadToken`，旧提交响应不得回写；轮询周期只走 `loadDetail`，终态命中后补拉一次 `loadCases` |
-| `syncPoller` / `stopPoller` | — | 收敛轮询启停决策；poller task 捕获同一 `id + loadToken`，不得随路由隐式改查另一提交 |
+| `syncPoller` / `stopPoller` | — | 收敛轮询启停决策；轮询 task 捕获同一 `id + loadToken`，不得随路由隐式改查另一提交 |
 | `goBack` / `openProblem` | — | 返回评测列表（`Submissions` 路由）/ 跳解题页 |
 
 ## 直接依赖
@@ -92,7 +92,7 @@ onUnmounted: alive = false；stopPoller()；复制反馈 timer 由 useTransientV
 - **详情/测试点各自降级**：测试点明细在部分 OJ 配置下会被隐藏，终态无明细时
   提示「以最终判定为准」而非报错；详情瞬时失败不清空已有页面。
 - **路由复用必须同时换数据与请求代际**：`/submissions/A → /submissions/B` 只改参数时组件不重挂，
-  仅加 watch 会让 A 的迟到响应继续覆盖 B；因此 detail/cases/poller 全链固定 `id + loadToken`，
+  仅加 watch 会让 A 的迟到响应继续覆盖 B；因此 detail/cases/轮询全链固定 `id + loadToken`，
   切换先清旧提交状态并为 B 重建 deadline，旧请求、旧错误与旧 loading 收尾一律失效。
 - 评测中且无明细时渲染 4 行脉冲骨架（渐进透明度），提示「测试点结果将自动刷新」。
 - 子任务制按 `subTasks[].groupNum` 分组渲染，每组独立表头与「N/M 通过」计数；
@@ -117,4 +117,4 @@ onUnmounted: alive = false；stopPoller()；复制反馈 timer 由 useTransientV
 
 `src/views/__tests__/SubmissionDetailView.spec.ts`（响应式 route + service mock + `mountView`）锁定：
 A 详情在途切 B 后只渲染 B、迟到 A 不触发 A 测试点请求；切换先清旧详情，迟到 A 测试点不得覆盖 B；
-旧 poller 不再请求 A，且跨过 A 的旧 deadline 后 B 仍按新 deadline 继续轮询。
+旧轮询器不再请求 A，且跨过 A 的旧 deadline 后 B 仍按新 deadline 继续轮询。

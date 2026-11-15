@@ -31,4 +31,4 @@
 
 ## 测试
 
-经三个消费方 composable 的 spec 覆盖（读取成功/失败分支与重载路径）。
+经三个消费方 composable 的 spec 覆盖：读取成功与重载路径（三份 spec 均有）；失败分支与「失败后重载成功复位 failed」由 `useAboutSettings.spec.ts` 锁定（含删复位行即红的变异验证）。

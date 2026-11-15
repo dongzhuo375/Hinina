@@ -452,6 +452,7 @@ src/
 │   ├── useAboutSettings.ts                # 设置页 About 存储信息与复制反馈（复用 useTransientValue）
 │   ├── useMaintenanceSettings.ts          # 设置页重置/清理控制器与提示 timer
 │   ├── useDataDirSettings.ts              # 设置页数据目录候选、迁移与通知控制器
+│   ├── useAsyncResource.ts                # 设置页辅助信息「一次性加载 + failed 标志」壳（存储/数据目录/占用三消费方；成功复位 failed）
 │   ├── useSettingsScrollSpy.ts            # 设置页分组导航高亮、点击锁、atBottom 与 scope 清理
 │   └── __tests__/                         # useTransientValue / useNowMs / useSettingsForm / useAboutSettings / useMaintenanceSettings / useDataDirSettings / useSettingsScrollSpy .spec.ts（共享回弹与墙钟；设置页表单、维护、About、目录与导航状态机）
 ├── utils/
@@ -471,6 +472,7 @@ src/
 │   ├── logger.ts                         # 前端日志唯一入口（createLogger 作用域前缀 + debug/info 仅开发环境、warn/error 恒输出；不落盘，持久化日志归 Rust tracing）
 │   ├── error.ts                          # 错误文案收敛唯一出口（errorMessage：Error/字符串取信息，空值与非 Error 载荷回退兜底文案；不依赖 bridge，纯函数）
 │   ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
+│   ├── page-visibility.ts                # 页面可见性判据（isPageHidden：document.hidden；榜单/公告/列表轮询共用的暂停条件单源，无 document 环境（node/SSR）按可见处理）
 │   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入；createPollerLifecycle 单持有位生命周期壳）
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
@@ -570,7 +572,7 @@ src/
 - **公告红点走事件驱动 + 可见性补拉**：Rust 侧 `ContestService::list_announcements` 按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`（**首次拉取只建基线不发事件**，否则一开机就亮红点；基线按比赛隔离，失败时保留旧基线），`bootstrap::events` 的前端事件桥转发到 `announcements-published`，前端即时刷新。**事件只是刷新触发**：公告正文始终由 `list_contest_announcements` 经 IPC 查询，事件丢失时下一轮轮询即可恢复。前端轮询仍是拉取的唯一发起方（60s ± 10s），但**窗口重新可见/聚焦时立即补拉一次**（1s 去重）—— 桌面客户端的常态是「切出去看题解再切回来」，只靠节拍意味着切回来最多等 70s 才可能看到红点，被选手直接感知为「红点不出现」。已读语义配套收紧：页面不可见时不标记（切走了 = 没看到），`isWatching`（公告页在屏）时落地的新公告自动标为已读，避免离开页面后冒出假红点
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；**保存门禁也在 service**——`runSaveTxn` 保存事务覆盖「保存 → 自动切换」复合临界区，设置页保存、编辑器偏好、分栏比例等全部写入口同一队列串行（并发的读-改-写不交错）。门禁分两个视图：`settingsSaveInFlight`（只标 `settingsPage: true` 的事务，是设置页 `saving`／OJ 域禁用／切换互斥与 **`load` 等待**（`whenSettingsSaveSettled` + `settingsSaveEpoch`）的唯一来源——后台写入不该让设置页下拉框与保存按钮产生反应，其悬挂也不得把加载永久卡住）；`saveInFlight` = 任意写入口在途，是**队列观测 API**（生产零消费，测试锁定队列语义）（2026-11-04 G4 下沉：原先只在 composable 模块级的单飞/代际/等待已删）；评测轮询的**节拍与超时唯一归属前端** `submissionStore`（createPoller 驱动，终态判据见 `utils/submission.ts`，deadline 兜底），后端 `get_judgement` 是单次查询、无内层循环 —— 双层轮询会让前端抖动沦为装饰、`stopPolling` 停不掉在途后端循环；View 只表达提交意图
 - **比赛工作台外壳**：`ContestLayout` 承载 TopBar（**导航条 ActivityBar 内嵌于其第二行**）+ `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；**`--settings` 无会话时为极简壳**（拖动区标题「Hinina 设置」+ 窗口控件 + 返回登录，内容区与完整外壳共享同一 router-view 以保留草稿）；钥匙设置页豁免结束遮罩/inert/navigation-disabled（`contestGated=false`），赛前/赛后从设置页点赛场页面被拦回并提示；钥匙设置页在 `running→upcoming` 回退时同样停公告轮询并清 `liveFor`（回到 running 再重启）；窗口拖拽与窗口控制在完整外壳的 TopBar 与极简壳头部各有一份，登录页由 `App.vue` 提供兜底窗口条。外壳同时承担**赛程闸门**：`upcoming` 立即回登录页，`ended` 叠加结束覆盖层（`inert` + 导航禁用）并在 2 秒后返回登录页 —— 延迟窗口留给离页落盘，不打断正在进行的保存。View 与 component **禁止**直接 import `@/bridge`（分层判据，`check:layering` 静态门禁断言）
-- **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄经 `createPollerLifecycle` 单持有位壳持有（模块级、不进 `ref/reactive`；榜单/公告/题目总览/评测列表/提交详情五处共用，暂停判据与启停编排留在调用方），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：
+- **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄经 `createPollerLifecycle` 单持有位壳持有（不进 `ref/reactive`；榜单/公告在 store 模块级、题目总览/评测列表/提交详情在视图 setup 作用域，五处共用，暂停判据与启停编排留在调用方），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：
 
   | 场景 | 节奏 | hidden 暂停 | 停止判据 | 归属 |
   |------|------|------------|---------|------|

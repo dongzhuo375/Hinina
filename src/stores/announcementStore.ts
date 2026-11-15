@@ -22,7 +22,7 @@ const ANNOUNCEMENT_POLL_JITTER_MS = 10_000
  */
 const livePolling = createPollerLifecycle()
 
-/// 窗口重新可见/聚焦时的补拉回调（模块作用域副作用句柄，与 poller 同款约定）
+/// 窗口重新可见/聚焦时的补拉回调（模块作用域副作用句柄，与轮询器同款约定）
 let visibilityRefresh: (() => void) | null = null
 
 /// `visibilitychange` 与 `focus` 都可能触发，用时间窗去重，避免一次切回打两次请求

@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-常量：`POLL_INTERVAL_MS`(5s)、`POLL_JITTER_MS`(1s)。模块级普通变量：`alive`（卸载标记）、`poller: Poller | null`（副作用句柄，不进响应式系统）。
+常量：`POLL_INTERVAL_MS`(5s)、`POLL_JITTER_MS`(1s)。setup 作用域普通变量：`alive`（卸载标记）、`historyPolling`（`createPollerLifecycle` 壳，副作用句柄不进响应式系统）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|

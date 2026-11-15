@@ -125,7 +125,7 @@ stopLive → livePolling.stop() + isLive = false + 清空查询去抖 memo
 - **轮询编排归 store 而非组件**：榜单数据被多个视图共享（榜单页、题目总览、统计卡），
   组件级 onUnmounted 停表在视图切换/keep-alive 场景下不可靠；store 与会话同生命周期，
   登出时由 `stores/session` 统一 `stopLive()` + `$reset()`（含「我的行」，属会话数据）。
-- **句柄放模块作用域**：`poller` 是副作用句柄，不进 state —— Vue 深层代理定时器句柄
+- **句柄放模块作用域**：`livePolling`（轮询生命周期壳）持有的轮询句柄是副作用句柄，不进 state —— Vue 深层代理定时器句柄
   无意义且可能干扰句柄语义（与 `utils/polling` 的约定一致）。
 - **失败保留旧数据**：赛场网络抖动频繁，`refresh` 吞错让表格停留在上一次成功快照，
   比闪成空态/错误态更可用；错误仍写入 `error` 供 UI 提示。

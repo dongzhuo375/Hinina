@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-常量：`POLL_INTERVAL_MS`(30s)、`POLL_JITTER_MS`(5s)。模块级普通变量：`poller: Poller | null`（副作用句柄，不进 ref/reactive）、`supplementaryLoaded: boolean`（补充数据是否已触发过）。
+常量：`POLL_INTERVAL_MS`(30s)、`POLL_JITTER_MS`(5s)。setup 作用域普通变量：`problemsPolling`（`createPollerLifecycle` 壳，副作用句柄不进 ref/reactive）、`supplementaryLoaded: boolean`（补充数据是否已触发过）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
