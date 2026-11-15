@@ -47,7 +47,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 
 ## 关键实现约定
 - **必须发送 `Accept: application/json`**：Hydro 的响应分支是 `request.json || response.redirect || ?noTemplate=1 || !response.template`，不带该头会渲染 HTML 模板 —— 这是取 JSON 的唯一手段。请求头在适配器里用 `headers()` 组装（infra 只做透传，不假设认证方式）
-- **两条通道都走 infra 的 raw 变体**（`get_text_raw` / `post_text_raw`：任意状态码都返回 status + headers + body）：Hydro 的用户可见错误全在响应体包络里（`LoginError` / `OpcountExceededError` / `PermissionError`），登录还要读 `Set-Cookie`，而非 raw 变体会在非 2xx 时丢弃响应体。GET 的 5xx 仍由 infra 退避重试（耗尽后返回响应）；POST 不重试。代价是 **401 不再由 infra 自动映射为 `Auth`** —— 由本适配器的 `http_status_error` 承担（判据与 infra 的 `status_error` 逐条对齐，否则会话守卫失效）
+- **两条通道都走 infra 的 raw 变体**（`get_text_raw` / `post_text_raw`：任意状态码都返回 status + headers + body）：Hydro 的用户可见错误全在响应体包络里（`LoginError` / `OpcountExceededError` / `PermissionError`），登录还要读 `Set-Cookie`，而非 raw 变体会在非 2xx 时丢弃响应体。GET 的 5xx 与 **body 断流**（读响应体阶段失败，2026-11-15 联调实测约 5% 轮询）由 infra 退避重试（耗尽后返回响应/报错）；POST 不重试。代价是 **401 不再由 infra 自动映射为 `Auth`** —— 由本适配器的 `http_status_error` 承担（判据与 infra 的 `status_error` 逐条对齐，否则会话守卫失效）
 - **错误包络没有 message**：`{"error":{"name","params","code"}}`（`message` 是原型上的非枚举 getter，不参与序列化），文案必须由调用方或前端自行组织；`code` 即 HTTP 状态码
 - **未登录的 JSON 化重定向**：Hydro 在 `onerror` 里对未登录的 `PermissionError`/`PrivilegeError` 重定向到 `/login?redirect=...`，JSON 模式下是 **HTTP 200 + `{"url":"/login?..."}`**。不识别它会把「会话过期」当成「成功但数据为空」，前端永远回不到登录页 → `types::login_redirect_url` 只认指向 `/login` 的 url（`{"url":"/"}`、文件下载签名链接不算）
 - **`Authorization` 头一旦出现即完全覆盖 Cookie**：即使格式不对也不回退到 sid Cookie，故只在持有 sid 时附加该头（服务端取空格分隔的第 2 段，scheme 名不参与校验）

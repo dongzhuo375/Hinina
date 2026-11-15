@@ -3486,7 +3486,7 @@ GET /record
 | `page` | number | 当前页 |
 | `rdocs` | `RecordDoc[]` | 记录列表（已按上下文投影/裁剪） |
 | `tdoc` | `Tdoc \| null` | 比赛文档 |
-| `pdict` | object | **docId + pid 双键**：`problem.getList` 对带 `pid` 的题按 `docId` 与 `pid` 各收录一条（同一 `ProblemDoc`）。**2026-11-15 实测**（上游 master `Object.assign(r, l)`）：单题比赛返回 `{"1": …, "P1000": …}` 两个键——消费方必须按 docId 去重，不能假设键唯一 |
+| `pdict` | object | **docId + pid 双键**：`problem.getList` 对带 `pid` 的题按 `docId` 与 `pid` 各收录一条（同一 `ProblemDoc`）。**2026-11-15 实测**（上游 master `Object.assign(r, l)`）：单题比赛返回 `{"1": …, "P1000": …}` 两个键——消费方必须按 docId 去重，不能假设键唯一。接口参考中其余 `ProblemDict` / `pdict` 条目（训练/作业/榜单等）同源同键 |
 | `udict` | object | `uid → User` |
 | `all` | boolean | 回显 |
 | `allDomain` | boolean | 回显 |
@@ -6220,7 +6220,7 @@ const udict = await UserModel.getListForRender(tdoc.domainId, [...uids, ...membe
 if (tdoc.allowTeam) { /* 为每个队伍 tsdoc 写入 udict[uid].teamMembers = 成员 uid 列表 */ }
 ```
 
-**`pdict`**：`problem.getList(..., PROJECTION_CONTEST_DETAIL)`，投影为 `_id`/`domainId`/`docType`/`docId`/`pid`/`owner`/`title`/`config`/`content`/`html`/`data`/`additional_file`/`reference`/`maintainer`（`model/problem.ts:75-98`）；渲染表头/行时被就地写入 `nAccept`、`nSubmit`（各赛制的 `scoreboardHeader` 初始化、`scoreboardRow` 累加）。
+**`pdict`**：`problem.getList(..., PROJECTION_CONTEST_DETAIL)`，投影为 `_id`/`domainId`/`docType`/`docId`/`pid`/`owner`/`title`/`config`/`content`/`html`/`data`/`additional_file`/`reference`/`maintainer`（`model/problem.ts:75-98`）；渲染表头/行时被就地写入 `nAccept`、`nSubmit`（各赛制的 `scoreboardHeader` 初始化、`scoreboardRow` 累加）。键形态与 `problem.getList` 一致为 **docId + pid 双键**（上游 `contest.ts:1081` 起同源；Hinina 的榜单路径不消费 pdict）。
 
 **`tsdoc`**：`tsdocAsPublic()`（contest.ts:107-114）——`attend`、`subscribe`、`startAt`、`displayName`、`members`，以及存在 `duration`/`endAt` 时的 `endAt`。
 
@@ -6526,7 +6526,7 @@ POST /training/:tid
 | `tdoc` | `TrainingDoc` | 训练文档；`description` 中的 `file://` 会被改写为 `./:tid/file/` |
 | `tsdoc` | `TrainingStatusDoc` | 当前用户的训练状态，由 `training.setStatus` 写入 `doneNids`/`donePids`/`done` |
 | `pids` | number[] | DAG 中去重后的全部题目 ID |
-| `pdict` | `Record<number, ProblemDoc>` | 题目 ID → 题目文档（受隐藏题目可见性限制） |
+| `pdict` | `Record<number, ProblemDoc>` | 题目 ID → 题目文档（受隐藏题目可见性限制）。**实际键为 docId + pid 双键**（`problem.getList` 同源；上游类型标注 `Record<number, …>` 未反映 pid 别名键） |
 | `psdict` | `Record<string, ProblemStatusDoc>` | 题目 ID → 被查看用户的提交状态（`uid` 对应用户） |
 | `selfPsdict` | `Record<string, ProblemStatusDoc>` | 题目 ID → 当前用户自己的提交状态（仅 `shouldCompare` 时非空） |
 | `ndict` | `Record<number, TrainingNode>` | 节点 ID → 节点定义 |

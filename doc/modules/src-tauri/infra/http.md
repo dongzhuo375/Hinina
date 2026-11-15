@@ -16,14 +16,14 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 ## 核心类型/函数
 - **`HttpClient`** — HTTP 客户端 struct，封装 `reqwest::Client`
 - **`HttpClient::new() -> Result<Self, reqwest::Error>`** — 创建默认客户端：30s 超时、Cookie Store、UA 为 `Hinina/{version}`（内部委托 `with_timeout(30s)`）
-- **`HttpClient::with_timeout(timeout: Duration) -> Result<Self, reqwest::Error>`** — 创建指定超时的客户端。**超时来自 `oj.timeout_secs` 配置**（由 `core/context.rs` 装配时读取并注入，`timeout_secs.max(1)` 防 0 值），不再硬编码；**连接池空闲超时 4s**（`pool_idle_timeout`）：必须短于常见部署的服务器 Keep-Alive 超时（Hydro 实测响应头 `Keep-Alive: timeout=5`），否则轮询间隔大于服务器超时的端点会复用已被服务器关闭的连接、在读响应体阶段断流（2026-11-15 联调实测约 5% 轮询失败；`retry_get` 只重试发送段，盖不住 body 断流）。reqwest 不暴露 getter，「该值确实被传入」由装配代码保证（与超时同款口径）；其余行为（Cookie Store、UA、重试）与 `new()` 一致
+- **`HttpClient::with_timeout(timeout: Duration) -> Result<Self, reqwest::Error>`** — 创建指定超时的客户端。**超时来自 `oj.timeout_secs` 配置**（由 `core/context.rs` 装配时读取并注入，`timeout_secs.max(1)` 防 0 值），不再硬编码；其余行为（Cookie Store、UA、重试）与 `new()` 一致
 - **`HttpClient::client() -> &reqwest::Client`** — 获取内部 client 引用，供 Adapter 层直接调用原始 API（HOJ 的 `login` 需自行读响应头取 token、`logout` 忽略响应体）。**`validate_session` 已不再走 raw client**：它改走 `get_json_authed`，才能拿到去 null 解析、体内鉴权失败识别、token 轮换与 5xx 退避重试（见 `adapter/hoj/mod.md`）
-- **`HttpClient::get_text_with_headers(url, headers) -> AppResult<(String, HeaderMap)>`** — GET，返回**原始响应体**与响应头；5xx 与传输错误自动重试，4xx 直接报错；`headers` 由调用方注入并原样附加（空 map = 无附加头，重试时原样重附）
+- **`HttpClient::get_text_with_headers(url, headers) -> AppResult<(String, HeaderMap)>`** — GET，返回**原始响应体**与响应头；5xx、传输错误与 **body 断流**自动重试（见 `retry_get_text`），4xx 直接报错；`headers` 由调用方注入并原样附加（空 map = 无附加头，重试时原样重附）
 - **`HttpClient::post_text_with_headers<B: Serialize>(url, body, headers) -> AppResult<(String, HeaderMap)>`** — POST（JSON body），返回**原始响应体**与响应头；非幂等，不重试，非 2xx 直接报错（**错误信息附带响应体摘录**）
-- **`HttpClient::get_text_raw(url, headers) -> AppResult<(StatusCode, HeaderMap, String)>`** — GET，**任意状态码都返回原始响应**，不做状态码映射。5xx 仍退避重试（GET 幂等），**耗尽后返回响应而不是报错**；4xx 不重试。供需要读错误包络的适配器使用（`adapter/hydro`）
+- **`HttpClient::get_text_raw(url, headers) -> AppResult<(StatusCode, HeaderMap, String)>`** — GET，**任意状态码都返回原始响应**，不做状态码映射。5xx 与 body 断流仍退避重试（GET 幂等），**耗尽后返回响应而不是报错**；4xx 不重试。供需要读错误包络的适配器使用（`adapter/hydro`）
 - **`HttpClient::post_text_raw<B: Serialize>(url, body, headers) -> AppResult<(StatusCode, HeaderMap, String)>`** — POST（JSON body），语义同 `get_text_raw`，但非幂等、**不做任何重试**（Hydro 的登录/提交走它：既要错误包络，也要读 `Set-Cookie`）
-- **`retry_get(url, headers, allow_error) -> AppResult<Response>`**（私有）— 内部重试：最多 2 次，指数退避 1s/2s；4xx 立即报错不重试；**5xx 重试耗尽后**按 `allow_error` 决定「报错」还是「原样返回响应」（处置判据见 `classify_status`）
-- **`classify_status(status, attempt, allow_error) -> StatusDecision`**（私有纯函数）— 处置判据：`Accept`（2xx；或 `allow_error` 下的任意状态码）/ `Retry`（5xx 且 `attempt < MAX_RETRIES`）/ `Fail`（其余非成功状态，含重试耗尽的 5xx 与 3xx 残留）。抽成纯函数是为了让判据可被单元测试穷尽锁定 —— 这里曾有 bug：5xx 耗尽后落到 `return Ok(response)`，把网关 HTML 错误页当成正常响应，最终报成「响应不是合法 JSON」而不是「HTTP 502」，把排障引向错误方向，同时使 `retry_get` 末尾的 `Err(last_error)` 成为永不可达的死代码。`allow_error` 让两组语义共用同一份判据（两条不可错的边界：raw 下 4xx **不重试**、5xx **仍重试**只是耗尽后返回）
+- **`retry_get_text(url, headers, allow_error) -> AppResult<(StatusCode, HeaderMap, String)>`**（私有）— 内部重试：最多 2 次，指数退避 1s/2s，**响应体读取纳入重试循环**——三段失败（发送段 / 5xx 状态段 / body 断流段）都在额度内退避重发整个请求。body 断流的背景：2026-11-15 联调实测榜单/题目列表等轮询端点约 5% 的请求在**读响应体阶段**失败（`error decoding response body`），与发送段不是同一失败面，根因方向未定（服务端中途中断 / 中间设备），GET 幂等故重试对两种来源都有效。曾试验连接池 `pool_idle_timeout(4s)` 对抗「服务器 Keep-Alive 超时后复用」竞态，评审探针证实 hyper 在复用前已自行探测对端关闭（该竞态只表现发送段、已被 ① 覆盖），对 body 断流无效，已回退。4xx 立即报错不重试；**5xx 重试耗尽后**按 `allow_error` 决定「报错」还是「原样返回 (status, headers, body)」（处置判据见 `classify_status`）
+- **`classify_status(status, attempt, allow_error) -> StatusDecision`**（私有纯函数）— 处置判据：`Accept`（2xx；或 `allow_error` 下的任意状态码）/ `Retry`（5xx 且 `attempt < MAX_RETRIES`）/ `Fail`（其余非成功状态，含重试耗尽的 5xx 与 3xx 残留）。抽成纯函数是为了让判据可被单元测试穷尽锁定 —— 这里曾有 bug：5xx 耗尽后落到 `return Ok(response)`，把网关 HTML 错误页当成正常响应，最终报成「响应不是合法 JSON」而不是「HTTP 502」，把排障引向错误方向，同时使 `retry_get_text` 末尾的 `Err(last_error)` 成为永不可达的死代码。`allow_error` 让两组语义共用同一份判据（两条不可错的边界：raw 下 4xx **不重试**、5xx **仍重试**只是耗尽后返回）
 - **`StatusDecision`**（私有枚举）— `Accept` / `Retry` / `Fail`
 - **`status_error(url, status) -> AppError`**（私有）— HTTP 状态码 → `AppError`，消息统一为 `"HTTP {code} {reason}: {url}"`。**401 → `Auth`，其余（含 403 与全部 5xx）→ `Network`**
   - 401 单独映射的理由：HTTP 401 的标准语义就是「未认证」，与会话失效等价；而前端 `sessionGuard` 与 `AuthService::validate_session` 都**只依据 `Auth` 变体**判定失效。若一律归 `Network`，token 过期时守卫不会触发 —— 选手只会看到「网络错误」，永远回不到登录页。这属 HTTP 通用语义而非 OJ 私有约定，故由 infra 层承担；OJ 把鉴权失败藏在响应体（HTTP 200 + 体内 `status=401/403`）的情形由 Adapter 层识别（`adapter/hoj` 的 `auth_failure_from_body`）
@@ -48,11 +48,11 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 - `adapter/hoj`（HOJ Adapter 将通过 HttpClient 发送 API 请求）
 
 ## 逻辑流程
-创建时配置全局超时（`with_timeout` 由配置驱动，见上）、Cookie Store 与连接池空闲超时（4s，短于常见部署的 Keep-Alive 超时，见上）。GET 请求自动对 5xx 响应执行重试（最多 2 次，指数退避），4xx 客户端错误直接返回含状态码的错误。POST 为非幂等操作，任何非 2xx 状态码直接报错。请求头经 `headers` 参数由调用方注入（认证方式是 Adapter 层概念，infra 不感知——HOJ 的 `Authorization` 头由 `adapter/hoj` 的 `auth_headers` 组装）。`*_with_headers` 变体将响应头原样返回，infra 层不感知任何 OJ 私有协议语义（如 HOJ 的 `Refresh-Token` 轮换约定由 `adapter/hoj` 自行解析）。
+创建时配置全局超时（`with_timeout` 由配置驱动，见上）与 Cookie Store。GET 请求的三段失败——5xx 状态、传输错误、**响应体读取断流**——都自动重试（最多 2 次，指数退避，重发整个请求），4xx 客户端错误直接返回含状态码与响应体摘录的错误。POST 为非幂等操作，任何失败都不重试。请求头经 `headers` 参数由调用方注入（认证方式是 Adapter 层概念，infra 不感知——HOJ 的 `Authorization` 头由 `adapter/hoj` 的 `auth_headers` 组装）。`*_with_headers` 变体将响应头原样返回，infra 层不感知任何 OJ 私有协议语义（如 HOJ 的 `Refresh-Token` 轮换约定由 `adapter/hoj` 自行解析）。
 
 **状态码 → 错误变体映射**（GET 与 POST 共用 `status_error`）：
 
-| 响应 | GET（`retry_get`） | POST |
+| 响应 | GET（`retry_get_text`） | POST |
 |------|------|------|
 | 2xx | `Ok(原始响应体, 响应头)` | 同左 |
 | 401 | `Err(Auth("HTTP 401 Unauthorized: {url}"))`，**不重试** | 同左 |
