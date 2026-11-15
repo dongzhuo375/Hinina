@@ -20,7 +20,7 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 - **`HttpClient::client() -> &reqwest::Client`** — 获取内部 client 引用，供 Adapter 层直接调用原始 API（HOJ 的 `login` 需自行读响应头取 token、`logout` 忽略响应体）。**`validate_session` 已不再走 raw client**：它改走 `get_json_authed`，才能拿到去 null 解析、体内鉴权失败识别、token 轮换与 5xx 退避重试（见 `adapter/hoj/mod.md`）
 - **`HttpClient::get_text_with_headers(url, headers) -> AppResult<(String, HeaderMap)>`** — GET，返回**原始响应体**与响应头；5xx、传输错误与 **body 断流**自动重试（见 `retry_get_text`），4xx 直接报错；`headers` 由调用方注入并原样附加（空 map = 无附加头，重试时原样重附）
 - **`HttpClient::post_text_with_headers<B: Serialize>(url, body, headers) -> AppResult<(String, HeaderMap)>`** — POST（JSON body），返回**原始响应体**与响应头；非幂等，不重试，非 2xx 直接报错（**错误信息附带响应体摘录**）
-- **`HttpClient::get_text_raw(url, headers) -> AppResult<(StatusCode, HeaderMap, String)>`** — GET，**任意状态码都返回原始响应**，不做状态码映射。5xx 与 body 断流仍退避重试（GET 幂等），**耗尽后返回响应而不是报错**；4xx 不重试。供需要读错误包络的适配器使用（`adapter/hydro`）
+- **`HttpClient::get_text_raw(url, headers) -> AppResult<(StatusCode, HeaderMap, String)>`** — GET，**任意状态码都返回原始响应**，不做状态码映射。5xx 与 body 断流仍退避重试（GET 幂等）；**5xx 重试耗尽后返回响应而不是报错，body 断流耗尽后报 `Err(读取响应体失败 …)`**；4xx 不触发状态段重试（body 断流仍重试）。供需要读错误包络的适配器使用（`adapter/hydro`）
 - **`HttpClient::post_text_raw<B: Serialize>(url, body, headers) -> AppResult<(StatusCode, HeaderMap, String)>`** — POST（JSON body），语义同 `get_text_raw`，但非幂等、**不做任何重试**（Hydro 的登录/提交走它：既要错误包络，也要读 `Set-Cookie`）
 - **`retry_get_text(url, headers, allow_error) -> AppResult<(StatusCode, HeaderMap, String)>`**（私有）— 内部重试：最多 2 次，指数退避 1s/2s，**响应体读取纳入重试循环**——三段失败（发送段 / 5xx 状态段 / body 断流段）都在额度内退避重发整个请求。body 断流的背景：2026-11-15 联调实测榜单/题目列表等轮询端点约 5% 的请求在**读响应体阶段**失败（`error decoding response body`），与发送段不是同一失败面，根因方向未定（服务端中途中断 / 中间设备），GET 幂等故重试对两种来源都有效。曾试验连接池 `pool_idle_timeout(4s)` 对抗「服务器 Keep-Alive 超时后复用」竞态，本地模拟探针证实 hyper 在复用前已自行探测对端关闭（该竞态只表现发送段、已被 ① 覆盖），对 body 断流无效，已回退。**4xx 不触发状态段重试**：非 raw 直接报错；raw 变体的 4xx 会进入 body 段，body 断流仍按额度重试（GET 幂等）；**5xx 重试耗尽后**按 `allow_error` 决定「报错」还是「原样返回 (status, headers, body)」（处置判据见 `classify_status`）
 - **`classify_status(status, attempt, allow_error) -> StatusDecision`**（私有纯函数）— 处置判据：`Accept`（2xx；或 `allow_error` 下的任意状态码）/ `Retry`（5xx 且 `attempt < MAX_RETRIES`）/ `Fail`（其余非成功状态，含重试耗尽的 5xx 与 3xx 残留）。抽成纯函数是为了让判据可被单元测试穷尽锁定 —— 这里曾有 bug：5xx 耗尽后落到 `return Ok(response)`，把网关 HTML 错误页当成正常响应，最终报成「响应不是合法 JSON」而不是「HTTP 502」，把排障引向错误方向，同时使 `retry_get_text` 末尾的 `Err(last_error)` 成为永不可达的死代码。`allow_error` 让两组语义共用同一份判据（两条不可错的边界：raw 下 4xx **不重试**、5xx **仍重试**只是耗尽后返回）
@@ -59,7 +59,7 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 | 其它 4xx（含 403） | `Err(Network("HTTP {code} {reason}: {url}"))`，**不重试**（客户端错误重试无意义） | 同左 |
 | 5xx | 退避 1s / 2s 后重试，最多 2 次；**重试耗尽后 `Err(Network("HTTP {code} …"))`**，不会把网关错误页当成正常响应交给上层 | 不重试，直接 `Err(Network(...))` |
 | 传输错误 / 超时 | 同样退避重试 2 次；耗尽后 `Err(Network("GET 请求失败 {url}: {e}"))` | `Err(Network("POST 请求失败 {url}: {e}"))` |
-| 读响应体失败 | `Err(Network("读取响应体失败: {e}"))` | 同左 |
+| 读响应体失败 | 同 5xx 额度退避重试；耗尽后 `Err(Network("读取响应体失败 {url}: {e}"))` | 不重试，`Err(Network("读取响应体失败: {e}"))` |
 
 > 变体是前端 `isAuthError` 分流与 `sessionGuard` 会话失效兜底的唯一依据，因此本层**只在传输环节构造错误，绝不改写下游变体**；Adapter 与 Service 补环节名一律用 `AppError::context()`（见 `core/error.md`）。
 
@@ -69,4 +69,4 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 
 ## 真实传输层测试（M2）
 
-`tests/http_tests.rs` 除判定函数外，新增经 loopback 脚本 server 的真实传输用例：GET 5xx 恰好重试一次后成功 / 重试耗尽如实报错、POST 500 一律不重试且错误附响应体摘录、401→`Auth` 与 403→`Network` 的线上映射、自定义头与 `Hinina/{version}` UA 透传。
+`tests/http_tests.rs` 除判定函数外，新增经 loopback 脚本 server 的真实传输用例：GET 5xx 恰好重试一次后成功 / 重试耗尽如实报错、POST 500 一律不重试且错误附响应体摘录、401→`Auth` 与 403→`Network` 的线上映射、自定义头与 `Hinina/{version}` UA 透传；**body 断流三态**（`truncated` 响应：Content-Length 多报后提前断开）——非 raw 重试一次成功、耗尽如实报 `读取响应体失败`、raw 变体同样重试成功。

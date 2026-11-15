@@ -454,3 +454,28 @@ async fn raw_variant_retries_mid_body_disconnect_too() {
 
     server.shutdown();
 }
+
+/// raw + body 断流耗尽：raw 的 4xx/5xx 都进入 body 段，断流耗尽同样如实报错
+/// （补齐矩阵：非 raw 耗尽与 raw 成功已覆盖，本用例锁 raw 通道的耗尽分支）。
+#[tokio::test]
+async fn raw_variant_reports_error_when_body_disconnect_exhausts_budget() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("p1"),
+        ScriptedResponse::truncated("p2"),
+        ScriptedResponse::truncated("p3"),
+    ])
+    .await;
+
+    let err = client()
+        .get_text_raw(&format!("{}/x", server.url()), &Default::default())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("读取响应体失败")),
+        "raw 通道 body 断流耗尽应为 Network 错误，实得 {:?}",
+        err
+    );
+    assert_eq!(server.requests().len(), 3, "首次 + 最多 2 次重试");
+
+    server.shutdown();
+}
