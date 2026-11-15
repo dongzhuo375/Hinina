@@ -46,4 +46,23 @@ describe('SubmitButton', () => {
     expect(button.textContent).not.toContain('提交代码')
     expect(button.disabled).toBe(true)
   })
+
+  it('点击转发 submit 事件（消费方经监听触发提交流）', async () => {
+    const received: number[] = []
+    const host = document.createElement('div')
+    const app = createApp({
+      render: () =>
+        h(SubmitButton, {
+          tone: 'success',
+          busy: false,
+          pending: false,
+          onSubmit: () => received.push(1),
+        }),
+    })
+    app.mount(host)
+    await nextTick()
+    host.querySelector('button')!.click()
+    await nextTick()
+    expect(received).toHaveLength(1)
+  })
 })

@@ -42,7 +42,7 @@ describe('useAboutSettings', () => {
     await about.loadStorage()
     expect(about.storageFailed.value).toBe(true)
 
-    // 重试成功：失败标志复位 + 数据写值（复位语义曾被复制走样，此用例锁死）
+    // 重试成功：失败标志复位 + 数据写值（重载路径依赖复位语义，此用例锁死）
     await about.loadStorage()
     expect(about.storageFailed.value).toBe(false)
     expect(about.storage.value?.version).toBe('0.1.2')

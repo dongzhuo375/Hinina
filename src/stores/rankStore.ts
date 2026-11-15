@@ -475,7 +475,7 @@ export const useRankStore = defineStore('rank', {
     /**
      * 开启实时刷新（10s ± 2s 抖动）。
      *
-     * 暂停判据：页面隐藏（`document.hidden`）或调用方给出的条件（如比赛已结束）。
+     * 暂停判据：页面隐藏（`utils/page-visibility` 的 `isPageHidden`）或调用方给出的条件（如比赛已结束）。
      * 首次数据由调用方自行 `loadRank` 拉取 —— 轮询器的第一次执行在一个完整周期之后，
      * 这样进入页面能立刻看到数据而不是等 10 秒。
      *
