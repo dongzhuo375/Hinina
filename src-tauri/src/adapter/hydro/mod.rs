@@ -1015,7 +1015,7 @@ impl ContestProvider for HydroAdapter {
     /// 比赛题目列表：`GET /contest/:tid/problems`。
     ///
     /// 展示字母由 `tdoc.pids` 的**下标**派生（Hydro 自身的规则），
-    /// 因为 `pdict` 是按 docId 键的映射，且 JS 对象的数字键会被重排 ——
+    /// 因为 `pdict` 是 docId + pid 双键映射（缺口 D21）且 JS 对象的数字键会被重排 ——
     /// 不能靠键顺序推字母。
     async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
         let vo: ContestProblemListVO = self

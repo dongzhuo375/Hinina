@@ -3574,7 +3574,7 @@ POST /record/:rid
 
 `RecordDoc` 主要字段（`interface.ts` 的 `RecordDoc` = `RecordPayload` + `_id`）：`_id`、`domainId`、`pid`、`uid`、`lang`、`code`、`score`、`time`、`memory`、`status`、`judgeTexts`、`compilerTexts`、`testCases`、`subtasks`、`judger`、`judgeAt`、`rejudged`、`progress`、`contest`、`files`、`hackTarget`、`input`（自测）、`notify`。
 
-> **2026-11-15 实测补充**（测试部署 + 上游 master 源码）：① `time` / `testCases[].time` 是**带小数的毫秒**（hydrojudge `flow.ts` 的 `Math.floor(total_time*1e6)/1e6`；实测 `time: 3.393`、单点 `time: 1.913`；2 秒死循环被判 TLE 时单点 1088.429 → 单位定标为毫秒），客户端取整为毫秒整数消费；② `subtasks` 是**对象** `{"<subtaskId>": { type, score, status }}`（`cancel` 操作写 `{}`），不是数组。③ 比赛进行中的 ACM/OI 投影可能整体删除这些字段（见「赛制投影」表），字段缺省属正常形态。
+> **2026-11-15 实测补充**（测试部署 + 上游 master 源码）：① `time` / `testCases[].time` 是**带小数的毫秒**（hydrojudge `flow.ts` 的 `Math.floor(total_time*1e6)/1e6`；实测 `time: 3.393`、单点 `time: 1.913`；2 秒死循环被判 TLE 时单点 1088.429 → 单位定标为毫秒），客户端取整为毫秒整数消费；② `subtasks` 是**对象** `{"<subtaskId>": { type, score, status }}`（`cancel` 操作写 `{}`），不是数组。③ 比赛进行中的 ACM/OI 投影可能整体删除这些字段（见上文 `applyProjection` 裁剪逻辑表），字段缺省属正常形态。
 
 **POST 子操作（`operation`）**
 
@@ -4680,7 +4680,7 @@ Accept: application/json
 
 ```json
 {
-  "pdict": { "1001": { "docId": 1001, "pid": "A1", "title": "A+B" } },
+  "pdict": { "1001": { "docId": 1001, "pid": "A1", "title": "A+B" }, "A1": { "docId": 1001, "pid": "A1", "title": "A+B" } },
   "psdict": {},
   "udict": { "2": { "_id": 2, "uname": "admin" } },
   "rdict": {},

@@ -95,10 +95,10 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 ```
 
 ## 测试
-`tests/mod_tests.rs`（+ `tests/fixtures/*.json`，两类出处：按 `doc/Hydro/HYDRO-API.md` 手工构造 + 2026-11-15 自测试部署实测收编（`contest_problems_dual_key`，个人数据已脱敏））：
+`tests/mod_tests.rs`（+ `tests/fixtures/*.json`，两类出处：按 `doc/Hydro/HYDRO-API.md` 手工构造 + 2026-11-15 自测试部署实测收编（`contest_problems_dual_key` / `record_list_real`，个人数据已脱敏））：
 - 响应处置：非 2xx + 错误包络 → `Auth`；**网关 HTML 错误页 → `Network` 且带状态码**（不得报成「不是合法 JSON」）；401 → `Auth`；HTTP 200 + 登录重定向 → `Auth`；成功但字段不匹配 → `Serialization`
 - 比赛阶段（`contest_status` 全分支含边界与时间缺失）、赛制归一、`oi_rank_score_type` 只对 oi/strictioi 标注
-- `into_contest`（时间/赛制/封榜）、`map_contest_problems`（**字母按下标派生而非顺序**、无顺序表时的回退）、`into_problem`（Markdown 题面/limits/语言翻译/无 config 时的零值）
+- `into_contest`（时间/赛制/封榜）、`map_contest_problems`（**字母按下标派生而非顺序**、无顺序表时的回退、**双键 pdict 去重**与命名空间回退键、**双键 pdict 下的记录映射路径**）、`into_problem`（Markdown 题面/limits/语言翻译/无 config 时的零值）
 - 评测投影：非终态清零指标、CE 文本拼接、非终态隐藏 score、`display_id` 由 pids 下标派生、ACM 的 score 必须为 `None`
 - 测试点：字段缺失落默认值、按 `subtaskId` 分组与排序、平铺题无子任务
 - **共用解析入口**（`HydroResponse::parse_value`，GET 通道直接依赖它）：错误包络 → `Auth`、登录重定向 → `Auth`、非 JSON → `Serialization`（消息含「不是合法 JSON」）、成功载荷透传（并已 `strip_nulls`）

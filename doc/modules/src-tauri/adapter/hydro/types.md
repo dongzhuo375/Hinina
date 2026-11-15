@@ -64,12 +64,14 @@ Hydro 响应 DTO 与全部归一化纯函数。**不含任何网络调用**，�
 3. 映射函数把 DTO 折算为领域实体；榜单走 `scoreboard_rank_page` 的「表头定位 → 逐行取列 → 单元格归一」三步
 
 ## 测试
-`tests/types_tests.rs`（夹具在 `tests/fixtures/`，按文档手工构造）：
+`tests/types_tests.rs`（夹具在 `tests/fixtures/`，共 13 个、两类出处：按 `doc/Hydro/HYDRO-API.md` 手工构造 9 个 + 2026-11-15 自测试部署实测收编 4 个——`record_detail_real` / `record_detail_tle` / `record_list_real` / `contest_problems_dual_key`，个人数据已脱敏）：
 - `strip_nulls` 递归与 falsy 保留、`preview` 按字符截断
 - 错误包络 → `Auth`、非包络不误判、登录重定向只认 `/login`、`set-cookie` 解析（含 `xsid` 干扰与缺失头）
 - `parse_time`（再导出，用例锁定毫秒/`Z`/空格/时区偏移/闰日/空串）、`objectid_seconds`（越界与非 ObjectId 一律拒绝）、`parse_duration_seconds`
 - `map_status` 全码表（含 `22 → Pending`）、`is_terminal_status` 穷尽、`hoj_status_to_hydro` 映射与拒绝
 - 语言表**双射**校验（展示名唯一，往返恒等）、未知 key 透传、前端可识别的展示名、`display_letter` 边界
 - `coerce_*`、`strip_html`（**保留换行结构**）、`pending_count`（必须锚定 `color:orange`）、`problem_status_code`
-- 六个夹具的 DTO 解析（含 `config` 为字符串的容错、`duration` 推算、`ObjectId` 提交时间、非终态指标清零）
+- **数字容错钩子 `de_opt_i64_from_number`**：实测浮点毫秒解析与取整（含 .5 边界锁「四舍五入」）、非数字仍拒绝、对象形态 `subtasks` 保留
+- 实测夹具解析：`record_detail_real`（浮点毫秒/对象 subtasks/浮点测试点）、`record_detail_tle`（TLE 指标保留）、`record_list_real`（浮点列表页 + 双键 pdict）
+- 手工夹具的 DTO 解析（含 `config` 为字符串的容错、`duration` 推算、`ObjectId` 提交时间、非终态指标清零）
 - 榜单矩阵归一：ACM 三行（普通/打星/封榜待判）逐字段断言、OI 分数语义、空榜单、表头无字母时的回退
