@@ -222,12 +222,18 @@ vi.mock('@/services/config.service', async () => {
     isOjSwitchPersistFailed: (e: unknown) => isPersistFailed(e),
   }
 })
-vi.mock('@/services/system.service', () => ({
-  systemService: {
-    launchFlags: mocks.launchFlags,
-    isKeyed: () => mocks.launchFlags.value.settings,
-  },
-}))
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 真 ref 支撑面（生产 launchFlags = readonly(ref)，systemStore.spec 同款打桩）：
+  // isKeyed 经 systemStore getter（computed）消费，支撑必须是响应式 ref
+  mocks.launchFlags = ref({ settings: false })
+  return {
+    systemService: {
+      launchFlags: mocks.launchFlags,
+      isKeyed: () => mocks.launchFlags.value.settings,
+    },
+  }
+})
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
 /// OJ 切换的认证态复位（与 resetSessionForOjSwitch 成对调用；纯 composable 测试
 /// 无活动 pinia，打桩同 session 模块）

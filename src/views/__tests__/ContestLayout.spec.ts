@@ -30,13 +30,19 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: mocks.replace }),
   useRoute: () => ({ name: mocks.routeName.value }),
 }))
-vi.mock('@/services/system.service', () => ({
-  systemService: {
-    launchFlags: mocks.launchFlags,
-    // 进程级判据（路由级组合在 systemStore.isKeyedSettingsRoute，真 store 读同一 mock）
-    isKeyed: () => mocks.launchFlags.value.settings,
-  },
-}))
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 真 ref 支撑面（生产 launchFlags = readonly(ref)，systemStore.spec 同款打桩）：
+  // isKeyed 经 systemStore getter（computed）消费，支撑必须是响应式 ref
+  mocks.launchFlags = ref({ settings: false })
+  return {
+    systemService: {
+      launchFlags: mocks.launchFlags,
+      // 进程级判据（路由级组合在 systemStore.isKeyedSettingsRoute，真 store 读同一 mock）
+      isKeyed: () => mocks.launchFlags.value.settings,
+    },
+  }
+})
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => mocks }))
 vi.mock('@/services/contest.service', () => ({ contestService: { loadConfiguredContest: mocks.loadConfiguredContest } }))
 vi.mock('@/components/layout/TopBar.vue', () => ({ default: { template: '<header />' } }))

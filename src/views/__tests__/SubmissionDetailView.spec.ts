@@ -36,6 +36,10 @@ vi.mock('@/services/submission.service', () => ({
     getSubmissionCases: mocks.getSubmissionCases,
   },
 }))
+// 局部 mock 只覆盖当前消费面（轮询计划经 configStore action 逐次直读）。刻意不提供
+// in-flight/epoch ref 支撑面：挂载树今日不消费 configStore 的 settingsSaveInFlight/
+// ojSwitchInFlight getter——若将来开始消费，computed 对缺席成员永久缓存会先假绿；
+// 扩展前须先补 ref 支撑面（孪生样板：useSettingsForm.spec；真 ref 打桩：systemStore.spec）
 vi.mock('@/services/config.service', () => ({
   configService: { getPollSchedule: mocks.getPollSchedule },
 }))

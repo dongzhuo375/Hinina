@@ -88,20 +88,26 @@ vi.mock('@/services/config.service', async () => {
       e instanceof IpcError && e.variant === 'OjSwitchPersistFailed',
   }
 })
-vi.mock('@/services/system.service', () => ({
-  systemService: {
-    getStorageInfo: mocks.getStorageInfo,
-    localDataUsage: mocks.localDataUsage,
-    getDataDir: mocks.getDataDir,
-    pickDataDir: mocks.pickDataDir,
-    setDataDir: mocks.setDataDir,
-    resetDataDir: mocks.resetDataDir,
-    resetClient: mocks.resetClient,
-    purgeLocalData: mocks.purgeLocalData,
-    launchFlags: mocks.launchFlags,
-    isKeyed: () => mocks.launchFlags.value.settings,
-  },
-}))
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 真 ref 支撑面（生产 launchFlags = readonly(ref)，systemStore.spec 同款打桩）：
+  // isKeyed 经 systemStore getter（computed）消费，支撑必须是响应式 ref
+  mocks.launchFlags = ref({ settings: false })
+  return {
+    systemService: {
+      getStorageInfo: mocks.getStorageInfo,
+      localDataUsage: mocks.localDataUsage,
+      getDataDir: mocks.getDataDir,
+      pickDataDir: mocks.pickDataDir,
+      setDataDir: mocks.setDataDir,
+      resetDataDir: mocks.resetDataDir,
+      resetClient: mocks.resetClient,
+      purgeLocalData: mocks.purgeLocalData,
+      launchFlags: mocks.launchFlags,
+      isKeyed: () => mocks.launchFlags.value.settings,
+    },
+  }
+})
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
 vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMyStatus: mocks.invalidateMyStatus }) }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => ({ refresh: mocks.announcementRefresh }) }))

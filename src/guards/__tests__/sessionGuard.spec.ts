@@ -25,12 +25,18 @@ vi.mock('@/bridge', () => {
   return { setIpcErrorObserver: mocks.setIpcErrorObserver, IpcError }
 })
 vi.mock('@/services/auth.service', () => ({ authService: { logout: mocks.logout } }))
-vi.mock('@/services/system.service', () => ({
-  systemService: {
-    launchFlags: mocks.launchFlags,
-    isKeyed: () => mocks.launchFlags.value.settings,
-  },
-}))
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 真 ref 支撑面（生产 launchFlags = readonly(ref)，systemStore.spec 同款打桩）：
+  // isKeyed 经 systemStore getter（computed）消费，支撑必须是响应式 ref
+  mocks.launchFlags = ref({ settings: false })
+  return {
+    systemService: {
+      launchFlags: mocks.launchFlags,
+      isKeyed: () => mocks.launchFlags.value.settings,
+    },
+  }
+})
 
 import { installSessionGuard } from '@/guards/sessionGuard'
 import * as settingsGateNoticeModule from '@/utils/settings-gate-notice'
