@@ -645,7 +645,7 @@ import { x } from '@/services/config.service'`,
     expect(violations[0]).toContain('views/Ae.ts:2:')
   })
 
-  it('P3：多行块注释掩码保留换行——违规行号落在真实行', () => {
+  it('多行块注释掩码保留换行——违规行号落在真实行', () => {
     const violations = findViolations([
       {
         path: 'views/Ad.vue',
