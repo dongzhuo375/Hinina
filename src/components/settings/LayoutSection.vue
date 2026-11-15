@@ -15,21 +15,11 @@ function onSplitInput(event: Event): void {
 </script>
 
 <template>
-  <SettingsSectionFrame id="settings-2">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
-                <svg
-                  class="h-4 w-4 text-[var(--color-primary)]"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <rect x="3" y="4" width="18" height="16" rx="1.5" />
-                  <path d="M10 4v16" />
-                </svg>
-                <h2 class="text-sm font-semibold text-[var(--text-primary)]">布局</h2>
-              </div>
+  <SettingsSectionFrame id="settings-2" title="布局">
+    <template #icon>
+      <rect x="3" y="4" width="18" height="16" rx="1.5" />
+      <path d="M10 4v16" />
+    </template>
               <div class="px-5 py-4">
                 <div class="mb-2 flex items-center justify-between">
                   <span class="text-xs font-medium text-[var(--text-secondary)]">

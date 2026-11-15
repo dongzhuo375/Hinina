@@ -4,7 +4,7 @@
 
 ## 职责
 
-展示客户端版本、存储目录与日志路径，并提供逐项复制；末行渲染项目仓库外链（GitHub 图标 + 仓库 slug，内联 SVG）。组件只呈现 `useAboutSettings` 模型，复制反馈由共享 `useTransientValue` 管理。
+展示客户端版本、存储目录与日志路径（三份同构行经 `AboutInfoRow` 渲染，逐项复制），并提供逐项复制反馈；读取中/失败回退行与末行项目仓库外链（GitHub 图标 + 仓库 slug，内联 SVG）保持手写（独有形态）。组件只呈现 `useAboutSettings` 模型，复制反馈由共享 `useTransientValue` 管理。
 
 ## 核心类型/函数
 
@@ -14,7 +14,8 @@
 
 ## 直接依赖
 
-- `SettingsSectionFrame`
+- `SettingsSectionFrame`（区块头 + 分组样式壳）
+- `AboutInfoRow`（三份复制行的形态单点）
 - `@/composables/useAboutSettings`（模型类型）
 
 ## 被依赖
