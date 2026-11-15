@@ -7,8 +7,7 @@
 
 View / component / composable 访问**系统服务**（窗口控制、启动标志、存储信息、
 维护清理、数据目录）的唯一入口。`services/system.service` 只面向本 store、
-守卫与组合根；视图不再直接 import service（与 `system.service.ts` 内注释的旧
-口径「允许 View 经服务」相矛盾的部分已统一）。
+守卫与组合根；视图不直接 import service。
 
 **本 store 不复制状态**：启动标志快照仍由 `systemService.launchFlags` 持有
 （守卫首航填充，早于任何组件挂载）。`isKeyed` 转发单一判据

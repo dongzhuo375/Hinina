@@ -24,4 +24,4 @@
 
 ## 被依赖
 
-- `bridge/system.bridge.ts`、`services/system.service.ts`（含 `launchFlags` 同步快照）、`composables/useAboutSettings.ts` / `useMaintenanceSettings.ts` / `useDataDirSettings.ts`；`LaunchFlags` 另被 `router/index.ts`（守卫）与 `views/ContestLayout.vue`（最小壳判据）消费
+- `bridge/system.bridge.ts`、`services/system.service.ts`（含 `launchFlags` 同步快照）、`stores/systemStore.ts`（`DataDirChange` / `DataDirInfo` / `LocalDataUsage` / `PurgeReport` / `StorageInfo` 的转发签名）、`composables/useAboutSettings.ts` / `useMaintenanceSettings.ts` / `useDataDirSettings.ts`；`LaunchFlags` 另被 `router/index.ts`（守卫 `getLaunchFlags`）消费，`views/ContestLayout.vue` 的最小壳判据经 `systemStore.isKeyedSettingsRoute` 间接消费

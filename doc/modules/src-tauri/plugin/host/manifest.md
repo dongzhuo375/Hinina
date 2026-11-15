@@ -33,7 +33,7 @@ Plugin Manifest v2 的解析与校验：未知字段、权限、事件均拒绝�
 | contributes / configSchema | 当前只接受 `[]` / `{}`，没有 UI 扩展或动态配置表单 |
 | description / author | 可选描述 |
 
-- Manifest v1/API v1 不再加载，旧 `allowHosts` / `httpsOnly` 必须迁移为精确 origin；没有静默兼容、默认扩权或 runtimeVersion 字段。`PluginEventEnvelope.version` 独立保持 2
+- Manifest v1/API v1 不再加载，旧 `allowHosts` / `httpsOnly` 必须迁移为精确 origin；没有静默兼容、默认扩权或 runtimeVersion 字段。`PluginEventEnvelope.version` 独立于清单/API 版本（当前为 3）
 
 ## 逻辑流程（宿主配置 plugins.json）
 - 数据目录的 `plugins.json` 与代码分离；结构见 [plugins.example.json](../sdk/plugins.example.json)。只启用 `enabled=true` 的 ID；批准权限与声明取**交集**，插件修改清单或重载不会自动获得新权限；批准的网络 origin 也必须仍在清单声明中

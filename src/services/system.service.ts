@@ -34,7 +34,7 @@ let launchFlagsOnce: Promise<LaunchFlags> | null = null
 export class SystemService {
   /**
    * 启动标志同步快照（响应式）。守卫首航 `await getLaunchFlags()` 之后即为
-   * 真值 —— 组件（ContestLayout 最小壳判据、SettingsView 分层锁）直接读这里，
+   * 真值 —— 组件经 `systemStore` 读取（`isKeyed` getter 转发到此快照），
    * 无需再等 Promise：异步判据会把闪帧反转到钥匙启动的首帧。
    */
   /// 只读视图：快照的「进程内不可变」由类型强制，外部拿不到写入口
@@ -57,7 +57,7 @@ export class SystemService {
 
   /**
    * 读取本次启动的启动标志（守卫做初始导航/门禁豁免的唯一 Promise 入口；
-   * 组件一律读同步快照 `launchFlags`）。
+   * 组件一律经 `systemStore.isKeyed` 读同步快照）。
    *
    * **进程内 memoize**：标志不可变，多处消费必须同源。读取失败（旧二进制、
    * 桥异常）保持快照默认「无参数」—— 安全侧默认值，绝不让钥匙通道故障把

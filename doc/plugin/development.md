@@ -232,7 +232,7 @@ if (contest && !contest.sealed) {
 
 ### 阶段 2：协议、安全投影与 API Adapter
 
-- 定义 Manifest/API v2、事件协议 v2、点分事件名。
+- 定义 Manifest/API v2、事件协议 v3（三者版本独立）、点分事件名。
 - 定义安全 DTO、权限 trait、错误白名单。
 - 查询上下文绑定实际 endpoint + 稳定用户 + 比赛 + revision。
 - 游标不透明、单次使用、绑定 context/query；可重试失败回填。
