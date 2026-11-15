@@ -176,9 +176,10 @@ vi.mock('@/services/config.service', async () => {
           },
           (e: unknown) => {
             if (isPersistFailed(e)) {
-              switchState.last = { target: id, outcome: 'persist-failed' }
-              // 与生产 switchOj 一致：persist-failed 时失效缓存（下次读取拉真值）
+              // 与生产 switchOj 同序：invalidate 先于赋值（success 分支则
+              // 赋值先于 invalidate）；同步块无观察者可见差异，纯形态对齐
               mocks.invalidate()
+              switchState.last = { target: id, outcome: 'persist-failed' }
             }
             settleSwitch(run)
           },
