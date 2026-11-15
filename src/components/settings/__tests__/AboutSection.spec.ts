@@ -24,10 +24,10 @@ describe('AboutSection 项目仓库行', () => {
       'a[href="https://github.com/dongzhuo375/Hinina"]',
     )
     // 无 aria-label：可见 slug 天然成可访问名（WCAG 2.5.3 label-in-name，
-    // 语音输入说 slug 即匹配）
+    // 语音输入说 slug 即匹配）；重新加回覆盖型 aria-label 会让下方断言变红
     expect(link?.textContent).toContain('dongzhuo375/Hinina')
     expect(link?.querySelector('svg')).not.toBeNull()
-    expect(link?.textContent).toContain('dongzhuo375/Hinina')
+    expect(link?.hasAttribute('aria-label')).toBe(false)
     expect(link?.hasAttribute('target')).toBe(false)
     app.unmount()
   })
