@@ -101,7 +101,8 @@ pub trait ContestProvider: Send + Sync {
     /// **输入形态契约**：入参是 `ensure_contest_access` 返回的**适配器原生
     /// 错误**（可含适配器自有环节前缀），早于 service 层的 `context` 环节
     /// 前缀包装——改用锚定/精确判据的适配器不应被 service 层文案破坏。
-    /// 分类在 core 内恰好执行一次，写回守卫与后台兜底的分级共用该结果。
+    /// 分类在 `ensure_contest_access_core` 内恰好执行一次，写回守卫与后台
+    /// 兜底的分级共用该结果。
     ///
     /// 默认实现把 `AppError::Contest` 归为 `Rejected`（保守缓存：未实现分类
     /// 的适配器按现状防重复提交，避免未知措辞的密码错误每周期重发报名
