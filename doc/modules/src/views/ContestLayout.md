@@ -24,7 +24,7 @@
 | `ensureLive` | `() => void` | 公告轮询的唯一启动点：`phase === 'running'` 且 `contest.id` 存在、且不是跨场未刷新（brief.id ≠ contest.id）时 `startLive(id)`；按 id 幂等。**阶段跃迁到 running 时也调用**（赛前打开的外壳在开赛后无需重挂即可补启轮询），**contest id 变化时也调用**（首次加载失败后的自愈路径：phase 未变、阶段监听不会再触发，见逻辑流程） |
 | `watch([contest?.id, brief?.id])`（实现为单 getter 返回数组） | — | **两个 id 任一变化** → `ensureLive()`（数组每次求值都是新引用：同 id 的整对象替换也会触发回调，靠 ensureLive 的 liveFor 幂等吸收——行为正确、仅微量空转，改多源形态属可选优化）（补启自愈轮询；监听 brief 的理由：contest 先换场会被 brief 失配守卫拦下，brief 后到时必须有人再触发——只监听 contest.id 会让轮询停在旧场；**bareShell 守卫只拦启动**——新入口不绕过 bootstrap 的最小壳跳过语义）；**contest.id 被清 → `stopLive()` + 清 liveFor**（修「OJ 切换后同 cid 被 liveFor 挡住」的既有缺口；本地清理不受守卫，最小壳下照跑） |
 | `backToLogin` | `() => void` | 最小壳的「返回登录」按钮 → `replace(Login)`（正常登录页，含匿名简报与重试 UI） |
-| `exitTimer` | 定时器句柄 | 结束退出延迟；模块级普通变量，不进响应式系统（墙钟 interval 已归 `useNowMs`） |
+| `exitTimer` | 定时器句柄 | 结束退出延迟；setup 作用域普通变量，不进响应式系统（墙钟 interval 已归 `useNowMs`） |
 | `disposed` | `boolean` | 卸载后阻断在途异步续跑 |
 
 ## 直接依赖
