@@ -12,7 +12,7 @@
 |------|------|------|
 | `getContestRank` | `(query: RankQuery) => Promise<ContestRankPage>` | invoke `get_contest_rank`，参数 `{ contestId, currentPage, limit, keyword, removeStar, containsEnd }` |
 
-参数原样透传（`RankQuery` 字段均为必填）：HOJ 语义默认值的合并单点在 `services/rank.service`（唯一调用方），桥接层不做第二遍 `??` 归一——改一层漏一层的漂移面收敛到 service。
+参数原样透传：`types/rank.ts` 的 `keyword/removeStar/containsEnd` 形态上仍可选，但唯一调用方 `services/rank.service` 归一 HOJ 默认值后传入全字段对象——桥接层不做第二遍 `??` 归一（改一层漏一层的漂移面收敛到 service 单点）。
 
 ## 直接依赖
 

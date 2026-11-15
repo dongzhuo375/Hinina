@@ -65,7 +65,7 @@ onUnmounted → alive = false；stopPoller()
 设计要点：
 
 - **列表轮询与提交收敛轮询取舍相反**：评测页轮询属于「在场才需要」的列表刷新，
-  配置 `isPaused: document.hidden` 切后台暂停；而 submissionStore 的单提交收敛轮询
+  配置 `isPaused: isPageHidden`（`utils/page-visibility`）切后台暂停；而 submissionStore 的单提交收敛轮询
   刻意不暂停（切窗口回来就该看到结果）。节奏也更慢（5s±1s vs 2s 级）。
 - **搜索只作用于当前页**（客户端过滤），与服务端筛选（题目/状态，触发重新请求）分层：
   搜索零网络开销，底栏同时展示「共 N 条」与「本页匹配 M 条」管理预期。

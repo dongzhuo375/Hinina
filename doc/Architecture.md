@@ -332,7 +332,7 @@ Hinina/
 
 ```
 src/
-├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 组合根装配：全局错误转发（Vue/window/promise/router/CSP 违规 五类 → Rust 日志，先于 mount）+ 全局会话守卫 + 工作区落盘事件订阅 + 新公告事件订阅 + 关窗前落盘握手（装配 utils/close-guard）+ 外链拦截（装配 utils/external-links）+ KaTeX 公式样式全局引入 + styles/contest.css 赛场主题引入 + DEV-only 插件控制台助手 window.hininaPlugins（发布构建不含），字体本地打包不经 CDN）
+├── main.ts                               # Vue 应用入口（Pinia + Router + Naive UI + 组合根装配：全局错误转发（Vue/window/promise/router/CSP 违规 五类 → Rust 日志，先于 mount）+ 全局会话守卫 + 工作区落盘事件订阅 + 新公告事件订阅 + 关窗前落盘握手（装配 utils/close-guard）+ 外链拦截（装配 utils/external-links）+ KaTeX 公式样式全局引入 + styles/contest.css 赛场主题引入 + styles/prose.css 正文排版引入 + DEV-only 插件控制台助手 window.hininaPlugins（发布构建不含），字体本地打包不经 CDN）
 ├── App.vue                               # 根组件（n-config-provider，其内挂插件通知出口 PluginNotifications；按路由分区切换主题：比赛外壳内挂 .contest-theme 并用赛场 themeOverrides，入口页用紫系 themeOverrides）
 ├── env.d.ts                              # Vite 环境类型声明
 ├── router/
@@ -478,7 +478,8 @@ src/
 │   └── __tests__/                        # brief-retry / close-guard / contest / contest-clock / editor / error / focus-scope / language / limits / logger / markdown / markdown-dom / oj / pagination / polling / rank / session-check / settings-access / submission / submission-tone .spec.ts（退避延迟表、关窗守卫状态机与有界多轮重刷、阶段判据与权威赛程、时钟模型与 urgent 阈值、编辑器偏好值域、错误文案收敛、弹层焦点陷阱与归还、语言映射、limits 换算、日志级别分流与作用域前缀、渲染契约、jsdom 消毒激活态的生产链路契约、OJ 候选取值域与顺序、预检调度边界、轮询节奏、榜单映射与口径、设置显现计数状态机、终态穷尽映射与双层时间上界）
 └── styles/
     ├── global.css                        # TailwindCSS + 字体栈（Inter / JetBrains Mono / Noto Sans SC，经 @fontsource-variable 本地打包）+ CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题 + KaTeX 公式全局样式（块级公式横向滚动防裁切，题面/公告/简介共用）；**不覆写 Monaco 背景**（编辑器底色由 theme.editorTheme 自绘，否则 vs-dark 只换字色）
-    └── contest.css                       # 赛场主题（PR #36）：在 `.contest-theme` 作用域重写整套令牌（中性灰/木色主色/低饱和语义色/`--radius: 3px`/响应式密度 `--ui-step` 与派生字号），并提供通用类（`.eyebrow`/`.action-primary`/`.action-quiet`/`.page-heading`/`.page-title`/`.workspace-main`/`.data-page`/`.reading-body`/`.surface-overlay`、表格与 `:focus-visible`/`::selection` 统一样式、≤1100px 与 prefers-reduced-motion 媒体查询）
+    ├── contest.css                       # 赛场主题（PR #36）：在 `.contest-theme` 作用域重写整套令牌（中性灰/木色主色/低饱和语义色/`--radius: 3px`/响应式密度 `--ui-step` 与派生字号），并提供通用类（`.eyebrow`/`.action-primary`/`.action-quiet`/`.page-heading`/`.page-title`/`.workspace-main`/`.data-page`/`.reading-body`/`.surface-overlay`、表格与 `:focus-visible`/`::selection` 统一样式、≤1100px 与 prefers-reduced-motion 媒体查询）
+    └── prose.css                         # Markdown 正文共享排版（`.prose` 元素级规则，公告正文与题面同源；容器差异由各组件局部样式定义。登录页简介刻意不在消费面——`.prose` 面向赛场主题变量，登录页换类名 brief-prose 排除）
 ```
 
 ---
@@ -569,7 +570,7 @@ src/
 - **公告红点走事件驱动 + 可见性补拉**：Rust 侧 `ContestService::list_announcements` 按比赛维护公告 ID 基线，出现新 ID 时发布 `CoreEvent::AnnouncementChanged`（**首次拉取只建基线不发事件**，否则一开机就亮红点；基线按比赛隔离，失败时保留旧基线），`bootstrap::events` 的前端事件桥转发到 `announcements-published`，前端即时刷新。**事件只是刷新触发**：公告正文始终由 `list_contest_announcements` 经 IPC 查询，事件丢失时下一轮轮询即可恢复。前端轮询仍是拉取的唯一发起方（60s ± 10s），但**窗口重新可见/聚焦时立即补拉一次**（1s 去重）—— 桌面客户端的常态是「切出去看题解再切回来」，只靠节拍意味着切回来最多等 70s 才可能看到红点，被选手直接感知为「红点不出现」。已读语义配套收紧：页面不可见时不标记（切走了 = 没看到），`isWatching`（公告页在屏）时落地的新公告自动标为已读，避免离开页面后冒出假红点
 - **配置与轮询归属**：配置读取统一经 `services/config.service.ts`（进程内缓存 + 兜底），View/Store 不得直接调用 `config.bridge`；**保存门禁也在 service**——`runSaveTxn` 保存事务覆盖「保存 → 自动切换」复合临界区，设置页保存、编辑器偏好、分栏比例等全部写入口同一队列串行（并发的读-改-写不交错）。门禁分两个视图：`settingsSaveInFlight`（只标 `settingsPage: true` 的事务，是设置页 `saving`／OJ 域禁用／切换互斥与 **`load` 等待**（`whenSettingsSaveSettled` + `settingsSaveEpoch`）的唯一来源——后台写入不该让设置页下拉框与保存按钮产生反应，其悬挂也不得把加载永久卡住）；`saveInFlight` = 任意写入口在途，是**队列观测 API**（生产零消费，测试锁定队列语义）（2026-11-04 G4 下沉：原先只在 composable 模块级的单飞/代际/等待已删）；评测轮询的**节拍与超时唯一归属前端** `submissionStore`（createPoller 驱动，终态判据见 `utils/submission.ts`，deadline 兜底），后端 `get_judgement` 是单次查询、无内层循环 —— 双层轮询会让前端抖动沦为装饰、`stopPolling` 停不掉在途后端循环；View 只表达提交意图
 - **比赛工作台外壳**：`ContestLayout` 承载 TopBar（**导航条 ActivityBar 内嵌于其第二行**）+ `<router-view>` + StatusBar，各功能页是平级路由而非单页三栏；**`--settings` 无会话时为极简壳**（拖动区标题「Hinina 设置」+ 窗口控件 + 返回登录，内容区与完整外壳共享同一 router-view 以保留草稿）；钥匙设置页豁免结束遮罩/inert/navigation-disabled（`contestGated=false`），赛前/赛后从设置页点赛场页面被拦回并提示；钥匙设置页在 `running→upcoming` 回退时同样停公告轮询并清 `liveFor`（回到 running 再重启）；窗口拖拽与窗口控制在完整外壳的 TopBar 与极简壳头部各有一份，登录页由 `App.vue` 提供兜底窗口条。外壳同时承担**赛程闸门**：`upcoming` 立即回登录页，`ended` 叠加结束覆盖层（`inert` + 导航禁用）并在 2 秒后返回登录页 —— 延迟窗口留给离页落盘，不打断正在进行的保存。View 与 component **禁止**直接 import `@/bridge`（分层判据，`check:layering` 静态门禁断言）
-- **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄由 store 持有（模块级普通变量，不进 `ref/reactive`），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：
+- **轮询统一原语**：周期性刷新（榜单、题目总览、公告）走 `utils/polling.ts` 的 `createPoller`（递归 setTimeout + 抖动 + 重入保护 + `document.hidden` 暂停），定时器句柄经 `createPollerLifecycle` 单持有位壳持有（模块级、不进 `ref/reactive`；榜单/公告/题目总览/评测列表/提交详情五处共用，暂停判据与启停编排留在调用方），离开路由或比赛结束（`status == 1`）必须停止。提交结果轮询是**按提交 ID 的一次性收敛轮询**（终态判据 + 总超时，见 `utils/submission.ts`），已统一到 `createPoller`（P54），但**刻意不配置 hidden 暂停** —— 选手切窗口查资料回来就该看到结果，暂停只会拉长「评测中」焦虑期。全部轮询场景的节奏矩阵：
 
   | 场景 | 节奏 | hidden 暂停 | 停止判据 | 归属 |
   |------|------|------------|---------|------|
