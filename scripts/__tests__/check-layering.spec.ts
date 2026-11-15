@@ -621,7 +621,7 @@ import x from '@/services/real'
     expect(local).toEqual([])
   })
 
-  it('规则A：合法正则字面量含 /* 不再截断后续源码（P2-5）', () => {
+  it('规则A：合法正则字面量含 /* 不再截断后续源码', () => {
     const violations = findViolations([
       {
         path: 'views/Ac.ts',

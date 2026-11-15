@@ -76,7 +76,7 @@ const a = 1
     expect(ts).not.toContain('注释')
   })
 
-  it('偏移稳定（P3）：prepareSource 的输出长度与原始输入一致、换行逐一保留', () => {
+  it('偏移稳定：prepareSource 的输出长度与原始输入一致、换行逐一保留', () => {
     const src = `<template><p>Don't</p></template>\n<script>\n/* first\nsecond */\nconst a = 1\n</script>`
     const prepared = prepareSource('views/A.vue', src)
     expect(prepared).toHaveLength(src.length)

@@ -10,7 +10,8 @@
 //
 // Rules (each maps to one of the three exported findings):
 //   1. `runSaveTxn` may only appear in allowlisted files (definition + the one
-//      transactional caller). A new caller must pass review once.
+//      transactional caller). A new caller must be verified once before
+//      joining the allowlist.
 //   2. A `runSaveTxn` callback body must not **call** ANY queued save entry
 //      — `runSaveTxn`, `updateEditorPrefs`, `saveSplitRatio` — and the entries
 //      must not be **referenced bare anywhere in a scanned file**. The two
