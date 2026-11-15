@@ -173,7 +173,10 @@ const accountStatus = computed(() => {
           </svg>
         </button>
         <div v-if="briefVisible" id="contest-brief" class="mt-3 max-h-48 overflow-y-auto border-l border-[#8c6a43]/50 pl-4 text-[13px] leading-6 text-[#6b7280]">
-          <div v-if="briefHtml" class="prose prose-sm max-w-none" v-html="briefHtml"></div>
+          <!-- brief-prose 而非 .prose：全局 .prose 元素规则（styles/prose.css）面向赛场主题
+               变量，登录页不在 .contest-theme 作用域，命中会把紫系衍生的主色/代码块底色
+               混进登录卡独立的灰字体系——简介保持浏览器默认排版 -->
+          <div v-if="briefHtml" class="brief-prose" v-html="briefHtml"></div>
           <p v-else>暂无比赛简介</p>
         </div>
       </div>

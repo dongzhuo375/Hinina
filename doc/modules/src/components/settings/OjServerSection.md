@@ -28,7 +28,9 @@
 
 ## 直接依赖
 
-- `SettingsSectionFrame`
+- `SettingsSectionFrame`（区块头 + 分组样式壳）
+- `SettingsField`（服务器地址/比赛 ID/密码/四个数字字段的四件套骨架）
+- `SettingsSwitch`（题面缓存开关行）
 - `@/utils/oj`（`ojBaseUrlHint` / `ojSelectOptions` 类型）
 - `@/composables/useSettingsForm`（`SETTINGS_INPUT` 常量和类型）
 

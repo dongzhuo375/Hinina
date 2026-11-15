@@ -21,6 +21,7 @@
 | `installExternalLinks()` | **组合根注入**：document 级 `click` + `auxclick` 委托（`utils/external-links`）——markdown 渲染面（题面/公告/简报）里的 http(s) 锚点经 `systemService.openExternal()` 转交系统默认浏览器，WebView 永不导航离开应用（消费面含不经 `renderMarkdown` 的模板级锚点——设置页 About 的项目仓库链接）（分层审计 2026-10「外链无出路」缺口闭合）。规则：**左键（含 Ctrl/Meta/Shift/Alt）与中键都转交**（WebView 无新标签语义，放过等于无动作），右键放行；`href` 解析后 http/https 且 host ≠ 应用 host（判据与渲染层钩子共用 `resolveExternalUrl`）；应用内 RouterLink/`#` 片段/同 host 锚点不受影响；已被前置 `preventDefault` 的点击不重复处理。scheme 白名单的最后一道在 Rust 命令 `open_external`（`app_cmd.md`）；打开失败仅 `log.warn`（无补救动作） |
 | `import '@/styles/global.css'` | 全局样式（CSS 变量主题、字体栈、榜单状态色等） |
 | `import '@/styles/contest.css'` | 赛场主题样式（`.contest-theme` 作用域下的令牌重写 + 通用类：页头/表格/正文/浮层/响应式密度 `--ui-step`）；在 global.css 之后导入，保证赛场令牌覆盖 `:root` 同名变量 |
+| `import '@/styles/prose.css'` | Markdown 正文共享排版（`.prose` 元素级规则，公告正文与题面同源；容器差异由各组件局部样式定义） |
 | `import 'katex/dist/katex.min.css'` | KaTeX 公式样式与字体（题面/公告/简介的 LaTeX 公式）；字体由 katex 包本地打包、不经 CDN，符合离线客户端约束 |
 | `app.mount('#app')` | 挂载 |
 | `if (import.meta.env.DEV) …` | **DEV-only 插件控制台助手**：动态 import `pluginStore`，`Object.defineProperty(window, 'hininaPlugins', …)` 冻结暴露 `list/start/stop/reload/resync`；跟随 Store → Service → Bridge 分层，发布构建不含此分支 |
@@ -42,6 +43,7 @@
 - `@/services/system.service`（`onCloseRequested` 关窗握手事件源 + `closeWindow` / `destroyWindow` 注入；2026-11-04 G3 起组合根不再直用 `@tauri-apps/api/window`，权限 `core:window:allow-close` 与 `core:window:allow-destroy` 已在 capabilities）
 - `@/styles/global.css`
 - `@/styles/contest.css`（赛场主题令牌与通用类；作用域仍靠 `.contest-theme` 类名限定）
+- `@/styles/prose.css`（`.prose` 正文共享排版）
 - `katex/dist/katex.min.css`（公式渲染的消费前提，与 `utils/markdown.ts` 的 KaTeX 输出配套）
 
 ## 被依赖

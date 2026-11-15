@@ -42,6 +42,7 @@
 - `@/utils/submission`（`findFirstFailedCase` / `formatMsToSeconds` / `isTerminalStatus` / `statusAbbr` / `statusTone` + `StatusTone` 类型）
 - `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — tabSize prop 兜底）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
+- 组件：`SubmitButton`（提交三态按钮，控制台条 primary 底色 + tracking 文本）/ `SpinnerIcon`（最新记录 pill 的 pending 旋转圈）
 
 ## 被依赖
 

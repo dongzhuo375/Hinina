@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPoller, planPollDelayMs } from '@/utils/polling'
+import { createPoller, createPollerLifecycle, planPollDelayMs } from '@/utils/polling'
 import type { PollerOptions } from '@/utils/polling'
 
 /// 榜单轮询节奏：10s ± 2s（HOJ 榜单文档 §9.9 要求间隔 ≥10s）
@@ -281,5 +281,63 @@ describe('createPoller — 重入保护', () => {
     clock.advance(INTERVAL)
     await flushAsync()
     expect(calls).toBe(2)
+  })
+})
+
+describe('createPollerLifecycle — 单持有位生命周期壳', () => {
+  /// 壳的契约直接锁定：公共 util 不只靠五个消费方 spec 间接覆盖
+  const makeOptions = (clock: FakeClock, task: () => void, intervalMs = INTERVAL): PollerOptions => ({
+    task,
+    intervalMs,
+    setTimeoutFn: clock.setTimeoutFn,
+    clearTimeoutFn: clock.clearTimeoutFn,
+  })
+
+  it('startIfAbsent：未持有即建并启动；已持有时保留旧轮询器，新选项被忽略', () => {
+    const clock = new FakeClock()
+    const first = vi.fn()
+    const second = vi.fn()
+    const live = createPollerLifecycle()
+    live.startIfAbsent(makeOptions(clock, first, 10_000))
+    live.startIfAbsent(makeOptions(clock, second, 30_000))
+    clock.advance(10_000)
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).not.toHaveBeenCalled()
+    clock.advance(20_000)
+    // 旧节奏继续（30s 处 first 第 3 次），second 始终未注册
+    expect(first).toHaveBeenCalledTimes(3)
+    expect(second).not.toHaveBeenCalled()
+    expect(clock.pending).toBe(1)
+  })
+
+  it('restart：停掉旧轮询器并按新选项重建（旧 task 不再触发，句柄不叠加）', () => {
+    const clock = new FakeClock()
+    const first = vi.fn()
+    const second = vi.fn()
+    const live = createPollerLifecycle()
+    live.startIfAbsent(makeOptions(clock, first, 10_000))
+    clock.advance(25_000)
+    expect(first).toHaveBeenCalledTimes(2)
+    live.restart(makeOptions(clock, second, 10_000))
+    // 旧周期句柄已清，只余新轮询器的一个待触发句柄
+    expect(clock.pending).toBe(1)
+    clock.advance(10_000)
+    expect(first).toHaveBeenCalledTimes(2)
+    expect(second).toHaveBeenCalledTimes(1)
+  })
+
+  it('stop：清空持有位后 task 不再触发；幂等；之后可再次 startIfAbsent', () => {
+    const clock = new FakeClock()
+    const task = vi.fn()
+    const live = createPollerLifecycle()
+    live.startIfAbsent(makeOptions(clock, task, 10_000))
+    live.stop()
+    expect(clock.pending).toBe(0)
+    clock.advance(60_000)
+    expect(task).not.toHaveBeenCalled()
+    live.stop()
+    live.startIfAbsent(makeOptions(clock, task, 10_000))
+    clock.advance(10_000)
+    expect(task).toHaveBeenCalledTimes(1)
   })
 })

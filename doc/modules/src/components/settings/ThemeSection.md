@@ -12,7 +12,8 @@
 
 ## 直接依赖
 
-- `SettingsSectionFrame`
+- `SettingsSectionFrame`（区块头 + 分组样式壳）
+- `SettingsField`（两个只读下拉的字段骨架）
 - `@/composables/useSettingsForm`（`SETTINGS_INPUT` 常量）
 
 ## 被依赖

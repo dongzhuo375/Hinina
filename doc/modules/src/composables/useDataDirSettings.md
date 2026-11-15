@@ -21,7 +21,8 @@
 
 - `vue`（`ref` / `computed`）
 - `@/composables/useTransientValue`（5s 目录提示）
-- `@/services/system.service`
+- `@/composables/useAsyncResource`（目录信息加载 + failed 标志）
+- `@/stores/systemStore`（纯转发 `system.service`）
 - `@/utils/error`
 - `@/types/system`
 

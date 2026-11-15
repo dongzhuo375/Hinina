@@ -2,8 +2,7 @@ import { defineStore } from 'pinia'
 import type { ContestRankPage, ContestRankRow } from '@/types/rank'
 import { DEFAULT_RANK_PAGE_SIZE, rankService } from '@/services/rank.service'
 import { getSessionGeneration } from '@/stores/sessionGeneration'
-import { createPoller } from '@/utils/polling'
-import type { Poller } from '@/utils/polling'
+import { createPollerLifecycle } from '@/utils/polling'
 import {
   dedupeRankRows,
   filterRankRowsByGroup,
@@ -14,6 +13,7 @@ import {
 } from '@/utils/rank'
 import type { RankGroupFilter } from '@/utils/rank'
 import { errorMessage } from '@/utils/error'
+import { isPageHidden } from '@/utils/page-visibility'
 
 /// 榜单轮询节奏：HOJ 文档 §9.9 要求间隔 ≥10s 且切后台暂停；
 /// 抖动用于打散全场客户端的同步相位（同一秒进入榜单页时不会每周期都齐发）
@@ -83,17 +83,12 @@ function isFullSnapshotFilter(filter: RankGroupFilter): boolean {
 export type FullFetchState = 'idle' | 'loading' | 'done' | 'truncated' | 'error'
 
 /**
- * 轮询器句柄。
+ * 轮询器生命周期。
  *
  * 副作用句柄而非渲染状态，置于模块作用域（不进响应式系统），
  * 由 `stopLive` 回收；登出时经 `stores/session` 统一停止。
  */
-let poller: Poller | null = null
-
-/// 页面是否不可见（窗口最小化/切到后台）—— 此时暂停轮询，避免无谓请求
-function isPageHidden(): boolean {
-  return typeof document !== 'undefined' && document.hidden
-}
+const livePolling = createPollerLifecycle()
 
 export const useRankStore = defineStore('rank', {
   state: () => ({
@@ -480,7 +475,7 @@ export const useRankStore = defineStore('rank', {
     /**
      * 开启实时刷新（10s ± 2s 抖动）。
      *
-     * 暂停判据：页面隐藏（`document.hidden`）或调用方给出的条件（如比赛已结束）。
+     * 暂停判据：页面隐藏（`utils/page-visibility` 的 `isPageHidden`）或调用方给出的条件（如比赛已结束）。
      * 首次数据由调用方自行 `loadRank` 拉取 —— 轮询器的第一次执行在一个完整周期之后，
      * 这样进入页面能立刻看到数据而不是等 10 秒。
      *
@@ -492,7 +487,7 @@ export const useRankStore = defineStore('rank', {
       // 避免「登出 → 重新登录 → 首次翻页」因 memo 命中而跳过请求（界面停空）
       queryMemo = null
       queryInFlight = null
-      poller = createPoller({
+      livePolling.restart({
         task: () => this.refresh(),
         intervalMs: RANK_POLL_INTERVAL_MS,
         jitterMs: RANK_POLL_JITTER_MS,
@@ -506,14 +501,12 @@ export const useRankStore = defineStore('rank', {
           this.error = errorMessage(e, '榜单刷新失败')
         },
       })
-      poller.start()
       this.isLive = true
     },
 
     /** 停止实时刷新（离开榜单页、比赛结束、登出时调用） */
     stopLive() {
-      poller?.stop()
-      poller = null
+      livePolling.stop()
       this.isLive = false
       // 查询去抖 memo 只在「停留榜单页期间」有意义：离开页面后下一次进入是新上下文，
       // 保留 memo 会让「登出 → 重新登录 → 首次翻页」跳过请求（界面停空）

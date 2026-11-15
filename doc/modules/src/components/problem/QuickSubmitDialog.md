@@ -32,7 +32,7 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- 组件：`CodeEditor`（v-model 代码、语言双向绑定、Ctrl+Enter submit 复用）
+- 组件：`CodeEditor`（v-model 代码、语言双向绑定、Ctrl+Enter submit 复用）/ `SubmitButton`（提交三态按钮）/ `SpinnerIcon`（评测状态行旋转圈）
 - `@/utils/focus-scope`（`vFocusScope` —— 对话框焦点陷阱与 Esc 关闭）
 - stores：`contestStore`（contestId，`whenLoaded` 兜底）、`submissionStore`（`submitCode` / `pendingFor` / `submissions` / `isSubmitting` / `error`）、`workspaceStore`（仅读 `language` 作默认值）
 - `@/stores/problemStore`（允许语言列表；纯转发 `problem.service`）

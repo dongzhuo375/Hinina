@@ -17,7 +17,9 @@
 
 ## 直接依赖
 
-- `SettingsSectionFrame`
+- `SettingsSectionFrame`（区块头 + 分组样式壳）
+- `SettingsField`（字号/Tab 宽度/默认语言/自动保存间隔的字段骨架）
+- `SettingsSwitch`（自动保存开关行）
 - `@/utils/language` / `editor`
 - `@/composables/useSettingsForm`（`SETTINGS_INPUT` 常量和类型）
 

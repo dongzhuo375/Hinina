@@ -3,6 +3,8 @@ import { vFocusScope } from '@/utils/focus-scope'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import CodeEditor from '@/components/editor/CodeEditor.vue'
+import SpinnerIcon from '@/components/common/SpinnerIcon.vue'
+import SubmitButton from '@/components/common/SubmitButton.vue'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -327,10 +329,7 @@ function goDetail() {
           class="flex flex-wrap items-center gap-3 rounded-sm border border-[var(--border-color)] bg-[var(--bg-sidebar)]/70 px-3.5 py-2.5"
         >
           <template v-if="!entryTerminal">
-            <svg class="h-4 w-4 animate-spin text-[var(--color-warning)]" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-              <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-            </svg>
+            <SpinnerIcon class="h-4 w-4 text-[var(--color-warning)]" :stroke-width="2.5" />
             <span class="text-xs font-medium text-[var(--text-secondary)]">
               已提交 #{{ entry.id }}，评测中…（结果将自动更新）
             </span>
@@ -374,30 +373,12 @@ function goDetail() {
           >
             取消
           </button>
-          <button
-            type="button"
-            class="flex items-center gap-2 rounded-sm bg-[var(--color-success)] px-5 py-1.5 text-[13px] font-semibold whitespace-nowrap text-white shadow-none transition-all duration-150 hover:bg-[var(--color-success)] hover:shadow  disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="submitting || !!pendingSubmission"
-            :aria-busy="submitting || !!pendingSubmission"
-            @click="doSubmit"
-          >
-            <svg
-              v-if="submitting || pendingSubmission"
-              class="h-4 w-4 animate-spin"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-              <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-            </svg>
-            <span>{{ submitting ? '提交中…' : pendingSubmission ? '评测中…' : '提交代码' }}</span>
-            <svg v-if="!submitting && !pendingSubmission" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M6 12L3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12zm0 0h7.5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
+          <SubmitButton
+            tone="success"
+            :busy="submitting"
+            :pending="!!pendingSubmission"
+            @submit="doSubmit"
+          />
         </div>
       </div>
     </div>

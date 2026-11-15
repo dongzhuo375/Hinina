@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import SpinnerIcon from '@/components/common/SpinnerIcon.vue'
+import SubmitButton from '@/components/common/SubmitButton.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
@@ -277,17 +279,10 @@ function goDetail(submitId: string) {
           >
             <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          <svg
+          <SpinnerIcon
             v-else-if="serverPill.tone === 'pending'"
-            class="h-3.5 w-3.5 shrink-0 animate-spin"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            viewBox="0 0 24 24"
-          >
-            <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-            <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-          </svg>
+            class="h-3.5 w-3.5 shrink-0"
+          />
           <span>最新记录: #{{ serverPill.submitId }} {{ serverPill.abbr }}</span>
           <span v-if="serverPill.detail" class="font-mono">({{ serverPill.detail }})</span>
         </div>
@@ -331,10 +326,7 @@ function goDetail(submitId: string) {
           >
             <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          <svg v-else class="h-3.5 w-3.5 shrink-0 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-            <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-          </svg>
+          <SpinnerIcon v-else class="h-3.5 w-3.5 shrink-0" />
           <span>最新记录: #{{ latest.id }} {{ statusLabel(latest.status) }}</span>
           <span v-if="timeLabel" class="font-mono">({{ timeLabel }})</span>
         </div>
@@ -369,29 +361,13 @@ function goDetail(submitId: string) {
           </svg>
           <span>提交记录<span v-if="totalCount > 0" class="font-mono"> ({{ totalCount }})</span></span>
         </button>
-        <button
-          type="button"
-          class="flex items-center gap-2 rounded-sm bg-[var(--color-primary)] px-5 py-1.5 text-[13px] font-semibold whitespace-nowrap text-white shadow-none transition-all duration-150 hover:bg-[var(--color-primary-hover)] hover:shadow  disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="submissionStore.isSubmitting || !!pendingSubmissionId"
-          :aria-busy="submissionStore.isSubmitting || !!pendingSubmissionId"
-          @click="$emit('submit')"
-        >
-          <svg
-            v-if="submissionStore.isSubmitting || pendingSubmissionId"
-            class="h-4 w-4 animate-spin"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            viewBox="0 0 24 24"
-          >
-            <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-            <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-          </svg>
-          <span class="tracking-wide">{{ submissionStore.isSubmitting ? '提交中…' : pendingSubmissionId ? '评测中…' : '提交代码' }}</span>
-          <svg v-if="!submissionStore.isSubmitting && !pendingSubmissionId" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path d="M6 12L3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12zm0 0h7.5" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
+        <SubmitButton
+          tone="primary"
+          tracking
+          :busy="submissionStore.isSubmitting"
+          :pending="!!pendingSubmissionId"
+          @submit="$emit('submit')"
+        />
       </div>
     </div>
 
