@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-模块级普通变量：`loadToken: number`（并发防护令牌）、`isLoadingPage: boolean`（加载进行中标记，供 focus 监听让位与提交守卫）、`loadedProblemDisplayId: string | null`（**最近一次 openProblem 成功且为最新加载的比赛内题号** —— currentProblem 的配对凭证；openProblem 失败时 problemStore 不清空，currentProblem 仍是旧题而 code 已是新题，提交前必须校验配对）、`flushingToDisk: boolean`（落盘进行中标记，避免失焦与页面隐藏重复落盘）。
+setup 作用域普通变量：`loadToken: number`（并发防护令牌）、`isLoadingPage: boolean`（加载进行中标记，供 focus 监听让位与提交守卫）、`loadedProblemDisplayId: string | null`（**最近一次 openProblem 成功且为最新加载的比赛内题号** —— currentProblem 的配对凭证；openProblem 失败时 problemStore 不清空，currentProblem 仍是旧题而 code 已是新题，提交前必须校验配对）、`flushingToDisk: boolean`（落盘进行中标记，避免失焦与页面隐藏重复落盘）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|

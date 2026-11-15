@@ -33,7 +33,7 @@
 | `reschedulePrecheck` / `runPrecheck` / `clearPrecheck` | fn | 赛前会话预检的排程/执行/取消（策略纯函数在 `utils/session-check`） |
 | `watch([() => auth.isLoggedIn, contestPhase], reschedulePrecheck)` | — | 登录态或阶段变化即重新排程 |
 
-模块级普通变量（副作用句柄与计数，刻意不进响应式系统）：`disposed`（卸载标记，阻止卸载后在途回调继续排程）、`briefRetryCount` / `briefRetryTimer`（简报重试）、`precheckTimer` / `precheckRetried`（预检与 unknown 单次重试标记）。墙钟 interval 已归 `useNowMs`。另有 `briefRetryScheduled: ref<boolean>` 仅用于页脚文案（「正在自动重试」）。
+setup 作用域普通变量（副作用句柄与计数，刻意不进响应式系统）：`disposed`（卸载标记，阻止卸载后在途回调继续排程）、`briefRetryCount` / `briefRetryTimer`（简报重试）、`precheckTimer` / `precheckRetried`（预检与 unknown 单次重试标记）。墙钟 interval 已归 `useNowMs`。另有 `briefRetryScheduled: ref<boolean>` 仅用于页脚文案（「正在自动重试」）。
 
 ## 直接依赖
 
