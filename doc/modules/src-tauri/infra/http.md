@@ -55,7 +55,7 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 | 响应 | GET（`retry_get_text`） | POST |
 |------|------|------|
 | 2xx | `Ok(原始响应体, 响应头)` | 同左 |
-| 401 | `Err(Auth("HTTP 401 Unauthorized: {url}"))`，**不重试** | 同左 |
+| 401 | `Err(Auth("HTTP 401 Unauthorized: {url}"))`，**不触发状态段重试**（raw 的 401 进入 body 段，body 断流仍按额度重试） | 不重试，直接 `Err(Auth(...))` |
 | 其它 4xx（含 403） | `Err(Network("HTTP {code} {reason}: {url}"))`，**不触发状态段重试**（客户端错误重试无意义；raw 的 4xx 进入 body 段，body 断流仍按额度重试） | 不重试，直接 `Err(Network(...))` |
 | 5xx | 退避 1s / 2s 后重试，最多 2 次；**重试耗尽后 `Err(Network("HTTP {code} …"))`**，不会把网关错误页当成正常响应交给上层 | 不重试，直接 `Err(Network(...))` |
 | 传输错误 / 超时 | 同样退避重试 2 次；耗尽后 `Err(Network("GET 请求失败 {url}: {e}"))` | `Err(Network("POST 请求失败 {url}: {e}"))` |
@@ -64,7 +64,7 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 > 变体是前端 `isAuthError` 分流与 `sessionGuard` 会话失效兜底的唯一依据，因此本层**只在传输环节构造错误，绝不改写下游变体**；Adapter 与 Service 补环节名一律用 `AppError::context()`（见 `core/error.md`）。
 
 ## 测试
-`src-tauri/src/infra/tests/http_tests.rs`（由 `http.rs` 底部 `#[cfg(test)] #[path = "tests/http_tests.rs"] mod tests;` 引用）锁定：`status_error` 把 **HTTP 401 映射为 `Auth`** 变体（并断言消息保留状态码与 URL，便于现场排障）、**403 保持 `Network`**（业务性无权访问不得误判为会话失效）、400 / 404 / 500 / 502 / 503 一律 `Network`、`retry_delay` 指数退避 1s / 2s / 4s（纯函数性质；实际重试只用到 attempt 0/1，即 1s / 2s）；`classify_status` 的完整判据 —— 2xx 在任意 attempt 都 `Accept`、5xx（500/502/503/504）在额度内 `Retry` 而**耗尽后 `Fail`**（正面锁定上述回归）、4xx（400/401/403/404）在任意 attempt 都 `Fail` 不重试、3xx 残留同样 `Fail`；`with_timeout` 构造路径可用（reqwest::Client 不暴露 timeout getter，「配置值确实被传入」由 context.rs 的装配代码保证：`timeout_secs → with_timeout`）。
+`src-tauri/src/infra/tests/http_tests.rs`（由 `http.rs` 底部 `#[cfg(test)] #[path = "tests/http_tests.rs"] mod tests;` 引用）锁定：`status_error` 把 **HTTP 401 映射为 `Auth`** 变体（并断言消息保留状态码与 URL，便于现场排障）、**403 保持 `Network`**（业务性无权访问不得误判为会话失效）、400 / 404 / 500 / 502 / 503 一律 `Network`、`retry_delay` 指数退避 1s / 2s / 4s（纯函数性质；实际重试只用到 attempt 0/1，即 1s / 2s）；`classify_status` 的完整判据 —— 非 raw 半边：2xx 在任意 attempt 都 `Accept`、5xx（500/502/503/504）在额度内 `Retry` 而**耗尽后 `Fail`**（正面锁定上述回归）、4xx（400/401/403/404）在任意 attempt 都 `Fail` 不重试、3xx 残留同样 `Fail`；raw 半边三条（4xx 任意 attempt `Accept`、5xx 额度内 `Retry` 而**耗尽后 `Accept` 返回响应**、2xx 同非 raw）；`with_timeout` 构造路径可用（reqwest::Client 不暴露 timeout getter，「配置值确实被传入」由 context.rs 的装配代码保证：`timeout_secs → with_timeout`）。
 
 
 ## 真实传输层测试（M2）

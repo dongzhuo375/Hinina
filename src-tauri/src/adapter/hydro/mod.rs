@@ -613,7 +613,7 @@ impl HydroAdapter {
         // 各带命名空间前缀，防跨域碰撞（docId "5" 与 pid "5" 不是同一标识）；
         // 键名前缀保证不同条目永不被错并。之后按 docId 升序固定输出顺序。
         let mut entries: Vec<&PdocVO> = Vec::with_capacity(pdict.len());
-        let mut seen_doc_ids: HashSet<String> = HashSet::with_capacity(pdict.len());
+        let mut seen_identity_keys: HashSet<String> = HashSet::with_capacity(pdict.len());
         for (key, pdoc) in pdict {
             let doc_id = pdoc
                 .doc_id
@@ -629,7 +629,7 @@ impl HydroAdapter {
                         .map(|pid| format!("p:{pid}"))
                 })
                 .unwrap_or_else(|| format!("k:{key}"));
-            if seen_doc_ids.insert(doc_id) {
+            if seen_identity_keys.insert(doc_id) {
                 entries.push(pdoc);
             }
         }
