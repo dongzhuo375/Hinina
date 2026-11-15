@@ -16,7 +16,7 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 ## 核心类型/函数
 - **`HttpClient`** — HTTP 客户端 struct，封装 `reqwest::Client`
 - **`HttpClient::new() -> Result<Self, reqwest::Error>`** — 创建默认客户端：30s 超时、Cookie Store、UA 为 `Hinina/{version}`（内部委托 `with_timeout(30s)`）
-- **`HttpClient::with_timeout(timeout: Duration) -> Result<Self, reqwest::Error>`** — 创建指定超时的客户端。**超时来自 `oj.timeout_secs` 配置**（由 `core/context.rs` 装配时读取并注入，`timeout_secs.max(1)` 防 0 值），不再硬编码；其余行为（Cookie Store、UA、重试）与 `new()` 一致
+- **`HttpClient::with_timeout(timeout: Duration) -> Result<Self, reqwest::Error>`** — 创建指定超时的客户端。**超时来自 `oj.timeout_secs` 配置**（由 `core/context.rs` 装配时读取并注入，`timeout_secs.max(1)` 防 0 值），不再硬编码；**连接池空闲超时 4s**（`pool_idle_timeout`）：必须短于常见部署的服务器 Keep-Alive 超时（Hydro 实测响应头 `Keep-Alive: timeout=5`），否则轮询间隔大于服务器超时的端点会复用已被服务器关闭的连接、在读响应体阶段断流（2026-11-15 联调实测约 5% 轮询失败；`retry_get` 只重试发送段，盖不住 body 断流）。reqwest 不暴露 getter，「该值确实被传入」由装配代码保证（与超时同款口径）；其余行为（Cookie Store、UA、重试）与 `new()` 一致
 - **`HttpClient::client() -> &reqwest::Client`** — 获取内部 client 引用，供 Adapter 层直接调用原始 API（HOJ 的 `login` 需自行读响应头取 token、`logout` 忽略响应体）。**`validate_session` 已不再走 raw client**：它改走 `get_json_authed`，才能拿到去 null 解析、体内鉴权失败识别、token 轮换与 5xx 退避重试（见 `adapter/hoj/mod.md`）
 - **`HttpClient::get_text_with_headers(url, headers) -> AppResult<(String, HeaderMap)>`** — GET，返回**原始响应体**与响应头；5xx 与传输错误自动重试，4xx 直接报错；`headers` 由调用方注入并原样附加（空 map = 无附加头，重试时原样重附）
 - **`HttpClient::post_text_with_headers<B: Serialize>(url, body, headers) -> AppResult<(String, HeaderMap)>`** — POST（JSON body），返回**原始响应体**与响应头；非幂等，不重试，非 2xx 直接报错（**错误信息附带响应体摘录**）
@@ -48,7 +48,7 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 - `adapter/hoj`（HOJ Adapter 将通过 HttpClient 发送 API 请求）
 
 ## 逻辑流程
-创建时配置全局超时（`with_timeout` 由配置驱动，见上）与 Cookie Store。GET 请求自动对 5xx 响应执行重试（最多 2 次，指数退避），4xx 客户端错误直接返回含状态码的错误。POST 为非幂等操作，任何非 2xx 状态码直接报错。请求头经 `headers` 参数由调用方注入（认证方式是 Adapter 层概念，infra 不感知——HOJ 的 `Authorization` 头由 `adapter/hoj` 的 `auth_headers` 组装）。`*_with_headers` 变体将响应头原样返回，infra 层不感知任何 OJ 私有协议语义（如 HOJ 的 `Refresh-Token` 轮换约定由 `adapter/hoj` 自行解析）。
+创建时配置全局超时（`with_timeout` 由配置驱动，见上）、Cookie Store 与连接池空闲超时（4s，短于常见部署的 Keep-Alive 超时，见上）。GET 请求自动对 5xx 响应执行重试（最多 2 次，指数退避），4xx 客户端错误直接返回含状态码的错误。POST 为非幂等操作，任何非 2xx 状态码直接报错。请求头经 `headers` 参数由调用方注入（认证方式是 Adapter 层概念，infra 不感知——HOJ 的 `Authorization` 头由 `adapter/hoj` 的 `auth_headers` 组装）。`*_with_headers` 变体将响应头原样返回，infra 层不感知任何 OJ 私有协议语义（如 HOJ 的 `Refresh-Token` 轮换约定由 `adapter/hoj` 自行解析）。
 
 **状态码 → 错误变体映射**（GET 与 POST 共用 `status_error`）：
 

@@ -43,7 +43,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - `SubmissionProvider::submit(contest_id, problem_id, language, code)` — `POST /p/:pid/submit`（`lang` + `code` + `tid`）；语言经 `types::lang_key` 从显示名反查回 key；**刻意不做字母换算**（万一某题 pid 恰好是单字母，换算会把提交打到另一道题上，这个失败模式不可接受）；响应无 `rid` 时明确报错（比赛隐藏本人记录时服务端返回 `tid`，缺口 D12）
 - `SubmissionProvider::get_judgement(id)` / `get_submission_detail(id)` — 同一端点 `GET /record/:rid` 的两种投影，对齐 HOJ 侧拆分
 - `SubmissionProvider::list_contest_submissions(query)` — `GET /record?page=&tid=&uidOrName=&pid=&status=`。`only_mine` → `uidOrName=<探测到的 uid>`（拿不到 uid 时报 `Auth`）；`problem_display_id` 直接传字母（服务端按 `tdoc.pids` 解析）；`status` 经 `types::hoj_status_to_hydro` 翻译，无对应语义时明确报错而不是静默忽略筛选；`total`/`pages` 按假定页大小 `ASSUMED_RECORD_PAGE_SIZE = 100` 推导（Hydro 不返回总条数，缺口 D8）
-- `SubmissionProvider::get_submission_cases(id)` — 同端点的 `rdoc.testCases`；子任务分组由 `testCases[].subtaskId` 完成（**不解析 `rdoc.subtasks`**：文档未给出其结构，由明确存在的字段分组既确定又不依赖猜测）；`mode` 取题目 `config.type` 透传
+- `SubmissionProvider::get_submission_cases(id)` — 同端点的 `rdoc.testCases`；子任务分组由 `testCases[].subtaskId` 完成（**不解析 `rdoc.subtasks`**：实测它是按 subtaskId 键的冗余汇总对象，用稳定分组键逐点还原即可，不必依赖汇总形态——该字段在赛制投影下还会被整体删除）；`mode` 取题目 `config.type` 透传
 
 ## 关键实现约定
 - **必须发送 `Accept: application/json`**：Hydro 的响应分支是 `request.json || response.redirect || ?noTemplate=1 || !response.template`，不带该头会渲染 HTML 模板 —— 这是取 JSON 的唯一手段。请求头在适配器里用 `headers()` 组装（infra 只做透传，不假设认证方式）
@@ -56,7 +56,6 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - **三态契约**：见 `AuthProvider::validate_session` 的分支说明；判据与 HOJ 侧同源，测试锁定在 `tests/mod_tests.rs`
 - **不发送 `Referer`**：Hydro 的 POST 在带 `Referer` 且 host 与请求 host 不符时抛 `CsrfTokenError`(403)；reqwest 默认不发送该头，故天然安全（不要在后续改动里加上 Referer）
 - **展示字母由 `tdoc.pids` 下标派生**：依据 `record_main` 的 `tdoc.pids[parseInt(pid, 36) - 10]`（A=0 … Z=25）；超过 26 题退回十进制序号
-- **`cid` 填 0**：Hydro 的比赛 ID 是 24 位 hex ObjectId，装不进 `ContestProblem.cid: i64`（缺口 D1，需改 entity 字段类型）
 - **不缓存领域数据**：唯一的缓存是 `tid → tdoc.pids` 的顺序表（`TtlCache`，60s TTL / 32 容量），属于「协议换算所需的映射」而非业务数据 —— 前端「题目 limits 渐进填充」会对每道题各调一次 `get_problem`，不缓存会为一场 12 题的比赛重复发 12 次 `/contest/:tid`（Hydro 全局限流仅 100 请求/5 秒）。空列表不缓存（多为异常响应）。键是比赛 ID，天然带 OJ 作用域（适配器实例按 OJ 实例构造）
 
 ## 直接依赖
@@ -76,7 +75,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 
 ## 逻辑流程
 1. Service 调用 trait 方法（如 `login()`）
-2. 组装路径与请求头（`headers()`）→ GET 走 `get_json`（infra，含退避重试）/ POST 走 `post_json`（原始 reqwest）
+2. 组装路径与请求头（`headers()`）→ GET 走本适配器 helper `get_json`→`get_raw`→infra `get_text_raw`（raw 变体，5xx 退避重试）/ POST 走 `post_json`→`post_raw`→infra `post_text_raw`（不重试）
 3. 协议层判定（`HydroResponse::parse_value`，两条通道共用）：非法 JSON → `Serialization`；错误包络 → `AppError`；JSON 化登录重定向 → `Auth`；POST 额外先按状态码判定（非 2xx 且无包络 → `http_status_error`）
 4. 反序列化为 DTO（`into_json` / `get_json`）
 5. 映射为领域实体（User/Contest/ContestProblem/Problem/ContestRankPage/JudgementResult/SubmissionRecord/SubmissionDetail/SubmissionCases/AnnouncementPage）
@@ -96,7 +95,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 ```
 
 ## 测试
-`tests/mod_tests.rs`（+ `tests/fixtures/*.json`，按 `doc/Hydro/HYDRO-API.md` 手工构造，无联调实例）：
+`tests/mod_tests.rs`（+ `tests/fixtures/*.json`，两类出处：按 `doc/Hydro/HYDRO-API.md` 手工构造 + 2026-11-15 自测试部署实测收编（`contest_problems_dual_key`，个人数据已脱敏））：
 - 响应处置：非 2xx + 错误包络 → `Auth`；**网关 HTML 错误页 → `Network` 且带状态码**（不得报成「不是合法 JSON」）；401 → `Auth`；HTTP 200 + 登录重定向 → `Auth`；成功但字段不匹配 → `Serialization`
 - 比赛阶段（`contest_status` 全分支含边界与时间缺失）、赛制归一、`oi_rank_score_type` 只对 oi/strictioi 标注
 - `into_contest`（时间/赛制/封榜）、`map_contest_problems`（**字母按下标派生而非顺序**、无顺序表时的回退）、`into_problem`（Markdown 题面/limits/语言翻译/无 config 时的零值）
