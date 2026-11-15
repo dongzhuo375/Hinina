@@ -7,7 +7,7 @@
 已经交付一个**最小可运行的外围 JavaScript 插件宿主**：
 
 - QuickJS（`rquickjs`）隔离 worker，每插件一个 OS 线程、一个引擎实例
-- Manifest / API / 事件协议均为 v2
+- Manifest / API 为 v2、事件协议为 v3
 - 作用域只读 API：身份、当前比赛（含 `contestType`/`sealed`）、本人提交历史（不读源码、不读题面）
 - 比赛题目列表（题号 ↔ 气球颜色）与全场榜单分页（`contest.rank` 独立权限，`teamKey` 可比对自身）
 - 按插件有界事件投递与通用 Resync

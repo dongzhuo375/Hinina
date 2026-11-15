@@ -7,7 +7,7 @@
 
 | 范围 | 状态 | 说明 |
 |---|---|---|
-| Manifest / API / 事件 v2 | ✅ | 版本独立，未知字段/权限/事件拒绝 |
+| Manifest / API v2、事件 v3 | ✅ | 三者版本独立，未知字段/权限/事件拒绝 |
 | 声明与授权分离 | ✅ | 有效权限 = Manifest ∩ `plugins.json`；默认不启用 |
 | 事件边界 | ✅ | 唯一 `CoreEventBus` → `PluginHost` → 有界队列（`PLUGIN_EVENT_QUEUE_CAPACITY`） |
 | 只读查询 | ✅ | 身份 / 当前比赛 / 本人提交历史；不读源码 |

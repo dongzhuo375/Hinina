@@ -1,6 +1,6 @@
 # Hinina 项目架构与文件树
 
-> 最后更新：2026-11-14 | 分支：`main`
+> 最后更新：2026-11-16 | 分支：`main`
 >
 > 本文档记录项目完整文件树，每个文件/目录后附简要职责说明。
 
@@ -605,7 +605,7 @@ src/
 
 ### 插件宿主（2026-10）
 
-当前交付最小可运行的外围 JavaScript 宿主：Manifest / API / 事件均为 v2，QuickJS 独立 worker，只读身份 / 比赛 / 本人提交历史，私有 JSON/CAS，受限 HTTP，纯文本通知，以及 start / stop / reload / resync 开发命令。未交付管理 UI、配置写入、安装/更新、业务插件和真实 OJ 联调。
+当前交付最小可运行的外围 JavaScript 宿主：Manifest / API 为 v2、事件协议为 v3，QuickJS 独立 worker，只读身份 / 比赛 / 本人提交历史，私有 JSON/CAS，受限 HTTP，纯文本通知，以及 start / stop / reload / resync 开发命令。未交付管理 UI、配置写入、安装/更新、业务插件和真实 OJ 联调。
 
 分层：`core/access` 提供显式 `AccessRevision`；`service` 提供只读查询并显式撤销；`plugin/api|permission|query|execution_api` 提供安全 DTO、授权交集、作用域句柄/游标和有限 JSON 桥；`plugin/host` 是唯一 `CoreEventBus` 插件消费者（128 有界队列）；`plugin/runtime|manager` 持有 QuickJS worker 与生命周期；`infra/fs_plugin_repo|plugin_storage|plugin_http` 实现仓库、存储、网络端口（通知端口实现在组合根 `bootstrap/notification.rs`，infra 不触框架）。依赖方向 `infra → plugin`，`core/service` 不依赖 plugin（组合根 `core/context.rs` 除外）。
 
