@@ -75,7 +75,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 
 ## 逻辑流程
 1. Service 调用 trait 方法（如 `login()`）
-2. 组装路径与请求头（`headers()`）→ GET 走本适配器 helper `get_json`→`get_raw`→infra `get_text_raw`（raw 变体，5xx 退避重试）/ POST 走 `post_json`→`post_raw`→infra `post_text_raw`（不重试）
+2. 组装路径与请求头（`headers()`）→ GET 走本适配器 helper `get_json`→`get_raw`→infra `get_text_raw`（raw 变体，5xx 与 body 断流退避重试）/ POST 走 `post_json`→`post_raw`→infra `post_text_raw`（不重试）
 3. 协议层判定（`HydroResponse::parse_value`，两条通道共用）：非法 JSON → `Serialization`；错误包络 → `AppError`；JSON 化登录重定向 → `Auth`；POST 额外先按状态码判定（非 2xx 且无包络 → `http_status_error`）
 4. 反序列化为 DTO（`into_json` / `get_json`）
 5. 映射为领域实体（User/Contest/ContestProblem/Problem/ContestRankPage/JudgementResult/SubmissionRecord/SubmissionDetail/SubmissionCases/AnnouncementPage）
