@@ -10,7 +10,8 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `checked` | prop `boolean` | 开关状态（受控：由调用方经 update 事件回写） |
+| `label` | prop `string` | 开关的可访问名（设置项名称）——按钮内只有圆钮无可见文本，经 aria-label 提供 |
+| `checked` | prop `boolean` | 开关状态（受控：由调用方经 update 事件回写；状态由 aria-checked 表达） |
 | `disabled` | prop `boolean?` | 禁用（锁定/域忙碌时） |
 | `update` | emit `(checked: boolean)` | 点击请求切换为反转值 |
 

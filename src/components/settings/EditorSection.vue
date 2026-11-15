@@ -63,6 +63,7 @@ const TAB_SIZES = EDITOR_TAB_SIZES
           自动保存
         </span>
         <SettingsSwitch
+          label="自动保存"
           :checked="props.form.autoSave"
           @update="(checked) => emit('update:form', { autoSave: checked })"
         />

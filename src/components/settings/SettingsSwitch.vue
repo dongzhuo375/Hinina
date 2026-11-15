@@ -1,7 +1,10 @@
 <script setup lang="ts">
 /// Settings 开关行：role=switch 按钮圆钮 + 「已开启/已关闭」状态文本。
+/// 按钮内只有圆钮无可见文本，可访问名经 aria-label=label 提供（状态由 aria-checked 表达）。
 /// `settings-switch(-knob)` class 由 SettingsSectionFrame 的 :deep 样式消费，不得改名。
 defineProps<{
+  /** 开关的可访问名（设置项名称，如「题面缓存」） */
+  label: string
   checked: boolean
   disabled?: boolean
 }>()
@@ -13,6 +16,7 @@ const emit = defineEmits<{ (event: 'update', checked: boolean): void }>()
     <button
       type="button"
       role="switch"
+      :aria-label="label"
       :aria-checked="checked"
       :disabled="disabled"
       class="settings-switch relative h-6 w-11 shrink-0 transition-colors disabled:cursor-not-allowed disabled:opacity-60"

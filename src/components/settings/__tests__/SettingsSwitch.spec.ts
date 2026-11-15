@@ -5,7 +5,7 @@ import SettingsSwitch from '@/components/settings/SettingsSwitch.vue'
 
 function mount(checked: boolean, disabled?: boolean): HTMLElement {
   const host = document.createElement('div')
-  const app = createApp(SettingsSwitch, { checked, disabled })
+  const app = createApp(SettingsSwitch, { label: '题面缓存', checked, disabled })
   app.mount(host)
   return host
 }
@@ -15,6 +15,8 @@ describe('SettingsSwitch', () => {
     const host = mount(true)
     await nextTick()
     const button = host.querySelector<HTMLButtonElement>('button[role="switch"]')!
+    // 按钮内无可见文本，可访问名经 aria-label 提供
+    expect(button.getAttribute('aria-label')).toBe('题面缓存')
     expect(button.getAttribute('aria-checked')).toBe('true')
     // settings-switch(-knob) class 由 SettingsSectionFrame 的 :deep 样式消费
     expect(button.className).toContain('settings-switch')
@@ -33,6 +35,7 @@ describe('SettingsSwitch', () => {
     const app = createApp({
       render: () =>
         h(SettingsSwitch, {
+          label: '自动保存',
           checked: false,
           onUpdate: (checked: boolean) => received.push(checked),
         }),

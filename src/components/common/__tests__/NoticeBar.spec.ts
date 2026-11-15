@@ -46,4 +46,13 @@ describe('NoticeBar', () => {
     await nextTick()
     expect(host2.querySelector('button')).toBeNull()
   })
+
+  it('重试按钮描边/hover 配色随 tone（wa 红系 / pending 琥珀系）', async () => {
+    const host = mount({ tone: 'pending', retry: () => {} })
+    await nextTick()
+    const button = host.querySelector('button')!
+    expect(button.className).toContain('border-[var(--color-pending-border)]')
+    expect(button.className).toContain('hover:bg-[var(--color-pending-bg)]')
+    expect(button.className).not.toContain('wa-border')
+  })
 })

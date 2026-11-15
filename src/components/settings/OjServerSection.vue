@@ -201,6 +201,7 @@ function onSwitchOj(): void {
           题面缓存
         </span>
         <SettingsSwitch
+          label="题面缓存"
           :checked="props.form.cacheProblemStatement"
           :disabled="props.locked || ojDomainBusy"
           @update="(checked) => emit('update:form', { cacheProblemStatement: checked })"

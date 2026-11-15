@@ -40,7 +40,12 @@ defineProps<{
     <button
       v-if="retry"
       type="button"
-      class="shrink-0 rounded-md border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2 py-0.5 font-medium transition-colors hover:bg-[var(--color-wa-bg)]"
+      class="shrink-0 rounded-md border bg-[var(--bg-card)] px-2 py-0.5 font-medium transition-colors"
+      :class="
+        tone === 'wa'
+          ? 'border-[var(--color-wa-border)] hover:bg-[var(--color-wa-bg)]'
+          : 'border-[var(--color-pending-border)] hover:bg-[var(--color-pending-bg)]'
+      "
       @click="retry"
     >
       立即重试
