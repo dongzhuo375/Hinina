@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia'
 import type { Announcement } from '@/types/announcement'
 import { announcementService } from '@/services/announcement.service'
-import { createPoller } from '@/utils/polling'
-import type { Poller } from '@/utils/polling'
+import { createPollerLifecycle } from '@/utils/polling'
 import { errorMessage } from '@/utils/error'
+import { isPageHidden } from '@/utils/page-visibility'
 import { createLogger } from '@/utils/logger'
 import { getSessionGeneration } from '@/stores/sessionGeneration'
 
@@ -15,19 +15,14 @@ const ANNOUNCEMENT_POLL_INTERVAL_MS = 60_000
 const ANNOUNCEMENT_POLL_JITTER_MS = 10_000
 
 /**
- * 轮询器句柄。
+ * 轮询器生命周期。
  *
  * 副作用句柄而非渲染状态，置于模块作用域（不进响应式系统），
  * 由 `stopLive` 回收；登出时经 `stores/session` 统一停止。
  */
-let poller: Poller | null = null
+const livePolling = createPollerLifecycle()
 
-/// 页面是否不可见（窗口最小化/切到后台）—— 此时暂停轮询，避免无谓请求
-function isPageHidden(): boolean {
-  return typeof document !== 'undefined' && document.hidden
-}
-
-/// 窗口重新可见/聚焦时的补拉回调（模块作用域副作用句柄，与 poller 同款约定）
+/// 窗口重新可见/聚焦时的补拉回调（模块作用域副作用句柄，与轮询器同款约定）
 let visibilityRefresh: (() => void) | null = null
 
 /// `visibilitychange` 与 `focus` 都可能触发，用时间窗去重，避免一次切回打两次请求
@@ -215,7 +210,7 @@ export const useAnnouncementStore = defineStore('announcement', {
       this.stopLive()
       this.contestId = contestId
       void this.refresh()
-      poller = createPoller({
+      livePolling.restart({
         task: () => this.refresh(),
         intervalMs: ANNOUNCEMENT_POLL_INTERVAL_MS,
         jitterMs: ANNOUNCEMENT_POLL_JITTER_MS,
@@ -224,7 +219,6 @@ export const useAnnouncementStore = defineStore('announcement', {
           this.error = errorMessage(e, '公告刷新失败')
         },
       })
-      poller.start()
       this.isLive = true
       installVisibilityRefresh(() => {
         if (isPaused?.() ?? false) return
@@ -234,8 +228,7 @@ export const useAnnouncementStore = defineStore('announcement', {
 
     /** 停止实时刷新（离开工作台、比赛结束、登出时调用） */
     stopLive() {
-      poller?.stop()
-      poller = null
+      livePolling.stop()
       this.isLive = false
       removeVisibilityRefresh()
     },

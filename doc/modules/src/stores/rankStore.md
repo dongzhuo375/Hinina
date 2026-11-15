@@ -14,8 +14,8 @@
 |------|------|------|
 | `RankGroupFilter` | `'all' \| 'official' \| 'star' \| 'female'` | 分组筛选（类型与过滤纯函数定义在 `utils/rank`，此处 re-export）；official 走服务端 `removeStar`，star/female 服务端无对应参数 → 全量快照模式 |
 | `FullFetchState` | `'idle' \| 'loading' \| 'done' \| 'truncated' \| 'error'` | 快照拉取状态：未拉取 / 拉取中 / 完整 / 达上限截断 / 失败（无可用快照） |
-| `poller` | 模块级 `Poller \| null` | 轮询器句柄（副作用句柄而非渲染状态，**不进响应式系统**） |
-| `isPageHidden` / `isFullSnapshotFilter` | 模块内私有 fn | `document.hidden` 判后台；`filter ∈ {star, female}` 判是否需要全量快照 |
+| `livePolling` | 模块级 `PollerLifecycle` | 轮询器生命周期壳（副作用句柄而非渲染状态，**不进响应式系统**） |
+| `isPageHidden` / `isFullSnapshotFilter` | 判据 | `utils/page-visibility` 判后台；`filter ∈ {star, female}` 判是否需要全量快照 |
 | state | `rows`（已去重）/ `myRow` / `total` / `size` / `current` / `pages` / `participants` / `keyword` / `removeStar` / `groupFilter` / `isLoading` / `loadSeq` / `isLive` / `error` / `lastUpdated` / `contestId` / `uid` | `contestId`/`uid` 是轮询上下文，供 `refresh` 复用；`loadSeq` 是同会话请求序号，登出随 `$reset` 清理 |
 | state（全量快照） | `fullRows: ContestRankRow[] \| null` / `fullFetchState` / `fullPage` / `fullLoadedRows` | 跨页去重合并的快照（非全量模式为 null）/ 拉取状态 / 客户端分页当前页 / 已加载行数（状态行「已加载 N 行」用） |
 | `isFullMode` | getter | 是否处于全量快照模式（star/female 筛选**且快照已就位**） |
@@ -39,7 +39,8 @@
 - `pinia`
 - `@/types/rank`（仅类型）
 - `@/services/rank.service`（`rankService.getRank` + `DEFAULT_RANK_PAGE_SIZE`）
-- `@/utils/polling`（`createPoller` + `Poller` 类型）
+- `@/utils/polling`（`createPollerLifecycle` —— 模块级轮询句柄的持有与回收）
+- `@/utils/page-visibility`（`isPageHidden`）
 - `@/utils/rank`（`dedupeRankRows` / `filterRankRowsByGroup` / `mergeRankPages` / `paginateRankRows` / `resolveMyRow` / `resolveParticipantCountFromPage` + `RankGroupFilter` 类型）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/stores/sessionGeneration`（`getSessionGeneration` —— 会话代际守卫）
@@ -107,16 +108,16 @@ syncFullPaging()
 
 startLive(isPaused?)
   → stopLive()（幂等防重复定时器）
-  → poller = createPoller({
+  → livePolling.restart({
       task: refresh,                            // 吞错，不打断轮询节奏；全量筛选态下
                                                 // 重拉整个快照（只会被手动刷新触发）
       intervalMs: 10s, jitterMs: 2s,
       isPaused: 页面隐藏 || 全量快照模式（star/female） || 调用方条件（如比赛已结束）,
       onError: 记录 error })
-  → poller.start()；首次执行在一个完整周期后 —— 首屏数据由调用方自行 loadRank，
+  → 首次执行在一个完整周期后 —— 首屏数据由调用方自行 loadRank，
     进入页面立刻可见而不是等 10 秒
 
-stopLive → poller?.stop() + 置 null + isLive = false + 清空查询去抖 memo
+stopLive → livePolling.stop() + isLive = false + 清空查询去抖 memo
 ```
 
 设计要点：
@@ -124,7 +125,7 @@ stopLive → poller?.stop() + 置 null + isLive = false + 清空查询去抖 mem
 - **轮询编排归 store 而非组件**：榜单数据被多个视图共享（榜单页、题目总览、统计卡），
   组件级 onUnmounted 停表在视图切换/keep-alive 场景下不可靠；store 与会话同生命周期，
   登出时由 `stores/session` 统一 `stopLive()` + `$reset()`（含「我的行」，属会话数据）。
-- **句柄放模块作用域**：`poller` 是副作用句柄，不进 state —— Vue 深层代理定时器句柄
+- **句柄放模块作用域**：`livePolling`（轮询生命周期壳）持有的轮询句柄是副作用句柄，不进 state —— Vue 深层代理定时器句柄
   无意义且可能干扰句柄语义（与 `utils/polling` 的约定一致）。
 - **失败保留旧数据**：赛场网络抖动频繁，`refresh` 吞错让表格停留在上一次成功快照，
   比闪成空态/错误态更可用；错误仍写入 `error` 供 UI 提示。

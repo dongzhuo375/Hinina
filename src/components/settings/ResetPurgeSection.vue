@@ -11,24 +11,14 @@ const {
 </script>
 
 <template>
-  <SettingsSectionFrame id="settings-4">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
-                <svg
-                  class="h-4 w-4 text-[var(--color-primary)]"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <ellipse cx="12" cy="5" rx="8" ry="3" />
-                  <path
-                    d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"
-                    stroke-linecap="round"
-                  />
-                </svg>
-                <h2 class="text-sm font-semibold text-[var(--text-primary)]">重置与清理</h2>
-              </div>
+  <SettingsSectionFrame id="settings-4" title="重置与清理">
+    <template #icon>
+      <ellipse cx="12" cy="5" rx="8" ry="3" />
+      <path
+        d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"
+        stroke-linecap="round"
+      />
+    </template>
 
               <div class="divide-y divide-[var(--border-color)]">
                 <!-- 重置客户端（安全，可反复点） -->

@@ -14,27 +14,18 @@ const {
 </script>
 
 <template>
-  <SettingsSectionFrame id="settings-5">
-              <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
-                <svg
-                  class="h-4 w-4 text-[var(--color-primary)]"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-                <h2 class="text-sm font-semibold text-[var(--text-primary)]">数据目录</h2>
-                <span v-if="props.locked" class="ml-auto text-xs text-[var(--text-muted)]">
-                  维护者选项：完全退出应用后以 --settings 重新启动可修改
-                </span>
-              </div>
+  <SettingsSectionFrame
+    id="settings-5"
+    title="数据目录"
+    :hint="props.locked ? '维护者选项：完全退出应用后以 --settings 重新启动可修改' : undefined"
+  >
+    <template #icon>
+      <path
+        d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
 
               <div class="flex flex-col gap-3 px-5 py-4">
                 <p v-if="dataDirFailed" class="text-xs text-[var(--color-error)]">数据目录信息获取失败</p>

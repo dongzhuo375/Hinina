@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-常量：`POLL_INTERVAL_MS`(5s)、`POLL_JITTER_MS`(1s)。模块级普通变量：`alive`（卸载标记）、`poller: Poller | null`（副作用句柄，不进响应式系统）。
+常量：`POLL_INTERVAL_MS`(5s)、`POLL_JITTER_MS`(1s)。setup 作用域普通变量：`alive`（卸载标记）、`historyPolling`（`createPollerLifecycle` 壳，副作用句柄不进响应式系统）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
@@ -29,12 +29,13 @@
 ## 直接依赖
 
 - `vue` / `vue-router`
-- 组件：`PageHeading`（页头，编号 `03` / `SUBMISSION ARCHIVE`）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner`
+- 组件：`PageHeading`（页头，编号 `03` / `SUBMISSION ARCHIVE`）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner` / `NoticeBar`（刷新失败保留旧数据横幅）/ `SpinnerIcon`（状态 pill 评测中图标）
 - stores：`contestStore`（比赛标题 / startTime / 题目列表）、`submissionStore`（history 数据源）
 - `@/types/contest` / `@/types/submission`（仅类型）
 - `@/utils/submission`（`STATUS_OPTIONS` / `formatClock` / `formatCodeLength` / `formatDurationHms` / `formatMemoryKb` / `isJudging` / `statusLabel` / `statusTone`）
 - `@/utils/submission-tone`（共享 pill 类串）
-- `@/utils/polling`（`createPoller` + `Poller` 类型）
+- `@/utils/polling`（`createPollerLifecycle` —— 视图自有轮询句柄的持有与回收）
+- `@/utils/page-visibility`（`isPageHidden` 切后台暂停判据）
 - `@/utils/pagination`（`getPageItems` 页码窗口纯函数）
 
 ## 被依赖
@@ -54,9 +55,9 @@ onMounted → bootstrap():
       // 题目/状态筛选（不发请求），否则列表会被静默过滤
 
 watch(history.records) → syncPoller():
-  当前页存在 isJudging 记录且无 poller → createPoller(5s±1s, task=重拉当前页,
-                                        isPaused: document.hidden)
-  当前页全部终态 → stopPoller()               // 收敛即停，不做常驻轮询
+  当前页存在 isJudging 记录 → historyPolling.startIfAbsent(5s±1s, task=重拉当前页,
+                                        isPaused: isPageHidden)   // 已持有则不动
+  当前页全部终态 → historyPolling.stop()      // 收敛即停，不做常驻轮询
 
 onUnmounted → alive = false；stopPoller()
 ```
@@ -64,7 +65,7 @@ onUnmounted → alive = false；stopPoller()
 设计要点：
 
 - **列表轮询与提交收敛轮询取舍相反**：评测页轮询属于「在场才需要」的列表刷新，
-  配置 `isPaused: document.hidden` 切后台暂停；而 submissionStore 的单提交收敛轮询
+  配置 `isPaused: isPageHidden`（`utils/page-visibility`）切后台暂停；而 submissionStore 的单提交收敛轮询
   刻意不暂停（切窗口回来就该看到结果）。节奏也更慢（5s±1s vs 2s 级）。
 - **搜索只作用于当前页**（客户端过滤），与服务端筛选（题目/状态，触发重新请求）分层：
   搜索零网络开销，底栏同时展示「共 N 条」与「本页匹配 M 条」管理预期。

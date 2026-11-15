@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
+import { useAsyncResource } from '@/composables/useAsyncResource'
 import { useSystemStore } from '@/stores/systemStore'
 import { useAnnouncementStore } from '@/stores/announcementStore'
 import { useContestStore } from '@/stores/contestStore'
@@ -27,8 +28,8 @@ export function useMaintenanceSettings() {
   } = useTransientValue<{ text: string; warn: boolean } | null>(null, 3_000)
   const resetError = ref<string | null>(null)
 
-  const usage = ref<LocalDataUsage | null>(null)
-  const usageFailed = ref(false)
+  const { data: usage, failed: usageFailed, load: loadUsage } =
+    useAsyncResource<LocalDataUsage>(() => systemStore.localDataUsage())
   const purgeLogs = ref(true)
   const purgeSnapshots = ref(true)
   const purging = ref(false)
@@ -65,15 +66,6 @@ export function useMaintenanceSettings() {
       resetError.value = errorMessage(e, '重置失败')
     } finally {
       resetting.value = false
-    }
-  }
-
-  async function loadUsage(): Promise<void> {
-    try {
-      usage.value = await systemStore.localDataUsage()
-      usageFailed.value = false
-    } catch {
-      usageFailed.value = true
     }
   }
 

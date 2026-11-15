@@ -14,6 +14,7 @@
 | `PollerOptions` | interface | `task` / `intervalMs` / `jitterMs?` / `isPaused?` / `onError?` / `rand?` / `setTimeoutFn?` / `clearTimeoutFn?` |
 | `Poller` | interface | `start()`（幂等）/ `stop()`（幂等，清理句柄）/ `isRunning()` |
 | `createPoller` | `(options: PollerOptions) => Poller` | 创建递归 setTimeout 轮询器 |
+| `PollerLifecycle` / `createPollerLifecycle` | interface / `() => PollerLifecycle` | 单持有位生命周期壳：`startIfAbsent`（条件启停）/ `restart`（重配置）/ `stop`（幂等回收），吞掉「句柄声明持有 + stop 置空 + 建后即启」样板（store 模块级与视图 setup 作用域皆可）并把「句柄不进响应式」纪律收进壳内 |
 
 ## 直接依赖
 

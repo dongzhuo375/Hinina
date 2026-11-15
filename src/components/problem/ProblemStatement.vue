@@ -235,73 +235,19 @@ async function copySampleInput(index: number, text: string) {
 .statement-content { width: 100%; max-width: 48em; margin-inline: auto; font-size: var(--statement-font); }
 .statement-content > section + section { margin-top: 2em; }
 .statement-section-title { font-size: 1.0714em; line-height: 1.5; }
+/* 题面正文排版：元素级规则共享自 styles/prose.css；此处只留题面独有的
+   容器形态（继承字号/主色/溢出换行）与表格横向滚动 */
 .prose {
   font-size: inherit;
   line-height: 1.85;
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
-.prose :deep(p) {
-  margin: 0 0 0.75rem;
-}
-.prose :deep(p:last-child) {
-  margin-bottom: 0;
-}
-.prose :deep(ul) {
-  list-style: disc;
-  padding-left: 1.25rem;
-  margin: 0 0 0.75rem;
-}
-.prose :deep(ol) {
-  list-style: decimal;
-  padding-left: 1.25rem;
-  margin: 0 0 0.75rem;
-}
-.prose :deep(li) {
-  margin-bottom: 0.25rem;
-}
-.prose :deep(strong) {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-.prose :deep(pre) {
-  background: var(--bg-sidebar);
-  border-radius: var(--radius);
-  padding: 0.75rem 1rem;
-  font-size: max(12px, 0.9em);
-  overflow-x: auto;
-}
-.prose :deep(code) {
-  font-family: var(--font-mono);
-  font-size: max(12px, 0.9em);
-  background: var(--bg-sidebar);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 0.1rem 0.35rem;
-  color: var(--text-primary);
-}
-.prose :deep(pre code) {
-  background: transparent;
-  border: none;
-  padding: 0;
-  font-size: inherit;
-}
-.prose :deep(img) {
-  max-width: 100%;
-  height: auto;
-}
 .prose :deep(table) {
   display: block;
   width: max-content;
   max-width: 100%;
   overflow-x: auto;
-  border-collapse: collapse;
-  margin-bottom: 0.75rem;
-}
-.prose :deep(th),
-.prose :deep(td) {
-  border: 1px solid var(--border-color);
-  padding: 0.25rem 0.5rem;
 }
 
 /* 样例 I/O 跟随题面阅读字号，保留横向滚动及输入/输出选区色。 */

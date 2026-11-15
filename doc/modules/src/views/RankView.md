@@ -29,7 +29,7 @@
 ## 直接依赖
 
 - `vue`
-- 组件：`PageHeading`（页头，编号 `02` / `LIVE SCOREBOARD`）/ `ContestStatsBar`（页头右侧插槽）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner` / `RankToolbar` / `ScoreboardTable`
+- 组件：`PageHeading`（页头，编号 `02` / `LIVE SCOREBOARD`）/ `ContestStatsBar`（页头右侧插槽）/ `PagePager`（底栏分页）/ `ErrorMessage` / `LoadingSpinner` / `NoticeBar`（封榜提示 + 刷新失败横幅）/ `RankToolbar` / `ScoreboardTable`
 - stores：`authStore`（uid）/ `contestStore` / `rankStore`
 - `@/utils/contest`（`getContestPhase`）
 - `@/utils/pagination`（`getPageItems` 页码窗口纯函数）

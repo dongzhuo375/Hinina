@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { useTransientValue } from '@/composables/useTransientValue'
+import { useAsyncResource } from '@/composables/useAsyncResource'
 import { useSystemStore } from '@/stores/systemStore'
 import { errorMessage } from '@/utils/error'
 import type { DataDirInfo } from '@/types/system'
@@ -7,8 +8,8 @@ import type { DataDirInfo } from '@/types/system'
 /// 数据目录：只校验并记录位置指针，真正迁移在下次启动完成
 export function useDataDirSettings() {
   const systemStore = useSystemStore()
-  const dataDir = ref<DataDirInfo | null>(null)
-  const dataDirFailed = ref(false)
+  const { data: dataDir, failed: dataDirFailed, load: loadDataDir } =
+    useAsyncResource<DataDirInfo>(() => systemStore.getDataDir())
   const pendingDir = ref<string | null>(null)
   const migrateData = ref(true)
   const changingDir = ref(false)
@@ -29,15 +30,6 @@ export function useDataDirSettings() {
         return { text: '默认位置', cls: 'text-[var(--text-muted)]' }
     }
   })
-
-  async function loadDataDir(): Promise<void> {
-    try {
-      dataDir.value = await systemStore.getDataDir()
-      dataDirFailed.value = false
-    } catch {
-      dataDirFailed.value = true
-    }
-  }
 
   function cancelDataDirChoice(): void {
     pendingDir.value = null

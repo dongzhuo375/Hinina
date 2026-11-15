@@ -91,5 +91,6 @@ renderMarkdown(md, baseUrl):
 - 只改写以 `/` 开头的站内相对路径；`data:`、协议相对 `//` 与绝对 URL 不动。
 - `baseUrl` 为空串时跳过改写（config.service 读取失败的兜底），相对路径按原样输出——
   宁可图裂也不阻断题面文本。
-- 输出经 `v-html` 渲染，消费方用 scoped `.prose :deep()` 收敛样式；块级公式横向滚动由
+- 输出经 `v-html` 渲染，`.prose` 元素级排版由 `styles/prose.css` 全局提供（题面/公告同源，
+  容器差异由各消费方局部样式定义）；块级公式横向滚动由
   `styles/global.css` 的 `.katex-display` 全局样式提供（题面/公告/简介共用）。

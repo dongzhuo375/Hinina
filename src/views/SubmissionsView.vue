@@ -5,6 +5,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import NoticeBar from '@/components/common/NoticeBar.vue'
+import SpinnerIcon from '@/components/common/SpinnerIcon.vue'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import type { ContestProblem } from '@/types/contest'
@@ -20,8 +22,8 @@ import {
   statusTone,
 } from '@/utils/submission'
 import { statusToneClasses } from '@/utils/submission-tone'
-import { createPoller } from '@/utils/polling'
-import type { Poller } from '@/utils/polling'
+import { createPollerLifecycle } from '@/utils/polling'
+import { isPageHidden } from '@/utils/page-visibility'
 import { getPageItems } from '@/utils/pagination'
 
 /// 评测页轮询节奏：5s ± 1s，仅在当前页存在评测中的提交时运行（收敛即停）
@@ -35,8 +37,8 @@ const submissionStore = useSubmissionStore()
 
 /// 组件已卸载标记：异步引导链路可能在卸载后才落地，此时不得再触碰 store
 let alive = true
-/// 轮询器是副作用句柄而非渲染状态：放普通变量，不进 ref/reactive
-let poller: Poller | null = null
+/// 轮询器是副作用句柄而非渲染状态：生命周期壳持有，不进 ref/reactive
+const historyPolling = createPollerLifecycle()
 
 const contest = computed(() => contestStore.contest)
 const history = computed(() => submissionStore.history)
@@ -184,14 +186,13 @@ function openProblem(record: SubmissionRecord) {
 // ── 评测中提交的实时刷新（视图自有轮询，收敛即停） ──
 
 function stopPoller() {
-  poller?.stop()
-  poller = null
+  historyPolling.stop()
 }
 
 function syncPoller() {
   const hasJudging = history.value.records.some((r) => isJudging(r.status))
-  if (hasJudging && !poller) {
-    poller = createPoller({
+  if (hasJudging) {
+    historyPolling.startIfAbsent({
       task: async () => {
         const contestId = history.value.contestId || contest.value?.id
         if (!contestId || !alive) return
@@ -204,12 +205,11 @@ function syncPoller() {
       intervalMs: POLL_INTERVAL_MS,
       jitterMs: POLL_JITTER_MS,
       // 切后台暂停：评测页轮询属于「在场才需要」的列表刷新，与提交收敛轮询取舍相反
-      isPaused: () => typeof document !== 'undefined' && document.hidden,
+      isPaused: isPageHidden,
       onError: () => {},
     })
-    poller.start()
-  } else if (!hasJudging) {
-    stopPoller()
+  } else {
+    historyPolling.stop()
   }
 }
 
@@ -340,33 +340,9 @@ onUnmounted(() => {
          否则 flex-1 min-h-0 的卡片会收缩并把多余行裁掉（无滚动条可看） -->
     <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 py-3">
       <!-- 轮询/刷新失败但仍有旧数据：顶部错误条，不清空表格 -->
-      <div
-        v-if="history.error && history.records.length > 0"
-        class="flex shrink-0 items-center gap-2 rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-[var(--color-error)]"
-      >
-        <svg
-          class="h-3.5 w-3.5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
+      <NoticeBar v-if="history.error && history.records.length > 0" tone="wa" :retry="retry">
         <span class="min-w-0 flex-1 truncate">刷新失败：{{ history.error }}（已保留上一次数据）</span>
-        <button
-          type="button"
-          class="shrink-0 rounded-md border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2 py-0.5 font-medium transition-colors hover:bg-[var(--color-wa-bg)]"
-          @click="retry"
-        >
-          立即重试
-        </button>
-      </div>
+      </NoticeBar>
 
       <div
         class="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-[var(--border-color)] bg-[var(--bg-card)]"
@@ -494,18 +470,11 @@ onUnmounted(() => {
                     class="inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-xs font-semibold shadow-none"
                     :class="statusToneClasses(statusTone(record.status))"
                   >
-                    <svg
+                    <SpinnerIcon
                       v-if="isJudging(record.status)"
-                      class="h-3 w-3 animate-spin"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.5"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-                      <path d="M21 12a9 9 0 00-9-9" stroke-linecap="round" />
-                    </svg>
+                      class="h-3 w-3"
+                      :stroke-width="2.5"
+                    />
                     <span>{{ statusLabel(record.status) }}</span>
                   </span>
                 </td>

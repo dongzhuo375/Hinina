@@ -5,6 +5,7 @@ import PagePager from '@/components/common/PagePager.vue'
 import ContestStatsBar from '@/components/contest/ContestStatsBar.vue'
 import ErrorMessage from '@/components/common/ErrorMessage.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import NoticeBar from '@/components/common/NoticeBar.vue'
 import RankToolbar from '@/components/rank/RankToolbar.vue'
 import ScoreboardTable from '@/components/rank/ScoreboardTable.vue'
 import { useAuthStore } from '@/stores/authStore'
@@ -186,55 +187,30 @@ watch(isEnded, (ended) => {
 
     <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-8 pb-6">
       <!-- 封榜提示：只信 contest 字段（文档 §9.3），封榜期间通过状态对普通用户不可见 -->
-      <div
-        v-if="isSealed"
-        class="flex shrink-0 items-center gap-2 rounded-sm border border-[var(--color-pending-border)] bg-[var(--color-pending-bg)] px-3 py-2 text-xs text-[var(--color-warning)]"
-      >
-        <svg
-          class="h-3.5 w-3.5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <rect x="4" y="10" width="16" height="10" rx="2" stroke-linejoin="round" />
-          <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke-linecap="round" />
-        </svg>
+      <NoticeBar v-if="isSealed" tone="pending">
+        <template #icon>
+          <svg
+            class="h-3.5 w-3.5 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <rect x="4" y="10" width="16" height="10" rx="2" stroke-linejoin="round" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke-linecap="round" />
+          </svg>
+        </template>
         <span class="font-medium">榜单已封榜，仅显示尝试次数</span>
         <span class="text-[var(--text-secondary)]">封榜时段内的提交结果将在赛后统一揭晓</span>
-      </div>
+      </NoticeBar>
 
       <!-- 轮询失败但仍有旧数据：顶部一条不打断阅读的错误条，绝不清空榜单 -->
-      <div
-        v-if="rankStore.error && rankStore.hasData"
-        class="flex shrink-0 items-center gap-2 rounded-sm border border-[var(--color-wa-border)] bg-[var(--color-wa-bg)] px-3 py-2 text-xs text-[var(--color-error)]"
-      >
-        <svg
-          class="h-3.5 w-3.5 shrink-0"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
+      <NoticeBar v-if="rankStore.error && rankStore.hasData" tone="wa" :retry="retry">
         <span class="min-w-0 flex-1 truncate">
           榜单刷新失败：{{ rankStore.error }}（已保留上一次数据，将自动重试）
         </span>
-        <button
-          type="button"
-          class="shrink-0 rounded-md border border-[var(--color-wa-border)] bg-[var(--bg-card)] px-2 py-0.5 font-medium transition-colors hover:bg-[var(--color-wa-bg)]"
-          @click="retry"
-        >
-          立即重试
-        </button>
-      </div>
+      </NoticeBar>
 
       <!-- 全量快照模式状态行：打星/女生为客户端跨页筛选，展示快照规模与手动刷新入口 -->
       <div

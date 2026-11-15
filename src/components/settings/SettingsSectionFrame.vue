@@ -1,10 +1,32 @@
 <script setup lang="ts">
-defineProps<{ id: string }>()
+/// 区块头并入 Frame 后统一图标容器/标题/右侧提示的形态；
+/// 头部 DOM 形态（section > div:first-child > svg + h2 [+ span]）是本组件
+/// :deep 样式的目标（隐藏图标、重排首块 padding），不得改变层级。
+defineProps<{
+  id: string
+  title: string
+  /** 区块头右侧提示（如维护者锁定说明）；不传则不渲染 */
+  hint?: string
+}>()
 </script>
 
 <template>
   <!-- 真实 section 保留 scroll-spy 的 id/focus 契约；组件边界不出现在 DOM 中 -->
   <section :id="id" tabindex="-1" class="settings-section">
+    <div class="flex items-center gap-2 border-b border-[var(--border-color)] px-5 py-3.5">
+      <svg
+        class="h-4 w-4 text-[var(--color-primary)]"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <slot name="icon" />
+      </svg>
+      <h2 class="text-sm font-semibold text-[var(--text-primary)]">{{ title }}</h2>
+      <span v-if="hint" class="ml-auto text-xs text-[var(--text-muted)]">{{ hint }}</span>
+    </div>
     <slot />
   </section>
 </template>

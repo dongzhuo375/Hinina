@@ -299,35 +299,13 @@ onUnmounted(() => {
 .announcement-body, .announcement-expand { grid-column: 2; }
 @media (max-width: 1100px) { .announcement-entry { grid-template-columns: 140px minmax(0, 1fr); gap: 16px 24px; } }
 
-/* 公告正文排版：与题面 .prose 同风格（内容来自 renderMarkdown 出口，已消毒） */
+/* 公告正文排版（内容来自 renderMarkdown 出口，已消毒）：
+   元素级规则共享自 styles/prose.css；此处只留公告独有的容器形态与标题/引用样式 */
 .prose {
   font-size: var(--reading-size);
   max-width: 48em;
   line-height: 1.85;
   color: var(--text-secondary);
-}
-.prose :deep(p) {
-  margin: 0 0 0.75rem;
-}
-.prose :deep(p:last-child) {
-  margin-bottom: 0;
-}
-.prose :deep(ul) {
-  list-style: disc;
-  padding-left: 1.25rem;
-  margin: 0 0 0.75rem;
-}
-.prose :deep(ol) {
-  list-style: decimal;
-  padding-left: 1.25rem;
-  margin: 0 0 0.75rem;
-}
-.prose :deep(li) {
-  margin-bottom: 0.25rem;
-}
-.prose :deep(strong) {
-  color: var(--text-primary);
-  font-weight: 600;
 }
 .prose :deep(h1),
 .prose :deep(h2),
@@ -336,41 +314,6 @@ onUnmounted(() => {
   color: var(--text-primary);
   font-weight: 600;
   margin: 0.75rem 0 0.5rem;
-}
-.prose :deep(pre) {
-  background: var(--bg-sidebar);
-  border-radius: var(--radius);
-  padding: 0.75rem 1rem;
-  font-size: max(12px, 0.9em);
-  overflow-x: auto;
-}
-.prose :deep(code) {
-  font-family: var(--font-mono);
-  font-size: max(12px, 0.9em);
-  background: var(--bg-sidebar);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 0.1rem 0.35rem;
-  color: var(--text-primary);
-}
-.prose :deep(pre code) {
-  background: transparent;
-  border: none;
-  padding: 0;
-  font-size: inherit;
-}
-.prose :deep(img) {
-  max-width: 100%;
-  height: auto;
-}
-.prose :deep(table) {
-  border-collapse: collapse;
-  margin-bottom: 0.75rem;
-}
-.prose :deep(th),
-.prose :deep(td) {
-  border: 1px solid var(--border-color);
-  padding: 0.25rem 0.5rem;
 }
 .prose :deep(blockquote) {
   border-left: 3px solid var(--border-color);

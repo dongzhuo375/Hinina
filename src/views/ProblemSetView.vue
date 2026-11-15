@@ -12,8 +12,8 @@ import { useProblemStore } from '@/stores/problemStore'
 import { useRankStore } from '@/stores/rankStore'
 import type { ContestProblem } from '@/types/contest'
 import { getContestPhase } from '@/utils/contest'
-import { createPoller } from '@/utils/polling'
-import type { Poller } from '@/utils/polling'
+import { createPollerLifecycle } from '@/utils/polling'
+import { isPageHidden } from '@/utils/page-visibility'
 
 /// 题目总览刷新节奏：30s ± 5s 抖动，打散全场客户端的请求相位（见 utils/polling 头注释）
 const POLL_INTERVAL_MS = 30_000
@@ -25,8 +25,8 @@ const problemStore = useProblemStore()
 const rankStore = useRankStore()
 const authStore = useAuthStore()
 
-/// 轮询器句柄是副作用句柄而非渲染状态：放普通变量，不进 ref/reactive
-let poller: Poller | null = null
+/// 轮询器句柄是副作用句柄而非渲染状态：生命周期壳持有，不进 ref/reactive
+const problemsPolling = createPollerLifecycle()
 /// 补充数据（limits/状态/榜单）是否已触发过 —— 开赛后题目首次出现时需补拉一次
 let supplementaryLoaded = false
 
@@ -90,23 +90,20 @@ function loadSupplementary() {
 }
 
 function startPolling() {
-  stopPolling()
-  poller = createPoller({
+  problemsPolling.restart({
     task: refresh,
     intervalMs: POLL_INTERVAL_MS,
     jitterMs: POLL_JITTER_MS,
     // 切后台/最小化时暂停，避免无谓请求
-    isPaused: () => typeof document !== 'undefined' && document.hidden,
+    isPaused: isPageHidden,
     onError: () => {
       // 瞬时失败静默：保留上一次数据，等下一周期（错误已记录在 store.error）
     },
   })
-  poller.start()
 }
 
 function stopPolling() {
-  poller?.stop()
-  poller = null
+  problemsPolling.stop()
 }
 
 /// 每周期：重拉比赛（刷新 ac/total）+ 我的提交状态（仅在需要时）

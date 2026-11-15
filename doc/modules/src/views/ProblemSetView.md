@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-常量：`POLL_INTERVAL_MS`(30s)、`POLL_JITTER_MS`(5s)。模块级普通变量：`poller: Poller | null`（副作用句柄，不进 ref/reactive）、`supplementaryLoaded: boolean`（补充数据是否已触发过）。
+常量：`POLL_INTERVAL_MS`(30s)、`POLL_JITTER_MS`(5s)。setup 作用域普通变量：`problemsPolling`（`createPollerLifecycle` 壳，副作用句柄不进 ref/reactive）、`supplementaryLoaded: boolean`（补充数据是否已触发过）。
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
@@ -25,7 +25,7 @@
 - 组件：`PageHeading`（页头，编号 `01` / `PROBLEM COLLECTION`）/ `ContestStatsBar`（页头右侧插槽）/ `ErrorMessage` / `LoadingSpinner` / `ProblemCard`（目录行）
 - stores：`authStore`（uid）/ `contestStore` / `problemStore` / `rankStore`
 - `@/types/contest`（仅类型）
-- `@/utils/contest`（`getContestPhase`）、`@/utils/polling`（`createPoller` + `Poller` 类型）
+- `@/utils/contest`（`getContestPhase`）、`@/utils/polling`（`createPollerLifecycle`）、`@/utils/page-visibility`（`isPageHidden`）
 
 ## 被依赖
 
@@ -37,14 +37,14 @@
 onMounted:
   ensureContest()            // 外壳通常已发起；在途则等它落地，避免重复请求
   loadSupplementary()        // limits + myStatus + 榜单（无数据时），并发不 await
-  startPolling()             // createPoller(30s±5s, isPaused: document.hidden)
+  startPolling()             // problemsPolling.restart(30s±5s, isPaused: isPageHidden)
 
 每周期 refresh():
   contestStore.loadContest() 失败 → 本周期跳过（保留旧数据）
   supplementaryLoaded → 只重拉 myStatus（刷新 pill）
   未加载过（挂载时题目为空、开赛后首次出现）→ 补拉 loadSupplementary()
 
-onUnmounted → stopPolling()（回收模块级句柄）
+onUnmounted → stopPolling()（回收轮询句柄）
 ```
 
 设计要点：
@@ -58,7 +58,7 @@ onUnmounted → stopPolling()（回收模块级句柄）
   已渲染出卡片后，轮询的瞬时失败不应把整页打回错误态/加载态。
 - **未开始 ≠ 错误**：`phase === 'upcoming'` 且拿不到题目时显示「比赛尚未开始」提示
   （HOJ 此时通常不放题）；若 OJ 提前放题则照常展示卡片。
-- **轮询句柄放模块级普通变量**：副作用句柄而非渲染状态，进 ref/reactive 会被 Vue 深层代理，
+- **轮询句柄放 setup 作用域普通变量**（经 `createPollerLifecycle` 壳持有）：副作用句柄而非渲染状态，进 ref/reactive 会被 Vue 深层代理，
   既无意义又可能干扰句柄语义（与 `utils/polling`、`rankStore` 的约定一致）。
 - 30s±5s 抖动错峰理由见 `utils/polling` 头注释；切后台暂停（`document.hidden`）。
 - 分层约束：View 只经 store 取数，不 import `@/bridge` / `@/services`。

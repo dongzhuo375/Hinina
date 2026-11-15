@@ -10,9 +10,9 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `getContestRank` | `(query: RankQuery) => Promise<ContestRankPage>` | invoke `get_contest_rank`，参数 `{ contestId, currentPage, limit, keyword, removeStar, containsEnd }` |
+| `getContestRank` | `(query: Required<RankQuery>) => Promise<ContestRankPage>` | invoke `get_contest_rank`，参数 `{ contestId, currentPage, limit, keyword, removeStar, containsEnd }` |
 
-可选参数在桥接层归一：`keyword ?? null`、`removeStar ?? false`、`containsEnd ?? false`，保证 Rust 端 `Option` 参数收到确定值。
+参数原样透传，入参类型为 `Required<RankQuery>`（全字段必填）：HOJ 语义默认值的合并单点在 `services/rank.service`（唯一调用方，归一后传入全字段对象），必填形态让「绕过 service 直接以可选字段调 bridge」在编译期不可表达——改一层漏一层的漂移面收敛到 service 单点。
 
 ## 直接依赖
 
