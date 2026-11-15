@@ -37,6 +37,17 @@ describe('useAboutSettings', () => {
     expect(about.storageFailed.value).toBe(true)
   })
 
+  it('失败后重载成功会复位 failed（useAsyncResource 的复位语义，可被重试路径依赖）', async () => {
+    getStorageInfo.mockRejectedValueOnce(new Error('io'))
+    await about.loadStorage()
+    expect(about.storageFailed.value).toBe(true)
+
+    // 重试成功：失败标志复位 + 数据写值（复位语义曾被复制走样，此用例锁死）
+    await about.loadStorage()
+    expect(about.storageFailed.value).toBe(false)
+    expect(about.storage.value?.version).toBe('0.1.2')
+  })
+
   it('复制使用共享 key 反馈并在 2 秒后回弹，失败保持静默', async () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
