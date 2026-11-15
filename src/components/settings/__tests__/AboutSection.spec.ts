@@ -23,7 +23,9 @@ describe('AboutSection 项目仓库行', () => {
     const link = host.querySelector<HTMLAnchorElement>(
       'a[href="https://github.com/dongzhuo375/Hinina"]',
     )
-    expect(link?.getAttribute('aria-label')).toBe('在 GitHub 上查看项目仓库')
+    // 无 aria-label：可见 slug 天然成可访问名（WCAG 2.5.3 label-in-name，
+    // 语音输入说 slug 即匹配）
+    expect(link?.textContent).toContain('dongzhuo375/Hinina')
     expect(link?.querySelector('svg')).not.toBeNull()
     expect(link?.textContent).toContain('dongzhuo375/Hinina')
     expect(link?.hasAttribute('target')).toBe(false)

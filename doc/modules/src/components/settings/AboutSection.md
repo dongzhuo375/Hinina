@@ -15,7 +15,6 @@
 ## 直接依赖
 
 - `SettingsSectionFrame`
-- `utils/external-links`（外链拦截器，点击转交系统浏览器——运行时行为，非 import 依赖）
 - `@/composables/useAboutSettings`（模型类型）
 
 ## 被依赖
