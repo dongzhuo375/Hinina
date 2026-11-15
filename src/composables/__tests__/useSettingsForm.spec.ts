@@ -21,7 +21,8 @@ const mocks = vi.hoisted(() => ({
   resetSessionForOjSwitch: vi.fn(),
   resetAuthForOjSwitch: vi.fn(),
   routerReplace: vi.fn(),
-  // 启动标志响应式快照（systemService.launchFlags）：钥匙模式切换后留在设置页
+  // 启动标志（systemService.launchFlags）：钥匙模式切换后留在设置页。字面量仅类型锚——
+  // mock 工厂会在任何消费前以真 ref 覆盖（Ref 可结构赋给此形状），勿照抄普通对象形态
   launchFlags: { value: { settings: false } },
   // 当前路由（**活对象**：mock 的 currentRoute.value 直接引用它，测试中途可改）
   route: { name: 'Settings' as string | undefined },
@@ -222,12 +223,18 @@ vi.mock('@/services/config.service', async () => {
     isOjSwitchPersistFailed: (e: unknown) => isPersistFailed(e),
   }
 })
-vi.mock('@/services/system.service', () => ({
-  systemService: {
-    launchFlags: mocks.launchFlags,
-    isKeyed: () => mocks.launchFlags.value.settings,
-  },
-}))
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 真 ref 支撑面（生产 launchFlags = readonly(ref)，systemStore.spec 同款打桩）：
+  // isKeyed 经 systemStore getter（computed）消费，支撑必须是响应式 ref
+  mocks.launchFlags = ref({ settings: false })
+  return {
+    systemService: {
+      launchFlags: mocks.launchFlags,
+      isKeyed: () => mocks.launchFlags.value.settings,
+    },
+  }
+})
 vi.mock('@/stores/session', () => ({ resetSessionForOjSwitch: mocks.resetSessionForOjSwitch }))
 /// OJ 切换的认证态复位（与 resetSessionForOjSwitch 成对调用；纯 composable 测试
 /// 无活动 pinia，打桩同 session 模块）

@@ -23,20 +23,27 @@ const mocks = vi.hoisted(() => ({
   loadConfiguredContest: vi.fn(),
   // 当前路由名（最小壳判据的一部分）；默认非 Settings，模拟工作台子路由
   routeName: { value: 'ProblemSet' as string | undefined },
-  // 启动标志响应式快照（systemService.launchFlags）：最小壳判据之一
+  // 启动标志（systemService.launchFlags）：最小壳判据之一。字面量仅类型锚——
+  // mock 工厂会在任何消费前以真 ref 覆盖（Ref 可结构赋给此形状），勿照抄普通对象形态
   launchFlags: { value: { settings: false } },
 }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: mocks.replace }),
   useRoute: () => ({ name: mocks.routeName.value }),
 }))
-vi.mock('@/services/system.service', () => ({
-  systemService: {
-    launchFlags: mocks.launchFlags,
-    // 进程级判据（路由级组合在 systemStore.isKeyedSettingsRoute，真 store 读同一 mock）
-    isKeyed: () => mocks.launchFlags.value.settings,
-  },
-}))
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 真 ref 支撑面（生产 launchFlags = readonly(ref)，systemStore.spec 同款打桩）：
+  // isKeyed 经 systemStore getter（computed）消费，支撑必须是响应式 ref
+  mocks.launchFlags = ref({ settings: false })
+  return {
+    systemService: {
+      launchFlags: mocks.launchFlags,
+      // 进程级判据（路由级组合在 systemStore.isKeyedSettingsRoute，真 store 读同一 mock）
+      isKeyed: () => mocks.launchFlags.value.settings,
+    },
+  }
+})
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => mocks }))
 vi.mock('@/services/contest.service', () => ({ contestService: { loadConfiguredContest: mocks.loadConfiguredContest } }))
 vi.mock('@/components/layout/TopBar.vue', () => ({ default: { template: '<header />' } }))

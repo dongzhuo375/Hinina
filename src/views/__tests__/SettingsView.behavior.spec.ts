@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
   resetDataDir: vi.fn(),
   resetClient: vi.fn(),
   purgeLocalData: vi.fn(),
-  // 启动标志响应式快照（systemService.launchFlags）：分层锁同步读取
+  // 启动标志（systemService.launchFlags）：分层锁同步读取。字面量仅类型锚——
+  // mock 工厂会在任何消费前以真 ref 覆盖（Ref 可结构赋给此形状），勿照抄普通对象形态
   launchFlags: { value: { settings: false } },
   loadContest: vi.fn(),
   invalidateMyStatus: vi.fn(),
@@ -88,20 +89,26 @@ vi.mock('@/services/config.service', async () => {
       e instanceof IpcError && e.variant === 'OjSwitchPersistFailed',
   }
 })
-vi.mock('@/services/system.service', () => ({
-  systemService: {
-    getStorageInfo: mocks.getStorageInfo,
-    localDataUsage: mocks.localDataUsage,
-    getDataDir: mocks.getDataDir,
-    pickDataDir: mocks.pickDataDir,
-    setDataDir: mocks.setDataDir,
-    resetDataDir: mocks.resetDataDir,
-    resetClient: mocks.resetClient,
-    purgeLocalData: mocks.purgeLocalData,
-    launchFlags: mocks.launchFlags,
-    isKeyed: () => mocks.launchFlags.value.settings,
-  },
-}))
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 真 ref 支撑面（生产 launchFlags = readonly(ref)，systemStore.spec 同款打桩）：
+  // isKeyed 经 systemStore getter（computed）消费，支撑必须是响应式 ref
+  mocks.launchFlags = ref({ settings: false })
+  return {
+    systemService: {
+      getStorageInfo: mocks.getStorageInfo,
+      localDataUsage: mocks.localDataUsage,
+      getDataDir: mocks.getDataDir,
+      pickDataDir: mocks.pickDataDir,
+      setDataDir: mocks.setDataDir,
+      resetDataDir: mocks.resetDataDir,
+      resetClient: mocks.resetClient,
+      purgeLocalData: mocks.purgeLocalData,
+      launchFlags: mocks.launchFlags,
+      isKeyed: () => mocks.launchFlags.value.settings,
+    },
+  }
+})
 vi.mock('@/stores/contestStore', () => ({ useContestStore: () => ({ loadContest: mocks.loadContest }) }))
 vi.mock('@/stores/problemStore', () => ({ useProblemStore: () => ({ invalidateMyStatus: mocks.invalidateMyStatus }) }))
 vi.mock('@/stores/announcementStore', () => ({ useAnnouncementStore: () => ({ refresh: mocks.announcementRefresh }) }))

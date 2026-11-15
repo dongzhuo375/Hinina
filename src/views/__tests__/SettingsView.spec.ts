@@ -31,25 +31,36 @@ const mocks = vi.hoisted(() => ({
   routerReplace: vi.fn(),
 }))
 
-vi.mock('@/services/system.service', () => ({
-  systemService: {
-    resetClient: mocks.resetClient,
-    localDataUsage: mocks.localDataUsage,
-    purgeLocalData: mocks.purgeLocalData,
-    getStorageInfo: mocks.getStorageInfo,
-    getDataDir: mocks.getDataDir,
-    // 正常模式（无 --settings）：维护者层保持锁定
-    launchFlags: { value: { settings: false } },
-    isKeyed: () => false,
-  },
-}))
+vi.mock('@/services/system.service', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  // 真 ref 支撑面（生产 launchFlags = readonly(ref)，systemStore.spec 同款打桩）：
+  // isKeyed 经 systemStore getter（computed）消费，支撑必须是响应式 ref。
+  // 本 spec 用例不翻转启动标志，与 busy 一样作工厂局部状态
+  const launchFlags = ref({ settings: false })
+  return {
+    systemService: {
+      resetClient: mocks.resetClient,
+      localDataUsage: mocks.localDataUsage,
+      purgeLocalData: mocks.purgeLocalData,
+      getStorageInfo: mocks.getStorageInfo,
+      getDataDir: mocks.getDataDir,
+      // 正常模式（无 --settings）：维护者层保持锁定
+      launchFlags,
+      isKeyed: () => launchFlags.value.settings,
+    },
+  }
+})
 vi.mock('@/services/config.service', async () => {
   const { readonly, ref } = await vi.importActual<typeof import('vue')>('vue')
   const { IpcError } = await vi.importActual<typeof import('@/bridge')>('@/bridge')
   const busy = ref(false)
   const settingsBusy = ref(false)
-  // 视图级只需「保存门禁 busy 可见 + 直通 bridge 缝」；真实排队语义由
-  // config.service.spec 的「save 门禁」套件锁定
+  // 切换在途标志（生产是读 `switchQueue.inFlight.value` 的 getter，见下方 mock）
+  const switchInFlight = ref(false)
+  // 视图级只需「保存/切换门禁 busy 可见 + 直通 bridge 缝」；真实排队/代际语义由
+  // config.service.spec 的「save 门禁」套件锁定。in-flight 支撑必须是 ref（store
+  // getter 是 computed，普通属性会永久缓存）；扩展「重载期间新切换」类用例前须先
+  // 移植完整孪生（样板：useSettingsForm.spec 的 switchState/saveState）
   async function runSaveTxn<T>(
     fn: (tx: {
       updateConfig: (mutate: (draft: AppConfig) => void) => Promise<AppConfig>
@@ -71,8 +82,16 @@ vi.mock('@/services/config.service', async () => {
       // 刻意不 mock 公共 updateConfig：生产已删除该公开包装
       invalidate: mocks.invalidate,
       latestOjSwitchResult: () => null,
-      ojSwitchEpoch: 0,
-      ojSwitchInFlight: false,
+      // 生产是只读 getter（store 以 action 逐次直读，不做缓存）——mock 同样用
+      // getter，避免「普通属性快照」的形态漂移
+      get ojSwitchEpoch() {
+        return 0
+      },
+      // 生产 getter 读 `switchQueue.inFlight.value`：响应式追踪发生在 .value，
+      // mock 用「getter 包 ref」同构
+      get ojSwitchInFlight() {
+        return switchInFlight.value
+      },
       whenOjSwitchSettled: async () => {},
       get saveEpoch() {
         return 0
