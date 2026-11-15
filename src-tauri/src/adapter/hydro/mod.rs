@@ -21,7 +21,7 @@
 pub mod error;
 pub mod types;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -604,8 +604,25 @@ impl HydroAdapter {
         let Some(pdict) = vo.pdict.as_ref() else {
             return Vec::new();
         };
-        // HashMap 迭代顺序随机，按 docId 升序固定输出顺序
-        let mut entries: Vec<&PdocVO> = pdict.values().collect();
+        // 上游 `problem.getList` 对带 `pid` 的题按 docId + pid **双键**收录同一条
+        // pdoc（`r[pdoc.docId]=pdoc; if (pdoc.pid) l[pdoc.pid]=pdoc; …Object.assign(r,l)`），
+        // 直接迭代 values() 会把同一道题映射两次——实测一场单题比赛返回 2 条重复
+        // 条目（缺口 D21）。按归一 docId 去重、只保留首次出现：HashMap 迭代序随机，
+        // 但双键指向同一条 pdoc，保留哪条结果都相同；docId 缺失时回退用键名，
+        // 至少不把不同条目错并。之后按 docId 升序固定输出顺序。
+        let mut entries: Vec<&PdocVO> = Vec::with_capacity(pdict.len());
+        let mut seen_doc_ids: HashSet<String> = HashSet::with_capacity(pdict.len());
+        for (key, pdoc) in pdict {
+            let doc_id = pdoc
+                .doc_id
+                .as_ref()
+                .map(types::coerce_id)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| key.clone());
+            if seen_doc_ids.insert(doc_id) {
+                entries.push(pdoc);
+            }
+        }
         entries.sort_by_key(|pdoc| pdoc.doc_id_num());
 
         entries

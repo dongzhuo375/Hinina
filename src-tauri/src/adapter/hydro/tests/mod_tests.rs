@@ -1,6 +1,8 @@
 // Hydro mod.rs 单元测试：响应处置、映射 helper、评测记录投影。
 //
-// 夹具均为按 `doc/Hydro/HYDRO-API.md` 手工构造（无可用联调实例）。
+// 夹具有两类出处：按 `doc/Hydro/HYDRO-API.md` 手工构造（contest_list 等，
+// 无 pid 别名键的 pdict 仍是合法形态，保留锁旧契约与多题覆盖）；以及 2026-11-15
+// 实测收编（contest_problems_dual_key，测试部署真实载荷，锁定缺口 D21）。
 
 use super::*;
 use crate::core::entity::submission::JudgementStatus;
@@ -88,6 +90,7 @@ fn fixture(name: &str) -> Value {
     let raw = match name {
         "contest_list" => include_str!("fixtures/contest_list.json"),
         "contest_problems" => include_str!("fixtures/contest_problems.json"),
+        "contest_problems_dual_key" => include_str!("fixtures/contest_problems_dual_key.json"),
         "problem_detail" => include_str!("fixtures/problem_detail.json"),
         "record_detail" => include_str!("fixtures/record_detail.json"),
         "record_list" => include_str!("fixtures/record_list.json"),
@@ -299,6 +302,25 @@ fn map_contest_problems_without_pid_order_falls_back_to_position() {
     // 顺序表缺失时按 docId 升序的下标派生，至少保证字母唯一
     assert_eq!(problems[0].display_id, "A");
     assert_eq!(problems[1].display_id, "B");
+}
+
+#[test]
+fn map_contest_problems_dedupes_pid_alias_keys() {
+    // 实测夹具（2026-11-15 测试部署）：上游 `problem.getList` 对带 `pid` 的题按
+    // docId + pid 双键收录同一道题——pdict 键为 "1"（docId）与 "P1000"（pid 别名），
+    // 直接迭代 values() 曾让单题比赛出现两条重复条目（缺口 D21）
+    let vo: ContestProblemListVO =
+        serde_json::from_value(fixture("contest_problems_dual_key")).unwrap();
+    assert_eq!(vo.pdict.as_ref().unwrap().len(), 2, "夹具本身双键");
+
+    let problems =
+        HydroAdapter::map_contest_problems(&vo, "6af56687ce73a66a8b262d4e", &["1".to_string()]);
+    assert_eq!(problems.len(), 1, "同一道题不得因 pid 别名键重复出现");
+    assert_eq!(problems[0].id, 1);
+    assert_eq!(problems[0].display_id, "A");
+    assert_eq!(problems[0].problem_id, "P1000");
+    assert_eq!(problems[0].display_title, "A+B Problem");
+    assert_eq!(problems[0].cid, "6af56687ce73a66a8b262d4e");
 }
 
 // ── 题目映射 ──
