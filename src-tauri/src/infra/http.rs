@@ -150,11 +150,20 @@ impl HttpClient {
     }
 
     /// 创建指定超时的 HttpClient（超时来自 `oj.timeout_secs` 配置）。
+    ///
+    /// 连接池空闲超时（4s）**必须短于常见部署的服务器 Keep-Alive 超时**（Hydro
+    /// 实测响应头 `Keep-Alive: timeout=5`）：池默认空闲期远长于它时，轮询间隔大于
+    /// 服务器超时的端点（榜单 10s / 题目状态 30s）会复用已被服务器关闭的连接，
+    /// 在读响应体阶段断流（"error decoding response body"）。2026-11-15 联调实测
+    /// 约 5% 的轮询请求如此失败，而 2s 间隔轮询的记录端点几乎不触发——失败集中
+    /// 在「空闲超过服务器超时后的首次复用」。客户端先弃连接，竞态窗口消失；
+    /// 代价是空闲超过 4s 后的请求多一次握手。
     pub fn with_timeout(timeout: Duration) -> Result<Self, reqwest::Error> {
         let client = reqwest::Client::builder()
             .cookie_store(true)
             .user_agent(format!("Hinina/{}", env!("CARGO_PKG_VERSION")))
             .timeout(timeout)
+            .pool_idle_timeout(Duration::from_secs(4))
             .build()?;
         Ok(Self { client })
     }
