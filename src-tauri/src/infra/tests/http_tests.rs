@@ -104,7 +104,7 @@ fn retry_delay_backs_off_exponentially() {
 //
 // 回归背景：5xx 在重试耗尽后曾落到 `return Ok(response)`，把网关的 HTML 错误页
 // 当成正常响应交给上层，最终报成「响应不是合法 JSON」而不是「HTTP 502」，
-// 把排障引向错误方向；同时 retry_get 末尾的 Err(last_error) 成了永不可达的死代码。
+// 把排障引向错误方向；同时 retry_get_text 末尾的 Err(last_error) 成了永不可达的死代码。
 
 #[test]
 fn classify_accepts_success_on_any_attempt() {
@@ -196,9 +196,10 @@ fn with_timeout_builds_client() {
 //
 // raw 变体存在的理由：有些 OJ 把用户可见的错误文案放在响应体里（Hydro 的
 // `{"error":{"name",…}}`），而非 raw 变体在非 2xx 时会丢弃响应体。
-// 两条不能错的判据：① raw 下 4xx **不重试**（重试只会得到同样的结果，
-// 而 4xx 常是「密码错」这类不该重放的请求）；② 5xx **仍重试**，只是耗尽后
-// 返回响应而不是报错（否则 raw 变体等于把 5xx 退避策略整体废掉）。
+// 两条不能错的判据：① raw 下 4xx **不触发状态段重试**（重试只会得到同样的结果，
+// 而 4xx 常是「密码错」这类不该重放的请求；4xx 响应进入 body 段，断流仍重试）；
+// ② 5xx **仍重试**，只是耗尽后返回响应而不是报错（否则 raw 变体等于把 5xx 退避
+// 策略整体废掉）。
 
 #[test]
 fn raw_accepts_client_error_without_retry() {
@@ -381,6 +382,145 @@ async fn custom_headers_and_user_agent_pass_through() {
         "UA 应为 Hinina/{{version}}，实得 {:?}",
         req.header("user-agent")
     );
+
+    server.shutdown();
+}
+
+/// GET body 断流自动重试：首响应声明多于实际字节数后断开连接（**读响应体阶段**
+/// 失败，与发送段失败不是同一失败面——生产日志的 `error decoding response body`
+/// 出自 `.text()` 包装），重试后成功。2026-11-15 联调实测约 5% 轮询在此阶段
+/// 断流，重试吸收之。用例耗时约 1 秒（退避为真实时钟）。
+#[tokio::test]
+async fn get_retries_mid_body_disconnect_then_succeeds() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("partial"),
+        ScriptedResponse::json("ok"),
+    ])
+    .await;
+
+    let (body, _) = client()
+        .get_text_with_headers(&format!("{}/d", server.url()), &Default::default())
+        .await
+        .expect("body 断流应经重试成功");
+    assert_eq!(body, "ok");
+    assert_eq!(
+        server.requests().len(),
+        2,
+        "body 断流与 5xx 同额度：一次重试即止，不得多发"
+    );
+
+    server.shutdown();
+}
+
+/// body 断流重试耗尽后如实报错（与 5xx 耗尽同口径，不静默吞掉）。
+#[tokio::test]
+async fn get_reports_error_when_body_disconnect_exhausts_budget() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("p1"),
+        ScriptedResponse::truncated("p2"),
+        ScriptedResponse::truncated("p3"),
+    ])
+    .await;
+
+    let err = client()
+        .get_text_with_headers(&format!("{}/x", server.url()), &Default::default())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("读取响应体失败")),
+        "重试耗尽应为 body 断流的 Network 错误，实得 {:?}",
+        err
+    );
+    assert_eq!(server.requests().len(), 3, "首次 + 最多 2 次重试");
+
+    server.shutdown();
+}
+
+/// raw 变体同样受 body 断流重试保护（Hydro 通道走 raw，不能只有非 raw 受益）。
+#[tokio::test]
+async fn raw_variant_retries_mid_body_disconnect_too() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("partial"),
+        ScriptedResponse::json(r#"{"url":"/"}"#),
+    ])
+    .await;
+
+    let (status, _, body) = client()
+        .get_text_raw(&format!("{}/r", server.url()), &Default::default())
+        .await
+        .expect("raw 通道 body 断流应经重试成功");
+    assert_eq!(status, 200);
+    assert_eq!(body, r#"{"url":"/"}"#);
+    assert_eq!(server.requests().len(), 2);
+
+    server.shutdown();
+}
+
+/// raw + body 断流耗尽：raw 变体不因状态段挡在 body 段之外——2xx/3xx/4xx 立即
+/// 进入 body 段，5xx 先耗尽状态段重试再进入；因此断流耗尽分支对任意状态可达
+/// （本用例以 200 夹具覆盖；补齐矩阵：非 raw 耗尽与 raw 成功已覆盖）。
+#[tokio::test]
+async fn raw_variant_reports_error_when_body_disconnect_exhausts_budget() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("p1"),
+        ScriptedResponse::truncated("p2"),
+        ScriptedResponse::truncated("p3"),
+    ])
+    .await;
+
+    let err = client()
+        .get_text_raw(&format!("{}/x", server.url()), &Default::default())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("读取响应体失败")),
+        "raw 通道 body 断流耗尽应为 Network 错误，实得 {:?}",
+        err
+    );
+    assert_eq!(server.requests().len(), 3, "首次 + 最多 2 次重试");
+
+    server.shutdown();
+}
+
+/// POST 的 body 断流同样**不重试**（非幂等，防重复提交；重试矩阵只覆盖 GET）。
+/// 两个 POST 变体各打一发 truncated 响应即报 `读取响应体失败`，计数锁死 2。
+#[tokio::test]
+async fn post_never_retries_mid_body_disconnect() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("p1"),
+        ScriptedResponse::truncated("p2"),
+    ])
+    .await;
+
+    let err = client()
+        .post_text_with_headers(
+            &format!("{}/a", server.url()),
+            &serde_json::json!({"code": "x"}),
+            &Default::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("读取响应体失败")),
+        "POST body 断流应直接报错，实得 {:?}",
+        err
+    );
+
+    let err = client()
+        .post_text_raw(
+            &format!("{}/b", server.url()),
+            &serde_json::json!({}),
+            &Default::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("读取响应体失败")),
+        "raw POST body 断流应直接报错，实得 {:?}",
+        err
+    );
+
+    assert_eq!(server.requests().len(), 2, "POST 两个变体各一发，绝不重试");
 
     server.shutdown();
 }

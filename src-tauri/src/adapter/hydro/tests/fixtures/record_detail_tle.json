@@ -1,0 +1,132 @@
+{
+  "udoc": {
+    "_id": 2,
+    "uname": "admin",
+    "mail": "admin@example.com",
+    "perm": "BigInt::-1",
+    "role": "root",
+    "priv": -1,
+    "regat": "2026-11-12T06:57:42.181Z",
+    "loginat": "2026-11-15T08:15:08.579Z",
+    "avatar": "qq:123456789"
+  },
+  "rdoc": {
+    "_id": "6af96c0ace73a66a8b262db5",
+    "status": 3,
+    "uid": 2,
+    "code": "#include <iostream>\n#include <chrono>\nint main(){long long a,b;std::cin>>a>>b;auto t0=std::chrono::steady_clock::now();while(std::chrono::duration<double>(std::chrono::steady_clock::now()-t0).count()<2.0){}std::cout<<a+b<<std::endl;return 0;}\n",
+    "lang": "cc",
+    "pid": 1,
+    "domainId": "system",
+    "score": 0,
+    "time": 2176.329,
+    "memory": 512,
+    "judgeTexts": [],
+    "compilerTexts": [],
+    "testCases": [
+      {
+        "id": 2,
+        "subtaskId": 1,
+        "status": 3,
+        "score": 0,
+        "time": 1088.429,
+        "memory": 508,
+        "message": ""
+      },
+      {
+        "id": 1,
+        "subtaskId": 1,
+        "status": 3,
+        "score": 0,
+        "time": 1087.9,
+        "memory": 512,
+        "message": ""
+      }
+    ],
+    "judger": 1,
+    "judgeAt": "2026-11-15T08:23:40.911Z",
+    "rejudged": false,
+    "contest": "6af56687ce73a66a8b262d4e",
+    "files": {},
+    "subtasks": {
+      "1": {
+        "type": "sum",
+        "score": 0,
+        "status": 3
+      }
+    }
+  },
+  "pdoc": {
+    "_id": "6af5613222c05f100aa58071",
+    "owner": 1,
+    "domainId": "system",
+    "docType": 10,
+    "docId": 1,
+    "title": "A+B Problem",
+    "tag": [
+      "系统测试"
+    ],
+    "hidden": true,
+    "nSubmit": 3,
+    "nAccept": 2,
+    "pid": "P1000",
+    "config": {
+      "count": 0,
+      "memoryMin": 64,
+      "memoryMax": 64,
+      "timeMin": 1000,
+      "timeMax": 1000,
+      "type": "default"
+    },
+    "stats": {
+      "AC": 2,
+      "WA": 0,
+      "TLE": 1,
+      "MLE": 0,
+      "RE": 0,
+      "SE": 0,
+      "IGN": 0,
+      "CE": 0,
+      "s100": 2,
+      "s0": 1
+    }
+  },
+  "tdoc": {
+    "_id": "6af56687ce73a66a8b262d4e",
+    "content": "111",
+    "owner": 2,
+    "domainId": "system",
+    "docType": 30,
+    "docId": "6af56687ce73a66a8b262d4e",
+    "assign": [],
+    "duration": null,
+    "title": "11111111111111111111111111",
+    "rule": "acm",
+    "beginAt": "2026-11-12T07:15:00.000Z",
+    "endAt": "2026-11-20T15:15:00.000Z",
+    "pids": [
+      1
+    ],
+    "attend": 1,
+    "rated": true,
+    "allowPrint": false,
+    "allowTeam": false,
+    "allowViewCode": true,
+    "autoHide": true,
+    "keepScoreboardHidden": false,
+    "langs": [
+      "cc.cc98o2",
+      "cc",
+      "cc.cc11",
+      "cc.cc11o2",
+      "py.py3",
+      "py",
+      "py.py2",
+      "rs",
+      "php"
+    ],
+    "lockAt": null,
+    "maintainer": []
+  },
+  "allRevs": {}
+}

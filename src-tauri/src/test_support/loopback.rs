@@ -29,6 +29,10 @@ pub struct ScriptedResponse {
     /// 发送本响应前的延迟：用于制造「请求在途期间测试侧继续操作」的真实竞态
     /// （如探测进行中换号登录）。
     pub delay: std::time::Duration,
+    /// **body 断流形态**：`Content-Length` 多报 16 字节、写完 `body` 后立刻断开
+    /// 连接——客户端在读响应体阶段拿到「连接早闭」，与生产日志的
+    /// `error decoding response body` 同一失败面（区别于发送段失败）。
+    pub truncate: bool,
 }
 
 impl ScriptedResponse {
@@ -39,6 +43,7 @@ impl ScriptedResponse {
             headers: Vec::new(),
             body: body.into(),
             delay: std::time::Duration::ZERO,
+            truncate: false,
         }
     }
 
@@ -49,6 +54,18 @@ impl ScriptedResponse {
             headers,
             body: body.into(),
             delay: std::time::Duration::ZERO,
+            truncate: false,
+        }
+    }
+
+    /// 200 + body 断流：声明多于实际字节数，写完 `body` 即断开。
+    pub fn truncated(body: impl Into<String>) -> Self {
+        Self {
+            status: 200,
+            headers: Vec::new(),
+            body: body.into(),
+            delay: std::time::Duration::ZERO,
+            truncate: true,
         }
     }
 
@@ -160,6 +177,7 @@ async fn run_server(
                             headers: Vec::new(),
                             body: "scripted queue exhausted".into(),
                             delay: std::time::Duration::ZERO,
+                            truncate: false,
                         }
                     })
                 };
@@ -168,11 +186,14 @@ async fn run_server(
                     tokio::time::sleep(response.delay).await;
                 }
 
+                // truncate：Content-Length 多报 16 字节且不补足——客户端读 body
+                // 时连接早闭（body 断流失败面）
+                let declared = response.body.len() + if response.truncate { 16 } else { 0 };
                 let mut head = format!(
                     "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n",
                     response.status,
                     reason_phrase(response.status),
-                    response.body.len(),
+                    declared,
                 );
                 for (k, v) in &response.headers {
                     head.push_str(&format!("{}: {}\r\n", k, v));
@@ -182,6 +203,9 @@ async fn run_server(
                 let _ = socket.write_all(head.as_bytes()).await;
                 let _ = socket.write_all(response.body.as_bytes()).await;
                 let _ = socket.flush().await;
+                if response.truncate {
+                    break; // 丢弃 socket：声明的字节数没写完就断开
+                }
             } // keep-alive 循环：继续读同连接上的下一个请求
         });
     }

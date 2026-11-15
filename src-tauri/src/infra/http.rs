@@ -119,9 +119,10 @@ enum StatusDecision {
 /// 把网关的 HTML 错误页当成正常响应交给上层，最终报成「响应不是合法 JSON」
 /// 而不是「HTTP 502」，把排障引向错误方向；同时末尾的 `Err(last_error)` 成了死代码。
 ///
-/// `allow_error` 由 raw 变体传入（`get_text_raw` / `post_text_raw`）：**任意状态码
+/// `allow_error` 由 GET 的 raw 变体（`get_text_raw`）传入：**任意状态码
 /// 都返回原始响应**，因为有些 OJ 把错误信息放在响应体里，而响应体在非 raw 变体里
-/// 会被丢弃。5xx 仍然重试（GET 幂等），只是**重试耗尽后返回响应而不是报错**。
+/// 会被丢弃（POST 非幂等不重试，不走本判据）。5xx 仍然重试（GET 幂等），只是
+/// **重试耗尽后返回响应而不是报错**。
 fn classify_status(status: reqwest::StatusCode, attempt: u32, allow_error: bool) -> StatusDecision {
     if status.is_server_error() {
         return if attempt < MAX_RETRIES {
@@ -184,23 +185,19 @@ impl HttpClient {
 
     // ── 请求方法 ──
 
-    /// 发送 GET 请求，返回**原始响应体**与响应头（自动重试 5xx）。
+    /// 发送 GET 请求，返回**原始响应体**与响应头（自动重试 5xx 与 body 断流）。
     ///
     /// `headers` 由调用方注入并**原样附加**（认证方式是 Adapter 层概念，
     /// infra 不感知 —— 空 map 即无附加头）。
-    /// 对 4xx 错误直接返回 `AppError::Network`（含状态码），不重试。
+    /// 对 4xx 错误直接返回 `AppError::Network`（含状态码与响应体摘录），不重试。
     /// 响应头原样暴露给调用方，用于解析协议特定的头语义（如 HOJ 的 token 轮换）。
     pub async fn get_text_with_headers(
         &self,
         url: &str,
         headers: &reqwest::header::HeaderMap,
     ) -> AppResult<(String, reqwest::header::HeaderMap)> {
-        let response = self.retry_get(url, headers, false).await?;
-        let response_headers = response.headers().clone();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| crate::core::error::AppError::Network(format!("读取响应体失败: {}", e)))?;
+        let (status, response_headers, body) = self.retry_get_text(url, headers, false).await?;
+        debug_assert!(status.is_success(), "非 raw 变体的非 2xx 已在重试层报错");
         Ok((body, response_headers))
     }
 
@@ -211,8 +208,9 @@ impl HttpClient {
     /// `{"error":{"name","params","code"}}` 是用户可见文案的唯一来源），而 4xx/5xx 的
     /// 响应体在非 raw 变体里会被丢弃，调用方只能得到一句「HTTP 403」。
     ///
-    /// 重试策略：5xx 仍按退避重试（GET 幂等），**重试耗尽后把最后一次响应原样返回**；
-    /// 4xx 不重试（重试只会得到同样的结果）。
+    /// 重试策略：5xx 与 body 断流仍按退避重试（GET 幂等）；
+    /// **5xx 重试耗尽后把最后一次响应原样返回，body 断流耗尽后报
+    /// `Err(读取响应体失败 {url}: {e})`**；4xx 不触发状态段重试（body 断流仍重试）。
     ///
     /// **调用方需自行处理状态码语义**：401 不会自动变成 `Auth` 变体，而前端
     /// `sessionGuard` 的会话失效判定依赖该变体 —— 用本方法就必须自己映射
@@ -222,14 +220,7 @@ impl HttpClient {
         url: &str,
         headers: &reqwest::header::HeaderMap,
     ) -> AppResult<(reqwest::StatusCode, reqwest::header::HeaderMap, String)> {
-        let response = self.retry_get(url, headers, true).await?;
-        let status = response.status();
-        let response_headers = response.headers().clone();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| crate::core::error::AppError::Network(format!("读取响应体失败: {}", e)))?;
-        Ok((status, response_headers, body))
+        self.retry_get_text(url, headers, true).await
     }
 
     /// 发送 POST 请求（JSON body），返回**原始响应体**与响应头。
@@ -291,54 +282,33 @@ impl HttpClient {
 
     // ── 内部重试逻辑 ──
 
-    /// 发送 GET 请求，对 5xx 与传输错误自动重试（最多 2 次，指数退避 1s/2s）。
+    /// 发送 GET 请求并把**响应体读取纳入重试循环**（最多 2 次，指数退避 1s/2s）。
     ///
-    /// 4xx 直接报错不重试（客户端错误重试只会得到同样的结果）；
-    /// **5xx 在重试耗尽后**：`allow_error` 为假时报错（不把错误页当正常响应交给上层
-    /// 解析），为真时返回最后一次响应让调用方自己读状态码与响应体
-    /// （处置判据见 `classify_status`）。请求头每次重试原样重附。
-    async fn retry_get(
+    /// 三段失败都在额度内退避重试（GET 幂等，请求头每次原样重附）：
+    /// ① 发送段（`req.send()` Err）；② 状态段（5xx，处置判据见 `classify_status`）；
+    /// ③ **body 断流**（读响应体阶段连接早闭/中断）。
+    ///
+    /// ③ 的背景（2026-11-15 联调实测）：榜单/题目列表等轮询端点约 5% 的请求在
+    /// **读 body 阶段**失败（`error decoding response body`），与发送段失败不是
+    /// 同一失败面——根因方向未定（服务端中途中断或中间设备干扰），但 GET 幂等，
+    /// 重试对两种来源都有效，用户不再可见。**4xx 不触发状态段重试**：非 raw 直接
+    /// 报错（客户端错误重试只会得到同样的结果）；raw 变体的 4xx 会进入 body 段，
+    /// body 断流仍按额度重试（GET 幂等）。**5xx 在重试耗尽后**：`allow_error` 为假
+    /// 时报错（不把错误页当正常响应交给上层解析），为真时返回最后一次响应的
+    /// (status, headers, body) 让调用方自己读状态码与响应体。
+    async fn retry_get_text(
         &self,
         url: &str,
         headers: &reqwest::header::HeaderMap,
         allow_error: bool,
-    ) -> AppResult<reqwest::Response> {
+    ) -> AppResult<(reqwest::StatusCode, reqwest::header::HeaderMap, String)> {
         let mut last_error: Option<crate::core::error::AppError> = None;
 
         for attempt in 0..=MAX_RETRIES {
             let req = self.client.get(url).headers(headers.clone());
 
-            match req.send().await {
-                Ok(response) => {
-                    let status = response.status();
-                    match classify_status(status, attempt, allow_error) {
-                        StatusDecision::Accept => return Ok(response),
-                        StatusDecision::Fail => {
-                            let excerpt = read_error_excerpt(response).await;
-                            return Err(status_error_with_body(url, status, &excerpt));
-                        }
-                        StatusDecision::Retry => {
-                            let delay = retry_delay(attempt);
-                            // 重试决策必须可归因：3 秒级延迟静默吞掉，
-                            // 排障时只会看到「突然变慢」而不知道在重试
-                            warn!(
-                                url = %url,
-                                status = %status,
-                                attempt = attempt + 1,
-                                delay_ms = delay.as_millis() as u64,
-                                "服务端错误，稍后重试"
-                            );
-                            tokio::time::sleep(delay).await;
-                            last_error = Some(crate::core::error::AppError::Network(format!(
-                                "服务端错误 {} (status: {})，第 {} 次重试",
-                                url,
-                                status,
-                                attempt + 1
-                            )));
-                            continue;
-                        }
-                    }
-                }
+            let response = match req.send().await {
+                Ok(response) => response,
                 Err(e) => {
                     if attempt < MAX_RETRIES {
                         let delay = retry_delay(attempt);
@@ -360,6 +330,65 @@ impl HttpClient {
                     }
                     return Err(crate::core::error::AppError::Network(format!(
                         "GET 请求失败 {}: {}",
+                        url, e
+                    )));
+                }
+            };
+            let status = response.status();
+
+            match classify_status(status, attempt, allow_error) {
+                StatusDecision::Accept => {}
+                StatusDecision::Fail => {
+                    let excerpt = read_error_excerpt(response).await;
+                    return Err(status_error_with_body(url, status, &excerpt));
+                }
+                StatusDecision::Retry => {
+                    let delay = retry_delay(attempt);
+                    // 重试决策必须可归因：3 秒级延迟静默吞掉，
+                    // 排障时只会看到「突然变慢」而不知道在重试
+                    warn!(
+                        url = %url,
+                        status = %status,
+                        attempt = attempt + 1,
+                        delay_ms = delay.as_millis() as u64,
+                        "服务端错误，稍后重试"
+                    );
+                    tokio::time::sleep(delay).await;
+                    last_error = Some(crate::core::error::AppError::Network(format!(
+                        "服务端错误 {} (status: {})，第 {} 次重试",
+                        url,
+                        status,
+                        attempt + 1
+                    )));
+                    continue;
+                }
+            }
+
+            let response_headers = response.headers().clone();
+            match response.text().await {
+                Ok(body) => return Ok((status, response_headers, body)),
+                Err(e) => {
+                    // body 断流与发送段失败同类处理：额度内退避重发整个请求
+                    if attempt < MAX_RETRIES {
+                        let delay = retry_delay(attempt);
+                        warn!(
+                            url = %url,
+                            error = %e,
+                            attempt = attempt + 1,
+                            delay_ms = delay.as_millis() as u64,
+                            "读取响应体失败，稍后重试"
+                        );
+                        tokio::time::sleep(delay).await;
+                        last_error = Some(crate::core::error::AppError::Network(format!(
+                            "读取响应体失败 {}: {}，第 {} 次重试",
+                            url,
+                            e,
+                            attempt + 1
+                        )));
+                        continue;
+                    }
+                    return Err(crate::core::error::AppError::Network(format!(
+                        "读取响应体失败 {}: {}",
                         url, e
                     )));
                 }

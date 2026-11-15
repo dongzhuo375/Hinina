@@ -1,6 +1,8 @@
 // Hydro mod.rs 单元测试：响应处置、映射 helper、评测记录投影。
 //
-// 夹具均为按 `doc/Hydro/HYDRO-API.md` 手工构造（无可用联调实例）。
+// 夹具有两类出处：按 `doc/Hydro/HYDRO-API.md` 手工构造（contest_list 等，
+// 无 pid 别名键的 pdict 仍是合法形态，保留锁旧契约与多题覆盖）；以及 2026-11-15
+// 实测收编（contest_problems_dual_key / record_list_real，测试部署真实载荷，锁定缺口 D21 与实测线格式契约）。
 
 use super::*;
 use crate::core::entity::submission::JudgementStatus;
@@ -88,9 +90,11 @@ fn fixture(name: &str) -> Value {
     let raw = match name {
         "contest_list" => include_str!("fixtures/contest_list.json"),
         "contest_problems" => include_str!("fixtures/contest_problems.json"),
+        "contest_problems_dual_key" => include_str!("fixtures/contest_problems_dual_key.json"),
         "problem_detail" => include_str!("fixtures/problem_detail.json"),
         "record_detail" => include_str!("fixtures/record_detail.json"),
         "record_list" => include_str!("fixtures/record_list.json"),
+        "record_list_real" => include_str!("fixtures/record_list_real.json"),
         other => panic!("未登记的夹具: {}", other),
     };
     let mut value: Value = serde_json::from_str(raw).expect("夹具必须是合法 JSON");
@@ -299,6 +303,106 @@ fn map_contest_problems_without_pid_order_falls_back_to_position() {
     // 顺序表缺失时按 docId 升序的下标派生，至少保证字母唯一
     assert_eq!(problems[0].display_id, "A");
     assert_eq!(problems[1].display_id, "B");
+}
+
+#[test]
+fn map_contest_problems_dedupes_pid_alias_keys() {
+    // 实测夹具（2026-11-15 测试部署）：上游 `problem.getList` 对带 `pid` 的题按
+    // docId + pid 双键收录同一道题——pdict 键为 "1"（docId）与 "P1000"（pid 别名），
+    // 直接迭代 values() 曾让单题比赛出现两条重复条目（缺口 D21）
+    let vo: ContestProblemListVO =
+        serde_json::from_value(fixture("contest_problems_dual_key")).unwrap();
+    assert_eq!(vo.pdict.as_ref().unwrap().len(), 2, "夹具本身双键");
+
+    let problems =
+        HydroAdapter::map_contest_problems(&vo, "6af56687ce73a66a8b262d4e", &["1".to_string()]);
+    assert_eq!(problems.len(), 1, "同一道题不得因 pid 别名键重复出现");
+    assert_eq!(problems[0].id, 1);
+    assert_eq!(problems[0].display_id, "A");
+    assert_eq!(problems[0].problem_id, "P1000");
+    assert_eq!(problems[0].display_title, "A+B Problem");
+    assert_eq!(problems[0].cid, "6af56687ce73a66a8b262d4e");
+}
+
+#[test]
+fn map_contest_problems_dedup_fallback_uses_namespaced_keys() {
+    // 回退链 docId → pid → 键名各带命名空间前缀：
+    // ① 缺 docId 的别名对按 pid 去重；② docId 与 pid 数值相同也不串题
+    let vo: ContestProblemListVO = serde_json::from_value(serde_json::json!({
+        "pdict": {
+            "1":  { "docId": 5, "title": "A" },
+            "2":  { "pid": "5", "title": "B" },
+            "10": { "pid": "P7", "title": "C" },
+            "P7": { "pid": "P7", "title": "C" },
+            "20": { "title": "D" },
+            "21": { "title": "D" }
+        }
+    }))
+    .unwrap();
+    // "1"/"2" 键的两个条目 docId 缺失、pid 数值同为 "5"——命名空间不同不得错并。
+    // 断言用计数而非顺序：缺 docId 的条目 doc_id_num 同为 0，稳定排序后相对顺序
+    // 随 HashMap 迭代序漂移
+    let problems = HydroAdapter::map_contest_problems(&vo, "cid", &[]);
+    assert_eq!(
+        problems.len(),
+        5,
+        "六键去重后 5 条：A/B/C/D，仅 C 的别名对并一条"
+    );
+    // 缺 docId 的别名对（"10"/"P7" 同 pid "P7"）按 pid 去重为一条
+    assert_eq!(
+        problems.iter().filter(|p| p.display_title == "C").count(),
+        1
+    );
+    // docId 与 pid 均缺失的两个条目键名不同——各算一道（键名前缀永唯一）
+    assert_eq!(
+        problems.iter().filter(|p| p.display_title == "D").count(),
+        2
+    );
+    // docId "5" 与 pid "5" 不同命名空间：A/B 都保留
+    assert_eq!(
+        problems.iter().filter(|p| p.display_title == "A").count(),
+        1
+    );
+    assert_eq!(
+        problems.iter().filter(|p| p.display_title == "B").count(),
+        1
+    );
+}
+
+#[test]
+fn submission_record_maps_from_dual_key_pdict_fixture() {
+    // 实测夹具（record_list_real）：双键 pdict 下 `into_submission_record` 按 docId
+    // 键反查 pdoc 的映射路径（display_pid/title）——旧单键夹具只覆盖了同形路径
+    let vo: RecordListVO = serde_json::from_value(fixture("record_list_real")).unwrap();
+    let rdoc = &vo.rdocs.as_ref().unwrap()[0];
+    let record = HydroAdapter::into_submission_record(
+        rdoc,
+        &vo.pdict.unwrap_or_default(),
+        &vo.udict.unwrap_or_default(),
+        &["1".to_string()],
+        true, // tdoc.rule == "acm"
+    );
+
+    assert_eq!(record.pid, "1");
+    assert_eq!(
+        record.display_pid, "P1000",
+        "双键 pdict 按 docId 键反查 pdoc"
+    );
+    assert_eq!(record.title, "A+B Problem");
+    assert_eq!(record.display_id, "A", "pids 下标 0 → 展示字母");
+    assert_eq!(record.owner_id.as_deref(), Some("2"));
+    assert_eq!(record.username, "admin");
+    assert!(matches!(record.status, JudgementStatus::Accepted));
+    // ACM 契约：score 必须为 None（Hydro 对 ACM 也回 100）
+    assert_eq!(record.score, None);
+    assert_eq!(record.time_ms, 3, "浮点毫秒 3.393 取整");
+    assert_eq!(record.memory_kb, 508);
+    assert_eq!(record.language, "C++", "lang key cc → HOJ 显示名");
+    // 提交时刻取 ObjectId 前缀（judgeAt 只是评测完成时刻）
+    assert_eq!(
+        record.submit_time,
+        types::objectid_seconds("6af56937ce73a66a8b262d57").unwrap()
+    );
 }
 
 // ── 题目映射 ──

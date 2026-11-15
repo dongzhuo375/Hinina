@@ -388,11 +388,57 @@ pub fn coerce_id(value: &Value) -> String {
 }
 
 /// 把可能是数字或字符串的值归一为 i64。
+///
+/// 截断口径（`as`）：这里归一的是 **ID/计数类**值；测量值（毫秒）的取整走
+/// [`de_opt_i64_from_number`]（四舍五入），勿混用。
 pub fn coerce_i64(value: &Value) -> Option<i64> {
     match value {
         Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
         Value::String(s) => s.trim().parse::<i64>().ok(),
         _ => None,
+    }
+}
+
+/// 把 JSON 数字（整数或浮点）反序列化为 `Option<i64>` 的 serde 钩子（缺口 D22）。
+///
+/// 背景（2026-11-15 实测定标）：上游 master 的 hydrojudge 以
+/// `Math.floor(total_time * 1e6) / 1e6`（`packages/hydrojudge/src/flow.ts:134`）
+/// 产出**带小数的毫秒数**（实测 `rdoc.time: 3.393`、`testCases[].time: 1.48`；
+/// 单位仍是毫秒——2 秒死循环被判 TLE 时单点报 1088.429）。serde 的 `i64` 字段
+/// 遇浮点直接报 `invalid type: floating point`，整份 rdoc 解析失败——评测
+/// 轮询/列表/详情/测试点四条通道全灭。整数原样收下、浮点四舍五入为毫秒整数
+/// （与 `coerce_i64` 的截断口径**刻意不同**：这里取整的是测量值，那里归一的是
+/// ID）；**非数字（字符串等）仍按类型错误拒绝**——不过度容忍，毫秒语义不收字符串。
+/// 极端边界：超出 `i64` 值域的浮点经 `as` 饱和为 `i64::MAX`（旧行为是干净的
+/// 类型错误）——无实害，仅记录口径。
+pub fn de_opt_i64_from_number<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(number) = value.as_number() else {
+        return Err(serde::de::Error::invalid_type(
+            unexpected_of(&value),
+            &"a JSON number (integer or fractional milliseconds)",
+        ));
+    };
+    Ok(Some(number.as_i64().unwrap_or_else(|| {
+        number.as_f64().map_or(0, |f| f.round() as i64)
+    })))
+}
+
+/// 把非数字 JSON 值映射为 `serde::de::Unexpected`（仅用于类型错误文案）。
+fn unexpected_of(value: &Value) -> serde::de::Unexpected<'_> {
+    match value {
+        Value::Null => serde::de::Unexpected::Unit,
+        Value::Bool(b) => serde::de::Unexpected::Bool(*b),
+        Value::String(s) => serde::de::Unexpected::Str(s),
+        Value::Array(_) => serde::de::Unexpected::Seq,
+        Value::Object(_) => serde::de::Unexpected::Map,
+        Value::Number(_) => unreachable!("调用方已确保非 Number"),
     }
 }
 
@@ -687,10 +733,11 @@ pub struct ContestDetailVO {
 pub struct ContestProblemListVO {
     #[serde(default)]
     pub tdoc: Option<TdocVO>,
-    /// key = docId
+    /// **docId + pid 双键**（上游 `problem.getList` 对带 `pid` 的题两种键各收录
+    /// 一条同值条目，缺口 D21）——消费方必须按 docId 去重，不能假设键唯一
     #[serde(default)]
     pub pdict: Option<HashMap<String, PdocVO>>,
-    /// key = docId（**不是 pid**），值为 `ProblemStatusDoc`
+    /// key = docId（实测确为 docId 单键，非双键），值为 `ProblemStatusDoc`
     #[serde(default)]
     pub psdict: Option<HashMap<String, Value>>,
 }
@@ -721,7 +768,10 @@ pub struct SubmitVO {
     pub tid: Option<Value>,
 }
 
-/// 单个测试点（`rdoc.testCases[]`）
+/// 单个测试点（`rdoc.testCases[]`）。
+///
+/// `time`/`memory` 实测为**带小数的毫秒/KiB**（缺口 D22），经
+/// `de_opt_i64_from_number` 收数字并取整——写死 `i64` 会让整份 rdoc 解析失败。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestCaseVO {
@@ -733,9 +783,9 @@ pub struct TestCaseVO {
     pub status: Option<i64>,
     #[serde(default)]
     pub score: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub time: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub memory: Option<i64>,
     #[serde(default)]
     pub message: Option<String>,
@@ -758,11 +808,12 @@ pub struct RdocVO {
     pub code: Option<String>,
     #[serde(default)]
     pub score: Option<f64>,
-    /// 运行耗时（毫秒）
-    #[serde(default)]
+    /// 运行耗时（毫秒）。实测上游 master 给**带小数的毫秒**（缺口 D22），经
+    /// `de_opt_i64_from_number` 收数字并取整——整数毫秒的旧形态同样收下
+    #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub time: Option<i64>,
-    /// 运行内存（KiB）
-    #[serde(default)]
+    /// 运行内存（KiB）。同 `time` 容忍浮点形态（实测样本均为整数，防御同源失败）
+    #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub memory: Option<i64>,
     #[serde(default)]
     pub status: Option<i64>,
@@ -771,8 +822,12 @@ pub struct RdocVO {
     pub compiler_texts: Option<Vec<String>>,
     #[serde(default)]
     pub test_cases: Option<Vec<TestCaseVO>>,
+    /// 子任务汇总。**实测是对象形态** `{"<subtaskId>": {...}}`（`cancel` 操作写
+    /// `{}`；旧文档示例的数组形态同样收下）。**刻意不解析**：它是逐测试点数据的
+    /// 冗余汇总，子任务分组用 `testCases[].subtaskId` 这一稳定键即可完整还原
+    /// （见 `group_sub_tasks`），不必依赖汇总形态
     #[serde(default)]
-    pub subtasks: Option<Vec<Value>>,
+    pub subtasks: Option<Value>,
     #[serde(default)]
     pub judger: Option<Value>,
     /// 评测完成时刻（**不是提交时刻**，见 `objectid_seconds`）
@@ -854,7 +909,8 @@ pub struct RecordListVO {
     pub page: Option<i64>,
     #[serde(default)]
     pub rdocs: Option<Vec<RdocVO>>,
-    /// key = pid（字符串形态的数字）
+    /// **docId + pid 双键**（缺口 D21，同 `ContestProblemListVO.pdict`）；记录的
+    /// `pid` 是 docId，按 docId 键取值不受别名键影响
     #[serde(default)]
     pub pdict: Option<HashMap<String, PdocVO>>,
     #[serde(default)]

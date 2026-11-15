@@ -21,7 +21,7 @@
 pub mod error;
 pub mod types;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -302,7 +302,8 @@ impl HydroAdapter {
     /// 「HTTP 403」。代价是 401 不会自动变成 `Auth` 变体，故本适配器自己映射
     /// （见 `http_status_error`，判据与 infra 的 `status_error` 一致）。
     ///
-    /// 重试由 infra 负责：5xx 退避重试（GET 幂等），耗尽后返回响应而非报错。
+    /// 重试由 infra 负责：5xx 与 body 断流退避重试（GET 幂等）；5xx 耗尽返回
+    /// 响应，body 耗尽报 `Err(读取响应体失败 …)`。
     async fn get_raw(&self, path: &str, inject_user: bool) -> AppResult<HydroResponse> {
         let url = self.url(path);
         let (status, headers, body) = self
@@ -604,8 +605,34 @@ impl HydroAdapter {
         let Some(pdict) = vo.pdict.as_ref() else {
             return Vec::new();
         };
-        // HashMap 迭代顺序随机，按 docId 升序固定输出顺序
-        let mut entries: Vec<&PdocVO> = pdict.values().collect();
+        // 上游 `problem.getList` 对带 `pid` 的题按 docId + pid **双键**收录同一条
+        // pdoc（`r[pdoc.docId]=pdoc; if (pdoc.pid) l[pdoc.pid]=pdoc; …Object.assign(r,l)`），
+        // 直接迭代 values() 会把同一道题映射两次——实测一场单题比赛返回 2 条重复
+        // 条目（缺口 D21）。按归一 docId 去重、只保留首次出现：HashMap 迭代序随机，
+        // 但双键指向同一条 pdoc，保留哪条结果都相同。回退链 docId → pid → 键名
+        // 各带命名空间前缀，防跨域碰撞（docId "5" 与 pid "5" 不是同一标识）；
+        // 键名前缀保证不同条目永不被错并。之后按 docId 升序固定输出顺序。
+        let mut entries: Vec<&PdocVO> = Vec::with_capacity(pdict.len());
+        let mut seen_identity_keys: HashSet<String> = HashSet::with_capacity(pdict.len());
+        for (key, pdoc) in pdict {
+            let doc_id = pdoc
+                .doc_id
+                .as_ref()
+                .map(types::coerce_id)
+                .filter(|s| !s.is_empty())
+                .map(|id| format!("d:{id}"))
+                .or_else(|| {
+                    pdoc.pid
+                        .as_ref()
+                        .map(types::coerce_id)
+                        .filter(|s| !s.is_empty())
+                        .map(|pid| format!("p:{pid}"))
+                })
+                .unwrap_or_else(|| format!("k:{key}"));
+            if seen_identity_keys.insert(doc_id) {
+                entries.push(pdoc);
+            }
+        }
         entries.sort_by_key(|pdoc| pdoc.doc_id_num());
 
         entries
@@ -766,10 +793,11 @@ impl HydroAdapter {
 
     /// 按 `subtaskId` 把测试点分组为子任务。
     ///
-    /// 刻意**不解析 `rdoc.subtasks`**：文档未给出其结构（只有一句
-    /// 「`rdoc.subtasks`」），而 `testCases[].subtaskId` 是明确存在的字段，
-    /// 由它分组既确定又不依赖猜测。没有子任务的题返回空列表
-    /// （前端 `hasSubTasks` 为假 → 走平铺展示）。
+    /// 刻意**不解析 `rdoc.subtasks`**：实测它是按 subtaskId 键的**冗余汇总**对象
+    /// （`{"<subtaskId>": {type, score, status}}`，见 `HYDRO-API.md` 实测补充），
+    /// 而逐测试点分组用 `testCases[].subtaskId` 这一**稳定分组键**即可完整还原，
+    /// 不必依赖汇总形态（该字段在赛制投影下还会被整体删除）。没有子任务的题
+    /// 返回空列表（前端 `hasSubTasks` 为假 → 走平铺展示）。
     fn group_sub_tasks(cases: &[JudgeCase]) -> Vec<SubTaskCases> {
         let mut groups: HashMap<i64, Vec<JudgeCase>> = HashMap::new();
         for case in cases {
@@ -988,7 +1016,7 @@ impl ContestProvider for HydroAdapter {
     /// 比赛题目列表：`GET /contest/:tid/problems`。
     ///
     /// 展示字母由 `tdoc.pids` 的**下标**派生（Hydro 自身的规则），
-    /// 因为 `pdict` 是按 docId 键的映射，且 JS 对象的数字键会被重排 ——
+    /// 因为 `pdict` 是 docId + pid 双键映射（缺口 D21）且 JS 对象的数字键会被重排 ——
     /// 不能靠键顺序推字母。
     async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
         let vo: ContestProblemListVO = self

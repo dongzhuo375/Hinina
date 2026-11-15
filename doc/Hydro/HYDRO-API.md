@@ -3486,7 +3486,7 @@ GET /record
 | `page` | number | 当前页 |
 | `rdocs` | `RecordDoc[]` | 记录列表（已按上下文投影/裁剪） |
 | `tdoc` | `Tdoc \| null` | 比赛文档 |
-| `pdict` | object | `pid → ProblemDoc` |
+| `pdict` | object | **docId + pid 双键**：`problem.getList` 对带 `pid` 的题按 `docId` 与 `pid` 各收录一条（同一 `ProblemDoc`）。**2026-11-15 实测**（上游 master `Object.assign(r, l)`）：单题比赛返回 `{"1": …, "P1000": …}` 两个键——消费方必须按 docId 去重，不能假设键唯一。接口参考中其余 `ProblemDict` / `pdict` 条目（训练/作业/榜单等）同源同键 |
 | `udict` | object | `uid → User` |
 | `all` | boolean | 回显 |
 | `allDomain` | boolean | 回显 |
@@ -3509,7 +3509,7 @@ Accept: application/json
   "page": 1,
   "rdocs": [{ "_id": "6530f0c1a1b2c3d4e5f60718", "pid": 1000, "uid": 2, "lang": "cc", "status": 1, "score": 100, "time": 12, "memory": 1024, "progress": null }],
   "tdoc": null,
-  "pdict": { "1000": { "docId": 1000, "pid": "P1000", "title": "A+B Problem" } },
+  "pdict": { "1000": { "docId": 1000, "pid": "P1000", "title": "A+B Problem" }, "P1000": { "docId": 1000, "pid": "P1000", "title": "A+B Problem" } },
   "udict": { "2": { "_id": 2, "uname": "admin" } },
   "all": false,
   "allDomain": false,
@@ -3573,6 +3573,8 @@ POST /record/:rid
 | `url` | string | 当 `download=true` 触发重定向时由 base 层附加 |
 
 `RecordDoc` 主要字段（`interface.ts` 的 `RecordDoc` = `RecordPayload` + `_id`）：`_id`、`domainId`、`pid`、`uid`、`lang`、`code`、`score`、`time`、`memory`、`status`、`judgeTexts`、`compilerTexts`、`testCases`、`subtasks`、`judger`、`judgeAt`、`rejudged`、`progress`、`contest`、`files`、`hackTarget`、`input`（自测）、`notify`。
+
+> **2026-11-15 实测补充**（测试部署 + 上游 master 源码）：① `time` / `testCases[].time` 是**带小数的毫秒**（hydrojudge `flow.ts` 的 `Math.floor(total_time*1e6)/1e6`；实测 `time: 3.393`、单点 `time: 1.913`；2 秒死循环被判 TLE 时单点 1088.429 → 单位定标为毫秒），客户端取整为毫秒整数消费；② `subtasks` 是**对象** `{"<subtaskId>": { type, score, status }}`（`cancel` 操作写 `{}`），不是数组。③ 比赛进行中的 ACM/OI 投影可能整体删除这些字段（见上文 `applyProjection` 裁剪逻辑表），字段缺省属正常形态。
 
 **POST 子操作（`operation`）**
 
@@ -4648,7 +4650,7 @@ POST /contest/:tid/problems
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `pdict` | `ProblemDict` | `problem.getList(..., PROJECTION_CONTEST_LIST)`：`_id`/`domainId`/`docType`/`docId`/`pid`/`owner`/`title`/`config` |
+| `pdict` | `ProblemDict` | `problem.getList(..., PROJECTION_CONTEST_LIST)`：`_id`/`domainId`/`docType`/`docId`/`pid`/`owner`/`title`/`config`。**注意键是 docId + pid 双键**（对带 `pid` 的题两种键各收录一条同值条目，2026-11-15 实测；消费方按 docId 去重） |
 | `psdict` | `Record<pid, ContestDetailEntry>` | 当前用户的 `tsdoc.detail`（未参赛时为 `{}`） |
 | `udict` | `UserDict` | 比赛所有者与当前用户 |
 | `rdict` | `Record<rid, RecordDoc>` | 可见提交的评测记录字典；不可见时退化为 `{ [rid]: { _id } }` |
@@ -4678,7 +4680,7 @@ Accept: application/json
 
 ```json
 {
-  "pdict": { "1001": { "docId": 1001, "pid": "A1", "title": "A+B" } },
+  "pdict": { "1001": { "docId": 1001, "pid": "A1", "title": "A+B" }, "A1": { "docId": 1001, "pid": "A1", "title": "A+B" } },
   "psdict": {},
   "udict": { "2": { "_id": 2, "uname": "admin" } },
   "rdict": {},
@@ -6218,7 +6220,7 @@ const udict = await UserModel.getListForRender(tdoc.domainId, [...uids, ...membe
 if (tdoc.allowTeam) { /* 为每个队伍 tsdoc 写入 udict[uid].teamMembers = 成员 uid 列表 */ }
 ```
 
-**`pdict`**：`problem.getList(..., PROJECTION_CONTEST_DETAIL)`，投影为 `_id`/`domainId`/`docType`/`docId`/`pid`/`owner`/`title`/`config`/`content`/`html`/`data`/`additional_file`/`reference`/`maintainer`（`model/problem.ts:75-98`）；渲染表头/行时被就地写入 `nAccept`、`nSubmit`（各赛制的 `scoreboardHeader` 初始化、`scoreboardRow` 累加）。
+**`pdict`**：`problem.getList(..., PROJECTION_CONTEST_DETAIL)`，投影为 `_id`/`domainId`/`docType`/`docId`/`pid`/`owner`/`title`/`config`/`content`/`html`/`data`/`additional_file`/`reference`/`maintainer`（`model/problem.ts:75-98`）；渲染表头/行时被就地写入 `nAccept`、`nSubmit`（各赛制的 `scoreboardHeader` 初始化、`scoreboardRow` 累加）。键形态与 `problem.getList` 一致为 **docId + pid 双键**（上游 `contest.ts:1081` 起同源；Hinina 的榜单路径不消费 pdict）。
 
 **`tsdoc`**：`tsdocAsPublic()`（contest.ts:107-114）——`attend`、`subscribe`、`startAt`、`displayName`、`members`，以及存在 `duration`/`endAt` 时的 `endAt`。
 
@@ -6524,7 +6526,7 @@ POST /training/:tid
 | `tdoc` | `TrainingDoc` | 训练文档；`description` 中的 `file://` 会被改写为 `./:tid/file/` |
 | `tsdoc` | `TrainingStatusDoc` | 当前用户的训练状态，由 `training.setStatus` 写入 `doneNids`/`donePids`/`done` |
 | `pids` | number[] | DAG 中去重后的全部题目 ID |
-| `pdict` | `Record<number, ProblemDoc>` | 题目 ID → 题目文档（受隐藏题目可见性限制） |
+| `pdict` | `Record<number, ProblemDoc>` | 题目 ID → 题目文档（受隐藏题目可见性限制）。**实际键为 docId + pid 双键**（`problem.getList` 同源；上游类型标注 `Record<number, …>` 未反映 pid 别名键） |
 | `psdict` | `Record<string, ProblemStatusDoc>` | 题目 ID → 被查看用户的提交状态（`uid` 对应用户） |
 | `selfPsdict` | `Record<string, ProblemStatusDoc>` | 题目 ID → 当前用户自己的提交状态（仅 `shouldCompare` 时非空） |
 | `ndict` | `Record<number, TrainingNode>` | 节点 ID → 节点定义 |
