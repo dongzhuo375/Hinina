@@ -39,7 +39,7 @@
 //     stripper: expressions are **code fragments**, and a block comment can
 //     split a token pair the matchers key on (`import/*c*/('@/services/x')` was
 //     a real dynamic import the raw text read as neither `import(` nor an
-//     unreadable argument — silent green, review). String literals stay
+//     unreadable argument — silent green). String literals stay
 //     verbatim, so `'https://…'` and `//` inside a string are still data.
 //   - `readBalanced` skips strings, comments and regex literals with the same
 //     heuristic, so `/[}]/` inside a transaction callback no longer truncates
@@ -116,7 +116,7 @@ export function skipRegexLiteral(source, start) {
  * `` `a${`b`}c` `` does not desync the tokenizer — the previous shallow scan
  * treated everything up to the next backtick as literal text, so a `/*` or `//`
  * inside a real string could flip comment states and either hide code or flag a
- * commented-out call (review item 6). CRLF line continuations are consumed as a
+ * commented-out call. CRLF line continuations are consumed as a
  * unit so a bare `\n` is never left dangling.
  */
 export function skipStringLiteral(source, start) {
@@ -566,9 +566,9 @@ export function buildLineIndex(source) {
  * verbatim in `raw` (decode them with `decodeStringLiteral`); line continuations
  * survive here and are removed by the decoder. Returns `{ raw, end }` or `null`
  * when the literal is unterminated or a single/double-quoted literal contains a
- * raw newline — callers must fail closed on `null` (review: regex `[^'"]+`
- * capture stopped at the *other* quote type and at escaped quotes, so three
- * specifier shapes went green).
+ * raw newline — callers must fail closed on `null` (a naive regex `[^'"]+`
+ * capture stops at the *other* quote type and at escaped quotes, so three
+ * specifier shapes would go green).
  */
 export function readStringLiteral(source, quoteIndex) {
   const quote = source[quoteIndex]
@@ -602,12 +602,12 @@ export function readStringLiteral(source, quoteIndex) {
  * (the opening `<`). Nested generics (`Array<Map<string, T>>`) and string
  * literals inside the list are handled. **`=>` inside the list is skipped**
  * (function-type annotations like `(e: Event) => void` — the `>` of `=>` must
- * not decrease the depth, review P3: the shallow `</>` balance truncated at the
+ * not decrease the depth — the shallow `</>` balance truncated at the
  * arrow and dropped the whole call name). **Single-line only**: any newline
  * inside the list returns `null` — multi-line generic arguments are outside
  * the tracked shapes, and a cross-line scan used to run past the newline (the
  * old `depth === 0` guard was dead: depth is ≥ 1 from the first character) to
- * an unrelated `>` further down (review). Returns the index just past the
+ * an unrelated `>` further down. Returns the index just past the
  * closing `>` or `null` when unbalanced / newline-crossing.
  */
 export function readAngles(source, start) {
@@ -644,7 +644,7 @@ export function readAngles(source, start) {
  * Skips string literals, comments and regex literals so braces inside them
  * cannot unbalance the scan. The regex/division decision reuses the same
  * heuristic as `stripComments` (control-statement closing parens are regex
- * context; member `.catch(` is not) — review: `/[}]/` inside a transaction
+ * context; member `.catch(` is not) — `/[}]/` inside a transaction
  * callback used to truncate the body and hide the queued save behind it.
  */
 export function readBalanced(source, start, open, close) {
@@ -733,14 +733,14 @@ export function readBalanced(source, start, open, close) {
 /**
  * Decode string-literal escapes in a module specifier before the layer match.
  * `'@/servi\u0063es/config.service'` is `@/services/...` at runtime — the gate
- * must not go green on the raw spelling (review).
+ * must not go green on the raw spelling.
  *
  * Covers `\uXXXX`, `\u{…}`, `\xXX`, **identity escapes** (`\c` → `c`,
  * `\e` → `e`): JavaScript drops the backslash for any non-special character, so
  * `'@/servi\ces/config.service'` is the service module too, and **line
  * continuations** (`\` + LF / CRLF / LS / PS — a backslash-newline inside a
  * string literal produces nothing, so `"@/servi\<newline>ces/…"` is the
- * service module — round-twelve review). Plus `\\`, quotes, `\b`, `\f`,
+ * service module). Plus `\\`, quotes, `\b`, `\f`,
  * `\v`, `\0`, `\n`, `\r`, `\t`. An unmatched `\u`/`\x` (invalid escape, file
  * would not compile) stays verbatim — conservative.
  */

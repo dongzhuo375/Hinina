@@ -195,7 +195,7 @@ describe('contest exit lifecycle', () => {
   })
 
   it('switches polling when contest arrives before brief catches up', async () => {
-    // P1 回归：contest 与 brief 先后从 A 切到 B。contest 先换到 B 时被
+    // 回归：contest 与 brief 先后从 A 切到 B。contest 先换到 B 时被
     // ensureLive 的 brief 失配守卫拦下（等 brief 跟上再启动）；此前只监听
     // contest.id，brief 后到时无人再调 ensureLive —— 旧 A 轮询不停止、
     // B 轮询不启动。watcher 必须同时观察 brief.id（变异：去掉 brief 观察即红）

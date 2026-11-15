@@ -119,7 +119,7 @@ marked.use(vditorContainer)
 // http/https 或协议相对），防止 `javascript:` 基址绕过白名单。
 // Node 测试环境（无 DOM）下 isSupported 为 false：不创建实例、跳过消毒与改写
 // （相对 URL 改写的用例在 markdown-dom.spec.ts）。
-// （分层审计 2026-10「外链无出路」缺口的渲染半边；转交半边在 Rust open_external。）
+// （渲染半边：外链加固在渲染层完成；转交半边在 Rust open_external。）
 
 /// 本次 sanitize 期间的相对 URL 改写基址（空串 = 不改写）。
 /// `renderMarkdown` 同步调用 sanitize，钩子在同一个调用栈内读取，无并发问题。

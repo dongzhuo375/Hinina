@@ -1,4 +1,4 @@
-//! `RUST_LOG` 不得让 panic 记录消失（评审 P2 回归）：`RUST_LOG=off` 会过滤
+//! `RUST_LOG` 不得让 panic 记录消失：`RUST_LOG=off` 会过滤
 //! `tracing::error!`，即使订阅器与文件层都正常也什么都不写。钩子必须无条件
 //! 追加 bootstrap 文件，作为不受普通过滤配置影响的独立持久出口。
 //!

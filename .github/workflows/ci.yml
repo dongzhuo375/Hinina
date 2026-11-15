@@ -48,7 +48,7 @@ jobs:
         run: test "$(node --version)" = "v$(cat .nvmrc)"
       - run: npm ci
       # tsconfig.node.json 的 include 含 vite.config.ts / playwright.config.ts / e2e/**/*.ts：
-      # 这一步同时门禁 E2E 与配置文件的类型（评审四轮的「e2e 无门禁」在此已覆盖）
+      # 这一步同时门禁 E2E 与配置文件的类型
       - name: Type-check config and e2e sources
         run: npx tsc -p tsconfig.node.json --noEmit
       - run: npm run plugin:sdk:check
@@ -88,7 +88,7 @@ jobs:
       - uses: ./.github/actions/tauri-system-deps
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          # 仓库根无 Cargo.toml：不指定则探测失败、src-tauri/target 永不缓存（评审六轮）
+          # 仓库根无 Cargo.toml：不指定则探测失败、src-tauri/target 永不缓存
           workspaces: "src-tauri -> target"
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       # --locked 同时充当锁文件校验：Cargo.lock 与 Cargo.toml 不同步时直接失败

@@ -15,9 +15,7 @@ import { stripComments } from '../../scripts/lib/source-scan.mjs'
  * Vue 模板文本三类曾是缺口，负例逐条覆盖），再对真实 `src/` 树跑一遍——后者
  * 是「扫描面（含 utils/types 中转面）不 import Service、扫描面不 import
  * bridge / @tauri-apps/*（src 整树，bridge/ 与 tests 除外；stores 同禁 bridge——梯级）」两条红线在 `npm test`
- * 里的实际保障（2026-11-09
- * 分层欠账清偿后恒绿；
- * 新增直连会在这里红出来）。
+ * 里的实际保障（新增直连会在这里红出来）。
  *
  * `.vue` 夹具注意：扫描只看 `<script>` 块，裸脚本夹具一律用 `.ts` 路径，
  * SFC 行为由专门的 `.vue` 用例覆盖。
@@ -191,7 +189,7 @@ describe('check-layering — 规则判定（合成夹具）', () => {
       expect(hit[0], content).toContain('Store')
     }
     // **store 的 glob 一律 fail closed**：模式串不点名 bridge 也可能
-    // 展开到 bridge（主面第二十四～二十七轮终结的同一族——字面文本判据看不见
+    // 展开到 bridge（同一族形态：字面文本判据看不见
     // 展开集合）。以下六形态 Vite 都真实展开成 bridge 边，代码里没有 bridge 字样。
     for (const pattern of [
       '@/**',
@@ -513,10 +511,10 @@ import x from '@/services/real'
   })
 
   it('glob 语义不可穷尽 → 一律 fail closed（明文/转义/extglob/** 递归）', () => {
-    // 同一处门禁的连续四轮修补清单，全部收敛为 opaque：Vite 对非相对/非绝对
+    // 这些形态全部收敛为 opaque：Vite 对非相对/非绝对
     // 模式先 resolveId（别名生效）再展开，展开集合由 picomatch/tinyglobby 决定
     // ——`@/**` 与 `@/../**` 是**路径递归**（字面量前缀判据看不见 services/
-    // bridge），转义与 extglob 表达同样集合。逐项打补丁逐轮留缺口，故终结为
+    // bridge），转义与 extglob 表达同样集合。逐项补丁式判据留缺口，故终结为
     // 「glob 调用一律 fail closed + GLOB_ALLOWLIST」。
     for (const pattern of [
       '@/*/config.service.ts',
@@ -748,7 +746,7 @@ import { x } from '@/services/config.service'`,
 
   it('命名 HTML 实体不隐藏模板动态 import（&lpar; / &sol; / @tauri-apps/api）', () => {
     // Vue 解析模板时按**完整 HTML5 实体表**解码，编译产物是真实动态 import；
-    // 门禁曾用原文切片 + 六实体量表 → 零违规静默假绿。表达式文本改取 AST 的
+    // 门禁若用原文切片 + 六实体量表 → 零违规静默假绿。表达式文本取 AST 的
     // 已解码 content 后全部命中。
     const cases = [
       `<button @click="import&lpar;'@/services/x'&rpar;">x</button>`,

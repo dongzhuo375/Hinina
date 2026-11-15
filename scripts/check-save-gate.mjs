@@ -4,7 +4,7 @@
 // Why a source scan and not a runtime check: the browser has no async-context
 // API (`AsyncLocalStorage` is Node-only), so a reentrant call cannot be told
 // apart from a legitimate concurrent caller — and a timeout heuristic would
-// reject writes that still land afterwards (rejected in review). The deadlock
+// reject writes that still land afterwards. The deadlock
 // only happens when a callback body calls a *queued* save entry, so pinning
 // that shape in the source is the honest guarantee.
 //
@@ -18,7 +18,7 @@
 //      like a nested transaction. Call detection is reference-level
 //      (`QUEUED_ENTRY`: `(obj.m)(x)`, `obj.m.bind(obj)(x)`, `obj?.['m']?.(x)`,
 //      `(0, obj.m)(x)`, tagged templates are all recognized or reported at the
-//      bare-reference site). The bare-reference rule is the round-twenty fix:
+//      bare-reference site). The bare-reference rule covers the aliased form:
 //      `const up = configStore.updateEditorPrefs` at module scope followed by
 //      `up({})` inside a callback used to be green — the callback body only
 //      names the alias, and the runtime call queues behind the save gate the
@@ -47,7 +47,7 @@
 //      spread read `[...switchObservers]`) — aliases (`const reg =
 //      switchObservers.add`), `add.bind`, bracket access, wholesale reassignment
 //      and bare references all fail closed (an alias defeats any registration
-//      matcher, so its listener would never be scanned — review). Every scanned
+//      matcher, so its listener would never be scanned). Every scanned
 //      listener must be resolvable and clean.
 //
 // Rule 2 treats a **bare parameter name** as a pure forward — scoped to the
@@ -132,7 +132,7 @@ export { stripComments, readBalanced }
 export const TXN_ALLOWLIST = [
   'services/config.service.ts', // definition + the two semantic wrappers
   'composables/useSettingsForm.ts', // the only compound transaction (save → auto-switch)
-  // 2026-11-09 严格分层：View/composable 不再直连 configService，保存事务经
+  // 分层口径：View/composable 不直连 configService，保存事务经
   // stores/configStore 转发。纯转发（非新事务调用方）：回调以**参数直传**形态出现，
   // 由 findViolations 的参数直传规则免扫——回调正文在调用点，而任何出现
   // runSaveTxn 的文件都必须白名单化并被逐调用点扫描，转发体本身不可能引入

@@ -17,10 +17,8 @@ export type { EditorPrefs } from '@/services/config.service'
 /**
  * 配置服务的前端消费入口（分层约定统一为 View → Store → Service）。
  *
- * 历史：编辑器偏好、OJ 基址、分栏比例与设置页保存事务曾由视图/组件/composable
- * 直接调用 `configService`（Architecture.md 登记的分层欠账，2026-11-09 清偿）。
- * 现在 View / component / composable **一律经本 store**；service 面向 store 与
- * 其它 service（`contest.service`）。
+ * View / component / composable **一律经本 store** 消费 `configService`；
+ * service 面向 store 与其它 service（`contest.service`）。
  *
  * 本 store 不复制状态：保存队列、切换队列、代际计数与最近切换结果仍由
  * `configService` 持有（跨控制器共享的单一真值），这里只做消费入口的转发。

@@ -426,8 +426,7 @@ export const useSubmissionStore = defineStore('submission', {
     /**
      * 获取提交详情（含源代码 / CE 错误信息）——提交详情视图的取数入口。
      *
-     * 纯转发（2026-11-09 严格分层：`SubmissionDetailView` 的自持轮询此前直连
-     * `submissionService`，现一律经本 store；转发不复制状态、不加 await 壳）。
+     * 纯转发（View 不直连 `submissionService`；转发不复制状态、不加 await 壳）。
      */
     getSubmissionDetail(submissionId: string): Promise<SubmissionDetail> {
       return submissionService.getSubmissionDetail(submissionId)

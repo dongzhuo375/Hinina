@@ -1,6 +1,6 @@
 # Tauri 2 Ubuntu 构建依赖的单一事实来源。
-# 此前这份 apt 清单在 ci.yml（rust-lint / rust-test）与 integration.yml
-# （build / stress-repeat / rust-coverage）共 5 份拷贝，存在漂移风险（评审二轮）。
+# ci.yml（rust-lint / rust-test）与 integration.yml（build / stress-repeat /
+# rust-coverage）的 apt 依赖清单统一经本 action 共用，避免多处拷贝漂移。
 # 调用方自行守卫 `if: runner.os == 'Linux'`（composite action 内拿不到稳定的
 # 平台语境；纯 ubuntu job 可不守卫）。
 #
