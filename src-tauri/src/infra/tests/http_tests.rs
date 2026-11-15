@@ -455,8 +455,9 @@ async fn raw_variant_retries_mid_body_disconnect_too() {
     server.shutdown();
 }
 
-/// raw + body 断流耗尽：raw 的 4xx/5xx 都进入 body 段，断流耗尽同样如实报错
-/// （补齐矩阵：非 raw 耗尽与 raw 成功已覆盖，本用例锁 raw 通道的耗尽分支）。
+/// raw + body 断流耗尽：raw 变体不因状态段挡在 body 段之外——2xx/3xx/4xx 立即
+/// 进入 body 段，5xx 先耗尽状态段重试再进入；因此断流耗尽分支对任意状态可达
+/// （本用例以 200 夹具覆盖；补齐矩阵：非 raw 耗尽与 raw 成功已覆盖）。
 #[tokio::test]
 async fn raw_variant_reports_error_when_body_disconnect_exhausts_budget() {
     let server = LoopbackServer::start(vec![

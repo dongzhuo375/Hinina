@@ -69,4 +69,4 @@ HTTP 客户端封装（基于 Reqwest），提供统一的超时、重试、UA�
 
 ## 真实传输层测试（M2）
 
-`tests/http_tests.rs` 除判定函数外，新增经 loopback 脚本 server 的真实传输用例：GET 5xx 恰好重试一次后成功 / 重试耗尽如实报错、POST 500 一律不重试且错误附响应体摘录、401→`Auth` 与 403→`Network` 的线上映射、自定义头与 `Hinina/{version}` UA 透传；**body 断流三态**（`truncated` 响应：Content-Length 多报后提前断开）——非 raw 重试一次成功、耗尽如实报 `读取响应体失败`、raw 变体同样重试成功。
+`tests/http_tests.rs` 除判定函数外，新增经 loopback 脚本 server 的真实传输用例：GET 5xx 恰好重试一次后成功 / 重试耗尽如实报错、POST 500 一律不重试且错误附响应体摘录、401→`Auth` 与 403→`Network` 的线上映射、自定义头与 `Hinina/{version}` UA 透传；**body 断流四态**（`truncated` 响应：Content-Length 多报后提前断开）——非 raw 重试一次成功、非 raw 耗尽如实报 `读取响应体失败`、raw 变体重试一次成功、raw 耗尽同样如实报错。
