@@ -2,7 +2,7 @@
 //
 // 夹具有两类出处：按 `doc/Hydro/HYDRO-API.md` 手工构造（contest_list 等，
 // 无 pid 别名键的 pdict 仍是合法形态，保留锁旧契约与多题覆盖）；以及 2026-11-15
-// 实测收编（contest_problems_dual_key，测试部署真实载荷，锁定缺口 D21）。
+// 实测收编（contest_problems_dual_key / record_list_real，测试部署真实载荷，锁定缺口 D21 与实测线格式契约）。
 
 use super::*;
 use crate::core::entity::submission::JudgementStatus;

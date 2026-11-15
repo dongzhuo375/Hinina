@@ -302,7 +302,8 @@ impl HydroAdapter {
     /// 「HTTP 403」。代价是 401 不会自动变成 `Auth` 变体，故本适配器自己映射
     /// （见 `http_status_error`，判据与 infra 的 `status_error` 一致）。
     ///
-    /// 重试由 infra 负责：5xx 退避重试（GET 幂等），耗尽后返回响应而非报错。
+    /// 重试由 infra 负责：5xx 与 body 断流退避重试（GET 幂等）；5xx 耗尽返回
+    /// 响应，body 耗尽报 `Err(读取响应体失败 …)`。
     async fn get_raw(&self, path: &str, inject_user: bool) -> AppResult<HydroResponse> {
         let url = self.url(path);
         let (status, headers, body) = self
