@@ -384,3 +384,73 @@ async fn custom_headers_and_user_agent_pass_through() {
 
     server.shutdown();
 }
+
+/// GET body 断流自动重试：首响应声明多于实际字节数后断开连接（**读响应体阶段**
+/// 失败，与发送段失败不是同一失败面——生产日志的 `error decoding response body`
+/// 出自 `.text()` 包装），重试后成功。2026-11-15 联调实测约 5% 轮询在此阶段
+/// 断流，重试吸收之。用例耗时约 1 秒（退避为真实时钟）。
+#[tokio::test]
+async fn get_retries_mid_body_disconnect_then_succeeds() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("partial"),
+        ScriptedResponse::json("ok"),
+    ])
+    .await;
+
+    let (body, _) = client()
+        .get_text_with_headers(&format!("{}/d", server.url()), &Default::default())
+        .await
+        .expect("body 断流应经重试成功");
+    assert_eq!(body, "ok");
+    assert_eq!(
+        server.requests().len(),
+        2,
+        "body 断流与 5xx 同额度：一次重试即止，不得多发"
+    );
+
+    server.shutdown();
+}
+
+/// body 断流重试耗尽后如实报错（与 5xx 耗尽同口径，不静默吞掉）。
+#[tokio::test]
+async fn get_reports_error_when_body_disconnect_exhausts_budget() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("p1"),
+        ScriptedResponse::truncated("p2"),
+        ScriptedResponse::truncated("p3"),
+    ])
+    .await;
+
+    let err = client()
+        .get_text_with_headers(&format!("{}/x", server.url()), &Default::default())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, AppError::Network(ref m) if m.contains("读取响应体失败")),
+        "重试耗尽应为 body 断流的 Network 错误，实得 {:?}",
+        err
+    );
+    assert_eq!(server.requests().len(), 3, "首次 + 最多 2 次重试");
+
+    server.shutdown();
+}
+
+/// raw 变体同样受 body 断流重试保护（Hydro 通道走 raw，不能只有非 raw 受益）。
+#[tokio::test]
+async fn raw_variant_retries_mid_body_disconnect_too() {
+    let server = LoopbackServer::start(vec![
+        ScriptedResponse::truncated("partial"),
+        ScriptedResponse::json(r#"{"url":"/"}"#),
+    ])
+    .await;
+
+    let (status, _, body) = client()
+        .get_text_raw(&format!("{}/r", server.url()), &Default::default())
+        .await
+        .expect("raw 通道 body 断流应经重试成功");
+    assert_eq!(status, 200);
+    assert_eq!(body, r#"{"url":"/"}"#);
+    assert_eq!(server.requests().len(), 2);
+
+    server.shutdown();
+}
