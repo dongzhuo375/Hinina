@@ -783,10 +783,11 @@ impl HydroAdapter {
 
     /// 按 `subtaskId` 把测试点分组为子任务。
     ///
-    /// 刻意**不解析 `rdoc.subtasks`**：文档未给出其结构（只有一句
-    /// 「`rdoc.subtasks`」），而 `testCases[].subtaskId` 是明确存在的字段，
-    /// 由它分组既确定又不依赖猜测。没有子任务的题返回空列表
-    /// （前端 `hasSubTasks` 为假 → 走平铺展示）。
+    /// 刻意**不解析 `rdoc.subtasks`**：实测它是按 subtaskId 键的**冗余汇总**对象
+    /// （`{"<subtaskId>": {type, score, status}}`，见 `HYDRO-API.md` 实测补充），
+    /// 而逐测试点分组用 `testCases[].subtaskId` 这一**稳定分组键**即可完整还原，
+    /// 不必依赖汇总形态（该字段在赛制投影下还会被整体删除）。没有子任务的题
+    /// 返回空列表（前端 `hasSubTasks` 为假 → 走平铺展示）。
     fn group_sub_tasks(cases: &[JudgeCase]) -> Vec<SubTaskCases> {
         let mut groups: HashMap<i64, Vec<JudgeCase>> = HashMap::new();
         for case in cases {

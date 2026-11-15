@@ -94,6 +94,7 @@ fn fixture(name: &str) -> Value {
         "problem_detail" => include_str!("fixtures/problem_detail.json"),
         "record_detail" => include_str!("fixtures/record_detail.json"),
         "record_list" => include_str!("fixtures/record_list.json"),
+        "record_list_real" => include_str!("fixtures/record_list_real.json"),
         other => panic!("未登记的夹具: {}", other),
     };
     let mut value: Value = serde_json::from_str(raw).expect("夹具必须是合法 JSON");
@@ -321,6 +322,42 @@ fn map_contest_problems_dedupes_pid_alias_keys() {
     assert_eq!(problems[0].problem_id, "P1000");
     assert_eq!(problems[0].display_title, "A+B Problem");
     assert_eq!(problems[0].cid, "6af56687ce73a66a8b262d4e");
+}
+
+#[test]
+fn submission_record_maps_from_dual_key_pdict_fixture() {
+    // 实测夹具（record_list_real）：双键 pdict 下 `into_submission_record` 按 docId
+    // 键反查 pdoc 的映射路径（display_pid/title）——旧单键夹具只覆盖了同形路径
+    let vo: RecordListVO = serde_json::from_value(fixture("record_list_real")).unwrap();
+    let rdoc = &vo.rdocs.as_ref().unwrap()[0];
+    let record = HydroAdapter::into_submission_record(
+        rdoc,
+        &vo.pdict.unwrap_or_default(),
+        &vo.udict.unwrap_or_default(),
+        &["1".to_string()],
+        true, // tdoc.rule == "acm"
+    );
+
+    assert_eq!(record.pid, "1");
+    assert_eq!(
+        record.display_pid, "P1000",
+        "双键 pdict 按 docId 键反查 pdoc"
+    );
+    assert_eq!(record.title, "A+B Problem");
+    assert_eq!(record.display_id, "A", "pids 下标 0 → 展示字母");
+    assert_eq!(record.owner_id.as_deref(), Some("2"));
+    assert_eq!(record.username, "admin");
+    assert!(matches!(record.status, JudgementStatus::Accepted));
+    // ACM 契约：score 必须为 None（Hydro 对 ACM 也回 100）
+    assert_eq!(record.score, None);
+    assert_eq!(record.time_ms, 3, "浮点毫秒 3.393 取整");
+    assert_eq!(record.memory_kb, 508);
+    assert_eq!(record.language, "C++", "lang key cc → HOJ 显示名");
+    // 提交时刻取 ObjectId 前缀（judgeAt 只是评测完成时刻）
+    assert_eq!(
+        record.submit_time,
+        types::objectid_seconds("6af56937ce73a66a8b262d57").unwrap()
+    );
 }
 
 // ── 题目映射 ──
