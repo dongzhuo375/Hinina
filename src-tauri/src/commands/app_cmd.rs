@@ -8,8 +8,7 @@
 //! 转交系统默认浏览器：插件注册为 Rust-only（不装 npm 包、不声明 opener
 //! capability——插件的 IPC 命令虽已在 invoke handler 注册，但 webview 调用一律被
 //! ACL 拒绝；且 `open_js_links_on_click` 已关闭，没有注入的点击脚本这条旁路），
-//! 前端经本命令消费——WebView 永不导航离开应用（分层审计 2026-10「外链无出路」
-//! 缺口的闭合）。
+//! 前端经本命令消费——WebView 永不导航离开应用。
 
 use crate::core::error::{AppError, AppResult};
 use crate::infra::launch_args::{self, LaunchFlags};
@@ -29,7 +28,7 @@ pub async fn launch_flags() -> AppResult<LaunchFlags> {
 ///
 /// 把 http(s) 外链转交**系统默认浏览器**（题面/公告 markdown 里的链接）。
 /// WebView 内点这类链接的默认行为是把整个客户端导航走——这里拦下转交，
-/// 应用界面保持不动（分层审计 2026-10「外链无出路」缺口）。
+/// 应用界面保持不动。
 ///
 /// **scheme 白名单由本命令守卫**：`Opener` 的 Rust API 不做任何 scope 校验
 /// （插件文档明示）；插件的 IPC 命令无 capability 授权（webview 调用被 ACL

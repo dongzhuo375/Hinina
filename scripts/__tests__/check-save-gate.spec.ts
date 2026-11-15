@@ -1183,8 +1183,8 @@ describe('check-save-gate — 真实源码树', () => {
   })
 
   it('白名单只列真正需要事务的文件（防止被顺手扩大）', () => {
-    // stores/configStore.ts 不是事务调用方——它是分层收编后的纯转发入口
-    // （2026-11-09 严格分层），列入只为通过规则 1 的标识符扫描
+    // stores/configStore.ts 不是事务调用方——它是分层收编后的纯转发入口，
+    // 列入只为通过规则 1 的标识符扫描
     expect(TXN_ALLOWLIST).toEqual([
       'services/config.service.ts',
       'composables/useSettingsForm.ts',

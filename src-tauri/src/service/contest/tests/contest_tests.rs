@@ -392,7 +392,7 @@ impl ContestProvider for StubContestProvider {
     /// stub 只产出一条 Contest 消息（「密码错误」，见 `ensure_contest_access`），
     /// 判据用**锚定匹配**（starts_with）：service 层契约是「classify 见适配器
     /// 原生错误」（环节前缀加在分类之后）——若分类被挪到加前缀之后，本判据
-    /// 不再命中、kind 退回 Other，锚定用例即红（C2 回归锁的判据半边）
+    /// 不再命中、kind 退回 Other，锚定用例即红（分类回归锁的判据半边）
     fn classify_access_rejection(&self, error: &AppError) -> AccessRejectionKind {
         match error {
             AppError::Contest(msg) if msg.starts_with("密码错误") => {
@@ -687,7 +687,7 @@ fn best_effort_backfill_failure_does_not_break_loading() {
 
 #[tokio::test]
 async fn access_core_classifies_the_raw_error_before_the_stage_prefix() {
-    // C2 回归锁：分类在加环节前缀**之前**对原始错误计算并随结果携带（写回
+    // 分类回归锁：分类在加环节前缀**之前**对原始错误计算并随结果携带（写回
     // 守卫与后台兜底分级共用该判定）。stub 判据用**锚定匹配**（starts_with）：
     // 若把分类挪回 `context` 之后（对「私有赛进入校验失败: 密码错误」分类），
     // 锚定不再命中、kind 退回 Other，本用例即红

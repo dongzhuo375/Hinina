@@ -40,7 +40,7 @@
 // a string literal does not read as one either. Specifiers are decoded
 // (`decodeStringLiteral`: Unicode, hex and simple escapes) before the layer
 // match - an escaped spelling of the service module is still the service module
-// at runtime (review: raw-text matching was a silent bypass).
+// at runtime (raw-text matching would silently bypass the escaped spellings).
 //
 // Dynamic imports are only checkable when the specifier is statically visible:
 // a plain string literal or a backtick literal without `${}`. Every other form
@@ -57,7 +57,7 @@
 // while the literal directory prefix says nothing) each defeated a
 // pattern-text check. The rule is therefore terminal: within the scan surface
 // every glob call is opaque (fail closed) unless its **decoded** pattern is
-// registered in GLOB_ALLOWLIST (explicit review; the pattern's own layer
+// registered in GLOB_ALLOWLIST (a curated allowlist; the pattern's own layer
 // rules still run). Plain dynamic `import()` keeps the literal rule.
 //
 // Scan surface: `views/`, `components/`, `composables/` (recursively) plus
@@ -152,8 +152,8 @@ function normalizeSpecifier(spec) {
 /// `import.meta.glob` / `globEager` 的显式放行清单（**解码 + 归一化后**的模式
 /// 字符串）。扫描面内 glob 调用默认一律 fail closed（展开集合由
 /// picomatch/tinyglobby 语义决定，通配/转义/extglob/`**` 递归无法穷尽）。新增
-/// 条目必须评审：模式本身的层判据（规则 A/B）仍会执行，但展开集合是否全在
-/// 合法落点由评审负责。当前为空（src 内 glob 零使用）。
+/// 新增条目须人工核实：模式本身的层判据（规则 A/B）仍会执行，但展开集合
+/// 是否全在合法落点须人工确认。当前为空（src 内 glob 零使用）。
 export const GLOB_ALLOWLIST = []
 
 /**

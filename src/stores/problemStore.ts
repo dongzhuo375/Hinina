@@ -95,8 +95,7 @@ export const useProblemStore = defineStore('problem', {
     /**
      * 获取单个题目详情（不写入 store 状态）——快捷提交弹窗拉取允许语言用。
      *
-     * 纯转发（2026-11-09 严格分层：QuickSubmitDialog 此前直连
-     * `problemService.getProblem`，现一律经本 store；不复制状态、不加 await 壳）。
+     * 纯转发（View 不直连 `problemService`；不复制状态、不加 await 壳）。
      * 与 `openProblem` 的区别：后者把结果设为 `currentProblem` 并带过期保护，
      * 本方法只回传数据，由调用方自行消费。
      */

@@ -65,7 +65,7 @@ vi.mock('@/services/config.service', async () => {
       },
       // 生产 getter 读 `switchQueue.inFlight.value`：响应式追踪发生在 .value，
       // mock 用「getter 包 ref」同构。注意本 spec **不覆盖**「等待在途切换」
-      // 路径——那条路径的回归在 useSettingsForm.spec（普通属性 mock 曾致 P2）
+      // 路径——那条路径的回归在 useSettingsForm.spec
       get ojSwitchInFlight() {
         return switchInFlight.value
       },

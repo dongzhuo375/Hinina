@@ -88,7 +88,7 @@ impl<R: ConfigRepository> ConfigService<R> {
     ///
     /// **为什么在这里发布**：`update` 才是生产链路的配置变更入口（`update_config`、
     /// `switch_oj` 的持久化都走它）；只有 `reload` 发布的话，订阅者永远
-    /// 等不到事件 —— `reload_config` 命令在前端没有调用方（2026-09-21 复核）。
+    /// 等不到事件 —— `reload_config` 命令在前端没有调用方。
     ///
     /// **`ConfigChanged` 只是完成事实通知**：需要「配置变更后必须完成的动作」
     /// （如按新间隔同步 auto-save）由命令层在 `update` 返回后**显式调用**，

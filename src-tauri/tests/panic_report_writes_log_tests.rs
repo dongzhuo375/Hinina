@@ -17,7 +17,7 @@ fn panic_message_lands_in_log_file_with_backtrace() {
     let sandbox = common::SandboxTemp::new("writes-log");
     let base_dir = sandbox.join("data");
     fs::create_dir_all(&base_dir).unwrap();
-    // EnvFilter 优先读 RUST_LOG：显式固定级别，宿主环境不得干扰（评审 #11 同款）
+    // EnvFilter 优先读 RUST_LOG：显式固定级别，宿主环境不得干扰
     std::env::set_var("RUST_LOG", "info");
     let logger = hinina_lib::infra::logger::Logger::init(&base_dir);
     assert!(logger.has_log_file(), "订阅器空闲时应接管文件层");

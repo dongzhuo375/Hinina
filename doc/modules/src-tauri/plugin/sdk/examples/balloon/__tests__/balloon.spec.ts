@@ -508,7 +508,7 @@ describe('balloon reference plugin host contract', () => {
     // if either side drifts, this fails and the fix must land in the same
     // PR. Values that still exist only as inline literals in the sources
     // (e.g. the 600/min bridge-admit budget, in-flight semaphores) are not
-    // covered here and stay review-synced.
+    // covered here and must be kept in sync manually.
     const fsModule = 'node:fs'
     const { readFileSync } = (await import(fsModule)) as {
       readFileSync: (path: URL, encoding: string) => string

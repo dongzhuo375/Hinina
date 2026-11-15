@@ -2,7 +2,7 @@ import { expect, test } from '../fixtures'
 import { callCount, loginAndEnterContest } from '../fake-tauri'
 
 /**
- * §6.3 补缺（2026-11 审计 C4）：公告页 —— 列表渲染、进入即标已读、
+ * 公告页 —— 列表渲染、进入即标已读、
  * 新公告事件驱动的红点/未读计数（事件只是刷新触发，不是状态来源）。
  */
 test.describe('赛事公告', () => {

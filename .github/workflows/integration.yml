@@ -144,7 +144,7 @@ jobs:
           name: ${{ matrix.artifactName }}
           path: ${{ matrix.artifactPath }}
           retention-days: 7
-          # glob 落空默认只警告、leg 照样绿——构建声明了产物就该存在（评审二轮）
+          # glob 落空默认只警告、leg 照样绿——构建声明了产物就该存在
           if-no-files-found: error
       # continue-on-error 下 needs.*.result 不可信：关键步骤的真实 outcome 在这里
       # 自报进运行摘要页（汇总 job 据此展示观测平台明细，且不因其失败而红）。
@@ -164,7 +164,7 @@ jobs:
             # 必须三步全部 success：它们没有「成功路径下的正常跳过」。
             # 前置步骤（checkout/setup-node/corepack/apt/rust-cache）失败时三者
             # 全为 skipped——若把 skipped 当中性，观测平台会把初始化失败报成成功
-            #（评审三轮：macOS/Linux 的唯一真实结果渠道就是这份自报）
+            #（macOS/Linux 的唯一真实结果渠道就是这份自报）
             if [ "$value" != "success" ]; then outcome=failure; fi
           done
           # 探针只在 Windows leg 存在：其余 leg 的 skipped 是合法跳过，不判失败
@@ -179,7 +179,7 @@ jobs:
     name: stress-repeat
     runs-on: ubuntu-24.04
     # 40 分钟：覆盖 apt 依赖（最坏 ~20 分钟）+ 冷缓存编译 + 10 轮过滤跑。原 15 分钟在
-    # 冷缓存/apt 抖动下会被预算耗尽（评审四轮 #3 首验：apt 无响应吃掉全部 15 分钟 → job 取消）
+    # 冷缓存/apt 抖动下会被预算耗尽（apt 无响应吃掉全部 15 分钟 → job 取消）
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -195,7 +195,7 @@ jobs:
       # 切换的访问栅栏）。
       # --lib 跳过 src-tauri/tests/ 下两个 logger 集成二进制（进程级订阅器单例设计）。
       # 过滤串匹配不到用例时 cargo test 退出码仍为 0（阻塞 job 会假绿），因此每轮
-      # 解析 test result 的 passed 数并要求 > 0（评审六轮）。
+      # 解析 test result 的 passed 数并要求 > 0。
       - name: Stress repeat (concurrent + auto_save + #87 write-txn, 10 rounds)
         run: |
           run_filter() {
@@ -217,7 +217,7 @@ jobs:
             run_filter access_fence
           done
 
-  # Rust 覆盖率基线（M2 遗留项，用户裁定留 M3 夜间）：--lib 口径与单元测试套件一致，
+  # Rust 覆盖率基线：--lib 口径与单元测试套件一致，
   # 只报告不卡线；基线数字回写 doc/cicd/m3-integration.md。
   rust-coverage:
     name: rust-coverage
@@ -231,14 +231,14 @@ jobs:
           workspaces: "src-tauri -> target"
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
-          # 报告性质但固定版本，避免上游行为漂移悄悄改变基线口径（评审六轮）
+          # 报告性质但固定版本，避免上游行为漂移悄悄改变基线口径
           tool: cargo-llvm-cov@0.9.1
       - name: Add llvm-tools-preview component
         run: rustup component add llvm-tools-preview
       - name: Rust coverage baseline (lib unit tests)
         working-directory: src-tauri
         # --output-path 仅支持单一格式，text 汇总改为从 lcov 行数统计得出。
-        # 空数据（0 行）必须判红：否则 awk 打印 0.00% 而 job 仍绿（评审六轮）
+        # 空数据（0 行）必须判红：否则 awk 打印 0.00% 而 job 仍绿
         run: |
           cargo llvm-cov --locked --lib --lcov --output-path lcov.info
           awk -F: '/^LF:/{lf+=$2} /^LH:/{lh+=$2} END{
@@ -338,7 +338,7 @@ jobs:
           restore-keys: |
             tauri-apt-archives-${{ runner.os }}-
       # 浏览器缓存：PLAYWRIGHT_BROWSERS_PATH 只声明路径不产生缓存，必须有 cache 步骤
-      # 才能避免每次夜间跑重新下载 Chromium（评审二轮）。Chromium 版本跟随
+      # 才能避免每次夜间跑重新下载 Chromium。Chromium 版本跟随
       # @playwright/test，以 package-lock 哈希为 key。
       - name: Restore Playwright browser cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

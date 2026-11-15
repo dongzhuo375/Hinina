@@ -2,7 +2,7 @@ import { expect, test } from '../fixtures'
 import { callCount, loginAndEnterContest } from '../fake-tauri'
 
 /**
- * §6.3 补缺（2026-11 审计 C4）：提交详情页 —— 终态详情（状态/耗时/测试点/源代码）
+ * 提交详情页 —— 终态详情（状态/耗时/测试点/源代码）
  * 与评测中详情（judging 形态 + 明细自动刷新占位）。fake 的详情按会话内提交构造，
  * code 取提交原文、测试点按终态状态生成，与真实契约（SubmissionDetail/
  * SubmissionCases）形状一致。

@@ -11,10 +11,8 @@ import type {
 /**
  * 系统服务的前端消费入口（分层约定统一为 View → Store → Service）。
  *
- * 历史：窗口控制与启动标志曾由视图/组件直接调用 `systemService`，而 service
- * 的注释允许这种直连——与「View → Store → Service」的分层规则矛盾。现在
- * View / component / composable **一律经本 store**；service 只面向 store、
- * 守卫与组合根（不认识路由，也不承载视图调用）。
+ * View / component / composable **一律经本 store** 消费 `systemService`；
+ * service 只面向 store、守卫与组合根（不认识路由，也不承载视图调用）。
  *
  * 本 store 不复制状态：启动标志快照仍由 `systemService` 持有（守卫首航填充，
  * 早于任何组件挂载），`isKeyed` 只是转发读——避免两处快照漂移。

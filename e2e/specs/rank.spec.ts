@@ -2,7 +2,7 @@ import { expect, test } from '../fixtures'
 import { callCount, loginAndEnterContest } from '../fake-tauri'
 
 /**
- * §6.3 补缺（2026-11 审计 C4）：榜单页 —— 全应用最复杂的客户端状态机。
+ * 榜单页 —— 全应用最复杂的客户端状态机。
  * 覆盖：加载与实时刷新形态、封榜横幅、分页翻页与失败回滚、打星筛选触发的
  * 全量快照跨页聚合（fake 按 currentPage/limit 分页，与真实 IPage 形态一致）。
  */

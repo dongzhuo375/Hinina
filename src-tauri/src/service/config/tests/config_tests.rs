@@ -159,7 +159,7 @@ fn reload_publishes_config_changed_event() {
     );
 }
 
-/// `update` 也必须发布 `ConfigChanged`（2026-09-21 复核发现的生产断链）。
+/// `update` 也必须发布 `ConfigChanged`。
 ///
 /// 生产链路的配置变更入口是 `update`（`update_config` 命令、`switch_oj`
 /// 的持久化都走它），而 `reload_config` 命令在前端**没有任何调用方**（只有 spec 的
