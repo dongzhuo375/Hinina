@@ -34,12 +34,13 @@ Hydro 响应 DTO 与全部归一化纯函数。**不含任何网络调用**，�
 
 ### 值归一
 - `coerce_id(&Value) -> String` / `coerce_i64(&Value) -> Option<i64>` / `cell_text(&CellVO) -> String` — Hydro 的 `_id`/`docId`/`pid`/单元格 `value` 混用数字与字符串
+- `de_opt_i64_from_number`（serde `deserialize_with` 钩子）— **数字字段容错**（缺口 D22）：上游 master 的 hydrojudge 产出**带小数的毫秒**（`flow.ts` 的 `Math.floor(total_time*1e6)/1e6`；2026-11-15 实测定标单位=毫秒），serde 的 `i64` 遇浮点整份解析失败。整数原样、浮点四舍五入；非数字仍按类型错误拒绝。应用于 `RdocVO.time/memory` 与 `TestCaseVO.time/memory`
 - `strip_html(raw) -> String` — 剥离标签 + 反转义常见实体。**刻意不做整体 trim**：榜单单元格的换行是结构（ACM 通过格首行是被剥离的图标、第二行才是 AC 用时），整体 trim 会把两行并成一行、让解析全部错位
 - `pending_count(raw) -> Option<i32>` — 提取封榜期间「+N 次待判提交」。**必须锚定 `color:orange`**：AC 单元格首行本身就是 `+{失败次数}`，只找 `+数字` 会把「AC 前的失败次数」误当成待判次数
 - `problem_status_code(&Value) -> i32` — `psdoc`/`psdict` → Hinina 三态（0 未提交 / 1 已 AC / 2 尝试过）
 
 ### DTO
-`UserBriefVO`（+`display()` 回退顺序 `displayName` → `uname`）、`PdocVO`（+`problem_id()`/`doc_id_num()`/`problem_config()` 宽松解析 —— 服务端把 config.yaml 解析错误以**字符串**塞在 `config` 里，非对象一律视为缺失）、`ProblemConfigVO`（+`time_limit_ms()` 取 `timeMax`、`memory_limit_mb()` 取 `memoryMax`）、`TdocVO`（+`contest_id()`/`pid_list()`/`is_locked()`）、`ContestListVO`、`ContestDetailVO`、`ContestProblemListVO`、`ProblemDetailVO`、`SubmitVO`、`TestCaseVO`、`RdocVO`（+`record_id()`/`submit_time()`/`code_length()`/`compiler_message()`/`status_code()`/`terminal_metrics()`）、`RecordDetailVO`、`RecordListVO`、`CellVO`、`ScoreboardVO`、`LoginVO`
+`UserBriefVO`（+`display()` 回退顺序 `displayName` → `uname`）、`PdocVO`（+`problem_id()`/`doc_id_num()`/`problem_config()` 宽松解析 —— 服务端把 config.yaml 解析错误以**字符串**塞在 `config` 里，非对象一律视为缺失）、`ProblemConfigVO`（+`time_limit_ms()` 取 `timeMax`、`memory_limit_mb()` 取 `memoryMax`）、`TdocVO`（+`contest_id()`/`pid_list()`/`is_locked()`）、`ContestListVO`、`ContestDetailVO`、`ContestProblemListVO`（**`pdict` 为 docId + pid 双键**，缺口 D21，消费方按 docId 去重）、`ProblemDetailVO`、`SubmitVO`、`TestCaseVO`（`time`/`memory` 经 `de_opt_i64_from_number` 容忍浮点）、`RdocVO`（+`record_id()`/`submit_time()`/`code_length()`/`compiler_message()`/`status_code()`/`terminal_metrics()`；`time`/`memory` 同上容忍浮点；**`subtasks` 实测为对象形态** `{"<subtaskId>": {...}}`，刻意不解析——分组用 `testCases[].subtaskId`）、`RecordDetailVO`、`RecordListVO`、`CellVO`、`ScoreboardVO`、`LoginVO`
 
 ### 榜单归一
 - `ScoreboardHeader` / `parse_header(&[CellVO])`（私有）— **按表头 `type` 定位列**（rank/user/solved/time/total_score/problem），不依赖列顺序：Hydro 各赛制的列顺序不同（`acm` = rank→user→solved→每题；`oi` 家族 = rank→user→total_score→每题；`homework` 还多一列 time），且文档内示例与速查表不一致
