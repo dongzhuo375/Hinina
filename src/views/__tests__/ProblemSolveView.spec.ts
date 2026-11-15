@@ -82,10 +82,12 @@ vi.mock('@/stores/submissionStore', () => ({
     },
   }),
 }))
-// 局部 mock 只覆盖当前消费面（分栏比例经 configStore action 逐次直读）。刻意不提供
-// in-flight/epoch ref 支撑面：挂载树今日不消费 configStore 的 settingsSaveInFlight/
-// ojSwitchInFlight getter——若将来开始消费，computed 对缺席成员永久缓存会先假绿；
-// 扩展前须先补 ref 支撑面（孪生样板：useSettingsForm.spec；真 ref 打桩：systemStore.spec）
+// 局部 mock 只覆盖当前消费面（分栏比例经 configStore action 逐次直读）；刻意不提供
+// 在途/代际支撑面，挂载树今日也不消费对应成员。将来若开始消费，失败形态按成员分述：
+// settingsSaveInFlight 缺席 → store getter 读 .value 直接 TypeError（响亮红）；
+// ojSwitchInFlight 缺席 → store getter 读到 undefined 被 computed 永久缓存（假绿，
+// 须补「getter 包 ref」支撑面）；epoch 走 action 逐次直读、无缓存面（普通计数器即可）。
+// 扩展前按需补齐（孪生样板：useSettingsForm.spec；真 ref 打桩：systemStore.spec）
 vi.mock('@/services/config.service', () => ({
   configService: {
     getSplitRatio: vi.fn(async () => 0.48),
