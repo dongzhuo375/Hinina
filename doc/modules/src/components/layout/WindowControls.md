@@ -23,7 +23,7 @@
 
 ## 直接依赖
 
-- `@/services/system.service`（`minimizeWindow` / `toggleMaximizeWindow` / `closeWindow`）——View 只经 Service；Service 再转发 `bridge/window.bridge`（bridge 是唯一接触 `@tauri-apps/api` 的地方，评审十九 #8 / 二十一 #6）
+- `@/stores/systemStore`（`minimizeWindow` / `toggleMaximizeWindow` / `closeWindow`）——View 只经 Store；store 转发 `system.service`，service 再转发 `bridge/window.bridge`（bridge 是唯一接触 `@tauri-apps/api` 的地方）
 
 ## 被依赖
 

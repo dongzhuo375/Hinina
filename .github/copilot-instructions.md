@@ -25,7 +25,7 @@ Hinina 是基于 Tauri 2 + Rust + Vue 3 的 OJ 桌面竞赛客户端，面向 AC
 | `core/entity` | User, Session, Contest, Problem, Submission, **Workspace**, AppConfig, Announcement, Rank |
 | `core/provider` | 拆分的 trait：`AuthProvider`, `ContestProvider`, `ProblemProvider`, `SubmissionProvider` |
 | `core/event` | `CoreEvent` 枚举 + `CoreEventBus` |
-| `service/` | auth, contest, problem, submission, **workspace**, config, theme |
+| `service/` | auth, contest, problem, submission, **workspace**, config |
 | `adapter/` | hoj、hydro 已实现；qduoj、hustoj 仅有骨架（各自组合实现需要的 trait） |
 | `infra/` | http, storage, cache, logger, audit, data_dir, fs_*_repo, plugin_*（插件存储/HTTP/通知等适配层） |
 

@@ -33,7 +33,7 @@
 ## 被依赖
 
 - `commands::invoke_handler` — `generate_handler!` 注册 4 条命令
-- `src/bridge/system.bridge.ts` → `system.service.ts` → `composables/useDataDirSettings.ts` → `components/settings/DataDirSection.vue`
+- `src/bridge/system.bridge.ts` → `system.service.ts` → `stores/systemStore.ts` → `composables/useDataDirSettings.ts` → `components/settings/DataDirSection.vue`
 
 ## 逻辑流程
 
