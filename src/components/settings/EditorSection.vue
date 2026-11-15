@@ -59,12 +59,7 @@ const TAB_SIZES = EDITOR_TAB_SIZES
       </SettingsField>
 
       <div class="block">
-        <span
-          class="mb-1 block text-xs font-medium"
-          :class="
-            props.form.autoSave ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'
-          "
-        >
+        <span class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
           自动保存
         </span>
         <SettingsSwitch
