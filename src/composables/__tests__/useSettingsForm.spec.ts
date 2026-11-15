@@ -21,7 +21,8 @@ const mocks = vi.hoisted(() => ({
   resetSessionForOjSwitch: vi.fn(),
   resetAuthForOjSwitch: vi.fn(),
   routerReplace: vi.fn(),
-  // 启动标志响应式快照（systemService.launchFlags）：钥匙模式切换后留在设置页
+  // 启动标志（systemService.launchFlags）：钥匙模式切换后留在设置页。字面量仅类型锚——
+  // mock 工厂会在任何消费前以真 ref 覆盖（Ref 可结构赋给此形状），勿照抄普通对象形态
   launchFlags: { value: { settings: false } },
   // 当前路由（**活对象**：mock 的 currentRoute.value 直接引用它，测试中途可改）
   route: { name: 'Settings' as string | undefined },

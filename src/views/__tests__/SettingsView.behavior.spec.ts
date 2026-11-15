@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
   resetDataDir: vi.fn(),
   resetClient: vi.fn(),
   purgeLocalData: vi.fn(),
-  // 启动标志响应式快照（systemService.launchFlags）：分层锁同步读取
+  // 启动标志（systemService.launchFlags）：分层锁同步读取。字面量仅类型锚——
+  // mock 工厂会在任何消费前以真 ref 覆盖（Ref 可结构赋给此形状），勿照抄普通对象形态
   launchFlags: { value: { settings: false } },
   loadContest: vi.fn(),
   invalidateMyStatus: vi.fn(),

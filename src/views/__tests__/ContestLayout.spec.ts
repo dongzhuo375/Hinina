@@ -23,7 +23,8 @@ const mocks = vi.hoisted(() => ({
   loadConfiguredContest: vi.fn(),
   // 当前路由名（最小壳判据的一部分）；默认非 Settings，模拟工作台子路由
   routeName: { value: 'ProblemSet' as string | undefined },
-  // 启动标志响应式快照（systemService.launchFlags）：最小壳判据之一
+  // 启动标志（systemService.launchFlags）：最小壳判据之一。字面量仅类型锚——
+  // mock 工厂会在任何消费前以真 ref 覆盖（Ref 可结构赋给此形状），勿照抄普通对象形态
   launchFlags: { value: { settings: false } },
 }))
 vi.mock('vue-router', () => ({

@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   setIpcErrorObserver: vi.fn(),
   logout: vi.fn(),
   replace: vi.fn().mockResolvedValue(undefined),
-  // 启动标志响应式快照（systemService.launchFlags）：钥匙旁路的判据
+  // 启动标志（systemService.launchFlags）：钥匙旁路的判据。字面量仅类型锚——
+  // mock 工厂会在任何消费前以真 ref 覆盖（Ref 可结构赋给此形状），勿照抄普通对象形态
   launchFlags: { value: { settings: false } },
   routeName: { value: 'ProblemSet' as string | undefined },
 }))
