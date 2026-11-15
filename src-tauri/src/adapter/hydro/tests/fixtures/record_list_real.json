@@ -1,1 +1,111 @@
-{"page":1,"rdocs":[{"_id":"6af56937ce73a66a8b262d57","status":1,"uid":2,"lang":"cc","pid":1,"domainId":"system","score":100,"time":3.393,"memory":508,"judger":3,"judgeAt":"2026-11-12T07:22:32.453Z","rejudged":false,"contest":"6af56687ce73a66a8b262d4e","files":{}}],"tdoc":{"_id":"6af56687ce73a66a8b262d4e","content":"111","owner":2,"domainId":"system","docType":30,"docId":"6af56687ce73a66a8b262d4e","assign":[],"duration":null,"title":"11111111111111111111111111","rule":"acm","beginAt":"2026-11-12T07:15:00.000Z","endAt":"2026-11-20T15:15:00.000Z","pids":[1],"attend":1,"rated":true,"allowPrint":false,"allowTeam":false,"allowViewCode":true,"autoHide":true,"keepScoreboardHidden":false,"langs":["cc.cc98o2","cc","cc.cc11","cc.cc11o2","py.py3","py","py.py2","rs","php"],"lockAt":null,"maintainer":[]},"pdict":{"1":{"_id":"6af5613222c05f100aa58071","owner":1,"domainId":"system","docType":10,"docId":1,"title":"A+B Problem","pid":"P1000","config":{"count":2,"memoryMin":64,"memoryMax":64,"timeMin":1000,"timeMax":1000,"type":"default"}},"P1000":{"_id":"6af5613222c05f100aa58071","owner":1,"domainId":"system","docType":10,"docId":1,"title":"A+B Problem","pid":"P1000","config":{"count":2,"memoryMin":64,"memoryMax":64,"timeMin":1000,"timeMax":1000,"type":"default"}}},"udict":{"2":{"_id":2,"uname":"admin","mail":"admin@example.com","perm":"BigInt::-1","role":"root","priv":-1,"regat":"2026-11-12T06:57:42.181Z","loginat":"2026-11-15T08:15:08.579Z","avatar":"qq:123456789"}},"all":false,"allDomain":false,"filterTid":"6af56687ce73a66a8b262d4e","notification":[]}
+{
+  "page": 1,
+  "rdocs": [
+    {
+      "_id": "6af56937ce73a66a8b262d57",
+      "status": 1,
+      "uid": 2,
+      "lang": "cc",
+      "pid": 1,
+      "domainId": "system",
+      "score": 100,
+      "time": 3.393,
+      "memory": 508,
+      "judger": 3,
+      "judgeAt": "2026-11-12T07:22:32.453Z",
+      "rejudged": false,
+      "contest": "6af56687ce73a66a8b262d4e",
+      "files": {}
+    }
+  ],
+  "tdoc": {
+    "_id": "6af56687ce73a66a8b262d4e",
+    "content": "111",
+    "owner": 2,
+    "domainId": "system",
+    "docType": 30,
+    "docId": "6af56687ce73a66a8b262d4e",
+    "assign": [],
+    "duration": null,
+    "title": "11111111111111111111111111",
+    "rule": "acm",
+    "beginAt": "2026-11-12T07:15:00.000Z",
+    "endAt": "2026-11-20T15:15:00.000Z",
+    "pids": [
+      1
+    ],
+    "attend": 1,
+    "rated": true,
+    "allowPrint": false,
+    "allowTeam": false,
+    "allowViewCode": true,
+    "autoHide": true,
+    "keepScoreboardHidden": false,
+    "langs": [
+      "cc.cc98o2",
+      "cc",
+      "cc.cc11",
+      "cc.cc11o2",
+      "py.py3",
+      "py",
+      "py.py2",
+      "rs",
+      "php"
+    ],
+    "lockAt": null,
+    "maintainer": []
+  },
+  "pdict": {
+    "1": {
+      "_id": "6af5613222c05f100aa58071",
+      "owner": 1,
+      "domainId": "system",
+      "docType": 10,
+      "docId": 1,
+      "title": "A+B Problem",
+      "pid": "P1000",
+      "config": {
+        "count": 2,
+        "memoryMin": 64,
+        "memoryMax": 64,
+        "timeMin": 1000,
+        "timeMax": 1000,
+        "type": "default"
+      }
+    },
+    "P1000": {
+      "_id": "6af5613222c05f100aa58071",
+      "owner": 1,
+      "domainId": "system",
+      "docType": 10,
+      "docId": 1,
+      "title": "A+B Problem",
+      "pid": "P1000",
+      "config": {
+        "count": 2,
+        "memoryMin": 64,
+        "memoryMax": 64,
+        "timeMin": 1000,
+        "timeMax": 1000,
+        "type": "default"
+      }
+    }
+  },
+  "udict": {
+    "2": {
+      "_id": 2,
+      "uname": "admin",
+      "mail": "admin@example.com",
+      "perm": "BigInt::-1",
+      "role": "root",
+      "priv": -1,
+      "regat": "2026-11-12T06:57:42.181Z",
+      "loginat": "2026-11-15T08:15:08.579Z",
+      "avatar": "qq:123456789"
+    }
+  },
+  "all": false,
+  "allDomain": false,
+  "filterTid": "6af56687ce73a66a8b262d4e",
+  "notification": []
+}

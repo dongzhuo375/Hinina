@@ -1,1 +1,136 @@
-{"udoc":{"_id":2,"uname":"admin","mail":"admin@example.com","perm":"BigInt::-1","role":"root","priv":-1,"regat":"2026-11-12T06:57:42.181Z","loginat":"2026-11-15T08:15:08.579Z","avatar":"qq:123456789"},"rdoc":{"_id":"6af56937ce73a66a8b262d57","status":1,"uid":2,"code":"#include <iostream>\nint main() {\n    long long a, b;\n    std::cin >> a >> b;\n    std::cout << a + b << std::endl;\n    return 0;\n}","lang":"cc","pid":1,"domainId":"system","score":100,"time":3.393,"memory":508,"judgeTexts":[{"message":"Syncing testdata, please wait...","params":[]}],"compilerTexts":[],"testCases":[{"id":1,"subtaskId":1,"status":1,"score":50,"time":1.913,"memory":508,"message":""},{"id":2,"subtaskId":1,"status":1,"score":50,"time":1.48,"memory":412,"message":""}],"judger":3,"judgeAt":"2026-11-12T07:22:32.453Z","rejudged":false,"contest":"6af56687ce73a66a8b262d4e","files":{},"subtasks":{"1":{"type":"sum","score":100,"status":1}}},"pdoc":{"_id":"6af5613222c05f100aa58071","owner":1,"domainId":"system","docType":10,"docId":1,"title":"A+B Problem","tag":["系统测试"],"hidden":true,"nSubmit":2,"nAccept":2,"pid":"P1000","config":{"count":0,"memoryMin":64,"memoryMax":64,"timeMin":1000,"timeMax":1000,"type":"default"},"stats":{"AC":2,"WA":0,"TLE":0,"MLE":0,"RE":0,"SE":0,"IGN":0,"CE":0,"s100":2}},"tdoc":{"_id":"6af56687ce73a66a8b262d4e","content":"111","owner":2,"domainId":"system","docType":30,"docId":"6af56687ce73a66a8b262d4e","assign":[],"duration":null,"title":"11111111111111111111111111","rule":"acm","beginAt":"2026-11-12T07:15:00.000Z","endAt":"2026-11-20T15:15:00.000Z","pids":[1],"attend":1,"rated":true,"allowPrint":false,"allowTeam":false,"allowViewCode":true,"autoHide":true,"keepScoreboardHidden":false,"langs":["cc.cc98o2","cc","cc.cc11","cc.cc11o2","py.py3","py","py.py2","rs","php"],"lockAt":null,"maintainer":[]},"allRevs":{}}
+{
+  "udoc": {
+    "_id": 2,
+    "uname": "admin",
+    "mail": "admin@example.com",
+    "perm": "BigInt::-1",
+    "role": "root",
+    "priv": -1,
+    "regat": "2026-11-12T06:57:42.181Z",
+    "loginat": "2026-11-15T08:15:08.579Z",
+    "avatar": "qq:123456789"
+  },
+  "rdoc": {
+    "_id": "6af56937ce73a66a8b262d57",
+    "status": 1,
+    "uid": 2,
+    "code": "#include <iostream>\nint main() {\n    long long a, b;\n    std::cin >> a >> b;\n    std::cout << a + b << std::endl;\n    return 0;\n}",
+    "lang": "cc",
+    "pid": 1,
+    "domainId": "system",
+    "score": 100,
+    "time": 3.393,
+    "memory": 508,
+    "judgeTexts": [
+      {
+        "message": "Syncing testdata, please wait...",
+        "params": []
+      }
+    ],
+    "compilerTexts": [],
+    "testCases": [
+      {
+        "id": 1,
+        "subtaskId": 1,
+        "status": 1,
+        "score": 50,
+        "time": 1.913,
+        "memory": 508,
+        "message": ""
+      },
+      {
+        "id": 2,
+        "subtaskId": 1,
+        "status": 1,
+        "score": 50,
+        "time": 1.48,
+        "memory": 412,
+        "message": ""
+      }
+    ],
+    "judger": 3,
+    "judgeAt": "2026-11-12T07:22:32.453Z",
+    "rejudged": false,
+    "contest": "6af56687ce73a66a8b262d4e",
+    "files": {},
+    "subtasks": {
+      "1": {
+        "type": "sum",
+        "score": 100,
+        "status": 1
+      }
+    }
+  },
+  "pdoc": {
+    "_id": "6af5613222c05f100aa58071",
+    "owner": 1,
+    "domainId": "system",
+    "docType": 10,
+    "docId": 1,
+    "title": "A+B Problem",
+    "tag": [
+      "系统测试"
+    ],
+    "hidden": true,
+    "nSubmit": 2,
+    "nAccept": 2,
+    "pid": "P1000",
+    "config": {
+      "count": 0,
+      "memoryMin": 64,
+      "memoryMax": 64,
+      "timeMin": 1000,
+      "timeMax": 1000,
+      "type": "default"
+    },
+    "stats": {
+      "AC": 2,
+      "WA": 0,
+      "TLE": 0,
+      "MLE": 0,
+      "RE": 0,
+      "SE": 0,
+      "IGN": 0,
+      "CE": 0,
+      "s100": 2
+    }
+  },
+  "tdoc": {
+    "_id": "6af56687ce73a66a8b262d4e",
+    "content": "111",
+    "owner": 2,
+    "domainId": "system",
+    "docType": 30,
+    "docId": "6af56687ce73a66a8b262d4e",
+    "assign": [],
+    "duration": null,
+    "title": "11111111111111111111111111",
+    "rule": "acm",
+    "beginAt": "2026-11-12T07:15:00.000Z",
+    "endAt": "2026-11-20T15:15:00.000Z",
+    "pids": [
+      1
+    ],
+    "attend": 1,
+    "rated": true,
+    "allowPrint": false,
+    "allowTeam": false,
+    "allowViewCode": true,
+    "autoHide": true,
+    "keepScoreboardHidden": false,
+    "langs": [
+      "cc.cc98o2",
+      "cc",
+      "cc.cc11",
+      "cc.cc11o2",
+      "py.py3",
+      "py",
+      "py.py2",
+      "rs",
+      "php"
+    ],
+    "lockAt": null,
+    "maintainer": []
+  },
+  "allRevs": {}
+}

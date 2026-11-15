@@ -512,8 +512,10 @@ fn record_detail_real_fixture_parses_fractional_milliseconds() {
     let rdoc = vo.rdoc.expect("应含 rdoc");
     // 实测 `time: 3.393` / `memory: 508`：取整后 (3, 508, 100.0)
     assert_eq!(rdoc.terminal_metrics(), (3, 508, 100.0));
-    // subtasks 实测是对象 `{"<subtaskId>": {...}}`（旧文档示例的数组形态已废弃）
-    assert!(rdoc.subtasks.as_ref().unwrap().is_object());
+    // subtasks 实测是对象 `{"<subtaskId>": {...}}`（旧文档示例的数组形态已废弃）。
+    // 断言用 is_some 而非 is_object：类型回退变异（Option<Vec<Value>>）时
+    // 解析即失败 → 运行期红，与其它夹具用例同款判别力（is_object 会变成编译红）
+    assert!(rdoc.subtasks.is_some(), "subtasks 应保留");
     // testCases time 实测 1.913 / 1.48 → 取整 2 / 1（按服务端返回顺序）
     let cases = rdoc.test_cases.as_ref().unwrap();
     assert_eq!(cases.len(), 2);

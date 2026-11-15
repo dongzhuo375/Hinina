@@ -390,7 +390,7 @@ pub fn coerce_id(value: &Value) -> String {
 /// 把可能是数字或字符串的值归一为 i64。
 ///
 /// 截断口径（`as`）：这里归一的是 **ID/计数类**值；测量值（毫秒）的取整走
-/// [`de_opt_i64_from_number`](fn.de_opt_i64_from_number.html)（四舍五入），勿混用。
+/// [`de_opt_i64_from_number`]（四舍五入），勿混用。
 pub fn coerce_i64(value: &Value) -> Option<i64> {
     match value {
         Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
