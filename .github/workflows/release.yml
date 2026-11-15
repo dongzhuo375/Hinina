@@ -1,6 +1,6 @@
 # M4：标签触发的 Windows 草稿发布（doc/cicd/m4-release.md）。
 # job 名是稳定名（doc/cicd/m0-baseline.md §六），改名须同步该表与 RELEASE.md。
-# OS 签名（M5）与 updater（M6）不在本工作流范围内；产物为未签名草稿，人工验收后手动公开。
+# OS 签名已取消（无签名证书，SmartScreen 未签名警告作为已知成本接受）；updater（M6）不在本工作流范围内；产物为未签名草稿，人工验收后手动公开。
 name: Release
 
 on:

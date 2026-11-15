@@ -1,6 +1,6 @@
 # 发布手册（RELEASE）
 
-Hinina 的 Windows x64 发布流程（M4 范围），发布产物为**免安装裸 exe**（`Hinina_<版本>_x64.exe`）。NSIS 安装包线路保留（`src-tauri/tauri.conf.json` 的 `bundle.targets` 仍为 `["nsis"]`）但发布主线不使用：发布构建带 `--no-bundle`，需要安装包时移除该旗标即可恢复。裸 exe 无 WebView2 引导安装——**目标机需已装 WebView2 Runtime**（Windows 11 自带，Windows 10 通常已有；缺失时应用无法启动，错误框见 `startup_dialog`）。OS 代码签名接入为 M5 范围、自动更新为 M6 范围，本手册不涉及；两项接入后在本手册追加对应步骤。
+Hinina 的 Windows x64 发布流程（M4 范围），发布产物为**免安装裸 exe**（`Hinina_<版本>_x64.exe`）。NSIS 安装包线路保留（`src-tauri/tauri.conf.json` 的 `bundle.targets` 仍为 `["nsis"]`）但发布主线不使用：发布构建带 `--no-bundle`，需要安装包时移除该旗标即可恢复。裸 exe 无 WebView2 引导安装——**目标机需已装 WebView2 Runtime**（Windows 11 自带，Windows 10 通常已有；缺失时应用无法启动，错误框见 `startup_dialog`）。OS 代码签名**已取消**（无签名证书，SmartScreen 的未签名警告作为已知成本接受，产物保持未签名）；自动更新为 M6 范围，本手册不涉及，接入后在本手册追加对应步骤。
 
 ## 一、版本准备
 

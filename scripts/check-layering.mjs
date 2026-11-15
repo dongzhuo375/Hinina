@@ -78,7 +78,11 @@
 // **import-shaped text inside a string literal is scanned** — a string such as
 // `'x from "@/services/y"'` reports a violation (false positive, fail-closed
 // direction; keep prose examples in comments). `require()` is not scanned
-// (ESM-only codebase).
+// (ESM-only codebase). Store-mode dynamic imports built by string
+// concatenation / templates are judged only by their **readable prefix**
+// (a partial prefix like `'../b' + x` is allowed) — that is the explicit
+// cost of permitting store lazy-load concatenation; the main scan surface
+// fails closed on the same shapes.
 //
 // Usage:
 //   node scripts/check-layering.mjs      (also: npm run check:layering)

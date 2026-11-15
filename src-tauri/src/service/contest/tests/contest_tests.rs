@@ -389,12 +389,15 @@ impl ContestProvider for StubContestProvider {
         matches!(error, AppError::Contest(_))
     }
 
-    /// stub 的 Contest 错误全部代表「注册被拒」（确定性结果，进结论记忆）；
-    /// Network/Auth 错误走默认的 Other（退避，不进结论记忆）——与
-    /// AccessMode 语义一一对应
+    /// stub 只产出一条 Contest 消息（「密码错误」，见 `ensure_contest_access`），
+    /// 判据用**锚定匹配**（starts_with）：service 层契约是「classify 见适配器
+    /// 原生错误」（环节前缀加在分类之后）——若分类被挪到加前缀之后，本判据
+    /// 不再命中、kind 退回 Other，锚定用例即红（C2 回归锁的判据半边）
     fn classify_access_rejection(&self, error: &AppError) -> AccessRejectionKind {
         match error {
-            AppError::Contest(_) => AccessRejectionKind::Rejected,
+            AppError::Contest(msg) if msg.starts_with("密码错误") => {
+                AccessRejectionKind::Rejected
+            }
             _ => AccessRejectionKind::Other,
         }
     }
@@ -678,8 +681,36 @@ fn best_effort_backfill_failure_does_not_break_loading() {
     assert_eq!(
         stub.access_call_count(),
         1,
-        "后台失败路径确实执行（provider 被调一次，错误按 debug 级留痕）"
+        "后台失败路径确实执行（provider 被调一次；WrongPassword 分类为 Rejected，错误升 warn 留痕）"
     );
+}
+
+#[tokio::test]
+async fn access_core_classifies_the_raw_error_before_the_stage_prefix() {
+    // C2 回归锁：分类在加环节前缀**之前**对原始错误计算并随结果携带（写回
+    // 守卫与后台兜底分级共用该判定）。stub 判据用**锚定匹配**（starts_with）：
+    // 若把分类挪回 `context` 之后（对「私有赛进入校验失败: 密码错误」分类），
+    // 锚定不再命中、kind 退回 Other，本用例即红
+    let stub = Arc::new(StubContestProvider::new(StubMode::Ok));
+    stub.set_access_mode(AccessMode::WrongPassword);
+    let result = ensure_contest_access_core(
+        Arc::new(Mutex::new(AccessAttemptMemo::new())),
+        Arc::new(AtomicU64::new(0)),
+        stub,
+        "HOJ".into(),
+        "1011".into(),
+        Some("pw".to_string()),
+        tracing::Level::DEBUG,
+    )
+    .await;
+    match result {
+        AccessCoreResult::Attempted(Err(_), kind) => assert_eq!(
+            kind,
+            AccessRejectionKind::Rejected,
+            "原始错误「密码错误」在加环节前缀之前分类为 Rejected"
+        ),
+        other => panic!("期望 Attempted(Err)，实际 {other:?}"),
+    }
 }
 
 #[test]
@@ -1025,12 +1056,12 @@ fn access_memo_rejected_expires_after_retention() {
         ),
         "保留期一过即视为未尝试"
     );
+    // lookup 清除路线的判别性断言（Miss 文档声明「过期条目已被顺手清除」）：
+    // 删掉 lookup 内的 entries.remove 会让本断言变红——普通 Miss 断言对此
+    // 无判别力（清除与否都返回 Miss）
     assert!(
-        matches!(
-            memo.lookup(&key, t0 + ACCESS_MEMO_RETENTION),
-            AccessMemoLookup::Miss
-        ),
-        "过期条目已被顺手清除，不会反复判过期"
+        memo.entries.is_empty(),
+        "过期条目已被 lookup 顺手清除，不占记忆"
     );
 }
 

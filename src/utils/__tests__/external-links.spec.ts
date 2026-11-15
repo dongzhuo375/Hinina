@@ -69,7 +69,11 @@ describe('installExternalLinkOpener — 外链拦截', () => {
 
   it('同 host（应用内）不转交——RouterLink 与站内锚点不受影响', () => {
     const inApp = clickAnchor('<a href="/contest/problems">题目列表</a>')
-    const sameHostAbsolute = clickAnchor('<a href="http://localhost:3000/in-app">应用内绝对地址</a>')
+    // 同源 URL 从 location 动态构造（jsdom 的 host 带端口，硬编码 localhost
+    // 会落进跨源分支）
+    const sameHostAbsolute = clickAnchor(
+      `<a href="${new URL('/in-app', window.location.href).href}">应用内绝对地址</a>`,
+    )
     const fragment = clickAnchor('<a href="#section">页内片段</a>')
     expect(opener).not.toHaveBeenCalled()
     // 放行 = 不调用我们的 preventDefault（路由跳转与页内滚动保留默认动作）
