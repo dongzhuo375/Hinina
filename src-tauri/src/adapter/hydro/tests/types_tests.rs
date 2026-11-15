@@ -1,7 +1,12 @@
 // Hydro types.rs 单元测试：响应归一化、错误包络、时间、状态码、语言、榜单单元格矩阵。
 //
-// 夹具均为**按 `doc/Hydro/HYDRO-API.md` 手工构造**（无可用联调实例），
-// 键名与 null 分布严格照文档示例，用于锁定解析契约；真实联调见缺口报告待办清单。
+// 夹具有两类出处（键名与 null 分布照文档示例，用于锁定解析契约）：
+// - **手工构造**（按 `doc/Hydro/HYDRO-API.md`）：contest_list / contest_problems /
+//   problem_detail / record_detail / record_list / scoreboard_* —— 无 pid 别名键的
+//   pdict、整数毫秒等形态仍是合法线格式，保留以锁旧契约与多题多记录覆盖；
+// - **2026-11-15 实测收编**（测试部署 http://135.149.84.204:18080，上游 master 行为）：
+//   record_detail_real / record_detail_tle / record_list_real —— 浮点毫秒、对象形态
+//   subtasks 等真实载荷，锁定缺口 D22 的容错契约。
 
 use super::*;
 
@@ -12,6 +17,9 @@ fn load(name: &str) -> Value {
         "problem_detail" => include_str!("fixtures/problem_detail.json"),
         "record_detail" => include_str!("fixtures/record_detail.json"),
         "record_list" => include_str!("fixtures/record_list.json"),
+        "record_detail_real" => include_str!("fixtures/record_detail_real.json"),
+        "record_detail_tle" => include_str!("fixtures/record_detail_tle.json"),
+        "record_list_real" => include_str!("fixtures/record_list_real.json"),
         "scoreboard_acm" => include_str!("fixtures/scoreboard_acm.json"),
         "scoreboard_oi" => include_str!("fixtures/scoreboard_oi.json"),
         "error_privilege" => include_str!("fixtures/error_privilege.json"),
@@ -494,6 +502,70 @@ fn record_list_fixture_parses() {
     assert_eq!(tdoc.rule.as_deref(), Some("acm"));
     assert_eq!(vo.pdict.as_ref().unwrap().len(), 2);
     assert_eq!(vo.udict.as_ref().unwrap()["3"].display(), "alice");
+}
+
+// ── 2026-11-15 实测载荷（缺口 D22：浮点毫秒 / 对象形态 subtasks）──
+
+#[test]
+fn record_detail_real_fixture_parses_fractional_milliseconds() {
+    let vo: RecordDetailVO = parse("record_detail_real");
+    let rdoc = vo.rdoc.expect("应含 rdoc");
+    // 实测 `time: 3.393` / `memory: 508`：取整后 (3, 508, 100.0)
+    assert_eq!(rdoc.terminal_metrics(), (3, 508, 100.0));
+    // subtasks 实测是对象 `{"<subtaskId>": {...}}`（旧文档示例的数组形态已废弃）
+    assert!(rdoc.subtasks.as_ref().unwrap().is_object());
+    // testCases time 实测 1.913 / 1.48 → 取整 2 / 1（按服务端返回顺序）
+    let cases = rdoc.test_cases.as_ref().unwrap();
+    assert_eq!(cases.len(), 2);
+    assert_eq!(cases[0].time, Some(2));
+    assert_eq!(cases[1].time, Some(1));
+    assert_eq!(cases[0].memory, Some(508));
+}
+
+#[test]
+fn record_detail_tle_fixture_parses_and_keeps_terminal_metrics() {
+    let vo: RecordDetailVO = parse("record_detail_tle");
+    let rdoc = vo.rdoc.expect("应含 rdoc");
+    assert_eq!(rdoc.status_code(), 3, "实测为 TLE（2 秒死循环，限时 1s）");
+    // 实测 `time: 2176.329` / `memory: 512`（两测试点之和）
+    assert_eq!(rdoc.terminal_metrics(), (2176, 512, 0.0));
+    // 单点 1088.429 / 1087.9 → 均取整 1088
+    let cases = rdoc.test_cases.as_ref().unwrap();
+    assert_eq!(cases.len(), 2);
+    assert!(cases.iter().all(|case| case.time == Some(1088)));
+}
+
+#[test]
+fn record_list_real_fixture_parses() {
+    // 提交列表曾因 `rdocs[].time = 3.393`（浮点）整页解析失败（实测日志 11 次）
+    let vo: RecordListVO = parse("record_list_real");
+    let rdocs = vo.rdocs.as_ref().unwrap();
+    assert_eq!(rdocs.len(), 1);
+    assert_eq!(rdocs[0].terminal_metrics(), (3, 508, 100.0));
+    // pdict 双键：docId "1" + pid 别名 "P1000"（缺口 D21；按 docId 取值的消费方不受影响）
+    let pdict = vo.pdict.as_ref().unwrap();
+    assert_eq!(pdict.len(), 2);
+    assert!(pdict.contains_key("1") && pdict.contains_key("P1000"));
+}
+
+#[test]
+fn fractional_milliseconds_round_to_nearest() {
+    let rdoc: RdocVO = serde_json::from_value(serde_json::json!({
+        "status": 1, "time": 2176.5, "memory": 508.5, "score": 100
+    }))
+    .unwrap();
+    // .5 边界锁定「四舍五入」而非截断
+    assert_eq!(rdoc.terminal_metrics(), (2177, 509, 100.0));
+}
+
+#[test]
+fn record_time_rejects_non_numeric_value() {
+    // 过度容忍会把毫秒语义放宽到任意类型；字符串必须仍是类型错误
+    let err = serde_json::from_value::<RdocVO>(serde_json::json!({
+        "status": 1, "time": "451"
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("invalid type"), "实际错误: {err}");
 }
 
 // ── 榜单单元格矩阵 ──

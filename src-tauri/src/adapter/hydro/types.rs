@@ -396,6 +396,46 @@ pub fn coerce_i64(value: &Value) -> Option<i64> {
     }
 }
 
+/// 把 JSON 数字（整数或浮点）反序列化为 `Option<i64>` 的 serde 钩子（缺口 D22）。
+///
+/// 背景（2026-11-15 实测定标）：上游 master 的 hydrojudge 以
+/// `Math.floor(total_time * 1e6) / 1e6`（`packages/hydrojudge/src/flow.ts:134`）
+/// 产出**带小数的毫秒数**（实测 `rdoc.time: 3.393`、`testCases[].time: 1.48`；
+/// 单位仍是毫秒——2 秒死循环被判 TLE 时单点报 1088.429）。serde 的 `i64` 字段
+/// 遇浮点直接报 `invalid type: floating point`，整份 rdoc 解析失败——评测
+/// 轮询/列表/详情/测试点四条通道全灭。整数原样收下、浮点四舍五入为毫秒整数；
+/// **非数字（字符串等）仍按类型错误拒绝**——不过度容忍，毫秒语义不收字符串。
+pub fn de_opt_i64_from_number<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(number) = value.as_number() else {
+        return Err(serde::de::Error::invalid_type(
+            unexpected_of(&value),
+            &"a JSON number (integer or fractional milliseconds)",
+        ));
+    };
+    Ok(Some(number.as_i64().unwrap_or_else(|| {
+        number.as_f64().map_or(0, |f| f.round() as i64)
+    })))
+}
+
+/// 把非数字 JSON 值映射为 `serde::de::Unexpected`（仅用于类型错误文案）。
+fn unexpected_of(value: &Value) -> serde::de::Unexpected<'_> {
+    match value {
+        Value::Null => serde::de::Unexpected::Unit,
+        Value::Bool(b) => serde::de::Unexpected::Bool(*b),
+        Value::String(s) => serde::de::Unexpected::Str(s),
+        Value::Array(_) => serde::de::Unexpected::Seq,
+        Value::Object(_) => serde::de::Unexpected::Map,
+        Value::Number(_) => unreachable!("调用方已确保非 Number"),
+    }
+}
+
 /// 把单元格 `value` 归一为字符串（文档声明是 string，实测可能是数字）。
 pub fn cell_text(cell: &CellVO) -> String {
     match cell.value.as_ref() {
@@ -721,7 +761,10 @@ pub struct SubmitVO {
     pub tid: Option<Value>,
 }
 
-/// 单个测试点（`rdoc.testCases[]`）
+/// 单个测试点（`rdoc.testCases[]`）。
+///
+/// `time`/`memory` 实测为**带小数的毫秒/KiB**（缺口 D22），经
+/// `de_opt_i64_from_number` 收数字并取整——写死 `i64` 会让整份 rdoc 解析失败。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestCaseVO {
@@ -733,9 +776,9 @@ pub struct TestCaseVO {
     pub status: Option<i64>,
     #[serde(default)]
     pub score: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub time: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub memory: Option<i64>,
     #[serde(default)]
     pub message: Option<String>,
@@ -758,11 +801,12 @@ pub struct RdocVO {
     pub code: Option<String>,
     #[serde(default)]
     pub score: Option<f64>,
-    /// 运行耗时（毫秒）
-    #[serde(default)]
+    /// 运行耗时（毫秒）。实测上游 master 给**带小数的毫秒**（缺口 D22），经
+    /// `de_opt_i64_from_number` 收数字并取整——整数毫秒的旧形态同样收下
+    #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub time: Option<i64>,
-    /// 运行内存（KiB）
-    #[serde(default)]
+    /// 运行内存（KiB）。同 `time` 容忍浮点形态（实测样本均为整数，防御同源失败）
+    #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub memory: Option<i64>,
     #[serde(default)]
     pub status: Option<i64>,
@@ -771,8 +815,11 @@ pub struct RdocVO {
     pub compiler_texts: Option<Vec<String>>,
     #[serde(default)]
     pub test_cases: Option<Vec<TestCaseVO>>,
+    /// 子任务汇总。**实测是对象形态** `{"<subtaskId>": {...}}`（`cancel` 操作写
+    /// `{}`；旧文档示例的数组形态同样收下）。**刻意不解析**：文档未给出稳定结构，
+    /// 子任务分组用 `testCases[].subtaskId`（见 `group_sub_tasks`）
     #[serde(default)]
-    pub subtasks: Option<Vec<Value>>,
+    pub subtasks: Option<Value>,
     #[serde(default)]
     pub judger: Option<Value>,
     /// 评测完成时刻（**不是提交时刻**，见 `objectid_seconds`）
