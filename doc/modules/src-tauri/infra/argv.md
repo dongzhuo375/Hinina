@@ -6,7 +6,7 @@
 
 启动参数匹配的**唯一来源**：`--console`（`console::requested`）与 `--settings`
 （`launch_args::requested`）曾各写一份相同的 `OsString` 扫描，注释声称「语义必须
-一致」却无机制保证（评审十九 #9）。收敛到 `has_flag` 后，新增参数只加一行调用。
+一致」却无机制保证。收敛到 `has_flag` 后，新增参数只加一行调用。
 
 ## 核心类型/函数
 

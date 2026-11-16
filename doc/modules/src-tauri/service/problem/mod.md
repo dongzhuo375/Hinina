@@ -41,7 +41,7 @@
 - `commands::maintenance_cmd`（`reset_client` → `clear_caches`）
 
 ## 逻辑流程
-- ~~**list_problems(contest_id)**~~：已删除（P70）—— 该链路零调用方，题目列表实际走 `ContestProvider::list_contest_problems`（返回 `ContestProblem`）；即便被调用也是语义滥用（同一端点却映射成 description 为空、limits 为 0 的 `Problem`）
+- ~~**list_problems(contest_id)**~~：已删除—— 该链路零调用方，题目列表实际走 `ContestProvider::list_contest_problems`（返回 `ContestProblem`）；即便被调用也是语义滥用（同一端点却映射成 description 为空、limits 为 0 的 `Problem`）
 - **open_problem(contest_id, problem_id, cache_enabled)**：`load_problem_statement`（内存 → 磁盘 → 网络，命中即回填；`cache_enabled=false` 直连）→ 发布 `CoreEvent::ProblemOpened` → 返回题目。**只缓存成功结果**：Provider 错误原样上抛，不入缓存
 - **on_oj_switched**：`limits_cache.clear()` + `statement_cache.clear()`（内存段同步）→ `clear_problem_disk_caches(...)`（有 tokio 上下文则 `Handle::spawn`，否则同步兜底）
 - **get_user_problem_status(contest_id, problem_ids)**：空列表短路 → `registry.current_problem()` → `ProblemProvider::get_user_problem_status()` → 失败 `e.context("获取用户题目状态失败")`，变体不改写

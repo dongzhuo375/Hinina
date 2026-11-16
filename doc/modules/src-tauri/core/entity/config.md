@@ -1,7 +1,7 @@
 # config
 
 ## 职责
-定义应用全局配置的实体类型，包含用户偏好、OJ 连接（实例清单 + 当前 OJ + 比赛引用）、编辑器、主题、布局五类配置。所有 struct 均实现 `Serialize + Deserialize + Default`，以 JSON 格式通过 `ConfigService` 持久化和加载。所有可变行为参数均从 Config 读取，支持运行时热更新（`ConfigService::reload()`）。另提供旧值归一纯函数 `normalize_legacy_values`（P55），把历史配置中的旧默认值收敛到当前取值域，并完成 OJ 配置 v2 迁移（`hojUrl` / `contestId` / `lastOjType` → `instances` / `contestRef` / `active`）；以及写入路径的 `validate()` / `sanitize()`（M4），供 `update_config` Command 持久化前做后端兜底校验与钳制。
+定义应用全局配置的实体类型，包含用户偏好、OJ 连接（实例清单 + 当前 OJ + 比赛引用）、编辑器、主题、布局五类配置。所有 struct 均实现 `Serialize + Deserialize + Default`，以 JSON 格式通过 `ConfigService` 持久化和加载。所有可变行为参数均从 Config 读取，支持运行时热更新（`ConfigService::reload()`）。另提供旧值归一纯函数 `normalize_legacy_values`，把历史配置中的旧默认值收敛到当前取值域，并完成 OJ 配置 v2 迁移（`hojUrl` / `contestId` / `lastOjType` → `instances` / `contestRef` / `active`）；以及写入路径的 `validate()` / `sanitize()`，供 `update_config` Command 持久化前做后端兜底校验与钳制。
 
 ## 核心类型
 
@@ -54,7 +54,7 @@
 ## 默认值函数
 所有默认值通过模块级私有函数提供（如 `default_hoj_url()`, `default_timeout()`, `default_font_size()` 等），`const fn` 用于编译期常量、`fn` 用于需要 `String` 的默认值。OJ 侧另有 `default_active_oj()`（`"HOJ"`，与旧版 `default_oj_type` 一致，行为零变化）、`default_oj_instances()`（默认单 HOJ 实例，沿用旧版默认地址）与 `default_true()`（实例默认启用）。
 
-## 旧值归一（P55）
+## 旧值归一
 - **`normalize_legacy_values(cfg: &mut AppConfig)`**（公开纯函数）— 一次性归一历史配置文件中的旧默认值，由 `ConfigService::new()` 与 `reload()` 两条加载路径调用。背景：`editor.defaultLanguage` 的值域已翻转为 HOJ 语言显示名（与提交契约一致）—— 被上一版归一成 Monaco id（`'cpp'` 等）的配置在此重新映射回显示名；另有 `theme = dark`（整机深色 UI 尚未实现，前端只有浅色）、`splitRatio = 0.45`（旧默认，现默认 0.48）仍按旧规则修正。**只修正恰好等于旧默认值的项，用户显式设置的其他值一律不动**：
   - 语言：经私有 `normalize_language_display_name` 把旧 Monaco id 映射为显示名（大小写不敏感：`cpp→"C++"` / `c→"C"` / `java→"Java"` / `python→"Python"`）；已是显示名或其他非空值（OJ 可能提供 Go/Rust 等）原样保留，仅空串回退默认 `"C++"`
   - 主题（legacy）：`legacy_theme_name.take() == Some("dark")` 且 `editor_theme == "vs-dark"`（旧切换器的成对写入）→ 编辑器主题归位 `"vs"`。编辑器主题是解题页可选项，浅色界面 + 深色编辑器是合法组合，非成对值不动
@@ -66,7 +66,7 @@
     - `contest_ref` trim；实例 `id` 与 `active` 统一 trim（id 带空白会让工厂匹配静默失败）；`active` 不指向**已启用**实例时回退首个启用实例（而非硬编码 HOJ —— HOJ 实例可能被禁用/移除，指向不存在或不可用的 id 都是死路；迁移分支保证 instances 至少一条，回退目标恒存在）
 - 抽成纯函数（而非埋在 ConfigService 里）是为了可被单元测试直接锁定，且幂等（每次加载都会执行）
 
-## 写入路径校验与净化（M4）
+## 写入路径校验与净化
 `update_config` Command 持久化前调用（config.json 可被手改，前端 SettingsView 不是唯一防线）。均为纯函数/纯方法，可直接单测：
 - **`AppConfig::validate(&self) -> Result<(), String>`** — 校验不可钳制项，失败返回可直接展示的错误消息（Command 层把 `Err(msg)` 映射为 `AppError::Config(msg)` 拒绝落盘）。四条判据：
   1. 实例 id 非空、**不含路径分隔符与 `..`**（id 会拼进会话文件名 `sessions/{id}.json` 与注册表键，路径穿越必须拒绝；`Storage::resolve` 是第二道防线）且唯一（重复 id 会让注册表互相覆盖、会话文件名撞车）
@@ -74,7 +74,7 @@
   3. `active` 必须指向**已启用**的实例（禁用实例不会被注册，指向它等于死路）
 - **`AppConfig::sanitize(&mut self) -> bool`** — 就地钳制越界字段，取值域与前端 SettingsView 校验一致：`timeout_secs 1..=120`、`poll_interval_secs 1..=30`、`poll_timeout_secs 30..=3600`、`cache_ttl_secs 0..=600`、`font_size 8..=32`、`tab_size 1..=8`、`auto_save_interval_secs 5..=300`、`split_ratio 0.30..=0.70`（非有限值先回退默认 0.48 再钳制）；`oj.active`、`oj.contest_ref` 与各实例的 `id` / `base_url` trim；`default_language` 经私有 `sanitize_language_id` 净化 —— 旧 Monaco id 先走 `normalize_language_display_name` 映射为显示名，其余非空值（含 OJ 可能提供的 Go/Rust 等）原样保留，仅空串回退默认 `"C++"`；`editor_theme` 经私有 `sanitize_editor_theme` 收敛到 Monaco 内置 `vs` / `vs-dark`（其余值回退默认 `vs` —— 未知主题名会让 `setTheme` 静默无效）。返回是否修改了任何字段（调用方据此记 warn 日志），为此各配置 struct 追加了 `PartialEq` derive
 
-- **`AppConfig::preserve_locked_fields(&mut self, previous: &Self)`** / **`validate_preserving_locked(&self)`** / **`sanitize_editable(&mut self) -> bool`**（评审二十六 #2，`update_config` 的锁定路径；执行真值由 `launch_args` 推导）：锁定字段（OJ 选择、实例清单与地址、超时/轮询/缓存 TTL、题面缓存）整体取旧配置，只让选手层字段取新值；校验只保留「active 指向已启用实例」的结构性检查（手改非法锁定值不阻塞可编辑字段保存），净化只钳制比赛引用/编辑器/主题/布局——锁定值不 trim、不钳制、不改写。`oj.active` 在两条路径下都**只由 `switch_oj` 改写**（普通保存不得覆盖，评审二十九 #1）。
+- **`AppConfig::preserve_locked_fields(&mut self, previous: &Self)`** / **`validate_preserving_locked(&self)`** / **`sanitize_editable(&mut self) -> bool`**（`update_config` 的锁定路径；执行真值由 `launch_args` 推导）：锁定字段（OJ 选择、实例清单与地址、超时/轮询/缓存 TTL、题面缓存）整体取旧配置，只让选手层字段取新值；校验只保留「active 指向已启用实例」的结构性检查（手改非法锁定值不阻塞可编辑字段保存），净化只钳制比赛引用/编辑器/主题/布局——锁定值不 trim、不钳制、不改写。`oj.active` 在两条路径下都**只由 `switch_oj` 改写**（普通保存不得覆盖）。
 
 ## 直接依赖
 - `serde::{Deserialize, Serialize}`
