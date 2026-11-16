@@ -1,6 +1,6 @@
 # announcement.spec.ts（E2E：赛事公告）
 
-> 源文件：`e2e/specs/announcement.spec.ts`；2026-11 审计 C4 补缺。
+> 源文件：`e2e/specs/announcement.spec.ts`；2026-11 补缺。
 
 ## 职责
 
