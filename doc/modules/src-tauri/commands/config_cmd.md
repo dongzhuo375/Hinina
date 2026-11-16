@@ -21,7 +21,7 @@
 - `crate::core::entity::config::AppConfig`
 - `crate::core::error::{AppError, AppResult}`（`AppError::Config` 承载地址校验失败）
 - `crate::infra::logger::LOG_RELATIVE_PATH`（日志展示路径的唯一事实来源）
-- `crate::infra::launch_args`（`update_config` 的锁定执行真值：`maintainer_locked = !launch_args::get().settings`，2026-11-04 G1）
+- `crate::infra::launch_args`（`update_config` 的锁定执行真值：`maintainer_locked = !launch_args::get().settings`，2026-11-04 起）
 
 ## 被依赖
 - `commands::invoke_handler`（`generate_handler!` 注册全部四个 Command）

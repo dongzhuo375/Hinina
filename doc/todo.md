@@ -106,7 +106,7 @@
 - [x] **评测页** — `views/SubmissionsView.vue`（筛选工具条 + 提交表格 + 分页；onlyMine 后端强制；`?problem=` 自动预筛）+ `views/SubmissionDetailView.vue`（判定横幅 + 测试点明细/子任务 + 只读代码）
 - [x] **榜单页** — `views/RankView.vue` + `components/rank/{RankToolbar,ScoreboardTable,RankCell}.vue` + `components/contest/ContestStatsBar.vue`（ACM/OI 分流、封榜提示、打星/女生全量快照模式）
 - [x] **公告页** — `views/AnnouncementsView.vue`（卡片 feed + 长文折叠）+ 客户端已读状态（Rust 文件持久化，ActivityBar 未读红点）
-- [x] **设置页** — `views/SettingsView.vue`（OJ / 编辑器 / 布局 / 主题置灰 / **数据目录** / **重置与清理** / 关于 七个分组，P55 配置值域统一与消费落地）
+- [x] **设置页** — `views/SettingsView.vue`（OJ / 编辑器 / 布局 / 主题置灰 / **数据目录** / **重置与清理** / 关于 七个分组，配置值域统一与消费落地）
 - [x] **赛场视觉体系** — `styles/contest.css`（`.contest-theme` 令牌 + `--ui-step` 响应式密度）+ `components/common/PageHeading.vue`（01–05 编号页头）+ `utils/focus-scope.ts`（弹层焦点作用域指令）+ 5 个 `@fontsource-variable/*` 本地打包字体（PR #36）
 - [x] **客户端缓存优化** — `infra/cache.rs` 落地 `TtlCache` + `JsonDiskCache` 原语；比赛元信息（TTL 120s，内存+磁盘）、题面（TTL 30min，内存+磁盘，`oj.cacheProblemStatement` 开关）、终态提交详情/测试点（TTL 2h，仅内存 + 登出清理）；前端 `myStatus` 增量失效 + 榜单用户操作路径去抖 memo。判据与失效路径见 `doc/Architecture.md`「客户端缓存策略」
 

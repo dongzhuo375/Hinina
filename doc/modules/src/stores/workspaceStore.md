@@ -24,7 +24,7 @@
 | `markPersisted` | `(workspaceId?: string, revision?: number) => void` | 后端落盘事件（`workspace-saved`）到达时清 `isDirty`。四重过滤：① 按 `workspaceId` 过滤过期事件（旧工作区的落盘可能在新工作区已编辑后才送达）；② 按 `revision` **幂等** —— 后端 `revision` 是全局单调计数器，小于等于 `lastPersistedRevision` 的事件一律视为重复或过期而跳过（落盘事实只能被更新的修订号推进，不能被回退），并推进该标量；③ **`revision < lastPushedRevision` 时不清脏**（该落盘快照早于编辑器已推送的最新内容，磁盘还没追上编辑器）；④ 若期间又有新改动（`syncPending`）则不清 —— 后端在写失败或快照后又有新改动时不发该事件，故清除等价于「最新内容确已在磁盘上」。**跨会话安全性**：事件载荷不带代际，故**刻意不加代际守卫**（会误挡新会话自己的事件）；安全性不依赖「id 跨会话不同」（`find_or_create` 会恢复同一工作区、同一 id），而由后端 revision 的进程级全局单调 + 仅磁盘写入后发布 + 上述 ③④ 保证——有专项用例覆盖同 id 迟到事件 |
 | `cancelPendingSync` | `(options?: { resetRevisionWatermarks?: boolean }) => void` | 取消未触发的防抖同步、清 `syncPending`。**修订水位默认保留**：后端 `revision` 是进程级单调计数器（WorkspaceManager 存活于 AppContext；登出/切 OJ 继续递增，仅数据目录变更需重启才重建），跨会话可比——归零会让旧会话迟到的落盘事件误清新会话恢复出的脏工作区（假「已自动备份」）。仅测试隔离/后端管理器重建时传 `resetRevisionWatermarks: true` |
 | `purgeStaleCodeFiles` | `() => Promise<void>` | 清理 ≠ `activeFile` 的代码文件（**单代码文件约束**）：语言切换后编辑器内容已复制到新文件名，旧扩展名文件成为过期残留，不清理会一直被后端 `save()` 全量落盘。代码文件判定沿用 `CODE_FILE_EXTENSIONS`，非代码文件不在清理范围；逐个删除、失败仅 `log.error`（下次加载/切换重试）；**每次删除前重查 `activeFile` 与工作区引用**（切换在途时避免误删新 active 文件，后端 `active_file` 守卫为第二道防线） |
-| `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程；**`isLoadingWorkspace` 时拒收**（同源约束：此时切换会把旧题代码经 flush 推到新派生文件名下 —— 后端若已切到新工作区，就是跨工作区的内容错配） |
+| `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程；**`isLoadingWorkspace` 时拒收**（与 `updateCode` 的拒收同源：此时切换会把旧题代码经 flush 推到新派生文件名下 —— 后端若已切到新工作区，就是跨工作区的内容错配） |
 | `installWorkspacePersistenceListener` | `() => void` | 组合根（`main.ts`）安装一次：订阅 `workspace-saved` → `markPersisted(payload.workspaceId, payload.revision)`（`revision` 原样透传，幂等过滤在 store 内完成）；订阅失败只降级指示器 |
 
 ## 直接依赖
@@ -138,7 +138,7 @@ workspace=ws-old、code='old session code'。
   日志中明示后果（「切题或重启后可能退回默认语言」）便于排查。
 - **changeLanguage 不再标脏**：语言由后端立即落盘，不属于「未落盘的代码改动」；
   旧实现置 `isDirty = true` 会让「编辑中…」在语言切换后一直挂着。
-- **单代码文件约束（P62 已闭合）**：切换语言时编辑器内容复制到新派生文件名，旧扩展名
+- **单代码文件约束**：切换语言时编辑器内容复制到新派生文件名，旧扩展名
   文件由 `purgeStaleCodeFiles` 静默清理（不弹窗、不阻断 —— 内容已复制，常规场景删除
   无损失；历史分叉旧文件一并清理是项目决策）。**清理链为 flush → save → purge**：
   purge 删除的旧文件是磁盘上唯一的崩溃恢复副本，必须等新文件内容与元数据

@@ -9,7 +9,7 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、保存�
 
 **持锁写盘与元数据取舍（2026-10-16 裁决维持）**：
 - **持锁写盘**：`save()` 持写锁、auto-save 持读锁完成整个磁盘写，期间 `update_file` 短暂阻塞。这是防「旧快照的写落在更新的写之后 → 磁盘回退到旧内容且永不重写」的**唯一屏障**（`can_mark_clean` 的修订号判据只能阻止误标 clean，不能撤销已发生的覆盖；`auto_save_write_is_serialized_with_explicit_save` 确定性锁定该竞态）。锁外写盘方案存在无法闭合的回退窗口——「写前复查修订号」与「写盘」之间仍可插入新改动，窗口内崩溃会把**已落盘的新内容**覆盖回旧值，比现状（窗口为 0）更糟。阻塞为毫秒级（工作区通常 1–2 个 KB 级文件）且被前端 2 秒防抖稀释，用户无感。
-- **auto-save 不写元数据**：`persist_meta` 仅由 create / save / set_language 显式路径调用，auto-save 刻意不回写。除「快照时刻的语言可能覆盖回刚落盘的新语言」外，还有一层：若 auto-save 写元数据，会打开「元数据新于文件内容」的不一致窗口——切语言 C++→Java 后崩溃，磁盘上是 `language=Java` + 缺失的 `Main.java`，重载得到「Java + 空编辑器」；现状回退到最后一次**一致的**显式保存态（C++ + 旧代码）反而更安全。且 `set_language` 不递增修订号，`can_mark_clean` 防不住该交错。`updated_at` 当前无任何消费方（已裁决不做启动恢复，`find_or_create` 按 contest + problem 匹配），故该取舍无功能代价。
+- **auto-save 不写元数据**：`persist_meta` 仅由 create / save / set_language 显式路径调用，auto-save 刻意不回写。除「快照时刻的语言可能覆盖回刚落盘的新语言」外，还有一层：若 auto-save 写元数据，会打开「元数据新于文件内容」的不一致窗口——切语言 C++→Java 后崩溃，磁盘上是 `language=Java` + 缺失的 `Main.java`，重载得到「Java + 空编辑器」；现状回退到最后一次**一致的**显式保存态（C++ + 旧代码）反而更安全。且 `set_language` 不递增修订号，`can_mark_clean` 防不住该交错。`updated_at` 当前无任何消费方（既有裁决：不做启动恢复，`find_or_create` 按 contest + problem 匹配），故该取舍无功能代价。
 
 ## 核心类型/函数
 - **`WorkspaceManager`** — 工作区管理器
@@ -21,7 +21,7 @@ Workspace 生命周期管理器。负责 Workspace 的创建、加载、保存�
   - `fn persist_meta(&self, ws) -> AppResult<()>`（私有）— 把 `WorkspaceMeta` 序列化写入 `workspace.json`，被 `create` / `save` / `set_language` 三处共用。携带 `language` 与 **`active_file`**（后者 `#[serde(default)]`：历史 workspace.json 无该字段时降级为 `None`，由前端回退到「语言派生名 + 后缀探测」的老启发式）。**auto-save 刻意不写元数据**：`set_language` 会立即落盘语言，若 auto-save 用快照时刻的元数据回写，会把刚落盘的新语言覆盖回旧值
   - `fn auto_save_interval_secs(&self) -> Option<u64>` — 当前 auto-save 的间隔（`None` = 未运行）。单独记一份状态是为了让命令层「按配置同步」成为**幂等**操作：间隔未变则保持不动（免得每次 `load_workspace` 都重置计时器），关掉后也有状态可依、能重新启动（旧实现用一次性 `static AtomicBool`，关掉后再也起不来）
   - `fn save_current_if_dirty(&self) -> ()`（私有）— 落盘当前工作区（脏时才写），失败仅 `warn`。`create` / `load` 替换 `current` 前都必须调用：内存是唯一权威副本，不先落盘则未落盘的改动随替换静默消失
-  - `fn find_or_create(&self, contest_id, problem_id, root_path) -> AppResult<Workspace>` — 按 contest_id + problem_id 扫描所有工作区的 `workspace.json` 元数据：命中 → `load()` 恢复代码；未命中 → `create()` 新建（P36 修复；元数据持久化正是为了避免从 workspace_id 字符串解析字段）
+  - `fn find_or_create(&self, contest_id, problem_id, root_path) -> AppResult<Workspace>` — 按 contest_id + problem_id 扫描所有工作区的 `workspace.json` 元数据：命中 → `load()` 恢复代码；未命中 → `create()` 新建（元数据持久化正是为了避免从 workspace_id 字符串解析字段）
   - `fn start_auto_save(&self, interval_secs: u64)` — 启动后台自动保存（先停旧的再启动）。**「停旧的 → 起新的 → 登记句柄」在同一把锁内完成**：分三次取锁时，并发的两个调用会各自停掉「当时存在的」任务、各自 spawn，随后后登记者的句柄覆盖先登记者 —— 先起的循环成为无人可停的孤儿任务，`stop_auto_save` 之后仍在写盘（有并发用例锁定，修复前 4/4 失败）。循环语义：脏才写；**取快照与写盘整体在读锁内完成**（与 `save()` / `update_file` 的写锁互斥，保证「旧快照的写」不可能落在「更新的写」之后 —— 只锁「取快照」会让写盘期间到来的 `save()` 插进本次写盘之后被旧内容覆盖回退，且工作区已 clean → 新内容永不重写）；写盘失败保持脏、下轮重试且**不发布事件**（前端「已自动备份」必须表示最新内容确已落盘）；仅当修订号未变（快照之后无新改动）才 `mark_clean()` 并发布 `CoreEvent::WorkspaceSaved { workspace_id, revision: snapshot_revision, automatic: true }`
   - `fn stop_auto_save(&self) -> ()` — 停止自动保存：take 出 `auto_save_handle` 中的 JoinHandle 并 abort
   - `fn destroy(&self, workspace_id) -> AppResult<()>` — 销毁工作区：删除所有文件 → 若为当前则清空 current

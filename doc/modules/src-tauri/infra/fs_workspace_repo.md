@@ -16,7 +16,7 @@
 - **`save_file(workspace_id, path, content)`** — 保存工作区文件（**原子写**：临时文件 + fsync + rename 替换），自动创建父目录。同路径并发写由调用方串行化：`WorkspaceManager` 的锁序已保证 `save` / auto-save 写盘互斥；`set_language` 与 `save` 的元数据写理论上存在毫秒级交叠窗口，原子写把它从「内容交错损坏」降级为「其中一方收到 Io 错误、可重试」
 - **`read_file(workspace_id, path)`** — 读取工作区文件，不存在时返回 `AppError::Workspace`
 - **`list_files(workspace_id)`** — 递归列出工作区所有文件，不存在返回空列表
-- **`delete_file(workspace_id, path)`** — 删除单个工作区文件（P62 旧代码文件清理）：经 `workspace_relative()` 路径穿越校验后委托 `Storage::remove()`；文件不存在时返回 `Ok(())`（幂等，清理路径可安全重试）
+- **`delete_file(workspace_id, path)`** — 删除单个工作区文件（旧代码文件清理）：经 `workspace_relative()` 路径穿越校验后委托 `Storage::remove()`；文件不存在时返回 `Ok(())`（幂等，清理路径可安全重试）
 - **`delete_workspace(workspace_id)`** — 递归删除整个工作区目录
 - **`exists(workspace_id)`** — 检查工作区目录是否存在
 - **`list_workspace_ids()`** — 扫描 `workspaces/` 目录列出全部工作区 ID（`WorkspaceManager::find_or_create` 的匹配输入；目录不存在返回空列表，仅收录子目录且目录名须为合法 UTF-8）

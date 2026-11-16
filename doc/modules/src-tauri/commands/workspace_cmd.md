@@ -4,7 +4,7 @@
 工作区相关 Tauri Command 模块。管理代码编辑工作区的加载、保存、切换、状态查询、文件内容同步与语言设置，面向前端暴露 IPC 接口（invoke 名与函数同名，无命名空间前缀）。
 
 ## 核心类型/函数
-- `pub async fn load_workspace(ctx, contest_id, problem_id) -> AppResult<Workspace>` — 加载或创建指定比赛/题目的工作区（`find_or_create`：按 contest_id + problem_id 匹配已有工作区，命中恢复代码，未命中新建）；加载前在**配置写事务锁内**读取配置并同步 auto-save（`load_workspace_sync_auto_save`，评审三十八：与 update_config/reload 串行，避免按旧快照 stop 覆盖并发保存；锁不覆盖后续 find_or_create）。P39：确保 `tokio::spawn` 运行在正确 runtime 上；P48：不再用一次性 static 标记
+- `pub async fn load_workspace(ctx, contest_id, problem_id) -> AppResult<Workspace>` — 加载或创建指定比赛/题目的工作区（`find_or_create`：按 contest_id + problem_id 匹配已有工作区，命中恢复代码，未命中新建）；加载前在**配置写事务锁内**读取配置并同步 auto-save（`load_workspace_sync_auto_save`：与 update_config/reload 串行，避免按旧快照 stop 覆盖并发保存；锁不覆盖后续 find_or_create）。确保 `tokio::spawn` 运行在正确 runtime 上；不再用一次性 static 标记
 - `pub async fn save_workspace(ctx) -> AppResult<()>` — 持久化当前工作区（脏时全量写文件 + 元数据）；**本命令返回 `Ok` 即表示内容已落盘**（未脏时是无操作且不发布事件），成功落盘时 `WorkspaceManager` 发布 `CoreEvent::WorkspaceSaved`，经 `bootstrap::events` 的前端事件桥转为前端的 `workspace-saved`，驱动「已自动备份」指示 —— 事件只是通知，保存的成败由本命令的返回值决定
 - `pub async fn update_workspace_file(ctx, file_name, content) -> AppResult<u64>` — 前端 Monaco 编辑器内容同步到后端（2s 防抖推送的落点）。**只写内存不落盘**：磁盘写入由 auto-save 与显式 `save_workspace` 负责，这样「自动保存间隔」才真正决定落盘频率。**返回本次内容被赋予的修订号**（`WorkspaceManager::update_file` 的返回值原样透传）：前端记为 `lastPushedRevision`，用于与落盘事件的修订号比较 —— 落盘落后于推送时磁盘还没追上编辑器，不能清脏标记
 - `pub async fn set_workspace_language(ctx, language) -> AppResult<Workspace>` — 设置当前工作区语言并**立即落盘**。前端 invoke 签名 `set_workspace_language`({ language })。动机：语言不属于任何代码文件，`update_workspace_file` 带不上它；若不单独持久化，切题或重启后会退回默认语言——选手的 Java 代码会被当作 C++ 提交，属于赛场上最难排查的静默故障
@@ -32,7 +32,7 @@
 
 设计要点：
 
-- **auto-save 的启停是「按配置同步」，不是一次性懒启动**（P48 修复）：旧实现用 `static AtomicBool`
+- **auto-save 的启停是「按配置同步」，不是一次性懒启动**：旧实现用 `static AtomicBool`
   只启动一次，设置页关掉后再也打不开、间隔也只读首次配置。现在由 `auto_save_action` 的判据表决定
   `Keep` / `Start` / `Stop`，并由**配置类命令显式调用** `sync_auto_save_from_context` 触发热生效 ——
   **改开关/间隔无需重启客户端**。

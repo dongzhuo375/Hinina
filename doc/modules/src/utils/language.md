@@ -15,7 +15,7 @@
 | `monacoIdOf` | `(language) => string` | 显示名 → Monaco language id（高亮用）；带版本后缀（"C++17 (GCC 13.2)"/"PyPy3"）按前缀归一；Kotlin 以 Java 近似；**无法识别回退 'cpp'**（高亮错语言好过无高亮） |
 | `isCLikeLanguage` | `(language) => boolean` | 是否 C/C++ 族（limits 1 倍基准，判题端按 .c/.cpp 后缀判定）；空/未知返回 false，调用方按保守 ×2 |
 | `sourceFileNameOf` | `(language) => string` | 显示名 → 工作区源文件名（C++→main.cpp、Java→Main.java、C#→Main.cs、Kotlin→Main.kt…）；**未知语言回退 main.txt，绝不猜 .cpp**（判题端按后缀判语言，猜错后缀 = 用错语言评测） |
-| `normalizeHojLanguage` | `(raw) => string` | 任意历史值 → 显示名：旧 Monaco id（'cpp' 等，P55 时代工作区/配置遗留）映射回显示名；其它非空值原样保留（OJ 可能提供映射外语言）；空 → "C++" |
+| `normalizeHojLanguage` | `(raw) => string` | 任意历史值 → 显示名：旧 Monaco id（'cpp' 等工作区/配置遗留）映射回显示名；其它非空值原样保留（OJ 可能提供映射外语言）；空 → "C++" |
 | `hojLanguageOfFileName` | `(fileName) => string \| null` | 扩展名 → 显示名（上传/拖拽代码文件自动识别语言）；无法识别返回 null。识别面来自 `HOJ_LANGUAGE_BY_EXT` 映射表 |
 | `SOURCE_FILE_EXTENSIONS` | `readonly string[]` | 可识别的源代码扩展名集合（**由映射表派生，识别面唯一来源**）—— QuickSubmitDialog 上传白名单、workspaceStore 代码文件探测清单、两处文件选择器 accept 属性全部由它派生，防止多处清单各自维护漂移 |
 | `resolveAllowedLanguage` | `(detected, allowed) => string \| null` | 把识别出的语言解析为**允许列表中的服务端原名**：精确匹配优先，否则按语言族（`monacoIdStrict` 同族）命中部署变体（"Python"→列表中的 "Python3"、"C++"→"C++17"）；无命中返回 null。上传/拖拽切语言、解题页加载归位（ProblemSolveView）与对话框初始语言校正都必须经它 —— 提交参数必须用服务端认得的写法 |

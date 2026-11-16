@@ -22,15 +22,15 @@
 | `ConfigService.ojSwitchEpoch` | `number`（getter） | 切换代际：开始与结束各 +1；设置页读取配置时据此检测「读取期间发生过切换」并重读 |
 | `ConfigService.ojSwitchInFlight` | `boolean`（getter） | 是否有切换在途（跨控制器） |
 | `ConfigService.whenOjSwitchSettled` | `() => Promise<void>` | 等待在途切换落地；切换失败也视为落地（不向等待者抛出切换错误） |
-| `SaveTxn` | `{ updateConfig(mutate): Promise<AppConfig> }` | 保存事务句柄：`runSaveTxn` 回调内的**唯一不排队**写入通道（直通）。公开的排队入口有三个（`runSaveTxn` + 两个语义化包装），回调内调用任意一个都会自死锁——规则由静态门禁锁定：**识别不了的引用式回调按违规处理（fail closed）**，而不是静默跳过（2026-11-04 G4 下沉；评审后去掉超时看门狗，改为源码扫描约束） |
+| `SaveTxn` | `{ updateConfig(mutate): Promise<AppConfig> }` | 保存事务句柄：`runSaveTxn` 回调内的**唯一不排队**写入通道（直通）。公开的排队入口有三个（`runSaveTxn` + 两个语义化包装），回调内调用任意一个都会自死锁——规则由静态门禁锁定：**识别不了的引用式回调按违规处理（fail closed）**，而不是静默跳过（2026-11-04 下沉：超时看门狗已去掉，改为源码扫描约束） |
 | `ConfigService.saveEpoch` | `number`（getter） | 保存代际：**任意**保存事务入队与结束各 +1（排队中的也算开始）。供全量队列观测；设置页加载用 `settingsSaveEpoch` |
 | `ConfigService.saveInFlight` | `Readonly<Ref<boolean>>` | **任意**写入口的保存队列状态（排队或在途均为 true；由队列 tail **派生**）。供观测/测试；设置页 `load` **不**等它（后台写入悬挂不得把设置页卡在 loading） |
 | `ConfigService.settingsSaveInFlight` | `Readonly<Ref<boolean>>` | **设置页发起**的保存事务是否在途（`runSaveTxn(..., { settingsPage: true })`，由 `settingsSaveDepth > 0` **派生**，无独立布尔量）。设置页的 `saving`（UI「保存中…」、保存按钮禁用、与 OJ 切换的双向互斥）取它——后台写入（编辑器偏好/分栏比例）只排保存队列，不该让设置页下拉框与保存按钮产生反应 |
 | `ConfigService.settingsSaveEpoch` | `number`（getter） | **设置页保存**代际：设置页事务入队与结束各 +1，后台写入不参与。设置页 `load` 据此检测「读取期间发生过设置页保存」并重读 |
 | `ConfigService.whenSaveSettled` | `() => Promise<void>` | 等待**调用时刻**已排队/在途的**任意**保存事务落地（不向其后的新任务延伸；需要覆盖「等待期间新开始的保存」的调用方自己复核代际）；不向等待者抛出保存错误 |
-| `ConfigService.whenSettingsSaveSettled` | `() => Promise<void>` | 等待**设置页发起**的保存事务落地（无在途时同步 resolved）。设置页 `load` 用它：只等设置页自己的保存——后台写入可能长时间不返回，等它们会把加载永久卡住（2026-11-04 评审恢复旧等待范围） |
-| `ConfigService.runSaveTxn` | `<T>(fn: (tx: SaveTxn) => Promise<T>, options?: { settingsPage?: boolean }) => Promise<T>` | 保存事务：整个回调期间持有保存门禁，覆盖「保存 → 自动切换」复合操作（旧实现靠设置页 composable 的模块级 `saving` 圈住，编辑器偏好/分栏比例等第二保存入口绕过它）；回调内只能走 `tx.updateConfig`——**不得嵌套 `runSaveTxn`，也不得调用 `updateEditorPrefs` / `saveSplitRatio`（含 `?.()` 可选调用）**（两个包装同样排队，与嵌套事务等价）。规则由 `scripts/check-save-gate.mjs` 锁定（判定用例见 `scripts/__tests__/check-save-gate.spec.ts`，含传递调用、环检测、**引用式回调 fail closed**、可选调用、`switchObservers` 监听器规则）。回调内 `switchOj` 安全（独立队列）。`options.settingsPage` 标记事务来源：推进 `settingsSaveEpoch` 并置位 `settingsSaveInFlight`（2026-11-04 G4 下沉） |
-| `ConfigService.latestOjSwitchResult` | `() => { target, outcome: 'success' \| 'persist-failed' } \| null` | 最近一次**已生效**切换的共享结果：`persist-failed` 让晚挂载设置页恢复「重启可能回退」警告；后续成功切换或任意一次保存成功落盘同一 active 时解除（评审三十五/三十六） |
+| `ConfigService.whenSettingsSaveSettled` | `() => Promise<void>` | 等待**设置页发起**的保存事务落地（无在途时同步 resolved）。设置页 `load` 用它：只等设置页自己的保存——后台写入可能长时间不返回，等它们会把加载永久卡住（2026-11-04 恢复旧等待范围） |
+| `ConfigService.runSaveTxn` | `<T>(fn: (tx: SaveTxn) => Promise<T>, options?: { settingsPage?: boolean }) => Promise<T>` | 保存事务：整个回调期间持有保存门禁，覆盖「保存 → 自动切换」复合操作（旧实现靠设置页 composable 的模块级 `saving` 圈住，编辑器偏好/分栏比例等第二保存入口绕过它）；回调内只能走 `tx.updateConfig`——**不得嵌套 `runSaveTxn`，也不得调用 `updateEditorPrefs` / `saveSplitRatio`（含 `?.()` 可选调用）**（两个包装同样排队，与嵌套事务等价）。规则由 `scripts/check-save-gate.mjs` 锁定（判定用例见 `scripts/__tests__/check-save-gate.spec.ts`，含传递调用、环检测、**引用式回调 fail closed**、可选调用、`switchObservers` 监听器规则）。回调内 `switchOj` 安全（独立队列）。`options.settingsPage` 标记事务来源：推进 `settingsSaveEpoch` 并置位 `settingsSaveInFlight`（2026-11-04 下沉） |
+| `ConfigService.latestOjSwitchResult` | `() => { target, outcome: 'success' \| 'persist-failed' } \| null` | 最近一次**已生效**切换的共享结果：`persist-failed` 让晚挂载设置页恢复「重启可能回退」警告；后续成功切换或任意一次保存成功落盘同一 active 时解除 |
 | `ConfigService.getPollSchedule` | `() => Promise<PollSchedule>` | 轮询间隔与总超时；失败或非法配置回退 2s / 300s |
 | `ConfigService.getEditorPrefs` | `() => Promise<EditorPrefs>` | 字号 / Tab 宽度 / 编辑器主题（钳位上下界取自 `utils/editor`，越界与未知主题回退 14 / 4 / `'vs'`）；CodeEditor 挂载时消费 |
 | `ConfigService.updateEditorPrefs` | `(patch: Partial<EditorPrefs>) => Promise<void>` | **解题页编辑器设置弹层落盘入口**：只写传入字段（读-改-写保留其余配置）；主题落 `theme.editorTheme`（旧版 `themeName` 已随 theme 域删除），落盘前经 `normalizeEditorTheme` 归一 |
@@ -39,7 +39,7 @@
 | `ConfigService.saveSplitRatio` | `(ratio: number) => Promise<void>` | **解题页拖拽结束后的分栏比例落盘入口**：经 `runSaveTxn` 只写 `layout.splitRatio`（后台写入，不标记 `settingsPage`，不进入设置页门禁） |
 | `configService` | 单例 | 全局唯一实例 |
 
-> 语言归一函数是 `@/utils/language` 的 `normalizeHojLanguage`（历史配置遗留的 Monaco id → HOJ 显示名），本服务消费它而非自定义导出（P55 语言域改为「权威值 = HOJ 显示名」后原 `normalizeLanguageId` 已删除）。
+> 语言归一函数是 `@/utils/language` 的 `normalizeHojLanguage`（历史配置遗留的 Monaco id → HOJ 显示名），本服务消费它而非自定义导出（语言域改为「权威值 = HOJ 显示名」后原 `normalizeLanguageId` 已删除）。
 
 ## 直接依赖
 
@@ -113,7 +113,7 @@ getOjBaseUrl() / getPollSchedule() / getEditorPrefs() / getDefaultLanguage() / g
 - **分层约定**：View / Store 不得直接调用 `config.bridge`，配置读写一律经本服务。
 - **不引入 store**：缓存 Promise 而非结果，使多处调用共享一次 IPC；设置页保存经
   `runSaveTxn` 事务句柄写后端 + 失效缓存，其余读取方下次调用即拿到新值。
-- **P55 值域统一（后经语言权威值改造修订）**：`defaultLanguage` 值域为 **HOJ 显示名**
+- **值域统一（后经语言权威值改造修订）**：`defaultLanguage` 值域为 **HOJ 显示名**
   （与提交契约同源，见 `utils/language`）；历史 Monaco id 由前后端各自的归一函数
   映射回显示名（前端 `normalizeHojLanguage`、Rust `normalize_language_display_name`）。
   Rust 端默认值 `light` / `vs` / `0.48` 不变。

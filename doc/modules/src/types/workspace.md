@@ -37,4 +37,4 @@
   「这个文件是什么语言」。两者可能矛盾（历史数据、或切语言后崩溃）—— 此时**以
   `activeFile` 的扩展名为准**并告警，因为判题端按后缀判语言与 limits 倍率。
   语言切换后旧扩展名文件由 `workspaceStore.purgeStaleCodeFiles` 静默清理
-  （P62 已闭合：单代码文件约束，见 `stores/workspaceStore.md`）。
+  （单代码文件约束已落地，见 `stores/workspaceStore.md`）。

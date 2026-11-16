@@ -15,7 +15,7 @@ View / component / composable 访问**配置服务**（配置读取与缓存失�
 | 名称 | 签名 | 说明 |
 |---|---|---|
 | `settingsSaveInFlight` | getter `() => boolean` | **设置页发起**的保存事务在途（覆盖「保存 → 自动切换」整段）。service 侧是 readonly computed ref——getter 内读 `.value` 被依赖追踪。消费方需要 Ref 语义时直接 `const { settingsSaveInFlight } = storeToRefs(store)`（`useSettingsForm` 即此形态；getter 已是 computed，不必再手工包 `computed(() => store.settingsSaveInFlight)`）；不要直接解构 store（拿到的是展开后的布尔快照） |
-| `ojSwitchInFlight` | getter `() => boolean` | 是否有 OJ 切换在途。**支撑必须是 ref**：service 侧由 `switchQueue.inFlight`（computed ref）派生；转发或 mock 若读普通属性，getter 会对无响应式依赖的求值结果永久缓存（评审 P2 的死代码教训，`configStore.spec` 锁定） |
+| `ojSwitchInFlight` | getter `() => boolean` | 是否有 OJ 切换在途。**支撑必须是 ref**：service 侧由 `switchQueue.inFlight`（computed ref）派生；转发或 mock 若读普通属性，getter 会对无响应式依赖的求值结果永久缓存（getter 缓存曾造成死代码，`configStore.spec` 锁定） |
 | `ojSwitchEpoch` | action `() => number` | 切换代际（每次切换开始与结束各 +1）。service 侧普通字段（非响应式）——**必须 action 逐次直读**：getter 化会被 computed 永久缓存，`useSettingsForm` 的重读循环静默失效 |
 | `settingsSaveEpoch` | action `() => number` | 设置页保存代际（入队与结束各 +1；后台写入不参与）。同上，逐次直读 |
 | `latestOjSwitchResult` | action `() => OjSwitchResult \| null` | 最近一次已生效切换的共享结果（service 以方法读普通字段，非响应式）。逐次直读；持久化失败是「已生效但重启可能回退」的既存事实，晚挂载控制器据此恢复提示 |
@@ -54,4 +54,4 @@ View/composable → useConfigStore()
 
 ## 测试
 
-`src/stores/__tests__/configStore.spec.ts`：真 pinia + mock `config.service`（真实 Vue ref 打桩）。锁定三件事——① ref 支撑的 getter 响应式转发（`settingsSaveInFlight` 经 `computed` 包裹链仍跟随翻转）；② 普通字段必须逐次直读（翻转后读新值；误改成 getter 会在调用形态直接抛错，本组用例另锁新鲜度）；③ action 参数与回传直透、`runSaveTxn` 透传回调与 `options` 且回调收到 service 给的 `tx`。消费方 spec 沿用「真 store + 既有 service mock」路径（store 纯转发，mock 面不变）；`useSettingsForm.spec` 以真 pinia 实例化本 store，其 config.service 同构孪生 mock 的 in-flight 支撑必须是 ref（评审 P2：读普通属性会把「新控制器等在途切换」测成死代码）。
+`src/stores/__tests__/configStore.spec.ts`：真 pinia + mock `config.service`（真实 Vue ref 打桩）。锁定三件事——① ref 支撑的 getter 响应式转发（`settingsSaveInFlight` 经 `computed` 包裹链仍跟随翻转）；② 普通字段必须逐次直读（翻转后读新值；误改成 getter 会在调用形态直接抛错，本组用例另锁新鲜度）；③ action 参数与回传直透、`runSaveTxn` 透传回调与 `options` 且回调收到 service 给的 `tx`。消费方 spec 沿用「真 store + 既有 service mock」路径（store 纯转发，mock 面不变）；`useSettingsForm.spec` 以真 pinia 实例化本 store，其 config.service 同构孪生 mock 的 in-flight 支撑必须是 ref（读普通属性会把「新控制器等在途切换」测成死代码）。
