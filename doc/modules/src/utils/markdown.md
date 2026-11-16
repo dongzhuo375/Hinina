@@ -80,7 +80,7 @@ renderMarkdown(md, baseUrl):
   `<span class="katex-mathml">` 里的 MathML 供读屏器；只开 `html` 档公式会碎成乱码。
   `<semantics>`/`<annotation>`（annotation 内为 LaTeX 源码）不在 DOMPurify 预置白名单，
   经 `ADD_TAGS` 补入——mXSS 载体 `<annotation-xml>` 仍被拒。
-- **出口统一消毒（P49/P63 关闭）**：marked 默认放行内联 HTML，而题面/简介/公告全部来自
+- **出口统一消毒**：marked 默认放行内联 HTML，而题面/简介/公告全部来自
   OJ 服务端且编辑者面较宽（兼容任意 HOJ/QDUOJ/HUSTOJ 部署，不宜按"服务端完全可信"假设）；
   在唯一出口消毒使所有 `v-html` 调用点自动受保护，未来新增调用点也不易遗漏。
 - **Node 测试环境降级**：DOMPurify 依赖 DOM，无 jsdom 时 `isSupported === false`，跳过消毒

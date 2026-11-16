@@ -8,7 +8,7 @@
 
 ## 核心类型/函数
 
-**props**：`modelValue: string`（代码）、`language: string`（**HOJ 显示名**，Monaco id 经 `utils/language.monacoIdOf` 派生）、`languages?: string[]`（本题允许的提交语言列表，来自题目详情；空则回退内置默认）、`isDirty: boolean`（驱动备份指示）、`readonly?: boolean`（只读模式：隐藏工具条、禁用编辑与 Ctrl+Enter 提交快捷键，供提交详情页代码查看复用）、`locked?: boolean`（**加载锁定**，PR21-8：Monaco 只读但**工具条保留** —— 与 readonly 的「隐藏工具条」语义分立；随加载完成自动解锁，解锁时以 modelValue 回写自愈）。
+**props**：`modelValue: string`（代码）、`language: string`（**HOJ 显示名**，Monaco id 经 `utils/language.monacoIdOf` 派生）、`languages?: string[]`（本题允许的提交语言列表，来自题目详情；空则回退内置默认）、`isDirty: boolean`（驱动备份指示）、`readonly?: boolean`（只读模式：隐藏工具条、禁用编辑与 Ctrl+Enter 提交快捷键，供提交详情页代码查看复用）、`locked?: boolean`（**加载锁定**：Monaco 只读但**工具条保留** —— 与 readonly 的「隐藏工具条」语义分立；随加载完成自动解锁，解锁时以 modelValue 回写自愈）。
 **emits**：`update:modelValue`、`update:language`、`submit`、`cursor: [{ line, column }]`、`prefs-change: [EditorPrefs]`（挂载读配置后 + 每次弹层改动后上报，供父级同步状态行等派生展示）。
 **expose**：`focus()` —— 供 `?focus=1` 快捷提交联动程序化聚焦；Monaco 未就绪时静默降级为 no-op，不抛错不阻塞。
 
@@ -86,7 +86,7 @@ onUnmounted → editor.dispose() + 移除 keydown 监听 + 在途偏好改动补
 设计要点：
 
 - **locked 与 readonly 语义分立**：`readonly` 是终态只读（详情页查看，隐藏工具条、不注册
-  提交快捷键）；`locked` 是瞬态锁定（切题加载期间，PR21-8），工具条保留、解锁即恢复。
+  提交快捷键）；`locked` 是瞬态锁定（切题加载期间），工具条保留、解锁即恢复。
   locked 置位到 Monaco `updateOptions` 生效之间有一个渲染 tick 窗口，漏进 Monaco 的输入
   会被 workspaceStore 的守卫拒收（store.code 不变 → prop 不变 → modelValue watcher 不
   触发），解锁时按 modelValue 回写自愈，保证「Monaco === store」不变式；加载成功时该

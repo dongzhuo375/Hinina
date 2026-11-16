@@ -87,7 +87,7 @@ submissionStore.error 非空 → 紧随其后截断展示（提交失败 / 轮�
   摘要覆盖成旧题数据；版本号守卫让最后一次发起的请求胜出。
 - **失败测试点提示每条提交只拉一次**：`hintSubmitId` 去重，避免摘要反复刷新时
   重复打测试点接口；测试点不可得时回退记录自身耗时，pill 不留空洞。
-- **子任务制感知（L1）**：subtask 判题下平铺 `cases` 常为空（明细在
+- **子任务制感知**：subtask 判题下平铺 `cases` 常为空（明细在
   `subTasks[].cases`），`findFirstFailedCase`（utils/submission 纯函数）先查平铺、
   为空再按 groupNum/seq 展开子任务，避免「Test N」提示静默消失。
 - **失败原因首行就地可见**：`JudgementResult.errorMessage` 由轮询回填到本会话条目，控制台条取首行做条内提示 —— CE 的编译错误是选手改代码的唯一依据，只显示「Compile Error」等于把定位成本推给选手（点进详情页才发现第几行错了）。首行截断 + `title` 全文是「条内空间有限、完整内容在详情页」的折中。

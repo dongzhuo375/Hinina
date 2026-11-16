@@ -30,7 +30,7 @@
 > Repository 就绪后，填充核心实体和事件总线逻辑。
 
 - [x] **EventBus 实现（阶段 3 初版，已于阶段 8 重构）** — `core/event/event_bus.rs`：`publish()` / `subscribe()` / `unsubscribe()`、AppEvent::category() 映射、All 通配订阅、锁外回调防死锁。该实现**已被阶段 8 的 CoreEventBus 取代并删除**
-- [x] **AppError From 转换** — `core/error.rs`：`io::Error` / `reqwest::Error` / `serde_json::Error` — 阶段 1 已提前完成。**后注**：`reqwest::Error` 已于 2026-11-04 删除（F4：零消费者死转换，所有真实转换为发起点显式 `map_err`）
+- [x] **AppError From 转换** — `core/error.rs`：`io::Error` / `reqwest::Error` / `serde_json::Error` — 阶段 1 已提前完成。**后注**：`reqwest::Error` 已于 2026-11-04 删除（零消费者死转换，所有真实转换为发起点显式 `map_err`）
 - [x] **Workspace 实体完善** — `core/entity/workspace.rs`：`new()` / `touch()` / `mark_dirty()` / `mark_clean()` 方法。5 项单元测试
 
 ---
@@ -102,7 +102,7 @@
 - [x] **代码编辑器** — `components/editor/CodeEditor.vue`（Monaco Editor + 语言切换 + 提交按钮；PR #36 语言菜单改 Teleport 浮层）
 - [x] **编辑器设置弹层** — `components/editor/EditorSettingsPopover.vue`（字号 / Tab 宽度 / 编辑器主题 `vs`·`vs-dark`，即时生效 + debounce 落盘；值域唯一来源 `utils/editor.ts`，Rust `EditorConfig::sanitize` 兜底收敛）
 - [x] **提交反馈与快捷提交** — `components/editor/EditorConsoleBar.vue`（最新记录 pill + 失败原因首行）+ `components/problem/QuickSubmitDialog.vue`（题目行内快捷提交）。两者自 #14 工作台重构起取代了早期的 `components/submission/SubmissionPanel.vue`（该文件与 `views/ContestView.vue` 均已删除）；PR #36 补上提交即时反馈与重复发送三层防护
-- [x] **Rust 后端补齐** — OjConfig 增加 contest_id、Contest 实体扩展、load_configured_contest 命令、WorkspaceManager find_or_create（P36）、auto-save Tauri runtime（P39）
+- [x] **Rust 后端补齐** — OjConfig 增加 contest_id、Contest 实体扩展、load_configured_contest 命令、WorkspaceManager find_or_create、auto-save Tauri runtime
 - [x] **评测页** — `views/SubmissionsView.vue`（筛选工具条 + 提交表格 + 分页；onlyMine 后端强制；`?problem=` 自动预筛）+ `views/SubmissionDetailView.vue`（判定横幅 + 测试点明细/子任务 + 只读代码）
 - [x] **榜单页** — `views/RankView.vue` + `components/rank/{RankToolbar,ScoreboardTable,RankCell}.vue` + `components/contest/ContestStatsBar.vue`（ACM/OI 分流、封榜提示、打星/女生全量快照模式）
 - [x] **公告页** — `views/AnnouncementsView.vue`（卡片 feed + 长文折叠）+ 客户端已读状态（Rust 文件持久化，ActivityBar 未读红点）

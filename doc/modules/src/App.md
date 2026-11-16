@@ -20,7 +20,7 @@
 ## 直接依赖
 
 - `vue`（`computed`）/ `vue-router`（`useRoute`）
-- `naive-ui`（`NConfigProvider` 组件 + `GlobalThemeOverrides` 类型；按需引入，非插件安装。曾挂载 `NDialogProvider`，全仓无 `useDialog` 消费方，属死装配，已移除——分层审计 F9）
+- `naive-ui`（`NConfigProvider` 组件 + `GlobalThemeOverrides` 类型；按需引入，非插件安装。曾挂载 `NDialogProvider`，全仓无 `useDialog` 消费方，属死装配，已移除）
 - `@/stores/systemStore`（`minimizeWindow` / `toggleMaximizeWindow` / `closeWindow`）
 - `@/components/PluginNotifications.vue`（插件通知出口组件）
 

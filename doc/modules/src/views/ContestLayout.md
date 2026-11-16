@@ -17,9 +17,9 @@
 | `nowMs` / `now` | `useNowMs()` / computed（秒） | 共享毫秒墙钟派生秒，驱动 `phase` 跃迁；scope dispose 清理 interval |
 | `phase` | computed | `getContestPhase(getAuthoritativeSchedule(contestStore.contest, contestStore.brief), now)` |
 | `keyedSettings` | computed | `useSystemStore().isKeyedSettingsRoute(route.name)`（2026-11-04 H3：路由级组合收进 store 单一入口）—— 设置页各项豁免的**共同判据**（阶段闸门跳转与锁定的短路、最小壳）。赛程闸门只防「滞留在过期赛场看旧数据」，设置页只碰本地配置不在其射程内 |
-| `contestGated` | computed | `!keyedSettings && (phase === 'ended' \|\| phase === 'upcoming')` —— 赛程闸门的**模板判定**（赛程遮罩 v-if、内容区 inert、TopBar navigation-disabled 三处同源）；钥匙模式设置页恒为 false（评审六） |
-| `bareShell` | computed | `keyedSettings && !auth.isLoggedIn` —— 最小壳判据（三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态（评审四 P2-1） |
-| `watch([phase, keyedSettings], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**keyedSettings 时只免跳转**——无会话（最小壳，评审四 P2-2）与有会话（评审五）两个分支都覆盖；`ended` 与 `upcoming` 的 `stopLive()` 清理**不能被豁免吞掉**（自然结束或 `running→upcoming` 回退后公告请求会一直打，评审八 P2-1、评审三十三 #5），并清 `liveFor` 以便回到 running 重启 |
+| `contestGated` | computed | `!keyedSettings && (phase === 'ended' \|\| phase === 'upcoming')` —— 赛程闸门的**模板判定**（赛程遮罩 v-if、内容区 inert、TopBar navigation-disabled 三处同源）；钥匙模式设置页恒为 false |
+| `bareShell` | computed | `keyedSettings && !auth.isLoggedIn` —— 最小壳判据（三条件与）；**刻意不含 `sessionResolved`**：钥匙 + 存量过期会话启动时首个认证请求 401 会把它复位为 false，此刻正是最小壳的形态 |
+| `watch([phase, keyedSettings], …)` | — | **赛程闸门**（唯一退出决策点）：`upcoming` → 立即 `replace(Login)`；`ended` → `stopLive()` 后 `setTimeout(2_000)` 再 `replace(Login)`；每次先清 `exitTimer`。**keyedSettings 时只免跳转**——无会话（最小壳）与有会话两个分支都覆盖；`ended` 与 `upcoming` 的 `stopLive()` 清理**不能被豁免吞掉**（自然结束或 `running→upcoming` 回退后公告请求会一直打），并清 `liveFor` 以便回到 running 重启 |
 | `bootstrap` | `() => Promise<void>` | 首行 `bareShell` 直接 return（跳过认证拉取与公告轮询）；否则 `whenLoaded()` → 跨场刷新 → `ensureLive()`，见逻辑流程 |
 | `ensureLive` | `() => void` | 公告轮询的唯一启动点：`phase === 'running'` 且 `contest.id` 存在、且不是跨场未刷新（brief.id ≠ contest.id）时 `startLive(id)`；按 id 幂等。**阶段跃迁到 running 时也调用**（赛前打开的外壳在开赛后无需重挂即可补启轮询），**contest id 变化时也调用**（首次加载失败后的自愈路径：phase 未变、阶段监听不会再触发，见逻辑流程） |
 | `watch([contest?.id, brief?.id])`（实现为单 getter 返回数组） | — | **两个 id 任一变化** → `ensureLive()`（数组每次求值都是新引用：同 id 的整对象替换也会触发回调，靠 ensureLive 的 liveFor 幂等吸收——行为正确、仅微量空转，改多源形态属可选优化）（补启自愈轮询；监听 brief 的理由：contest 先换场会被 brief 失配守卫拦下，brief 后到时必须有人再触发——只监听 contest.id 会让轮询停在旧场；**bareShell 守卫只拦启动**——新入口不绕过 bootstrap 的最小壳跳过语义）；**contest.id 被清 → `stopLive()` + 清 liveFor**（修「OJ 切换后同 cid 被 liveFor 挡住」的既有缺口；本地清理不受守卫，最小壳下照跑） |
@@ -48,7 +48,7 @@
 ```
 onMounted → bootstrap()（墙钟 interval 由 useNowMs 自持）
 bootstrap:
-  await contestStore.whenLoaded()             // 复用在途请求（P59），子视图先触发也走同一链路
+  await contestStore.whenLoaded()             // 复用在途请求，子视图先触发也走同一链路
   ├ disposed → return
   ├ contest.id 与 brief.id 都存在且不同
   │   → await contestStore.loadContest()      // 简报已切到新比赛，刷新认证数据
@@ -73,9 +73,9 @@ watch([contest?.id, brief?.id])（单 getter 返回数组，同 id 换对象也�
 
 watch([phase, keyedSettings], immediate):
   每次先清 exitTimer（避免 upcoming 之后又被旧的 ended 定时器踢走）
-  keyed → 评审四 P2-2 + 评审五：**跳转豁免，清理不豁免**
+  keyed：**跳转豁免，清理不豁免**
           phase === 'ended' 或 'upcoming' → announcementStore.stopLive() 并清 liveFor
-          （自然结束/赛程回退后公告请求会一直打，评审八 P2-1、评审三十三 #5；
+          （自然结束/赛程回退后公告请求会一直打；
            回到 running 时 ensureLive 重启）
   upcoming → router.replace(Login)                  // 赛程被移到未来：立即回入口等待
   ended    → announcementStore.stopLive()
@@ -103,7 +103,7 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
   刻意保留，见上文「无会话最小壳」节）。
 - **最小壳必须自带拖动区**：App 的全局标题栏在 matched 含 Contest 时不渲染，
   窗口 `decorations: false`，无拖动区则窗口无法移动。
-- **最小壳含窗口控件（评审十 #2 反转了 M1 的「不加 UI」裁定）**：窗口
+- **最小壳含窗口控件（反转了最初「不加 UI」的裁定）**：窗口
   `decorations: false`，只靠 Alt+F4/任务栏关闭在维护场景不可接受。抽出共享
   `components/layout/WindowControls.vue`（最小化/最大化/关闭），TopBar 与最小壳
   共用同一实现，消除重复。
@@ -150,4 +150,4 @@ onUnmounted → disposed = true；清退出定时器；announcementStore.stopLiv
 
 ## 测试
 
-`src/views/__tests__/ContestLayout.spec.ts`（jsdom，mock `useRouter` / `useRoute` / `announcementStore` / `contestService.loadConfiguredContest` / `systemService.launchFlags` 快照，stub 三个 layout 子组件，赛程 `startTime=900 / endTime=1002`）锁定：到点后出现 `role="alert"` 的结束卡片（父容器含 `top-10`）、存在 `[inert]`、`stopLive` 恰好一次、`replace` 未立即调用，2 秒后 `replace({ name: 'Login' })` 恰好一次；服务端 `status=1` 提前结束时同样处理；赛程被移到未来时立即 `replace(Login)` 且 `startLive` 未被调用；「旧 id 已结束 contest + 新 brief」以简报为准、不出覆盖层；brief 指向新比赛时 `loadConfiguredContest` 被调用一次且 `startLive` 用新 contestId；卸载后推进 5 秒 `replace` 未被调用且无残留定时器。最小壳用例（钥匙 + `user=null` 且**不设** `sessionResolved`，锁 bareShell 不读它）：渲染「Hinina 设置」拖动区标题与「返回登录」、不出 TopBar/StatusBar、`loadConfiguredContest` 与 `startLive` 均未被调用、点击返回登录 `replace(Login)`；普通启动（无钥匙）+ 设置路由/比赛子路由两种登出过渡态均保持正常外壳；保留的已结束/未开始简报在最小壳下不触发赛程跳转（评审四 P2-2）；最小壳↔完整外壳翻转时内容区 DOM 节点同一（评审六，草稿保留的结构锁定）。
+`src/views/__tests__/ContestLayout.spec.ts`（jsdom，mock `useRouter` / `useRoute` / `announcementStore` / `contestService.loadConfiguredContest` / `systemService.launchFlags` 快照，stub 三个 layout 子组件，赛程 `startTime=900 / endTime=1002`）锁定：到点后出现 `role="alert"` 的结束卡片（父容器含 `top-10`）、存在 `[inert]`、`stopLive` 恰好一次、`replace` 未立即调用，2 秒后 `replace({ name: 'Login' })` 恰好一次；服务端 `status=1` 提前结束时同样处理；赛程被移到未来时立即 `replace(Login)` 且 `startLive` 未被调用；「旧 id 已结束 contest + 新 brief」以简报为准、不出覆盖层；brief 指向新比赛时 `loadConfiguredContest` 被调用一次且 `startLive` 用新 contestId；卸载后推进 5 秒 `replace` 未被调用且无残留定时器。最小壳用例（钥匙 + `user=null` 且**不设** `sessionResolved`，锁 bareShell 不读它）：渲染「Hinina 设置」拖动区标题与「返回登录」、不出 TopBar/StatusBar、`loadConfiguredContest` 与 `startLive` 均未被调用、点击返回登录 `replace(Login)`；普通启动（无钥匙）+ 设置路由/比赛子路由两种登出过渡态均保持正常外壳；保留的已结束/未开始简报在最小壳下不触发赛程跳转；最小壳↔完整外壳翻转时内容区 DOM 节点同一（草稿保留的结构锁定）。

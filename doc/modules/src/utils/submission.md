@@ -12,7 +12,7 @@
 |------|------|------|
 | `isTerminalStatus` | `(status: JudgementStatus) => boolean` | 状态是否为终态（终态即停止轮询） |
 | `isJudging` | `(status: JudgementStatus) => boolean` | 是否仍在评测中（= 非终态，评测页温和刷新的判据） |
-| `findFirstFailedCase` | `(result: SubmissionCases) => JudgeCase \| null` | 首个非 Accepted 测试点（「Test N」失败提示数据源）：先查平铺 `cases`；子任务制下 `cases` 常为空，此时按 groupNum、组内按 seq 展开 `subTasks` 查找（L1：避免提示静默消失） |
+| `findFirstFailedCase` | `(result: SubmissionCases) => JudgeCase \| null` | 首个非 Accepted 测试点（「Test N」失败提示数据源）：先查平铺 `cases`；子任务制下 `cases` 常为空，此时按 groupNum、组内按 seq 展开 `subTasks` 查找（避免提示静默消失） |
 | `StatusTone` | `'ac' \| 'wa' \| 'tle' \| 'pending' \| 'system' \| 'neutral'` | 状态语义色调（组件层映射到具体样式类） |
 | `statusLabel` | `(status) => string` | 状态原词（HOJ 文案，架构约束「状态文案以接口返回为准」） |
 | `statusAbbr` | `(status) => string` | 缩写（AC/WA/TLE…，紧凑 pill 用） |

@@ -14,17 +14,17 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| state | `workspace` / `activeFile` / `code` / `language`（默认 'C++'）/ `isDirty` / `syncPending` / `isLoadingWorkspace` | `activeFile` = **当前代码文件名（权威源）**，读写都锚定它；`isDirty` = 有改动尚未落盘；`syncPending` = 有改动尚未推送到后端内存（防抖窗口内）；`isLoadingWorkspace` = 工作区加载在途（PR21-8：期间编辑器只读、输入拒收，ProblemSolveView 绑定为 CodeEditor 的 `locked`） |
+| state | `workspace` / `activeFile` / `code` / `language`（默认 'C++'）/ `isDirty` / `syncPending` / `isLoadingWorkspace` | `activeFile` = **当前代码文件名（权威源）**，读写都锚定它；`isDirty` = 有改动尚未落盘；`syncPending` = 有改动尚未推送到后端内存（防抖窗口内）；`isLoadingWorkspace` = 工作区加载在途（期间编辑器只读、输入拒收，ProblemSolveView 绑定为 CodeEditor 的 `locked`） |
 | `currentCode` / `currentLanguage` | getters | 编辑器当前代码与语言 |
-| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **`const gen = ++loadGeneration` + 捕获会话代际 + 置位 `isLoadingWorkspace`** → **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ **flush 后代际检查**（`loadGeneration` 或**会话代际**变化则本次作废，不发 IPC）→ **加载 IPC 经 `loadQueue` 单飞**（等前一次落定再发起；**turn 执行时再查两项代际**，清理后已排队的旧加载也不会发出 `load_workspace` —— 否则后端 current 会短暂指向旧会话题目，评审七轮；`load_workspace` 是 async 命令，并发乱序完成会让后端 current 停在旧工作区而 store 已切新工作区）→ **IPC 后代际检查 + 原子应用**（迟到结果作废；结果经 turn 返回后一次性写入 store；**元数据语言解析在 language 为空时走 `getDefaultLanguage`，必须先于任何 store 写入完成并在其后复查代际**）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测）；language 与文件扩展名矛盾时**以文件为准**并 `warn`；恢复 isDirty；随后 `void purgeStaleCodeFiles()`。**仅成功路径解锁**：失败保持锁定（闩锁）。**加载在途拒收一切输入（PR21-8）** |
-| `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 离开解题页 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；仅当「推送成功 **且** 期间无新改动（`!syncPending`）**且会话代际未变**」才清 `isDirty`（推送失败 → 内容未进后端；期间又落键 → 最新改动连后端内存都还没到，清脏会显示假「已自动备份」；旧会话的落定不得清新会话的脏标记，评审五轮） |
-| `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + `isDirty = true` + `syncPending = true` + `scheduleSync()`；**`isLoadingWorkspace` 时拒收**（PR21-8：Monaco 只读是第一道防线，此处兜住工具条清空/上传等绕过键盘的程序化路径） |
+| `loadWorkspace` | `(contestId, problemId) => Promise<void>` | **`const gen = ++loadGeneration` + 捕获会话代际 + 置位 `isLoadingWorkspace`** → **先 `flushPendingSync()`**（本方法整体替换 code/language/workspace，在途改动不先推送就会被加载结果覆盖、再被旧内容回推）→ **flush 后代际检查**（`loadGeneration` 或**会话代际**变化则本次作废，不发 IPC）→ **加载 IPC 经 `loadQueue` 单飞**（等前一次落定再发起；**turn 执行时再查两项代际**，清理后已排队的旧加载也不会发出 `load_workspace` —— 否则后端 current 会短暂指向旧会话题目；`load_workspace` 是 async 命令，并发乱序完成会让后端 current 停在旧工作区而 store 已切新工作区）→ **IPC 后代际检查 + 原子应用**（迟到结果作废；结果经 turn 返回后一次性写入 store；**元数据语言解析在 language 为空时走 `getDefaultLanguage`，必须先于任何 store 写入完成并在其后复查代际**）→ 加载工作区：**代码文件以 `workspace.activeFile` 为权威源**（后端已持久化；回退链只服务历史工作区：语言派生名 → `CODE_FILE_EXTENSIONS` 后缀探测）；language 与文件扩展名矛盾时**以文件为准**并 `warn`；恢复 isDirty；随后 `void purgeStaleCodeFiles()`。**仅成功路径解锁**：失败保持锁定（闩锁）。**加载在途拒收一切输入** |
+| `saveWorkspace` | `() => Promise<void>` | 落盘入口（切题 / 失焦 / 离开解题页 / 关窗 / 手动）：**先 `flushPendingSync()` 再 `save_workspace`** —— 顺序反了会把旧内容写进磁盘；仅当「推送成功 **且** 期间无新改动（`!syncPending`）**且会话代际未变**」才清 `isDirty`（推送失败 → 内容未进后端；期间又落键 → 最新改动连后端内存都还没到，清脏会显示假「已自动备份」；旧会话的落定不得清新会话的脏标记） |
+| `updateCode` | `(code: string) => void` | 编辑器输入：更新 code + `isDirty = true` + `syncPending = true` + `scheduleSync()`；**`isLoadingWorkspace` 时拒收**（Monaco 只读是第一道防线，此处兜住工具条清空/上传等绕过键盘的程序化路径） |
 | `scheduleSync` | `() => void` | 重置 2s 定时器，到点调用 `flushPendingSync()` |
-| `flushPendingSync` | `() => Promise<boolean>` | 取消防抖窗口并立即把代码按 **`activeFile`**（权威源；回退 `sourceFileNameOf(language)`）推送到后端内存；返回是否成功，失败只 `log.error` 并保留 `syncPending`（调用方不应被一次 IPC 失败阻断）。**会话代际守卫**：推送返回时若已发生清理，直接返回 false，不推进修订水位、不改 `syncPending`/`isDirty`（评审五轮）。**推送期间又有新改动时不清 `syncPending`**（本次推送带的是调用时刻的内容；清了会让新内容既不被本次携带、又被下次防抖短路跳过）。推送成功后把返回值记为 `lastPushedRevision`，并**补一次清脏判定**：`!syncPending && lastPersistedRevision >= revision` 时清 `isDirty` —— 落盘事件可能在推送在途时已到达（此时 `markPersisted` 因 `syncPending` 推迟清脏），而后端已 clean、后续 auto-save tick 不再发事件，不补判指示器会卡在「编辑中…」。判据方向必须是**水位 ≥ 推送**（磁盘追上编辑器）；反向会在事件未到时提前清脏，即假「已自动备份」 |
-| `markPersisted` | `(workspaceId?: string, revision?: number) => void` | 后端落盘事件（`workspace-saved`）到达时清 `isDirty`。四重过滤：① 按 `workspaceId` 过滤过期事件（旧工作区的落盘可能在新工作区已编辑后才送达）；② 按 `revision` **幂等** —— 后端 `revision` 是全局单调计数器，小于等于 `lastPersistedRevision` 的事件一律视为重复或过期而跳过（落盘事实只能被更新的修订号推进，不能被回退），并推进该标量；③ **`revision < lastPushedRevision` 时不清脏**（该落盘快照早于编辑器已推送的最新内容，磁盘还没追上编辑器）；④ 若期间又有新改动（`syncPending`）则不清 —— 后端在写失败或快照后又有新改动时不发该事件，故清除等价于「最新内容确已在磁盘上」。**跨会话安全性（评审五轮核验）**：事件载荷不带代际，故**刻意不加代际守卫**（会误挡新会话自己的事件）；安全性不依赖「id 跨会话不同」（`find_or_create` 会恢复同一工作区、同一 id），而由后端 revision 的进程级全局单调 + 仅磁盘写入后发布 + 上述 ③④ 保证——有专项用例覆盖同 id 迟到事件 |
-| `cancelPendingSync` | `(options?: { resetRevisionWatermarks?: boolean }) => void` | 取消未触发的防抖同步、清 `syncPending`。**修订水位默认保留**：后端 `revision` 是进程级单调计数器（WorkspaceManager 存活于 AppContext；登出/切 OJ 继续递增，仅数据目录变更需重启才重建），跨会话可比——归零会让旧会话迟到的落盘事件误清新会话恢复出的脏工作区（假「已自动备份」，评审七轮）。仅测试隔离/后端管理器重建时传 `resetRevisionWatermarks: true` |
-| `purgeStaleCodeFiles` | `() => Promise<void>` | 清理 ≠ `activeFile` 的代码文件（**单代码文件约束**，P62 已闭合）：语言切换后编辑器内容已复制到新文件名，旧扩展名文件成为过期残留，不清理会一直被后端 `save()` 全量落盘。代码文件判定沿用 `CODE_FILE_EXTENSIONS`，非代码文件不在清理范围；逐个删除、失败仅 `log.error`（下次加载/切换重试）；**每次删除前重查 `activeFile` 与工作区引用**（切换在途时避免误删新 active 文件，后端 `active_file` 守卫为第二道防线） |
-| `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程；**`isLoadingWorkspace` 时拒收**（PR21-8 同源：此时切换会把旧题代码经 flush 推到新派生文件名下 —— 后端若已切到新工作区，就是跨工作区的内容错配） |
+| `flushPendingSync` | `() => Promise<boolean>` | 取消防抖窗口并立即把代码按 **`activeFile`**（权威源；回退 `sourceFileNameOf(language)`）推送到后端内存；返回是否成功，失败只 `log.error` 并保留 `syncPending`（调用方不应被一次 IPC 失败阻断）。**会话代际守卫**：推送返回时若已发生清理，直接返回 false，不推进修订水位、不改 `syncPending`/`isDirty`。**推送期间又有新改动时不清 `syncPending`**（本次推送带的是调用时刻的内容；清了会让新内容既不被本次携带、又被下次防抖短路跳过）。推送成功后把返回值记为 `lastPushedRevision`，并**补一次清脏判定**：`!syncPending && lastPersistedRevision >= revision` 时清 `isDirty` —— 落盘事件可能在推送在途时已到达（此时 `markPersisted` 因 `syncPending` 推迟清脏），而后端已 clean、后续 auto-save tick 不再发事件，不补判指示器会卡在「编辑中…」。判据方向必须是**水位 ≥ 推送**（磁盘追上编辑器）；反向会在事件未到时提前清脏，即假「已自动备份」 |
+| `markPersisted` | `(workspaceId?: string, revision?: number) => void` | 后端落盘事件（`workspace-saved`）到达时清 `isDirty`。四重过滤：① 按 `workspaceId` 过滤过期事件（旧工作区的落盘可能在新工作区已编辑后才送达）；② 按 `revision` **幂等** —— 后端 `revision` 是全局单调计数器，小于等于 `lastPersistedRevision` 的事件一律视为重复或过期而跳过（落盘事实只能被更新的修订号推进，不能被回退），并推进该标量；③ **`revision < lastPushedRevision` 时不清脏**（该落盘快照早于编辑器已推送的最新内容，磁盘还没追上编辑器）；④ 若期间又有新改动（`syncPending`）则不清 —— 后端在写失败或快照后又有新改动时不发该事件，故清除等价于「最新内容确已在磁盘上」。**跨会话安全性**：事件载荷不带代际，故**刻意不加代际守卫**（会误挡新会话自己的事件）；安全性不依赖「id 跨会话不同」（`find_or_create` 会恢复同一工作区、同一 id），而由后端 revision 的进程级全局单调 + 仅磁盘写入后发布 + 上述 ③④ 保证——有专项用例覆盖同 id 迟到事件 |
+| `cancelPendingSync` | `(options?: { resetRevisionWatermarks?: boolean }) => void` | 取消未触发的防抖同步、清 `syncPending`。**修订水位默认保留**：后端 `revision` 是进程级单调计数器（WorkspaceManager 存活于 AppContext；登出/切 OJ 继续递增，仅数据目录变更需重启才重建），跨会话可比——归零会让旧会话迟到的落盘事件误清新会话恢复出的脏工作区（假「已自动备份」）。仅测试隔离/后端管理器重建时传 `resetRevisionWatermarks: true` |
+| `purgeStaleCodeFiles` | `() => Promise<void>` | 清理 ≠ `activeFile` 的代码文件（**单代码文件约束**）：语言切换后编辑器内容已复制到新文件名，旧扩展名文件成为过期残留，不清理会一直被后端 `save()` 全量落盘。代码文件判定沿用 `CODE_FILE_EXTENSIONS`，非代码文件不在清理范围；逐个删除、失败仅 `log.error`（下次加载/切换重试）；**每次删除前重查 `activeFile` 与工作区引用**（切换在途时避免误删新 active 文件，后端 `active_file` 守卫为第二道防线） |
+| `changeLanguage` | `(lang: string) => void` | 切换语言，见逻辑流程；**`isLoadingWorkspace` 时拒收**（同源约束：此时切换会把旧题代码经 flush 推到新派生文件名下 —— 后端若已切到新工作区，就是跨工作区的内容错配） |
 | `installWorkspacePersistenceListener` | `() => void` | 组合根（`main.ts`）安装一次：订阅 `workspace-saved` → `markPersisted(payload.workspaceId, payload.revision)`（`revision` 原样透传，幂等过滤在 store 内完成）；订阅失败只降级指示器 |
 
 ## 直接依赖
@@ -88,13 +88,13 @@ loadWorkspace(contestId, problemId)
   → 代际检查 + 原子应用（迟到结果作废，一次性写入 store；
     language 为空时 getDefaultLanguage 属 apply 前置解析，其后复查代际；
     两处检查同时比对 loadGeneration 与 getSessionGeneration()，
-    防止清理后迟到的 load_workspace 恢复旧会话代码，评审三轮 P2）
+    防止清理后迟到的 load_workspace 恢复旧会话代码）
   → activeFile 解析（权威源 + 历史回退链）
-  → void purgeStaleCodeFiles()                // 历史多文件工作区收敛（P62）
+  → void purgeStaleCodeFiles()                // 历史多文件工作区收敛
   → 仅成功路径复位 isLoadingWorkspace（带代际守卫；失败 catch 显式重置为 true，
     且仅在 loadGeneration 与会话代际均未变时才写锁状态）
 
-**会话代际回归（评审三轮 P2）**：`loadWorkspace` 的 turn 后与 apply 前置 await 后
+**会话代际回归**：`loadWorkspace` 的 turn 后与 apply 前置 await 后
 都比对 `getSessionGeneration()`；`clearDomainState()` 在 `load_workspace` 在途时执行，
 旧响应成功返回后 workspace/activeFile/code 保持重置态（workspace=null、code=''），
 失败 catch 也不会在会话切换后重新上锁。变异验证（暂存修复）时恢复出
@@ -103,25 +103,25 @@ workspace=ws-old、code='old session code'。
 
 设计要点：
 
-- **加载在途拒收输入（PR21-8 已闭合）**：`loadWorkspace` 的 IPC 往返窗口内编辑器仍显示
+- **加载在途拒收输入**：`loadWorkspace` 的 IPC 往返窗口内编辑器仍显示
   旧题代码，此时敲键属旧题上下文 —— 随加载结果被覆盖是预期行为；「保留用户输入」反而
   更坏（会把旧题文本经防抖推到新工作区文件名下，跨工作区错配）。防线三层：CodeEditor
   `locked`（Monaco 只读，用户可见不可编辑）→ `updateCode` 守卫（兜住工具条清空/上传等
   绕过键盘的程序化路径）→ `changeLanguage` 守卫（防止旧题代码被 flush 推到新派生文件名
-  下）。**失败闩锁（评审二轮）**：仅成功路径解锁 —— 最新一次加载失败时后端 current
+  下）。**失败闩锁**：仅成功路径解锁 —— 最新一次加载失败时后端 current
   与 store 是否一致不可知（单飞队列下更早的过期加载可能已在后端完成切换、其结果被
   代际检查丢弃），解锁后的防抖推送会把 store 代码写进后端实际工作区（跨工作区写入）；
-  保持锁定 + 视图层错误提示（含重试），下次加载成功即解锁。**原子应用（评审二轮）**：
+  保持锁定 + 视图层错误提示（含重试），下次加载成功即解锁。**原子应用**：
   加载结果经 turn 返回后代际检查通过才一次性写入 store，轮次内直接写 `this.workspace`
   会留下「workspace 已是新题、code 还是旧题」的失配对，后续加载失败时无法自愈。
-  **apply 块的原子性以「无 await」为准（评审三轮）**：元数据语言解析（language 为空时
+  **apply 块的原子性以「无 await」为准**：元数据语言解析（language 为空时
   走 `getDefaultLanguage`，新建工作区恒如此、配置缓存冷时是真实 IPC）是 apply 路径上
   唯一的 await，必须先于任何 store 写入完成并在其后复查代际 —— 否则该 await 期间被
   新加载取代的过期加载会应用过期字段并无条件解锁，击穿失败闩锁。解锁同样带代际守卫、
   失败 catch 显式重置标志为 true（而非仅「不清除」），均为防御性加固。
   加载期间的失焦/页面隐藏落盘（`flushToDisk`）无需守卫：两个守卫保证 `syncPending`
   在加载期间不可能置位，flush 空转、后端 `save_workspace` 对 clean 工作区是无操作。
-- **并发切题的代际 + 单飞（PR21-8 评审加固）**：快速切题 A→B→C 时 B、C 两次加载并发
+- **并发切题的代际 + 单飞**：快速切题 A→B→C 时 B、C 两次加载并发
   在途。**代际计数器** `loadGeneration`：B 先完成不得复位加载锁（否则 C 的 IPC 仍在飞，
   三层防线提前全部失效）、迟到结果不得覆盖 store（两处代际检查：flush 后、IPC 后）；
   **单飞队列** `loadQueue`：`load_workspace` 是 async 命令，并发 `find_or_create` 乱序
@@ -163,11 +163,11 @@ workspace=ws-old、code='old session code'。
   内容改动 +1，见 `service/workspace/manager.md`），因此「同一事件重复送达」与「旧修订号
   的事件晚于新修订号到达」都能用 `revision <= lastPersistedRevision` 一次判掉；落盘事实
   只能被更新的修订号推进。**该计数器跨登出/切账号/切 OJ 继续单调（管理器存活于 AppContext），
-  因此本地水位也跨会话保留**（评审七轮）；只有数据目录变更需要重启、进程重建后自然归零。
+  因此本地水位也跨会话保留**；只有数据目录变更需要重启、进程重建后自然归零。
 - **修订号比较的语义边界**：`revision` 是 `WorkspaceManager` 实例级全局计数器（不是每工作区一份），
   且只在 `new()` 初始化为 0、无其他重置点 —— 所以跨工作区切换不会回退，比较仍然成立；
   `markPersisted` 的 `workspaceId` 过滤先于水位推进，其他工作区的快照不会污染本工作区的水位。
 - 代码文件按后缀识别而非固定文件名：兼容后端工作区中已存在的任意命名。
-- **已闭合边界（评审七轮）**：
+- **已闭合边界**：
   ① ~~`loadQueue` 的轮次闭包只检查 `loadGeneration`~~ → **turn 内同时校验会话代际**：清理后已排队的旧加载不再发出 `load_workspace`（后端 current 不会被指向旧会话）；
   ② ~~`cancelPendingSync` 归零修订水位~~ → **默认保留水位**：后端 revision 进程级单调、跨会话可比，旧会话迟到事件只能按真实磁盘进度裁决（≤ 已落盘水位幂等跳过、< 已推送水位不清脏），专项用例+变异验证。数据目录变更需重启，进程重建后水位自然归零。

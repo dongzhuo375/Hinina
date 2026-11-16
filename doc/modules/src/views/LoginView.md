@@ -2,7 +2,7 @@
 
 > 源文件：`src/views/LoginView.vue`
 
-**`--settings` 管理方钥匙**：钥匙模式下页脚出现「返回设置」入口（`systemStore.isKeyed`，`stores/systemStore` 统一判据）。没有它，从设置页点「返回登录」就是单向门——无边框窗口没有地址栏、`firstNavigation` 已消费，维护者只能重启带参（评审十五 A）。
+**`--settings` 管理方钥匙**：钥匙模式下页脚出现「返回设置」入口（`systemStore.isKeyed`，`stores/systemStore` 统一判据）。没有它，从设置页点「返回登录」就是单向门——无边框窗口没有地址栏、`firstNavigation` 已消费，维护者只能重启带参。
 
 ## 职责
 

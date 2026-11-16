@@ -22,7 +22,7 @@
 | `toggleBrief` | `() => Promise<void>` | 打开简介浮层时异步读 `configStore.getOjBaseUrl()`（store 纯转发 `config.service`），把描述中相对图片地址改写为绝对地址后 `renderMarkdown` |
 | `handleLogout` | `() => Promise<void>` | `isLoggingOut` 防重复点击；`authStore.logout()` 不会 reject（后端失败也清理本地），`finally` 中必然 `router.replace(Login)`，不会滞留比赛页 |
 | `userInitial` | computed | 账号首字母（大写），账号菜单头像位 |
-| `WindowControls` | 子组件 | 窗口控制（最小化/最大化/关闭）走共享组件 `components/layout/WindowControls.vue`——与 `--settings` 极简壳同一实现（评审十 #2），窗口 API 不再由本组件持有 |
+| `WindowControls` | 子组件 | 窗口控制（最小化/最大化/关闭）走共享组件 `components/layout/WindowControls.vue`——与 `--settings` 极简壳同一实现，窗口 API 不再由本组件持有 |
 
 ## 直接依赖
 

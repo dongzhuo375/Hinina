@@ -57,7 +57,7 @@ load(id):
   3. contestStore.problems 按 displayId 找 ContestProblem（找不到 → localError）
   4. workspaceStore.loadWorkspace(contestId, cp.problemId)   // 工作区按题目真实 ID(pid) 隔离
      （内部先 flushPendingSync：加载会整体替换 code，不先推送就会丢最后一次编辑；
-       加载在途 isLoadingWorkspace=true → CodeEditor :locked 只读 + store 拒收输入，PR21-8）
+       加载在途 isLoadingWorkspace=true → CodeEditor :locked 只读 + store 拒收输入）
   5. problemStore.openProblem(contestId, id)                 // 题面详情按比赛内展示题号查询
      成功且 token 最新 → loadedProblemDisplayId = id         // currentProblem 配对凭证（提交守卫用）
   5.5 允许语言归位：题目 languages 非空时
@@ -106,7 +106,7 @@ load(id):
 
 ## 测试（M2）
 
-`__tests__/ProblemSolveView.spec.ts`（store 整店打桩 + 共享挂载 helper）：切题先落盘脏工作区（saveWorkspace 先于 loadWorkspace）、迟到响应不覆盖新题、加载失败后旧题与新路由不配对时拒绝提交（PR21-8 防错题提交）、卸载时落盘在途改动。
+`__tests__/ProblemSolveView.spec.ts`（store 整店打桩 + 共享挂载 helper）：切题先落盘脏工作区（saveWorkspace 先于 loadWorkspace）、迟到响应不覆盖新题、加载失败后旧题与新路由不配对时拒绝提交（防错题提交）、卸载时落盘在途改动。
 
 ## 提交配对的第二道校验（M2 评审 P1）
 

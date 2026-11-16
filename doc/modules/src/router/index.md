@@ -31,7 +31,7 @@
 ## 逻辑流程
 
 ```
-beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不再读 currentRoute（评审二十一 #5）
+beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不再读 currentRoute
   0. flags = await systemService.getLaunchFlags()（进程内 memoize：成功后不再发 IPC；
      失败不缓存 rejection，下次调用重试并保持安全侧快照；
      try/catch 包死 —— service 已兜底，这里是导航路径上的第二道防线，守卫抛错=路由卡死）
@@ -49,11 +49,11 @@ beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不�
      sessionGuard 读到 requiresAuth=true 照常回登录页
   3a. 钥匙设置页出发、无会话：回 **Settings** 并提示「未登录」（评审二十——无条件 Login 会
       卸载设置视图、丢草稿）；
-  4a. loadBrief 期间会话失效：钥匙流程回 **Settings**（评审十九 #2，与后续闸门失败同向）；
+  4a. loadBrief 期间会话失效：钥匙流程回 **Settings**（与后续闸门失败同向）；
       简报缺失（服务器不可达，正是钥匙要修的场景）时提示「未能加载比赛信息」而非
-      「比赛未进行」（评审十九 #3）
+      「比赛未进行」
   4. 受保护且已登录，且「从钥匙设置页出发」或「当前不在 Contest 子树内」时
-     做赛程闸门（前者是评审十 #1：从设置页点题目/榜单也要过闸门，否则会落进
+     做赛程闸门（前者：从设置页点题目/榜单也要过闸门，否则会落进
      被锁定的比赛页、随后被外壳踢回登录页）：
        !contest.brief → await contest.loadBrief()    // 深链/首次进入补加载匿名简报
        期间会话可能失效 → 钥匙流程回 Settings（并提示「会话已失效」），其它回 Login
@@ -71,7 +71,7 @@ afterEach(to):
   isKeyedSettingsRoute(to.name) → return（钥匙设置页豁免）
   否则 → replace(Login)
 ```
-**为什么需要**（评审九 P2-2）：beforeEach 只能看导航开始时的会话；守卫批准后、
+**为什么需要**：beforeEach 只能看导航开始时的会话；守卫批准后、
 路由确认前，某个在途请求返回 401 → sessionGuard 清理会话——它读到的
 `currentRoute` 仍是**尚未确认**的旧路由（设置页），钥匙豁免会跳过跳转，豁免
 被这条在途的受保护导航继承，用户落到无会话的比赛页。afterEach 在确认后补一次
