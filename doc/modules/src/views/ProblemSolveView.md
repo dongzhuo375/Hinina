@@ -104,10 +104,10 @@ load(id):
 - 分层约束：View 不 import `@/bridge`；配置读写走 `configStore`（View 侧唯一入口，转发 `config.service`）。
 
 
-## 测试（M2）
+## 测试
 
 `__tests__/ProblemSolveView.spec.ts`（store 整店打桩 + 共享挂载 helper）：切题先落盘脏工作区（saveWorkspace 先于 loadWorkspace）、迟到响应不覆盖新题、加载失败后旧题与新路由不配对时拒绝提交（防错题提交）、卸载时落盘在途改动。
 
-## 提交配对的第二道校验（M2）
+## 提交配对的第二道校验
 
 `handleSubmit` 除 displayId 配对外，还要求 `currentProblem.id === loadedProblemId`（本次成功加载写入的题目真实 ID）。store 的 `openProblem` 已有**请求序号 + 会话代际双守卫**（迟到旧题响应在 store 层被丢弃，主防线，见 problemStore 文档）；视图仍记账本次成功加载的真实 ID 作**防御纵深** —— loadToken 只能丢弃旧加载的后续编排，一旦 store 层守卫被未来改动击穿，会出现「配对标记是 B、currentProblem 被迟到响应改回 A」的脏状态，displayId 配对对此失明（放行会把 B 的代码以 A 的 problem.id 提交），真实 ID 比对兜住这一层。竞态测试整店打桩，其迟到 mock 刻意复刻 store 被污染后的形态，专测这道视图侧防线。

@@ -94,6 +94,6 @@ createApp → use(pinia) → use(router)
   落盘钩子只调用 store 的既有动作，不自带保存策略。
 
 
-## 测试（M2）
+## 测试
 
 `src/__tests__/main.spec.ts`：六个装配副作用（全局错误转发/会话守卫/工作区落盘订阅/公告订阅/关窗握手/外链拦截）注册齐备、全局错误转发**先于**会话守卫装配（`invocationCallOrder` 在 beforeAll 当场快照，规避 clearMocks）、公告事件按 `contestId` 过滤（切比赛瞬间的旧比赛在途事件被丢弃）。
