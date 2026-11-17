@@ -170,7 +170,7 @@ Hinina/
         │   │       ├── types_tests.rs    # DTO 解析测试（榜单 ACM/OI 归一、封榜只有 tryNum、打星 rank=-1、字段缺失与 null 容错、map_status 全表、公告/提交列表/测试点夹具）
         │   │       └── fixtures/
         │   │           ├── contest_list_anon.json      # 真实 get-contest-list 响应（已脱敏），锁定 null 容错回归
-        │   │           ├── announcement_list.json      # 按文档手工构造（未经真实联调，待联调清单）
+        │   │           ├── announcement_list.json      # 按文档手工构造（未经真实联调，待真实联调校正）
         │   │           ├── contest_submissions.json    # 同上
         │   │           └── case_result.json            # 同上
         │   ├── qduoj/
@@ -191,7 +191,7 @@ Hinina/
         │   │   └── tests/
         │   │       ├── mod_tests.rs      # 响应处置、共用解析入口、工厂契约（ID/会话文件名/四能力）、映射 helper、评测投影、缓存语义
         │   │       ├── types_tests.rs    # 纯函数与夹具解析（状态码全表、语言双射、单元格矩阵、ObjectId 时间、strip_html 保留换行）
-        │   │       └── fixtures/         # 按文档手工构造（无联调实例，见缺口报告待办清单）
+        │   │       └── fixtures/         # 按文档手工构造（无联调实例，待真实联调校正）
         │   │           ├── contest_list.json / contest_problems.json / problem_detail.json
         │   │           ├── record_detail.json / record_list.json
         │   │           ├── scoreboard_acm.json / scoreboard_oi.json

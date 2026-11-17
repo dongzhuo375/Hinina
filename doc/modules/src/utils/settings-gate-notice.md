@@ -6,7 +6,7 @@
 
 钥匙模式下从设置页点赛场页面（题目/榜单等）时，守卫的阶段闸门会把导航拦回
 设置页——vue-router 只 resolve 一个 `NavigationFailure`，用户看不到任何反馈，
-而导航又不能禁用（那正是 `inert` 修复所防）。守卫写入本模块，SettingsView
+而导航又不能禁用（那正是 `inert` 修复所替代的做法）。守卫写入本模块，SettingsView
 渲染一行提示并自动清除。
 
 ## 核心类型/函数
