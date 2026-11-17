@@ -2,7 +2,7 @@
 //
 // 夹具有两类出处：按 `doc/Hydro/HYDRO-API.md` 手工构造（contest_list 等，
 // 无 pid 别名键的 pdict 仍是合法形态，保留锁旧契约与多题覆盖）；以及 2026-11-15
-// 实测收编（contest_problems_dual_key / record_list_real，测试部署真实载荷，锁定缺口 D21 与实测线格式契约）。
+// 实测收编（contest_problems_dual_key / record_list_real，测试部署真实载荷，锁定 pdict 双键去重与实测线格式契约）。
 
 use super::*;
 use crate::core::entity::submission::JudgementStatus;
@@ -309,7 +309,7 @@ fn map_contest_problems_without_pid_order_falls_back_to_position() {
 fn map_contest_problems_dedupes_pid_alias_keys() {
     // 实测夹具（2026-11-15 测试部署）：上游 `problem.getList` 对带 `pid` 的题按
     // docId + pid 双键收录同一道题——pdict 键为 "1"（docId）与 "P1000"（pid 别名），
-    // 直接迭代 values() 曾让单题比赛出现两条重复条目（缺口 D21）
+    // 直接迭代 values() 曾让单题比赛出现两条重复条目
     let vo: ContestProblemListVO =
         serde_json::from_value(fixture("contest_problems_dual_key")).unwrap();
     assert_eq!(vo.pdict.as_ref().unwrap().len(), 2, "夹具本身双键");
@@ -418,7 +418,7 @@ fn into_problem_maps_markdown_limits_and_languages() {
     // 三段式题面只有一段有内容（Hydro 的题面是单块 Markdown）
     assert_eq!(problem.input_description, "");
     assert_eq!(problem.output_description, "");
-    // Hydro 无样例字段（缺口 D6）
+    // Hydro 无样例字段
     assert!(problem.samples.is_empty());
     assert_eq!(problem.time_limit, 2000, "多测试点取 timeMax");
     assert_eq!(problem.memory_limit, 256);
