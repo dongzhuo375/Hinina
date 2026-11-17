@@ -421,7 +421,7 @@ describe('提交历史（评测页数据源）', () => {
     )
   })
 
-  it('resetHistoryFilters 清空筛选且不发起请求（L2：筛选不得跨访问泄漏）', () => {
+  it('resetHistoryFilters 清空筛选且不发起请求（筛选不得跨访问泄漏）', () => {
     const store = useSubmissionStore()
     store.history.problemFilter = 'B'
     store.history.statusFilter = 5
