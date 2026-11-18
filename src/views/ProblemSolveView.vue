@@ -15,6 +15,7 @@ import { useConfigStore } from '@/stores/configStore'
 import type { EditorPrefs } from '@/stores/configStore'
 import { resolveAllowedLanguage } from '@/utils/language'
 import { DEFAULT_EDITOR_TAB_SIZE } from '@/utils/editor'
+import { clampSplitRatio, DEFAULT_SPLIT_RATIO, SPLIT_RATIO_MAX, SPLIT_RATIO_MIN } from '@/utils/layout'
 import { errorMessage } from '@/utils/error'
 import { createLogger } from '@/utils/logger'
 
@@ -192,9 +193,9 @@ onBeforeUnmount(() => {
   void flushToDisk('离开解题页时')
 })
 
-// ── 左右分栏拖拽（0.3 – 0.7） ──
+// ── 左右分栏拖拽（值域单源见 utils/layout，0.30 – 0.70） ──
 
-const splitRatio = ref(0.48)
+const splitRatio = ref(DEFAULT_SPLIT_RATIO)
 const splitContainer = ref<HTMLElement>()
 /// 用户是否已手动拖拽 —— 配置异步到达时不得覆盖用户刚调好的比例
 let userAdjustedSplit = false
@@ -213,7 +214,7 @@ function persistSplitRatio() {
 
 function adjustSplit(delta: number) {
   userAdjustedSplit = true
-  splitRatio.value = Math.min(0.7, Math.max(0.3, splitRatio.value + delta))
+  splitRatio.value = clampSplitRatio(splitRatio.value + delta)
   persistSplitRatio()
 }
 
@@ -227,7 +228,7 @@ function startDrag(e: MouseEvent) {
   const onMove = (ev: MouseEvent) => {
     const ratio = (ev.clientX - rect.left) / rect.width
     userAdjustedSplit = true
-    splitRatio.value = Math.min(0.7, Math.max(0.3, ratio))
+    splitRatio.value = clampSplitRatio(ratio)
   }
   const onUp = () => {
     window.removeEventListener('mousemove', onMove)
@@ -329,7 +330,8 @@ async function handleSubmit() {
       <div
         class="split-handle"
         role="separator" tabindex="0" aria-label="调整题面宽度" aria-orientation="vertical"
-        :aria-valuenow="Math.round(splitRatio * 100)" :aria-valuemin="30" :aria-valuemax="70"
+        :aria-valuenow="Math.round(splitRatio * 100)"
+        :aria-valuemin="Math.round(SPLIT_RATIO_MIN * 100)" :aria-valuemax="Math.round(SPLIT_RATIO_MAX * 100)"
         @keydown.left.prevent="adjustSplit(-0.02)" @keydown.right.prevent="adjustSplit(0.02)"
         @mousedown="startDrag"
       ></div>

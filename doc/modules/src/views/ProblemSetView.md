@@ -12,7 +12,7 @@
 
 | 名称 | 签名 | 用途 |
 |------|------|------|
-| `phase` / `formatLabel` / `startTimeText` | computed | 比赛阶段（`utils/contest`）、赛制文案（OI/ACM）、开赛时间 |
+| `phase` / `formatLabel` / `startTimeText` | computed | 比赛阶段（`utils/contest`）、赛制文案（OI/ACM）、开赛时间。`phase` **刻意不接 `useNowMs`**：直接读 `Date.now()`（非响应式），只随 30s 轮询替换 `contest` 引用才重算——开赛瞬间的即时跃迁由外壳（ContestLayout/TopBar 的每秒 phase）负责，本页若即时切 running，题目卡片仍要等下一轮轮询，会从「开赛后自动出现」占位退化为空列表 |
 | `showLoading` / `showError` / `showUpcoming` | computed | 三种全屏兜底的判据（见设计要点） |
 | `ensureContest` | `() => Promise<void>` | 统一走 `contestStore.whenLoaded()`（外壳已拉取则跳过、在途则复用、无人拉取则发起；原 `waitLoadingSettled` watch 写法已删除） |
 | `loadSupplementary` | `() => void` | 并发拉 limits / myStatus / 榜单第 1 页，**不 await**、各自吞错 |

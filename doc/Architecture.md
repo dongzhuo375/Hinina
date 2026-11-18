@@ -433,7 +433,7 @@ src/
 │   ├── workspace.bridge.ts               # load_workspace / save_workspace / updateWorkspaceFile / setWorkspaceLanguage + onWorkspaceSaved（workspace-saved 事件订阅）
 │   ├── config.bridge.ts                  # get_config / update_config / reload_config
 │   ├── diagnostics.bridge.ts             # frontend_log（前端全局错误三标量转发到 Rust tracing；唯一持久化日志通道）
-│   └── __tests__/                        # index.spec.ts / diagnostics.bridge.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数、frontend_log 命令名与三标量透传）
+│   └── __tests__/                        # index.spec.ts / diagnostics.bridge.spec.ts（AppError → IpcError 跨端契约、日志不泄露参数、frontend_log 命令名与三标量透传）/ window.bridge.spec.ts（同步取窗口抛错归一为 rejected promise）/ announcement / plugin / workspace .bridge.spec.ts（事件载荷形状校验：畸形整事件丢弃、newIds 归一空数组、合法透传）
 ├── types/
 │   ├── plugin.ts                         # 插件状态、错误与通知DTO
 │   ├── user.ts                           # User 实体 + SessionValidity（valid/invalid/unknown 三态）
@@ -467,8 +467,10 @@ src/
 │   ├── settings-access.ts                # 设置入口的隐藏显现（连点状态栏版本号 5 下；注入式计数状态机 createRevealGate + 会话级单例 settingsRevealed/tapVersion；状态不落盘）
 │   ├── settings-gate-notice.ts           # 钥匙模式的阶段闸门提示（从设置页点赛场页面被拦回时给一次可见反馈，4 秒自动清除）
 │   ├── focus-scope.ts                    # vFocusScope 指令（弹层焦点作用域：打开即聚焦首个可见控件 + Tab 循环陷阱 + Esc 关闭 + 卸载归还焦点；defaultPrevented 短路以不吞 Monaco 的 Tab 缩进）
+│   ├── external-links.ts                 # 外链拦截器（document 级 click/auxclick 委托：http(s) 外链含修饰键/中键组合经 open_external 转交系统浏览器，同源锚点/`#` 片段/应用内导航不受影响；外链判据 resolveExternalUrl 与 markdown 消毒改写共用）
 │   ├── session-check.ts                  # 赛前会话预检的错峰调度策略（窗口内随机取点 / 周期复检 ±60s 抖动 / 迟到启动抖动 / 临近开赛不再预检）
 │   ├── editor.ts                         # 编辑器偏好值域唯一权威模块（主题候选 vs/vs-dark + normalizeEditorTheme 归一 / 字号 8–32 / Tab 存储域 1–8 与候选档位 2·4·8；前端各消费方一律取此处常量，Rust sanitize 同域）
+│   ├── layout.ts                         # 布局偏好值域唯一权威模块（分栏比例默认 0.48 / 值域 [0.30, 0.70] + clampSplitRatio 归一——非有限值回退默认、有限越界钳边界；前端各消费方一律取此处常量，Rust sanitize 与 sanitize_editable 同域）
 │   ├── logger.ts                         # 前端日志唯一入口（createLogger 作用域前缀 + debug/info 仅开发环境、warn/error 恒输出；不落盘，持久化日志归 Rust tracing）
 │   ├── error.ts                          # 错误文案收敛唯一出口（errorMessage：Error/字符串取信息，空值与非 Error 载荷回退兜底文案；不依赖 bridge，纯函数）
 │   ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
@@ -477,7 +479,7 @@ src/
 │   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
 │   ├── oj.ts                             # OJ 类型域唯一权威（OJ_TYPES 已知类型枚举 / ojSelectOptions 下拉候选组装：枚举在前含未配置者 + 枚举外实例追加 / ojBaseUrlHint 地址占位）
-│   └── __tests__/                        # brief-retry / close-guard / contest / contest-clock / editor / error / focus-scope / language / limits / logger / markdown / markdown-dom / oj / pagination / polling / rank / session-check / settings-access / submission / submission-tone .spec.ts（退避延迟表、关窗守卫状态机与有界多轮重刷、阶段判据与权威赛程、时钟模型与 urgent 阈值、编辑器偏好值域、错误文案收敛、弹层焦点陷阱与归还、语言映射、limits 换算、日志级别分流与作用域前缀、渲染契约、jsdom 消毒激活态的生产链路契约、OJ 候选取值域与顺序、预检调度边界、轮询节奏、榜单映射与口径、设置显现计数状态机、终态穷尽映射与双层时间上界）
+│   └── __tests__/                        # brief-retry / close-guard / contest / contest-clock / editor / error / external-links / focus-scope / language / layout / limits / logger / markdown / markdown-dom / oj / pagination / polling / rank / session-check / settings-access / submission / submission-tone .spec.ts（退避延迟表、关窗守卫状态机与有界多轮重刷、阶段判据与权威赛程、时钟模型与 urgent 阈值、编辑器偏好值域、错误文案收敛、外链拦截判据、弹层焦点陷阱与归还、语言映射、分栏值域归一、limits 换算、日志级别分流与作用域前缀、渲染契约、jsdom 消毒激活态的生产链路契约、OJ 候选取值域与顺序、预检调度边界、轮询节奏、榜单映射与口径、设置显现计数状态机、终态穷尽映射与双层时间上界）
 └── styles/
     ├── global.css                        # TailwindCSS + 字体栈（Inter / JetBrains Mono / Noto Sans SC，经 @fontsource-variable 本地打包）+ CSS 变量（电光紫主题 #7C5CFF）+ 暗色主题 + KaTeX 公式全局样式（块级公式横向滚动防裁切，题面/公告/简介共用）；**不覆写 Monaco 背景**（编辑器底色由 theme.editorTheme 自绘，否则 vs-dark 只换字色）
     ├── contest.css                       # 赛场主题（PR #36）：在 `.contest-theme` 作用域重写整套令牌（中性灰/木色主色/低饱和语义色/`--radius: 3px`/响应式密度 `--ui-step` 与派生字号），并提供通用类（`.eyebrow`/`.action-primary`/`.action-quiet`/`.page-heading`/`.page-title`/`.workspace-main`/`.data-page`/`.reading-body`/`.surface-overlay`、表格与 `:focus-visible`/`::selection` 统一样式、≤1100px 与 prefers-reduced-motion 媒体查询）

@@ -8,10 +8,10 @@ import { ipcInvoke } from '@/bridge'
  *
  * 已读状态是客户端特性（HOJ 无已读概念），由 Rust 端按 比赛+用户 持久化到本地文件。
  * 新公告事件由 Rust 侧比对基线后发布（`CoreEvent::AnnouncementChanged`），
- * 经 `src-tauri/src/main.rs` 的事件桥转发到 `announcements-published` 通道。
+ * 经 `src-tauri/src/bootstrap/events.rs` 的事件桥转发到 `announcements-published` 通道。
  */
 
-/** 新公告事件的前端通道名（与 `src-tauri/src/main.rs` 的 emit 一致） */
+/** 新公告事件的前端通道名（与 `src-tauri/src/bootstrap/events.rs` 的 emit 一致） */
 export const ANNOUNCEMENTS_PUBLISHED_EVENT = 'announcements-published'
 
 /** 新公告事件载荷 */
@@ -59,6 +59,6 @@ export async function onAnnouncementsPublished(
   return listen<AnnouncementsPublishedPayload>(ANNOUNCEMENTS_PUBLISHED_EVENT, (event) => {
     const payload = event.payload
     if (!payload || typeof payload.contestId !== 'string') return
-    handler({ contestId: payload.contestId, newIds: payload.newIds ?? [] })
+    handler({ contestId: payload.contestId, newIds: Array.isArray(payload.newIds) ? payload.newIds : [] })
   })
 }

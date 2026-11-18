@@ -44,11 +44,11 @@ export async function deleteWorkspaceFile(fileName: string): Promise<void> {
   return ipcInvoke<void>('delete_workspace_file', { fileName })
 }
 
-/** 落盘事件载荷（Rust `main.rs` 的事件桥下发） */
+/** 落盘事件载荷（Rust `bootstrap::events` 的事件桥下发） */
 export interface WorkspaceSavedPayload {
   workspaceId: string
   /** 内容修订号（Rust 侧写盘时的修订号）；用于幂等处理重复/过期事件 */
-  revision?: number
+  revision: number
   /** true = 后台 auto-save，false = 显式 `save_workspace` */
   auto: boolean
 }
@@ -65,5 +65,15 @@ export interface WorkspaceSavedPayload {
 export async function onWorkspaceSaved(
   handler: (payload: WorkspaceSavedPayload) => void,
 ): Promise<UnlistenFn> {
-  return listen<WorkspaceSavedPayload>('workspace-saved', (event) => handler(event.payload))
+  return listen<WorkspaceSavedPayload>('workspace-saved', (event) => {
+    // 载荷形状校验（与 announcement/plugin 事件桥同一口径）：畸形整事件丢弃，不进 store
+    const payload = event.payload
+    if (
+      !payload || typeof payload !== 'object'
+      || typeof payload.workspaceId !== 'string'
+      || typeof payload.revision !== 'number'
+      || typeof payload.auto !== 'boolean'
+    ) return
+    handler(payload)
+  })
 }

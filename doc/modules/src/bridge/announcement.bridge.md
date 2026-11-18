@@ -15,7 +15,7 @@
 | `markAnnouncementsRead` | `(contestId, ids) => Promise<void>` | `mark_announcements_read`（后端合并去重持久化） |
 | `ANNOUNCEMENTS_PUBLISHED_EVENT` | 常量 `'announcements-published'` | 前端事件通道名，必须与 `bootstrap::events` 的 emit 字面量一致 |
 | `AnnouncementsPublishedPayload` | `{ contestId: string; newIds: string[] }` | 事件载荷；`newIds` = 本次新出现的公告 ID |
-| `onAnnouncementsPublished` | `(handler) => Promise<UnlistenFn>` | 包一层 Tauri `listen`：**校验载荷形状**（`payload` 存在且 `contestId` 为 string，否则直接丢弃 —— 事件来自 Rust 且通道公开，越界数据不该进 store），`newIds` 缺省补 `[]`。返回取消订阅函数，调用方（组合根）应保留以便注销 |
+| `onAnnouncementsPublished` | `(handler) => Promise<UnlistenFn>` | 包一层 Tauri `listen`：**校验载荷形状**（`payload` 存在且 `contestId` 为 string，否则直接丢弃 —— 事件来自 Rust 且通道公开，越界数据不该进 store），`newIds` 缺省**或非数组**补 `[]`（`Array.isArray` 归一，与 plugin/workspace 事件桥同款形状口径）。返回取消订阅函数，调用方（组合根）应保留以便注销 |
 
 ## 直接依赖
 

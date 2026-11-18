@@ -33,6 +33,11 @@ let supplementaryLoaded = false
 const contest = computed(() => contestStore.contest)
 const problems = computed(() => contestStore.problems)
 
+/// **刻意不接 `useNowMs`**（与 LoginView/RankView/TopBar/ContestLayout 的每秒口径不同）：
+/// 直接读 Date.now() 使 phase 只随 30s 轮询替换 `contest` 引用才重算。开赛瞬间的
+/// 即时跃迁由外壳负责（ContestLayout/TopBar 的每秒 phase）；本页若也即时切 running，
+/// 题目卡片仍要等下一轮轮询才到，页面会从「开赛后自动出现」占位退化为空列表——
+/// 占位文案已明示 30s 刷新节奏，属设计内取舍
 const phase = computed(() => getContestPhase(contest.value, Math.floor(Date.now() / 1000)))
 
 /// OI 赛制（contestType===1）罚时口径不同，元信息行文案需区分

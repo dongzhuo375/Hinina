@@ -344,15 +344,13 @@ export const useWorkspaceStore = defineStore('workspace', {
      * 单调、跨会话可比，归零会让旧会话事件重获「高水位特权」。因此旧会话迟到事件
      * 只会按真实磁盘进度裁决（≤ 已落盘水位被幂等跳过；< 已推送水位不清脏）。
      */
-    markPersisted(workspaceId?: string, revision?: number) {
-      if (workspaceId && this.workspace && this.workspace.id !== workspaceId) return
+    markPersisted(workspaceId: string, revision: number) {
+      if (this.workspace && this.workspace.id !== workspaceId) return
 
-      if (revision !== undefined) {
-        if (revision <= lastPersistedRevision) return
-        lastPersistedRevision = revision
-        // 落盘快照早于最近一次推送：磁盘落后于编辑器，脏标记保持
-        if (revision < lastPushedRevision) return
-      }
+      if (revision <= lastPersistedRevision) return
+      lastPersistedRevision = revision
+      // 落盘快照早于最近一次推送：磁盘落后于编辑器，脏标记保持
+      if (revision < lastPushedRevision) return
 
       if (this.syncPending) return // 事件到达后又有新改动：仍需落盘
       this.isDirty = false

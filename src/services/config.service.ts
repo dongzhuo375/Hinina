@@ -14,6 +14,7 @@ import {
   EDITOR_TAB_SIZE_MIN,
   normalizeEditorTheme,
 } from '@/utils/editor'
+import { clampSplitRatio, DEFAULT_SPLIT_RATIO } from '@/utils/layout'
 import { createLogger } from '@/utils/logger'
 
 /// 配置读取失败只影响局部展示/节奏，故一律 warn + 兜底值，不向上抛
@@ -420,13 +421,14 @@ export class ConfigService {
   /**
    * 解题页初始分栏比例（左栏占比）。
    *
-   * 非法值回退设计稿默认 0.48；读取失败同样回退，不阻断页面渲染。
+   * 按 `utils/layout` 单源值域 [0.30, 0.70] 归一（镜像 Rust `sanitize` 语义：
+   * 非法/非有限值回退默认 0.48，有限越界钳到边界）——读取路径不经过后端
+   * sanitize，手改 config.json 的越界值在此兜底；读取失败同样回退，不阻断页面渲染。
    */
   async getSplitRatio(): Promise<number> {
     try {
       const config = await this.getConfig()
-      const ratio = config.layout?.splitRatio
-      return typeof ratio === 'number' && ratio >= 0.2 && ratio <= 0.8 ? ratio : DEFAULT_SPLIT_RATIO
+      return clampSplitRatio(config.layout?.splitRatio)
     } catch (e) {
       log.error('读取分栏比例失败，使用默认值:', e)
       return DEFAULT_SPLIT_RATIO
@@ -501,9 +503,6 @@ export interface EditorPrefs {
   /// Monaco 主题名（值域见 `utils/editor`）
   editorTheme: string
 }
-
-/// 分栏比例兜底值（设计稿 48% / 52%）
-const DEFAULT_SPLIT_RATIO = 0.48
 
 /// 整数钳位：非法值（非数字/越界）回退兜底
 function clampInt(value: number | undefined, min: number, max: number, fallback: number): number {

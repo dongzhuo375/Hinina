@@ -138,7 +138,7 @@ export const useConfigStore = defineStore('config', {
       return configService.updateEditorPrefs(patch)
     },
 
-    /** 解题页初始分栏比例（非法/失败回退 0.48） */
+    /** 解题页初始分栏比例（非数字/非有限或读取失败回退 0.48；有限越界钳到 [0.30, 0.70] 边界，语义见 utils/layout） */
     getSplitRatio(): Promise<number> {
       return configService.getSplitRatio()
     },

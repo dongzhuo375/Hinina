@@ -12,7 +12,7 @@
 |------|------|------|
 | `splitRatio` | prop `number` | 当前比例 |
 | `splitPercent` | computed | `round(splitRatio * 100)` 展示 |
-| `onSplitInput` | fn | 经共享 `clampRatio` 钳位后 emit `{ splitRatio }` |
+| `onSplitInput` | fn | 经共享 `clampRatio` 钳位后 emit `{ splitRatio }`（值域取 `utils/layout` 单源常量 + 滑杆 step 两位小数舍入） |
 | `update:form` | emit `SettingsFormPatch` | 通知父级更新同一中央草稿 |
 
 ## 直接依赖
@@ -20,6 +20,7 @@
 - `vue`
 - `SettingsSectionFrame`
 - `@/composables/useSettingsForm`（`clampRatio` 与补丁类型）
+- `@/utils/layout`（滑杆 min/max 绑定单源常量）
 
 ## 被依赖
 
@@ -27,7 +28,7 @@
 
 ## 逻辑流程
 
-滑杆 `0.30–0.70`、步长 `0.01` 与原实现一致。输入先经 `clampRatio`，再以补丁写回；加载回填与输入共用同一钳位函数。
+滑杆 `0.30–0.70`（min/max 绑定 `utils/layout` 的 `SPLIT_RATIO_MIN/MAX`）、步长 `0.01` 与原实现一致。输入先经 `clampRatio`，再以补丁写回；加载回填与输入共用同一钳位函数。
 
 ## 测试
 

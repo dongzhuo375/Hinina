@@ -23,7 +23,7 @@
 | `SERVER_TONE_MAP` | 常量 | `StatusTone`（utils/submission 语义色）→ 控制台条既有 `Tone` |
 | `toneOf(status)` | `(JudgementStatus) => Tone` | 本地 pill 配色：AC=success；TLE/MLE=warning；Pending/Compiling/Running=pending（旋转圈）；Unknown=muted；WA/RE/CE=error |
 | `TONE_STYLES` / `toneStyle` / `serverToneStyle` | — | Tone → CSS 变量（`--color-ac-bg` / `--color-wa-bg` / `--color-pending-bg` / `--color-*-border` 等） |
-| `statusLabel(status)` | 组件私有 fn | 本地 pill 文案：驼峰拆空格 `WrongAnswer → Wrong Answer`，**不缩写**——原词与判题语义一一对应（服务端 pill 则用 `statusAbbr` 紧凑缩写） |
+| `statusLabel(status)` | `utils/submission` 导入 | 本地 pill 文案：全站单一权威 `STATUS_META`（HOJ 原词，如 `CompilationError → Compile Error`），**不缩写**——原词与判题语义一一对应（服务端 pill 则用 `statusAbbr` 紧凑缩写）。曾私有一份驼峰拆词实现（`Compilation Error`），与评测页/详情页形成两套文案权威，已随口径统一删除 |
 | `failureDetail` | computed | 本会话最新提交的 `errorMessage` **首个非空行**（`\n` 切分后 trim 非空的第一行）；无错误为 null。渲染为 pill 旁等宽截断 span（`title` 悬浮全文，`max-w-[420px] truncate`）—— 完整多行编译错误在提交详情页。**没有它，选手在解题页只看到「Compile Error」四个字**，必须点进详情页才知道错在哪 |
 | `timeLabel` | computed | 本地条目轮询回填的耗时（`entry.time`，ms）；未到终态无值不显示 |
 | `totalCount` | computed | `summary.total`（「提交记录 (n)」计数；摘要未到达/为 0 时不显示 n） |
@@ -39,7 +39,7 @@
 - `@/stores/submissionStore`（`getSubmissionCases` — 失败测试点提示；经 store 纯转发 `submission.service`）
 - stores：`contestStore`（contestId）、`submissionStore`（`submissions` / `error` / `isSubmitting` / `fetchProblemSummary`）
 - `@/types/submission`（仅 `JudgementStatus` / `SubmissionRecord` 类型）
-- `@/utils/submission`（`findFirstFailedCase` / `formatMsToSeconds` / `isTerminalStatus` / `statusAbbr` / `statusTone` + `StatusTone` 类型）
+- `@/utils/submission`（`findFirstFailedCase` / `formatMsToSeconds` / `isTerminalStatus` / `statusAbbr` / `statusLabel` / `statusTone` + `StatusTone` 类型）
 - `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — tabSize prop 兜底）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 - 组件：`SubmitButton`（提交三态按钮，控制台条 primary 底色 + tracking 文本）/ `SpinnerIcon`（最新记录 pill 的 pending 旋转圈）

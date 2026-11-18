@@ -17,7 +17,7 @@ setup 作用域普通变量：`loadToken: number`（并发防护令牌）、`isL
 | `load` | `(id: string) => Promise<void>` | 加载编排主流程（见逻辑流程），每步之后校验 `token !== loadToken` 则放弃 |
 | `consumeFocusQuery` | `() => Promise<void>` | 消费 `?focus=1`：`nextTick` 后调 `codeEditor.focus()`，随后 `router.replace({ query: {} })` 清掉 |
 | `splitRatio` | ref | 初始值经 `configStore.getSplitRatio()` 从配置读取（配置消费已落地；异步到达时若用户已拖拽则不覆盖） |
-| `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例钳制 0.3–0.7，拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
+| `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例经 `utils/layout` 单源 `clampSplitRatio` 钳制（0.30–0.70），拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
 | `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configStore.saveSplitRatio`（转发 `config.service`）写回配置（**后台写入**：只排保存队列、不进设置页门禁；下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
 | `adjustSplit` | `(delta: number) => void` | 分隔条键盘调整（`←/→` 每次 ±0.02，钳制在 [0.30, 0.70]）+ 落盘；分隔条带 `role="separator"` / `tabindex="0"` / `aria-*`，纯键盘可用 |
 | `pendingSubmission` | computed | `submissionStore.pendingFor(contestId, currentProblemId, displayId, workspaceStore.language, workspaceStore.code)` —— 本会话同内容提交在评测期间的锁与展示源 |
@@ -35,6 +35,7 @@ setup 作用域普通变量：`loadToken: number`（并发防护令牌）、`isL
 - stores：`contestStore` / `problemStore` / `workspaceStore` / `submissionStore`
 - `@/stores/configStore`（分栏比例读取/回写、`EditorPrefs` 类型 —— View 侧配置消费唯一入口，store 纯转发 `config.service`；`Architecture.md` 登记的 View 直连 Service 欠账已清偿）
 - `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — 偏好上报到达前的状态行兜底）
+- `@/utils/layout`（分栏比例单源值域：初始值 / 拖拽钳制 / aria 值域派生）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 
