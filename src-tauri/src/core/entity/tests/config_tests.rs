@@ -411,9 +411,10 @@ fn normalize_trims_instance_ids_and_active() {
 
 #[test]
 fn validate_rejects_path_characters_in_instance_ids() {
-    // id 会拼进会话文件名（sessions/{id}.json）与注册表键：路径分隔符与
-    // `..`（路径穿越）必须拒绝；Storage::resolve 只是第二道防线
-    for bad in ["a/b", "a\\b", "a..b", ".."] {
+    // id 会拼进会话文件名（sessions/{id}.json）与注册表键：路径分隔符、
+    // `..`（路径穿越）与 `:`（NTFS 备用数据流：sessions/HOJ:x.json 是文件
+    // HOJ 的 ADS，资源管理器不可见）必须拒绝；Storage::resolve 只是第二道防线
+    for bad in ["a/b", "a\\b", "a..b", "..", "HOJ:x"] {
         let mut cfg = AppConfig::default();
         cfg.oj.instances[0].id = bad.into();
         let err = cfg.validate().expect_err(&format!("{:?} 应被拒绝", bad));
