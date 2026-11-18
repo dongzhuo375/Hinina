@@ -16,7 +16,7 @@
 | `setWorkspaceLanguage` | `(language) => Promise<Workspace>` | invoke `set_workspace_language`，返回更新后的 Workspace。**语言不属于任何代码文件，`updateWorkspaceFile` 带不上它**；不单独持久化会导致切题/重启后退回默认语言，从而用错语言提交 |
 | `deleteWorkspaceFile` | `(fileName) => Promise<void>` | invoke `delete_workspace_file`（旧代码文件清理）。后端守卫拒绝删除当前代码文件（activeFile）与 `workspace.json`，调用方无需重复设防 |
 | `WorkspaceSavedPayload` | `{ workspaceId: string; revision: number; auto: boolean }` | 落盘事件载荷（`auto = true` 为后台 auto-save，`false` 为显式保存）。`revision` 是 Rust 侧写盘时的内容修订号，用于**幂等**处理重复 / 过期事件（后端 `payload_for` 恒携带，必填） |
-| `onWorkspaceSaved` | `(handler) => Promise<UnlistenFn>` | 订阅 `workspace-saved`（`@tauri-apps/api/event` 的 `listen`）：后端在**内容确已落盘**时才发（写失败、或快照后又有新改动时不发），前端据此清「编辑中…」指示 |
+| `onWorkspaceSaved` | `(handler) => Promise<UnlistenFn>` | 订阅 `workspace-saved`（`@tauri-apps/api/event` 的 `listen`）：后端在**内容确已落盘**时才发（写失败、或快照后又有新改动时不发），前端据此清「编辑中…」指示。回调前做载荷形状校验（workspaceId string / revision number / auto boolean，畸形整事件丢弃——与 announcement/plugin 事件桥同一口径） |
 
 ## 直接依赖
 

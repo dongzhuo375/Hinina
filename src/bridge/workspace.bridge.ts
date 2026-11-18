@@ -65,5 +65,15 @@ export interface WorkspaceSavedPayload {
 export async function onWorkspaceSaved(
   handler: (payload: WorkspaceSavedPayload) => void,
 ): Promise<UnlistenFn> {
-  return listen<WorkspaceSavedPayload>('workspace-saved', (event) => handler(event.payload))
+  return listen<WorkspaceSavedPayload>('workspace-saved', (event) => {
+    // 载荷形状校验（与 announcement/plugin 事件桥同一口径）：畸形整事件丢弃，不进 store
+    const payload = event.payload
+    if (
+      !payload || typeof payload !== 'object'
+      || typeof payload.workspaceId !== 'string'
+      || typeof payload.revision !== 'number'
+      || typeof payload.auto !== 'boolean'
+    ) return
+    handler(payload)
+  })
 }
