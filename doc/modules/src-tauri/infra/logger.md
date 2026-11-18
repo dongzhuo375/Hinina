@@ -46,6 +46,6 @@
 - **只清内容、不删文件**：删了要等下次启动才重建，中间这段排障信息就彻底没了。
 
 
-## 测试构建不装全局订阅器（M2）
+## 测试构建不装全局订阅器
 
 `Logger::init` 在 `cfg(test)` 下只探测文件层是否可用（决定 `log_path`），**不安装全局 tracing 订阅器**：全局订阅器是进程级单例，并行测试各自 `AppContext::init` 会争抢全局位；且装上后整个测试进程全部用例的调试日志都会被格式化输出，与 libtest 捕获机制叠加在 Windows 上曾引发进程级崩溃（STATUS_STACK_BUFFER_OVERRUN）。`clear_log_file` / `has_log_file` 是纯文件层操作，测试语义不受影响。

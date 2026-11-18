@@ -13,14 +13,14 @@
 | `showGlobalTitleBar` | computed | `!route.matched.some(r => r.name === 'Contest')` —— 比赛外壳（ContestLayout）的 TopBar 自带窗口控制，外壳之外的路由（当前只有登录页）由此处提供精简窗口条，避免窗口无法关闭/最小化 |
 | `contestThemeOverrides` | `GlobalThemeOverrides` | **赛场主题**：primary `#2e3033`、语义色与 `contest.css` 令牌对齐（info `#5b736d` / success `#50705c` / warning `#8c6a43` / error `#a33b2a`）、`borderRadius: '3px'`、`fontFamily: 'var(--font-sans)'` |
 | `themeOverrides` | `GlobalThemeOverrides` | 入口页主题：primary `#7C5CFF` 系 + info/success/warning/error 语义色 |
-| `minimize` / `toggleMaximize` / `close` | fn | `systemStore.minimizeWindow()/toggleMaximizeWindow()/closeWindow()`（无边框窗口；2026-11-04 G3 迁出直用的 `getCurrentWindow()`） |
+| `minimize` / `toggleMaximize` / `close` | fn | `systemStore.minimizeWindow()/toggleMaximizeWindow()/closeWindow()`（无边框窗口；2026-11-04 迁出直用的 `getCurrentWindow()`） |
 
 模板结构：`n-config-provider(:theme="null" + :theme-overrides="showGlobalTitleBar ? themeOverrides : contestThemeOverrides")` → **插件通知出口 `<PluginNotifications />`**（纯文本通知渲染，挂在 provider 内、根 div 之前）→ 根 div（`:class="{ 'contest-theme': !showGlobalTitleBar }"`）→ 条件渲染的兜底 header（`.entry-titlebar` + `data-tauri-drag-region`）→ `router-view`。
 
 ## 直接依赖
 
 - `vue`（`computed`）/ `vue-router`（`useRoute`）
-- `naive-ui`（`NConfigProvider` 组件 + `GlobalThemeOverrides` 类型；按需引入，非插件安装。曾挂载 `NDialogProvider`，全仓无 `useDialog` 消费方，属死装配，已移除——分层审计 F9）
+- `naive-ui`（`NConfigProvider` 组件 + `GlobalThemeOverrides` 类型；按需引入，非插件安装。曾挂载 `NDialogProvider`，全仓无 `useDialog` 消费方，属死装配，已移除）
 - `@/stores/systemStore`（`minimizeWindow` / `toggleMaximizeWindow` / `closeWindow`）
 - `@/components/PluginNotifications.vue`（插件通知出口组件）
 

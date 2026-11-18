@@ -27,7 +27,7 @@
 
 - `@/bridge`（`setIpcErrorObserver`、`IpcError` 类型）
 - `@/stores/authStore`（`useAuthStore`、`SESSION_INVALID_MESSAGE`）
-- `@/stores/systemStore`（`isKeyedSettingsRoute(routeName)` —— 钥匙设置页 401 旁路的唯一判据；2026-11-04 H3 起路由级组合收进 store 单一入口，原 `guards/keyed-settings-route` 已删）
+- `@/stores/systemStore`（`isKeyedSettingsRoute(routeName)` —— 钥匙设置页 401 旁路的唯一判据；2026-11-04 起路由级组合收进 store 单一入口，原 `guards/keyed-settings-route` 已删）
 - `@/utils/settings-gate-notice`（`markSettingsGateBlocked` —— 旁路时写一次可见提示）
 - `vue-router`（仅 `Router` 类型 + 导航）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
@@ -56,7 +56,7 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
 
 设计要点：
 
-- **钥匙旁路（评审四）**：`isKeyedSettingsRoute(router.currentRoute.value.name)`
+- **钥匙旁路**：`isKeyedSettingsRoute(router.currentRoute.value.name)`
   时跳过登录重定向并写一次可见提示，其余路由不受旁路影响（钥匙模式下比赛页 401 照常回登录页）。
   最小壳（ContestLayout 的 bareShell）随之接管——其判据同样不含 `sessionResolved`
   （invalidateSession 会把它复位为 false，而此刻正是最小壳的形态）。
@@ -72,6 +72,6 @@ ipcInvoke 捕获错误 → IpcError（含 AppError variant）→ 通知观察者
   （含比赛进行中的 token 过期、服务端重启清空 Redis 等场景）。
 
 
-## 测试（M2）
+## 测试
 
 `__tests__/sessionGuard.spec.ts`：并发认证错误只清理一次（`invalidating` 防重入）、未登录与非认证错误不处理、仅受保护路由跳登录页、失效完成后的后续错误因已登出而短路；**钥匙设置页 401** 清理会话但不跳转并写提示，普通启动的同路由 401 照常跳转（旁路不得扩展）。

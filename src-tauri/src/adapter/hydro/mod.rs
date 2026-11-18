@@ -72,7 +72,7 @@ const PID_CACHE_TTL: Duration = Duration::from_secs(60);
 /// 顺序表缓存容量上限（比赛数；一个会话内远用不到这么多，仅作上界防御）
 const PID_CACHE_CAPACITY: usize = 32;
 /// 假定评测记录每页条数（Hydro 的页大小由服务端 `pagination.record` 决定，默认 100，
-/// 客户端无法查询；仅用于推导分页控件，见缺口 D8）
+/// 客户端无法查询；仅用于推导分页控件）
 const ASSUMED_RECORD_PAGE_SIZE: i64 = 100;
 
 /// 当前登录用户的轻量身份（Hydro 无 `/user/me`，靠注入头获得）
@@ -215,9 +215,9 @@ impl HydroAdapter {
     /// 创建 HydroAdapter。
     ///
     /// `base_url` 是站点根地址（**不含**尾部斜杠），如 `https://hydro.ac`。
-    /// 多域部署的 `/d/:domainId` 前缀暂不支持（缺口 D4）：本适配器按**系统域**
+    /// 多域部署的 `/d/:domainId` 前缀暂不支持：本适配器按**系统域**
     /// （`system`）拼路径 —— 且 `AdapterFactory::build` 目前只把 `base_url`
-    /// 交给适配器，`OjInstance.options` 里的域名配置还传不进来（见冲突记录）。
+    /// 交给适配器，`OjInstance.options` 里的域名配置还传不进来。
     pub fn new(http: Arc<HttpClient>, base_url: String) -> Self {
         Self {
             http,
@@ -374,7 +374,7 @@ impl HydroAdapter {
     ///   或**响应里根本没有 `UserContext` 字段**（该部署不支持注入头）。
     ///
     /// 最后一条尤其重要：若把「不支持注入头」当成「匿名」，一次版本差异就会把
-    /// 全部在线选手踢回登录页；按「无法判定」处理才会保留会话（缺口 D18）。
+    /// 全部在线选手踢回登录页；按「无法判定」处理才会保留会话。
     /// 探测当前用户上下文（**带缓存**：展示类查询用，命中即免网络请求）。
     ///
     /// **会话校验不得走本方法**：缓存命中会短路网络，服务器吊销 sid 后校验
@@ -608,7 +608,7 @@ impl HydroAdapter {
         // 上游 `problem.getList` 对带 `pid` 的题按 docId + pid **双键**收录同一条
         // pdoc（`r[pdoc.docId]=pdoc; if (pdoc.pid) l[pdoc.pid]=pdoc; …Object.assign(r,l)`），
         // 直接迭代 values() 会把同一道题映射两次——实测一场单题比赛返回 2 条重复
-        // 条目（缺口 D21）。按归一 docId 去重、只保留首次出现：HashMap 迭代序随机，
+        // 条目。按归一 docId 去重、只保留首次出现：HashMap 迭代序随机，
         // 但双键指向同一条 pdoc，保留哪条结果都相同。回退链 docId → pid → 键名
         // 各带命名空间前缀，防跨域碰撞（docId "5" 与 pid "5" 不是同一标识）；
         // 键名前缀保证不同条目永不被错并。之后按 docId 升序固定输出顺序。
@@ -674,7 +674,7 @@ impl HydroAdapter {
             description: pdoc.content.clone().unwrap_or_default(),
             input_description: String::new(),
             output_description: String::new(),
-            // Hydro 的 JSON 里没有独立样例字段（样例写在题面 Markdown 里）→ 恒空（缺口 D6）
+            // Hydro 的 JSON 里没有独立样例字段（样例写在题面 Markdown 里）→ 恒空
             samples: Vec::new(),
             time_limit: config.as_ref().map(|c| c.time_limit_ms()).unwrap_or(0),
             memory_limit: config.as_ref().map(|c| c.memory_limit_mb()).unwrap_or(0),
@@ -1016,7 +1016,7 @@ impl ContestProvider for HydroAdapter {
     /// 比赛题目列表：`GET /contest/:tid/problems`。
     ///
     /// 展示字母由 `tdoc.pids` 的**下标**派生（Hydro 自身的规则），
-    /// 因为 `pdict` 是 docId + pid 双键映射（缺口 D21）且 JS 对象的数字键会被重排 ——
+    /// 因为 `pdict` 是 docId + pid 双键映射且 JS 对象的数字键会被重排 ——
     /// 不能靠键顺序推字母。
     async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
         let vo: ContestProblemListVO = self
@@ -1037,7 +1037,7 @@ impl ContestProvider for HydroAdapter {
     ///
     /// **`query` 的字段基本被忽略**：Hydro 榜单是「整榜算完一次性返回」，
     /// 服务端不接受分页/关键词/打星/赛后提交参数（那些是网页端在前端做的），
-    /// 故页码/搜索/打星/赛后提交全部无效，返回单页全量（见缺口 D10）。
+    /// 故页码/搜索/打星/赛后提交全部无效，返回单页全量。
     /// 调用方的轮询节奏仍然生效。
     async fn get_contest_rank(
         &self,
@@ -1066,7 +1066,7 @@ impl ContestProvider for HydroAdapter {
 
     /// 比赛公告：**Hydro 没有公告接口**，恒返回空页。
     ///
-    /// 现状（已与项目负责人确认并留档，见缺口 D11）：Hydro 的对应能力是
+    /// 现状（已与项目负责人确认）：Hydro 的对应能力是
     /// **答疑（clarification）**，与 Hinina 的公告在语义与数据结构上都不同
     /// （答疑是「提问 + 裁判回复」的会话，公告是单向广播）。HOJ 是本项目
     /// 第一优先级的 OJ，且短期不会为 Hydro 改前端，故此处不把答疑伪装成公告
@@ -1229,7 +1229,7 @@ impl SubmissionProvider for HydroAdapter {
                 Ok(rid)
             }
             // 比赛隐藏本人记录时服务端用 tid 代替 rid（`canShowSelfRecord` 为假）：
-            // 此时拿不到记录 ID，客户端无法轮询评测结果（缺口 D12）
+            // 此时拿不到记录 ID，客户端无法轮询评测结果
             None => Err(AppError::Submission(
                 "Hydro 未返回评测记录 ID：本场比赛隐藏本人评测记录，无法查询评测结果".into(),
             )),
@@ -1254,12 +1254,12 @@ impl SubmissionProvider for HydroAdapter {
 
     /// 提交列表：`GET /record?page=&tid=&uidOrName=&pid=&status=`。
     ///
-    /// 与 HOJ 的差异（均在缺口报告留档）：
+    /// 与 HOJ 的差异：
     /// - Hydro **没有 `limit`/`uid` 参数**，页大小由服务端决定，用户筛选用 `uidOrName`
     ///   （接受 uid/用户名/邮箱，此处用探测到的 uid 以保证精确）；
-    /// - Hydro **不返回总条数**，故 `total`/`pages` 只能按假定页大小推导（D8）；
+    /// - Hydro **不返回总条数**，故 `total`/`pages` 只能按假定页大小推导；
     /// - `status` 收 Hydro 码，前端传的是 HOJ 码 → 经 `types::hoj_status_to_hydro` 翻译，
-    ///   无对应语义时明确报错而不是静默忽略筛选（D13）。
+    ///   无对应语义时明确报错而不是静默忽略筛选。
     async fn list_contest_submissions(&self, query: &SubmissionQuery) -> AppResult<SubmissionPage> {
         let page = query.current_page.max(1);
         let mut path = format!("/record?page={}", page);

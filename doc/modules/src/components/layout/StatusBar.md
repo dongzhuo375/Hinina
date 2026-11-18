@@ -13,7 +13,7 @@
 | `connected` | computed | `contestStore.contest !== null && !contestStore.error` —— 复用 store 状态作为判据，**不额外发探测请求** |
 | `version` | `__APP_VERSION__` | 版本号构建期注入（vite define ← package.json），与 LoginView 同源，避免写死后漂移 |
 | `onVersionClick` | `fn` | 调 `tapVersion()`；**仅在「刚刚显示」那一次**给出 3 秒提示「已显示设置入口」 |
-| `revealedHint` | `useTransientValue(false, 3_000)` | 提示的可见性（3 秒后自动隐藏；timer 与 scope 清理由该 composable 统一处理，评审二十四 #7） |
+| `revealedHint` | `useTransientValue(false, 3_000)` | 提示的可见性（3 秒后自动隐藏；timer 与 scope 清理由该 composable 统一处理） |
 
 ## 直接依赖
 

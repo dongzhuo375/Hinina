@@ -8,7 +8,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 ## 核心类型/函数
 - `HydroAdapter` — 封装 `Arc<HttpClient>` + `base_url` + `RwLock<Option<String>>`（会话 sid）+ `RwLock<Option<HydroUser>>`（身份缓存）+ `TtlCache<String, Vec<String>>`（比赛题目顺序缓存）。**不持有事件总线**：Hydro 没有 HOJ 的 `Refresh-Token` 轮换协议，sid 由服务端滑动续期且值不变，不存在「凭证轮换需回写磁盘」的场景（它只随 `AdapterDeps` 的形状调整，不消费 `event_bus` / `session_repo`）
 - `HydroAdapter::ID` — `"Hydro"`（与 `HydroFactory::id()` 一致；决定会话文件名，并与 `oj.instances[].id` 匹配）
-- `HydroAdapter::new(http, base_url)` — 构造；`base_url` 自动去尾斜杠。多域部署的 `/d/:domainId` 前缀暂不支持（缺口 D4：`OjInstance.options` 目前传不进适配器），按**系统域**拼路径
+- `HydroAdapter::new(http, base_url)` — 构造；`base_url` 自动去尾斜杠。多域部署的 `/d/:domainId` 前缀暂不支持（`OjInstance.options` 目前传不进适配器），按**系统域**拼路径
 - `HydroFactory` / `static FACTORY` — 工厂：`build()` 经 `ProviderSet::full` 聚合四能力（只消费 `deps.http_client`）
 - `HydroResponse`（私有）— 一次请求的原始结果（状态码 + 响应头 + 响应体），**只由 POST 通道产生**：
   - `into_value()` — 协议层判定，顺序刻意是「**状态码 → 错误包络 → 登录重定向 → 类型化解析**」。先看状态码才能把网关的 HTML 错误页报成 `HTTP 502` 而不是「响应不是合法 JSON」（把排障引向错误方向）；再认错误包络是因为 Hydro 用 HTTP 状态码承载 `error.code`，而**登录重定向却是 HTTP 200**
@@ -31,18 +31,18 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 ### 四 trait 实现要点
 - `AuthProvider::login(username, password)` — `POST /login`（JSON body：`uname`/`password`/`rememberme: true`）。Hydro 的登录响应**体里没有 token**（只有 `{"url":"/"}`），会话靠 `Set-Cookie: sid=<32 位随机串>` 下发；带 `Accept: application/json` 时重定向被序列化为 HTTP 200 + `{"url":...}`（**不会 302**），Set-Cookie 因此留在同一次响应里。**密码原样发送**（服务端自行哈希比对）。登录后经 `probe_user_context` 取 uid/uname；探测失败则降级为「用输入的用户名 + 空 uid」并记 warn，不让一次探测失败否定已建立的会话
 - `AuthProvider::logout()` — `POST /logout`（`GET` 只渲染确认页，不做登出）；远端结果一律忽略，以清除本地身份为主
-- `AuthProvider::validate_session()` — 本地无 sid 直接 `Ok(false)`；否则 `probe_user_context_uncached()`（**必须绕过缓存**：校验的职责就是问服务器，命中缓存即恒真，服务器吊销 sid 在进程内不可见——评审 P0）：`Ok(Some)`→`Ok(true)`、`Ok(None)`→`Ok(false)`（并清身份）、`Err(Auth)`→`Ok(false)`、**其余 `Err` 一律上抛**（网络/5xx/解析失败/部署不支持注入头都属「无法判定」，折成 `Ok(false)` 会在赛前一次断网就把选手踢回登录页）
+- `AuthProvider::validate_session()` — 本地无 sid 直接 `Ok(false)`；否则 `probe_user_context_uncached()`（**必须绕过缓存**：校验的职责就是问服务器，命中缓存即恒真，服务器吊销 sid 在进程内不可见）：`Ok(Some)`→`Ok(true)`、`Ok(None)`→`Ok(false)`（并清身份）、`Err(Auth)`→`Ok(false)`、**其余 `Err` 一律上抛**（网络/5xx/解析失败/部署不支持注入头都属「无法判定」，折成 `Ok(false)` 会在赛前一次断网就把选手踢回登录页）
 - `AuthProvider::restore_token(token)` — 回注磁盘会话里的裸 sid；`send` 发送时补 `Bearer ` 前缀
 - `ContestProvider::list_contests()` — `GET /contest?page=N` 按 `tpcount` 翻页（页大小由服务端 `pagination.contest` 决定，客户端无法指定；上限 `MAX_CONTEST_PAGES = 20` 页防御）
 - `ContestProvider::get_contest(id)` — `GET /contest/:tid`，顺带刷新题目顺序缓存
-- `ContestProvider::list_contest_problems(id)` — `GET /contest/:tid/problems`；展示字母由 `tdoc.pids` 下标派生（**`pdict` 是 docId + pid 双键**：上游 `problem.getList` 对带 `pid` 的题按两种键收录同一条 pdoc，消费方必须按 docId 去重——缺口 D21；且 JS 数字键会被重排，不能靠键顺序推字母）；`cid` 如实携带比赛 ObjectId（缺口 D1 已解决：实体 `cid` 为 `String`）
-- `ContestProvider::get_contest_rank(id, query)` — `GET /contest/:tid/scoreboard`，单元格矩阵经 `types::scoreboard_rank_page` 归一。**`RankQuery` 的字段基本被忽略**：Hydro 榜单是整榜算完一次性返回，服务端不接受分页/关键词/打星/赛后提交参数（缺口 D10）
-- `ContestProvider::list_announcements(...)` — **恒返回空页**：Hydro 没有公告接口，其对应能力是**答疑（clarification）**，语义与结构都不同（答疑是「提问 + 裁判回复」的会话，公告是单向广播）。不把答疑伪装成公告 —— 那会让选手把裁判的定向回复误读成全场公告（缺口 D11，后续应在 Provider 层新增答疑能力而不是做有损映射）
+- `ContestProvider::list_contest_problems(id)` — `GET /contest/:tid/problems`；展示字母由 `tdoc.pids` 下标派生（**`pdict` 是 docId + pid 双键**：上游 `problem.getList` 对带 `pid` 的题按两种键收录同一条 pdoc，消费方必须按 docId 去重；且 JS 数字键会被重排，不能靠键顺序推字母）；`cid` 如实携带比赛 ObjectId（实体 `cid` 为 `String`）
+- `ContestProvider::get_contest_rank(id, query)` — `GET /contest/:tid/scoreboard`，单元格矩阵经 `types::scoreboard_rank_page` 归一。**`RankQuery` 的字段基本被忽略**：Hydro 榜单是整榜算完一次性返回，服务端不接受分页/关键词/打星/赛后提交参数
+- `ContestProvider::list_announcements(...)` — **恒返回空页**：Hydro 没有公告接口，其对应能力是**答疑（clarification）**，语义与结构都不同（答疑是「提问 + 裁判回复」的会话，公告是单向广播）。不把答疑伪装成公告 —— 那会让选手把裁判的定向回复误读成全场公告（后续应在 Provider 层新增答疑能力而不是做有损映射）
 - `ProblemProvider::get_problem(contest_id, problem_id)` — `problem_id` 经 `resolve_problem_id` 换算后请求 `GET /p/:pid?tid=`；`pdoc.content`（单块 Markdown）→ `description`，limits 取 `config.timeMin/Max`、`memoryMin/Max`，`config.langs` 经 `types::lang_display` 翻译为 HOJ 显示名
 - `ProblemProvider::get_user_problem_status(contest_id, problem_ids)` — `GET /contest/:tid/problems` 的 `psdict`；入参是**真实 pid** 而 `psdict` 以 **docId** 为键，故先经 `pdict` 反查；未提交的题不出现在返回 map 中
-- `SubmissionProvider::submit(contest_id, problem_id, language, code)` — `POST /p/:pid/submit`（`lang` + `code` + `tid`）；语言经 `types::lang_key` 从显示名反查回 key；**刻意不做字母换算**（万一某题 pid 恰好是单字母，换算会把提交打到另一道题上，这个失败模式不可接受）；响应无 `rid` 时明确报错（比赛隐藏本人记录时服务端返回 `tid`，缺口 D12）
+- `SubmissionProvider::submit(contest_id, problem_id, language, code)` — `POST /p/:pid/submit`（`lang` + `code` + `tid`）；语言经 `types::lang_key` 从显示名反查回 key；**刻意不做字母换算**（万一某题 pid 恰好是单字母，换算会把提交打到另一道题上，这个失败模式不可接受）；响应无 `rid` 时明确报错（比赛隐藏本人记录时服务端返回 `tid`）
 - `SubmissionProvider::get_judgement(id)` / `get_submission_detail(id)` — 同一端点 `GET /record/:rid` 的两种投影，对齐 HOJ 侧拆分
-- `SubmissionProvider::list_contest_submissions(query)` — `GET /record?page=&tid=&uidOrName=&pid=&status=`。`only_mine` → `uidOrName=<探测到的 uid>`（拿不到 uid 时报 `Auth`）；`problem_display_id` 直接传字母（服务端按 `tdoc.pids` 解析）；`status` 经 `types::hoj_status_to_hydro` 翻译，无对应语义时明确报错而不是静默忽略筛选；`total`/`pages` 按假定页大小 `ASSUMED_RECORD_PAGE_SIZE = 100` 推导（Hydro 不返回总条数，缺口 D8）
+- `SubmissionProvider::list_contest_submissions(query)` — `GET /record?page=&tid=&uidOrName=&pid=&status=`。`only_mine` → `uidOrName=<探测到的 uid>`（拿不到 uid 时报 `Auth`）；`problem_display_id` 直接传字母（服务端按 `tdoc.pids` 解析）；`status` 经 `types::hoj_status_to_hydro` 翻译，无对应语义时明确报错而不是静默忽略筛选；`total`/`pages` 按假定页大小 `ASSUMED_RECORD_PAGE_SIZE = 100` 推导（Hydro 不返回总条数）
 - `SubmissionProvider::get_submission_cases(id)` — 同端点的 `rdoc.testCases`；子任务分组由 `testCases[].subtaskId` 完成（**不解析 `rdoc.subtasks`**：实测它是按 subtaskId 键的冗余汇总对象，用稳定分组键逐点还原即可，不必依赖汇总形态——该字段在赛制投影下还会被整体删除）；`mode` 取题目 `config.type` 透传
 
 ## 关键实现约定
@@ -52,7 +52,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - **未登录的 JSON 化重定向**：Hydro 在 `onerror` 里对未登录的 `PermissionError`/`PrivilegeError` 重定向到 `/login?redirect=...`，JSON 模式下是 **HTTP 200 + `{"url":"/login?..."}`**。不识别它会把「会话过期」当成「成功但数据为空」，前端永远回不到登录页 → `types::login_redirect_url` 只认指向 `/login` 的 url（`{"url":"/"}`、文件下载签名链接不算）
 - **`Authorization` 头一旦出现即完全覆盖 Cookie**：即使格式不对也不回退到 sid Cookie，故只在持有 sid 时附加该头（服务端取空格分隔的第 2 段，scheme 名不参与校验）
 - **sid 失效会静默降级为匿名**：Hydro 对无效 sid 不报错，只把 `UserContext._id` 置 0 → 会话失效的判据是 `_id == 0`，而不是 HTTP 状态码
-- **注入头不被支持时不得判失效**：若响应里根本没有 `UserContext` 字段（部署版本不支持 `X-Hydro-Inject`），必须按「无法判定」上抛（缺口 D18）—— 否则一次版本差异就会把全部在线选手踢回登录页
+- **注入头不被支持时不得判失效**：若响应里根本没有 `UserContext` 字段（部署版本不支持 `X-Hydro-Inject`），必须按「无法判定」上抛—— 否则一次版本差异就会把全部在线选手踢回登录页
 - **三态契约**：见 `AuthProvider::validate_session` 的分支说明；判据与 HOJ 侧同源，测试锁定在 `tests/mod_tests.rs`
 - **不发送 `Referer`**：Hydro 的 POST 在带 `Referer` 且 host 与请求 host 不符时抛 `CsrfTokenError`(403)；reqwest 默认不发送该头，故天然安全（不要在后续改动里加上 Referer）
 - **展示字母由 `tdoc.pids` 下标派生**：依据 `record_main` 的 `tdoc.pids[parseInt(pid, 36) - 10]`（A=0 … Z=25）；超过 26 题退回十进制序号

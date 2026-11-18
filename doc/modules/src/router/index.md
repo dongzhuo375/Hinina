@@ -4,7 +4,7 @@
 
 ## 职责
 
-钥匙豁免的判定一律经 `systemStore.isKeyedSettingsRoute(routeName)`（2026-11-04 H3 起路由级组合收进 store 单一入口，原 `guards/keyed-settings-route` 已删），不在守卫内联。定义全部路由（登录页 + 比赛工作台嵌套子树）与 `beforeEach` 守卫：首次导航统一恢复后端会话，受保护路由鉴权，并在**首次进入工作台（含深链）前校验比赛阶段**——赛前/赛后一律退回登录页等待。另承载 `--settings` 管理方钥匙的前端落点：首次导航落登录页时直落设置页，且设置页的免登录访问是守卫里的**条件豁免**（`isKeyedSettingsRoute(to.name)`）——meta 保持继承父级保护，普通模式下无钥匙访客直达设置页会被送回登录页、页面 401 也照常回登录页。
+钥匙豁免的判定一律经 `systemStore.isKeyedSettingsRoute(routeName)`（2026-11-04 起路由级组合收进 store 单一入口，原 `guards/keyed-settings-route` 已删），不在守卫内联。定义全部路由（登录页 + 比赛工作台嵌套子树）与 `beforeEach` 守卫：首次导航统一恢复后端会话，受保护路由鉴权，并在**首次进入工作台（含深链）前校验比赛阶段**——赛前/赛后一律退回登录页等待。另承载 `--settings` 管理方钥匙的前端落点：首次导航落登录页时直落设置页，且设置页的免登录访问是守卫里的**条件豁免**（`isKeyedSettingsRoute(to.name)`）——meta 保持继承父级保护，普通模式下无钥匙访客直达设置页会被送回登录页、页面 401 也照常回登录页。
 
 ## 核心类型/函数
 
@@ -31,7 +31,7 @@
 ## 逻辑流程
 
 ```
-beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不再读 currentRoute（评审二十一 #5）
+beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不再读 currentRoute
   0. flags = await systemService.getLaunchFlags()（进程内 memoize：成功后不再发 IPC；
      失败不缓存 rejection，下次调用重试并保持安全侧快照；
      try/catch 包死 —— service 已兜底，这里是导航路径上的第二道防线，守卫抛错=路由卡死）
@@ -47,13 +47,13 @@ beforeEach(to, from):   // 来源路由在入口一次性捕获，异步后不�
      不限首次——返回登录后想再修一次地址仍可直达）；受保护但未登录 → Login
      普通模式（无钥匙）设置页照常受保护：无钥匙访客直达 → Login；页面上 401 →
      sessionGuard 读到 requiresAuth=true 照常回登录页
-  3a. 钥匙设置页出发、无会话：回 **Settings** 并提示「未登录」（评审二十——无条件 Login 会
+  3a. 钥匙设置页出发、无会话：回 **Settings** 并提示「未登录」（无条件 Login 会
       卸载设置视图、丢草稿）；
-  4a. loadBrief 期间会话失效：钥匙流程回 **Settings**（评审十九 #2，与后续闸门失败同向）；
+  4a. loadBrief 期间会话失效：钥匙流程回 **Settings**（与后续闸门失败同向）；
       简报缺失（服务器不可达，正是钥匙要修的场景）时提示「未能加载比赛信息」而非
-      「比赛未进行」（评审十九 #3）
+      「比赛未进行」
   4. 受保护且已登录，且「从钥匙设置页出发」或「当前不在 Contest 子树内」时
-     做赛程闸门（前者是评审十 #1：从设置页点题目/榜单也要过闸门，否则会落进
+     做赛程闸门（前者：从设置页点题目/榜单也要过闸门，否则会落进
      被锁定的比赛页、随后被外壳踢回登录页）：
        !contest.brief → await contest.loadBrief()    // 深链/首次进入补加载匿名简报
        期间会话可能失效 → 钥匙流程回 Settings（并提示「会话已失效」），其它回 Login
@@ -71,7 +71,7 @@ afterEach(to):
   isKeyedSettingsRoute(to.name) → return（钥匙设置页豁免）
   否则 → replace(Login)
 ```
-**为什么需要**（评审九 P2-2）：beforeEach 只能看导航开始时的会话；守卫批准后、
+**为什么需要**：beforeEach 只能看导航开始时的会话；守卫批准后、
 路由确认前，某个在途请求返回 401 → sessionGuard 清理会话——它读到的
 `currentRoute` 仍是**尚未确认**的旧路由（设置页），钥匙豁免会跳过跳转，豁免
 被这条在途的受保护导航继承，用户落到无会话的比赛页。afterEach 在确认后补一次
@@ -86,7 +86,7 @@ afterEach(to):
   阶段闸门不受影响）。已登录用户带参启动同样直落设置页（管理方意图明确）。
 - **豁免必须挂条件而不是写 meta**：无条件豁免（`requiresAuth: false`）会让无钥匙
   访客直达设置页，且 401 时 sessionGuard 读到 `requiresAuth=false` 不再回登录页，
-  用户滞留在无会话的外壳里（评审 P2）。meta 继承保护 + 守卫条件豁免后，普通/
+  用户滞留在无会话的外壳里。meta 继承保护 + 守卫条件豁免后，普通/
   钥匙两种模式的差异收敛为一处判据。
 - **已登录用户经隐藏入口进设置页会跳过赛程阶段闸门**（闸门只挂在受保护链上，
   且从工作台内切换时 currentRoute 已在 Contest 子树）—— 偏好页在赛前/赛后可见
@@ -110,4 +110,4 @@ afterEach(to):
 
 `src/router/__tests__/index.spec.ts` 用真实 routes 的 `router.resolve()` 锁定 requiresAuth **合并矩阵**：Settings 继承父级 true（免登录是守卫的条件豁免，不是 meta 声明）、其余工作台子路由继承父级 true、Login 无声明即不受保护 —— 判据本身是一行 `=== true`，会漂移的是「哪条路由声明了什么 meta」。
 
-`src/router/__tests__/launch-redirect.spec.ts` 在真实 router 上锁定钥匙的**守卫行为**（mock `getLaunchFlags`，`resetModules` 保证每个用例拿到全新 `firstNavigation`）：带参首航直落、仅首航生效（再次回登录页不被重定向——不困死维护人员）、非登录页首航不直落、IPC 失败按「无参数」退化、无钥匙直达设置页回 Login（P2 路径一）、钥匙模式非首航直达设置页放行（豁免不限首次）。
+`src/router/__tests__/launch-redirect.spec.ts` 在真实 router 上锁定钥匙的**守卫行为**（mock `getLaunchFlags`，`resetModules` 保证每个用例拿到全新 `firstNavigation`）：带参首航直落、仅首航生效（再次回登录页不被重定向——不困死维护人员）、非登录页首航不直落、IPC 失败按「无参数」退化、无钥匙直达设置页回 Login、钥匙模式非首航直达设置页放行（豁免不限首次）。

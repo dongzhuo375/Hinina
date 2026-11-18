@@ -6,7 +6,7 @@
 //   pdict、整数毫秒等形态仍是合法线格式，保留以锁旧契约与多题多记录覆盖；
 // - **2026-11-15 实测收编**（私有测试部署，上游 master 行为；脱敏：真实邮箱/QQ 号
 //   已替换为占位值，schema 保真）：record_detail_real / record_detail_tle /
-//   record_list_real —— 浮点毫秒、对象形态 subtasks 等真实载荷，锁定缺口 D22 的容错契约。
+//   record_list_real —— 浮点毫秒、对象形态 subtasks 等真实载荷，锁定上述形态的容错契约。
 
 use super::*;
 
@@ -504,7 +504,7 @@ fn record_list_fixture_parses() {
     assert_eq!(vo.udict.as_ref().unwrap()["3"].display(), "alice");
 }
 
-// ── 2026-11-15 实测载荷（缺口 D22：浮点毫秒 / 对象形态 subtasks）──
+// ── 2026-11-15 实测载荷（浮点毫秒 / 对象形态 subtasks）──
 
 #[test]
 fn record_detail_real_fixture_parses_fractional_milliseconds() {
@@ -544,7 +544,7 @@ fn record_list_real_fixture_parses() {
     let rdocs = vo.rdocs.as_ref().unwrap();
     assert_eq!(rdocs.len(), 1);
     assert_eq!(rdocs[0].terminal_metrics(), (3, 508, 100.0));
-    // pdict 双键：docId "1" + pid 别名 "P1000"（缺口 D21；按 docId 取值的消费方不受影响）
+    // pdict 双键：docId "1" + pid 别名 "P1000"（按 docId 取值的消费方不受影响）
     let pdict = vo.pdict.as_ref().unwrap();
     assert_eq!(pdict.len(), 2);
     assert!(pdict.contains_key("1") && pdict.contains_key("P1000"));

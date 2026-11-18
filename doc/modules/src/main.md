@@ -16,9 +16,9 @@
 | `installGlobalErrorGuard(app, router, forward)` | **组合根注入**（**第一个装配，先于 mount 与其余 install** —— 首屏渲染/早期 IPC 的错误也要被捕获）：装 `app.config.errorHandler` + `window` `error`/`unhandledrejection` 监听 + `router.onError` + `document` `securitypolicyviolation` 监听，五类全局事件归一化（IpcError → `ipc:{cmd}`）后经注入的 `forward` 走 `bridge/diagnostics.bridge` 的 `forwardFrontendLog` → Rust `frontend_log` 命令落 `logs/hinina.log`（panic 钩子的前端半边）。`forward` 的 Promise 拒绝由组合根 catch 成 `log.warn` —— 报错的通道不允许自己成为新的错误源。见 `guards/globalErrorGuard.md` |
 | `installSessionGuard(router)` | **组合根注入**：把「认证类 IPC 失败 → 判定会话失效 → 清理并回登录页」的观察者挂到 Bridge 层，随后传入 router 供失效后导航 |
 | `installWorkspacePersistenceListener()` | **组合根注入**：订阅后端 `workspace-saved`（显式保存 / 后台 auto-save 成功）→ `workspaceStore.markPersisted()`，驱动「已自动备份」指示；订阅失败只降级指示器 |
-| `installAnnouncementListener()` | **组合根注入**：订阅 `onAnnouncementsPublished`（Rust 比对公告基线后发布的新公告事件）→ 事件的 `contestId` 与 store 当前 `contestId` 一致时调 `announcementStore.refresh()`，红点随即点亮，不必等下一个 60s 轮询周期。**只认当前比赛**：切比赛瞬间可能有在途事件（旧比赛的新公告），误刷新会把旧比赛的公告拉进当前列表；订阅失败只经 `createLogger('main')` 记 `log.error`（F6 吸收：`main.ts` 已不用裸 console），红点退化为轮询发现（功能降级而非失效） |
-| `installCloseFlushGuard()` | **组合根注入**：把真实窗口操作注入 `createCloseGuard({ flush, shouldReflush, close, destroy })`（`flush` = `workspaceStore.saveWorkspace()`；`shouldReflush` = `syncPending \|\| isDirty`，PR21-7：每轮落盘完成后复查在途改动，把关窗握手窗口内到达的落键也纳入落盘），`onCloseRequested` 里 `guard.handleRequest()` 返回 `true` 才 `event.preventDefault()`。状态机、双层时间上界（落盘 3s / 硬超时 5s）与有界多轮重刷全部收敛在 `utils/close-guard`，此处**只做装配**；收尾用 `destroy()` 而非 `close()` —— 落盘已完成，不需要再走一遍 `close-requested` 往返（那个往返正是原内联实现「窗口关不掉」的失效点）。**本函数不再持有任何 `proceedClose` 布尔量**：布尔量在 `close()` 抛错时会被永久卡在 `true`，此后每次点关闭都命中拦截，窗口再也关不掉（详见 `utils/close-guard.md` 失效模式分析） |
-| `installExternalLinks()` | **组合根注入**：document 级 `click` + `auxclick` 委托（`utils/external-links`）——markdown 渲染面（题面/公告/简报）里的 http(s) 锚点经 `systemService.openExternal()` 转交系统默认浏览器，WebView 永不导航离开应用（消费面含不经 `renderMarkdown` 的模板级锚点——设置页 About 的项目仓库链接）（分层审计 2026-10「外链无出路」缺口闭合）。规则：**左键（含 Ctrl/Meta/Shift/Alt）与中键都转交**（WebView 无新标签语义，放过等于无动作），右键放行；`href` 解析后 http/https 且 host ≠ 应用 host（判据与渲染层钩子共用 `resolveExternalUrl`）；应用内 RouterLink/`#` 片段/同 host 锚点不受影响；已被前置 `preventDefault` 的点击不重复处理。scheme 白名单的最后一道在 Rust 命令 `open_external`（`app_cmd.md`）；打开失败仅 `log.warn`（无补救动作） |
+| `installAnnouncementListener()` | **组合根注入**：订阅 `onAnnouncementsPublished`（Rust 比对公告基线后发布的新公告事件）→ 事件的 `contestId` 与 store 当前 `contestId` 一致时调 `announcementStore.refresh()`，红点随即点亮，不必等下一个 60s 轮询周期。**只认当前比赛**：切比赛瞬间可能有在途事件（旧比赛的新公告），误刷新会把旧比赛的公告拉进当前列表；订阅失败只经 `createLogger('main')` 记 `log.error`（`main.ts` 已不用裸 console），红点退化为轮询发现（功能降级而非失效） |
+| `installCloseFlushGuard()` | **组合根注入**：把真实窗口操作注入 `createCloseGuard({ flush, shouldReflush, close, destroy })`（`flush` = `workspaceStore.saveWorkspace()`；`shouldReflush` = `syncPending \|\| isDirty`，每轮落盘完成后复查在途改动，把关窗握手窗口内到达的落键也纳入落盘），`onCloseRequested` 里 `guard.handleRequest()` 返回 `true` 才 `event.preventDefault()`。状态机、双层时间上界（落盘 3s / 硬超时 5s）与有界多轮重刷全部收敛在 `utils/close-guard`，此处**只做装配**；收尾用 `destroy()` 而非 `close()` —— 落盘已完成，不需要再走一遍 `close-requested` 往返（那个往返正是原内联实现「窗口关不掉」的失效点）。**本函数不再持有任何 `proceedClose` 布尔量**：布尔量在 `close()` 抛错时会被永久卡在 `true`，此后每次点关闭都命中拦截，窗口再也关不掉（详见 `utils/close-guard.md` 失效模式分析） |
+| `installExternalLinks()` | **组合根注入**：document 级 `click` + `auxclick` 委托（`utils/external-links`）——markdown 渲染面（题面/公告/简报）里的 http(s) 锚点经 `systemService.openExternal()` 转交系统默认浏览器，WebView 永不导航离开应用（消费面含不经 `renderMarkdown` 的模板级锚点——设置页 About 的项目仓库链接）（2026-10「外链无出路」缺口闭合）。规则：**左键（含 Ctrl/Meta/Shift/Alt）与中键都转交**（WebView 无新标签语义，放过等于无动作），右键放行；`href` 解析后 http/https 且 host ≠ 应用 host（判据与渲染层钩子共用 `resolveExternalUrl`）；应用内 RouterLink/`#` 片段/同 host 锚点不受影响；已被前置 `preventDefault` 的点击不重复处理。scheme 白名单的最后一道在 Rust 命令 `open_external`（`app_cmd.md`）；打开失败仅 `log.warn`（无补救动作） |
 | `import '@/styles/global.css'` | 全局样式（CSS 变量主题、字体栈、榜单状态色等） |
 | `import '@/styles/contest.css'` | 赛场主题样式（`.contest-theme` 作用域下的令牌重写 + 通用类：页头/表格/正文/浮层/响应式密度 `--ui-step`）；在 global.css 之后导入，保证赛场令牌覆盖 `:root` 同名变量 |
 | `import '@/styles/prose.css'` | Markdown 正文共享排版（`.prose` 元素级规则，公告正文与题面同源；容器差异由各组件局部样式定义） |
@@ -40,7 +40,7 @@
 - `@/stores/announcementStore`（`useAnnouncementStore` —— 新公告事件到达即 `refresh()`）
 - `@/bridge/announcement.bridge`（`onAnnouncementsPublished` —— 新公告事件订阅；组合根可直接用 Bridge 层的订阅原语，装配链「Bridge ← 观察者 ← store」不反向）
 - `@/utils/close-guard`（`createCloseGuard` —— 关窗守卫状态机与时间上界，见 `utils/close-guard.md`）
-- `@/services/system.service`（`onCloseRequested` 关窗握手事件源 + `closeWindow` / `destroyWindow` 注入；2026-11-04 G3 起组合根不再直用 `@tauri-apps/api/window`，权限 `core:window:allow-close` 与 `core:window:allow-destroy` 已在 capabilities）
+- `@/services/system.service`（`onCloseRequested` 关窗握手事件源 + `closeWindow` / `destroyWindow` 注入；2026-11-04 起组合根不再直用 `@tauri-apps/api/window`，权限 `core:window:allow-close` 与 `core:window:allow-destroy` 已在 capabilities）
 - `@/styles/global.css`
 - `@/styles/contest.css`（赛场主题令牌与通用类；作用域仍靠 `.contest-theme` 类名限定）
 - `@/styles/prose.css`（`.prose` 正文共享排版）
@@ -94,6 +94,6 @@ createApp → use(pinia) → use(router)
   落盘钩子只调用 store 的既有动作，不自带保存策略。
 
 
-## 测试（M2）
+## 测试
 
 `src/__tests__/main.spec.ts`：六个装配副作用（全局错误转发/会话守卫/工作区落盘订阅/公告订阅/关窗握手/外链拦截）注册齐备、全局错误转发**先于**会话守卫装配（`invocationCallOrder` 在 beforeAll 当场快照，规避 clearMocks）、公告事件按 `contestId` 过滤（切比赛瞬间的旧比赛在途事件被丢弃）。

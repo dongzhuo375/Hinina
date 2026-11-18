@@ -6,7 +6,7 @@
 
 把 `@tauri-apps/api/window` 的窗口控制（最小化 / 最大化 / 关闭 / 销毁 / 关闭请求订阅）收敛到 bridge 层。
 `bridge/*.bridge.ts` 是唯一接触 `@tauri-apps/api` 的地方，**无例外**——所有层经
-`systemService` 消费，服务再转发本模块（评审二十四 #5 补齐文档；2026-11-04 G3 完成 main.ts/App.vue 两处组合根遗留迁移）。
+`systemService` 消费，服务再转发本模块（2026-11-04 完成 main.ts/App.vue 两处组合根遗留迁移）。
 
 ## 核心类型/函数
 

@@ -86,7 +86,7 @@ onUnmounted: alive = false；stopPoller()；复制反馈 timer 由 useTransientV
 
 - **收敛轮询与 submissionStore 同一取舍**：不配置 `isPaused`（页面隐藏不暂停）——
   有限生命周期轮询，选手切窗口查资料回来就该看到结果；总超时（deadline）兜底防无限轮询。
-- **轮询周期只拉详情（M3）**：评测中 `get-all-case-result` 无稳定结果，每周期重复
+- **轮询周期只拉详情**：评测中 `get-all-case-result` 无稳定结果，每周期重复
   拉取纯属浪费（且同会话提交已有 store 收敛轮询在打 `get_judgement`）；终态判据
   （`isTerminalStatus`）命中后测试点明细只请求一次，随后 syncPoller 停轮询。
 - **详情/测试点各自降级**：测试点明细在部分 OJ 配置下会被隐藏，终态无明细时

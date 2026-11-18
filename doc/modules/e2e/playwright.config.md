@@ -12,7 +12,7 @@ E2E 的运行器配置：测试目录、引擎、dev server 拉起方式与失�
 |------|------|------|
 | `testDir` | `./e2e` | 用例与 fake 均在 e2e/ 下；根 tsconfig 只含 `src/**`、vitest include 是显式 glob 清单（src / doc/modules / scripts，M4 起三项），e2e 对二者天然不可见（无需排除配置） |
 | `fullyParallel` | `true` | 各用例独立 browser context，fake 状态按页面隔离，可安全并行 |
-| `forbidOnly` | `!!process.env.CI` | CI 上提交了 `test.only` 会只跑该用例且退出码为 0（夜间静默漏测），直接拒绝（评审二轮） |
+| `forbidOnly` | `!!process.env.CI` | CI 上提交了 `test.only` 会只跑该用例且退出码为 0（夜间静默漏测），直接拒绝 |
 | `timeout` / `expect.timeout` | 60s / 10s | 用例与单断言上限 |
 | `reporter` | list + html（`open: never`，输出 `playwright-report/`） | 失败排查用 HTML 报告 |
 | `use` | `baseURL http://localhost:1420`；`trace/screenshot/video` 失败保留 | 产物内容仅 fake 数据，无凭证 |

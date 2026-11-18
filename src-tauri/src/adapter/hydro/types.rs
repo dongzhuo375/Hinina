@@ -226,7 +226,7 @@ pub fn parse_duration_seconds(raw: &str) -> Option<i64> {
 /// - 9 CANCELED → `Cancelled`（HOJ `-4`，语义精确对应，无文案落差）
 /// - 11 HACKED / 30 IGNORED / 32 HACK_SUCCESSFUL / 33 HACK_UNSUCCESSFUL → `Unknown`
 ///   （HOJ 值域里确实没有对应项，前端显示 "Unknown"，与 Hydro 网页端的 "Hacked"
-///   等有文案落差，见设计缺口报告 D9）
+///   等有文案落差）
 /// - 31 FORMAT_ERROR → `PresentationError`（语义最近）
 /// - 22 FETCHED → `Pending`（见下）
 ///
@@ -399,7 +399,7 @@ pub fn coerce_i64(value: &Value) -> Option<i64> {
     }
 }
 
-/// 把 JSON 数字（整数或浮点）反序列化为 `Option<i64>` 的 serde 钩子（缺口 D22）。
+/// 把 JSON 数字（整数或浮点）反序列化为 `Option<i64>` 的 serde 钩子。
 ///
 /// 背景（2026-11-15 实测定标）：上游 master 的 hydrojudge 以
 /// `Math.floor(total_time * 1e6) / 1e6`（`packages/hydrojudge/src/flow.ts:134`）
@@ -557,7 +557,7 @@ pub struct PdocVO {
     /// 原始 Markdown 题面（`html` 为 true 时是 HTML）
     #[serde(default)]
     pub content: Option<String>,
-    /// 题面是否为 HTML（**Hinina 的 Problem 无此判别位**，见缺口 D5）
+    /// 题面是否为 HTML（**Hinina 的 Problem 无此判别位**）
     #[serde(default)]
     pub html: Option<bool>,
     #[serde(default)]
@@ -734,7 +734,7 @@ pub struct ContestProblemListVO {
     #[serde(default)]
     pub tdoc: Option<TdocVO>,
     /// **docId + pid 双键**（上游 `problem.getList` 对带 `pid` 的题两种键各收录
-    /// 一条同值条目，缺口 D21）——消费方必须按 docId 去重，不能假设键唯一
+    /// 一条同值条目）——消费方必须按 docId 去重，不能假设键唯一
     #[serde(default)]
     pub pdict: Option<HashMap<String, PdocVO>>,
     /// key = docId（实测确为 docId 单键，非双键），值为 `ProblemStatusDoc`
@@ -770,7 +770,7 @@ pub struct SubmitVO {
 
 /// 单个测试点（`rdoc.testCases[]`）。
 ///
-/// `time`/`memory` 实测为**带小数的毫秒/KiB**（缺口 D22），经
+/// `time`/`memory` 实测为**带小数的毫秒/KiB**，经
 /// `de_opt_i64_from_number` 收数字并取整——写死 `i64` 会让整份 rdoc 解析失败。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -808,7 +808,7 @@ pub struct RdocVO {
     pub code: Option<String>,
     #[serde(default)]
     pub score: Option<f64>,
-    /// 运行耗时（毫秒）。实测上游 master 给**带小数的毫秒**（缺口 D22），经
+    /// 运行耗时（毫秒）。实测上游 master 给**带小数的毫秒**，经
     /// `de_opt_i64_from_number` 收数字并取整——整数毫秒的旧形态同样收下
     #[serde(default, deserialize_with = "de_opt_i64_from_number")]
     pub time: Option<i64>,
@@ -909,7 +909,7 @@ pub struct RecordListVO {
     pub page: Option<i64>,
     #[serde(default)]
     pub rdocs: Option<Vec<RdocVO>>,
-    /// **docId + pid 双键**（缺口 D21，同 `ContestProblemListVO.pdict`）；记录的
+    /// **docId + pid 双键**（同 `ContestProblemListVO.pdict`）；记录的
     /// `pid` 是 docId，按 docId 键取值不受别名键影响
     #[serde(default)]
     pub pdict: Option<HashMap<String, PdocVO>>,
@@ -1049,7 +1049,7 @@ fn acm_rank_cell(cell: Option<&CellVO>) -> RankCell {
 ///
 /// 这些赛制的每题单元格只给分数（`score` = 该题原始分 0-100，
 /// `value` = 按题目权重缩放后的展示分），没有尝试次数与用时，
-/// 故 `error_num` / `ac_time` / `time_info` 留空（见缺口 D10）。
+/// 故 `error_num` / `ac_time` / `time_info` 留空。
 fn oi_rank_cell(cell: Option<&CellVO>) -> RankCell {
     let Some(cell) = cell else {
         return RankCell::default();
@@ -1188,7 +1188,7 @@ pub fn scoreboard_rank_page(vo: &ScoreboardVO) -> ContestRankPage {
                 .unwrap_or_default(),
             nickname: String::new(),
             school: String::new(),
-            // Hydro 榜单投影没有性别字段 → 前端「女生队」高亮不可用（缺口 D10）
+            // Hydro 榜单投影没有性别字段 → 前端「女生队」高亮不可用
             gender: String::new(),
             avatar: brief
                 .and_then(|b| b.avatar_url.clone().or_else(|| b.avatar.clone()))
@@ -1198,7 +1198,7 @@ pub fn scoreboard_rank_page(vo: &ScoreboardVO) -> ContestRankPage {
             total_time,
             total_score: cell_int(header.total_score.and_then(|i| row.get(i))),
             submission_info,
-            // Hydro 每题单元格不含用时 → OI 的「最优耗时」不可得（缺口 D10）
+            // Hydro 每题单元格不含用时 → OI 的「最优耗时」不可得
             time_info: HashMap::new(),
         });
     }

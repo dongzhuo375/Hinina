@@ -46,7 +46,7 @@ login → epochAtStart = authEpoch（await 前捕获）→ authService.login
   → 代际不符（OJ 切换/登出/新登录在途发生）→ 丢弃迟到结果：error=「登录已被中断，请重试」+ rethrow，不写 user
 
 logout（永不 reject）
-  → authService.logout()（后端登出；失败仅记录 backendCleared=false。前端无 localStorage 持久化——P66 已移除，会话唯一存放处是后端会话文件）
+  → authService.logout()（后端登出；失败仅记录 backendCleared=false。前端无 localStorage 持久化，会话唯一存放处是后端会话文件）
   → user = null；sessionResolved = backendCleared
   → clearDomainState()（workspace 防抖取消 → submission/rank 轮询回收 → contest 定向清理 → problem 重置）
 

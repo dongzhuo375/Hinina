@@ -13,10 +13,10 @@ setup 作用域普通变量：`loadToken: number`（并发防护令牌）、`isL
 | 名称 | 签名 | 用途 |
 |------|------|------|
 | `displayId` | computed | 路由参数 `:displayId`（比赛内题号 A/B/C…） |
-| `ensureContestId` | `() => Promise<string>` | 深链/刷新直达本页时外壳可能未加载完比赛，`contestStore.whenLoaded()`（P59 统一入口，复用在途请求）后取 id |
+| `ensureContestId` | `() => Promise<string>` | 深链/刷新直达本页时外壳可能未加载完比赛，`contestStore.whenLoaded()`（统一入口，复用在途请求）后取 id |
 | `load` | `(id: string) => Promise<void>` | 加载编排主流程（见逻辑流程），每步之后校验 `token !== loadToken` 则放弃 |
 | `consumeFocusQuery` | `() => Promise<void>` | 消费 `?focus=1`：`nextTick` 后调 `codeEditor.focus()`，随后 `router.replace({ query: {} })` 清掉 |
-| `splitRatio` | ref | 初始值经 `configStore.getSplitRatio()` 从配置读取（P55 消费落地；异步到达时若用户已拖拽则不覆盖） |
+| `splitRatio` | ref | 初始值经 `configStore.getSplitRatio()` 从配置读取（配置消费已落地；异步到达时若用户已拖拽则不覆盖） |
 | `startDrag` | `(e: MouseEvent) => void` | 分栏拖拽：比例钳制 0.3–0.7，拖拽期间全局锁定 `cursor: col-resize` 与 `user-select: none` |
 | `persistSplitRatio` | `() => void` | 拖拽结束把比例经 `configStore.saveSplitRatio`（转发 `config.service`）写回配置（**后台写入**：只排保存队列、不进设置页门禁；下次进入解题页生效）；失败只 `log.error` 记录（`utils/logger` 作用域日志），不打断使用 |
 | `adjustSplit` | `(delta: number) => void` | 分隔条键盘调整（`←/→` 每次 ±0.02，钳制在 [0.30, 0.70]）+ 落盘；分隔条带 `role="separator"` / `tabindex="0"` / `aria-*`，纯键盘可用 |
@@ -57,7 +57,7 @@ load(id):
   3. contestStore.problems 按 displayId 找 ContestProblem（找不到 → localError）
   4. workspaceStore.loadWorkspace(contestId, cp.problemId)   // 工作区按题目真实 ID(pid) 隔离
      （内部先 flushPendingSync：加载会整体替换 code，不先推送就会丢最后一次编辑；
-       加载在途 isLoadingWorkspace=true → CodeEditor :locked 只读 + store 拒收输入，PR21-8）
+       加载在途 isLoadingWorkspace=true → CodeEditor :locked 只读 + store 拒收输入）
   5. problemStore.openProblem(contestId, id)                 // 题面详情按比赛内展示题号查询
      成功且 token 最新 → loadedProblemDisplayId = id         // currentProblem 配对凭证（提交守卫用）
   5.5 允许语言归位：题目 languages 非空时
@@ -104,10 +104,10 @@ load(id):
 - 分层约束：View 不 import `@/bridge`；配置读写走 `configStore`（View 侧唯一入口，转发 `config.service`）。
 
 
-## 测试（M2）
+## 测试
 
-`__tests__/ProblemSolveView.spec.ts`（store 整店打桩 + 共享挂载 helper）：切题先落盘脏工作区（saveWorkspace 先于 loadWorkspace）、迟到响应不覆盖新题、加载失败后旧题与新路由不配对时拒绝提交（PR21-8 防错题提交）、卸载时落盘在途改动。
+`__tests__/ProblemSolveView.spec.ts`（store 整店打桩 + 共享挂载 helper）：切题先落盘脏工作区（saveWorkspace 先于 loadWorkspace）、迟到响应不覆盖新题、加载失败后旧题与新路由不配对时拒绝提交（防错题提交）、卸载时落盘在途改动。
 
-## 提交配对的第二道校验（M2 评审 P1）
+## 提交配对的第二道校验
 
 `handleSubmit` 除 displayId 配对外，还要求 `currentProblem.id === loadedProblemId`（本次成功加载写入的题目真实 ID）。store 的 `openProblem` 已有**请求序号 + 会话代际双守卫**（迟到旧题响应在 store 层被丢弃，主防线，见 problemStore 文档）；视图仍记账本次成功加载的真实 ID 作**防御纵深** —— loadToken 只能丢弃旧加载的后续编排，一旦 store 层守卫被未来改动击穿，会出现「配对标记是 B、currentProblem 被迟到响应改回 A」的脏状态，displayId 配对对此失明（放行会把 B 的代码以 A 的 problem.id 提交），真实 ID 比对兜住这一层。竞态测试整店打桩，其迟到 mock 刻意复刻 store 被污染后的形态，专测这道视图侧防线。

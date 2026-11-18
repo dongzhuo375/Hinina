@@ -4,7 +4,7 @@
 比赛相关 Tauri Command 模块。提供比赛列表查询、比赛选中、「加载配置比赛」、比赛排行榜查询、比赛公告查询及公告已读状态读写功能，面向前端暴露 IPC 接口。
 
 ## 核心类型/函数
-- 常量：`DEFAULT_RANK_LIMIT: i64 = 50`（`pub(crate)`）— 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）。**唯一取值点在前端 `rank.service.ts` 的 `DEFAULT_RANK_PAGE_SIZE`**，此处是「绕过前端直接调命令」的防御值（P71）；提为 `pub(crate)` 以便用例锁定三处同值
+- 常量：`DEFAULT_RANK_LIMIT: i64 = 50`（`pub(crate)`）— 榜单默认分页大小（HOJ 建议值：榜单为全量计算后分页，limit 越大单次越慢）。**唯一取值点在前端 `rank.service.ts` 的 `DEFAULT_RANK_PAGE_SIZE`**，此处是「绕过前端直接调命令」的防御值；提为 `pub(crate)` 以便用例锁定三处同值
 - 常量：`DEFAULT_ANNOUNCEMENT_LIMIT: i64 = 50` — 公告默认分页大小
 - `pub async fn list_contests(ctx) -> AppResult<Vec<Contest>>` — 获取比赛列表（TTL 从 `oj.cache_ttl_secs` 读取，默认 60 秒）
 - `pub async fn load_configured_contest(ctx) -> AppResult<ContestBundle>` — 从 `oj.contest_ref` 读取当前比赛引用（不透明字符串：HOJ 为数字 ID，其它 OJ 可能是任意资源 ID），并以 `oj.contestPassword` 作为私有赛进入凭证一并传入（**空串/纯空白归一化为 None、非空值保留原样不裁剪**——Some("") 会以空密码发起注册让用户看到「密码错误」而非引导文案，而合法密码可能带首尾空格、静默裁剪会改写真实密码；本命令内不落日志/事件；配置本体仍按设置页语义持久化在 config.json），加载详情 + 题目列表；空串（trim 后）返回错误提示在 config.json 中设置 `oj.contestRef`

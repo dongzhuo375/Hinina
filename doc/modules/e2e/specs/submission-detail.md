@@ -1,6 +1,6 @@
 # submission-detail.spec.ts（E2E：提交详情）
 
-> 源文件：`e2e/specs/submission-detail.spec.ts`；2026-11 审计 C4 补缺。
+> 源文件：`e2e/specs/submission-detail.spec.ts`；2026-11 补缺。
 
 ## 职责
 
