@@ -226,7 +226,7 @@ describe('markPersisted — 后端落盘事件驱动指示器', () => {
     store.updateCode(CODE)
     store.syncPending = false // 已推送、等待落盘
 
-    store.markPersisted()
+    store.markPersisted('ws-1', 1)
 
     expect(store.isDirty).toBe(false)
   })
@@ -237,7 +237,7 @@ describe('markPersisted — 后端落盘事件驱动指示器', () => {
     store.syncPending = false
     store.updateCode(`${CODE}\n// 又改了`) // 事件与本次改动竞争
 
-    store.markPersisted()
+    store.markPersisted('ws-1', 1)
 
     expect(store.isDirty).toBe(true)
   })
@@ -259,7 +259,7 @@ describe('markPersisted — 后端落盘事件驱动指示器', () => {
     store.updateCode(CODE)
     store.syncPending = false
 
-    store.markPersisted('ws-old') // 切题前保存旧工作区的事件迟到
+    store.markPersisted('ws-old', 1) // 切题前保存旧工作区的事件迟到
 
     expect(store.isDirty).toBe(true)
   })

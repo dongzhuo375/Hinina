@@ -48,7 +48,7 @@ export async function deleteWorkspaceFile(fileName: string): Promise<void> {
 export interface WorkspaceSavedPayload {
   workspaceId: string
   /** 内容修订号（Rust 侧写盘时的修订号）；用于幂等处理重复/过期事件 */
-  revision?: number
+  revision: number
   /** true = 后台 auto-save，false = 显式 `save_workspace` */
   auto: boolean
 }
