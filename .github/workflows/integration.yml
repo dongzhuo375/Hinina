@@ -1,4 +1,4 @@
-# M3 夜间集成（doc/cicd/m3-integration.md）：三平台原生构建、并发压力重复、
+# 夜间集成（doc/cicd/m3-integration.md）：三平台原生构建、并发压力重复、
 # Rust 覆盖率基线、浏览器 E2E。
 # 独立 workflow，不在 ci-required 分支保护链内（必需检查仅属 ci.yml）；
 # 阻塞口径：build(windows-2022 钉版含 CSP 运行时探针 + ubuntu/macos) + stress-repeat + rust-coverage + e2e → integration-summary。
