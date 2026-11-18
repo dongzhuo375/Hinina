@@ -102,6 +102,17 @@ describe('editor submission feedback', () => {
     expect(host.textContent).not.toContain('Compilation Error')
   })
 
+  it('判题中的本地条目用统一文案（Compiling → Judging；轮询会把服务端状态写进本地条目，此态可达）', async () => {
+    await mount()
+    const store = useSubmissionStore()
+    store.submissions.push({ id: 'new', problemId: 'p1', status: 'Compiling', submittedAt: '2026-10-18T06:00:00Z' })
+    await settle()
+    expect(host.textContent).toContain('#new Judging')
+    // 判别片段：组件曾私有一份驼峰拆词实现（会显示 "Compiling"）；
+    // STATUS_META 把 Compiling/Running 统一为 HOJ 口径 "Judging"
+    expect(host.textContent).not.toContain('Compiling')
+  })
+
   it('shows the server verdict once the local entry times out to Unknown instead of masking it forever', async () => {
     await mount()
     expect(host.textContent).toContain('#old')
