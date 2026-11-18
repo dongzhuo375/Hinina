@@ -6,7 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useContestStore } from '@/stores/contestStore'
 import { useSubmissionStore } from '@/stores/submissionStore'
 import type { JudgementStatus, SubmissionRecord } from '@/types/submission'
-import { findFirstFailedCase, formatMsToSeconds, isTerminalStatus, statusAbbr, statusTone } from '@/utils/submission'
+import { findFirstFailedCase, formatMsToSeconds, isTerminalStatus, statusAbbr, statusLabel, statusTone } from '@/utils/submission'
 import type { StatusTone } from '@/utils/submission'
 import { DEFAULT_EDITOR_TAB_SIZE } from '@/utils/editor'
 import { createLogger } from '@/utils/logger'
@@ -172,12 +172,6 @@ const TONE_STYLES: Record<Tone, { fg: string; bg: string; border: string }> = {
 }
 
 const toneStyle = computed(() => TONE_STYLES[latest.value ? toneOf(latest.value.status) : 'muted'])
-
-/// 状态文案用后端 JudgementStatus 原词，仅把驼峰拆成空格分隔（WrongAnswer → Wrong Answer），
-/// 不缩写成 AC/WA —— 与判题语义一一对应，避免歧义
-function statusLabel(status: JudgementStatus): string {
-  return status.replace(/([a-z])([A-Z])/g, '$1 $2')
-}
 
 /// 运行耗时（轮询回填的 timeMs）；未到达终态时无值
 const timeLabel = computed(() => {
