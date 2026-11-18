@@ -47,7 +47,7 @@
 - `@/bridge`（`IpcError` —— 持久化失败判据的类型根基）
 - `vue`（`ref` / `readonly` —— `saveInFlight` 的响应式只读视图，先例：`system.service` 的 `launchFlags` 快照）
 - `@/types/config`（仅类型）
-- `@/utils/language`（`normalizeHojLanguage`）、`@/utils/editor`（偏好默认值、钳位上下界与主题归一）
+- `@/utils/language`（`normalizeHojLanguage`）、`@/utils/editor`（偏好默认值、钳位上下界与主题归一）、`@/utils/layout`（分栏比例单源值域与归一）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 
 ## 被依赖

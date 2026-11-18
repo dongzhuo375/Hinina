@@ -35,6 +35,7 @@ setup 作用域普通变量：`loadToken: number`（并发防护令牌）、`isL
 - stores：`contestStore` / `problemStore` / `workspaceStore` / `submissionStore`
 - `@/stores/configStore`（分栏比例读取/回写、`EditorPrefs` 类型 —— View 侧配置消费唯一入口，store 纯转发 `config.service`；`Architecture.md` 登记的 View 直连 Service 欠账已清偿）
 - `@/utils/editor`（`DEFAULT_EDITOR_TAB_SIZE` — 偏好上报到达前的状态行兜底）
+- `@/utils/layout`（分栏比例单源值域：初始值 / 拖拽钳制 / aria 值域派生）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/utils/logger`（`createLogger` —— 作用域日志）
 

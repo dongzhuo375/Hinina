@@ -37,7 +37,7 @@
 - `@/stores/session`（`resetSessionForOjSwitch`）
 - `@/stores/authStore`（`resetForOjSwitch`，与领域清理成对调用）
 - `@/composables/useTransientValue`（已保存提示）
-- `@/utils/language` / `editor` / `error` / `oj`
+- `@/utils/language` / `editor` / `layout` / `error` / `oj`
 - `@/types/config`
 
 ## 被依赖
