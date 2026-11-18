@@ -450,6 +450,11 @@ pub struct ContestService {
     /// **每个比赛一条基线**：同一进程内可能先看 1011 再看 1012，
     /// 只留一份会让切回旧比赛时把已有公告误判成新公告（红点误报）。
     announcement_baseline: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// 公告已读状态的串行化锁：`mark_announcements_read` 的读-合-写与
+    /// `clear_announcement_read_state` 的删除必须互斥——无锁时并发两次标记
+    /// 会双双读到旧状态互相覆盖（丢合并），迟到写入还会在清除后复活已读状态。
+    /// 叶锁：持锁期间不再获取其它锁。
+    read_state_lock: Mutex<()>,
     /// 私有赛进入尝试记忆（防轮询重复报名；失败项带保留期）。
     ///
     /// 见 [`AccessAttemptMemo`] 与 [`ACCESS_MEMO_RETENTION`]。
@@ -492,6 +497,7 @@ impl ContestService {
             current_contest: RwLock::new(None),
             cache,
             announcement_baseline: Arc::new(RwLock::new(HashMap::new())),
+            read_state_lock: Mutex::new(()),
             access_attempts: Arc::new(Mutex::new(AccessAttemptMemo::new())),
             access_epoch: Arc::new(AtomicU64::new(0)),
         }
@@ -745,6 +751,12 @@ impl ContestService {
     /// 清掉的表现是红点全部复亮 —— 这正是重置应有的语义。
     /// 返回是否确实删除了目录（不存在时返回 `false`，不算失败）。
     pub fn clear_announcement_read_state(&self) -> bool {
+        // 与 mark_announcements_read 同锁：无锁清除会被「读到旧状态的迟到写入」
+        // 在删除之后复活已读状态
+        let _guard = self
+            .read_state_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if !self.storage.exists(ANNOUNCEMENTS_READ_DIR) {
             return false;
         }
@@ -1013,6 +1025,12 @@ impl ContestService {
         uid: &str,
         ids: &[String],
     ) -> AppResult<()> {
+        // 读-合-写全程持锁（单临界区）：两次并发标记若无锁会双双读到旧状态，
+        // 后写者覆盖前写者，丢掉一次合并
+        let _guard = self
+            .read_state_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let path = Self::read_state_path(contest_id, uid)?;
 
         // 合并去重（保留首次出现顺序）；旧状态损坏时从空列表重建
