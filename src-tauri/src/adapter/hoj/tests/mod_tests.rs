@@ -925,6 +925,7 @@ use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
 use crate::core::provider::contest::{AccessRejectionKind, ContestProvider};
 use crate::core::provider::oj_id::OjId;
+use crate::core::provider::problem::ProblemProvider;
 use crate::core::provider::submission::SubmissionProvider;
 use crate::core::repository::session_repo::SessionRepository;
 use crate::infra::fs_session_repo::FsSessionRepository;
@@ -1571,4 +1572,48 @@ fn already_registered_matcher_samples() {
             msg
         );
     }
+}
+
+/// 非法比赛 ID 在**所有**消费 cid 的端点产出同一 `Contest` 变体且零出网：
+/// 口径必须全端点一致（手改 config 的非数字 contest_ref 不因端点不同而
+/// 产出不同错误形态），非法值也不得拼进 query。
+#[tokio::test]
+async fn invalid_contest_id_rejected_uniformly_across_endpoints() {
+    let server = LoopbackServer::start(vec![]).await; // 空脚本队列：任何请求都会被记为 500
+    let fx = fixture(server.url());
+
+    // 三个端点覆盖 trait 的三个能力面；其余端点（rank/公告/状态/提交/报名）
+    // 由 parse_cid 的单元测试与既有契约测试锁定
+    let results: Vec<crate::core::error::AppError> = vec![
+        fx.adapter
+            .get_contest("1001abc")
+            .await
+            .expect_err("get_contest 应拒绝非法比赛 ID"),
+        fx.adapter
+            .list_contest_problems("12.5")
+            .await
+            .expect_err("list_contest_problems 应拒绝非法比赛 ID"),
+        fx.adapter
+            .get_problem("../inject", "A")
+            .await
+            .expect_err("get_problem 应拒绝非法比赛 ID"),
+    ];
+    for err in &results {
+        assert!(
+            matches!(err, crate::core::error::AppError::Contest(_)),
+            "非法比赛 ID 应统一报 Contest 变体，实得 {:?}",
+            err
+        );
+    }
+    assert!(
+        server.requests().is_empty(),
+        "非法比赛 ID 必须在出网前拒绝（实得请求: {:?})",
+        server
+            .requests()
+            .iter()
+            .map(|r| r.path.clone())
+            .collect::<Vec<_>>()
+    );
+
+    server.shutdown();
 }

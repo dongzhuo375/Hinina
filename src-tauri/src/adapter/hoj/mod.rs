@@ -785,7 +785,10 @@ impl ContestProvider for HOJAdapter {
     }
 
     async fn get_contest(&self, contest_id: &str) -> AppResult<Contest> {
-        let url = self.api_url(&format!("/get-contest-info?cid={}", contest_id));
+        // cid 先经 parse_cid 归一（口径与其余端点一致：非法 ID 报 Contest
+        // 而不是把原始字符串直接拼进 query）
+        let cid = Self::parse_cid(contest_id)?;
+        let url = self.api_url(&format!("/get-contest-info?cid={}", cid));
 
         let api_resp = self
             .get_json_authed::<ApiResponse<ContestVO>>(&url)
@@ -800,7 +803,8 @@ impl ContestProvider for HOJAdapter {
     }
 
     async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
-        let url = self.api_url(&format!("/get-contest-problem?cid={}", contest_id));
+        let cid = Self::parse_cid(contest_id)?;
+        let url = self.api_url(&format!("/get-contest-problem?cid={}", cid));
 
         let api_resp = self
             .get_json_authed::<ApiResponse<Vec<ContestProblemVO>>>(&url)
@@ -1047,10 +1051,12 @@ impl ContestProvider for HOJAdapter {
 #[async_trait]
 impl ProblemProvider for HOJAdapter {
     async fn get_problem(&self, contest_id: &str, problem_id: &str) -> AppResult<Problem> {
-        // problem_id 在比赛中对应 displayId（如 "A", "B"）
+        // problem_id 在比赛中对应 displayId（如 "A", "B"）；cid 同样先经
+        // parse_cid 归一，非法比赛 ID 在所有端点产出同一 Contest 变体
+        let cid = Self::parse_cid(contest_id)?;
         let url = self.api_url(&format!(
             "/get-contest-problem-details?cid={}&displayId={}",
-            contest_id, problem_id
+            cid, problem_id
         ));
 
         let api_resp = self
