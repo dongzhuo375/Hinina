@@ -170,7 +170,7 @@ Hinina/
         │   │       ├── types_tests.rs    # DTO 解析测试（榜单 ACM/OI 归一、封榜只有 tryNum、打星 rank=-1、字段缺失与 null 容错、map_status 全表、公告/提交列表/测试点夹具）
         │   │       └── fixtures/
         │   │           ├── contest_list_anon.json      # 真实 get-contest-list 响应（已脱敏），锁定 null 容错回归
-        │   │           ├── announcement_list.json      # 按文档手工构造（未经真实联调，待真实联调校正）
+        │   │           ├── announcement_list.json      # 按文档手工构造（未经真实联调，待联调校正）
         │   │           ├── contest_submissions.json    # 同上
         │   │           └── case_result.json            # 同上
         │   ├── qduoj/

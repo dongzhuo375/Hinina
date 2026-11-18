@@ -8,7 +8,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 ## 核心类型/函数
 - `HydroAdapter` — 封装 `Arc<HttpClient>` + `base_url` + `RwLock<Option<String>>`（会话 sid）+ `RwLock<Option<HydroUser>>`（身份缓存）+ `TtlCache<String, Vec<String>>`（比赛题目顺序缓存）。**不持有事件总线**：Hydro 没有 HOJ 的 `Refresh-Token` 轮换协议，sid 由服务端滑动续期且值不变，不存在「凭证轮换需回写磁盘」的场景（它只随 `AdapterDeps` 的形状调整，不消费 `event_bus` / `session_repo`）
 - `HydroAdapter::ID` — `"Hydro"`（与 `HydroFactory::id()` 一致；决定会话文件名，并与 `oj.instances[].id` 匹配）
-- `HydroAdapter::new(http, base_url)` — 构造；`base_url` 自动去尾斜杠。多域部署的 `/d/:domainId` 前缀暂不支持（缺口：`OjInstance.options` 目前传不进适配器），按**系统域**拼路径
+- `HydroAdapter::new(http, base_url)` — 构造；`base_url` 自动去尾斜杠。多域部署的 `/d/:domainId` 前缀暂不支持（`OjInstance.options` 目前传不进适配器），按**系统域**拼路径
 - `HydroFactory` / `static FACTORY` — 工厂：`build()` 经 `ProviderSet::full` 聚合四能力（只消费 `deps.http_client`）
 - `HydroResponse`（私有）— 一次请求的原始结果（状态码 + 响应头 + 响应体），**只由 POST 通道产生**：
   - `into_value()` — 协议层判定，顺序刻意是「**状态码 → 错误包络 → 登录重定向 → 类型化解析**」。先看状态码才能把网关的 HTML 错误页报成 `HTTP 502` 而不是「响应不是合法 JSON」（把排障引向错误方向）；再认错误包络是因为 Hydro 用 HTTP 状态码承载 `error.code`，而**登录重定向却是 HTTP 200**
@@ -35,7 +35,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - `AuthProvider::restore_token(token)` — 回注磁盘会话里的裸 sid；`send` 发送时补 `Bearer ` 前缀
 - `ContestProvider::list_contests()` — `GET /contest?page=N` 按 `tpcount` 翻页（页大小由服务端 `pagination.contest` 决定，客户端无法指定；上限 `MAX_CONTEST_PAGES = 20` 页防御）
 - `ContestProvider::get_contest(id)` — `GET /contest/:tid`，顺带刷新题目顺序缓存
-- `ContestProvider::list_contest_problems(id)` — `GET /contest/:tid/problems`；展示字母由 `tdoc.pids` 下标派生（**`pdict` 是 docId + pid 双键**：上游 `problem.getList` 对带 `pid` 的题按两种键收录同一条 pdoc，消费方必须按 docId 去重；且 JS 数字键会被重排，不能靠键顺序推字母）；`cid` 如实携带比赛 ObjectId（缺口已解决：实体 `cid` 为 `String`）
+- `ContestProvider::list_contest_problems(id)` — `GET /contest/:tid/problems`；展示字母由 `tdoc.pids` 下标派生（**`pdict` 是 docId + pid 双键**：上游 `problem.getList` 对带 `pid` 的题按两种键收录同一条 pdoc，消费方必须按 docId 去重；且 JS 数字键会被重排，不能靠键顺序推字母）；`cid` 如实携带比赛 ObjectId（实体 `cid` 为 `String`）
 - `ContestProvider::get_contest_rank(id, query)` — `GET /contest/:tid/scoreboard`，单元格矩阵经 `types::scoreboard_rank_page` 归一。**`RankQuery` 的字段基本被忽略**：Hydro 榜单是整榜算完一次性返回，服务端不接受分页/关键词/打星/赛后提交参数
 - `ContestProvider::list_announcements(...)` — **恒返回空页**：Hydro 没有公告接口，其对应能力是**答疑（clarification）**，语义与结构都不同（答疑是「提问 + 裁判回复」的会话，公告是单向广播）。不把答疑伪装成公告 —— 那会让选手把裁判的定向回复误读成全场公告（后续应在 Provider 层新增答疑能力而不是做有损映射）
 - `ProblemProvider::get_problem(contest_id, problem_id)` — `problem_id` 经 `resolve_problem_id` 换算后请求 `GET /p/:pid?tid=`；`pdoc.content`（单块 Markdown）→ `description`，limits 取 `config.timeMin/Max`、`memoryMin/Max`，`config.langs` 经 `types::lang_display` 翻译为 HOJ 显示名
