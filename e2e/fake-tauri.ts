@@ -478,7 +478,8 @@ function fakeTauriBootstrap(options: FakeOptions): void {
         return structuredClone(config)
       }
       case 'reload_config':
-        return null
+        // 与真实命令一致：返回重载后的完整配置（fake 的「磁盘」即本会话状态）
+        return structuredClone(config)
       case 'launch_flags':
         // 缺省走正常门禁路径（无 --settings）：连接与缓存字段保持锁定；
         // 钥匙旅程用例经 FakeOptions.launchFlags 打开

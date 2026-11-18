@@ -16,9 +16,9 @@ export async function updateConfig(config: AppConfig): Promise<AppConfig> {
   return ipcInvoke<AppConfig>('update_config', { config })
 }
 
-/** 触发后端从磁盘重载配置（发布 `ConfigChanged`；磁盘 active 与 Registry 不同时同步切换并发布 `OjSwitched`） */
-export async function reloadConfig(): Promise<void> {
-  return ipcInvoke<void>('reload_config')
+/** 触发后端从磁盘重载配置并返回重载后的完整配置（发布 `ConfigChanged`；磁盘 active 与 Registry 不同时同步切换并发布 `OjSwitched`） */
+export async function reloadConfig(): Promise<AppConfig> {
+  return ipcInvoke<AppConfig>('reload_config')
 }
 
 /**
