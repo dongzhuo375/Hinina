@@ -311,7 +311,7 @@ function openProblem() {
           <div class="flex flex-wrap items-center gap-4">
             <span
               class="inline-flex items-center gap-2 rounded-sm border px-4 py-2 text-base font-bold shadow-none"
-              :class="[statusToneClasses(statusTone(detail.status)), judging ? '' : '']"
+              :class="statusToneClasses(statusTone(detail.status))"
             >
               <SpinnerIcon v-if="judging" class="h-4 w-4" :stroke-width="2.5" />
               <span>{{ statusLabel(detail.status) }}</span>
