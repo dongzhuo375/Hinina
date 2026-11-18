@@ -16,6 +16,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
   - `into_json::<T>()` — `into_value()` + 反序列化
 - `http_status_error(url, status)` — HTTP 状态码 → `AppError`，镜像 `infra::http::status_error` 的判据（**401 → `Auth`**、403 保持 `Network`）。**两条通道共用**（raw 变体不做状态码映射，故这一步归适配器）
 - `now_secs()` — 当前 UTC 秒
+- `percent_encode_component(value)`（自由函数）— URL 插值段的百分号编码（RFC 3986 unreserved 之外的字节全部转义）。tid/rid/uid/pid 等字符串标识拼进路径/查询前必须经它：含 `&`/`#` 的值会注入或截断 query、含空格的 URL 会被 reqwest 拒绝解析；正常标识（hex/数字/字母/`-._~`）恒等通过，不改变现有线上形态
 - **请求入口（按通道分工）**：
   - `headers(inject_user) -> HeaderMap` — 组装 `Accept: application/json` + `Authorization: Bearer <sid>`（有会话时）+ 可选 `X-Hydro-Inject: UserContext`
   - `get_raw(path, inject_user)` / `get_value` / `get_json::<T>` — GET，走 infra raw 变体（保留 5xx 退避重试）
@@ -54,6 +55,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - **注入头不被支持时不得判失效**：若响应里根本没有 `UserContext` 字段（部署版本不支持 `X-Hydro-Inject`），必须按「无法判定」上抛—— 否则一次版本差异就会把全部在线选手踢回登录页
 - **三态契约**：见 `AuthProvider::validate_session` 的分支说明；判据与 HOJ 侧同源，测试锁定在 `tests/mod_tests.rs`
 - **不发送 `Referer`**：Hydro 的 POST 在带 `Referer` 且 host 与请求 host 不符时抛 `CsrfTokenError`(403)；reqwest 默认不发送该头，故天然安全（不要在后续改动里加上 Referer）
+- **URL 插值段一律经 `percent_encode_component`**：路径段（`/contest/:tid`、`/record/:rid`、`/p/:pid`）与查询值（`tid`/`uidOrName`/`pid`）拼 URL 前编码；纯数字位（`page`/`status`）不经过也无妨。数字与 hex 标识恒等通过，线上形态不变
 - **展示字母由 `tdoc.pids` 下标派生**：依据 `record_main` 的 `tdoc.pids[parseInt(pid, 36) - 10]`（A=0 … Z=25）；超过 26 题退回十进制序号
 - **不缓存领域数据**：唯一的缓存是 `tid → tdoc.pids` 的顺序表（`TtlCache`，60s TTL / 32 容量），属于「协议换算所需的映射」而非业务数据 —— 前端「题目 limits 渐进填充」会对每道题各调一次 `get_problem`，不缓存会为一场 12 题的比赛重复发 12 次 `/contest/:tid`（Hydro 全局限流仅 100 请求/5 秒）。空列表不缓存（多为异常响应）。键是比赛 ID，天然带 OJ 作用域（适配器实例按 OJ 实例构造）
 
