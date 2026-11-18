@@ -32,8 +32,9 @@ clampSplitRatio(raw)
   非数字 / 非有限值（NaN / Infinity）→ DEFAULT_SPLIT_RATIO
   有限值 → clamp 到 [SPLIT_RATIO_MIN, SPLIT_RATIO_MAX]
 
-值域变更需同步两处：本文件、Rust `LayoutConfig::sanitize`（split_ratio 钳制 +
-非有限值回退默认）。前端消费方一律 import 本模块常量，禁止再写字面量
+值域变更需同步三处：本文件、Rust `AppConfig::sanitize` 与 `sanitize_editable`
+（split_ratio 钳制 + 非有限值回退默认；同一值域字面量在 Rust 有两个 clamp 入口，
+漏改任一即前后端口径分裂）。前端消费方一律 import 本模块常量，禁止再写字面量
 （曾出现三处分头写死：config.service 0.2–0.8 透传带、useSettingsForm 0.3/0.7、
 ProblemSolveView 拖拽 0.3/0.7 —— 手改 0.25 会原样进解题页、首次拖拽即跳变）
 ```

@@ -42,8 +42,8 @@ function onSplitInput(event: Event): void {
                 <div
                   class="mt-1 flex justify-between font-mono text-xs text-[var(--text-muted)]"
                 >
-                  <span>30%</span>
-                  <span>70%</span>
+                  <span>{{ Math.round(SPLIT_RATIO_MIN * 100) }}%</span>
+                  <span>{{ Math.round(SPLIT_RATIO_MAX * 100) }}%</span>
                 </div>
                 <p class="mt-2 text-xs text-[var(--text-muted)]">
                   拖拽解题页分栏条也会自动保存该比例

@@ -4,7 +4,8 @@
 /// 前后端各自做一次归一，保证喂给 UI 的恒为合法值（保存路径 Rust 已钳制；
 /// 读取路径不经过 sanitize，由本模块在前端兜底，否则手改 config.json 写入的
 /// 0.25 会原样进解题页、首次拖拽即跳变）。
-/// 值域变更需同步两处：本文件、Rust `LayoutConfig::sanitize`（存储侧钳制）；
+/// 值域变更需同步三处：本文件、Rust `AppConfig::sanitize` 与 `sanitize_editable`
+/// （存储侧两个 clamp 入口，漏改任一即前后端口径分裂）；
 /// 前端消费方（`config.service` / 设置页滑杆 / 解题页拖拽）一律取本文件常量，不再复制字面量。
 
 /// 分栏比例兜底值（设计稿 48% / 52%）；与 Rust `default_split_ratio` 一致
