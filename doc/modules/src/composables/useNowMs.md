@@ -26,6 +26,7 @@
 - `views/ContestLayout.vue` — 派生秒，驱动赛程阶段；2 秒退出 timer 仍由视图持有
 - `views/LoginView.vue` — 派生秒，驱动倒计时与开赛进场；简报/预检 timer 不动
 - `views/RankView.vue` — 直接使用毫秒并派生秒，保留 `updatedText` 的亚秒边界
+- `views/ProblemSetView.vue` — **刻意不在消费方之列**：其 `phase` 直接读 `Date.now()`（非响应式），只随 30s 轮询替换 `contest` 引用才重算（占位文案已明示 30s 节奏；即时跃迁由 ContestLayout/TopBar 负责），勿「顺手统一」成 useNowMs
 - `composables/__tests__/useNowMs.spec.ts`
 
 ## 逻辑流程
