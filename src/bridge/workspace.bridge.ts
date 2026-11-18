@@ -44,7 +44,7 @@ export async function deleteWorkspaceFile(fileName: string): Promise<void> {
   return ipcInvoke<void>('delete_workspace_file', { fileName })
 }
 
-/** 落盘事件载荷（Rust `main.rs` 的事件桥下发） */
+/** 落盘事件载荷（Rust `bootstrap::events` 的事件桥下发） */
 export interface WorkspaceSavedPayload {
   workspaceId: string
   /** 内容修订号（Rust 侧写盘时的修订号）；用于幂等处理重复/过期事件 */
