@@ -1069,3 +1069,96 @@ fn load_saves_old_workspace_before_replacing() {
         "切换后当前工作区应是目标工作区"
     );
 }
+
+// ── find_or_create：同题一工作区的结构保证 ──
+
+/// 顺序语义：同 contest+problem 两次调用恢复同一工作区；换题则新建。
+#[test]
+fn find_or_create_reuses_workspace_for_same_contest_and_problem() {
+    let mgr = test_manager("find-or-create-reuse");
+
+    let first = mgr
+        .find_or_create("c1", "p1", "/ws")
+        .expect("首次查找/创建应成功");
+    let second = mgr
+        .find_or_create("c1", "p1", "/ws")
+        .expect("二次查找应成功");
+    assert_eq!(first.id, second.id, "同 contest+problem 必须恢复同一工作区");
+
+    let other = mgr
+        .find_or_create("c1", "p2", "/ws")
+        .expect("换题应新建工作区");
+    assert_ne!(other.id, first.id, "不同题目必须新建工作区");
+}
+
+/// 并发语义（确定性时序）：线程 1 卡在 create 的元数据落盘（save_file 钩子内
+/// 阻塞）时，线程 2 发起同题 find_or_create——扫描与创建同临界区后，线程 2
+/// 被锁挡在扫描前，线程 1 完成后即扫描命中，两个调用返回同一工作区、磁盘上
+/// 只有一个工作区目录。无锁形态下线程 2 会在 meta 落盘前扫描（未命中）并
+/// 各自创建，产出同题的两个孤儿工作区。
+#[test]
+fn concurrent_find_or_create_yields_single_workspace() {
+    use std::sync::mpsc;
+
+    let dir = TempDir::named("hinina-test-mgr-find-or-create-race");
+    let storage = Arc::new(Storage::new(dir.to_path_buf()));
+    let inner = Arc::new(FsWorkspaceRepository::new(Arc::clone(&storage)));
+
+    // 首笔 save_file（= 线程 1 的 persist_meta）先发信号再阻塞，等测试放行；
+    // 后续 save_file 直通（若竞态存在，线程 2 的 persist_meta 不应阻塞）
+    let (tx_entered, rx_entered) = mpsc::channel::<()>();
+    let (tx_release, rx_release) = mpsc::channel::<()>();
+    // Receiver 非 Sync，钩子要求跨线程共享，用 Mutex 包一层
+    let rx_release = Arc::new(std::sync::Mutex::new(rx_release));
+    let first_save = Arc::new(AtomicUsize::new(0));
+    let hook_first_save = Arc::clone(&first_save);
+    let on_save: SaveHook = Arc::new(move |_ws_id: &str, _content: &str| {
+        if hook_first_save.fetch_add(1, AtomicOrdering::SeqCst).eq(&0) {
+            tx_entered.send(()).ok();
+            let release = rx_release.lock().unwrap_or_else(|e| e.into_inner());
+            if release.recv().is_err() {
+                // 测试侧提前退出（panic/超时）：放行而不是把线程卡死
+                return Err(AppError::Workspace("测试释放通道关闭".into()));
+            }
+        }
+        Ok(())
+    });
+    let repo: Arc<dyn WorkspaceRepository> = Arc::new(HookedRepo {
+        inner: Arc::clone(&inner),
+        on_save,
+        on_saved: None,
+    });
+    let mgr = Arc::new(WorkspaceManager::new(repo, Arc::new(CoreEventBus::new())));
+
+    // 线程 1：进入 create 并卡在元数据落盘
+    let racer1 = Arc::clone(&mgr);
+    let thread1 = std::thread::spawn(move || racer1.find_or_create("c1", "p1", "/ws"));
+
+    rx_entered
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("线程 1 应进入 create 的元数据落盘（钩子信号）");
+
+    // 线程 2：此刻 meta 尚未落盘。修复形态下它阻塞在 find_or_create_lock 上；
+    // 无锁形态下扫描未命中并各自创建。稍候再放行线程 1，保证线程 2 已发起
+    // （主线程只编排，不亲自调用 find_or_create——否则修复形态下会与线程 1 互锁）
+    let racer2 = Arc::clone(&mgr);
+    let thread2 = std::thread::spawn(move || racer2.find_or_create("c1", "p1", "/ws"));
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    tx_release.send(()).expect("放行线程 1");
+    let first = thread1
+        .join()
+        .expect("线程 1 不应 panic")
+        .expect("线程 1 查找/创建应成功");
+    let second = thread2
+        .join()
+        .expect("线程 2 不应 panic")
+        .expect("线程 2 查找/创建应成功");
+
+    assert_eq!(
+        first.id, second.id,
+        "并发同题 find_or_create 必须收敛到同一工作区"
+    );
+    let ids = inner.list_workspace_ids().expect("列出工作区应成功");
+    assert_eq!(ids.len(), 1, "磁盘上只应有一个工作区目录，实得 {:?}", ids);
+}
