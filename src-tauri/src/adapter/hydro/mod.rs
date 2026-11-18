@@ -435,22 +435,6 @@ impl HydroAdapter {
         Ok(Some(user))
     }
 
-    /// 取当前用户（宽松版，供登录与提交列表筛选使用）。
-    ///
-    /// 与 `probe_user_context` 的差别：把「无法判定」折成 `Ok(None)` 而不是上抛，
-    /// 因为调用点只关心「能不能拿到 uid」，拿不到时按降级路径处理即可
-    /// （登录仍成功、提交列表退化为不筛选并记 warn），不该因上下文探测失败
-    /// 让主流程失败。**注意：三态会话校验必须用严格版**。
-    async fn current_user(&self) -> AppResult<Option<HydroUser>> {
-        match self.probe_user_context().await {
-            Ok(user) => Ok(user),
-            Err(e) => {
-                warn!(error = %e, "Hydro 用户上下文探测失败，按未知身份继续");
-                Ok(None)
-            }
-        }
-    }
-
     // ── 比赛题目顺序（展示字母 ↔ pid） ──
 
     fn cached_pids(&self, tid: &str) -> Option<Vec<String>> {
@@ -1267,13 +1251,19 @@ impl SubmissionProvider for HydroAdapter {
             path.push_str(&format!("&tid={}", query.contest_id));
         }
         if query.only_mine {
-            // 产品决策：后端恒置 onlyMine，前端不可绕过
-            let uid = self
-                .current_user()
-                .await?
-                .map(|user| user.id)
-                .filter(|id| !id.is_empty())
-                .ok_or_else(|| AppError::Auth("Hydro 需登录后才能只看本人提交".into()))?;
+            // 产品决策：后端恒置 onlyMine，前端不可绕过。
+            // 身份探测三态（与 validate_session 同一契约）：Ok(None) 是服务端
+            // **明确**判定匿名（或本地无 sid）→ Auth；Err 是「无法判定」
+            // （网络瞬断/5xx/部署不支持注入头）→ 必须原变体上抛，绝不能折成
+            // Auth —— 前端 sessionGuard 见 Auth 即踢出登录并删除本地会话，
+            // 一次网络抖动就会把选手误锁在登录页外（重启后首查提交列表正是窗口）。
+            let uid = match self.probe_user_context().await {
+                Ok(user) => user
+                    .map(|user| user.id)
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| AppError::Auth("Hydro 需登录后才能只看本人提交".into()))?,
+                Err(e) => return Err(e.context("Hydro 用户上下文")),
+            };
             path.push_str(&format!("&uidOrName={}", uid));
         }
         if let Some(display_id) = query

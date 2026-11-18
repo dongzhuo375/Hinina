@@ -1078,3 +1078,127 @@ async fn probe_response_during_account_switch_is_discarded() {
 
     server.shutdown();
 }
+
+// ── 提交列表 only_mine 的身份探测三态 ──
+//
+// 命令层恒置 only_mine（commands/submission_cmd.rs），每次提交列表都要解析
+// uid；探测结论必须与 validate_session 同一三态契约，否则「无法判定」会被
+// 折成 Auth，前端 sessionGuard 见 Auth 即踢出登录并删除本地会话。
+
+/// 方便构造 only_mine 查询（命令层恒置 only_mine，其余字段取中性默认）
+fn own_submissions_query() -> crate::core::entity::submission::SubmissionQuery {
+    crate::core::entity::submission::SubmissionQuery {
+        contest_id: String::new(),
+        current_page: 1,
+        limit: 50,
+        only_mine: true,
+        problem_display_id: None,
+        status: None,
+    }
+}
+
+/// 探测网络瞬断：提交列表必须报「无法判定」（Network）而不是 Auth ——
+/// 折成 Auth 会让前端 sessionGuard 误踢登录并删除本地会话
+/// （重启后身份缓存为空、首查提交列表正是触发窗口）。
+#[tokio::test]
+async fn submission_list_keeps_probe_failure_out_of_auth_variant() {
+    // 5xx 由 infra 重试（首次 + 2 次重试 = 一次探测 3 个请求）
+    let probe_500 = || ScriptedResponse::with(500, vec![], "boom");
+    let server = LoopbackServer::start(vec![
+        login_ok("sid-1"),
+        // 登录后的探测：服务端判匿名 → 身份降级、缓存为空（让列表探测真实出网）
+        ScriptedResponse::json(r#"{"UserContext":{"_id":0}}"#),
+        // 列表的 uid 探测：网络瞬断（3 个请求全部 500）
+        probe_500(),
+        probe_500(),
+        probe_500(),
+    ])
+    .await;
+    let adapter = loopback_adapter(server.url());
+    adapter.login("alice", "pw").await.unwrap();
+
+    let err = adapter
+        .list_contest_submissions(&own_submissions_query())
+        .await
+        .expect_err("探测失败必须上抛");
+    match err {
+        crate::core::error::AppError::Network(_) => {}
+        other => panic!(
+            "探测网络瞬断属「无法判定」，应为 Network 而非 {:?}（Auth 会误踢会话）",
+            other
+        ),
+    }
+    // 失败发生在探测段：不得发出 /record 请求
+    assert!(
+        server.requests().iter().all(|r| r.path != "/record"),
+        "探测失败时不应请求提交列表"
+    );
+
+    server.shutdown();
+}
+
+/// 服务端明确判匿名（_id == 0）：uid 拿不到是**确定结论**，报 Auth 是正确语义。
+#[tokio::test]
+async fn submission_list_reports_auth_when_probe_says_anonymous() {
+    let anonymous = || ScriptedResponse::json(r#"{"UserContext":{"_id":0}}"#);
+    let server = LoopbackServer::start(vec![
+        login_ok("sid-1"),
+        anonymous(), // 登录探测：匿名 → 降级身份、缓存为空
+        anonymous(), // 列表探测：再次匿名 → Auth
+    ])
+    .await;
+    let adapter = loopback_adapter(server.url());
+    adapter.login("alice", "pw").await.unwrap();
+
+    let err = adapter
+        .list_contest_submissions(&own_submissions_query())
+        .await
+        .expect_err("服务端判匿名时只看本人提交必须报错");
+    assert!(
+        matches!(err, crate::core::error::AppError::Auth(_)),
+        "服务端明确匿名应报 Auth，实得 {:?}",
+        err
+    );
+    assert!(
+        server.requests().iter().all(|r| r.path != "/record"),
+        "Auth 判定发生在探测段，不应请求提交列表"
+    );
+
+    server.shutdown();
+}
+
+/// 探测成功：uid 进 `uidOrName` 查询参数，且身份缓存让第二次列表**不再探测**。
+#[tokio::test]
+async fn submission_list_filters_by_probed_uid_and_caches_identity() {
+    let record_list = r#"{"tdoc":{"pids":["P1"]}}"#; // tdoc.pids 就地满足 pids_of，免二次请求
+    let server = LoopbackServer::start(vec![
+        login_ok("sid-1"),
+        ScriptedResponse::json(r#"{"UserContext":{"_id":7,"uname":"alice"}}"#),
+        ScriptedResponse::json(record_list),
+        ScriptedResponse::json(record_list),
+    ])
+    .await;
+    let adapter = loopback_adapter(server.url());
+    adapter.login("alice", "pw").await.unwrap();
+
+    let first = adapter
+        .list_contest_submissions(&own_submissions_query())
+        .await
+        .expect("探测成功后列表应可用");
+    assert_eq!(first.records.len(), 0);
+    assert_eq!(server.requests()[2].path, "/record?page=1&uidOrName=7");
+
+    // 第二次列表：身份缓存命中 → 只有列表请求本身，不再出探测
+    adapter
+        .list_contest_submissions(&own_submissions_query())
+        .await
+        .expect("缓存身份下第二次列表应可用");
+    assert_eq!(
+        server.requests().len(),
+        4,
+        "第二次列表不应重新探测（多出的请求即缓存未生效）"
+    );
+    assert_eq!(server.requests()[3].path, "/record?page=1&uidOrName=7");
+
+    server.shutdown();
+}
