@@ -103,7 +103,7 @@ describe('getEditorPrefs / getDefaultLanguage / getSplitRatio — 派生参数�
     expect(await configService.getDefaultLanguage()).toBe('C++')
   })
 
-  it('越界/非法值回退兜底（字号 14、Tab 4、主题 vs、分栏 0.48）', async () => {
+  it('越界/非法值回退兜底（字号 14、Tab 4、主题 vs）；分栏有限越界钳到边界（与 Rust sanitize 一致）', async () => {
     const config = makeConfig()
     config.editor.fontSize = 999
     config.editor.tabSize = -1
@@ -116,7 +116,15 @@ describe('getEditorPrefs / getDefaultLanguage / getSplitRatio — 派生参数�
       tabSize: 4,
       editorTheme: 'vs',
     })
-    expect(await configService.getSplitRatio()).toBe(0.48)
+    expect(await configService.getSplitRatio()).toBe(0.7)
+  })
+
+  it('分栏读取路径钳制手改越界值：0.25 → 0.30（旧 0.2–0.8 透传带会放行，首次拖拽即跳变）', async () => {
+    const config = makeConfig()
+    config.layout.splitRatio = 0.25
+    getConfig.mockResolvedValue(config)
+
+    expect(await configService.getSplitRatio()).toBe(0.3)
   })
 
   it('读取失败全部回退兜底值，不向上抛错', async () => {

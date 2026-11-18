@@ -4,6 +4,7 @@ import { effectScope, ref } from 'vue'
 import type { EffectScope } from 'vue'
 import { IpcError, parseAppError } from '@/bridge'
 import { useSettingsForm } from '@/composables/useSettingsForm'
+import { clampRatio } from '@/composables/useSettingsForm'
 import { configService } from '@/services/config.service'
 import type { AppConfig } from '@/types/config'
 
@@ -1162,5 +1163,18 @@ describe('useSettingsForm', () => {
     expect(formB.form.activeOj).toBe('Hydro')
     expect(formB.switchNotice.value).toBeNull()
     scopeB.stop()
+  })
+})
+
+describe('clampRatio — 设置页分栏钳位（utils/layout 单源 + 滑杆 step 舍入）', () => {
+  it('带内值钳位后取两位小数（与 step 0.01 对齐）', () => {
+    expect(clampRatio(0.333)).toBe(0.33)
+    expect(clampRatio(0.55)).toBe(0.55)
+  })
+
+  it('越界值钳到边界、非有限值回退默认 0.48', () => {
+    expect(clampRatio(0.25)).toBe(0.3)
+    expect(clampRatio(0.95)).toBe(0.7)
+    expect(clampRatio(Number.NaN)).toBe(0.48)
   })
 })

@@ -9,6 +9,7 @@ import { resetSessionForOjSwitch } from '@/stores/session'
 import { useSystemStore } from '@/stores/systemStore'
 import { normalizeHojLanguage } from '@/utils/language'
 import { EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN, EDITOR_TAB_SIZES } from '@/utils/editor'
+import { clampSplitRatio, DEFAULT_SPLIT_RATIO } from '@/utils/layout'
 import { errorMessage } from '@/utils/error'
 import { ojSelectOptions } from '@/utils/oj'
 import type { AppConfig, OjInstance } from '@/types/config'
@@ -33,10 +34,10 @@ export interface SettingsForm {
 
 export type SettingsFormPatch = Partial<SettingsForm>
 
-/// 分栏比例钳位到滑杆值域 [0.30, 0.70]，两位小数（与 step 0.01 对齐）
+/// 分栏比例钳位到 `utils/layout` 单源值域并取两位小数（与滑杆 step 0.01 对齐）。
+/// 舍入只属于设置页：解题页拖拽增量可小于 0.005，那边直接用 `clampSplitRatio`
 export function clampRatio(value: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 0.48
-  return Math.min(0.7, Math.max(0.3, Math.round(value * 100) / 100))
+  return Math.round(clampSplitRatio(value) * 100) / 100
 }
 
 /// 严格非负整数解析：拒绝空串/小数/负号/科学计数法等 Number() 会宽容接受的形式
@@ -133,7 +134,7 @@ export function useSettingsForm(maintainerLocked: Readonly<Ref<boolean>> = ref(f
     defaultLanguage: 'C++',
     autoSave: true,
     autoSaveIntervalSecs: '30',
-    splitRatio: 0.48,
+    splitRatio: DEFAULT_SPLIT_RATIO,
   })
 
   const baseline = ref('')

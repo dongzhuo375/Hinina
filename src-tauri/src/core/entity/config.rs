@@ -264,7 +264,8 @@ pub struct LayoutConfig {
     /// 侧边栏宽度（像素）
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: u32,
-    /// 题面与编辑器分栏比例（0.0 ~ 1.0，0.5 表示各占一半；默认 0.48）
+    /// 题面与编辑器分栏比例（0.30 ~ 0.70，0.5 表示各占一半；默认 0.48，
+    /// 越界/非有限值由 `sanitize` 钳制或回退；值域与前端 `utils/layout` 单源一致）
     #[serde(default = "default_split_ratio")]
     pub split_ratio: f64,
 }

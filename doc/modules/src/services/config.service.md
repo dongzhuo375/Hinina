@@ -35,7 +35,7 @@
 | `ConfigService.getEditorPrefs` | `() => Promise<EditorPrefs>` | 字号 / Tab 宽度 / 编辑器主题（钳位上下界取自 `utils/editor`，越界与未知主题回退 14 / 4 / `'vs'`）；CodeEditor 挂载时消费 |
 | `ConfigService.updateEditorPrefs` | `(patch: Partial<EditorPrefs>) => Promise<void>` | **解题页编辑器设置弹层落盘入口**：只写传入字段（读-改-写保留其余配置）；主题落 `theme.editorTheme`（旧版 `themeName` 已随 theme 域删除），落盘前经 `normalizeEditorTheme` 归一 |
 | `ConfigService.getDefaultLanguage` | `() => Promise<string>` | 默认语言（**HOJ 显示名**，如 "C++"）；经 `normalizeHojLanguage` 归一，历史配置遗留的 Monaco id（'cpp'）映射回显示名，空值回退 "C++"，其它非空值（Go/Rust…）原样保留 |
-| `ConfigService.getSplitRatio` | `() => Promise<number>` | 解题页初始分栏比例（非法回退 0.48） |
+| `ConfigService.getSplitRatio` | `() => Promise<number>` | 解题页初始分栏比例。按 `utils/layout` 单源值域 [0.30, 0.70] 归一（非数字/非有限值回退 0.48，有限越界钳到边界——镜像 Rust `sanitize` 语义；读取路径不经过后端 sanitize，手改 `config.json` 的越界值在此兜底，避免解题页首次拖拽跳变） |
 | `ConfigService.saveSplitRatio` | `(ratio: number) => Promise<void>` | **解题页拖拽结束后的分栏比例落盘入口**：经 `runSaveTxn` 只写 `layout.splitRatio`（后台写入，不标记 `settingsPage`，不进入设置页门禁） |
 | `configService` | 单例 | 全局唯一实例 |
 

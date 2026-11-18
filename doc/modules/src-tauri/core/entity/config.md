@@ -49,7 +49,7 @@
 
 ### LayoutConfig
 - `sidebar_width: u32`（默认 `280`）— 侧边栏宽度（像素）
-- `split_ratio: f64`（默认 `0.48`）— 题面与编辑器分栏比例（0.0~1.0，0.5 表示各占一半；旧默认 0.45 由 `normalize_legacy_values` 归一）
+- `split_ratio: f64`（默认 `0.48`）— 题面与编辑器分栏比例（0.30~0.70，0.5 表示各占一半；越界/非有限值由 `sanitize` 钳制或回退，值域与前端 `utils/layout` 单源一致；旧默认 0.45 由 `normalize_legacy_values` 归一）
 
 ## 默认值函数
 所有默认值通过模块级私有函数提供（如 `default_hoj_url()`, `default_timeout()`, `default_font_size()` 等），`const fn` 用于编译期常量、`fn` 用于需要 `String` 的默认值。OJ 侧另有 `default_active_oj()`（`"HOJ"`，与旧版 `default_oj_type` 一致，行为零变化）、`default_oj_instances()`（默认单 HOJ 实例，沿用旧版默认地址）与 `default_true()`（实例默认启用）。

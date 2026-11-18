@@ -15,7 +15,7 @@
 | `OjConfig` | `{ active, instances, contestRef, contestPassword: string \| null, timeoutSecs, pollIntervalSecs, pollTimeoutSecs, cacheTtlSecs, cacheProblemStatement: boolean }` | `active` 为当前 OJ 实例 id（须指向 instances 中一条）；时长字段一律**秒**；`contestRef` 为**不透明字符串**的比赛引用（HOJ 为数字串，其它 OJ 可能是任意资源 ID），**空串 = 未配置**（简报链路据此走 `unconfigured` 态，后端 `load_configured_contest` 据此报错提示配置）；`contestPassword` 私有赛用，公开赛为 null；`cacheProblemStatement` 为题面缓存开关（Rust 侧默认 `true`，前端回填时 `?? true` 兜底旧配置） |
 | `EditorConfig` | `{ fontSize, tabSize, autoSave, autoSaveIntervalSecs, defaultLanguage }` | autoSaveIntervalSecs 秒；`defaultLanguage` 值域为 **HOJ 显示名**（默认 "C++"，与提交契约同源；历史 Monaco id 由 Rust `normalize_language_display_name` 与前端 `normalizeHojLanguage` 双向兜底归一），消费方为 workspaceStore 新建工作区的默认语言 |
 | `ThemeConfig` | `{ editorTheme }` | `editorTheme` 已被消费（`config.service.getEditorPrefs` 读取、`updateEditorPrefs` 落盘、`CodeEditor` 应用 vs/vs-dark；App.vue 全局壳仍固定浅色 `:theme="null"`）。旧版 `themeName` 已随 theme 域删除转为 Rust 侧 legacy 迁移字段（读入即消费、永不写回），不在本镜像 |
-| `LayoutConfig` | `{ sidebarWidth, splitRatio }` | `splitRatio` 已被消费（`config.service.getSplitRatio` 读取、ProblemSolveView 初始化/拖拽回写、`useSettingsForm` 编辑/保存、`LayoutSection` 滑杆）；`sidebarWidth` 仍为字段预留 |
+| `LayoutConfig` | `{ sidebarWidth, splitRatio }` | `splitRatio` 已被消费（`config.service.getSplitRatio` 读取、ProblemSolveView 初始化/拖拽回写、`useSettingsForm` 编辑/保存、`LayoutSection` 滑杆；值域单源见 `utils/layout`）；`sidebarWidth` 仍为字段预留 |
 
 > 注：Rust 端 `AppConfig.user` 段不在本镜像——`lastUsername` 无生产读写路径已删除，剩余仅旧版迁移字段 `lastOjType`（OJ 选择是应用级状态，迁移至 `oj.active`，Rust 加载路径归一），前端从不读写该段。
 

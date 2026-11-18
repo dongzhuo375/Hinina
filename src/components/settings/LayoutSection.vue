@@ -3,6 +3,7 @@ import SettingsSectionFrame from './SettingsSectionFrame.vue'
 import { computed } from 'vue'
 import { clampRatio } from '@/composables/useSettingsForm'
 import type { SettingsFormPatch } from '@/composables/useSettingsForm'
+import { SPLIT_RATIO_MAX, SPLIT_RATIO_MIN } from '@/utils/layout'
 
 const props = defineProps<{ splitRatio: number }>()
 const emit = defineEmits<{ (event: 'update:form', patch: SettingsFormPatch): void }>()
@@ -31,8 +32,8 @@ function onSplitInput(event: Event): void {
                 </div>
                 <input
                   type="range"
-                  min="0.3"
-                  max="0.7"
+                  :min="SPLIT_RATIO_MIN"
+                  :max="SPLIT_RATIO_MAX"
                   step="0.01"
                   :value="splitRatio"
                   class="w-full accent-[var(--color-primary)]"
