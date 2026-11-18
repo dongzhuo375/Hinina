@@ -59,6 +59,6 @@ export async function onAnnouncementsPublished(
   return listen<AnnouncementsPublishedPayload>(ANNOUNCEMENTS_PUBLISHED_EVENT, (event) => {
     const payload = event.payload
     if (!payload || typeof payload.contestId !== 'string') return
-    handler({ contestId: payload.contestId, newIds: payload.newIds ?? [] })
+    handler({ contestId: payload.contestId, newIds: Array.isArray(payload.newIds) ? payload.newIds : [] })
   })
 }
