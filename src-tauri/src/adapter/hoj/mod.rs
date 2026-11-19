@@ -1184,9 +1184,11 @@ impl SubmissionProvider for HOJAdapter {
     }
 
     async fn get_judgement(&self, submission_id: &str) -> AppResult<JudgementResult> {
+        // submitId 来自服务端响应的回传值，仍按约定编码：畸形值含 `&`/`#`
+        // 时不得注入伪参数或截断 query（与其余字符串插值位同一防线）
         let url = self.api_url(&format!(
             "/get-submission-detail?submitId={}",
-            submission_id
+            percent_encode_component(submission_id)
         ));
 
         // 走统一 GET 封装：带上 token（若已登录）、处理轮换、去 null 解析。
@@ -1274,7 +1276,10 @@ impl SubmissionProvider for HOJAdapter {
     }
 
     async fn get_submission_detail(&self, submit_id: &str) -> AppResult<SubmissionDetail> {
-        let url = self.api_url(&format!("/get-submission-detail?submitId={}", submit_id));
+        let url = self.api_url(&format!(
+            "/get-submission-detail?submitId={}",
+            percent_encode_component(submit_id)
+        ));
 
         // 与 get_judgement 同一端点，但投影为完整实体（含 code / errorMessage / judger）
         let api_resp = self
@@ -1291,7 +1296,10 @@ impl SubmissionProvider for HOJAdapter {
     }
 
     async fn get_submission_cases(&self, submit_id: &str) -> AppResult<SubmissionCases> {
-        let url = self.api_url(&format!("/get-all-case-result?submitId={}", submit_id));
+        let url = self.api_url(&format!(
+            "/get-all-case-result?submitId={}",
+            percent_encode_component(submit_id)
+        ));
 
         let api_resp = self
             .get_json_authed::<ApiResponse<types::JudgeCaseVO>>(&url)

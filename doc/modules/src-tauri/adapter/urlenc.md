@@ -23,7 +23,7 @@ URL 插值段的百分号编码，HOJ 与 Hydro 共用。放在 adapter 层与 `
 ## 被依赖
 
 - `adapter/hydro/mod.rs`（tid/rid/uid/pid 等全部字符串插值位）
-- `adapter/hoj/mod.rs`（`get_problem` 的 `displayId`、`list_contest_submissions` 的 `problemID`）
+- `adapter/hoj/mod.rs`（`get_problem` 的 `displayId`、`list_contest_submissions` 的 `problemID`、评测查询三端点的 `submitId`）
 
 ## 测试
 

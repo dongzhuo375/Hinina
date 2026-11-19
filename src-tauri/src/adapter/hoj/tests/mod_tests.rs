@@ -1618,14 +1618,17 @@ async fn invalid_contest_id_rejected_uniformly_across_endpoints() {
     server.shutdown();
 }
 
-/// 线上断言：题目筛选值（problemID）与题目详情的 displayId 拼查询串前必须
-/// 百分号编码——裸 `&`/`#` 会注入或截断 query（与 Hydro 侧同一防线，
-/// 共用 `adapter::urlenc::percent_encode_component`）。
+/// 线上断言：题目筛选值（problemID）、题目详情的 displayId 与评测查询的
+/// submitId 拼查询串前必须百分号编码——裸 `&`/`#` 会注入或截断 query
+/// （与 Hydro 侧同一防线，共用 `adapter::urlenc::percent_encode_component`）。
+/// submitId 虽是服务端回传值，回传畸形串时同样不得注入伪参数。
 #[tokio::test]
 async fn submission_list_and_problem_detail_percent_encode_filter_values() {
     let server = LoopbackServer::start(vec![
         page_ok(),
-        // 题目详情响应体最小化：断言目标在请求行，解析结果不参与判据
+        // 题目详情/评测详情响应体最小化：断言目标在请求行，解析结果不参与判据
+        ScriptedResponse::json(r#"{"status":200,"msg":"success","data":{}}"#),
+        ScriptedResponse::json(r#"{"status":200,"msg":"success","data":{}}"#),
         ScriptedResponse::json(r#"{"status":200,"msg":"success","data":{}}"#),
     ])
     .await;
@@ -1654,6 +1657,21 @@ async fn submission_list_and_problem_detail_percent_encode_filter_values() {
         server.requests()[1].path.contains("displayId=A%23B"),
         "displayId 必须编码，实得 {}",
         server.requests()[1].path
+    );
+
+    // 评测轮询与测试点查询：submitId 含特殊字符时以编码形态到达请求行
+    let _ = fx.adapter.get_judgement("9&flag=1").await;
+    assert!(
+        server.requests()[2].path.contains("submitId=9%26flag%3D1"),
+        "submitId 必须编码（裸 `&` 会注入伪参数 flag），实得 {}",
+        server.requests()[2].path
+    );
+
+    let _ = fx.adapter.get_submission_cases("10#x").await;
+    assert!(
+        server.requests()[3].path.contains("submitId=10%23x"),
+        "测试点查询的 submitId 必须编码，实得 {}",
+        server.requests()[3].path
     );
 
     server.shutdown();
