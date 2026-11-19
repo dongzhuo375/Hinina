@@ -154,9 +154,11 @@ Hinina/
         ├── adapter/
         │   ├── mod.rs                    # AdapterDeps（仅 infra 依赖，禁止塞 Service）+ AdapterFactory{id, build} + factories() 内建清单（接入新 OJ = 新子目录 + 此处一行）
         │   ├── time.rs                   # 各 Adapter 共用的时间解析：ISO 8601 → 秒级 UTC（毫秒 / Z / ±HHMM / ±HH:MM / 空格分隔 / 非零填充 / 仅日期；解析失败与**非零偏移**均 warn，绝不 panic）
+        │   ├── urlenc.rs                 # 各 Adapter 共用的 URL 插值段百分号编码：RFC 3986 unreserved 之外的字节全部转义（正常 hex/数字恒等，线上形态不变）
         │   ├── tests/
         │   │   ├── adapter_tests.rs      # 工厂防线测试（id 唯一 + 全部可构建 + 四能力齐备 + HOJ 会话文件名契约）
-        │   │   └── time_tests.rs         # 时间解析测试（HOJ 实测串 `...16:00:00.000+0000`、非零/半小时偏移、非零填充、仅日期、闰日、畸形输入不 panic）
+        │   │   ├── time_tests.rs         # 时间解析测试（HOJ 实测串 `...16:00:00.000+0000`、非零/半小时偏移、非零填充、仅日期、闰日、畸形输入不 panic）
+        │   │   └── urlenc_tests.rs       # URL 插值编码测试（unreserved 恒等 + 保留字/多字节转义：%20/%26/%23/%25/UTF-8 逐字节）
         │   ├── hoj/
         │   │   ├── mod.rs                # HOJAdapter：ID 常量 + FACTORY 工厂 + 实现 4 个 Provider trait + get/post_json_authed（共用 handle_token_rotation 做 Refresh-Token 轮换）
         │   │   │                         #   + parse_hoj_json（全部响应的唯一解析入口：去 null → 识别体内鉴权失败 → 类型化解析）
