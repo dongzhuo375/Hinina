@@ -1307,7 +1307,9 @@ impl SubmissionProvider for HydroAdapter {
                     .map(|user| user.id)
                     .filter(|id| !id.is_empty())
                     .ok_or_else(|| AppError::Auth("Hydro 需登录后才能只看本人提交".into()))?,
-                Err(e) => return Err(e.context("Hydro 用户上下文")),
+                // 探测函数内部已给 get 失败补「Hydro 用户上下文」环节名，
+                // 这里再包一层会叠成「用户上下文: 用户上下文: …」的双重前缀
+                Err(e) => return Err(e),
             };
             path.push_str(&format!("&uidOrName={}", percent_encode_component(&uid)));
         }

@@ -182,7 +182,7 @@ Hinina/
         │   │   │                         #   + 请求入口按通道分工：两条通道都走 infra 的 raw 变体（get_text_raw/post_text_raw，5xx 与 body 断流退避重试，POST 本就不重试）
         │   │   │                         #     （infra 非 2xx 丢响应体，而 Hydro 的用户可见错误全在包络里；401→Auth 由适配器 http_status_error 承担）
         │   │   │                         #   + HydroResponse::parse_value（两条通道共用的协议层判定：错误包络 → 变体、JSON 化登录重定向 → Auth）
-        │   │   │                         #   + probe_user_context（会话三态严格版：注入头缺失按「无法判定」上抛，绝不判失效）/ current_user（宽松版）
+        │   │   │                         #   + probe_user_context（缓存层）/ probe_user_context_uncached（会话三态严格版：注入头缺失按「无法判定」上抛，绝不判失效）
         │   │   │                         #   + resolve_problem_id（展示字母 → tdoc.pids 下标 → 真实 pid）+ contest_pids（TtlCache 顺序表缓存）
         │   │   ├── types.rs              # Hydro DTO：Tdoc/Pdoc/Rdoc/RecordList/Scoreboard(CellVO)/Submit/UserBrief + 错误包络 + strip_nulls
         │   │   │                         #   + Hydro 全状态码映射（FETCHED→Pending 保非终态）+ HOJ→Hydro 状态筛选翻译

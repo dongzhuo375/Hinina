@@ -1122,7 +1122,15 @@ async fn submission_list_keeps_probe_failure_out_of_auth_variant() {
         .await
         .expect_err("探测失败必须上抛");
     match err {
-        crate::core::error::AppError::Network(_) => {}
+        crate::core::error::AppError::Network(msg) => {
+            // 环节名只出现一次：探测函数内部已补「Hydro 用户上下文」，
+            // 提交列表再包一层会叠成双重前缀（经 service 层后成三重）
+            assert_eq!(
+                msg.matches("Hydro 用户上下文").count(),
+                1,
+                "环节前缀不得叠加: {msg}"
+            );
+        }
         other => panic!(
             "探测网络瞬断属「无法判定」，应为 Network 而非 {:?}（Auth 会误踢会话）",
             other
