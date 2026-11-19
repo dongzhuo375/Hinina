@@ -925,6 +925,7 @@ use crate::core::event::core_event_bus::CoreEventBus;
 use crate::core::provider::auth::AuthProvider;
 use crate::core::provider::contest::{AccessRejectionKind, ContestProvider};
 use crate::core::provider::oj_id::OjId;
+use crate::core::provider::problem::ProblemProvider;
 use crate::core::provider::submission::SubmissionProvider;
 use crate::core::repository::session_repo::SessionRepository;
 use crate::infra::fs_session_repo::FsSessionRepository;
@@ -1571,4 +1572,151 @@ fn already_registered_matcher_samples() {
             msg
         );
     }
+}
+
+/// 非法比赛 ID 在**所有**消费 cid 的端点产出同一 `Contest` 变体且零出网：
+/// 口径必须全端点一致（手改 config 的非数字 contest_ref 不因端点不同而
+/// 产出不同错误形态），非法值也不得拼进 query。
+#[tokio::test]
+async fn invalid_contest_id_rejected_uniformly_across_endpoints() {
+    // 脚本队列只放登录：submit / ensure_contest_access 的 require_token 前置
+    // 断言先于 parse_cid，需要会话才能到达 cid 校验；队列耗尽后任何意外
+    // 出网都被记为 500（变体不再是 Contest + 零出网断言，双重判红）
+    let server = LoopbackServer::start(vec![login_ok("jwt-cid")]).await;
+    let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.expect("登录应成功");
+    let baseline = server.requests().len();
+
+    // 全部九个消费 cid 的端点逐端点接线回归：回退任一端点的 parse_cid
+    // （裸 cid 出网）本用例必红，不依赖实现通读确认
+    let results: Vec<crate::core::error::AppError> = vec![
+        fx.adapter
+            .get_contest("1001abc")
+            .await
+            .expect_err("get_contest 应拒绝非法比赛 ID"),
+        fx.adapter
+            .list_contest_problems("12.5")
+            .await
+            .expect_err("list_contest_problems 应拒绝非法比赛 ID"),
+        fx.adapter
+            .get_problem("../inject", "A")
+            .await
+            .expect_err("get_problem 应拒绝非法比赛 ID"),
+        fx.adapter
+            .get_contest_rank(
+                "abc",
+                &crate::core::entity::rank::RankQuery {
+                    current_page: 1,
+                    limit: 50,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("get_contest_rank 应拒绝非法比赛 ID"),
+        fx.adapter
+            .list_announcements("1001abc", 1, 20)
+            .await
+            .expect_err("list_announcements 应拒绝非法比赛 ID"),
+        // problem_ids 为空会在 parse_cid 之前短路返回，必须传非空列表
+        fx.adapter
+            .get_user_problem_status("1.2.3", &["1000".to_string()])
+            .await
+            .expect_err("get_user_problem_status 应拒绝非法比赛 ID"),
+        fx.adapter
+            .submit("9x", "1000", "A", "C++", "int main() {}")
+            .await
+            .expect_err("submit 应拒绝非法比赛 ID"),
+        fx.adapter
+            .ensure_contest_access("../cid", Some("pw"))
+            .await
+            .expect_err("ensure_contest_access 应拒绝非法比赛 ID"),
+        fx.adapter
+            .list_contest_submissions(&crate::core::entity::submission::SubmissionQuery {
+                contest_id: "12.5".into(),
+                current_page: 1,
+                limit: 20,
+                only_mine: false,
+                problem_display_id: None,
+                status: None,
+            })
+            .await
+            .expect_err("list_contest_submissions 应拒绝非法比赛 ID"),
+    ];
+    for err in &results {
+        assert!(
+            matches!(err, crate::core::error::AppError::Contest(_)),
+            "非法比赛 ID 应统一报 Contest 变体，实得 {:?}",
+            err
+        );
+    }
+    assert_eq!(
+        server.requests().len(),
+        baseline,
+        "非法比赛 ID 必须在出网前拒绝（登录后不应有新请求，实得: {:?})",
+        server.requests()[baseline..]
+            .iter()
+            .map(|r| r.path.clone())
+            .collect::<Vec<_>>()
+    );
+
+    server.shutdown();
+}
+
+/// 线上断言：题目筛选值（problemID）、题目详情的 displayId 与评测查询的
+/// submitId 拼查询串前必须百分号编码——裸 `&`/`#` 会注入或截断 query
+/// （与 Hydro 侧同一防线，共用 `adapter::urlenc::percent_encode_component`）。
+/// submitId 虽是服务端回传值，回传畸形串时同样不得注入伪参数。
+#[tokio::test]
+async fn submission_list_and_problem_detail_percent_encode_filter_values() {
+    let server = LoopbackServer::start(vec![
+        page_ok(),
+        // 题目详情/评测详情响应体最小化：断言目标在请求行，解析结果不参与判据
+        ScriptedResponse::json(r#"{"status":200,"msg":"success","data":{}}"#),
+        ScriptedResponse::json(r#"{"status":200,"msg":"success","data":{}}"#),
+        ScriptedResponse::json(r#"{"status":200,"msg":"success","data":{}}"#),
+    ])
+    .await;
+    let fx = fixture(server.url());
+
+    let query = crate::core::entity::submission::SubmissionQuery {
+        contest_id: "1001".into(),
+        current_page: 1,
+        limit: 20,
+        only_mine: true,
+        problem_display_id: Some("A&B".into()),
+        status: None,
+    };
+    fx.adapter
+        .list_contest_submissions(&query)
+        .await
+        .expect("列表应成功");
+    assert!(
+        server.requests()[0].path.contains("problemID=A%26B"),
+        "题目筛选值必须编码，实得 {}",
+        server.requests()[0].path
+    );
+
+    let _ = fx.adapter.get_problem("1001", "A#B").await;
+    assert!(
+        server.requests()[1].path.contains("displayId=A%23B"),
+        "displayId 必须编码，实得 {}",
+        server.requests()[1].path
+    );
+
+    // 评测轮询与测试点查询：submitId 含特殊字符时以编码形态到达请求行
+    let _ = fx.adapter.get_judgement("9&flag=1").await;
+    assert!(
+        server.requests()[2].path.contains("submitId=9%26flag%3D1"),
+        "submitId 必须编码（裸 `&` 会注入伪参数 flag），实得 {}",
+        server.requests()[2].path
+    );
+
+    let _ = fx.adapter.get_submission_cases("10#x").await;
+    assert!(
+        server.requests()[3].path.contains("submitId=10%23x"),
+        "测试点查询的 submitId 必须编码，实得 {}",
+        server.requests()[3].path
+    );
+
+    server.shutdown();
 }

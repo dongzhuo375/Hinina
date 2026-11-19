@@ -414,10 +414,20 @@ impl AppConfig {
                 return Err("OJ 实例 id 不能为空".into());
             }
             // id 会拼进会话文件名（`sessions/{id}.json`）与注册表键：
-            // 拒绝路径分隔符与 `..`（路径穿越），`Storage::resolve` 是第二道防线
-            if instance.id.contains('/') || instance.id.contains('\\') || instance.id.contains("..")
+            // 拒绝路径分隔符与 `..`（路径穿越，`Storage::resolve` 是第二道防线）；
+            // 拒绝 `:`（NTFS 备用数据流分隔符，`sessions/HOJ:x.json` 会写成文件
+            // HOJ 的 ADS，资源管理器不可见、体积/清理工具漏计）——`resolve`
+            // 不拒 `:`（`HOJ:x.json` 是合法 Normal 组件直通），本层是唯一防线；
+            // 工作区仓库同口径见 `fs_workspace_repo` 的 `validate_win32_component`
+            if instance.id.contains('/')
+                || instance.id.contains('\\')
+                || instance.id.contains("..")
+                || instance.id.contains(':')
             {
-                return Err(format!("OJ 实例 id 不得包含 /、\\ 或 ..：{}", instance.id));
+                return Err(format!(
+                    "OJ 实例 id 不得包含 /、\\、.. 或 :：{}",
+                    instance.id
+                ));
             }
             if !seen.insert(instance.id.trim().to_string()) {
                 return Err(format!("OJ 实例 id 重复: {}", instance.id));

@@ -51,6 +51,8 @@ use crate::core::provider::submission::SubmissionProvider;
 use crate::infra::cache::TtlCache;
 use crate::infra::http::HttpClient;
 
+use super::urlenc::percent_encode_component;
+
 use self::types::{
     ContestDetailVO, ContestListVO, ContestProblemListVO, PdocVO, ProblemDetailVO, RdocVO,
     RecordDetailVO, RecordListVO, ScoreboardVO, SubmitVO, TdocVO, UserBriefVO,
@@ -435,22 +437,6 @@ impl HydroAdapter {
         Ok(Some(user))
     }
 
-    /// 取当前用户（宽松版，供登录与提交列表筛选使用）。
-    ///
-    /// 与 `probe_user_context` 的差别：把「无法判定」折成 `Ok(None)` 而不是上抛，
-    /// 因为调用点只关心「能不能拿到 uid」，拿不到时按降级路径处理即可
-    /// （登录仍成功、提交列表退化为不筛选并记 warn），不该因上下文探测失败
-    /// 让主流程失败。**注意：三态会话校验必须用严格版**。
-    async fn current_user(&self) -> AppResult<Option<HydroUser>> {
-        match self.probe_user_context().await {
-            Ok(user) => Ok(user),
-            Err(e) => {
-                warn!(error = %e, "Hydro 用户上下文探测失败，按未知身份继续");
-                Ok(None)
-            }
-        }
-    }
-
     // ── 比赛题目顺序（展示字母 ↔ pid） ──
 
     fn cached_pids(&self, tid: &str) -> Option<Vec<String>> {
@@ -471,7 +457,10 @@ impl HydroAdapter {
             return Ok(pids);
         }
         let detail: ContestDetailVO = self
-            .get_json(&format!("/contest/{}", tid), false)
+            .get_json(
+                &format!("/contest/{}", percent_encode_component(tid)),
+                false,
+            )
             .await
             .map_err(|e| e.context("Hydro 比赛详情"))?;
         let pids = detail.tdoc.map(|t| t.pid_list()).unwrap_or_default();
@@ -824,7 +813,7 @@ impl HydroAdapter {
 
     /// 拉取单条评测记录
     async fn fetch_record(&self, rid: &str) -> AppResult<RecordDetailVO> {
-        self.get_json(&format!("/record/{}", rid), false)
+        self.get_json(&format!("/record/{}", percent_encode_component(rid)), false)
             .await
             .map_err(|e| e.context("Hydro 评测记录"))
     }
@@ -1002,7 +991,10 @@ impl ContestProvider for HydroAdapter {
 
     async fn get_contest(&self, contest_id: &str) -> AppResult<Contest> {
         let vo: ContestDetailVO = self
-            .get_json(&format!("/contest/{}", contest_id), false)
+            .get_json(
+                &format!("/contest/{}", percent_encode_component(contest_id)),
+                false,
+            )
             .await
             .map_err(|e| e.context("Hydro 比赛详情"))?;
         let tdoc = vo
@@ -1020,7 +1012,10 @@ impl ContestProvider for HydroAdapter {
     /// 不能靠键顺序推字母。
     async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
         let vo: ContestProblemListVO = self
-            .get_json(&format!("/contest/{}/problems", contest_id), false)
+            .get_json(
+                &format!("/contest/{}/problems", percent_encode_component(contest_id)),
+                false,
+            )
             .await
             .map_err(|e| e.context("Hydro 比赛题目列表"))?;
         let pids = self.pids_of(contest_id, vo.tdoc.as_ref()).await?;
@@ -1045,7 +1040,13 @@ impl ContestProvider for HydroAdapter {
         query: &RankQuery,
     ) -> AppResult<ContestRankPage> {
         let vo: ScoreboardVO = self
-            .get_json(&format!("/contest/{}/scoreboard", contest_id), false)
+            .get_json(
+                &format!(
+                    "/contest/{}/scoreboard",
+                    percent_encode_component(contest_id)
+                ),
+                false,
+            )
             .await
             .map_err(|e| e.context("Hydro 榜单"))?;
         if query
@@ -1102,10 +1103,14 @@ impl ProblemProvider for HydroAdapter {
     async fn get_problem(&self, contest_id: &str, problem_id: &str) -> AppResult<Problem> {
         let pid = self.resolve_problem_id(contest_id, problem_id).await?;
         let path = if contest_id.trim().is_empty() {
-            format!("/p/{}", pid)
+            format!("/p/{}", percent_encode_component(&pid))
         } else {
             // `tid` 让服务端进入比赛模式（校验已报名、清空 tag 与统计）
-            format!("/p/{}?tid={}", pid, contest_id)
+            format!(
+                "/p/{}?tid={}",
+                percent_encode_component(&pid),
+                percent_encode_component(contest_id)
+            )
         };
         let vo: ProblemDetailVO = self
             .get_json(&path, false)
@@ -1140,7 +1145,10 @@ impl ProblemProvider for HydroAdapter {
             return Ok(HashMap::new());
         }
         let vo: ContestProblemListVO = self
-            .get_json(&format!("/contest/{}/problems", contest_id), false)
+            .get_json(
+                &format!("/contest/{}/problems", percent_encode_component(contest_id)),
+                false,
+            )
             .await
             .map_err(|e| e.context("Hydro 题目状态"))?;
         let pdict = vo.pdict.clone().unwrap_or_default();
@@ -1214,7 +1222,10 @@ impl SubmissionProvider for HydroAdapter {
             "Hydro 提交代码"
         );
         let vo: SubmitVO = self
-            .post_json(&format!("/p/{}/submit", problem_id.trim()), Some(&body))
+            .post_json(
+                &format!("/p/{}/submit", percent_encode_component(problem_id.trim())),
+                Some(&body),
+            )
             .await
             .map_err(|e| e.context("Hydro 提交"))?;
 
@@ -1264,17 +1275,28 @@ impl SubmissionProvider for HydroAdapter {
         let page = query.current_page.max(1);
         let mut path = format!("/record?page={}", page);
         if !query.contest_id.trim().is_empty() {
-            path.push_str(&format!("&tid={}", query.contest_id));
+            path.push_str(&format!(
+                "&tid={}",
+                percent_encode_component(&query.contest_id)
+            ));
         }
         if query.only_mine {
-            // 产品决策：后端恒置 onlyMine，前端不可绕过
-            let uid = self
-                .current_user()
-                .await?
-                .map(|user| user.id)
-                .filter(|id| !id.is_empty())
-                .ok_or_else(|| AppError::Auth("Hydro 需登录后才能只看本人提交".into()))?;
-            path.push_str(&format!("&uidOrName={}", uid));
+            // 产品决策：后端恒置 onlyMine，前端不可绕过。
+            // 身份探测三态（与 validate_session 同一契约）：Ok(None) 是服务端
+            // **明确**判定匿名（或本地无 sid）→ Auth；Err 是「无法判定」
+            // （网络瞬断/5xx/部署不支持注入头）→ 必须原变体上抛，绝不能折成
+            // Auth —— 前端 sessionGuard 见 Auth 即踢出登录并删除本地会话，
+            // 一次网络抖动就会把选手误锁在登录页外（重启后首查提交列表正是窗口）。
+            let uid = match self.probe_user_context().await {
+                Ok(user) => user
+                    .map(|user| user.id)
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| AppError::Auth("Hydro 需登录后才能只看本人提交".into()))?,
+                // 探测函数内部已给 get 失败补「Hydro 用户上下文」环节名，
+                // 这里再包一层会叠成「用户上下文: 用户上下文: …」的双重前缀
+                Err(e) => return Err(e),
+            };
+            path.push_str(&format!("&uidOrName={}", percent_encode_component(&uid)));
         }
         if let Some(display_id) = query
             .problem_display_id
@@ -1282,7 +1304,7 @@ impl SubmissionProvider for HydroAdapter {
             .filter(|s| !s.is_empty())
         {
             // 单字母 pid 由服务端按 tdoc.pids 解析（与 `record_main` 的规则一致）
-            path.push_str(&format!("&pid={}", display_id));
+            path.push_str(&format!("&pid={}", percent_encode_component(display_id)));
         }
         if let Some(status) = query.status {
             let hydro_status = types::hoj_status_to_hydro(status).ok_or_else(|| {

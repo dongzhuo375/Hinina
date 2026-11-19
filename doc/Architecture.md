@@ -154,9 +154,11 @@ Hinina/
         ├── adapter/
         │   ├── mod.rs                    # AdapterDeps（仅 infra 依赖，禁止塞 Service）+ AdapterFactory{id, build} + factories() 内建清单（接入新 OJ = 新子目录 + 此处一行）
         │   ├── time.rs                   # 各 Adapter 共用的时间解析：ISO 8601 → 秒级 UTC（毫秒 / Z / ±HHMM / ±HH:MM / 空格分隔 / 非零填充 / 仅日期；解析失败与**非零偏移**均 warn，绝不 panic）
+        │   ├── urlenc.rs                 # 各 Adapter 共用的 URL 插值段百分号编码：RFC 3986 unreserved 之外的字节全部转义（正常 hex/数字恒等，线上形态不变）
         │   ├── tests/
         │   │   ├── adapter_tests.rs      # 工厂防线测试（id 唯一 + 全部可构建 + 四能力齐备 + HOJ 会话文件名契约）
-        │   │   └── time_tests.rs         # 时间解析测试（HOJ 实测串 `...16:00:00.000+0000`、非零/半小时偏移、非零填充、仅日期、闰日、畸形输入不 panic）
+        │   │   ├── time_tests.rs         # 时间解析测试（HOJ 实测串 `...16:00:00.000+0000`、非零/半小时偏移、非零填充、仅日期、闰日、畸形输入不 panic）
+        │   │   └── urlenc_tests.rs       # URL 插值编码测试（unreserved 恒等 + 保留字/多字节转义：%20/%26/%23/%25/UTF-8 逐字节）
         │   ├── hoj/
         │   │   ├── mod.rs                # HOJAdapter：ID 常量 + FACTORY 工厂 + 实现 4 个 Provider trait + get/post_json_authed（共用 handle_token_rotation 做 Refresh-Token 轮换）
         │   │   │                         #   + parse_hoj_json（全部响应的唯一解析入口：去 null → 识别体内鉴权失败 → 类型化解析）
@@ -182,7 +184,7 @@ Hinina/
         │   │   │                         #   + 请求入口按通道分工：两条通道都走 infra 的 raw 变体（get_text_raw/post_text_raw，5xx 与 body 断流退避重试，POST 本就不重试）
         │   │   │                         #     （infra 非 2xx 丢响应体，而 Hydro 的用户可见错误全在包络里；401→Auth 由适配器 http_status_error 承担）
         │   │   │                         #   + HydroResponse::parse_value（两条通道共用的协议层判定：错误包络 → 变体、JSON 化登录重定向 → Auth）
-        │   │   │                         #   + probe_user_context（会话三态严格版：注入头缺失按「无法判定」上抛，绝不判失效）/ current_user（宽松版）
+        │   │   │                         #   + probe_user_context（缓存层）/ probe_user_context_uncached（会话三态严格版：注入头缺失按「无法判定」上抛，绝不判失效）
         │   │   │                         #   + resolve_problem_id（展示字母 → tdoc.pids 下标 → 真实 pid）+ contest_pids（TtlCache 顺序表缓存）
         │   │   ├── types.rs              # Hydro DTO：Tdoc/Pdoc/Rdoc/RecordList/Scoreboard(CellVO)/Submit/UserBrief + 错误包络 + strip_nulls
         │   │   │                         #   + Hydro 全状态码映射（FETCHED→Pending 保非终态）+ HOJ→Hydro 状态筛选翻译
@@ -557,7 +559,7 @@ src/
 - **infra 在非 2xx 时丢弃响应体 → 需要读错误包络的 OJ 走 raw 变体**：Hydro 的用户可见错误全在响应体包络里（`{"error":{"name",…}}`，无 message），而非 raw 变体在非 2xx 时只返回状态码 → 适配器改用 **raw 变体**（`get_text_raw` / `post_text_raw`：任意状态码都返回 status + headers + body）。重试策略：GET 的 5xx 与 body 断流退避重试（5xx 耗尽返回响应、body 耗尽报错），4xx 不触发状态段重试；POST 不重试。代价是 401 不再由 infra 自动映射为 `Auth`，由适配器的 `http_status_error` 承担（判据与 infra 的 `status_error` 逐条对齐）。两条通道共用 `HydroResponse::parse_value` 做协议层判定（错误包络 → 变体、JSON 化登录重定向 → `Auth`）
 - **Hydro 是第二个内建 OJ，也是首个非 HOJ 实现**：HOJ（Hcode Online Judge）与 Hydro 无关联、自带 REST + JWT 层，**两者是两套协议**（无统一包络、Cookie `sid` 会话、`Accept: application/json` 内容协商、无 `/user/me` 靠 `X-Hydro-Inject` 注入、状态码 0–33、榜单是预渲染单元格矩阵），因此不复用 HOJ 的调用方式，只共享 `core::entity::*` 与 infra。能力边界（无公告接口、JSON 无样例字段、榜单无服务端分页/搜索、记录无提交时间与总数、比赛隐藏本人记录时提交只返回 `tid` 等）在 `doc/Hydro/Hydro-Adapter-设计缺口报告.md`（**本地文档，不入库**）
 - **接入新 OJ = 1 个子目录 + `factories()` 一行 + 一条配置，且可从 UI 自助启用**：设置页的 OJ 下拉候选 = 已知 OJ 枚举（`src/utils/oj.ts`）+ 配置里的其它实例 id；选中尚未配置的类型 → 引导填地址 → 「保存」创建实例 → 后端 `AppContext::ensure_oj_registered` **按需注册**（判定条件与启动注册同源，不能凭空激活未配置的 OJ）→ 自动切换并持久化 `oj.active`，**无需手改 `config.json`、无需重启**。实测接入成本：`adapter/mod.rs` 两行 + 自己的目录，未触碰 core/infra/commands
-- **OJ 身份与配置是数据，不是编译期常量**：`OjId(String)` 取代闭集枚举 `OJType`（接一个新 OJ 不再要求修改 Domain）；会话文件名 = `sessions/{id}.json` 显式契约（内建 id 与历史枚举 Debug 输出一致，`sessions/HOJ.json` 零迁移，有测试锁定；配置实例 id 拒绝路径分隔符与 `..`，`Storage::resolve` 为第二道防线）；`OjSwitched` 事件载荷为可序列化字符串（**纯事实通知**：清缓存由 `switch_oj` 命令显式调用三个 Service 的 `on_oj_switched()` 完成）。失去编译期穷尽检查的替代防线：启动时校验 active 已注册（未注册 warn + **回退首个已注册 OJ**——硬编码回退 HOJ 在 HOJ 被禁用/移除时是死路）、查询未命中返回 `ProviderNotFound`、`adapter/tests` 断言 `factories()` id 唯一且全部可构建
+- **OJ 身份与配置是数据，不是编译期常量**：`OjId(String)` 取代闭集枚举 `OJType`（接一个新 OJ 不再要求修改 Domain）；会话文件名 = `sessions/{id}.json` 显式契约（内建 id 与历史枚举 Debug 输出一致，`sessions/HOJ.json` 零迁移，有测试锁定；配置实例 id 拒绝路径分隔符、`..` 与 `:`（NTFS 备用数据流；路径穿越由 `Storage::resolve` 兜底，`:` 不经 resolve、仅由本层拦截））；`OjSwitched` 事件载荷为可序列化字符串（**纯事实通知**：清缓存由 `switch_oj` 命令显式调用三个 Service 的 `on_oj_switched()` 完成）。失去编译期穷尽检查的替代防线：启动时校验 active 已注册（未注册 warn + **回退首个已注册 OJ**——硬编码回退 HOJ 在 HOJ 被禁用/移除时是死路）、查询未命中返回 `ProviderNotFound`、`adapter/tests` 断言 `factories()` id 唯一且全部可构建
 - **注册侧聚合、查询侧按能力**：一个 OJ 的能力集合是 `ProviderSet`（字段 Option×4 —— 保住「新 Adapter 可先只实现部分接口」的扩展路径，缺能力报 `ProviderNotFound` 而非注册失败），组合根对每个 OJ 一次 `register(id, set)`；Service 查询只拿单项能力（`current_contest()?` 等一行转发），**禁止提供返回聚合体的 `current()`** —— 那会让 Service 拿到它不需要的三个能力，接口隔离从接口层面退化成约定层面
 - **`AdapterDeps` 只准 infra 依赖**：适配器工厂构造签名只接收 http_client / event_bus / **session_repo** / storage，**禁止把 Service 塞进 `AdapterDeps`**（与「插件只能访问 `plugin/api`、禁止直调内部 Service」同理 —— 适配器一旦反向依赖应用层，依赖边界彻底糊掉）。`session_repo` 是**仓库（infra 侧）**而非 Service：Provider 侧凭证轮换必须在拿到新 token 的当场显式落盘（见下一条），因此它需要的是「会话持久化能力」，不是认证业务逻辑。`AdapterFactory { id, build }` 的形状即 v1.0 插件 manifest 的雏形：将来把编译期工厂清单换成运行时扫描插件目录，上层（registry / context / Service）不用再改
 - **凭证轮换必须显式落盘，且 token 绝不进事件流**：HOJ 的 Refresh-Token 协议会在响应头里轮换凭证。旧实现让适配器发布**带真实 token** 的 `TokenRefreshed` 事件、由 `AuthService` 的同步订阅者代劳写盘 —— 既把凭证塞进公共事件流，又把持久性保证挂在事件投递时序上（消费者可能落后、可能不存在）。现在由适配器经 `SessionRepository::rotate_token` 在**当场显式写盘**（所有会话变更共用一把锁串行化，会话不存在返回 `Ok(false)` 不凭空创建；写入走 `write_string_atomic`），**仅在落盘成功后**才发布**只带 OJ 标识**的 `TokenRotated`（`Ok(false)`/`Err` 都不发布 —— 该事件的语义是「已轮换且已落盘」）；落盘失败只告警（HTTP 请求本身已成功，不能因落盘失败把它变成错误）

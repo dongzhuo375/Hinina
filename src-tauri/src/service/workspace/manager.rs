@@ -56,6 +56,12 @@ pub struct WorkspaceManager {
     /// 「要不要重启」，避免每次 `load_workspace` 都重置计时器，也避免「关掉再打开」
     /// 时无状态可依（旧实现用 `static AtomicBool` 做一次性懒启动，关掉后再也起不来）。
     auto_save_interval_secs: Mutex<Option<u64>>,
+    /// `find_or_create` 的串行化锁：扫描「已有工作区」与「创建新工作区」必须在
+    /// 同一临界区内完成——无锁时两个并发调用（同 contest+problem）会双双扫描
+    /// 未命中、各自建出互不覆盖的工作区（id 含时间戳+随机后缀，产生孤儿目录）。
+    /// 「同题一工作区」由后端结构保证，不依赖调用方的单飞纪律。
+    /// 锁序恒为「本锁 → current 写锁」（create/load 内部获取），无反向路径。
+    find_or_create_lock: Mutex<()>,
 }
 
 /// 工作区元数据，持久化在 workspace.json 中，避免从 workspace_id 字符串解析字段。
@@ -114,6 +120,7 @@ impl WorkspaceManager {
             revision: Arc::new(AtomicU64::new(0)),
             auto_save_handle: Mutex::new(None),
             auto_save_interval_secs: Mutex::new(None),
+            find_or_create_lock: Mutex::new(()),
         }
     }
 
@@ -667,6 +674,12 @@ impl WorkspaceManager {
         problem_id: &str,
         root_path: &str,
     ) -> AppResult<Workspace> {
+        // 扫描与创建同临界区（见字段注释）：无锁时并发两调用双双扫描未命中，
+        // 各自创建出同题的两个工作区
+        let _guard = self
+            .find_or_create_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // 扫描已有工作区，查找匹配的 workspace.json 元数据
         let ids = self.repo.list_workspace_ids().unwrap_or_default();
         for ws_id in &ids {

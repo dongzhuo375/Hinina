@@ -1454,6 +1454,41 @@ fn read_state_roundtrip_merges_and_dedupes() {
     );
 }
 
+/// 并发标记已读不得丢合并：多个线程同时各标 1 条 id，最终文件必须含全集。
+///
+/// 非确定性说明：`Storage` 是具体类型、无注入钩子，无法确定性编排读-写交错；
+/// 此处用 barrier + 多线程放大竞态窗口（每线程都做真实文件 I/O，锁缺失时
+/// 后写者覆盖前写者几乎必现）。结构性保证来自 `read_state_lock` 的单临界区。
+#[test]
+fn concurrent_mark_read_does_not_lose_merges() {
+    let (service, _stub, _dir) = make_service(StubMode::Ok);
+    let service = std::sync::Arc::new(service);
+    const THREADS: usize = 8;
+
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
+    let mut handles = Vec::new();
+    for i in 0..THREADS {
+        let service = std::sync::Arc::clone(&service);
+        let barrier = std::sync::Arc::clone(&barrier);
+        handles.push(std::thread::spawn(move || {
+            barrier.wait();
+            service
+                .mark_announcements_read("1011", "uid-1", &[format!("id-{i}")])
+                .expect("标记已读应成功");
+        }));
+    }
+    for handle in handles {
+        handle.join().expect("标记线程不应 panic");
+    }
+
+    let mut read = service
+        .get_read_announcement_ids("1011", "uid-1")
+        .expect("读取应成功");
+    read.sort();
+    let expected: Vec<String> = (0..THREADS).map(|i| format!("id-{i}")).collect();
+    assert_eq!(read, expected, "并发标记不得丢合并（丢即串行化缺失）");
+}
+
 #[test]
 fn read_state_corrupt_file_degrades_to_empty() {
     let (service, _stub, dir) = make_service(StubMode::Ok);

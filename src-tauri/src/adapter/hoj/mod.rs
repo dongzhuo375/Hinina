@@ -32,6 +32,8 @@ use crate::core::provider::submission::SubmissionProvider;
 use crate::core::repository::session_repo::SessionRepository;
 use crate::infra::http::HttpClient;
 
+use super::urlenc::percent_encode_component;
+
 use self::types::{
     map_status, AnnouncementVO, ApiResponse, ContestProblemVO, ContestRankDTO, ContestRankVO,
     ContestVO, JudgeCaseDTO, JudgeVO, LoginRequest, ProblemInfoVO, SubmitRequest, UserInfoVO,
@@ -785,7 +787,10 @@ impl ContestProvider for HOJAdapter {
     }
 
     async fn get_contest(&self, contest_id: &str) -> AppResult<Contest> {
-        let url = self.api_url(&format!("/get-contest-info?cid={}", contest_id));
+        // cid 先经 parse_cid 归一（口径与其余端点一致：非法 ID 报 Contest
+        // 而不是把原始字符串直接拼进 query）
+        let cid = Self::parse_cid(contest_id)?;
+        let url = self.api_url(&format!("/get-contest-info?cid={}", cid));
 
         let api_resp = self
             .get_json_authed::<ApiResponse<ContestVO>>(&url)
@@ -800,7 +805,8 @@ impl ContestProvider for HOJAdapter {
     }
 
     async fn list_contest_problems(&self, contest_id: &str) -> AppResult<Vec<ContestProblem>> {
-        let url = self.api_url(&format!("/get-contest-problem?cid={}", contest_id));
+        let cid = Self::parse_cid(contest_id)?;
+        let url = self.api_url(&format!("/get-contest-problem?cid={}", cid));
 
         let api_resp = self
             .get_json_authed::<ApiResponse<Vec<ContestProblemVO>>>(&url)
@@ -1047,10 +1053,14 @@ impl ContestProvider for HOJAdapter {
 #[async_trait]
 impl ProblemProvider for HOJAdapter {
     async fn get_problem(&self, contest_id: &str, problem_id: &str) -> AppResult<Problem> {
-        // problem_id 在比赛中对应 displayId（如 "A", "B"）
+        // problem_id 在比赛中对应 displayId（如 "A", "B"）；cid 同样先经
+        // parse_cid 归一，非法比赛 ID 在所有端点产出同一 Contest 变体；
+        // displayId 拼查询前经百分号编码（裸 `&`/`#` 会注入或截断 query）
+        let cid = Self::parse_cid(contest_id)?;
         let url = self.api_url(&format!(
             "/get-contest-problem-details?cid={}&displayId={}",
-            contest_id, problem_id
+            cid,
+            percent_encode_component(problem_id)
         ));
 
         let api_resp = self
@@ -1174,9 +1184,11 @@ impl SubmissionProvider for HOJAdapter {
     }
 
     async fn get_judgement(&self, submission_id: &str) -> AppResult<JudgementResult> {
+        // submitId 来自服务端响应的回传值，仍按约定编码：畸形值含 `&`/`#`
+        // 时不得注入伪参数或截断 query（与其余字符串插值位同一防线）
         let url = self.api_url(&format!(
             "/get-submission-detail?submitId={}",
-            submission_id
+            percent_encode_component(submission_id)
         ));
 
         // 走统一 GET 封装：带上 token（若已登录）、处理轮换、去 null 解析。
@@ -1229,7 +1241,10 @@ impl SubmissionProvider for HOJAdapter {
             .as_deref()
             .filter(|s| !s.is_empty())
         {
-            url.push_str(&format!("&problemID={}", display_id));
+            url.push_str(&format!(
+                "&problemID={}",
+                percent_encode_component(display_id)
+            ));
         }
         if let Some(status) = query.status {
             url.push_str(&format!("&status={}", status));
@@ -1261,7 +1276,10 @@ impl SubmissionProvider for HOJAdapter {
     }
 
     async fn get_submission_detail(&self, submit_id: &str) -> AppResult<SubmissionDetail> {
-        let url = self.api_url(&format!("/get-submission-detail?submitId={}", submit_id));
+        let url = self.api_url(&format!(
+            "/get-submission-detail?submitId={}",
+            percent_encode_component(submit_id)
+        ));
 
         // 与 get_judgement 同一端点，但投影为完整实体（含 code / errorMessage / judger）
         let api_resp = self
@@ -1278,7 +1296,10 @@ impl SubmissionProvider for HOJAdapter {
     }
 
     async fn get_submission_cases(&self, submit_id: &str) -> AppResult<SubmissionCases> {
-        let url = self.api_url(&format!("/get-all-case-result?submitId={}", submit_id));
+        let url = self.api_url(&format!(
+            "/get-all-case-result?submitId={}",
+            percent_encode_component(submit_id)
+        ));
 
         let api_resp = self
             .get_json_authed::<ApiResponse<types::JudgeCaseVO>>(&url)
