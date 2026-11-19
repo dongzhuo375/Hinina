@@ -1579,11 +1579,16 @@ fn already_registered_matcher_samples() {
 /// 产出不同错误形态），非法值也不得拼进 query。
 #[tokio::test]
 async fn invalid_contest_id_rejected_uniformly_across_endpoints() {
-    let server = LoopbackServer::start(vec![]).await; // 空脚本队列：任何请求都会被记为 500
+    // 脚本队列只放登录：submit / ensure_contest_access 的 require_token 前置
+    // 断言先于 parse_cid，需要会话才能到达 cid 校验；队列耗尽后任何意外
+    // 出网都被记为 500（变体不再是 Contest + 零出网断言，双重判红）
+    let server = LoopbackServer::start(vec![login_ok("jwt-cid")]).await;
     let fx = fixture(server.url());
+    fx.adapter.login("alice", "pw").await.expect("登录应成功");
+    let baseline = server.requests().len();
 
-    // 三个端点是本用例的回归面；其余消费 cid 的端点（rank/公告/状态/提交/报名）
-    // 经实现通读确认同样先走 parse_cid，但未逐端点设接线回归（回退不会红）
+    // 全部九个消费 cid 的端点逐端点接线回归：回退任一端点的 parse_cid
+    // （裸 cid 出网）本用例必红，不依赖实现通读确认
     let results: Vec<crate::core::error::AppError> = vec![
         fx.adapter
             .get_contest("1001abc")
@@ -1597,6 +1602,45 @@ async fn invalid_contest_id_rejected_uniformly_across_endpoints() {
             .get_problem("../inject", "A")
             .await
             .expect_err("get_problem 应拒绝非法比赛 ID"),
+        fx.adapter
+            .get_contest_rank(
+                "abc",
+                &crate::core::entity::rank::RankQuery {
+                    current_page: 1,
+                    limit: 50,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("get_contest_rank 应拒绝非法比赛 ID"),
+        fx.adapter
+            .list_announcements("1001abc", 1, 20)
+            .await
+            .expect_err("list_announcements 应拒绝非法比赛 ID"),
+        // problem_ids 为空会在 parse_cid 之前短路返回，必须传非空列表
+        fx.adapter
+            .get_user_problem_status("1.2.3", &["1000".to_string()])
+            .await
+            .expect_err("get_user_problem_status 应拒绝非法比赛 ID"),
+        fx.adapter
+            .submit("9x", "1000", "A", "C++", "int main() {}")
+            .await
+            .expect_err("submit 应拒绝非法比赛 ID"),
+        fx.adapter
+            .ensure_contest_access("../cid", Some("pw"))
+            .await
+            .expect_err("ensure_contest_access 应拒绝非法比赛 ID"),
+        fx.adapter
+            .list_contest_submissions(&crate::core::entity::submission::SubmissionQuery {
+                contest_id: "12.5".into(),
+                current_page: 1,
+                limit: 20,
+                only_mine: false,
+                problem_display_id: None,
+                status: None,
+            })
+            .await
+            .expect_err("list_contest_submissions 应拒绝非法比赛 ID"),
     ];
     for err in &results {
         assert!(
@@ -1605,11 +1649,11 @@ async fn invalid_contest_id_rejected_uniformly_across_endpoints() {
             err
         );
     }
-    assert!(
-        server.requests().is_empty(),
-        "非法比赛 ID 必须在出网前拒绝（实得请求: {:?})",
-        server
-            .requests()
+    assert_eq!(
+        server.requests().len(),
+        baseline,
+        "非法比赛 ID 必须在出网前拒绝（登录后不应有新请求，实得: {:?})",
+        server.requests()[baseline..]
             .iter()
             .map(|r| r.path.clone())
             .collect::<Vec<_>>()
