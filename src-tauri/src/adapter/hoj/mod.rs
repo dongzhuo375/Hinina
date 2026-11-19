@@ -32,6 +32,8 @@ use crate::core::provider::submission::SubmissionProvider;
 use crate::core::repository::session_repo::SessionRepository;
 use crate::infra::http::HttpClient;
 
+use super::urlenc::percent_encode_component;
+
 use self::types::{
     map_status, AnnouncementVO, ApiResponse, ContestProblemVO, ContestRankDTO, ContestRankVO,
     ContestVO, JudgeCaseDTO, JudgeVO, LoginRequest, ProblemInfoVO, SubmitRequest, UserInfoVO,
@@ -1052,11 +1054,13 @@ impl ContestProvider for HOJAdapter {
 impl ProblemProvider for HOJAdapter {
     async fn get_problem(&self, contest_id: &str, problem_id: &str) -> AppResult<Problem> {
         // problem_id 在比赛中对应 displayId（如 "A", "B"）；cid 同样先经
-        // parse_cid 归一，非法比赛 ID 在所有端点产出同一 Contest 变体
+        // parse_cid 归一，非法比赛 ID 在所有端点产出同一 Contest 变体；
+        // displayId 拼查询前经百分号编码（裸 `&`/`#` 会注入或截断 query）
         let cid = Self::parse_cid(contest_id)?;
         let url = self.api_url(&format!(
             "/get-contest-problem-details?cid={}&displayId={}",
-            cid, problem_id
+            cid,
+            percent_encode_component(problem_id)
         ));
 
         let api_resp = self
@@ -1235,7 +1239,10 @@ impl SubmissionProvider for HOJAdapter {
             .as_deref()
             .filter(|s| !s.is_empty())
         {
-            url.push_str(&format!("&problemID={}", display_id));
+            url.push_str(&format!(
+                "&problemID={}",
+                percent_encode_component(display_id)
+            ));
         }
         if let Some(status) = query.status {
             url.push_str(&format!("&status={}", status));

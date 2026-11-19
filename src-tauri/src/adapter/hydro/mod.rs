@@ -51,6 +51,8 @@ use crate::core::provider::submission::SubmissionProvider;
 use crate::infra::cache::TtlCache;
 use crate::infra::http::HttpClient;
 
+use super::urlenc::percent_encode_component;
+
 use self::types::{
     ContestDetailVO, ContestListVO, ContestProblemListVO, PdocVO, ProblemDetailVO, RdocVO,
     RecordDetailVO, RecordListVO, ScoreboardVO, SubmitVO, TdocVO, UserBriefVO,
@@ -203,23 +205,6 @@ fn now_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
-}
-
-/// URL 插值段的百分号编码（RFC 3986 unreserved 之外的字节全部转义）。
-///
-/// tid/rid/uid/pid 等标识是字符串，直接 `format!` 进路径/查询时，含 `&`/`#`
-/// 的值会注入或截断 query，含空格的 URL 会被 reqwest 拒绝解析。正常标识
-/// （hex/数字/字母）全部落在 unreserved 集合内，编码恒等，不改变现有线上形态。
-fn percent_encode_component(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{:02X}", byte));
-        }
-    }
-    out
 }
 
 impl HydroAdapter {

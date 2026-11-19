@@ -1617,3 +1617,44 @@ async fn invalid_contest_id_rejected_uniformly_across_endpoints() {
 
     server.shutdown();
 }
+
+/// 线上断言：题目筛选值（problemID）与题目详情的 displayId 拼查询串前必须
+/// 百分号编码——裸 `&`/`#` 会注入或截断 query（与 Hydro 侧同一防线，
+/// 共用 `adapter::urlenc::percent_encode_component`）。
+#[tokio::test]
+async fn submission_list_and_problem_detail_percent_encode_filter_values() {
+    let server = LoopbackServer::start(vec![
+        page_ok(),
+        // 题目详情响应体最小化：断言目标在请求行，解析结果不参与判据
+        ScriptedResponse::json(r#"{"status":200,"msg":"success","data":{}}"#),
+    ])
+    .await;
+    let fx = fixture(server.url());
+
+    let query = crate::core::entity::submission::SubmissionQuery {
+        contest_id: "1001".into(),
+        current_page: 1,
+        limit: 20,
+        only_mine: true,
+        problem_display_id: Some("A&B".into()),
+        status: None,
+    };
+    fx.adapter
+        .list_contest_submissions(&query)
+        .await
+        .expect("列表应成功");
+    assert!(
+        server.requests()[0].path.contains("problemID=A%26B"),
+        "题目筛选值必须编码，实得 {}",
+        server.requests()[0].path
+    );
+
+    let _ = fx.adapter.get_problem("1001", "A#B").await;
+    assert!(
+        server.requests()[1].path.contains("displayId=A%23B"),
+        "displayId 必须编码，实得 {}",
+        server.requests()[1].path
+    );
+
+    server.shutdown();
+}
