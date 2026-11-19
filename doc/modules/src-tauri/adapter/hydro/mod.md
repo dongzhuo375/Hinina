@@ -105,6 +105,7 @@ Hydro（上游 Hydro OJ，`packages/hydrooj`）适配器，实现 `AuthProvider`
 - **共用解析入口**（`HydroResponse::parse_value`，GET 通道直接依赖它）：错误包络 → `Auth`、登录重定向 → `Auth`、非 JSON → `Serialization`（消息含「不是合法 JSON」）、成功载荷透传（并已 `strip_nulls`）
 - **工厂契约**：`HydroAdapter::ID == "Hydro"` 且 `session_file() == "Hydro.json"`；`FACTORY.id()` 与适配器 ID 一致；四能力齐备（通用断言只查「至少一个能力」，完整能力在此显式锁定，避免漏装能力拖到运行期 `ProviderNotFound`）
 - 内部状态：`restore_token`（空串不回注）/`clear_identity`、顺序表缓存（空表不写 + 写入即命中 + 键隔离；过期语义归 infra `cache_tests.rs`）、URL 拼接
-- **提交列表身份探测三态**（loopback 契约测试）：探测网络瞬断 → `Network` 且不发出 `/record` 请求（折成 `Auth` 会被 sessionGuard 误踢删会话）；服务端明确匿名（`_id == 0`）→ `Auth`；探测成功 → `uidOrName` 携真实 uid，且身份缓存让第二次列表不再探测（请求计数锁定）
+- **提交列表身份探测三态**（loopback 契约测试）：探测网络瞬断 → `Network` 且不发出 `/record` 请求、错误消息的「Hydro 用户上下文」环节前缀恰好一次（探测函数内部已加，列表侧再包会叠加；折成 `Auth` 会被 sessionGuard 误踢删会话）；服务端明确匿名（`_id == 0`）→ `Auth`；探测成功 → `uidOrName` 携真实 uid，且身份缓存让第二次列表不再探测（请求计数锁定）
+- **提交列表 URL 插值编码**（loopback 契约测试 `submission_list_percent_encodes_uid_and_problem_filter`）：uid 与题目筛选值的特殊字符以编码形态到达请求行；编码函数 `adapter::urlenc::percent_encode_component` 的恒等/转义单测在 `adapter/tests/urlenc_tests.rs`（见 `urlenc.md`）
 
 提交历史将rdoc.uid保留为宿主私有owner_id，username继续按displayName→uname显示。插件校验稳定uid，不依赖udict或展示名与登录名一致；fixture覆盖两种情况。

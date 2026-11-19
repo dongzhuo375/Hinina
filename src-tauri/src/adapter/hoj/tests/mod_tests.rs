@@ -1582,8 +1582,8 @@ async fn invalid_contest_id_rejected_uniformly_across_endpoints() {
     let server = LoopbackServer::start(vec![]).await; // 空脚本队列：任何请求都会被记为 500
     let fx = fixture(server.url());
 
-    // 三个端点覆盖 trait 的三个能力面；其余端点（rank/公告/状态/提交/报名）
-    // 由 parse_cid 的单元测试与既有契约测试锁定
+    // 三个端点是本用例的回归面；其余消费 cid 的端点（rank/公告/状态/提交/报名）
+    // 经实现通读确认同样先走 parse_cid，但未逐端点设接线回归（回退不会红）
     let results: Vec<crate::core::error::AppError> = vec![
         fx.adapter
             .get_contest("1001abc")
