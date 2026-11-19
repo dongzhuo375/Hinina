@@ -423,7 +423,10 @@ impl AppConfig {
                 || instance.id.contains("..")
                 || instance.id.contains(':')
             {
-                return Err(format!("OJ 实例 id 不得包含 /、\\、.. 或 :：{}", instance.id));
+                return Err(format!(
+                    "OJ 实例 id 不得包含 /、\\、.. 或 :：{}",
+                    instance.id
+                ));
             }
             if !seen.insert(instance.id.trim().to_string()) {
                 return Err(format!("OJ 实例 id 重复: {}", instance.id));
