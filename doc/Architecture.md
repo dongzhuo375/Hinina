@@ -382,7 +382,9 @@ src/
 │   ├── rank/
 │   │   ├── RankToolbar.vue               # 榜单工具条（服务端 keyword 搜索 300ms 防抖 + 分组 tab + 赛制图例 + OI 计分规则徽章）
 │   │   ├── ScoreboardTable.vue           # 榜单表格（粘性表头/我的行/前两列，ACM 与 OI 分流渲染）
-│   │   └── RankCell.vue                  # ACM 单元格（一血/通过/未通过/封榜/赛后提交/未作答）
+│   │   ├── RankCell.vue                  # ACM 单元格（一血/通过/未通过/封榜/赛后提交/未作答）
+│   │   └── __tests__/
+│   │       └── ScoreboardTable.spec.ts   # 置顶我的行 + 正文纯名次序回归（HOJ 前置副本形态/第 2 页形态/未登录）
 │   └── common/
 │       ├── PageHeading.vue               # 赛场通用页头（编号/副标题眉标 + 主标题 + description 插槽 + 右侧操作插槽；样式取自 styles/contest.css）
 │       ├── PagePager.vue                 # 极简分页器（评测页/榜单页共用：无边框无底色，当前页加粗 + 木色极细下划线，上下页纯文字悬停转黑）

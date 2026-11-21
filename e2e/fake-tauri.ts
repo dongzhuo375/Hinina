@@ -167,9 +167,18 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       ? { errorNum: 0, tryNum: 2, isAc: false, isFirstAc: false, acTime: null, isAfterContest: false, score: null }
       : { errorNum: 0, tryNum: null, isAc: true, isFirstAc: n0 === 1, acTime: 300 + n0 * 10, isAfterContest: false, score: null }
     return {
-      // 当前登录用户是 uid 1（e2e_player）：其名次与 team_07 对调成 7，保证
-      // 「我的名次 ≠ 1」——置顶我 + 正文从 1 起的形态只有在这种 fixture 下才可观测
-      rank: n0 === 1 ? 7 : n0 === 7 ? 1 : n0 === 13 ? -1 : n0,
+      // 当前登录用户是 uid 1（e2e_player）：rankTeams ≥ 7 时其名次与 team_07 对调
+      // （我=7、team_07=1），保证「我的名次 ≠ 1」——置顶我 + 正文从 1 起的形态只有
+      // 在这种 fixture 下才可观测；小榜没有 team_07 可换，保持自然名次（默认 1 队
+      // 榜单若 rank=7 是语义错乱的 fixture，且波及全部非榜单 spec 的默认进场）
+      rank:
+        rankTeamCount >= 7 && (n0 === 1 || n0 === 7)
+          ? n0 === 1
+            ? 7
+            : 1
+          : n0 === 13
+            ? -1
+            : n0,
       uid: String(n0),
       username: n0 === 1 ? 'e2e_player' : `team_${String(n0).padStart(2, '0')}`,
       realname: '', nickname: '', school: '', gender: '', avatar: '',

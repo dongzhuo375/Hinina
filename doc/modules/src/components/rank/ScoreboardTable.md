@@ -33,12 +33,6 @@
 
 - `views/RankView.vue` — 表格主体（分页/刷新状态底栏在 RankView）
 
-## 测试
-
-`src/components/rank/__tests__/ScoreboardTable.spec.ts`（jsdom 挂载，pinia store 供数）锁定：
-置顶我的行 + 正文纯名次序（HOJ 前置副本形态下首行 `#名次`、正文从 1 起、我在自然位置）、
-第 2 页形态（前置副本唯一出现 → 只渲染置顶我）、未登录无置顶行。
-
 ## 逻辑流程
 
 ```
@@ -76,3 +70,10 @@ OI 分支：oiCellsByUid 按行预计算 resolveOiRankCell(cell, timeInfo[displa
   前 3 名徽章由琥珀色圆角胶囊改为 `--color-pending-*` 方角标签，字号统一 `text-xs`、
   去掉 `shadow-xs`；**气球色回退调色板整体换成低饱和大地色系**（原高饱和色与中性主题冲突）。
   逻辑与不变量（粘性底、内阴影分隔线、OI 独立判档、预计算）均未变。
+
+## 测试
+
+`src/components/rank/__tests__/ScoreboardTable.spec.ts`（jsdom 挂载，经共享
+`test-support/view-mount` 供 pinia store 数）锁定：置顶我的行 + 正文纯名次序
+（HOJ 前置副本形态下首行 `#名次`、正文从 1 起、我在自然位置）、第 2 页形态
+（前置副本唯一出现 → 只渲染置顶我）、未登录无置顶行。

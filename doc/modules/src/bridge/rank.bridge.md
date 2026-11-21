@@ -35,5 +35,5 @@ rank.service.getRank → getContestRank(query)
 设计要点：
 
 - 返回的 records 可能含服务端前置的「当前用户/关注用户」副本（HOJ §9.2），
-  **去重与参与人数修正由 `utils/rank` 的纯函数处理**，Bridge 层只做 IPC——
+  **副本剔除、去重与参与人数修正由 `utils/rank` 的纯函数处理**，Bridge 层只做 IPC——
   保持桥接层无逻辑，跨端契约的形状差异全部收敛在 types 与 utils。

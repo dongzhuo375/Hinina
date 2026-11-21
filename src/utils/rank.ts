@@ -148,9 +148,11 @@ export function resolveMyRow(
  *    别页），仅凭窗口判据会漏剔。
  * 2. **窗口判据（短页回退）**：末页行数不足 `size`，结构判据无从触发；此时副本携带
  *    「我」的真实名次，自然行不在本页名次窗口 `[(current-1)*size+1, current*size]`
- *    内即判副本。打星行 `rank === -1` 无自然位置，天然落在窗口外，同样按前置副本
- *    处理。关键词过滤会在全量排名上重排再分页，重排后的短页窗口可能对不上（已知
- *    残余）；关键词态下位于非首条的自然行不受影响。
+ *    内即判副本。窗口判据**仅适用于有名次的行（rank ≥ 1）**——打星行 `rank === -1`
+ *    无自然位置，rank 本身不构成副本证据（无前置服务端的榜首打星自然行会被误剔，
+ *    见 Hydro），仅结构判据可剔；HOJ 星队的短页前置副本因此成为已知残余。关键词
+ *    过滤会在全量排名上重排再分页，重排后的短页窗口可能对不上（已知残余）；
+ *    关键词态下位于非首条的自然行不受影响。
  *
  * 仅供 {@link stripPrependedSelfRow} 与 {@link resolveParticipantCountFromPage}
  * 共用，两处判据必须保持一致。
@@ -164,6 +166,7 @@ function isLoneSelfRowPrepended(
   const front = records[0]
   if (!front || front.uid !== myUid) return false
   if (size > 0 && records.length > size) return true
+  if (front.rank < 1) return false
   const windowStart = (current - 1) * size + 1
   const windowEnd = current * size
   return front.rank < windowStart || front.rank > windowEnd
@@ -177,7 +180,8 @@ function isLoneSelfRowPrepended(
  * 把它保下来并把我的自然位置行丢掉——名次列于是从「我的名次」开始而不是 1。规则：
  * - myUid 出现 ≥2 次：首条必为前置副本（服务端页行里还有自然位置行），剔除首条；
  * - myUid 恰好出现 1 次：按 {@link isLoneSelfRowPrepended} 两级判据剔除（第 2 页起
- *   前置副本是唯一出现：满页看 `length > size` 结构证据，短页回退名次窗口）；
+ *   前置副本是唯一出现：满页看 `length > size` 结构证据，短页回退名次窗口——仅
+ *   rank ≥ 1 的行适用，打星行需结构证据）；
  * - uid 为空 / 未出现：原样返回。
  *
  * 必须传入**去重前**的原始 records：`dedupeRankRows` 会先把自然位置行丢掉，届时
@@ -241,8 +245,8 @@ export function formatPenaltyMinutes(totalTimeSeconds: number): string {
  *   不构成重复），需要额外减 1。判据与 {@link isLoneSelfRowPrepended} 两级一致：
  *   myUid 恰好出现一次、位于 records[0]，满页 `length > size` 结构性证明副本存在
  *   （打星占位/并列名次会让副本 rank 落进本页名次窗口，仅看窗口会漏减），短页回退
- *   「rank 不落在本页名次窗口内」（打星行 `rank === -1` 自然位置无定义，同样按
- *   前置副本处理）。
+ *   「rank 不落在本页名次窗口内」——仅 rank ≥ 1 的行适用，打星行 rank 本身不构成
+ *   副本证据，需结构判据（HOJ 星队的短页前置副本为已知残余）。
  * `total` 缺失（<=0）时才退回最大 rank 口径。
  *
  * @param myUid 当前登录用户 uid（null 表示未登录/取不到，跳过前置副本修正）

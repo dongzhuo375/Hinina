@@ -61,7 +61,8 @@ interface BodyRow {
  * 该副本（`stripPrependedSelfRow`），因此 `visibleRows` 是纯名次序（1、2、3…），
  * 翻到任意页都能取到 `myRow`，固定住它选手才不用在几百行里找自己；它的自然位置行
  * 照常渲染，置顶与自然位置并存是刻意设计（与 Codeforces 等榜单的浮标行一致）——
- * 此前置顶与正文首行是同一份前置副本，名次列才会从「我的名次」而非 1 开始。
+ * 不剔除的话，置顶行与正文首行会是同一份前置副本，名次列就会从「我的名次」而非
+ * 1 开始。
  */
 const bodyRows = computed<BodyRow[]>(() => {
   const list: BodyRow[] = rankStore.visibleRows.map((row) => ({ row, isMe: false }))

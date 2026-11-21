@@ -72,7 +72,8 @@ loadRank(contestId, uid, page)
       2. myRow = resolveMyRow(原始 records, uid) // 从未去重的 records 定位——前置副本正是它
                                                // 存在的意义，任意页都能取到「我的行」
       3. participants = resolveParticipantCountFromPage(page, uid)
-                                               // total − 本页重复行数 − 我的窗外首条前置副本
+                                               // total − 本页重复行数 − 我的前置副本
+                                               // （满页结构判据 / 短页窗口回退，见 utils/rank）
       4. lastUpdated = Date.now()
   失败 → 仅最新请求先把 current 回退到请求前页，再记录 error + rethrow
          （rows 保留上一次成功数据时不能留下新页码）；过期失败静默丢弃
@@ -136,7 +137,8 @@ stopLive → livePolling.stop() + isLive = false + 清空查询去抖 memo
   比闪成空态/错误态更可用；错误仍写入 `error` 供 UI 提示。
 - **参与人数不用分页 `total` 原值**：服务端把当前用户/关注用户前置复制进 records，
   `total` 随之偏大（HOJ §9.2）；`applyPage` 统一改用
-  `resolveParticipantCountFromPage(page, uid)` = `total − 本页重复行数 − 我的窗外首条前置副本`
+  `resolveParticipantCountFromPage(page, uid)` = `total − 本页重复行数 − 我的前置副本`
+  （两级判据见 `utils/rank`：满页 length > size 结构判据、短页窗口回退仅 rank ≥ 1）
   修正（口径与残余误差详见 `utils/rank.md`），视图层不再各自推算。
 - `setKeyword` 后服务端会在**全量排名**上重新过滤再分页，`total` 随关键词变化（HOJ §9.4），
   因此必须回到第 1 页。

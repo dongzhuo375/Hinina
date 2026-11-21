@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest'
-import { createApp, nextTick } from 'vue'
-import type { App } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import type { Pinia } from 'pinia'
+import { afterEach, describe, expect, it } from 'vitest'
 import { useContestStore } from '@/stores/contestStore'
 import { useRankStore } from '@/stores/rankStore'
 import type { Contest } from '@/types/contest'
 import type { ContestRankPage, ContestRankRow } from '@/types/rank'
 import ScoreboardTable from '@/components/rank/ScoreboardTable.vue'
+import { mountView, settleView } from '@/test-support/view-mount'
+import type { Mounted } from '@/test-support/view-mount'
 
 /**
  * 回归锁：HOJ 会把当前登录用户前置复制到 records（文档 §9.2），rankStore 装配时
@@ -42,43 +40,37 @@ function makePage(records: ContestRankRow[], total: number, current = 1): Contes
   return { records, total, size: 50, current, pages: Math.max(1, Math.ceil(total / 50)) }
 }
 
-let app: App | undefined
-let pinia: Pinia
-let host: HTMLDivElement
+let view: Mounted | undefined
 
-async function mount() {
-  host = document.createElement('div')
-  document.body.appendChild(host)
-  app = createApp(ScoreboardTable)
-  app.use(pinia)
-  app.mount(host)
-  await nextTick()
+/// 挂载组件（共享 helper 供 pinia）后写入比赛上下文与榜单数据，返回榜单 store；
+/// store 是响应式的，置数后再 settle 即可驱动重渲染
+async function mount(): Promise<ReturnType<typeof useRankStore>> {
+  view = await mountView(ScoreboardTable)
+  const contestStore = useContestStore()
+  contestStore.contest = { id: 'c1', contestType: 0, rankShowName: 'username' } as Contest
+  contestStore.problems = []
+  const rank = useRankStore()
+  await settleView()
+  return rank
 }
+
+afterEach(() => {
+  view?.unmount()
+  view = undefined
+})
 
 /// 每个 tbody 行首格（名次列）的文本：置顶行带「我」徽章；压缩空白便于断言
 function rankCellTexts(): string[] {
-  return [...host.querySelectorAll('tbody tr')].map(
+  return [...view!.host.querySelectorAll('tbody tr')].map(
     (tr) => tr.querySelector('td')?.textContent?.replace(/\s+/g, '') ?? '',
   )
 }
 
-beforeEach(() => {
-  pinia = createPinia()
-  setActivePinia(pinia)
-  const contestStore = useContestStore()
-  contestStore.contest = { id: 'c1', contestType: 0, rankShowName: 'username' } as Contest
-  contestStore.problems = []
-  return () => {
-    app?.unmount()
-    host.remove()
-  }
-})
-
 describe('ScoreboardTable — 置顶我的行 + 纯名次序正文', () => {
   it('HOJ 前置副本形态：首行为置顶我（#名次），正文严格按名次 1 起、我在自然位置', async () => {
+    const rank = await mount()
     const me = makeRow({ uid: MY_UID, rank: 3, username: 'me' })
     // 服务端形态：me 前置副本 + 自然位置行同页（rank 3 在第 1 页窗口 [1,50] 内）
-    const rank = useRankStore()
     rank.applyPage(
       makePage([
         me,
@@ -89,7 +81,7 @@ describe('ScoreboardTable — 置顶我的行 + 纯名次序正文', () => {
       ], 120),
       MY_UID,
     )
-    await mount()
+    await settleView()
 
     // 名次列序列：置顶我 #3 → 1 → 2 → 3(自然位置) → 4。
     // 若前置副本未被剔除，此处会渲染成 我#3 → #3 → 1 → 2 → 4（首行名次 ≠ 1）
@@ -100,8 +92,8 @@ describe('ScoreboardTable — 置顶我的行 + 纯名次序正文', () => {
   })
 
   it('第 2 页形态：前置副本是唯一出现 → 只渲染置顶我，正文从本页首名次开始', async () => {
+    const rank = await mount()
     const me = makeRow({ uid: MY_UID, rank: 42, username: 'me' })
-    const rank = useRankStore()
     rank.applyPage(
       makePage(
         [me, makeRow({ uid: 'u51', rank: 51, username: 'dave' }), makeRow({ uid: 'u52', rank: 52, username: 'erin' })],
@@ -110,13 +102,13 @@ describe('ScoreboardTable — 置顶我的行 + 纯名次序正文', () => {
       ),
       MY_UID,
     )
-    await mount()
+    await settleView()
 
     expect(rankCellTexts()).toEqual(['我#42', '51', '52'])
   })
 
   it('未登录（无 myRow）：正文即纯名次序，无置顶行', async () => {
-    const rank = useRankStore()
+    const rank = await mount()
     rank.applyPage(
       makePage([
         makeRow({ uid: 'u1', rank: 1, username: 'alice' }),
@@ -124,7 +116,7 @@ describe('ScoreboardTable — 置顶我的行 + 纯名次序正文', () => {
       ], 2),
       null,
     )
-    await mount()
+    await settleView()
 
     expect(rankCellTexts()).toEqual(['1', '2'])
   })

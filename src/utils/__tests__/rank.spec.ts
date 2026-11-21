@@ -304,10 +304,22 @@ describe('stripPrependedSelfRow — 剔除服务端前置的「当前用户」�
     expect(stripped[1]).toBe(me)
   })
 
-  it('打星我（rank=-1）单条出现在首条 → 剔除；与自然位置打星行同页 → 副本剔除、自然行保留', () => {
-    const lone = [makeRow({ uid: 'me', rank: -1 }), makeRow({ uid: 'u1', rank: 1 })]
-    expect(strip(lone, 'me').map((r) => r.uid)).toEqual(['u1'])
+  it('打星我（rank=-1）短页单条在首条 → 保留（rank 不构成副本证据：Hydro 榜首打星自然行不被误剔）', () => {
+    // Hydro 无前置服务端、单页 length == size：榜首打星自然行仅凭 rank=-1 不可判别，
+    // 短页无结构证据 → 不剔（HOJ 星队的短页前置副本为已知残余，仅结构判据可剔）
+    const rows = [makeRow({ uid: 'me', rank: -1 }), makeRow({ uid: 'u1', rank: 1 })]
+    expect(strip(rows, 'me').map((r) => r.uid)).toEqual(['me', 'u1'])
+  })
 
+  it('满页上打星前置副本唯一出现 → 结构判据剔除（HOJ 星队跨页形态）', () => {
+    const pageRows = Array.from({ length: 50 }, (_, i) => makeRow({ uid: `u${i + 1}`, rank: i + 1 }))
+    const rows = [makeRow({ uid: 'me', rank: -1 }), ...pageRows]
+    const stripped = strip(rows, 'me', 2)
+    expect(stripped).toHaveLength(50)
+    expect(stripped.every((r) => r.uid !== 'me')).toBe(true)
+  })
+
+  it('打星我与自然位置打星行同页出现 → 副本剔除、自然行保留', () => {
     const me = makeRow({ uid: 'me', rank: -1 })
     const both = [me, makeRow({ uid: 'u1', rank: 1 }), { ...me }]
     expect(strip(both, 'me').map((r) => r.uid)).toEqual(['u1', 'me'])
@@ -392,8 +404,10 @@ describe('resolveParticipantCountFromPage', () => {
   })
 
   // 口径修正说明：旧口径只做「total − 本页重复数」，当「我」的自然名次不在本页时
-  // 前置副本不构成重复，分母会偏大 1。新口径额外识别「单条出现且 rank 不在本页
-  // 名次窗口内」的前置副本并再减 1（含打星 myRow，rank=-1 无自然位置）。
+  // 前置副本不构成重复，分母会偏大 1。新口径按两级判据识别「单条出现且位于
+  // records[0]」的前置副本并再减 1：满页 length > size 结构判据（兜住打星占位/
+  // 并列名次的 rank-位置错位），短页回退「rank 不在本页名次窗口内」——仅 rank ≥ 1
+  // 的行适用，打星 rank=-1 不构成证据（HOJ 星队短页副本为已知残余）。
 
   it('用 total 减去本页重复行数修正参与人数（服务端会前置复制当前用户）', () => {
     // total=361 含 1 条前置副本；本页 me 出现两次（副本 + 自然行）→ 修正为 360
@@ -424,13 +438,16 @@ describe('resolveParticipantCountFromPage', () => {
     expect(resolveParticipantCountFromPage(page(rows, 361), 'me')).toBe(360)
   })
 
-  it('打星 myRow（rank=-1，自然位置无定义）→ 额外减 1', () => {
+  it('打星 myRow（rank=-1）短页单条不构成副本证据 → 不减（Hydro 榜首打星自然行不被误减）', () => {
+    // 短页（2 行 < size 50）无结构证据；rank=-1 无自然位置、不构成判据 → 视为自然行
+    // （HOJ 星队的短页前置副本为已知残余，分母此处偏大 1）
     const rows = [makeRow({ uid: 'me', rank: -1 }), makeRow({ uid: 'u1', rank: 1 })]
-    expect(resolveParticipantCountFromPage(page(rows, 101), 'me')).toBe(100)
+    expect(resolveParticipantCountFromPage(page(rows, 101), 'me')).toBe(101)
   })
 
-  it('myUid 单条出现且 rank 恰在本页名次窗口内 → 视为自然行，不额外减', () => {
-    // 第 2 页窗口 [51,100]，me rank=60 只出现一次 → 服务端未前置副本，total 未因我偏大
+  it('短页上单条出现在首条且 rank 恰在本页名次窗口内 → 视为自然行，不额外减', () => {
+    // 短页（2 行 < size 50）无结构证据；第 2 页窗口 [51,100]，me rank=60 有名次且
+    // 在窗口内 → 自然行，total 未因我偏大
     const rows = [makeRow({ uid: 'me', rank: 60 }), makeRow({ uid: 'u1', rank: 51 })]
     expect(resolveParticipantCountFromPage(page(rows, 120, 2), 'me')).toBe(120)
   })
