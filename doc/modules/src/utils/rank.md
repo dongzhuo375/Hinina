@@ -134,4 +134,4 @@ score >= 100 → full（满分）；0 < score < 100 → partial（部分分）�
 
 ## 测试
 
-`src/utils/__tests__/rank.spec.ts`（71 例）锁定：ACM 单元格规则（AC 行 errorNum+1、after-ac 加 `*` 且优先于 first-ac、封榜行优先于 wa、acTime 脏数据渲染 `--:--`）、时间/罚时格式化与非法值占位、显示名三级回退、打星行判定优先级、uid 去重不改入参、前置副本剔除（同页出现剔首条留自然行、窗外唯一出现剔除、打星占位 rank-位置错位的满页结构判据剔除、短页窗口回退剔除、短页窗内首条视为自然行保留、非首条保留、打星我、uid 空/未出现、不改入参）、参与人数口径（total−重复行、我的窗外首条前置副本额外减 1、打星 myRow 减 1、窗口边界、短页恰在窗口内不减、非首条不减、rank-位置错位满页结构判据减 1、多关注用户副本的捕获与已知残余误差、不退化为本页最大 rank、total 缺失退回最大 rank）、全量快照纯函数（mergeRankPages 跨页去重/首次出现优先/不改入参、filterRankRowsByGroup 三档判据、paginateRankRows 切片/钳位/越界/不分页边界）、OI 档位与 timeInfo 毫秒换算。
+`src/utils/__tests__/rank.spec.ts`（73 例）锁定：ACM 单元格规则（AC 行 errorNum+1、after-ac 加 `*` 且优先于 first-ac、封榜行优先于 wa、acTime 脏数据渲染 `--:--`）、时间/罚时格式化与非法值占位、显示名三级回退、打星行判定优先级、uid 去重不改入参、前置副本剔除（同页出现剔首条留自然行、窗外唯一出现剔除、打星占位 rank-位置错位的满页结构判据剔除、短页窗口回退剔除、短页窗内首条视为自然行保留、非首条保留、打星我、uid 空/未出现、不改入参）、参与人数口径（total−重复行、我的窗外首条前置副本额外减 1、打星 myRow 短页单条不减（rank 不构成证据，HOJ 星队短页副本为残余）、满页打星副本结构判据减 1、窗口边界、短页恰在窗口内不减、非首条不减、rank-位置错位满页结构判据减 1、多关注用户副本的捕获与已知残余误差、不退化为本页最大 rank、total 缺失退回最大 rank）、全量快照纯函数（mergeRankPages 跨页去重/首次出现优先/不改入参、filterRankRowsByGroup 三档判据、paginateRankRows 切片/钳位/越界/不分页边界）、OI 档位与 timeInfo 毫秒换算。

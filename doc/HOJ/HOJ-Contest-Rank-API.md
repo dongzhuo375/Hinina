@@ -461,7 +461,7 @@ CONTEST_RANK_CONCERNED_{contestID}
 ## 9. 客户端实现注意事项
 
 1. **必须登录才能看内榜**：`POST /api/get-contest-rank` 是 `@RequiresAuthentication`，客户端需始终带 `Authorization` 头；建议对 401 做统一跳转登录处理。
-2. **`total` 包含前置条目**：服务端会把「当前登录用户」和「关注列表用户」复制一份插到 `records` 最前面，因此 `total` 会略大于真实人数，且第 1 页可能出现重复行。客户端去重时建议按 `uid` 去重，不要用 `total` 推算真实人数（需要真实人数时以最后一页的 `rank` 最大值为准，或忽略打星 `-1`）。
+2. **`total` 包含前置条目**：服务端会把「当前登录用户」和「关注列表用户」复制一份插到 `records` 最前面，因此 `total` 会略大于真实人数，且第 1 页可能出现重复行（Hinina 实现口径：副本**每页**都会前置，与自然行同页即成重复，不限第 1 页——剔除与人数修正见前端 `utils/rank.stripPrependedSelfRow`）。客户端去重时建议按 `uid` 去重，不要用 `total` 推算真实人数（需要真实人数时以最后一页的 `rank` 最大值为准，或忽略打星 `-1`）。
 3. **`forceRefresh` 不是万能的**：非比赛创建者/超管传 `true` 会被服务端忽略，仍返回封榜后的榜单。客户端不要依赖它判断封榜状态，应以 `contest.sealRank` + `contest.sealRankTime` 自行判断。
 4. **`keyword` 只匹配学校/榜单显示名**，不匹配用户名（除非 `rankShowName` 为 `username`）。搜索时服务端会重新在**全量排名**上过滤再分页，因此 `total` 会随关键词变化。
 5. **`containsEnd` 仅在 `allowEndSubmit = true` 时生效**；否则传了也不会显示赛后提交。
