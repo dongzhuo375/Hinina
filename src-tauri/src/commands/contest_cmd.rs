@@ -78,7 +78,8 @@ pub(crate) async fn load_configured_contest_impl(ctx: &AppContext) -> AppResult<
 /// 除 `contestId` 外均可省略（默认第 1 页、每页 50 条、不过滤）。
 ///
 /// 注意：返回的 `records` 可能包含服务端前置的「当前用户/关注用户」副本，
-/// 前端渲染前需按 `uid` 去重；`total` 含这些前置条目，不能当作真实参赛人数。
+/// 前端渲染前需**先剔除当前用户的前置副本再按 `uid` 去重**（顺序不能反）；
+/// `total` 含这些前置条目，不能当作真实参赛人数。
 #[tauri::command]
 pub async fn get_contest_rank(
     ctx: State<'_, AppContext>,

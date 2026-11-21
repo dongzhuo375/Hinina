@@ -74,8 +74,11 @@ pub struct ContestRankRow {
 /// 分页榜单（对应 MyBatis-Plus `IPage`）。
 ///
 /// 注意：HOJ 会把「当前登录用户」与「关注列表用户」的排名**复制一份插到 records 最前面**，
-/// 因此 `total` 略大于真实参赛人数，且第 1 页可能出现重复行 —— 渲染前必须按 `uid` 去重，
-/// 真实人数应以去重后非打星行的最大 `rank` 为准。
+/// 因此 `total` 略大于真实参赛人数，且任意页都可能出现重复行 —— 渲染前必须**先剔除当前
+/// 用户的前置副本再按 `uid` 去重**（前端装配层：`utils/rank.stripPrependedSelfRow` +
+/// `dedupeRankRows`；顺序不能反，keep-first 去重会保住副本、丢掉自然位置行，名次列会从
+/// 「我的名次」开始）；真实人数按「total − 本页重复数 − 未被去重捕获的我的前置副本」修正
+/// （前端 `resolveParticipantCountFromPage`），`total` 缺失才退回去重后非打星行的最大 `rank`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContestRankPage {

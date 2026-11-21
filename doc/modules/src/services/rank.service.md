@@ -31,7 +31,7 @@
 ```
 rankStore.loadRank → rankService.getRank(部分参数)
   → 补全 HOJ 默认值 → rank.bridge.getContestRank → IPC get_contest_rank
-  → ContestRankPage 原样返回（不做任何归一，去重/参与人数修正在 store.applyPage）
+  → ContestRankPage 原样返回（不做任何归一，副本剔除/去重/参与人数修正在 store.applyPage）
 ```
 
 设计要点：
