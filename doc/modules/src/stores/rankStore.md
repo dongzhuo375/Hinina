@@ -17,7 +17,7 @@
 | `livePolling` | 模块级 `PollerLifecycle` | 轮询器生命周期壳（副作用句柄而非渲染状态，**不进响应式系统**） |
 | `isPageHidden` / `isFullSnapshotFilter` | 判据 | `utils/page-visibility` 判后台；`filter ∈ {star, female}` 判是否需要全量快照 |
 | state | `rows`（已剔除前置副本并去重）/ `myRow` / `total` / `size` / `current` / `pages` / `participants` / `keyword` / `removeStar` / `groupFilter` / `isLoading` / `loadSeq` / `isLive` / `error` / `lastUpdated` / `contestId` / `uid` | `contestId`/`uid` 是轮询上下文，供 `refresh` 复用；`loadSeq` 是同会话请求序号，登出随 `$reset` 清理 |
-| state（全量快照） | `fullRows: ContestRankRow[] \| null` / `fullFetchState` / `fullPage` / `fullLoadedRows` | 跨页去重合并的快照（非全量模式为 null）/ 拉取状态 / 客户端分页当前页 / 已加载行数（状态行「已加载 N 行」用） |
+| state（全量快照） | `fullRows: ContestRankRow[] \| null` / `fullFetchState` / `fullPage` / `fullLoadedRows` | 逐页先剔除前置副本再跨页去重合并的快照（非全量模式为 null）/ 拉取状态 / 客户端分页当前页 / 已加载行数（状态行「已加载 N 行」用） |
 | `isFullMode` | getter | 是否处于全量快照模式（star/female 筛选**且快照已就位**） |
 | `fullFilteredRows` | getter | 快照按当前分组过滤后的全部行（未分页，`filterRankRowsByGroup`） |
 | `visibleRows` | getter | 全量模式：过滤快照后 `paginateRankRows` 客户端切片（`pages`/`current` 已由 `syncFullPaging` 同步为等效值，视图无需感知模式差异）；常规模式：`filterRankRowsByGroup(rows, groupFilter)`——star/female 但快照未就位（拉取中/失败）时退化为筛当前页，聊胜于无 |

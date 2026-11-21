@@ -24,7 +24,7 @@
 | `formatPenaltyMinutes` | `(totalTimeSeconds: number) => string` | ACM 总罚时秒 → 分钟整数（向下取整）；非法 → `--` |
 | `resolveParticipantCountFromPage` | `(page: ContestRankPage, myUid: string \| null) => number` | 从整页响应推算真实参与人数（统计卡分母），含「我的前置副本」修正，见下 |
 | `RankGroupFilter` | `'all' \| 'official' \| 'star' \| 'female'` | 榜单分组筛选：official 走服务端 `removeStar`；star/female 服务端无对应参数，只筛当前页会跨页漏行，须全量快照后客户端过滤（`rankStore.fetchAllRows`） |
-| `mergeRankPages` | `(existing, incoming) => ContestRankRow[]` | 跨页合并快照：按 uid 去重，已存在的行保留（首次出现优先），新行按序追加；不改入参 |
+| `mergeRankPages` | `(existing, incoming) => ContestRankRow[]` | 跨页合并快照：当前用户前置副本已由 `stripPrependedSelfRow` 在合并前剔除（`fetchAllRows` 逐页处理），此处处理关注用户等其余跨页同 uid 重复行——已存在的行保留（首次出现优先），新行按序追加；不改入参 |
 | `filterRankRowsByGroup` | `(rows, filter) => ContestRankRow[]` | 分组过滤纯函数（全量快照与当前页共用同一判据）：`star` → `rank === -1`；`female` → `gender === 'female'`；其余原样返回 |
 | `paginateRankRows` | `(rows, current, size) => ContestRankRow[]` | 客户端分页切片：`current` 钳到 ≥1，越界页返回空数组，`size <= 0` 视为不分页原样返回 |
 | `OiCellKind` | `'full' \| 'partial' \| 'zero' \| 'none'` | OI 档位（对应 HOJ §8 的 `oi-100` / `oi-between` / `oi-0`） |

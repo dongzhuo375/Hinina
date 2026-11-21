@@ -3,7 +3,7 @@
  *
  * 规则严格照 `doc/HOJ/HOJ-Contest-Rank-API.md` §8「客户端需要自行补充计算」与
  * §9「客户端实现注意事项」：HOJ 服务端只返回原始聚合（errorNum/tryNum/isAC/ACTime…），
- * 单元格文案、样式类别、显示名回退、去重与真实参与人数都要客户端自行推导。
+ * 单元格文案、样式类别、显示名回退、前置副本剔除、去重与真实参与人数都要客户端自行推导。
  * 把这些推导集中在此处，避免散落在多个 View 里各自实现产生分歧。
  */
 
@@ -273,8 +273,9 @@ export type RankGroupFilter = 'all' | 'official' | 'star' | 'female'
 /**
  * 跨页合并榜单行：按 uid 去重，已存在的行保留（首次出现优先），新行按序追加。
  *
- * 全量快照逐页拉取时，服务端在**每一页**都会前置复制当前用户/关注用户（文档 §9.2），
- * 页与页之间因此存在同 uid 重复行，合并时必须去重。
+ * 当前用户的前置副本已由 {@link stripPrependedSelfRow} 在合并前剔除（文档 §9.2，
+ * rankStore.fetchAllRows 逐页处理），这里处理关注用户等其余跨页同 uid 重复行，
+ * 不合并会渲染两遍。
  */
 export function mergeRankPages(
   existing: ContestRankRow[],

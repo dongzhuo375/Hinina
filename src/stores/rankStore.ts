@@ -123,13 +123,13 @@ export const useRankStore = defineStore('rank', {
     uid: null as string | null,
 
     // ── 全量快照模式（star/female 跨页过滤）──
-    /// 全量榜单快照（跨页按 uid 去重合并）；非全量模式为 null
+    /// 全量榜单快照（逐页先剔除前置副本再跨页按 uid 去重合并）；非全量模式为 null
     fullRows: null as ContestRankRow[] | null,
     /// 快照拉取状态
     fullFetchState: 'idle' as FullFetchState,
     /// 快照模式下客户端分页的当前页（映射到 `current` 供视图无感消费）
     fullPage: 1,
-    /// 快照已加载行数（去重后），用于状态行「已加载 N 行」
+    /// 快照已加载行数（剔除前置副本并去重后），用于状态行「已加载 N 行」
     fullLoadedRows: 0,
   }),
 
