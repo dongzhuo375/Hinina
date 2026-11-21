@@ -141,11 +141,16 @@ export function resolveMyRow(
 /**
  * 判断「myUid 在 records 中恰好出现一次」的那条是否为服务端前置副本。
  *
- * 判据（文档 §9.2）：前置副本必插在 `records[0]`，且它携带的是「我」的真实名次——
- * 我的自然名次不在本页名次窗口 `[(current-1)*size+1, current*size]` 内。反之，
- * 恰好出现一次且 rank 在窗口内，说明它就是自然行（服务端未前置，或窗口漂移的
- * 关键词过滤态下位于非首条的自然行）。打星行 `rank === -1` 无自然位置，天然
- * 落在窗口外，同样按前置副本处理。
+ * 两级判据（文档 §9.2）：
+ * 1. **结构判据（满页）**：HOJ 把副本插在 `limit` 行**之外**，满页 `records.length >
+ *    size` 即结构性证明副本存在——`records[0]` 必是它。这同时兜住打星行占位/并列
+ *    名次导致的 rank 与位置错位：此时副本 rank 可能恰好落进本页名次窗口（自然行在
+ *    别页），仅凭窗口判据会漏剔。
+ * 2. **窗口判据（短页回退）**：末页行数不足 `size`，结构判据无从触发；此时副本携带
+ *    「我」的真实名次，自然行不在本页名次窗口 `[(current-1)*size+1, current*size]`
+ *    内即判副本。打星行 `rank === -1` 无自然位置，天然落在窗口外，同样按前置副本
+ *    处理。关键词过滤会在全量排名上重排再分页，重排后的短页窗口可能对不上（已知
+ *    残余）；关键词态下位于非首条的自然行不受影响。
  *
  * 仅供 {@link stripPrependedSelfRow} 与 {@link resolveParticipantCountFromPage}
  * 共用，两处判据必须保持一致。
@@ -158,6 +163,7 @@ function isLoneSelfRowPrepended(
 ): boolean {
   const front = records[0]
   if (!front || front.uid !== myUid) return false
+  if (size > 0 && records.length > size) return true
   const windowStart = (current - 1) * size + 1
   const windowEnd = current * size
   return front.rank < windowStart || front.rank > windowEnd
@@ -170,8 +176,8 @@ function isLoneSelfRowPrepended(
  * 话，该副本会以普通行身份占据正文第 0 行——`dedupeRankRows` 保留首次出现，恰好
  * 把它保下来并把我的自然位置行丢掉——名次列于是从「我的名次」开始而不是 1。规则：
  * - myUid 出现 ≥2 次：首条必为前置副本（服务端页行里还有自然位置行），剔除首条；
- * - myUid 恰好出现 1 次：按 {@link isLoneSelfRowPrepended} 判据剔除（第 2 页起
- *   前置副本是唯一出现；若 rank 在窗口内则视为自然行，不剔除）；
+ * - myUid 恰好出现 1 次：按 {@link isLoneSelfRowPrepended} 两级判据剔除（第 2 页起
+ *   前置副本是唯一出现：满页看 `length > size` 结构证据，短页回退名次窗口）；
  * - uid 为空 / 未出现：原样返回。
  *
  * 必须传入**去重前**的原始 records：`dedupeRankRows` 会先把自然位置行丢掉，届时
@@ -232,10 +238,11 @@ export function formatPenaltyMinutes(totalTimeSeconds: number): string {
  * `total` 的偏大量等于服务端前置复制的条目数（文档 §9.2）：
  * - 前置副本与其自然位置**同页**出现时，uid 重复，被去重计数捕获；
  * - 「我」的自然名次**不在本页**时，本页只有前置副本这一条（uid 仅出现一次，
- *   不构成重复），需要额外减 1。判据与 {@link isLoneSelfRowPrepended} 一致：
- *   myUid 恰好出现一次、位于 records[0] 且 rank 不落在本页名次窗口内（打星行
- *   `rank === -1` 自然位置无定义，同样按前置副本处理）；若单条出现的 rank 恰在
- *   窗口内，说明它就是自然行（服务端未再前置副本），不减。
+ *   不构成重复），需要额外减 1。判据与 {@link isLoneSelfRowPrepended} 两级一致：
+ *   myUid 恰好出现一次、位于 records[0]，满页 `length > size` 结构性证明副本存在
+ *   （打星占位/并列名次会让副本 rank 落进本页名次窗口，仅看窗口会漏减），短页回退
+ *   「rank 不落在本页名次窗口内」（打星行 `rank === -1` 自然位置无定义，同样按
+ *   前置副本处理）。
  * `total` 缺失（<=0）时才退回最大 rank 口径。
  *
  * @param myUid 当前登录用户 uid（null 表示未登录/取不到，跳过前置副本修正）

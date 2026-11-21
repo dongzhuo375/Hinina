@@ -69,8 +69,12 @@ errorNum > 0 → wa，triesText = `-${errorNum}`     // ICPC 习惯显示 -罚�
 - 副本不去除会以普通行身份占据正文首行——`dedupeRankRows` 保留首次出现恰好把它保下来并丢掉
   自然位置行，名次列会从「我的名次」开始而不是 1。`stripPrependedSelfRow(rows, myUid, current, size)`
   的剔除规则：myUid 出现 ≥2 次 → 首条必为前置副本，剔除首条（自然位置行保留）；恰好 1 次 →
-  仅当位于 `records[0]` 且 rank 不落在本页名次窗口 `[(current−1)×size+1, current×size]` 内才剔除
-  （第 2 页起前置副本是唯一出现；打星 `rank === -1` 无自然位置，天然窗口外）；uid 为空/未出现原样返回。
+  位于 `records[0]` 且满足两级判据之一：满页 `length > size` **结构判据**（HOJ 把副本插在
+  `limit` 行之外，满页长度即结构证据——同时兜住打星行占位/并列名次导致的 rank 与位置错位，
+  此时副本 rank 可能恰好落进本页窗口、仅看窗口会漏剔）；短页（末页）回退**窗口判据**——
+  rank 不落在本页名次窗口 `[(current−1)×size+1, current×size]` 内（打星 `rank === -1`
+  无自然位置，天然窗口外）。关键词过滤重排后的短页窗口可能对不上，是已知残余；uid 为空/
+  未出现原样返回。
   **必须在 `dedupeRankRows` 之前调用**：去重会把自然位置行丢掉，届时无法再区分副本与自然行；
   `myRow` 定位（`resolveMyRow`）也用剔除前的原始 records——前置副本正是它每页都存在的意义；
 - 不能用「本页最大 rank」：第 1 页 limit=50 时最大 rank 只有 ~50，不是全场人数；
@@ -78,9 +82,10 @@ errorNum > 0 → wa，triesText = `-${errorNum}`     // ICPC 习惯显示 -罚�
   `total − 本页重复行数 − 未被去重捕获的「我的前置副本」`。
   前置副本与其自然位置**同页**出现时 uid 重复，被去重计数捕获；「我」的自然名次
   **不在本页**时，本页只有前置副本这一条（uid 仅出现一次，不构成重复），须额外减 1。
-  判据与 `stripPrependedSelfRow` 共用：myUid 恰好出现一次、位于 `records[0]` 且其 rank 不落在
-  本页名次窗口内（打星 myRow `rank === -1` 自然位置无定义，同样按前置副本处理）；
-  若单条出现的 rank 恰在窗口内，说明它就是自然行（服务端未再前置副本），不减。
+  判据与 `stripPrependedSelfRow` 两级共用：myUid 恰好出现一次、位于 `records[0]`，
+  满页 `length > size` 结构判据（兜住打星占位/并列名次的 rank-位置错位），短页回退
+  「rank 不落在本页名次窗口内」（打星 myRow `rank === -1` 自然位置无定义，同样按
+  前置副本处理）。
   残余误差：**关注用户**的窗外前置副本无法用同一判据识别（口径只修「我」），
   分母仍可能偏大——对展示无实质影响，不为此额外请求末页。
   `total ≤ 0` 时才退回 `resolveParticipantCount` 的最大 rank 口径
@@ -126,4 +131,4 @@ score >= 100 → full（满分）；0 < score < 100 → partial（部分分）�
 
 ## 测试
 
-`src/utils/__tests__/rank.spec.ts`（68 例）锁定：ACM 单元格规则（AC 行 errorNum+1、after-ac 加 `*` 且优先于 first-ac、封榜行优先于 wa、acTime 脏数据渲染 `--:--`）、时间/罚时格式化与非法值占位、显示名三级回退、打星行判定优先级、uid 去重不改入参、前置副本剔除（同页出现剔首条留自然行、窗外唯一出现剔除、窗内首条视为自然行保留、非首条保留、打星我、uid 空/未出现、不改入参）、参与人数口径（total−重复行、我的窗外首条前置副本额外减 1、打星 myRow 减 1、窗口边界、恰在窗口内不减、非首条不减、多关注用户副本的捕获与已知残余误差、不退化为本页最大 rank、total 缺失退回最大 rank）、全量快照纯函数（mergeRankPages 跨页去重/首次出现优先/不改入参、filterRankRowsByGroup 三档判据、paginateRankRows 切片/钳位/越界/不分页边界）、OI 档位与 timeInfo 毫秒换算。
+`src/utils/__tests__/rank.spec.ts`（71 例）锁定：ACM 单元格规则（AC 行 errorNum+1、after-ac 加 `*` 且优先于 first-ac、封榜行优先于 wa、acTime 脏数据渲染 `--:--`）、时间/罚时格式化与非法值占位、显示名三级回退、打星行判定优先级、uid 去重不改入参、前置副本剔除（同页出现剔首条留自然行、窗外唯一出现剔除、打星占位 rank-位置错位的满页结构判据剔除、短页窗口回退剔除、短页窗内首条视为自然行保留、非首条保留、打星我、uid 空/未出现、不改入参）、参与人数口径（total−重复行、我的窗外首条前置副本额外减 1、打星 myRow 减 1、窗口边界、短页恰在窗口内不减、非首条不减、rank-位置错位满页结构判据减 1、多关注用户副本的捕获与已知残余误差、不退化为本页最大 rank、total 缺失退回最大 rank）、全量快照纯函数（mergeRankPages 跨页去重/首次出现优先/不改入参、filterRankRowsByGroup 三档判据、paginateRankRows 切片/钳位/越界/不分页边界）、OI 档位与 timeInfo 毫秒换算。

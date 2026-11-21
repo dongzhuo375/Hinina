@@ -84,7 +84,7 @@ describe('applyPage — 服务端响应归一', () => {
     expect(rank.myRow?.rank).toBe(42)
   })
 
-  it('恰一次出现在首条且名次在本页窗口内 → 视为自然行保留', () => {
+  it('恰一次出现在首条、短页且名次在本页窗口内 → 视为自然行保留（结构判据无证据）', () => {
     const rank = useRankStore()
     const me = makeRow({ uid: MY_UID, rank: 42 })
     rank.applyPage(makePage([me, makeRow({ uid: 'u1', rank: 1 })], 121), MY_UID)

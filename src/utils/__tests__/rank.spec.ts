@@ -272,7 +272,23 @@ describe('stripPrependedSelfRow — 剔除服务端前置的「当前用户」�
     expect(strip(rows, 'me', 2).map((r) => r.uid)).toEqual(['u51'])
   })
 
-  it('单条出现在首条且名次在本页窗口内 → 视为自然行保留', () => {
+  it('回归：打星行占位使 rank 与位置错位（副本 rank 落进窗口而自然行在别页）→ 满页结构判据剔除', () => {
+    // 1 支打星队占第 13 位，我 rank=100 在第 101 位：第 2 页（位置 51-100）装的是
+    // rank 50-99，名次窗口按 rank 数学是 [51,100]，前置副本 rank=100 恰落其中——
+    // 仅看窗口会漏剔；满页 length=51 > size=50 结构性证明副本存在，必须剔除
+    const pageRows = Array.from({ length: 50 }, (_, i) => makeRow({ uid: `u${50 + i}`, rank: 50 + i }))
+    const rows = [makeRow({ uid: 'me', rank: 100 }), ...pageRows]
+    const stripped = strip(rows, 'me', 2)
+    expect(stripped).toHaveLength(50)
+    expect(stripped.every((r) => r.uid !== 'me')).toBe(true)
+  })
+
+  it('短页（末页）无结构证据 → 回退名次窗口判据', () => {
+    const rows = [makeRow({ uid: 'me', rank: 100 }), makeRow({ uid: 'u150', rank: 149 })]
+    expect(strip(rows, 'me', 3).map((r) => r.uid)).toEqual(['u150'])
+  })
+
+  it('恰一次出现在首条、短页且名次在本页窗口内 → 视为自然行保留（结构判据无证据）', () => {
     const me = makeRow({ uid: 'me', rank: 42 })
     const rows = [me, makeRow({ uid: 'u1', rank: 1 })]
     const stripped = strip(rows, 'me')
@@ -450,6 +466,15 @@ describe('resolveParticipantCountFromPage', () => {
     // 前置副本必在 records[0]；位于非首条的自然行即使窗口对不上也不是副本
     const rows = [makeRow({ uid: 'u60', rank: 60 }), makeRow({ uid: 'me', rank: 42 })]
     expect(resolveParticipantCountFromPage(page(rows, 121, 2), 'me')).toBe(121)
+  })
+
+  it('rank 与位置错位（打星占位）时满页结构判据 → 副本额外减 1（旧窗口判据漏减）', () => {
+    // 与 stripPrependedSelfRow 的打星占位回归同场景：第 2 页 51 条（副本 + 50 行），
+    // 副本 rank=100 落在 rank 数学窗口 [51,100] 内——满页 length>size 结构判据兜住
+    const pageRows = Array.from({ length: 50 }, (_, i) => makeRow({ uid: `u${50 + i}`, rank: 50 + i }))
+    const rows = [makeRow({ uid: 'me', rank: 100 }), ...pageRows]
+    // total 152 = 150 真实 + 1 打星 + 1 前置副本 → 修正 151
+    expect(resolveParticipantCountFromPage(page(rows, 152, 2), 'me')).toBe(151)
   })
 })
 
