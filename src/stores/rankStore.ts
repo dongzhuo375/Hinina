@@ -93,7 +93,7 @@ const livePolling = createPollerLifecycle()
 
 export const useRankStore = defineStore('rank', {
   state: () => ({
-    /// 当前页榜单行（已按 uid 去重）
+    /// 当前页榜单行（已剔除服务端前置副本并按 uid 去重）
     rows: [] as ContestRankRow[],
     /// 我的行（服务端会前置复制一份，因此任意页都能取到）
     myRow: null as ContestRankRow | null,

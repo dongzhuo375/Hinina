@@ -115,8 +115,8 @@ export function resolveRowKind(row: ContestRankRow): RankRowKind {
 /**
  * 按 `uid` 去重，保留首次出现的行。
  *
- * HOJ 会把「当前登录用户」与「关注列表用户」复制一份插到 records 最前面
- * （文档 §9.2），第 1 页因此可能出现同一 uid 的重复行，直接渲染会显示两遍。
+ * 当前用户的前置副本已由 {@link stripPrependedSelfRow} 在去重前剔除（文档 §9.2），
+ * 这里处理其余残余重复（关注列表用户的副本等）——不去除会渲染两遍。
  */
 export function dedupeRankRows(rows: ContestRankRow[]): ContestRankRow[] {
   const seen = new Set<string>()

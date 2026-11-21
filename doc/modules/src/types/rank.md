@@ -12,7 +12,7 @@
 |------|------|----------|
 | `RankCell` | `{ errorNum, tryNum, isAc, isFirstAc, acTime, isAfterContest, score }` | `tryNum: number \| null` —— **非 null 即封榜行**（封榜期间服务端不写 isAc/acTime）；`acTime: number \| null` —— AC 时的比赛进度（**秒**，相对 startTime，不是墙钟）；`score: number \| null` —— OI 该题得分（ACM 恒 null）；`errorNum` 不含本次 AC，显示尝试数需 +1 |
 | `ContestRankRow` | `{ rank, uid, username, realname, nickname, school, gender, avatar, ac, total, totalTime, totalScore, submissionInfo, timeInfo }` | `rank = -1` 打星队伍；`totalTime` **ACM 为总罚时秒 / OI 为总耗时毫秒**（同名不同单位）；`totalScore: number \| null` 仅 OI；`submissionInfo: Record<displayId, RankCell>`（未出现的题 = 无提交）；`timeInfo: Record<displayId, number>`（OI 最优耗时，**毫秒**） |
-| `ContestRankPage` | `{ records, total, size, current, pages }` | MyBatis-Plus IPage；`total` **含服务端前置副本**（当前用户/关注用户），不能当真实参赛人数，records 渲染前须按 uid 去重（HOJ §9.2） |
+| `ContestRankPage` | `{ records, total, size, current, pages }` | MyBatis-Plus IPage；`total` **含服务端前置副本**（当前用户/关注用户），不能当真实参赛人数，records 渲染前须先剔除当前用户前置副本（`utils/rank.stripPrependedSelfRow`）**再**按 uid 去重（HOJ §9.2；顺序不能反——keep-first 去重会保副本丢自然行，名次列会从「我的名次」开始） |
 | `RankQuery` | `{ contestId, currentPage, limit, keyword?, removeStar?, containsEnd? }` | 前端调用态查询参数，见下方「与 Rust 的差异」 |
 | `ProblemLimits` | `{ displayId, timeLimit, memoryLimit }` | `timeLimit` **毫秒**、`memoryLimit` **MB**，均为 C/C++ 基准值（其它语言判题 ×2，HOJ-Problem-Limits-API.md §4/§5） |
 | `UserProblemStatus` | `0 \| 1 \| 2` | 我的题目状态：0=未提交 / 1=已AC / 2=尝试过；未出现在 map 中视为未提交 |

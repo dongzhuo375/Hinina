@@ -992,7 +992,7 @@ impl ContestProvider for HOJAdapter {
             .map_err(|msg| AppError::Contest(format!("HOJ contest rank 失败: {}", msg)))?;
 
         // 注意：records 可能含服务端前置的「当前用户/关注用户」副本，
-        // 去重与真实参赛人数推导由前端按 uid 处理（见 ContestRankPage 文档注释）
+        // 副本剔除、去重与真实参赛人数推导由前端按 uid 处理（见 ContestRankPage 文档注释）
         let records = page
             .records
             .into_iter()
