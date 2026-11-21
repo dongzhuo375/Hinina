@@ -57,9 +57,11 @@ interface BodyRow {
 /**
  * 正文行 = 粘性「我的行」+ 当前页可见行。
  *
- * HOJ 会把当前登录用户前置复制到 records（文档 §9.2），因此翻到任意页都能取到 `myRow`，
- * 固定住它选手才不用在几百行里找自己。它在正文中的自然位置仍照常渲染
- * （`rows` 已按 uid 去重，正文不会出现两遍），与 Codeforces 等榜单的浮标行一致。
+ * HOJ 会把当前登录用户前置复制到 records（文档 §9.2），rankStore 已在装配时剔除
+ * 该副本（`stripPrependedSelfRow`），因此 `visibleRows` 是纯名次序（1、2、3…），
+ * 翻到任意页都能取到 `myRow`，固定住它选手才不用在几百行里找自己；它的自然位置行
+ * 照常渲染，置顶与自然位置并存是刻意设计（与 Codeforces 等榜单的浮标行一致）——
+ * 此前置顶与正文首行是同一份前置副本，名次列才会从「我的名次」而非 1 开始。
  */
 const bodyRows = computed<BodyRow[]>(() => {
   const list: BodyRow[] = rankStore.visibleRows.map((row) => ({ row, isMe: false }))

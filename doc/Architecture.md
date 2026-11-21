@@ -403,7 +403,7 @@ src/
 │   ├── configStore.ts                    # 配置服务的前端消费入口（2026-11-09 严格分层：原 View/component/composable 直连 configService 的 7 条边收编于此；配置读取/保存事务 runSaveTxn/OJ 切换/OJ 基址/编辑器偏好/分栏比例/轮询参数纯转发，保存队列/切换队列/代际仍由 service 持有不复制；ref 支撑走 getter、普通字段（代际/最近切换结果）走 action 逐次直读——getter 化会被 computed 永久缓存）
 │   ├── contestStore.ts                   # 比赛 + 题目摘要状态 + loadContest 并发去重 + whenLoaded 统一等待入口 + 登录页匿名比赛简报状态（brief*）
 │   ├── problemStore.ts                   # 当前题目详情 + limits 缓存 + 我的题目状态（limitsOf/statusOf 派生读取；myStatusStale 增量失效，提交终态触发重拉）
-│   ├── rankStore.ts                      # 榜单状态与轮询编排（uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页；用户操作路径查询去抖 in-flight 合并 + 3s memo，轮询与手动刷新不走去抖）
+│   ├── rankStore.ts                      # 榜单状态与轮询编排（前置副本剔除、uid 去重、参与人数口径修正、分组筛选、我的行、后台暂停；打星/女生队全量快照模式：跨页拉取+客户端过滤分页；用户操作路径查询去抖 in-flight 合并 + 3s memo，轮询与手动刷新不走去抖）
 │   ├── submissionStore.ts                # 提交记录 + 评测收敛轮询（createPoller，终态/超时停止，登出统一回收；终态时触发 problemStore.invalidateMyStatus）+ **重复发送防护**（pendingFor 按「比赛+题目+展示题号+语言+源码」五元组去重，评测期间复用编号；isSubmitting 同步上锁）+ **轮询超时把条目收敛为终态 Unknown**（让服务端结果接管展示）+ 服务端提交历史（history 筛选/分页）+ fetchProblemSummary
 │   ├── announcementStore.ts              # 公告列表 + 客户端已读状态（unreadCount 红点数据源、markAllRead 乐观更新+失败回滚+不可见不标记、isWatching 语义、60s±10s 轮询、窗口重新可见/聚焦即时补拉（去重 1s））
 │   ├── workspaceStore.ts                 # 工作区 + 代码编辑器状态（两级状态机：syncPending=未推送内存 / isDirty=未落盘；语言权威值=HOJ 显示名，切换即时持久化；源文件名经 utils/language 派生；落盘事件订阅安装器）
@@ -478,7 +478,7 @@ src/
 │   ├── language.ts                       # 语言域唯一权威模块（权威值 = HOJ 显示名；monacoIdOf 高亮派生 / sourceFileNameOf 源文件名 / normalizeHojLanguage 历史值归一 / hojLanguageOfFileName 扩展名反推 / isCLikeLanguage 倍率判定）
 │   ├── page-visibility.ts                # 页面可见性判据（isPageHidden：document.hidden；榜单/公告/列表轮询共用的暂停条件单源，无 document 环境（node/SSR）按可见处理）
 │   ├── polling.ts                        # 轮询原语（planPollDelayMs 抖动错峰 + createPoller 递归 setTimeout：重入保护/可暂停/定时器可注入；createPollerLifecycle 单持有位生命周期壳）
-│   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
+│   ├── rank.ts                           # 榜单渲染纯映射（单元格文案与样式、显示名回退、前置副本剔除 stripPrependedSelfRow、uid 去重、跨页合并 mergeRankPages、分组过滤/客户端分页、参与人数口径修正、罚时格式化）
 │   ├── limits.ts                         # 题目时限/内存格式化与语言倍率换算（C/C++ 1 倍，其它语言 ×2）
 │   ├── oj.ts                             # OJ 类型域唯一权威（OJ_TYPES 已知类型枚举 / ojSelectOptions 下拉候选组装：枚举在前含未配置者 + 枚举外实例追加 / ojBaseUrlHint 地址占位）
 │   └── __tests__/                        # brief-retry / close-guard / contest / contest-clock / editor / error / external-links / focus-scope / language / layout / limits / logger / markdown / markdown-dom / oj / pagination / polling / rank / session-check / settings-access / submission / submission-tone .spec.ts（退避延迟表、关窗守卫状态机与有界多轮重刷、阶段判据与权威赛程、时钟模型与 urgent 阈值、编辑器偏好值域、错误文案收敛、外链拦截判据、弹层焦点陷阱与归还、语言映射、分栏值域归一、limits 换算、日志级别分流与作用域前缀、渲染契约、jsdom 消毒激活态的生产链路契约、OJ 候选取值域与顺序、预检调度边界、轮询节奏、榜单映射与口径、设置显现计数状态机、终态穷尽映射与双层时间上界）
@@ -588,7 +588,7 @@ src/
   | 提交详情页收敛轮询 | 同上（读同一配置） | ❌（刻意） | 终态（终态后补拉一次测试点）/ 总超时 / `submitId` 切换 / 离页 | `SubmissionDetailView`（视图自持，评测中只拉 detail 不拉 cases；切换时旧请求失效并重建 deadline） |
 - **公告已读状态是客户端特性**：HOJ 无已读概念，已读 ID 集合由 Rust 端按「比赛 + 用户」持久化（`announcements_read/{cid}_{uid}.json`，合并去重、损坏降级为空 + warn）；未读红点 = 列表与已读集合的差集，由外壳启动的公告轮询在全部页面保持鲜活，且 Rust 侧检测到新公告会经事件桥即时通知前端（见下一条）。标记已读由 `announcementStore.load` 在 `isWatching && 页面可见` 时统一完成（乐观更新，持久化失败回滚 —— 红点复发优于假已读）：**页面不可见时不标记**（切走了 = 没看到），**不在公告页时不标记**（新公告必须保持未读以点亮红点）
 - **提交列表「只看本人」由后端强制**：`list_contest_submissions` 命令层恒置 `onlyMine = true`，前端不传该参数、不可绕过（产品决策：评测页只显示本人提交）
-- **榜单数据源职责**：卡片「我的状态」取 `get-user-problem-status`（轻量、不受榜单分页/搜索影响，AC 判定与榜单我的行取并集且 **AC 优先**）；统计卡「解题进度 / 实时排名 / 总罚时」取榜单我的行（服务端前置复制，天然可得）；`ac/total` 与气球色取比赛题目列表。HOJ 会把当前用户与关注列表**前置复制**进 `records`，渲染前必须按 `uid` 去重，`total` 因此偏大、不能直接当参赛人数（口径：`total − 本页重复数`，且当「我的前置副本在页内而自然名次不在本页窗口」时再 −1，见 `utils/rank.resolveParticipantCountFromPage`；关注用户的页外副本仍是已知残差）；`rank == -1` 是打星队伍；封榜以 `contest.sealRank + sealRankTime` 自行判断，**不依赖 `forceRefresh`**（对非管理员无效）
+- **榜单数据源职责**：卡片「我的状态」取 `get-user-problem-status`（轻量、不受榜单分页/搜索影响，AC 判定与榜单我的行取并集且 **AC 优先**）；统计卡「解题进度 / 实时排名 / 总罚时」取榜单我的行（服务端前置复制，天然可得）；`ac/total` 与气球色取比赛题目列表。HOJ 会把当前用户与关注列表**前置复制**进 `records`，渲染前必须先剔除「当前用户」的前置副本（`utils/rank.stripPrependedSelfRow`，保留自然位置行——否则副本以普通行身份占据正文首行，名次列从「我的名次」开始）再按 `uid` 去重，`total` 因此偏大、不能直接当参赛人数（口径：`total − 本页重复数`，且当「我的前置副本是本页唯一出现（位于首条且自然名次不在本页窗口）」时再 −1，见 `utils/rank.resolveParticipantCountFromPage`；关注用户的页外副本仍是已知残差）；`rank == -1` 是打星队伍；封榜以 `contest.sealRank + sealRankTime` 自行判断，**不依赖 `forceRefresh`**（对非管理员无效）
 - **语言权威值 = HOJ 显示名**：提交契约（`submit-problem-judge` 的 `language: "C++"`）、题目详情 `languages` 允许列表、工作区元数据与配置 `defaultLanguage` 全部使用 HOJ 显示名；Monaco 高亮 id 与源文件名是**派生值**，只在消费点经 `utils/language` 映射（`monacoIdOf` / `sourceFileNameOf`），绝不反向作为存储值 —— Monaco id 有损（C++17/C++20 同归 'cpp'）且无法承载 Go/Rust 等语言。语言下拉候选以**题目详情返回的允许列表**为准（HOJ 按题限制语言），服务端未提供时回退内置 `DEFAULT_LANGUAGES`；历史遗留的 Monaco id（如 'cpp'）由前后端归一函数双向兜底迁移。未知语言的文件名回退 `main.txt` 而非猜测 `.cpp` —— 判题端按后缀判语言，猜错后缀等于用错语言评测
 - **打星队/女生队跨页过滤**：服务端只有 `removeStar`（正式参赛队走它，跨页正确）；打星/女生无服务端参数，切「全量快照模式」—— 顺序拉全部分页（上限 40 页 / 2000 行，超限标记 truncated 并提示）、跨页 uid 去重后客户端过滤 + 客户端分页，轮询暂停改手动刷新（全量重拉太重）。HOJ 榜单页是整榜全量重算后分页，连发即让服务端背靠背算整榜 —— **页间强制 400ms 节流**摊开突发；拉取循环持代际令牌并逐页校验筛选态，中途切筛选/登出即中止且不写快照（过期数据不复活、不并发双写）
 - **OI 计分规则只读展示**：`oiRankScoreType`（Recent/Highest）是比赛属性（get-contest-info 返回），不是请求参数 —— 客户端在榜单工具条渲染徽章，不提供切换

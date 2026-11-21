@@ -13,6 +13,7 @@ import {
   resolveParticipantCountFromPage,
   resolveRankCell,
   resolveRowKind,
+  stripPrependedSelfRow,
 } from '@/utils/rank'
 import type { ContestRankPage, ContestRankRow, RankCell } from '@/types/rank'
 
@@ -252,6 +253,67 @@ describe('resolveMyRow', () => {
   })
 })
 
+describe('stripPrependedSelfRow — 剔除服务端前置的「当前用户」副本', () => {
+  /// 第 1 页窗口 [1,50]、第 2 页窗口 [51,100]
+  const strip = (rows: ContestRankRow[], myUid: string | null, current = 1) =>
+    stripPrependedSelfRow(rows, myUid, current, 50)
+
+  it('回归：前置副本与自然行同页出现 → 剔除首条副本，保留自然位置行（名次序恢复 1 起）', () => {
+    const me = makeRow({ uid: 'me', rank: 42, username: 'me' })
+    const rows = [me, makeRow({ uid: 'u1', rank: 1 }), makeRow({ uid: 'u2', rank: 2 }), { ...me }]
+    const stripped = strip(rows, 'me')
+    expect(stripped.map((r) => r.uid)).toEqual(['u1', 'u2', 'me'])
+    // 保留的是自然位置那个对象，不是前置副本
+    expect(stripped[2]).toBe(rows[3])
+  })
+
+  it('第 2 页形态：前置副本是唯一出现且名次在窗口外 → 剔除（正文不再携带我）', () => {
+    const rows = [makeRow({ uid: 'me', rank: 42 }), makeRow({ uid: 'u51', rank: 51 })]
+    expect(strip(rows, 'me', 2).map((r) => r.uid)).toEqual(['u51'])
+  })
+
+  it('单条出现在首条且名次在本页窗口内 → 视为自然行保留', () => {
+    const me = makeRow({ uid: 'me', rank: 42 })
+    const rows = [me, makeRow({ uid: 'u1', rank: 1 })]
+    const stripped = strip(rows, 'me')
+    expect(stripped.map((r) => r.uid)).toEqual(['me', 'u1'])
+    expect(stripped[0]).toBe(me)
+  })
+
+  it('单条出现但不在首条（关键词过滤态窗口漂移）→ 视为自然行保留', () => {
+    const me = makeRow({ uid: 'me', rank: 42 })
+    const rows = [makeRow({ uid: 'u60', rank: 60 }), me]
+    const stripped = strip(rows, 'me', 2)
+    expect(stripped.map((r) => r.uid)).toEqual(['u60', 'me'])
+    expect(stripped[1]).toBe(me)
+  })
+
+  it('打星我（rank=-1）单条出现在首条 → 剔除；与自然位置打星行同页 → 副本剔除、自然行保留', () => {
+    const lone = [makeRow({ uid: 'me', rank: -1 }), makeRow({ uid: 'u1', rank: 1 })]
+    expect(strip(lone, 'me').map((r) => r.uid)).toEqual(['u1'])
+
+    const me = makeRow({ uid: 'me', rank: -1 })
+    const both = [me, makeRow({ uid: 'u1', rank: 1 }), { ...me }]
+    expect(strip(both, 'me').map((r) => r.uid)).toEqual(['u1', 'me'])
+    expect(strip(both, 'me')[1]).toBe(both[2])
+  })
+
+  it('uid 为 null / 未出现 / 空数组 → 原样返回', () => {
+    const rows = [makeRow({ uid: 'u1', rank: 1 })]
+    expect(strip(rows, null)).toBe(rows)
+    expect(strip(rows, 'nobody')).toBe(rows)
+    expect(strip([], 'me')).toEqual([])
+  })
+
+  it('不修改入参数组', () => {
+    const me = makeRow({ uid: 'me', rank: 300 })
+    const rows = [me, makeRow({ uid: 'u1', rank: 1 })]
+    strip(rows, 'me')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toBe(me)
+  })
+})
+
 describe('resolveParticipantCount', () => {
   it('回归：不用分页 total（含前置重复条目而偏大），取非打星行最大 rank', () => {
     const rows = [
@@ -382,6 +444,12 @@ describe('resolveParticipantCountFromPage', () => {
       makeRow({ uid: 'u1', rank: 1 }),
     ]
     expect(resolveParticipantCountFromPage(page(rows, 362), 'me')).toBe(361)
+  })
+
+  it('单条出现但不在首条、名次在窗口外（关键词过滤态窗口漂移）→ 视为自然行，不减', () => {
+    // 前置副本必在 records[0]；位于非首条的自然行即使窗口对不上也不是副本
+    const rows = [makeRow({ uid: 'u60', rank: 60 }), makeRow({ uid: 'me', rank: 42 })]
+    expect(resolveParticipantCountFromPage(page(rows, 121, 2), 'me')).toBe(121)
   })
 })
 

@@ -62,12 +62,33 @@ beforeEach(() => {
 })
 
 describe('applyPage — 服务端响应归一', () => {
-  it('按 uid 去重（HOJ 会把当前用户前置复制一份）', () => {
+  it('剔除服务端前置副本，保留自然位置行（正文恢复纯名次序）', () => {
     const rank = useRankStore()
     const me = makeRow({ uid: MY_UID, rank: 42 })
+    // 服务端形态：me 前置副本 + 自然位置行同页出现（rank 42 在第 1 页窗口 [1,50] 内）
     rank.applyPage(makePage([me, makeRow({ uid: 'u1', rank: 1 }), me], 121), MY_UID)
 
-    expect(rank.rows).toHaveLength(2)
+    expect(rank.rows.map((r) => r.uid)).toEqual(['u1', MY_UID])
+  })
+
+  it('第 2 页形态：前置副本是唯一出现（自然名次不在本页窗口）→ rows 不含我', () => {
+    const rank = useRankStore()
+    const me = makeRow({ uid: MY_UID, rank: 42 })
+    // 第 2 页窗口 [51,100]；me(42) 只以前置副本出现，置顶行仍由 myRow 提供
+    rank.applyPage(
+      makePage([me, makeRow({ uid: 'u51', rank: 51 }), makeRow({ uid: 'u52', rank: 52 })], 121, 2),
+      MY_UID,
+    )
+
+    expect(rank.rows.map((r) => r.uid)).toEqual(['u51', 'u52'])
+    expect(rank.myRow?.rank).toBe(42)
+  })
+
+  it('恰一次出现在首条且名次在本页窗口内 → 视为自然行保留', () => {
+    const rank = useRankStore()
+    const me = makeRow({ uid: MY_UID, rank: 42 })
+    rank.applyPage(makePage([me, makeRow({ uid: 'u1', rank: 1 })], 121), MY_UID)
+
     expect(rank.rows.map((r) => r.uid)).toEqual([MY_UID, 'u1'])
   })
 
@@ -438,14 +459,15 @@ describe('startLive / stopLive — 实时刷新', () => {
 })
 
 describe('全量快照模式 — 打星/女生队跨页过滤', () => {
-  /// 三页服务端响应：每页都前置复制一份「我」（文档 §9.2），跨页合并须去重
+  /// 三页服务端响应：每页都前置复制一份「我」（文档 §9.2）；第 1 页同时含
+  /// 自然位置行（rank 42 在窗口 [1,50] 内），第 2/3 页只有前置副本
   function mockThreePages() {
     const me = makeRow({ uid: MY_UID, rank: 42 })
     rankService.getRank.mockImplementation(async (q: { currentPage?: number }) => {
       const current = q.currentPage ?? 1
       if (current === 1) {
         return makePage(
-          [me, makeRow({ uid: 'starA', rank: -1 }), makeRow({ uid: 'u1', rank: 1 })],
+          [me, makeRow({ uid: 'starA', rank: -1 }), makeRow({ uid: 'u1', rank: 1 }), me],
           120,
           1,
         )
@@ -480,8 +502,10 @@ describe('全量快照模式 — 打星/女生队跨页过滤', () => {
       expect.objectContaining({ removeStar: false, limit: 50 }),
     )
     expect(rank.fullFetchState).toBe('done')
-    // me/starA/u1/u2/f1/starB —— me 的每页前置副本被去重
+    // starA/u1/me/u2/f1/starB —— 页 1 前置副本被剔除（自然位置行保留），
+    // 页 2/3 的前置副本（唯一出现、名次在窗口外）同样被剔除，快照恢复纯名次序
     expect(rank.fullLoadedRows).toBe(6)
+    expect(rank.fullRows?.map((r) => r.uid)).toEqual(['starA', 'u1', MY_UID, 'u2', 'f1', 'starB'])
     expect(rank.isFullMode).toBe(true)
     expect(rank.visibleRows.map((r) => r.uid)).toEqual(['starA', 'starB'])
     expect(rank.pages).toBe(1)

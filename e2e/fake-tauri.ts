@@ -167,7 +167,9 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       ? { errorNum: 0, tryNum: 2, isAc: false, isFirstAc: false, acTime: null, isAfterContest: false, score: null }
       : { errorNum: 0, tryNum: null, isAc: true, isFirstAc: n0 === 1, acTime: 300 + n0 * 10, isAfterContest: false, score: null }
     return {
-      rank: n0 === 13 ? -1 : n0,
+      // 当前登录用户是 uid 1（e2e_player）：其名次与 team_07 对调成 7，保证
+      // 「我的名次 ≠ 1」——置顶我 + 正文从 1 起的形态只有在这种 fixture 下才可观测
+      rank: n0 === 1 ? 7 : n0 === 7 ? 1 : n0 === 13 ? -1 : n0,
       uid: String(n0),
       username: n0 === 1 ? 'e2e_player' : `team_${String(n0).padStart(2, '0')}`,
       realname: '', nickname: '', school: '', gender: '', avatar: '',
@@ -179,6 +181,14 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       timeInfo: {},
     }
   })
+  // 真实服务端的页行按名次序返回（分页 = 名次窗口），fake 须按 rank 排序后再切片；
+  // 打星行 rank=-1 无名次，按 uid 序内联保持原位（与原 fixture 形态一致，不挤占
+  // 名次窗口——沉底会让后续名次整体前移一位）。当前用户名次与 team_07 对调后
+  // 数组序 ≠ 名次序，不排序会让「第 2 页首行 = 名次 51」等断言失真
+  allRankRecords.sort(
+    (a, b) =>
+      (a.rank === -1 ? Number(a.uid) : a.rank) - (b.rank === -1 ? Number(b.uid) : b.rank),
+  )
 
   // 工作区按题目真实 ID（pid）隔离，内存态跨切题保留（对应 Rust 磁盘 + 内存双层）。
   // 新建工作区与真实后端一致：**无预置文件**（files 为空、activeFile null、language 空），
@@ -563,7 +573,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       }
       case 'get_contest_rank': {
         // 真实服务端契约：每页前置「当前用户 + 关注列表」的副本，
-        // total 相应偏大——前端的跨页去重（dedupeRankRows / mergeRankPages）与
+        // total 相应偏大——前端的副本剔除（stripPrependedSelfRow）与跨页去重（dedupeRankRows / mergeRankPages）与
         // 参与人数修正（total − 本页重复数 − 未去重的我的前置副本）只有在这种
         // 形态下才会被 E2E 观测到。fake 逐页前置当前用户行。
         const page = Math.max(1, Number(args?.currentPage ?? 1))

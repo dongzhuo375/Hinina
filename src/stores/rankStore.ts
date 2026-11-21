@@ -10,6 +10,7 @@ import {
   paginateRankRows,
   resolveMyRow,
   resolveParticipantCountFromPage,
+  stripPrependedSelfRow,
 } from '@/utils/rank'
 import type { RankGroupFilter } from '@/utils/rank'
 import { errorMessage } from '@/utils/error'
@@ -234,13 +235,16 @@ export const useRankStore = defineStore('rank', {
     /**
      * 应用一页榜单数据。
      *
-     * 三处归一必须在此完成，视图层不再重复处理：
-     * 1. 按 uid 去重（服务端把当前用户/关注用户前置复制了一份）
-     * 2. 从**未去重**的原始 records 中定位我的行
-     * 3. 参与人数按「total − 本页重复数 − 未被去重捕获的我的前置副本」修正
+     * 四处归一必须在此完成，视图层不再重复处理：
+     * 1. 剔除服务端前置的「当前用户」副本（否则它以普通行身份占据正文首行，
+     *    名次列从我的名次开始而不是 1；必须在去重**之前**做——去重保留首次出现，
+     *    会把前置副本保下来并丢掉自然位置行，届时已无法区分）
+     * 2. 按 uid 去重（关注用户等其余重复行）
+     * 3. 从**未去重**的原始 records 中定位我的行（前置副本正是它每页都存在的意义）
+     * 4. 参与人数按「total − 本页重复数 − 未被去重捕获的我的前置副本」修正
      */
     applyPage(page: ContestRankPage, uid: string | null) {
-      this.rows = dedupeRankRows(page.records)
+      this.rows = dedupeRankRows(stripPrependedSelfRow(page.records, uid, page.current, page.size))
       this.myRow = resolveMyRow(page.records, uid)
       this.total = page.total
       this.size = page.size
@@ -253,8 +257,10 @@ export const useRankStore = defineStore('rank', {
     /**
      * 全量快照拉取（star/female 跨页过滤的数据源）。
      *
-     * 从第 1 页起顺序拉取并按 uid 跨页去重合并（服务端每页都会前置复制
-     * 当前用户/关注用户），直到末页或触达上限（40 页 / 2000 行 → `truncated`）。
+     * 从第 1 页起顺序拉取，每页先剔除服务端前置的「当前用户」副本再按 uid 跨页
+     * 去重合并（服务端每页都会前置复制当前用户/关注用户；不去除的话副本会占住
+     * 快照头部并让按位置切片的名次窗口整体错位），直到末页或触达上限
+     * （40 页 / 2000 行 → `truncated`）。
      * keyword 保持生效（每页请求都带上）；removeStar 恒为 false —— 快照必须
      * 包含打星行，否则「打星队」筛选恒为空。
      *
@@ -297,7 +303,10 @@ export const useRankStore = defineStore('rank', {
           ) {
             return
           }
-          merged = mergeRankPages(merged, result.records)
+          merged = mergeRankPages(
+            merged,
+            stripPrependedSelfRow(result.records, this.uid, result.current, result.size),
+          )
           if (page >= result.pages) break
           if (page >= FULL_FETCH_MAX_PAGES || merged.length >= FULL_FETCH_MAX_ROWS) {
             truncated = true
