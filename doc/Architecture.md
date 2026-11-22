@@ -360,7 +360,7 @@ src/
 │   │   ├── StatusBar.vue                 # 底部状态条（连接状态 + 客户端版本；版本号同时是设置入口的隐藏显现点）
 │   │   └── WindowControls.vue            # 无边框窗口的最小化/最大化/关闭（TopBar 与 `--settings` 极简壳共用）
 │   ├── contest/
-│   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总罚时或 OI 总得分，数据源=榜单我的行；无卡片外框，渲染在 PageHeading 的右侧插槽）
+│   │   └── ContestStatsBar.vue           # 统计卡（解题进度 / 实时排名 / 总用时或 OI 总得分，数据源=榜单我的行；无卡片外框，渲染在 PageHeading 的右侧插槽）
 │   ├── login/                            # 登录页专用组件（PR #35 拆分）
 │   │   ├── LoginForm.vue                 # 登录卡片（未登录=账号/密码表单 + 密码显隐 + 提交；已登录=账号欢迎态 + 切换账号；底部比赛简介折叠面板。纯受控组件，业务在 LoginView）
 │   │   ├── Countdown.vue                 # 赛程时钟（距开赛四段倒计时 / 赛内已用时 / 「比赛已结束」大字；urgent 时数字转朱红；role=timer + aria-label 拼串）
@@ -590,7 +590,7 @@ src/
   | 提交详情页收敛轮询 | 同上（读同一配置） | ❌（刻意） | 终态（终态后补拉一次测试点）/ 总超时 / `submitId` 切换 / 离页 | `SubmissionDetailView`（视图自持，评测中只拉 detail 不拉 cases；切换时旧请求失效并重建 deadline） |
 - **公告已读状态是客户端特性**：HOJ 无已读概念，已读 ID 集合由 Rust 端按「比赛 + 用户」持久化（`announcements_read/{cid}_{uid}.json`，合并去重、损坏降级为空 + warn）；未读红点 = 列表与已读集合的差集，由外壳启动的公告轮询在全部页面保持鲜活，且 Rust 侧检测到新公告会经事件桥即时通知前端（见下一条）。标记已读由 `announcementStore.load` 在 `isWatching && 页面可见` 时统一完成（乐观更新，持久化失败回滚 —— 红点复发优于假已读）：**页面不可见时不标记**（切走了 = 没看到），**不在公告页时不标记**（新公告必须保持未读以点亮红点）
 - **提交列表「只看本人」由后端强制**：`list_contest_submissions` 命令层恒置 `onlyMine = true`，前端不传该参数、不可绕过（产品决策：评测页只显示本人提交）
-- **榜单数据源职责**：卡片「我的状态」取 `get-user-problem-status`（轻量、不受榜单分页/搜索影响，AC 判定与榜单我的行取并集且 **AC 优先**）；统计卡「解题进度 / 实时排名 / 总罚时」取榜单我的行（服务端前置复制，天然可得）；`ac/total` 与气球色取比赛题目列表。HOJ 会把当前用户与关注列表**前置复制**进 `records`，渲染前必须先剔除「当前用户」的前置副本（`utils/rank.stripPrependedSelfRow`，保留自然位置行——否则副本以普通行身份占据正文首行，名次列从「我的名次」开始）再按 `uid` 去重，`total` 因此偏大、不能直接当参赛人数（口径：`total − 本页重复数`，且当「我的前置副本是本页唯一出现（位于首条：满页 `length > size` 结构性证明副本存在——兜住打星占位/并列名次的 rank-位置错位；短页回退自然名次不在本页窗口）」时再 −1，见 `utils/rank.resolveParticipantCountFromPage`；关注用户的页外副本仍是已知残差）；`rank == -1` 是打星队伍；封榜以 `contest.sealRank + sealRankTime` 自行判断，**不依赖 `forceRefresh`**（对非管理员无效）
+- **榜单数据源职责**：卡片「我的状态」取 `get-user-problem-status`（轻量、不受榜单分页/搜索影响，AC 判定与榜单我的行取并集且 **AC 优先**）；统计卡「解题进度 / 实时排名 / 总用时」取榜单我的行（服务端前置复制，天然可得）；`ac/total` 与气球色取比赛题目列表。HOJ 会把当前用户与关注列表**前置复制**进 `records`，渲染前必须先剔除「当前用户」的前置副本（`utils/rank.stripPrependedSelfRow`，保留自然位置行——否则副本以普通行身份占据正文首行，名次列从「我的名次」开始）再按 `uid` 去重，`total` 因此偏大、不能直接当参赛人数（口径：`total − 本页重复数`，且当「我的前置副本是本页唯一出现（位于首条：满页 `length > size` 结构性证明副本存在——兜住打星占位/并列名次的 rank-位置错位；短页回退自然名次不在本页窗口）」时再 −1，见 `utils/rank.resolveParticipantCountFromPage`；关注用户的页外副本仍是已知残差）；`rank == -1` 是打星队伍；封榜以 `contest.sealRank + sealRankTime` 自行判断，**不依赖 `forceRefresh`**（对非管理员无效）
 - **语言权威值 = HOJ 显示名**：提交契约（`submit-problem-judge` 的 `language: "C++"`）、题目详情 `languages` 允许列表、工作区元数据与配置 `defaultLanguage` 全部使用 HOJ 显示名；Monaco 高亮 id 与源文件名是**派生值**，只在消费点经 `utils/language` 映射（`monacoIdOf` / `sourceFileNameOf`），绝不反向作为存储值 —— Monaco id 有损（C++17/C++20 同归 'cpp'）且无法承载 Go/Rust 等语言。语言下拉候选以**题目详情返回的允许列表**为准（HOJ 按题限制语言），服务端未提供时回退内置 `DEFAULT_LANGUAGES`；历史遗留的 Monaco id（如 'cpp'）由前后端归一函数双向兜底迁移。未知语言的文件名回退 `main.txt` 而非猜测 `.cpp` —— 判题端按后缀判语言，猜错后缀等于用错语言评测
 - **打星队/女生队跨页过滤**：服务端只有 `removeStar`（正式参赛队走它，跨页正确）；打星/女生无服务端参数，切「全量快照模式」—— 顺序拉全部分页（上限 40 页 / 2000 行，超限标记 truncated 并提示）、跨页 uid 去重后客户端过滤 + 客户端分页，轮询暂停改手动刷新（全量重拉太重）。HOJ 榜单页是整榜全量重算后分页，连发即让服务端背靠背算整榜 —— **页间强制 400ms 节流**摊开突发；拉取循环持代际令牌并逐页校验筛选态，中途切筛选/登出即中止且不写快照（过期数据不复活、不并发双写）
 - **OI 计分规则只读展示**：`oiRankScoreType`（Recent/Highest）是比赛属性（get-contest-info 返回），不是请求参数 —— 客户端在榜单工具条渲染徽章，不提供切换

@@ -4,7 +4,7 @@ import { useContestStore } from '@/stores/contestStore'
 import { useRankStore } from '@/stores/rankStore'
 import { formatPenaltyMinutes } from '@/utils/rank'
 
-/// 统计卡（题目总览与榜单共用）：解题进度 / 实时排名 / 总罚时。
+/// 统计卡（题目总览与榜单共用）：解题进度 / 实时排名 / 总用时。
 ///
 /// 数据源是**榜单中「我的行」**（HOJ 会把当前用户前置复制到 records，因此任意页都能取到），
 /// 不额外发请求。榜单尚未加载或我没有名次时显示占位符 `—`，**不显示 0** ——
@@ -31,11 +31,14 @@ const rankText = computed(() => {
   return { value, unit: rank.participants > 0 ? `/ ${rank.participants}` : '' }
 })
 
-const penaltyText = computed(() => {
+/// 第三段：ACM 显示「总用时」，数值 = HOJ totalTime（含罚时 = Σ(各题 AC 时刻 +
+/// 每错一次 ×20min)，ICPC 榜单 Total time/Elapsed 惯例），与榜单「总用时」列同源；
+/// OI 显示「总得分」（totalScore）
+const timeText = computed(() => {
   const my = rank.myRow
-  if (!my) return { label: '总罚时', value: '—' }
+  if (!my) return { label: '总用时', value: '—' }
   return isAcm.value
-    ? { label: '总罚时', value: `${formatPenaltyMinutes(my.totalTime)}m` }
+    ? { label: '总用时', value: `${formatPenaltyMinutes(my.totalTime)}m` }
     : { label: '总得分', value: my.totalScore === null ? '—' : String(my.totalScore) }
 })
 </script>
@@ -66,8 +69,8 @@ const penaltyText = computed(() => {
     <div class="h-9 w-px bg-[var(--border-color)]"></div>
 
     <div class="px-2 text-left">
-      <span class="block text-xs font-medium text-[var(--text-secondary)]">{{ penaltyText.label }}</span>
-      <span class="font-mono text-2xl font-medium text-[var(--text-primary)]">{{ penaltyText.value }}</span>
+      <span class="block text-xs font-medium text-[var(--text-secondary)]">{{ timeText.label }}</span>
+      <span class="font-mono text-2xl font-medium text-[var(--text-primary)]">{{ timeText.value }}</span>
     </div>
   </div>
 </template>
