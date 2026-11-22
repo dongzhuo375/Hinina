@@ -20,7 +20,7 @@ Hydro 适配器专用错误类型，以及「错误包络 → `AppError`」的�
 
 ## 被依赖
 - `adapter::hydro::types::parse_hydro_error` — 错误包络 → `AppError`
-- `adapter::hydro::mod` — `HttpResponse::into_value()` 的错误分支、`validate_session` 的 `Err(Auth)` 判定
+- `adapter::hydro::mod` — `HydroResponse::into_value()` 的错误分支、`validate_session` 的 `Err(Auth)` 判定
 
 ## 逻辑流程
 ```
