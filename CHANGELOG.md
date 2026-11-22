@@ -2,6 +2,20 @@
 
 本文件记录 Hinina 的用户可见变更，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.9] - 2026-11-23
+
+维护版本：运行栈整体抬升——Tauri 2.12.7 与单实例插件 2.5.5（caret 解锁），无功能与界面变更；单实例拦截随上游获得多项行为修复。
+
+### Changed
+
+- **运行栈抬升**：Tauri 2.12.5 → 2.12.7（构建链 tauri-build/codegen/macros 2.7.6、tauri-runtime 2.12.4、tauri-runtime-wry 2.12.5、tauri-utils 2.10.4 随动）；`tauri-plugin-single-instance` 由 =2.4.5 精确锁解锁为 2.5.5 caret（Cargo.toml 内自述的解锁条件——2.5.x 起要求 Tauri ^2.12——随本次抬栈满足）；npm 侧 @tauri-apps/api 锁定升至 2.12.5、CLI 2.12.6（版本区间不变）。
+- **单实例行为修复（随插件上游）**：第二实例等待第一实例响应从无限等待改为 10 秒上限后退出；含非 Unicode 字符的启动参数不再 panic（以 U+FFFD 替换后照常转发，非 Unicode 工作目录同理）；Windows 下第二实例启动期偶发无法退出的竞态修复；Linux 无 DBus 会话时改为正常启动并告警（单实例功能降级不再致启动失败）。
+
+### Known Issues
+
+- 项目仍在开发中，界面与配置格式可能继续调整（见 README）。
+- 运行栈抬升已通过三平台集成验证（含打包 exe 的 CSP 运行时探针）；单实例「双开聚焦」与长时使用观察继续。
+
 ## [0.3.8] - 2026-11-22
 
 榜单正确性修复与界面细节打磨：修复登录用户查看榜单时名次列不从 1 开始、自己的行重复出现的显示缺陷，统计卡时间标签与榜单列头统一，顶栏账号菜单箭头垂直居中。
