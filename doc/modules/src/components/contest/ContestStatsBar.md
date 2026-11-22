@@ -4,7 +4,7 @@
 
 ## 职责
 
-题目总览与榜单页共用的顶部统计条：解题进度（`x / n AC`）、实时排名（`#x / 人数`）、ACM 总罚时或 OI 总得分，零额外请求。
+题目总览与榜单页共用的顶部统计条：解题进度（`x / n AC`）、实时排名（`#x / 人数`）、ACM 总用时或 OI 总得分，零额外请求。
 
 ## 核心类型/函数
 
@@ -15,7 +15,7 @@
 | `isAcm` | `computed<boolean>` | `contest.contest?.contestType !== 1`（OI=1，其余按 ACM 处理） |
 | `solvedText` | `computed<{value, unit}>` | 解题进度：`myRow.ac`，unit 为 `/ ${题目数} AC`（题目数缺失时只显示 `AC`） |
 | `rankText` | `computed<{value, unit}>` | 实时排名：`#${myRow.rank}`，unit 为 `/ ${participants}`（participants 为 0 时不显示）；打星（`rank === -1`）或缺失显示 `—` |
-| `penaltyText` | `computed<{label, value}>` | ACM：`总罚时` = `formatPenaltyMinutes(totalTime)` + `m`；OI：`总得分` = `totalScore` |
+| `timeText` | `computed<{label, value}>` | ACM：`总用时` = `formatPenaltyMinutes(totalTime)` + `m`（数值即 HOJ totalTime，含罚时 = Σ(各题 AC 时刻 + 每错一次 ×20min)，与榜单「总用时」列同源）；OI：`总得分` = `totalScore` |
 
 ## 直接依赖
 
@@ -57,3 +57,11 @@ contestStore ──contestType/problems.length──▶ 赛制分支与分母
   （见 `utils/rank` 的 `formatPenaltyMinutes` 注释），故第三段整体切换为 `总得分`。
 - 纯展示组件：所有状态来自 store，自身不发请求、不持有轮询——刷新节奏完全由
   `rankStore.startLive` 编排。
+
+## 测试
+
+`src/components/contest/__tests__/ContestStatsBar.spec.ts`（jsdom 挂载，经共享
+`test-support/view-mount` 供 pinia store 数）锁定：ACM 三段标签与数值（解题进度 /
+实时排名 / 总用时 `Xm`，含罚时口径与榜单「总用时」列同源）、OI 第三段总得分、
+myRow 未加载占位（`—` 而非 0；解题进度保留「— / n AC」形态）。两处标签
+（ACM 分支与空态占位）各有用例锁定，任一回退即红。

@@ -21,7 +21,7 @@
 | `stripPrependedSelfRow` | `(rows, myUid: string \| null, current: number, size: number) => ContestRankRow[]` | 剔除服务端前置的「当前用户」副本，保留自然位置行（正文恢复纯名次序），见下 |
 | `resolveMyRow` | `(rows, uid: string \| null) => ContestRankRow \| null` | 定位「我的行」（置顶高亮用） |
 | `resolveParticipantCount` | `(rows, total: number) => number` | 去重后非打星行的最大 `rank`；取不到才回退 `total` |
-| `formatPenaltyMinutes` | `(totalTimeSeconds: number) => string` | ACM 总罚时秒 → 分钟整数（向下取整）；非法 → `--` |
+| `formatPenaltyMinutes` | `(totalTimeSeconds: number) => string` | ACM totalTime 秒（含罚时，UI 标签「总用时」）→ 分钟整数（向下取整）；非法 → `--` |
 | `resolveParticipantCountFromPage` | `(page: ContestRankPage, myUid: string \| null) => number` | 从整页响应推算真实参与人数（统计卡分母），含「我的前置副本」修正，见下 |
 | `RankGroupFilter` | `'all' \| 'official' \| 'star' \| 'female'` | 榜单分组筛选：official 走服务端 `removeStar`；star/female 服务端无对应参数，只筛当前页会跨页漏行，须全量快照后客户端过滤（`rankStore.fetchAllRows`） |
 | `mergeRankPages` | `(existing, incoming) => ContestRankRow[]` | 跨页合并快照：当前用户前置副本已由 `stripPrependedSelfRow` 在合并前剔除（`fetchAllRows` 逐页处理），此处处理关注用户等其余跨页同 uid 重复行——已存在的行保留（首次出现优先），新行按序追加；不改入参 |

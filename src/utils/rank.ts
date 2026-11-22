@@ -223,8 +223,10 @@ export function resolveParticipantCount(rows: ContestRankRow[], total: number): 
 }
 
 /**
- * ACM 总罚时（秒）→ 分钟整数字符串（如 2700 → `45`），向下取整。
- * 非法/负值返回 `--`。注意 OI 赛制的 totalTime 是毫秒，不适用本函数。
+ * ACM totalTime（秒，含罚时 = Σ(各题 AC 时刻 + 每错一次 ×20min)，ICPC 榜单
+ * Total time/Elapsed 惯例；UI 标签「总用时」）→ 分钟整数字符串（如 2700 → `45`），
+ * 向下取整。非法/负值返回 `--`。注意 OI 赛制的 totalTime 是毫秒且语义为耗时，
+ * 不适用本函数。
  */
 export function formatPenaltyMinutes(totalTimeSeconds: number): string {
   if (!Number.isFinite(totalTimeSeconds) || totalTimeSeconds < 0) return '--'
