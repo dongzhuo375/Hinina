@@ -138,7 +138,10 @@ async function handleLogout() {
         <div class="relative">
           <button class="account-button" :aria-expanded="userMenuOpen" @click="userMenuOpen = !userMenuOpen">
             <span class="account-initial">{{ userInitial }}</span>
-            <span class="max-w-[120px] truncate">{{ auth.username }}</span><span aria-hidden="true">⌄</span>
+            <span class="max-w-[120px] truncate">{{ auth.username }}</span>
+            <span aria-hidden="true" class="flex h-3 w-3 shrink-0 items-center justify-center">
+              <svg viewBox="0 0 16 16" class="h-2.5 w-2.5" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 6 4 4 4-4" /></svg>
+            </span>
           </button>
           <template v-if="userMenuOpen">
             <div class="fixed inset-0 z-40" @click="userMenuOpen = false"></div>
