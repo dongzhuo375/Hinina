@@ -9,7 +9,8 @@
 // policy copy):
 //   1. served CSP header matches every configured directive source-for-source
 //      (order-independent; the ONLY tolerated addition is sha256-* hashes on
-//      script-src — the one augmentation tauri 2.12.5 empirically performs.
+//      script-src — the one augmentation tauri empirically performs (measured
+//      on 2.12.5; re-verified on 2.12.7 — sole addition, hash:chunk 1:1).
 //      Anything else the header gains, including loosening sources like
 //      'unsafe-eval', fails the probe);
 //   2. an EXPLICIT invoke inside the zero-violation window succeeds and
@@ -119,11 +120,11 @@ try {
     const [name, ...sources] = directive.split(/\s+/)
     served.set(name.toLowerCase(), sources)
   }
-  // 唯一容忍的增补：script-src 上的 sha256-* hash（tauri 2.12.5 实证的唯一
-  // 增补形态）。其余任何多出来的源（含上游追加以放宽为方向的 'unsafe-eval'
+  // 唯一容忍的增补：script-src 上的 sha256-* hash（tauri 2.12.5 实证、2.12.7
+  // 复测仍在的唯一增补形态）。其余任何多出来的源（含上游追加以放宽为方向的 'unsafe-eval'
   // 类）一律红——superset 检查会静默漏过这类放宽。
   // 反向盲区同样关闭：服务态**新增整条指令**（配置里没有的指令名）也红——
-  // 2.12.5 的 set_csp 机制上不会这么做，此断言是对未来上游行为的观测兜底。
+  // 2.12.5 的 set_csp 机制上不会这么做（2.12.7 探针复验零新增指令），此断言是对未来上游行为的观测兜底。
   for (const name of served.keys()) {
     if (!expected.has(name)) failures.push(`served header has a directive not in the config: ${name}`)
   }

@@ -49,8 +49,9 @@ export const PROD_POLICY = {
   // e2e runs against the dev server, so CI cannot see this regression).
   'font-src': ["'self'", 'data:'],
   // Tauri v2 IPC origins (Windows WebView2 uses http://ipc.localhost). These
-  // are load-bearing: the tauri 2.12.5 core has NO automatic connect-src
-  // augmentation for IPC, and when the fetch channel is CSP-blocked the IPC
+  // are load-bearing: the tauri core has NO automatic connect-src
+  // augmentation for IPC (measured on 2.12.5; re-verified on 2.12.7 by the
+  // runtime probe), and when the fetch channel is CSP-blocked the IPC
   // layer silently degrades to postMessage with a single console.warn —
   // config drift here is a quiet slowdown, not a loud failure.
   'connect-src': ["'self'", 'ipc:', 'http://ipc.localhost'],
