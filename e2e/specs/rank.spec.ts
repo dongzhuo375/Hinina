@@ -14,10 +14,17 @@ test.describe('实时榜单', () => {
     await page.waitForURL('**/contest/rank')
 
     // 形态断言前先等业务加载标记（表格行），避免轮询空窗期假绿。
-    // uid 1 = 当前登录用户：其记录被合并为置顶「我」行，页面上不存在 team_01
+    // uid 1 = 当前登录用户 e2e_player，名次与 team_07 对调为 7：置顶「我」行
+    // 显示 #7，正文剔除前置副本后从名次 1（team_07）开始
     await expect(page.getByText('team_02')).toBeVisible()
     await expect(page.getByRole('heading', { name: /实时榜单/ })).toBeVisible()
     await expect(page.getByText('实时刷新中')).toBeVisible()
+    // 置顶我行是 tbody 首行（带「我」徽章与 #7 名次），紧随其后的正文首行
+    // 必须是名次 1（team_07）——前置副本混入正文会让第二行变成 #7/7，在此变红
+    const table = page.getByRole('table')
+    await expect(table.locator('tbody tr').first()).toHaveText(/我/)
+    await expect(table.locator('tbody tr').first()).toHaveText(/#7/)
+    await expect(table.locator('tbody tr').nth(1)).toHaveText(/team_07/)
     // 服务端 total 含 1 条前置副本（fake 复刻），前端修正后必须恰为 55 队——
     // 「共 0 队」之类的修正回归会在这里变红
     await expect(page.getByText('共 55 队')).toBeVisible()
@@ -47,17 +54,21 @@ test.describe('实时榜单', () => {
     await page.getByRole('link', { name: /榜单/ }).click()
     await page.waitForURL('**/contest/rank')
     await expect(page.getByText('team_02')).toBeVisible()
-    // 第 1 页：我的行在前置副本与本页原行中各出现一次 → 去重后参与人数 = 105
+    // 第 1 页：me 前置副本与自然位置行各出现一次 → 重复数被扣除，参与人数 = 105
     await expect(page.getByText('共 105 队')).toBeVisible()
 
     const pager = page.getByRole('navigation', { name: '分页' })
     await pager.getByRole('button', { name: '2', exact: true }).click()
     await expect(page.getByText('team_51').first()).toBeVisible()
+    // 第 2 页：我的前置副本是唯一出现（名次 7 不在窗口 [51,100]）→ 被剔除，
+    // 正文首行是名次 51（team_51），置顶我行仍固定在表头下方
+    const table = page.getByRole('table')
+    await expect(table.locator('tbody tr').first()).toHaveText(/#7/)
+    await expect(table.locator('tbody tr').nth(1)).toHaveText(/team_51/)
     await pager.getByRole('button', { name: '3', exact: true }).click()
     await expect(page.getByText('team_101').first()).toBeVisible()
     await expect(pager.locator('[aria-current="page"]')).toHaveText('3')
-    // 第 3 页：我的前置副本不在本页唯一行中 → 走「未被去重捕获的前置副本」
-    // 修正项，人数仍是 105
+    // 第 3 页：同第 2 页形态 → 走「未被去重捕获的前置副本」修正项，人数仍是 105
     await expect(page.getByText('共 105 队')).toBeVisible()
 
     // 让第 2 页的查询 memo 过期后注入失败并折返第 2 页：请求真发、真失败

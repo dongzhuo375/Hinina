@@ -18,12 +18,13 @@
 | `RankRowKind` | `'star' \| 'female' \| 'normal'` | 行样式类别 |
 | `resolveRowKind` | `(row) => RankRowKind` | `rank === -1` 打星（优先级最高）> `gender === 'female'` > 普通 |
 | `dedupeRankRows` | `(rows) => ContestRankRow[]` | 按 `uid` 去重，保留首次出现的行 |
+| `stripPrependedSelfRow` | `(rows, myUid: string \| null, current: number, size: number) => ContestRankRow[]` | 剔除服务端前置的「当前用户」副本，保留自然位置行（正文恢复纯名次序），见下 |
 | `resolveMyRow` | `(rows, uid: string \| null) => ContestRankRow \| null` | 定位「我的行」（置顶高亮用） |
 | `resolveParticipantCount` | `(rows, total: number) => number` | 去重后非打星行的最大 `rank`；取不到才回退 `total` |
 | `formatPenaltyMinutes` | `(totalTimeSeconds: number) => string` | ACM 总罚时秒 → 分钟整数（向下取整）；非法 → `--` |
 | `resolveParticipantCountFromPage` | `(page: ContestRankPage, myUid: string \| null) => number` | 从整页响应推算真实参与人数（统计卡分母），含「我的前置副本」修正，见下 |
 | `RankGroupFilter` | `'all' \| 'official' \| 'star' \| 'female'` | 榜单分组筛选：official 走服务端 `removeStar`；star/female 服务端无对应参数，只筛当前页会跨页漏行，须全量快照后客户端过滤（`rankStore.fetchAllRows`） |
-| `mergeRankPages` | `(existing, incoming) => ContestRankRow[]` | 跨页合并快照：按 uid 去重，已存在的行保留（首次出现优先），新行按序追加；不改入参 |
+| `mergeRankPages` | `(existing, incoming) => ContestRankRow[]` | 跨页合并快照：当前用户前置副本已由 `stripPrependedSelfRow` 在合并前剔除（`fetchAllRows` 逐页处理），此处处理关注用户等其余跨页同 uid 重复行——已存在的行保留（首次出现优先），新行按序追加；不改入参 |
 | `filterRankRowsByGroup` | `(rows, filter) => ContestRankRow[]` | 分组过滤纯函数（全量快照与当前页共用同一判据）：`star` → `rank === -1`；`female` → `gender === 'female'`；其余原样返回 |
 | `paginateRankRows` | `(rows, current, size) => ContestRankRow[]` | 客户端分页切片：`current` 钳到 ≥1，越界页返回空数组，`size <= 0` 视为不分页原样返回 |
 | `OiCellKind` | `'full' \| 'partial' \| 'zero' \| 'none'` | OI 档位（对应 HOJ §8 的 `oi-100` / `oi-between` / `oi-0`） |
@@ -36,7 +37,7 @@
 
 ## 被依赖
 
-- `stores/rankStore.ts` — `applyPage()` 用 `dedupeRankRows` / `resolveMyRow` / `resolveParticipantCountFromPage` 做入页归一；全量快照模式用 `mergeRankPages` / `filterRankRowsByGroup` / `paginateRankRows`（`RankGroupFilter` 经 store re-export 给 RankToolbar）
+- `stores/rankStore.ts` — `applyPage()` 用 `stripPrependedSelfRow` / `dedupeRankRows` / `resolveMyRow` / `resolveParticipantCountFromPage` 做入页归一；全量快照模式用 `stripPrependedSelfRow`（逐页）+ `mergeRankPages` / `filterRankRowsByGroup` / `paginateRankRows`（`RankGroupFilter` 经 store re-export 给 RankToolbar）
 - `components/rank/ScoreboardTable.vue` — `resolveDisplayName` / `resolveRowKind` / `resolveOiRankCell`（OI 榜单）/ `formatPenaltyMinutes` / `formatRankTime`
 - `components/rank/RankCell.vue` — `resolveRankCell`（ACM 单元格文案与样式）
 - `components/contest/ContestStatsBar.vue` — `formatPenaltyMinutes`
@@ -61,21 +62,35 @@ errorNum > 0 → wa，triesText = `-${errorNum}`     // ICPC 习惯显示 -罚�
 其余 → none
 ```
 
-**参与人数为什么两个口径都不能直接用**（HOJ §9.2）：
+**前置副本剔除与参与人数为什么两个口径都不能直接用**（HOJ §9.2）：
 
-- 不能用分页 `total`：服务端把「当前登录用户」与「关注列表用户」复制一份插到 records 最前面，
+- 服务端把「当前登录用户」与「关注列表用户」复制一份插到 records 最前面（**每一页**都前置），
   `total` 含这些前置副本，比真实人数偏大；
+- 副本不去除会以普通行身份占据正文首行——`dedupeRankRows` 保留首次出现恰好把它保下来并丢掉
+  自然位置行，名次列会从「我的名次」开始而不是 1。`stripPrependedSelfRow(rows, myUid, current, size)`
+  的剔除规则：myUid 出现 ≥2 次 → 首条必为前置副本，剔除首条（自然位置行保留）；恰好 1 次 →
+  位于 `records[0]` 且满足两级判据之一：满页 `length > size` **结构判据**（HOJ 把副本插在
+  `limit` 行之外，满页长度即结构证据——同时兜住打星行占位/并列名次导致的 rank 与位置错位，
+  此时副本 rank 可能恰好落进本页窗口、仅看窗口会漏剔）；短页（末页）回退**窗口判据**——
+  有名次行（rank ≥ 1）rank 不落在本页名次窗口 `[(current−1)×size+1, current×size]` 内。
+  **打星行 rank === -1 不构成副本证据**（无自然位置既可解释为 HOJ 前置副本、也可解释为
+  无前置服务端如 Hydro 的榜首打星自然行），仅结构判据可剔——HOJ 星队的短页前置副本为
+  已知残余。关键词过滤重排后的短页窗口可能对不上，同样是已知残余；uid 为空/未出现
+  原样返回。
+  **必须在 `dedupeRankRows` 之前调用**：去重会把自然位置行丢掉，届时无法再区分副本与自然行；
+  `myRow` 定位（`resolveMyRow`）也用剔除前的原始 records——前置副本正是它每页都存在的意义；
 - 不能用「本页最大 rank」：第 1 页 limit=50 时最大 rank 只有 ~50，不是全场人数；
 - `resolveParticipantCountFromPage(page, myUid)` 的口径：
   `total − 本页重复行数 − 未被去重捕获的「我的前置副本」`。
   前置副本与其自然位置**同页**出现时 uid 重复，被去重计数捕获；「我」的自然名次
   **不在本页**时，本页只有前置副本这一条（uid 仅出现一次，不构成重复），须额外减 1。
-  判据：myUid 在 records 中恰好出现一次，且其 rank 不落在本页名次窗口
-  `[(current−1)×size+1, current×size]` 内（打星 myRow `rank === -1` 自然位置无定义，
-  同样按前置副本处理）；若单条出现的 rank 恰在窗口内，说明它就是自然行
-  （服务端未再前置副本），不减。
-  残余误差：**关注用户**的窗外前置副本无法用同一判据识别（口径只修「我」），
-  分母仍可能偏大——对展示无实质影响，不为此额外请求末页。
+  判据与 `stripPrependedSelfRow` 两级共用：myUid 恰好出现一次、位于 `records[0]`，
+  满页 `length > size` 结构判据（兜住打星占位/并列名次的 rank-位置错位），短页回退
+  「rank 不落在本页名次窗口内」——仅 rank ≥ 1 的行适用，打星行 rank 本身不构成
+  副本证据。
+  残余误差：**关注用户**的窗外前置副本与 **HOJ 星队的短页前置副本**无法用同一判据
+  识别（口径只修「我」与有名次行），分母仍可能偏大——对展示无实质影响，不为此额外
+  请求末页。
   `total ≤ 0` 时才退回 `resolveParticipantCount` 的最大 rank 口径
   （打星 `rank === -1` 不参与排名，须剔除）。
 
@@ -83,8 +98,9 @@ errorNum > 0 → wa，triesText = `-${errorNum}`     // ICPC 习惯显示 -罚�
 
 ```
 mergeRankPages：服务端在**每一页**都前置复制当前用户/关注用户（§9.2），
-  逐页拉取合并时页与页之间存在同 uid 重复行，必须去重；首次出现优先
-  （与 dedupeRankRows 一致），不改入参
+  逐页拉取合并前先经 stripPrependedSelfRow 剔除（否则副本占住快照头部，
+  按位置切片的名次窗口整体错位），页与页之间的同 uid 重复行再去重；
+  首次出现优先（与 dedupeRankRows 一致），不改入参
 filterRankRowsByGroup：star/female 判据与 resolveRowKind 的行样式判定同源；
   all/official 原样返回（official 的过滤在服务端 removeStar 完成）
 paginateRankRows：快照过滤后的客户端切片，供 rankStore.visibleRows 分页
@@ -118,4 +134,4 @@ score >= 100 → full（满分）；0 < score < 100 → partial（部分分）�
 
 ## 测试
 
-`src/utils/__tests__/rank.spec.ts`（60 例）锁定：ACM 单元格规则（AC 行 errorNum+1、after-ac 加 `*` 且优先于 first-ac、封榜行优先于 wa、acTime 脏数据渲染 `--:--`）、时间/罚时格式化与非法值占位、显示名三级回退、打星行判定优先级、uid 去重不改入参、参与人数口径（total−重复行、我的窗外前置副本额外减 1、打星 myRow 减 1、窗口边界、恰在窗口内不减、多关注用户副本的捕获与已知残余误差、不退化为本页最大 rank、total 缺失退回最大 rank）、全量快照纯函数（mergeRankPages 跨页去重/首次出现优先/不改入参、filterRankRowsByGroup 三档判据、paginateRankRows 切片/钳位/越界/不分页边界）、OI 档位与 timeInfo 毫秒换算。
+`src/utils/__tests__/rank.spec.ts`（73 例）锁定：ACM 单元格规则（AC 行 errorNum+1、after-ac 加 `*` 且优先于 first-ac、封榜行优先于 wa、acTime 脏数据渲染 `--:--`）、时间/罚时格式化与非法值占位、显示名三级回退、打星行判定优先级、uid 去重不改入参、前置副本剔除（同页出现剔首条留自然行、窗外唯一出现剔除、打星占位 rank-位置错位的满页结构判据剔除、短页窗口回退剔除、短页窗内首条视为自然行保留、非首条保留、打星我、uid 空/未出现、不改入参）、参与人数口径（total−重复行、我的窗外首条前置副本额外减 1、打星 myRow 短页单条不减（rank 不构成证据，HOJ 星队短页副本为残余）、满页打星副本结构判据减 1、窗口边界、短页恰在窗口内不减、非首条不减、rank-位置错位满页结构判据减 1、多关注用户副本的捕获与已知残余误差、不退化为本页最大 rank、total 缺失退回最大 rank）、全量快照纯函数（mergeRankPages 跨页去重/首次出现优先/不改入参、filterRankRowsByGroup 三档判据、paginateRankRows 切片/钳位/越界/不分页边界）、OI 档位与 timeInfo 毫秒换算。

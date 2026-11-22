@@ -4,7 +4,7 @@
 
 ## 职责
 
-持有当前比赛的榜单分页数据与查询条件，编排 10s±2s 的实时刷新轮询，并为打星/女生筛选维护**全量快照模式**（跨页拉取 + 客户端过滤分页，轮询暂停）；入页数据的服务端怪癖归一（uid 去重、我的行定位、参与人数修正）统一在 `applyPage` 完成，视图层不再重复处理。
+持有当前比赛的榜单分页数据与查询条件，编排 10s±2s 的实时刷新轮询，并为打星/女生筛选维护**全量快照模式**（跨页拉取 + 客户端过滤分页，轮询暂停）；入页数据的服务端怪癖归一（前置副本剔除、uid 去重、我的行定位、参与人数修正）统一在 `applyPage` 完成，视图层不再重复处理。
 
 ## 核心类型/函数
 
@@ -16,14 +16,14 @@
 | `FullFetchState` | `'idle' \| 'loading' \| 'done' \| 'truncated' \| 'error'` | 快照拉取状态：未拉取 / 拉取中 / 完整 / 达上限截断 / 失败（无可用快照） |
 | `livePolling` | 模块级 `PollerLifecycle` | 轮询器生命周期壳（副作用句柄而非渲染状态，**不进响应式系统**） |
 | `isPageHidden` / `isFullSnapshotFilter` | 判据 | `utils/page-visibility` 判后台；`filter ∈ {star, female}` 判是否需要全量快照 |
-| state | `rows`（已去重）/ `myRow` / `total` / `size` / `current` / `pages` / `participants` / `keyword` / `removeStar` / `groupFilter` / `isLoading` / `loadSeq` / `isLive` / `error` / `lastUpdated` / `contestId` / `uid` | `contestId`/`uid` 是轮询上下文，供 `refresh` 复用；`loadSeq` 是同会话请求序号，登出随 `$reset` 清理 |
-| state（全量快照） | `fullRows: ContestRankRow[] \| null` / `fullFetchState` / `fullPage` / `fullLoadedRows` | 跨页去重合并的快照（非全量模式为 null）/ 拉取状态 / 客户端分页当前页 / 已加载行数（状态行「已加载 N 行」用） |
+| state | `rows`（已剔除前置副本并去重）/ `myRow` / `total` / `size` / `current` / `pages` / `participants` / `keyword` / `removeStar` / `groupFilter` / `isLoading` / `loadSeq` / `isLive` / `error` / `lastUpdated` / `contestId` / `uid` | `contestId`/`uid` 是轮询上下文，供 `refresh` 复用；`loadSeq` 是同会话请求序号，登出随 `$reset` 清理 |
+| state（全量快照） | `fullRows: ContestRankRow[] \| null` / `fullFetchState` / `fullPage` / `fullLoadedRows` | 逐页先剔除前置副本再跨页去重合并的快照（非全量模式为 null）/ 拉取状态 / 客户端分页当前页 / 已加载行数（状态行「已加载 N 行」用） |
 | `isFullMode` | getter | 是否处于全量快照模式（star/female 筛选**且快照已就位**） |
 | `fullFilteredRows` | getter | 快照按当前分组过滤后的全部行（未分页，`filterRankRowsByGroup`） |
 | `visibleRows` | getter | 全量模式：过滤快照后 `paginateRankRows` 客户端切片（`pages`/`current` 已由 `syncFullPaging` 同步为等效值，视图无需感知模式差异）；常规模式：`filterRankRowsByGroup(rows, groupFilter)`——star/female 但快照未就位（拉取中/失败）时退化为筛当前页，聊胜于无 |
 | `hasData` | getter | 是否已加载过（区分「空榜单」与「尚未请求」） |
 | `loadRank` | `(contestId, uid, page?) => Promise<void>` | 加载一页；传入比赛与 store 当前比赛不同时，先作废旧普通/全量请求并清空旧榜单、快照与分页，再按**传入的 contestId**加载。全量筛选中统一转 `fetchAllRows`（含重新进入 RankView 的直接调用），不得让普通分页覆写全量分页。常规模式显式页码在请求前同步到 `current`，使翻页在途时的轮询仍读取目标页；最新请求失败时把页码回退到请求前的成功页。**请求序号 + 会话代际双守卫**：过期成功/失败均静默丢弃，只有最新请求记录 `error`、向上抛出并收尾 `isLoading` |
-| `applyPage` | `(page, uid) => void` | 应用一页数据的三处归一（见逻辑流程） |
+| `applyPage` | `(page, uid) => void` | 应用一页数据的四处归一（见逻辑流程） |
 | `fetchAllRows` | `() => Promise<void>` | 全量快照拉取，见逻辑流程。发起时固定 `contestId` 快照，循环不得逐页读取可变的 store 上下文。循环中止检查点包含 `fullFetchGeneration`、分组筛选与会话代际；catch/finally 同样只认当前拉取代际。进入全量时作废旧普通 `loadRank`，退出全量时作废旧快照拉取，共享 `isLoading` 仅由当前请求收尾 |
 | `syncFullPaging` | `() => void` | 把客户端分页状态同步到 `pages`/`current`（RankView 分页条直接读这两个字段） |
 | `refresh` | `() => Promise<void>` | 轮询/手动刷新：**吞掉异常**；全量筛选态下重拉整个快照（只会被手动刷新触发），否则重拉当前页 |
@@ -41,7 +41,7 @@
 - `@/services/rank.service`（`rankService.getRank` + `DEFAULT_RANK_PAGE_SIZE`）
 - `@/utils/polling`（`createPollerLifecycle` —— 模块级轮询句柄的持有与回收）
 - `@/utils/page-visibility`（`isPageHidden`）
-- `@/utils/rank`（`dedupeRankRows` / `filterRankRowsByGroup` / `mergeRankPages` / `paginateRankRows` / `resolveMyRow` / `resolveParticipantCountFromPage` + `RankGroupFilter` 类型）
+- `@/utils/rank`（`stripPrependedSelfRow` / `dedupeRankRows` / `filterRankRowsByGroup` / `mergeRankPages` / `paginateRankRows` / `resolveMyRow` / `resolveParticipantCountFromPage` + `RankGroupFilter` 类型）
 - `@/utils/error`（`errorMessage` —— 错误文案收敛）
 - `@/stores/sessionGeneration`（`getSessionGeneration` —— 会话代际守卫）
 
@@ -65,11 +65,15 @@ loadRank(contestId, uid, page)
   常规模式 → token = ++loadSeq；显式 page 先同步 current（轮询随即读取用户目标页）
   → rankService.getRank({ contestId, currentPage, keyword, removeStar })
   → token 仍为最新且会话代际未变才 applyPage(result, uid)：
-      1. rows = dedupeRankRows(records)        // 服务端把当前用户/关注用户前置复制了一份
+      1. rows = dedupeRankRows(stripPrependedSelfRow(records, uid, current, size))
+         // 服务端把当前用户前置复制了一份（每页都前置）；先剔前置副本（保留自然
+         // 位置行）再去重——顺序不能反：去重保留首次出现，会把前置副本保下来并
+         // 丢掉自然位置行，名次列会从「我的名次」开始而不是 1
       2. myRow = resolveMyRow(原始 records, uid) // 从未去重的 records 定位——前置副本正是它
                                                // 存在的意义，任意页都能取到「我的行」
       3. participants = resolveParticipantCountFromPage(page, uid)
-                                               // total − 本页重复行数 − 我的窗外前置副本
+                                               // total − 本页重复行数 − 我的前置副本
+                                               // （满页结构判据 / 短页窗口回退，见 utils/rank）
       4. lastUpdated = Date.now()
   失败 → 仅最新请求先把 current 回退到请求前页，再记录 error + rethrow
          （rows 保留上一次成功数据时不能留下新页码）；过期失败静默丢弃
@@ -95,7 +99,9 @@ fetchAllRows()
     generation 已过期 或 groupFilter 已离开 star/female → 静默中止，不写快照
     // HOJ 榜单页是整榜全量重算后分页，连发即让服务端背靠背算整榜 —— 页间节流摊开突发；
     // 中止校验防止过期循环把旧快照写回（复活）或与新循环并发双写
-  merged = mergeRankPages(merged, records)     // 每页都会前置复制我/关注用户，跨页按 uid 去重
+  merged = mergeRankPages(merged, stripPrependedSelfRow(records, uid, current, size))
+  // 每页都会前置复制我/关注用户：先剔除（否则副本占住快照头部，按位置切片的
+  // 名次窗口整体错位）再跨页按 uid 去重
   page >= pages → done；page >= 40 或 merged >= 2000 行 → truncated
   成功 → fullRows/fullLoadedRows/fullFetchState/lastUpdated + syncFullPaging()
   失败 → 仅当前代际：有旧快照则保留并回退到拉取前状态；毫无快照则 fullFetchState = 'error'；
@@ -131,7 +137,8 @@ stopLive → livePolling.stop() + isLive = false + 清空查询去抖 memo
   比闪成空态/错误态更可用；错误仍写入 `error` 供 UI 提示。
 - **参与人数不用分页 `total` 原值**：服务端把当前用户/关注用户前置复制进 records，
   `total` 随之偏大（HOJ §9.2）；`applyPage` 统一改用
-  `resolveParticipantCountFromPage(page, uid)` = `total − 本页重复行数 − 我的窗外前置副本`
+  `resolveParticipantCountFromPage(page, uid)` = `total − 本页重复行数 − 我的前置副本`
+  （两级判据见 `utils/rank`：满页 length > size 结构判据、短页窗口回退仅 rank ≥ 1）
   修正（口径与残余误差详见 `utils/rank.md`），视图层不再各自推算。
 - `setKeyword` 后服务端会在**全量排名**上重新过滤再分页，`total` 随关键词变化（HOJ §9.4），
   因此必须回到第 1 页。
@@ -154,8 +161,8 @@ stopLive → livePolling.stop() + isLive = false + 清空查询去抖 memo
 `src/stores/__tests__/rankStore.spec.ts`（mock rankService；多页场景经
 `runWithFakeTimers` 辅助以 fake timers 推进页间节流）锁定：
 
-- **applyPage 三处归一**：uid 去重、我的行从未去重 records 定位（uid 为空不抛错）、参与人数 `resolveParticipantCountFromPage(page, uid)` 修正、分页信息与刷新时间记录。
+- **applyPage 四处归一**：剔除服务端前置副本（`stripPrependedSelfRow`，保留自然位置行——去重必须在剔除之后）、uid 去重、我的行从未去重 records 定位（uid 为空不抛错）、参与人数 `resolveParticipantCountFromPage(page, uid)` 修正、分页信息与刷新时间记录。
 - **loadRank / refresh**：失败记录原因、复位 loading 并抛出但**保留上一次数据**；`refresh` 吞异常且无 contestId 不发请求；旧页迟到成功/失败不得覆盖新页或提前收尾 loading；翻页在途时轮询读取目标页；最新翻页失败恢复最后成功页；过期响应不得污染 memo，旧在途登记不得截获更新后的查询。
 - **分页与筛选**：`setPage` 越界短路 / 范围内按页请求；`setKeyword` trim 后回第 1 页且空串传 null；official 置 removeStar 重新请求（服务端参数）、从 official 切回 all 复位重载。
-- **全量快照模式专节**：`setGroupFilter(star)` 顺序拉取全部页并按 uid 跨页去重合并；star↔female 互切重拉快照并按新分组过滤；全量模式翻页是纯客户端切片不发请求；超过 40 页上限截断并标记 `truncated`；**拉取中途退出全量模式时旧循环中止、过期快照不复活，旧失败/finally 不污染普通分页**；被新全量拉取取代的旧失败不覆盖新状态；普通 ↔ 全量交错时 loading 仅由当前请求收尾；全量筛选中的直接/去重加载入口仍走快照、不发普通分页；全量筛选切到另一场比赛时按传入 contestId 重拉并清空旧快照，旧比赛在途响应不写回；全量模式自动轮询暂停、`refresh()` 手动触发重拉快照；切回 all/official 清空快照恢复服务端分页；全量模式 `setKeyword` 携带关键词重拉快照并回第 1 页；快照失败且无旧快照标记 `error`（`visibleRows` 退化为筛当前页）；重拉失败保留旧快照继续浏览（状态不回退、不停在 loading）；无 contestId 不发请求。
+- **全量快照模式专节**：`setGroupFilter(star)` 顺序拉取全部页，每页先剔除前置副本再按 uid 跨页去重合并（快照恢复纯名次序，我在自然位置只出现一次）；star↔female 互切重拉快照并按新分组过滤；全量模式翻页是纯客户端切片不发请求；超过 40 页上限截断并标记 `truncated`；**拉取中途退出全量模式时旧循环中止、过期快照不复活，旧失败/finally 不污染普通分页**；被新全量拉取取代的旧失败不覆盖新状态；普通 ↔ 全量交错时 loading 仅由当前请求收尾；全量筛选中的直接/去重加载入口仍走快照、不发普通分页；全量筛选切到另一场比赛时按传入 contestId 重拉并清空旧快照，旧比赛在途响应不写回；全量模式自动轮询暂停、`refresh()` 手动触发重拉快照；切回 all/official 清空快照恢复服务端分页；全量模式 `setKeyword` 携带关键词重拉快照并回第 1 页；快照失败且无旧快照标记 `error`（`visibleRows` 退化为筛当前页）；重拉失败保留旧快照继续浏览（状态不回退、不停在 loading）；无 contestId 不发请求。
 - **startLive / stopLive**：按 10s±2s 抖动刷新、停止后不再刷新、重复调用不产生多个轮询器、暂停判据生效时跳过请求但轮询存活、`stopLive` 幂等。

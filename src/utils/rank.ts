@@ -3,7 +3,7 @@
  *
  * 规则严格照 `doc/HOJ/HOJ-Contest-Rank-API.md` §8「客户端需要自行补充计算」与
  * §9「客户端实现注意事项」：HOJ 服务端只返回原始聚合（errorNum/tryNum/isAC/ACTime…），
- * 单元格文案、样式类别、显示名回退、去重与真实参与人数都要客户端自行推导。
+ * 单元格文案、样式类别、显示名回退、前置副本剔除、去重与真实参与人数都要客户端自行推导。
  * 把这些推导集中在此处，避免散落在多个 View 里各自实现产生分歧。
  */
 
@@ -115,8 +115,8 @@ export function resolveRowKind(row: ContestRankRow): RankRowKind {
 /**
  * 按 `uid` 去重，保留首次出现的行。
  *
- * HOJ 会把「当前登录用户」与「关注列表用户」复制一份插到 records 最前面
- * （文档 §9.2），第 1 页因此可能出现同一 uid 的重复行，直接渲染会显示两遍。
+ * 当前用户的前置副本已由 {@link stripPrependedSelfRow} 在去重前剔除（文档 §9.2），
+ * 这里处理其余残余重复（关注列表用户的副本等）——不去除会渲染两遍。
  */
 export function dedupeRankRows(rows: ContestRankRow[]): ContestRankRow[] {
   const seen = new Set<string>()
@@ -136,6 +136,74 @@ export function resolveMyRow(
 ): ContestRankRow | null {
   if (!uid) return null
   return rows.find((row) => row.uid === uid) ?? null
+}
+
+/**
+ * 判断「myUid 在 records 中恰好出现一次」的那条是否为服务端前置副本。
+ *
+ * 两级判据（文档 §9.2）：
+ * 1. **结构判据（满页）**：HOJ 把副本插在 `limit` 行**之外**，满页 `records.length >
+ *    size` 即结构性证明副本存在——`records[0]` 必是它。这同时兜住打星行占位/并列
+ *    名次导致的 rank 与位置错位：此时副本 rank 可能恰好落进本页名次窗口（自然行在
+ *    别页），仅凭窗口判据会漏剔。
+ * 2. **窗口判据（短页回退）**：末页行数不足 `size`，结构判据无从触发；此时副本携带
+ *    「我」的真实名次，自然行不在本页名次窗口 `[(current-1)*size+1, current*size]`
+ *    内即判副本。窗口判据**仅适用于有名次的行（rank ≥ 1）**——打星行 `rank === -1`
+ *    无自然位置，rank 本身不构成副本证据（无前置服务端的榜首打星自然行会被误剔，
+ *    见 Hydro），仅结构判据可剔；HOJ 星队的短页前置副本因此成为已知残余。关键词
+ *    过滤会在全量排名上重排再分页，重排后的短页窗口可能对不上（已知残余）；
+ *    关键词态下位于非首条的自然行不受影响。
+ *
+ * 仅供 {@link stripPrependedSelfRow} 与 {@link resolveParticipantCountFromPage}
+ * 共用，两处判据必须保持一致。
+ */
+function isLoneSelfRowPrepended(
+  records: ContestRankRow[],
+  myUid: string,
+  current: number,
+  size: number,
+): boolean {
+  const front = records[0]
+  if (!front || front.uid !== myUid) return false
+  if (size > 0 && records.length > size) return true
+  if (front.rank < 1) return false
+  const windowStart = (current - 1) * size + 1
+  const windowEnd = current * size
+  return front.rank < windowStart || front.rank > windowEnd
+}
+
+/**
+ * 剔除服务端前置的「当前用户」副本，让榜单正文恢复纯名次序（文档 §9.2）。
+ *
+ * HOJ 会把当前登录用户复制一份插到 records 最前面（**每一页**都前置）。不去除的
+ * 话，该副本会以普通行身份占据正文第 0 行——`dedupeRankRows` 保留首次出现，恰好
+ * 把它保下来并把我的自然位置行丢掉——名次列于是从「我的名次」开始而不是 1。规则：
+ * - myUid 出现 ≥2 次：首条必为前置副本（服务端页行里还有自然位置行），剔除首条；
+ * - myUid 恰好出现 1 次：按 {@link isLoneSelfRowPrepended} 两级判据剔除（第 2 页起
+ *   前置副本是唯一出现：满页看 `length > size` 结构证据，短页回退名次窗口——仅
+ *   rank ≥ 1 的行适用，打星行需结构证据）；
+ * - uid 为空 / 未出现：原样返回。
+ *
+ * 必须传入**去重前**的原始 records：`dedupeRankRows` 会先把自然位置行丢掉，届时
+ * 无法再区分前置副本与自然行。`myRow` 的定位同样用原始 records（`resolveMyRow`）。
+ */
+export function stripPrependedSelfRow(
+  records: ContestRankRow[],
+  myUid: string | null,
+  current: number,
+  size: number,
+): ContestRankRow[] {
+  if (!myUid) return records
+  const occurrences = records.filter((row) => row.uid === myUid).length
+  if (occurrences === 0) return records
+  if (occurrences >= 2) {
+    const first = records.findIndex((row) => row.uid === myUid)
+    return records.filter((_, i) => i !== first)
+  }
+  if (isLoneSelfRowPrepended(records, myUid, current, size)) {
+    return records.slice(1)
+  }
+  return records
 }
 
 /**
@@ -174,10 +242,11 @@ export function formatPenaltyMinutes(totalTimeSeconds: number): string {
  * `total` 的偏大量等于服务端前置复制的条目数（文档 §9.2）：
  * - 前置副本与其自然位置**同页**出现时，uid 重复，被去重计数捕获；
  * - 「我」的自然名次**不在本页**时，本页只有前置副本这一条（uid 仅出现一次，
- *   不构成重复），需要额外减 1。判据：myUid 在 records 中恰好出现一次，且其
- *   rank 不落在本页名次窗口 `[(current-1)*size+1, current*size]` 内
- *   （打星行 `rank === -1` 自然位置无定义，同样按前置副本处理）。
- *   若单条出现的 rank 恰在窗口内，说明它就是自然行（服务端未再前置副本），不减。
+ *   不构成重复），需要额外减 1。判据与 {@link isLoneSelfRowPrepended} 两级一致：
+ *   myUid 恰好出现一次、位于 records[0]，满页 `length > size` 结构性证明副本存在
+ *   （打星占位/并列名次会让副本 rank 落进本页名次窗口，仅看窗口会漏减），短页回退
+ *   「rank 不落在本页名次窗口内」——仅 rank ≥ 1 的行适用，打星行 rank 本身不构成
+ *   副本证据，需结构判据（HOJ 星队的短页前置副本为已知残余）。
  * `total` 缺失（<=0）时才退回最大 rank 口径。
  *
  * @param myUid 当前登录用户 uid（null 表示未登录/取不到，跳过前置副本修正）
@@ -193,11 +262,12 @@ export function resolveParticipantCountFromPage(
   if (corrected > 0 && myUid) {
     const myRow = resolveMyRow(page.records, myUid)
     const occurrences = page.records.filter((row) => row.uid === myUid).length
-    if (myRow && occurrences === 1) {
-      const windowStart = (page.current - 1) * page.size + 1
-      const windowEnd = page.current * page.size
-      const inWindow = myRow.rank >= windowStart && myRow.rank <= windowEnd
-      if (!inWindow) corrected -= 1
+    if (
+      myRow &&
+      occurrences === 1 &&
+      isLoneSelfRowPrepended(page.records, myUid, page.current, page.size)
+    ) {
+      corrected -= 1
     }
   }
 
@@ -214,8 +284,9 @@ export type RankGroupFilter = 'all' | 'official' | 'star' | 'female'
 /**
  * 跨页合并榜单行：按 uid 去重，已存在的行保留（首次出现优先），新行按序追加。
  *
- * 全量快照逐页拉取时，服务端在**每一页**都会前置复制当前用户/关注用户（文档 §9.2），
- * 页与页之间因此存在同 uid 重复行，合并时必须去重。
+ * 当前用户的前置副本已由 {@link stripPrependedSelfRow} 在合并前剔除（文档 §9.2，
+ * rankStore.fetchAllRows 逐页处理），这里处理关注用户等其余跨页同 uid 重复行，
+ * 不合并会渲染两遍。
  */
 export function mergeRankPages(
   existing: ContestRankRow[],

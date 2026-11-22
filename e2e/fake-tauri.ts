@@ -163,22 +163,47 @@ function fakeTauriBootstrap(options: FakeOptions): void {
   const rankTeamCount = options.rankTeams ?? 1
   const allRankRecords: ContestRankRow[] = Array.from({ length: rankTeamCount }, (_, i) => {
     const n0 = i + 1
+    // 当前登录用户是 uid 1（e2e_player）：rankTeams ≥ 7 时其名次与 team_07 对调
+    // （我=7、team_07=1），保证「我的名次 ≠ 1」——置顶我 + 正文从 1 起的形态只有
+    // 在这种 fixture 下才可观测；小榜没有 team_07 可换，保持自然名次（默认 1 队
+    // 榜单若 rank=7 是语义错乱的 fixture，且波及全部非榜单 spec 的默认进场）
+    const rankValue =
+      rankTeamCount >= 7 && (n0 === 1 || n0 === 7)
+        ? n0 === 1
+          ? 7
+          : 1
+        : n0 === 13
+          ? -1
+          : n0
+    // ACM 按罚时升序定名次：acTime/totalTime 必须随 rankValue 单调递增、一血属于
+    // rank 1（对调后是 team_07 而非我）——按原始序号生成会产出「rank 1 罚时不是
+    // 最小 / rank 7 持一血」这种真实服务端不可能给出的自相矛盾榜。
+    // 打星行无名次，按原始序号取值即可（落在相邻名次的取值之间，观感自然）
+    const elapsed = rankValue === -1 ? 300 + n0 * 10 : 300 + rankValue * 10
     const cellA: RankCell = options.sealRank === true
       ? { errorNum: 0, tryNum: 2, isAc: false, isFirstAc: false, acTime: null, isAfterContest: false, score: null }
-      : { errorNum: 0, tryNum: null, isAc: true, isFirstAc: n0 === 1, acTime: 300 + n0 * 10, isAfterContest: false, score: null }
+      : { errorNum: 0, tryNum: null, isAc: true, isFirstAc: rankValue === 1, acTime: elapsed, isAfterContest: false, score: null }
     return {
-      rank: n0 === 13 ? -1 : n0,
+      rank: rankValue,
       uid: String(n0),
       username: n0 === 1 ? 'e2e_player' : `team_${String(n0).padStart(2, '0')}`,
       realname: '', nickname: '', school: '', gender: '', avatar: '',
       ac: options.sealRank === true ? 0 : 1,
       total: options.sealRank === true ? 2 : 1,
-      totalTime: 300 + n0 * 10,
+      totalTime: elapsed,
       totalScore: null,
       submissionInfo: { A: cellA },
       timeInfo: {},
     }
   })
+  // 真实服务端的页行按名次序返回（分页 = 名次窗口），fake 须按 rank 排序后再切片；
+  // 打星行 rank=-1 无名次，按 uid 序内联保持原位（与原 fixture 形态一致，不挤占
+  // 名次窗口——沉底会让后续名次整体前移一位）。当前用户名次与 team_07 对调后
+  // 数组序 ≠ 名次序，不排序会让「第 2 页首行 = 名次 51」等断言失真
+  allRankRecords.sort(
+    (a, b) =>
+      (a.rank === -1 ? Number(a.uid) : a.rank) - (b.rank === -1 ? Number(b.uid) : b.rank),
+  )
 
   // 工作区按题目真实 ID（pid）隔离，内存态跨切题保留（对应 Rust 磁盘 + 内存双层）。
   // 新建工作区与真实后端一致：**无预置文件**（files 为空、activeFile null、language 空），
@@ -563,7 +588,7 @@ function fakeTauriBootstrap(options: FakeOptions): void {
       }
       case 'get_contest_rank': {
         // 真实服务端契约：每页前置「当前用户 + 关注列表」的副本，
-        // total 相应偏大——前端的跨页去重（dedupeRankRows / mergeRankPages）与
+        // total 相应偏大——前端的副本剔除（stripPrependedSelfRow）与跨页去重（dedupeRankRows / mergeRankPages）与
         // 参与人数修正（total − 本页重复数 − 未去重的我的前置副本）只有在这种
         // 形态下才会被 E2E 观测到。fake 逐页前置当前用户行。
         const page = Math.max(1, Number(args?.currentPage ?? 1))
