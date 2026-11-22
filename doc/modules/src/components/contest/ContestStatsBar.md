@@ -57,3 +57,11 @@ contestStore ──contestType/problems.length──▶ 赛制分支与分母
   （见 `utils/rank` 的 `formatPenaltyMinutes` 注释），故第三段整体切换为 `总得分`。
 - 纯展示组件：所有状态来自 store，自身不发请求、不持有轮询——刷新节奏完全由
   `rankStore.startLive` 编排。
+
+## 测试
+
+`src/components/contest/__tests__/ContestStatsBar.spec.ts`（jsdom 挂载，经共享
+`test-support/view-mount` 供 pinia store 数）锁定：ACM 三段标签与数值（解题进度 /
+实时排名 / 总用时 `Xm`，含罚时口径与榜单「总用时」列同源）、OI 第三段总得分、
+myRow 未加载占位（`—` 而非 0；解题进度保留「— / n AC」形态）。两处标签
+（ACM 分支与空态占位）各有用例锁定，任一回退即红。

@@ -42,7 +42,7 @@ OI 分支：oiCellsByUid 按行预计算 resolveOiRankCell(cell, timeInfo[displa
          → 档位 → OI_BOX 配色 + 得分/耗时两行文案 + hint
 
 总用时列（两套 VO 单位不同，混用会把 OI 用时放大 1000 倍）：
-  ACM：totalTime = 总罚时（秒）→ formatPenaltyMinutes 换算分钟整数
+  ACM：totalTime（秒，含罚时）→ formatPenaltyMinutes 换算分钟整数
   OI ：totalTime = AC 提交耗时之和（毫秒）→ ÷1000 后 formatRankTime；
        为 0（无 AC）显示 `—` 而不是 `00:00`（0 会被误读成「用时极短」）
 ```

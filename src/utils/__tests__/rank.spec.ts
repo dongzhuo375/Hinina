@@ -374,7 +374,7 @@ describe('resolveParticipantCount', () => {
 })
 
 describe('formatPenaltyMinutes', () => {
-  it('ACM 总罚时秒 → 分钟整数字符串（向下取整）', () => {
+  it('ACM totalTime 秒（含罚时）→ 分钟整数字符串（向下取整）', () => {
     expect(formatPenaltyMinutes(2700)).toBe('45')
     expect(formatPenaltyMinutes(0)).toBe('0')
     expect(formatPenaltyMinutes(59)).toBe('0')

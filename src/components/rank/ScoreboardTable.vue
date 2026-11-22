@@ -150,7 +150,7 @@ function solvedText(row: ContestRankRow): string {
 
 /**
  * 总用时列 —— 两套 VO 的 `totalTime` 单位不同，混用会把 OI 用时放大 1000 倍：
- * - ACM：**总罚时（秒）** = Σ(errorNum × 20min + ACTime)，按 ICPC 习惯换算成分钟整数；
+ * - ACM：**totalTime（秒，含罚时）** = Σ(errorNum × 20min + ACTime)，按 ICPC 习惯换算成分钟整数；
  * - OI：**AC 提交耗时之和（毫秒）**，与罚时无关，须先 ÷1000 再按时长格式化；
  *   没有 AC 提交时为 0，此时显示 `—` 而不是 `00:00`（0 会被误读成「用时极短」）。
  */
