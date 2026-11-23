@@ -2,7 +2,7 @@
 
 Hinina 是一个面向XCPC竞赛的桌面客户端。它把登录、题目、代码编辑、提交、榜单和公告放在同一个比赛工作台里，比赛时不用在浏览器标签页之间来回切换。
 
-项目目前仍在开发中，界面和配置格式可能继续调整。当前仓库没有发布稳定版，想试用的话需要从源码构建；正式发布（GitHub Releases 草稿验收后公开）提供免安装的 Windows x64 裸 exe。
+当前已发布首个正式稳定版 **1.0.0**：从 [GitHub Releases](https://github.com/dongzhuo375/Hinina/releases/latest) 下载免安装的 Windows x64 裸 exe（需已装 WebView2 Runtime，详见 Release 说明），放到任意可写目录直接运行，无需安装器；不想下载的话也可以从源码构建。界面与配置格式仍可能随版本迭代调整。
 
 ## 界面一览
 

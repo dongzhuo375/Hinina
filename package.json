@@ -1,7 +1,7 @@
 {
   "name": "hinina",
   "private": true,
-  "version": "0.3.9",
+  "version": "1.0.0",
   "type": "module",
   "packageManager": "npm@11.18.0",
   "engines": {
